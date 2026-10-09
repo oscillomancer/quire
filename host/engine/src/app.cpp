@@ -3,6 +3,7 @@
 #include "runtime_protection.h"
 #include "supple/model/numeric.h"
 
+#include <poll.h>
 #include <algorithm>
 #include <cctype>
 #include <charconv>
@@ -74,10 +75,14 @@ Result<std::unique_ptr<EngineApp>> EngineApp::create(AppOptions options, model::
             "engine.workdir", "cannot create " + options.workdir.string(), {},
             "pass a writable workdir and ensure its parent directory exists and has space");
     auto app = std::unique_ptr<EngineApp>(new EngineApp(std::move(options)));
+    if (app->serviceFd() < 0)
+        return Error("engine.service_wake", "cannot create the main-thread service descriptor", {},
+                     "close unused files/descriptors and retry creating the engine app");
     EngineApp* self = app.get();
     app->pool_ = std::make_unique<InstancePool>(
         [self](const model::PluginRef& ref) { return self->findPlugin(ref.id); },
         app->options_.identity);
+    app->pool_->setMainThreadWake(app->mainWake_);
     SUPPLE_TRY(app->newProject(std::move(project)));
     return app;
 }
@@ -140,6 +145,7 @@ Result<host::Instance*> EngineApp::scratch(const model::FxInstance& fx) {
             return std::move(made).error();
         }
         slot = std::move(*made);
+        slot->setMainThreadWake(mainWake_);
     }
     return slot.get();
 }
@@ -200,6 +206,7 @@ Result<json::Value> EngineApp::setPlainParams(model::Id id, const json::Value& v
     auto made = host::Instance::create(*info, options_.identity);
     if (!made) return made.error();
     auto& instance = **made;
+    instance.setMainThreadWake(mainWake_);
     SUPPLE_TRY(restoreFx(instance, *fx, s));
     const auto params = instance.params();
     std::map<std::uint32_t, double> pending;
@@ -290,6 +297,7 @@ Result<std::uint32_t> EngineApp::fxLatencySamples(model::Id id, const model::FxI
     auto made = host::Instance::create(*info, options_.identity);
     if (!made) return std::move(made).error();
     host::Instance& probe = **made;
+    probe.setMainThreadWake(mainWake_);
     SUPPLE_TRY(restoreFx(probe, fx, view()));
     constexpr std::uint32_t kProbeBlock = 512;  // OfflineSettings' default block
     SUPPLE_TRY(probe.activate(head().project->sampleRate, 1, kProbeBlock));
@@ -462,6 +470,8 @@ Status EngineApp::replaceProject(model::Session session, fs::path path,
     }
     pool_ = std::make_unique<InstancePool>(
         [this](const model::PluginRef& ref) { return findPlugin(ref.id); }, options_.identity);
+    pool_->setMainThreadWake(mainWake_);
+    pendingDirtyStates_.clear();
     if (scripts_) {
         clearScripts_ = scripts_->active();
         if (!clearScripts_) scripts_->clear();
@@ -469,7 +479,7 @@ Status EngineApp::replaceProject(model::Session session, fs::path path,
     versions_ = std::make_unique<model::VersionStore>(std::move(session));
     projectPath_ = std::move(path);
     autosaveMarked_ = !projectPath_.empty();
-    autosaveMs_ = clockMs();
+    autosaveMs_ = serviceClockMs();
     autosaveVersion_ = head().version;
     const Status prepared = prepare ? prepare() : Status{};
     if (running) SUPPLE_TRY(startEngine(*running, config, settings));
@@ -510,7 +520,7 @@ Status EngineApp::save(const fs::path& where) {
     }
     projectPath_ = path;
     autosaveMarked_ = true;  // the file itself is the newest copy
-    autosaveMs_ = clockMs();
+    autosaveMs_ = serviceClockMs();
     autosaveVersion_ = head().version;
     return okStatus();
 }
@@ -727,11 +737,12 @@ void EngineApp::startJob(std::function<void(std::stop_token)> work) {
     }
     auto finished = std::make_shared<std::atomic<bool>>(false);
     jobs_.push_back({std::jthread([hook = options_.jobStartedHook, done = options_.jobFinishedHook,
-                                   work = std::move(work), finished](std::stop_token stop) {
+                                   work = std::move(work), finished, this](std::stop_token stop) {
                          if (hook) hook();
                          work(stop);
                          if (done) done();
                          finished->store(true, std::memory_order_release);
+                         mainWake_.notify();
                      }),
                      finished});
 }
@@ -780,9 +791,12 @@ Status EngineApp::startEngine(Backend& backend, const BackendConfig& config,
     if (effective.workers < 0 && audioThreadLimit_ > 0)
         effective.workers = static_cast<int>(audioThreadLimit_ - 1);
     engine_ = std::make_unique<Engine>(*pool_, media_, effective);
+    engine_->setMainThreadWake(mainWake_);
+    backend.setMainThreadWake(&mainWake_);
     auto st = engine_->start(backend, config);
     if (!st) {
         engine_.reset();
+        backend.setMainThreadWake(nullptr);
         return st;
     }
     model::Session atRate = head();
@@ -799,6 +813,7 @@ Status EngineApp::startEngine(Backend& backend, const BackendConfig& config,
     if (!numeric) {
         engine_->stop();
         engine_.reset();
+        backend.setMainThreadWake(nullptr);
         return numeric.error();
     }
     backend_ = &backend;
@@ -868,6 +883,7 @@ void EngineApp::haltEngine() {
         pool_->prune(head());  // nothing processes now: replaced instances can go
     }
     protections_->stop();
+    if (backend_) backend_->setMainThreadWake(nullptr);
     backend_ = nullptr;
     ownedBackend_.reset();
     outputGestures_.clear();
@@ -882,7 +898,7 @@ void EngineApp::stopEngine() {
     haltEngine();
 }
 
-// --- the periodic service tick ------------------------------------------------------------
+// --- main-thread service ------------------------------------------------------------
 
 namespace {
 constexpr std::uint64_t kAutosaveIntervalMs = 60'000;
@@ -891,6 +907,9 @@ constexpr std::uint64_t kRestartGiveUpMs = 30'000;
 }  // namespace
 
 void EngineApp::tick() {
+    mainWake_.drain();  // re-arm before inspecting producer queues
+    std::erase_if(jobs_,
+                  [](const auto& job) { return job.finished->load(std::memory_order_acquire); });
     if (clearScripts_ && scripts_ && !scripts_->active()) {
         scripts_->clear();
         clearScripts_ = false;
@@ -899,10 +918,16 @@ void EngineApp::tick() {
         engine_->service();
         consumePluginOutputs();
         pollControl();
-        captureFxStates(engine_->takeDirtyStates());
+        // Controller actions may stop or replace the engine on this thread.
+        auto dirty = engine_ ? engine_->takeDirtyStates() : std::vector<model::Id>{};
+        for (const auto id : dirty)
+            if (std::find(pendingDirtyStates_.begin(), pendingDirtyStates_.end(), id) ==
+                pendingDirtyStates_.end())
+                pendingDirtyStates_.push_back(id);
+        if (!txn_) captureFxStates(std::exchange(pendingDirtyStates_, {}));
         // Failures reach subscribers without a client asking.
         checkFailures();
-        if (backend_) {
+        if (backend_ && engine_) {
             const BackendStatus b = backend_->status();
             if (b.restartNeeded)
                 beginRestart(b.restartReason.empty() ? std::string("the device changed")
@@ -912,15 +937,103 @@ void EngineApp::tick() {
     } else if (restarting_) {
         retryRestart();
     }
+    // Probe instances also own callback, FD and timer subscriptions. Their
+    // idle outputs describe the probe only and never edit an arbitrary FX.
+    for (const auto& [id, instance] : scratch_) {
+        instance->serviceMainThread();
+        instance->takeNotifications();
+        instance->takeIdleOutputs();
+    }
+    if (!engine_) {
+        for (const auto& fx : head().fx) {
+            auto notes = pool_->service(fx.id);
+            if (notes.stateDirty &&
+                std::find(pendingDirtyStates_.begin(), pendingDirtyStates_.end(), fx.id) ==
+                    pendingDirtyStates_.end())
+                pendingDirtyStates_.push_back(fx.id);
+        }
+        consumePluginOutputs();
+        pollControl();
+        checkFailures();
+    }
+    if (!txn_) {
+        auto dirty = std::exchange(pendingDirtyStates_, {});
+        captureFxStates(dirty);
+    }
     maybeAutosave();
+    if (commands_) commands_->flushJobEvents();
     // What the tick emitted (fx.failed, engine.restarting, …) reaches scripts
     // now, not after some later command.
     if (scripts_ && !clearScripts_) scripts_->deliver();
 }
 
+std::uint64_t EngineApp::serviceClockMs() const {
+    if (fixedClock_) return fixedClock_;
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                          std::chrono::steady_clock::now().time_since_epoch())
+                                          .count());
+}
+std::vector<host::Instance*> EngineApp::serviceInstances() const {
+    auto out = pool_->instances();
+    for (const auto& [id, instance] : scratch_)
+        if (instance) out.push_back(instance.get());
+    return out;
+}
+std::vector<EngineApp::ServiceFd> EngineApp::serviceFds() const {
+    std::vector<ServiceFd> out;
+    for (auto* instance : serviceInstances()) {
+        if (instance->isolated()) continue;  // bridge owns its subscriptions
+        for (const auto& [fd, flags] : instance->watchedFds()) {
+            short events = 0;
+            if (flags & CLAP_POSIX_FD_READ) events |= POLLIN;
+            if (flags & CLAP_POSIX_FD_WRITE) events |= POLLOUT;
+            if (flags & CLAP_POSIX_FD_ERROR) events |= POLLERR;
+            out.push_back({fd, events, instance});
+        }
+    }
+    return out;
+}
+void EngineApp::serviceFdReady(const ServiceFd& watch, short ready) {
+    // A preceding ready callback/command may replace an instance or unregister
+    // an fd. Never dereference a stale owner from a poll snapshot.
+    for (const auto& current : serviceFds()) {
+        if (current.owner != watch.owner || current.fd != watch.fd) continue;
+        std::uint32_t flags = 0;
+        if (ready & POLLIN) flags |= CLAP_POSIX_FD_READ;
+        if (ready & POLLOUT) flags |= CLAP_POSIX_FD_WRITE;
+        if (ready & (POLLERR | POLLHUP | POLLNVAL)) flags |= CLAP_POSIX_FD_ERROR;
+        current.owner->onFd(current.fd, flags);
+        return;
+    }
+}
+std::optional<std::uint64_t> EngineApp::nextServiceDelayMs() const {
+    std::optional<std::uint64_t> delay;
+    const auto now = serviceClockMs();
+    auto at = [&](std::uint64_t deadline) {
+        const auto ms = deadline <= now ? 0 : deadline - now;
+        if (!delay || ms < *delay) delay = ms;
+    };
+    if (!projectPath_.empty() && head().version != autosaveVersion_)
+        at(autosaveMs_ + kAutosaveIntervalMs);
+    if (restarting_) at(std::min(restartRetryAt_, restartUntil_));
+    if (!txn_)
+        for (const auto& [key, commit] : learnCommits_) at(commit.lastMs + 300);
+    for (auto* instance : serviceInstances()) {
+        if (instance->isolated()) continue;
+        const int timer = instance->nextTimerMs();
+        if (timer >= 0) at(now + static_cast<std::uint64_t>(timer));
+    }
+    return delay;
+}
+std::optional<std::chrono::steady_clock::time_point> EngineApp::nextServiceDeadline() const {
+    const auto delay = nextServiceDelayMs();
+    if (!delay) return {};
+    return std::chrono::steady_clock::now() + std::chrono::milliseconds(*delay);
+}
+
 void EngineApp::maybeAutosave() {
     if (projectPath_.empty()) return;
-    const std::uint64_t now = clockMs();
+    const std::uint64_t now = serviceClockMs();
     if (!autosaveMarked_) {
         autosaveMarked_ = true;
         autosaveMs_ = now;
@@ -934,10 +1047,11 @@ void EngineApp::maybeAutosave() {
 
 void EngineApp::beginRestart(std::string reason, double seconds) {
     restartReason_ = std::move(reason);
+    restartError_.clear();
     restartSeconds_ = seconds;
     restartBackoff_ = 0;
-    restartUntil_ = clockMs() + kRestartGiveUpMs;
-    restartRetryAt_ = clockMs();
+    restartUntil_ = serviceClockMs() + kRestartGiveUpMs;
+    restartRetryAt_ = serviceClockMs();
     json::Value ev = json::Value::object();
     ev["reason"] = restartReason_;
     emit("engine.restarting", std::move(ev));
@@ -947,7 +1061,15 @@ void EngineApp::beginRestart(std::string reason, double seconds) {
 }
 
 void EngineApp::retryRestart() {
-    const std::uint64_t now = clockMs();
+    const std::uint64_t now = serviceClockMs();
+    if (now >= restartUntil_) {
+        restarting_ = false;
+        auto ev = json::Value::object();
+        ev["reason"] = restartReason_;
+        ev["error"] = restartError_.empty() ? "device restart deadline expired" : restartError_;
+        emit("engine.error", std::move(ev));
+        return;
+    }
     if (now < restartRetryAt_) return;
     Status st = okStatus();
     if (!engineKind_.empty())
@@ -965,17 +1087,19 @@ void EngineApp::retryRestart() {
         }
         return;
     }
-    if (now >= restartUntil_) {
+    restartError_ = st.error().toString();
+    const auto finishedAt = serviceClockMs();
+    if (finishedAt >= restartUntil_) {
         restarting_ = false;
         json::Value ev = json::Value::object();
         ev["reason"] = restartReason_;
-        ev["error"] = st.error().toString();
+        ev["error"] = restartError_;
         emit("engine.error", std::move(ev));
         return;
     }
     restartBackoff_ =
         restartBackoff_ == 0 ? 250 : std::min<std::uint64_t>(restartBackoff_ * 2, 4000);
-    restartRetryAt_ = now + restartBackoff_;
+    restartRetryAt_ = finishedAt + restartBackoff_;
 }
 
 fs::path EngineApp::autosaveDir() const {
@@ -1060,7 +1184,7 @@ void EngineApp::autosave() {
     const fs::path file = dir / ("autosave-" + std::to_string(next) + ".json");
     if (auto st = writeFileAtomic(file, model::serializeProject(head())); !st) {
         emit("engine.error", json::Value(st.error().toString()));
-        autosaveMs_ = clockMs();  // try again after an interval, not every tick
+        autosaveMs_ = serviceClockMs();  // try again after an interval, not every tick
         return;
     }
     existing.push_back({next, file});
@@ -1072,7 +1196,7 @@ void EngineApp::autosave() {
         existing.erase(existing.begin());
     }
     autosaveVersion_ = head().version;
-    autosaveMs_ = clockMs();
+    autosaveMs_ = serviceClockMs();
     autosaveMarked_ = true;
 }
 
@@ -2222,6 +2346,7 @@ Result<std::vector<RecordedInfo>> EngineApp::recover(const std::vector<std::stri
 }
 
 void EngineApp::headChanged() {
+    mainWake_.notify();
     if (!engine_) return;
     // Returning to a version before the first patch/state edit means defaults,
     // rather than retaining the previous version's live plugin state.
@@ -2270,6 +2395,7 @@ Status EngineApp::commitTransaction(std::uint64_t id) {
             "history.transaction", "no such open transaction", {},
             "use the id returned by beginTransaction while that transaction is still open");
     std::unique_ptr<model::EditTxn> t = std::move(txn_);
+    mainWake_.notify();  // resume work deferred by this transaction
     auto changes = t->changes();
     if (changes.empty() && !t->projectChanged() && t->created().empty())
         return okStatus();  // nothing to record
@@ -2289,7 +2415,10 @@ Status EngineApp::commitTransaction(std::uint64_t id) {
 }
 
 Status EngineApp::rollbackTransaction(std::uint64_t id) {
-    if (id == txnId_) txn_.reset();
+    if (id == txnId_) {
+        txn_.reset();
+        mainWake_.notify();
+    }
     return okStatus();
 }
 
@@ -2322,6 +2451,7 @@ void EngineApp::emit(std::string_view topic, json::Value payload) {
 }
 
 void EngineApp::commandFinished() {
+    mainWake_.notify();  // deadlines/FD subscriptions may have changed
     if (clearScripts_ && scripts_ && !scripts_->active()) {
         scripts_->clear();
         clearScripts_ = false;

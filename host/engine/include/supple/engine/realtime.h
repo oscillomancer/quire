@@ -28,6 +28,7 @@
 
 #include "supple/audio/audio_file.h"
 #include "supple/base/handoff.h"
+#include "supple/base/main_thread_wake.h"
 #include "supple/base/spsc.h"
 #include "supple/base/thread.h"
 #include "supple/engine/offline.h"
@@ -165,6 +166,9 @@ class Backend {
     using Callback =
         std::function<void(const float* const* in, float* const* out, std::uint32_t frames)>;
     virtual ~Backend() = default;
+    // Install before start; relay outlives stop/close. Default backends have no
+    // asynchronous status producers. Null detaches after stop/close.
+    virtual void setMainThreadWake(MainThreadWake*) {}
     virtual Status start(const BackendConfig& config, Callback callback) = 0;
     virtual void stop() = 0;
     virtual BackendConfig config() const = 0;
@@ -313,6 +317,11 @@ class Engine {
   public:
     Engine(InstancePool& plugins, MediaCache& media, EngineOptions options = {});
     ~Engine();
+    // Main thread before start; wake outlives stop().
+    void setMainThreadWake(MainThreadWake& wake) { mainWake_ = &wake; }
+    // Main thread: one-shot callback watermark for queued anticipative outputs.
+    // INT64_MAX disarms it. Rechecks after arming so consumption cannot be lost.
+    void armOutputWake(std::uint64_t epoch, std::int64_t stream);
     Engine(const Engine&) = delete;
     Engine& operator=(const Engine&) = delete;
 
@@ -540,6 +549,14 @@ class Engine {
     bool notificationReload_ = false;
     InstancePool& plugins_;
     MediaCache& media_;
+    MainThreadWake* mainWake_ = nullptr;
+    void notifyMain() SUPPLE_RT {
+        if (mainWake_) mainWake_->notify();
+    }
+    void wakeOutputConsumed() SUPPLE_RT;
+    std::atomic<std::uint64_t> outputWakeSerial_{0}, outputWakeEpoch_{0};
+    std::atomic<std::int64_t> outputWakeAt_{INT64_MAX};
+    std::uint64_t outputWakeSeen_ = 0;  // callback only
     EngineOptions options_;
     Backend* backend_ = nullptr;
     BackendConfig config_;

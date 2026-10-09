@@ -56,6 +56,19 @@ class MeterBank {
     // keeps at most this many, newest; the main thread's memory stays bounded.
     static constexpr std::size_t kMaxPendingPerSlot = 256;
 
+    // Main-thread activity subscription for a GUI whose meters are at rest.
+    // Observe the sequence before draining/reading; arm with that observation
+    // only after deciding no animation deadline is needed. Arming rechecks
+    // publication, so activity between the read and arm cannot be lost.
+    void setMainThreadWake(MainThreadWake& wake) { mainWake_ = &wake; }
+    std::uint64_t activitySequence() const { return activitySequence_.load(); }
+    void armActivity(std::uint64_t observed) {
+        activityArmed_.store(true);
+        if (activitySequence_.load() != observed && activityArmed_.exchange(false))
+            if (mainWake_) mainWake_->notify();
+    }
+    bool activityArmed() const { return activityArmed_.load(); }
+
     // --- producers (one thread each: the renderer, the audio callback) -----------
     bool pushRenderer(const MeterEntry& entry) SUPPLE_RT {
         return push(renderer_, droppedRenderer_, entry);
@@ -94,14 +107,23 @@ class MeterBank {
     std::size_t pendingEntries() const;
 
   private:
-    static bool push(SpscRing<MeterEntry, kRingCapacity>& ring, std::atomic<std::uint64_t>& dropped,
-                     const MeterEntry& entry) SUPPLE_RT {
-        if (ring.push(entry)) return true;
-        dropped.fetch_add(1, std::memory_order_relaxed);
-        return false;
+    bool push(SpscRing<MeterEntry, kRingCapacity>& ring, std::atomic<std::uint64_t>& dropped,
+              const MeterEntry& entry) SUPPLE_RT {
+        const bool accepted = ring.push(entry);
+        if (!accepted) dropped.fetch_add(1, std::memory_order_relaxed);
+        // Below the meter's display floor (-120 dB), silence/denormal noise
+        // does not start an animation. Never notify per block while animating.
+        if (entry.peak[0] > 1e-6f || entry.peak[1] > 1e-6f) {
+            activitySequence_.fetch_add(1);
+            if (activityArmed_.exchange(false) && mainWake_) mainWake_->notify();
+        }
+        return accepted;
     }
     void drain(SpscRing<MeterEntry, kRingCapacity>& ring);
 
+    MainThreadWake* mainWake_ = nullptr;
+    std::atomic<std::uint64_t> activitySequence_{0};
+    std::atomic<bool> activityArmed_{false};
     using Ring = SpscRing<MeterEntry, kRingCapacity>;
     Ring renderer_, callback_;
     std::atomic<std::uint64_t> droppedRenderer_{0}, droppedCallback_{0};

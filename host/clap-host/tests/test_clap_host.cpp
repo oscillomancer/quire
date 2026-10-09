@@ -2283,3 +2283,39 @@ TEST_CASE("VST3 restart notifications wake main and rearm after processing stops
     CHECK(instance.latency() == 64);
     instance.deactivate();
 }
+
+TEST_CASE("local timer and descriptor subscription changes wake the main loop without an editor") {
+    MainThreadWake wake;
+    auto made = Instance::create(find("com.suppleaudio.test.edge"), {});
+    REQUIRE(made);
+    auto& instance = **made;
+    instance.setMainThreadWake(wake);
+    drainWake(wake);
+    const auto* plugin = instance.raw();
+    const auto* host =
+        static_cast<const clap_host_t*>(plugin->get_extension(plugin, "supple.test.edge-host"));
+    REQUIRE(host);
+    const auto* timers = static_cast<const clap_host_timer_support_t*>(
+        host->get_extension(host, CLAP_EXT_TIMER_SUPPORT));
+    const auto* fds = static_cast<const clap_host_posix_fd_support_t*>(
+        host->get_extension(host, CLAP_EXT_POSIX_FD_SUPPORT));
+    REQUIRE(timers);
+    REQUIRE(fds);
+    clap_id id = CLAP_INVALID_ID;
+    REQUIRE(timers->register_timer(host, 3'600'000, &id));
+    drainWake(wake);
+    REQUIRE(timers->unregister_timer(host, id));
+    drainWake(wake);
+    CHECK(instance.nextTimerMs() == -1);
+    int pipe[2];
+    REQUIRE(::pipe(pipe) == 0);
+    REQUIRE(fds->register_fd(host, pipe[0], CLAP_POSIX_FD_READ));
+    drainWake(wake);
+    REQUIRE(fds->modify_fd(host, pipe[0], CLAP_POSIX_FD_READ | CLAP_POSIX_FD_ERROR));
+    drainWake(wake);
+    REQUIRE(fds->unregister_fd(host, pipe[0]));
+    drainWake(wake);
+    CHECK(instance.watchedFds().empty());
+    ::close(pipe[0]);
+    ::close(pipe[1]);
+}

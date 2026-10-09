@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <poll.h>
 #include <unistd.h>
 
 #include <chrono>
@@ -1674,14 +1675,20 @@ TEST_CASE("the tick autosaves the project, rotates five, and open reports a newe
     const auto now = fs::file_time_type::clock::now();
     fs::last_write_time(project, now - std::chrono::seconds(60));
 
+    CHECK_FALSE(app->nextServiceDelayMs());
     // 60 s with no change: nothing is written.
     app->setFixedClock(1'060'000);
     app->tick();
     CHECK_FALSE(fs::exists(app->autosaveDir()));
 
+    CHECK_FALSE(app->nextServiceDelayMs());
     // A change plus an interval: one autosave, then six more (rotating to five).
     for (int i = 0; i < 6; ++i) {
         call("project.set", std::string(R"({"name": "Take )") + std::to_string(i) + "\"}");
+        if (i == 0)
+            CHECK(app->nextServiceDelayMs() == 0);
+        else
+            CHECK(app->nextServiceDelayMs() == 60'000);
         app->setFixedClock(1'120'000 + static_cast<std::uint64_t>(i) * 60'000);
         app->tick();
     }
@@ -1749,6 +1756,7 @@ TEST_CASE("the tick restarts the engine after a device change, then gives up and
         }
     CHECK(announced);
     CHECK_FALSE(call("engine.status", "{}")["running"].asBool());
+    CHECK(app->nextServiceDelayMs() == 0);
     app->tick();  // the retry fires at once (backoff starts at zero)
     auto status = call("engine.status", "{}");
     REQUIRE(status["running"].asBool());
@@ -1766,11 +1774,20 @@ TEST_CASE("the tick restarts the engine after a device change, then gives up and
     fake.shutdown();
     app->tick();
     fake.failOpen(1);
+    app->tick();
+    CHECK(app->nextServiceDelayMs() == 250);
+    fake.failOpen(1);
+    app->setFixedClock(1'029'999);
+    app->tick();
+    CHECK(app->nextServiceDelayMs() == 1);  // give-up precedes the next retry
     app->setFixedClock(1'031'000);
     app->tick();
     bool reported = false;
     for (auto& [topic, payload] : app->takeEvents())
-        if (topic == "engine.error" && payload.isObject()) reported = true;
+        if (topic == "engine.error" && payload.isObject()) {
+            reported = true;
+            CHECK(payload["error"].asString().find("JACK") != std::string::npos);
+        }
     CHECK(reported);
     CHECK_FALSE(call("engine.status", "{}")["running"].asBool());
     app->tick();  // it stays given up, it does not retry forever
@@ -3066,4 +3083,66 @@ TEST_CASE("failed initial load rolls back a supplied backend and permits another
     REQUIRE(app->startEngine(backend, {}, {.anticipative = false}));
     CHECK(app->engineStatus().running);
     app->stopEngine();
+}
+
+TEST_CASE("app service subscriptions keep local instance callbacks alive after engine stop") {
+    Root root;
+    auto app = makeApp(root.path);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    app->setupFixture(bus, "song_with_fx");
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    REQUIRE(
+        app->startEngine(backend, {.sampleRate = 48000, .blockSize = 64}, {.anticipative = false}));
+    const model::Id fx{model::Kind::Fx, 1};
+    auto* instance = app->instanceOf(fx);
+    REQUIRE(instance);
+    app->stopEngine();
+    CHECK_FALSE(app->nextServiceDelayMs());
+    // Use an edge fixture so its host callbacks and timer extension are visible.
+    auto info = app->findPlugin("com.suppleaudio.test.edge");
+    REQUIRE(info);
+    auto transaction = app->beginTransaction(kTest, "Local subscriptions");
+    REQUIRE(transaction);
+    app->txn().modify<model::FxInstance>(fx, [&](auto& value) {
+        value.plugin.id = info->id;
+        value.patch.reset();
+        value.state.reset();
+    });
+    REQUIRE(app->commitTransaction(*transaction));
+    REQUIRE(
+        app->startEngine(backend, {.sampleRate = 48000, .blockSize = 64}, {.anticipative = false}));
+    instance = app->instanceOf(fx);
+    REQUIRE(instance);
+    app->stopEngine();
+    const auto* plugin = instance->raw();
+    const auto* host =
+        static_cast<const clap_host_t*>(plugin->get_extension(plugin, "supple.test.edge-host"));
+    REQUIRE(host);
+    const auto* timers = static_cast<const clap_host_timer_support_t*>(
+        host->get_extension(host, CLAP_EXT_TIMER_SUPPORT));
+    const auto* descriptors = static_cast<const clap_host_posix_fd_support_t*>(
+        host->get_extension(host, CLAP_EXT_POSIX_FD_SUPPORT));
+    clap_id timer = CLAP_INVALID_ID;
+    REQUIRE(timers->register_timer(host, 3'600'000, &timer));
+    REQUIRE(app->nextServiceDelayMs());
+    REQUIRE(timers->unregister_timer(host, timer));
+    CHECK_FALSE(app->nextServiceDelayMs());
+    int fds[2];
+    REQUIRE(::pipe(fds) == 0);
+    REQUIRE(descriptors->register_fd(host, fds[0], CLAP_POSIX_FD_READ));
+    auto watches = app->serviceFds();
+    REQUIRE(watches.size() == 1);
+    CHECK(watches[0].owner == instance);
+    CHECK(watches[0].fd == fds[0]);
+    REQUIRE(descriptors->unregister_fd(host, fds[0]));
+    CHECK(app->serviceFds().empty());
+    app->serviceFdReady(watches[0], POLLIN);  // stale snapshots are harmless
+    // Main-thread callback request is delivered by explicit service, with no device/editor.
+    host->request_callback(host);
+    app->tick();
+    CHECK_FALSE(instance->serviceMainThread());
+    ::close(fds[0]);
+    ::close(fds[1]);
 }

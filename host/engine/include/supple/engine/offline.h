@@ -40,6 +40,9 @@ class InstancePool {
     using Resolver = std::function<Result<host::PluginInfo>(const model::PluginRef&)>;
     InstancePool(Resolver resolve, host::HostIdentity identity = {});
     ~InstancePool();
+    // Main thread, before use. Also applies to replaced/retired instances.
+    void setMainThreadWake(MainThreadWake& wake);
+    std::vector<host::Instance*> instances() const;
 
     // The instance for `id`, configured from `fx` (patch or state blob from
     // `session`). A plugin that cannot be found is an error the caller may
@@ -95,6 +98,7 @@ class InstancePool {
         std::string appliedState;  // canonical patch text or blob hash last applied
     };
     void retire(std::unique_ptr<host::Instance> instance);
+    MainThreadWake* mainWake_ = nullptr;
     Resolver resolve_;
     host::HostIdentity identity_;
     std::shared_ptr<host::BridgeProcess> sharedBridge_;
@@ -169,6 +173,8 @@ struct OfflineSettings {
     model::Tap tap = model::Tap::PostFader;
     std::shared_ptr<const std::atomic<bool>> cancelFlag;  // checked between offline blocks
     std::shared_ptr<std::atomic<double>> progressFlag;
+    // Optional worker-side publication, at most once per 500 ms plus final.
+    std::function<void(double)> progress;
     double progressBase = 0.0, progressScale = 1.0;
     std::stop_token stopToken;
 };

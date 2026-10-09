@@ -172,11 +172,13 @@ class PlugFrame : public Steinberg::U::Implements<
         Steinberg::Linux::IEventHandler* h, Steinberg::Linux::FileDescriptor fd) override {
         if (!h) return kInvalidArgument;
         handlers.emplace_back(h, fd);
+        if (auto* wake = mainWake.load(std::memory_order_acquire)) wake->notify();
         return kResultOk;
     }
     Steinberg::tresult PLUGIN_API
     unregisterEventHandler(Steinberg::Linux::IEventHandler* h) override {
         std::erase_if(handlers, [&](const auto& x) { return x.first == h; });
+        if (auto* wake = mainWake.load(std::memory_order_acquire)) wake->notify();
         return kResultOk;
     }
     Steinberg::tresult PLUGIN_API registerTimer(Steinberg::Linux::ITimerHandler* h,
@@ -185,10 +187,12 @@ class PlugFrame : public Steinberg::U::Implements<
         const auto period = static_cast<std::uint32_t>(std::max<Steinberg::uint64>(ms, 1));
         timers.push_back(
             {h, period, std::chrono::steady_clock::now() + std::chrono::milliseconds(period)});
+        if (auto* wake = mainWake.load(std::memory_order_acquire)) wake->notify();
         return kResultOk;
     }
     Steinberg::tresult PLUGIN_API unregisterTimer(Steinberg::Linux::ITimerHandler* h) override {
         std::erase_if(timers, [&](const Timer& t) { return t.handler == h; });
+        if (auto* wake = mainWake.load(std::memory_order_acquire)) wake->notify();
         return kResultOk;
     }
 };

@@ -583,19 +583,52 @@ Events: `transport.changed`, `engine.xrun`, `engine.stats` (1 Hz),
 `meters` (rate-limited, subscribe per track), `fx.failed`,
 `record.progress`.
 
-The servers drive a **service tick** on the model thread every 100 ms
-(`EngineApp::tick()`; `ModelLoop::every` on the socket server, a poll
-deadline in the stdio MCP loop), so the app's periodic work happens with no
-client asking: retired plans are freed and `fx.failed` is emitted (that is
-why subscribers see failures on their own), the project is autosaved when
-its head changed (session-model §5.3), and a device change restarts the
-engine — `engine.restarting {reason}` when the running backend reports
-`restart_needed`, then `engine.stop`/`engine.start` with the same backend
-kind, block and options, retried with backoff for up to 30 s and finally
-reported as `engine.error {reason, error}`. The transport position and the
-loop are restored; playback stays stopped.
+The headless socket and stdio MCP servers drive **main-thread service** on
+notifications and the nearest deadline (ADR-0030), using `EngineApp::tick()`
+as the explicit service call. `serviceFd()` exposes the app's coalesced relay;
+`serviceFds()` snapshots local plug-in descriptor subscriptions (including
+persistent probes and retired instances). `serviceFdReady()` checks that the
+owner and registration still exist before invoking a plug-in. Consumers cancel
+old watches before owners/fds can be destroyed or reused. Remote instances use
+the same `setMainThreadWake` subscription contract; the bridge owns forwarding.
 
-The tick also polls the devices' **control messages** for MIDI learn
+`tick()` drains/rearms the relay before consuming work, services instances,
+consumes outputs and control MIDI, captures dirty state, reports failures,
+handles backend changes and autosave, then flushes dispatcher work/job events
+and delivers Lua events in the same pass. Retained work blocked by a model
+transaction resumes on commit/rollback. Inactive instances and persistent
+probes keep their main callbacks/timers/FDs serviced; probe outputs do not edit
+an unrelated FX. Finished worker threads notify and are joined on main.
+
+Producers notify after publishing control MIDI (including drops), outputs and
+output/voice drops, executor plan adoption, epoch/state transitions, failures,
+backend status changes, job events and posted work. Unchanged audio blocks do
+not wake main. JACK period changes update status; rate changes/shutdown trigger
+restart. The installed backend relay outlives client close and is detached
+afterwards.
+
+`nextServiceDelayMs()` returns the minimum remaining service delay, or none;
+`nextServiceDeadline()` maps that delay to an absolute steady-clock deadline.
+Service time is monotonic (`serviceClockMs()`); command/history timestamps stay
+wall-clock. `setFixedClock()` drives both for deterministic tests. Only changed,
+named projects arm autosave, at 60 s since the last save/attempt; an overdue
+edit is serviced immediately, and write failure waits another 60 s. Plain
+learned controls commit after 300 ms at rest, except while a transaction is open.
+Local plug-in timers participate even without an editor. Device restart uses
+an immediate attempt, then 250/500/1000/2000/4000 ms retries, with the 30 s
+give-up deadline taking precedence over a later retry. Give-up retains the
+last backend error even when it expires before another attempt.
+`engine.restarting {reason}` announces restart; exhaustion emits
+`engine.error {reason, error}`.
+The backend kind, block/options, transport position and loop are restored;
+playback stays stopped. There is no global main-thread safety poll.
+
+The GUI currently retains its 100 ms service and 10 ms control timers pending
+the GUI loop conversion; it can consume the same service API. MeterBank offers
+an opt-in activity sequence and one-shot arm/recheck notification for readings
+above -120 dB; ongoing animation uses GUI frame deadlines, not per-block wakes.
+
+The tick drains the devices' **control messages** for MIDI learn
 (ADR-0027): each callback copies its notes, CCs, program changes and pitch
 bends into a 1024-entry SPSC ring (`Engine::takeControlMidi`; overflow
 counted, `controlMidiDrops`), and `EngineApp::pollControl` drains it, hands
@@ -605,8 +638,9 @@ semantic parameter through `fx.param.set` with one gesture per movement, a
 plain one on the running instance at once and into the project when the
 control has rested for 300 ms (as an edit in the plug-in's own editor).
 Nothing moves while `setLearning(true)` (a learn dialog listens); bindings
-with `when_*` conditions ask `learnGate` and wait without one. The window app
-also polls every 10 ms while anything is bound. `lastTouched()` is the
+with `when_*` conditions ask `learnGate` and wait without one. The callback
+publishes a batch and wakes main at once. The GUI conversion will remove its
+existing 10 ms binding timer. `lastTouched()` is the
 parameter edited last from the window or a plug-in's editor (not by agents or
 controls); `moveParam` moves any parameter the way a binding does, for the
 "last touched parameter" action.
@@ -922,6 +956,13 @@ plan generation, transport epoch, timeline sample, stream sample, the entire
 the stage's input PDC; idle flush records use the service-time play position.
 Parameter values and gesture boundaries are copied after worker tasks finish,
 into separate preallocated 4096-entry SPSC rings for renderer and callback.
+Publishing a batch (or a drop) notifies main after queue publication. Outputs
+rendered ahead of playback are retained until their epoch's played stream
+reaches their stream sample. Main arms the earliest pending target with
+`Engine::armOutputWake(epoch, stream)` (`INT64_MAX` disarms); callback consumption
+notifies only once per arm. Main rechecks after arming, so a crossing cannot be
+lost. Seek/stop/plan changes discard stale pending records and rearm. A model
+transaction defers model edits and disarms the target until it closes.
 Per-executor FIFO is preserved; there is no global ordering between these queues
 and idle flushes. Output arenas have 256 entries per stage and idle staging has
 4096 entries. Overflow drops newest records and is exposed as a cumulative

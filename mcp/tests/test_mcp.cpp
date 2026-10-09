@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <poll.h>
 #include <supple/mcp/server.h>
 #include <supple/product.h>
 #include <unistd.h>
@@ -316,4 +317,98 @@ TEST_CASE("R16 malformed envelopes without ids return Invalid Request") {
         CHECK(reply->find("error")->find("code")->asInt() == -32600);
     }
     CHECK_FALSE(server.handle(parse(R"({"jsonrpc":"2.0","method":"notifications/initialized"})")));
+}
+
+TEST_CASE("stdio service fds run while an incomplete request waits without a periodic tick") {
+    auto r = registry();
+    Host host;
+    cmd::Dispatcher bus(r, host);
+    mcp::Server server(r, bus);
+    int input[2], wake[2];
+    REQUIRE(::pipe(input) == 0);
+    REQUIRE(::pipe(wake) == 0);
+    const std::string prefix = R"({"jsonrpc":"2.0","id":1,"method":"initialize")";
+    REQUIRE(::write(input[1], prefix.data(), prefix.size()) == static_cast<ssize_t>(prefix.size()));
+    char byte = 1;
+    REQUIRE(::write(wake[1], &byte, 1) == 1);
+    bool ready = false;
+    int calls = 0;
+    mcp::Tick service;
+    service.watches = [&] {
+        return std::vector<mcp::Tick::Watch>{{wake[0], POLLIN, [&](short) {
+                                                  REQUIRE(::read(wake[0], &byte, 1) == 1);
+                                                  ready = true;
+                                              }}};
+    };
+    service.deadline = [] { return std::optional<std::chrono::steady_clock::time_point>{}; };
+    service.fn = [&] {
+        CHECK(ready);
+        ++calls;
+        REQUIRE(::write(input[1], "}\n", 2) == 2);
+        ::close(input[1]);
+    };
+    std::ostringstream output;
+    REQUIRE(server.serve(input[0], output, service));
+    CHECK(calls == 1);
+    CHECK(output.str().find("protocolVersion") != std::string::npos);
+    ::close(input[0]);
+    ::close(wake[0]);
+    ::close(wake[1]);
+}
+
+TEST_CASE("stdio recomputes one-shot deadlines after service") {
+    auto r = registry();
+    Host host;
+    cmd::Dispatcher bus(r, host);
+    mcp::Server server(r, bus);
+    int input[2];
+    REQUIRE(::pipe(input) == 0);
+    int calls = 0;
+    mcp::Tick service;
+    service.deadline = [&] {
+        return calls ? std::optional<std::chrono::steady_clock::time_point>{}
+                     : std::optional(std::chrono::steady_clock::time_point::min());
+    };
+    service.fn = [&] {
+        ++calls;
+        ::close(input[1]);
+    };
+    std::ostringstream output;
+    REQUIRE(server.serve(input[0], output, service));
+    CHECK(calls == 1);
+    ::close(input[0]);
+}
+
+TEST_CASE("stdio service is fair during a long request already buffered by the reader") {
+    auto r = registry();
+    Host host;
+    cmd::Dispatcher bus(r, host);
+    mcp::Server server(r, bus);
+    auto* input = ::tmpfile();
+    REQUIRE(input);
+    const std::string frame =
+        std::string(6000, ' ') + R"({"jsonrpc":"2.0","id":1,"method":"initialize"})" + '\n';
+    REQUIRE(::fwrite(frame.data(), 1, frame.size(), input) == frame.size());
+    ::rewind(input);
+    int wake[2];
+    REQUIRE(::pipe(wake) == 0);
+    char byte = 1;
+    int inspections = 0, calls = 0;
+    mcp::Tick service;
+    service.watches = [&] {
+        if (++inspections == 2) REQUIRE(::write(wake[1], &byte, 1) == 1);
+        return std::vector<mcp::Tick::Watch>{
+            {wake[0], POLLIN, [&](short) { REQUIRE(::read(wake[0], &byte, 1) == 1); }}};
+    };
+    service.fn = [&] {
+        ++calls;
+        CHECK(inspections == 2);
+    };
+    std::ostringstream output;
+    REQUIRE(server.serve(::fileno(input), output, service));
+    CHECK(calls == 1);
+    CHECK(output.str().find("protocolVersion") != std::string::npos);
+    ::fclose(input);
+    ::close(wake[0]);
+    ::close(wake[1]);
 }

@@ -112,7 +112,13 @@ host, daw or plugins; plugins use only header-light libs.
 `core-base` provides `supple::MainThreadWake`, a coalesced notification relay
 (ADR-0029). Producers publish atomics and wake a private futex; its parked
 non-RT thread writes a pollable eventfd. The bridge uses it for plug-in main
-requests. App service scheduling still uses its existing timers.
+requests. EngineApp subscribes its local instances, engine, backend and jobs to
+one relay that outlives all producers. Headless socket/MCP loops poll that fd,
+local plug-in descriptors and the nearest monotonic service deadline (ADR-0030).
+Audio callbacks notify for published work/state transitions and one-shot output
+consumption targets, not unchanged blocks. Job/post notifications run outside
+locks; service flushes events before Lua delivery. The GUI still uses its
+existing service/control timers pending its event-loop conversion.
 
 Model → audio: immutable `RenderPlan` swapped with an atomic pointer;
 parameter changes and transport commands via bounded SPSC queues. Audio →

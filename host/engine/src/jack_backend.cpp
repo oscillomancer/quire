@@ -1,3 +1,4 @@
+#include "supple/base/main_thread_wake.h"
 #include "supple/engine/bench_probe.h"
 #include "supple/engine/jack.h"
 
@@ -160,6 +161,7 @@ struct JackBackend::Impl {
     // activation, and flips during it), so only a later difference counts.
     std::atomic<Frames> rate{0}, reportedRate{0};
     Callback callback;
+    MainThreadWake* mainWake = nullptr;
     BenchProbe* benchProbe = nullptr;
 
     std::atomic<int> state{kRunning};
@@ -238,19 +240,27 @@ struct JackBackend::Impl {
         return static_cast<Impl*>(self)->process(n);
     }
     static int xrunThunk(void* self) {
-        static_cast<Impl*>(self)->xruns.fetch_add(1, std::memory_order_relaxed);
+        auto* s = static_cast<Impl*>(self);
+        s->xruns.fetch_add(1, std::memory_order_relaxed);
+        if (s->mainWake) s->mainWake->notify();
         return 0;
     }
     static int bufferSizeThunk(Frames n, void* self) {
-        static_cast<Impl*>(self)->period.store(n, std::memory_order_relaxed);
+        auto* s = static_cast<Impl*>(self);
+        if (s->period.exchange(n, std::memory_order_acq_rel) != n && s->mainWake)
+            s->mainWake->notify();
         return 0;
     }
     static int sampleRateThunk(Frames n, void* self) {
-        static_cast<Impl*>(self)->reportedRate.store(n, std::memory_order_relaxed);
+        auto* s = static_cast<Impl*>(self);
+        if (s->reportedRate.exchange(n, std::memory_order_acq_rel) != n && s->mainWake)
+            s->mainWake->notify();
         return 0;
     }
     static void shutdownThunk(void* self) {
-        static_cast<Impl*>(self)->serverGone.store(true, std::memory_order_release);
+        auto* s = static_cast<Impl*>(self);
+        s->serverGone.store(true, std::memory_order_release);
+        if (s->mainWake) s->mainWake->notify();
     }
 
     void close() {
@@ -317,6 +327,7 @@ Status JackBackend::start(const BackendConfig& config, Callback callback) {
     const Api* api = *loadedApi;
     auto impl = std::make_unique<Impl>();
     impl->api = api;
+    impl->mainWake = mainWake_;
     impl->callback = std::move(callback);
     impl->benchProbe = options_.benchProbe;
     impl->inputs = config.inputs;

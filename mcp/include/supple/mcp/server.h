@@ -8,13 +8,23 @@
 #include <memory>
 #include <optional>
 #include <ostream>
+#include <vector>
 
 namespace supple::mcp {
-// A service tick run on the serving thread whenever no request is waiting (the
-// stdio reader polls, so it never blocks the tick).
+// Service on the serving thread, between requests or bytes of partial frames.
+// The fd reader polls async sources/deadlines; legacy callers use an interval.
 struct Tick {
     std::function<void()> fn;
     std::chrono::milliseconds interval{100};
+    struct Watch {
+        int fd;
+        short events;
+        std::function<void(short)> ready;
+    };
+    // When supplied, these replace the periodic interval. Sources/deadlines
+    // are recomputed after service and requests; fn stays on the serving thread.
+    std::function<std::vector<Watch>()> watches = {};
+    std::function<std::optional<std::chrono::steady_clock::time_point>()> deadline = {};
 };
 
 // MCP over newline-delimited JSON-RPC on stdio. The in-process deployment

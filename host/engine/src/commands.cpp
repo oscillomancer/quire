@@ -2600,6 +2600,9 @@ void registerEngineCommands(cmd::Registry& registry) {
                     OfflineSettings settings = o;
                     settings.cancelFlag = jobs.cancellationFlag(id);
                     settings.progressFlag = jobs.progressFlag(id);
+                    settings.progress = [&jobs, id](double fraction) {
+                        (void)jobs.progress(id, fraction, "Rendering");
+                    };
                     settings.progressScale = 0.8;
                     settings.stopToken = stop;
                     auto r = renderSnapshot(s, settings, catalogue, identity);

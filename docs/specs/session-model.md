@@ -407,8 +407,11 @@ same-named file with other bytes gets `-2`, `-3`…; the same bytes are
 reused) instead of naming it where it is. The GUI gives each project a
 folder of its own (gui.md §4.11).
 
-The engine app writes the autosaves from its service tick (engine.md §6),
-only when the head changed since the last one and 60 s have passed, and
+The engine app writes autosaves from main-thread service (engine.md §6,
+ADR-0030), only when a named project's head changed since the last one and
+60 s of monotonic service time have passed. Unchanged/unnamed projects have no
+autosave deadline; an overdue edit arms immediate service. A failed write
+waits 60 s before retrying. History timestamps still use wall time, and
 `<n>` counts up from the highest present. `project.open` of a file that has
 a newer autosave next to it reports `autosave_available` and loads nothing
 from it; opening the autosave file itself is how it comes back.

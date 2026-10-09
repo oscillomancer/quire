@@ -59,7 +59,7 @@ std::shared_ptr<std::atomic<double>> JobManager::progressFlag(std::string_view i
 }
 Status JobManager::progress(std::string_view id, double fraction, std::string message,
                             json::Value extra) {
-    std::lock_guard lock(mutex_);
+    std::unique_lock lock(mutex_);
     auto it = jobs_.find(std::string(id));
     if (it == jobs_.end()) return Error("job.unknown", "unknown job", "/job", "use job.list");
     auto& job = it->second;
@@ -70,13 +70,17 @@ Status JobManager::progress(std::string_view id, double fraction, std::string me
     job.progress["fraction"] = fraction;
     job.fraction->store(fraction, std::memory_order_relaxed);
     job.progress["message"] = std::move(message);
+    bool queued = false;
     auto now = std::chrono::steady_clock::now();
     if (job.lastProgressEvent.time_since_epoch().count() == 0 ||
         now - job.lastProgressEvent >= std::chrono::milliseconds(500)) {
         events_.emplace_back("job.progress", snapshot(job));
         job.lastProgressEvent = now;
+        queued = true;
     }
     cv_.notify_all();
+    lock.unlock();
+    if (queued && wake_) wake_();
     return {};
 }
 Status JobManager::complete(std::string_view id, json::Value result) {
@@ -84,7 +88,7 @@ Status JobManager::complete(std::string_view id, json::Value result) {
 }
 Status JobManager::completeWith(std::string_view id, json::Value result,
                                 const std::function<void()>& publish) {
-    std::lock_guard lock(mutex_);
+    std::unique_lock lock(mutex_);
     auto it = jobs_.find(std::string(id));
     if (it == jobs_.end()) return Error("job.unknown", "unknown job", "/job", "use job.list");
     if (it->second.status != "running")
@@ -106,10 +110,12 @@ Status JobManager::completeWith(std::string_view id, json::Value result,
     events_.emplace_back("job.done", snapshot(it->second));
     cv_.notify_all();
     prune();
+    lock.unlock();
+    if (wake_) wake_();
     return {};
 }
 Status JobManager::fail(std::string_view id, Error error) {
-    std::lock_guard lock(mutex_);
+    std::unique_lock lock(mutex_);
     auto it = jobs_.find(std::string(id));
     if (it == jobs_.end()) return Error("job.unknown", "unknown job", "/job", "use job.list");
     if (it->second.status != "running")
@@ -119,10 +125,12 @@ Status JobManager::fail(std::string_view id, Error error) {
     events_.emplace_back("job.done", snapshot(it->second));
     cv_.notify_all();
     prune();
+    lock.unlock();
+    if (wake_) wake_();
     return {};
 }
 Status JobManager::cancel(std::string_view id, std::optional<json::Value> result) {
-    std::lock_guard lock(mutex_);
+    std::unique_lock lock(mutex_);
     auto it = jobs_.find(std::string(id));
     if (it == jobs_.end()) return Error("job.unknown", "unknown job", "/job", "use job.list");
     if (it->second.status == "running") {
@@ -136,6 +144,8 @@ Status JobManager::cancel(std::string_view id, std::optional<json::Value> result
     events_.emplace_back("job.done", snapshot(it->second));
     cv_.notify_all();
     prune();
+    lock.unlock();
+    if (wake_) wake_();
     return {};
 }
 Result<json::Value> JobManager::status(std::string_view id) const {

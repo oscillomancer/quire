@@ -19,9 +19,11 @@
 #endif
 
 #include <fcntl.h>
+#include <poll.h>
 #include <sched.h>
 #include <sys/resource.h>
 #include <unistd.h>
+#include <cerrno>
 
 #include <supple/audio/audio_file.h>
 #include <supple/base/files.h>
@@ -42,6 +44,14 @@ namespace supple::engine {
 // A main-thread transport write stalled halfway (preempted after the odd
 // sequence store), and the executors' view of the epoch.
 struct EngineTestAccess {
+    static void outputConsume(Engine& e, std::uint64_t epoch, std::int64_t stream) SUPPLE_RT {
+        e.rtEpoch_ = epoch;
+        e.rtStream_.store(stream);
+        e.rtPosEpoch_.store(epoch);
+        e.wakeOutputConsumed();
+    }
+    static std::uint64_t outputSeen(const Engine& e) { return e.outputWakeSeen_; }
+    static std::uint64_t outputSerial(const Engine& e) { return e.outputWakeSerial_.load(); }
     static void liveHooks(Engine& e, detail::LiveWorkers::Hooks hooks) {
         e.liveWorkersReady_.store(nullptr);
         e.liveWorkers_ = std::make_unique<detail::LiveWorkers>(3, hooks);
@@ -4629,4 +4639,49 @@ TEST_CASE("background elevation refusals keep every background thread normal and
             CHECK(warnsNormal(engine, "RLIMIT_RTTIME"));
         engine.stop();
     }
+}
+
+TEST_CASE("output consumption targets are one-shot and tagged with the playback epoch") {
+    InstancePool pool([](const model::PluginRef&) -> Result<host::PluginInfo> {
+        return Error("test.unused", "unused resolver");
+    });
+    MediaCache media;
+    MainThreadWake wake;
+    Engine engine(pool, media);
+    engine.setMainThreadWake(wake);
+    engine.armOutputWake(3, 128);
+    const auto serial = EngineTestAccess::outputSerial(engine);
+    EngineTestAccess::outputConsume(engine, 2, 1000);  // wrong epoch cannot satisfy the target
+    CHECK(EngineTestAccess::outputSeen(engine) != serial);
+    EngineTestAccess::outputConsume(engine, 3, 127);
+    CHECK(EngineTestAccess::outputSeen(engine) != serial);
+    EngineTestAccess::outputConsume(engine, 3, 128);
+    CHECK(EngineTestAccess::outputSeen(engine) == serial);
+    EngineTestAccess::outputConsume(engine, 3, 256);
+    CHECK(EngineTestAccess::outputSeen(engine) == serial);
+    engine.armOutputWake(3, 512);
+    CHECK(EngineTestAccess::outputSerial(engine) != serial);
+    EngineTestAccess::outputConsume(engine, 3, 511);
+    CHECK(EngineTestAccess::outputSeen(engine) == serial);
+    EngineTestAccess::outputConsume(engine, 3, 512);
+    CHECK(EngineTestAccess::outputSeen(engine) == EngineTestAccess::outputSerial(engine));
+    engine.armOutputWake(3, INT64_MAX);
+    EngineTestAccess::outputConsume(engine, 3, 1024);
+    CHECK(EngineTestAccess::outputSeen(engine) == EngineTestAccess::outputSerial(engine));
+    auto drain = [&] {
+        pollfd fd{wake.fd(), POLLIN, 0};
+        int ready;
+        do {
+            ready = ::poll(&fd, 1, -1);
+        } while (ready < 0 && errno == EINTR);
+        REQUIRE(ready == 1);
+        REQUIRE(wake.drain());
+    };
+    drain();                       // earlier callback notifications coalesced
+    engine.armOutputWake(3, 128);  // consumption crossed before the arm
+    drain();                       // main's arm/recheck signals without another callback
+    engine.armOutputWake(3, INT64_MAX);
+    EngineTestAccess::outputConsume(engine, 3, 2048);
+    pollfd fd{wake.fd(), POLLIN, 0};
+    CHECK(::poll(&fd, 1, 0) == 0);  // disarmed/unchanged work does not notify
 }

@@ -294,6 +294,7 @@ struct HostCallbacks {
             {newId, std::max<std::uint32_t>(periodMs, 1),
              std::chrono::steady_clock::now() + std::chrono::milliseconds(periodMs)});
         *id = newId;
+        s->notifyMain();
         return true;
     }
     static bool CLAP_ABI unregisterTimer(const clap_host_t* h, clap_id id) {
@@ -301,6 +302,7 @@ struct HostCallbacks {
         const auto before = t.size();
         t.erase(std::remove_if(t.begin(), t.end(), [&](const auto& x) { return x.id == id; }),
                 t.end());
+        if (t.size() != before) S(h)->notifyMain();
         return t.size() != before;
     }
 
@@ -334,12 +336,14 @@ struct HostCallbacks {
         for (auto& [f, fl] : fds)
             if (f == fd) return false;
         fds.emplace_back(fd, flags);
+        S(h)->notifyMain();
         return true;
     }
     static bool CLAP_ABI modifyFd(const clap_host_t* h, int fd, clap_posix_fd_flags_t flags) {
         for (auto& [f, fl] : S(h)->fds)
             if (f == fd) {
                 fl = flags;
+                S(h)->notifyMain();
                 return true;
             }
         return false;
@@ -348,6 +352,7 @@ struct HostCallbacks {
         auto& fds = S(h)->fds;
         const auto before = fds.size();
         std::erase_if(fds, [&](const auto& x) { return x.first == fd; });
+        if (fds.size() != before) S(h)->notifyMain();
         return fds.size() != before;
     }
 
@@ -412,8 +417,12 @@ struct HostCallbacks {
                 return true;
         }
         if (s->idleFlush) {
-            if (s->idleOutputs.push(out)) return true;
+            if (s->idleOutputs.push(out)) {
+                s->notifyMain();
+                return true;
+            }
             s->idleDropped.fetch_add(1, std::memory_order_relaxed);
+            s->notifyMain();
             return false;
         }
         if (sink->count < sink->storage.size()) {

@@ -889,3 +889,49 @@ TEST_CASE("model-loop timers run on the model thread in order and stop on cancel
     CHECK(fast <= fastAtCancel + 1);
     CHECK(slow <= slowAtCancel + 1);
 }
+
+TEST_CASE("one-shot deadlines expire once and cancel other due owners") {
+    rpc::ModelLoop loop;
+    int calls = 0;
+    rpc::Timer second;
+    auto first = loop.at(std::chrono::steady_clock::time_point::min(), [&] {
+        ++calls;
+        second.cancel();
+    });
+    second = loop.at(std::chrono::steady_clock::time_point::min(), [&] { calls += 100; });
+    CHECK(loop.pump() == -1);
+    CHECK(calls == 1);
+    CHECK_FALSE(first.active());
+    CHECK_FALSE(second.active());
+    CHECK(loop.pump() == -1);
+    CHECK(calls == 1);
+}
+
+TEST_CASE("fd watches cancel ready snapshots before owners or descriptors are reused") {
+    rpc::ModelLoop loop;
+    int fds[2];
+    REQUIRE(::pipe(fds) == 0);
+    char byte = 1;
+    REQUIRE(::write(fds[1], &byte, 1) == 1);
+    int calls = 0;
+    rpc::FdWatch second, replacement;
+    auto first = loop.watch(fds[0], POLLIN, [&](short ready) {
+        CHECK((ready & POLLIN) != 0);
+        ++calls;
+        second.cancel();
+        replacement = loop.watch(fds[0], POLLIN, [&](short) {
+            REQUIRE(::read(fds[0], &byte, 1) == 1);
+            calls += 10;
+        });
+    });
+    second = loop.watch(fds[0], POLLIN, [&](short) { calls += 100; });
+    loop.pump();
+    CHECK(calls == 1);
+    first.cancel();
+    loop.pump();
+    CHECK(calls == 11);
+    replacement.cancel();
+    CHECK(loop.pump() == -1);
+    ::close(fds[0]);
+    ::close(fds[1]);
+}

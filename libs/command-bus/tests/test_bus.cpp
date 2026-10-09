@@ -30,6 +30,8 @@ struct JobStarted {
 };
 struct FakeHost : Host, RefResolver {
     Toy toy;
+    int wakes = 0;
+    void workQueued() override { ++wakes; }
     bool failRollback = false, failCapture = false, failRestore = false;
     int before = 0;
     int begins = 0, commits = 0, rollbacks = 0;
@@ -387,6 +389,8 @@ TEST_CASE("posted edits wait for the open transaction to close") {
         dispatcher.post(
             "edit", [&] { return ran.push_back("edit"), Status{}; }, Dispatcher::PostKind::Edit);
         dispatcher.post("service", [&] { return ran.push_back("service"), Status{}; });
+        CHECK(host.wakes == 2);
+        CHECK(ran.empty());           // wake never executes posted work on its producer
         dispatcher.flushJobEvents();  // what job.wait does inside a batch
         CHECK(ran == std::vector<std::string>{"service"});
         return json::Value::object();
@@ -511,4 +515,25 @@ TEST_CASE("R13 batch aggregates closed-object structural errors before execution
         CHECK_FALSE(call(dispatcher, "batch", obj(input)));
     }
     CHECK(host.toy.count == 0);
+}
+
+TEST_CASE("job publication wakes outside the store lock") {
+    cmd::JobManager jobs;
+    const auto id = jobs.create();
+    int wakes = 0;
+    jobs.setWaker([&] {
+        ++wakes;
+        // A waker may inspect the store: publication must release its lock.
+        REQUIRE(jobs.status(id));
+    });
+    REQUIRE(jobs.progress(id, 0.1, "working"));
+    CHECK(wakes == 1);
+    auto events = jobs.drainEvents();
+    REQUIRE(events.size() == 1);
+    CHECK(events[0].first == "job.progress");
+    REQUIRE(jobs.complete(id, json::Value::object()));
+    CHECK(wakes == 2);
+    events = jobs.drainEvents();
+    REQUIRE(events.size() == 1);
+    CHECK(events[0].first == "job.done");
 }

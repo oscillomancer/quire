@@ -1,3 +1,4 @@
+#include <poll.h>
 // <slug>-engine: the headless DAW (spec: docs/specs/engine.md §6).
 //
 //   <slug>-engine exec '<json>' [--project FILE] [--save] [--workdir DIR] [--plugin-path P]...
@@ -213,9 +214,6 @@ int main(int argc, char** argv) {
             }
         }
         cmd::Dispatcher dispatcher(registry, **app);
-        // The service tick: engine housekeeping (plans, failures, device
-        // restart, autosave) every 100 ms, also while no command arrives.
-        const auto interval = std::chrono::milliseconds(100);
         rpc::Server* activeServer = nullptr;
         auto publishEvents = [&] {
             for (auto& [topic, payload] : (*app)->takeEvents())
@@ -224,10 +222,35 @@ int main(int argc, char** argv) {
         (*app)->attachCommands(dispatcher);
         if (rpcMode) {
             rpc::ModelLoop loop;
+            rpc::Timer deadline;
+            std::vector<rpc::FdWatch> pluginWatches;
+            std::function<void()> schedule;
+            auto service = [&] {
+                pluginWatches.clear();  // service may prune owners and close fds
+                deadline.cancel();
+                (*app)->tick();
+                publishEvents();
+                schedule();
+            };
+            schedule = [&] {
+                deadline.cancel();
+                if (auto next = (*app)->nextServiceDeadline()) deadline = loop.at(*next, service);
+                pluginWatches.clear();
+                for (const auto& watch : (*app)->serviceFds())
+                    pluginWatches.push_back(
+                        loop.watch(watch.fd, watch.events, [&, watch](short ready) {
+                            (*app)->serviceFdReady(watch, ready);
+                            service();
+                        }));
+            };
+            auto wake = loop.watch((*app)->serviceFd(), POLLIN, [&](short) { service(); });
             rpc::Server server(registry, dispatcher, [&](auto task) {
                 loop.post([&, task = std::move(task)] {
+                    pluginWatches.clear();  // commands may replace instances
+                    deadline.cancel();
                     task();
                     publishEvents();
+                    schedule();
                 });
             });
             activeServer = &server;
@@ -236,26 +259,33 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "%s\n", started.error().toString().c_str());
                 return 1;
             }
-            auto tick = loop.every(interval, [&] {
-                (*app)->tick();
-                dispatcher.flushJobEvents();  // job events and follow-ups from workers
-                publishEvents();
-            });
+            service();
             loop.run();
-            tick.cancel();
+            wake.cancel();
+            deadline.cancel();
+            pluginWatches.clear();
             server.stop();
             return 0;
         }
         mcp::Server server(registry, dispatcher);
         // The tick drains the app's events: MCP has no event channel, so they
         // would only pile up.
-        auto status = server.serve(::fileno(stdin), std::cout,
-                                   mcp::Tick{[&] {
-                                                 (*app)->tick();
-                                                 dispatcher.flushJobEvents();
-                                                 (*app)->takeEvents();
-                                             },
-                                             interval});
+        mcp::Tick tick;
+        tick.fn = [&] {
+            (*app)->tick();
+            (*app)->takeEvents();
+        };
+        tick.deadline = [&] { return (*app)->nextServiceDeadline(); };
+        tick.watches = [&] {
+            std::vector<mcp::Tick::Watch> watches{{(*app)->serviceFd(), POLLIN, [](short) {}}};
+            for (const auto& watch : (*app)->serviceFds())
+                watches.push_back({watch.fd, watch.events, [&, watch](short ready) {
+                                       (*app)->serviceFdReady(watch, ready);
+                                   }});
+            return watches;
+        };
+        tick.fn();
+        auto status = server.serve(::fileno(stdin), std::cout, tick);
         if (!status) {
             std::fprintf(stderr, "%s\n", status.error().toString().c_str());
             return 1;

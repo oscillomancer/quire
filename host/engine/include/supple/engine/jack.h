@@ -53,6 +53,7 @@ class JackBackend : public Backend {
     // Opens a client, registers `config.inputs`/`config.outputs` ports and
     // activates it. The granted rate is in config() (the requested rate is
     // not enforced: the graph owns it).
+    void setMainThreadWake(MainThreadWake* wake) override { mainWake_ = wake; }
     Status start(const BackendConfig& config, Callback callback) override;
     // The next process cycle makes the final zero-frame callback; then the
     // client is deactivated and closed. If the server is gone or no cycle
@@ -79,6 +80,7 @@ class JackBackend : public Backend {
 
   private:
     struct Impl;
+    MainThreadWake* mainWake_ = nullptr;
     Options options_;
     BackendConfig config_;
     std::unique_ptr<Impl> impl_;

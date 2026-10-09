@@ -42,7 +42,9 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
   `pdc: ignore`); parallel FX groups; per-FX oversampling (2/4/8x); input
   FX on armed channels, monitored and recorded; plugins keep
   running while the transport is stopped; renderer deadline/event waits
-  (ADR-0028); smooth plan swaps (10 ms ramps);
+  (ADR-0028); headless main-thread service driven by notifications and
+  deadlines (ADR-0030), including MIDI controls, plug-in subscriptions,
+  render-ahead output consumption, jobs, restart and autosave; smooth plan swaps (10 ms ramps);
   every node, plug-ins and bridged plug-ins included, runs with FTZ/DAZ in
   every executor, and owned audio threads prefault their stacks (ADR-0025).
 - **Strips and routing** (ADR-0019 to ADR-0022): typed channel, buss and
@@ -117,6 +119,10 @@ bench-only; synthetic deadline counts and server xruns are separate. Historical
 capacity reports retain their original revision/settings.
 
 ## Known limits
+
+- The GUI retains its 100 ms service and 10 ms bound-control timers pending
+  conversion to the app's event/deadline API. Remote-instance forwarding to
+  that API is a separate bridge change; local subscriptions are wired.
 
 Engine and hosting:
 - Without anticipation, a single Orrery chain can miss deadlines at 64

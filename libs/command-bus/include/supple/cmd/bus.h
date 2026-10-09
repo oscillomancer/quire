@@ -206,6 +206,9 @@ inline constexpr double kMaxWaitSeconds = 30.0;
 
 class JobManager {
   public:
+    // Install before starting workers; outlives workers. Called after releasing
+    // the store lock, only when an event was queued. Never dispatch inline.
+    void setWaker(std::function<void()> wake) { wake_ = std::move(wake); }
     std::string create();
     bool cancelled(std::string_view id) const;
     std::shared_ptr<const std::atomic<bool>> cancellationFlag(std::string_view id) const;
@@ -246,6 +249,7 @@ class JobManager {
     std::vector<std::string> order_;
     std::vector<std::pair<std::string, json::Value>> events_;
     std::uint64_t next_ = 1;
+    std::function<void()> wake_;
 };
 
 class Dispatcher;
@@ -285,11 +289,15 @@ class Host {
     virtual void stopJobs() {}
     // The dispatcher owns the job store; hosts may cancel their project work.
     virtual void dispatcherAttached(Dispatcher*) {}
+    // Any producer thread, after publication and outside bus locks. Wake the
+    // model thread only; execution remains in flushJobEvents().
+    virtual void workQueued() {}
 };
 
 class Dispatcher {
   public:
     Dispatcher(const Registry& registry, Host& host) : registry_(registry), host_(host) {
+        jobs_.setWaker([this] { host_.workQueued(); });
         host_.dispatcherAttached(this);
     }
     ~Dispatcher();

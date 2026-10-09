@@ -348,11 +348,24 @@ class EngineApp : public cmd::Host {
     void setMetronome(const MetronomeSettings& m);  // reaches the engine now and on every start
     const TransportRange& punch() const { return punch_; }
 
-    // --- periodic service (the servers' tick, every 100 ms on the model thread) ------
+    // --- main-thread service (event/deadline driven) --------------------------------
     // Frees retired plans, emits fx.failed (so subscribers see failures without
     // asking), restarts the engine after a device change, and autosaves the
     // project when its head changed and an autosave interval has passed.
     void tick();
+    int serviceFd() const { return mainWake_.fd(); }
+    // All persistent local instances, including probes and retired plans.
+    struct ServiceFd {
+        int fd;
+        short events;
+        host::Instance* owner;
+    };
+    std::vector<ServiceFd> serviceFds() const;
+    void serviceFdReady(const ServiceFd& watch, short ready);
+    std::optional<std::uint64_t> nextServiceDelayMs() const;
+    std::optional<std::chrono::steady_clock::time_point> nextServiceDeadline() const;
+    std::uint64_t serviceClockMs() const;
+    void workQueued() override { mainWake_.notify(); }
 
     // --- MIDI learn (ADR-0027) --------------------------------------------------------
     // A device's control message and the name of its input port.
@@ -365,8 +378,8 @@ class EngineApp : public cmd::Host {
     // (fx `learn`): a semantic one through fx.param.set (one undo step per
     // movement, recorded by touch/latch envelopes), a plain one on the running
     // instance at once and into the project when the control rests. While
-    // learning() it moves nothing. tick() calls it; the window app calls it
-    // more often, so a knob answers within a frame.
+    // learning() it moves nothing. tick() calls it; device batches notify
+    // the shared relay, so event-driven callers need no control poll timer.
     void pollControl();
     std::function<void(const std::vector<ControlEvent>&)> onControl;
     // Whether a binding with `when_*` conditions may act now: the window app
@@ -471,6 +484,8 @@ class EngineApp : public cmd::Host {
     Status replaceProject(model::Session session, std::filesystem::path path,
                           const std::function<Status()>& prepare = {});
     bool copyImports_ = false;
+    // Declared first: outlives instances, engine/backend, and worker joins.
+    MainThreadWake mainWake_;
     AppOptions options_;
     std::atomic<std::uint64_t> projectGeneration_{0};
     cmd::Dispatcher* commands_ = nullptr;
@@ -521,6 +536,8 @@ class EngineApp : public cmd::Host {
     std::uint64_t outputDrops_ = 0, voiceDrops_ = 0, consumerDrops_ = 0;
     bool outputOverflow_ = false;
     static json::Value pluginErrorJson(const Error& error);
+    std::vector<model::Id> pendingDirtyStates_;
+    std::vector<host::Instance*> serviceInstances() const;
     void consumePluginOutputs();
     // A running plug-in's state into the model (its blob), when it differs:
     // one coalesced undo step per plug-in. For plug-ins that report a state
@@ -570,7 +587,7 @@ class EngineApp : public cmd::Host {
     BackendConfig restartConfig_{};
     EngineOptions restartOptions_{};
     bool restarting_ = false;
-    std::string restartReason_;
+    std::string restartReason_, restartError_;
     double restartSeconds_ = 0.0;       // the transport position to restore
     std::uint64_t restartUntil_ = 0;    // give up (engine.error) at this clock
     std::uint64_t restartRetryAt_ = 0;  // the next attempt

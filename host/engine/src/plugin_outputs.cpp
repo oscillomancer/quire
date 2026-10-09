@@ -33,7 +33,7 @@ json::Value EngineApp::pluginErrorJson(const Error& e) {
 }
 
 Status EngineApp::commitOutputGesture(const OutputKey& key, const OutputGesture& gesture) {
-    if (!gesture.latest || !engine_) return {};
+    if (!gesture.latest) return {};
     const auto* fx = head().fx.find(key.first);
     auto* instance = pool_->find(key.first);
     if (!fx || !instance || instance->failed()) return {};
@@ -128,7 +128,7 @@ Status EngineApp::commitOutputGesture(const OutputKey& key, const OutputGesture&
         txn().putBlob(*next.state,
                       std::make_shared<const model::Blob>(model::Blob{std::move(*state)}));
     for (const auto& output : gesture.recording) {
-        if (!records) break;
+        if (!records || !engine_) break;
         auto recorded = plain(output.event.value);
         if (!recorded) continue;
         const double physical = semantic ? params::fromClap(semantic->spec, *recorded) : *recorded;
@@ -194,9 +194,39 @@ Status EngineApp::commitOutputGesture(const OutputKey& key, const OutputGesture&
 }
 
 void EngineApp::consumePluginOutputs() {
-    auto taken = engine_->takePluginOutputs();
-    const auto generation = engine_->planGeneration();
-    const auto epoch = engine_->meterClock().epoch;
+    PluginOutputs taken;
+    if (engine_)
+        taken = engine_->takePluginOutputs();
+    else
+        for (const auto& fx : head().fx)
+            if (auto* instance = pool_->find(fx.id)) {
+                auto idle = instance->takeIdleOutputs();
+                taken.dropped += idle.dropped;
+                for (const auto& event : idle.events) {
+                    PluginOutput output;
+                    output.fx = fx.id;
+                    output.event = event;
+                    output.idle = true;
+                    taken.events.push_back(output);
+                }
+            }
+    const auto generation = engine_ ? engine_->planGeneration() : 0;
+    const auto epoch = engine_ ? engine_->meterClock().epoch : 0;
+    // Re-arm after all exits, including a transaction deferral. No time poll is
+    // used for rendered outputs; callback consumption makes them eligible.
+    struct Arm {
+        EngineApp& app;
+        ~Arm() {
+            if (!app.engine_) return;
+            std::int64_t target = INT64_MAX;
+            const auto epoch = app.engine_->meterClock().epoch;
+            if (!app.txn_)
+                for (const auto& output : app.pendingOutputs_)
+                    if (output.anticipative && !output.idle && output.epoch == epoch)
+                        target = std::min(target, output.streamSample);
+            app.engine_->armOutputWake(epoch, target);
+        }
+    } arm{*this};
     if (generation != outputGeneration_ || epoch != outputEpoch_) {
         outputGestures_.clear();
         pendingOutputs_.clear();
@@ -207,7 +237,7 @@ void EngineApp::consumePluginOutputs() {
         outputOverflow_ || taken.dropped != outputDrops_ || taken.voiceDropped != voiceDrops_;
     outputDrops_ = taken.dropped;
     voiceDrops_ = taken.voiceDropped;
-    if (loadedHead_ && loadedHead_->version != head().version) {
+    if (engine_ && loadedHead_ && loadedHead_->version != head().version) {
         // A failed head rebuild leaves an older plan playing. Its outputs must
         // not edit the newer model merely because the published generation stayed.
         outputGestures_.clear();
@@ -233,7 +263,7 @@ void EngineApp::consumePluginOutputs() {
         if (!result) emit("engine.error", pluginErrorJson(result.error()));
         // Our own rebuild does not make the rest of this drain stale. External
         // changes are detected at the next entry, before another drain is used.
-        outputGeneration_ = engine_->planGeneration();
+        outputGeneration_ = engine_ ? engine_->planGeneration() : 0;
     };
     if (overflow) {
         outputOverflow_ = false;
@@ -269,7 +299,8 @@ void EngineApp::consumePluginOutputs() {
         return;
     }
     for (auto it = pendingOutputs_.begin(); it != pendingOutputs_.end();) {
-        if (it->anticipative && !it->idle && it->streamSample > engine_->playedStream(epoch)) {
+        if (engine_ && it->anticipative && !it->idle &&
+            it->streamSample > engine_->playedStream(epoch)) {
             ++it;
             continue;
         }
@@ -318,7 +349,7 @@ void EngineApp::consumePluginOutputs() {
             }
             auto& gesture = outputGestures_[key];
             gesture.latest = output;
-            if (!output.idle && engine_->transport().playing &&
+            if (engine_ && !output.idle && engine_->transport().playing &&
                 !(event.flags & host::OutputEvent::DontRecord)) {
                 if (gesture.recording.size() < kGesturePoints)
                     gesture.recording.push_back(output);

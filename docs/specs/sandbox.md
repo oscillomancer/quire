@@ -115,7 +115,11 @@ Teardown joins the relay after destroying all instances.
 nearest remaining duration rounded up to milliseconds and saturated at
 `INT_MAX`. Timers and registered descriptors remain serviceable with no editor
 open; registrations are main-thread operations, so the loop rebuilds its
-watches and deadlines after callbacks and control requests.
+watches and deadlines after callbacks and control requests. Local timer and FD
+registration/modification/removal also notify the subscribed relay. Idle output
+publication (or overflow) notifies after updating its queue/counter. The engine
+app subscribes persistent instances and probes to its one relay and includes
+all local subscriptions in its service deadline/FD snapshot (ADR-0030).
 
 Thread discipline follows CLAP: create/activate/params-info/state/GUI on the
 main thread; `process` on one audio thread. The sandbox's audio thread is

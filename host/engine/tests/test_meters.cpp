@@ -238,3 +238,20 @@ TEST_CASE("rapid plans reject queued entries from a reused meter generation") {
     reading = bank.read(1, kHeardEverything);
     CHECK(find(reading, track(2))->peak[0] == .25f);
 }
+
+TEST_CASE("meter activity arms once and rechecks publication without a periodic wake") {
+    auto bank = std::make_unique<MeterBank>();
+    const auto observed = bank->activitySequence();
+    bank->armActivity(observed);
+    REQUIRE(bank->pushCallback(block(0, 1, 0, 64, 0)));
+    CHECK(bank->activityArmed());
+    REQUIRE(bank->pushCallback(block(0, 1, 64, 64, 0.5f)));
+    CHECK_FALSE(bank->activityArmed());
+    const auto next = bank->activitySequence();
+    REQUIRE(bank->pushCallback(block(0, 1, 128, 64, 0.5f)));
+    CHECK_FALSE(bank->activityArmed());  // frame deadlines own ongoing motion
+    bank->armActivity(next);             // activity arrived between the read and this arm
+    CHECK_FALSE(bank->activityArmed());
+    bank->armActivity(bank->activitySequence());
+    CHECK(bank->activityArmed());
+}

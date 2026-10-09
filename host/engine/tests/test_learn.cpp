@@ -322,10 +322,19 @@ TEST_CASE("MIDI learn: a plain parameter moves the running plug-in, then the pro
     rig.send(0xb0, 1, 32);
     rig.backend->run(2);  // the audio thread takes the change
     CHECK(live->paramValue(1).value() == doctest::Approx(32.0 / 127).epsilon(0.001));
+    CHECK(rig.app->nextServiceDelayMs() == 300);
     // Not yet in the project: the knob has not rested.
     CHECK(rig.app->versions().history(1000).size() == before);
+    rig.app->setFixedClock(1'000'299);
+    CHECK(rig.app->nextServiceDelayMs() == 1);
+    auto transaction = rig.app->beginTransaction({}, "Defer learned value");
+    REQUIRE(transaction);
+    CHECK_FALSE(rig.app->nextServiceDelayMs());
+    REQUIRE(rig.app->rollbackTransaction(*transaction));
     rig.app->setFixedClock(1'000'500);
+    CHECK(rig.app->nextServiceDelayMs() == 0);
     rig.app->pollControl();
+    CHECK_FALSE(rig.app->nextServiceDelayMs());
     const model::FxInstance& after = *rig.app->head().fx.find(fx);
     CHECK(after.params.at(1) == doctest::Approx(32.0 / 127).epsilon(0.001));
     CHECK(rig.app->versions().history(1000).size() == before + 1);
@@ -390,4 +399,28 @@ TEST_CASE("MIDI learn: the last touched parameter is the window's last edit") {
                                    [](double, double) { return std::optional<double>(0.5); }));
     rig.call("fx.remove", R"({"fx":"fx_2"})");
     CHECK_FALSE(rig.app->lastTouched());  // gone with its effect
+}
+
+TEST_CASE("a control action may stop the engine during event-driven service") {
+    Rig rig;
+    rig.start();
+    int received = 0;
+    rig.app->onControl = [&](const auto& events) {
+        received += static_cast<int>(events.size());
+        rig.app->stopEngine();
+    };
+    {
+        std::lock_guard lock(rig.lock);
+        MidiInputEvent event;
+        event.size = 3;
+        event.bytes[0] = 0xb0;
+        event.bytes[1] = 1;
+        event.bytes[2] = 64;
+        rig.queued.push_back(event);
+    }
+    rig.backend->run(1);
+    rig.app->tick();
+    CHECK(received == 1);
+    CHECK(rig.app->engine() == nullptr);
+    CHECK_FALSE(rig.app->nextServiceDelayMs());
 }

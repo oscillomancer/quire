@@ -533,6 +533,9 @@ Result<json::Value> runTasks(EngineApp& app, const std::vector<RenderTask>& task
         if (jobs) {
             settings.cancelFlag = jobs->cancellationFlag(job);
             settings.progressFlag = jobs->progressFlag(job);
+            settings.progress = [jobs, id = std::string(job)](double fraction) {
+                (void)jobs->progress(id, fraction, "Rendering");
+            };
             settings.progressBase = static_cast<double>(i) / tasks.size();
             settings.progressScale = 0.8 / tasks.size();
         }

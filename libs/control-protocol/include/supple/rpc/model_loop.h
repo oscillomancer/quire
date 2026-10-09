@@ -26,6 +26,14 @@ struct TimerState {
     std::function<void()> fn;
     std::chrono::steady_clock::duration interval{};
     std::chrono::steady_clock::time_point next{};
+    bool once = false;
+    std::atomic<bool> cancelled{false};
+    std::weak_ptr<Wake> wake;
+};
+struct FdState {
+    int fd = -1;
+    short events = 0;
+    std::function<void(short)> fn;
     std::atomic<bool> cancelled{false};
     std::weak_ptr<Wake> wake;
 };
@@ -63,6 +71,25 @@ class Timer {
     std::shared_ptr<detail::TimerState> state_;
 };
 
+// A level-triggered fd watch. Same cancellation guarantee as Timer. Cancel
+// on the model thread before closing/reusing the fd or destroying its owner.
+class FdWatch {
+  public:
+    FdWatch() = default;
+    ~FdWatch() { cancel(); }
+    FdWatch(FdWatch&&) noexcept = default;
+    FdWatch& operator=(FdWatch&&) noexcept;
+    FdWatch(const FdWatch&) = delete;
+    FdWatch& operator=(const FdWatch&) = delete;
+    void cancel();
+    bool active() const { return state_ && !state_->cancelled.load(std::memory_order_acquire); }
+
+  private:
+    friend class ModelLoop;
+    explicit FdWatch(std::shared_ptr<detail::FdState> state) : state_(std::move(state)) {}
+    std::shared_ptr<detail::FdState> state_;
+};
+
 // Executes posted socket requests on the headless host's model thread, and runs
 // periodic timers between them (a service tick).
 class ModelLoop {
@@ -77,6 +104,11 @@ class ModelLoop {
     // called from any thread. Intervals below 1 ms are 1 ms; an interval
     // beyond the clock's range never comes due.
     Timer every(std::chrono::milliseconds interval, std::function<void()> fn);
+    // One invocation at an absolute monotonic deadline. Already due deadlines
+    // run on the next pass, never inline. May be registered from any thread.
+    Timer at(std::chrono::steady_clock::time_point deadline, std::function<void()> fn);
+    // `events` and callback readiness flags use poll(2)'s POLLIN/POLLOUT/etc.
+    FdWatch watch(int fd, short events, std::function<void(short)> fn);
     void post(std::function<void()> task);
     void run();  // blocks until SIGINT or SIGTERM
 

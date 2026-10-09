@@ -449,3 +449,34 @@ model thread.
 Provider SSE fields are type-checked and incomplete streams refuse unless the
 provider completion marker arrived. Credential configuration publishes through an
 exclusive 0600 temporary file and atomic rename.
+
+
+### Main-thread scheduling (ADR-0030)
+
+`Host::workQueued()` wakes the model thread after `Dispatcher::post` publishes
+work outside the posted-work lock. JobManager's optional `setWaker` is installed
+before workers start and outlives them; queued progress/completion/failure/cancel
+events invoke it after releasing the store lock. Rate-limited progress retains
+its 500 ms publication limit. Raw progress flags remain available for snapshots;
+engine offline jobs also publish progress events through the callback in
+OfflineSettings. Wakers signal only; consumers call `flushJobEvents()` on main.
+EngineApp's service flushes these events before delivering Lua subscribers.
+
+`ModelLoop::watch(fd, pollEvents, callback)` returns a cancellable FdWatch;
+`at(steadyDeadline, callback)` returns a one-shot Timer, inactive before its
+callback starts. Already due deadlines execute on the next pass. `run()` polls
+the wake pipe and watched descriptors until the earliest timer, indefinitely
+without a timer. `pump()` handles ready descriptors without blocking. FD watches
+have the timer's cancellation guarantee: model-thread cancellation suppresses
+callbacks even from an already-ready snapshot, so cancel before freeing owners
+or reusing descriptors. Cross-thread cancellation requires the same owner
+synchronization as timers. New work/registration changes wake the pipe/embedding
+waker; the GUI owner must arrange an fd wake into its native event loop.
+
+MCP Tick retains its legacy `fn`/periodic `interval`. Optional `watches` and
+`deadline` suppliers select event/deadline scheduling instead; sources are
+recomputed after requests/service. The fd reader polls stdin plus those watches,
+and checks deadlines/readiness at frame boundaries, every 4 KiB of buffered input
+and whenever input buffering empties. Partial frames cannot block asynchronous
+service; continuous buffered requests cannot starve it. The istream overload
+retains blocking stream behavior. No MCP or control wire schema changes.

@@ -1,6 +1,7 @@
 #include <poll.h>
 #include <supple/mcp/server.h>
 #include <supple/product.h>
+#include <supple/rpc/model_loop.h>
 #include <unistd.h>
 #include <algorithm>
 #include <cerrno>
@@ -277,13 +278,16 @@ namespace {
 // fd it can poll with the tick's deadline.
 struct Byter {
     virtual ~Byter() = default;
-    virtual int wait(int timeoutMs) = 0;  // >0 ready, 0 not ready (yet), <0 end
-    virtual int get() = 0;                // the byte, or <0 at the end
+    virtual int wait(
+        int timeoutMs,
+        const std::vector<Tick::Watch>& watches) = 0;  // >0 ready, 0 not ready (yet), <0 end
+    virtual bool buffered() const { return false; }
+    virtual int get() = 0;  // the byte, or <0 at the end
 };
 
 struct StreamByter : Byter {
     explicit StreamByter(std::istream& input) : input_(input) {}
-    int wait(int) override {
+    int wait(int, const std::vector<Tick::Watch>&) override {
         if (input_.rdbuf()->in_avail() > 0) return 1;
         return input_.peek() == std::char_traits<char>::eof() ? -1 : 1;
     }
@@ -295,13 +299,26 @@ struct StreamByter : Byter {
 // per byte.
 struct FdByter : Byter {
     explicit FdByter(int fd) : fd_(fd) {}
-    int wait(int timeoutMs) override {
-        if (pos_ < end_) return 1;
-        pollfd descriptor{fd_, POLLIN, 0};
-        const int ready = ::poll(&descriptor, 1, timeoutMs);
+    bool buffered() const override { return pos_ < end_; }
+    int wait(int timeoutMs, const std::vector<Tick::Watch>& watches) override {
+        const bool buffered = pos_ < end_;
+        if (buffered && watches.empty()) return 1;
+        std::vector<pollfd> fds{{fd_, POLLIN, 0}};
+        for (const auto& watch : watches) fds.push_back({watch.fd, watch.events, 0});
+        const int ready = ::poll(fds.data(), fds.size(), buffered ? 0 : timeoutMs);
         if (ready < 0) return errno == EINTR ? 0 : -1;
+        bool serviced = false;
+        for (std::size_t i = 0; i < watches.size(); ++i) {
+            if (!fds[i + 1].revents) continue;
+            // The owner validates snapshots if a preceding callback removed a
+            // later fd; callbacks only publish work, service runs below.
+            watches[i].ready(fds[i + 1].revents);
+            serviced = true;
+        }
+        if (serviced) return 0;
+        if (buffered) return 1;
         if (ready == 0) return 0;
-        return (descriptor.revents & (POLLIN | POLLHUP | POLLERR)) ? 1 : -1;
+        return (fds[0].revents & (POLLIN | POLLHUP | POLLERR)) ? 1 : -1;
     }
     int get() override {
         if (pos_ == end_) {
@@ -319,27 +336,47 @@ struct FdByter : Byter {
     std::size_t pos_ = 0, end_ = 0;
 };
 
-// Frames newline-delimited requests; `tick` runs whenever no request is
-// waiting (never in the middle of one) so a service tick keeps running while
-// the server waits for input.
+// Frames newline-delimited requests. Async service also runs between bytes
+// of partial frames and buffered input; dispatch itself stays model-thread only.
 Status pump(Server& server, Byter& byter, std::ostream& output, const Tick& tick) {
-    const bool periodic = tick.fn != nullptr;
+    const bool periodic = tick.fn && !tick.deadline && !tick.watches;
+    std::size_t bytes = 0;
+    bool boundary = true;
     std::string frame;
     bool overflow = false;
     auto last = std::chrono::steady_clock::now();
     auto runTick = [&] {
-        tick.fn();
+        if (tick.fn) tick.fn();
         last = std::chrono::steady_clock::now();
     };
     while (true) {
-        const int ready = byter.wait(periodic ? static_cast<int>(tick.interval.count()) : -1);
+        // Inspect async sources at frame boundaries and every 4 KiB while
+        // framing long/continuous input, including the reader's buffered bytes.
+        const bool inspect = boundary || bytes % 4096 == 0 || !byter.buffered();
+        int timeout = inspect && periodic
+                          ? rpc::detail::waitMilliseconds(last + tick.interval -
+                                                          std::chrono::steady_clock::now())
+                          : -1;
+        if (inspect && tick.deadline)
+            if (const auto deadline = tick.deadline()) {
+                const auto now = std::chrono::steady_clock::now();
+                timeout = *deadline <= now ? 0 : rpc::detail::waitMilliseconds(*deadline - now);
+            }
+        if (inspect && timeout == 0) {
+            runTick();
+            continue;
+        }
+        auto watches = inspect && tick.watches ? tick.watches() : std::vector<Tick::Watch>{};
+        const int ready = byter.wait(timeout, watches);
         if (ready < 0) break;
         if (ready == 0) {
-            if (periodic) runTick();
+            runTick();
             continue;
         }
         const int next = byter.get();
         if (next < 0) break;
+        ++bytes;
+        boundary = next == '\n';
         if (next != '\n') {
             if (!overflow) {
                 if (frame.size() < rpc::kMaxMessageBytes)

@@ -187,6 +187,7 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
     // Before the backend starts: its callbacks push meter entries at once.
     // Kept across plan swaps; slots for a plan's strips are assigned in load().
     meters_ = std::make_shared<MeterBank>();
+    if (mainWake_) meters_->setMainThreadWake(*mainWake_);
     if (options_.anticipative) {
         // Allocated before the backend starts: its callbacks read the ring at
         // once. Room for the render-ahead amount at up to 192 kHz.
@@ -204,6 +205,9 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
     }
     deviceInputs_ =
         std::min<std::uint32_t>(config.inputs, 64);  // the callback's copy, set before it runs
+    outputWakeAt_.store(INT64_MAX);
+    outputWakeSerial_.fetch_add(1);
+    outputWakeSeen_ = 0;
     midiSource_ = &backend;  // before any callback (backend_ is set after start returns)
     auto started = backend.start(config, [this](const float* const* in, float* const* out,
                                                 std::uint32_t n) { cycle(in, out, n); });
@@ -338,6 +342,7 @@ void Engine::stop() {
     if (renderer_.joinable()) {  // the renderer stops every plugin as it ends
         rendererQuit_.store(true, std::memory_order_release);
         wakeRenderer();
+        notifyMain();
         renderer_.join();
     }
     recorder_.store(nullptr, std::memory_order_release);
@@ -501,6 +506,7 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
         for (auto* instance : plan->instances) instance->setAudioWake(&rendererEvent_);
     latestPlan_.store(plan.get(), std::memory_order_release);
     wakeRenderer();
+    notifyMain();
     plans_.push_back(std::move(plan));
     collectPlans();
     plugins_.setGeneration(publishedGen_ + 1);  // later replacements: after this plan
@@ -516,11 +522,13 @@ void Engine::writeTransport(F&& change) {
     epoch_.fetch_add(1, std::memory_order_release);  // anticipative: drop what is rendered
     xportSeq_.store(seq + 2, std::memory_order_release);
     wakeRenderer();
+    notifyMain();
 }
 
 void Engine::play() {
     wantPlaying_.store(true, std::memory_order_release);
     wakeRenderer();
+    notifyMain();
 }
 void Engine::pause() {
     wantPlaying_.store(false, std::memory_order_release);
@@ -690,6 +698,30 @@ void Engine::collectPlans() {
 
 std::vector<model::Id> Engine::takeDirtyStates() { return std::exchange(dirtyStates_, {}); }
 
+void Engine::armOutputWake(std::uint64_t epoch, std::int64_t stream) {
+    outputWakeEpoch_.store(epoch, std::memory_order_relaxed);
+    outputWakeAt_.store(stream, std::memory_order_relaxed);
+    // Paired SC operations with the callback's stream store and serial load:
+    // either it sees this arm, or our following recheck sees its consumption.
+    outputWakeSerial_.fetch_add(1);
+    if (stream != INT64_MAX && playedStream(epoch) >= stream) notifyMain();
+}
+void Engine::wakeOutputConsumed() SUPPLE_RT {
+    const auto serial = outputWakeSerial_.load();
+    if (serial == outputWakeSeen_) return;
+    const auto epoch = outputWakeEpoch_.load(std::memory_order_relaxed);
+    const auto target = outputWakeAt_.load(std::memory_order_relaxed);
+    if (outputWakeSerial_.load() != serial) return;  // next cycle retries
+    if (target == INT64_MAX) {
+        outputWakeSeen_ = serial;
+        return;
+    }
+    if (epoch == rtEpoch_ && rtStream_.load() >= target) {
+        outputWakeSeen_ = serial;
+        notifyMain();
+    }
+}
+
 void Engine::service() {
     bool reload = false;
     if (latest_) {
@@ -740,6 +772,14 @@ void Engine::service() {
                     st.instance->takeNotifications();
                     drainIdle(*st.instance, st.fx, (*it)->generation);
                 });
+        // A failed compilation may retire an instance before it appears in a
+        // plan. Its subscriptions remain live until pruning is safe.
+        for (auto* instance : plugins_.instances())
+            if (serviced.insert(instance).second) {
+                instance->serviceMainThread();
+                instance->takeNotifications();
+                instance->takeIdleOutputs();
+            }
     }
     // A strip kept live while playing (load()) leaves once the transport stops.
     if (!plans_.empty() && plans_.back()->heldLive &&
@@ -785,15 +825,18 @@ PluginOutputs Engine::takePluginOutputs() {
 void Engine::publishPluginOutputs(detail::Plan& p, bool renderer, std::uint64_t epoch,
                                   std::int64_t pos, std::int64_t stream) SUPPLE_RT {
     auto& queue = renderer ? *rendererOutputs_ : *callbackOutputs_;
+    bool changed = false;
     for (auto& node : p.nodes) {
         if (options_.anticipative && node.live == renderer) continue;
         detail::forEachStage(node, [&](detail::Stage& st) {
+            changed |= st.voiceDropped != 0 || st.outEvents.dropped != 0;
             voiceDrops_.fetch_add(st.voiceDropped, std::memory_order_relaxed);
             st.voiceDropped = 0;
             outputDrops_.fetch_add(st.outEvents.dropped, std::memory_order_relaxed);
             for (std::size_t i = 0; i < st.outEvents.count; ++i) {
                 const auto& event = st.outEvents.storage[i];
                 if (event.kind == host::OutputEvent::Kind::NoteEnd) continue;
+                changed = true;
                 PluginOutput output;
                 output.fx = st.fx;
                 output.planGeneration = p.generation;
@@ -807,6 +850,7 @@ void Engine::publishPluginOutputs(detail::Plan& p, bool renderer, std::uint64_t 
             }
         });
     }
+    if (changed) notifyMain();
 }
 
 namespace {
@@ -847,6 +891,7 @@ void Engine::startFree(std::vector<host::Instance*>& owned,
         if (!in->startProcessing()) {
             in->setOwner(&kRefused);
             processErrors_.fetch_add(1);
+            notifyMain();
             continue;
         }
         in->setOwner(self);
@@ -882,11 +927,30 @@ void Engine::resetOwned(const std::vector<host::Instance*>& owned, detail::Plan*
 }
 
 void Engine::cycle(const float* const* in, float* const* out, std::uint32_t frames) SUPPLE_RT {
-    struct InCycle {  // cycleSeq_ is odd from here until return
-        std::atomic<std::uint64_t>& seq;
-        explicit InCycle(std::atomic<std::uint64_t>& s) : seq(s) { seq.fetch_add(1); }
-        ~InCycle() { seq.fetch_add(1, std::memory_order_release); }
-    } inCycle(cycleSeq_);
+    struct InCycle {
+        Engine& engine;
+        std::uint64_t errors, misses, generation, stopped, epoch;
+        bool playing;
+        explicit InCycle(Engine& e)
+            : engine(e),
+              errors(e.processErrors_.load()),
+              misses(e.misses_.load()),
+              generation(e.callbackGen_.load()),
+              stopped(e.stoppedGen_.load()),
+              epoch(e.rtPosEpoch_.load()),
+              playing(e.reportedPlaying_.load()) {
+            e.cycleSeq_.fetch_add(1);
+        }
+        ~InCycle() {
+            auto& e = engine;
+            e.cycleSeq_.fetch_add(1, std::memory_order_release);
+            e.wakeOutputConsumed();
+            if (errors != e.processErrors_.load() || misses != e.misses_.load() ||
+                generation != e.callbackGen_.load() || stopped != e.stoppedGen_.load() ||
+                epoch != e.rtPosEpoch_.load() || playing != e.reportedPlaying_.load())
+                e.notifyMain();
+        }
+    } inCycle(*this);
     if (frames == 0) {  // the backend's final callback: stop every plugin here
         // Anticipative: the renderer stopped its share as it ended; the live
         // share is this thread's.
@@ -945,8 +1009,10 @@ void Engine::cycle(const float* const* in, float* const* out, std::uint32_t fram
 // Each callback's device control messages, once, for MIDI learn (ADR-0027).
 void Engine::pushControlMidi() SUPPLE_RT {
     if (!midiSource_) return;
+    bool changed = false;
     for (const MidiInputEvent& e : midiSource_->midiInput()) {
         if (e.size == 0 || !isControlMidi(e.bytes[0])) continue;
+        changed = true;
         ControlMidiEvent c;
         c.port = e.port;
         c.bytes[0] = e.bytes[0];
@@ -954,6 +1020,7 @@ void Engine::pushControlMidi() SUPPLE_RT {
         c.bytes[2] = e.size > 2 ? e.bytes[2] : 0;
         if (!controlMidi_->push(c)) controlDrops_.fetch_add(1, std::memory_order_relaxed);
     }
+    if (changed) notifyMain();
 }
 
 void Engine::takeControlMidi(std::vector<ControlMidiEvent>& out) {
@@ -1111,7 +1178,7 @@ void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t 
     }
     if (ok && run) {
         rtPos_.store(pos_, std::memory_order_relaxed);
-        rtStream_.store(meterStream, std::memory_order_relaxed);
+        rtStream_.store(meterStream);
         rtPosEpoch_.store(rtEpoch_, std::memory_order_release);
     }
     reportedPos_.store(pos_);
@@ -1468,6 +1535,7 @@ void Engine::rendererLoop(std::uint64_t seen) {
                 plan->handEpoch = seen;
                 stoppedGen_.store(plan->generation, std::memory_order_release);
                 handPlan_.store(plan, std::memory_order_release);
+                notifyMain();
             }
         } else if (plan) {
             startFree(processing_, &plan->rendererInstances, self);  // let go by the callback
@@ -1483,6 +1551,7 @@ void Engine::rendererLoop(std::uint64_t seen) {
                 resetOwned(processing_, plan_);
             }
             reportedPlaying_.store(playing_);
+            notifyMain();
         }
         const bool held = hold_.load(std::memory_order_acquire);
         if (held) holdSeen_.store(true, std::memory_order_release);
@@ -1502,7 +1571,10 @@ void Engine::rendererLoop(std::uint64_t seen) {
             if (now >= stoppedRenderDeadline(idleNext, idleLast, requested())) {
                 const bool ok = detail::processRendererBlock(workers_.get(), *plan_, pos_, block,
                                                              self, &loopR_, false);
-                if (!ok) processErrors_.fetch_add(1);
+                if (!ok) {
+                    processErrors_.fetch_add(1);
+                    notifyMain();
+                }
                 publishPluginOutputs(*plan_, true, seen, pos_, streamLocal_);
                 // An early block replaces the next regular block; repeated
                 // requests must not push its deadline ever farther ahead.
@@ -1529,7 +1601,10 @@ void Engine::rendererLoop(std::uint64_t seen) {
             BenchProbe::Timer timer(options_.benchProbe, false, n);
             return detail::processRendererBlock(workers_.get(), *plan_, pos_, n, self, &loopR_);
         }();
-        if (!ok) processErrors_.fetch_add(1);
+        if (!ok) {
+            processErrors_.fetch_add(1);
+            notifyMain();
+        }
         publishPluginOutputs(*plan_, true, seen, pos_, streamLocal_);
         auto fill = [&](detail::Chunk* c, const detail::Stereo& from) {
             if (ok) {
@@ -1575,6 +1650,7 @@ void Engine::rendererLoop(std::uint64_t seen) {
     reportedPlaying_.store(false);
     stoppedOnAudioThread_ = true;
     shutDown_.store(true);
+    notifyMain();
 }
 
 // --- the live region (ADR-0014) -----------------------------------------------------------
@@ -1614,6 +1690,7 @@ void Engine::anticipativeCycle(const float* const* in, float* const* out, std::u
         loopC_ = xport.loop;  // the renderer takes the loop with the epoch too
         rtEpochSeen_.store(rtEpoch_, std::memory_order_release);
         wakeRenderer();
+        notifyMain();
     }
     const std::uint64_t e = rtEpoch_;
     const bool playing = wantNow();
@@ -1710,7 +1787,10 @@ std::uint32_t Engine::liveRender(const float* const* in, float* const* out, std:
     p.deviceMidiOffset = offset;
     const bool ok = detail::processCallbackBlock(liveWorkersReady_.load(std::memory_order_acquire),
                                                  p, livePos_, k, playing, true, self, &loopC_);
-    if (!ok) processErrors_.fetch_add(1);
+    if (!ok) {
+        processErrors_.fetch_add(1);
+        notifyMain();
+    }
     publishPluginOutputs(p, false, rtEpoch_, livePos_, liveStream_);
     // Metering (P5.3c): the callback measures the live nodes it just played, at
     // the position it played them from. While the transport is stopped nothing

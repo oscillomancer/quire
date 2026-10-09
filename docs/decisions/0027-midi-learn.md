@@ -5,6 +5,10 @@
 §4.5 and §6. Builds on ADR-0016 (MIDI input) and ADR-0007 (every change is
 a command).
 
+**Amendment, 2026-10-08:** [ADR-0030](0030-main-thread-scheduling.md) replaces
+the polling schedule described below with notifications and monotonic service
+deadlines. The GUI loop conversion follows separately.
+
 ## Context
 
 A MIDI controller's knobs, faders and buttons should be able to move any

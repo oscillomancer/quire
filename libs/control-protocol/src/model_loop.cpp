@@ -65,11 +65,25 @@ Timer& Timer::operator=(Timer&& other) noexcept {
     return *this;
 }
 
+void FdWatch::cancel() {
+    if (!state_) return;
+    state_->cancelled.store(true, std::memory_order_release);
+    if (auto wake = state_->wake.lock()) wake->notify();
+}
+FdWatch& FdWatch::operator=(FdWatch&& other) noexcept {
+    if (this != &other) {
+        cancel();
+        state_ = std::move(other.state_);
+    }
+    return *this;
+}
+
 struct ModelLoop::Impl {
     std::shared_ptr<detail::Wake> wake = std::make_shared<detail::Wake>();
     std::mutex mutex;
     std::deque<std::function<void()>> tasks;
     std::vector<std::shared_ptr<detail::TimerState>> timers;
+    std::vector<std::shared_ptr<detail::FdState>> watches;
     struct sigaction oldInt{}, oldTerm{};
 
     // Milliseconds until the nearest timer, or -1 when there is none. Called
@@ -79,7 +93,7 @@ struct ModelLoop::Impl {
         int best = -1;
         for (const auto& timer : timers) {
             if (timer->cancelled.load(std::memory_order_relaxed)) continue;
-            const int ms = detail::waitMilliseconds(timer->next - now);
+            const int ms = timer->next <= now ? 0 : detail::waitMilliseconds(timer->next - now);
             best = best < 0 ? ms : std::min(best, ms);
         }
         return best;
@@ -102,13 +116,17 @@ struct ModelLoop::Impl {
                 }
                 if (timer->next <= now) {
                     due.push_back(timer);
-                    timer->next = later(now, timer->interval);
+                    timer->next =
+                        timer->once ? Clock::time_point::max() : later(now, timer->interval);
                 }
                 ++it;
             }
         }
         for (const auto& timer : due)
-            if (!timer->cancelled.load(std::memory_order_acquire)) timer->fn();
+            if (timer->once) {
+                if (!timer->cancelled.exchange(true, std::memory_order_acq_rel)) timer->fn();
+            } else if (!timer->cancelled.load(std::memory_order_acquire))
+                timer->fn();
     }
 
     void drainTasks() {
@@ -122,6 +140,33 @@ struct ModelLoop::Impl {
             }
             task();
         }
+    }
+
+    bool pollOnce(bool block) {
+        std::vector<std::shared_ptr<detail::FdState>> readyWatches;
+        std::vector<pollfd> fds{{wake->readFd, POLLIN, 0}};
+        int timeout = 0;
+        {
+            std::lock_guard lock(mutex);
+            std::erase_if(watches, [](const auto& w) {
+                return w->cancelled.load(std::memory_order_acquire);
+            });
+            readyWatches = watches;
+            for (const auto& w : readyWatches) fds.push_back({w->fd, w->events, 0});
+            if (block && tasks.empty()) timeout = nextTimeoutMs();
+        }
+        const int result = ::poll(fds.data(), fds.size(), timeout);
+        if (result < 0) return errno == EINTR;
+        drainWake();
+        drainTasks();
+        for (std::size_t i = 0; i < readyWatches.size(); ++i) {
+            const auto& w = readyWatches[i];
+            if (fds[i + 1].revents && !w->cancelled.load(std::memory_order_acquire))
+                w->fn(fds[i + 1].revents);
+        }
+        runDueTimers();
+        drainTasks();
+        return true;
     }
 
     void drainWake() const {
@@ -175,6 +220,33 @@ Timer ModelLoop::every(std::chrono::milliseconds interval, std::function<void()>
     return Timer(std::move(state));
 }
 
+Timer ModelLoop::at(Clock::time_point deadline, std::function<void()> fn) {
+    auto state = std::make_shared<detail::TimerState>();
+    state->once = true;
+    state->next = deadline;
+    state->fn = std::move(fn);
+    state->wake = impl_->wake;
+    {
+        std::lock_guard lock(impl_->mutex);
+        impl_->timers.push_back(state);
+    }
+    impl_->wake->notify();
+    return Timer(std::move(state));
+}
+FdWatch ModelLoop::watch(int fd, short events, std::function<void(short)> fn) {
+    auto state = std::make_shared<detail::FdState>();
+    state->fd = fd;
+    state->events = events;
+    state->fn = std::move(fn);
+    state->wake = impl_->wake;
+    {
+        std::lock_guard lock(impl_->mutex);
+        impl_->watches.push_back(state);
+    }
+    impl_->wake->notify();
+    return FdWatch(std::move(state));
+}
+
 void ModelLoop::post(std::function<void()> task) {
     {
         std::lock_guard lock(impl_->mutex);
@@ -186,9 +258,7 @@ void ModelLoop::post(std::function<void()> task) {
 void ModelLoop::setWaker(std::function<void()> waker) { impl_->wake->waker = std::move(waker); }
 
 int ModelLoop::pump() {
-    impl_->drainWake();
-    impl_->runDueTimers();
-    impl_->drainTasks();
+    impl_->pollOnce(false);
     std::lock_guard lock(impl_->mutex);
     return impl_->nextTimeoutMs();
 }
@@ -196,22 +266,8 @@ int ModelLoop::pump() {
 bool ModelLoop::stopRequested() const { return stopping.load(std::memory_order_relaxed); }
 
 void ModelLoop::run() {
-    while (true) {
-        if (!stopping.load(std::memory_order_relaxed)) {
-            int timeout = -1;
-            {
-                std::lock_guard lock(impl_->mutex);
-                timeout = impl_->nextTimeoutMs();
-            }
-            pollfd descriptor{impl_->wake->readFd, POLLIN, 0};
-            const int ready = ::poll(&descriptor, 1, timeout);
-            if (ready < 0 && errno == EINTR) continue;
-            if (ready < 0) break;
-        }
-        impl_->drainWake();
-        impl_->runDueTimers();
-        impl_->drainTasks();
-        if (stopping.load(std::memory_order_relaxed)) break;
-    }
+    while (!stopRequested())
+        if (!impl_->pollOnce(true)) break;
+    impl_->drainTasks();
 }
 }  // namespace supple::rpc

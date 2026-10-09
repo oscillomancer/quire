@@ -241,7 +241,7 @@ std::optional<double> EngineApp::moveParam(
     if (!moved) return std::nullopt;
     const double to = target.quantize(std::clamp(*moved, 0.0, 1.0));
     if (std::abs(to - target.current) < 1e-12) return std::nullopt;
-    const std::uint64_t now = clockMs();
+    const std::uint64_t now = serviceClockMs();
     LearnState& state = learnState_[{id, param}];
     if (now > state.lastMs + kGestureMs) ++state.serial;
     state.lastMs = now;
@@ -269,6 +269,7 @@ std::optional<double> EngineApp::moveParam(
     commit.value = value;
     commit.lastMs = now;
     commit.live = live != nullptr;
+    mainWake_.notify();  // rest deadline was published above
     if (live)
         if (auto set = live->setParam(target.id, value); !set) {
             emit("engine.error", pluginErrorJson(set.error()));
@@ -303,7 +304,7 @@ std::string EngineApp::paramName(model::Id id, const std::string& param) {
 }
 
 void EngineApp::commitLearned(bool all) {
-    const std::uint64_t now = clockMs();
+    const std::uint64_t now = serviceClockMs();
     for (auto it = learnCommits_.begin(); it != learnCommits_.end();) {
         if (!all && now < it->second.lastMs + kRestMs) {
             ++it;

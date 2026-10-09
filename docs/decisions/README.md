@@ -48,3 +48,4 @@ current state.
 | [0027](0027-midi-learn.md) | MIDI learn: controllers drive parameters and actions | Accepted |
 | [0028](0028-renderer-wakeups.md) | Renderer deadlines and event-driven wakes | Accepted |
 | [0029](0029-shared-main-thread-wake.md) | Shared main-thread notification relay | Accepted |
+| [0030](0030-main-thread-scheduling.md) | Main-thread service notifications and deadlines | Accepted |

@@ -581,8 +581,11 @@ Result<json::Value> Dispatcher::execute(const Invocation& invocation) {
     return result;
 }
 void Dispatcher::post(std::string label, std::function<Status()> work, PostKind kind) {
-    std::lock_guard lock(postedMutex_);
-    posted_.push_back({std::move(label), std::move(work), kind});
+    {
+        std::lock_guard lock(postedMutex_);
+        posted_.push_back({std::move(label), std::move(work), kind});
+    }
+    host_.workQueued();
 }
 
 void Dispatcher::flushJobEvents() {

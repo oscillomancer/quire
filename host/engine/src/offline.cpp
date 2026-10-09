@@ -93,6 +93,18 @@ InstancePool::InstancePool(Resolver resolve, host::HostIdentity identity)
 
 InstancePool::~InstancePool() = default;
 
+void InstancePool::setMainThreadWake(MainThreadWake& wake) {
+    mainWake_ = &wake;
+    for (auto* instance : instances()) instance->setMainThreadWake(wake);
+}
+std::vector<host::Instance*> InstancePool::instances() const {
+    std::vector<host::Instance*> out;
+    for (const auto& [id, entry] : instances_)
+        if (entry.instance) out.push_back(entry.instance.get());
+    for (const auto& [generation, instance] : retired_) out.push_back(instance.get());
+    return out;
+}
+
 Result<host::Instance*> InstancePool::get(Id id, const model::FxInstance& fx,
                                           const Session& session) {
     const bool isolated = fx.isolation == model::Isolation::SharedBridge ||
@@ -136,6 +148,7 @@ Result<host::Instance*> InstancePool::get(Id id, const model::FxInstance& fx,
             return std::move(made).error();
         }
         e.instance = std::move(*made);
+        if (mainWake_) e.instance->setMainThreadWake(*mainWake_);
         e.pluginId = fx.plugin.id;
         e.isolation = fx.isolation;
         e.appliedState.clear();
@@ -453,6 +466,7 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     detail::Workers workers(opt.threads == 0 ? detail::Workers::defaultHelpers()
                                              : std::min(opt.threads, 64u) - 1);
     std::thread audio([&] {
+        auto progressAt = std::chrono::steady_clock::time_point::min();
         nameThread("audio-offline");
         for (host::Instance* in : instances) {
             in->reset();
@@ -485,11 +499,15 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
                                            outL[static_cast<std::size_t>(pos) + i],
                                            outR[static_cast<std::size_t>(pos) + i]);
                 }
-                if (opt.progressFlag)
-                    opt.progressFlag->store(opt.progressBase + opt.progressScale *
-                                                                   static_cast<double>(pos + n) /
-                                                                   static_cast<double>(total),
-                                            std::memory_order_relaxed);
+                const double fraction = opt.progressBase + opt.progressScale *
+                                                               static_cast<double>(pos + n) /
+                                                               static_cast<double>(total);
+                if (opt.progressFlag) opt.progressFlag->store(fraction, std::memory_order_relaxed);
+                if (opt.progress &&
+                    (pos + n == total || std::chrono::steady_clock::now() >= progressAt)) {
+                    opt.progress(fraction);
+                    progressAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+                }
             }
         }
         for (host::Instance* in : instances) in->stopProcessing();
