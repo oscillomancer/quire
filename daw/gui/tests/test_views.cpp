@@ -25,6 +25,7 @@
 #include "supple/ui/root.h"
 #include "supple/ui/text_field.h"
 #include "supple/views/arrange.h"
+#include "supple/views/envelope_edit.h"
 #include "supple/views/envelope_lane.h"
 #include "supple/views/mouse_map.h"
 
@@ -1877,4 +1878,43 @@ TEST_CASE("audit3: arrange and layout ignore version deltas across generations")
     CHECK(view->session().tracks.find(track)->name == "replacement");
     CHECK_FALSE(view->trackLayout().show(after, nullptr, 2));
     CHECK(view->trackLayout().show(after, &emptyDelta, 3));
+}
+
+TEST_CASE("envelope point edits: move stops at the start and keeps time order; paste replaces") {
+    using model::EnvPoint;
+    const views::EnvScale volume{};
+    const std::vector<EnvPoint> pts = {{1, -6}, {2, -12}, {4, 0}, {6, -3}};
+    // Moving the first and third left by 3 beats: the group stops at 0.
+    auto moved = views::movePoints(pts, {pts[0], pts[2]}, -3, 0, volume);
+    REQUIRE(moved.points.size() == 4);
+    CHECK(moved.points[0].pos == doctest::Approx(0));
+    CHECK(moved.points[0].value == doctest::Approx(-6));
+    CHECK(moved.points[1].pos == doctest::Approx(2));  // the unselected one, unchanged
+    CHECK(moved.points[2].pos == doctest::Approx(3));
+    CHECK(moved.selected.size() == 2);
+    // Moved past a neighbour, the points stay in time order.
+    moved = views::movePoints(pts, {pts[0]}, 2, 0, volume);
+    CHECK(moved.points[0].pos == doctest::Approx(2));
+    CHECK(moved.points[1].pos == doctest::Approx(3));
+    // Values move on the lane and stop at its top.
+    moved = views::movePoints(pts, {pts[2]}, 0, 2.0, volume);
+    CHECK(volume.toNorm(moved.points[2].value) == doctest::Approx(1.0));
+    // A stale selection entry names nothing.
+    CHECK(views::selectedIndices(pts, {EnvPoint{5, 0}}).empty());
+    // Paste over beats 1..3: the points in that span are replaced.
+    const auto clip = views::copyPoints(pts, {pts[2], pts[3]}, volume, "volume");
+    REQUIRE(clip.points.size() == 2);
+    CHECK(clip.points[0].pos == 0);
+    CHECK(clip.points[1].pos == doctest::Approx(2));
+    const auto pasted = views::pastePoints(pts, clip, 1, volume, "volume");
+    REQUIRE(pasted.points.size() == 4);  // {1,-6} and {2,-12} replaced by two
+    CHECK(pasted.points[0].pos == doctest::Approx(1));
+    CHECK(pasted.points[0].value == doctest::Approx(0));
+    CHECK(pasted.points[1].pos == doctest::Approx(3));
+    CHECK(pasted.selected.size() == 2);
+    // Deleting and shaping touch only the selection.
+    CHECK(views::deletePoints(pts, {pts[1]}).points.size() == 3);
+    const auto shaped = views::shapePoints(pts, {pts[3]}, model::PointShape::Square);
+    CHECK(shaped.points[3].shape == model::PointShape::Square);
+    CHECK(shaped.points[0].shape == model::PointShape::Linear);
 }

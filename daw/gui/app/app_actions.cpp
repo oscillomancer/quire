@@ -16,6 +16,7 @@ void selectTrack(UiState& ui, const std::string& track, unsigned mods,
                  const std::vector<std::string>& order) {
     auto& sel = ui.selectedTracks;
     ui.tracksFocused = true;
+    ui.envelopeFocused = false;
     if (mods & ui::kShift) {  // extend from the anchor, in the view's order
         const std::string from = ui.trackAnchor.value_or(track);
         auto a = std::find(order.begin(), order.end(), from);
@@ -188,9 +189,11 @@ AppActions::AppActions(const cmd::Registry& registry, cmd::Dispatcher& dispatche
     remove.id = "edit.delete";
     remove.name = "Edit: delete the selection";
     remove.description =
-        "Remove the selected tracks when tracks were selected last, else the "
-        "selected items.";
+        "Remove the selected automation points when an automation lane was "
+        "clicked last, the selected tracks when tracks were selected last, else "
+        "the selected items.";
     remove.builtin = [this](const actions::Context&) -> Result<json::Value> {
+        if (ui_.envelopeFocused) return run("ui.env.points.delete");
         return run(ui_.tracksFocused && !ui_.selectedTracks.empty() ? "track.remove:selected"
                                                                     : "item.remove:selected");
     };

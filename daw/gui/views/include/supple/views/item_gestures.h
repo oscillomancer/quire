@@ -8,14 +8,16 @@
 // corners (Ctrl+click cycles a fade's shape), the take badge cycles takes, double-click opens a
 // MIDI item, and files dropped on the lanes. An item showing its take lanes: click a lane to hear
 // that take, swipe across one to comp that range (split + take), drag the name bar to move it. On
-// an automation lane: click adds a point, drag moves one (snapped; Shift frees), Alt+click deletes
-// one. Ctrl-drag below the name bar of an item with several takes takes that take (the one under
-// the pointer, else the heard one) out into an item of its own, on any channel. A right-click on
-// an item (without dragging) opens its menu: Delete, timebase, take FX and envelopes, and for
-// several takes: show all takes, explode them onto tracks or along the track, delete the take
-// under the pointer; and rendering the item through its FX (MIDI to audio) in place or as a new
-// take. Each gesture previews as a ghost on the root's overlay and commits ONE transaction on
-// release.
+// an automation lane: click selects a point (Ctrl toggles; a right-drag or a Ctrl-drag from empty
+// space selects with a marquee) or adds one on empty space, drag moves the selected points
+// (snapped; Shift frees), Alt+click deletes one, a right-click opens the lane's menu (points,
+// automation items, the envelope). Ctrl-drag below the name bar of an item with several takes takes
+// that take (the one under the pointer, else the heard one) out into an item of its own, on any
+// channel. A right-click on an item (without dragging) opens its menu: Delete, timebase, take FX
+// and envelopes, and for several takes: show all takes, explode them onto tracks or along the
+// track, delete the take under the pointer; and rendering the item through its FX (MIDI to audio)
+// in place or as a new take. Each gesture previews as a ghost on the root's overlay and commits ONE
+// transaction on release.
 #pragma once
 
 #include <filesystem>
@@ -30,6 +32,7 @@
 #include "supple/json/json.h"
 #include "supple/model/session.h"
 #include "supple/ui/geometry.h"
+#include "supple/views/envelope_edit.h"
 #include "supple/views/mouse_map.h"
 
 namespace supple::ui {
@@ -108,6 +111,26 @@ class ItemGestures {
         return !clipboard_.items.empty() &&
                (!projectGeneration || projectGeneration() == clipboard_.generation);
     }
+    // Selected automation points: one envelope's (the lane clicked last). The
+    // keyboard's Delete and clipboard keys act on them while the lanes have
+    // the focus (onEnvelopeFocus); the lane's menu offers the same.
+    std::optional<model::Id> pointEnvelope() const { return pointEnv_; }
+    // The selected points that the envelope still has (as they are now).
+    std::vector<model::EnvPoint> selectedPoints() const;
+    void selectPoints(model::Id env, std::vector<model::EnvPoint> points);
+    void selectAllPoints(model::Id env);
+    void clearPoints();
+    Status deletePoints();
+    void copyPoints();
+    Status cutPoints();
+    // Pastes the copied points at `atBeat` into `env` (default: the lane
+    // clicked last), replacing its points over their span.
+    Status pastePoints(double atBeat, std::optional<model::Id> env = {});
+    bool canPastePoints() const { return !pointClip_.empty(); }
+    Status shapePoints(model::PointShape shape);
+    // A press on an automation lane (true) or elsewhere in the lanes (false).
+    std::function<void(bool)> onEnvelopeFocus;
+
     // The play rate that keeps a take's material filling the item when its
     // end moves by `deltaBeats` (the stretch gesture).
     double stretchRate(const model::Item& item, const model::Take& take, double deltaBeats) const;
@@ -126,7 +149,8 @@ class ItemGestures {
         Comp,
         AutoItemMove,
         AutoItemLength,
-        TakeOut  // Ctrl-drag on a take: it leaves its item for a place of its own
+        EnvMarquee,  // selecting automation points (a right-click without a drag: the menu)
+        TakeOut      // Ctrl-drag on a take: it leaves its item for a place of its own
     };
     struct State {
         Drag drag = Drag::None;
@@ -152,6 +176,8 @@ class ItemGestures {
         // item moved by its header / resized by its right edge (deltaBeats).
         std::optional<model::Id> autoItem;
         double envOffset = 0;
+        // Several selected points dragged together: the selection as drafted.
+        std::vector<model::EnvPoint> envMoved;
     };
     const State& state() const { return state_; }
 
@@ -185,9 +211,15 @@ class ItemGestures {
     double beatAtX(float x) const;
     // A right-click on an item (no drag): selection deletion/timebase and active take FX/envelopes.
     void openItemMenu(ui::Point at);
-    // A right-click on an automation lane: insert an item, or edit the one
-    // under the pointer (duplicate, unpool, loop, delete).
-    void openAutoItemMenu(model::Id env, ui::Point at);
+    // A right-click on an automation lane: its points (insert, select, copy,
+    // paste, delete, shape), automation items (insert, or edit the one under
+    // the pointer) and the envelope (bypass, hide, remove).
+    void openEnvMenu(model::Id env, ui::Point at);
+    void openShapeMenu(ui::Point at);
+    Status setPoints(model::Id env, const EnvEdit& edit, const std::string& label);
+    std::optional<model::Id> pointEnv_;
+    std::vector<model::EnvPoint> pointSel_;
+    EnvClip pointClip_;
     bool envPress(model::Id env, const ui::PointerEvent& e,
                   std::optional<AutoHit> autoItem = std::nullopt);
     void envDrag(const ui::PointerEvent& e);
@@ -199,7 +231,7 @@ class ItemGestures {
     std::vector<model::Id> selection_;
     State state_;
     ui::Point press_{};
-    bool moved_ = false, free_ = false, copy_ = false, cycleFade_ = false;
+    bool moved_ = false, free_ = false, copy_ = false, cycleFade_ = false, marqueeAdd_ = false;
     std::size_t pressRow_ = 0;
     ui::Root::OverlayHandle overlay_;
     std::shared_ptr<ItemGestures*> alive_;  // the overlay's ghost checks it

@@ -340,6 +340,29 @@ bar of an item with several takes takes that take (the lane under the
 pointer, else the heard one) out into an item of its own, anywhere on any
 channel (take.extract, one undo step; elsewhere Ctrl-drag still copies).
 
+**Automation lanes.** A click on a point selects it (Ctrl+click adds or
+removes one; a right-drag, or a Ctrl-drag from empty space, selects with a
+marquee) and a click on empty space adds a point there, selected. Dragging a
+selected point moves every selected point by the same time and lane height
+(one `env.points.set`, one undo step); Shift frees it from the grid and
+Alt+click deletes a point. The selection is one envelope's (the lane clicked
+last) and names points by position and value, so points an edit elsewhere
+removed simply leave it; a press elsewhere in the lanes clears it. While a
+lane was clicked last, Delete, Ctrl+C, Ctrl+X and Ctrl+V take its points
+(paste at the playhead, into that lane) instead of items. A right-click
+without a drag opens the lane's menu: **Insert point**; **Select all
+points**, **Copy**/**Cut**/**Paste points** (paste at the pointer, replacing
+the points over the pasted span), **Delete points**, **Point shape…** (a
+second menu: linear, square, slow start/end, fast start, fast end, bezier);
+**Insert automation item**, or for the item under the pointer **Duplicate**
+(pooled, or a copy), **Unpool**, **Loop** and **Delete**; and **Bypass**,
+**Hide** or **Remove envelope** (`env.set active/visible`, `env.remove`).
+Points pasted into an envelope of another kind (volume into pan) keep their
+height on the lane. An automation item's header moves it; dragging its right
+edge stretches its shape with it (its points and the span they repeat over,
+for every item of its pool), and Alt-drag extends or shortens it by
+repeating the shape instead.
+
 Commands: `item.*`, `take.*`, `fade.*` (as named in session-model §7),
 `envelope.*`, `marker.*`, `region.*`, `tempo.*`, `transport.*`.
 
@@ -625,8 +648,9 @@ Delete.
   moves or removes it, or resets menus and toolbar.
 - **Mouse modifiers:** a map per context of the arrange view — item drag
   (move, copy, slip; each also off the grid), item edge (trim, stretch), item
-  click (select, toggle, extend), fade handle (drag, cycle shape), empty-lane
-  drag (select, add), automation lane (edit, delete), ruler markers/regions
+  click (select, toggle, extend), automation item edge (stretch, loop), fade
+  handle (drag, cycle shape), empty-lane drag (select, add), automation lane
+  (edit, toggle, delete), ruler markers/regions
   (move, remove) and tempo points (toggle ramp) — from each modifier
   combination to a behaviour. The defaults are the built-in gestures;
   `mouse.json` (supple.mouse/1.0, only what differs) overrides them, and

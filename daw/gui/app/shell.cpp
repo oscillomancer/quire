@@ -400,6 +400,7 @@ void Shell::addStrip(std::string_view type) {
     ui_.selectedTracks = {created};  // §4.2: the new strip is selected
     ui_.trackAnchor = created;
     ui_.tracksFocused = true;
+    ui_.envelopeFocused = false;
 }
 
 Status Shell::openColorMenu(const model::Id& track, const ui::Rect& anchor) {

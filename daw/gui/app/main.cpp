@@ -625,6 +625,10 @@ int main(int argc, char** argv) {
             for (model::Id id : items) uiState.selectedItems.push_back(id.str());
             if (!items.empty()) uiState.tracksFocused = false;  // Delete takes the items now
         };
+        g.onEnvelopeFocus = [&](bool lane) {
+            uiState.envelopeFocused = lane;
+            if (lane) uiState.tracksFocused = false;
+        };
         g.onOpenMidi = [&](model::Id item) {
             if (auto r = midiEditor.open(item.str()); !r)
                 std::fprintf(stderr, "midi: %s\n", r.error().toString().c_str());
@@ -676,18 +680,44 @@ int main(int argc, char** argv) {
     auto reportEdit = [](const char* what, const Status& st) {
         if (!st) std::fprintf(stderr, "%s: %s\n", what, st.error().toString().c_str());
     };
-    appActions.addUi("ui.item.copy", "Item: copy",
-                     [&] { shell.arrange()->gestures().copySelection(); });
-    appActions.addUi("ui.item.cut", "Item: cut",
-                     [&] { reportEdit("cut", shell.arrange()->gestures().cutSelection()); });
-    appActions.addUi("ui.item.paste", "Item: paste at the playhead", [&] {
-        views::ArrangeView& a = *shell.arrange();
-        std::optional<model::Id> track;
-        if (!uiState.selectedTracks.empty())
-            track = model::Id::parse(uiState.selectedTracks.front());
-        reportEdit("paste",
-                   a.gestures().paste((*app)->head().timeMap->beatAt(a.playhead()), track));
+    // After a click on an automation lane they take its selected points.
+    auto playheadBeat = [&] { return (*app)->head().timeMap->beatAt(shell.arrange()->playhead()); };
+    appActions.addUi("ui.env.points.delete", "Envelope: delete the selected points", [&] {
+        reportEdit("delete points", shell.arrange()->gestures().deletePoints());
     });
+    appActions.addUi("ui.env.points.copy", "Envelope: copy the selected points",
+                     [&] { shell.arrange()->gestures().copyPoints(); });
+    appActions.addUi("ui.env.points.cut", "Envelope: cut the selected points",
+                     [&] { reportEdit("cut points", shell.arrange()->gestures().cutPoints()); });
+    appActions.addUi("ui.env.points.paste", "Envelope: paste points at the playhead", [&] {
+        reportEdit("paste points", shell.arrange()->gestures().pastePoints(playheadBeat()));
+    });
+    appActions.addUi("ui.item.copy", "Edit: copy items (or automation points)", [&] {
+        if (uiState.envelopeFocused)
+            shell.arrange()->gestures().copyPoints();
+        else
+            shell.arrange()->gestures().copySelection();
+    });
+    appActions.addUi("ui.item.cut", "Edit: cut items (or automation points)", [&] {
+        auto& g = shell.arrange()->gestures();
+        if (uiState.envelopeFocused)
+            reportEdit("cut points", g.cutPoints());
+        else
+            reportEdit("cut", g.cutSelection());
+    });
+    appActions.addUi(
+        "ui.item.paste", "Edit: paste items (or automation points) at the playhead", [&] {
+            if (uiState.envelopeFocused) {
+                reportEdit("paste points", shell.arrange()->gestures().pastePoints(playheadBeat()));
+                return;
+            }
+            views::ArrangeView& a = *shell.arrange();
+            std::optional<model::Id> track;
+            if (!uiState.selectedTracks.empty())
+                track = model::Id::parse(uiState.selectedTracks.front());
+            reportEdit("paste",
+                       a.gestures().paste((*app)->head().timeMap->beatAt(a.playhead()), track));
+        });
     appActions.addUi("ui.item.duplicate", "Item: duplicate after itself", [&] {
         reportEdit("duplicate", shell.arrange()->gestures().duplicateSelection());
     });

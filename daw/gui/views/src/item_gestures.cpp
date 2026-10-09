@@ -37,6 +37,24 @@ struct EnvFrame {
         return scale.fromNorm(static_cast<double>((area.bottom() - yPos) / area.h));
     }
 };
+const char* shapeName(model::PointShape shape) {
+    switch (shape) {
+        case model::PointShape::Linear:
+            return "linear";
+        case model::PointShape::Square:
+            return "square";
+        case model::PointShape::Slow:
+            return "slow";
+        case model::PointShape::FastStart:
+            return "fast_start";
+        case model::PointShape::FastEnd:
+            return "fast_end";
+        case model::PointShape::Bezier:
+            return "bezier";
+    }
+    return "linear";
+}
+
 std::optional<EnvFrame> envFrame(const ArrangeView& v, model::Id id, const model::Envelope& env) {
     const model::Session& s = v.session();
     if (env.target.object.kind == model::Kind::Take) {
@@ -151,6 +169,15 @@ class Ghost : public ui::Node {
         for (model::Id id : g.selection())
             if (const model::Item* it = itemOf(s, id))
                 if (auto r = rectFor(*it, 0, 0, 0, 0)) c.strokeRect(*r, t.color("focus"), 2);
+        // Selected automation points (filled), unless a drag draws them moved.
+        if (const auto pe = g.pointEnvelope(); pe && st.drag != ItemGestures::Drag::EnvPoint)
+            if (const model::Envelope* env = s.envelopes.find(*pe))
+                if (const auto frame = envFrame(v, *pe, *env))
+                    for (const model::EnvPoint& pt : g.selectedPoints()) {
+                        const float x = v.xAt(s.timeMap->secondsAt(frame->offsetBeats + pt.pos));
+                        if (x < lanes.x - 4 || x > lanes.right() + 4) continue;
+                        c.fillRect({x - 4, frame->y(pt.value) - 4, 8, 8}, t.color("focus"));
+                    }
         // The drag's ghost.
         const model::Item* anchor =
             st.anchor.kind == model::Kind::Item ? itemOf(s, st.anchor) : nullptr;
@@ -226,6 +253,7 @@ class Ghost : public ui::Node {
                     }
                 break;
             case ItemGestures::Drag::Marquee:
+            case ItemGestures::Drag::EnvMarquee:
                 c.fillRect(st.marquee, t.color("selection").withAlpha(0.3f));
                 c.strokeRect(st.marquee, t.color("focus"));
                 break;
@@ -253,7 +281,11 @@ class Ghost : public ui::Node {
                     if (x > x0) c.line(prev, p, t.color("focus"), 2);
                     prev = p;
                 }
-                if (st.envIndex < st.envDraft.size()) {
+                for (const model::EnvPoint& pt : st.envMoved)
+                    c.fillRect({v.xAt(s.timeMap->secondsAt(frame->offsetBeats + pt.pos)) - 4,
+                                frame->y(pt.value) - 4, 8, 8},
+                               t.color("focus"));
+                if (st.envMoved.empty() && st.envIndex < st.envDraft.size()) {
                     const model::EnvPoint& pt = st.envDraft[st.envIndex];
                     const ui::Point at{v.xAt(s.timeMap->secondsAt(frame->offsetBeats + pt.pos)),
                                        frame->y(pt.value)};
@@ -568,13 +600,23 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
         if (const auto lane = rowAt(e.pos.y); lane && view_.trackLayout().rows()[*lane].env) {
             const model::Id env = *view_.trackLayout().rows()[*lane].env;
             const auto ai = autoItemAt(env, e.pos);
-            if (e.button == 3) {
-                openAutoItemMenu(env, e.pos);
+            if (onEnvelopeFocus) onEnvelopeFocus(true);
+            if (e.button == 3) {  // a marquee over its points; without a drag, the lane's menu
+                state_.drag = Drag::EnvMarquee;
+                state_.env = env;
+                state_.marquee = {e.pos.x, e.pos.y, 0, 0};
+                marqueeAdd_ = mouse.behaviour("lane.drag", e.mods) == "add";
+                if (root_) root_->capture(&view_);
                 return true;
             }
             if (ai && ai->zone != Drag::EnvPoint) {
                 state_.drag = ai->zone;
                 state_.autoItem = ai->item;
+                if (ai->zone == Drag::AutoItemLength) {  // its shape stretches, or repeats
+                    const std::string_view b = mouse.behaviour("autoitem.edge", e.mods);
+                    state_.stretch = b.starts_with("stretch");
+                    free_ = b.ends_with("_free");
+                }
                 if (root_) root_->capture(&view_);
                 return true;
             }
@@ -583,7 +625,12 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
         const auto h = hit(e.pos);
         // A take envelope drawn on the item takes the press near its line.
         if (e.button == 1 && h && e.clicks < 2)
-            if (const auto env = takeEnvelopeAt(h->item, e.pos)) return envPress(*env, e);
+            if (const auto env = takeEnvelopeAt(h->item, e.pos)) {
+                if (onEnvelopeFocus) onEnvelopeFocus(true);
+                return envPress(*env, e);
+            }
+        clearPoints();  // a press elsewhere leaves the automation points
+        if (onEnvelopeFocus) onEnvelopeFocus(false);
         pressRow_ = rowAt(e.pos.y).value_or(0);
         if (e.button == 1 && e.clicks >= 2 && !h) {  // empty space on a channel: a new MIDI item
             if (const auto row = rowAt(e.pos.y)) {
@@ -774,6 +821,10 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
                     state_.compFrom = std::min(a0, a1);
                     state_.compTo = std::max(a0, a1);
                 }
+                break;
+            case Drag::EnvMarquee:
+                state_.marquee = {std::min(press_.x, e.pos.x), std::min(press_.y, e.pos.y),
+                                  std::abs(e.pos.x - press_.x), std::abs(e.pos.y - press_.y)};
                 break;
             case Drag::EnvPoint:
             case Drag::AutoItemMove:
@@ -983,9 +1034,41 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
         if (steps.empty() || !run) return;
         if (auto r = run(label, steps); !r && onError) onError(r.error());
     };
+    if (state_.drag == Drag::EnvMarquee && state_.env) {
+        if (!moved_) {
+            openEnvMenu(*state_.env, press_);
+            return;
+        }
+        const model::Envelope* env = s.envelopes.find(*state_.env);
+        const auto frame = env ? envFrame(view_, *state_.env, *env) : std::nullopt;
+        if (!frame) return;
+        std::vector<model::EnvPoint> picked = marqueeAdd_ && pointEnv_ == state_.env
+                                                  ? selectedPoints()
+                                                  : std::vector<model::EnvPoint>{};
+        for (const model::EnvPoint& pt : env->points) {
+            const ui::Point at{view_.xAt(s.timeMap->secondsAt(frame->offsetBeats + pt.pos)),
+                               frame->y(pt.value)};
+            if (state_.marquee.contains(at) &&
+                selectedIndices(picked, {pt}).empty())  // not already picked
+                picked.push_back(pt);
+        }
+        selectPoints(*state_.env, std::move(picked));
+        return;
+    }
     if (state_.drag == Drag::EnvPoint) {
-        if (moved_ || state_.envCreated)
-            commitEnv(state_.envCreated ? "Add envelope point" : "Move envelope point");
+        if (moved_ || state_.envCreated) {
+            const std::string label = state_.envCreated            ? "Add envelope point"
+                                      : state_.envMoved.size() > 1 ? "Move envelope points"
+                                                                   : "Move envelope point";
+            commitEnv(label);
+        }
+        if (!state_.autoItem && state_.env && state_.envIndex < state_.envDraft.size())
+            selectPoints(*state_.env, state_.envCreated
+                                          ? std::vector{state_.envDraft[state_.envIndex]}
+                                      : !moved_ ? std::vector{state_.envBase[state_.envIndex]}
+                                      : !state_.envMoved.empty()
+                                          ? state_.envMoved
+                                          : std::vector{state_.envDraft[state_.envIndex]});
         return;
     }
     if ((state_.drag == Drag::AutoItemMove || state_.drag == Drag::AutoItemLength) &&
@@ -993,13 +1076,43 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
         if (const model::AutomationItem* ai = s.autoItems.find(*state_.autoItem)) {
             json::Value args = json::Value::object();
             args["item"] = state_.autoItem->str();
-            if (state_.drag == Drag::AutoItemMove)
+            std::vector<EditStep> steps;
+            if (state_.drag == Drag::AutoItemMove) {
                 args["position"] = ai->position + state_.deltaBeats;
-            else
-                args["length"] = ai->length + state_.deltaBeats;
+            } else {
+                const double length = ai->length + state_.deltaBeats;
+                args["length"] = length;
+                if (state_.stretch && ai->length > 0) {
+                    // The shape stretches with the item: its points and the
+                    // span they repeat over scale (for its whole pool, whose
+                    // items keep their share of it).
+                    const double k = length / ai->length;
+                    args["source_length"] = ai->sourceLength * k;
+                    json::Value points = json::Value::array();
+                    for (const model::EnvPoint& pt : ai->points) {
+                        json::Value p = json::Value::object();
+                        p["beat"] = pt.pos * k;
+                        p["value"] = pt.value;
+                        p["shape"] = shapeName(pt.shape);
+                        if (pt.tension != 0) p["tension"] = pt.tension;
+                        points.push_back(std::move(p));
+                    }
+                    args["points"] = std::move(points);
+                    if (ai->pool > 0)
+                        for (const auto& other : s.autoItems)
+                            if (other.id != *state_.autoItem && other.value->pool == ai->pool) {
+                                json::Value o = json::Value::object();
+                                o["item"] = other.id.str();
+                                o["length"] = other.value->length * k;
+                                steps.push_back({"autoitem.set", std::move(o)});
+                            }
+                }
+            }
+            steps.insert(steps.begin(), {"autoitem.set", std::move(args)});
             runSteps(state_.drag == Drag::AutoItemMove ? "Move automation item"
+                     : state_.stretch                  ? "Stretch automation item"
                                                        : "Resize automation item",
-                     {{"autoitem.set", std::move(args)}});
+                     steps);
         }
         return;
     }
@@ -1278,33 +1391,13 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
         case Drag::Comp:
         case Drag::TakeOut:
         case Drag::EnvPoint:
+        case Drag::EnvMarquee:
         case Drag::AutoItemMove:
         case Drag::AutoItemLength:
         case Drag::None:
             return;
     }
 }
-
-namespace {
-
-const char* shapeName(model::PointShape shape) {
-    switch (shape) {
-        case model::PointShape::Linear:
-            return "linear";
-        case model::PointShape::Square:
-            return "square";
-        case model::PointShape::Slow:
-            return "slow";
-        case model::PointShape::FastStart:
-            return "fast_start";
-        case model::PointShape::FastEnd:
-            return "fast_end";
-        case model::PointShape::Bezier:
-            return "bezier";
-    }
-    return "linear";
-}
-}  // namespace
 
 bool ItemGestures::envPress(model::Id envId, const ui::PointerEvent& e,
                             std::optional<AutoHit> autoItem) {
@@ -1338,6 +1431,31 @@ bool ItemGestures::envPress(model::Id envId, const ui::PointerEvent& e,
     }
     const std::string_view press = mouse.behaviour("envelope", e.mods);
     free_ = press == "edit_free";
+    if (press == "toggle" && !state_.autoItem) {
+        if (nearest) {  // in or out of the selection
+            std::vector<model::EnvPoint> picked =
+                pointEnv_ == envId ? selectedPoints() : std::vector<model::EnvPoint>{};
+            const model::EnvPoint& pt = state_.envDraft[*nearest];
+            const auto was =
+                std::find_if(picked.begin(), picked.end(),
+                             [&](const model::EnvPoint& q) { return samePoint(q, pt); });
+            if (was != picked.end())
+                picked.erase(was);
+            else
+                picked.push_back(pt);
+            selectPoints(envId, std::move(picked));
+            state_ = State{};
+            return true;
+        }
+        // From empty space: a marquee that adds to the selection.
+        state_ = State{};
+        state_.drag = Drag::EnvMarquee;
+        state_.env = envId;
+        state_.marquee = {e.pos.x, e.pos.y, 0, 0};
+        marqueeAdd_ = true;
+        if (root_) root_->capture(&view_);
+        return true;
+    }
     if (nearest && press == "delete") {
         state_.envDraft.erase(state_.envDraft.begin() + static_cast<std::ptrdiff_t>(*nearest));
         commitEnv("Delete envelope point");
@@ -1346,6 +1464,15 @@ bool ItemGestures::envPress(model::Id envId, const ui::PointerEvent& e,
     }
     if (nearest) {
         state_.envIndex = *nearest;
+        if (!state_.autoItem) {
+            // A point outside the selection becomes it; one in it drags them all.
+            const model::EnvPoint& pt = state_.envDraft[*nearest];
+            std::vector<model::EnvPoint> picked =
+                pointEnv_ == envId ? selectedPoints() : std::vector<model::EnvPoint>{};
+            if (selectedIndices(picked, {pt}).empty()) picked = {pt};
+            selectPoints(envId, picked);
+            if (picked.size() > 1) state_.envMoved = std::move(picked);
+        }
     } else {  // a new point under the pointer
         model::EnvPoint pt;
         pt.pos = std::max(0.0, snap(beatAtX(e.pos.x), free_) - frame->offsetBeats);
@@ -1375,6 +1502,20 @@ void ItemGestures::envDrag(const ui::PointerEvent& e) {
     frame->offsetBeats += state_.envOffset;
     const model::AutomationItem* ai =
         state_.autoItem ? s.autoItems.find(*state_.autoItem) : nullptr;
+    if (!state_.envMoved.empty()) {  // the selected points move together
+        const model::EnvPoint& anchor = state_.envBase[state_.envIndex];
+        double beats = 0;
+        if (std::abs(e.pos.x - press_.x) >= 4) {
+            const double raw =
+                frame->offsetBeats + anchor.pos + beatAtX(e.pos.x) - beatAtX(press_.x);
+            beats = snap(raw, free_) - frame->offsetBeats - anchor.pos;
+        }
+        const double norm = static_cast<double>((press_.y - e.pos.y) / frame->area.h);
+        const EnvEdit moved = movePoints(state_.envBase, pointSel_, beats, norm, frame->scale);
+        state_.envDraft = moved.points;
+        state_.envMoved = moved.selected;
+        return;
+    }
     auto& pts = state_.envDraft;
     model::EnvPoint& pt = pts[state_.envIndex];
     // A mostly vertical drag keeps the point's time (snapping would move it).
@@ -1444,12 +1585,18 @@ std::optional<ItemGestures::AutoHit> ItemGestures::autoItemAt(model::Id env, ui:
     return found;
 }
 
-void ItemGestures::openAutoItemMenu(model::Id env, ui::Point at) {
+void ItemGestures::openEnvMenu(model::Id env, ui::Point at) {
     if (!root_) return;
     const model::Session& s = view_.session();
+    const model::Envelope* en = s.envelopes.find(env);
+    if (!en) return;
     const auto hitItem = autoItemAt(env, at);
     const model::AutomationItem* ai = hitItem ? s.autoItems.find(hitItem->item) : nullptr;
+    const bool picked = pointEnv_ == env && !selectedPoints().empty();
     std::vector<ui::MenuItem> items;
+    auto report = [this](const Status& st) {
+        if (!st && onError) onError(st.error());
+    };
     auto step = [this](std::string label, std::string command, json::Value args) {
         return [this, label = std::move(label), command = std::move(command),
                 args = std::move(args)]() mutable {
@@ -1458,16 +1605,45 @@ void ItemGestures::openAutoItemMenu(model::Id env, ui::Point at) {
                 onError(r.error());
         };
     };
-    ui::MenuItem insert;
-    insert.label = "Insert automation item";
-    {
-        json::Value args = json::Value::object();
-        args["env"] = env.str();
-        args["position"] = std::max(0.0, snap(beatAtX(at.x), free_));
-        args["length"] = 4.0;
-        insert.run = step("Insert automation item", "autoitem.add", std::move(args));
-    }
-    items.push_back(std::move(insert));
+    auto add = [&](std::string label, std::function<void()> fn, bool enabled = true,
+                   std::string shortcut = {}) {
+        ui::MenuItem m;
+        m.label = std::move(label);
+        m.run = std::move(fn);
+        m.enabled = enabled;
+        m.shortcut = std::move(shortcut);
+        items.push_back(std::move(m));
+    };
+    auto rule = [&] {
+        ui::MenuItem m;
+        m.separator = true;
+        items.push_back(std::move(m));
+    };
+    const double beat = std::max(0.0, snap(beatAtX(at.x), free_));
+    // Points: a press there adds one (the same as a click).
+    add("Insert point", [this, env, at] {
+        ui::PointerEvent e;
+        e.type = ui::PointerEvent::Type::Down;
+        e.pos = at;
+        e.button = 1;
+        press_ = at;
+        moved_ = false;
+        envPress(env, e, std::nullopt);
+        if (state_.drag == Drag::EnvPoint) commit(e);
+        state_ = State{};
+        if (root_) root_->capture(nullptr);
+    });
+    rule();
+    add("Select all points", [this, env] { selectAllPoints(env); }, !en->points.empty());
+    add("Copy points", [this] { copyPoints(); }, picked, "Ctrl+C");
+    add("Cut points", [this, report] { report(cutPoints()); }, picked, "Ctrl+X");
+    add(
+        "Paste points", [this, env, beat, report] { report(pastePoints(beat, env)); },
+        canPastePoints(), "Ctrl+V");
+    add("Delete points", [this, report] { report(deletePoints()); }, picked, "Delete");
+    add("Point shape…", [this, at] { openShapeMenu(at); }, picked);
+    rule();
+    // Automation items: one under the pointer, else a new one there.
     if (ai) {
         const std::string id = hitItem->item.str();
         auto ref = [&id] {
@@ -1475,45 +1651,156 @@ void ItemGestures::openAutoItemMenu(model::Id env, ui::Point at) {
             a["item"] = id;
             return a;
         };
-        ui::MenuItem rule;
-        rule.separator = true;
-        items.push_back(rule);
-        ui::MenuItem pooled;
-        pooled.label = "Duplicate (pooled)";
-        pooled.run = step("Duplicate automation item", "autoitem.duplicate", ref());
-        items.push_back(std::move(pooled));
-        ui::MenuItem copy;
-        copy.label = "Duplicate (unpooled copy)";
-        {
-            json::Value a = ref();
-            a["pooled"] = false;
-            copy.run = step("Duplicate automation item", "autoitem.duplicate", std::move(a));
-        }
-        items.push_back(std::move(copy));
-        if (ai->pool > 0) {
-            ui::MenuItem unpool;
-            unpool.label = "Unpool";
-            unpool.run = step("Unpool automation item", "autoitem.unpool", ref());
-            items.push_back(std::move(unpool));
-        }
-        ui::MenuItem loop;
-        loop.label = "Loop";
-        loop.checked = ai->loop;
-        {
-            json::Value a = ref();
-            a["loop"] = !ai->loop;
-            loop.run = step("Automation item loop", "autoitem.set", std::move(a));
-        }
-        items.push_back(std::move(loop));
-        items.push_back(rule);
-        ui::MenuItem del;
-        del.label = "Delete automation item";
-        del.run = step("Delete automation item", "autoitem.remove", ref());
-        items.push_back(std::move(del));
+        add("Duplicate automation item (pooled)",
+            step("Duplicate automation item", "autoitem.duplicate", ref()));
+        json::Value unpooledCopy = ref();
+        unpooledCopy["pooled"] = false;
+        add("Duplicate automation item (copy)",
+            step("Duplicate automation item", "autoitem.duplicate", std::move(unpooledCopy)));
+        if (ai->pool > 0)
+            add("Unpool automation item", step("Unpool automation item", "autoitem.unpool", ref()));
+        json::Value loop = ref();
+        loop["loop"] = !ai->loop;
+        add("Loop automation item", step("Automation item loop", "autoitem.set", std::move(loop)));
+        items.back().checked = ai->loop;
+        add("Delete automation item", step("Delete automation item", "autoitem.remove", ref()));
+    } else {
+        json::Value args = json::Value::object();
+        args["env"] = env.str();
+        args["position"] = beat;
+        args["length"] = 4.0;
+        add("Insert automation item",
+            step("Insert automation item", "autoitem.add", std::move(args)));
     }
+    rule();
+    // The envelope.
+    json::Value bypass = json::Value::object();
+    bypass["env"] = env.str();
+    bypass["active"] = !en->active;
+    add("Bypass envelope",
+        step(en->active ? "Bypass envelope" : "Enable envelope", "env.set", std::move(bypass)));
+    items.back().checked = !en->active;
+    json::Value hide = json::Value::object();
+    hide["env"] = env.str();
+    hide["visible"] = false;
+    add("Hide envelope", step("Hide envelope", "env.set", std::move(hide)));
+    json::Value remove = json::Value::object();
+    remove["env"] = env.str();
+    add("Remove envelope", step("Remove envelope", "env.remove", std::move(remove)));
+    root_->openPopup(ui::makeMenu("env.menu", std::move(items), [this] { root_->closePopup(); }),
+                     {at.x, at.y, 1, 1});
+}
+
+void ItemGestures::openShapeMenu(ui::Point at) {
+    if (!root_) return;
+    const auto picked = selectedPoints();
+    std::vector<ui::MenuItem> items;
+    for (auto [label, shape] : {std::pair{"Linear", model::PointShape::Linear},
+                                {"Square", model::PointShape::Square},
+                                {"Slow start/end", model::PointShape::Slow},
+                                {"Fast start", model::PointShape::FastStart},
+                                {"Fast end", model::PointShape::FastEnd},
+                                {"Bezier", model::PointShape::Bezier}}) {
+        ui::MenuItem m;
+        m.label = label;
+        m.checked = !picked.empty() &&
+                    std::all_of(picked.begin(), picked.end(),
+                                [shape](const model::EnvPoint& p) { return p.shape == shape; });
+        m.run = [this, shape] {
+            if (auto st = shapePoints(shape); !st && onError) onError(st.error());
+        };
+        items.push_back(std::move(m));
+    }
+    // Opened from the lane's menu as it closes.
     root_->openPopup(
-        ui::makeMenu("autoitem.menu", std::move(items), [this] { root_->closePopup(); }),
+        ui::makeMenu("env.shape.menu", std::move(items), [this] { root_->closePopup(); }),
         {at.x, at.y, 1, 1});
+}
+
+std::vector<model::EnvPoint> ItemGestures::selectedPoints() const {
+    const model::Envelope* env = pointEnv_ ? view_.session().envelopes.find(*pointEnv_) : nullptr;
+    if (!env) return {};
+    std::vector<model::EnvPoint> out;
+    for (std::size_t i : selectedIndices(env->points, pointSel_)) out.push_back(env->points[i]);
+    return out;
+}
+
+void ItemGestures::selectPoints(model::Id env, std::vector<model::EnvPoint> points) {
+    pointEnv_ = env;
+    pointSel_ = std::move(points);
+    if (root_) root_->requestAnimationFrame();
+}
+
+void ItemGestures::selectAllPoints(model::Id env) {
+    if (const model::Envelope* en = view_.session().envelopes.find(env))
+        selectPoints(env, en->points);
+}
+
+void ItemGestures::clearPoints() {
+    if (!pointEnv_ && pointSel_.empty()) return;
+    pointEnv_.reset();
+    pointSel_.clear();
+    if (root_) root_->requestAnimationFrame();
+}
+
+Status ItemGestures::setPoints(model::Id env, const EnvEdit& edit, const std::string& label) {
+    if (!run) return Error("gui.unwired", "no command runner");
+    json::Value args = json::Value::object(), points = json::Value::array();
+    args["env"] = env.str();
+    for (const model::EnvPoint& pt : edit.points) {
+        json::Value p = json::Value::object();
+        p["beat"] = pt.pos;
+        p["value"] = pt.value;
+        p["shape"] = shapeName(pt.shape);
+        if (pt.tension != 0) p["tension"] = pt.tension;
+        points.push_back(std::move(p));
+    }
+    args["points"] = std::move(points);
+    if (auto r = run(label, {{"env.points.set", std::move(args)}}); !r) return r.error();
+    selectPoints(env, edit.selected);
+    return {};
+}
+
+Status ItemGestures::deletePoints() {
+    const auto picked = selectedPoints();
+    const model::Envelope* env = pointEnv_ ? view_.session().envelopes.find(*pointEnv_) : nullptr;
+    if (!env || picked.empty()) return {};
+    return setPoints(*pointEnv_, views::deletePoints(env->points, picked),
+                     picked.size() == 1 ? "Delete envelope point" : "Delete envelope points");
+}
+
+void ItemGestures::copyPoints() {
+    const model::Envelope* env = pointEnv_ ? view_.session().envelopes.find(*pointEnv_) : nullptr;
+    const auto frame = env ? envFrame(view_, *pointEnv_, *env) : std::nullopt;
+    const auto picked = selectedPoints();
+    if (!frame || picked.empty()) return;
+    pointClip_ = views::copyPoints(env->points, picked, frame->scale, envUnit(*env, frame->scale));
+}
+
+Status ItemGestures::cutPoints() {
+    copyPoints();
+    return deletePoints();
+}
+
+Status ItemGestures::pastePoints(double atBeat, std::optional<model::Id> envId) {
+    if (!envId) envId = pointEnv_;
+    const model::Envelope* env = envId ? view_.session().envelopes.find(*envId) : nullptr;
+    const auto frame = env ? envFrame(view_, *envId, *env) : std::nullopt;
+    if (!frame || pointClip_.empty()) return {};
+    // Points are beats from the envelope's start (a take envelope: its item's).
+    const EnvEdit edit = views::pastePoints(env->points, pointClip_, atBeat - frame->offsetBeats,
+                                            frame->scale, envUnit(*env, frame->scale));
+    return setPoints(
+        *envId, edit,
+        pointClip_.points.size() == 1 ? "Paste envelope point" : "Paste envelope points");
+}
+
+Status ItemGestures::shapePoints(model::PointShape shape) {
+    const auto picked = selectedPoints();
+    const model::Envelope* env = pointEnv_ ? view_.session().envelopes.find(*pointEnv_) : nullptr;
+    if (!env || picked.empty()) return {};
+    return setPoints(*pointEnv_, views::shapePoints(env->points, picked, shape),
+                     "Envelope point shape");
 }
 
 void ItemGestures::commitEnv(const std::string& label) {

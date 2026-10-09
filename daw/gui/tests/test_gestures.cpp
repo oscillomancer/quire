@@ -500,12 +500,14 @@ TEST_CASE("automation lanes: items inserted, edited inside, moved, resized, pool
         f.pointer(ui::PointerEvent::Type::Down, p, 3);
         f.pointer(ui::PointerEvent::Type::Up, p, 3);
         f.sync();
-        REQUIRE(f.root->find("autoitem.menu"));
+        REQUIRE(f.root->find("env.menu"));
     };
     const float body = area.y + area.h * 0.6f;
+    // The lane's menu: points (rows 0-7), then automation items from row 9.
+    constexpr int kItems = 9;
     // Insert: a 4-beat item at the pointer, capturing the flat envelope.
     rightClick({xOfBeat(4) + 1, body});
-    f.menuRow("autoitem.menu", 0);
+    f.menuRow("env.menu", kItems);
     REQUIRE(items().size() == 1);
     const model::Id ai = items()[0].first;
     CHECK(items()[0].second.position == doctest::Approx(4));
@@ -525,11 +527,22 @@ TEST_CASE("automation lanes: items inserted, edited inside, moved, resized, pool
     const float header = laneRect.y + 1 + views::Lanes::kAutoHeader / 2;
     f.drag({xOfBeat(5), header}, {xOfBeat(9), header});
     CHECK(f.app->head().autoItems.find(ai)->position == doctest::Approx(8));
+    // Dragging the right edge stretches its shape with it (its points and the
+    // span they repeat over); Alt extends it by repeating the shape.
+    const double sourceBefore = f.app->head().autoItems.find(ai)->sourceLength;
+    const double lastPoint = f.app->head().autoItems.find(ai)->points.back().pos;
     f.drag({xOfBeat(12) - 2, body}, {xOfBeat(14) - 2, body});
     CHECK(f.app->head().autoItems.find(ai)->length == doctest::Approx(6));
-    // Rows: Insert, rule, Duplicate (pooled), Duplicate (copy), Loop, rule, Delete.
+    CHECK(f.app->head().autoItems.find(ai)->sourceLength == doctest::Approx(sourceBefore * 1.5));
+    CHECK(f.app->head().autoItems.find(ai)->points.back().pos == doctest::Approx(lastPoint * 1.5));
+    f.drag({xOfBeat(14) - 2, body}, {xOfBeat(16) - 2, body}, ui::kAlt);
+    CHECK(f.app->head().autoItems.find(ai)->length == doctest::Approx(8));
+    CHECK(f.app->head().autoItems.find(ai)->sourceLength == doctest::Approx(sourceBefore * 1.5));
+    f.drag({xOfBeat(16) - 2, body}, {xOfBeat(14) - 2, body}, ui::kAlt);
+    CHECK(f.app->head().autoItems.find(ai)->length == doctest::Approx(6));
+    // Item rows: Duplicate (pooled), Duplicate (copy), Loop, Delete.
     rightClick({xOfBeat(9), body});
-    f.menuRow("autoitem.menu", 2);
+    f.menuRow("env.menu", kItems);
     REQUIRE(items().size() == 2);
     for (const auto& [id, it] : items()) CHECK(it.pool == 1);
     // Editing points in the copy edits the pool.
@@ -539,15 +552,15 @@ TEST_CASE("automation lanes: items inserted, edited inside, moved, resized, pool
     CHECK(f.app->head().autoItems.find(ai)->points.size() ==
           f.app->head().autoItems.find(copy)->points.size());
     CHECK(f.app->head().autoItems.find(ai)->points.size() == pointsBefore + 2);
-    // Unpool appears for a pooled item: Insert, rule, dup, dup, Unpool, Loop, rule, Delete.
+    // Unpool appears for a pooled item: dup, dup, Unpool, Loop, Delete.
     rightClick({xOfBeat(15) + 1, body});
-    f.menuRow("autoitem.menu", 4);
+    f.menuRow("env.menu", kItems + 2);
     CHECK(f.app->head().autoItems.find(copy)->pool == 0);
     rightClick({xOfBeat(15) + 1, body});
-    f.menuRow("autoitem.menu", 4);
+    f.menuRow("env.menu", kItems + 2);
     CHECK_FALSE(f.app->head().autoItems.find(copy)->loop);
     rightClick({xOfBeat(15) + 1, body});
-    f.menuRow("autoitem.menu", 6);
+    f.menuRow("env.menu", kItems + 3);
     CHECK(items().size() == 1);
     // Deleting the block during a point gesture must not write its draft into
     // the underlying envelope instead.
@@ -1318,4 +1331,105 @@ TEST_CASE("an envelope drag over points another client changed is not applied") 
     REQUIRE(points.size() == 3);
     CHECK(points[1].pos == doctest::Approx(4));  // the other client's point stays
     CHECK(points[1].value == doctest::Approx(-30));
+}
+
+TEST_CASE("automation points: select, move together, marquee, menu, clipboard, shapes") {
+    Fixture f;
+    if (!f.ok) return;
+    const model::Id track = f.view->trackLayout().rows()[0].track;
+    auto added = f.dispatcher->execute(
+        {"env.add",
+         json::parse(R"({"track":")" + track.str() +
+                     R"(","param":"volume","points":[{"beat":0,"value":-12},{"beat":4,"value":-6},)"
+                     R"({"beat":8,"value":-12},{"beat":12,"value":-6}]})")
+             .value(),
+         kUi});
+    REQUIRE(added);
+    const model::Id env = *model::Id::parse((*added)["env"].asString());
+    f.sync();
+    const auto lane = f.view->trackLayout().indexOfEnv(env);
+    REQUIRE(lane);
+    const ui::Rect area = views::Lanes::envArea(f.view->rowRect(*lane));
+    auto& g = f.view->gestures();
+    auto points = [&] { return f.app->head().envelopes.find(env)->points; };
+    auto at = [&](std::size_t i) {
+        const model::EnvPoint p = points()[i];
+        return ui::Point{
+            f.view->xAt(f.app->head().timeMap->secondsAt(p.pos)),
+            area.bottom() - static_cast<float>(views::EnvScale{}.toNorm(p.value)) * area.h};
+    };
+    auto rightClick = [&](ui::Point p) {
+        f.pointer(ui::PointerEvent::Type::Down, p, 3);
+        f.pointer(ui::PointerEvent::Type::Up, p, 3);
+        f.sync();
+        REQUIRE(f.root->find("env.menu"));
+    };
+    // A click selects a point (no edit); Ctrl+click adds another.
+    auto steps = f.steps();
+    f.click(at(1));
+    CHECK(f.steps() == steps);
+    CHECK(g.pointEnvelope() == env);
+    CHECK(g.selectedPoints().size() == 1);
+    f.click(at(3), ui::kCtrl);
+    REQUIRE(g.selectedPoints().size() == 2);
+    // Dragging one of them moves both, in one step; the others stay.
+    f.drag(at(1), {at(1).x, at(1).y - area.h * 0.1f});
+    CHECK(f.steps() == steps + 1);
+    REQUIRE(points().size() == 4);
+    CHECK(points()[1].value > -6);
+    CHECK(points()[3].value == doctest::Approx(points()[1].value));
+    CHECK(points()[0].value == doctest::Approx(-12));
+    CHECK(points()[2].value == doctest::Approx(-12));
+    CHECK(g.selectedPoints().size() == 2);  // still selected, where they moved
+    // A right-drag selects with a marquee (the first three points).
+    f.drag({at(2).x + 6, area.y + 1}, {at(0).x - 6, area.bottom() - 1}, 0, 3);
+    CHECK_FALSE(f.root->find("env.menu"));
+    CHECK(g.selectedPoints().size() == 3);
+    // Rows: Insert point, rule, Select all, Copy, Cut, Paste, Delete, Point shape.
+    rightClick({at(3).x + 40, area.y + area.h / 2});
+    if (const char* out = std::getenv("SUPPLE_TEST_SNAPSHOTS"))
+        (void)gui::writePng(std::filesystem::path(out) / "automation-points-menu.png",
+                            f.root->readBack());
+    f.menuRow("env.menu", 6);
+    CHECK(f.steps() == steps + 2);
+    REQUIRE(points().size() == 1);
+    CHECK(g.selectedPoints().empty());
+    REQUIRE(f.dispatcher->execute({"history.undo", json::Value::object(), kUi}));
+    f.sync();
+    REQUIRE(points().size() == 4);
+    // Select all, copy, paste at beat 16: four more points from there.
+    rightClick({at(3).x + 40, area.y + area.h / 2});
+    f.menuRow("env.menu", 2);
+    CHECK(g.selectedPoints().size() == 4);
+    g.copyPoints();
+    REQUIRE(g.canPastePoints());
+    REQUIRE(g.pastePoints(16));
+    f.sync();
+    REQUIRE(points().size() == 8);
+    CHECK(points()[4].pos == doctest::Approx(16));
+    CHECK(points()[7].pos == doctest::Approx(28));
+    CHECK(points()[4].value == doctest::Approx(points()[0].value));
+    CHECK(g.selectedPoints().size() == 4);  // the pasted ones
+    // Point shape: the second menu sets the selected points' shape.
+    rightClick({at(7).x + 40, area.y + area.h / 2});
+    f.menuRow("env.menu", 7);
+    REQUIRE(f.root->find("env.shape.menu"));
+    f.menuRow("env.shape.menu", 1);  // Square
+    for (std::size_t i = 4; i < 8; ++i) CHECK(points()[i].shape == model::PointShape::Square);
+    CHECK(points()[0].shape == model::PointShape::Linear);
+    // Pasting into a pan lane converts the values through the lanes.
+    auto pan = f.dispatcher->execute(
+        {"env.add", json::parse(R"({"track":")" + track.str() + R"(","param":"pan"})").value(),
+         kUi});
+    REQUIRE(pan);
+    const model::Id panEnv = *model::Id::parse((*pan)["env"].asString());
+    f.sync();
+    REQUIRE(g.pastePoints(0, panEnv));
+    f.sync();
+    const auto& panPoints = f.app->head().envelopes.find(panEnv)->points;
+    REQUIRE(panPoints.size() >= 4);
+    for (const auto& p : panPoints) CHECK(std::abs(p.value) <= 100.0);
+    // A click elsewhere in the lanes leaves the points.
+    f.click({f.view->lanesRect().x + 5, f.view->lanesRect().bottom() - 5});
+    CHECK_FALSE(g.pointEnvelope());
 }

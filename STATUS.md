@@ -60,7 +60,9 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
   tempo and meter maps, the item clipboard, a piano roll with velocity and
   CC lanes, an event list and a notation panel.
 - **Automation**: envelopes on strip, route and plugin parameters,
-  automation items with pools, take envelopes, touch/latch/write recording.
+  automation items with pools, take envelopes, touch/latch/write recording;
+  automation points selected (click, Ctrl+click, marquee) and moved, deleted,
+  copied, pasted and reshaped together from the lane's menu or the keyboard.
 - **Rendering** (`specs/engine.md` §3): mix, stems, regions and the render
   matrix; file-name patterns; loudness or peak normalization with a
   true-peak limiter; WAV (16/24-bit with seeded dither, or float, RF64
