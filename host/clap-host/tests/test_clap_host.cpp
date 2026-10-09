@@ -135,7 +135,7 @@ struct ControllerWatch {
 TEST_CASE("VST3 fixture scans, processes, and restores state") {
     auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
     REQUIRE(found);
-    REQUIRE(found->size() == 7);
+    REQUIRE(found->size() == 8);
     CHECK((*found)[0].format == "vst3");
     CHECK((*found)[0].id.rfind("vst3:", 0) == 0);
     CHECK((*found)[0].version == "2.0");
@@ -1451,7 +1451,7 @@ TEST_CASE("VST3 scan retains search path precedence and suppresses repeated bund
     const std::array<fs::path, 3> paths{first.parent_path(), second.parent_path(), first};
     auto found = scan(paths);
     REQUIRE(found);
-    REQUIRE(found->size() == 14);  // two bundles of seven classes
+    REQUIRE(found->size() == 16);  // two bundles of eight classes
     CHECK(found->front().path == first);
     CHECK(found->back().path == second);
 }
@@ -2170,6 +2170,31 @@ TEST_CASE("a VST3 state its controller rejects leaves the plug-in as it was") {
     const auto after = (*made)->paramValue(1);
     REQUIRE(after);
     CHECK(*after == doctest::Approx(*before));
+}
+
+TEST_CASE("a VST3 controller without state of its own still saves the component's") {
+    setBridgeExecutable(BRIDGE_PATH);
+    auto list = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(list);
+    const auto info = std::find_if(list->begin(), list->end(), [](const auto& p) {
+        return p.name == "Test VST3 Stateless Controller Gain";
+    });
+    REQUIRE(info != list->end());
+    for (bool isolated : {false, true}) {
+        CAPTURE(isolated);
+        auto made = Instance::create(*info, {}, isolated);
+        REQUIRE(made);
+        REQUIRE((*made)->setParam(1, 0.8).ok());
+        // The controller's getState answers kNotImplemented, as sfizz's does.
+        auto saved = (*made)->saveState();
+        REQUIRE_MESSAGE(saved, (saved ? "" : saved.error().toString()));
+        auto restored = Instance::create(*info, {}, isolated);
+        REQUIRE(restored);
+        REQUIRE((*restored)->loadState(*saved).ok());
+        const auto value = (*restored)->paramValue(1);
+        REQUIRE(value);
+        CHECK(*value == doctest::Approx(0.8));
+    }
 }
 
 TEST_CASE("a VST3 that settles on another layout is served it, in process or isolated") {

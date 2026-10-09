@@ -732,8 +732,14 @@ Result<std::vector<std::uint8_t>> Vst3Instance::saveState() {
     Steinberg::ResizableMemoryIBStream component, controller;
     if (state_->component->getState(&component) != kResultOk)
         return Error("host.state", "VST3 component could not save state");
-    if (state_->separateController && state_->controller->getState(&controller) != kResultOk)
-        return Error("host.state", "VST3 controller could not save state");
+    // A controller with no state of its own may answer kNotImplemented (the
+    // SDK's default; sfizz keeps it): its state is then empty, and the
+    // component's alone is saved.
+    if (state_->separateController) {
+        const auto result = state_->controller->getState(&controller);
+        if (result != kResultOk && result != Steinberg::kNotImplemented)
+            return Error("host.state", "VST3 controller could not save state");
+    }
     return encodeState(component.take(), controller.take());
 }
 Status Vst3Instance::loadState(std::span<const std::uint8_t> bytes) {

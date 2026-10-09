@@ -1,6 +1,6 @@
-// Original MIT test module for the VST3 host. Five processor classes exercise the
-// effect, note, latency and sidechain paths without any external installed
-// plug-in. The sidechain gain behaves like strict real plug-ins: it refuses
+// Original MIT test module for the VST3 host. Its processor classes exercise the
+// effect, note, latency, sidechain, layout and state paths without any external
+// installed plug-in. The sidechain gain behaves like strict real plug-ins: it refuses
 // a bus layout that leaves out its sidechain, outputs silence unless given
 // every bus, and answers setProcessing with kNotImplemented.
 #include <algorithm>
@@ -29,6 +29,10 @@ const FUID kSeparateId(0x11000105, 0x22000202, 0x33000303, 0x44000404);
 const FUID kControllerId(0x11000106, 0x22000202, 0x33000303, 0x44000404);
 const FUID kMultiOutId(0x11000107, 0x22000202, 0x33000303, 0x44000404);
 const FUID kAdapterId(0x11000108, 0x22000202, 0x33000303, 0x44000404);
+// A separate controller with no state of its own: like sfizz, it keeps the
+// SDK's getState, which answers kNotImplemented.
+const FUID kStatelessId(0x11000109, 0x22000202, 0x33000303, 0x44000404);
+const FUID kStatelessControllerId(0x1100010A, 0x22000202, 0x33000303, 0x44000404);
 constexpr double kTau = 6.28318530717958647692;
 
 // The host must call the edit controller on the thread that initialized the
@@ -116,7 +120,7 @@ class Fixture final : public SingleComponentEffect {
     // MultiOut (ADR-0021): an instrument with a main output (0.125) and an
     // auxiliary "Kick" output bus (0.25), constant levels. Adapter: a gain that
     // offers stereo but refuses it at setBusArrangements and settles on mono.
-    enum Kind { Gain, Sine, Delay, Sidechain, Separate, MultiOut, Adapter };
+    enum Kind { Gain, Sine, Delay, Sidechain, Separate, MultiOut, Adapter, Stateless };
     explicit Fixture(Kind kind, bool controller = false)
         : controller_(controller), kind_(kind), value_(kind == Delay ? 0.0 : 0.5) {}
     tresult PLUGIN_API initialize(FUnknown* context) override {
@@ -151,8 +155,8 @@ class Fixture final : public SingleComponentEffect {
         return controller_ && std::strcmp(name, ViewType::kEditor) == 0 ? new TestView : nullptr;
     }
     tresult PLUGIN_API getControllerClassId(TUID id) override {
-        if (kind_ != Separate) return kResultFalse;
-        kControllerId.toTUID(id);
+        if (kind_ != Separate && kind_ != Stateless) return kResultFalse;
+        (kind_ == Stateless ? kStatelessControllerId : kControllerId).toTUID(id);
         return kResultOk;
     }
     tresult PLUGIN_API setProcessing(TBool state) override {
@@ -190,6 +194,7 @@ class Fixture final : public SingleComponentEffect {
         return kResultOk;
     }
     tresult PLUGIN_API getState(IBStream* stream) override {
+        if (controller_ && kind_ == Stateless) return kNotImplemented;
         int32 n = 0;
         double value = value_.load();
         return stream->write(&value, sizeof(value), &n) == kResultOk && n == sizeof(value)
@@ -326,11 +331,12 @@ class Factory final
         *info = PFactoryInfo("Supple Audio", "https://supple.audio", "dev@supple.audio", 0);
         return kResultOk;
     }
-    int32 PLUGIN_API countClasses() override { return 8; }
+    int32 PLUGIN_API countClasses() override { return 10; }
     tresult PLUGIN_API getClassInfo(int32 index, PClassInfo* info) override {
-        if (!info || index < 0 || index >= 8) return kInvalidArgument;
-        const FUID ids[] = {kGainId,     kSineId,     kDelayId,      kSidechainId,
-                            kSeparateId, kMultiOutId, kControllerId, kAdapterId};
+        if (!info || index < 0 || index >= 10) return kInvalidArgument;
+        const FUID ids[] = {
+            kGainId,     kSineId,       kDelayId,   kSidechainId, kSeparateId,
+            kMultiOutId, kControllerId, kAdapterId, kStatelessId, kStatelessControllerId};
         const char* names[] = {"Test VST3 Gain",
                                "Test VST3 Sine",
                                "Test VST3 Latency",
@@ -338,16 +344,20 @@ class Factory final
                                "Test VST3 Separate Gain",
                                "Test VST3 Multi-Out",
                                "Test VST3 Gain Controller",
-                               "Test VST3 Mono Adapter"};
-        *info = PClassInfo(ids[index], PClassInfo::kManyInstances,
-                           index == 6 ? kVstComponentControllerClass : kVstAudioEffectClass,
-                           names[index]);
+                               "Test VST3 Mono Adapter",
+                               "Test VST3 Stateless Controller Gain",
+                               "Test VST3 Stateless Controller"};
+        *info = PClassInfo(
+            ids[index], PClassInfo::kManyInstances,
+            index == 6 || index == 9 ? kVstComponentControllerClass : kVstAudioEffectClass,
+            names[index]);
         return kResultOk;
     }
     tresult PLUGIN_API getClassInfo2(int32 index, PClassInfo2* info) override {
-        if (!info || index < 0 || index >= 8) return kInvalidArgument;
-        const FUID ids[] = {kGainId,     kSineId,     kDelayId,      kSidechainId,
-                            kSeparateId, kMultiOutId, kControllerId, kAdapterId};
+        if (!info || index < 0 || index >= 10) return kInvalidArgument;
+        const FUID ids[] = {
+            kGainId,     kSineId,       kDelayId,   kSidechainId, kSeparateId,
+            kMultiOutId, kControllerId, kAdapterId, kStatelessId, kStatelessControllerId};
         const char* names[] = {"Test VST3 Gain",
                                "Test VST3 Sine",
                                "Test VST3 Latency",
@@ -355,18 +365,22 @@ class Factory final
                                "Test VST3 Separate Gain",
                                "Test VST3 Multi-Out",
                                "Test VST3 Gain Controller",
-                               "Test VST3 Mono Adapter"};
-        *info = PClassInfo2(ids[index], PClassInfo::kManyInstances,
-                            index == 6 ? kVstComponentControllerClass : kVstAudioEffectClass,
-                            names[index], 0, index == 1 || index == 5 ? "Instrument" : "Fx",
-                            "Supple Audio", "1.0", kVstVersionString);
+                               "Test VST3 Mono Adapter",
+                               "Test VST3 Stateless Controller Gain",
+                               "Test VST3 Stateless Controller"};
+        *info = PClassInfo2(
+            ids[index], PClassInfo::kManyInstances,
+            index == 6 || index == 9 ? kVstComponentControllerClass : kVstAudioEffectClass,
+            names[index], 0, index == 1 || index == 5 ? "Instrument" : "Fx", "Supple Audio", "1.0",
+            kVstVersionString);
         return kResultOk;
     }
     tresult PLUGIN_API createInstance(FIDString cid, FIDString iid, void** obj) override {
         if (!obj) return kInvalidArgument;
         *obj = nullptr;
-        const FUID ids[] = {kGainId,     kSineId,     kDelayId,      kSidechainId,
-                            kSeparateId, kMultiOutId, kControllerId, kAdapterId};
+        const FUID ids[] = {
+            kGainId,     kSineId,       kDelayId,   kSidechainId, kSeparateId,
+            kMultiOutId, kControllerId, kAdapterId, kStatelessId, kStatelessControllerId};
         for (int i = 0; i < 6; ++i) {
             if (std::memcmp(cid, ids[i], 16) != 0) continue;
             auto* plugin = new Fixture(static_cast<Fixture::Kind>(i));
@@ -380,8 +394,16 @@ class Factory final
             plugin->release();
             return result;
         }
-        if (std::memcmp(cid, kControllerId, 16) == 0) {
-            auto* controller = new Fixture(Fixture::Gain, true);
+        if (std::memcmp(cid, kStatelessId, 16) == 0) {
+            auto* plugin = new Fixture(Fixture::Stateless);
+            const auto result = plugin->queryInterface(iid, obj);
+            plugin->release();
+            return result;
+        }
+        if (std::memcmp(cid, kControllerId, 16) == 0 ||
+            std::memcmp(cid, kStatelessControllerId, 16) == 0) {
+            const bool stateless = std::memcmp(cid, kStatelessControllerId, 16) == 0;
+            auto* controller = new Fixture(stateless ? Fixture::Stateless : Fixture::Gain, true);
             const auto result = controller->queryInterface(iid, obj);
             controller->release();
             return result;

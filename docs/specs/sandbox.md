@@ -57,7 +57,9 @@ class Instance {   // owns one plugin instance; main-thread object
     Result<void> setPatch(std::string_view json, int mode);   // errors: the plugin's error array as Error details
     Result<std::string> describe(bool changedOnly);
 
-    // State
+    // State. A VST3 blob holds the component's state, then the separate
+    // controller's (ADR-0017); a controller whose getState answers
+    // kNotImplemented (the SDK default; sfizz) has none, which is not an error.
     Result<std::vector<std::uint8_t>> saveState();
     Status loadState(std::span<const std::uint8_t>);
 
