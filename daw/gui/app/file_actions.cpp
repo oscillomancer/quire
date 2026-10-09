@@ -199,10 +199,10 @@ void FileActions::showSaveWarnings(const std::string& command, const json::Value
     auto form = std::make_unique<ui::Node>("file.warning");
     form->layout.dir = ui::Layout::Dir::Column;
     form->layout.width = ui::SizeRule::fixed(460);
-    form->layout.height = ui::SizeRule::fixed(96 + 16 * std::min(lines, 12));
+    form->layout.height = ui::SizeRule::fixed(80 + 16 * std::min(lines, 12));
     form->layout.padding = ui::Insets::all(14);
     form->layout.gap = 10;
-    form->emplace<ui::Label>("file.warning.title", "Saved, but a plug-in's state was not",
+    form->emplace<ui::Label>("file.warning.title", "Saved, but a plug-in's state could not be read",
                              ui::Font::UiBold, "body");
     form->emplace<ui::TextBlock>("file.warning.text", text, ui::Font::Ui, "small", "ink-quiet");
     auto& row = form->emplace<ui::Node>("file.warning.buttons");

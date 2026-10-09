@@ -71,13 +71,15 @@ class FileActions {
     // thread with the chosen folder.
     void chooseFolder(const std::filesystem::path& start,
                       std::function<void(std::filesystem::path)> done);
+    // A save's (or template's) warnings, if it has any, in a popup: a plug-in
+    // whose state could not be read keeps its earlier state.
+    void showSaveWarnings(const std::string& command, const json::Value& result);
 
   private:
     std::string dialogStart() const;  // the project's file, else mediaHome()
     Result<json::Value> exec(const std::string& command, json::Value args);
     void markSaved();
     void showError(const std::string& message);
-    void showSaveWarnings(const std::string& command, const json::Value& result);
     ui::Root& root_;
     AppActions& actions_;
     cmd::Dispatcher& dispatcher_;

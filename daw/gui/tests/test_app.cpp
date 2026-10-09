@@ -647,6 +647,24 @@ TEST_CASE(
     REQUIRE(a.root->click("file.confirm.discard"));
     CHECK(went);
 
+    // A save whose plug-in state could not be read says so in a popup.
+    json::Value saved =
+        json::parse(
+            R"({"path":"x","warnings":[{"code":"fx.state","path":"/fx/fx_1","message":)"
+            R"("sfizz on Track 1: its current state could not be read (VST3 controller could not )"
+            R"(save state); the state saved before is kept"}]})")
+            .value();
+    files.showSaveWarnings("project.save", saved);
+    a.root->frame(false);
+    REQUIRE(a.root->popupOpen());
+    REQUIRE(a.root->find("file.warning.text"));
+    if (const char* out = std::getenv("SUPPLE_TEST_SNAPSHOTS"))
+        (void)gui::writePng(std::filesystem::path(out) / "save-warning.png", a.root->readBack());
+    REQUIRE(a.root->click("file.warning.ok"));
+    CHECK_FALSE(a.root->popupOpen());
+    files.showSaveWarnings("project.save", json::parse(R"({"path":"x"})").value());
+    CHECK_FALSE(a.root->popupOpen());  // none: nothing to say
+
     files.openPath(a.dir / "song" / "song.json");
     CHECK_FALSE(files.dirty());
     CHECK(a.app->projectPath() == a.dir / "song" / "song.json");
