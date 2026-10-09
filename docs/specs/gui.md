@@ -340,16 +340,27 @@ bar of an item with several takes takes that take (the lane under the
 pointer, else the heard one) out into an item of its own, anywhere on any
 channel (take.extract, one undo step; elsewhere Ctrl-drag still copies).
 
+**The marquee.** A drag from empty space, or a right-drag anywhere in the
+lanes (on an automation lane: a right-drag, or a Ctrl-drag from empty
+space), draws one marquee that selects every item it touches and every
+automation point inside it, on any track and in any lane, take envelopes
+drawn on items included; with the add modifier (`lane.drag`) it adds to
+what is selected. After a marquee that took items and points, Delete
+removes both (one undo step) and Ctrl+C, Ctrl+X and Ctrl+V take the items;
+after one that took points only, the keys take the points.
+
 **Automation lanes.** A click on a point selects it (Ctrl+click adds or
-removes one; a right-drag, or a Ctrl-drag from empty space, selects with a
-marquee) and a click on empty space adds a point there, selected. Dragging a
-selected point moves every selected point by the same time and lane height
-(one `env.points.set`, one undo step); Shift frees it from the grid and
-Alt+click deletes a point. The selection is one envelope's (the lane clicked
-last) and names points by position and value, so points an edit elsewhere
-removed simply leave it; a press elsewhere in the lanes clears it. While a
-lane was clicked last, Delete, Ctrl+C, Ctrl+X and Ctrl+V take its points
-(paste at the playhead, into that lane) instead of items. A right-click
+removes one) and a click on empty space adds a point there, selected.
+Dragging a selected point moves every selected point, in every lane, by the
+same time and the same share of its lane's height (one `env.points.set` per
+envelope, one undo step); Shift frees it from the grid and Alt+click
+deletes a point. A click selects in one lane; the selection names points
+by position and value, so points an edit elsewhere removed simply leave it;
+a press elsewhere in the lanes clears it. While a lane was clicked last,
+Delete, Ctrl+C, Ctrl+X and Ctrl+V take the selected points instead of
+items; points copied from one lane paste at the playhead into the lane
+clicked last, points from several lanes back into their own lanes, keeping
+their offsets in time. A right-click
 without a drag opens the lane's menu: **Insert point**; **Select all
 points**, **Copy**/**Cut**/**Paste points** (paste at the pointer, replacing
 the points over the pasted span), **Delete points**, **Point shape…** (a

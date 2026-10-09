@@ -1,6 +1,7 @@
 // Editing gestures in the arrange view (docs/specs/gui.md §4.3, P5.6;
 // reaper-ux.md 8-13): select (click, Shift add, Ctrl toggle, marquee on empty
-// space or a right-drag anywhere), move in time and across channels (snapped
+// space or a right-drag anywhere: it takes the items and the automation points
+// inside it, on any track), move in time and across channels (snapped
 // to the grid at the current zoom; Shift moves freely; Ctrl-drag copies), trim either edge (the
 // left edge moves the take's source offset so the audio stays put; Alt on the
 // right edge stretches: the play rate follows the length), slip
@@ -9,8 +10,8 @@
 // MIDI item, and files dropped on the lanes. An item showing its take lanes: click a lane to hear
 // that take, swipe across one to comp that range (split + take), drag the name bar to move it. On
 // an automation lane: click selects a point (Ctrl toggles; a right-drag or a Ctrl-drag from empty
-// space selects with a marquee) or adds one on empty space, drag moves the selected points
-// (snapped; Shift frees), Alt+click deletes one, a right-click opens the lane's menu (points,
+// space is the marquee) or adds one on empty space, drag moves the selected points, in every
+// lane (snapped; Shift frees), Alt+click deletes one, a right-click opens the lane's menu (points,
 // automation items, the envelope). Ctrl-drag below the name bar of an item with several takes takes
 // that take (the one under the pointer, else the heard one) out into an item of its own, on any
 // channel. A right-click on an item (without dragging) opens its menu: Delete, timebase, take FX
@@ -22,6 +23,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -111,22 +113,32 @@ class ItemGestures {
         return !clipboard_.items.empty() &&
                (!projectGeneration || projectGeneration() == clipboard_.generation);
     }
-    // Selected automation points: one envelope's (the lane clicked last). The
-    // keyboard's Delete and clipboard keys act on them while the lanes have
-    // the focus (onEnvelopeFocus); the lane's menu offers the same.
-    std::optional<model::Id> pointEnvelope() const { return pointEnv_; }
-    // The selected points that the envelope still has (as they are now).
+    // Selected automation points, in any number of envelopes (a click selects
+    // in one lane, a marquee in every lane it covers). The keyboard's Delete
+    // and clipboard keys act on them while the lanes have the focus
+    // (onEnvelopeFocus); the lane's menu offers the same.
+    std::optional<model::Id> pointEnvelope() const { return pointEnv_; }  // the lane clicked last
+    std::vector<model::Id> pointEnvelopes() const;  // the envelopes with selected points
+    // The selected points that the envelopes still have (as they are now):
+    // every envelope's, or one's.
     std::vector<model::EnvPoint> selectedPoints() const;
+    std::vector<model::EnvPoint> selectedPoints(model::Id env) const;
+    // `points` of `env` become the whole point selection.
     void selectPoints(model::Id env, std::vector<model::EnvPoint> points);
     void selectAllPoints(model::Id env);
     void clearPoints();
-    Status deletePoints();
+    // A marquee took items and points: Delete removes both (deleteAll), and
+    // the clipboard keys take the items.
+    bool mixedSelection() const { return mixed_ && !selection_.empty() && !pointSel_.empty(); }
+    Status deletePoints();  // in every envelope, one undo step
+    Status deleteAll();     // the selected items and points, one undo step
     void copyPoints();
     Status cutPoints();
-    // Pastes the copied points at `atBeat` into `env` (default: the lane
-    // clicked last), replacing its points over their span.
+    // Pastes the copied points at `atBeat`, replacing the points over their
+    // span: one envelope's into `env` (default: the lane clicked last);
+    // several envelopes' back into their own, keeping their offsets.
     Status pastePoints(double atBeat, std::optional<model::Id> env = {});
-    bool canPastePoints() const { return !pointClip_.empty(); }
+    bool canPastePoints() const { return !pointClip_.parts.empty(); }
     Status shapePoints(model::PointShape shape);
     // A press on an automation lane (true) or elsewhere in the lanes (false).
     std::function<void(bool)> onEnvelopeFocus;
@@ -144,13 +156,12 @@ class ItemGestures {
         Slip,
         FadeIn,
         FadeOut,
-        Marquee,
+        Marquee,  // items and automation points (on a lane, a right-click without a drag: its menu)
         EnvPoint,
         Comp,
         AutoItemMove,
         AutoItemLength,
-        EnvMarquee,  // selecting automation points (a right-click without a drag: the menu)
-        TakeOut      // Ctrl-drag on a take: it leaves its item for a place of its own
+        TakeOut  // Ctrl-drag on a take: it leaves its item for a place of its own
     };
     struct State {
         Drag drag = Drag::None;
@@ -162,7 +173,8 @@ class ItemGestures {
         std::size_t takeLane = 0;         // comp / take out: the take (index) under the press
         double compFrom = 0, compTo = 0;  // comp: the range being swiped (beats)
         ui::Rect marquee{};
-        std::vector<model::Id> marqueeBase;
+        std::vector<model::Id> marqueeBase;  // what a marquee adds to
+        std::map<model::Id, std::vector<model::EnvPoint>> pointBase;
         // An automation lane's point being added or dragged (P5.14): a click
         // on the lane adds one, a drag moves it, Alt+click deletes one.
         std::optional<model::Id> env;
@@ -178,6 +190,13 @@ class ItemGestures {
         double envOffset = 0;
         // Several selected points dragged together: the selection as drafted.
         std::vector<model::EnvPoint> envMoved;
+        std::vector<model::EnvPoint> envPicked;  // the pressed lane's selection at the press
+        // Other envelopes' selected points moving along.
+        struct Along {
+            model::Id env;
+            std::vector<model::EnvPoint> base, picked, draft, moved;
+        };
+        std::vector<Along> envAlong;
     };
     const State& state() const { return state_; }
 
@@ -216,10 +235,27 @@ class ItemGestures {
     // the pointer) and the envelope (bypass, hide, remove).
     void openEnvMenu(model::Id env, ui::Point at);
     void openShapeMenu(ui::Point at);
-    Status setPoints(model::Id env, const EnvEdit& edit, const std::string& label);
+    using EnvEdits = std::vector<std::pair<model::Id, EnvEdit>>;
+    // One env.points.set per envelope; adoptPoints makes their selections the
+    // point selection.
+    std::vector<EditStep> pointSteps(const EnvEdits& edits) const;
+    void adoptPoints(const EnvEdits& edits);
+    Status setPoints(const EnvEdits& edits, const std::string& label);
+    EnvEdits pointDeletions(std::size_t* count) const;
+    // Lanes in row order, then visible take envelopes: what a marquee covers.
+    std::vector<model::Id> shownEnvelopes() const;
+    void marqueePoints();  // the points inside the marquee, added to its base
     std::optional<model::Id> pointEnv_;
-    std::vector<model::EnvPoint> pointSel_;
-    EnvClip pointClip_;
+    std::map<model::Id, std::vector<model::EnvPoint>> pointSel_;  // none empty
+    bool mixed_ = false;
+    struct PointClip {
+        struct Part {
+            model::Id env;
+            EnvClip clip;
+            double at = 0;  // beats after the earliest copied point
+        };
+        std::vector<Part> parts;
+    } pointClip_;
     bool envPress(model::Id env, const ui::PointerEvent& e,
                   std::optional<AutoHit> autoItem = std::nullopt);
     void envDrag(const ui::PointerEvent& e);

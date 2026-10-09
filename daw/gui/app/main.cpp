@@ -680,10 +680,16 @@ int main(int argc, char** argv) {
     auto reportEdit = [](const char* what, const Status& st) {
         if (!st) std::fprintf(stderr, "%s: %s\n", what, st.error().toString().c_str());
     };
-    // After a click on an automation lane they take its selected points.
+    // After a click on an automation lane they take its selected points; after
+    // a marquee that took items too, Delete removes both and the clipboard
+    // keys take the items.
     auto playheadBeat = [&] { return (*app)->head().timeMap->beatAt(shell.arrange()->playhead()); };
+    auto pointKeys = [&] {
+        return uiState.envelopeFocused && !shell.arrange()->gestures().mixedSelection();
+    };
     appActions.addUi("ui.env.points.delete", "Envelope: delete the selected points", [&] {
-        reportEdit("delete points", shell.arrange()->gestures().deletePoints());
+        auto& g = shell.arrange()->gestures();
+        reportEdit("delete points", g.mixedSelection() ? g.deleteAll() : g.deletePoints());
     });
     appActions.addUi("ui.env.points.copy", "Envelope: copy the selected points",
                      [&] { shell.arrange()->gestures().copyPoints(); });
@@ -693,21 +699,21 @@ int main(int argc, char** argv) {
         reportEdit("paste points", shell.arrange()->gestures().pastePoints(playheadBeat()));
     });
     appActions.addUi("ui.item.copy", "Edit: copy items (or automation points)", [&] {
-        if (uiState.envelopeFocused)
+        if (pointKeys())
             shell.arrange()->gestures().copyPoints();
         else
             shell.arrange()->gestures().copySelection();
     });
     appActions.addUi("ui.item.cut", "Edit: cut items (or automation points)", [&] {
         auto& g = shell.arrange()->gestures();
-        if (uiState.envelopeFocused)
+        if (pointKeys())
             reportEdit("cut points", g.cutPoints());
         else
             reportEdit("cut", g.cutSelection());
     });
     appActions.addUi(
         "ui.item.paste", "Edit: paste items (or automation points) at the playhead", [&] {
-            if (uiState.envelopeFocused) {
+            if (pointKeys()) {
                 reportEdit("paste points", shell.arrange()->gestures().pastePoints(playheadBeat()));
                 return;
             }
