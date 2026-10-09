@@ -4,8 +4,8 @@ This spec describes the GUI as built and is updated with it. Decisions it
 builds on:
 ADR-0005 (SDL3 X11 windows, GL3 + NanoVG, own retained toolkit, performance
 gates), ADR-0007 (command bus), ADR-0008 (versions, branches, undo),
-ADR-0019 (typed strips), `ARCHITECTURE.md` §3 (threads, event delivery) and
-§10, and the workflow research in `docs/research/reaper-ux.md` (the top-40
+ADR-0019 (typed strips), ADR-0030 (main-thread notifications/deadlines),
+`ARCHITECTURE.md` §3 (threads, event delivery) and §10, and the workflow research in `docs/research/reaper-ux.md` (the top-40
 list in §16 is the priority order for workflow coverage).
 
 Goal: a complete track can be produced in Quire without falling back to
@@ -38,14 +38,29 @@ CLAP main-thread callbacks and hosts plugin GUIs. Consequences:
   no synchronous task on the UI thread over 2 ms (`ARCHITECTURE.md` §3),
   measured (§9). As built: the browser's Rescan runs `plugin.scan
   {wait: false}` (every module in the supervised scanner, the catalogue
-  installed when its job is done); the UI sidecar's periodic writes go to a
+  installed when its job is done); the UI sidecar's coalesced writes go to a
   writer thread (exit and project switches write synchronously, after it);
   waveform lookups of media without a content hash read the file's size and
   mtime at most every two seconds and again on each new session version.
 - **Event-driven loop.** `SDL_WaitEventTimeout` with the timeout set by the
-  nearest deadline: CLAP timers, the bus service tick (`ModelLoop::every`,
-  `engine.md` §6), animation frames, meter refresh (30 Hz while audio runs, 0 while
-  stopped and silent). Idle with no timers due = no wake-ups.
+  nearest deadline: app service (`engine.md` §6), local CLAP timers (also
+  without editors), ModelLoop timers, pending notation compilation (300 ms),
+  dirty render previews (40 ms by default), and armed UI sidecar checks.
+  One parked `FdWatcher` watches the app relay, local plug-in descriptors and
+  ModelLoop's wake pipe; readiness posts an SDL wake, dispatches on main, and
+  stays out of poll until consumed/rearmed. Posted worker results also wake SDL.
+  Signal shutdown wakes through ModelLoop's pipe even without any deadline.
+  The 100 ms service and 10 ms control polls are removed: MIDI batches use the
+  relay. Remote instances use only `setMainThreadWake` forwarding; the GUI
+  does not poll a remote editor or its bridge descriptors. Playback frames
+  run at 16 ms; transport counters refresh at 250 ms only while playing or
+  recording, with stopped state/xrun/error changes refreshed on notifications.
+  Visible moving/decaying meters have a 33 ms frame deadline, including their
+  1.5 s peak hold; at rest the feed arms/rechecks one audio activity wake at
+  its -60 dB display floor. Clip latches alone do not animate. Idle with no
+  work or deadlines blocks indefinitely. FD service failure is reported and
+  ends the app loop rather than adding a fallback poll. Offscreen idle
+  measurements use the same service/watch/deadline path with a finite end bound.
 
 ### 1.1 Observing the model
 
@@ -83,6 +98,13 @@ sidecar; absent files or sections retain those defaults. Sidecars use
 `supple.ui/1.0`; a file without a `schema` reads as 1.x, and a different
 schema major is treated as absent and its file is left untouched. Save As preserves the current layout and copies it to
 the new sidecar, subject to the same schema protection.
+
+Any input event (including editor geometry) or command processed on main arms
+one compare/write check about a second later. Continued input coalesces into
+that earliest check, so long gestures still persist; unchanged idle UI has no
+periodic check. Internal wake events do not arm writes. Writer completion/failure
+posts to main; failures arm a bounded one-second retry. Project switches and
+exit retain explicit flushes.
 
 Screenset names trim leading and trailing spaces and tabs. Import skips
 empty names and silently keeps the first entry when trimmed names collide.
@@ -391,10 +413,12 @@ binds through `fx.learn.set`, Remove (when bound) through `fx.learn.remove`.
 While the dialog is open nothing learned moves. Latency badges refresh after effect model edits,
 host replacement and live latency changes. File-descriptor service startup
 and poll failures are reported; editors requiring unavailable FD service
-cannot remain open. Each editor registration (an open, or a reopen for a
-replaced instance) watches its descriptors under its own serial: readiness
-reaches only the registration it was found for, and a poll that overlapped a
-change of the watched set is discarded and repeated. Plugin show/hide requests change the parent window's
+cannot remain open. App instances use the app-wide local descriptor snapshot; caller-owned editor
+instances use their editor serial. The registrations share one watcher, including
+when no editor is open. Watches suspend before model/input commands can close
+or reuse descriptors, and a poll overlapping a changed set is discarded.
+App timers are serviced once by EngineApp; editor service adds deadlines only
+for caller-owned local instances. Readiness reaches its original registration. Plugin show/hide requests change the parent window's
 visibility while retaining the editor and its timer/FD service. Close takes
 precedence; when show and hide are coalesced together, hide takes precedence.
 Opening an existing hidden editor shows and raises that same window. Each
@@ -643,7 +667,7 @@ Delete.
   `/etc/security/limits.d/`, and membership of that group). The status note appears only for pending intent
   ("Applies when the engine starts"), effective locking ("Locked") or failure;
   Off has no duplicate note or reserved space. Notes refresh on opening/toggling
-  and the existing GUI model-service tick; the dialog height follows visible
+  and model/service notifications; the dialog height follows visible
   content. Canonical saves
   preserve existing monitoring/thread values; no project format changes.
   **Keep CPUs out of deep idle** is separately off by

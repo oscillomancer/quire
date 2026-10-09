@@ -935,3 +935,20 @@ TEST_CASE("fd watches cancel ready snapshots before owners or descriptors are re
     ::close(fds[0]);
     ::close(fds[1]);
 }
+
+TEST_CASE("embedded loop wake fd covers posted work and idle shutdown signals") {
+    rpc::ModelLoop loop;
+    REQUIRE(loop.wakeFd() >= 0);
+    pollfd watched{loop.wakeFd(), POLLIN, 0};
+    CHECK(::poll(&watched, 1, 0) == 0);
+    int calls = 0;
+    loop.post([&] { ++calls; });
+    CHECK(::poll(&watched, 1, 0) == 1);
+    CHECK(loop.pump() == -1);
+    CHECK(calls == 1);
+    CHECK(::poll(&watched, 1, 0) == 0);
+    REQUIRE(::raise(SIGTERM) == 0);
+    CHECK(::poll(&watched, 1, 0) == 1);
+    CHECK(loop.stopRequested());
+    CHECK(loop.pump() == -1);
+}

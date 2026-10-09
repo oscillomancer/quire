@@ -250,7 +250,8 @@ void PluginWindows::loadLayout(const json::Value& layout) {
 }
 
 Status PluginWindows::attach(Editor editor, const std::string& title) {
-    editor.serial = nextSerial_++;
+    editor.serial = nextSerial_;
+    nextSerial_ += 2;
     if (watcher_)
         if (auto error = watcher_->error()) watcherError_ = std::move(error);
     if (!editor.instance->hasEditor())
@@ -331,7 +332,8 @@ bool PluginWindows::reattach(Editor& editor) {
         return false;
     }
     editor.instance = instance;
-    editor.serial = nextSerial_++;  // a new registration: old readiness is not its own
+    editor.serial = nextSerial_;  // a new registration: old readiness is not its own
+    nextSerial_ += 2;
     // A resizable editor keeps the window's size; the window keeps its place.
     if (size->resizable && editor.resizable) {
         if (auto kept =
@@ -407,7 +409,39 @@ bool PluginWindows::handle(const SDL_Event& e) {
     return false;
 }
 
+void PluginWindows::suspendFdWatches() {
+    if (watcher_) watcher_->watch({});
+}
+
+bool PluginWindows::dispatchFds() {
+    const auto ready = watcher_ ? watcher_->takeReady() : std::vector<FdWatch>{};
+    suspendFdWatches();
+    bool appReady = false;
+    for (const FdWatch& r : ready) {
+        if (r.owner == 0 || r.owner == 2) {
+            appReady = true;  // consumed by EngineApp::tick / ModelLoop::pump
+            continue;
+        }
+        for (const auto& w : serviceWatches_)
+            if (w.serial == r.owner && w.source.fd == r.fd) {
+                short flags = 0;
+                if (r.flags & CLAP_POSIX_FD_READ) flags |= POLLIN;
+                if (r.flags & CLAP_POSIX_FD_WRITE) flags |= POLLOUT;
+                if (r.flags & CLAP_POSIX_FD_ERROR) flags |= POLLERR;
+                app_.serviceFdReady(w.source, flags);
+                appReady = true;
+            }
+        for (Editor& e : editors_)
+            if (!e.fx && e.serial == r.owner)
+                for (const auto& [fd, flags] : e.instance->watchedFds())
+                    if (fd == r.fd) e.instance->onFd(fd, r.flags);
+    }
+    if (!editors_.empty()) restoreContext();
+    return appReady;
+}
+
 int PluginWindows::service() {
+    dispatchFds();
     if (watcher_)
         if (auto error = watcher_->error()) watcherError_ = std::move(error);
     if (watcherError_) {
@@ -439,16 +473,30 @@ int PluginWindows::service() {
         }
         applyEditorRequests(*e.window, requests);
     }
-    // Ready descriptors go to their plugin, then are watched again.
-    for (const FdWatch& ready :
-         watcher_ && !watcherError_ ? watcher_->takeReady() : std::vector<FdWatch>{})
-        for (Editor& e : editors_)
-            if (e.serial == ready.owner)
-                for (const auto& [wfd, wflags] : e.instance->watchedFds())
-                    if (wfd == ready.fd) e.instance->onFd(ready.fd, ready.flags);
+    // App-wide local instances (including closed editors, retired instances,
+    // and probes) share this worker with caller-owned editors. The app owns
+    // their timers. Remote instances wake only through setMainThreadWake.
     std::vector<FdWatch> fds;
+    if (app_.serviceFd() >= 0) fds.push_back({app_.serviceFd(), CLAP_POSIX_FD_READ, 0});
+    if (modelWakeFd_ >= 0) fds.push_back({modelWakeFd_, CLAP_POSIX_FD_READ, 2});
+    std::vector<ServiceWatch> services;
+    for (const auto& source : app_.serviceFds()) {
+        auto old = std::find_if(serviceWatches_.begin(), serviceWatches_.end(), [&](const auto& w) {
+            return w.source.fd == source.fd && w.source.owner == source.owner &&
+                   w.source.events == source.events;
+        });
+        const auto serial = old != serviceWatches_.end() ? old->serial : nextServiceSerial_;
+        if (old == serviceWatches_.end()) nextServiceSerial_ += 2;
+        services.push_back({source, serial});
+        std::uint32_t flags = 0;
+        if (source.events & POLLIN) flags |= CLAP_POSIX_FD_READ;
+        if (source.events & POLLOUT) flags |= CLAP_POSIX_FD_WRITE;
+        fds.push_back({source.fd, flags, serial});
+    }
+    serviceWatches_ = std::move(services);
     int next = -1;
     for (Editor& e : editors_) {
+        if (e.fx || e.instance->isolated()) continue;
         for (const auto& [fd, flags] : e.instance->watchedFds())
             fds.push_back({fd, flags, e.serial});
         int due = e.instance->nextTimerMs();

@@ -23,11 +23,6 @@ namespace {
 
 const cmd::Origin kUiOrigin{cmd::Origin::Type::Ui, "gui", {}};
 
-double nowMs() {
-    using namespace std::chrono;
-    return duration<double, std::milli>(steady_clock::now().time_since_epoch()).count();
-}
-
 bool draggingSlider(const ui::Node& node) {
     if (const auto* slider = dynamic_cast<const ui::Slider*>(&node); slider && slider->dragging())
         return true;
@@ -520,23 +515,17 @@ std::string FxWindow::badgeText(const model::FxInstance& fx, bool failed) {
 
 // engine.status lists the isolated instances whose process crashed or hung.
 void FxWindow::checkFailures() {
-    const double now = nowMs();
-    if (now - failureCheckMs_ < 500.0) return;
-    failureCheckMs_ = now;
-    auto status = dispatcher_.execute({"engine.status", json::Value::object(), kUiOrigin});
-    if (!status) return;
+    const auto status = app_.engineStatus();
     std::set<std::string> failed;
-    if (const json::Value* list = status->find("failed_fx"); list && list->isArray())
-        for (const json::Value& id : list->asArray())
-            if (id.isString()) failed.insert(id.asString());
+    for (const auto& id : status.failedFx) failed.insert(id);
     if (failed == failed_) return;
     failed_ = std::move(failed);
     refresh();
 }
 
-void FxWindow::tick() {
+void FxWindow::tick(bool event) {
     browser_->tick();
-    checkFailures();
+    if (event) checkFailures();
     if (page_ && touched_) {
         const auto t = app_.lastTouched();
         const std::uint64_t serial = t ? t->serial : 0;

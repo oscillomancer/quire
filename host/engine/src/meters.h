@@ -47,6 +47,7 @@ struct MeterEntry {
 
 class MeterBank {
   public:
+    static_assert(std::atomic<float>::is_always_lock_free);
     MeterBank();
 
     static constexpr std::uint16_t kNoSlot = 0xffff;
@@ -62,7 +63,8 @@ class MeterBank {
     // publication, so activity between the read and arm cannot be lost.
     void setMainThreadWake(MainThreadWake& wake) { mainWake_ = &wake; }
     std::uint64_t activitySequence() const { return activitySequence_.load(); }
-    void armActivity(std::uint64_t observed) {
+    void armActivity(std::uint64_t observed, float minimumPeak = 1e-6f) {
+        activityFloor_.store(minimumPeak);
         activityArmed_.store(true);
         if (activitySequence_.load() != observed && activityArmed_.exchange(false))
             if (mainWake_) mainWake_->notify();
@@ -111,9 +113,10 @@ class MeterBank {
               const MeterEntry& entry) SUPPLE_RT {
         const bool accepted = ring.push(entry);
         if (!accepted) dropped.fetch_add(1, std::memory_order_relaxed);
-        // Below the meter's display floor (-120 dB), silence/denormal noise
-        // does not start an animation. Never notify per block while animating.
-        if (entry.peak[0] > 1e-6f || entry.peak[1] > 1e-6f) {
+        // The subscriber supplies its display floor. Sub-floor noise must
+        // not repeatedly wake a view that cannot animate it.
+        const float floor = activityFloor_.load();
+        if (entry.peak[0] > floor || entry.peak[1] > floor) {
             activitySequence_.fetch_add(1);
             if (activityArmed_.exchange(false) && mainWake_) mainWake_->notify();
         }
@@ -124,6 +127,7 @@ class MeterBank {
     MainThreadWake* mainWake_ = nullptr;
     std::atomic<std::uint64_t> activitySequence_{0};
     std::atomic<bool> activityArmed_{false};
+    std::atomic<float> activityFloor_{1e-6f};
     using Ring = SpscRing<MeterEntry, kRingCapacity>;
     Ring renderer_, callback_;
     std::atomic<std::uint64_t> droppedRenderer_{0}, droppedCallback_{0};

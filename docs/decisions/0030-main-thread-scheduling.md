@@ -72,3 +72,9 @@ Events remain model-thread-only and no wire schema, render result, dependency,
 or audio-thread syscall exception changes. Correctness depends on producer
 publication and cancellation ordering, covered by deterministic queue,
 watermark, deadline and ready-snapshot tests plus RealtimeSanitizer.
+
+**Implementation note, 2026-10-08:** The GUI follow-up now shares the FD watcher
+for app/local plug-in/ModelLoop sources and uses the panel/activity deadlines
+specified above (gui.md §1). UI input coalesces into the earliest sidecar check.
+The activity subscriber supplies its display floor to avoid sub-floor noise
+waking stationary meters. No decision or bridge contract changes.

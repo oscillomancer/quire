@@ -108,13 +108,16 @@ class PanControl : public Node {
 class Meter : public Node {
   public:
     explicit Meter(std::string id, bool vertical = true);
-    void push(const float peak[2], const float rms[2]);  // linear amplitudes
+    void push(const float peak[2], const float rms[2],
+              std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
     void reset();
     bool clipped() const { return clip_[0] || clip_[1]; }
     float shownPeakDb(int channel) const { return peakDb_[channel]; }
     void paint(Canvas& canvas) override;
     bool onPointer(const PointerEvent& e) override;
-    void tick();  // decay (call every frame the meter is visible)
+    void tick(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
+    // Includes a held peak waiting to decay; clip latches alone do not animate.
+    bool moving() const;
 
   private:
     bool vertical_;

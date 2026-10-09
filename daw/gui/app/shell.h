@@ -48,7 +48,8 @@ class Shell {
     // setContent.
     void installOverlay(ui::Root& root);
     // Brings the view up to the model's head version; invalidates what changed.
-    void sync();
+    void sync(bool event = true);
+    std::optional<std::chrono::steady_clock::time_point> nextDeadline() const;
     views::ArrangeView* arrange() const { return arrange_; }
     // The meters the TCP shows; the app sets the source (EngineApp::meters())
     // and polls once per frame. Shared with the mixer: one feed, one poll.

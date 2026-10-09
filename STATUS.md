@@ -86,7 +86,10 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
   explode onto tracks or along the track, delete one, Ctrl-drag one out, and
   render an item through its FX (MIDI to audio) in place or as a new take.
   The FX chain selects several effects (Ctrl/Shift+click) to bypass, offline
-  or remove together; a double click opens an effect's editor.
+  or remove together; a double click opens an effect's editor. The window
+  waits on app/local plug-in/ModelLoop notifications and demand-driven
+  deadlines; stopped transport and stationary meters have no refresh timer.
+  Input/commands coalesce UI sidecar checks, and writer completion wakes main.
 - **MIDI learn** (ADR-0027): any plug-in parameter (the FX window's MIDI
   button, or `fx.learn.set` for agents) and any action (Ctrl+L in the
   actions list) learns a controller by moving it: CC, note, pitch bend or
@@ -120,9 +123,8 @@ capacity reports retain their original revision/settings.
 
 ## Known limits
 
-- The GUI retains its 100 ms service and 10 ms bound-control timers pending
-  conversion to the app's event/deadline API. Remote-instance forwarding to
-  that API is a separate bridge change; local subscriptions are wired.
+- Remote-instance forwarding to the app's event/deadline API is a separate
+  bridge change; local subscriptions and the GUI event loop are wired.
 
 Engine and hosting:
 - Without anticipation, a single Orrery chain can miss deadlines at 64

@@ -1263,6 +1263,16 @@ std::vector<MeterReading> EngineApp::meters() {
     return bank->read(clock.epoch, clock.heardStream);
 }
 
+std::uint64_t EngineApp::meterActivitySequence() const {
+    const auto bank = engine_ ? engine_->meterBank() : nullptr;
+    return bank ? bank->activitySequence() : 0;
+}
+
+void EngineApp::armMeterActivity(std::uint64_t observed, float minimumPeak) {
+    if (engine_)
+        if (const auto bank = engine_->meterBank()) bank->armActivity(observed, minimumPeak);
+}
+
 Result<TransportInfo> EngineApp::transport(std::string_view action, std::optional<double> seconds) {
     if (!engine_)
         return Error("engine.stopped", "the real-time engine is not running", {},

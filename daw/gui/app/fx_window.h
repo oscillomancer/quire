@@ -60,7 +60,7 @@ class FxWindow {
     bool isOpen() const { return page_ != nullptr; }
 
     // Frame pass: refresh after changes made elsewhere (agents, undo).
-    void tick();
+    void tick(bool event = true);
     void refresh();
     void setStatus(std::string message);
 
@@ -145,7 +145,6 @@ class FxWindow {
     };
     std::map<std::string, Latency> latency_;
     std::set<std::string> failed_;  // engine.status failed_fx
-    double failureCheckMs_ = -1e9;
     std::string presetChain_ = "main";
     bool chainMenuOpen_ = false;  // the Load chain… menu is showing
     ui::Button* presetChainButton_ = nullptr;

@@ -9,6 +9,7 @@
 //          [--audio jack|dummy|none] [--theme dark|light|FILE] [--palette warm|ink]
 //          [--action ID]...
 #include <SDL3/SDL.h>
+#include <poll.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -366,14 +367,6 @@ int main(int argc, char** argv) {
         }
         status = "agents: " + path.string();
     }
-    std::function<void()> controlPollUpdate;  // MIDI learn's fast poll (set below)
-    auto tick = loop.every(std::chrono::milliseconds(100), [&] {
-        (*app)->tick();
-        dispatcher.flushJobEvents();  // job events and follow-ups from workers
-        publish();
-        if (controlPollUpdate) controlPollUpdate();
-    });
-
     // The plugin bridge for isolated fx (and their editors, gap log #39).
     if (!host::locateBridgeExecutable(std::string(product::kSlug) + "-bridge"))
         std::fprintf(stderr, "no plugin bridge found: isolated fx will not start\n");
@@ -449,6 +442,7 @@ int main(int argc, char** argv) {
         applyLook();
     });
     gui::PluginWindows pluginWindows(**platform, **app, [p = platform->get()] { p->wake(); });
+    pluginWindows.setModelWakeFd(loop.wakeFd());
     pluginWindows.onError = [&](const Error& error) {
         if (shell.onError) shell.onError(error.message);
     };
@@ -484,8 +478,8 @@ int main(int argc, char** argv) {
         gui::Favourites::defaultFile(product::kSlug));
     // MIDI learn (ADR-0027): the devices' messages reach the actions bound to
     // them, or a learn dialog that listens. "Enable only when" asks the
-    // selection and the windows. Controllers answer within a frame while
-    // anything is bound or a dialog listens; the service tick polls otherwise.
+    // selection and the windows. Published MIDI batches wake app service,
+    // including while the transport is stopped or a learn dialog listens.
     (*app)->onControl = [&](const std::vector<engine::EngineApp::ControlEvent>& events) {
         appActions.control(events);
     };
@@ -500,21 +494,7 @@ int main(int argc, char** argv) {
     std::shared_ptr<void> releaseControl(nullptr, [&](void*) {
         (*app)->onControl = nullptr;
         (*app)->learnGate = nullptr;
-        controlPollUpdate = nullptr;
     });
-    rpc::Timer controlPoll;
-    controlPollUpdate = [&] {
-        const bool want =
-            (*app)->engine() &&
-            (appActions.learnSink || !appActions.controls().empty() || (*app)->hasLearn());
-        if (want && !controlPoll.active())
-            controlPoll = loop.every(std::chrono::milliseconds(10), [&] {
-                (*app)->pollControl();
-                publish();
-            });
-        else if (!want && controlPoll.active())
-            controlPoll.cancel();
-    };
     appActions.addUi("ui.fx.chain", "FX: chain…", "track",
                      [&](const json::Value& v) -> Status { return fxWindow.openFor(uiState, v); });
     appActions.addUi("ui.track.color", "Track: color…", "track",
@@ -773,7 +753,7 @@ int main(int argc, char** argv) {
     }
 
     // Per-project UI state (gui.md §1.2).
-    gui::UiPersistence uiFile;
+    gui::UiPersistence uiFile([&loop] { loop.post([] {}); });
     uiFile.add(
         "selection",
         [&] {
@@ -940,9 +920,12 @@ int main(int argc, char** argv) {
     // Counted runs (--frames) first wait, uncounted, until every visible
     // pyramid is ready; --script then moves the viewport every frame.
     bool warm = o.frames == 0;
+    bool inputChanged = true;
     auto preserveUi = [&](const std::function<void()>& work) {
         (void)dispatcher.guarded(
             [&](const cmd::Invocation& invocation) -> Status {
+                uiFile.arm();
+                inputChanged = true;
                 const auto name = invocation.command.substr(0, invocation.command.find('@'));
                 if (name == "project.new" || name == "project.open") uiFile.prepareProjectSwitch();
                 return {};
@@ -965,27 +948,82 @@ int main(int argc, char** argv) {
             longestTaskMs = std::max(longestTaskMs, ms);
         }
     };
-    while (!quit && !loop.stopRequested()) {
+    using Clock = std::chrono::steady_clock;
+    std::optional<Clock::time_point> meterFrame;
+    bool serviceFailed = false;
+    auto service = [&] {
+        bool event = std::exchange(inputChanged, false);
         int next = -1;
         timed([&] {
-            preserveUi([&] { next = loop.pump(); });
+            event = pluginWindows.dispatchFds() || event;
+            // A deadline may beat the FD worker to a newly readable relay.
+            // Remember that notification before tick drains it, so a stopped
+            // status/error change cannot disappear into an animation pass.
+            pollfd relay{(*app)->serviceFd(), POLLIN, 0};
+            if (::poll(&relay, 1, 0) > 0 && relay.revents) event = true;
+            preserveUi([&] {
+                next = loop.pump();
+                (*app)->tick();
+                publish();
+            });
+            event = std::exchange(inputChanged, false) || event;
             uiFile.tick((*app)->projectPath(), (*app)->projectGeneration());
-            if (const int plugin = pluginWindows.service(); plugin >= 0)
-                next = next < 0 ? plugin : std::min(next, plugin);
         });
         timed([&] {
-            shell.sync();
+            shell.sync(event);
             midiEditor.sync();
             routing.sync();
             mixer.sync();
             history.sync();
-            meterFeed.poll();
-            fxWindow.tick();
+            const auto now = Clock::now();
+            const auto activity = (*app)->meterActivitySequence();
+            // Observe before reading; arm/recheck after the visible meters rest.
+            if (event || !meterFrame || now >= *meterFrame) {
+                meterFeed.poll(now);
+                if (meterFeed.moving())
+                    meterFrame = now + std::chrono::milliseconds(33);
+                else {
+                    meterFrame.reset();
+                    if (meterFeed.visible()) (*app)->armMeterActivity(activity);
+                }
+            }
+            fxWindow.tick(event);
             renderDialog.tick();
             if (preferences.isOpen()) preferences.refresh();
+            if (shell.arrange()->poll(event)) root.requestAnimationFrame();
         });
+        return next;
+    };
+    auto waitUntil = [&](int next) {
+        const auto now = Clock::now();
+        auto include = [&](std::optional<Clock::time_point> deadline) {
+            if (!deadline) return;
+            const int ms = rpc::detail::waitMilliseconds(*deadline - now);
+            next = next < 0 ? ms : std::min(next, ms);
+        };
+        include((*app)->nextServiceDeadline());
+        include(uiFile.nextDeadline());
+        include(midiEditor.nextDeadline());
+        include(renderDialog.nextDeadline());
+        include(shell.nextDeadline());
+        include(meterFrame);
+        // The playhead has a frame deadline only during playback/recording.
+        if (shell.arrange()->playing()) include(now + std::chrono::milliseconds(16));
+        const int plugin = pluginWindows.service();
+        if (auto error = pluginWindows.fdError()) {
+            std::fprintf(stderr, "%s\n", error->toString().c_str());
+            quit = true;  // no replacement safety poll after FD service fails
+            serviceFailed = true;
+        }
+        if (plugin >= 0) next = next < 0 ? plugin : std::min(next, plugin);
+        return next;
+    };
+    while (!quit && !loop.stopRequested()) {
+        int next = service();
         // --action: after the first tick has read the project's UI state.
         for (const auto& spec : std::exchange(o.actions, {})) {
+            uiFile.arm();
+            inputChanged = true;
             const auto space = spec.find(' ');
             const std::string id = spec.substr(0, space);
             const actions::Action* action = appActions.registry().find(id);
@@ -1002,8 +1040,7 @@ int main(int argc, char** argv) {
                 return 1;
             }
         }
-        const bool moved = shell.arrange()->poll();
-        if (moved) root.requestAnimationFrame();
+        if (inputChanged) next = service();
         if (o.script && warm) {
             views::ArrangeView& arrange = *shell.arrange();
             views::Viewport v = arrange.viewport();
@@ -1034,10 +1071,15 @@ int main(int argc, char** argv) {
             }
         }
         SDL_Event e;
-        int wait = next;
-        if (o.frames == 0 && shell.arrange()->playing() && (wait < 0 || wait > 16)) wait = 16;
+        const int wait = waitUntil(next);
+        if (quit || loop.stopRequested()) break;
         const bool got = o.frames > 0 ? SDL_PollEvent(&e) : SDL_WaitEventTimeout(&e, wait);
+        if (got) inputChanged = pluginWindows.dispatchFds() || inputChanged;
         for (bool have = got; have; have = SDL_PollEvent(&e)) {
+            if (e.type != (*platform)->wakeEvent()) {
+                uiFile.arm();
+                inputChanged = true;
+            }
             if (pluginWindows.handle(e)) continue;  // an editor window's event
             if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
                 if (o.frames > 0 || !fileActions.dirty())
@@ -1060,26 +1102,21 @@ int main(int argc, char** argv) {
     double idleCpuPercent = -1;
     if (o.idleSeconds > 0) {  // no input, no model changes: the loop should sleep
         const double c0 = processCpuMs(), w0 = wallMs();
-        while (wallMs() - w0 < o.idleSeconds * 1000) {
-            const int next = loop.pump();
-            shell.sync();
-            midiEditor.sync();
-            routing.sync();
-            mixer.sync();
-            history.sync();
-            meterFeed.poll();
+        while (!quit && !loop.stopRequested() && wallMs() - w0 < o.idleSeconds * 1000) {
+            const int next = service();
             if (root.wantsFrame()) root.frame();
             SDL_Event e;
             const double left = o.idleSeconds * 1000 - (wallMs() - w0);
+            const int deadline = waitUntil(next);
             const int wait =
-                next < 0 ? static_cast<int>(left) : std::min(next, static_cast<int>(left));
+                deadline < 0 ? static_cast<int>(left) : std::min(deadline, static_cast<int>(left));
             if (SDL_WaitEventTimeout(&e, std::max(1, wait)))
                 while (SDL_PollEvent(&e)) {
                 }
         }
         idleCpuPercent = 100.0 * (processCpuMs() - c0) / (wallMs() - w0);
     }
-    tick.cancel();
+    pluginWindows.suspendFdWatches();
     if (server) server->stop();
     (void)uiFile.flush((*app)->projectPath());
     if (!o.snapshot.empty()) {  // the final state, for tests and bug reports
@@ -1111,5 +1148,5 @@ int main(int argc, char** argv) {
             longestTaskMs, idleCpuPercent, o.generate, ls.rows, ls.items, ls.columns, ls.notes,
             peaks.stats().built, peaks.stats().loaded, (*window)->renderer().c_str());
     }
-    return 0;
+    return serviceFailed ? 1 : 0;
 }

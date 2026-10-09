@@ -93,6 +93,7 @@ class MidiEditor {
     // Every loop pass: reload when the session changed, compile the notation
     // after a pause in typing, follow the playhead.
     void sync();
+    std::optional<std::chrono::steady_clock::time_point> nextDeadline() const;
 
     // The panel's height, set by dragging its top border (double-click resets
     // to kDefaultHeight). The stored height is the preference; sync() shrinks

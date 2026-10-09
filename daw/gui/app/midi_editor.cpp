@@ -1296,7 +1296,7 @@ void MidiEditor::sync() {
         }
         if (replaced || !text_ || !text_->focused() || !textDirty_) reloadText();
     }
-    if (compilePending_ && std::chrono::steady_clock::now() - lastEdit_ > kCompileDelay) {
+    if (compilePending_ && std::chrono::steady_clock::now() - lastEdit_ >= kCompileDelay) {
         compilePending_ = false;  // a failed compile waits for the next edit
         compileText(true);
     }
@@ -1308,6 +1308,11 @@ void MidiEditor::sync() {
             root_.requestAnimationFrame();
         }
     }
+}
+
+std::optional<std::chrono::steady_clock::time_point> MidiEditor::nextDeadline() const {
+    if (!isOpen() || !compilePending_) return {};
+    return lastEdit_ + kCompileDelay;
 }
 
 }  // namespace supple::gui

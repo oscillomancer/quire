@@ -1334,3 +1334,22 @@ TEST_CASE("audit3: active render refuses additional launches") {
     CHECK(starts == 1);
     CHECK(f.root->find("render.status")->valueText().find("active") != std::string::npos);
 }
+
+TEST_CASE("render preview has one deadline only while an open dialog is dirty") {
+    Fixture f;
+    if (!f.ok) return;
+    CHECK_FALSE(f.render->nextDeadline());
+    f.render->open();
+    CHECK_FALSE(f.render->nextDeadline());
+    f.render->setField("render.pattern", "next-{counter:02}");
+    REQUIRE(f.render->nextDeadline());
+    const auto deadline = *f.render->nextDeadline();
+    f.render->setDebounceMs(0);
+    CHECK(*f.render->nextDeadline() == deadline - std::chrono::milliseconds(40));
+    f.render->tick();
+    CHECK_FALSE(f.render->nextDeadline());
+    f.render->setField("render.pattern", "later-{counter:02}");
+    REQUIRE(f.render->nextDeadline());
+    f.render->close();
+    CHECK_FALSE(f.render->nextDeadline());
+}

@@ -256,6 +256,7 @@ void ModelLoop::post(std::function<void()> task) {
 }
 
 void ModelLoop::setWaker(std::function<void()> waker) { impl_->wake->waker = std::move(waker); }
+int ModelLoop::wakeFd() const { return impl_->wake->readFd; }
 
 int ModelLoop::pump() {
     impl_->pollOnce(false);

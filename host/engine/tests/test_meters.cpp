@@ -255,3 +255,15 @@ TEST_CASE("meter activity arms once and rechecks publication without a periodic 
     bank->armActivity(bank->activitySequence());
     CHECK(bank->activityArmed());
 }
+
+TEST_CASE("meter activity below a subscriber's display floor stays armed") {
+    auto bank = std::make_unique<MeterBank>();
+    const auto sequence = bank->activitySequence();
+    bank->armActivity(sequence, 0.001f);  // the GUI's -60 dB floor
+    REQUIRE(bank->pushCallback(block(0, 1, 0, 64, 0.0001f)));
+    CHECK(bank->activityArmed());
+    CHECK(bank->activitySequence() == sequence);
+    REQUIRE(bank->pushRenderer(block(0, 1, 64, 64, 0.01f)));
+    CHECK_FALSE(bank->activityArmed());
+    CHECK(bank->activitySequence() == sequence + 1);
+}

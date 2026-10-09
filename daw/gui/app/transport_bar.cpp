@@ -20,11 +20,6 @@ namespace {
 
 const cmd::Origin kOrigin{cmd::Origin::Type::Ui, "gui", {}};
 
-double nowMs() {
-    using namespace std::chrono;
-    return duration<double, std::milli>(steady_clock::now().time_since_epoch()).count();
-}
-
 std::string timeText(double seconds) {
     if (seconds < 0) seconds = 0;
     const auto totalMs = std::llround(seconds * 1000.0);
@@ -157,7 +152,7 @@ std::unique_ptr<ui::Node> TransportBar::build() {
     return bar;
 }
 
-void TransportBar::sync() {
+void TransportBar::sync(bool event, std::chrono::steady_clock::time_point now) {
     const model::Session& s = app_.head();
     engine::TransportInfo info;
     if (auto r = app_.transport("get")) info = *r;
@@ -171,13 +166,16 @@ void TransportBar::sync() {
     if (loop_) setIfChanged(loop_, info.loop.enabled ? "loop on" : "loop");
     if (punch_) setIfChanged(punch_, info.punch.enabled ? "punch on" : "punch");
     if (click_) setIfChanged(click_, app_.metronome().enabled ? "click on" : "click");
-    const double now = nowMs();
-    if (engine_ && now - lastStatusMs_ >= 250.0) {  // ≤ 4 Hz
-        lastStatusMs_ = now;
+    const bool moving = info.playing || info.recording;
+    if (event || !lastStatus_ || moving != moving_) {
         // Where a recording will go, shown before it starts (and during it).
         bool armed = info.recording;
         for (const auto& e : s.tracks) armed = armed || e.value->record.armed;
         setIfChanged(recordPath_, armed ? "rec: " + shortPath(app_.recordDir()) : "");
+    }
+    if (engine_ && (!lastStatus_ || moving != moving_ || (!moving && event) ||
+                    (moving && now - *lastStatus_ >= std::chrono::milliseconds(250)))) {
+        lastStatus_ = now;
         const engine::EngineStatus st = app_.engineStatus();
         if (!st.running) {
             setIfChanged(engine_, "engine stopped");
@@ -191,6 +189,12 @@ void TransportBar::sync() {
             setIfChanged(engine_, buf);
         }
     }
+    moving_ = moving;
+}
+
+std::optional<std::chrono::steady_clock::time_point> TransportBar::nextDeadline() const {
+    if (!moving_ || !lastStatus_) return {};
+    return *lastStatus_ + std::chrono::milliseconds(250);
 }
 
 void TransportBar::openTempoForm() {

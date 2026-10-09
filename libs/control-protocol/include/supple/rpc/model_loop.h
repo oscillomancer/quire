@@ -115,9 +115,12 @@ class ModelLoop {
     // Embedding in another event loop (the GUI's): `waker` is called, from any
     // thread, whenever the loop has new work (a post, a timer change); it must
     // only wake the owner (e.g. push an SDL event). Set it before other threads
-    // use the loop. Signals do not call it: the owner sees stopRequested() at
-    // its next wake-up, which the nearest timer bounds.
+    // use the loop. Signals only make wakeFd() readable; an embedded owner
+    // watches that fd too, so shutdown wakes even without a timer.
     void setWaker(std::function<void()> waker);
+    // Borrowed read descriptor for embedding: watch for POLLIN, then pump().
+    // Only pump/run drains it. Stop watching before destroying the loop.
+    int wakeFd() const;
     // Runs the due timers and the posted tasks once, without blocking.
     // Returns the milliseconds until the nearest timer (detail::waitMilliseconds:
     // rounded up, at most INT_MAX), or -1 when there is none.

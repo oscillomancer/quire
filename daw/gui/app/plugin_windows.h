@@ -29,11 +29,10 @@ namespace supple::gui {
 // editors are removed by the owner; close takes precedence over other flags.
 void applyEditorRequests(Window& window, const host::Instance::EditorRequests& requests);
 
-// Polls plugin file descriptors on a thread and wakes the UI thread when one
+// Polls app/model and plugin descriptors on one thread and wakes the UI when one
 // is ready; a ready descriptor is not polled again until the UI thread has
 // dispatched it (so a level-triggered fd cannot spin).
-// One descriptor an editor asked to watch, with the registration it belongs
-// to (`owner`: an editor's serial), so readiness found for one registration
+// One descriptor with its registration's serial (`owner`), so old readiness
 // never reaches a later one that reuses the descriptor number.
 struct FdWatch {
     int fd = -1;
@@ -97,9 +96,17 @@ class PluginWindows {
 
     // Events addressed to editor windows; true when consumed.
     bool handle(const SDL_Event& e);
-    // Runs due plugin timers, ready fds and resize/close requests; returns the
-    // milliseconds to the next plugin deadline (-1: none).
+    // Applies editor requests and rebuilds the shared watch set. App instance
+    // timers run in EngineApp::tick; caller-owned local editors add their own
+    // timer deadlines here. Returns their nearest delay (-1: none).
     int service();
+    // Shared watcher: dispatch the previous pass's app/editor readiness, then
+    // suspend before model commands can close/reuse descriptors. service()
+    // rebuilds the set afterwards, even when no editor is open.
+    bool dispatchFds();
+    void suspendFdWatches();
+    void setModelWakeFd(int fd) { modelWakeFd_ = fd; }
+    std::optional<Error> fdError() { return watcher_ ? watcher_->error() : watcherError_; }
 
   private:
     struct Editor {
@@ -127,6 +134,13 @@ class PluginWindows {
     engine::EngineApp& app_;
     std::vector<Editor> editors_;
     std::uint64_t nextSerial_ = 1;
+    std::uint64_t nextServiceSerial_ = 4;  // even; editors have odd serials
+    struct ServiceWatch {
+        engine::EngineApp::ServiceFd source;
+        std::uint64_t serial;
+    };
+    std::vector<ServiceWatch> serviceWatches_;
+    int modelWakeFd_ = -1;
     std::map<model::Id, Placement> placements_;
     std::unique_ptr<FdWatcher> watcher_;
     std::optional<Error> watcherError_;

@@ -19,6 +19,7 @@
 #include "supple/cmd/bus.h"
 #include "supple/engine/app.h"
 #include "supple/host/clap_host.h"
+#include "supple/rpc/model_loop.h"
 
 using namespace supple;
 
@@ -566,4 +567,48 @@ TEST_CASE("editor FD readiness never reaches a later registration of the same de
     watcher->reset();
     ::close(descriptors[0]);
     ::close(descriptors[1]);
+}
+
+TEST_CASE("the shared GUI watcher wakes for app and model work without an editor") {
+    auto platform = gui::Platform::start(gui::Platform::Driver::Offscreen);
+    REQUIRE(platform);
+    engine::AppOptions options;
+    options.workdir =
+        std::filesystem::temp_directory_path() / ("supple-gui-wake-" + std::to_string(::getpid()));
+    auto app = engine::EngineApp::create(options);
+    REQUIRE(app);
+    rpc::ModelLoop loop;
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool notified = false;
+    {
+        gui::PluginWindows windows(**platform, **app, [&] {
+            std::lock_guard lock(mutex);
+            notified = true;
+            changed.notify_one();
+        });
+        windows.setModelWakeFd(loop.wakeFd());
+        CHECK(windows.count() == 0);
+        CHECK(windows.service() == -1);
+        (*app)->workQueued();
+        {
+            std::unique_lock lock(mutex);
+            changed.wait(lock, [&] { return notified; });
+            notified = false;
+        }
+        CHECK(windows.dispatchFds());
+        (*app)->tick();
+        CHECK(windows.service() == -1);
+        int calls = 0;
+        loop.post([&] { ++calls; });
+        {
+            std::unique_lock lock(mutex);
+            changed.wait(lock, [&] { return notified; });
+        }
+        CHECK(windows.dispatchFds());
+        CHECK(loop.pump() == -1);
+        CHECK(calls == 1);
+        windows.suspendFdWatches();
+    }
+    std::filesystem::remove_all(options.workdir);
 }

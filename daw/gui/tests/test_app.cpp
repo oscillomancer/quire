@@ -6,8 +6,10 @@
 
 #include <unistd.h>
 #include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
+#include <mutex>
 #include <thread>
 
 #include "actions_list.h"
@@ -585,9 +587,9 @@ TEST_CASE("UI state written in the background never overtakes a later flush") {
             [&](const json::Value& v) { zoom = v.find("zoom")->asDouble(); });
         p.tick(project);
         zoom = 80;
-        // The periodic write (at most once a second) goes to the writer thread.
-        std::this_thread::sleep_for(std::chrono::milliseconds(1100));
-        p.tick(project);
+        // Run the armed deadline explicitly: no wall-clock pass/fail decision.
+        REQUIRE(p.nextDeadline());
+        p.tick(project, 0, *p.nextDeadline());
         zoom = 120;
         REQUIRE(p.flush(project));  // after the pending write: the newest state wins
     }
@@ -975,11 +977,22 @@ TEST_CASE("the transport bar drives the transport, the tempo and the meter (P5.5
         return *r;
     };
     CHECK_FALSE(get()["playing"].asBool());
+    CHECK_FALSE(bar->nextDeadline());
     bar->sync();
     a.root->frame(false);
     CHECK(a.root->find("transport.position")->valueText() == "1.1.000");
     a.root->click("transport.play");
     CHECK(get()["playing"].asBool());
+    const auto statusAt = std::chrono::steady_clock::time_point(std::chrono::seconds(10));
+    bar->sync(false, statusAt);
+    REQUIRE(bar->nextDeadline());
+    CHECK(*bar->nextDeadline() == statusAt + std::chrono::milliseconds(250));
+    bar->sync(true, statusAt + std::chrono::milliseconds(100));
+    CHECK(*bar->nextDeadline() == statusAt + std::chrono::milliseconds(250));
+    bar->sync(false, statusAt + std::chrono::milliseconds(249));
+    CHECK(*bar->nextDeadline() == statusAt + std::chrono::milliseconds(250));
+    bar->sync(false, statusAt + std::chrono::milliseconds(250));
+    CHECK(*bar->nextDeadline() == statusAt + std::chrono::milliseconds(500));
     // Recording needs an armed track with an input.
     json::Value add = json::Value::object();
     add["name"] = "Rec";
@@ -1052,6 +1065,8 @@ TEST_CASE("the transport bar drives the transport, the tempo and the meter (P5.5
     // Stop and disarm: the golden must not show this run's temporary folder.
     a.root->click("transport.play");
     CHECK_FALSE(get()["recording"].asBool());
+    bar->sync();
+    CHECK_FALSE(bar->nextDeadline());
     json::Value disarm = json::Value::object();
     disarm["track"] = track;
     disarm["armed"] = false;
@@ -1499,4 +1514,69 @@ TEST_CASE("a macro passes its typed arguments to the steps that ask for them") {
     auto r = a.actions->run(*a.actions->registry().find("macro:loop"));
     REQUIRE_FALSE(r);
     CHECK(r.error().code == "action.macro_depth");
+}
+
+TEST_CASE("UI sidecar compares once after input and wakes main after writing") {
+    using Clock = std::chrono::steady_clock;
+    const auto now = Clock::time_point(std::chrono::seconds(10));
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-ui-deadline-" + std::to_string(::getpid()));
+    std::filesystem::create_directories(dir);
+    const auto project = dir / "song.json";
+    std::mutex mutex;
+    std::condition_variable completed;
+    bool written = false;
+    int value = 0;
+    {
+        gui::UiPersistence p([&] {
+            std::lock_guard lock(mutex);
+            written = true;
+            completed.notify_one();
+        });
+        p.add("value", [&] { return json::Value(value); }, [](const json::Value&) {});
+        p.tick(project, 0, now);
+        REQUIRE(p.nextDeadline());
+        CHECK(*p.nextDeadline() == now + std::chrono::seconds(1));
+        p.arm(now + std::chrono::milliseconds(500));
+        CHECK(*p.nextDeadline() == now + std::chrono::seconds(1));
+        value = 1;
+        p.tick(project, 0, now + std::chrono::milliseconds(999));
+        CHECK_FALSE(std::filesystem::exists(gui::UiPersistence::fileFor(project)));
+        p.tick(project, 0, *p.nextDeadline());
+        CHECK_FALSE(p.nextDeadline());
+        {
+            std::unique_lock lock(mutex);
+            completed.wait(lock, [&] { return written; });
+        }
+        p.tick(project, 0, now + std::chrono::hours(1));
+        CHECK_FALSE(p.nextDeadline());
+        p.arm(now + std::chrono::seconds(2));
+        p.tick(project, 0, *p.nextDeadline());  // unchanged bytes: no new deadline
+        CHECK_FALSE(p.nextDeadline());
+    }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("meter frames end at the floor including holds; hidden meters do not animate") {
+    using Clock = std::chrono::steady_clock;
+    const auto now = Clock::time_point(std::chrono::seconds(10));
+    ui::Meter meter("test.meter");
+    gui::MeterFeed feed;
+    feed.attach("tr_1", &meter);
+    feed.poll(now);
+    CHECK_FALSE(feed.moving());
+    const float peak[2] = {1.2f, 0.5f}, rms[2] = {0.4f, 0.3f};
+    meter.push(peak, rms, now);
+    CHECK(feed.moving());
+    feed.poll(now + std::chrono::seconds(1));
+    CHECK(feed.moving());  // includes peak hold before its 1.5 s expiry
+    feed.poll(now + std::chrono::seconds(10));
+    CHECK_FALSE(feed.moving());
+    CHECK(meter.clipped());  // latch is stationary
+    meter.push(peak, rms, now + std::chrono::seconds(10));
+    meter.visible = false;
+    feed.poll(now + std::chrono::seconds(10));
+    CHECK_FALSE(feed.moving());
+    CHECK_FALSE(feed.visible());
+    feed.detach(&meter);
 }

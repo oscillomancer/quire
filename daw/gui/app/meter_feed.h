@@ -43,7 +43,7 @@ class MeterFeed {
         shown_.clear();
     }
     // Every frame.
-    void poll() {
+    void poll(std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now()) {
         for (auto& [meter, shown] : shown_) {
             const bool visible = meter->visibleInTree();
             if (visible && !shown) meter->reset();
@@ -53,10 +53,20 @@ class MeterFeed {
             for (const StripReading& r : source_())
                 if (auto it = meters_.find(r.track); it != meters_.end())
                     for (ui::Meter* m : it->second)
-                        if (shown_[m]) m->push(r.peak, r.rms);
+                        if (shown_[m]) m->push(r.peak, r.rms, now);
         for (auto& [track, list] : meters_)
             for (ui::Meter* m : list)
-                if (shown_[m]) m->tick();
+                if (shown_[m]) m->tick(now);
+    }
+    bool moving() const {
+        for (const auto& [meter, shown] : shown_)
+            if (shown && meter->moving()) return true;
+        return false;
+    }
+    bool visible() const {
+        for (const auto& [meter, shown] : shown_)
+            if (shown) return true;
+        return false;
     }
 
   private:

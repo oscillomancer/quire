@@ -618,13 +618,16 @@ TEST_CASE("MIDI editor: the notation panel compiles live, writes back, and follo
     REQUIRE(text);
     CHECK(text->text().find("C4") != std::string::npos);
 
+    CHECK_FALSE(f.editor->nextDeadline());
     // Type a new phrase: after the pause it compiles and is written.
     f.root->focus(text);
     f.root->key(SDLK_A, ui::kCtrl);
     f.root->text("voice v; 1: D4:h F4:h");
+    REQUIRE(f.editor->nextDeadline());
     f.frame();
     std::this_thread::sleep_for(std::chrono::milliseconds(350));
     f.frame();
+    CHECK_FALSE(f.editor->nextDeadline());
     auto n = f.notes();
     REQUIRE(n.size() == 2);
     CHECK(n.at(0).find("pitch")->asInt() == 62);

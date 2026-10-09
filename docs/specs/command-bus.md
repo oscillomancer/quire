@@ -471,7 +471,10 @@ have the timer's cancellation guarantee: model-thread cancellation suppresses
 callbacks even from an already-ready snapshot, so cancel before freeing owners
 or reusing descriptors. Cross-thread cancellation requires the same owner
 synchronization as timers. New work/registration changes wake the pipe/embedding
-waker; the GUI owner must arrange an fd wake into its native event loop.
+waker. `wakeFd()` borrows the loop's read descriptor for embedding: watch for
+POLLIN, then call `pump()` (only pump/run drains it), and stop watching before
+destroying the loop. Signals write this pipe without calling the embedding
+waker, so native owners watch it even when no timer exists.
 
 MCP Tick retains its legacy `fn`/periodic `interval`. Optional `watches` and
 `deadline` suppliers select event/deadline scheduling instead; sources are

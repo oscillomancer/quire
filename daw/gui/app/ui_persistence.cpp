@@ -8,7 +8,9 @@
 
 namespace supple::gui {
 
-UiPersistence::UiPersistence() : writer_([this](std::stop_token stop) { writerLoop(stop); }) {}
+UiPersistence::UiPersistence(std::function<void()> completed)
+    : completed_(std::move(completed)),
+      writer_([this](std::stop_token stop) { writerLoop(stop); }) {}
 
 UiPersistence::~UiPersistence() {
     drain();
@@ -32,6 +34,9 @@ void UiPersistence::writerLoop(std::stop_token stop) {
         lock.lock();
         writing_ = false;
         wake_.notify_all();
+        lock.unlock();
+        if (completed_) completed_();
+        lock.lock();
     }
 }
 
@@ -78,7 +83,12 @@ void UiPersistence::tick(const std::filesystem::path& project) {
     tick(project, initialized_ && project != current_ ? generation_ + 1 : generation_);
 }
 
-void UiPersistence::tick(const std::filesystem::path& project, std::uint64_t generation) {
+void UiPersistence::arm(std::chrono::steady_clock::time_point now) {
+    if (!nextCheck_) nextCheck_ = now + std::chrono::seconds(1);
+}
+
+void UiPersistence::tick(const std::filesystem::path& project, std::uint64_t generation,
+                         std::chrono::steady_clock::time_point now) {
     const bool replaced = !initialized_ || generation != generation_;
     if (replaced || project != current_) {
         if (initialized_ && !prepared_) prepareProjectSwitch();
@@ -119,14 +129,17 @@ void UiPersistence::tick(const std::filesystem::path& project, std::uint64_t gen
         // Unsupported existing files stay untouched in either case.
         if (replaced && !protectedFile_ && !state.asObject().empty())
             written_ = json::writeCanonical(collect());
-        nextCheck_ = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+        nextCheck_.reset();
+        if (!project.empty() && !protectedFile_) arm(now);
         return;
     }
     prepared_ = false;  // a refused project command did not replace anything
-    const auto now = std::chrono::steady_clock::now();
-    if (project.empty() || now < nextCheck_) return;
-    nextCheck_ = now + std::chrono::seconds(1);
-    if (writeFailed_.exchange(false)) written_.clear();  // try again
+    if (writeFailed_.exchange(false)) {
+        written_.clear();
+        arm(now);  // bounded retry, woken by the writer's completion
+    }
+    if (!nextCheck_ || now < *nextCheck_) return;
+    nextCheck_.reset();
     const auto file = fileFor(project);
     if (file.empty() || protectedFile_) return;
     std::string text = json::writeCanonical(collect());
@@ -141,6 +154,7 @@ void UiPersistence::tick(const std::filesystem::path& project, std::uint64_t gen
 
 Status UiPersistence::flush(const std::filesystem::path& project) {
     drain();  // a pending background write must not land after this one
+    nextCheck_.reset();
     if (writeFailed_.exchange(false)) written_.clear();
     const auto file = fileFor(project);
     if (file.empty() || (project == current_ && protectedFile_)) return {};

@@ -117,8 +117,12 @@ one relay that outlives all producers. Headless socket/MCP loops poll that fd,
 local plug-in descriptors and the nearest monotonic service deadline (ADR-0030).
 Audio callbacks notify for published work/state transitions and one-shot output
 consumption targets, not unchanged blocks. Job/post notifications run outside
-locks; service flushes events before Lua delivery. The GUI still uses its
-existing service/control timers pending its event-loop conversion.
+locks; service flushes events before Lua delivery. The GUI shares one parked
+FD watcher for the app relay, local plug-in descriptors and ModelLoop wake
+pipe (including signals). SDL waits until those sources, input, or the nearest
+app/panel deadline. Playback frames and transport counters stop with transport;
+meters animate only while moving, and arm one activity wake at rest. Input and
+commands arm a coalesced UI sidecar check; writer completion posts to main.
 
 Model → audio: immutable `RenderPlan` swapped with an atomic pointer;
 parameter changes and transport commands via bounded SPSC queues. Audio →

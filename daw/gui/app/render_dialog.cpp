@@ -712,4 +712,10 @@ void RenderDialog::tick() {
         refreshPreview();
 }
 
+std::optional<std::chrono::steady_clock::time_point> RenderDialog::nextDeadline() const {
+    if (!page_ || !dirty_) return {};
+    return std::chrono::steady_clock::time_point(
+        std::chrono::milliseconds(lastEditMs_ + std::max(0, debounceMs_)));
+}
+
 }  // namespace supple::gui

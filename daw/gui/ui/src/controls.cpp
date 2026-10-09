@@ -427,9 +427,9 @@ void Meter::reset() {
     invalidate();
 }
 
-void Meter::push(const float peak[2], const float rms[2]) {
-    const auto now = std::chrono::steady_clock::now();
-    tick();
+void Meter::push(const float peak[2], const float rms[2],
+                 std::chrono::steady_clock::time_point now) {
+    tick(now);
     bool moved = false;
     for (int ch = 0; ch < 2; ++ch) {
         const float p = toDb(peak[ch]), r = toDb(rms[ch]);
@@ -450,8 +450,7 @@ void Meter::push(const float peak[2], const float rms[2]) {
     if (moved) invalidate();
 }
 
-void Meter::tick() {
-    const auto now = std::chrono::steady_clock::now();
+void Meter::tick(std::chrono::steady_clock::time_point now) {
     if (last_.time_since_epoch().count() == 0) last_ = now;
     const float dt = std::chrono::duration<float>(now - last_).count();
     last_ = now;
@@ -475,6 +474,13 @@ void Meter::tick() {
         invalidate();
         if (Root* r = root()) r->requestAnimationFrame();
     }
+}
+
+bool Meter::moving() const {
+    for (int ch = 0; ch < 2; ++ch)
+        if (peakDb_[ch] > kMeterFloor || rmsDb_[ch] > kMeterFloor || holdDb_[ch] > kMeterFloor)
+            return true;
+    return false;
 }
 
 void Meter::paint(Canvas& c) {

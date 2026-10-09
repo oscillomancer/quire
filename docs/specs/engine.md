@@ -583,7 +583,7 @@ Events: `transport.changed`, `engine.xrun`, `engine.stats` (1 Hz),
 `meters` (rate-limited, subscribe per track), `fx.failed`,
 `record.progress`.
 
-The headless socket and stdio MCP servers drive **main-thread service** on
+The GUI, headless socket and stdio MCP servers drive **main-thread service** on
 notifications and the nearest deadline (ADR-0030), using `EngineApp::tick()`
 as the explicit service call. `serviceFd()` exposes the app's coalesced relay;
 `serviceFds()` snapshots local plug-in descriptor subscriptions (including
@@ -618,15 +618,21 @@ Local plug-in timers participate even without an editor. Device restart uses
 an immediate attempt, then 250/500/1000/2000/4000 ms retries, with the 30 s
 give-up deadline taking precedence over a later retry. Give-up retains the
 last backend error even when it expires before another attempt.
+GUI meter consumers observe `meterActivitySequence()` before draining
+`meters()`, then call `armMeterActivity(observed, minimumPeak)` only when visible
+meters reach rest. Arm rechecks intervening publication. The default GUI floor
+is 0.001 linear (-60 dB); sub-floor readings do not wake main. Moving meters
+use GUI frame deadlines and remain disarmed; there is no per-block meter wake.
+
 `engine.restarting {reason}` announces restart; exhaustion emits
 `engine.error {reason, error}`.
 The backend kind, block/options, transport position and loop are restored;
 playback stays stopped. There is no global main-thread safety poll.
 
-The GUI currently retains its 100 ms service and 10 ms control timers pending
-the GUI loop conversion; it can consume the same service API. MeterBank offers
-an opt-in activity sequence and one-shot arm/recheck notification for readings
-above -120 dB; ongoing animation uses GUI frame deadlines, not per-block wakes.
+The GUI shares one FD watcher for the app relay, local plug-in descriptors
+and ModelLoop's wake pipe. Its nearest panel/service deadline bounds SDL's
+wait; there is no service/control poll. Editor service does not duplicate
+app timers, and remote editor work relies on the bridge wake contract.
 
 The tick drains the devices' **control messages** for MIDI learn
 (ADR-0027): each callback copies its notes, CCs, program changes and pitch
@@ -639,8 +645,8 @@ plain one on the running instance at once and into the project when the
 control has rested for 300 ms (as an edit in the plug-in's own editor).
 Nothing moves while `setLearning(true)` (a learn dialog listens); bindings
 with `when_*` conditions ask `learnGate` and wait without one. The callback
-publishes a batch and wakes main at once. The GUI conversion will remove its
-existing 10 ms binding timer. `lastTouched()` is the
+publishes a batch and wakes main at once; the GUI needs no binding timer.
+`lastTouched()` is the
 parameter edited last from the window or a plug-in's editor (not by agents or
 controls); `moveParam` moves any parameter the way a binding does, for the
 "last touched parameter" action.

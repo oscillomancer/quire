@@ -86,7 +86,7 @@ class ArrangeView : public ui::Node {
               std::uint64_t generation = 0);
     // Reads the transport (at most once per 16 ms) and moves the playhead;
     // true when the playhead moved (the app loop keeps its wait short then).
-    bool poll();
+    bool poll(bool force = false);  // force after input/model service, bypassing the throttle
 
     const Viewport& viewport() const { return view_; }
     void setViewport(const Viewport& v);

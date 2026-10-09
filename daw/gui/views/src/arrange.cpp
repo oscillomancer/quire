@@ -1082,10 +1082,10 @@ void ArrangeView::show(const model::Session& session, const std::vector<model::C
     }
 }
 
-bool ArrangeView::poll() {
+bool ArrangeView::poll(bool force) {
     if (!transportSource_) return false;
     const double now = steadyMs();
-    if (now - lastPollMs_ < 15.0) return false;
+    if (!force && now - lastPollMs_ < 15.0) return false;
     lastPollMs_ = now;
     const Transport t = transportSource_();
     const bool wasPlaying = transport_.playing;

@@ -5,9 +5,12 @@
 // workers; the dialog polls job.get and lists the result files.
 #pragma once
 
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -35,8 +38,9 @@ class RenderDialog {
 
     // Frame pass: debounced preview refresh and job polling.
     void tick();
+    std::optional<std::chrono::steady_clock::time_point> nextDeadline() const;
     // For tests: 0 runs the preview on the next tick without a wait.
-    void setDebounceMs(int ms) { debounceMs_ = ms; }
+    void setDebounceMs(int ms) { debounceMs_ = std::max(0, ms); }
     void refreshPreview();  // run render.dry-run now
 
     enum class Source { Master, Stems, Regions };

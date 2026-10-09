@@ -295,6 +295,10 @@ class EngineApp : public cmd::Host {
     // thread, the way the GUI's tick does; empty when the engine is stopped.
     // Main-thread work only: it drains the engine's meter rings.
     std::vector<MeterReading> meters();
+    // GUI activity subscription: observe before meters(), then arm only once
+    // visible meters reach rest. Arm rechecks activity arriving during the read.
+    std::uint64_t meterActivitySequence() const;
+    void armMeterActivity(std::uint64_t observed, float minimumPeak = 0.001f);
     // fx.restart: the next plan gets a new instance of `fx` (the failed one is
     // freed once no plan uses it).
     void restartFx(model::Id fx);

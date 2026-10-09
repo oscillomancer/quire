@@ -199,7 +199,7 @@ void Shell::installOverlay(ui::Root& root) {
     if (arrange_) arrange_->installOverlay(root);
 }
 
-void Shell::sync() {
+void Shell::sync(bool event) {
     const model::Session& s = app_.head();
     const bool replaced = app_.projectGeneration() != projectGeneration_;
     const bool moved = replaced || s.version != shownVersion_;
@@ -238,9 +238,13 @@ void Shell::sync() {
         arrange_->gestures().setSelection(std::move(selected));
     // The bar changes with the model or while the engine runs; refreshing it on
     // every idle pass would repaint (and cost) for nothing.
-    if (transport_ && (moved || app_.engine())) transport_->sync();
+    if (transport_) transport_->sync(event || moved);
     // The input names track the engine (started or stopped), not the model.
     if (moved || app_.engine()) inputs();
+}
+
+std::optional<std::chrono::steady_clock::time_point> Shell::nextDeadline() const {
+    return transport_ ? transport_->nextDeadline() : std::nullopt;
 }
 
 const json::Value& Shell::inputs(bool force) {

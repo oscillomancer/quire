@@ -3,6 +3,7 @@
 // session tempo and meter (click to edit them), and the engine's readouts.
 #pragma once
 
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <string>
@@ -24,9 +25,11 @@ class TransportBar {
     TransportBar(engine::EngineApp& app, AppActions& actions, cmd::Dispatcher& dispatcher,
                  ui::Root& root);
     std::unique_ptr<ui::Node> build();
-    // Reads the transport every call and the engine status at most 4 times a
-    // second (the readouts must not cost anything while the engine is idle).
-    void sync();
+    // Reads transport each pass. Counters have a 4 Hz deadline only during
+    // playback/recording; stopped readouts refresh on model/input notifications.
+    void sync(bool event = true,
+              std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
+    std::optional<std::chrono::steady_clock::time_point> nextDeadline() const;
 
   private:
     void openTempoForm();
@@ -48,7 +51,8 @@ class TransportBar {
     ui::Label* time_ = nullptr;
     ui::Label* engine_ = nullptr;
     ui::Label* recordPath_ = nullptr;  // where recordings go, while a track is armed
-    double lastStatusMs_ = -1e9;
+    bool moving_ = false;
+    std::optional<std::chrono::steady_clock::time_point> lastStatus_;
 };
 
 }  // namespace supple::gui
