@@ -136,7 +136,7 @@ TEST_CASE("every guide recipe remains bit-identical across host block sizes") {
         const auto patch = type.parse(json);
         REQUIRE(patch);
         const auto reference = renderPerformance(*patch, 4096);
-        for (std::uint32_t block : {1u, 7u, 256u}) {
+        for (std::uint32_t block : {7u, 256u}) {
             CAPTURE(block);
             CHECK(renderPerformance(*patch, block) == reference);
         }

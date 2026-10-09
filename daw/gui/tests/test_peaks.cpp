@@ -117,8 +117,8 @@ TEST_CASE("the peak service builds once off-thread, caches on disk and loads the
         std::lock_guard lock(m);
         posted.push_back(std::move(f));
     };
-    auto drainUntil = [&](auto done) {
-        for (int i = 0; i < 500 && !done(); ++i) {
+    auto drainUntil = [&](auto done, int rounds = 500) {
+        for (int i = 0; i < rounds && !done(); ++i) {
             std::vector<std::function<void()>> now;
             {
                 std::lock_guard lock(m);
@@ -194,7 +194,7 @@ TEST_CASE("the peak service builds once off-thread, caches on disk and loads the
         for (int i = 0; i < 200 && service->stats().loaded == 0; ++i)
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         service.reset();
-        drainUntil([] { return false; });
+        drainUntil([] { return false; }, 5);
     }
     std::filesystem::remove_all(dir.parent_path());
 }

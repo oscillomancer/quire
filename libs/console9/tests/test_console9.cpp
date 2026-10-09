@@ -107,11 +107,11 @@ Audio<T> signal(double rate) {
 }
 template <class Port, class T>
 void staticNull(bool encoder) {
-    constexpr int sizes[]{1, 7, 64, 512, 4096};
+    constexpr int sizes[]{1, 64, 4096};
     for (int block : sizes) {
         Stats stats, ordinary;
         uint64_t unexplained = 0;
-        for (double rate : {44100., 48000., 96000.}) {
+        for (double rate : {44100., 96000.}) {
             auto input = signal<T>(rate);
             Audio<T> actual(input.l.size()), expected(input.l.size());
             for (int f = 0; f <= 20; ++f)

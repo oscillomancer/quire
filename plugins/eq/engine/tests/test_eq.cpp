@@ -154,7 +154,8 @@ TEST_CASE("EQ bell/shelf/pass response and analytic/process agreement across rat
 TEST_CASE("EQ natural bell/shelf follows analog prototypes through 20 kHz") {
     for (double fs : {44100., 48000.})
         for (int type : {eq::Bell, eq::LowShelf, eq::HighShelf}) {
-            const auto worst = eq::measurement::ordinary(type, fs);
+            // 64 probes a case catch a regression; eq_bench measures at 2048 (VERIFICATION.md).
+            const auto worst = eq::measurement::ordinary(type, fs, 64);
             CAPTURE(fs);
             CAPTURE(type);
             CAPTURE(worst.f0);
