@@ -1,4 +1,5 @@
 add_subdirectory(common)
+add_subdirectory(suite)
 add_subdirectory(gate/engine)
 add_subdirectory(delay/engine)
 add_subdirectory(analyzer/engine)

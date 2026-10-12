@@ -207,7 +207,10 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
 - Choose a project license before publishing the repository.
 - Profile the 64-frame worst case; a pipelined bridge mode.
 - Track groups, stretch markers, MIDI outputs, a background media cache.
-- Lua ergonomics (a script library path, hot reload) and a DSP scripting
-  language.
+- Lua ergonomics (a script library path, hot reload).
+- DSP scripting (ADR-0032, proposed): plugins written in a checked subset of
+  C++, run by a JIT player plugin, exported as plugins or C++ projects. The
+  compiler and runtime exist (`plugins/suite`, tested against the same scripts
+  compiled as C++); the player, the commands and exports do not yet.
 - Orrery's structural performance pass.
 - Hardening and ports beyond Linux.
