@@ -1,0 +1,5 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 27, "patch": 0 },
+  "include": ["framework/cmake/presets.json"]
+}

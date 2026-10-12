@@ -1,0 +1,7 @@
+# Named editor previews: a name, then gui-preview's options (see
+# framework/tools/gui_preview.cpp). "default", the editor as it opens, is
+# always rendered too. `gui-preview --all <folder>` renders every one, and
+# ctest's `previews` renders them into build/<preset>/previews.
+custom         --preset "Add Nine"
+typing         --preset "Minor Seventh" --text "Intervals"
+label          --property "Label=Strings" --text "Label"

@@ -1,0 +1,45 @@
+diff --git a/src/wrapasauv2.cpp b/src/wrapasauv2.cpp
+index 668d87f..eb94df9 100644
+--- a/src/wrapasauv2.cpp
++++ b/src/wrapasauv2.cpp
+@@ -1432,7 +1432,9 @@ OSStatus WrapAsAUV2::SaveState(CFPropertyListRef *ptPList)
+   else
+   {
+     Clap::StateMemento chunk;
+-    _plugin->_ext._state->save(_plugin->_plugin, chunk);
++    // A plugin that cannot save must not leave the host holding an empty
++    // state it believes is good.
++    if (!_plugin->_ext._state->save(_plugin->_plugin, chunk)) return kAudioUnitErr_CannotDoInCurrentContext;
+ 
+ #if DICTIONARY_STREAM_FORMAT_JUCE
+     auto err = ausdk::AUBase::SaveState(ptPList);
+@@ -1491,6 +1493,9 @@ OSStatus WrapAsAUV2::RestoreState(CFPropertyListRef plist)
+ 
+   if (!IsInitialized()) return kAudioUnitErr_Uninitialized;
+ 
++  // SaveState wrote AUBase's own dictionary for a plugin without CLAP state.
++  if (!_plugin->_ext._state) return AUBase::RestoreState(plist);
++
+   CFDictionaryRef tDict = CFDictionaryRef(plist);
+ 
+   // Find 'data' key
+@@ -1525,7 +1530,7 @@ OSStatus WrapAsAUV2::RestoreState(CFPropertyListRef plist)
+       UInt8 *streamData = (UInt8 *)(CFDataGetBytePtr(juceData));
+ 
+       chunk.setData(streamData, numBytes);
+-      _plugin->_ext._state->load(_plugin->_plugin, chunk);
++      if (!_plugin->_ext._state->load(_plugin->_plugin, chunk)) return kAudioUnitErr_InvalidPropertyValue;
+     }
+     return noErr;
+   }
+@@ -1548,7 +1553,9 @@ OSStatus WrapAsAUV2::RestoreState(CFPropertyListRef plist)
+     {
+       Clap::StateMemento chunk;
+       chunk.setData(pData, lLen);
+-      _plugin->_ext._state->load(_plugin->_plugin, chunk);
++      // The plugin refused it (damaged, or not its own): say so, rather than
++      // let the host believe the session was restored.
++      if (!_plugin->_ext._state->load(_plugin->_plugin, chunk)) return kAudioUnitErr_InvalidPropertyValue;
+     }
+   }
+   return noErr;

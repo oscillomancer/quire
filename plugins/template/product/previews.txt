@@ -1,0 +1,10 @@
+# Named editor previews: a name, then gui-preview's options (see
+# framework/tools/gui_preview.cpp). "default", the editor as it opens, is
+# always rendered too. `gui-preview --all <folder>` renders every one, and
+# ctest's `previews` renders them into build/<preset>/previews.
+filters-on     --set "Low Cut Enabled=On" --set "Low Cut=200 Hz" --set "High Cut Enabled=On" --set "High Cut=6 kHz" --set "Slope=24 dB/oct"
+cutoff-hover   --set "Low Cut Enabled=On" --hover "Low Cut"
+typing         --text "Input Gain"
+tooltip        --tooltip "Low Cut"
+context-menu   --context "Mix"
+large          --scale 2

@@ -1,0 +1,40 @@
+--- a/src/wrapasvst3.cpp
++++ b/src/wrapasvst3.cpp
+@@ -832,6 +832,37 @@
+ 
+   if (!strcmp(port_type, CLAP_PORT_MONO)) return Vst::SpeakerArr::kMono;
+   if (!strcmp(port_type, CLAP_PORT_STEREO)) return Vst::SpeakerArr::kStereo;
++  // CLAP's surround positions are the bits of a VST3 arrangement, in the same
++  // order. The usual layouts are known by their size: 5.1, 7.1 (side
++  // surrounds) and 7.1.4. Ambisonics are ACN/SN3D in both.
++  if (!strcmp(port_type, CLAP_PORT_SURROUND))
++  {
++    switch (channel_count)
++    {
++      case 6:
++        return Vst::SpeakerArr::k51;
++      case 8:
++        return Vst::SpeakerArr::k71Music;
++      case 12:
++        return Vst::SpeakerArr::k71_4;
++      default:
++        return speakerArrFromPortType(nullptr, channel_count);
++    }
++  }
++  if (!strcmp(port_type, CLAP_PORT_AMBISONIC))
++  {
++    switch (channel_count)
++    {
++      case 4:
++        return Vst::SpeakerArr::kAmbi1stOrderACN;
++      case 9:
++        return Vst::SpeakerArr::kAmbi2cdOrderACN;
++      case 16:
++        return Vst::SpeakerArr::kAmbi3rdOrderACN;
++      default:
++        return speakerArrFromPortType(nullptr, channel_count);
++    }
++  }
+ 
+   return Vst::SpeakerArr::kEmpty;
+ }

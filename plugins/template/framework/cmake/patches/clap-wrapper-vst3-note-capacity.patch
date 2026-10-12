@@ -1,0 +1,75 @@
+diff --git a/src/detail/vst3/process.cpp b/src/detail/vst3/process.cpp
+index a051be6..73a0823 100644
+--- a/src/detail/vst3/process.cpp
++++ b/src/detail/vst3/process.cpp
+@@ -113,7 +113,11 @@ void ProcessAdapter::setupProcessing(const clap_plugin_t *plugin, const clap_plu
+ 
+   _out_events.ctx = this;
+ 
+-  _activeNotes.reserve(32);
++  // A fixed capacity, made here: process() must not allocate however many
++  // notes sound at once (addToActiveNotes recycles a slot when it is full).
++  _activeNotes.clear();
++  _activeNotes.reserve(kMaxActiveNotes);
++  _nextRecycledNote = 0;
+ 
+   _supportsPolyPressure = enablePolyPressure;
+   _supportsTuningNoteExpression = supportsTuningNoteExpression;
+@@ -594,10 +598,12 @@ void ProcessAdapter::processInputEvents(Steinberg::Vst::IEventList *eventlist)
+           n.noteexpression.header.time = vstevent.sampleOffset;
+           n.noteexpression.header.size = sizeof(clap_event_note_expression);
+           n.noteexpression.note_id = vstevent.polyPressure.noteId;
++          bool known = false;
+           for (auto &i : _activeNotes)
+           {
+             if (i.used && i.note_id == vstevent.polyPressure.noteId)
+             {
++              known = true;
+               n.noteexpression.expression_id = CLAP_NOTE_EXPRESSION_PRESSURE;
+               n.noteexpression.port_index = i.port_index;
+               n.noteexpression.key = i.key;  // should be the same as vstevent.polyPressure.pitch
+@@ -605,8 +611,11 @@ void ProcessAdapter::processInputEvents(Steinberg::Vst::IEventList *eventlist)
+               n.noteexpression.value = vstevent.polyPressure.pressure;
+             }
+           }
+-          _eventindices.push_back(_events.size());
+-          _events.push_back(n);
++          if (known)
++          {
++            _eventindices.push_back(_events.size());
++            _events.push_back(n);
++          }
+         }
+         else if (vstevent.type == Vst::Event::kPolyPressureEvent)
+         {
+@@ -876,7 +885,15 @@ void ProcessAdapter::addToActiveNotes(const clap_event_note *note)
+       return;
+     }
+   }
+-  _activeNotes.emplace_back(ActiveNote{true, note->note_id, note->port_index, note->channel, note->key});
++  if (_activeNotes.size() < _activeNotes.capacity())
++  {
++    _activeNotes.emplace_back(ActiveNote{true, note->note_id, note->port_index, note->channel, note->key});
++    return;
++  }
++  // Full: forget a note rather than allocate on the audio thread. Its later
++  // expressions then find no note and are dropped.
++  _activeNotes[_nextRecycledNote] = ActiveNote{true, note->note_id, note->port_index, note->channel, note->key};
++  _nextRecycledNote = (_nextRecycledNote + 1) % _activeNotes.size();
+ }
+ 
+ void ProcessAdapter::removeFromActiveNotes(const clap_event_note *note)
+diff --git a/src/detail/vst3/process.h b/src/detail/vst3/process.h
+index 1e3a85b..d201e53 100644
+--- a/src/detail/vst3/process.h
++++ b/src/detail/vst3/process.h
+@@ -114,7 +114,9 @@ class ProcessAdapter
+     int16_t channel;  // 0..15
+     int16_t key;      // 0..127
+   };
++  static constexpr size_t kMaxActiveNotes = 1024;
+   std::vector<ActiveNote> _activeNotes;
++  size_t _nextRecycledNote = 0;
+ 
+   std::unique_ptr<clap_audio_buffer_t[]> _input_ports;
+   std::unique_ptr<clap_audio_buffer_t[]> _output_ports;

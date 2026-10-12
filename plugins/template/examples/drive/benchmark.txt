@@ -1,0 +1,6 @@
+# What this product costs, per machine, in units of the benchmark's reference
+# workload (framework/tools/benchmark.cpp). Written by `benchmark --update`.
+machine Intel(R) Core(TM) Ultra 5 225F | GCC 16.2.1
+  automated 11.648
+  small 11.806
+  steady 11.876

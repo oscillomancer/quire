@@ -1,0 +1,45 @@
+diff --git a/src/mac.m b/src/mac.m
+index c2551cf..65a03b4 100644
+--- a/src/mac.m
++++ b/src/mac.m
+@@ -364,13 +364,21 @@ dispatchCurrentChildViewConfiguration(PuglView* const view)
+ 
+ /* NSDraggingDestination */
+ 
++- (NSPoint)puglDragLocation:(id<NSDraggingInfo>)sender
++{
++  // Window coordinates, like an event's locationInWindow: into this view's
++  // flipped space and then pixels, as eventLocation does for the mouse.
++  return nsPointFromPoints(
++    puglview, [self convertPoint:[sender draggingLocation] fromView:nil]);
++}
++
+ - (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender
+ {
+   dragSource     = sender;
+   dragOperation  = NSDragOperationNone;
+   droppedUriList = nil;
+ 
+-  const NSPoint            wloc  = [sender draggingLocation];
++  const NSPoint            wloc  = [self puglDragLocation:sender];
+   const PuglDataOfferEvent offer = {
+     PUGL_DATA_OFFER,
+     0,
+@@ -390,7 +398,7 @@ dispatchCurrentChildViewConfiguration(PuglView* const view)
+ {
+   assert(dragSource == sender);
+ 
+-  const NSPoint            wloc  = [sender draggingLocation];
++  const NSPoint            wloc  = [self puglDragLocation:sender];
+   const PuglDataOfferEvent offer = {
+     PUGL_DATA_OFFER,
+     0,
+@@ -409,7 +417,7 @@ dispatchCurrentChildViewConfiguration(PuglView* const view)
+ - (void)draggingEnded:(id<NSDraggingInfo>)sender
+ {
+   NSPasteboard* const pasteboard = [sender draggingPasteboard];
+-  const NSPoint       wloc       = [sender draggingLocation];
++  const NSPoint       wloc       = [self puglDragLocation:sender];
+ 
+   const NSArray<NSPasteboardType>* const types = [pasteboard types];
+   if (acceptedDragTypeIndex >= [types count]) {

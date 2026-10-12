@@ -1,0 +1,143 @@
+diff --git a/src/detail/auv2/auv2_base_classes.h b/src/detail/auv2/auv2_base_classes.h
+index 2db27a8..528af7a 100644
+--- a/src/detail/auv2/auv2_base_classes.h
++++ b/src/detail/auv2/auv2_base_classes.h
+@@ -27,6 +27,7 @@
+ #include "process.h"
+ #include "parameter.h"
+ #include "detail/shared/fixedqueue.h"
++#include "detail/shared/spinlock.h"
+ #include "detail/shared/midi_translation.h"
+ #include "detail/os/osutil.h"
+ #include "detail/clap/automation.h"
+@@ -581,8 +582,12 @@ class WrapAsAUV2 : public ausdk::AUBase,
+   void mark_dirty() override
+   {
+   }
++  // [thread-safe] in CLAP: a plugin asks to be deactivated and activated
++  // again (a latency or processing change). AUv2 has no way to ask the host,
++  // so onIdle does it on the main thread (restartCLAP).
+   void restartPlugin() override
+   {
++    _requestRestart = true;
+   }
+   void request_callback() override
+   {
+@@ -740,6 +745,7 @@ class WrapAsAUV2 : public ausdk::AUBase,
+ 
+   void activateCLAP();
+   void deactivateCLAP();
++  void restartCLAP();
+   bool IsBypassEffect()
+   {
+     return _isBypassed;
+@@ -819,6 +825,10 @@ class WrapAsAUV2 : public ausdk::AUBase,
+ #endif
+ 
+   std::atomic_bool _requestUICallback = false;
++  std::atomic_bool _requestRestart = false;
++  // Held by Render, and by restartCLAP while it reactivates the plugin; a
++  // render that finds it taken outputs silence instead of waiting.
++  ClapWrapper::detail::shared::SpinLock _renderLock;
+ 
+   // the queue from audiothread to UI thread
+   ClapWrapper::detail::shared::fixedqueue<queueEvent, 8192> _queueToUI;
+diff --git a/src/detail/shared/spinlock.h b/src/detail/shared/spinlock.h
+index d624bd5..a2bf3ff 100644
+--- a/src/detail/shared/spinlock.h
++++ b/src/detail/shared/spinlock.h
+@@ -20,6 +20,12 @@ struct SpinLock
+     }
+   }
+ 
++  // For a thread that must not wait (an audio thread): false if it is held.
++  bool try_lock()
++  {
++    return !locked_.exchange(true, std::memory_order_acquire);
++  }
++
+   void unlock()
+   {
+     locked_.store(false, std::memory_order_release);
+diff --git a/src/wrapasauv2.cpp b/src/wrapasauv2.cpp
+index ca783d1..668d87f 100644
+--- a/src/wrapasauv2.cpp
++++ b/src/wrapasauv2.cpp
+@@ -3,6 +3,7 @@
+ #include <set>
+ #include <limits>
+ #include <cassert>
++#include <cstring>
+ #include <Block.h>
+ 
+ extern bool fillAudioUnitCocoaView(AudioUnitCocoaViewInfo *viewInfo, std::shared_ptr<Clap::Plugin>);
+@@ -1150,12 +1151,57 @@ void WrapAsAUV2::deactivateCLAP()
+ #endif
+ }
+ 
++// Main thread, from onIdle: what a host does for CLAP's request_restart.
++// Same buses, sample rate and block sizes; the plugin prepares again, so a
++// change that needed a restart (latency, oversampling) takes effect. The
++// plugin reports a new latency from activate(), which reaches the host as
++// kAudioUnitProperty_Latency.
++void WrapAsAUV2::restartCLAP()
++{
++  if (!_plugin || !_initialized) return;
++  auto guarantee_mainthread = _plugin->AlwaysMainThread();
++  ClapWrapper::detail::shared::SpinLockGuard guard(_renderLock);
++  _plugin->stop_processing();
++  _plugin->deactivate();
++  if (!_plugin->activate())
++  {
++    // As if uninitialized: Render does nothing until the host initializes again.
++    _initialized = false;
++    return;
++  }
++  _plugin->start_processing();
++}
++
+ OSStatus WrapAsAUV2::Render(AudioUnitRenderActionFlags &inFlags, const AudioTimeStamp &inTimeStamp,
+                             UInt32 inFrames)
+ {
+   assert(inFlags == 0);
+   if (_initialized && (inFlags == 0))
+   {
++    // restartCLAP holds the lock while it reactivates the plugin on the main
++    // thread: render silence for this block rather than wait for it.
++    if (!_renderLock.try_lock())
++    {
++      for (UInt32 i = 0; i < Outputs().GetNumberOfElements(); ++i)
++      {
++        AudioBufferList &buffers = Output(i).PrepareBuffer(inFrames);
++        for (UInt32 j = 0; j < buffers.mNumberBuffers; ++j)
++        {
++          if (buffers.mBuffers[j].mData)
++            std::memset(buffers.mBuffers[j].mData, 0, buffers.mBuffers[j].mDataByteSize);
++        }
++      }
++      return noErr;
++    }
++    struct Unlock
++    {
++      ClapWrapper::detail::shared::SpinLock &lock;
++      ~Unlock()
++      {
++        lock.unlock();
++      }
++    } unlock{_renderLock};
++
+     // do the render dance
+     Clap::AUv2::ProcessData data{inFlags, inTimeStamp, inFrames, this};
+ 
+@@ -1364,6 +1410,11 @@ void WrapAsAUV2::onIdle()
+       _plugin->_plugin->on_main_thread(_plugin->_plugin);
+     }
+   }
++
++  if (_requestRestart.exchange(false))
++  {
++    restartCLAP();
++  }
+ }
+ 
+ OSStatus WrapAsAUV2::SaveState(CFPropertyListRef *ptPList)

@@ -25,6 +25,10 @@ SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hh", ".m", ".mm"
 FORBIDDEN_SPDX = re.compile("SPDX-License-" + r"Identifier:[ \t]*[^\n]*\b(A?GPL|LGPL)", re.IGNORECASE)
 FETCH_RE = re.compile(r"(?:FetchContent_Declare|ExternalProject_Add)\s*\(\s*([A-Za-z0-9_.+-]+)", re.IGNORECASE)
 SKIP_PARTS = {"build", "_deps", ".git", "third_party", "node_modules"}
+# Files that name a GPL licence without being under it. The plugin template's
+# product generator offers GPL-3.0-or-later as a licence for the product it
+# writes, and rewrites the SPDX tags of the copies it makes.
+SPDX_NAMES_ONLY = {pathlib.PurePosixPath("plugins/template/framework/tools/new_product.cmake")}
 
 
 def license_ok(expr: str, allowed: set) -> bool:
@@ -151,7 +155,7 @@ def main() -> int:
                 text = p.read_text(errors="replace")
             except OSError:
                 continue
-            if FORBIDDEN_SPDX.search(text):
+            if FORBIDDEN_SPDX.search(text) and pathlib.PurePosixPath(rel.as_posix()) not in SPDX_NAMES_ONLY:
                 errors.append(f"{rel}: carries a (L/A)GPL SPDX identifier")
             if p.name == "CMakeLists.txt" or p.suffix == ".cmake":
                 for m in FETCH_RE.finditer(text):

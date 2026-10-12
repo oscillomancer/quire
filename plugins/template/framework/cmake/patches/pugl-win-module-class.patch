@@ -1,0 +1,54 @@
+diff --git a/src/win.c b/src/win.c
+index 5b74c10..e071051 100644
+--- a/src/win.c
++++ b/src/win.c
+@@ -120,19 +120,26 @@ puglWinStatus(const BOOL success)
+   return success ? PUGL_SUCCESS : PUGL_UNKNOWN_ERROR;
+ }
+ 
+-static bool
+-puglRegisterWindowClass(const char* name)
++static HMODULE
++puglWinGetModuleHandle(void)
+ {
+-  ArgStringChar* const nameArg = puglArgStringNew(name);
+-
+   HMODULE module = NULL;
+   if (!GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+-                         (LPCTSTR)puglRegisterWindowClass,
++                         (LPCTSTR)puglWinGetModuleHandle,
+                          &module)) {
+     module = GetModuleHandle(NULL);
+   }
+ 
++  return module;
++}
++
++static bool
++puglRegisterWindowClass(const char* name)
++{
++  ArgStringChar* const nameArg = puglArgStringNew(name);
++  const HMODULE       module  = puglWinGetModuleHandle();
++
+   WNDCLASSEX wc = PUGL_INIT_STRUCT;
+   if (GetClassInfoEx(module, nameArg, &wc)) {
+     return true; // Already registered
+@@ -419,7 +426,7 @@ puglFreeWorldInternals(PuglWorld* world)
+   const char* const    className    = world->strings[PUGL_CLASS_NAME];
+   ArgStringChar* const classNameArg = puglArgStringNew(className);
+ 
+-  UnregisterClass(classNameArg, NULL);
++  UnregisterClass(classNameArg, puglWinGetModuleHandle());
+   puglArgStringFree(classNameArg);
+   free(world->impl);
+ }
+@@ -1685,7 +1692,7 @@ puglWinCreateWindow(PuglView* const   view,
+                          wr.bottom - wr.top,
+                          (HWND)parent,
+                          NULL,
+-                         NULL,
++                         puglWinGetModuleHandle(),
+                          NULL);
+   puglArgStringFree(titleArg);
+   puglArgStringFree(classNameArg);

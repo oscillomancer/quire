@@ -1,0 +1,434 @@
+# Build and test every format on the platforms GitHub hosts.
+#
+# On demand only: Actions tab -> "Build and test" -> Run workflow, or
+#   gh workflow run build.yml -f platforms=macos [-f examples=false]
+#
+# In the template, each directory under examples/ is also built as the
+# product and taken through the release checks, in a job of its own: the
+# examples are where sidechains, aux outputs, surround, instruments and note
+# effects meet a real AU, VST3 and CLAP. A product has no examples/, so
+# there the starter's jobs are the only ones.
+#
+# What runs where, and what it can and cannot prove, is in
+# framework/docs/BUILDING.md under "Continuous integration".
+
+name: Build and test
+
+on:
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: Platforms to build and test
+        type: choice
+        options: [macos, linux, windows, all]
+        default: all
+      sanitizers:
+        description: Also run the asan preset (and tsan on Linux)
+        type: boolean
+        default: false
+      examples:
+        description: Also build and check each example under examples/ (release)
+        type: boolean
+        default: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Fetched dependencies live outside the build tree so they can be cached
+  # between runs; Pins.cmake, Dependencies.cmake and patches key the cache.
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.deps/cpm
+  FETCH_DIR: ${{ github.workspace }}/.deps/fetch
+  CTEST_OUTPUT_ON_FAILURE: "1"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # One extra release job per example on each platform; none without examples/.
+  plan:
+    name: Plan
+    runs-on: ubuntu-24.04
+    outputs:
+      examples: ${{ steps.list.outputs.examples }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        run: |
+          list='[]'
+          if [ '${{ inputs.examples }}' = true ]; then
+            list=$(for f in examples/*/product.cmake; do if [ -f "$f" ]; then basename "$(dirname "$f")"; fi; done |
+              jq -Rnc '[inputs | {preset: "release", product: .}]')
+          fi
+          echo "examples=$list" | tee -a "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  macos:
+    if: ${{ inputs.platforms == 'macos' || inputs.platforms == 'all' }}
+    needs: plan
+    name: macOS (${{ matrix.preset }}, ${{ matrix.product }})
+    runs-on: macos-15
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: ${{ fromJSON(inputs.sanitizers && '["release","debug","asan"]' || '["release","debug"]') }}
+        product: [starter]
+        include: ${{ fromJSON(needs.plan.outputs.examples) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # What new_product does for -DEXAMPLE, under the example's own name and codes.
+      - name: The example as the product
+        if: matrix.product != 'starter'
+        run: |
+          rm -rf product
+          cp -R 'examples/${{ matrix.product }}' product
+
+      - name: Product identity
+        id: product
+        run: |
+          .github/scripts/step.sh product-info bash -c '.github/scripts/product-info.sh > "$RUNNER_TEMP/product.env"'
+          cat "$RUNNER_TEMP/product.env" >> "$GITHUB_OUTPUT"
+          sed 's/^/CI_PRODUCT_/' "$RUNNER_TEMP/product.env" >> "$GITHUB_ENV"
+
+      - name: Tools
+        run: |
+          command -v ninja >/dev/null || brew install ninja
+          cmake --version | head -1
+          xcrun clang --version | head -1
+          sw_vers
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: .deps
+          key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('framework/cmake/Dependencies.cmake', 'framework/cmake/Pins.cmake', 'framework/cmake/patches/*') }}
+
+      - name: clap-validator
+        if: matrix.preset == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/get-clap-validator.sh macos
+
+      - name: Configure
+        run: |
+          .github/scripts/step.sh configure cmake --preset ${{ matrix.preset }} -G Ninja \
+            -DFETCHCONTENT_BASE_DIR="$FETCH_DIR" \
+            ${CLAP_VALIDATOR:+-DSUPPLE_CLAP_VALIDATOR="$CLAP_VALIDATOR"}
+
+      - name: Build
+        id: build
+        run: .github/scripts/step.sh build cmake --build --preset ${{ matrix.preset }} -- -k 0
+
+      - name: Test
+        run: .github/scripts/step.sh test ctest --preset ${{ matrix.preset }} --timeout 600
+
+      # Everything below exercises the release build as a host would see it.
+
+      - name: Install into the user plug-in folders
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.preset == 'release' }}
+        run: |
+          cmake --build build/release --target product-install
+          ls -la ~/Library/Audio/Plug-Ins/CLAP ~/Library/Audio/Plug-Ins/VST3 ~/Library/Audio/Plug-Ins/Components
+
+      - name: Bundle signatures and architecture
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.preset == 'release' }}
+        run: |
+          name="$CI_PRODUCT_name"
+          for b in "$name.clap" "$name.vst3" "$name.component"; do
+            bin="build/release/plugins/$b/Contents/MacOS/$name"
+            echo "== $b"
+            lipo -info "$bin"
+            otool -l "$bin" | grep -A4 LC_BUILD_VERSION | grep -E "minos|sdk" || true
+            codesign -dv "build/release/plugins/$b" 2>&1 | grep -E "Signature|flags|Sealed" || true
+          done
+          # Only the AU is signed as a bundle (macOS refuses to register an
+          # AU otherwise); the CLAP and VST3 carry the linker's ad-hoc
+          # signature on their binaries, as Ferric's do.
+          .github/scripts/step.sh codesign-au codesign --verify --deep --strict --verbose=2 \
+            "build/release/plugins/$name.component"
+          plutil -p "build/release/plugins/$name.component/Contents/Info.plist"
+
+      - name: auval
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.preset == 'release' }}
+        run: |
+          auval -a | grep -i -- "$CI_PRODUCT_au_manufacturer" || true
+          .github/scripts/step.sh auval auval -strict -v "$CI_PRODUCT_au_type" "$CI_PRODUCT_au_subtype" "$CI_PRODUCT_au_manufacturer"
+
+      - name: pluginval (VST3 and AU)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.preset == 'release' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PLUGINVAL="$(.github/scripts/get-pluginval.sh macos)"
+          name="$CI_PRODUCT_name"
+          .github/scripts/step.sh pluginval-vst3 "$PLUGINVAL" --strictness-level 8 --validate-in-process --timeout-ms 300000 \
+            --validate "$HOME/Library/Audio/Plug-Ins/VST3/$name.vst3"
+          .github/scripts/step.sh pluginval-au "$PLUGINVAL" --strictness-level 8 --validate-in-process --timeout-ms 300000 \
+            --validate "$HOME/Library/Audio/Plug-Ins/Components/$name.component"
+
+      # A real Cocoa window hosting the editor through the CLAP. GitHub's
+      # macOS runners are virtual machines: the window server is real, the
+      # GPU is paravirtualised. A pass here is evidence, not proof -- the
+      # editor still has to be opened on real hardware.
+      - name: clap-probe (editor in a Cocoa host window)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.preset == 'release' }}
+        run: .github/scripts/clap-probe-mac.sh "$CI_PRODUCT_name"
+
+      - name: gui-preview (OpenGL, every named scenario, and 2x)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.preset == 'release' }}
+        run: |
+          mkdir -p preview
+          .github/scripts/step.sh previews ./build/release/gui-preview --all preview
+          .github/scripts/step.sh preview-2x ./build/release/gui-preview preview/default-2x.png --scale 2
+
+      # The release archive and installer (unsigned here: bundles ad hoc,
+      # the .pkg unsigned). See BUILDING.md for signing.
+      - name: Release package
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.preset == 'release' }}
+        run: .github/scripts/step.sh package cmake --build build/release --target product-package
+
+      - name: Package
+        if: always() && matrix.preset == 'release'
+        run: |
+          mkdir -p dist
+          cp build/release/package/*.* dist/ 2>/dev/null || true
+          cp preview/*.png probe/*.png probe/*.txt dist/ 2>/dev/null || true
+          cp -r logs dist/ 2>/dev/null || true
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.preset == 'release'
+        with:
+          name: macos-${{ matrix.product == 'starter' && 'plugins' || matrix.product }}
+          path: dist/
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  linux:
+    if: ${{ inputs.platforms == 'linux' || inputs.platforms == 'all' }}
+    needs: plan
+    name: Linux (${{ matrix.preset }}, ${{ matrix.product }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: ${{ fromJSON(inputs.sanitizers && '["release","debug","asan","tsan"]' || '["release","debug"]') }}
+        product: [starter]
+        include: ${{ fromJSON(needs.plan.outputs.examples) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # What new_product does for -DEXAMPLE, under the example's own name and codes.
+      - name: The example as the product
+        if: matrix.product != 'starter'
+        run: |
+          rm -rf product
+          cp -R 'examples/${{ matrix.product }}' product
+
+      - name: Product identity
+        id: product
+        run: |
+          .github/scripts/step.sh product-info bash -c '.github/scripts/product-info.sh > "$RUNNER_TEMP/product.env"'
+          cat "$RUNNER_TEMP/product.env" >> "$GITHUB_OUTPUT"
+          sed 's/^/CI_PRODUCT_/' "$RUNNER_TEMP/product.env" >> "$GITHUB_ENV"
+
+      - name: Packages
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q ninja-build libx11-dev libxcursor-dev libxrandr-dev \
+            libxext-dev libgl1-mesa-dev libgl1-mesa-dri xvfb xauth
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: .deps
+          key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('framework/cmake/Dependencies.cmake', 'framework/cmake/Pins.cmake', 'framework/cmake/patches/*') }}
+
+      - name: clap-validator
+        if: matrix.preset == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/get-clap-validator.sh linux
+
+      - name: Configure
+        run: |
+          .github/scripts/step.sh configure cmake --preset ${{ matrix.preset }} -G Ninja \
+            -DFETCHCONTENT_BASE_DIR="$FETCH_DIR" \
+            ${CLAP_VALIDATOR:+-DSUPPLE_CLAP_VALIDATOR="$CLAP_VALIDATOR"}
+
+      - name: Build
+        id: build
+        run: .github/scripts/step.sh build cmake --build --preset ${{ matrix.preset }} -- -k 0
+
+      - name: Test (under Xvfb, so x11-embedding runs)
+        run: .github/scripts/step.sh test xvfb-run -a -s "-screen 0 1920x1080x24" ctest --preset ${{ matrix.preset }} --timeout 600
+
+      - name: pluginval (VST3)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.preset == 'release' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PLUGINVAL="$(.github/scripts/get-pluginval.sh linux)"
+          .github/scripts/step.sh pluginval xvfb-run -a -s "-screen 0 1920x1080x24" "$PLUGINVAL" --strictness-level 8 \
+            --validate-in-process --timeout-ms 300000 \
+            --validate "build/release/plugins/$CI_PRODUCT_name.vst3"
+
+      - name: gui-preview (every named scenario, and 2x)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.preset == 'release' }}
+        run: |
+          mkdir -p preview
+          .github/scripts/step.sh previews xvfb-run -a -s "-screen 0 1920x1080x24" ./build/release/gui-preview --all preview
+          .github/scripts/step.sh preview-2x xvfb-run -a -s "-screen 0 1920x1080x24" ./build/release/gui-preview preview/default-2x.png --scale 2
+
+      - name: Release package
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.preset == 'release' }}
+        run: .github/scripts/step.sh package cmake --build build/release --target product-package
+
+      - name: Package
+        if: always() && matrix.preset == 'release'
+        run: |
+          mkdir -p dist
+          cp -r build/release/plugins/. dist/ 2>/dev/null || true
+          cp build/release/package/*.* dist/ 2>/dev/null || true
+          cp preview/*.png dist/ 2>/dev/null || true
+          cp -r logs dist/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.preset == 'release'
+        with:
+          name: linux-${{ matrix.product == 'starter' && 'plugins' || matrix.product }}
+          path: dist/
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  windows:
+    if: ${{ inputs.platforms == 'windows' || inputs.platforms == 'all' }}
+    needs: plan
+    name: Windows (${{ matrix.preset }}, ${{ matrix.product }})
+    runs-on: windows-2022
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [release, debug]
+        product: [starter]
+        include: ${{ fromJSON(needs.plan.outputs.examples) }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # What new_product does for -DEXAMPLE, under the example's own name and codes.
+      - name: The example as the product
+        if: matrix.product != 'starter'
+        run: |
+          rm -rf product
+          cp -R 'examples/${{ matrix.product }}' product
+
+      - name: Product identity
+        id: product
+        run: |
+          .github/scripts/step.sh product-info bash -c '.github/scripts/product-info.sh > "$RUNNER_TEMP/product.env"'
+          cat "$RUNNER_TEMP/product.env" >> "$GITHUB_OUTPUT"
+          sed 's/^/CI_PRODUCT_/' "$RUNNER_TEMP/product.env" >> "$GITHUB_ENV"
+
+      # Puts cl.exe, link.exe and the Windows SDK on PATH for Ninja.
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: .deps
+          key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('framework/cmake/Dependencies.cmake', 'framework/cmake/Pins.cmake', 'framework/cmake/patches/*') }}
+
+      - name: clap-validator
+        if: matrix.preset == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/get-clap-validator.sh windows
+
+      - name: Configure
+        run: |
+          .github/scripts/step.sh configure cmake --preset ${{ matrix.preset }} -G Ninja \
+            -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl \
+            -DFETCHCONTENT_BASE_DIR="$FETCH_DIR" \
+            ${CLAP_VALIDATOR:+-DSUPPLE_CLAP_VALIDATOR="$CLAP_VALIDATOR"}
+
+      - name: Build
+        id: build
+        run: .github/scripts/step.sh build cmake --build --preset ${{ matrix.preset }} -- -k 0
+
+      # The runner's desktop is 1024x768, smaller than an editor resized to
+      # 1320x840, which would put the probe's capture partly off screen.
+      - name: Display resolution
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        continue-on-error: true
+        shell: pwsh
+        run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
+
+      # The runner has no GPU driver; see get-mesa-windows.sh. Placed beside
+      # the build's executables, so win32-embedding and gui-preview draw.
+      - name: Software OpenGL
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/get-mesa-windows.sh build/${{ matrix.preset }}
+
+      - name: Test
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: .github/scripts/step.sh test ctest --preset ${{ matrix.preset }} --timeout 600
+
+      - name: Install into the user plug-in folders
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.preset == 'release' }}
+        run: |
+          .github/scripts/step.sh install cmake --build build/release --target product-install
+          ls -la "$LOCALAPPDATA/Programs/Common/CLAP" "$LOCALAPPDATA/Programs/Common/VST3"
+
+      - name: pluginval (VST3)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.preset == 'release' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PLUGINVAL="$(.github/scripts/get-pluginval.sh windows)"
+          .github/scripts/get-mesa-windows.sh "$(dirname "$PLUGINVAL")"
+          .github/scripts/step.sh pluginval "$PLUGINVAL" --strictness-level 8 --validate-in-process --timeout-ms 300000 \
+            --validate "build/release/plugins/VST3/$CI_PRODUCT_name.vst3"
+
+      - name: gui-preview (every named scenario, and 2x)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.preset == 'release' }}
+        run: |
+          mkdir -p preview
+          .github/scripts/step.sh previews ./build/release/gui-preview --all preview
+          .github/scripts/step.sh preview-2x ./build/release/gui-preview preview/default-2x.png --scale 2
+
+      # The release archive and the Inno Setup installer (unsigned here).
+      - name: Release package
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.preset == 'release' }}
+        run: |
+          ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          if [ ! -f "$ISCC" ]; then choco install innosetup --no-progress -y > /dev/null; fi
+          cmake -DSUPPLE_ISCC="$(cygpath -m "$ISCC")" build/release > /dev/null
+          .github/scripts/step.sh package cmake --build build/release --target product-package
+
+      - name: Package
+        if: always() && matrix.preset == 'release'
+        run: |
+          mkdir -p dist/probe
+          cp -r build/release/plugins/. dist/ 2>/dev/null || true
+          cp build/release/package/*.* dist/ 2>/dev/null || true
+          cp preview/*.png dist/ 2>/dev/null || true
+          cp build/release/win32-probe*.ppm dist/probe/ 2>/dev/null || true
+          cp -r logs dist/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.preset == 'release'
+        with:
+          name: windows-${{ matrix.product == 'starter' && 'plugins' || matrix.product }}
+          path: dist/
+          if-no-files-found: ignore

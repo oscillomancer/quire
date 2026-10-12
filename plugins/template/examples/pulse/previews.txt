@@ -1,0 +1,8 @@
+# Named editor previews: a name, then gui-preview's options (see
+# framework/tools/gui_preview.cpp). "default", the editor as it opens, is
+# always rendered too. `gui-preview --all <folder>` renders every one, and
+# ctest's `previews` renders them into build/<preset>/previews.
+wide-pan       --preset "Wide Pan"
+preset-menu    --preset "Wide Pan" --menu Presets
+second-page    --page 1
+slow-swell     --preset "Slow Swell" --hover "Depth"

@@ -51,6 +51,14 @@ class BuildFiles(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("SPDX identifier", errors)
 
+    def test_only_the_named_file_may_name_a_gpl_tag(self):
+        tag = 'string(REPLACE "SPDX-License-' + 'Identifier: MIT" "SPDX-License-' + 'Identifier: GPL-3.0-or-later")\n'
+        result, errors = self.check_fixture("plugins/template/framework/tools/new_product.cmake", tag)
+        self.assertEqual(result, 0, errors)
+        result, errors = self.check_fixture("plugins/template/framework/tools/other.cmake", tag)
+        self.assertEqual(result, 1)
+        self.assertIn("SPDX identifier", errors)
+
     def test_cmake_commands_are_case_insensitive(self):
         for command in ("fetchcontent_declare", "externalproject_add"):
             with self.subTest(command=command):

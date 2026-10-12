@@ -1,0 +1,41 @@
+diff --git a/src/wrapasvst3.cpp b/src/wrapasvst3.cpp
+index fc1ad0a..e113d81 100644
+--- a/src/wrapasvst3.cpp
++++ b/src/wrapasvst3.cpp
+@@ -1366,8 +1366,9 @@ void ClapAsVst3::latency_changed()
+ 
+ void ClapAsVst3::tail_changed()
+ {
+-  // TODO: this could also be kIoChanged, we have to check this
+-  this->componentHandler->restartComponent(Vst::RestartFlags::kLatencyChanged);
++  // CLAP calls this on the audio thread; IComponentHandler belongs to the UI
++  // thread, and the host may not have given us one. Tell it from onIdle.
++  _requestTailChanged = true;
+ }
+ 
+ void ClapAsVst3::mark_dirty()
+@@ -1540,6 +1541,12 @@ void ClapAsVst3::onIdle()
+     _plugin->_plugin->on_main_thread(_plugin->_plugin);
+   }
+ 
++  if (_requestTailChanged.exchange(false))
++  {
++    // TODO: this could also be kIoChanged, we have to check this
++    if (componentHandler) componentHandler->restartComponent(Vst::RestartFlags::kLatencyChanged);
++  }
++
+   if (_requestRestart)
+   {
+     _requestRestart = false;
+diff --git a/src/wrapasvst3.h b/src/wrapasvst3.h
+index c2d4136..0708b10 100644
+--- a/src/wrapasvst3.h
++++ b/src/wrapasvst3.h
+@@ -412,6 +412,7 @@ class ClapAsVst3 : public Steinberg::Vst::SingleComponentEffect,
+ 
+   std::atomic_bool _requestUICallback = false;
+   std::atomic_bool _requestRestart = false;
++  std::atomic_bool _requestTailChanged = false;
+   bool _missedLatencyRequest = false;
+ 
+   std::thread::id _main_thread_id{};

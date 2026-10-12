@@ -1,0 +1,49 @@
+--- a/src/mac.m
++++ b/src/mac.m
+@@ -2095,6 +2095,24 @@
+   return PUGL_SUCCESS;
+ }
+ 
++PuglStatus
++puglRejectOffer(PuglView* const                 view,
++                const PuglDataOfferEvent* const offer,
++                const int                       PUGL_UNUSED(regionX),
++                const int                       PUGL_UNUSED(regionY),
++                const unsigned                  PUGL_UNUSED(regionWidth),
++                const unsigned                  PUGL_UNUSED(regionHeight))
++{
++  // Forget an earlier acceptance in this drag, so leaving a target ends it.
++  if (offer->clipboard == PUGL_CLIPBOARD_DRAG) {
++    PuglWrapperView* const wrapper = view->impl->wrapperView;
++    wrapper->dragOperation         = NSDragOperationNone;
++    wrapper->acceptedDragTypeIndex = UINT32_MAX;
++  }
++
++  return PUGL_SUCCESS;
++}
++
+ const void*
+ puglGetClipboard(PuglView* const     view,
+                  const PuglClipboard clipboard,
+--- a/src/win.c
++++ b/src/win.c
+@@ -1461,6 +1461,19 @@
+   return puglDispatchEvent(view, &dataEvent);
+ }
+ 
++PuglStatus
++puglRejectOffer(PuglView* const                 PUGL_UNUSED(view),
++                const PuglDataOfferEvent* const PUGL_UNUSED(offer),
++                const int                       PUGL_UNUSED(regionX),
++                const int                       PUGL_UNUSED(regionY),
++                const unsigned                  PUGL_UNUSED(regionWidth),
++                const unsigned                  PUGL_UNUSED(regionHeight))
++{
++  // Files arrive whole with WM_DROPFILES, and a paste has nothing to tell
++  // its source, so there is nothing to refuse.
++  return PUGL_SUCCESS;
++}
++
+ const void*
+ puglGetClipboard(PuglView* const     view,
+                  const PuglClipboard clipboard,
