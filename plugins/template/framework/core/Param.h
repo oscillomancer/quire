@@ -90,6 +90,7 @@ inline constexpr uint32_t kPlainHost = 1u << 5;    // tapered, but the host valu
 inline constexpr uint32_t kOutput = 1u << 6;       // read-only, reported by the processor, never saved
 inline constexpr uint32_t kOffAtMin = 1u << 7;     // the minimum means off: "-inf dB", "Off"
 inline constexpr uint32_t kPolyMod = 1u << 8;      // accepts CLAP modulation per note, too
+inline constexpr uint32_t kNormalHost = 1u << 9;   // continuous: the host value is the 0..1 position, linear too
 }  // namespace pflag
 
 inline constexpr const char* kOffOnLabels[] = {"Off", "On"};
@@ -149,6 +150,11 @@ struct ParamDef {
     constexpr ParamDef restartOnChange() const { return with(pflag::kRestart); }
     // See the top of this file: only for sessions saved before the move.
     constexpr ParamDef plainHostValue() const { return with(pflag::kPlainHost); }
+    // A continuous parameter's host value is its 0..1 position along the
+    // taper even when the taper is linear: every continuous parameter then
+    // reaches hosts the same way, as hosts that keep normalized values
+    // expect. A tapered one is so already.
+    constexpr ParamDef normalizedHostValue() const { return with(pflag::kNormalHost); }
     constexpr ParamDef notAutomatable() const { return without(pflag::kAutomatable | pflag::kModulatable | pflag::kPolyMod); }
     // Keep a removed parameter's ID reserved and loadable, invisible to hosts.
     constexpr ParamDef retired() const { return with(pflag::kHidden).notAutomatable(); }
@@ -173,7 +179,10 @@ struct ParamDef {
     constexpr bool stepped() const { return kind != ParamKind::Continuous; }
     constexpr bool tapered() const { return kind == ParamKind::Continuous && taper != Taper::Linear; }
     // The host value is the taper position (0..1) rather than the plain value.
-    constexpr bool hostTapered() const { return tapered() && !is(pflag::kPlainHost); }
+    constexpr bool hostTapered() const {
+        return kind == ParamKind::Continuous && !is(pflag::kPlainHost) &&
+               (taper != Taper::Linear || is(pflag::kNormalHost));
+    }
     constexpr bool bipolar() const { return min < 0.0 && max > 0.0; }
     constexpr double hostMin() const { return hostTapered() ? 0.0 : min; }
     constexpr double hostMax() const { return hostTapered() ? 1.0 : max; }

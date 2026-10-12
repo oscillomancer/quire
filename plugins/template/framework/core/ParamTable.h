@@ -131,6 +131,7 @@ constexpr bool modifiersValid() {
         if (p.is(pflag::kOffAtMin) && p.kind != ParamKind::Continuous && p.kind != ParamKind::Integer) return false;
         if (p.smoothing < 0.0 || (p.smoothing > 0.0 && p.kind != ParamKind::Continuous)) return false;
         if (p.unit == Unit::Note && p.kind == ParamKind::Choice) return false;
+        if (p.is(pflag::kNormalHost) && (p.kind != ParamKind::Continuous || p.is(pflag::kPlainHost))) return false;
     }
     return true;
 }
@@ -151,7 +152,8 @@ static_assert(detail::outputsValid(),
               "an output parameter cannot be the bypass, restart, smoothed or modulated per note");
 static_assert(detail::modifiersValid(),
               "offAtMinimum() and smoothed() are for continuous parameters (offAtMinimum also integers), "
-              "and a smoothing time cannot be negative");
+              "a smoothing time cannot be negative, and normalizedHostValue() is for a continuous "
+              "parameter without plainHostValue()");
 
 inline constexpr uint32_t kIdLimit = detail::idLimit();
 static_assert(kIdLimit <= 65536, "parameter IDs above 65535: use a denser ID scheme");

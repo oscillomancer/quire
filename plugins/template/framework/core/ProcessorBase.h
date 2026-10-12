@@ -56,14 +56,18 @@
 #include <string_view>
 #include <vector>
 
+#include "core/Definition.h"
 #include "core/Files.h"
 #include "core/Layout.h"
 #include "core/Notes.h"
-#include "core/ParamTable.h"
 #include "core/ParamValues.h"
 #include "core/Tuning.h"
 #include "dsp/AudioFile.h"
 #include "ProductInfo.h"
+#if !SUPPLE_PRODUCT_RUNTIME
+// A product with tables reads them as constants too (params::find, ...).
+#include "core/ParamTable.h"
+#endif
 
 namespace supple {
 
@@ -134,17 +138,16 @@ struct Block {
     }
 
     // The engine's.
+    const ParamTable* params = nullptr;
     const double* const* glides = nullptr;
     const bool* moving = nullptr;
 
   private:
-    static size_t slot(uint32_t id) {
-        const int i = params::indexOf(id);
-        assert(i >= 0 && params::kSmoothedSlot[static_cast<size_t>(i)] >= 0 &&
-               "Block::smoothed reads a parameter marked smoothed()");
-        return i >= 0 && params::kSmoothedSlot[static_cast<size_t>(i)] >= 0
-                   ? static_cast<size_t>(params::kSmoothedSlot[static_cast<size_t>(i)])
-                   : 0;
+    size_t slot(uint32_t id) const {
+        const int i = params->indexOf(id);
+        const int k = i >= 0 ? params->smoothedSlot(static_cast<size_t>(i)) : -1;
+        assert(k >= 0 && "Block::smoothed reads a parameter marked smoothed()");
+        return k >= 0 ? static_cast<size_t>(k) : 0;
     }
 };
 
@@ -367,12 +370,15 @@ class ProcessorBase {
     // process(). The framework passes it to the host (about 30 times a
     // second, when it changed) and to the editor.
     void setOutput(uint32_t id, double plain) {
-        const int i = params::indexOf(id);
-        assert(i >= 0 && params::at(static_cast<size_t>(i)).isOutput() && "setOutput needs an output() parameter");
+        const int i = outputTable_ ? outputTable_->indexOf(id) : -1;
+        assert(i >= 0 && outputTable_->at(static_cast<size_t>(i)).isOutput() && "setOutput needs an output() parameter");
         if (outputs_ && i >= 0 && std::isfinite(plain)) outputs_[i] = plain;
     }
     // The engine's; a processor never calls it.
-    void bindOutputs(double* sink) { outputs_ = sink; }
+    void bindOutputs(double* sink, const ParamTable* table) {
+        outputs_ = sink;
+        outputTable_ = table;
+    }
 
     // A product with note input calls this when it is done with a note it was
     // given -- a voice released to silence, choked, stolen, reset; a note
@@ -382,15 +388,18 @@ class ProcessorBase {
     // PRODUCT_NOTE_OUTPUT: a note on, off or choke to the host's next plugin,
     // and a MIDI message, at `frame` as above.
     void sendNote(const NoteEvent& note, int frame = 0) {
-        assert(product::info::kNoteOutput && "sendNote needs PRODUCT_NOTE_OUTPUT");
+        assert(sendsNotes_ && "sendNote needs PRODUCT_NOTE_OUTPUT");
         emit(NoteOutput::Kind::Note, note, {}, frame);
     }
     void sendMidi(const MidiMessage& message, int frame = 0) {
-        assert(product::info::kNoteOutput && "sendMidi needs PRODUCT_NOTE_OUTPUT");
+        assert(sendsNotes_ && "sendMidi needs PRODUCT_NOTE_OUTPUT");
         emit(NoteOutput::Kind::Midi, {}, message, frame);
     }
     // The engine's; a processor never calls it.
-    void bindNoteOutput(NoteOutput* sink) { noteOutput_ = sink; }
+    void bindNoteOutput(NoteOutput* sink, bool sendsNotes) {
+        noteOutput_ = sink;
+        sendsNotes_ = sendsNotes;
+    }
     template <class T>
     void captureTelemetry(T&) {}
 
@@ -413,7 +422,9 @@ class ProcessorBase {
     }
 
     NoteOutput* noteOutput_ = nullptr;
+    bool sendsNotes_ = false;
     double* outputs_ = nullptr;
+    const ParamTable* outputTable_ = nullptr;
     bool* namesChanged_ = nullptr;
     TuningSource* tuning_ = nullptr;
 };

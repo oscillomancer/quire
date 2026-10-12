@@ -4,6 +4,73 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.16.0
+
+Run-time products: a plugin the framework learns about when it runs, not
+when it compiles. What a product must do: nothing. Its tables, checks and
+code are as they were; framework code it reads changed underneath.
+
+- **Definitions.** A plugin is now a `Definition` (`core/Definition.h`): its
+  identity and buses (`PluginInfo`), parameters (`ParamTable`), properties
+  (`PropertyList`) and factory presets. The engine and its stores, state,
+  presets, the CLAP plugin and the editor read the Definition an instance
+  was made with. A product with tables makes its one Definition from
+  `product.cmake`, `Params.h`, `Properties.h` and `Presets.h`
+  (`core/ProductDefinition.cpp`), and every compile-time check stays.
+  Classes that took the product's tables implicitly (`ParamValues`,
+  `ParamStore`, `PropertyStore`, `state::Snapshot`, `EditBridge`,
+  `BasicEngine`, `PresetLibrary`) take a Definition or its tables, and keep
+  default constructors that use the product's own. `FileSlots<P>` and
+  `PropertyStore` lost their table template parameter. `EditorHost` has
+  `pluginDefinition()`; `EditorBase` has `definition()` and `paramTable()`.
+- **Catalogs.** The CLAP factory lists a `Catalog` (`core/Catalog.h`): a
+  product with tables, its one plugin; a run-time product, whatever
+  `product::makeCatalog()` returns, one plugin or many. Preset discovery
+  lists one provider per plugin with presets.
+- **`PRODUCT_RUNTIME ON`.** No `Params.h`: the product's catalog makes each
+  plugin's Definition, and its processor is made from it (a constructor
+  taking `const supple::DefinitionPtr&`). Its `product.cmake` kind and
+  layouts describe the plugin host-smoke tests. CLAP and VST3 only (an AU
+  component is one plugin). The tests and tools that read the tables as
+  constants are not built; the product's own tests, host-smoke and the
+  validators cover it. The `stages` example.
+- **Layers (`PRODUCT_LAYER ON`).** `product::makeLayer()` gives every
+  instance a `Layer` (`plugin/Layer.h`): CLAP extensions of its own, a state
+  chunk saved after the framework's that can rewrite or refuse a state
+  before it is applied, a main-thread tick and callbacks, and
+  `Instance::redefine()`, which changes what an instance is -- its
+  parameters, buses, name -- keeping its ID: the host restarts it, the swap
+  happens at the deactivation with `CLAP_PARAM_RESCAN_ALL` (and an
+  audio-ports rescan when the buses changed), the state carries over, and
+  an open editor is rebuilt. Layer sources go in `PRODUCT_LAYER_SOURCES`.
+- **`.normalizedHostValue()`**: a continuous parameter's host value is its
+  0..1 position even when its taper is linear, for hosts that keep every
+  continuous parameter normalized.
+- `state::appendChunk` and `state::findChunk` for chunks beyond the
+  framework's; `state::maxSavedBytes(definition)`.
+- A plugin built without an editor (the tsan preset) compiles again: the
+  context menu's parameter check was inside the editor's block.
+
+## 1.15.4
+
+Two AU threading bugs in clap-wrapper, found with a new test that hosts the
+AU in process. What a product must do: nothing.
+
+- `au-parameter-race` (macOS): the AU registered from its own bundle,
+  rendering on one thread, automated from two more, while state loads (each
+  a parameter rescan) run on the main thread. The CI workflow now runs the
+  tsan preset on macOS too, where it is a race check.
+- `SetParameter`, which hosts call from any thread and several at once,
+  appended to the event list the audio thread was rendering from; under load
+  that corrupted it (pluginval's parameter thread safety test crashed on it
+  once). A patch (`auv2-parameter-queue`) passes changes through a fixed
+  queue the next render takes.
+- A state load rescans the parameters, and the rescan rewrote what
+  `SetParameter` reads unlocked: each parameter's info (now only when it
+  changed, `auv2-rescan-race`) and the bypass parameter's ID, cleared and
+  set again (now atomic and never cleared, in `auv2-bypass-sync`).
+  `GetParameterList` takes the parameter tree's lock.
+
 ## 1.15.3
 
 What a product must do: nothing.

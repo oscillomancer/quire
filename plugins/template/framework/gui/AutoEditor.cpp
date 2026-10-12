@@ -18,11 +18,9 @@
 #include <string>
 #include <vector>
 
-#include "core/ParamTable.h"
-#include "core/PropertyTable.h"
+#include "core/Definition.h"
 #include "gui/EditorBase.h"
 #include "gui/Widgets.h"
-#include "ProductInfo.h"
 
 // The product's palette, if it has one: angle brackets, so the search is the
 // include path (where product/ is) and not this directory's own Theme.h.
@@ -103,7 +101,9 @@ struct Plan {
     float width = 0.0f, height = 0.0f;
 };
 
-Plan plan() {
+Plan plan(const Definition& definition) {
+    const ParamTable& params = definition.params();
+    const PropertyList& properties = definition.properties();
     Plan out;
     auto groupNamed = [&](const std::string& title) -> Group& {
         for (Group& g : out.groups)
@@ -111,22 +111,22 @@ Plan plan() {
         out.groups.push_back({title, {}, false, {}});
         return out.groups.back();
     };
-    for (size_t i = 0; i < params::kCount; ++i) {
-        const ParamDef& p = params::at(i);
+    for (size_t i = 0; i < params.count(); ++i) {
+        const ParamDef& p = params.at(i);
         if (p.is(pflag::kHidden) || p.is(pflag::kBypass)) continue;
         groupNamed(p.group ? p.group : "").cells.push_back(cellFor(p));
     }
-    for (size_t i = 0; i < properties::kCount; ++i) {
+    for (size_t i = 0; i < properties.count(); ++i) {
         Cell c;
-        const bool file = properties::at(i).isFile();
+        const bool file = properties.at(i).isFile();
         c.widget = file ? Widget::File : Widget::TextField;
-        c.id = properties::at(i).id;
+        c.id = properties.at(i).id;
         c.w = file ? 300.0f : 200.0f;
         c.h = 26.0f + kCaption;
         c.caption = true;
         groupNamed("").cells.push_back(c);
     }
-    if (product::info::kAudioOutput) out.groups.push_back({"Level", {}, true, {}});
+    if (definition.info().audioOutput()) out.groups.push_back({"Level", {}, true, {}});
 
     // Inside each panel: rows of cells, as wide as kMaxInner allows.
     for (Group& g : out.groups) {
@@ -192,7 +192,7 @@ Plan plan() {
         widest = meters->panel.right();
         bottom = std::max(bottom, meters->panel.bottom());
     }
-    const float header = (product::info::kPresets ? 296.0f + 24.0f : 0.0f) + 112.0f + 300.0f;
+    const float header = (definition.info().presets ? 296.0f + 24.0f : 0.0f) + 112.0f + 300.0f;
     out.width = std::max({widest + kMargin, header, 480.0f});
     out.height = bottom + kMargin;
     return out;
@@ -203,21 +203,22 @@ class AutoEditor : public EditorBase {
     AutoEditor(EditorHost& host, Plan layout)
         : EditorBase(host, autoTheme(), layout.width, layout.height), plan_(std::move(layout)) {
         float right = width() - kMargin;
-        if (params::kBypassIndex >= 0) {
-            ui().toggle(params::at(static_cast<size_t>(params::kBypassIndex)).id, {right - 112.0f, 16.0f, 112.0f, 28.0f});
+        const ParamTable& params = paramTable();
+        if (params.bypassIndex() >= 0) {
+            ui().toggle(params.at(static_cast<size_t>(params.bypassIndex())).id, {right - 112.0f, 16.0f, 112.0f, 28.0f});
             right -= 112.0f + 16.0f;
         }
-        if (product::info::kPresets) ui().presetBar({right - 296.0f, 16.0f, 296.0f, 28.0f});
+        if (definition().info().presets) ui().presetBar({right - 296.0f, 16.0f, 296.0f, 28.0f});
         for (Group& g : plan_.groups) {
             const Rect body = inner(g);
             for (Cell& c : g.cells) {
                 Rect r = c.at.offset(body.x, body.y);
                 if (c.caption) r.cutTop(kCaption);
                 Control& control = ui().add(c.id, c.widget, r);
-                if (c.widget == Widget::TextField) control.label = properties::at(static_cast<size_t>(properties::indexOf(c.id))).name;
+                if (c.widget == Widget::TextField) control.label = propertyName(c.id);
             }
         }
-        usePeakMeters(product::info::kAudioOutput);
+        usePeakMeters(definition().info().audioOutput());
     }
 
     void paint(NVGcontext* vg) override {
@@ -231,7 +232,7 @@ class AutoEditor : public EditorBase {
         nvgFillPaint(vg, nvgLinearGradient(vg, 0, 0, 0, kHeader, rgb(t.surface), rgb(t.ground)));
         nvgFill(vg);
         widgets::hairline(vg, 0, kHeader - 0.5f, width(), kHeader - 0.5f, rgb(t.line));
-        std::string name = product::info::kName;
+        std::string name = definition().info().name;
         for (char& ch : name) ch = (ch >= 'a' && ch <= 'z') ? static_cast<char>(ch - 'a' + 'A') : ch;
         nvgSave(vg);
         nvgFontFace(vg, font::kDisplay);
@@ -241,8 +242,9 @@ class AutoEditor : public EditorBase {
         nvgFillColor(vg, rgb(t.text));
         nvgText(vg, kMargin + 2.0f, 27.0f, name.c_str(), nullptr);
         nvgRestore(vg);
-        char version[48];
-        std::snprintf(version, sizeof(version), "%s  \xC2\xB7  v%s", product::info::kVendor, product::info::kVersion);
+        char version[96];
+        std::snprintf(version, sizeof(version), "%s  \xC2\xB7  v%s", definition().info().vendor.c_str(),
+                      definition().info().version.c_str());
         widgets::caption(vg, kMargin + 3.0f, 47.0f, version, rgb(t.textFaint), widgets::Align::Left, 9.0f);
 
         for (const Group& g : plan_.groups) {
@@ -261,8 +263,8 @@ class AutoEditor : public EditorBase {
                 if (!c.caption) continue;
                 const Rect r = c.at.offset(body.x, body.y);
                 const char* text = c.widget == Widget::TextField || c.widget == Widget::File
-                                       ? properties::at(static_cast<size_t>(properties::indexOf(c.id))).name
-                                       : params::find(c.id)->displayLabel();
+                                       ? propertyName(c.id)
+                                       : paramTable().find(c.id)->displayLabel();
                 widgets::caption(vg, r.x + 1.0f, r.y + 6.0f, text, rgb(t.textMuted), widgets::Align::Left, 9.5f);
             }
         }
@@ -270,6 +272,12 @@ class AutoEditor : public EditorBase {
     }
 
   private:
+    const char* propertyName(uint32_t id) const {
+        const PropertyList& properties = definition().properties();
+        const int k = properties.indexOf(id);
+        return k >= 0 ? properties.at(static_cast<size_t>(k)).name : "";
+    }
+
     static Rect inner(const Group& g) {
         Rect body = g.panel.inset(kPad);
         if (!g.title.empty()) body.cutTop(kTitle);
@@ -284,6 +292,6 @@ class AutoEditor : public EditorBase {
 
 namespace product {
 std::unique_ptr<supple::gui::EditorBase> createEditor(supple::gui::EditorHost& host) {
-    return std::make_unique<supple::gui::AutoEditor>(host, supple::gui::plan());
+    return std::make_unique<supple::gui::AutoEditor>(host, supple::gui::plan(host.pluginDefinition()));
 }
 }  // namespace product

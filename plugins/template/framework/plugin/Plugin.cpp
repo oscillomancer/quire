@@ -39,18 +39,21 @@
 #include <libMTSClient.h>
 #endif
 
+#include "core/Catalog.h"
+#include "core/Definition.h"
 #include "core/Engine.h"
-#include "core/ParamTable.h"
-#include "core/Preset.h"
 #include "core/PresetLibrary.h"
-#include "core/PropertyTable.h"
 #include "core/Realtime.h"
 #include "core/StateFormat.h"
 #include "plugin/EditBridge.h"
 #include "plugin/Entry.h"
+#include "plugin/Layer.h"
 #include "plugin/PresetDiscovery.h"
 #include "plugin/TestHooks.h"
 #include "ProductInfo.h"
+#if !SUPPLE_PRODUCT_RUNTIME
+#include "core/ParamTable.h"
+#endif
 
 #if SUPPLE_WITH_GUI
 #include "gui/EditorHost.h"
@@ -60,10 +63,10 @@
 namespace supple::plugin {
 namespace {
 
-namespace info = product::info;
+using Processor = product::Processor;
 
-constexpr uint32_t kStateMagic = state::fourcc(info::kStateTag);
-constexpr uint32_t kTimerMs = 16;  // ~60 Hz editor ticks
+constexpr uint32_t kTimerMs = 16;       // ~60 Hz editor ticks
+constexpr uint32_t kLayerTimerMs = 33;  // ~30 Hz layer ticks
 
 #ifdef NDEBUG
 constexpr bool kDebugBuild = false;
@@ -71,22 +74,20 @@ constexpr bool kDebugBuild = false;
 constexpr bool kDebugBuild = true;
 #endif
 
-// What the product asked for beyond the basics.
-constexpr bool kRender = product::Processor::kOfflineMode;
-constexpr bool kNoteNames = info::kNoteInput && NamesNotes<product::Processor>;
-static_assert(info::kNoteInput || !NamesNotes<product::Processor>,
-              "noteNames() names keys for notes the plugin takes: it needs note input");
-constexpr bool kTuning = info::kTuning;
-static_assert(!kTuning || info::kNoteInput, "PRODUCT_TUNING needs note input");
+// What the processor asked for beyond the basics.
+constexpr bool kRender = Processor::kOfflineMode;
 
-const clap_plugin_descriptor_t kDescriptor = {
-    CLAP_VERSION_INIT, info::kId, info::kName, info::kVendor, info::kUrl, "", "",
-    info::kVersion,    info::kDescription, info::kFeatures};
+#if !SUPPLE_PRODUCT_RUNTIME
+// A product with tables is checked as it compiles; a run-time product's
+// definitions by Definition::problems() as they are made.
+static_assert(product::info::kNoteInput || !NamesNotes<Processor>,
+              "noteNames() names keys for notes the plugin takes: it needs note input");
+static_assert(!product::info::kTuning || product::info::kNoteInput, "PRODUCT_TUNING needs note input");
+static_assert(!params::kAnyPolyMod || product::info::kNoteInput,
+              "polyModulatable() needs note input: an instrument, a note effect, or PRODUCT_NOTE_INPUT ON");
+#endif
 
 // --- events ---------------------------------------------------------------------
-
-static_assert(!params::kAnyPolyMod || info::kNoteInput,
-              "polyModulatable() needs note input: an instrument, a note effect, or PRODUCT_NOTE_INPUT ON");
 
 // Feeds the engine CLAP's input events in order, translated and filtered.
 // Parameter values are taken as global: nothing here declares per-note
@@ -98,9 +99,10 @@ static_assert(!params::kAnyPolyMod || info::kNoteInput,
 class ClapEvents {
   public:
     // `tuningSpace`: where the host puts CLAP tuning events, for a product
-    // with PRODUCT_TUNING; UINT16_MAX for none.
-    explicit ClapEvents(const clap_input_events_t* in, uint16_t tuningSpace = UINT16_MAX)
-        : in_(in), count_(in ? in->size(in) : 0), tuningSpace_(tuningSpace) {}
+    // with PRODUCT_TUNING; UINT16_MAX for none. `notes`: the plugin takes
+    // notes and MIDI.
+    ClapEvents(const ParamTable& params, bool notes, const clap_input_events_t* in, uint16_t tuningSpace = UINT16_MAX)
+        : params_(params), notes_(notes), in_(in), count_(in ? in->size(in) : 0), tuningSpace_(tuningSpace) {}
 
     bool next(EngineEvent& e) {
         while (index_ < count_) {
@@ -124,8 +126,8 @@ class ClapEvents {
                 case CLAP_EVENT_PARAM_VALUE: {
                     if (h->size < sizeof(clap_event_param_value_t)) continue;
                     const auto* v = reinterpret_cast<const clap_event_param_value_t*>(h);
-                    e.index = params::indexOf(v->param_id);
-                    if (e.index < 0 || params::at(static_cast<size_t>(e.index)).isOutput()) continue;
+                    e.index = params_.indexOf(v->param_id);
+                    if (e.index < 0 || params_.at(static_cast<size_t>(e.index)).isOutput()) continue;
                     e.type = EngineEvent::Type::Value;
                     e.value = v->value;
                     return true;
@@ -133,21 +135,21 @@ class ClapEvents {
                 case CLAP_EVENT_PARAM_MOD: {
                     if (h->size < sizeof(clap_event_param_mod_t)) continue;
                     const auto* m = reinterpret_cast<const clap_event_param_mod_t*>(h);
-                    e.index = params::indexOf(m->param_id);
-                    if (e.index < 0 || params::at(static_cast<size_t>(e.index)).isOutput()) continue;
+                    e.index = params_.indexOf(m->param_id);
+                    if (e.index < 0 || params_.at(static_cast<size_t>(e.index)).isOutput()) continue;
                     e.value = m->amount;
                     if (m->note_id == -1 && m->port_index == -1 && m->channel == -1 && m->key == -1) {
                         e.type = EngineEvent::Type::Modulation;
                         return true;
                     }
-                    if (!params::at(static_cast<size_t>(e.index)).is(pflag::kPolyMod)) continue;
+                    if (!params_.at(static_cast<size_t>(e.index)).is(pflag::kPolyMod)) continue;
                     e.type = EngineEvent::Type::NoteModulation;
                     e.address = NoteAddress{m->note_id, m->port_index, m->channel, m->key};
                     return true;
                 }
                 case CLAP_EVENT_NOTE_EXPRESSION: {
                     if (h->size < sizeof(clap_event_note_expression_t)) continue;
-                    if (!info::kNoteInput) continue;
+                    if (!notes_) continue;
                     const auto* x = reinterpret_cast<const clap_event_note_expression_t*>(h);
                     if (x->expression_id < CLAP_NOTE_EXPRESSION_VOLUME || x->expression_id > CLAP_NOTE_EXPRESSION_PRESSURE)
                         continue;
@@ -161,7 +163,7 @@ class ClapEvents {
                 case CLAP_EVENT_NOTE_OFF:
                 case CLAP_EVENT_NOTE_CHOKE: {
                     if (h->size < sizeof(clap_event_note_t)) continue;
-                    if (!info::kNoteInput) continue;
+                    if (!notes_) continue;
                     const auto* n = reinterpret_cast<const clap_event_note_t*>(h);
                     e.type = EngineEvent::Type::Note;
                     e.note.type = h->type == CLAP_EVENT_NOTE_ON    ? NoteEvent::Type::On
@@ -176,7 +178,7 @@ class ClapEvents {
                 }
                 case CLAP_EVENT_MIDI: {
                     if (h->size < sizeof(clap_event_midi_t)) continue;
-                    if (!info::kNoteInput) continue;
+                    if (!notes_) continue;
                     const auto* m = reinterpret_cast<const clap_event_midi_t*>(h);
                     const uint8_t status = m->data[0] & 0xF0;
                     if (status >= 0xA0 && status <= 0xE0) {
@@ -202,6 +204,8 @@ class ClapEvents {
     }
 
   private:
+    const ParamTable& params_;
+    bool notes_;
     const clap_input_events_t* in_;
     uint32_t count_;
     uint32_t index_ = 0;
@@ -301,7 +305,7 @@ class PluginTuning final : public TuningSource {
 
 // --- the plugin -------------------------------------------------------------------
 
-struct Plugin : StateAccess
+struct Plugin final : StateAccess, Instance
 #if SUPPLE_WITH_GUI
     , gui::EditorHost
 #endif
@@ -321,14 +325,19 @@ struct Plugin : StateAccess
     const clap_host_context_menu_t* hostContextMenu = nullptr;
     const clap_host_track_info_t* hostTrackInfo = nullptr;
     const clap_host_note_name_t* hostNoteName = nullptr;
+    const clap_host_audio_ports_t* hostAudioPorts = nullptr;
+    const clap_host_note_ports_t* hostNotePorts = nullptr;
     uint16_t tuningSpace = UINT16_MAX;  // where the host's tuning events are, if anywhere
     // The host creates the plugin on its main thread; without thread-check,
     // that is how a debug build knows it.
     std::thread::id mainThread = std::this_thread::get_id();
 
-    Engine engine;
-    EditBridge edits;
-    int channels = info::kChannelLayouts[0];
+    // What this instance is. Everything below follows from it.
+    DefinitionPtr definition;
+    uint32_t magic;  // the state tag
+    std::unique_ptr<Engine> engine;
+    std::unique_ptr<EditBridge> edits;
+    int channels;  // the main bus width: the selected layout's
     bool active = false;
     int reportedLatency = -1;         // main thread: what the host was last told
     bool restartOutstanding = false;  // main thread
@@ -337,8 +346,7 @@ struct Plugin : StateAccess
     // get_value reports the same, so the host's two views never disagree.
     // (The editor reads the store, which follows every block.) Written on
     // the audio thread.
-    static constexpr size_t kOutputSlots = params::kOutputCount > 0 ? params::kOutputCount : 1;
-    std::atomic<double> heardOutputs[kOutputSlots];
+    std::unique_ptr<std::atomic<double>[]> heardOutputs;  // by place in table().outputs()
     bool resendOutputs = true;  // audio thread: after activation, tell the host every value once
 
     // The preset library (main thread), for a product with presets.
@@ -346,9 +354,66 @@ struct Plugin : StateAccess
     PluginTuning tuning;  // PRODUCT_TUNING
     NoteNames noteNameList;  // main thread: the note names as the host last read them
 
-    Plugin() {
-        for (size_t k = 0; k < params::kOutputCount; ++k)
-            heardOutputs[k].store(hostDefault(params::at(params::kOutputIndices[k])), std::memory_order_relaxed);
+    // The product's layer (plugin/Layer.h), if it has one, and its timer.
+    std::unique_ptr<Layer> layer;
+    clap_id layerTimerId = CLAP_INVALID_ID;
+    std::atomic<bool> layerCallback{false};
+    // What redefine() asked for, applied at the next deactivation.
+    DefinitionPtr pendingDefinition;
+    bool applyRestart = false;  // main thread: an apply changed a restart parameter
+
+    explicit Plugin(DefinitionPtr d)
+        : definition(std::move(d)),
+          magic(state::fourcc(definition->info().stateTag.c_str())),
+          engine(std::make_unique<Engine>(definition)),
+          edits(std::make_unique<EditBridge>(definition->params().count())),
+          channels(definition->info().layouts.empty() ? 0 : definition->info().layouts[0].channels),
+          heardOutputs(std::make_unique<std::atomic<double>[]>(std::max<size_t>(1, table().outputs().size()))) {
+        for (size_t k = 0; k < table().outputs().size(); ++k)
+            heardOutputs[k].store(hostDefault(table().at(table().outputs()[k])), std::memory_order_relaxed);
+    }
+
+    const PluginInfo& info() const { return definition->info(); }
+    const ParamTable& table() const { return definition->params(); }
+    const PropertyList& propertyList() const { return definition->properties(); }
+    // Note names: a processor that has them, for notes the plugin takes.
+    bool namesNotes() const { return NamesNotes<Processor> && info().takesNotes(); }
+    // Voices, for hosts that plan around them (CLAP voice-info).
+    int voiceCapacity() const { return info().voices > 0 ? info().voices : Processor::kVoices; }
+    // --- Instance: what the layer sees (main thread) --------------------------------
+
+    const clap_plugin_t* clapPlugin() const override { return &clap; }
+    const clap_host_t* clapHost() const override { return host; }
+    const void* hostExtension(const char* id) const override {
+        return host && host->get_extension ? host->get_extension(host, id) : nullptr;
+    }
+    const DefinitionPtr& currentDefinition() const override { return definition; }
+    bool isActive() const override { return active; }
+    state::Snapshot snapshot() const override {
+        engine->properties().collect();
+        state::Snapshot s(*definition);
+        for (size_t i = 0; i < table().count(); ++i) s.host[i] = engine->store().get(i);
+        for (size_t i = 0; i < propertyList().count(); ++i) {
+            s.property[i] = engine->properties().get(i);
+            s.hasProperty[i] = true;
+        }
+        return s;
+    }
+    void* processor() override { return &engine->processor(); }
+    void requestLayerCallback() override {
+        layerCallback.store(true, std::memory_order_release);
+        requestCallback();
+    }
+    void log(clap_log_severity severity, std::string_view text) const override {
+        const std::string line(text);
+        log(severity, line.c_str());
+    }
+
+    // The table index of a parameter the host and the editor may set: an
+    // output is read-only. -1 otherwise.
+    int editable(uint32_t id) const {
+        const int i = table().indexOf(id);
+        return i >= 0 && !table().at(static_cast<size_t>(i)).isOutput() ? i : -1;
     }
 
     // --- diagnostics ---------------------------------------------------------------
@@ -358,7 +423,7 @@ struct Plugin : StateAccess
         if (hostLog && hostLog->log)
             hostLog->log(host, severity, text);
         else if (kDebugBuild)
-            std::fprintf(stderr, "%s: %s\n", info::kName, text);
+            std::fprintf(stderr, "%s: %s\n", info().name.c_str(), text);
     }
 
     bool onMainThread() const {
@@ -423,35 +488,33 @@ struct Plugin : StateAccess
     // One complete edit of parameter i, as a menu item asks for: the host
     // hears a gesture around it, as from the editor.
     void editWhole(size_t i, double hostValue) {
-        if (params::at(i).isOutput()) return;
-        edits.begin(i);
-        engine.store().set(i, hostValue);
-        edits.value(i);
-        edits.end(i);
-        if (params::at(i).is(pflag::kRestart)) requestRestart();
+        if (table().at(i).isOutput()) return;
+        edits->begin(i);
+        engine->store().set(i, hostValue);
+        edits->value(i);
+        edits->end(i);
+        if (table().at(i).is(pflag::kRestart)) requestRestart();
         requestFlush();
         checkNoteNames();
     }
 
     NoteNames currentNoteNames() const {
         NoteNames names;
-        if constexpr (kNoteNames) {
-            ParamValues values;
-            for (size_t i = 0; i < params::kCount; ++i)
-                values.setIndex(i, toPlain(params::at(i), engine.store().get(i)));
-            noteNamesOf<product::Processor>(values, names);
+        if (namesNotes()) {
+            ParamValues values(table());
+            for (size_t i = 0; i < table().count(); ++i)
+                values.setIndex(i, toPlain(table().at(i), engine->store().get(i)));
+            noteNamesOf<Processor>(values, names);
         }
         return names;
     }
     // Tells the host when the names moved since it last read them.
     void checkNoteNames() {
-        if constexpr (kNoteNames) {
-            if (!hostNoteName || !hostNoteName->changed) return;
-            NoteNames now = currentNoteNames();
-            if (now == noteNameList) return;
-            noteNameList = std::move(now);
-            hostNoteName->changed(host);
-        }
+        if (!namesNotes() || !hostNoteName || !hostNoteName->changed) return;
+        NoteNames now = currentNoteNames();
+        if (now == noteNameList) return;
+        noteNameList = std::move(now);
+        hostNoteName->changed(host);
     }
 
     // --- state (main thread) -------------------------------------------------------
@@ -465,35 +528,42 @@ struct Plugin : StateAccess
     }
 
     std::vector<uint8_t> save(state::Context context) {
-        engine.properties().collect();
-        state::Snapshot s;
-        for (size_t i = 0; i < params::kCount; ++i) s.host[i] = engine.store().get(i);
-        for (size_t i = 0; i < properties::kCount; ++i) {
-            s.property[i] = engine.properties().get(i);
-            s.hasProperty[i] = true;
-        }
+        state::Snapshot s = snapshot();
         s.editorScale = currentEditorScale();
         if (presets && context == state::Context::Project) presets->describe(s);
-        return state::save(kStateMagic, s, context);
+        std::vector<uint8_t> bytes = state::save(magic, s, context);
+        if (layer && layer->chunkTag() != 0)
+            state::appendChunk(bytes, layer->chunkTag(), layer->saveChunk(s, context));
+        return bytes;
     }
 
     bool load(const uint8_t* data, size_t size, state::Context context) {
-        state::Snapshot snapshot;
-        const state::LoadResult result = state::load(data, size, kStateMagic, snapshot);
+        state::Snapshot snapshot(*definition);
+        const state::LoadResult result = state::load(data, size, magic, snapshot);
         if (result == state::LoadResult::Corrupt) {
             log(CLAP_LOG_WARNING, "the state to load is damaged; nothing was loaded");
             return false;
         }
         if (result == state::LoadResult::NotOurs) {
-            const bool legacy = product::Processor::loadLegacyState(data, size, [&](uint32_t id, double plainValue) {
-                const int i = params::indexOf(id);
+            const bool legacy = Processor::loadLegacyState(data, size, [&](uint32_t id, double plainValue) {
+                const int i = table().indexOf(id);
                 if (i >= 0 && std::isfinite(plainValue))
-                    snapshot.host[i] = toHost(params::at(static_cast<size_t>(i)), plainValue);
+                    snapshot.host[static_cast<size_t>(i)] = toHost(table().at(static_cast<size_t>(i)), plainValue);
             });
             if (!legacy) {
                 log(CLAP_LOG_WARNING, "the state to load is not this plugin's; nothing was loaded");
                 return false;
             }
+        }
+        // The layer's chunk may rewrite the snapshot, or refuse it, before
+        // anything is applied.
+        const uint8_t* chunk = nullptr;
+        size_t chunkSize = 0;
+        if (result == state::LoadResult::Ok && layer && layer->chunkTag() != 0 &&
+            state::findChunk(data, size, layer->chunkTag(), chunk, chunkSize) &&
+            !layer->loadChunk(chunk, chunkSize, snapshot, context)) {
+            log(CLAP_LOG_WARNING, "the state to load has a chunk this plugin cannot read; nothing was loaded");
+            return false;
         }
         apply(snapshot, context);
         return true;
@@ -502,25 +572,40 @@ struct Plugin : StateAccess
     // Everything the snapshot holds, for its context: a preset changes the
     // sound and leaves the session (editor size, perProject() properties,
     // which preset is loaded) as it was.
-    void apply(const state::Snapshot& snapshot, state::Context context) {
+    void apply(const state::Snapshot& snapshot, state::Context context) override {
         const bool session = context == state::Context::Project;
-        const bool restart = active && restartParamsDiffer(snapshot.host);
-        // Only the stores are written here; the audio thread applies them.
-        // Outputs are the processor's, and state does not carry them.
-        for (size_t i = 0; i < params::kCount; ++i)
-            if (!params::at(i).isOutput()) engine.store().set(i, snapshot.host[i]);
-        // A file property's file is relocated if it moved, and loaded before
-        // this returns, so the next block plays it.
-        for (size_t i = 0; i < properties::kCount; ++i) {
-            if (!session && properties::at(i).perProjectOnly()) continue;
-            engine.setProperty(i, snapshot.hasProperty[i] ? std::string_view(snapshot.property[i])
-                                                          : std::string_view(properties::at(i).def),
-                               true);
-        }
+        applySound(snapshot, session);
         if (session && snapshot.editorScale > 0.0) restoreEditorScale(snapshot.editorScale);
         if (session && presets) presets->restore(snapshot);
+        afterApply();
+    }
+    void applyValues(const state::Snapshot& snapshot) override {
+        applySound(snapshot, true);
+        afterApply();
+    }
+
+    // The values and properties; perProject() properties only with `perProject`.
+    void applySound(const state::Snapshot& snapshot, bool perProject) {
+        applyRestart = active && restartParamsDiffer(snapshot.host);
+        // Only the stores are written here; the audio thread applies them.
+        // Outputs are the processor's, and state does not carry them.
+        for (size_t i = 0; i < table().count(); ++i)
+            if (!table().at(i).isOutput()) engine->store().set(i, snapshot.host[i]);
+        // A file property's file is relocated if it moved, and loaded before
+        // this returns, so the next block plays it.
+        for (size_t i = 0; i < propertyList().count(); ++i) {
+            if (!perProject && propertyList().at(i).perProjectOnly()) continue;
+            engine->setProperty(i, snapshot.hasProperty[i] ? std::string_view(snapshot.property[i])
+                                                           : std::string_view(propertyList().at(i).def),
+                                true);
+        }
+    }
+
+    // Hosts hear that the values moved.
+    void afterApply() {
         if (hostParams && hostParams->rescan) hostParams->rescan(host, CLAP_PARAM_RESCAN_VALUES);
-        if (restart) requestRestart();
+        if (applyRestart) requestRestart();
+        applyRestart = false;
         // A stopped host would otherwise apply the new values only when it
         // next processes; a flush applies them now.
         if (active) requestFlush();
@@ -547,7 +632,7 @@ struct Plugin : StateAccess
     }
 
     // The session changed from inside the plugin; the host should save it.
-    void markDirty() {
+    void markDirty() override {
         if (hostState && hostState->mark_dirty) hostState->mark_dirty(host);
     }
 
@@ -560,8 +645,8 @@ struct Plugin : StateAccess
     }
 
     void createPresets() {
-        if constexpr (!info::kPresets) return;
-        presets = std::make_unique<PresetLibrary>(*this, PresetLibrary::defaultUserFolder());
+        if (!info().presets) return;
+        presets = std::make_unique<PresetLibrary>(*this, PresetLibrary::defaultUserFolder(info()), definition);
         presets->onLoaded = [this](const PresetLibrary::Entry& entry) {
             if (!hostPresetLoad || !hostPresetLoad->loaded) return;
             if (entry.user()) {
@@ -611,8 +696,8 @@ struct Plugin : StateAccess
     void drainEdits(const clap_output_events_t* out) {
         flushRequested.store(false, std::memory_order_release);
         if (!out) return;
-        const bool delivered = edits.drain([&](EditBridge::Kind kind, size_t i) {
-            const uint32_t id = params::at(i).id;
+        const bool delivered = edits->drain([&](EditBridge::Kind kind, size_t i) {
+            const uint32_t id = table().at(i).id;
             if (kind == EditBridge::Kind::Value) {
                 clap_event_param_value_t ev{};
                 ev.header.size = sizeof(ev);
@@ -624,7 +709,7 @@ struct Plugin : StateAccess
                 ev.port_index = -1;
                 ev.channel = -1;
                 ev.key = -1;
-                ev.value = engine.store().get(i);
+                ev.value = engine->store().get(i);
                 return out->try_push(out, &ev.header);
             }
             clap_event_param_gesture_t ev{};
@@ -646,27 +731,27 @@ struct Plugin : StateAccess
     // After the engine ran (audio thread, or main thread while inactive).
     // `frames` is the block length, 0 for a flush.
     void afterAudioWork(const clap_output_events_t* out, uint32_t frames) {
-        if (engine.properties().needsCollection()) requestCallback();
-        if (engine.takeRestartRequest()) {
+        if (engine->properties().needsCollection()) requestCallback();
+        if (engine->takeRestartRequest()) {
             restartWanted.store(true, std::memory_order_release);
             requestCallback();
         }
         // Only ever set while active, so this is the audio thread, as the
         // tail extension requires.
-        if (engine.takeTailChange() && hostTail && hostTail->changed) hostTail->changed(host);
-        if (engine.takeVoiceChange()) {  // voice_info.changed is main-thread only
+        if (engine->takeTailChange() && hostTail && hostTail->changed) hostTail->changed(host);
+        if (engine->takeVoiceChange()) {  // voice_info.changed is main-thread only
             voicesChanged.store(true, std::memory_order_release);
             requestCallback();
         }
-        if (kNoteNames && engine.takeNoteNamesChange()) {  // so is note_name.changed
+        if (engine->takeNoteNamesChange() && namesNotes()) {  // so is note_name.changed
             namesChanged.store(true, std::memory_order_release);
             requestCallback();
         }
-        if (const uint32_t resets = engine.safetyResets(); resets != safetyResetsSeen) {
+        if (const uint32_t resets = engine->safetyResets(); resets != safetyResetsSeen) {
             safetyResetsSeen = resets;
             report(kNonFinite);
         }
-        const NoteOutput& sent = engine.noteOutput();
+        const NoteOutput& sent = engine->noteOutput();
         if (sent.dropped() > 0) report(kNotesDropped);
         int delivered = 0;
         for (; out && delivered < sent.count(); ++delivered) {
@@ -704,26 +789,26 @@ struct Plugin : StateAccess
             }
             if (!pushed) break;
         }
-        engine.deferNotes(delivered);
+        engine->deferNotes(delivered);
         // Outputs last: stamped at the block's final frame, after every note
         // end, since the host's list must stay in time order.
-        if (engine.takeOutputsDue()) publishOutputs(out, frames);
+        if (engine->takeOutputsDue()) publishOutputs(out, frames);
     }
 
     // Audio thread. Each output whose value moved since the host last heard
     // it; one the queue refuses is offered again next time.
     void publishOutputs(const clap_output_events_t* out, uint32_t frames) {
         if (!out) return;
-        for (size_t k = 0; k < params::kOutputCount; ++k) {
-            const size_t i = params::kOutputIndices[k];
-            const double v = engine.store().get(i);
+        for (size_t k = 0; k < table().outputs().size(); ++k) {
+            const size_t i = table().outputs()[k];
+            const double v = engine->store().get(i);
             if (!resendOutputs && v == heardOutputs[k].load(std::memory_order_relaxed)) continue;
             clap_event_param_value_t ev{};
             ev.header.size = sizeof(ev);
             ev.header.time = frames ? frames - 1 : 0;
             ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
             ev.header.type = CLAP_EVENT_PARAM_VALUE;
-            ev.param_id = params::at(i).id;
+            ev.param_id = table().at(i).id;
             ev.note_id = -1;
             ev.port_index = -1;
             ev.channel = -1;
@@ -737,11 +822,78 @@ struct Plugin : StateAccess
 
     // Main thread: parameters whose change requires a restart, compared
     // against the values the active processor was built with.
-    bool restartParamsDiffer(const double* hostValues) const {
-        if (!params::kAnyRestart) return false;
-        for (size_t i = 0; i < params::kCount; ++i)
-            if (params::at(i).is(pflag::kRestart) && hostValues[i] != engine.store().get(i)) return true;
+    bool restartParamsDiffer(const std::vector<double>& hostValues) const {
+        if (!table().anyRestart()) return false;
+        for (size_t i = 0; i < table().count(); ++i)
+            if (table().at(i).is(pflag::kRestart) && hostValues[i] != engine->store().get(i)) return true;
         return false;
+    }
+
+    // --- redefinition (main thread) ----------------------------------------------------
+
+    bool redefine(DefinitionPtr next) override {
+        if (!next || next->info().id != info().id || next->info().stateTag != info().stateTag ||
+            !next->problems().empty())
+            return false;
+        pendingDefinition = std::move(next);
+        if (!active) swapDefinition();
+        else requestRestart();  // the swap happens as the host deactivates
+        return true;
+    }
+
+    // While inactive: the pending definition replaces the current one. What
+    // the instance holds carries over through the state, by parameter ID and
+    // the layer's chunk.
+    void swapDefinition() {
+        DefinitionPtr next = std::move(pendingDefinition);
+        pendingDefinition.reset();
+        if (!next || next == definition) return;
+        const std::vector<uint8_t> carried = save(state::Context::Project);
+        const PluginInfo before = info();
+        const int channelsBefore = channels;
+        const bool offline = engine->offline();
+        definition = std::move(next);
+        engine = std::make_unique<Engine>(definition);
+        engine->setOffline(offline);
+        if (info().tuning) engine->setTuning(&tuning);
+        edits = std::make_unique<EditBridge>(table().count());
+        heardOutputs = std::make_unique<std::atomic<double>[]>(std::max<size_t>(1, table().outputs().size()));
+        for (size_t k = 0; k < table().outputs().size(); ++k)
+            heardOutputs[k].store(hostDefault(table().at(table().outputs()[k])), std::memory_order_relaxed);
+        resendOutputs = true;
+        if (!info().offers(channels)) channels = info().layouts.empty() ? 0 : info().layouts[0].channels;
+        presets.reset();
+        createPresets();
+        load(carried.data(), carried.size(), state::Context::Project);
+        if (hostParams && hostParams->rescan) hostParams->rescan(host, CLAP_PARAM_RESCAN_ALL);
+        const PluginInfo& after = info();
+        const bool ports = before.kind != after.kind || before.sidechain != after.sidechain ||
+                           before.auxOutputs != after.auxOutputs || before.layouts != after.layouts ||
+                           channels != channelsBefore;
+        if (ports && hostAudioPorts && hostAudioPorts->rescan) {
+            const uint32_t flags = CLAP_AUDIO_PORTS_RESCAN_NAMES | CLAP_AUDIO_PORTS_RESCAN_FLAGS |
+                                   CLAP_AUDIO_PORTS_RESCAN_CHANNEL_COUNT | CLAP_AUDIO_PORTS_RESCAN_PORT_TYPE |
+                                   CLAP_AUDIO_PORTS_RESCAN_IN_PLACE_PAIR | CLAP_AUDIO_PORTS_RESCAN_LIST;
+            hostAudioPorts->rescan(host, flags);
+        }
+        if ((before.takesNotes() != after.takesNotes() || before.sendsNotes() != after.sendsNotes()) && hostNotePorts &&
+            hostNotePorts->rescan)
+            hostNotePorts->rescan(host, CLAP_NOTE_PORTS_RESCAN_ALL);
+        if (namesNotes() && !hostNoteName) hostNoteName = hostExtension<const clap_host_note_name_t>(CLAP_EXT_NOTE_NAME);
+        checkNoteNames();
+#if SUPPLE_WITH_GUI
+        if (editor) {
+            // The editor shows the old table: a new one for the new, at the
+            // same scale if the host agrees to the size.
+            editor->rebuild(*this);
+            engine->setMetering(true);
+            uint32_t w = 0, h = 0, cw = 0, ch = 0;
+            editor->sizeAt(editor->userScale(), w, h);
+            editor->size(cw, ch);
+            if ((w != cw || h != ch) && hostGui && hostGui->request_resize) hostGui->request_resize(host, w, h);
+        }
+#endif
+        if (layer) layer->redefined();
     }
 
 #if SUPPLE_WITH_GUI
@@ -750,62 +902,60 @@ struct Plugin : StateAccess
     double platformScale = 1.0;
 
     // --- gui::EditorHost (main thread) ---------------------------------------
+    const Definition& pluginDefinition() const override { return *definition; }
     double value(uint32_t id) const override {
-        const int i = params::indexOf(id);
-        return i >= 0 ? engine.store().get(static_cast<size_t>(i)) : 0.0;
+        const int i = table().indexOf(id);
+        return i >= 0 ? engine->store().get(static_cast<size_t>(i)) : 0.0;
     }
     double modulation(uint32_t id) const override {
-        const int i = params::indexOf(id);
-        return i >= 0 ? engine.modulation(static_cast<size_t>(i)) : 0.0;
+        const int i = table().indexOf(id);
+        return i >= 0 ? engine->modulation(static_cast<size_t>(i)) : 0.0;
     }
-    // An output is read-only for the editor too.
-    static int editable(uint32_t id) {
-        const int i = params::indexOf(id);
-        return i >= 0 && !params::at(static_cast<size_t>(i)).isOutput() ? i : -1;
-    }
+
     void beginEdit(uint32_t id) override {
         const int i = editable(id);
         if (i < 0) return;
-        edits.begin(static_cast<size_t>(i));
+        edits->begin(static_cast<size_t>(i));
         requestFlush();
     }
     void setValue(uint32_t id, double v) override {
         const int i = editable(id);
         if (i < 0) return;
         const size_t index = static_cast<size_t>(i);
-        engine.store().set(index, v);
-        edits.value(index);
-        if (params::at(index).is(pflag::kRestart)) requestRestart();
+        engine->store().set(index, v);
+        edits->value(index);
+        if (table().at(index).is(pflag::kRestart)) requestRestart();
         requestFlush();
     }
     void endEdit(uint32_t id) override {
         const int i = editable(id);
         if (i < 0) return;
-        edits.end(static_cast<size_t>(i));
+        edits->end(static_cast<size_t>(i));
         requestFlush();
         checkNoteNames();
     }
     std::string_view property(uint32_t id) const override {
-        const int i = properties::indexOf(id);
-        return i >= 0 ? std::string_view(engine.properties().get(static_cast<size_t>(i))) : std::string_view();
+        const int i = propertyList().indexOf(id);
+        return i >= 0 ? std::string_view(engine->properties().get(static_cast<size_t>(i))) : std::string_view();
     }
     bool setProperty(uint32_t id, std::string_view value) override {
-        const int i = properties::indexOf(id);
+        const int i = propertyList().indexOf(id);
         if (i < 0) return false;
-        const uint64_t before = engine.properties().version();
-        if (!engine.setProperty(static_cast<size_t>(i), value)) return false;
+        const uint64_t before = engine->properties().version();
+        if (!engine->setProperty(static_cast<size_t>(i), value)) return false;
         // The user chose this file: its folder helps find others.
-        if (properties::at(static_cast<size_t>(i)).isFile() && !value.empty()) engine.fileChosen(static_cast<size_t>(i));
-        if (engine.properties().version() != before) {
+        if (propertyList().at(static_cast<size_t>(i)).isFile() && !value.empty())
+            engine->fileChosen(static_cast<size_t>(i));
+        if (engine->properties().version() != before) {
             markDirty();
             if (active) requestFlush();
         }
         return true;
     }
-    uint64_t propertiesVersion() const override { return engine.properties().version(); }
+    uint64_t propertiesVersion() const override { return engine->properties().version(); }
     FileStatus fileStatus(uint32_t id) const override {
-        const int i = properties::indexOf(id);
-        return i >= 0 ? engine.fileStatus(static_cast<size_t>(i)) : FileStatus{};
+        const int i = propertyList().indexOf(id);
+        return i >= 0 ? engine->fileStatus(static_cast<size_t>(i)) : FileStatus{};
     }
     PresetLibrary* presetLibrary() override { return presets.get(); }
 
@@ -906,16 +1056,16 @@ struct Plugin : StateAccess
     }
 
     void playNote(int key, double velocity, bool on) override {
-        engine.playNote(key, velocity, on);  // played at the start of the next block
-        if (info::kNoteInput && host && host->request_process) host->request_process(host);
+        engine->playNote(key, velocity, on);  // played at the start of the next block
+        if (info().takesNotes() && host && host->request_process) host->request_process(host);
     }
     size_t readAudio(FeedFrame* out, size_t max) override {
-        AudioFeed* feed = engine.feed();
+        AudioFeed* feed = engine->feed();
         return feed ? feed->read(out, max) : 0;
     }
-    bool popTelemetry(TelemetryFrame& frame) override { return engine.telemetry().pop(frame); }
-    int latencySamples() const override { return engine.latency(); }
-    double sampleRate() const override { return engine.sampleRate(); }
+    bool popTelemetry(TelemetryFrame& frame) override { return engine->telemetry().pop(frame); }
+    int latencySamples() const override { return engine->latency(); }
+    double sampleRate() const override { return engine->sampleRate(); }
 
     void startTimer() {
         if (timerId != CLAP_INVALID_ID || !hostTimer || !hostTimer->register_timer) return;
@@ -928,7 +1078,7 @@ struct Plugin : StateAccess
         timerId = CLAP_INVALID_ID;
     }
     void closeEditor() {
-        engine.setMetering(false);
+        engine->setMetering(false);
         stopTimer();
         if (editor) editorScale = editor->userScale();
         editor.reset();
@@ -943,25 +1093,28 @@ Plugin* self(const clap_plugin_t* p) { return static_cast<Plugin*>(p->plugin_dat
 // Inputs: the main bus (an effect), then the sidechain. Outputs: the main bus
 // (all but a note effect), then each aux output. Every port is as wide as the
 // selected layout. IDs are stable: main 0, sidechain 1, aux k is 1 + k.
-constexpr uint32_t kInputPorts = (info::kAudioInput ? 1u : 0u) + (info::kSidechain ? 1u : 0u);
-constexpr uint32_t kOutputPorts = info::kAudioOutput ? 1u + static_cast<uint32_t>(info::kAuxOutputs) : 0u;
-constexpr uint32_t kSidechainPort = info::kAudioInput ? 1u : 0u;  // its input index
+uint32_t inputPorts(const PluginInfo& info) {
+    return (info.audioInput() ? 1u : 0u) + (info.sidechain ? 1u : 0u);
+}
+uint32_t outputPorts(const PluginInfo& info) {
+    return info.audioOutput() ? 1u + static_cast<uint32_t>(info.auxCount()) : 0u;
+}
+uint32_t sidechainPort(const PluginInfo& info) { return info.audioInput() ? 1u : 0u; }  // its input index
 
-constexpr Layout layoutOf(int channels) {
-    for (const auto& l : info::kLayouts)
+// The declared layout this wide, or Generic.
+Layout layoutOf(const PluginInfo& info, int channels) {
+    for (const BusLayout& l : info.layouts)
         if (l.channels == channels) return l.layout;
     return Layout::Generic;
 }
-constexpr bool anyLayout(bool (*test)(Layout)) {
-    for (const auto& l : info::kLayouts)
+bool anyLayout(const PluginInfo& info, bool (*test)(Layout)) {
+    for (const BusLayout& l : info.layouts)
         if (test(l.layout)) return true;
     return false;
 }
-constexpr bool kAnySurround = anyLayout(isSurround);
-constexpr bool kAnyAmbisonic = anyLayout(isAmbisonic);
 
-const char* portType(int channels) {
-    const Layout l = layoutOf(channels);
+const char* portType(const PluginInfo& info, int channels) {
+    const Layout l = layoutOf(info, channels);
     if (l == Layout::Mono) return CLAP_PORT_MONO;
     if (l == Layout::Stereo) return CLAP_PORT_STEREO;
     if (isSurround(l)) return CLAP_PORT_SURROUND;
@@ -969,58 +1122,64 @@ const char* portType(int channels) {
     return nullptr;
 }
 
-bool portExists(bool isInput, uint32_t index) { return index < (isInput ? kInputPorts : kOutputPorts); }
+bool portExists(const PluginInfo& info, bool isInput, uint32_t index) {
+    return index < (isInput ? inputPorts(info) : outputPorts(info));
+}
 
-uint32_t CLAP_ABI portsCount(const clap_plugin_t*, bool isInput) { return isInput ? kInputPorts : kOutputPorts; }
+uint32_t CLAP_ABI portsCount(const clap_plugin_t* p, bool isInput) {
+    return isInput ? inputPorts(self(p)->info()) : outputPorts(self(p)->info());
+}
 
 bool CLAP_ABI portsGet(const clap_plugin_t* p, uint32_t index, bool isInput, clap_audio_port_info_t* out) {
-    if (!portExists(isInput, index)) return false;
+    const PluginInfo& info = self(p)->info();
+    if (!portExists(info, isInput, index)) return false;
     const int channels = self(p)->channels;
-    const bool main = isInput ? info::kAudioInput && index == 0 : index == 0;
+    const bool main = isInput ? info.audioInput() && index == 0 : index == 0;
     std::memset(out, 0, sizeof(*out));
     if (isInput) {
         out->id = main ? 0 : 1;
         std::snprintf(out->name, sizeof(out->name), "%s", main ? "Input" : "Sidechain");
     } else {
         out->id = index;
-        std::snprintf(out->name, sizeof(out->name), "%s", main ? "Output" : info::kAuxOutputNames[index - 1]);
+        std::snprintf(out->name, sizeof(out->name), "%s", main ? "Output" : info.auxOutputs[index - 1].c_str());
     }
     out->flags = CLAP_AUDIO_PORT_SUPPORTS_64BITS | CLAP_AUDIO_PORT_REQUIRES_COMMON_SAMPLE_SIZE;
     if (main) out->flags |= CLAP_AUDIO_PORT_IS_MAIN;
     out->channel_count = static_cast<uint32_t>(channels);
-    out->port_type = portType(channels);
+    out->port_type = portType(info, channels);
     // In-place pairing is reciprocal, and only between the main buses.
-    out->in_place_pair = main && info::kAudioInput ? 0 : CLAP_INVALID_ID;
+    out->in_place_pair = main && info.audioInput() ? 0 : CLAP_INVALID_ID;
     return true;
 }
 
 const clap_plugin_audio_ports_t kAudioPorts = {portsCount, portsGet};
 
-constexpr uint32_t kLayoutCount = static_cast<uint32_t>(std::size(info::kChannelLayouts));
-
-uint32_t CLAP_ABI configsCount(const clap_plugin_t*) { return kLayoutCount; }
+uint32_t CLAP_ABI configsCount(const clap_plugin_t* p) {
+    return static_cast<uint32_t>(self(p)->info().layouts.size());
+}
 
 // A configuration's ID is its channel count: stable, and meaningful in logs.
-bool CLAP_ABI configsGet(const clap_plugin_t*, uint32_t index, clap_audio_ports_config_t* out) {
-    if (index >= kLayoutCount) return false;
-    const int channels = info::kChannelLayouts[index];
+bool CLAP_ABI configsGet(const clap_plugin_t* p, uint32_t index, clap_audio_ports_config_t* out) {
+    const PluginInfo& info = self(p)->info();
+    if (index >= info.layouts.size()) return false;
+    const int channels = info.layouts[index].channels;
     std::memset(out, 0, sizeof(*out));
     out->id = static_cast<clap_id>(channels);
     const char* names[] = {"", "Mono", "Stereo", "5.1", "7.1", "7.1.4", "Ambisonic 1st order", "Ambisonic 2nd order",
                            "Ambisonic 3rd order"};
-    const Layout l = layoutOf(channels);
+    const Layout l = layoutOf(info, channels);
     if (l == Layout::Generic)
         std::snprintf(out->name, sizeof(out->name), "%d channels", channels);
     else
         std::snprintf(out->name, sizeof(out->name), "%s", names[static_cast<int>(l)]);
-    out->input_port_count = kInputPorts;
-    out->output_port_count = kOutputPorts;
-    out->has_main_input = info::kAudioInput;
-    out->main_input_channel_count = info::kAudioInput ? static_cast<uint32_t>(channels) : 0;
-    out->main_input_port_type = info::kAudioInput ? portType(channels) : nullptr;
+    out->input_port_count = inputPorts(info);
+    out->output_port_count = outputPorts(info);
+    out->has_main_input = info.audioInput();
+    out->main_input_channel_count = info.audioInput() ? static_cast<uint32_t>(channels) : 0;
+    out->main_input_port_type = info.audioInput() ? portType(info, channels) : nullptr;
     out->has_main_output = true;
     out->main_output_channel_count = static_cast<uint32_t>(channels);
-    out->main_output_port_type = portType(channels);
+    out->main_output_port_type = portType(info, channels);
     return true;
 }
 
@@ -1028,9 +1187,9 @@ bool CLAP_ABI configsSelect(const clap_plugin_t* p, clap_id id) {
     Plugin* s = self(p);
     s->expect(Thread::Main, Site::PortsConfig);
     if (s->active) return false;
-    for (int channels : info::kChannelLayouts) {
-        if (static_cast<clap_id>(channels) == id) {
-            s->channels = channels;
+    for (const BusLayout& l : s->info().layouts) {
+        if (static_cast<clap_id>(l.channels) == id) {
+            s->channels = l.channels;
             return true;
         }
     }
@@ -1043,23 +1202,22 @@ const clap_plugin_audio_ports_config_t kAudioPortsConfig = {configsCount, config
 // host's speaker arrangements): every port takes the main bus's width, so
 // the requests must agree on one declared layout. Ports a request leaves out
 // follow it.
-bool layoutRequested(const clap_audio_port_configuration_request_t* requests, uint32_t count, int& channels) {
+bool layoutRequested(const PluginInfo& info, const clap_audio_port_configuration_request_t* requests, uint32_t count,
+                     int& channels) {
     if (!requests || count == 0) return false;
     int width = -1;
     for (uint32_t k = 0; k < count; ++k) {
         const auto& r = requests[k];
-        if (!portExists(r.is_input, r.port_index)) return false;
+        if (!portExists(info, r.is_input, r.port_index)) return false;
         const int w = static_cast<int>(r.channel_count);
         if (width >= 0 && w != width) return false;
         width = w;
     }
-    bool declared = false;
-    for (int c : info::kChannelLayouts) declared |= c == width;
-    if (!declared) return false;
-    const Layout l = layoutOf(width);
+    if (!info.offers(width)) return false;
+    const Layout l = layoutOf(info, width);
     for (uint32_t k = 0; k < count; ++k) {
         const auto& r = requests[k];
-        const char* type = portType(width);
+        const char* type = portType(info, width);
         if (r.port_type && (!type || std::strcmp(r.port_type, type) != 0)) return false;
         if (!r.port_type || !r.port_details) continue;
         if (isSurround(l) && std::memcmp(r.port_details, speakers(l), static_cast<size_t>(width)) != 0) return false;
@@ -1076,7 +1234,7 @@ bool layoutRequested(const clap_audio_port_configuration_request_t* requests, ui
 bool CLAP_ABI configurableCanApply(const clap_plugin_t* p, const clap_audio_port_configuration_request_t* requests,
                                    uint32_t count) {
     int channels = 0;
-    return !self(p)->active && layoutRequested(requests, count, channels);
+    return !self(p)->active && layoutRequested(self(p)->info(), requests, count, channels);
 }
 
 bool CLAP_ABI configurableApply(const clap_plugin_t* p, const clap_audio_port_configuration_request_t* requests,
@@ -1084,7 +1242,7 @@ bool CLAP_ABI configurableApply(const clap_plugin_t* p, const clap_audio_port_co
     Plugin* s = self(p);
     s->expect(Thread::Main, Site::PortsConfig);
     int channels = 0;
-    if (s->active || !layoutRequested(requests, count, channels)) return false;
+    if (s->active || !layoutRequested(s->info(), requests, count, channels)) return false;
     s->channels = channels;
     return true;
 }
@@ -1092,8 +1250,8 @@ bool CLAP_ABI configurableApply(const clap_plugin_t* p, const clap_audio_port_co
 const clap_plugin_configurable_audio_ports_t kConfigurablePorts = {configurableCanApply, configurableApply};
 
 // Surround and ambisonic layouts say which channel is which.
-bool CLAP_ABI surroundMaskSupported(const clap_plugin_t*, uint64_t mask) {
-    for (const auto& l : info::kLayouts)
+bool CLAP_ABI surroundMaskSupported(const clap_plugin_t* p, uint64_t mask) {
+    for (const BusLayout& l : self(p)->info().layouts)
         if (isSurround(l.layout) && speakerMask(l.layout, l.channels) == mask) return true;
     return false;
 }
@@ -1101,8 +1259,9 @@ bool CLAP_ABI surroundMaskSupported(const clap_plugin_t*, uint64_t mask) {
 uint32_t CLAP_ABI surroundChannelMap(const clap_plugin_t* p, bool isInput, uint32_t port, uint8_t* map,
                                      uint32_t capacity) {
     const int channels = self(p)->channels;
-    const Layout l = layoutOf(channels);
-    if (!portExists(isInput, port) || !isSurround(l) || !map || capacity < static_cast<uint32_t>(channels)) return 0;
+    const Layout l = layoutOf(self(p)->info(), channels);
+    if (!portExists(self(p)->info(), isInput, port) || !isSurround(l) || !map || capacity < static_cast<uint32_t>(channels))
+        return 0;
     std::memcpy(map, speakers(l), static_cast<size_t>(channels));
     return static_cast<uint32_t>(channels);
 }
@@ -1115,7 +1274,8 @@ bool CLAP_ABI ambisonicSupported(const clap_plugin_t*, const clap_ambisonic_conf
 }
 
 bool CLAP_ABI ambisonicConfig(const clap_plugin_t* p, bool isInput, uint32_t port, clap_ambisonic_config_t* config) {
-    if (!portExists(isInput, port) || !config || !isAmbisonic(layoutOf(self(p)->channels))) return false;
+    if (!portExists(self(p)->info(), isInput, port) || !config || !isAmbisonic(layoutOf(self(p)->info(), self(p)->channels)))
+        return false;
     config->ordering = CLAP_AMBISONIC_ORDERING_ACN;
     config->normalization = CLAP_AMBISONIC_NORMALIZATION_SN3D;
     return true;
@@ -1125,12 +1285,14 @@ const clap_plugin_ambisonic_t kAmbisonic = {ambisonicSupported, ambisonicConfig}
 
 // --- notes --------------------------------------------------------------------------------
 
-uint32_t CLAP_ABI notePortsCount(const clap_plugin_t*, bool isInput) {
-    return (isInput ? info::kNoteInput : info::kNoteOutput) ? 1 : 0;
+uint32_t CLAP_ABI notePortsCount(const clap_plugin_t* p, bool isInput) {
+    const PluginInfo& info = self(p)->info();
+    return (isInput ? info.takesNotes() : info.sendsNotes()) ? 1 : 0;
 }
 
-bool CLAP_ABI notePortsGet(const clap_plugin_t*, uint32_t index, bool isInput, clap_note_port_info_t* out) {
-    if (index != 0 || !(isInput ? info::kNoteInput : info::kNoteOutput)) return false;
+bool CLAP_ABI notePortsGet(const clap_plugin_t* p, uint32_t index, bool isInput, clap_note_port_info_t* out) {
+    const PluginInfo& info = self(p)->info();
+    if (index != 0 || !(isInput ? info.takesNotes() : info.sendsNotes())) return false;
     std::memset(out, 0, sizeof(*out));
     out->id = 0;
     out->supported_dialects = CLAP_NOTE_DIALECT_CLAP | CLAP_NOTE_DIALECT_MIDI;
@@ -1141,14 +1303,17 @@ bool CLAP_ABI notePortsGet(const clap_plugin_t*, uint32_t index, bool isInput, c
 
 const clap_plugin_note_ports_t kNotePorts = {notePortsCount, notePortsGet};
 
-// A processor that declares kVoices tells the host about its voices.
-constexpr bool kVoiceInfo = info::kNoteInput && product::Processor::kVoices > 0;
+// A plugin with a voice pool tells the host about its voices.
+bool voiceInfo(const Plugin& s) { return s.info().takesNotes() && s.voiceCapacity() > 0; }
 
 bool CLAP_ABI voiceInfoGet(const clap_plugin_t* p, clap_voice_info_t* out) {
     if (!out) return false;
-    out->voice_capacity = static_cast<uint32_t>(product::Processor::kVoices);
-    out->voice_count = static_cast<uint32_t>(std::clamp(self(p)->engine.voices(), 0, product::Processor::kVoices));
-    out->flags = product::Processor::kOverlappingNotes ? CLAP_VOICE_INFO_SUPPORTS_OVERLAPPING_NOTES : 0;
+    const int capacity = self(p)->voiceCapacity();
+    out->voice_capacity = static_cast<uint32_t>(capacity);
+    out->voice_count = static_cast<uint32_t>(std::clamp(self(p)->engine->voices(), 0, capacity));
+    out->flags = Processor::kOverlappingNotes || self(p)->info().overlappingNotes
+                     ? CLAP_VOICE_INFO_SUPPORTS_OVERLAPPING_NOTES
+                     : 0;
     return true;
 }
 
@@ -1157,7 +1322,7 @@ const clap_plugin_voice_info_t kVoiceInfoExt = {voiceInfoGet};
 // clap-wrapper's VST3 extension: which note expressions a VST3 host may
 // offer (product.cmake's PRODUCT_NOTE_EXPRESSIONS), and every MIDI channel.
 uint32_t CLAP_ABI vst3MidiChannels(const clap_plugin_t*, uint32_t) { return 16; }
-uint32_t CLAP_ABI vst3NoteExpressions(const clap_plugin_t*) { return info::kNoteExpressions; }
+uint32_t CLAP_ABI vst3NoteExpressions(const clap_plugin_t* p) { return self(p)->info().noteExpressions; }
 const clap_plugin_as_vst3_t kAsVst3 = {vst3MidiChannels, vst3NoteExpressions};
 
 // --- latency and tail ---------------------------------------------------------------------
@@ -1165,24 +1330,24 @@ const clap_plugin_as_vst3_t kAsVst3 = {vst3MidiChannels, vst3NoteExpressions};
 // The value from the last activation: latency may only change across one.
 uint32_t CLAP_ABI latencyGet(const clap_plugin_t* p) {
     self(p)->expect(Thread::Main, Site::Latency);
-    return static_cast<uint32_t>(self(p)->engine.latency());
+    return static_cast<uint32_t>(self(p)->engine->latency());
 }
 const clap_plugin_latency_t kLatency = {latencyGet};
 
-uint32_t CLAP_ABI tailGet(const clap_plugin_t* p) { return self(p)->engine.tail(); }
+uint32_t CLAP_ABI tailGet(const clap_plugin_t* p) { return self(p)->engine->tail(); }
 const clap_plugin_tail_t kTail = {tailGet};
 
 // --- params ----------------------------------------------------------------------------------
 
 uint32_t CLAP_ABI paramsCount(const clap_plugin_t* p) {
     self(p)->expect(Thread::Main, Site::ParamsCount);
-    return static_cast<uint32_t>(params::kCount);
+    return static_cast<uint32_t>(self(p)->table().count());
 }
 
 bool CLAP_ABI paramsInfo(const clap_plugin_t* plugin, uint32_t index, clap_param_info_t* out) {
     self(plugin)->expect(Thread::Main, Site::ParamsInfo);
-    if (index >= params::kCount) return false;
-    const ParamDef& p = params::at(index);
+    if (index >= self(plugin)->table().count()) return false;
+    const ParamDef& p = self(plugin)->table().at(index);
     std::memset(out, 0, sizeof(*out));
     out->id = p.id;
     out->flags = 0;
@@ -1206,20 +1371,21 @@ bool CLAP_ABI paramsInfo(const clap_plugin_t* plugin, uint32_t index, clap_param
 
 bool CLAP_ABI paramsValue(const clap_plugin_t* p, clap_id id, double* out) {
     self(p)->expect(Thread::Main, Site::ParamsValue);
-    const int i = params::indexOf(id);
+    const ParamTable& table = self(p)->table();
+    const int i = table.indexOf(id);
     if (i < 0) return false;
-    if (params::at(static_cast<size_t>(i)).isOutput()) {
-        for (size_t k = 0; k < params::kOutputCount; ++k)
-            if (params::kOutputIndices[k] == i) *out = self(p)->heardOutputs[k].load(std::memory_order_relaxed);
+    if (table.at(static_cast<size_t>(i)).isOutput()) {
+        for (size_t k = 0; k < table.outputs().size(); ++k)
+            if (table.outputs()[k] == i) *out = self(p)->heardOutputs[k].load(std::memory_order_relaxed);
         return true;
     }
-    *out = self(p)->engine.store().get(static_cast<size_t>(i));
+    *out = self(p)->engine->store().get(static_cast<size_t>(i));
     return true;
 }
 
 bool CLAP_ABI paramsValueToText(const clap_plugin_t* plugin, clap_id id, double value, char* out, uint32_t size) {
     self(plugin)->expect(Thread::Main, Site::ParamsToText);
-    const ParamDef* p = params::find(id);
+    const ParamDef* p = self(plugin)->table().find(id);
     if (!p || !out || size == 0) return false;
     formatValue(*p, value, out, size);
     return true;
@@ -1227,7 +1393,7 @@ bool CLAP_ABI paramsValueToText(const clap_plugin_t* plugin, clap_id id, double 
 
 bool CLAP_ABI paramsTextToValue(const clap_plugin_t* plugin, clap_id id, const char* text, double* out) {
     self(plugin)->expect(Thread::Main, Site::ParamsFromText);
-    const ParamDef* p = params::find(id);
+    const ParamDef* p = self(plugin)->table().find(id);
     return p && out && parseValue(*p, text, *out);
 }
 
@@ -1235,8 +1401,8 @@ void CLAP_ABI paramsFlush(const clap_plugin_t* p, const clap_input_events_t* in,
                           const clap_output_events_t* out) SUPPLE_REALTIME {
     Plugin* s = self(p);
     s->expect(Thread::AudioWhileActive, Site::ParamsFlush);
-    ClapEvents events(in, s->tuningSpace);
-    s->engine.flush(events);
+    ClapEvents events(s->table(), s->info().takesNotes(), in, s->tuningSpace);
+    s->engine->flush(events);
     s->drainEdits(out);
     s->afterAudioWork(out, 0);
 }
@@ -1303,7 +1469,7 @@ bool CLAP_ABI presetFromLocation(const clap_plugin_t* p, uint32_t kind, const ch
     bool ok = false;
     if (s->presets) {
         if (kind == CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN) {
-            const int index = presets::findFactory(loadKey);
+            const int index = loadKey ? s->definition->findPreset(loadKey) : -1;
             ok = index >= 0 && s->presets->loadFactory(static_cast<size_t>(index));
         } else if (kind == CLAP_PRESET_DISCOVERY_LOCATION_FILE && location) {
             ok = s->presets->loadFile(PresetLibrary::fromUtf8(location));
@@ -1328,7 +1494,7 @@ bool CLAP_ABI renderSet(const clap_plugin_t* p, clap_plugin_render_mode mode) {
     Plugin* s = self(p);
     s->expect(Thread::Main, Site::Render);
     if (mode != CLAP_RENDER_REALTIME && mode != CLAP_RENDER_OFFLINE) return false;
-    s->engine.setOffline(mode == CLAP_RENDER_OFFLINE);
+    s->engine->setOffline(mode == CLAP_RENDER_OFFLINE);
     return true;
 }
 
@@ -1342,8 +1508,8 @@ bool CLAP_ABI menuPopulate(const clap_plugin_t* p, const clap_context_menu_targe
                            const clap_context_menu_builder_t* builder) {
     self(p)->expect(Thread::Main, Site::ContextMenu);
     if (!target || target->kind != CLAP_CONTEXT_MENU_TARGET_KIND_PARAM || !builder) return true;
-    const int i = params::indexOf(target->id);
-    if (i < 0 || params::at(static_cast<size_t>(i)).isOutput()) return true;
+    const int i = self(p)->editable(target->id);
+    if (i < 0) return true;
     if (builder->supports && !builder->supports(builder, CLAP_CONTEXT_MENU_ITEM_ENTRY)) return true;
     const clap_context_menu_entry_t reset{"Reset to Default", true, kMenuReset};
     return builder->add_item(builder, CLAP_CONTEXT_MENU_ITEM_ENTRY, &reset);
@@ -1353,9 +1519,9 @@ bool CLAP_ABI menuPerform(const clap_plugin_t* p, const clap_context_menu_target
     Plugin* s = self(p);
     s->expect(Thread::Main, Site::ContextMenu);
     if (!target || target->kind != CLAP_CONTEXT_MENU_TARGET_KIND_PARAM || action != kMenuReset) return false;
-    const int i = params::indexOf(target->id);
-    if (i < 0 || params::at(static_cast<size_t>(i)).isOutput()) return false;
-    s->editWhole(static_cast<size_t>(i), hostDefault(params::at(static_cast<size_t>(i))));
+    const int i = s->editable(target->id);
+    if (i < 0) return false;
+    s->editWhole(static_cast<size_t>(i), hostDefault(s->table().at(static_cast<size_t>(i))));
     return true;
 }
 
@@ -1429,7 +1595,7 @@ bool CLAP_ABI guiCreate(const clap_plugin_t* p, const char* api, bool isFloating
     s->expect(Thread::Main, Site::GuiCreate);
     if (!guiIsApiSupported(p, api, isFloating)) return false;
     if (!s->editor) {
-        s->editor = std::make_unique<gui::Gui>(*s, info::kName);
+        s->editor = std::make_unique<gui::Gui>(*s, s->info().name.c_str());
         s->editor->setPlatformScale(s->platformScale);
         s->editor->setUserScale(s->editorScale);
     }
@@ -1437,8 +1603,8 @@ bool CLAP_ABI guiCreate(const clap_plugin_t* p, const char* api, bool isFloating
         s->editor.reset();
         return false;
     }
-    s->engine.telemetry().clear();  // a previous editor's unread frames
-    s->engine.setMetering(true);
+    s->engine->telemetry().clear();  // a previous editor's unread frames
+    s->engine->setMetering(true);
     s->startTimer();
     return true;
 }
@@ -1519,9 +1685,9 @@ bool CLAP_ABI guiShow(const clap_plugin_t* p) {
     Plugin* s = self(p);
     s->expect(Thread::Main, Site::GuiShow);
     if (!s->editor) return false;
-    s->engine.telemetry().clear();
+    s->engine->telemetry().clear();
     const bool shown = s->editor->show();
-    s->engine.setMetering(shown);
+    s->engine->setMetering(shown);
     if (shown) {
         s->startTimer();
         if (s->timerId == CLAP_INVALID_ID) s->editor->startFallbackTimer(kTimerMs / 1000.0);
@@ -1532,7 +1698,7 @@ bool CLAP_ABI guiShow(const clap_plugin_t* p) {
 bool CLAP_ABI guiHide(const clap_plugin_t* p) {
     Plugin* s = self(p);
     s->expect(Thread::Main, Site::GuiHide);
-    s->engine.setMetering(false);
+    s->engine->setMetering(false);
     s->stopTimer();
     if (!s->editor) return false;
     s->editor->stopFallbackTimer();
@@ -1545,15 +1711,19 @@ const clap_plugin_gui_t kGui = {guiIsApiSupported, guiPreferredApi, guiCreate,  
                                 guiAdjustSize,     guiSetSize,      guiSetParent,    guiSetTransient,
                                 guiSuggestTitle,   guiShow,         guiHide};
 
+#endif  // SUPPLE_WITH_GUI
+
+// The editor's timer, and the layer's.
 void CLAP_ABI timerTick(const clap_plugin_t* p, clap_id id) {
     Plugin* s = self(p);
     s->expect(Thread::Main, Site::Timer);
+#if SUPPLE_WITH_GUI
     if (s->editor && id == s->timerId) s->editor->tick();
+#endif
+    if (s->layer && id == s->layerTimerId) s->layer->tick();
 }
 
 const clap_plugin_timer_support_t kTimer = {timerTick};
-
-#endif  // SUPPLE_WITH_GUI
 
 // --- lifecycle ---------------------------------------------------------------------------------
 
@@ -1576,24 +1746,37 @@ bool CLAP_ABI pluginInit(const clap_plugin_t* p) {
         s->hostContextMenu = s->hostExtension<const clap_host_context_menu_t>(CLAP_EXT_CONTEXT_MENU_COMPAT);
     s->hostTrackInfo = s->hostExtension<const clap_host_track_info_t>(CLAP_EXT_TRACK_INFO);
     if (!s->hostTrackInfo) s->hostTrackInfo = s->hostExtension<const clap_host_track_info_t>(CLAP_EXT_TRACK_INFO_COMPAT);
-    if constexpr (kNoteNames) s->hostNoteName = s->hostExtension<const clap_host_note_name_t>(CLAP_EXT_NOTE_NAME);
-    if constexpr (kTuning) {
+    if (s->namesNotes()) s->hostNoteName = s->hostExtension<const clap_host_note_name_t>(CLAP_EXT_NOTE_NAME);
+    if (s->info().tuning) {
         const auto* registry = s->hostExtension<const clap_host_event_registry_t>(CLAP_EXT_EVENT_REGISTRY);
         uint16_t space = UINT16_MAX;
         if (registry && registry->query && registry->query(s->host, CLAP_EXT_TUNING, &space)) s->tuningSpace = space;
         s->tuning.attach(s->host, s->hostExtension<const clap_host_tuning_t>(CLAP_EXT_TUNING));
-        s->engine.setTuning(&s->tuning);
+        s->engine->setTuning(&s->tuning);
     }
+    s->hostAudioPorts = s->hostExtension<const clap_host_audio_ports_t>(CLAP_EXT_AUDIO_PORTS);
+    s->hostNotePorts = s->hostExtension<const clap_host_note_ports_t>(CLAP_EXT_NOTE_PORTS);
 #if SUPPLE_WITH_GUI
     s->refreshTrack();  // the host may never say it changed
 #endif
     s->createPresets();
+#if SUPPLE_PRODUCT_LAYER
+    s->layer = product::makeLayer(*s);
+    if (s->layer && s->hostTimer && s->hostTimer->register_timer) {
+        clap_id id = CLAP_INVALID_ID;
+        if (s->hostTimer->register_timer(s->host, kLayerTimerMs, &id)) s->layerTimerId = id;
+    }
+#endif
     return true;
 }
 
 void CLAP_ABI pluginDestroy(const clap_plugin_t* p) {
     Plugin* s = self(p);
     s->expect(Thread::Main, Site::Destroy);
+    if (s->layerTimerId != CLAP_INVALID_ID && s->hostTimer && s->hostTimer->unregister_timer)
+        s->hostTimer->unregister_timer(s->host, s->layerTimerId);
+    s->layerTimerId = CLAP_INVALID_ID;
+    s->layer.reset();  // first: it may reach the rest until it goes
     s->tuning.detach();
 #if SUPPLE_WITH_GUI
     // A host should destroy the editor first; not all do, and a timer left
@@ -1606,10 +1789,10 @@ void CLAP_ABI pluginDestroy(const clap_plugin_t* p) {
 bool CLAP_ABI pluginActivate(const clap_plugin_t* p, double sampleRate, uint32_t, uint32_t maxFrames) {
     Plugin* s = self(p);
     s->expect(Thread::Main, Site::Activate);
-    if (!s->engine.activate(sampleRate, static_cast<int>(std::max<uint32_t>(1, maxFrames)),
-                            info::kAudioInput ? s->channels : 0, s->channels))
+    if (!s->engine->activate(sampleRate, static_cast<int>(std::max<uint32_t>(1, maxFrames)),
+                             s->info().audioInput() ? s->channels : 0, s->channels))
         return false;
-    const int latency = s->engine.latency();
+    const int latency = s->engine->latency();
     // Telling the host during activate() is the only time it is allowed.
     if (s->reportedLatency >= 0 && latency != s->reportedLatency && s->hostLatency && s->hostLatency->changed)
         s->hostLatency->changed(s->host);
@@ -1619,14 +1802,18 @@ bool CLAP_ABI pluginActivate(const clap_plugin_t* p, double sampleRate, uint32_t
     s->resendOutputs = true;
     s->restartWanted.store(false, std::memory_order_relaxed);
     s->active = true;
+    if (s->layer) s->layer->activated();
     return true;
 }
 
 void CLAP_ABI pluginDeactivate(const clap_plugin_t* p) {
     Plugin* s = self(p);
     s->expect(Thread::Main, Site::Deactivate);
-    s->engine.deactivate();
+    s->engine->deactivate();
     s->active = false;
+    // A redefinition waits for this: parameters change only while inactive.
+    if (s->pendingDefinition) s->swapDefinition();
+    if (s->layer) s->layer->deactivated();
 }
 
 bool CLAP_ABI pluginStartProcessing(const clap_plugin_t* p) SUPPLE_REALTIME {
@@ -1639,7 +1826,7 @@ void CLAP_ABI pluginStopProcessing(const clap_plugin_t* p) SUPPLE_REALTIME {
 
 void CLAP_ABI pluginReset(const clap_plugin_t* p) SUPPLE_REALTIME {
     self(p)->expect(Thread::Audio, Site::Reset);
-    self(p)->engine.reset();
+    self(p)->engine->reset();
 }
 
 template <class T>
@@ -1652,26 +1839,30 @@ T* const* channelsOf(const clap_audio_buffer_t& b) {
 // when the host broke the ports' contract.
 template <class T, class Source>
 bool processAs(Plugin* s, const clap_process_t* process, Source& events, const Transport* t) SUPPLE_REALTIME {
+    const PluginInfo& info = s->info();
     const uint32_t width = static_cast<uint32_t>(s->channels);
     AudioBuses<T> io;
     clap_audio_buffer_t& out = process->audio_outputs[0];
     io.out = channelsOf<T>(out);
-    if (info::kAudioInput) {
+    if (info.audioInput()) {
         const clap_audio_buffer_t& in = process->audio_inputs[0];
         if (in.channel_count < width || !channelsOf<T>(in)) return false;
         io.in = channelsOf<T>(in);
     }
     // A bus the host left unconnected, or narrower than it was told, is
     // silence in and nowhere out.
-    if constexpr (info::kSidechain) {
-        if (kSidechainPort < process->audio_inputs_count) {
-            const clap_audio_buffer_t& sc = process->audio_inputs[kSidechainPort];
+    if (info.sidechain) {
+        if (sidechainPort(info) < process->audio_inputs_count) {
+            const clap_audio_buffer_t& sc = process->audio_inputs[sidechainPort(info)];
             if (sc.channel_count >= width) io.sidechain = channelsOf<T>(sc);
         }
     }
-    T* const* aux[info::kAuxOutputs > 0 ? info::kAuxOutputs : 1] = {};
-    if constexpr (info::kAuxOutputs > 0) {
-        for (uint32_t k = 0; k < static_cast<uint32_t>(info::kAuxOutputs); ++k) {
+    // Aux buses beyond what fits here are left untouched (and silent).
+    constexpr uint32_t kMaxAux = 64;
+    T* const* aux[kMaxAux] = {};
+    const uint32_t auxCount = std::min(static_cast<uint32_t>(info.auxCount()), kMaxAux);
+    if (auxCount > 0) {
+        for (uint32_t k = 0; k < auxCount; ++k) {
             if (1 + k >= process->audio_outputs_count) break;
             clap_audio_buffer_t& bus = process->audio_outputs[1 + k];
             bus.constant_mask = 0;
@@ -1679,14 +1870,14 @@ bool processAs(Plugin* s, const clap_process_t* process, Source& events, const T
         }
         io.aux = aux;
     }
-    s->engine.process(io, static_cast<int>(process->frames_count), events, t);
+    s->engine->process(io, static_cast<int>(process->frames_count), events, t);
     return true;
 }
 
 clap_process_status CLAP_ABI pluginProcess(const clap_plugin_t* p, const clap_process_t* process) SUPPLE_REALTIME {
     Plugin* s = self(p);
     s->expect(Thread::Audio, Site::Process);
-    ClapEvents events(process->in_events, s->tuningSpace);
+    ClapEvents events(s->table(), s->info().takesNotes(), process->in_events, s->tuningSpace);
     // Edits first, so the host records them in the block that plays them.
     s->drainEdits(process->out_events);
 
@@ -1704,13 +1895,13 @@ clap_process_status CLAP_ABI pluginProcess(const clap_plugin_t* p, const clap_pr
         t = &transport;
     }
 
-    if constexpr (info::kNoteEffect) {
+    if (s->info().noteEffect()) {
         // Notes in, notes out, no audio: still split at every event.
         AudioBuses<double> none;
-        s->engine.process(none, static_cast<int>(process->frames_count), events, t);
-    } else if (process->audio_outputs_count < 1 || (info::kAudioInput && process->audio_inputs_count < 1)) {
+        s->engine->process(none, static_cast<int>(process->frames_count), events, t);
+    } else if (process->audio_outputs_count < 1 || (s->info().audioInput() && process->audio_inputs_count < 1)) {
         s->report(kBadBuses);
-        s->engine.flush(events);
+        s->engine->flush(events);
     } else {
         clap_audio_buffer_t& out = process->audio_outputs[0];
         // Bus widths are fixed by the selected configuration and activate();
@@ -1729,7 +1920,7 @@ clap_process_status CLAP_ABI pluginProcess(const clap_plugin_t* p, const clap_pr
         else if (out.data64)
             ok = processAs<double>(s, process, events, t);
         else
-            s->engine.flush(events);
+            s->engine->flush(events);
         if (!ok) {
             s->report(kBadBuses);
             return CLAP_PROCESS_ERROR;
@@ -1739,37 +1930,43 @@ clap_process_status CLAP_ABI pluginProcess(const clap_plugin_t* p, const clap_pr
     return CLAP_PROCESS_CONTINUE;
 }
 
-const void* CLAP_ABI pluginExtension(const clap_plugin_t*, const char* id) {
+const void* CLAP_ABI pluginExtension(const clap_plugin_t* p, const char* id) {
+    const Plugin& s = *self(p);
+    const PluginInfo& info = s.info();
+    if (s.layer)
+        if (const void* own = s.layer->extension(id)) return own;
     if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &kAudioPorts;
-    if (info::kAudioOutput) {
+    if (info.audioOutput()) {
         if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG)) return &kAudioPortsConfig;
         if (!std::strcmp(id, CLAP_EXT_CONFIGURABLE_AUDIO_PORTS) ||
             !std::strcmp(id, CLAP_EXT_CONFIGURABLE_AUDIO_PORTS_COMPAT))
             return &kConfigurablePorts;
     }
-    if (kAnySurround && (!std::strcmp(id, CLAP_EXT_SURROUND) || !std::strcmp(id, CLAP_EXT_SURROUND_COMPAT)))
+    if (anyLayout(info, isSurround) && (!std::strcmp(id, CLAP_EXT_SURROUND) || !std::strcmp(id, CLAP_EXT_SURROUND_COMPAT)))
         return &kSurround;
-    if (kAnyAmbisonic && (!std::strcmp(id, CLAP_EXT_AMBISONIC) || !std::strcmp(id, CLAP_EXT_AMBISONIC_COMPAT)))
+    if (anyLayout(info, isAmbisonic) &&
+        (!std::strcmp(id, CLAP_EXT_AMBISONIC) || !std::strcmp(id, CLAP_EXT_AMBISONIC_COMPAT)))
         return &kAmbisonic;
-    if ((info::kNoteInput || info::kNoteOutput) && !std::strcmp(id, CLAP_EXT_NOTE_PORTS)) return &kNotePorts;
-    if (kVoiceInfo && !std::strcmp(id, CLAP_EXT_VOICE_INFO)) return &kVoiceInfoExt;
-    if (info::kNoteInput && !std::strcmp(id, CLAP_PLUGIN_AS_VST3)) return &kAsVst3;
+    if ((info.takesNotes() || info.sendsNotes()) && !std::strcmp(id, CLAP_EXT_NOTE_PORTS)) return &kNotePorts;
+    if (voiceInfo(s) && !std::strcmp(id, CLAP_EXT_VOICE_INFO)) return &kVoiceInfoExt;
+    if (info.takesNotes() && !std::strcmp(id, CLAP_PLUGIN_AS_VST3)) return &kAsVst3;
     if (!std::strcmp(id, CLAP_EXT_PARAMS)) return &kParams;
     if (!std::strcmp(id, CLAP_EXT_STATE)) return &kState;
     if (!std::strcmp(id, CLAP_EXT_STATE_CONTEXT)) return &kStateContext;
-    if (info::kPresets &&
-        (!std::strcmp(id, CLAP_EXT_PRESET_LOAD) || !std::strcmp(id, CLAP_EXT_PRESET_LOAD_COMPAT)))
+    if (info.presets && (!std::strcmp(id, CLAP_EXT_PRESET_LOAD) || !std::strcmp(id, CLAP_EXT_PRESET_LOAD_COMPAT)))
         return &kPresetLoad;
     if (!std::strcmp(id, CLAP_EXT_LATENCY)) return &kLatency;
     if (!std::strcmp(id, CLAP_EXT_TAIL)) return &kTail;
     if (kRender && !std::strcmp(id, CLAP_EXT_RENDER)) return &kRenderExt;
     if (!std::strcmp(id, CLAP_EXT_CONTEXT_MENU) || !std::strcmp(id, CLAP_EXT_CONTEXT_MENU_COMPAT)) return &kContextMenu;
-    if (kNoteNames && !std::strcmp(id, CLAP_EXT_NOTE_NAME)) return &kNoteName;
-    if (kTuning && !std::strcmp(id, CLAP_EXT_TUNING)) return &kTuningExt;
+    if (s.namesNotes() && !std::strcmp(id, CLAP_EXT_NOTE_NAME)) return &kNoteName;
+    if (info.tuning && !std::strcmp(id, CLAP_EXT_TUNING)) return &kTuningExt;
 #if SUPPLE_WITH_GUI
     if (!std::strcmp(id, CLAP_EXT_GUI)) return &kGui;
-    if (!std::strcmp(id, CLAP_EXT_TIMER_SUPPORT)) return &kTimer;
     if (!std::strcmp(id, CLAP_EXT_TRACK_INFO) || !std::strcmp(id, CLAP_EXT_TRACK_INFO_COMPAT)) return &kTrackInfo;
+    if (!std::strcmp(id, CLAP_EXT_TIMER_SUPPORT)) return &kTimer;
+#else
+    if (s.layer && !std::strcmp(id, CLAP_EXT_TIMER_SUPPORT)) return &kTimer;
 #endif
     return nullptr;
 }
@@ -1778,7 +1975,7 @@ void CLAP_ABI pluginOnMainThread(const clap_plugin_t* p) {
     Plugin* s = self(p);
     s->expect(Thread::Main, Site::OnMainThread);
     s->callbackRequested.store(false, std::memory_order_release);
-    s->engine.properties().collect();
+    s->engine->properties().collect();
     s->logReports();
     if (s->namesChanged.exchange(false, std::memory_order_acq_rel)) s->checkNoteNames();
     if (s->restartWanted.exchange(false, std::memory_order_acq_rel)) s->requestRestart();
@@ -1788,21 +1985,75 @@ void CLAP_ABI pluginOnMainThread(const clap_plugin_t* p) {
         s->flushRequested.store(false, std::memory_order_release);
         s->requestFlush();
     }
+    if (s->layer && s->layerCallback.exchange(false, std::memory_order_acq_rel)) s->layer->onMainThread();
 }
 
 // --- factory ----------------------------------------------------------------------------------
 
-uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 1; }
+// A plugin's CLAP descriptor and the text it points to.
+struct Descriptor {
+    DefinitionPtr definition;
+    std::vector<std::string> text;  // id, name, vendor, url, version, description
+    std::vector<const char*> features;
+    clap_plugin_descriptor_t clap{};
+
+    explicit Descriptor(DefinitionPtr d) : definition(std::move(d)) {
+        const PluginInfo& i = definition->info();
+        text = {i.id, i.name, i.vendor, i.url, i.version, i.description};
+        for (const std::string& f : i.features) features.push_back(f.c_str());
+        features.push_back(nullptr);
+        clap = {CLAP_VERSION_INIT, text[0].c_str(), text[1].c_str(), text[2].c_str(), text[3].c_str(), "", "",
+                text[4].c_str(), text[5].c_str(), features.data()};
+    }
+};
+
+// What the factory has listed (main thread). A descriptor lives as long as
+// the module: hosts keep the pointers.
+struct Listing {
+    std::vector<std::unique_ptr<Descriptor>> all;  // every one handed out
+    std::vector<const Descriptor*> current;        // the catalog as last listed
+
+    // The catalog now. A plugin that changed gets a new descriptor; the old
+    // one stays valid.
+    void refresh() {
+        current.clear();
+        for (DefinitionPtr& d : catalog().list())
+            if (usable(*d)) current.push_back(&descriptorFor(std::move(d)));
+    }
+    // A plugin whose definition breaks the rules is not offered. (A product
+    // with tables cannot build with one.)
+    static bool usable(const Definition& d) { return d.problems().empty(); }
+    const Descriptor& descriptorFor(DefinitionPtr d) {
+        for (auto& existing : all)
+            if (existing->definition == d) return *existing;
+        all.push_back(std::make_unique<Descriptor>(std::move(d)));
+        return *all.back();
+    }
+};
+
+Listing& listing() {
+    static Listing instance;
+    return instance;
+}
+
+uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) {
+    listing().refresh();
+    return static_cast<uint32_t>(listing().current.size());
+}
 
 const clap_plugin_descriptor_t* CLAP_ABI factoryDescriptor(const clap_plugin_factory_t*, uint32_t index) {
-    return index == 0 ? &kDescriptor : nullptr;
+    if (listing().current.empty()) listing().refresh();
+    return index < listing().current.size() ? &listing().current[index]->clap : nullptr;
 }
 
 const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const clap_host_t* host, const char* id) {
-    if (!host || !id || std::strcmp(id, kDescriptor.id) != 0) return nullptr;
-    auto* s = new Plugin();
+    if (!host || !id) return nullptr;
+    DefinitionPtr definition = catalog().find(id);
+    if (!definition || !Listing::usable(*definition)) return nullptr;
+    const Descriptor& descriptor = listing().descriptorFor(definition);
+    auto* s = new Plugin(std::move(definition));
     s->host = host;
-    s->clap.desc = &kDescriptor;
+    s->clap.desc = &descriptor.clap;
     s->clap.plugin_data = s;
     s->clap.init = pluginInit;
     s->clap.destroy = pluginDestroy;
@@ -1820,6 +2071,11 @@ const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const 
 const clap_plugin_factory_t kFactory = {factoryCount, factoryDescriptor, factoryCreate};
 
 }  // namespace
+
+Layer* Layer::of(const clap_plugin_t* plugin) {
+    return plugin && plugin->plugin_data ? self(plugin)->layer.get() : nullptr;
+}
+
 }  // namespace supple::plugin
 
 supple::gui::EditorHost* supple_test_editor_host(const clap_plugin_t* plugin) {
@@ -1832,7 +2088,7 @@ supple::gui::EditorHost* supple_test_editor_host(const clap_plugin_t* plugin) {
 }
 
 void supple_test_set_metering(const clap_plugin_t* plugin, bool on) {
-    if (plugin) supple::plugin::self(plugin)->engine.setMetering(on);
+    if (plugin) supple::plugin::self(plugin)->engine->setMetering(on);
 }
 
 uint64_t supple_test_wrong_threads(const clap_plugin_t* plugin) {
@@ -1844,7 +2100,7 @@ uint32_t supple_test_reports(const clap_plugin_t* plugin) {
 }
 
 bool supple_test_offline(const clap_plugin_t* plugin) {
-    return plugin && supple::plugin::self(plugin)->engine.offline();
+    return plugin && supple::plugin::self(plugin)->engine->offline();
 }
 
 double supple_test_retuning(const clap_plugin_t* plugin, int key, int channel) {
@@ -1856,8 +2112,11 @@ void supple_entry_deinit() {}
 const void* supple_entry_get_factory(const char* factoryId) {
     if (!factoryId) return nullptr;
     if (!std::strcmp(factoryId, CLAP_PLUGIN_FACTORY_ID)) return &supple::plugin::kFactory;
-    if (supple::presets::kEnabled && (!std::strcmp(factoryId, CLAP_PRESET_DISCOVERY_FACTORY_ID) ||
-                                      !std::strcmp(factoryId, CLAP_PRESET_DISCOVERY_FACTORY_ID_COMPAT)))
-        return supple::plugin::presetDiscoveryFactory();
+    if (!std::strcmp(factoryId, CLAP_PRESET_DISCOVERY_FACTORY_ID) ||
+        !std::strcmp(factoryId, CLAP_PRESET_DISCOVERY_FACTORY_ID_COMPAT)) {
+        // Offered while any plugin in the catalog has presets.
+        for (const supple::DefinitionPtr& d : supple::catalog().list())
+            if (d->info().presets) return supple::plugin::presetDiscoveryFactory();
+    }
     return nullptr;
 }

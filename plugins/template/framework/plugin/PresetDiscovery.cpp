@@ -3,12 +3,12 @@
 #include "plugin/PresetDiscovery.h"
 
 #include <cstring>
+#include <memory>
 #include <string>
 #include <system_error>
 #include <vector>
 
-#include "ProductInfo.h"
-#include "core/Preset.h"
+#include "core/Catalog.h"
 #include "core/Files.h"
 #include "core/PresetLibrary.h"
 #include "core/StateFormat.h"
@@ -16,41 +16,77 @@
 namespace supple::plugin {
 namespace {
 
-namespace info = product::info;
+// One provider per plugin in the catalog that has presets.
+struct ProviderInfo {
+    DefinitionPtr definition;
+    std::string id, name;
+    clap_preset_discovery_provider_descriptor_t clap{};
 
-const std::string kProviderId = std::string(info::kId) + ".presets";
-const std::string kProviderName = std::string(info::kName) + " presets";
-const std::string kFileTypeName = std::string(info::kName) + " preset";
+    explicit ProviderInfo(DefinitionPtr d) : definition(std::move(d)) {
+        const PluginInfo& i = definition->info();
+        id = i.id + ".presets";
+        name = i.name + " presets";
+        clap = {CLAP_VERSION_INIT, id.c_str(), name.c_str(), i.vendor.c_str()};
+    }
+};
 
-const clap_preset_discovery_provider_descriptor_t kDescriptor = {CLAP_VERSION_INIT, kProviderId.c_str(),
-                                                                  kProviderName.c_str(), info::kVendor};
+// Every provider handed out, kept for the life of the module (hosts keep
+// the pointers), and the catalog's as last listed.
+struct Providers {
+    std::vector<std::unique_ptr<ProviderInfo>> all;
+    std::vector<const ProviderInfo*> current;
+
+    void refresh() {
+        current.clear();
+        for (DefinitionPtr& d : catalog().list()) {
+            if (!d->info().presets) continue;
+            const ProviderInfo* found = nullptr;
+            for (auto& existing : all)
+                if (existing->definition == d) found = existing.get();
+            if (!found) {
+                all.push_back(std::make_unique<ProviderInfo>(std::move(d)));
+                found = all.back().get();
+            }
+            current.push_back(found);
+        }
+    }
+};
+
+Providers& providers() {
+    static Providers instance;
+    return instance;
+}
 
 struct Provider {
     clap_preset_discovery_provider_t clap{};
     const clap_preset_discovery_indexer_t* indexer = nullptr;
+    const ProviderInfo* info = nullptr;
+    std::string fileTypeName;
     std::string userFolder;  // kept for the indexer, which may hold the pointer
 };
 
 Provider* self(const clap_preset_discovery_provider_t* p) { return static_cast<Provider*>(p->provider_data); }
 
-void describe(const clap_preset_discovery_metadata_receiver_t* receiver, uint32_t flags) {
-    const clap_universal_plugin_id_t id{"clap", info::kId};
+void describe(const Provider& s, const clap_preset_discovery_metadata_receiver_t* receiver, uint32_t flags) {
+    const PluginInfo& info = s.info->definition->info();
+    const clap_universal_plugin_id_t id{"clap", info.id.c_str()};
     receiver->add_plugin_id(receiver, &id);
     receiver->set_flags(receiver, flags);
-    if (info::kVendor[0]) receiver->add_creator(receiver, info::kVendor);
+    if (!info.vendor.empty()) receiver->add_creator(receiver, info.vendor.c_str());
 }
 
 bool CLAP_ABI providerInit(const clap_preset_discovery_provider_t* p) {
     Provider* s = self(p);
-    const clap_preset_discovery_filetype_t type{kFileTypeName.c_str(), nullptr, PresetLibrary::kExtension + 1};
+    const Definition& definition = *s->info->definition;
+    const clap_preset_discovery_filetype_t type{s->fileTypeName.c_str(), nullptr, PresetLibrary::kExtension + 1};
     if (!s->indexer->declare_filetype(s->indexer, &type)) return false;
-    if (presets::kFactoryCount > 0) {
+    if (!definition.presets().empty()) {
         const clap_preset_discovery_location_t factory{CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT, "Factory",
                                                        CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN, nullptr};
         if (!s->indexer->declare_location(s->indexer, &factory)) return false;
     }
     std::error_code ec;
-    const auto folder = PresetLibrary::defaultUserFolder();
+    const auto folder = PresetLibrary::defaultUserFolder(definition.info());
     if (!folder.empty() && std::filesystem::is_directory(folder, ec)) {
         s->userFolder = PresetLibrary::toUtf8(folder);
         const clap_preset_discovery_location_t user{CLAP_PRESET_DISCOVERY_IS_USER_CONTENT, "User",
@@ -62,48 +98,61 @@ bool CLAP_ABI providerInit(const clap_preset_discovery_provider_t* p) {
 
 void CLAP_ABI providerDestroy(const clap_preset_discovery_provider_t* p) { delete self(p); }
 
-bool CLAP_ABI providerMetadata(const clap_preset_discovery_provider_t*, uint32_t kind, const char* location,
+bool CLAP_ABI providerMetadata(const clap_preset_discovery_provider_t* p, uint32_t kind, const char* location,
                                const clap_preset_discovery_metadata_receiver_t* receiver) {
+    const Provider& s = *self(p);
+    const Definition& definition = *s.info->definition;
     if (kind == CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN) {
-        for (size_t i = 0; i < presets::kFactoryCount; ++i) {
-            const Preset& preset = presets::factory(i);
-            if (!receiver->begin_preset(receiver, preset.name, preset.name)) return true;
-            describe(receiver, CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT);
-            if (preset.category[0]) receiver->add_feature(receiver, preset.category);
+        for (const FactoryPreset& preset : definition.presets()) {
+            if (!receiver->begin_preset(receiver, preset.name.c_str(), preset.name.c_str())) return true;
+            describe(s, receiver, CLAP_PRESET_DISCOVERY_IS_FACTORY_CONTENT);
+            if (!preset.category.empty()) receiver->add_feature(receiver, preset.category.c_str());
         }
         return true;
     }
     if (kind != CLAP_PRESET_DISCOVERY_LOCATION_FILE || !location) return false;
     const std::filesystem::path file = PresetLibrary::fromUtf8(location);
     std::vector<uint8_t> bytes;
-    state::Snapshot snapshot;
+    state::Snapshot snapshot(definition);
     if (!files::readBounded(file, bytes, state::kMaxBytes) ||
-        state::load(bytes.data(), bytes.size(), state::fourcc(info::kStateTag), snapshot) != state::LoadResult::Ok) {
+        state::load(bytes.data(), bytes.size(), state::fourcc(definition.info().stateTag.c_str()), snapshot) !=
+            state::LoadResult::Ok) {
         receiver->on_error(receiver, 0, "not a preset of this plugin");
         return false;
     }
     const std::string name = PresetLibrary::toUtf8(file.stem());
     if (!receiver->begin_preset(receiver, name.c_str(), nullptr)) return true;
-    describe(receiver, CLAP_PRESET_DISCOVERY_IS_USER_CONTENT);
+    describe(s, receiver, CLAP_PRESET_DISCOVERY_IS_USER_CONTENT);
     return true;
 }
 
 const void* CLAP_ABI providerExtension(const clap_preset_discovery_provider_t*, const char*) { return nullptr; }
 
-uint32_t CLAP_ABI factoryCount(const clap_preset_discovery_factory_t*) { return 1; }
+uint32_t CLAP_ABI factoryCount(const clap_preset_discovery_factory_t*) {
+    providers().refresh();
+    return static_cast<uint32_t>(providers().current.size());
+}
 
 const clap_preset_discovery_provider_descriptor_t* CLAP_ABI factoryDescriptor(const clap_preset_discovery_factory_t*,
                                                                                uint32_t index) {
-    return index == 0 ? &kDescriptor : nullptr;
+    if (providers().current.empty()) providers().refresh();
+    return index < providers().current.size() ? &providers().current[index]->clap : nullptr;
 }
 
 const clap_preset_discovery_provider_t* CLAP_ABI factoryCreate(const clap_preset_discovery_factory_t*,
                                                                 const clap_preset_discovery_indexer_t* indexer,
                                                                 const char* id) {
-    if (!indexer || !id || std::strcmp(id, kDescriptor.id) != 0) return nullptr;
+    if (!indexer || !id) return nullptr;
+    if (providers().current.empty()) providers().refresh();
+    const ProviderInfo* info = nullptr;
+    for (const ProviderInfo* candidate : providers().current)
+        if (candidate->id == id) info = candidate;
+    if (!info) return nullptr;
     auto* s = new Provider();
     s->indexer = indexer;
-    s->clap.desc = &kDescriptor;
+    s->info = info;
+    s->fileTypeName = info->definition->info().name + " preset";
+    s->clap.desc = &info->clap;
     s->clap.provider_data = s;
     s->clap.init = providerInit;
     s->clap.destroy = providerDestroy;

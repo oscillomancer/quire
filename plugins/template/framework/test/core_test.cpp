@@ -337,6 +337,33 @@ TEST(plain_host_value_keeps_the_knob_on_its_taper) {
 
 // --- DSP building blocks ------------------------------------------------------------
 
+TEST(normalized_host_value_reaches_hosts_as_a_position) {
+    // A linear parameter whose host value is its 0..1 position, as hosts
+    // that keep normalized values expect; the plain value is unchanged.
+    const ParamDef plain = decibels(0, "Gain", -24.0, 12.0, 0.0);
+    const ParamDef normal = plain.normalizedHostValue();
+    CHECK(normal.hostTapered() && !plain.hostTapered());
+    CHECK(normal.hostMin() == 0.0 && normal.hostMax() == 1.0);
+    CHECK(toHost(normal, -24.0) == 0.0 && toHost(normal, 12.0) == 1.0);
+    CHECK_NEAR(hostDefault(normal), 24.0 / 36.0, 1e-15);
+    for (int k = 0; k <= 36; ++k) {
+        const double db = -24.0 + k;
+        CHECK_NEAR(toPlain(normal, toHost(normal, db)), db, 1e-12);
+        CHECK(toNormalized(normal, toHost(normal, db)) == toNormalized(plain, toHost(plain, db)));
+    }
+    CHECK(text(normal, toHost(normal, -6.0)) == text(plain, -6.0));
+    // A tapered parameter is a position already; the flag changes nothing.
+    const ParamDef f = frequency(1, "F", 20.0, 20000.0, 1000.0);
+    CHECK(toHost(f.normalizedHostValue(), 440.0) == toHost(f, 440.0));
+    // Not for stepped parameters, nor with plainHostValue().
+    ParamTable::Builder b;
+    b.add(integer(2, "Steps", 1, 8, 4).normalizedHostValue());
+    b.add(f.plainHostValue().normalizedHostValue());
+    const Definition bad(productDefinition()->info(), b.build());
+    CHECK(bad.problems().find("'Steps': normalizedHostValue()") != std::string::npos);
+    CHECK(bad.problems().find("'F': normalizedHostValue()") != std::string::npos);
+}
+
 TEST(smoother_settles_exactly) {
     dsp::Smoother s;
     s.setTime(10.0, 48000.0);
@@ -2010,51 +2037,52 @@ TEST(edit_bridge_is_safe_across_threads) {
 }
 
 namespace {
-template <size_t N>
-struct FullProperties {
-    static constexpr size_t kCount = N, kSlots = N;
-    static constexpr PropertyDef at(size_t i) {
-        return property(static_cast<uint32_t>(i), "Blob").maxBytes(properties::kMaxBytes);
-    }
-};
+// `n` properties, each `limit` bytes long at most.
+PropertyList propertyList(size_t n, uint32_t limit = 4096) {
+    PropertyList::Builder b;
+    for (size_t i = 0; i < n; ++i)
+        b.add(property(static_cast<uint32_t>(i), b.text("Blob " + std::to_string(i))).maxBytes(limit));
+    return b.build();
+}
 }  // namespace
 
 TEST(properties_cannot_add_up_to_more_state_than_loads_back) {
-    // What the product's static_assert checks: 63 full properties fit, 64 do not.
-    static_assert(state::maxSavedBytes<FullProperties<63>>() <= state::kMaxBytes);
-    static_assert(state::maxSavedBytes<FullProperties<64>>() > state::kMaxBytes);
+    // What a product's build checks and Definition::problems() says: 63 full
+    // properties fit, 64 do not.
+    const size_t params = params::kCount - params::kOutputCount;
+    constexpr uint64_t kFull = PropertyList::kMaxBytes;
+    CHECK(state::maxSavedBytes(params, 63, 63 * kFull) <= state::kMaxBytes);
+    CHECK(state::maxSavedBytes(params, 64, 64 * kFull) > state::kMaxBytes);
+    const Definition full(productDefinition()->info(), ParamTable(product::kParams, params::kCount),
+                          propertyList(64, PropertyList::kMaxBytes));
+    CHECK(full.problems().find("more state than will load back") != std::string::npos);
     // And the bound is the real worst case: every property at its limit,
     // the editor's scale and the longest preset name kept.
+    const Definition& product = *productDefinition();
     state::Snapshot s;
     s.defaultProperties();
     for (size_t i = 0; i < properties::kCount; ++i) s.property[i].assign(properties::at(i).limit, 'x');
     s.editorScale = 1.5;
     s.hasPreset = true;
     s.presetName.assign(state::kMaxPresetName, 'n');
-    CHECK(state::save(state::fourcc("TEST"), s).size() == state::maxSavedBytes());
+    CHECK(state::save(state::fourcc("TEST"), s).size() == state::maxSavedBytes(product));
     // A longer name would not load, so it is not saved.
     s.presetName += 'n';
-    CHECK(state::save(state::fourcc("TEST"), s).size() < state::maxSavedBytes());
-    std::printf("      at most %zu bytes of state in this product\n", state::maxSavedBytes());
-}
-
-namespace {
-struct ManyProperties {
-    static constexpr size_t kCount = 130, kSlots = kCount;
-    static constexpr PropertyDef at(size_t i) { return property(static_cast<uint32_t>(i), "Text"); }
-};
+    CHECK(state::save(state::fourcc("TEST"), s).size() < state::maxSavedBytes(product));
+    std::printf("      at most %zu bytes of state in this product\n", state::maxSavedBytes(product));
 }
 
 TEST(activation_drains_more_properties_than_the_retirement_queue_holds) {
-    BasicPropertyStore<ManyProperties> store;
-    for (size_t i = 0; i < ManyProperties::kCount; ++i) CHECK(store.set(i, "new"));
+    const PropertyList many = propertyList(130);
+    PropertyStore store(many);
+    for (size_t i = 0; i < many.count(); ++i) CHECK(store.set(i, "new"));
     size_t seen = 0;
     store.deliverAll([&](size_t, std::string_view value) {
         CHECK(value == "new");
         ++seen;
     });
-    CHECK(seen == ManyProperties::kCount);
-    for (size_t i = 0; i < ManyProperties::kCount; ++i) CHECK(store.set(i, "next"));
+    CHECK(seen == many.count());
+    for (size_t i = 0; i < many.count(); ++i) CHECK(store.set(i, "next"));
     seen = 0;
     store.deliver([&](size_t, std::string_view value) { CHECK(value == "next"); ++seen; });
     CHECK(seen == 64 && store.needsCollection());
@@ -2112,11 +2140,6 @@ struct FileScratch {
 }  // namespace
 
 namespace {
-struct FileTableProbe {
-    static constexpr size_t kCount = 1, kSlots = 1;
-    static inline PropertyDef entry = property(1, "File").file();
-    static const PropertyDef& at(size_t) { return entry; }
-};
 struct SlowFileProbe {
     using FileContents = int;
     static inline std::atomic<bool> started{false}, finish{true};
@@ -2131,10 +2154,11 @@ struct SlowFileProbe {
 TEST(file_defaults_load_and_same_session_activation_waits) {
     FileScratch scratch;
     const std::string path = scratch.touch("default.file");
-    FileTableProbe::entry.def = path.c_str();
-    FileSlots<SlowFileProbe, FileTableProbe> slots;
-    FileTableProbe::entry.def = "";
-    const FileSlots<SlowFileProbe, FileTableProbe>::Session session{48000, 64, 2};
+    PropertyList::Builder b;
+    b.add(property(1, "File", b.text(path)).file());
+    const PropertyList list = b.build();
+    FileSlots<SlowFileProbe> slots(list);
+    const FileSlots<SlowFileProbe>::Session session{48000, 64, 2};
     slots.prepare(session);
     bool loaded = false;
     slots.deliverAll([&](size_t, const int* p) { loaded = p && *p == 42; });

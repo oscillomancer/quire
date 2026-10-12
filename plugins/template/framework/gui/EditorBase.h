@@ -136,6 +136,9 @@ class EditorBase {
 
   protected:
     EditorHost& host() const { return host_; }
+    // What the plugin is (EditorHost::pluginDefinition).
+    const Definition& definition() const { return host_.pluginDefinition(); }
+    const ParamTable& paramTable() const { return host_.pluginDefinition().params(); }
     Ui& ui() { return ui_; }
     const Ui& ui() const { return ui_; }
     const Theme& theme() const { return theme_; }

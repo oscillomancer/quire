@@ -1,5 +1,5 @@
 diff --git a/src/detail/auv2/auv2_base_classes.h b/src/detail/auv2/auv2_base_classes.h
-index 528af7a..6c3cf1a 100644
+index 528af7a..1e76752 100644
 --- a/src/detail/auv2/auv2_base_classes.h
 +++ b/src/detail/auv2/auv2_base_classes.h
 @@ -751,6 +751,9 @@ class WrapAsAUV2 : public ausdk::AUBase,
@@ -12,11 +12,14 @@ index 528af7a..6c3cf1a 100644
  
    // --------------- internals
  
-@@ -807,7 +810,11 @@ class WrapAsAUV2 : public ausdk::AUBase,
+@@ -806,8 +809,13 @@ class WrapAsAUV2 : public ausdk::AUBase,
+   Clumps _clumps;
  
    // the CLAP parameter flagged CLAP_PARAM_IS_BYPASS, driven by kAudioUnitProperty_BypassEffect
-   clap_id _bypassParamID = CLAP_INVALID_ID;
+-  clap_id _bypassParamID = CLAP_INVALID_ID;
 -  bool _isBypassed = false;
++  // Read by SetParameter() on the host's automation thread; rescans settle it.
++  std::atomic<clap_id> _bypassParamID{CLAP_INVALID_ID};
 +  std::atomic<bool> _isBypassed{false};
 +  // The bypass parameter's midpoint: at or above it, bypassed.
 +  std::atomic<double> _bypassThreshold{0.5};
@@ -26,20 +29,41 @@ index 528af7a..6c3cf1a 100644
    CFStringRef _current_program_name = 0;
  
 diff --git a/src/wrapasauv2.cpp b/src/wrapasauv2.cpp
-index eb94df9..c4d4c16 100644
+index eb94df9..2a80192 100644
 --- a/src/wrapasauv2.cpp
 +++ b/src/wrapasauv2.cpp
-@@ -449,7 +449,8 @@ void WrapAsAUV2::setupParameters(const clap_plugin_t *plugin, const clap_plugin_
+@@ -362,7 +362,9 @@ void WrapAsAUV2::setupParameters(const clap_plugin_t *plugin, const clap_plugin_
+   // _clumps is not cleared here, and cannot be -- see the note on the class.
+   _orderedParameterList.clear();
+   _paramOrderingProvided = false;
+-  _bypassParamID = CLAP_INVALID_ID;
++  // Settled at the end, not cleared here: SetParameter() reads it without the
++  // lock, so a rescan must not take it away even for a moment.
++  clap_id bypassParamID = CLAP_INVALID_ID;
+   auto *p = _plugin->_ext._params;
+   if (p)
+   {
+@@ -448,8 +450,9 @@ void WrapAsAUV2::setupParameters(const clap_plugin_t *plugin, const clap_plugin_
+           }
            if (paraminfo.flags & CLAP_PARAM_IS_BYPASS)
            {
-             _bypassParamID = paraminfo.id;
+-            _bypassParamID = paraminfo.id;
 -            _isBypassed = (result >= 0.5 * (paraminfo.min_value + paraminfo.max_value));
++            bypassParamID = paraminfo.id;
 +            _bypassThreshold = 0.5 * (paraminfo.min_value + paraminfo.max_value);
 +            noteBypassValue(paraminfo.id, result);
            }
            Globals()->SetParameter(paraminfo.id, result);
            _orderedParameterList.push_back(static_cast<AudioUnitParameterID>(paraminfo.id));
-@@ -586,10 +587,18 @@ OSStatus WrapAsAUV2::SetParameter(AudioUnitParameterID inID, AudioUnitScope inSc
+@@ -457,6 +460,7 @@ void WrapAsAUV2::setupParameters(const clap_plugin_t *plugin, const clap_plugin_
+       }
+     }
+   }
++  if (_bypassParamID.load() != bypassParamID) _bypassParamID = bypassParamID;
+ }
+ 
+ OSStatus WrapAsAUV2::GetParameterList(AudioUnitScope inScope, AudioUnitParameterID *outParameterList,
+@@ -586,10 +590,18 @@ OSStatus WrapAsAUV2::SetParameter(AudioUnitParameterID inID, AudioUnitScope inSc
          _processAdapter->addParameterEvent(param, inValue, inBufferOffsetInFrames);
        }
      }
@@ -58,7 +82,7 @@ index eb94df9..c4d4c16 100644
  void WrapAsAUV2::SetBypassEffect(bool bypass)
  {
    _isBypassed = bypass;
-@@ -1306,6 +1315,7 @@ void WrapAsAUV2::onPerformEdit(const clap_event_param_value_t *value)
+@@ -1306,6 +1318,7 @@ void WrapAsAUV2::onPerformEdit(const clap_event_param_value_t *value)
  {
  #ifdef NOTIFYDIRECT
    Globals()->SetParameter(value->param_id, value->value);
@@ -66,7 +90,7 @@ index eb94df9..c4d4c16 100644
    AudioUnitEvent myEvent;
    myEvent.mEventType = kAudioUnitEvent_ParameterValueChange;
    myEvent.mArgument.mParameter.mAudioUnit = GetComponentInstance();
-@@ -1337,6 +1347,10 @@ void WrapAsAUV2::onEndEdit(clap_id id)
+@@ -1337,6 +1350,10 @@ void WrapAsAUV2::onEndEdit(clap_id id)
  void WrapAsAUV2::onIdle()
  {
    if (!_plugin) return;

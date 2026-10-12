@@ -160,6 +160,10 @@ endfunction()
 supple_sources(product_dsp_sources ${PRODUCT_DSP_SOURCES})
 supple_sources(product_editor_sources ${PRODUCT_EDITOR_SOURCES})
 supple_sources(product_test_sources ${PRODUCT_TEST_SOURCES})
+supple_sources(product_layer_sources ${PRODUCT_LAYER_SOURCES})
+if (product_layer_sources AND NOT PRODUCT_LAYER)
+    message(FATAL_ERROR "PRODUCT_LAYER_SOURCES needs PRODUCT_LAYER ON")
+endif()
 
 # --- the product ----------------------------------------------------------------------------
 
@@ -217,10 +221,18 @@ list(APPEND asset_sources ${asset_out}/supple_assets.c)
 add_library(product-assets STATIC ${asset_sources})
 supple_vendored(product-assets)
 
-# Everything SDK-free: parameters, the engine, the product's DSP.
+# Everything SDK-free: parameters, the engine, the product's DSP. A product
+# with tables makes its Definition from them (core/ProductDefinition.cpp); a
+# run-time product makes its own, through its catalog (core/Catalog.h).
+set(product_definition_sources ${SUPPLE_FRAMEWORK}/core/ProductDefinition.cpp)
+if (PRODUCT_RUNTIME)
+    set(product_definition_sources)
+endif()
 add_library(product-core STATIC ${SUPPLE_FRAMEWORK}/core/Param.cpp ${SUPPLE_FRAMEWORK}/core/PresetLibrary.cpp
+    ${SUPPLE_FRAMEWORK}/core/Definition.cpp ${SUPPLE_FRAMEWORK}/core/Catalog.cpp ${product_definition_sources}
     ${SUPPLE_FRAMEWORK}/core/Files.cpp ${SUPPLE_FRAMEWORK}/dsp/AudioFile.cpp ${product_dsp_sources})
 target_include_directories(product-core PUBLIC ${SUPPLE_FRAMEWORK} ${SUPPLE_PRODUCT} ${SUPPLE_GENERATED})
+target_compile_definitions(product-core PUBLIC SUPPLE_PRODUCT_RUNTIME=$<BOOL:${PRODUCT_RUNTIME}>)
 find_package(Threads REQUIRED)
 target_link_libraries(product-core PUBLIC product-assets supple-drlibs Threads::Threads)
 supple_defaults(product-core)
@@ -275,8 +287,12 @@ if (SUPPLE_BUILD_GUI)
 endif()
 
 if (SUPPLE_BUILD_PLUGIN)
-    add_library(product-impl STATIC ${SUPPLE_FRAMEWORK}/plugin/Plugin.cpp ${SUPPLE_FRAMEWORK}/plugin/PresetDiscovery.cpp)
+    add_library(product-impl STATIC ${SUPPLE_FRAMEWORK}/plugin/Plugin.cpp ${SUPPLE_FRAMEWORK}/plugin/PresetDiscovery.cpp
+        ${product_layer_sources})
     target_link_libraries(product-impl PUBLIC product-core clap)
+    # A product's layer (plugin/Layer.h): product::makeLayer, defined in
+    # PRODUCT_LAYER_SOURCES or a library targets.cmake links in.
+    target_compile_definitions(product-impl PUBLIC SUPPLE_PRODUCT_LAYER=$<BOOL:${PRODUCT_LAYER}>)
     # clapwrapper/vst3.h: the extension that tells the VST3 wrapper about
     # note expressions and MIDI channels.
     target_include_directories(product-impl PRIVATE ${clap-wrapper_SOURCE_DIR}/include)
@@ -293,7 +309,9 @@ if (SUPPLE_BUILD_PLUGIN)
     supple_defaults(product-impl)
 
     set(formats CLAP VST3)
-    if (APPLE)
+    # An AU component is one plugin, its codes fixed in its bundle: a
+    # run-time product, whose plugins are found when it runs, has none.
+    if (APPLE AND NOT PRODUCT_RUNTIME)
         list(APPEND formats AUV2)
     endif()
     set(SUPPLE_ASSETS ${CMAKE_BINARY_DIR}/plugins)

@@ -12,9 +12,7 @@
 #include <utility>
 
 #include "core/Files.h"
-#include "core/ParamTable.h"
 #include "core/PresetLibrary.h"
-#include "core/PropertyTable.h"
 
 namespace supple::gui {
 namespace {
@@ -337,7 +335,7 @@ uint32_t Ui::paramOf(int i, int slot) const {
 
 const ParamDef* Ui::def(int i, int slot) const {
     const uint32_t id = paramOf(i, slot);
-    return id == kNoParam ? nullptr : params::find(id);
+    return id == kNoParam ? nullptr : host_.pluginDefinition().params().find(id);
 }
 
 bool Ui::parameterless(int i) const {
@@ -469,11 +467,8 @@ bool Ui::interactive(int i) const {
     const Control& c = controls_[static_cast<size_t>(i)];
     if (!c.enabled) return false;
     switch (c.widget) {
-        case Widget::TextField: return properties::indexOf(c.param) >= 0;
-        case Widget::File: {
-            const int k = properties::indexOf(c.param);
-            return k >= 0 && properties::at(static_cast<size_t>(k)).isFile();
-        }
+        case Widget::TextField: return host_.pluginDefinition().properties().indexOf(c.param) >= 0;
+        case Widget::File: return fileProperty(c.param) != nullptr;
         case Widget::PresetBar: return host_.presetLibrary() != nullptr;
         case Widget::Button: return static_cast<bool>(c.action);
         case Widget::Tabs: return !c.pages.empty();
@@ -1670,10 +1665,11 @@ void Ui::openTextEdit(int i) {
     if (i < 0 || i >= count()) return;
     const Control& c = controls_[static_cast<size_t>(i)];
     if (c.widget == Widget::TextField) {
-        const int k = properties::indexOf(c.param);
+        const PropertyList& properties = host_.pluginDefinition().properties();
+        const int k = properties.indexOf(c.param);
         if (k < 0) return;
         const uint32_t id = c.param;
-        const int limit = static_cast<int>(std::min<uint32_t>(properties::at(static_cast<size_t>(k)).limit,
+        const int limit = static_cast<int>(std::min<uint32_t>(properties.at(static_cast<size_t>(k)).limit,
                                                               TextEdit::kCapacity - 1));
         prompt(c.bounds, host_.property(id), limit,
                [this, id](std::string_view text) { return host_.setProperty(id, text); }, i);
@@ -1793,12 +1789,11 @@ void Ui::openTooltip() {
 
 // --- file slots ---------------------------------------------------------------------
 
-namespace {
-const PropertyDef* fileProperty(uint32_t id) {
-    const int k = properties::indexOf(id);
-    return k >= 0 && properties::at(static_cast<size_t>(k)).isFile() ? &properties::at(static_cast<size_t>(k)) : nullptr;
+const PropertyDef* Ui::fileProperty(uint32_t id) const {
+    const PropertyList& properties = host_.pluginDefinition().properties();
+    const int k = properties.indexOf(id);
+    return k >= 0 && properties.at(static_cast<size_t>(k)).isFile() ? &properties.at(static_cast<size_t>(k)) : nullptr;
 }
-}  // namespace
 
 int Ui::fileSlotAt(float x, float y, const std::vector<std::string>& paths) const {
     const int i = controlAt(x, y);

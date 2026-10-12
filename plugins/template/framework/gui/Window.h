@@ -66,6 +66,11 @@ class Window : public Clipboard {
     bool startFallbackTimer(double seconds);
     void stopFallbackTimer();
     bool realized() const { return view_ && realized_; }
+    // Hands the view to another editor: at once if nothing is attached,
+    // otherwise at the next draw, when the graphics context is current. The
+    // current editor must live until replacing() is false.
+    void replaceEditor(EditorBase& next);
+    bool replacing() const { return next_ != nullptr; }
     // A point in design units, in host units from the window's top left: where
     // a host shows a menu the editor asks for.
     void designToHost(float x, float y, int32_t& hostX, int32_t& hostY) const;
@@ -99,7 +104,10 @@ class Window : public Clipboard {
     float toDesignX(double x) const;
     float toDesignY(double y) const;
 
-    EditorBase& editor_;
+    void adopt();  // draw(): the replacement takes over
+
+    EditorBase* editor_;
+    EditorBase* next_ = nullptr;  // waiting for a draw to take over
     const char* className_;
     bool standalone_;
     PuglWorldImpl* world_ = nullptr;

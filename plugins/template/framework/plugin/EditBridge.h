@@ -28,8 +28,9 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 
-#include "core/ParamTable.h"
+#include "core/Definition.h"
 
 namespace supple {
 
@@ -37,13 +38,16 @@ class EditBridge {
   public:
     enum class Kind { Begin, Value, End };
 
-    EditBridge() {
-        for (size_t i = 0; i < params::kCount; ++i) {
+    // For `count` parameters, by table index.
+    explicit EditBridge(size_t count) : count_(count) {
+        for (size_t i = 0; i < count_; ++i) {
             begins_[i].store(0, std::memory_order_relaxed);
             ends_[i].store(0, std::memory_order_relaxed);
             dirty_[i].store(false, std::memory_order_relaxed);
         }
     }
+    // A product with tables: its own.
+    EditBridge() : EditBridge(productDefinition()->params().count()) {}
 
     // --- main thread --------------------------------------------------------
     void begin(size_t i) {
@@ -71,7 +75,7 @@ class EditBridge {
     template <class Emit>
     bool drain(Emit&& emit) {
         if (!any_.exchange(false, std::memory_order_acq_rel)) return true;
-        for (size_t i = 0; i < params::kCount; ++i) {
+        for (size_t i = 0; i < count_; ++i) {
             const uint32_t b = begins_[i].load(std::memory_order_acquire);
             const uint32_t e = ends_[i].load(std::memory_order_acquire);
             // Anything new since the last look means the value is owed again.
@@ -110,18 +114,24 @@ class EditBridge {
         return false;
     }
 
+    template <class T>
+    static std::unique_ptr<T[]> array(size_t n) {
+        return std::make_unique<T[]>(n > 0 ? n : 1);  // value-initialized
+    }
+
+    size_t count_;
     // Written by the main thread only.
-    bool open_[params::kCount]{};
-    std::atomic<uint32_t> begins_[params::kCount];
-    std::atomic<uint32_t> ends_[params::kCount];
-    std::atomic<bool> dirty_[params::kCount];
+    std::unique_ptr<bool[]> open_ = array<bool>(count_);
+    std::unique_ptr<std::atomic<uint32_t>[]> begins_ = array<std::atomic<uint32_t>>(count_);
+    std::unique_ptr<std::atomic<uint32_t>[]> ends_ = array<std::atomic<uint32_t>>(count_);
+    std::unique_ptr<std::atomic<bool>[]> dirty_ = array<std::atomic<bool>>(count_);
     std::atomic<bool> any_{false};
     // Consumer only.
-    uint32_t lookedBegins_[params::kCount]{};
-    uint32_t lookedEnds_[params::kCount]{};
-    uint32_t toldBegins_[params::kCount]{};
-    bool owesValue_[params::kCount]{};
-    bool hostOpen_[params::kCount]{};
+    std::unique_ptr<uint32_t[]> lookedBegins_ = array<uint32_t>(count_);
+    std::unique_ptr<uint32_t[]> lookedEnds_ = array<uint32_t>(count_);
+    std::unique_ptr<uint32_t[]> toldBegins_ = array<uint32_t>(count_);
+    std::unique_ptr<bool[]> owesValue_ = array<bool>(count_);
+    std::unique_ptr<bool[]> hostOpen_ = array<bool>(count_);
 };
 
 }  // namespace supple

@@ -30,6 +30,7 @@
 #include "Check.h"
 #include "core/Engine.h"
 #include "core/ParamTable.h"
+#include "core/PropertyTable.h"
 
 namespace supple::test {
 

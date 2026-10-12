@@ -8,8 +8,6 @@
 #include <fstream>
 #include <system_error>
 
-#include "ProductInfo.h"
-#include "core/Preset.h"
 #include "core/Files.h"
 
 namespace supple {
@@ -17,8 +15,6 @@ namespace supple {
 namespace fs = std::filesystem;
 
 namespace {
-
-constexpr uint32_t kMagic = state::fourcc(product::info::kStateTag);
 
 std::string lower(std::string_view s) {
     std::string out(s);
@@ -30,10 +26,10 @@ bool writeFile(const fs::path& file, const std::vector<uint8_t>& bytes) {
     return files::writeAtomic(file, bytes.data(), bytes.size());
 }
 
-bool ours(const fs::path& file) {
+bool ours(const fs::path& file, const std::string& stateTag) {
     std::ifstream in(file, std::ios::binary);
     char tag[4] = {};
-    return in.read(tag, 4) && std::equal(tag, tag + 4, product::info::kStateTag);
+    return stateTag.size() == 4 && in.read(tag, 4) && std::equal(tag, tag + 4, stateTag.begin());
 }
 
 }  // namespace
@@ -44,9 +40,13 @@ fs::path PresetLibrary::fromUtf8(std::string_view text) { return files::fromUtf8
 
 std::string PresetLibrary::toUtf8(const fs::path& path) { return files::toUtf8(path); }
 
-fs::path PresetLibrary::defaultUserFolder() {
+#if !SUPPLE_PRODUCT_RUNTIME
+fs::path PresetLibrary::defaultUserFolder() { return defaultUserFolder(productDefinition()->info()); }
+#endif
+
+fs::path PresetLibrary::defaultUserFolder(const PluginInfo& info) {
     if (const char* forced = std::getenv("SUPPLE_PRESETS_DIR"); forced && *forced) return fromUtf8(forced);
-    const fs::path product = fromUtf8(product::info::kVendor) / fromUtf8(product::info::kName);
+    const fs::path product = fromUtf8(info.vendor) / fromUtf8(info.name);
 #if defined(_WIN32)
     if (const wchar_t* appData = _wgetenv(L"APPDATA"); appData && *appData)
         return fs::path(appData) / product / "Presets";
@@ -84,7 +84,11 @@ bool PresetLibrary::validName(std::string_view name) {
 
 // --- the library ---------------------------------------------------------------------------------
 
-PresetLibrary::PresetLibrary(StateAccess& state, fs::path userFolder) : state_(state), folder_(std::move(userFolder)) {
+PresetLibrary::PresetLibrary(StateAccess& state, fs::path userFolder, DefinitionPtr definition)
+    : state_(state),
+      definition_(std::move(definition)),
+      magic_(state::fourcc(definition_->info().stateTag.c_str())),
+      folder_(std::move(userFolder)) {
     refresh();
 }
 
@@ -92,8 +96,8 @@ void PresetLibrary::refresh() {
     const std::string currentName = current() >= 0 ? entries_[static_cast<size_t>(current_)].name : "";
     const bool currentUser = current() >= 0 && entries_[static_cast<size_t>(current_)].user();
     entries_.clear();
-    for (size_t i = 0; i < presets::kFactoryCount; ++i)
-        entries_.push_back({presets::factory(i).name, presets::factory(i).category, static_cast<int>(i), {}});
+    const auto& factory = definition_->presets();
+    for (size_t i = 0; i < factory.size(); ++i) entries_.push_back({factory[i].name, factory[i].category, static_cast<int>(i), {}});
     if (!folder_.empty()) {
         std::vector<Entry> user;
         std::error_code ec;
@@ -101,7 +105,7 @@ void PresetLibrary::refresh() {
             const fs::path& file = it->path();
             if (!it->is_regular_file(ec) || file.extension() != kExtension) continue;
             const std::string name = toUtf8(file.stem());
-            if (!validName(name) || !ours(file)) continue;
+            if (!validName(name) || !ours(file, definition_->info().stateTag)) continue;
             user.push_back({name, "", -1, file});
         }
         std::sort(user.begin(), user.end(), [](const Entry& a, const Entry& b) {
@@ -144,25 +148,29 @@ void PresetLibrary::loaded(int index, std::string name) {
     stickyModified_ = false;
 }
 
-std::vector<uint8_t> PresetLibrary::defaultsBlob() {
-    state::Snapshot s;
+std::vector<uint8_t> PresetLibrary::defaultsBlob() const {
+    state::Snapshot s(*definition_);
     s.defaultProperties();
-    return state::save(kMagic, s, state::Context::Preset);
+    return state::save(magic_, s, state::Context::Preset);
 }
 
-std::vector<uint8_t> PresetLibrary::factoryBlob(size_t index) {
-    state::Snapshot s;
+std::vector<uint8_t> PresetLibrary::factoryBlob(size_t index) const {
+    state::Snapshot s(*definition_);
     s.defaultProperties();
-    const Preset& preset = presets::factory(index);
-    for (const PresetValue& v : preset.values) {
-        const int i = params::indexOf(v.id);
-        if (i >= 0) s.host[i] = sanitizeHost(params::at(static_cast<size_t>(i)), toHost(params::at(static_cast<size_t>(i)), v.plain));
+    const ParamTable& params = definition_->params();
+    const PropertyList& properties = definition_->properties();
+    const FactoryPreset& preset = definition_->presets()[index];
+    for (const auto& [id, plain] : preset.values) {
+        const int i = params.indexOf(id);
+        if (i < 0) continue;
+        const ParamDef& p = params.at(static_cast<size_t>(i));
+        s.host[static_cast<size_t>(i)] = sanitizeHost(p, toHost(p, plain));
     }
-    for (const PresetText& t : preset.texts) {
-        const int i = properties::indexOf(t.id);
-        if (i >= 0) s.property[i] = t.value;
+    for (const auto& [id, text] : preset.texts) {
+        const int i = properties.indexOf(id);
+        if (i >= 0) s.property[static_cast<size_t>(i)] = text;
     }
-    return state::save(kMagic, s, state::Context::Preset);
+    return state::save(magic_, s, state::Context::Preset);
 }
 
 bool PresetLibrary::load(int index) {
@@ -181,8 +189,9 @@ bool PresetLibrary::step(int delta) {
 }
 
 bool PresetLibrary::loadFactory(size_t index) {
-    if (index >= presets::kFactoryCount || !apply(factoryBlob(index))) return false;
-    loaded(findEntry(presets::factory(index).name, false), presets::factory(index).name);
+    if (index >= definition_->presets().size() || !apply(factoryBlob(index))) return false;
+    const std::string& name = definition_->presets()[index].name;
+    loaded(findEntry(name, false), name);
     return true;
 }
 
@@ -310,7 +319,7 @@ void PresetLibrary::copyToOther() { slots_[1 - slot_] = capture(); }
 // --- text ------------------------------------------------------------------------------------
 
 std::string PresetLibrary::copyText() {
-    return std::string(product::info::kName) + " state: " + base64::encode(state_.saveState(state::Context::Preset));
+    return definition_->info().name + " state: " + base64::encode(state_.saveState(state::Context::Preset));
 }
 
 bool PresetLibrary::pasteText(std::string_view text) {

@@ -496,6 +496,9 @@ class Ui {
     void play(int key, float y);
     void release();
 
+    // A file() property by ID, or null.
+    const PropertyDef* fileProperty(uint32_t id) const;
+
     EditorHost& host_;
     float designW_, designH_;
     std::deque<Control> controls_;  // stable references across add()

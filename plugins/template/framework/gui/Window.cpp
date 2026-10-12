@@ -55,7 +55,7 @@ PuglStatus eventThunk(PuglView* view, const PuglEvent* event) {
 }  // namespace
 
 Window::Window(EditorBase& editor, const char* className, bool standalone)
-    : editor_(editor),
+    : editor_(&editor),
       className_(className),
       standalone_(standalone),
       hostW_(static_cast<uint32_t>(std::lround(editor.width()))),
@@ -112,8 +112,8 @@ bool Window::create() {
     puglSetSizeHint(view_, PUGL_CURRENT_SIZE, static_cast<PuglSpan>(width_), static_cast<PuglSpan>(height_));
     if (minW_ && maxW_) setSizeLimits(minW_, minH_, maxW_, maxH_);
     // The panel is one composition: only its scale varies, never its shape.
-    puglSetSizeHint(view_, PUGL_FIXED_ASPECT, static_cast<PuglSpan>(std::lround(editor_.width())),
-                    static_cast<PuglSpan>(std::lround(editor_.height())));
+    puglSetSizeHint(view_, PUGL_FIXED_ASPECT, static_cast<PuglSpan>(std::lround(editor_->width())),
+                    static_cast<PuglSpan>(std::lround(editor_->height())));
     return true;
 }
 
@@ -183,7 +183,7 @@ bool Window::setSize(uint32_t w, uint32_t h) {
     hostH_ = h;
     width_ = toPixels(w);
     height_ = toPixels(h);
-    editor_.markDirty();
+    editor_->markDirty();
     return true;
 }
 
@@ -236,16 +236,16 @@ void Window::frame() {
     lastIdle_ = now;
     haveIdle_ = true;
     if (files_) files_->poll();  // a dialog that finished hands over its paths
-    editor_.idle(std::min(elapsed, 0.25));
-    if (realized_ && editor_.needsRepaint()) puglObscureView(view_);
+    editor_->idle(std::min(elapsed, 0.25));
+    if (realized_ && editor_->needsRepaint()) puglObscureView(view_);
 }
 
 Window::Fit Window::fit() const {
     // Uniform scale, centred: a host that ignores the aspect hint gets a
     // letterboxed panel rather than a stretched one.
     const float w = static_cast<float>(std::max(1u, width_)), h = static_cast<float>(std::max(1u, height_));
-    const float s = std::min(w / editor_.width(), h / editor_.height());
-    return {s, (w - editor_.width() * s) * 0.5f, (h - editor_.height() * s) * 0.5f};
+    const float s = std::min(w / editor_->width(), h / editor_->height());
+    return {s, (w - editor_->width() * s) * 0.5f, (h - editor_->height() * s) * 0.5f};
 }
 
 float Window::toDesignX(double x) const {
@@ -283,11 +283,11 @@ void Window::handleEvent(const void* eventPointer) {
         // The graphics context is current for REALIZE, UNREALIZE and EXPOSE
         // only, so the NanoVG context is built and torn down here.
         case PUGL_REALIZE:
-            editor_.setClipboard(this);
+            editor_->setClipboard(this);
             if (!canvasLoad()) break;
             vg_ = canvasCreate(puglGetContext(view_));
             if (!vg_) break;
-            if (!editor_.attach(vg_)) {  // a context without fonts draws no text: refuse it
+            if (!editor_->attach(vg_)) {  // a context without fonts draws no text: refuse it
                 canvasDestroy(vg_);
                 vg_ = nullptr;
                 break;
@@ -295,15 +295,19 @@ void Window::handleEvent(const void* eventPointer) {
             realized_ = true;
             haveIdle_ = false;
             files_ = std::make_unique<NativeFiles>(puglGetNativeView(view_));
-            editor_.setFileDialogs(files_.get());
+            editor_->setFileDialogs(files_.get());
             break;
 
         case PUGL_UNREALIZE:
-            editor_.setClipboard(nullptr);
-            editor_.setFileDialogs(nullptr);
+            editor_->setClipboard(nullptr);
+            editor_->setFileDialogs(nullptr);
             files_.reset();  // a dialog still open closes with the editor
             paste_ = nullptr;
-            editor_.detach();
+            editor_->detach();
+            if (next_) {  // never attached: it takes over as it is
+                editor_ = next_;
+                next_ = nullptr;
+            }
             if (vg_) canvasDestroy(vg_);
             vg_ = nullptr;
             realized_ = false;
@@ -317,7 +321,7 @@ void Window::handleEvent(const void* eventPointer) {
             const double ppu = pixelsPerUnit();
             hostW_ = static_cast<uint32_t>(std::lround(width_ / ppu));
             hostH_ = static_cast<uint32_t>(std::lround(height_ / ppu));
-            editor_.markDirty();
+            editor_->markDirty();
             break;
         }
 
@@ -342,33 +346,33 @@ void Window::handleEvent(const void* eventPointer) {
             lastPressButton_ = button;
             // Keyboard focus only when the press landed on something that can
             // use it, so a stray click does not take the host's shortcuts.
-            if (editor_.pointerDown(x, y, button, modsOf(e->button.state), doubleClick)) puglGrabFocus(view_);
+            if (editor_->pointerDown(x, y, button, modsOf(e->button.state), doubleClick)) puglGrabFocus(view_);
             syncCursor();
             break;
         }
 
         case PUGL_BUTTON_RELEASE:
-            editor_.pointerUp(toDesignX(e->button.x), toDesignY(e->button.y), static_cast<int>(e->button.button),
+            editor_->pointerUp(toDesignX(e->button.x), toDesignY(e->button.y), static_cast<int>(e->button.button),
                               modsOf(e->button.state));
             syncCursor();
             break;
 
         case PUGL_MOTION:
-            editor_.pointerMove(toDesignX(e->motion.x), toDesignY(e->motion.y), modsOf(e->motion.state));
+            editor_->pointerMove(toDesignX(e->motion.x), toDesignY(e->motion.y), modsOf(e->motion.state));
             syncCursor();
             break;
 
         case PUGL_SCROLL:
-            editor_.wheel(toDesignX(e->scroll.x), toDesignY(e->scroll.y), static_cast<float>(e->scroll.dx),
+            editor_->wheel(toDesignX(e->scroll.x), toDesignY(e->scroll.y), static_cast<float>(e->scroll.dx),
                           static_cast<float>(e->scroll.dy), modsOf(e->scroll.state));
             break;
 
         case PUGL_POINTER_IN: syncCursor(); break;
-        case PUGL_POINTER_OUT: editor_.pointerLeave(); break;
+        case PUGL_POINTER_OUT: editor_->pointerLeave(); break;
 
-        case PUGL_KEY_PRESS: editor_.key(e->key.key, modsOf(e->key.state)); break;
-        case PUGL_TEXT: editor_.text(e->text.character); break;
-        case PUGL_FOCUS_OUT: editor_.focusLost(); break;
+        case PUGL_KEY_PRESS: editor_->key(e->key.key, modsOf(e->key.state)); break;
+        case PUGL_TEXT: editor_->text(e->text.character); break;
+        case PUGL_FOCUS_OUT: editor_->focusLost(); break;
 
         case PUGL_DATA_OFFER: {
             const PuglDataOfferEvent& offer = e->offer;
@@ -379,7 +383,7 @@ void Window::handleEvent(const void* eventPointer) {
                 for (uint32_t i = 0; i < types && !accepted; ++i) {
                     const char* type = puglGetClipboardType(view_, offer.clipboard, i);
                     if (type && !std::strcmp(type, "text/uri-list") &&
-                        editor_.dropOver(toDesignX(offer.x), toDesignY(offer.y)))
+                        editor_->dropOver(toDesignX(offer.x), toDesignY(offer.y)))
                         accepted = puglAcceptOffer(view_, &offer, i, PUGL_DATA_ACTION_COPY, 0, 0, width_, height_) ==
                                    PUGL_SUCCESS;
                 }
@@ -408,7 +412,7 @@ void Window::handleEvent(const void* eventPointer) {
             const void* data = puglGetClipboard(view_, e->data.clipboard, e->data.typeIndex, &length);
             if (e->data.clipboard == PUGL_CLIPBOARD_DRAG) {
                 if (data)
-                    editor_.drop(toDesignX(e->data.x), toDesignY(e->data.y),
+                    editor_->drop(toDesignX(e->data.x), toDesignY(e->data.y),
                                  pathsFromUriList(std::string_view(static_cast<const char*>(data), length)));
                 break;
             }
@@ -418,7 +422,7 @@ void Window::handleEvent(const void* eventPointer) {
                 std::string_view text(static_cast<const char*>(data), length);
                 while (!text.empty() && text.back() == '\0') text.remove_suffix(1);
                 done(text);
-                editor_.markDirty();
+                editor_->markDirty();
             }
             break;
         }
@@ -428,19 +432,49 @@ void Window::handleEvent(const void* eventPointer) {
 }
 
 void Window::syncCursor() {
-    const int wanted = static_cast<int>(editor_.cursor());
+    const int wanted = static_cast<int>(editor_->cursor());
     if (!view_ || wanted == cursor_) return;
     cursor_ = wanted;
     puglSetCursor(view_, puglCursorOf(static_cast<Cursor>(wanted)));
 }
 
+void Window::replaceEditor(EditorBase& next) {
+    if (&next == editor_) return;
+    if (!vg_) {  // nothing attached: no context needed
+        editor_ = &next;
+        next_ = nullptr;
+        return;
+    }
+    // Detaching one and attaching the other needs the graphics context,
+    // which is current only while drawing: the next draw swaps them.
+    next_ = &next;
+    puglObscureView(view_);
+}
+
+void Window::adopt() {
+    EditorBase& old = *editor_;
+    old.focusLost();
+    old.setClipboard(nullptr);
+    old.setFileDialogs(nullptr);
+    old.detach();
+    editor_ = next_;
+    next_ = nullptr;
+    editor_->setClipboard(this);
+    editor_->attach(vg_);
+    editor_->setFileDialogs(files_.get());
+    puglSetSizeHint(view_, PUGL_FIXED_ASPECT, static_cast<PuglSpan>(std::lround(editor_->width())),
+                    static_cast<PuglSpan>(std::lround(editor_->height())));
+    editor_->markDirty();
+}
+
 void Window::draw() {
     if (!vg_) return;
+    if (next_) adopt();
     // Pugl's sizes are backing pixels on every platform, the drawable's
     // too, so the frame is laid out in pixels with a ratio of 1; the backing
     // scale is already in width_ and height_, and in fit().
     canvasViewport(static_cast<int>(width_), static_cast<int>(height_));
-    const NVGcolor bg = rgb(editor_.background());
+    const NVGcolor bg = rgb(editor_->background());
     canvasClear(vg_, bg.r, bg.g, bg.b);
     nvgBeginFrame(vg_, static_cast<float>(width_), static_cast<float>(height_), 1.0f);
     // One transform from design units to the view; nothing in the editor
@@ -448,7 +482,7 @@ void Window::draw() {
     const Fit f = fit();
     nvgTranslate(vg_, f.offsetX, f.offsetY);
     nvgScale(vg_, f.scale, f.scale);
-    editor_.render(vg_);
+    editor_->render(vg_);
     nvgEndFrame(vg_);
     if (onFrameDrawn) onFrameDrawn(frameUser);
 }

@@ -48,12 +48,24 @@ if (UNIX AND EXISTS "${SUPPLE_ROOT}/.github/scripts/clap-probe-mac.sh")
         ${SUPPLE_ROOT}/.github/scripts/clap-probe-mac.sh)
 endif()
 
-supple_test(core-tests SOURCES ${SUPPLE_FRAMEWORK}/test/core_test.cpp LINK product-core)
+# Tests and tools that read the product's tables as constants (product/
+# Params.h, ProductInfo.h). A run-time product (PRODUCT_RUNTIME ON) has none:
+# its own tests cover the plugins its catalog makes, and host-smoke and the
+# validators drive them through CLAP.
+set(supple_tables ON)
+if (PRODUCT_RUNTIME)
+    set(supple_tables OFF)
+endif()
+
+if (supple_tables)
+    supple_test(core-tests SOURCES ${SUPPLE_FRAMEWORK}/test/core_test.cpp LINK product-core)
+endif()
 supple_test(dsp-tests SOURCES ${SUPPLE_FRAMEWORK}/test/dsp_test.cpp LINK product-core)
 if (product_test_sources)
     supple_test(processor-tests SOURCES ${product_test_sources} LINK product-core)
 endif()
 
+if (supple_tables)
 # The product's cost against its stored baseline (tools/benchmark.cpp);
 # a timing means something only in an optimised build without sanitizers.
 add_executable(benchmark ${SUPPLE_FRAMEWORK}/tools/benchmark.cpp)
@@ -69,10 +81,11 @@ endif()
 add_executable(render-cli ${SUPPLE_FRAMEWORK}/tools/render_cli.cpp)
 target_link_libraries(render-cli PRIVATE product-core)
 supple_defaults(render-cli)
+endif()
 
 # --- editor -------------------------------------------------------------------------------
 
-if (SUPPLE_BUILD_GUI)
+if (SUPPLE_BUILD_GUI AND supple_tables)
     supple_test(ui-tests SOURCES ${SUPPLE_FRAMEWORK}/test/ui_test.cpp LINK ${SUPPLE_GL_GUI})
 
     add_executable(gui-preview ${SUPPLE_FRAMEWORK}/tools/gui_preview.cpp)
@@ -138,6 +151,7 @@ if (SUPPLE_BUILD_PLUGIN)
         PASS_REGULAR_EXPRESSION "x64 only; windows-arm64 is not supported")
 
     supple_test(probe-audio-tests SOURCES ${SUPPLE_FRAMEWORK}/test/probe_audio_test.cpp LINK product-core clap)
+    if (supple_tables)
     # The CLAP surface, in process: a scripted host with real threads.
     supple_test(plugin-tests SOURCES ${SUPPLE_FRAMEWORK}/test/plugin_test.cpp LINK product-impl)
 
@@ -145,7 +159,8 @@ if (SUPPLE_BUILD_PLUGIN)
     # fixed seed; with SUPPLE_FUZZ (the fuzz preset), libFuzzer's version too,
     # run for a minute from the same states.
     supple_test(state-fuzz SOURCES ${SUPPLE_FRAMEWORK}/test/state_fuzz.cpp LINK product-impl)
-    if (SUPPLE_FUZZ)
+    endif()
+    if (SUPPLE_FUZZ AND supple_tables)
         add_executable(state-fuzzer ${SUPPLE_FRAMEWORK}/test/state_fuzz.cpp)
         target_link_libraries(state-fuzzer PRIVATE product-impl)
         target_compile_definitions(state-fuzzer PRIVATE SUPPLE_LIBFUZZER=1)
@@ -224,7 +239,7 @@ if (SUPPLE_BUILD_PLUGIN)
         if (NOT vst3_sdk)
             set(vst3_sdk "${VST3_SDK_ROOT}")  # vendored
         endif()
-        if (vst3_sdk AND EXISTS "${vst3_sdk}/pluginterfaces/base/funknown.cpp")
+        if (vst3_sdk AND EXISTS "${vst3_sdk}/pluginterfaces/base/funknown.cpp" AND supple_tables)
             add_library(supple-vst3-iids OBJECT ${vst3_sdk}/pluginterfaces/base/funknown.cpp
                 ${vst3_sdk}/pluginterfaces/base/coreiids.cpp ${vst3_sdk}/public.sdk/source/vst/vstinitiids.cpp)
             target_include_directories(supple-vst3-iids SYSTEM PRIVATE ${vst3_sdk})
@@ -285,6 +300,14 @@ if (SUPPLE_BUILD_PLUGIN)
         add_test(NAME auv2-bundle
             COMMAND ${CMAKE_COMMAND} -DBUNDLE=${SUPPLE_ASSETS}/${PRODUCT_NAME}.component
                     -P ${SUPPLE_FRAMEWORK}/cmake/CheckAuBundle.cmake)
+        # Automation on one thread while state loads rescan the parameters on
+        # another; the tsan preset is what makes it a race check.
+        add_executable(au-parameter-race ${SUPPLE_FRAMEWORK}/test/au_parameter_race.cpp)
+        target_link_libraries(au-parameter-race PRIVATE "-framework AudioToolbox" "-framework CoreFoundation")
+        supple_defaults(au-parameter-race)
+        add_dependencies(au-parameter-race product-plugin_auv2)
+        add_test(NAME auv2-parameter-race
+            COMMAND au-parameter-race ${SUPPLE_ASSETS}/${PRODUCT_NAME}.component)
     endif()
 
     # free-audio/clap-validator, when installed (cargo install --git

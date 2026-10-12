@@ -199,6 +199,17 @@ if (SUPPLE_BUILD_PLUGIN)
     # - auv2-bypass-sync: the native BypassEffect property followed only the
     #   host setting it; it now follows the bypass parameter however it moves
     #   (automation, the plugin's editor, a loaded state), and tells the host.
+    #   The bypass parameter's ID, which SetParameter reads on the host's
+    #   automation thread, is atomic, and a rescan no longer clears it.
+    # - auv2-rescan-race: every state load rescans the parameters, and the
+    #   rescan rewrote each parameter's info, which SetParameter reads
+    #   unlocked; now only when it changed. GetParameterList takes the
+    #   tree's lock. (au-parameter-race, under tsan, found both.)
+    # - auv2-parameter-queue: SetParameter, which hosts call from any thread
+    #   and several at once, appended to the event list the audio thread was
+    #   rendering from; it now copies the change into a fixed queue under a
+    #   spinlock, and the next render takes them (pluginval's parameter
+    #   thread safety test crashed on it).
     supple_apply_patches(clap-wrapper)
 endif()
 

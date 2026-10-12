@@ -1,0 +1,75 @@
+diff --git a/src/detail/auv2/process.cpp b/src/detail/auv2/process.cpp
+index 6e4c315..65d9c80 100644
+--- a/src/detail/auv2/process.cpp
++++ b/src/detail/auv2/process.cpp
+@@ -189,6 +189,19 @@ void ProcessAdapter::sortEventIndices()
+ 
+ void ProcessAdapter::process(ProcessData &data)
+ {
++  // The host's parameter changes since the last cycle. A setter holds the
++  // lock only to copy one event in; if one has it now, they wait a cycle.
++  if (_pendingLock.try_lock())
++  {
++    for (size_t i = 0; i < _pendingCount && _events.size() < _events.capacity(); ++i)
++    {
++      _eventindices.emplace_back(_events.size());
++      _events.emplace_back(_pending[i]);
++    }
++    _pendingCount = 0;
++    _pendingLock.unlock();
++  }
++
+   // CLAP requires event times within [0, frames_count); a host stamping
+   // MIDIEventList packets with out-of-range timestamps (e.g. mach host time
+   // instead of sample offsets) would otherwise make plugins that index their
+@@ -802,7 +815,19 @@ void ProcessAdapter::addParameterEvent(const clap_param_info_t &info, double val
+   n.param.channel = -1;
+   n.param.note_id = -1;
+ 
+-  this->_eventindices.emplace_back(this->_events.size());
+-  this->_events.emplace_back(n);
++  ClapWrapper::detail::shared::SpinLockGuard guard(_pendingLock);
++  if (_pendingCount < _pending.size())
++  {
++    _pending[_pendingCount++] = n;
++    return;
++  }
++  for (size_t i = _pendingCount; i-- > 0;)
++  {
++    if (_pending[i].param.param_id == n.param.param_id)
++    {
++      _pending[i] = n;
++      return;
++    }
++  }
+ }
+ }  // namespace Clap::AUv2
+diff --git a/src/detail/auv2/process.h b/src/detail/auv2/process.h
+index 30186b1..776d346 100644
+--- a/src/detail/auv2/process.h
++++ b/src/detail/auv2/process.h
+@@ -31,6 +31,8 @@
+ #include "../clap/automation.h"
+ #include "../shared/midi_translation.h"
+ #include "parameter.h"
++#include "../shared/spinlock.h"
++#include <array>
+ #include <map>
+ 
+ namespace Clap::AUv2
+@@ -174,6 +176,15 @@ class ProcessAdapter
+   std::vector<clap_multi_event_t> _events;
+   std::vector<size_t> _eventindices;
+ 
++  // Parameter changes from SetParameter(), which a host calls from any
++  // thread, several at once, while the audio thread renders: they wait here
++  // and process() moves them into _events, which only it touches. Fixed, so
++  // neither side allocates; when full, a parameter's latest value replaces
++  // its earlier one.
++  ClapWrapper::detail::shared::SpinLock _pendingLock;
++  std::array<clap_multi_event_t, 1024> _pending;
++  size_t _pendingCount = 0;
++
+   // owns the payloads referenced by CLAP_EVENT_MIDI_SYSEX events for the
+   // duration of one process() cycle (clap_event_midi_sysex_t only borrows a
+   // pointer). Reset together with _events at the end of each cycle; buffers

@@ -7,7 +7,6 @@
 #include <cmath>
 
 #include "core/Assets.h"
-#include "core/ParamTable.h"
 #include "core/PresetLibrary.h"
 #include "gui/Fonts.h"
 #include "gui/Widgets.h"
@@ -20,9 +19,9 @@ EditorBase::EditorBase(EditorHost& host, const Theme& theme, float width, float 
       width_(width),
       height_(height),
       ui_(host, width, height),
-      shownValue_(params::kCount, 0.0),
-      shownModulation_(params::kCount, 0.0),
-      watched_(params::kCount, false) {
+      shownValue_(host.pluginDefinition().params().count(), 0.0),
+      shownModulation_(host.pluginDefinition().params().count(), 0.0),
+      watched_(host.pluginDefinition().params().count(), false) {
     if constexpr (product::Processor::kAudioFeed) {
         audio_ = std::make_unique<AudioHistory>();
         feedScratch_.resize(2048);
@@ -30,7 +29,7 @@ EditorBase::EditorBase(EditorHost& host, const Theme& theme, float width, float 
 }
 
 void EditorBase::watch(uint32_t id) {
-    const int i = params::indexOf(id);
+    const int i = paramTable().indexOf(id);
     if (i >= 0) watched_[static_cast<size_t>(i)] = true;
 }
 
@@ -51,12 +50,12 @@ void EditorBase::detach() {
 }
 
 double EditorBase::plain(uint32_t id) const {
-    const ParamDef* p = params::find(id);
+    const ParamDef* p = paramTable().find(id);
     return p ? toPlain(*p, host_.value(id)) : 0.0;
 }
 
 double EditorBase::effective(uint32_t id) const {
-    const ParamDef* p = params::find(id);
+    const ParamDef* p = paramTable().find(id);
     return p ? toPlain(*p, sanitizeHost(*p, host_.value(id) + host_.modulation(id))) : 0.0;
 }
 
@@ -133,9 +132,10 @@ bool EditorBase::needsRepaint() {
     if (dirty_) return true;
     if (host_.propertiesVersion() != shownProperties_) return dirty_ = true;
     if (host_.trackVersion() != shownTrack_) return dirty_ = true;
-    for (size_t i = 0; i < params::kCount; ++i) {
-        const uint32_t id = params::at(i).id;
-        if (params::at(i).isOutput() && !watched_[i]) {
+    const ParamTable& params = paramTable();
+    for (size_t i = 0; i < params.count(); ++i) {
+        const uint32_t id = params.at(i).id;
+        if (params.at(i).isOutput() && !watched_[i]) {
             bool shown = false;
             for (int c = 0; c < ui_.count() && !shown; ++c) {
                 const Control& k = ui_.control(c);
@@ -145,7 +145,7 @@ bool EditorBase::needsRepaint() {
             if (!shown) continue;  // nobody sees it move
         }
         if (host_.value(id) != shownValue_[i]) return dirty_ = true;
-        if (params::at(i).is(pflag::kModulatable) && host_.modulation(id) != shownModulation_[i])
+        if (params.at(i).is(pflag::kModulatable) && host_.modulation(id) != shownModulation_[i])
             return dirty_ = true;
     }
     return false;
@@ -156,8 +156,9 @@ void EditorBase::render(NVGcontext* vg) {
     // Recorded before drawing, so a change that lands mid-frame repaints again.
     shownProperties_ = host_.propertiesVersion();
     shownTrack_ = host_.trackVersion();
-    for (size_t i = 0; i < params::kCount; ++i) {
-        const uint32_t id = params::at(i).id;
+    const ParamTable& params = paramTable();
+    for (size_t i = 0; i < params.count(); ++i) {
+        const uint32_t id = params.at(i).id;
         shownValue_[i] = host_.value(id);
         shownModulation_[i] = host_.modulation(id);
     }

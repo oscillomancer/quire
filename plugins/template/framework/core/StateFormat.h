@@ -43,8 +43,7 @@
 #include <string>
 #include <vector>
 
-#include "core/ParamTable.h"
-#include "core/PropertyTable.h"
+#include "core/Definition.h"
 
 namespace supple::state {
 
@@ -150,24 +149,33 @@ inline constexpr size_t kMaxPresetName = 255;
 // clipboard -- so that nothing unbounded is read into memory.
 inline constexpr size_t kMaxBytes = 64u << 20;
 
-// Everything a state blob can carry, decoded and validated. Defaults until
-// something sets them; `property[i]` holds a value only where `hasProperty[i]`.
+// Everything a state blob can carry for one Definition, decoded and
+// validated. Defaults until something sets them; `property[i]` holds a value
+// only where `hasProperty[i]`.
 struct Snapshot {
-    double host[params::kCount];
-    std::string property[properties::kSlots];
-    bool hasProperty[properties::kSlots] = {};
+    const Definition* definition = nullptr;  // outlives the snapshot
+    std::vector<double> host;                // by parameter table index
+    std::vector<std::string> property;       // by property index
+    std::vector<bool> hasProperty;
     double editorScale = 0.0;  // 0 when absent
     bool hasPreset = false;    // the session remembers a preset by name
     std::string presetName;
     bool presetModified = false;
 
-    Snapshot() {
-        for (size_t i = 0; i < params::kCount; ++i) host[i] = hostDefault(params::at(i));
+    explicit Snapshot(const Definition& d)
+        : definition(&d), property(d.properties().count()), hasProperty(d.properties().count(), false) {
+        const ParamTable& params = d.params();
+        host.resize(params.count());
+        for (size_t i = 0; i < params.count(); ++i) host[i] = hostDefault(params.at(i));
     }
+    // A product with tables: its own.
+    Snapshot() : Snapshot(*productDefinition()) {}
+
     // Every property its default, as a fresh instance has them.
     void defaultProperties() {
-        for (size_t i = 0; i < properties::kCount; ++i) {
-            property[i] = properties::at(i).def;
+        const PropertyList& properties = definition->properties();
+        for (size_t i = 0; i < properties.count(); ++i) {
+            property[i] = properties.at(i).def;
             hasProperty[i] = true;
         }
     }
@@ -175,31 +183,31 @@ struct Snapshot {
 
 inline std::vector<uint8_t> save(uint32_t magic, const Snapshot& s, Context context = Context::Project) {
     const bool preset = context == Context::Preset;
+    const ParamTable& params = s.definition->params();
+    const PropertyList& properties = s.definition->properties();
     Writer w;
     w.tag(magic);
     w.u32(kFormatVersion);
     const size_t chunk = w.beginChunk(kParamChunk);
-    w.u32(static_cast<uint32_t>(params::kCount - params::kOutputCount));
-    for (size_t i = 0; i < params::kCount; ++i) {
-        if (params::at(i).isOutput()) continue;
-        w.u32(params::at(i).id);
+    w.u32(static_cast<uint32_t>(params.count() - params.outputs().size()));
+    for (size_t i = 0; i < params.count(); ++i) {
+        if (params.at(i).isOutput()) continue;
+        w.u32(params.at(i).id);
         w.f64(s.host[i]);
     }
     w.endChunk(chunk);
-    if constexpr (properties::kCount > 0) {
-        uint32_t count = 0;
-        for (size_t i = 0; i < properties::kCount; ++i)
-            count += s.hasProperty[i] && !(preset && properties::at(i).perProjectOnly()) ? 1 : 0;
-        if (count > 0) {
-            const size_t props = w.beginChunk(kPropertyChunk);
-            w.u32(count);
-            for (size_t i = 0; i < properties::kCount; ++i) {
-                if (!s.hasProperty[i] || (preset && properties::at(i).perProjectOnly())) continue;
-                w.u32(properties::at(i).id);
-                w.text(s.property[i]);
-            }
-            w.endChunk(props);
+    uint32_t count = 0;
+    for (size_t i = 0; i < properties.count(); ++i)
+        count += s.hasProperty[i] && !(preset && properties.at(i).perProjectOnly()) ? 1 : 0;
+    if (count > 0) {
+        const size_t props = w.beginChunk(kPropertyChunk);
+        w.u32(count);
+        for (size_t i = 0; i < properties.count(); ++i) {
+            if (!s.hasProperty[i] || (preset && properties.at(i).perProjectOnly())) continue;
+            w.u32(properties.at(i).id);
+            w.text(s.property[i]);
         }
+        w.endChunk(props);
     }
     if (!preset && s.editorScale > 0.0) {
         const size_t editor = w.beginChunk(kEditorChunk);
@@ -215,24 +223,56 @@ inline std::vector<uint8_t> save(uint32_t magic, const Snapshot& s, Context cont
     return w.bytes();
 }
 
-// The longest blob save() can write, every property at its limit: no more
-// than kMaxBytes, or a session could save what no reader would load back.
-template <class Properties = PropertyTable>
-constexpr size_t maxSavedBytes() {
-    size_t n = 4 + 4;                                                // magic, version
-    n += 8 + 4 + (4 + 8) * (params::kCount - params::kOutputCount);  // PARM
-    if (Properties::kCount > 0) n += 8 + 4;                           // PROP
-    for (size_t i = 0; i < Properties::kCount; ++i) n += 4 + 4 + Properties::at(i).limit;
-    n += 8 + 8;                       // EDIT
-    n += 8 + 4 + 4 + kMaxPresetName;  // PRST
+// The longest blob save() can write for these tables, every property at its
+// limit: no more than kMaxBytes, or a session could save what no reader
+// would load back (Definition::problems() says so; a product with tables
+// fails to build).
+constexpr size_t maxSavedBytes(size_t savedParams, size_t properties, uint64_t propertyLimits) {
+    size_t n = 4 + 4;                         // magic, version
+    n += 8 + 4 + (4 + 8) * savedParams;       // PARM
+    if (properties > 0) n += 8 + 4;           // PROP
+    n += (4 + 4) * properties + static_cast<size_t>(propertyLimits);
+    n += 8 + 8;                               // EDIT
+    n += 8 + 4 + 4 + kMaxPresetName;          // PRST
     return n;
 }
-static_assert(maxSavedBytes() <= kMaxBytes,
-              "the properties' limits add up to more state than will load back (64 MiB): lower some maxBytes()");
+inline size_t maxSavedBytes(const Definition& d) {
+    uint64_t limits = 0;
+    for (size_t i = 0; i < d.properties().count(); ++i) limits += d.properties().at(i).limit;
+    return maxSavedBytes(d.params().count() - d.params().outputs().size(), d.properties().count(), limits);
+}
+
+// Appends a chunk to a saved blob: what a layer adds (plugin/Layer.h).
+inline void appendChunk(std::vector<uint8_t>& blob, uint32_t chunkTag, const std::vector<uint8_t>& payload) {
+    const uint32_t size = static_cast<uint32_t>(payload.size());
+    for (int i = 3; i >= 0; --i) blob.push_back(static_cast<uint8_t>(chunkTag >> (8 * i)));
+    for (int i = 0; i < 4; ++i) blob.push_back(static_cast<uint8_t>(size >> (8 * i)));
+    blob.insert(blob.end(), payload.begin(), payload.end());
+}
+
+// The payload of the first chunk tagged `chunkTag` in a blob that load()
+// accepts, or false when there is none.
+inline bool findChunk(const uint8_t* data, size_t size, uint32_t chunkTag, const uint8_t*& payload, size_t& length) {
+    Reader r(data, size);
+    uint32_t magic = 0, version = 0;
+    if (!r.tag(magic) || !r.u32(version)) return false;
+    while (r.remaining() > 0) {
+        uint32_t tag = 0, n = 0;
+        if (!r.tag(tag) || !r.u32(n) || r.remaining() < n) return false;
+        if (tag == chunkTag) {
+            payload = data + r.position();
+            length = n;
+            return true;
+        }
+        r.skip(n);
+    }
+    return false;
+}
 
 enum class LoadResult { Ok, NotOurs, Corrupt };
 
 // NotOurs means the magic did not match: the caller may try a legacy loader.
+// `out` says which Definition the state is for.
 inline LoadResult load(const uint8_t* data, size_t size, uint32_t magic, Snapshot& out) {
     Reader r(data, size);
     uint32_t m = 0, version = 0;
@@ -240,7 +280,9 @@ inline LoadResult load(const uint8_t* data, size_t size, uint32_t magic, Snapsho
     if (m != magic) return LoadResult::NotOurs;
     if (!r.u32(version) || version == 0 || version > kFormatVersion) return LoadResult::Corrupt;
 
-    Snapshot snapshot;
+    const ParamTable& params = out.definition->params();
+    const PropertyList& properties = out.definition->properties();
+    Snapshot snapshot(*out.definition);
     bool sawParams = false;
     while (r.remaining() > 0) {
         uint32_t tag = 0, length = 0;
@@ -253,9 +295,9 @@ inline LoadResult load(const uint8_t* data, size_t size, uint32_t magic, Snapsho
                 uint32_t id = 0;
                 double v = 0.0;
                 if (!r.u32(id) || !r.f64(v)) return LoadResult::Corrupt;
-                const int i = params::indexOf(id);
-                if (i >= 0 && std::isfinite(v) && !params::at(static_cast<size_t>(i)).isOutput())
-                    snapshot.host[i] = sanitizeHost(params::at(static_cast<size_t>(i)), v);
+                const int i = params.indexOf(id);
+                if (i >= 0 && std::isfinite(v) && !params.at(static_cast<size_t>(i)).isOutput())
+                    snapshot.host[static_cast<size_t>(i)] = sanitizeHost(params.at(static_cast<size_t>(i)), v);
             }
             sawParams = true;
         } else if (tag == kPropertyChunk) {
@@ -265,12 +307,12 @@ inline LoadResult load(const uint8_t* data, size_t size, uint32_t magic, Snapsho
                 uint32_t id = 0;
                 std::string value;
                 if (!r.u32(id) || !r.text(value, end - r.position())) return LoadResult::Corrupt;
-                const int i = properties::indexOf(id);
+                const int i = properties.indexOf(id);
                 // A value too long for the property now is dropped, as an
                 // out-of-range one would be; the default stands.
-                if (i >= 0 && properties::accepts(static_cast<size_t>(i), value)) {
-                    snapshot.property[i] = std::move(value);
-                    snapshot.hasProperty[i] = true;
+                if (i >= 0 && properties.accepts(static_cast<size_t>(i), value)) {
+                    snapshot.property[static_cast<size_t>(i)] = std::move(value);
+                    snapshot.hasProperty[static_cast<size_t>(i)] = true;
                 }
             }
         } else if (tag == kPresetChunk) {
@@ -290,7 +332,7 @@ inline LoadResult load(const uint8_t* data, size_t size, uint32_t magic, Snapsho
         if (r.position() > end || !r.skip(end - r.position())) return LoadResult::Corrupt;
     }
     if (!sawParams) return LoadResult::Corrupt;
-    out = snapshot;
+    out = std::move(snapshot);
     return LoadResult::Ok;
 }
 

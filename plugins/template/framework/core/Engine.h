@@ -51,14 +51,15 @@
 #include <cstdint>
 #include <memory>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "core/AudioFeed.h"
+#include "core/Definition.h"
 #include "core/Denormals.h"
 #include "core/Dsp.h"
 #include "core/FileSlots.h"
 #include "core/Files.h"
-#include "core/ParamTable.h"
 #include "core/ParamValues.h"
 #include "core/PropertyStore.h"
 #include "core/ProcessorBase.h"
@@ -103,18 +104,30 @@ struct NoEvents {
 // engine at the start of its next block or flush.
 class ParamStore {
   public:
-    ParamStore() { resetToDefaults(); }
+    // Every parameter of `table` at its default. The table outlives this.
+    explicit ParamStore(const ParamTable& table)
+        : table_(&table),
+          count_(table.count()),
+          values_(std::make_unique<std::atomic<double>[]>(count_ > 0 ? count_ : 1)),
+          dirty_(std::make_unique<std::atomic<bool>[]>(count_ > 0 ? count_ : 1)) {
+        resetToDefaults();
+    }
+    // A product with tables: its own.
+    ParamStore() : ParamStore(productDefinition()->params()) {}
+    ParamStore(const ParamStore&) = delete;
+    ParamStore& operator=(const ParamStore&) = delete;
 
+    size_t count() const { return count_; }
     double get(size_t index) const { return values_[index].load(std::memory_order_relaxed); }
 
     void set(size_t index, double host) {
-        values_[index].store(sanitizeHost(params::at(index), host), std::memory_order_relaxed);
+        values_[index].store(sanitizeHost(table_->at(index), host), std::memory_order_relaxed);
         dirty_[index].store(true, std::memory_order_release);
         any_.store(true, std::memory_order_release);
     }
 
     void resetToDefaults() {
-        for (size_t i = 0; i < params::kCount; ++i) set(i, hostDefault(params::at(i)));
+        for (size_t i = 0; i < count_; ++i) set(i, hostDefault(table_->at(i)));
     }
 
     // Engine only.
@@ -124,15 +137,30 @@ class ParamStore {
     template <class Fn>
     void drain(Fn&& fn) {
         if (!any_.exchange(false, std::memory_order_acq_rel)) return;
-        for (size_t i = 0; i < params::kCount; ++i)
+        for (size_t i = 0; i < count_; ++i)
             if (dirty_[i].exchange(false, std::memory_order_acq_rel)) fn(i);
     }
 
   private:
-    std::atomic<double> values_[params::kCount];
-    std::atomic<bool> dirty_[params::kCount];
+    const ParamTable* table_;
+    size_t count_;
+    std::unique_ptr<std::atomic<double>[]> values_;
+    std::unique_ptr<std::atomic<bool>[]> dirty_;
     std::atomic<bool> any_{false};
 };
+
+// The processor an engine runs: made from the Definition when it takes one
+// (a run-time product's processor learns what it is from it), by default
+// otherwise.
+template <class P>
+P makeProcessor(const DefinitionPtr& definition) {
+    if constexpr (std::is_constructible_v<P, const DefinitionPtr&>) {
+        return P(definition);
+    } else {
+        (void)definition;
+        return P();
+    }
+}
 
 // Generic over the processor so framework tests can drive probes through
 // the real engine; everything else uses the product's, as `Engine`.
@@ -143,14 +171,37 @@ class BasicEngine {
     // How often output parameters are offered to the host.
     static constexpr double kOutputHz = 30.0;
 
-    BasicEngine() {
-        for (auto& m : modulation_) m.store(0.0, std::memory_order_relaxed);
-        for (size_t i = 0; i < params::kCount; ++i) outputs_[i] = params::at(i).def;
-        processor_.bindNoteOutput(&noteOutput_);
-        processor_.bindOutputs(outputs_);
+    // The plugin `definition` describes; it outlives nothing here.
+    explicit BasicEngine(DefinitionPtr definition)
+        : definition_(std::move(definition)),
+          table_(&definition_->params()),
+          propertyList_(&definition_->properties()),
+          info_(&definition_->info()),
+          processor_(makeProcessor<P>(definition_)),
+          store_(*table_),
+          properties_(*propertyList_),
+          values_(*table_),
+          mod_(table_->count(), 0.0),
+          modulation_(std::make_unique<std::atomic<double>[]>(table_->count() > 0 ? table_->count() : 1)),
+          outputs_(table_->count(), 0.0),
+          glides_(std::max<size_t>(1, table_->smoothed().size())),
+          glidePointers_(glides_.size(), nullptr),
+          moving_(std::make_unique<bool[]>(glides_.size())) {
+        for (size_t i = 0; i < table_->count(); ++i) {
+            modulation_[i].store(0.0, std::memory_order_relaxed);
+            outputs_[i] = table_->at(i).def;
+        }
+        processor_.bindNoteOutput(&noteOutput_, info_->sendsNotes());
+        processor_.bindOutputs(outputs_.data(), table_);
         processor_.bindNoteNamesChanged(&namesChanged_);
-        if constexpr (properties::kFileCount > 0) files_ = std::make_unique<FileSlots<P>>();
+        if (propertyList_->fileCount() > 0) files_ = std::make_unique<FileSlots<P>>(*propertyList_);
     }
+    // A product with tables: its own.
+    BasicEngine() : BasicEngine(productDefinition()) {}
+    BasicEngine(const BasicEngine&) = delete;
+    BasicEngine& operator=(const BasicEngine&) = delete;
+
+    const DefinitionPtr& definition() const { return definition_; }
 
     ParamStore& store() { return store_; }
     const ParamStore& store() const { return store_; }
@@ -167,8 +218,8 @@ class BasicEngine {
     // rendering offline wants. Setting what it already holds reloads it,
     // unless it loaded.
     bool setProperty(size_t index, std::string_view value, bool wait = false) {
-        if (index >= properties::kCount) return false;
-        if (!properties::at(index).isFile() || !files_) return properties_.set(index, value);
+        if (index >= propertyList_->count()) return false;
+        if (!propertyList_->at(index).isFile() || !files_) return properties_.set(index, value);
         std::string path(value);
         if (!path.empty() && !files::exists(path))
             if (std::string found = files::relocate(path); !found.empty()) path = found;
@@ -182,18 +233,18 @@ class BasicEngine {
     // remembered for relocating others, and any other file property whose
     // file is missing looks there now.
     void fileChosen(size_t index) {
-        if (!files_ || index >= properties::kCount || !properties::at(index).isFile()) return;
+        if (!files_ || index >= propertyList_->count() || !propertyList_->at(index).isFile()) return;
         const std::string folder = files::folderOf(properties_.get(index));
         files::rememberFolder(folder);
-        for (size_t i = 0; i < properties::kCount; ++i) {
-            if (i == index || !properties::at(i).isFile()) continue;
+        for (size_t i = 0; i < propertyList_->count(); ++i) {
+            if (i == index || !propertyList_->at(i).isFile()) continue;
             if (files_->status(i).state != FileStatus::State::Missing) continue;
             if (std::string found = files::relocate(properties_.get(i), {folder}); !found.empty()) setProperty(i, found);
         }
     }
     // What became of a file property's file.
     FileStatus fileStatus(size_t index) const {
-        if (!files_ || index >= properties::kCount || !properties::at(index).isFile()) return {};
+        if (!files_ || index >= propertyList_->count() || !propertyList_->at(index).isFile()) return {};
         return files_->status(index);
     }
     // Main thread: until every file asked for so far is loaded.
@@ -219,26 +270,25 @@ class BasicEngine {
         maxBlock_ = std::max(1, maxBlock);
         channelsIn_ = std::max(0, channelsIn);
         channelsOut_ = std::max(0, channelsOut);
-        layout_ = channelsOut_ == 1 ? Layout::Mono : channelsOut_ == 2 ? Layout::Stereo : Layout::Generic;
-        for (const auto& l : product::info::kLayouts)
-            if (l.channels == channelsOut_) layout_ = l.layout;
+        layout_ = info_->layoutOf(channelsOut_);
 
         const size_t width = static_cast<size_t>(channelsOut_), frames = static_cast<size_t>(maxBlock_);
         scratch_.assign(width, std::vector<double>(frames, 0.0));
         pointers_.resize(width);
         for (size_t c = 0; c < width; ++c) pointers_[c] = scratch_[c].data();
-        sidechain_.assign(product::info::kSidechain ? width : 0, std::vector<double>(frames, 0.0));
+        sidechain_.assign(info_->sidechain ? width : 0, std::vector<double>(frames, 0.0));
         sidechainPointers_.resize(sidechain_.size());
         for (size_t c = 0; c < sidechain_.size(); ++c) sidechainPointers_[c] = sidechain_[c].data();
-        const size_t auxBuses = static_cast<size_t>(product::info::kAuxOutputs);
+        const size_t auxBuses = static_cast<size_t>(info_->auxCount());
         aux_.assign(auxBuses * width, std::vector<double>(frames, 0.0));
         auxChannels_.resize(auxBuses * width);
         auxBuses_.resize(auxBuses);
         for (size_t k = 0; k < aux_.size(); ++k) auxChannels_[k] = aux_[k].data();
         for (size_t b = 0; b < auxBuses; ++b) auxBuses_[b] = auxChannels_.data() + b * width;
-        glideBuffer_.assign(params::kSmoothedCount * static_cast<size_t>(maxBlock_), 0.0);
-        for (size_t k = 0; k < params::kSmoothedCount; ++k) {
-            const ParamDef& p = params::at(params::kSmoothedIndices[k]);
+        const auto& smoothed = table_->smoothed();
+        glideBuffer_.assign(smoothed.size() * static_cast<size_t>(maxBlock_), 0.0);
+        for (size_t k = 0; k < smoothed.size(); ++k) {
+            const ParamDef& p = table_->at(smoothed[k]);
             glides_[k].smoother.setTime(p.smoothing, sampleRate_);
             glides_[k].log = p.taper == Taper::Log;
             // Settled at a billionth of the range (in log space, a billionth
@@ -255,9 +305,9 @@ class BasicEngine {
             feedIn_.assign(2, std::vector<float>(frames, 0.0f));
         }
         // Outputs start from their defaults, for the host and the editor.
-        for (uint16_t i : params::kOutputIndices) {
-            outputs_[i] = params::at(i).def;
-            store_.setFromAudio(i, hostDefault(params::at(i)));
+        for (uint16_t i : table_->outputs()) {
+            outputs_[i] = table_->at(i).def;
+            store_.setFromAudio(i, hostDefault(table_->at(i)));
         }
         outputPeriod_ = std::max(1, static_cast<int>(std::lround(sampleRate_ / kOutputHz)));
         outputCountdown_ = outputPeriod_;
@@ -265,7 +315,7 @@ class BasicEngine {
 
         // Every value is read fresh, so any pending store changes are moot.
         store_.drain([](size_t) {});
-        for (size_t i = 0; i < params::kCount; ++i) {
+        for (size_t i = 0; i < table_->count(); ++i) {
             mod_[i] = 0.0;
             modulation_[i].store(0.0, std::memory_order_relaxed);
             refresh(i);
@@ -275,11 +325,12 @@ class BasicEngine {
         offlineNow_ = offline_.load(std::memory_order_relaxed);
         processor_.prepare(ProcessSetup{sampleRate_, maxBlock_, channelsOut_, layout_, offlineNow_}, values_);
         properties_.deliverAll(
-            [this](size_t i, std::string_view value) { processor_.property(properties::at(i).id, value); });
+            [this](size_t i, std::string_view value) { processor_.property(propertyList_->at(i).id, value); });
         if (files_) {
             // Loaded for this rate, block size and width before the first block.
             files_->prepare({sampleRate_, maxBlock_, channelsOut_});
-            files_->deliverAll([this](size_t i, auto* contents) { processor_.file(properties::at(i).id, contents); });
+            files_->deliverAll(
+                [this](size_t i, auto* contents) { processor_.file(propertyList_->at(i).id, contents); });
         }
         retargetGlides(true);
         processor_.update(values_);
@@ -324,15 +375,11 @@ class BasicEngine {
     // at the start of the next block on port 0, channel 0, with no note ID.
     // A full queue drops new note-ons; refused note-offs have a per-key mailbox.
     void playNote(int key, double velocity, bool on) {
-        if constexpr (product::info::kNoteInput) {
-            if (key < 0 || key > 127) return;
-            const uint64_t bit = uint64_t{1} << (key & 63);
-            if (on && (editorOff_[key >> 6].load(std::memory_order_acquire) & bit)) return;
-            if (!editorNotes_.push({static_cast<int16_t>(key), on, static_cast<float>(std::clamp(velocity, 0.0, 1.0))}) && !on)
-                editorOff_[key >> 6].fetch_or(bit, std::memory_order_release);
-        } else {
-            (void)key, (void)velocity, (void)on;
-        }
+        if (!info_->takesNotes() || key < 0 || key > 127) return;
+        const uint64_t bit = uint64_t{1} << (key & 63);
+        if (on && (editorOff_[key >> 6].load(std::memory_order_acquire) & bit)) return;
+        if (!editorNotes_.push({static_cast<int16_t>(key), on, static_cast<float>(std::clamp(velocity, 0.0, 1.0))}) && !on)
+            editorOff_[key >> 6].fetch_or(bit, std::memory_order_release);
     }
 
     // Latency reported to the host at the last activation. It may not change
@@ -450,7 +497,7 @@ class BasicEngine {
             countdown_ = period_;
             resetPeaks();
         }
-        if constexpr (product::info::kNoteInput) {
+        if (info_->takesNotes()) {
             EditorNote n;
             while (editorNotes_.pop(n)) {
                 EngineEvent note;
@@ -516,14 +563,14 @@ class BasicEngine {
     }
 
   private:
-    static bool flagged(size_t i, uint32_t flag) { return params::at(i).is(flag); }
+    bool flagged(size_t i, uint32_t flag) const { return table_->at(i).is(flag); }
 
     bool bypassOn() const {
-        return params::kBypassIndex >= 0 && values_.atIndex(static_cast<size_t>(params::kBypassIndex)) > 0.5;
+        return table_->bypassIndex() >= 0 && values_.atIndex(static_cast<size_t>(table_->bypassIndex())) > 0.5;
     }
 
     void refresh(size_t i) {
-        const ParamDef& p = params::at(i);
+        const ParamDef& p = table_->at(i);
         if (p.isOutput()) return;  // the processor's to report, not to read
         const double host = sanitizeHost(p, store_.get(i) + mod_[i]);
         values_.setIndex(i, toPlain(p, host));
@@ -531,21 +578,17 @@ class BasicEngine {
 
     void syncStore() {
         store_.drain([this](size_t i) { refresh(i); });
-        if constexpr (properties::kCount > 0) {
-            // While stopped, activate() delivers every value anyway.
-            if (active_)
-                properties_.deliver(
-                    [this](size_t i, std::string_view value) { processor_.property(properties::at(i).id, value); });
-        }
-        if constexpr (properties::kFileCount > 0) {
-            if (active_ && files_) {
-                bool delivered = false;
-                files_->deliver([this, &delivered](size_t i, auto* contents) {
-                    processor_.file(properties::at(i).id, contents);
-                    delivered = true;
-                });
-                if (delivered) reread();
-            }
+        // While stopped, activate() delivers every value anyway.
+        if (active_ && propertyList_->count() > 0)
+            properties_.deliver(
+                [this](size_t i, std::string_view value) { processor_.property(propertyList_->at(i).id, value); });
+        if (active_ && files_) {
+            bool delivered = false;
+            files_->deliver([this, &delivered](size_t i, auto* contents) {
+                processor_.file(propertyList_->at(i).id, contents);
+                delivered = true;
+            });
+            if (delivered) reread();
         }
     }
 
@@ -578,9 +621,9 @@ class BasicEngine {
             }
             return;
         }
-        if (e.index < 0 || e.index >= static_cast<int>(params::kCount)) return;
+        if (e.index < 0 || e.index >= static_cast<int>(table_->count())) return;
         const size_t i = static_cast<size_t>(e.index);
-        const ParamDef& p = params::at(i);
+        const ParamDef& p = table_->at(i);
         if (p.isOutput()) return;  // read-only: a host has no business setting it
         if (e.type == Type::NoteModulation) {
             if (!active_ || !p.is(pflag::kPolyMod)) return;
@@ -619,16 +662,17 @@ class BasicEngine {
     void commit() {
         if (!values_.anyChanged()) return;
         if (active_) {
-            if (params::kAnyRestart && !values_.initial()) {
-                for (size_t i = 0; i < params::kCount; ++i)
-                    if (flagged(i, pflag::kRestart) && values_.changed(params::at(i).id))
+            if (table_->anyRestart() && !values_.initial()) {
+                for (size_t i = 0; i < table_->count(); ++i)
+                    if (flagged(i, pflag::kRestart) && values_.changed(table_->at(i).id))
                         restartWanted_.store(true, std::memory_order_release);
             }
-            if (params::kBypassIndex >= 0 &&
-                values_.changed(params::at(static_cast<size_t>(params::kBypassIndex)).id))
+            if (table_->bypassIndex() >= 0 &&
+                values_.changed(table_->at(static_cast<size_t>(table_->bypassIndex())).id))
                 bypass_.set(bypassOn() ? 1.0 : 0.0);
-            for (size_t k = 0; k < params::kSmoothedCount; ++k)
-                if (values_.changed(params::at(params::kSmoothedIndices[k]).id)) retarget(k, values_.initial());
+            const auto& smoothed = table_->smoothed();
+            for (size_t k = 0; k < smoothed.size(); ++k)
+                if (values_.changed(table_->at(smoothed[k]).id)) retarget(k, values_.initial());
             processor_.update(values_);
             reread();
         }
@@ -672,16 +716,16 @@ class BasicEngine {
 
     void retarget(size_t k, bool snap) {
         Glide& g = glides_[k];
-        g.target = values_.atIndex(params::kSmoothedIndices[k]);
+        g.target = values_.atIndex(table_->smoothed()[k]);
         g.smoother.set(g.log ? std::log(g.target) : g.target, snap);
         g.filled = 0;
     }
     void retargetGlides(bool snap) {
-        for (size_t k = 0; k < params::kSmoothedCount; ++k) retarget(k, snap);
+        for (size_t k = 0; k < table_->smoothed().size(); ++k) retarget(k, snap);
     }
 
     void fillGlides(int n) {
-        for (size_t k = 0; k < params::kSmoothedCount; ++k) {
+        for (size_t k = 0; k < table_->smoothed().size(); ++k) {
             Glide& g = glides_[k];
             double* out = glidePointers_[k];
             if (g.smoother.settled()) {
@@ -704,21 +748,18 @@ class BasicEngine {
     // --- outputs ----------------------------------------------------------------
 
     void publishOutputs(int frames) {
-        if constexpr (params::kOutputCount > 0) {
-            for (uint16_t i : params::kOutputIndices) {
-                const ParamDef& p = params::at(i);
-                const double host = sanitizeHost(p, toHost(p, outputs_[i]));
-                if (host != store_.get(i)) store_.setFromAudio(i, host);
-            }
-            // The remainder carries over, so the rate holds whatever the
-            // block size; a block longer than a period counts once.
-            outputCountdown_ -= frames;
-            if (outputCountdown_ <= 0) {
-                outputCountdown_ = std::max(1, outputCountdown_ + outputPeriod_);
-                outputsDue_ = true;
-            }
-        } else {
-            (void)frames;
+        if (table_->outputs().empty()) return;
+        for (uint16_t i : table_->outputs()) {
+            const ParamDef& p = table_->at(i);
+            const double host = sanitizeHost(p, toHost(p, outputs_[i]));
+            if (host != store_.get(i)) store_.setFromAudio(i, host);
+        }
+        // The remainder carries over, so the rate holds whatever the block
+        // size; a block longer than a period counts once.
+        outputCountdown_ -= frames;
+        if (outputCountdown_ <= 0) {
+            outputCountdown_ = std::max(1, outputCountdown_ + outputPeriod_);
+            outputsDue_ = true;
         }
     }
 
@@ -743,15 +784,13 @@ class BasicEngine {
             }
         }
 
-        if constexpr (product::info::kSidechain) {
-            for (size_t c = 0; c < sidechain_.size(); ++c) {
-                double* s = sidechain_[c].data();
-                const T* src = io.sidechain ? io.sidechain[c] : nullptr;
-                if (src)
-                    for (int i = 0; i < n; ++i) s[i] = static_cast<double>(src[offset + i]);
-                else
-                    std::fill(s, s + n, 0.0);
-            }
+        for (size_t c = 0; c < sidechain_.size(); ++c) {
+            double* s = sidechain_[c].data();
+            const T* src = io.sidechain ? io.sidechain[c] : nullptr;
+            if (src)
+                for (int i = 0; i < n; ++i) s[i] = static_cast<double>(src[offset + i]);
+            else
+                std::fill(s, s + n, 0.0);
         }
         for (auto& a : aux_) std::fill(a.begin(), a.begin() + n, 0.0);
 
@@ -762,8 +801,9 @@ class BasicEngine {
         block.frames = n;
         block.metering = metering;
         block.offline = offlineNow_;
-        block.glides = glidePointers_;
-        block.moving = moving_;
+        block.params = table_;
+        block.glides = glidePointers_.data();
+        block.moving = moving_.get();
         block.sidechain = sidechainPointers_.data();
         block.sidechainConnected = io.sidechain != nullptr;
         block.auxOutputs = static_cast<int>(auxBuses_.size());
@@ -855,7 +895,7 @@ class BasicEngine {
         const T* const* in = io.in;
         T* const* out = io.out;
         const size_t width = static_cast<size_t>(channelsOut_);
-        const bool hasBypass = params::kBypassIndex >= 0;
+        const bool hasBypass = table_->bypassIndex() >= 0;
         // The common case: not bypassed, nothing to delay. Straight copy.
         if (!hasBypass || (bypass_.settled() && bypass_.value() == 0.0 && dryLatency_ == 0)) {
             for (int c = 0; c < channelsOut_; ++c) {
@@ -920,21 +960,25 @@ class BasicEngine {
         resetPeaks();
     }
 
+    DefinitionPtr definition_;
+    const ParamTable* table_;
+    const PropertyList* propertyList_;
+    const PluginInfo* info_;
     Processor processor_;
     ParamStore store_;
     PropertyStore properties_;
     ParamValues values_;
-    double mod_[params::kCount]{};
-    std::atomic<double> modulation_[params::kCount];
-    double outputs_[params::kCount];  // plain, written by the processor
+    std::vector<double> mod_;
+    std::unique_ptr<std::atomic<double>[]> modulation_;
+    std::vector<double> outputs_;  // plain, written by the processor
     int outputPeriod_ = 1600;
     int outputCountdown_ = 1600;
     bool outputsDue_ = false;
 
-    static constexpr size_t kGlideSlots = params::kSmoothedCount > 0 ? params::kSmoothedCount : 1;
-    Glide glides_[kGlideSlots];
-    double* glidePointers_[kGlideSlots]{};
-    bool moving_[kGlideSlots]{};
+    // One per smoothed parameter, at least one.
+    std::vector<Glide> glides_;
+    std::vector<double*> glidePointers_;
+    std::unique_ptr<bool[]> moving_;
     std::vector<double> glideBuffer_;
 
     double sampleRate_ = 48000.0;

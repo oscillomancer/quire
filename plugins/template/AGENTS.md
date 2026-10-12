@@ -82,6 +82,15 @@ and `test_examples` puts back), with its own name, ID and codes, which
   swapped in by `file()`, declicked. Without one, a room of its own, built
   in `prepare()`. A `fileSlot()` in a small editor; pre-delay through a
   `dsp::FractionalDelay`.
+- `stages` (Stages): a run-time product (`PRODUCT_RUNTIME ON`). Its catalog
+  offers a built-in plugin and one more per `.stages` file in a folder
+  (`SUPPLE_STAGES_DIR`), each a chain of gain stages the file names; the
+  processor is made from its instance's Definition. Its layer
+  (`PRODUCT_LAYER ON`) redefines an instance when its file changes (the
+  host restarts it and rescans), keeps each stage's value by name in a state
+  chunk so a reordered file loses nothing, and answers a CLAP extension of
+  its own. `stages-plugin-tests` drives all of it through the CLAP factory
+  in process.
 
 ## The starter product
 

@@ -26,6 +26,8 @@ Read this file, then `docs/CONVENTIONS.md` for the reasons behind the rules.
 | What the product costs on your machine (written by `benchmark --update`) | `product/benchmark.txt` |
 | Notices for a dependency the product adds | `product/NOTICES.txt` |
 | The product's own tools and measurement programs (optional) | `product/targets.cmake` |
+| Plugins defined when it runs, not when it compiles (`PRODUCT_RUNTIME ON`) | `product::makeCatalog()` in a product source |
+| A CLAP extension, a state chunk or main-thread work of the product's family (`PRODUCT_LAYER ON`) | `product::makeLayer()` in `PRODUCT_LAYER_SOURCES` |
 | Anything in `framework/` | **the template**, never a product (see the end of this file) |
 
 Nothing outside `product/` names the product. The CLAP descriptor, bundle
@@ -125,6 +127,46 @@ effect is switched on there (checked by `cmake/Capabilities.cmake`):
 Framework tests follow these: a product is tested on the buses and notes it
 has, and the examples have them all.
 
+## Run-time products and layers
+
+Inside the framework a plugin is a `Definition` (`core/Definition.h`): its
+`PluginInfo` (identity, kind, buses, capabilities), its `ParamTable`, its
+`PropertyList` and its factory presets. A product with tables makes exactly
+one, from `product.cmake` and `product/Params.h` (and the rest), and keeps
+every compile-time check on them; nothing changes for it. The engine, state,
+presets, the CLAP plugin and the editor read the Definition an instance was
+made with, so the same code serves plugins whose tables are made at run time.
+
+- `PRODUCT_RUNTIME ON`: no `Params.h`. The product defines
+  `std::unique_ptr<supple::Catalog> product::makeCatalog()` (`core/Catalog.h`),
+  whose `list()` returns the plugins it offers now -- one, or one per file in
+  a folder -- each a Definition built with `ParamTable::Builder` and the same
+  factories (`supple::decibels(...)`), checked by `Definition::problems()`
+  before hosts see it. Return the same Definition while it is unchanged:
+  hosts list the catalog often. The processor is made from its instance's
+  Definition (`explicit Processor(const supple::DefinitionPtr&)`); a product
+  derives from `Definition` to carry what its processor needs. IDs and state
+  tags are permanent once shipped, as a product's are. The kind and layouts
+  in `product.cmake` describe the plugin host-smoke tests (give one the
+  product's own ID). CLAP and VST3 only. The framework tests and tools that
+  read tables as constants (core-tests, plugin-tests, ui-tests, render-cli,
+  gui-preview, the benchmark) are not built: test the catalog's plugins in
+  the product's own tests, through the Engine and through the CLAP factory
+  in process. The stages example.
+- `PRODUCT_LAYER ON` (either kind of product): `product::makeLayer(instance)`
+  (`plugin/Layer.h`, sources in `PRODUCT_LAYER_SOURCES`) gives each instance
+  a layer, on the main thread: CLAP extensions of its own (`extension(id)`,
+  `Layer::of(plugin)` in their callbacks), a state chunk (`saveChunk` from
+  the snapshot being saved; `loadChunk` may rewrite or refuse the snapshot
+  being loaded before anything applies), `tick()` about 30 times a second,
+  `onMainThread()` after `requestLayerCallback()`, and
+  `Instance::redefine(definition)`: the instance becomes another Definition
+  with the same ID and state tag. Active, the host is asked to restart and
+  the swap happens at the deactivation; either way the host rescans every
+  parameter (and the ports when the buses changed), the state carries over
+  by parameter ID and through the layer's chunk, and an open editor is
+  rebuilt. A layer never calls `redefine()` from `loadChunk()`.
+
 ## Parameters
 
 Each parameter is one row in `product::kParams`, built with a factory and
@@ -163,6 +205,9 @@ Further modifiers:
   note input. The instrument example.
 - `.help("...")`: what it does, in a sentence: its control's tooltip in the
   editor (hosts have nowhere to show it). Write one for every parameter.
+- `.normalizedHostValue()`: the host value is the 0..1 position even for a
+  linear parameter, as tapered ones already are, for hosts that keep every
+  continuous parameter normalized.
 - `.formatted(format, parse)`: the parameter's own text both ways, for what
   no `Unit` describes. ASCII; the parser reads back everything the formatter
   writes. Prefer a new `Unit` (in the template) when more than one product

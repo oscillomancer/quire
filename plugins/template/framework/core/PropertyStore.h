@@ -16,33 +16,44 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
-#include "core/PropertyTable.h"
+#include "core/Definition.h"
 #include "core/Ring.h"
 
 namespace supple {
 
-template <class Table = PropertyTable>
-class BasicPropertyStore {
+class PropertyStore {
   public:
-    BasicPropertyStore() {
-        for (size_t i = 0; i < Table::kCount; ++i) {
-            main_[i] = Table::at(i).def;
+    // Every property of `list` at its default. The list outlives this.
+    explicit PropertyStore(const PropertyList& list)
+        : list_(&list),
+          count_(list.count()),
+          main_(count_),
+          current_(count_, nullptr),
+          pending_(std::make_unique<std::atomic<std::string*>[]>(count_ > 0 ? count_ : 1)) {
+        for (size_t i = 0; i < count_; ++i) {
+            main_[i] = list.at(i).def;
             current_[i] = new std::string(main_[i]);
             pending_[i].store(nullptr, std::memory_order_relaxed);
         }
     }
-    ~BasicPropertyStore() {
+    // A product with tables: its own.
+    PropertyStore() : PropertyStore(productDefinition()->properties()) {}
+    ~PropertyStore() {
         collect();
-        for (size_t i = 0; i < Table::kCount; ++i) {
+        for (size_t i = 0; i < count_; ++i) {
             delete current_[i];
             delete pending_[i].exchange(nullptr, std::memory_order_acq_rel);
         }
     }
-    BasicPropertyStore(const BasicPropertyStore&) = delete;
-    BasicPropertyStore& operator=(const BasicPropertyStore&) = delete;
+    PropertyStore(const PropertyStore&) = delete;
+    PropertyStore& operator=(const PropertyStore&) = delete;
+
+    size_t count() const { return count_; }
 
     // --- main thread -------------------------------------------------------------
 
@@ -51,7 +62,7 @@ class BasicPropertyStore {
     // False, and nothing changes, when the value is longer than the
     // property's limit. Setting the value it already has does nothing.
     bool set(size_t index, std::string_view value) {
-        if (index >= Table::kCount || value.size() > Table::at(index).limit) return false;
+        if (index >= count_ || !list_->accepts(index, value)) return false;
         collect();
         if (main_[index] == value) return true;
         main_[index].assign(value.data(), value.size());
@@ -61,7 +72,7 @@ class BasicPropertyStore {
     }
 
     void resetToDefaults() {
-        for (size_t i = 0; i < Table::kCount; ++i) set(i, Table::at(i).def);
+        for (size_t i = 0; i < count_; ++i) set(i, list_->at(i).def);
     }
 
     // Changes with every value set, for an editor deciding whether to repaint.
@@ -79,7 +90,7 @@ class BasicPropertyStore {
     // fn(index, value) for each.
     template <class Fn>
     void deliver(Fn&& fn) {
-        for (size_t i = 0; i < Table::kCount; ++i) {
+        for (size_t i = 0; i < count_; ++i) {
             if (!pending_[i].load(std::memory_order_relaxed) || !retired_.writable()) continue;
             std::string* fresh = pending_[i].exchange(nullptr, std::memory_order_acq_rel);
             if (!fresh) continue;
@@ -97,7 +108,7 @@ class BasicPropertyStore {
     template <class Fn>
     void deliverAll(Fn&& fn) {
         collect();
-        for (size_t i = 0; i < Table::kCount; ++i) {
+        for (size_t i = 0; i < count_; ++i) {
             if (auto* fresh = pending_[i].exchange(nullptr, std::memory_order_acq_rel)) {
                 delete current_[i];
                 current_[i] = fresh;
@@ -107,13 +118,13 @@ class BasicPropertyStore {
     }
 
   private:
-    std::string main_[Table::kSlots];
-    std::string* current_[Table::kSlots] = {};
-    std::atomic<std::string*> pending_[Table::kSlots];
+    const PropertyList* list_;
+    size_t count_;
+    std::vector<std::string> main_;
+    std::vector<std::string*> current_;
+    std::unique_ptr<std::atomic<std::string*>[]> pending_;
     Ring<std::string*, 6> retired_;
     std::atomic<uint64_t> version_{0};
 };
-
-using PropertyStore = BasicPropertyStore<>;
 
 }  // namespace supple

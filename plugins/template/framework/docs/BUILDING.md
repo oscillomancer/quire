@@ -268,7 +268,7 @@ template's own build of that preset.
 `.github/workflows/build.yml` runs on demand only: the repository's Actions
 tab, "Build and test", "Run workflow", or
 `gh workflow run build.yml -f platforms=macos` (`linux`, `windows`, `all`;
-`-f sanitizers=true` adds asan, and tsan on Linux). Each platform builds the
+`-f sanitizers=true` adds asan and tsan on macOS and Linux). Each platform builds the
 release and debug presets and runs `ctest`. In the template, each example
 under `examples/` also gets a release job of its own on each platform
 (`-f examples=false` leaves them out): the job puts the example in place of

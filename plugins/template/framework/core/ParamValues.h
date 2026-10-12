@@ -17,20 +17,46 @@
 
 #include <cassert>
 #include <cmath>
+#include <algorithm>
 #include <cstdint>
+#include <memory>
 
-#include "core/ParamTable.h"
+#include "core/Definition.h"
 
 namespace supple {
 
 class ParamValues {
   public:
-    ParamValues() {
-        for (size_t i = 0; i < params::kCount; ++i) {
-            plain_[i] = params::at(i).def;
+    // Every parameter of `table` at its default. The table outlives this.
+    explicit ParamValues(const ParamTable& table)
+        : table_(&table),
+          count_(table.count()),
+          plain_(std::make_unique<double[]>(count_ > 0 ? count_ : 1)),
+          changed_(std::make_unique<bool[]>(count_ > 0 ? count_ : 1)) {
+        for (size_t i = 0; i < count_; ++i) {
+            plain_[i] = table.at(i).def;
             changed_[i] = true;
         }
     }
+    // A product with tables: its own.
+    ParamValues() : ParamValues(productDefinition()->params()) {}
+    ParamValues(const ParamValues& o) : ParamValues(*o.table_) { *this = o; }
+    ParamValues& operator=(const ParamValues& o) {
+        if (this == &o) return *this;
+        if (o.count_ != count_) {
+            plain_ = std::make_unique<double[]>(o.count_ > 0 ? o.count_ : 1);
+            changed_ = std::make_unique<bool[]>(o.count_ > 0 ? o.count_ : 1);
+        }
+        table_ = o.table_;
+        count_ = o.count_;
+        std::copy(o.plain_.get(), o.plain_.get() + count_, plain_.get());
+        std::copy(o.changed_.get(), o.changed_.get() + count_, changed_.get());
+        any_ = o.any_;
+        initial_ = o.initial_;
+        return *this;
+    }
+
+    const ParamTable& table() const { return *table_; }
 
     double operator[](uint32_t id) const { return plain_[slot(id)]; }
     int choice(uint32_t id) const { return static_cast<int>(std::lround(plain_[slot(id)])); }
@@ -39,21 +65,21 @@ class ParamValues {
     // parameter marked offAtMinimum(), exactly 1 at 0 dB.
     double gain(uint32_t id) const {
         const size_t i = slot(id);
-        assert(params::at(i).unit == Unit::Decibels && "gain() reads a decibel parameter");
-        return levelGain(params::at(i), plain_[i]);
+        assert(table_->at(i).unit == Unit::Decibels && "gain() reads a decibel parameter");
+        return levelGain(table_->at(i), plain_[i]);
     }
     // At the minimum of a parameter marked offAtMinimum().
-    bool off(uint32_t id) const { return params::at(slot(id)).off(plain_[slot(id)]); }
+    bool off(uint32_t id) const { return table_->at(slot(id)).off(plain_[slot(id)]); }
     // A noteValue() parameter's length in quarter notes.
     double beats(uint32_t id) const {
-        assert(params::at(slot(id)).labels == kNoteValueLabels && "beats() reads a noteValue() parameter");
+        assert(table_->at(slot(id)).labels == kNoteValueLabels && "beats() reads a noteValue() parameter");
         return noteValueBeats(choice(id));
     }
     // The plain value a per-note modulation amount (NoteModulation, host
     // units) makes of this parameter's current value, clamped to its range.
     double modulated(uint32_t id, double amount) const {
         const size_t i = slot(id);
-        return modulatedPlain(params::at(i), plain_[i], amount);
+        return modulatedPlain(table_->at(i), plain_[i], amount);
     }
     bool changed(uint32_t id) const { return changed_[slot(id)]; }
     // True for the update that follows prepare() or reset(): jump, don't glide.
@@ -69,25 +95,27 @@ class ParamValues {
         any_ = true;
     }
     void markAll() {
-        for (size_t i = 0; i < params::kCount; ++i) changed_[i] = true;
+        for (size_t i = 0; i < count_; ++i) changed_[i] = true;
         any_ = true;
     }
     void clearChanges() {
-        for (size_t i = 0; i < params::kCount; ++i) changed_[i] = false;
+        for (size_t i = 0; i < count_; ++i) changed_[i] = false;
         any_ = false;
         initial_ = false;
     }
     void setInitial(bool initial) { initial_ = initial; }
 
   private:
-    static size_t slot(uint32_t id) {
-        const int i = params::indexOf(id);
-        assert(i >= 0 && "ParamValues read with an ID that is not in product::kParams");
+    size_t slot(uint32_t id) const {
+        const int i = table_->indexOf(id);
+        assert(i >= 0 && "ParamValues read with an ID that is not in the parameter table");
         return i >= 0 ? static_cast<size_t>(i) : 0;
     }
 
-    double plain_[params::kCount];
-    bool changed_[params::kCount];
+    const ParamTable* table_;
+    size_t count_;
+    std::unique_ptr<double[]> plain_;
+    std::unique_ptr<bool[]> changed_;
     bool any_ = true;
     bool initial_ = true;
 };

@@ -48,7 +48,14 @@ class Gui {
     void sizeAt(double userScale, uint32_t& w, uint32_t& h) const;
     void aspect(uint32_t& w, uint32_t& h) const;
 
-    void tick() { window_.tick(); }
+    void tick() {
+        window_.tick();
+        if (retired_ && !window_.replacing()) retired_.reset();
+    }
+    // A new editor from product::createEditor, for a plugin whose definition
+    // changed (core/Definition.h). Its design size may differ: the host size
+    // for the current user scale is then sizeAt(userScale()).
+    void rebuild(EditorHost& host);
     bool startFallbackTimer(double seconds) { return window_.startFallbackTimer(seconds); }
     void stopFallbackTimer() { window_.stopFallbackTimer(); }
 
@@ -60,7 +67,8 @@ class Gui {
     uint32_t hostH(double userScale) const;
     void applyLimits();
 
-    std::unique_ptr<EditorBase> editor_;  // declared first: outlives the window
+    std::unique_ptr<EditorBase> editor_;   // declared first: outlives the window
+    std::unique_ptr<EditorBase> retired_;  // the editor the window shows until a rebuild's swap
     Window window_;
     double platformScale_ = 1.0;
     double userScale_ = 1.0;

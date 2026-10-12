@@ -13,7 +13,20 @@ Gui::Gui(EditorHost& host, const char* className, bool standalone)
 
 Gui::~Gui() {
     editor_->focusLost();  // closes any open gesture before the host loses us
+    if (retired_) retired_->focusLost();
     window_.destroy();
+}
+
+void Gui::rebuild(EditorHost& host) {
+    std::unique_ptr<EditorBase> next = product::createEditor(host);
+    editor_->focusLost();
+    window_.replaceEditor(*next);
+    // The editor the window shows lives until the swap; one that was only
+    // waiting for it goes now.
+    if (!retired_) retired_ = std::move(editor_);
+    editor_ = std::move(next);
+    if (!window_.replacing()) retired_.reset();
+    applyLimits();
 }
 
 bool Gui::create() {

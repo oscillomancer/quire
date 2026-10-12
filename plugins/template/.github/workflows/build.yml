@@ -23,7 +23,7 @@ on:
         options: [macos, linux, windows, all]
         default: all
       sanitizers:
-        description: Also run the asan preset (and tsan on Linux)
+        description: Also run the asan and tsan presets (not on Windows)
         type: boolean
         default: false
       examples:
@@ -74,7 +74,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        preset: ${{ fromJSON(inputs.sanitizers && '["release","debug","asan"]' || '["release","debug"]') }}
+        preset: ${{ fromJSON(inputs.sanitizers && '["release","debug","asan","tsan"]' || '["release","debug"]') }}
         product: [starter]
         include: ${{ fromJSON(needs.plan.outputs.examples) }}
     steps:
