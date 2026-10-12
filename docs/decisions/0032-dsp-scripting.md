@@ -1,0 +1,284 @@
+# ADR-0032: DSP scripting
+
+**Status:** Proposed, 2026-10-12 (awaiting the maintainer's review; work
+proceeds on it). Language reference: `skill/guides/dsp-language.md` (the
+canonical spec, shared by the skill and the MCP tools). Builds on ADR-0010,
+ADR-0011 and the plugin template's `framework/AGENTS.md`.
+
+## Context
+
+ADR-0006 left DSP scripting to a language of its own. The goal: a person or
+an LLM working through MCP writes an effect or instrument as a script, hears
+it in Quire at once, iterates, and exports it as a plugin for any DAW, either
+as a prebuilt "player" with the script embedded (no compiler needed) or as a
+buildable C++ project on the plugin template (the graduation path).
+
+Constraints found while surveying the code:
+
+- The template's framework (`/home/nate/Projects/audio-plugins/template`,
+  1.15.3) binds a product at compile time: `product::kParams` is included
+  by about 700 lines of framework code, and `product::info` (identity, kind,
+  buses) by about 230. Nothing can host a parameter table or a plugin kind
+  that is only known when a script loads.
+- Quire stores a semantic plugin's **patch**, not its CLAP state, in the
+  project (`FxInstance::patch`), keys presets by plugin ID, and lists and
+  instantiates plugins by ID. A scripted plugin that should behave like a
+  stock one therefore needs its own plugin ID, and its patch must hold
+  everything that matters (parameters and file references).
+- Generic hosts see ADR-0010's value domains: a float parameter's CLAP value
+  is its normalized curve position. The framework's host value is the plain
+  value for linear parameters.
+- Quire is C++20 and CMake with every dependency vendored and the build
+  offline. Plugins are built from the template as ExternalProjects.
+
+## Decision
+
+### 1. The language: a checked subset of C++20
+
+A script is one C++ file. Every script the compiler accepts also compiles,
+unchanged, as ordinary C++ against the runtime header `<supple/script.h>`,
+and means the same thing. The converse need not hold: the compiler rejects
+anything outside the subset with an error that names the subset's way to do
+it ("dynamic allocation isn't available in process(); declare a fixed-size
+`Array<float, 4096>` member, or a `Buffer<float>` sized in prepare()").
+
+```cpp
+#include <supple/script.h>
+
+struct Tilt : Effect {
+    static constexpr Info info = {.name = "Tilt", .id = "com.example.tilt", .version = "1.0.0"};
+
+    Param tilt  = decibels("Tilt", -6, 6, 0).smoothed(20).help("Raises the highs and lowers the lows.");
+    Param pivot = frequency("Pivot", 200, 5000, 1000);
+
+    Array<Biquad, 2> low, high;
+
+    void update() {
+        for (int c = 0; c < 2; ++c) {
+            low[c].lowShelf(pivot, 0.707, -tilt / 2);
+            high[c].highShelf(pivot, 0.707, tilt / 2);
+        }
+    }
+    void process(Block& io) {
+        for (int c = 0; c < io.channels; ++c)
+            for (int i = 0; i < io.frames; ++i)
+                io[c][i] = high[c].process(low[c].process(io[c][i]));
+    }
+};
+```
+
+- **Shape.** One struct derives from `Effect`, `Instrument` or `NoteEffect`
+  (the plugin's kind). `static constexpr Info info` gives its identity and
+  buses. Parameters are `Param` members built with factories named like the
+  framework's (`decibels`, `frequency`, `milliseconds`, `percent`, `ratio`,
+  `choice`, `toggle`, ...); the member name is the patch key, so keys are
+  stable across reordering, and the CLAP ID is a hash of the key (an
+  explicit `.id(n)` overrides it). Hooks follow the framework's processor
+  contract: `prepare()` (main thread: size buffers), `update()` (after
+  parameter changes), `process(Block&)` (block-based, in place, double
+  precision), `note()`, `midi()` and the voice hooks for instruments, and
+  `editor()`/`draw()` for the UI.
+- **Types.** `double`, `float`, `int`, `bool`; `Array<T, N>`; structs with
+  data members, default member initializers and member functions; references
+  as locals and parameters; `auto`; `const`/`constexpr`. No pointers, no
+  constructors or inheritance of the script's own, no virtual functions,
+  exceptions, templates, overloading, recursion, lambdas in audio code, or
+  standard library. Built-in types (`Biquad`, `DelayLine`, `Buffer<T>`,
+  `Voices<N>`, ...) come from the runtime.
+- **Defined behaviour everywhere.** `Array`, `Buffer` and `Block` indexing
+  is checked (an out-of-range read gives zero, a write is dropped, and the
+  script's status counts it). Float-to-int conversion is only explicit and
+  defined (`toInt`, `floorToInt`, `roundToInt`: saturating, NaN to 0);
+  integer `/` and `%` take positive constant divisors (`idiv`, `imod` and
+  `wrap` otherwise); shifts take constant amounts; signed overflow wraps
+  (exports build with `-fwrapv`). Where C++ leaves evaluation order
+  unspecified (operands of `+`, arguments of a call), the compiler rejects
+  expressions whose side effects could interfere, so the JIT and every C++
+  compiler agree. Exports build the script with `-ffp-contract=off`; every
+  executor runs with FTZ/DAZ (ADR-0025).
+- **Contexts.** The compiler knows where each function runs: init
+  (`prepare`, member initializers: may allocate), audio (`process`,
+  `update`, note hooks and everything they call: no allocation, no file
+  access, no unbounded recursion), UI (`editor`, `draw`: may format text).
+  UI code reads the DSP only through parameters and `Shared<T>` /
+  `SharedArray<T, N>` members (atomics; double buffering for arrays), which
+  exist identically in exported C++.
+- **Drawing.** `draw(Canvas& g)` uses an HTML-canvas-style API (`fillRect`,
+  `beginPath`, `arc`, `fillText`, ...) mapped onto the framework's NanoVG
+  renderer, plus the framework's widgets (`knob`, `slider`, `toggle`,
+  `meter`) in `editor()`. A script with neither gets the framework's
+  automatic editor.
+
+The reference (`skill/guides/dsp-language.md`) stays a few pages, and every
+example in it is a test.
+
+### 2. The compiler: a C++ front end and MIR
+
+`plugins/suite/compiler` is a self-contained C++20 library (no monorepo
+dependency) with a C ABI (`supple/script_compiler.h`): lexer, parser, semantic
+analysis (C++'s conversion and overload rules for the subset, name lookup,
+the context and evaluation-order checks), plugin extraction (identity,
+parameter table, hooks), and code generation into **MIR** (Vladimir
+Makarov's JIT, MIT, C11, vendored under `third_party/`). MIR generates
+x86-64 and AArch64 code (Linux, macOS including Apple Silicon, Windows
+x86-64) and has an interpreter for the same IR, which is the fallback for
+hosts that forbid executable memory. Diagnostics are JSON (`code`, `message`,
+`line`, `column`, `hint`), the same shape as the bus's errors.
+
+Back-edges in audio code count against a per-call budget; a script that
+exceeds it is stopped, its output silenced and its status set, instead of
+hanging the audio thread.
+
+### 3. One runtime
+
+`plugins/suite/runtime` holds `<supple/script.h>` and its implementation:
+math, conversions, `Param`, `Block`, `Array`, `Buffer`, shared state, the
+canvas shim, and script-facing wrappers over the framework's DSP library
+(`dsp::Biquad`, `dsp::Voices`, `dsp::Oversampler`, `dsp::Convolution`,
+`dsp::Stft`, the file worker...). The header includes no standard math
+header: built-in objects are opaque storage whose methods are compiled once
+in the runtime, so a script's unqualified `sin` or `Biquad` resolves to the
+runtime in clangd as in an export. JIT code calls the same compiled methods
+through C thunks generated from one binding list, so the JIT and an export
+run the same machine code for every built-in. General DSP the framework
+lacks is added to the framework (§6), never only to the runtime.
+
+### 4. Scripts in Quire run in the player
+
+The **player** is a product of the template plus the suite layer
+(`plugins/suite/player`), built like the stock plugins. Its processor
+(`supple::suite::ScriptProcessor`) runs a compiled script through the
+framework's engine; its editor runs the script's UI through the framework's
+GUI stack.
+
+Inside Quire the player is loaded **as a CLAP plugin, through Quire's
+ordinary hosting**, rather than as a separate non-plugin engine path. In
+library mode its factory lists one plugin per script in the user's script
+library (`<library>/<name>/<name>.cpp`, the library folder passed in
+`SUPPLE_SCRIPT_LIBRARY`), each with the script's own ID, name and kind.
+So a script is an ordinary plugin to Quire: `plugin.list`, `fx.add`,
+`fx.param.set`, `fx.patch.*`, presets, automation, project save (by ID and
+patch), isolation, PDC and the semantic conformance tool all apply
+unchanged, and Quire's host cannot tell a scripted plugin from a stock one
+by construction. In export mode the same factory lists the one embedded
+script. Quire's own process links the compiler only for diagnostics and the
+harness.
+
+Iteration: `dsp.write` saves the script and compiles it in Quire for
+structured diagnostics. Each live instance notices the change on its main
+thread (a CLAP timer), compiles, and swaps at a block boundary with a short
+crossfade, carrying over parameter values by key and state members by name
+and type. A failed compile leaves the previous version playing. A change to
+the parameter table goes through CLAP's restart and rescan, which the engine
+already handles with a crossfaded plan swap.
+
+### 5. Exports
+
+- **Player export.** Copy the prebuilt player for the platform and format,
+  append a payload (script, factory patches, assets, identity) and give it
+  the script's ID. Single-file CLAP and DLL binaries carry the payload as a
+  trailer the module finds through its own path; bundles carry it under
+  `Contents/Resources`. clap-wrapper derives the VST3 class ID from the CLAP
+  ID, so two exports never collide; macOS AU codes are written into the
+  bundle's `Info.plist` and the bundle is signed ad hoc.
+- **Source export.** `new_product.cmake` from the template version bundled
+  with Quire (`plugins/template`, byte-identical to a released framework),
+  then `suite/` (runtime and semantic layer, no compiler), the script
+  verbatim under `product/script/`, and generated glue in `product/`
+  (`product.cmake` identity, a `Processor.h` that binds the script type,
+  factory presets from the script's patches, a README). The parameter table
+  stays the script's own (registered at construction, as in the player);
+  there is no second copy to keep in step. `suite/tools/update_suite.cmake`
+  updates the layer as `update_framework.cmake` updates the framework.
+
+### 6. framework / suite / product
+
+| Layer | Contents | Owner |
+|---|---|---|
+| `framework/` | The template's, byte-identical to a release | the template repository |
+| `suite/` | Semantic-params extension and JSON patches (ported from `plugins/common`, core-params and core-patch, no monorepo dependency), the script runtime, the player glue | Quire (`plugins/suite`) |
+| `product/` | A script, or hand-written C++ | its author |
+
+Framework changes, each a general feature made in the template first,
+tested there with an example, and brought into Quire as a released version:
+
+1. **Run-time products.** A product may declare its parameter table, its
+   identity and its kind and buses at run time, per instance: the engine,
+   the CLAP layer, state, presets and the automatic editor take them from an
+   instance's descriptor. Compile-time products keep their constexpr tables
+   and static checks; their descriptor is a constant.
+2. **A layer seam.** Hooks to add CLAP extensions, reach host extensions,
+   add a state chunk and read it back, run on the main thread (timers,
+   callbacks), list several plugins from one factory, and change the
+   parameter table between activations (restart, then
+   `CLAP_PARAM_RESCAN_ALL`).
+3. **Normalized host values** as an option for linear parameters, so a
+   product can follow ADR-0010's domains.
+4. **`core/` and `gui/` without CLAP**, enforced by the build, plus an
+   offscreen canvas for rendering an editor without a window (the harness).
+
+General DSP blocks the runtime needs and the framework lacks go into the
+framework's DSP library the same way.
+
+### 7. State
+
+A scripted plugin's CLAP state is the framework's chunked format with one
+added chunk holding the canonical patch, framed as core-patch §4. On load,
+parameter values come from the patch (by key) when it is present, so a
+session survives a parameter being reordered or its ID changing during
+development. The patch document is `params` plus `properties` (file paths
+and text the script declares), so Quire's project, which stores only the
+patch, keeps everything. `semantic-params-extension.md` §5 is amended to
+allow either layout: the patch as the whole state (the stock plugins today)
+or as a chunk of the framework's state.
+
+### 8. MCP and the skill
+
+Commands in the `dsp.*` family, on the bus in the engine and the sandbox:
+`dsp.write`, `dsp.check`, `dsp.get`, `dsp.list`, `dsp.test` (the harness),
+`dsp.preview` (the editor as a PNG), `dsp.export`. Scripted plugins are then
+loaded and controlled with the existing `fx.*`, `plugin_*` and `patch_*`
+commands. The skill gains `guides/dsp-language.md` (the canonical language
+reference) and `guides/dsp-workflow.md` (write, check, test, listen,
+export; the stock plugins' conventions for parameters and patches); MCP
+resources serve the same files.
+
+### 9. Verification
+
+Differential tests: every example script runs through the JIT, the MIR
+interpreter and the script compiled as C++ (the same source, built into the
+test executable), and their outputs must be bit-identical; later also
+through a built player and a built source export. The semantic conformance
+tool runs against scripts in the player and against both exports.
+
+## Consequences
+
+Scripts reuse all of Quire's hosting and agent tooling with no special
+cases. The framework grows a run-time product mode, which is the largest
+single change and the one every later step depends on. MIR is a young
+dependency for a JIT; the interpreter path and the differential tests bound
+the risk, and the backend sits behind the compiler's own C ABI. Windows
+support for MIR is CI-tested upstream but untested here.
+
+## Alternatives considered
+
+- **Cranelift** (the brief's suggestion): better code, but Rust. It would
+  add a toolchain and dozens of vendored crates to an offline C++ build and
+  to every player build, and it has no interpreter for the no-JIT fallback.
+- **AsmJit**: robust and portable, but one lowering per architecture and no
+  optimizer; **sljit**: no register allocation; **LLVM**: too large to
+  vendor or ship inside a plugin; **TCC**: LGPL.
+- **A separate in-process script engine in Quire** (the brief's sketch):
+  Quire would need a second path, beside CLAP hosting, for state, patches,
+  the semantic view, automation, editors, isolation and the conformance
+  checks, and the player would no longer be what Quire tested.
+- **One generic player ID with the script in its state**: Quire saves only
+  the patch for semantic plugins, and keys presets by plugin ID, so the
+  script would be lost or every script would share one preset list.
+- **A generated static parameter table in source exports** (the brief's
+  "parameter declarations" glue): two copies of each declaration to keep in
+  step after graduation, and an export whose glue differs from the player's.
+- **The patch as the whole CLAP state**: loses the framework's editor size,
+  preset tracking and per-project properties in other hosts.
+- **A novel syntax, Faust, Cmajor, EEL2, Lua or WASM**: set aside in the
+  brief, for LLM fluency and export fidelity.
