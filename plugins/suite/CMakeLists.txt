@@ -30,6 +30,34 @@ set_target_properties(script-compiler PROPERTIES POSITION_INDEPENDENT_CODE ON)
 supple_target_defaults(script-compiler)
 add_library(supple::script-compiler ALIAS script-compiler)
 
+# The framework's SDK-free core, as the template has it, for the suite's own
+# tests; a plugin built from the template compiles its own. Vendored code:
+# its warnings are the template's to keep clean.
+add_library(suite-framework-core STATIC ${SUPPLE_TEMPLATE_FRAMEWORK}/core/Param.cpp
+                                        ${SUPPLE_TEMPLATE_FRAMEWORK}/core/Definition.cpp)
+target_include_directories(suite-framework-core SYSTEM PUBLIC ${SUPPLE_TEMPLATE_FRAMEWORK})
+target_compile_definitions(suite-framework-core PUBLIC SUPPLE_PRODUCT_RUNTIME=1)
+target_compile_features(suite-framework-core PUBLIC cxx_std_20)
+target_compile_options(suite-framework-core PRIVATE -w ${_supple_sanitize_flags})
+set_target_properties(suite-framework-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# The semantic layer's documents: JSON, meaning, patches, schemas.
+# Self-contained, as exports carry it. (The layer itself, semantic_layer.cpp,
+# is built with the plugin that uses it.)
+add_library(suite-semantic STATIC semantic/src/json.cpp semantic/src/semantics.cpp)
+target_include_directories(suite-semantic PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/semantic/include)
+target_link_libraries(suite-semantic PUBLIC suite-framework-core)
+set_target_properties(suite-semantic PROPERTIES POSITION_INDEPENDENT_CODE ON)
+supple_target_defaults(suite-semantic)
+add_library(supple::suite-semantic ALIAS suite-semantic)
+
+if(SUPPLE_BUILD_TESTS)
+  add_executable(suite-semantic.tests semantic/tests/test_json.cpp semantic/tests/test_semantics.cpp)
+  target_link_libraries(suite-semantic.tests PRIVATE supple::suite-semantic supple::doctest-main)
+  supple_target_defaults(suite-semantic.tests)
+  add_test(NAME suite-semantic.tests COMMAND suite-semantic.tests)
+endif()
+
 if(SUPPLE_BUILD_TESTS)
   add_executable(script-compiler.tests compiler/tests/test_compiler.cpp)
   target_include_directories(script-compiler.tests PRIVATE compiler/tests)
