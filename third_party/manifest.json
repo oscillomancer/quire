@@ -155,6 +155,18 @@
       "linkage": "static"
     },
     {
+      "name": "mir",
+      "dir": "mir-1.0.0",
+      "license": "MIT",
+      "license_file": "mir-1.0.0/LICENSE",
+      "version": "1.0.0",
+      "source": "https://github.com/vnmakarov/mir/archive/refs/tags/v1.0.0.tar.gz",
+      "commit": "477d820e7b3054980ea1b936ecb2945c0e6465e8",
+      "sha256": "fdc934db5c858ee9aa77c09e21a3ed19ddc243ae441eb4c9b08e79b203c34055",
+      "purpose": "JIT compiler and interpreter behind DSP scripts (ADR-0032): plugins/suite compiles scripts to MIR and runs them as machine code or interpreted. Only the core, generator and interpreter sources are vendored (no c2mir, tests or tools); upstream files are unmodified.",
+      "linkage": "static"
+    },
+    {
       "name": "vst3sdk",
       "dir": "vst3sdk-v3.8.0_build_66",
       "license": "MIT",

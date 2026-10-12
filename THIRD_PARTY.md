@@ -22,6 +22,7 @@ BSL-1.0, CC0, Unlicense (OFL-1.1 for fonts). Forbidden: GPL, AGPL. LGPL/MPL need
 | signalsmith-linear | MIT | 0.6.4 / `de55e6a` (tarball sha256 `2cb10d…a56`) | STFT/FFT layer Signalsmith Stretch is built on (its pinned dependency) | headers |
 | vst3sdk | MIT | v3.8.0_build_66 / `9fad977` | VST3 hosting ABI, module loader, event and parameter helpers | static |
 | lua | MIT | 5.4.9 (lua.org tarball, sha256 `2335b6c5…`; upstream `src/` unmodified) | The embedded scripting language behind `libs/lua-bus` and the `script.run` command (ADR-0006); built as a static library with only the core and sandbox libraries compiled | static |
+| mir | MIT | 1.0.0 / `477d820` (tarball sha256 `fdc934…4055`; upstream files unmodified) | JIT compiler and interpreter behind DSP scripts (ADR-0032); only the core, generator and interpreter sources are vendored | static |
 | clap-wrapper | MIT (bundles fmt: MIT; PreSonus gain-reduction header: public domain) | 0.16.0 / `1cca996` (template pin) | Builds template-derived plugins (CLAP; VST3/AUv2 when enabled) | static, plugins only |
 | pugl | ISC (a few build files 0BSD OR ISC) | 0.5.7 / `b763714` (template pin) | Plugin editor windowing (template GUI stack) | static, plugins only |
 | nanovg_metal | MIT | template pin `1e42439` | macOS-only plugin editor renderer, fetched by the template CMake on Apple; not vendored, never built on Linux | static, macOS plugins only |

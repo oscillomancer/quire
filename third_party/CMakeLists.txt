@@ -90,3 +90,22 @@ if(_supple_sanitize_flags)
 endif()
 target_link_libraries(tp-vst3-host PUBLIC ${CMAKE_DL_LIBS})
 add_library(supple::vst3-host ALIAS tp-vst3-host)
+
+# MIR 1.0.0 (MIT): the JIT and interpreter behind DSP scripts (ADR-0032).
+# Only the core, the interpreter (included by mir.c) and the generator are
+# built; each pulls in its target's back end by itself. GNU C11, as upstream
+# builds it.
+set(_mir ${CMAKE_CURRENT_SOURCE_DIR}/mir-1.0.0)
+add_library(tp-mir STATIC ${_mir}/mir.c ${_mir}/mir-gen.c)
+target_include_directories(tp-mir SYSTEM PUBLIC ${_mir})
+set_target_properties(tp-mir PROPERTIES C_STANDARD 11 C_EXTENSIONS ON POSITION_INDEPENDENT_CODE ON)
+target_compile_options(tp-mir PRIVATE -w -fsigned-char)
+if(_supple_sanitize_flags)
+  target_compile_options(tp-mir PRIVATE ${_supple_sanitize_flags})
+  # MIR's string hash reads unaligned 64-bit words (mir-hash.h), which
+  # x86-64 and AArch64 allow but UBSan's alignment check reports.
+  if(SUPPLE_SANITIZE MATCHES "undefined")
+    target_compile_options(tp-mir PRIVATE -fno-sanitize=alignment)
+  endif()
+endif()
+add_library(supple::mir ALIAS tp-mir)
