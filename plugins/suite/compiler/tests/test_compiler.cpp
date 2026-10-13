@@ -130,6 +130,21 @@ TEST_CASE("the first scripts' mistakes are refused with a hint") {
                             "void process(Block& io) {}")) == "script.param.unit");
     CHECK(firstError(plugin("Param p = decibels(\"P\", 0, 1, 0).curved(Unit::Hertz);\n"
                             "void process(Block& io) {}")) == "script.param.modifier");
+    // Names as C++ looks them up: a member hides a factory of its name, a
+    // local's name in its own initializer is that local, and the factories'
+    // names are the runtime's.
+    CHECK(firstError(plugin("Param ratio = ratio(\"Ratio\", 1, 20, 4);\n"
+                            "void process(Block& io) {}")) == "script.name.hidden");
+    CHECK(firstError(plugin("Param amount = ratio(\"Ratio\", 1, 20, 4).withKey(\"ratio\");\n"
+                            "void process(Block& io) {}")) == "");
+    CHECK(firstError(plugin("Param mix = percent(\"Mix\", 50);\n"
+                            "void process(Block& io) { double mix = mix * 2.0; }")) ==
+          "script.name.self");
+    CHECK(firstError(plugin("void process(Block& io) { double sin = sin(0.5); }")) ==
+          "script.name.self");
+    CHECK(firstError(head + "double percent(double x) { return x * 0.01; }\n" +
+                     "struct T : Effect {\n" + info + "void process(Block& io) {}\n};\n") ==
+          "script.name.builtin");
     // Identities every plugin format and the framework accept.
     auto withInfo = [&](const std::string& fields) {
         return head + "struct T : Effect {\nstatic constexpr Info info = {.name = \"T\", " +

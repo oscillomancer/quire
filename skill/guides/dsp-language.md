@@ -104,7 +104,9 @@ Reading: a `Param` reads as a `double` in its unit (`gain * 0.5`), with
 **Keys and IDs.** A parameter's patch key is its member's name in
 snake_case (`lowCut` is `low_cut`), and its CLAP id is a hash of the key.
 Renaming a member changes both, and sessions that saved the old one lose
-that value: give the new name `.withKey("old_key")` to keep it.
+that value: give the new name `.withKey("old_key")` to keep it. A member
+cannot share its factory's name, as in C++ (`Param ratio = ratio(...)`
+does not compile): write `Param slope = ratio("Ratio", 1, 20, 4).withKey("ratio")`.
 
 Follow the stock plugins: physical units with sensible ranges, a name a
 person would say ("Cutoff", not "Freq1"), a `.help()` line for each, `.in()`

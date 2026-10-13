@@ -479,6 +479,16 @@ Expr* Sema::checkName(NameExpr* n) {
         }
     };
     if (n->path.size() == 1) {
+        if (declaring_ && first == declaring_->name) {
+            error(
+                n->loc, "script.name.self",
+                "'" + first +
+                    "' in its own initializer is the new variable, which has no value yet (as "
+                    "in C++), not the '" +
+                    first + "' outside",
+                "give the new variable another name: double " + first + "Now = " + first + " ...;");
+            return n;
+        }
         if (VarDecl* v = lookupLocal(first)) {
             n->ref = RefKind::Local;
             n->var = v;
@@ -1813,6 +1823,18 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                 {"choice", {ParamModel::Unit::None, 3}},
                 {"toggle", {ParamModel::Unit::None, 2}}};
             auto it = factories.find(name);
+            // As in C++, a member of that name hides the factory (in a member
+            // initializer, every member is in scope).
+            if (it != factories.end())
+                for (StructDecl* s = self_; s; s = s->outer)
+                    if (findField(s, name) || findMethod(s, name)) {
+                        error(call->callee->loc, "script.name.hidden",
+                              "the member '" + name + "' hides the factory " + name +
+                                  "() here, as in C++",
+                              "rename the member and keep its key: Param " + name +
+                                  "Param = " + name + "(...).withKey(\"" + name + "\")");
+                        return std::nullopt;
+                    }
             if (it != factories.end()) {
                 Constant c;
                 c.kind = Constant::Kind::Spec;

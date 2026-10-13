@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <new>
+#include <set>
 #include <type_traits>
 
 #include "supple/script.h"
@@ -286,9 +287,13 @@ std::vector<const BuiltinFunction*> Builtins::functions(const std::string& name)
 }
 
 bool Builtins::reserved(const std::string& name) const {
+    // The parameter factories, which Sema::evaluate knows by name.
+    static const std::set<std::string> factories = {
+        "continuous", "decibels", "frequency", "milliseconds", "percent", "ratio", "semitones",
+        "cents",      "octaves",  "degrees",   "integer",      "choice",  "toggle"};
     return byName_.count(name) || classByName_.count(name) || enumByName_.count(name) ||
-           name == "pi" || name == "twoPi" || name == "Array" || name == "Buffer" ||
-           name == "Unit" || name == "Curve";
+           factories.count(name) || name == "pi" || name == "twoPi" || name == "Array" ||
+           name == "Buffer" || name == "Unit" || name == "Curve";
 }
 
 int Builtins::pluginBaseSize() const { return static_cast<int>(sizeof(S::Plugin)); }

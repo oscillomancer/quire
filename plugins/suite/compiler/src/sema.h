@@ -86,6 +86,9 @@ class Sema {
     FunctionDecl* fn_ = nullptr;
     StructDecl* self_ = nullptr;  // the struct whose member function it is
     std::vector<std::map<std::string, VarDecl*>> scopes_;
+    // The local whose initializer is being checked: in C++ its name already
+    // means the new variable there.
+    const VarDecl* declaring_ = nullptr;
     int loopDepth_ = 0, switchDepth_ = 0;
     bool inCallee_ = false;  // checking a call's callee: a function name is expected there
     std::vector<std::vector<CaseStmt*>> switchCases_;
@@ -142,6 +145,7 @@ class Sema {
     void checkBlock(CompoundStmt* c, bool newScope = true);
     void declareLocal(VarDecl* v);
     void checkLocal(VarDecl* v);
+    void checkLocalDecl(VarDecl* v);
     bool returns(Stmt* s) const;
     void checkFunction(FunctionDecl* f);
     void signature(FunctionDecl* f);

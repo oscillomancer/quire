@@ -767,6 +767,13 @@ void Sema::declareLocal(VarDecl* v) {
 }
 
 void Sema::checkLocal(VarDecl* v) {
+    const VarDecl* outer = declaring_;
+    declaring_ = v;
+    checkLocalDecl(v);
+    declaring_ = outer;
+}
+
+void Sema::checkLocalDecl(VarDecl* v) {
     TypeSpec* spec = v->spec;
     if (spec->isAuto) {
         if (!v->init) {
