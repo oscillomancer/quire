@@ -121,7 +121,7 @@ that scales audio directly (levels, mix) so that moving it does not click.
 | `void prepare()` | Before audio starts, and when the sample rate or block size changes. `sampleRate()` and `maxBlockSize()` are known | Allocation (`DelayLine::prepare`, `Buffer::resize`), seeding, anything sized from the sample rate |
 | `void update()` | After `prepare()`, then at the start of a block whenever a parameter changed (blocks are split at each change, so automation is sample-accurate) | Turning parameters into coefficients; `p.changed()` says which moved |
 | `void process(Block& io)` | Every block | The audio |
-| `void editor(Editor& e)`, `void draw(Canvas& g)` | The editor's (optional) | Its controls and drawing: see The editor |
+| `void editor(Editor& e)`, `void draw(Canvas& g)`, `void pointer(const Pointer& p)` | The editor's (optional) | Its controls, its drawing, and what the pointer does to the drawing: see The editor |
 
 There is no `reset()` to write: the runtime returns every member to what
 `prepare()` left, by itself. The script never calls a hook.
@@ -254,12 +254,14 @@ own.
 ## The editor
 
 With no editor code a plugin gets the automatic editor: every parameter, by
-group (`.in()`), with meters. To draw its own, it adds either hook or both:
+group (`.in()`), with meters. To draw its own, it adds `editor()`, `draw()`
+or both, and `pointer()` to make its drawing respond to the mouse:
 
 | Hook | When | What goes there |
 |---|---|---|
 | `void editor(Editor& e)` | Once, as the editor opens (and after a reload) | Its size and its controls |
 | `void draw(Canvas& g)` | At each repaint | What lies under the controls: panels, graphs, meters, text |
+| `void pointer(const Pointer& p)` | As the pointer acts where no control is (needs `draw()`) | Handles to drag, shapes to click: `p.edit()`s parameters |
 
 ```cpp
 #include <supple/script.h>
@@ -307,7 +309,8 @@ use is refused, so the audio code shares what the editor shows:
 
 They are members of the plugin struct, start at zero, and arrive together,
 as of one moment, about 120 times a second while the editor is open. Editor
-code never changes them, or a parameter: controls do that.
+code never changes them, and changes a parameter only as a user would:
+through a control, or by `edit()` in `pointer()`.
 
 Controls, `e.knob(p, x, y, w, h)` and the like, are the framework's own,
 bound to a parameter and labelled with its name, in design units (the
@@ -341,6 +344,50 @@ lines. To draw a filter's response, give the editor a `Biquad` of its own,
 designed from the parameters in `draw()`, and plot its `responseDb(hz)`.
 Editor code may loop freely within a generous budget; a hook that spends it
 stops, and the editor says where. `dsp.preview` saves the editor as a PNG.
+
+`pointer(p)` hears what the mouse does where no control is, and the editor
+repaints after each call. `p.action()` is what happened:
+
+| `PointerAction::` | |
+|---|---|
+| `Press` | The main button went down here (`p.doubleClick()`: the second of two). The pointer is the script's until the release |
+| `Drag` | It moved with that button down, wherever it went: `p.dx()`, `p.dy()` since the last |
+| `Release` | The button came up (or the editor lost focus mid-drag) |
+| `Move` | It moved with the button up: a hover, over controls too |
+| `Wheel` | The wheel turned here: `p.wheel()` notches, positive up |
+| `Leave` | It left the editor |
+
+`p.x()`, `p.y()` are where, in design units; `p.over(x, y, w, h)` and
+`p.within(x, y, radius)` test it; `p.shift()` (fine adjustment, by custom),
+`p.ctrl()` and `p.alt()` are the keys held. `xToHz(x, lowHz, highHz, gx, gw)`
+and `yToDb(y, lowDb, highDb, gy, gh)` undo `hzToX` and `dbToY`. A parameter
+changes as a user turning its knob would change it: `p.edit(value)` (in its
+units, kept in range), `p.editNormalized(position)` (0 to 1, as its knob
+travels; `p.normalized()` reads it) or `p.reset()` (its default). The host
+records it, the audio code hears it, and `value()` has it at once. A
+press's edits, through its drags to its release, are one gesture (two
+parameters to a gesture; more make more), a wheel's are one per burst, and
+edits on a `Move` or a `Leave` do nothing. Only `pointer()` (and what it
+calls) may edit; `draw()` runs with no user acting. A hover or a drag
+state is a member of the editor's own:
+
+```cpp
+    bool held = false;  // the editor's own
+
+    void pointer(const Pointer& p) {
+        if (p.action() == PointerAction::Press) held = p.within(nodeX(), nodeY(), 10);
+        if (p.action() == PointerAction::Drag && held) {
+            cutoff.edit(xToHz(p.x(), 20, 20000, 20, 440));
+            resonance.edit(resonance - p.dy() * (p.shift() ? 0.002 : 0.02));
+        }
+        if (p.action() == PointerAction::Release) held = false;
+    }
+```
+
+The `bell` example drags an EQ band's node. `dsp.preview` takes pointer
+actions (a click, a drag, a turn of the wheel) before it draws, and says
+what they edited, so a script's `pointer()` can be checked without a
+mouse.
 
 ## Types and statements
 

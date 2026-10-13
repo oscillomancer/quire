@@ -399,6 +399,19 @@ void Builtins::addClasses() {
     r.method(
         param, "const char* name() const", +[](const S::Param* p) { return p->name(); },
         Writes::Nothing, kUi);
+    r.method(
+        param, "double normalized() const", +[](const S::Param* p) { return p->normalized(); },
+        Writes::Nothing, kUi);
+    // pointer()'s (editorRules() keeps them there): the host's value, not
+    // the member's, is what they change.
+    r.method(
+        param, "void edit(double value) const", +[](const S::Param* p, double v) { p->edit(v); },
+        Writes::Nothing, kUi);
+    r.method(
+        param, "void editNormalized(double position) const",
+        +[](const S::Param* p, double v) { p->editNormalized(v); }, Writes::Nothing, kUi);
+    r.method(
+        param, "void reset() const", +[](const S::Param* p) { p->reset(); }, Writes::Nothing, kUi);
     param_ = param;
     (void)L::paramValue;
 
@@ -899,6 +912,47 @@ void Builtins::addEditor() {
         },
         Writes::Self, ui);
 
+    // Pointer: pointer()'s.
+    addEnum("PointerAction",
+            {{"Press", 0}, {"Drag", 1}, {"Release", 2}, {"Move", 3}, {"Wheel", 4}, {"Leave", 5}});
+    static_assert(static_cast<int>(S::PointerAction::Leave) == 5);
+    auto* pt = addClass("Pointer", sizeof(S::Pointer), alignof(S::Pointer));
+    pt->declarable = false;
+    pointer_ = pt;
+    using Pt = S::Pointer;
+    r.method(
+        pt, "PointerAction action() const",
+        +[](const Pt* p) { return static_cast<int>(p->action()); }, Writes::Nothing, ui);
+    r.method(pt, "double x() const", +[](const Pt* p) { return p->x(); }, Writes::Nothing, ui);
+    r.method(pt, "double y() const", +[](const Pt* p) { return p->y(); }, Writes::Nothing, ui);
+    r.method(pt, "double dx() const", +[](const Pt* p) { return p->dx(); }, Writes::Nothing, ui);
+    r.method(pt, "double dy() const", +[](const Pt* p) { return p->dy(); }, Writes::Nothing, ui);
+    r.method(
+        pt, "double wheel() const", +[](const Pt* p) { return p->wheel(); }, Writes::Nothing, ui);
+    r.method(
+        pt, "bool doubleClick() const", +[](const Pt* p) -> int { return p->doubleClick(); },
+        Writes::Nothing, ui);
+    r.method(
+        pt, "bool shift() const", +[](const Pt* p) -> int { return p->shift(); }, Writes::Nothing,
+        ui);
+    r.method(
+        pt, "bool ctrl() const", +[](const Pt* p) -> int { return p->ctrl(); }, Writes::Nothing,
+        ui);
+    r.method(
+        pt, "bool alt() const", +[](const Pt* p) -> int { return p->alt(); }, Writes::Nothing, ui);
+    r.method(
+        pt, "bool over(double x, double y, double w, double h) const",
+        +[](const Pt* p, double x, double y, double w, double h) -> int {
+            return p->over(x, y, w, h);
+        },
+        Writes::Nothing, ui);
+    r.method(
+        pt, "bool within(double x, double y, double radius) const",
+        +[](const Pt* p, double x, double y, double radius) -> int {
+            return p->within(x, y, radius);
+        },
+        Writes::Nothing, ui);
+
     // Editor: editor()'s.
     auto* e = addClass("Editor", sizeof(S::Editor), alignof(S::Editor));
     e->declarable = false;
@@ -1042,6 +1096,16 @@ void Builtins::addFunctions() {
         "double dbToY(double db, double lowDb, double highDb, double y, double h)",
         +[](double db, double lo, double hi, double y, double h) {
             return S::dbToY(db, lo, hi, y, h);
+        });
+    r.fn(
+        "double xToHz(double at, double lowHz, double highHz, double x, double w)",
+        +[](double at, double lo, double hi, double x, double w) {
+            return S::xToHz(at, lo, hi, x, w);
+        });
+    r.fn(
+        "double yToDb(double at, double lowDb, double highDb, double y, double h)",
+        +[](double at, double lo, double hi, double y, double h) {
+            return S::yToDb(at, lo, hi, y, h);
         });
     r.fn(
         "const char* format(const char* pattern, double a)",

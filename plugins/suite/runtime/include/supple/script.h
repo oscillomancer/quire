@@ -399,6 +399,19 @@ class Param {
     // returns.
     const char* text() const;
     const char* name() const;
+    // In editor code: where the value sits from 0 (the minimum) to 1 (the
+    // maximum), as its knob shows it (a frequency's on a log scale).
+    double normalized() const;
+    // In pointer(): change the parameter as a user turning its knob would,
+    // to a value in its units (kept in its range), to a position from 0 to
+    // 1 (as normalized()), or back to its default. The host records it and
+    // the audio code hears it; value() has it at once. One press's edits,
+    // through its drags to its release, are one gesture (two parameters to
+    // a gesture; more make more); a wheel's, one per burst. Edits on a Move
+    // or a Leave do nothing.
+    void edit(double value) const;
+    void editNormalized(double position) const;
+    void reset() const;
 
   private:
     friend struct detail::ParamBinding;
@@ -881,19 +894,22 @@ class Adsr {
 
 // --- the editor ------------------------------------------------------------------
 //
-// A plugin may draw its own editor with two hooks, both optional:
+// A plugin may draw its own editor with three hooks, each optional:
 //
-//   void editor(Editor& e)   once, as the editor opens: its size and controls
-//   void draw(Canvas& g)     at each repaint: what lies under the controls
+//   void editor(Editor& e)          once, as the editor opens: its size and controls
+//   void draw(Canvas& g)            at each repaint: what lies under the controls
+//   void pointer(const Pointer& p)  as the pointer acts where no control is:
+//                                   draggable handles, clickable shapes
 //
 // A plugin with neither gets the automatic editor: every parameter, by group.
 // Editor code runs on the host's main thread, in a copy of the plugin struct
 // of its own. There each Param reads its current value (with the host's
 // modulation) and each Shared member what the audio code last sent; members
 // only editor code uses are the editor's own (a hover state, a scale). It
-// sees nothing else of the audio code's: a member both use is refused.
-// Editor code may format text (format(), Param::text()) and loops as long as
-// it likes within a generous budget.
+// sees nothing else of the audio code's: a member both use is refused. It
+// changes a parameter only as a user would, by edit() in pointer(). Editor
+// code may format text (format(), Param::text()) and loops as long as it
+// likes within a generous budget.
 
 // A value the audio code shows the editor: a level, a position, a count. The
 // audio code set()s it; the editor get()s it as it was when last sent (about
@@ -1049,6 +1065,58 @@ const char* format(const char* pattern, double a);
 const char* format(const char* pattern, double a, double b);
 const char* format(const char* pattern, double a, double b, double c);
 const char* format(const char* pattern, double a, double b, double c, double d);
+
+// Their inverses, for pointer(): the frequency at `at` across x .. x + w,
+// and the level at `at` up from y + h.
+double xToHz(double at, double lowHz, double highHz, double x, double w);
+double yToDb(double at, double lowDb, double highDb, double y, double h);
+
+// What the pointer did, for pointer(): pressed the main button where no
+// control is, moved with it held (each move a Drag, wherever it goes),
+// released it, moved with it up (a hover), turned the wheel where no
+// control is, or left the editor.
+enum class PointerAction { Press, Drag, Release, Move, Wheel, Leave };
+
+// The pointer as pointer() sees it, in the editor's design units. The
+// editor repaints after every call.
+//
+//   void pointer(const Pointer& p) {
+//       if (p.action() == PointerAction::Press) held = p.within(nodeX, nodeY, 10);
+//       if (p.action() == PointerAction::Drag && held)
+//           cutoff.edit(xToHz(p.x(), 20, 20000, 20, 440));
+//       if (p.action() == PointerAction::Release) held = false;
+//   }
+class Pointer {
+  public:
+    PointerAction action() const { return action_; }
+    double x() const { return x_; }
+    double y() const { return y_; }
+    // Drag and Move: how far it went since the last one.
+    double dx() const { return dx_; }
+    double dy() const { return dy_; }
+    // Wheel: notches turned, positive up (away from the user).
+    double wheel() const { return wheel_; }
+    // Press: the second press of a double click.
+    bool doubleClick() const { return doubleClick_; }
+    // Keys held: Shift (fine adjustment, by custom), Ctrl (Cmd on a Mac), Alt.
+    bool shift() const { return shift_; }
+    bool ctrl() const { return ctrl_; }
+    bool alt() const { return alt_; }
+    // Whether it is over a rectangle, or within `radius` of a point.
+    bool over(double x, double y, double w, double h) const {
+        return x_ >= x && x_ < x + w && y_ >= y && y_ < y + h;
+    }
+    bool within(double x, double y, double radius) const {
+        const double a = x_ - x, b = y_ - y;
+        return a * a + b * b <= radius * radius;
+    }
+
+  private:
+    friend struct detail::Layout;
+    PointerAction action_ = PointerAction::Move;
+    double x_ = 0.0, y_ = 0.0, dx_ = 0.0, dy_ = 0.0, wheel_ = 0.0;
+    bool doubleClick_ = false, shift_ = false, ctrl_ = false, alt_ = false;
+};
 
 // What editor() builds: its size (480 x 320 unless given) and its controls,
 // the framework's own, each bound to a parameter (or a file) and drawn over

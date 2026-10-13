@@ -152,6 +152,7 @@ class Builtins {
     const BuiltinClass* convolver() const { return convolver_; }
     const BuiltinClass* canvas() const { return canvas_; }
     const BuiltinClass* editor() const { return editor_; }
+    const BuiltinClass* pointer() const { return pointer_; }
     // An AudioFile or Convolver: a file member, declared from a FileSpec.
     bool isFile(const Type* t) const;
     // Shared<T> for T (double, float, int, bool), or null.
@@ -189,7 +190,8 @@ class Builtins {
     const BuiltinClass *param_ = nullptr, *block_ = nullptr, *channel_ = nullptr,
                        *inputChannel_ = nullptr, *transport_ = nullptr, *paramSpec_ = nullptr,
                        *info_ = nullptr, *plugin_ = nullptr, *audioFile_ = nullptr,
-                       *convolver_ = nullptr, *canvas_ = nullptr, *editor_ = nullptr;
+                       *convolver_ = nullptr, *canvas_ = nullptr, *editor_ = nullptr,
+                       *pointer_ = nullptr;
 
     friend struct Registrar;
 };

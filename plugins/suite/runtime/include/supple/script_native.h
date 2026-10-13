@@ -158,6 +158,13 @@ class NativeCode final : public Code {
             };
         return nullptr;
     }
+    UiHook pointer() const override {
+        if constexpr (requires(T& t, Pointer& p) { t.pointer(p); })
+            return [](void*, void* self, void* p) {
+                static_cast<T*>(self)->pointer(*static_cast<Pointer*>(p));
+            };
+        return nullptr;
+    }
 
   private:
     struct Collector final : ParamRegistrar {

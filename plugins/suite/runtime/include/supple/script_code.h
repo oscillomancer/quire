@@ -158,12 +158,14 @@ class Code {
     virtual VoiceHook stopVoice() const { return nullptr; }
 
     // The editor's hooks, on the main thread in the editor's own instance:
-    // editor(Editor&) and draw(Canvas&), the object a script::Editor or
-    // script::Canvas. Null when the script has none; with neither, the
-    // plugin has the automatic editor.
+    // editor(Editor&), draw(Canvas&) and pointer(const Pointer&), the object
+    // a script::Editor, script::Canvas or script::Pointer. Null when the
+    // script has none; with neither editor() nor draw(), the plugin has the
+    // automatic editor (and pointer() is never called).
     using UiHook = void (*)(void* ctx, void* self, void* object);
     virtual UiHook editor() const { return nullptr; }
     virtual UiHook draw() const { return nullptr; }
+    virtual UiHook pointer() const { return nullptr; }
 };
 
 }  // namespace supple::script::detail

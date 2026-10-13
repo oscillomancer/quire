@@ -29,7 +29,7 @@ struct ProgramData {
     Program::ProcessHook process = nullptr;
     Program::VoiceHook startVoice = nullptr, releaseVoice = nullptr, stopVoice = nullptr;
     Program::StartHook startVoiceRetrigger = nullptr;
-    Program::UiHook editor = nullptr, draw = nullptr;
+    Program::UiHook editor = nullptr, draw = nullptr, pointer = nullptr;
     // String literals the code points at.
     std::vector<std::unique_ptr<std::string>> strings;
     void* mir = nullptr;  // MIR_context_t: owns the code

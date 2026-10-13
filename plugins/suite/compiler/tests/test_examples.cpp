@@ -41,6 +41,9 @@ namespace ex_compressor {
 namespace ex_spectral {
 #include "spectral.cpp"
 }
+namespace ex_bell {
+#include "bell.cpp"
+}
 namespace ex_meter {
 #include "meter.cpp"
 }
@@ -214,6 +217,10 @@ class Recorder final : public script::detail::Painter,
         texts_.push_back("param" + std::to_string(slot));
         return texts_.back().c_str();
     }
+    double paramNormalized(int slot, double value) override { return slot + value / 1024.0; }
+    void editParam(int slot, Edit kind, double value) override {
+        add("edit", {double(slot), double(int(kind)), value});
+    }
 
     // --- Painter ---
     double width() const override { return 400; }
@@ -323,7 +330,8 @@ class Recorder final : public script::detail::Painter,
     std::deque<std::string> texts_;
 };
 
-// The editor's hooks in each path after the same audio: the same calls.
+// The editor's hooks in each path after the same audio, and a hover, a
+// drag, a turn of the wheel and a double click: the same calls.
 template <class T>
 void sameDrawing(const std::string& file, int frames = 4800) {
     const std::string source = readExample(file);
@@ -336,6 +344,22 @@ void sameDrawing(const std::string& file, int frames = 4800) {
         run.process(a, 128);
         run.editor(&r);
         run.draw(&r);
+        using A = script::PointerAction;
+        auto act = [&](A action, double x, double y, double wheel = 0.0, bool twice = false) {
+            script::Pointer p;
+            script::detail::Layout::set(p, action, x, y, 0.0, 0.0, wheel, twice, false, false,
+                                        false);
+            run.pointer(p);
+            run.draw(&r);
+        };
+        act(A::Move, 240, 132);
+        act(A::Press, 240, 132);
+        act(A::Drag, 300, 80);
+        act(A::Release, 300, 80);
+        act(A::Wheel, 200, 100, 1.0);
+        act(A::Press, 200, 100, 0.0, true);
+        act(A::Release, 200, 100);
+        act(A::Leave, 200, 100);
         return r.calls;
     };
     NativeRunner<T> native;
@@ -473,6 +497,11 @@ TEST_CASE("meter: JIT, interpreter and C++ agree, and draw alike") {
     sameDrawing<script::ex_meter::Meter>("meter.cpp");
 }
 
+TEST_CASE("bell: JIT, interpreter and C++ agree, and draw and edit alike") {
+    differential<script::ex_bell::Bell>("bell.cpp", {2500.0, 9.0, 0.5}, {{20, 1, -12.0}});
+    sameDrawing<script::ex_bell::Bell>("bell.cpp");
+}
+
 TEST_CASE("Stft: a sine reads its amplitude, and a spectrum left alone is a delay") {
     script::detail::Instance instance;
     script::detail::CurrentScope scope(&instance);
@@ -504,6 +533,7 @@ TEST_CASE("a script compiled as C++ describes the plugin the compiler describes"
     sameDescription<script::ex_language::Tour>("language.cpp");
     sameDescription<script::ex_compressor::Compressor>("compressor.cpp");
     sameDescription<script::ex_spectral::Spectral>("spectral.cpp");
+    sameDescription<script::ex_bell::Bell>("bell.cpp");
     sameDescription<script::ex_meter::Meter>("meter.cpp");
     // Without its keys, a Param's key is its name's: "Pivot" -> pivot.
     const script::detail::NativeCode<Tilt> keyless;

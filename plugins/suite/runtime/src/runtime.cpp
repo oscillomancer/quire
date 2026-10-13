@@ -858,6 +858,22 @@ const char* Param::name() const {
     detail::EditorServices* ui = services();
     return ui ? ui->paramName(slot_) : "";
 }
+double Param::normalized() const {
+    detail::EditorServices* ui = services();
+    return ui ? ui->paramNormalized(slot_, value_) : 0.0;
+}
+void Param::edit(double value) const {
+    if (detail::EditorServices* ui = services())
+        ui->editParam(slot_, detail::EditorServices::Edit::Value, value);
+}
+void Param::editNormalized(double position) const {
+    if (detail::EditorServices* ui = services())
+        ui->editParam(slot_, detail::EditorServices::Edit::Position, position);
+}
+void Param::reset() const {
+    if (detail::EditorServices* ui = services())
+        ui->editParam(slot_, detail::EditorServices::Edit::Default, 0.0);
+}
 
 double hzToX(double hz, double lowHz, double highHz, double x, double w) {
     if (!(lowHz > 0.0) || !(highHz > lowHz) || !(hz > 0.0)) return x;
@@ -866,6 +882,14 @@ double hzToX(double hz, double lowHz, double highHz, double x, double w) {
 double dbToY(double db, double lowDb, double highDb, double y, double h) {
     if (!(highDb > lowDb)) return y + h;
     return y + h * (highDb - db) / (highDb - lowDb);
+}
+double xToHz(double at, double lowHz, double highHz, double x, double w) {
+    if (!(lowHz > 0.0) || !(highHz > lowHz) || !(w > 0.0)) return lowHz;
+    return lowHz * std::pow(highHz / lowHz, (at - x) / w);
+}
+double yToDb(double at, double lowDb, double highDb, double y, double h) {
+    if (!(highDb > lowDb) || !(h > 0.0)) return lowDb;
+    return highDb - (highDb - lowDb) * (at - y) / h;
 }
 
 // Every method draws through the glue's painter; a Canvas without one (none

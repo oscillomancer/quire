@@ -57,6 +57,13 @@ class EditorServices {
     // Parameter table index `slot`'s value as the host shows it, and its name.
     virtual const char* paramText(int slot, double value) = 0;
     virtual const char* paramName(int slot) = 0;
+    // Where `value` sits from 0 to 1 on its knob.
+    virtual double paramNormalized(int slot, double value) = 0;
+    // pointer()'s edits (Param::edit, editNormalized, reset): the parameter
+    // to a value in its units, a position from 0 to 1, or its default.
+    // Each sets the Param's value in the editor's copy as well.
+    enum class Edit { Value, Position, Default };
+    virtual void editParam(int slot, Edit kind, double value) = 0;
 
   protected:
     ~EditorServices() = default;
@@ -182,9 +189,22 @@ struct Layout {
     static constexpr int paramChanged = offsetof(Param, changed_);
     static constexpr int paramReported = offsetof(Param, reported_);
     static constexpr int pluginInstance = offsetof(Plugin, instance_);
-    // The glue's: a Canvas or Editor made for a hook.
+    // The glue's: a Canvas, Editor or Pointer made for a hook.
     static void bind(Canvas& canvas, Painter* painter) { canvas.painter_ = painter; }
     static void bind(Editor& editor, EditorBuilder* builder) { editor.builder_ = builder; }
+    static void set(Pointer& p, PointerAction action, double x, double y, double dx, double dy,
+                    double wheel, bool doubleClick, bool shift, bool ctrl, bool alt) {
+        p.action_ = action;
+        p.x_ = x;
+        p.y_ = y;
+        p.dx_ = dx;
+        p.dy_ = dy;
+        p.wheel_ = wheel;
+        p.doubleClick_ = doubleClick;
+        p.shift_ = shift;
+        p.ctrl_ = ctrl;
+        p.alt_ = alt;
+    }
     template <class T>
     static constexpr int bufferItems() {
         return offsetof(Buffer<T>, items_);

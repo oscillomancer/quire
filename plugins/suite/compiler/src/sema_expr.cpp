@@ -1132,7 +1132,7 @@ Expr* Sema::checkCall(CallExpr* c) {
                 if (fn_) fn_->calls.push_back(f);
                 if (f->name == "prepare" || f->name == "process" || f->name == "startVoice" ||
                     f->name == "releaseVoice" || f->name == "stopVoice" || f->name == "draw" ||
-                    f->name == "editor") {
+                    f->name == "editor" || f->name == "pointer") {
                     if (self_ && self_->base != PluginKind::None && f->owner == self_)
                         error(c->loc, "script.call.hook",
                               f->name + "() is called by the runtime, not by the script",

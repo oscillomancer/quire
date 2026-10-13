@@ -9,6 +9,7 @@
 #include <cctype>
 #include <cmath>
 #include <functional>
+#include <set>
 
 #include "sema.h"
 #include "supple/script.h"
@@ -1475,6 +1476,22 @@ void Sema::extractPlugin() {
                             !f->params[0]->qt.isConst && !f->isConst;
             if (expectSignature(ok, isDraw ? "void draw(Canvas& g)" : "void editor(Editor& e)"))
                 (isDraw ? p.draw : p.editor) = f;
+        } else if (n == "pointer") {
+            const bool ok = isVoid && f->params.size() == 1 && f->params[0]->qt.type &&
+                            f->params[0]->qt.type->kind == TypeKind::Object &&
+                            f->params[0]->qt.type->builtin == b_.pointer() &&
+                            f->params[0]->qt.isRef && !f->isConst;
+            if (expectSignature(ok, "void pointer(const Pointer& p)")) p.pointer = f;
+        } else if (n == "mouse" || n == "onMouse" || n == "mouseDown" || n == "onMouseDown" ||
+                   n == "mouseDrag" || n == "onMouseDrag" || n == "mouseUp" || n == "onMouseUp" ||
+                   n == "mouseMove" || n == "onMouseMove" || n == "onPointer" ||
+                   n == "pointerDown" || n == "onPointerDown" || n == "onClick" || n == "onDrag" ||
+                   n == "handleMouse" || n == "onWheel" || n == "mouseWheel") {
+            error(f->loc, "script.plugin.hook_name",
+                  "the runtime calls pointer(const Pointer& p) for every press, drag, release, "
+                  "move and wheel, not " +
+                      n + "()",
+                  "rename it: void pointer(const Pointer& p), and switch on p.action()");
         } else if (n == "paint" || n == "onDraw" || n == "drawEditor" || n == "drawUi" ||
                    n == "drawUI" || n == "gui" || n == "ui") {
             error(f->loc, "script.plugin.hook_name",
@@ -1891,6 +1908,7 @@ void Sema::contexts() {
     mark(p.stopVoice, kAudio);
     mark(p.editor, kUi);
     mark(p.draw, kUi);
+    mark(p.pointer, kUi);
     // Recursion: a cycle in the call graph.
     std::map<FunctionDecl*, int> state;  // 1: on the stack, 2: done
     std::function<bool(FunctionDecl*)> visit = [&](FunctionDecl* f) -> bool {
@@ -2639,16 +2657,35 @@ std::string hookList(std::uint8_t contexts) {
 
 }  // namespace
 
-// The editor's rules. Editor code (editor(), draw() and what they call) runs
-// on the main thread, in an instance of the plugin struct of its own that
-// shares only parameters and Shared members with the audio code's. So a
-// member only one side uses is that side's, and one both use is refused;
-// editor code reads parameters and Shared members and never changes them;
-// and each side calls only the built-ins it has.
+// The editor's rules. Editor code (editor(), draw(), pointer() and what they
+// call) runs on the main thread, in an instance of the plugin struct of its
+// own that shares only parameters and Shared members with the audio code's.
+// So a member only one side uses is that side's, and one both use is
+// refused; editor code reads parameters and Shared members and never
+// assigns them, changing a parameter only by edit() in pointer(), as a user
+// would; and each side calls only the built-ins it has.
 void Sema::editorRules() {
     const PluginModel& p = out_.plugin;
     if (!p.decl) return;
     const StructDecl* plugin = p.decl;
+    if (p.pointer && !p.draw)
+        error(p.pointer->loc, "script.editor.pointer",
+              "pointer() acts on what draw() draws, and the plugin has no draw()",
+              "add void draw(Canvas& g) and draw what the pointer moves; without it the plugin "
+              "has the automatic editor, which never calls pointer()");
+    // What draw() and editor() reach, where a parameter may not be edited.
+    std::set<const FunctionDecl*> drawing;
+    std::function<void(const FunctionDecl*)> reach = [&](const FunctionDecl* f) {
+        if (!f || !drawing.insert(f).second) return;
+        for (const FunctionDecl* g : f->calls) reach(g);
+    };
+    reach(p.draw);
+    reach(p.editor);
+    auto edits = [&](const CallExpr* c) {
+        return c->builtinMethod && c->builtinMethod->owner == b_.param() &&
+               (c->builtinMethod->name == "edit" || c->builtinMethod->name == "editNormalized" ||
+                c->builtinMethod->name == "reset");
+    };
     struct Use {
         FunctionDecl* f = nullptr;
         Loc loc;
@@ -2672,8 +2709,10 @@ void Sema::editorRules() {
             else if (field->qt.type->kind == TypeKind::Object &&
                      field->qt.type->builtin == b_.param())
                 error(loc, "script.editor.param_write",
-                      "editor code cannot change the parameter '" + field->name + "'",
-                      "give it a control in editor(): e.knob(" + field->name + ", x, y, w, h)");
+                      "editor code cannot assign the parameter '" + field->name + "'",
+                      "change it as a user would: " + field->name +
+                          ".edit(value) in pointer(), or a control in editor(): e.knob(" +
+                          field->name + ", x, y, w, h)");
         };
         std::function<bool(Expr*)> visit = [&](Expr* e) -> bool {
             switch (e->kind) {
@@ -2711,8 +2750,19 @@ void Sema::editorRules() {
                         error(c->loc, "script.editor.call",
                               name + "() is the editor's, and " + f->name + "() is " +
                                   hookList(f->contexts & (kInit | kAudio)) + " code",
-                              "call it from draw() or editor(); share what they need with a Shared "
-                              "member");
+                              edits(c) ? "the audio code reads the parameter; a user, or "
+                                         "pointer(), changes it"
+                                       : "call it from draw() or editor(); share what they need "
+                                         "with a Shared member");
+                    if (ui && edits(c) && drawing.count(f))
+                        error(c->loc, "script.editor.edit",
+                              name + "() changes the parameter as a user would, and " + f->name +
+                                  "() " +
+                                  (f == p.draw     ? "draws"
+                                   : f == p.editor ? "lays the editor out"
+                                                   : "is called while drawing") +
+                                  ", where no user acts",
+                              "call it from pointer(), on a Press, Drag, Release or Wheel");
                     // What a call changes: its object, through a method that
                     // changes it, and arguments bound to non-const references.
                     if (c->builtinMethod && c->builtinMethod->writes == Writes::Self && c->object)

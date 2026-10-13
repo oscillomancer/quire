@@ -278,6 +278,29 @@ TEST_CASE("editor code reads parameters and Shared members, and keeps the rest a
     // The hooks, as the runtime calls them.
     CHECK(firstError(plugin(process + "void draw() {}")) == "script.plugin.hook");
     CHECK(firstError(plugin(process + "void paint(Canvas& g) {}")) == "script.plugin.hook_name");
+    // pointer() edits parameters, as a user would; nothing else in the
+    // editor does, and it needs a draw() to act on.
+    const std::string draw = "void draw(Canvas& g) {}\n";
+    CHECK(firstError(plugin("bool held = false;\n" + process + draw +
+                            "void pointer(const Pointer& p) {\n"
+                            "  if (p.action() == PointerAction::Drag && held)\n"
+                            "    move(xToHz(p.x(), 20, 20000, 0, 100));\n"
+                            "  if (p.doubleClick()) gain.reset();\n"
+                            "  held = p.within(1, 2, 3) || p.over(0, 0, 4, 4);\n"
+                            "}\n"
+                            "void move(double hz) { gain.editNormalized(hz / 20000); }")) == "");
+    CHECK(firstError(plugin(process + "void draw(Canvas& g) { gain.edit(0); }")) ==
+          "script.editor.edit");
+    CHECK(firstError(plugin(process + "void draw(Canvas& g) { nudge(); }\n"
+                                      "void nudge() { gain.reset(); }")) == "script.editor.edit");
+    CHECK(firstError(plugin("void process(Block& io) { gain.edit(0); }\n" + draw)) ==
+          "script.editor.call");
+    CHECK(firstError(plugin(process + "void pointer(const Pointer& p) {}")) ==
+          "script.editor.pointer");
+    CHECK(firstError(plugin(process + draw + "int pointer(const Pointer& p) { return 0; }")) ==
+          "script.plugin.hook");
+    CHECK(firstError(plugin(process + draw + "void onMouseDown(const Pointer& p) {}")) ==
+          "script.plugin.hook_name");
 }
 
 TEST_CASE("continuous() takes a unit, for the units without a factory") {

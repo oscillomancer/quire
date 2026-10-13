@@ -1766,6 +1766,7 @@ std::shared_ptr<const Program> Codegen::run() {
     d.stopVoice = reinterpret_cast<Program::VoiceHook>(hook(model.stopVoice));
     d.editor = reinterpret_cast<Program::UiHook>(hook(model.editor));
     d.draw = reinterpret_cast<Program::UiHook>(hook(model.draw));
+    d.pointer = reinterpret_cast<Program::UiHook>(hook(model.pointer));
     program_ = nullptr;
     return program;
 }
@@ -1806,6 +1807,7 @@ Program::VoiceHook Program::releaseVoice() const { return d_->releaseVoice; }
 Program::VoiceHook Program::stopVoice() const { return d_->stopVoice; }
 Program::UiHook Program::editor() const { return d_->editor; }
 Program::UiHook Program::draw() const { return d_->draw; }
+Program::UiHook Program::pointer() const { return d_->pointer; }
 
 void* Program::create() const {
     const std::size_t bytes = (static_cast<std::size_t>(d_->size) + 63) / 64 * 64;

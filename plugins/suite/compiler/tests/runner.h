@@ -142,6 +142,11 @@ class JitRunner : public RunnerBase {
         instance.budget = std::int64_t{1} << 40;
         if (auto f = program_->draw()) f(&instance, self_, &g);
     }
+    void pointer(S::Pointer& p) {
+        D::CurrentScope scope(&instance);
+        instance.budget = std::int64_t{1} << 40;
+        if (auto f = program_->pointer()) f(&instance, self_, &p);
+    }
 
   private:
     std::shared_ptr<const scriptc::Program> program_;
@@ -198,6 +203,10 @@ class NativeRunner : public RunnerBase {
         D::Layout::bind(g, painter);
         D::CurrentScope scope(&instance);
         if constexpr (requires(T& t, S::Canvas& x) { t.draw(x); }) plugin_->draw(g);
+    }
+    void pointer(S::Pointer& p) {
+        D::CurrentScope scope(&instance);
+        if constexpr (requires(T& t, S::Pointer& x) { t.pointer(x); }) plugin_->pointer(p);
     }
 
   private:

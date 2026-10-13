@@ -61,6 +61,7 @@ class Program final : public script::detail::Code {
     VoiceHook stopVoice() const override;
     UiHook editor() const override;
     UiHook draw() const override;
+    UiHook pointer() const override;
 
   private:
     friend class Codegen;

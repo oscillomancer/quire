@@ -101,6 +101,36 @@ class Copy final : public D::EditorServices {
         if (slot < 0 || static_cast<size_t>(slot) >= table_.count()) return "";
         return table_.at(static_cast<size_t>(slot)).name;
     }
+    double paramNormalized(int slot, double value) override {
+        if (slot < 0 || static_cast<size_t>(slot) >= table_.count()) return 0.0;
+        const ParamDef& def = table_.at(static_cast<size_t>(slot));
+        return toNormalized(def, sanitizeHost(def, toHost(def, value)));
+    }
+    void editParam(int slot, Edit kind, double value) override {
+        if (!editing_ || slot < 0 || static_cast<size_t>(slot) >= table_.count()) return;
+        const auto index = static_cast<size_t>(slot);
+        const ParamDef& def = table_.at(index);
+        if (def.isOutput() || (kind != Edit::Default && !std::isfinite(value))) return;
+        const double host = sanitizeHost(def, kind == Edit::Value      ? toHost(def, value)
+                                              : kind == Edit::Position ? fromNormalized(def, value)
+                                                                       : hostDefault(def));
+        for (const auto& [param, i] : params_)
+            if (i == index) D::ParamBinding::setValue(*param, toPlain(def, host), false);
+        for (Edited& e : edits_)
+            if (e.index == index) {
+                e.host = host;
+                return;
+            }
+        edits_.push_back({index, host});
+    }
+
+    // pointer()'s edits, taken while allowed: each parameter's last.
+    struct Edited {
+        size_t index;  // in the table
+        double host;
+    };
+    void allowEdits(bool on) { editing_ = on; }
+    std::vector<Edited> takeEdits() { return std::exchange(edits_, {}); }
 
   private:
     std::shared_ptr<const D::Code> code_;
@@ -110,6 +140,8 @@ class Copy final : public D::EditorServices {
     std::vector<std::pair<S::Param*, size_t>> params_;  // each Param member, and its table index
     std::vector<char> text_;
     int used_ = 0;
+    bool editing_ = false;
+    std::vector<Edited> edits_;
 };
 
 // What editor() asks for: a size, and controls in the order given.
@@ -464,7 +496,63 @@ class ScriptEditor final : public gui::EditorBase {
         if (copy_->code().draw())
             for (size_t k = 0; k < table.count(); ++k)
                 if (table.at(k).isOutput()) watch(table.at(k).id);
+        // pointer() edits through Ui, which keeps the gesture rules: a
+        // hidden control for each parameter, after the script's own.
+        if (copy_->code().pointer()) {
+            hidden_.assign(table.count(), -1);
+            for (size_t k = 0; k < table.count(); ++k) {
+                if (table.at(k).isOutput()) continue;
+                hidden_[k] = ui().count();
+                ui().knob(table.at(k).id, {0.0f, 0.0f, 1.0f, 1.0f}).visible = false;
+            }
+        }
         report("editor()");
+    }
+
+    // --- pointer() --------------------------------------------------------------
+    // Presses and the wheel where no control is, and every move, go to the
+    // script; a press it gets holds the pointer until its release.
+
+    bool onPointerDown(float x, float y, int button, uint32_t mods, bool doubleClick) override {
+        if (!copy_->code().pointer() || stopped_ || button != 0 || overControl(x, y)) return false;
+        pressed_ = true;
+        point(S::PointerAction::Press, x, y, mods, 0.0, doubleClick);
+        return true;
+    }
+    bool onPointerMove(float x, float y, uint32_t mods) override {
+        if (!copy_->code().pointer() || stopped_) return false;
+        point(pressed_ ? S::PointerAction::Drag : S::PointerAction::Move, x, y, mods, 0.0, false);
+        return pressed_;  // a hover is the controls' too
+    }
+    bool onPointerUp(float x, float y, int button, uint32_t mods) override {
+        if (button != 0 || !pressed_) return true;
+        pressed_ = false;
+        point(S::PointerAction::Release, x, y, mods, 0.0, false);
+        ui().endDragEdit();
+        if (left_) {
+            left_ = false;
+            point(S::PointerAction::Leave, lastX_, lastY_, 0, 0.0, false);
+        }
+        return true;
+    }
+    bool onWheel(float x, float y, float dx, float dy, uint32_t mods) override {
+        (void)dx;
+        if (!copy_->code().pointer() || stopped_ || overControl(x, y)) return false;
+        point(S::PointerAction::Wheel, x, y, mods, dy, false);
+        return true;
+    }
+    void onPointerLeave() override {
+        if (pressed_)
+            left_ = true;  // told after the release
+        else if (copy_->code().pointer() && !stopped_)
+            point(S::PointerAction::Leave, lastX_, lastY_, 0, 0.0, false);
+    }
+    // Focus lost mid-press: the script hears a release (its edits ignored),
+    // and Ui ends the gesture.
+    void onCancel() override {
+        if (!pressed_) return;
+        pressed_ = left_ = false;
+        point(S::PointerAction::Release, lastX_, lastY_, 0, 0.0, false, false);
     }
 
     void animate(double seconds) override {
@@ -507,6 +595,49 @@ class ScriptEditor final : public gui::EditorBase {
     }
 
   private:
+    bool overControl(float x, float y) const {
+        for (int i = 0; i < ui().count(); ++i)
+            if (ui().interactive(i) && ui().control(i).bounds.contains(x, y)) return true;
+        return false;
+    }
+
+    // pointer() told what the pointer did, then its edits sent to the host
+    // through Ui: a press's as one gesture until the release (two
+    // parameters to a gesture), a wheel's as a burst.
+    void point(S::PointerAction action, float x, float y, uint32_t mods, double wheel,
+               bool doubleClick, bool editing = true) {
+        using A = S::PointerAction;
+        if (stopped_) return;
+        const bool moved = action == A::Drag || action == A::Move;
+        S::Pointer p;
+        D::Layout::set(p, action, x, y, moved ? x - lastX_ : 0.0, moved ? y - lastY_ : 0.0, wheel,
+                       doubleClick, (mods & gui::mod::kShift) != 0,
+                       (mods & (gui::mod::kCtrl | gui::mod::kSuper)) != 0,
+                       (mods & gui::mod::kAlt) != 0);
+        lastX_ = x;
+        lastY_ = y;
+        copy_->listen(host());
+        copy_->allowEdits(editing && action != A::Move && action != A::Leave);
+        stopped_ = !copy_->run(copy_->code().pointer(), &p);
+        copy_->allowEdits(false);
+        report("pointer()");
+        std::vector<Copy::Edited> edits = copy_->takeEdits();
+        std::sort(edits.begin(), edits.end(),
+                  [](const Copy::Edited& a, const Copy::Edited& b) { return a.index < b.index; });
+        for (size_t k = 0; k < edits.size(); ++k) {
+            const int c = hidden_[edits[k].index];
+            if (action == A::Wheel) {
+                ui().wheelEdit(c, edits[k].host);
+            } else if (k + 1 < edits.size()) {
+                ui().dragEdit(c, edits[k].host, hidden_[edits[k + 1].index], edits[k + 1].host);
+                ++k;
+            } else {
+                ui().dragEdit(c, edits[k].host);
+            }
+        }
+        markDirty();
+    }
+
     // What went wrong in the editor's code, in the host's log, once each.
     void report(const char* hook) {
         const D::Status& s = copy_->status();
@@ -532,6 +663,10 @@ class ScriptEditor final : public gui::EditorBase {
     std::shared_ptr<SharedChannel> channel_;
     std::vector<unsigned char> arrived_, shown_;
     std::vector<gui::Rect> meters_;
+    std::vector<int> hidden_;  // each parameter's hidden control, by table index
+    bool pressed_ = false;     // a press pointer() got, until its release
+    bool left_ = false;        // the pointer left during that press
+    float lastX_ = 0.0f, lastY_ = 0.0f;
     bool stopped_ = false;
     std::uint32_t budgetReported_ = 0, rangeReported_ = 0;
 };
