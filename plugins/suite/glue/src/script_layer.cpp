@@ -6,6 +6,9 @@
 #include <string>
 
 #include "dsp/AudioFile.h"
+#if SUPPLE_WITH_GUI
+#include "supple/suite/script_editor.h"
+#endif
 
 namespace supple::suite {
 
@@ -23,6 +26,12 @@ void ScriptLayer::redefined() {
     SemanticLayer::redefined();
     statusRestarted();
 }
+
+#if SUPPLE_WITH_GUI
+std::unique_ptr<gui::EditorBase> ScriptLayer::createEditor(gui::EditorHost& host) {
+    return makeScriptEditor(host, processor().editorCode(), processor().editorChannel());
+}
+#endif
 
 const ScriptDefinition& ScriptLayer::definition() {
     return static_cast<const ScriptDefinition&>(*instance().currentDefinition());

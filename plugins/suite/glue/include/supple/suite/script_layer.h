@@ -3,13 +3,16 @@
 //
 // The layer of a plugin made from a script (plugin/Layer.h): the
 // semantic-params extension (semantic_layer.h), the code the processor let
-// go of freed on the main thread, and what the script's status says in the
+// go of freed on the main thread, what the script's status says in the
 // host's log -- once per occurrence, with the line it was on: a loop that
-// spent its budget and was stopped, an index outside an array. The player's
-// layer derives from it to follow the script's file. Main thread only.
+// spent its budget and was stopped, an index outside an array -- and the
+// editor of a script that draws its own (script_editor.h; the product's,
+// the automatic one, otherwise). The player's layer derives from it to
+// follow the script's file. Main thread only.
 #pragma once
 
 #include <cstdint>
+#include <memory>
 
 #include "supple/suite/script_definition.h"
 #include "supple/suite/script_processor.h"
@@ -23,6 +26,9 @@ class ScriptLayer : public SemanticLayer {
 
     void tick() override;
     void redefined() override;
+#if SUPPLE_WITH_GUI
+    std::unique_ptr<gui::EditorBase> createEditor(gui::EditorHost& host) override;
+#endif
 
   protected:
     // A file member's file decodes as audio.

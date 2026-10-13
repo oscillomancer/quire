@@ -23,4 +23,8 @@ if (TARGET product-impl)
     target_sources(product-impl PRIVATE
         ${SUPPLE_SUITE}/semantic/src/semantic_layer.cpp
         ${SUPPLE_SUITE}/glue/src/script_layer.cpp)
+    # A script's own editor, where there is a GUI.
+    if (TARGET product-gui)
+        target_sources(product-impl PRIVATE ${SUPPLE_SUITE}/glue/src/script_editor.cpp)
+    endif()
 endif()

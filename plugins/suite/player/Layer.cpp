@@ -8,8 +8,9 @@
 // it replaces the running code: in place, crossfaded, when the parameters
 // are the same (ScriptProcessor::swap), or by redefining the plugin when
 // they are not (the host restarts it and rescans; values carry over by
-// key). A script that fails to compile leaves the running one playing, and
-// the host's log says why, once per change.
+// key). Either way an open editor is made again, from the new code. A
+// script that fails to compile leaves the running one playing, and the
+// host's log says why, once per change.
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -72,6 +73,7 @@ class PlayerLayer final : public suite::ScriptLayer {
                 values.setIndex(i, toPlain(definition().params().at(i), s.host[i]));
             processor().swap(next->code(), values);
             statusRestarted();
+            instance().rebuildEditor();
             return;
         }
         if (!instance().redefine(next))

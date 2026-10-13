@@ -28,6 +28,11 @@
 //   - An instrument's note expressions (CLAP's: volume, pan, tuning ...)
 //     and per-note modulation of its polyModulated() parameters go to the
 //     voices whose notes they address, and start neutral with each note.
+//   - Shared and SharedArray members go to the script's editor whenever
+//     telemetry is due (while an editor is open or the layer watches),
+//     through the generation's SharedChannel (script_shared.h).
+//     editorCode() and editorChannel() are what an editor opened now shows:
+//     the newest code offered, and its channel.
 //   - An instrument's notes go to the framework's voice manager
 //     (dsp/Voices.h), which calls the script's voice hooks -- startVoice,
 //     releaseVoice, stopVoice -- and which Instrument's methods read and
@@ -53,6 +58,7 @@
 #include "supple/script_files.h"
 #include "supple/script_runtime.h"
 #include "supple/suite/script_definition.h"
+#include "supple/suite/script_shared.h"
 
 namespace supple::suite {
 
@@ -81,6 +87,8 @@ class Generation {
         for (const D::FileModel& m : program_->files())
             if (const int i = properties.indexOf(m.id); i >= 0)
                 files_[static_cast<size_t>(i)] = m.offset;
+        if (!program_->shared().empty())
+            channel_ = std::make_shared<SharedChannel>(program_->shared());
     }
     ~Generation() {
         if (reset_) program_->destroy(reset_);
@@ -91,6 +99,12 @@ class Generation {
 
     const D::Code& program() const { return *program_; }
     void* self() const { return self_; }
+    // Its Shared members' way to the editor; null when it has none.
+    const std::shared_ptr<SharedChannel>& channel() const { return channel_; }
+    // Audio thread: the Shared members, as they are, to the editor.
+    void publish() const noexcept {
+        if (channel_) channel_->publish(self_);
+    }
     S::Param* param(size_t index) const { return params_[index]; }
     size_t paramCount() const { return params_.size(); }
     // Points file property `index`'s member at `contents` (null: none).
@@ -123,6 +137,7 @@ class Generation {
     void* reset_ = nullptr;
     std::vector<S::Param*> params_;
     std::vector<int> files_;  // each file property's member offset, or -1
+    std::shared_ptr<SharedChannel> channel_;
 };
 
 class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
@@ -146,6 +161,8 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
                 polyAmount_.emplace_back();
             }
         for (int v = 0; v < kMaxVoices; ++v) noteBegins(v);
+        editorCode_ = definition_->code();
+        editorChannel_ = current_->channel();
     }
     ~ScriptProcessor() {
         delete incoming_.exchange(nullptr, std::memory_order_acq_rel);
@@ -295,6 +312,12 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         endFrame_ = 0;
     }
 
+    // Whenever telemetry is due: the Shared members to the editor.
+    template <class T>
+    void captureTelemetry(T&) {
+        current_->publish();
+    }
+
     // setLatency()'s, from prepare(), or Info's.
     int latencySamples() const { return instance_.latency >= 0 ? instance_.latency : latency_; }
     uint32_t tailSamples() const { return tail_; }
@@ -304,12 +327,17 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     // The script's runtime record: its sample rate and block size, and its status.
     const D::Instance& instance() const { return instance_; }
 
+    // What an editor opened now shows: the newest code (the one playing, or
+    // one swap() offered), and the channel its Shared members arrive by.
+    const std::shared_ptr<const D::Code>& editorCode() const { return editorCode_; }
+    const std::shared_ptr<SharedChannel>& editorChannel() const { return editorChannel_; }
+
     // Offers a new build of the script, with the same parameters, to
     // replace the running one at the start of a block. Main thread, after
     // the first prepare.
     void swap(std::shared_ptr<const D::Code> code, const ParamValues& values) {
-        auto next = std::make_unique<Generation>(std::move(code), *table_,
-                                                 definition_->properties(), &instance_);
+        auto next =
+            std::make_unique<Generation>(code, *table_, definition_->properties(), &instance_);
         load(*next, values, true);
         // Prepared here while the audio thread runs the current code, so
         // against a record of its own -- the same rate and sizes, no voices
@@ -323,6 +351,8 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         next->bindInstance(&own);
         next->prepare(&own);
         next->bindInstance(&instance_);
+        editorCode_ = code;
+        editorChannel_ = next->channel();
         delete incoming_.exchange(next.release(), std::memory_order_acq_rel);
     }
 
@@ -543,6 +573,9 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     std::shared_ptr<const ScriptDefinition> definition_;
     const ParamTable* table_;
     D::Instance instance_;
+    // The main thread's: what an editor opened now shows.
+    std::shared_ptr<const D::Code> editorCode_;
+    std::shared_ptr<SharedChannel> editorChannel_;
     std::unique_ptr<Generation> current_;
     std::unique_ptr<Generation> fading_;
     std::vector<D::FileContents*> files_;  // by property index: the framework's, lent
