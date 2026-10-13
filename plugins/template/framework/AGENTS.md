@@ -166,6 +166,14 @@ made with, so the same code serves plugins whose tables are made at run time.
   parameter (and the ports when the buses changed), the state carries over
   by parameter ID and through the layer's chunk, and an open editor is
   rebuilt. A layer never calls `redefine()` from `loadChunk()`.
+  A layer may also make the editors: `createEditor(host)` returns one (an
+  editor laid out from what only the layer knows) or null for the
+  product's. `Instance::rebuildEditor()` makes an open one again, after
+  whatever it shows has changed. `Instance::watch(true)` sends telemetry as
+  if an editor were open, and `Instance::drawEditor(scale, picture, why)`
+  draws the editor without a window (`gui/Offscreen.h`), so a layer can
+  answer a host that asks what the plugin looks like. The stages example
+  does all three.
 
 ## Parameters
 
@@ -548,6 +556,10 @@ drive example). Write your own once the product is past its sketch.
 - Telemetry: `onTelemetry(frame)`, then `markDirty()` only if what is shown
   changed. An idle editor must draw nothing. An editor that does not draw
   the framework's peak meters calls `usePeakMeters(false)`.
+
+An editor can be drawn without a window or a display: `gui::drawOffscreen
+(editor, scale, picture)` (`gui/Offscreen.h`; Linux, through EGL, for now).
+`ui-tests` checks that the starter's draws so.
 
 `ui-tests` fuzzes the real editor with random input and fails on a nested
 or unclosed gesture, more than two parameters in one, or a note left

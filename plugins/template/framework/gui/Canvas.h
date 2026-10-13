@@ -26,6 +26,16 @@ void canvasClear(NVGcontext* ctx, float r, float g, float b);
 void canvasViewportSize(int* width, int* height);
 void canvasReadPixels(int width, int height, unsigned char* rgb);
 
+/* Drawing without a window (gui/Offscreen.cpp), GL only: a framebuffer
+ * object width x height, colour and stencil, bound for drawing; its entry
+ * points come from `resolve` (eglGetProcAddress). 0 when the context has no
+ * framebuffer objects. canvasReadPixelsRGBA reads what is bound, bottom row
+ * first, as GL does. */
+typedef void (*CanvasProc)(void);
+unsigned canvasTargetCreate(int width, int height, CanvasProc (*resolve)(const char* name));
+void canvasTargetDestroy(unsigned target);
+void canvasReadPixelsRGBA(int width, int height, unsigned char* rgba);
+
 #ifdef __cplusplus
 }
 #endif

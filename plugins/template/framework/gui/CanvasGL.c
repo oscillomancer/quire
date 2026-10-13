@@ -242,3 +242,78 @@ void canvasReadPixels(int w, int h, unsigned char* rgb)
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, rgb);
 }
+
+// Drawing without a window: a framebuffer object of the size asked for, with
+// the stencil NVG_STENCIL_STROKES needs. Its entry points are GL 3.0's (and
+// ARB_framebuffer_object's), resolved through the caller's loader rather
+// than linked, so nothing here depends on how GL was loaded.
+
+typedef void (*CanvasGenFn)(GLsizei, GLuint*);
+typedef void (*CanvasDeleteFn)(GLsizei, const GLuint*);
+typedef void (*CanvasBindFn)(GLenum, GLuint);
+typedef void (*CanvasStorageFn)(GLenum, GLenum, GLsizei, GLsizei);
+typedef void (*CanvasAttachFn)(GLenum, GLenum, GLenum, GLuint);
+typedef GLenum (*CanvasStatusFn)(GLenum);
+
+static struct {
+    CanvasGenFn genFramebuffers, genRenderbuffers;
+    CanvasDeleteFn deleteFramebuffers, deleteRenderbuffers;
+    CanvasBindFn bindFramebuffer, bindRenderbuffer;
+    CanvasStorageFn renderbufferStorage;
+    CanvasAttachFn framebufferRenderbuffer;
+    CanvasStatusFn checkFramebufferStatus;
+    GLuint buffers[2];
+} target;
+
+unsigned canvasTargetCreate(int w, int h, CanvasProc (*resolve)(const char* name))
+{
+    // GL 3.0 and ARB_framebuffer_object use these numbers.
+    const GLenum kFramebuffer = 0x8D40, kRenderbuffer = 0x8D41, kRgba8 = 0x8058, kDepthStencil = 0x88F0,
+                 kColour0 = 0x8CE0, kDepthStencilAttachment = 0x821A, kComplete = 0x8CD5;
+    target.genFramebuffers = (CanvasGenFn)resolve("glGenFramebuffers");
+    target.genRenderbuffers = (CanvasGenFn)resolve("glGenRenderbuffers");
+    target.deleteFramebuffers = (CanvasDeleteFn)resolve("glDeleteFramebuffers");
+    target.deleteRenderbuffers = (CanvasDeleteFn)resolve("glDeleteRenderbuffers");
+    target.bindFramebuffer = (CanvasBindFn)resolve("glBindFramebuffer");
+    target.bindRenderbuffer = (CanvasBindFn)resolve("glBindRenderbuffer");
+    target.renderbufferStorage = (CanvasStorageFn)resolve("glRenderbufferStorage");
+    target.framebufferRenderbuffer = (CanvasAttachFn)resolve("glFramebufferRenderbuffer");
+    target.checkFramebufferStatus = (CanvasStatusFn)resolve("glCheckFramebufferStatus");
+    if (!target.genFramebuffers || !target.genRenderbuffers || !target.deleteFramebuffers ||
+        !target.deleteRenderbuffers || !target.bindFramebuffer || !target.bindRenderbuffer ||
+        !target.renderbufferStorage || !target.framebufferRenderbuffer || !target.checkFramebufferStatus)
+        return 0;
+    GLuint fb = 0;
+    target.genFramebuffers(1, &fb);
+    target.bindFramebuffer(kFramebuffer, fb);
+    target.genRenderbuffers(2, target.buffers);
+    target.bindRenderbuffer(kRenderbuffer, target.buffers[0]);
+    target.renderbufferStorage(kRenderbuffer, kRgba8, w, h);
+    target.framebufferRenderbuffer(kFramebuffer, kColour0, kRenderbuffer, target.buffers[0]);
+    target.bindRenderbuffer(kRenderbuffer, target.buffers[1]);
+    target.renderbufferStorage(kRenderbuffer, kDepthStencil, w, h);
+    target.framebufferRenderbuffer(kFramebuffer, kDepthStencilAttachment, kRenderbuffer, target.buffers[1]);
+    if (target.checkFramebufferStatus(kFramebuffer) != kComplete) {
+        canvasTargetDestroy(fb);
+        return 0;
+    }
+    return fb;
+}
+
+void canvasTargetDestroy(unsigned fb)
+{
+    const GLenum kFramebuffer = 0x8D40;
+    GLuint name = fb;
+    if (!target.bindFramebuffer) return;
+    target.bindFramebuffer(kFramebuffer, 0);
+    target.deleteRenderbuffers(2, target.buffers);
+    target.deleteFramebuffers(1, &name);
+    target.buffers[0] = target.buffers[1] = 0;
+}
+
+void canvasReadPixelsRGBA(int w, int h, unsigned char* rgba)
+{
+    glFinish();
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+}

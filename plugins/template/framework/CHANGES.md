@@ -4,6 +4,27 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.20.0
+
+What a product must do: nothing. A layer that overrides nothing new behaves
+as before.
+
+- **Editors drawn without a window** (`gui/Offscreen.h`, `core/Picture.h`).
+  `drawOffscreen(editor, scale, picture)` draws an editor once, at its
+  design size times `scale`, to RGBA, with no window and no display: EGL
+  with no surface on Linux (Mesa provides it on a GPU or in software;
+  libEGL is loaded when first asked, so plugins gain no link dependency).
+  Elsewhere it says it cannot. `ui-tests` draws the starter's editor so.
+- **A layer's editors** (`plugin/Layer.h`). `Layer::createEditor(host)`
+  may make the instance's editor, in place of `product::createEditor`
+  (null leaves it to the product): a family of plugins with an editor of
+  the family's. `Instance::rebuildEditor()` makes an open editor again;
+  `Instance::watch(on)` sends telemetry as if an editor were open; and
+  `Instance::drawEditor(scale, picture, why)` draws the editor without a
+  window, so a layer can show a host what the plugin looks like. The
+  stages example makes its file plugins' editors and draws them through
+  its extension. `gui::Gui` takes the factory it makes editors with.
+
 ## 1.19.0
 
 What a product must do: nothing.

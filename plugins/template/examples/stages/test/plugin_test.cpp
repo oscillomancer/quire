@@ -3,7 +3,9 @@
 //
 // Stages as a host sees it, in process: plugins listed from files, a layer
 // that keeps values by name, and an instance redefined when its file changes.
+#include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -16,6 +18,10 @@
 #include "Check.h"
 #include "ProductInfo.h"
 #include "plugin/Entry.h"
+#include "plugin/TestHooks.h"
+#if SUPPLE_WITH_GUI
+#include "gui/EditorHost.h"
+#endif
 
 namespace {
 
@@ -142,12 +148,50 @@ struct Instance {
             params->flush(plugin, &in, &out);
         }
     }
-    uint32_t stagesExtension() const {
-        struct Ext {
-            uint32_t(CLAP_ABI* count)(const clap_plugin_t*);
-        };
-        const auto* ext = static_cast<const Ext*>(plugin->get_extension(plugin, "com.suppleaudio.stages/1"));
-        return ext ? ext->count(plugin) : 0;
+    struct Ext {
+        uint32_t(CLAP_ABI* count)(const clap_plugin_t*);
+        void(CLAP_ABI* watch)(const clap_plugin_t*, bool);
+        bool(CLAP_ABI* picture)(const clap_plugin_t*, double, uint32_t*, uint32_t*, uint8_t*, size_t);
+    };
+    const Ext* ext() const {
+        return static_cast<const Ext*>(plugin->get_extension(plugin, "com.suppleaudio.stages/1"));
+    }
+    uint32_t stagesExtension() const { return ext() ? ext()->count(plugin) : 0; }
+    // The editor drawn without a window; false where that cannot be done.
+    bool picture(double scale, uint32_t& w, uint32_t& h, std::vector<uint8_t>* pixels = nullptr) const {
+        if (!ext()->picture(plugin, scale, &w, &h, nullptr, 0)) return false;
+        if (!pixels) return true;
+        pixels->assign(static_cast<size_t>(w) * h * 4, 0);
+        return ext()->picture(plugin, scale, &w, &h, pixels->data(), pixels->size());
+    }
+    // `frames` of stereo silence through the active plugin.
+    void run(uint32_t frames) {
+        std::vector<float> l(frames), r(frames);
+        float* data[2] = {l.data(), r.data()};
+        clap_audio_buffer_t in{}, out{};
+        in.data32 = out.data32 = data;
+        in.channel_count = out.channel_count = 2;
+        const clap_input_events_t events{nullptr, [](const clap_input_events_t*) -> uint32_t { return 0; },
+                                         [](const clap_input_events_t*, uint32_t) -> const clap_event_header_t* {
+                                             return nullptr;
+                                         }};
+        const clap_output_events_t sink{nullptr, [](const clap_output_events_t*, const clap_event_header_t*) {
+                                            return true;
+                                        }};
+        clap_process_t p{};
+        p.frames_count = frames;
+        p.audio_inputs = &in;
+        p.audio_outputs = &out;
+        p.audio_inputs_count = p.audio_outputs_count = 1;
+        p.in_events = &events;
+        p.out_events = &sink;
+        p.steady_time = -1;
+        plugin->start_processing(plugin);
+        for (uint32_t done = 0; done < frames; done += 256) {
+            p.frames_count = std::min<uint32_t>(256, frames - done);
+            plugin->process(plugin, &p);
+        }
+        plugin->stop_processing(plugin);
     }
 };
 
@@ -247,6 +291,52 @@ TEST(an_inactive_instance_is_redefined_at_once) {
     folder.write("duo.stages", "Low\nLow\n", 4);
     a.tick(15);
     CHECK(a.count() == 2 && a.host.rescanAll == 1);
+}
+
+TEST(the_layer_makes_a_file_plugins_editor_and_draws_it_without_a_window) {
+    Folder folder;
+    folder.write("duo.stages", "Low\nHigh\n");
+    Instance a(kDuo);
+    uint32_t w = 0, h = 0;
+    if (!a.picture(1.0, w, h)) {
+        std::printf("    (no offscreen drawing here: skipped)\n");
+        return;
+    }
+    // The layer's editor, two faders and the output, at its design size.
+    CHECK(w == 320 && h == 300);
+    std::vector<uint8_t> pixels;
+    CHECK(a.picture(2.0, w, h, &pixels));
+    CHECK(w == 640 && h == 600 && pixels.size() == size_t{640} * 600 * 4);
+    // Its ground in the corner, and something drawn on it.
+    auto near = [&](size_t i, int want) { return std::abs(int(pixels[i]) - want) <= 2; };
+    CHECK(near(0, 0x0E) && near(1, 0x0F) && near(2, 0x12) && pixels[3] == 255);
+    bool varied = false;
+    for (size_t i = 0; i < pixels.size() && !varied; i += 4) varied = pixels[i] > 0x40;
+    CHECK(varied);
+    // The built-in plugin keeps the product's editor, laid out otherwise.
+    Instance b(product::info::kId);
+    CHECK(b.picture(1.0, w, h) && w != 320);
+}
+
+TEST(watching_sends_telemetry_without_an_editor) {
+#if SUPPLE_WITH_GUI
+    Folder folder;
+    folder.write("duo.stages", "Low\nHigh\n");
+    Instance a(kDuo);
+    a.activate();
+    supple::gui::EditorHost* editor = supple_test_editor_host(a.plugin);
+    supple::TelemetryFrame frame;
+    a.run(2048);
+    CHECK(!editor->popTelemetry(frame));
+    a.ext()->watch(a.plugin, true);
+    a.run(2048);
+    CHECK(editor->popTelemetry(frame));
+    a.ext()->watch(a.plugin, false);
+    while (editor->popTelemetry(frame)) {
+    }
+    a.run(2048);
+    CHECK(!editor->popTelemetry(frame));
+#endif
 }
 
 SUPPLE_TEST_MAIN

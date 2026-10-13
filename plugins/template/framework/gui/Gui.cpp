@@ -8,8 +8,10 @@
 
 namespace supple::gui {
 
-Gui::Gui(EditorHost& host, const char* className, bool standalone)
-    : editor_(product::createEditor(host)), window_(*editor_, className, standalone) {}
+Gui::Gui(EditorHost& host, const char* className, bool standalone, EditorFactory make)
+    : make_(make ? std::move(make) : EditorFactory(product::createEditor)),
+      editor_(make_(host)),
+      window_(*editor_, className, standalone) {}
 
 Gui::~Gui() {
     editor_->focusLost();  // closes any open gesture before the host loses us
@@ -18,7 +20,7 @@ Gui::~Gui() {
 }
 
 void Gui::rebuild(EditorHost& host) {
-    std::unique_ptr<EditorBase> next = product::createEditor(host);
+    std::unique_ptr<EditorBase> next = make_(host);
     editor_->focusLost();
     window_.replaceEditor(*next);
     // The editor the window shows lives until the swap; one that was only

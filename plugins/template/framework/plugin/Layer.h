@@ -28,17 +28,30 @@
 //     to restart and swaps at the deactivation (CLAP_PARAM_RESCAN_ALL),
 //     carrying the state over through saveChunk/loadChunk and by parameter
 //     ID, then calls redefined().
+//   - The editor: createEditor() may make every editor the instance opens,
+//     in place of product::createEditor (a family's editors, made from what
+//     only the layer knows); null leaves it to the product.
+//     Instance::rebuildEditor() makes an open one again, and
+//     Instance::drawEditor() draws one without a window (gui/Offscreen.h),
+//     after Instance::watch(true) and some audio has filled its meters.
 #pragma once
 
 #include <clap/clap.h>
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <vector>
 
 #include "core/Definition.h"
+#include "core/Picture.h"
 #include "core/StateFormat.h"
+
+namespace supple::gui {
+class EditorBase;
+class EditorHost;
+}  // namespace supple::gui
 
 namespace supple::plugin {
 
@@ -77,6 +90,18 @@ class Instance {
     // nothing, for a definition with problems, another ID or state tag.
     virtual bool redefine(DefinitionPtr next) = 0;
 
+    // An open editor made again, by the layer's createEditor() or the
+    // product's, as after a redefinition: at the same scale, if the host
+    // agrees to its size. Nothing when none is open.
+    virtual void rebuildEditor() = 0;
+    // Telemetry (and the audio feed) as an open editor gets them, while on,
+    // window or not: what plays meanwhile reaches drawEditor()'s meters.
+    virtual void watch(bool on) = 0;
+    // The editor as it would open now, drawn without a window at `scale`
+    // times its design size (gui/Offscreen.h). False, saying why, in a build
+    // without an editor or where nothing can be drawn offscreen.
+    virtual bool drawEditor(double scale, Picture& picture, std::string& why) = 0;
+
     // Any thread: a call to the layer's onMainThread() soon.
     virtual void requestLayerCallback() = 0;
     virtual void log(clap_log_severity severity, std::string_view text) const = 0;
@@ -113,6 +138,13 @@ class Layer {
     virtual void deactivated() {}
     // After a redefinition took effect.
     virtual void redefined() {}
+
+#if SUPPLE_WITH_GUI
+    // The editor for `host` (the plugin), or null for product::createEditor.
+    // Main thread, whenever one opens or is rebuilt. Only in a build with an
+    // editor: override it inside #if SUPPLE_WITH_GUI.
+    virtual std::unique_ptr<gui::EditorBase> createEditor(gui::EditorHost& host);
+#endif
 
     // The layer of the plugin a CLAP callback was given, or null.
     static Layer* of(const clap_plugin_t* plugin);

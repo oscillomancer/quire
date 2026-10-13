@@ -58,6 +58,7 @@
 #if SUPPLE_WITH_GUI
 #include "gui/EditorHost.h"
 #include "gui/Gui.h"
+#include "gui/Offscreen.h"
 #endif
 
 namespace supple::plugin {
@@ -364,6 +365,7 @@ struct Plugin final : StateAccess, Instance
     std::atomic<bool> layerCallback{false};
     // What redefine() asked for, applied at the next deactivation.
     DefinitionPtr pendingDefinition;
+    bool watching = false;  // main thread: the layer's watch()
     bool applyRestart = false;  // main thread: an apply changed a restart parameter
 
     explicit Plugin(DefinitionPtr d)
@@ -411,6 +413,39 @@ struct Plugin final : StateAccess, Instance
     void log(clap_log_severity severity, std::string_view text) const override {
         const std::string line(text);
         log(severity, line.c_str());
+    }
+    void rebuildEditor() override {
+#if SUPPLE_WITH_GUI
+        if (!editor) return;
+        editor->rebuild(*this);
+        uint32_t w = 0, h = 0, cw = 0, ch = 0;
+        editor->sizeAt(editor->userScale(), w, h);
+        editor->size(cw, ch);
+        if ((w != cw || h != ch) && hostGui && hostGui->request_resize) hostGui->request_resize(host, w, h);
+#endif
+    }
+    void watch(bool on) override {
+        if (on && !watching) engine->telemetry().clear();
+        watching = on;
+        updateMetering();
+    }
+    bool drawEditor(double scale, Picture& picture, std::string& why) override {
+#if SUPPLE_WITH_GUI
+        std::unique_ptr<gui::EditorBase> drawn = makeEditor(*this);
+        return gui::drawOffscreen(*drawn, scale, picture, &why);
+#else
+        (void)scale, (void)picture;
+        why = "this build of the plugin has no editor";
+        return false;
+#endif
+    }
+    // Telemetry flows while an editor shows or a layer watches.
+    void updateMetering() {
+#if SUPPLE_WITH_GUI
+        engine->setMetering(watching || editorShown);
+#else
+        engine->setMetering(watching);
+#endif
     }
 
     // The table index of a parameter the host and the editor may set: an
@@ -885,25 +920,25 @@ struct Plugin final : StateAccess, Instance
             hostNotePorts->rescan(host, CLAP_NOTE_PORTS_RESCAN_ALL);
         if (namesNotes() && !hostNoteName) hostNoteName = hostExtension<const clap_host_note_name_t>(CLAP_EXT_NOTE_NAME);
         checkNoteNames();
-#if SUPPLE_WITH_GUI
-        if (editor) {
-            // The editor shows the old table: a new one for the new, at the
-            // same scale if the host agrees to the size.
-            editor->rebuild(*this);
-            engine->setMetering(true);
-            uint32_t w = 0, h = 0, cw = 0, ch = 0;
-            editor->sizeAt(editor->userScale(), w, h);
-            editor->size(cw, ch);
-            if ((w != cw || h != ch) && hostGui && hostGui->request_resize) hostGui->request_resize(host, w, h);
-        }
-#endif
+        // The editor shows the old table: a new one for the new, at the same
+        // scale if the host agrees to the size.
+        rebuildEditor();
+        updateMetering();
         if (layer) layer->redefined();
     }
 
 #if SUPPLE_WITH_GUI
     std::unique_ptr<gui::Gui> editor;
+    bool editorShown = false;  // telemetry flows to it
     clap_id timerId = CLAP_INVALID_ID;
     double platformScale = 1.0;
+
+    // The layer's editor, if it makes one; the product's otherwise.
+    std::unique_ptr<gui::EditorBase> makeEditor(gui::EditorHost& h) {
+        if (layer)
+            if (std::unique_ptr<gui::EditorBase> e = layer->createEditor(h)) return e;
+        return product::createEditor(h);
+    }
 
     // --- gui::EditorHost (main thread) ---------------------------------------
     const Definition& pluginDefinition() const override { return *definition; }
@@ -1082,7 +1117,8 @@ struct Plugin final : StateAccess, Instance
         timerId = CLAP_INVALID_ID;
     }
     void closeEditor() {
-        engine->setMetering(false);
+        editorShown = false;
+        updateMetering();
         stopTimer();
         if (editor) editorScale = editor->userScale();
         editor.reset();
@@ -1599,7 +1635,8 @@ bool CLAP_ABI guiCreate(const clap_plugin_t* p, const char* api, bool isFloating
     s->expect(Thread::Main, Site::GuiCreate);
     if (!guiIsApiSupported(p, api, isFloating)) return false;
     if (!s->editor) {
-        s->editor = std::make_unique<gui::Gui>(*s, s->info().name.c_str());
+        s->editor = std::make_unique<gui::Gui>(*s, s->info().name.c_str(), false,
+                                               [s](gui::EditorHost& h) { return s->makeEditor(h); });
         s->editor->setPlatformScale(s->platformScale);
         s->editor->setUserScale(s->editorScale);
     }
@@ -1608,7 +1645,8 @@ bool CLAP_ABI guiCreate(const clap_plugin_t* p, const char* api, bool isFloating
         return false;
     }
     s->engine->telemetry().clear();  // a previous editor's unread frames
-    s->engine->setMetering(true);
+    s->editorShown = true;
+    s->updateMetering();
     s->startTimer();
     return true;
 }
@@ -1691,7 +1729,8 @@ bool CLAP_ABI guiShow(const clap_plugin_t* p) {
     if (!s->editor) return false;
     s->engine->telemetry().clear();
     const bool shown = s->editor->show();
-    s->engine->setMetering(shown);
+    s->editorShown = shown;
+    s->updateMetering();
     if (shown) {
         s->startTimer();
         if (s->timerId == CLAP_INVALID_ID) s->editor->startFallbackTimer(kTimerMs / 1000.0);
@@ -1702,7 +1741,8 @@ bool CLAP_ABI guiShow(const clap_plugin_t* p) {
 bool CLAP_ABI guiHide(const clap_plugin_t* p) {
     Plugin* s = self(p);
     s->expect(Thread::Main, Site::GuiHide);
-    s->engine->setMetering(false);
+    s->editorShown = false;
+    s->updateMetering();
     s->stopTimer();
     if (!s->editor) return false;
     s->editor->stopFallbackTimer();
@@ -2079,6 +2119,13 @@ const clap_plugin_factory_t kFactory = {factoryCount, factoryDescriptor, factory
 Layer* Layer::of(const clap_plugin_t* plugin) {
     return plugin && plugin->plugin_data ? self(plugin)->layer.get() : nullptr;
 }
+
+#if SUPPLE_WITH_GUI
+std::unique_ptr<gui::EditorBase> Layer::createEditor(gui::EditorHost& host) {
+    (void)host;
+    return nullptr;
+}
+#endif
 
 }  // namespace supple::plugin
 

@@ -13,6 +13,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 #include "gui/EditorBase.h"
@@ -20,12 +21,16 @@
 
 namespace supple::gui {
 
+// Makes the editor for a host: product::createEditor, unless a layer
+// supplies its own (plugin/Layer.h).
+using EditorFactory = std::function<std::unique_ptr<EditorBase>(EditorHost& host)>;
+
 class Gui {
   public:
     static constexpr double kMinScale = 0.5;
     static constexpr double kMaxScale = 2.5;
 
-    Gui(EditorHost& host, const char* className, bool standalone = false);
+    Gui(EditorHost& host, const char* className, bool standalone = false, EditorFactory make = {});
     ~Gui();
     Gui(const Gui&) = delete;
     Gui& operator=(const Gui&) = delete;
@@ -52,9 +57,10 @@ class Gui {
         window_.tick();
         if (retired_ && !window_.replacing()) retired_.reset();
     }
-    // A new editor from product::createEditor, for a plugin whose definition
-    // changed (core/Definition.h). Its design size may differ: the host size
-    // for the current user scale is then sizeAt(userScale()).
+    // A new editor from the factory, for a plugin whose definition changed
+    // (core/Definition.h) or whose layer asked (plugin/Layer.h). Its design
+    // size may differ: the host size for the current user scale is then
+    // sizeAt(userScale()).
     void rebuild(EditorHost& host);
     bool startFallbackTimer(double seconds) { return window_.startFallbackTimer(seconds); }
     void stopFallbackTimer() { window_.stopFallbackTimer(); }
@@ -67,7 +73,8 @@ class Gui {
     uint32_t hostH(double userScale) const;
     void applyLimits();
 
-    std::unique_ptr<EditorBase> editor_;   // declared first: outlives the window
+    EditorFactory make_;
+    std::unique_ptr<EditorBase> editor_;   // declared before the window: outlives it
     std::unique_ptr<EditorBase> retired_;  // the editor the window shows until a rebuild's swap
     Window window_;
     double platformScale_ = 1.0;

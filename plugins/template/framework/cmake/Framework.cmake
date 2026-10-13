@@ -262,8 +262,8 @@ if (SUPPLE_BUILD_GUI)
         set(sources
             ${SUPPLE_FRAMEWORK}/gui/EditorBase.cpp ${SUPPLE_FRAMEWORK}/gui/Fonts.cpp
             ${SUPPLE_FRAMEWORK}/gui/Gui.cpp ${SUPPLE_FRAMEWORK}/gui/Images.cpp
-            ${SUPPLE_FRAMEWORK}/gui/NativeFiles.cpp ${SUPPLE_FRAMEWORK}/gui/Ui.cpp
-            ${SUPPLE_FRAMEWORK}/gui/Widgets.cpp ${SUPPLE_FRAMEWORK}/gui/Window.cpp
+            ${SUPPLE_FRAMEWORK}/gui/NativeFiles.cpp ${SUPPLE_FRAMEWORK}/gui/Offscreen.cpp
+            ${SUPPLE_FRAMEWORK}/gui/Ui.cpp ${SUPPLE_FRAMEWORK}/gui/Widgets.cpp ${SUPPLE_FRAMEWORK}/gui/Window.cpp
             ${product_editor_sources})
         # A product with no editor code gets the automatic one.
         if (NOT product_editor_sources)
@@ -280,7 +280,8 @@ if (SUPPLE_BUILD_GUI)
             list(APPEND sources ${SUPPLE_FRAMEWORK}/gui/CanvasGL.c)
         endif()
         add_library(${name} STATIC ${sources})
-        target_link_libraries(${name} PUBLIC product-core supple-fonts supple-nanosvg)
+        # dlopen, for EGL (gui/Offscreen.cpp).
+        target_link_libraries(${name} PUBLIC product-core supple-fonts supple-nanosvg ${CMAKE_DL_LIBS})
         if (WIN32)
             target_link_libraries(${name} PUBLIC ole32 shell32 uuid)
         elseif (APPLE)

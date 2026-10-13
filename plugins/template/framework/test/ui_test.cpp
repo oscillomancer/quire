@@ -33,6 +33,7 @@
 #include "gui/Images.h"
 #include "gui/Layout.h"
 #include "gui/NativeFiles.h"
+#include "gui/Offscreen.h"
 #include "gui/Plot.h"
 #include "gui/Spectrum.h"
 #include "gui/Widgets.h"
@@ -1691,6 +1692,29 @@ struct ProductEditor {
     }
 };
 }  // namespace
+
+TEST(the_editor_draws_without_a_window_at_any_scale) {
+    MockHost host;
+    std::unique_ptr<EditorBase> editor = product::createEditor(host);
+    Picture picture;
+    std::string why;
+    if (!drawOffscreen(*editor, 1.5, picture, &why)) {
+        std::printf("    (%s: skipped)\n", why.c_str());
+        CHECK(!why.empty() && picture.rgba.empty());
+        return;
+    }
+    CHECK(picture.width == static_cast<int>(std::lround(editor->width() * 1.5)));
+    CHECK(picture.height == static_cast<int>(std::lround(editor->height() * 1.5)));
+    CHECK(picture.rgba.size() == static_cast<size_t>(picture.width) * static_cast<size_t>(picture.height) * 4);
+    // Not one colour: the editor drew something on its ground.
+    std::set<uint32_t> colours;
+    for (int y = 0; y < picture.height; y += 7)
+        for (int x = 0; x < picture.width; x += 7) colours.insert(picture.rgb(x, y));
+    CHECK(colours.size() > 8);
+    // Drawn again, the same picture, and the editor left as it was.
+    Picture again;
+    CHECK(drawOffscreen(*editor, 1.5, again) && again.rgba == picture.rgba);
+}
 
 TEST(the_layout_is_inside_the_panel_and_controls_do_not_overlap) {
     ProductEditor p;
