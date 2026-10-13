@@ -419,6 +419,18 @@ Where the work stands, and where it departs from the text above:
   `supple/script_program.hpp`); the C ABI of §2 is not written, since
   nothing loads the compiler across a library boundary yet.
 
+- 2026-10-13: `dsp.test` accepts physical-unit parameter automation as
+  sample-accurate CLAP events, a timed generated sidechain key through the
+  sandbox renderer's first-stage `RenderRequest::sidechain`, and custom
+  instrument notes with independent note IDs. Each signal/reference pass
+  uses a fresh instance with the initial patch. The harness compares the
+  largest adjacent-sample step with/without automation (a click/zipper
+  screening heuristic), and the keyed window's RMS with a connected silent
+  key (negative gain change means ducking). Custom release measurements use
+  the last actual note-off. Static THD/impulse-response reports are omitted
+  during automation/non-silent keys; contracts and limitations are in
+  `docs/specs/sandbox.md`, usage in `skill/guides/dsp-workflow.md`.
+
 ## Consequences
 
 Scripts reuse all of Quire's hosting and agent tooling with no special

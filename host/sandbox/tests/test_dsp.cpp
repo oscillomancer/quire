@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <numbers>
 #include <sstream>
 #include <string>
 
@@ -37,7 +38,197 @@ std::string script(const std::string& name, const std::string& id, const std::st
            id + "\"};\n" + body + "\n};\n";
 }
 
+// New harness cases share the real player and the small host fixtures.
+struct Harness {
+    Root root;
+    cmd::Registry registry;
+    std::unique_ptr<SandboxHost> host;
+    std::unique_ptr<cmd::Dispatcher> bus;
+
+    Harness() {
+        SessionOptions options;
+        options.workdir = root.path;
+        options.pluginPath = {fs::path(FIXTURE_CLAP_PATH), kStock / "Script Player.clap"};
+        auto session = Session::open(options);
+        REQUIRE(session);
+        host = std::make_unique<SandboxHost>(std::move(*session), fs::path{});
+        registerCommands(registry);
+        bus = std::make_unique<cmd::Dispatcher>(registry, *host);
+    }
+    Result<json::Value> test(std::string_view args) {
+        auto parsed = json::parse(args);
+        REQUIRE(parsed);
+        return bus->execute({"dsp.test", *parsed, kTest});
+    }
+    json::Value measured(std::string_view args) {
+        auto result = test(args);
+        REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
+        return *result;
+    }
+    void write(const std::string& name, const std::string& source) {
+        auto args = json::Value::object();
+        args["name"] = name;
+        args["source"] = source;
+        auto result = bus->execute({"dsp.write", args, kTest});
+        REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
+        REQUIRE_MESSAGE((*result)["ok"].asBool(), json::writeCompact((*result)["diagnostics"]));
+    }
+};
+
 }  // namespace
+
+TEST_CASE("dsp.test automation uses physical values and detects abrupt steps") {
+    Harness h;
+    // The command's value reaches the renderer at sample 12012, not the next block.
+    auto value = h.measured(R"({"plugin":"com.suppleaudio.test.gain","signals":["sine"],
+        "save":true,"frequency_hz":1000,"automation":[{"param":"gain","at_s":0.25025,"value":-6}]})");
+    auto audio = audio::readAudio(value["signals"].at(0).find("path")->asString());
+    REQUIRE(audio);
+    const auto& x = audio->channels[0];
+    const double amplitude = std::pow(10.0, -12.0 / 20.0);
+    for (std::size_t i : {12011u, 12012u}) {
+        const double input = amplitude * std::sin(2.0 * std::numbers::pi * 1000.0 *
+                                                  static_cast<double>(i) / 48000.0);
+        CHECK(
+            static_cast<double>(x[i]) ==
+            doctest::Approx(input * (i < 12012 ? 1.0 : std::pow(10.0, -6.0 / 20.0))).epsilon(1e-5));
+    }
+    CHECK_FALSE(value["signals"].at(0).find("thd_percent"));
+    for (const std::string name : {"abrupt", "smooth"}) {
+        h.write(name, script("Gain", "com.example." + name,
+                             "Param gain = decibels(\"Gain\", -60, 0, -60)" +
+                                 std::string(name == "smooth" ? ".smoothed(20)" : "") + R"(;
+            void process(Block& io) {
+                for (int c = 0; c < io.channels; ++c)
+                    for (int i = 0; i < io.frames; ++i) io[c][i] *= dbToGain(gain.at(i));
+            })"));
+    }
+    auto abrupt = h.measured(R"({"script":"abrupt","signals":["sine","sine"],"frequency_hz":100,
+        "automation":[{"param":"gain","at_s":0.2525,"value":0}]})");
+    auto smooth = h.measured(R"({"script":"smooth","signals":["sine"],"frequency_hz":100,
+        "automation":[{"param":"gain","at_s":0.2525,"value":0}]})");
+    const auto& step = *abrupt["signals"].at(0).find("automation");
+    CHECK(step.find("max_step")->asDouble() > 0.2);
+    const auto& smoothedStep = *smooth["signals"].at(0).find("automation");
+    CHECK(smoothedStep.find("max_step")->asDouble() < step.find("max_step")->asDouble() * 0.1);
+    CHECK(abrupt["problems"].at(0).asString().find("zipper noise") != std::string::npos);
+    CHECK(abrupt["signals"].at(0) == abrupt["signals"].at(1));  // a fresh initial value per pass
+}
+
+TEST_CASE("dsp.test compressor ducks under a timed key and measures a silent reference") {
+    Harness h;
+    std::ifstream in(std::string(SUPPLE_SCRIPT_EXAMPLES) + "/compressor.cpp");
+    std::stringstream source;
+    source << in.rdbuf();
+    h.write("compressor", source.str());
+    auto active = h.measured(R"({"script":"compressor","signals":["sine"],"level_db":-30,
+        "patch":{"params":{"attack":1}},"sidechain":{"level_db":-6}})");
+    const auto& duck = *active["signals"].at(0).find("sidechain");
+    CHECK(duck.find("gain_change_db")->asDouble() < -10.0);
+    CHECK(duck.find("reference_rms_dbfs")->asDouble() == doctest::Approx(-33.01).epsilon(0.001));
+    CHECK_FALSE(active["signals"].at(0).find("thd_percent"));
+    auto silent = h.measured(R"({"script":"compressor","signals":["sine","silence"],
+        "level_db":-30,"sidechain":{"signal":"silence"}})");
+    const auto& silentSine = *silent["signals"].at(0).find("sidechain");
+    const auto& silentMain = *silent["signals"].at(1).find("sidechain");
+    CHECK(silentSine.find("gain_change_db")->asDouble() == 0.0);
+    CHECK(silentMain.find("gain_change_db")->isNull());
+}
+
+TEST_CASE("dsp.test custom notes keep exact timing, velocity and their own final release") {
+    Harness h;
+    h.write("gates", R"(#include <supple/script.h>
+        struct Gates : Instrument {
+            static constexpr Info info = {.name="Gates", .id="com.example.gates", .voices=4};
+            Array<int, 4> remaining;
+            void startVoice(int v) { remaining[v] = -1; }
+            void releaseVoice(int v) { remaining[v] = 240; }
+            void process(Block& io) {
+                for (int v = 0; v < voiceCount(); ++v) {
+                    if (!voicePlaying(v)) continue;
+                    for (int i = 0; i < io.frames; ++i) {
+                        if (remaining[v] == 0) { voiceFinished(v); break; }
+                        for (int c = 0; c < io.channels; ++c) io[c][i] += 0.1 * voiceVelocity(v);
+                        if (remaining[v] > 0) --remaining[v];
+                    }
+                }
+            }
+        };)");
+    auto result = h.measured(R"({"script":"gates","save":true,
+        "notes":[{"key":60,"velocity":0.4,"start_s":0.013,"length_s":0.05},
+                 {"key":60,"velocity":0.8,"start_s":0.043,"length_s":0.06}]})");
+    REQUIRE(result["signals"].size() == 2);
+    const auto& notes = result["signals"].at(0);
+    CHECK(notes.find("signal")->asString() == "notes");
+    CHECK_FALSE(notes.find("pitch_hz"));
+    CHECK(notes.find("release_ms")->asDouble() == 5.0);
+    auto audio = audio::readAudio(notes.find("path")->asString());
+    REQUIRE(audio);
+    const auto& x = audio->channels[0];
+    CHECK(x[623] == 0.0f);
+    CHECK(static_cast<double>(x[624]) == doctest::Approx(0.04));
+    CHECK(static_cast<double>(x[2064]) == doctest::Approx(0.12));
+    CHECK(static_cast<double>(x[3263]) == doctest::Approx(0.12));
+    CHECK(static_cast<double>(x[3264]) == doctest::Approx(0.08));
+    CHECK(static_cast<double>(x[5183]) == doctest::Approx(0.08));
+    CHECK(x[5184] == 0.0f);
+    CHECK(result["signals"].at(1).find("peak_dbfs")->asDouble() == -200.0);
+}
+
+TEST_CASE("dsp.test rejects invalid automation, key and custom-note arguments at their paths") {
+    Harness h;
+    auto check = [&](std::string_view args, std::string_view path) {
+        auto result = h.test(args);
+        REQUIRE_FALSE(result);
+        if (result.error().code == "command.invalid_args") {
+            REQUIRE(result.error().details.size() == 1);
+            CHECK(result.error().details[0].path == "/args" + std::string(path));
+        } else {
+            CHECK(result.error().path == "/args" + std::string(path));
+        }
+        CHECK_FALSE(result.error().code.empty());
+        CHECK_FALSE(result.error().message.empty());
+        CHECK_FALSE(result.error().hint.empty());
+    };
+    check(
+        R"({"plugin":"com.suppleaudio.test.gain","automation":[{"param":"missing","at_s":0.2,"value":0}]})",
+        "/automation/0/param");
+    check(
+        R"({"plugin":"com.suppleaudio.test.gain","automation":[{"param":"gain","at_s":0.2,"value":999}]})",
+        "/automation/0/value");
+    check(
+        R"({"plugin":"com.suppleaudio.test.gain","automation":[{"param":"gain","at_s":1,"value":0}]})",
+        "/automation/0/at_s");
+    check(
+        R"({"plugin":"com.suppleaudio.test.keymix","automation":[{"param":"gain","at_s":0.2,"value":0}]})",
+        "/automation");
+    h.write(
+        "meter",
+        script("Meter", "com.example.readonly",
+               "Param level = decibels(\"Level\", -60, 0, 0).meter(); void process(Block& io) {}"));
+    check(R"({"script":"meter","automation":[{"param":"level","at_s":0.2,"value":0}]})",
+          "/automation/0/param");
+    check(R"({"plugin":"com.suppleaudio.test.gain","sidechain":{}})", "/sidechain");
+    check(R"({"plugin":"com.suppleaudio.test.keymix","sidechain":{"start_s":1}})",
+          "/sidechain/start_s");
+    check(R"({"plugin":"com.suppleaudio.test.keymix","sidechain":{"length_s":0.000000001}})",
+          "/sidechain/length_s");
+    check(
+        R"({"plugin":"com.suppleaudio.test.sine","notes":[{"key":60,"start_s":0.2,"length_s":1}]})",
+        "/notes/0/length_s");
+    check(
+        R"({"plugin":"com.suppleaudio.test.sine","notes":[{"key":128,"start_s":0.2,"length_s":0.1}]})",
+        "/notes/0/key");
+    check(
+        R"({"plugin":"com.suppleaudio.test.sine","signals":["note"],"notes":[{"key":60,"start_s":0,"length_s":0.1}]})",
+        "/notes");
+    check(
+        R"({"plugin":"com.suppleaudio.test.sine","signals":["silence"],"notes":[{"key":60,"start_s":0,"length_s":0.1}]})",
+        "/notes");
+    check(
+        R"({"plugin":"com.suppleaudio.test.gain","notes":[{"key":60,"start_s":0,"length_s":0.1}]})",
+        "/notes");
+}
 
 TEST_CASE("dsp.test measures a script through the player and names what goes wrong") {
     if (!fs::exists(kStock / "Script Player.clap")) {

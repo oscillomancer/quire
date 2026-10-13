@@ -217,8 +217,11 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
   script when its file changes. `dsp.write`, `dsp.check`, `dsp.get` and
   `dsp.list` write and compile scripts (the app's library is
   `<data>/<slug>/scripts`, shared with the sandbox), `dsp.test` measures
-  one with standard signals, and a script that compiles is loaded and set
-  like a stock plugin (`skill/guides/dsp-workflow.md`). `dsp.export` makes
+  one with standard signals, physical-unit parameter automation, a timed
+  sidechain key or a custom note sequence. It compares automation's sample
+  steps and keyed output against fresh reference renders, and measures
+  release from the sequence's last note-off. A script that compiles is
+  loaded and set like a stock plugin (`skill/guides/dsp-workflow.md`). `dsp.export` makes
   a script a CLAP plugin for any host (a copy of the player with the script
   appended, which offers that one plugin), or a C++ project of the plugin
   template that builds the same plugin, bit for bit, with the script

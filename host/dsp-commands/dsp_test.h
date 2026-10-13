@@ -27,6 +27,7 @@
 #include "supple/clap/semantic_params.h"
 #include "supple/dsp/dsp.h"
 #include "supple/host/clap_host.h"
+#include "supple/params/params.h"
 #include "supple/sandbox/render.h"
 
 namespace supple::dsp_commands {
@@ -62,10 +63,27 @@ inline const char* signalName(Signal s) {
     }
 }
 
+struct AutomationEvent {
+    std::string param;
+    double atS = 0.0;
+    json::Value value;
+};
+struct SidechainArgs {
+    Signal signal = Signal::Sine;
+    double levelDb = -6.0, frequencyHz = 100.0;
+    std::optional<double> startS, lengthS;
+};
+struct Note {
+    int key = 60;
+    double velocity = 0.8, startS = 0.0, lengthS = 0.0;
+};
 struct TestArgs {
     std::optional<std::string> plugin, script;
     std::optional<json::Value> patch;
     std::optional<std::vector<Signal>> signals;
+    std::optional<std::vector<AutomationEvent>> automation;
+    std::optional<SidechainArgs> sidechain;
+    std::optional<std::vector<Note>> notes;
     double levelDb = -12.0;
     double frequencyHz = 1000.0;
     double seconds = 1.0;
@@ -73,6 +91,13 @@ struct TestArgs {
 };
 struct ResponsePoint {
     double hz = 0.0, db = 0.0;
+};
+struct AutomationResult {
+    double maxStep = 0.0, baselineMaxStep = 0.0, excessStep = 0.0;
+};
+struct SidechainResult {
+    double rmsDbfs = -200.0, referenceRmsDbfs = -200.0;
+    json::Value gainChangeDb;  // null when either measurement is below -120 dBFS
 };
 struct SignalResult {
     std::string signal;
@@ -82,6 +107,8 @@ struct SignalResult {
     std::optional<std::vector<ResponsePoint>> response;
     std::optional<double> pitchHz, releaseMs;
     std::optional<std::string> path;
+    std::optional<AutomationResult> automation;
+    std::optional<SidechainResult> sidechain;
 };
 struct TestResult {
     std::string plugin;
@@ -192,6 +219,115 @@ inline std::vector<sandbox::TimedEvent> noteEvents(Signal s, double rate, double
 // When the last note is released, as a fraction of `seconds`.
 inline constexpr double kReleaseAt = 0.8;
 
+// All validation and conversions happen on main, before the renderer starts.
+inline Result<std::pair<std::int64_t, std::int64_t>> timeSpan(double start, double length,
+                                                              double seconds, double rate,
+                                                              const std::string& path,
+                                                              const std::string& code) {
+    if (!(start >= 0.0 && start < seconds))
+        return Error(code, "start lies outside the musical render", path + "/start_s",
+                     "use a start in [0, seconds)");
+    if (!(length > 0.0 && start + length <= seconds))
+        return Error(code, "length lies outside the musical render", path + "/length_s",
+                     "use a positive length ending at or before seconds");
+    const auto begin = std::llround(start * rate), end = std::llround((start + length) * rate);
+    if (end <= begin)
+        return Error(code, "span rounds to zero samples", path + "/length_s",
+                     "use a length of at least one sample at the render rate");
+    return std::pair<std::int64_t, std::int64_t>{begin, end};
+}
+
+inline Result<std::vector<sandbox::TimedEvent>> automationEvents(host::Instance& instance,
+                                                                 const TestArgs& a, double rate) {
+    std::vector<sandbox::TimedEvent> out;
+    if (!a.automation) return out;
+    if (!instance.info().semantic)
+        return Error("dsp.automation", "automation needs physical parameter definitions",
+                     "/automation", "choose a plugin with the semantic-params extension");
+    auto schema = instance.semanticSchema();
+    if (!schema) return std::move(schema).error().at("/automation");
+    const auto* entries = schema->find("params");
+    const auto live = instance.params();
+    for (std::size_t i = 0; i < a.automation->size(); ++i) {
+        const auto& point = (*a.automation)[i];
+        const std::string path = "/automation/" + std::to_string(i);
+        const auto* entry = entries && entries->isObject() ? entries->find(point.param) : nullptr;
+        if (!entry)
+            return Error("dsp.automation", "unknown parameter " + point.param, path + "/param",
+                         "choose a parameter key from the plugin's semantic schema");
+        auto described = params::fromDescription(point.param, *entry);
+        if (!described) return std::move(described).error().at(path + "/param");
+        const auto& spec = (*described)->spec;
+        const auto hostParam =
+            std::find_if(live.begin(), live.end(), [&](const auto& p) { return p.id == spec.id; });
+        const auto* active = entry->find("active");
+        if ((active && active->isBool() && !active->asBool()) || (spec.flags & params::kReadonly) ||
+            !(spec.flags & params::kAutomatable) || hostParam == live.end() ||
+            (hostParam->flags & CLAP_PARAM_IS_READONLY) ||
+            !(hostParam->flags & CLAP_PARAM_IS_AUTOMATABLE))
+            return Error("dsp.automation", "parameter is not available for automation",
+                         path + "/param", "choose an active, writable, automatable parameter");
+        auto physical = params::fromJson(spec, point.value);
+        if (!physical) return std::move(physical).error().at(path + "/value");
+        if (!(point.atS >= 0.0 && point.atS < a.seconds) ||
+            std::llround(point.atS * rate) >= std::llround(a.seconds * rate))
+            return Error("dsp.automation", "event lies outside the musical render", path + "/at_s",
+                         "place the event at a sample before seconds");
+        sandbox::TimedEvent e;
+        e.sample = std::llround(point.atS * rate);
+        e.event.kind = host::Event::Kind::Param;
+        e.event.paramId = spec.id;
+        e.event.value = params::toClap(spec, *physical);
+        if (instance.paramsNormalized()) {
+            auto normalized = instance.normalizedParam(spec.id, e.event.value);
+            if (!normalized) return std::move(normalized).error().at(path + "/value");
+            e.event.value = *normalized;
+        }
+        out.push_back(e);
+    }
+    return out;
+}
+
+inline Result<std::vector<sandbox::TimedEvent>> customNoteEvents(const TestArgs& a, double rate) {
+    std::vector<sandbox::TimedEvent> out;
+    if (!a.notes) return out;
+    for (std::size_t i = 0; i < a.notes->size(); ++i) {
+        const auto& note = (*a.notes)[i];
+        auto span = timeSpan(note.startS, note.lengthS, a.seconds, rate,
+                             "/notes/" + std::to_string(i), "dsp.notes");
+        if (!span) return std::move(span).error();
+        sandbox::TimedEvent e;
+        e.sample = span->first;
+        e.event.kind = host::Event::Kind::NoteOn;
+        e.event.key = static_cast<std::int16_t>(note.key);
+        e.event.noteId = static_cast<std::int32_t>(i);
+        e.event.velocity = note.velocity;
+        out.push_back(e);
+        e.sample = span->second;
+        e.event.kind = host::Event::Kind::NoteOff;
+        out.push_back(e);
+    }
+    return out;
+}
+
+inline double maxStep(const audio::AudioData& audio) {
+    double step = 0.0;
+    for (const auto& ch : audio.channels)
+        for (std::size_t i = 1; i < ch.size(); ++i)
+            step = std::max(step,
+                            std::abs(static_cast<double>(ch[i]) - static_cast<double>(ch[i - 1])));
+    return step;
+}
+
+inline double windowRmsDb(const audio::AudioData& audio, std::size_t begin, std::size_t end) {
+    double squares = 0.0;
+    for (const auto& ch : audio.channels)
+        for (std::size_t i = begin; i < std::min(end, ch.size()); ++i)
+            squares += static_cast<double>(ch[i]) * static_cast<double>(ch[i]);
+    const auto count = (end - begin) * audio.channels.size();
+    return toDb(count ? std::sqrt(squares / static_cast<double>(count)) : 0.0);
+}
+
 // The fundamental of x over 4096 samples from `begin` (the difference
 // function's first dip, as YIN finds it), between 40 Hz and 2 kHz, and how
 // periodic the sound is there (1: exactly); nothing when it is not a tone.
@@ -243,7 +379,7 @@ inline double toneAmplitude(const std::vector<float>& x, std::size_t begin, std:
 
 // Levels and counts over every channel; gain, THD and response by signal.
 inline SignalResult measure(Signal s, const audio::AudioData& out, std::size_t inputFrames,
-                            const TestArgs& a) {
+                            const TestArgs& a, std::optional<std::int64_t> releasedAt = {}) {
     SignalResult r;
     r.signal = signalName(s);
     double peak = 0.0, squares = 0.0;
@@ -275,7 +411,8 @@ inline SignalResult measure(Signal s, const audio::AudioData& out, std::size_t i
     }
     if (forInstruments(s)) {
         // From the last release to the last sample above -80 dBFS.
-        const auto released = static_cast<std::size_t>(kReleaseAt * a.seconds * rate);
+        const auto released = static_cast<std::size_t>(
+            releasedAt.value_or(std::llround(kReleaseAt * a.seconds * rate)));
         std::size_t last = 0;
         for (const auto& ch : out.channels)
             for (std::size_t i = ch.size(); i-- > 0;)
@@ -292,7 +429,8 @@ inline SignalResult measure(Signal s, const audio::AudioData& out, std::size_t i
         const std::size_t begin = std::min(static_cast<std::size_t>(0.1 * rate), end / 4);
         const double fundamental = toneAmplitude(x, begin, end, a.frequencyHz, rate);
         r.gainDb = toDb(fundamental) - toDb(amp);
-        if (fundamental > 1e-7) {
+        if (fundamental > 1e-7 && !a.automation &&
+            (!a.sidechain || a.sidechain->signal == Signal::Silence)) {
             double harmonics = 0.0;
             for (int k = 2; k <= 10 && k * a.frequencyHz < 0.45 * rate; ++k) {
                 const double h = toneAmplitude(x, begin, end, k * a.frequencyHz, rate);
@@ -301,7 +439,8 @@ inline SignalResult measure(Signal s, const audio::AudioData& out, std::size_t i
             r.thdPercent = rounded(100.0 * std::sqrt(harmonics) / fundamental, 4);
         }
         r.gainDb = rounded(*r.gainDb, 2);
-    } else if (s == Signal::Impulse) {
+    } else if (s == Signal::Impulse && !a.automation &&
+               (!a.sidechain || a.sidechain->signal == Signal::Silence)) {
         std::size_t n = 1;
         while (n < x.size() && n < (std::size_t(1) << 19)) n <<= 1;
         std::vector<double> in(n, 0.0);
@@ -353,8 +492,57 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
         "silence, no output, a note out of tune, sound that never dies away, non-finite "
         "samples the framework silenced, a script stopped by its loop budget or indexing "
         "outside an array). cpu_percent is measured, so it varies between runs. save: true "
-        "keeps each output as a WAV (path) for analyze and compare.";
+        "keeps each output as a WAV (path) for analyze and compare. "
+        "automation is a list of {param, at_s, value}: semantic patch keys and physical "
+        "values, as discrete sample-accurate changes applied to every signal (no implicit "
+        "ramps). automation.max_step is the largest adjacent-sample change in full-scale "
+        "amplitude; baseline_max_step uses the same render without automation; excess_step "
+        "is their positive difference. A step above both four times baseline and 0.05 "
+        "suggests clicks or zipper noise: a screening heuristic, not proof of an artifact "
+        "or of inaudibility. sidechain supplies a timed key; its middle half is measured "
+        "against a connected silent key with identical automation: gain_change_db is "
+        "negative for ducking, null if either output is below -120 dBFS. Slow attack may "
+        "not settle in that window. Each pass has a fresh instance and initial patch. "
+        "THD and impulse response are omitted during automation or a non-silent key; "
+        "gain_db then describes the changing render, not static gain. notes supplies an "
+        "instrument's sequence ({key, velocity, start_s, length_s}), replacing the notes "
+        "signal; defaults become notes and silence. Do not combine it with the A4 note "
+        "signal or select only silence. release_ms starts at its last note-off. "
+        "Times round to samples at the render rate; spans must fit within seconds.";
     c.tags = {"dsp", "analysis"};
+    auto automationEvent = schema::object<AutomationEvent>("dsp_automation_event")
+                               .field("param", &AutomationEvent::param,
+                                      schema::string().minLength(1).doc("semantic patch key"))
+                               .field("at_s", &AutomationEvent::atS, schema::number().min(0))
+                               .field("value", &AutomationEvent::value,
+                                      schema::any().doc("physical value, enum key or boolean"))
+                               .build();
+    auto sidechainArgs = schema::object<SidechainArgs>("dsp_sidechain_args")
+                             .field("signal", &SidechainArgs::signal,
+                                    schema::enumeration<Signal>({{Signal::Sine, "sine"},
+                                                                 {Signal::Sweep, "sweep"},
+                                                                 {Signal::Impulse, "impulse"},
+                                                                 {Signal::Noise, "noise"},
+                                                                 {Signal::Silence, "silence"}}))
+                             .defaultValue(Signal::Sine)
+                             .field("level_db", &SidechainArgs::levelDb,
+                                    schema::number().range(-60, 0).unit(units::Unit::dB))
+                             .defaultValue(-6.0)
+                             .field("frequency_hz", &SidechainArgs::frequencyHz,
+                                    schema::number().range(10, 20000).unit(units::Unit::Hz))
+                             .defaultValue(100.0)
+                             .field("start_s", &SidechainArgs::startS,
+                                    schema::number().min(0).doc("default: 0.25 * seconds"))
+                             .field("length_s", &SidechainArgs::lengthS,
+                                    schema::number().exclusiveMin(0).doc("default: 0.5 * seconds"))
+                             .build();
+    auto note = schema::object<Note>("dsp_test_note")
+                    .field("key", &Note::key, schema::integerOf<int>().range(0, 127))
+                    .field("velocity", &Note::velocity, schema::number().exclusiveMin(0).max(1))
+                    .defaultValue(0.8)
+                    .field("start_s", &Note::startS, schema::number().min(0))
+                    .field("length_s", &Note::lengthS, schema::number().exclusiveMin(0))
+                    .build();
     c.args = schema::object<TestArgs>("dsp_test_args")
                  .field("plugin", &TestArgs::plugin, schema::string().minLength(1))
                  .field("script", &TestArgs::script, schema::string().minLength(1))
@@ -367,7 +555,18 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                                                                      {Signal::Silence, "silence"},
                                                                      {Signal::Notes, "notes"},
                                                                      {Signal::Note, "note"}}))
-                            .doc("default: an effect's five, an instrument's three"))
+                            .doc("default: effects five; instruments three, or notes and silence "
+                                 "with custom notes"))
+                 .field("automation", &TestArgs::automation,
+                        schema::arrayOf(automationEvent)
+                            .minItems(1)
+                            .maxItems(1024)
+                            .doc("discrete physical-value changes on every signal"))
+                 .field("sidechain", &TestArgs::sidechain,
+                        sidechainArgs.doc("timed generated key input"))
+                 .field("notes", &TestArgs::notes,
+                        schema::arrayOf(note).minItems(1).maxItems(1024).doc(
+                            "instrument sequence replacing the notes stimulus"))
                  .field("level_db", &TestArgs::levelDb,
                         schema::number().range(-60, 0).unit(units::Unit::dB))
                  .defaultValue(-12.0)
@@ -383,6 +582,30 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                      .field("hz", &ResponsePoint::hz, schema::number())
                      .field("db", &ResponsePoint::db, schema::number())
                      .build();
+    auto automationResult =
+        schema::object<AutomationResult>("dsp_automation_result")
+            .field("max_step", &AutomationResult::maxStep, schema::number())
+            .field("baseline_max_step", &AutomationResult::baselineMaxStep, schema::number())
+            .field("excess_step", &AutomationResult::excessStep, schema::number())
+            .build();
+    schema::Schema<json::Value> nullableNumber(
+        "number or null",
+        [](const json::Value& v, json::Value& out, schema::DecodeCtx& ctx,
+           const std::string& path) {
+            if (!v.isNull()) {
+                double value = 0.0;
+                if (!schema::number().decodeInto(v, value, ctx, path)) return false;
+            }
+            out = v;
+            return true;
+        },
+        [](const json::Value& v) { return v; }, detail::j(R"({"type":["number","null"]})"));
+    auto sidechainResult =
+        schema::object<SidechainResult>("dsp_sidechain_result")
+            .field("rms_dbfs", &SidechainResult::rmsDbfs, schema::number())
+            .field("reference_rms_dbfs", &SidechainResult::referenceRmsDbfs, schema::number())
+            .field("gain_change_db", &SidechainResult::gainChangeDb, nullableNumber)
+            .build();
     auto signal = schema::object<SignalResult>("dsp_signal_result")
                       .field("signal", &SignalResult::signal, schema::string())
                       .field("peak_dbfs", &SignalResult::peakDbfs, schema::number())
@@ -399,6 +622,8 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                       .field("release_ms", &SignalResult::releaseMs,
                              schema::number().doc("an instrument's: sound after the last release"))
                       .field("path", &SignalResult::path, schema::string())
+                      .field("automation", &SignalResult::automation, automationResult)
+                      .field("sidechain", &SignalResult::sidechain, sidechainResult)
                       .build();
     c.result = schema::object<TestResult>("dsp_test_result")
                    .field("plugin", &TestResult::plugin, schema::string())
@@ -415,7 +640,13 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                 {"dsp.not_effect", "the plugin takes no audio and no notes",
                  "test an effect or an instrument"},
                 {"dsp.signal", "a signal the plugin cannot play",
-                 "an effect plays audio signals, an instrument notes"}};
+                 "an effect plays audio signals, an instrument notes"},
+                {"dsp.automation", "unavailable parameter or automation time outside the render",
+                 "choose a writable semantic parameter and a time before seconds"},
+                {"dsp.sidechain", "no key input or invalid key timing",
+                 "choose a plugin with a key and a nonempty span within seconds"},
+                {"dsp.notes", "invalid custom sequence or signal selection",
+                 "use an instrument, notes or notes and silence, and spans within seconds"}};
     if (!exampleEffect.empty()) {
         json::Value args = json::Value::object();
         args["plugin"] = exampleEffect;
@@ -425,6 +656,23 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                        detail::j(R"({"plugin":"<any>","latency":"<any>",
                           "signals":"<any>","cpu_percent":"<any>","problems":"<any>","log":"<any>"})"),
                        "empty"}};
+        auto expected = detail::j(R"({"plugin":"<any>","latency":"<any>","signals":"<any>",
+                                     "cpu_percent":"<any>","problems":"<any>","log":"<any>"})");
+        c.examples.push_back({"Automate an effect in dB",
+                              detail::j(R"({"plugin":"com.suppleaudio.test.gain","signals":["sine"],
+                              "automation":[{"param":"gain","at_s":0.253,"value":-12},
+                                            {"param":"gain","at_s":0.753,"value":0}]})"),
+                              expected, "empty"});
+        c.examples.push_back(
+            {"Measure a timed sidechain",
+             detail::j(R"({"plugin":"com.suppleaudio.test.keymix","signals":["sine"],
+                                            "sidechain":{"level_db":-6}})"),
+             expected, "empty"});
+        c.examples.push_back({"Play a custom note sequence",
+                              detail::j(R"({"plugin":"com.suppleaudio.test.sine",
+                              "notes":[{"key":60,"start_s":0.013,"length_s":0.2},
+                                       {"key":67,"velocity":0.6,"start_s":0.303,"length_s":0.4}]})"),
+                              expected, "empty"});
     }
     c.run = [](const TestArgs& a, Context& ctx) -> Result<TestResult> {
         Host& s = ctx.service<Host>();
@@ -473,9 +721,15 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
         out.plugin = info->id;
         const std::vector<Signal> signals =
             a.signals && !a.signals->empty() ? *a.signals
+            : a.notes                        ? std::vector<Signal>{Signal::Notes, Signal::Silence}
             : instrument
                 ? std::vector<Signal>(std::begin(kInstrumentSignals), std::end(kInstrumentSignals))
                 : std::vector<Signal>(std::begin(kEffectSignals), std::end(kEffectSignals));
+        if (a.notes && (!instrument ||
+                        std::find(signals.begin(), signals.end(), Signal::Note) != signals.end() ||
+                        std::find(signals.begin(), signals.end(), Signal::Notes) == signals.end()))
+            return Error("dsp.notes", "custom notes require an instrument's notes signal", "/notes",
+                         "select notes, or notes and silence; omit the A4 note signal");
         for (size_t k = 0; k < signals.size(); ++k)
             if (signals[k] != Signal::Silence && forInstruments(signals[k]) != instrument)
                 return Error("dsp.signal",
@@ -486,42 +740,60 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                              "/signals/" + std::to_string(k),
                              instrument ? "use notes, note or silence"
                                         : "use sine, sweep, impulse, noise or silence");
+        const sandbox::RenderSettings settings = Traits::settings(s);
+        auto automated = automationEvents(instance, a, settings.sampleRate);
+        if (!automated) return std::move(automated).error();
+        auto sequence = customNoteEvents(a, settings.sampleRate);
+        if (!sequence) return std::move(sequence).error();
+        std::optional<std::int64_t> releasedAt;
+        for (const auto& e : *sequence)
+            if (e.event.kind == host::Event::Kind::NoteOff)
+                releasedAt = std::max(releasedAt.value_or(0), e.sample);
+        audio::AudioData key, silentKey;
+        std::pair<std::int64_t, std::int64_t> keySpan{};
+        if (a.sidechain) {
+            if (!instance.sidechainChannels())
+                return Error("dsp.sidechain", "the plugin has no sidechain input", "/sidechain",
+                             "choose a plugin with a key input or omit sidechain");
+            const auto& sc = *a.sidechain;
+            auto span =
+                timeSpan(sc.startS.value_or(a.seconds * 0.25), sc.lengthS.value_or(a.seconds * 0.5),
+                         a.seconds, settings.sampleRate, "/sidechain", "dsp.sidechain");
+            if (!span) return std::move(span).error();
+            keySpan = *span;
+            key = stimulus(Signal::Silence, settings.sampleRate, a.seconds, 0.0, 100.0);
+            silentKey = key;
+            const auto active =
+                stimulus(sc.signal, settings.sampleRate,
+                         static_cast<double>(span->second - span->first) / settings.sampleRate,
+                         sc.levelDb, sc.frequencyHz);
+            for (std::size_t c = 0; c < key.channels.size(); ++c)
+                std::copy(active.channels[c].begin(), active.channels[c].end(),
+                          key.channels[c].begin() + span->first);
+        }
         std::set<std::string> logged;
         double rendered = 0.0, spent = 0.0;
-        host::Instance* chain[] = {&instance};
-        const sandbox::RenderSettings settings = Traits::settings(s);
-        for (const Signal sig : signals) {
-            const audio::AudioData input =
-                instrument
-                    ? audio::AudioData{}
-                    : stimulus(sig, settings.sampleRate, a.seconds, a.levelDb, a.frequencyHz);
-            const std::size_t inputFrames =
-                instrument ? static_cast<std::size_t>(std::llround(a.seconds * settings.sampleRate))
-                           : input.frames();
-            sandbox::RenderRequest request;
-            if (instrument) {
-                request.events = noteEvents(sig, settings.sampleRate, a.seconds);
-                request.lengthSamples = static_cast<std::int64_t>(inputFrames);
-            } else {
-                request.input = &input;
-            }
+        auto renderPass =
+            [&](const sandbox::RenderRequest& request) -> Result<sandbox::RenderResult> {
+            auto fresh = host::Instance::create(*info, Traits::identity(s));
+            if (!fresh) return std::move(fresh).error();
+            if (a.patch)
+                SUPPLE_TRY((*fresh)->setPatch(json::writeCompact(*a.patch), CLAP_SUPPLE_SET_MERGE));
+            host::Instance* chain[] = {fresh->get()};
             const auto start = std::chrono::steady_clock::now();
-            auto r = sandbox::render(chain, settings, request);
+            auto result = sandbox::render(chain, settings, request);
             spent +=
                 std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-            if (!r) return std::move(r).error();
-            rendered += r->audio.seconds();
-            out.latency = r->latency;
-            for (const std::string& line : r->log)
-                if (logged.insert(line).second) out.log.push_back(line);
-            SignalResult m = measure(sig, r->audio, inputFrames, a);
-            if (a.save) {
-                const fs::path file =
-                    Traits::outputDir(s) / ("dsp-test-" + info->id + "-" + m.signal + ".wav");
-                SUPPLE_TRY(audio::writeWav(file, r->audio));
-                m.path = file.string();
+            if (result) rendered += result->audio.seconds();
+            return result;
+        };
+        auto diagnose = [&](Signal sig, const sandbox::RenderResult& r, const SignalResult& m,
+                            const std::string& label) {
+            for (const auto& line : r.log) {
+                const std::string labeled = label.empty() ? line : m.signal + label + ": " + line;
+                if (logged.insert(labeled).second) out.log.push_back(labeled);
             }
-            const std::string with = " with the " + m.signal;
+            const std::string with = " with the " + m.signal + label;
             if (m.clipped > 0)
                 out.problems.push_back(std::to_string(m.clipped) + " samples beyond 0 dBFS" + with +
                                        " (peak " + fixed(m.peakDbfs) + " dBFS)");
@@ -533,14 +805,15 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                     (instrument ? " dBFS (a voice that plays without a note, or a source that "
                                   "runs free)"
                                 : " dBFS (feedback that sustains itself, or a source that runs "
-                                  "free)"));
+                                  "free)") +
+                    label);
             if (sig != Signal::Silence && m.peakDbfs < -120.0)
                 out.problems.push_back(
                     instrument ? "no sound" + with +
                                      " (does startVoice start the voice, and process() add "
                                      "each voice that voicePlaying(v) into io?)"
                                : "no output" + with);
-            if (instrument && sig != Signal::Silence && r->tailCapped)
+            if (instrument && sig != Signal::Silence && r.tailCapped)
                 out.problems.push_back(
                     "still sounding " + fixed(settings.tailLimitSeconds) +
                     " s after every note was released" + with +
@@ -552,7 +825,92 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                     out.problems.push_back("A4 (key 69) sounded at " + fixed(*m.pitchHz) + " Hz, " +
                                            fixed(cents, 0) +
                                            " cents from 440 Hz (voiceHz(v, i) is the note's "
-                                           "frequency)");
+                                           "frequency)" +
+                                           label);
+            }
+        };
+        for (const Signal sig : signals) {
+            const audio::AudioData input =
+                instrument
+                    ? audio::AudioData{}
+                    : stimulus(sig, settings.sampleRate, a.seconds, a.levelDb, a.frequencyHz);
+            const std::size_t inputFrames =
+                instrument ? static_cast<std::size_t>(std::llround(a.seconds * settings.sampleRate))
+                           : input.frames();
+            sandbox::RenderRequest request;
+            if (instrument) {
+                request.lengthSamples = static_cast<std::int64_t>(inputFrames);
+            } else {
+                request.input = &input;
+            }
+            const auto notes = a.notes && sig == Signal::Notes
+                                   ? *sequence
+                                   : noteEvents(sig, settings.sampleRate, a.seconds);
+            request.events = *automated;
+            request.events.insert(request.events.end(), notes.begin(), notes.end());
+            // Stable ties: parameters, releases, starts. The renderer keeps this order.
+            auto rank = [](host::Event::Kind kind) {
+                return kind == host::Event::Kind::Param     ? 0
+                       : kind == host::Event::Kind::NoteOff ? 1
+                                                            : 2;
+            };
+            std::stable_sort(
+                request.events.begin(), request.events.end(), [&](const auto& x, const auto& y) {
+                    return x.sample != y.sample ? x.sample < y.sample
+                                                : rank(x.event.kind) < rank(y.event.kind);
+                });
+            if (a.sidechain) request.sidechain = &key;
+            auto r = renderPass(request);
+            if (!r) return std::move(r).error();
+            out.latency = r->latency;
+            SignalResult m = measure(sig, r->audio, inputFrames, a, releasedAt);
+            diagnose(sig, *r, m, "");
+            if (a.automation) {
+                auto baselineRequest = request;
+                std::erase_if(baselineRequest.events, [](const auto& e) {
+                    return e.event.kind == host::Event::Kind::Param;
+                });
+                auto baseline = renderPass(baselineRequest);
+                if (!baseline) return std::move(baseline).error();
+                diagnose(sig, *baseline, measure(sig, baseline->audio, inputFrames, a, releasedAt),
+                         " (without automation)");
+                AutomationResult metric;
+                metric.maxStep = maxStep(r->audio);
+                metric.baselineMaxStep = maxStep(baseline->audio);
+                metric.excessStep = std::max(0.0, metric.maxStep - metric.baselineMaxStep);
+                m.automation = metric;
+                if (metric.maxStep > 4.0 * metric.baselineMaxStep && metric.maxStep > 0.05)
+                    out.problems.push_back(
+                        "possible clicks or zipper noise with the " + m.signal +
+                        ": largest sample step increased from " + fixed(metric.baselineMaxStep, 6) +
+                        " to " + fixed(metric.maxStep, 6) +
+                        " (check parameter smoothing; intended changes can also increase it)");
+            }
+            if (a.sidechain) {
+                auto referenceRequest = request;
+                referenceRequest.sidechain = &silentKey;
+                auto reference = renderPass(referenceRequest);
+                if (!reference) return std::move(reference).error();
+                diagnose(sig, *reference,
+                         measure(sig, reference->audio, inputFrames, a, releasedAt),
+                         " (silent key)");
+                const auto length = keySpan.second - keySpan.first;
+                const auto begin = static_cast<std::size_t>(keySpan.first + length / 4);
+                const auto end = static_cast<std::size_t>(keySpan.first + (3 * length + 3) / 4);
+                SidechainResult metric;
+                const double activeDb = windowRmsDb(r->audio, begin, end);
+                const double referenceDb = windowRmsDb(reference->audio, begin, end);
+                metric.rmsDbfs = rounded(activeDb, 2);
+                metric.referenceRmsDbfs = rounded(referenceDb, 2);
+                if (activeDb >= -120.0 && referenceDb >= -120.0)
+                    metric.gainChangeDb = rounded(activeDb - referenceDb, 2);
+                m.sidechain = metric;
+            }
+            if (a.save) {
+                const fs::path file =
+                    Traits::outputDir(s) / ("dsp-test-" + info->id + "-" + m.signal + ".wav");
+                SUPPLE_TRY(audio::writeWav(file, r->audio));
+                m.path = file.string();
             }
             out.signals.push_back(std::move(m));
         }
@@ -560,8 +918,8 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
         for (const std::string& line : out.log) {
             if (line.find("non-finite") != std::string::npos)
                 out.problems.push_back(
-                    "it produced NaN or infinity, which the framework silenced: "
-                    "look for a division by zero, log of 0 or growing feedback");
+                    "it produced NaN or infinity, which the framework silenced: " + line +
+                    " (look for a division by zero, log of 0 or growing feedback)");
             else if (line.find("loop budget") != std::string::npos)
                 out.problems.push_back("a loop never ended: " + line);
             else if (line.find("outside an array") != std::string::npos)

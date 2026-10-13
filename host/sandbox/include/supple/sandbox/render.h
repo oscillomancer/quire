@@ -40,6 +40,9 @@ struct RenderRequest {
     // The musical length (the tail follows). 0 = the input length or the last
     // event + 1, whichever is later.
     std::int64_t lengthSamples = 0;
+    // Optional key for the first stage, at the input's sample origin/rate.
+    // Mono is duplicated; shorter keys are zero-padded, including the tail.
+    const audio::AudioData* sidechain = nullptr;
 };
 
 struct RenderResult {

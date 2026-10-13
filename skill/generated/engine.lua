@@ -174,7 +174,10 @@ q = nil
 ---@field plugin? string
 ---@field script? string
 ---@field patch? any
----@field signals? "sine"|"sweep"|"impulse"|"noise"|"silence"|"notes"|"note"[] default: an effect's five, an instrument's three
+---@field signals? "sine"|"sweep"|"impulse"|"noise"|"silence"|"notes"|"note"[] default: effects five; instruments three, or notes and silence with custom notes
+---@field automation? table[] discrete physical-value changes on every signal
+---@field sidechain? table timed generated key input
+---@field notes? table[] instrument sequence replacing the notes stimulus
 ---@field level_db? number|string Quantity strings are range-checked by the server. (default: -12.0)
 ---@field frequency_hz? number|string Quantity strings are range-checked by the server. (default: 1000.0)
 ---@field seconds? number (default: 1.0)

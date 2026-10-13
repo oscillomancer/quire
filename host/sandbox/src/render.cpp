@@ -45,6 +45,8 @@ struct Job {
     std::vector<Stage> stages;
     std::vector<float> zeroL, zeroR, inL, inR;
     const float* inPtr[2] = {nullptr, nullptr};
+    std::vector<float> keyL, keyR;
+    const float* keyPtr[2] = {nullptr, nullptr};
     std::vector<float> outL, outR;  // sized to the maximum render length
     std::int64_t length = 0, latency = 0, maxTotal = 0, rendered = 0;
     std::int64_t tailEnd = -1;   // musical end + the chain's reported tail, or -1 (unknown)
@@ -60,6 +62,8 @@ void renderLoop(Job& j) SUPPLE_RT {
     const RenderSettings& s = *j.settings;
     const audio::AudioData* input = j.request->input;
     const std::int64_t inputFrames = input ? static_cast<std::int64_t>(input->frames()) : 0;
+    const audio::AudioData* key = j.request->sidechain;
+    const std::int64_t keyFrames = key ? static_cast<std::int64_t>(key->frames()) : 0;
     const std::int64_t musicalEnd = j.length + j.latency;
     std::size_t next = 0;
     std::int64_t pos = 0, silentRun = 0;
@@ -106,6 +110,15 @@ void renderLoop(Job& j) SUPPLE_RT {
             j.inPtr[0] = j.zeroL.data();
             j.inPtr[1] = j.zeroR.data();
         }
+        // Copy the first stage's key, with silence beyond its own input length.
+        if (key) {
+            const std::size_t rc = key->channelCount() > 1 ? 1 : 0;
+            for (std::uint32_t i = 0; i < n; ++i) {
+                const auto at = static_cast<std::size_t>(pos + i);
+                j.keyL[i] = pos + i < keyFrames ? key->channels[0][at] : 0.0f;
+                j.keyR[i] = pos + i < keyFrames ? key->channels[rc][at] : 0.0f;
+            }
+        }
         // Route this block's events to their targets.
         for (auto& st : j.stages) st.blockEvents.clear();
         while (next < j.events.size() && j.events[next].sample < pos + n) {
@@ -123,6 +136,10 @@ void renderLoop(Job& j) SUPPLE_RT {
             b.inputChannels = st.instance->audioInputChannels() ? 2 : 0;
             b.outputs = st.out;
             b.outputChannels = 2;
+            if (key && &st == &j.stages.front()) {
+                b.sidechain = j.keyPtr;
+                b.sidechainChannels = 2;
+            }
             b.frames = n;
             b.events = st.blockEvents;
             b.transport = &transport;
@@ -221,10 +238,33 @@ Result<RenderResult> render(std::span<host::Instance* const> chain, const Render
         for (const auto& channel : request.input->channels)
             if (channel.size() != request.input->frames())
                 return Error("render.input_layout", "input channels have different lengths");
+    if (const auto* key = request.sidechain) {
+        if (!chain.front()->sidechainChannels())
+            return Error("render.sidechain", "the first plugin has no sidechain input",
+                         "/sidechain", "choose a plugin with a key input or omit sidechain");
+        if (key->sampleRate != settings.sampleRate)
+            return Error("render.input_rate", "sidechain rate differs from the render rate",
+                         "/sidechain", "resample the key to the render rate first");
+        if (key->channelCount() < 1 || key->channelCount() > 2)
+            return Error("render.input_layout", "sidechain must be mono or stereo", "/sidechain",
+                         "supply one or two channels");
+        if (key->frames() > static_cast<std::size_t>(kMaxRenderFrames))
+            return Error(
+                "render.too_long", "sidechain audio is too long", "/sidechain",
+                "shorten the key to at most " + std::to_string(kMaxRenderFrames) + " frames");
+        for (const auto& channel : key->channels)
+            if (channel.size() != key->frames())
+                return Error("render.input_layout", "sidechain channels have different lengths",
+                             "/sidechain", "supply channels of equal length");
+    }
 
     // Main-thread preparation: (re)activate, service pending restarts.
     for (host::Instance* in : chain) {
         in->serviceMainThread();
+        if (in == chain.front() && in->sidechainActive() != (request.sidechain != nullptr)) {
+            if (in->active()) in->deactivate();
+            SUPPLE_TRY(in->setSidechainActive(request.sidechain != nullptr));
+        }
         if (in->active() &&
             (in->sampleRate() != settings.sampleRate || in->maxFrames() < settings.blockSize))
             in->deactivate();
@@ -277,6 +317,12 @@ Result<RenderResult> render(std::span<host::Instance* const> chain, const Render
     j.zeroR.assign(block, 0.0f);
     j.inL.assign(block, 0.0f);
     j.inR.assign(block, 0.0f);
+    if (request.sidechain) {
+        j.keyL.assign(block, 0.0f);
+        j.keyR.assign(block, 0.0f);
+        j.keyPtr[0] = j.keyL.data();
+        j.keyPtr[1] = j.keyR.data();
+    }
     j.outL.assign(static_cast<std::size_t>(j.maxTotal), 0.0f);
     j.outR.assign(static_cast<std::size_t>(j.maxTotal), 0.0f);
     j.stages.resize(chain.size());

@@ -4,6 +4,7 @@
 #include <limits>
 
 #include <supple/clap/semantic_params.h>
+#include <supple/params/params.h>
 #include <supple/sandbox/render.h>
 
 using namespace supple;
@@ -114,26 +115,80 @@ TEST_CASE("effect render with input audio and a targeted parameter event") {
     in.channels.assign(2, std::vector<float>(4000, 0.5f));
     RenderRequest req;
     req.input = &in;
-    TimedEvent mute;
+    TimedEvent change;
+    change.sample = 1003;
+    change.target = 0;
+    change.event.kind = host::Event::Kind::Param;
+    change.event.paramId = 0;
+    auto schema = gain->semanticSchema();
+    REQUIRE(schema);
+    auto param = params::fromDescription("gain", (*schema)["params"]["gain"]);
+    REQUIRE(param);
+    change.event.value = params::toClap((*param)->spec, -6.0);  // physical dB, not a host value
+    auto mute = change;
     mute.sample = 2000;
-    mute.target = 0;
-    mute.event.kind = host::Event::Kind::Param;
-    mute.event.paramId = 0;
-    mute.event.value = 0.0;  // normalized 0 = -60 dB = off
-    req.events = {mute};
+    mute.event.value = params::toClap((*param)->spec, (*param)->spec.min);
+    req.events = {change, mute};
     RenderSettings s;
     s.tailLimitSeconds = 0.0;
     host::Instance* chain[] = {gain.get()};
-    auto r = render(chain, s, req);
-    REQUIRE(r);
-    REQUIRE(r->audio.frames() == 4000);
-    CHECK(static_cast<double>(r->audio.channels[0][1999]) == doctest::Approx(0.5));
-    CHECK(r->audio.channels[0][2000] == 0.0f);
+    for (std::uint32_t block : {256u, 1000u}) {
+        REQUIRE(gain->setPatch(R"({"params":{"gain":0}})", CLAP_SUPPLE_SET_MERGE));
+        s.blockSize = block;
+        auto r = render(chain, s, req);
+        REQUIRE(r);
+        REQUIRE(r->audio.frames() == 4000);
+        CHECK(static_cast<double>(r->audio.channels[0][1002]) == doctest::Approx(0.5));
+        CHECK(static_cast<double>(r->audio.channels[0][1003]) ==
+              doctest::Approx(0.5 * std::pow(10.0, -6.0 / 20.0)));
+        CHECK(static_cast<double>(r->audio.channels[0][1999]) ==
+              doctest::Approx(0.5 * std::pow(10.0, -6.0 / 20.0)));
+        CHECK(r->audio.channels[0][2000] == 0.0f);
+    }
     // Wrong input rate is rejected.
     in.sampleRate = 44100;
     auto bad = render(chain, s, req);
     REQUIRE_FALSE(bad);
     CHECK(bad.error().code == "render.input_rate");
+}
+
+TEST_CASE("renderer mixes a mono key at exact samples and zero pads it" *
+          doctest::description("rt")) {
+    auto mix = make("com.suppleaudio.test.keymix");
+    host::Instance* chain[] = {mix.get()};
+    audio::AudioData input, key;
+    input.sampleRate = key.sampleRate = 48000;
+    input.channels.assign(2, std::vector<float>(3000, 0.25f));
+    key.channels.assign(1, std::vector<float>(2013, 0.0f));
+    std::fill(key.channels[0].begin() + 1003, key.channels[0].end(), 0.5f);
+    RenderRequest request;
+    request.input = &input;
+    request.sidechain = &key;
+    RenderSettings settings;
+    settings.tailLimitSeconds = 0;
+    for (std::uint32_t block : {256u, 1000u}) {
+        settings.blockSize = block;
+        auto r = render(chain, settings, request);
+        REQUIRE(r);
+        REQUIRE(r->audio.frames() == 3000);
+        std::size_t wrong = 0;
+        for (const auto& channel : r->audio.channels)
+            for (std::size_t i = 0; i < channel.size(); ++i)
+                wrong += channel[i] != (i >= 1003 && i < 2013 ? 0.75f : 0.25f);
+        CHECK(wrong == 0);
+    }
+    request.sidechain = nullptr;
+    auto dry = render(chain, settings, request);
+    REQUIRE(dry);
+    CHECK(dry->audio.channels == input.channels);
+    request.sidechain = &key;
+    key.sampleRate = 44100;
+    CHECK(render(chain, settings, request).error().path == "/sidechain");
+    key.sampleRate = 48000;
+    key.channels.push_back(std::vector<float>(1));
+    CHECK(render(chain, settings, request).error().path == "/sidechain");
+    key.channels.clear();
+    CHECK(render(chain, settings, request).error().path == "/sidechain");
 }
 
 #if defined(__SSE2__)
