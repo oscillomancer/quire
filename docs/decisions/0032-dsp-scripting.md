@@ -265,9 +265,8 @@ Where the work stands, and where it departs from the text above:
   `-DSUPPLE_PRODUCT_DIR=plugins/suite/player` and this repository's
   `third_party` copies, CLAP only unless `SUPPLE_PLUGIN_VST3`, and is staged
   in `plugins/clap/` with the stock plugins. Its processor is
-  `supple::player::ScriptProcessor`; its editor is the framework's
-  automatic one, since scripts have no UI yet. Scripts are effects only
-  until they receive notes.
+  `supple::suite::ScriptProcessor` (the glue, `plugins/suite/glue`); its
+  editor is the framework's automatic one, since scripts have no UI yet.
 - The library (§4, §8) is `AppOptions::scriptDir`: `<data>/<slug>/scripts`
   in the app, `<workdir>/scripts` otherwise. `EngineApp::create` names it
   first in `SUPPLE_SCRIPT_LIBRARY`, which the scanner and bridge processes
@@ -332,6 +331,19 @@ Where the work stands, and where it departs from the text above:
 - State (§7): the chunk is `PTCH` (magic, version, length, canonical
   patch). The patch holds parameters only, since scripts have no properties
   yet. `semantic-params-extension.md` has the amendment to §5 (2026-10-13).
+- Instruments, 2026-10-13: a script may derive from `Instrument`. The
+  glue gives its notes and controllers to the framework's voice manager
+  (`dsp/Voices.h`; framework 1.17.0 adds a voice count chosen at run time
+  and block-at-a-time glides), which calls the script's `startVoice(int
+  v[, bool retrigger])`, `releaseVoice(int v)` and optional `stopVoice(int
+  v)`. The script renders each voice playing and calls `voiceFinished(v)`
+  when it has died away, which reports the note's end. `voiceKey`,
+  `voiceVelocity`, `voicePitch(v, i)`, `voiceHz(v, i)`, `setVoiceMode`,
+  `setGlide` and `setBendRange` reach the manager through the instance. A
+  recompile restarts the sounding voices in the new code. Per-note
+  expression and polyphonic modulation are not exposed yet; note effects
+  stay refused until scripts send notes. `dsp.test` plays notes into an
+  instrument (a note and a chord, A4 for the pitch heard, no notes).
 - The compiler's API is C++ (`supple/script_compiler.hpp`,
   `supple/script_program.hpp`); the C ABI of §2 is not written, since
   nothing loads the compiler across a library boundary yet.

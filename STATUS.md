@@ -222,7 +222,8 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
   a script a CLAP plugin for any host (a copy of the player with the script
   appended, which offers that one plugin), or a C++ project of the plugin
   template that builds the same plugin, bit for bit, with the script
-  compiled as C++. Effects only (no notes yet), the automatic editor only,
+  compiled as C++. Effects and instruments (voices the runtime manages;
+  no per-note expression, no note effects), the automatic editor only,
   plugin-file exports for Linux only; editor previews do not exist yet.
 - Orrery's structural performance pass.
 - Hardening and ports beyond Linux.
