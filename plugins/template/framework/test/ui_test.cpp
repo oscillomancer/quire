@@ -1716,6 +1716,40 @@ TEST(the_editor_draws_without_a_window_at_any_scale) {
     CHECK(drawOffscreen(*editor, 1.5, again) && again.rgba == picture.rgba);
 }
 
+TEST(an_editor_drawn_without_a_window_takes_pointer_input_first) {
+    MockHost host;
+    std::unique_ptr<EditorBase> editor = product::createEditor(host);
+    int k = -1;
+    for (int i = 0; i < editor->layout().count() && k < 0; ++i) {
+        const Control& c = editor->layout().control(i);
+        if (c.widget == Widget::Knob && !c.rule && editor->layout().interactive(i) &&
+            isContinuous(*params::find(c.param)))
+            k = i;
+    }
+    if (k < 0) return;
+    const Control& c = editor->layout().control(k);
+    const ParamDef& p = *params::find(c.param);
+    host.values[MockHost::slot(c.param)] = 0.5 * (p.hostMin() + p.hostMax());
+    const double before = host.value(c.param);
+    using Kind = PointerInput::Kind;
+    const float x = c.bounds.cx(), y = c.bounds.cy();
+    const PointerInput drag[] = {{Kind::Move, x, y}, {Kind::Press, x, y}, {Kind::Move, x, y - 40.0f},
+                                 {Kind::Release, x, y - 40.0f}};
+    Picture picture;
+    std::string why;
+    if (!drawOffscreen(*editor, 1.0, drag, picture, &why)) {
+        std::printf("    (%s: skipped)\n", why.c_str());
+        CHECK(host.value(c.param) == before && host.begins == 0);
+        return;
+    }
+    CHECK(host.value(c.param) > before && host.openCount == 0 && host.clean());
+    // A wheel burst's gesture, still open as it is drawn, ends with the picture.
+    const PointerInput turn[] = {{Kind::Wheel, x, y, -1.0f}};
+    const double dragged = host.value(c.param);
+    CHECK(drawOffscreen(*editor, 1.0, turn, picture));
+    CHECK(host.value(c.param) < dragged && host.openCount == 0 && host.clean());
+}
+
 TEST(the_layout_is_inside_the_panel_and_controls_do_not_overlap) {
     ProductEditor p;
     const Ui& ui = p.editor->layout();
@@ -1867,6 +1901,38 @@ TEST(a_press_a_pointer_hook_takes_holds_the_pointer_until_its_release) {
     editor.pointerDown(250, 80, 0, 0, false);
     editor.pointerUp(250, 80, 0, 0);
     CHECK(editor.ups == 1);
+}
+
+TEST(the_wheel_and_the_pointer_leaving_reach_a_products_hooks_first) {
+    const auto ids = continuousParams(1);
+    if (ids.empty()) return;
+    struct WheelEditor : EditorBase {
+        using EditorBase::ui;
+        int wheels = 0, leaves = 0;
+        WheelEditor(EditorHost& host, uint32_t id) : EditorBase(host, Theme{}, 800, 600) {
+            ui().knob(id, {20, 20, 100, 120});
+        }
+        void paint(NVGcontext*) override {}
+        bool onWheel(float x, float, float, float, uint32_t) override {
+            ++wheels;
+            return x >= 400.0f;  // the knob's side is Ui's
+        }
+        void onPointerLeave() override { ++leaves; }
+    };
+    MockHost host;
+    const ParamDef& p = *params::find(ids[0]);
+    host.values[MockHost::slot(ids[0])] = 0.5 * (p.hostMin() + p.hostMax());
+    WheelEditor editor(host, ids[0]);
+    const double before = host.value(ids[0]);
+    CHECK(editor.wheel(500, 300, 0, 1, 0) && editor.wheels == 1 && host.value(ids[0]) == before);
+    CHECK(editor.wheel(70, 80, 0, 1, 0) && editor.wheels == 2 && host.value(ids[0]) != before);
+    // An open menu comes first.
+    editor.ui().openContextMenu(0, 70, 80);
+    editor.wheel(500, 300, 0, 1, 0);
+    CHECK(editor.wheels == 2);
+    editor.key(key::kEscape, 0);
+    editor.pointerLeave();
+    CHECK(editor.leaves == 1 && host.clean());
 }
 
 namespace {

@@ -40,6 +40,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -98,9 +99,15 @@ class Instance {
     // window or not: what plays meanwhile reaches drawEditor()'s meters.
     virtual void watch(bool on) = 0;
     // The editor as it would open now, drawn without a window at `scale`
-    // times its design size (gui/Offscreen.h). False, saying why, in a build
-    // without an editor or where nothing can be drawn offscreen.
-    virtual bool drawEditor(double scale, Picture& picture, std::string& why) = 0;
+    // times its design size (gui/Offscreen.h), after the pointer input, in
+    // order: what a click or a drag edits reaches the host as a user's edit.
+    // False, saying why, in a build without an editor or where nothing can
+    // be drawn offscreen.
+    virtual bool drawEditor(double scale, std::span<const PointerInput> input, Picture& picture,
+                            std::string& why) = 0;
+    bool drawEditor(double scale, Picture& picture, std::string& why) {
+        return drawEditor(scale, {}, picture, why);
+    }
 
     // Any thread: a call to the layer's onMainThread() soon.
     virtual void requestLayerCallback() = 0;

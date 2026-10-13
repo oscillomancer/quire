@@ -4,6 +4,22 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.21.0
+
+What a product must do: nothing.
+
+- **The wheel and the pointer leaving, for custom drawing**
+  (`gui/EditorBase.h`, `gui/Ui.h`). `onWheel(x, y, dx, dy, mods)` takes the
+  wheel before `Ui` does, and `ui().wheelEdit(control, value)` edits as a
+  control's wheel does, one gesture per burst. `onPointerLeave()` says the
+  pointer left the editor.
+- **Pointer input for pictures** (`core/Picture.h`, `gui/Offscreen.h`,
+  `plugin/Layer.h`). `drawOffscreen` and `Instance::drawEditor` take
+  `PointerInput`s (move, press, release, wheel, leave, in design units)
+  and apply them, as a window would, before drawing; the editor then loses
+  focus, which ends every gesture they opened. What they edit reaches the
+  host: a tool can show, and check, what a click or a drag does.
+
 ## 1.20.0
 
 What a product must do: nothing. A layer that overrides nothing new behaves

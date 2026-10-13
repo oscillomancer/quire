@@ -12,11 +12,14 @@
 //
 // The editor gets a context of its own, on a thread of its own (so a GL
 // context the caller has current is left alone), is drained of telemetry
-// once (its meters show what played since the last drain), drawn once at
-// its design size times `scale`, and let go. It must not be in a window. The
-// caller waits: call it from the main thread, as the editor would run.
+// once (its meters show what played since the last drain), takes the
+// pointer input given, in order, as from a window, is drawn once at its
+// design size times `scale`, and is let go: it loses focus, which ends
+// every gesture the input opened. It must not be in a window. The caller
+// waits: call it from the main thread, as the editor would run.
 #pragma once
 
+#include <span>
 #include <string>
 
 #include "core/Picture.h"
@@ -25,8 +28,12 @@ namespace supple::gui {
 
 class EditorBase;
 
-// False, saying why in `why`, when nothing could be drawn. `scale` is
-// clamped to 0.25 .. 4.
-bool drawOffscreen(EditorBase& editor, double scale, Picture& out, std::string* why = nullptr);
+// False, saying why in `why`, when nothing could be drawn; then the input
+// was not applied either. `scale` is clamped to 0.25 .. 4.
+bool drawOffscreen(EditorBase& editor, double scale, std::span<const PointerInput> input, Picture& out,
+                   std::string* why = nullptr);
+inline bool drawOffscreen(EditorBase& editor, double scale, Picture& out, std::string* why = nullptr) {
+    return drawOffscreen(editor, scale, {}, out, why);
+}
 
 }  // namespace supple::gui

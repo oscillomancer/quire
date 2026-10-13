@@ -76,6 +76,15 @@ class EditorBase {
         (void)x, (void)y, (void)button, (void)mods;
         return false;
     }
+    // The wheel, before Ui: return true to take it. Not called while a
+    // press is held or a menu or text field is open.
+    virtual bool onWheel(float x, float y, float dx, float dy, uint32_t mods) {
+        (void)x, (void)y, (void)dx, (void)dy, (void)mods;
+        return false;
+    }
+    // The pointer left the editor (during a held press too): drop any hover
+    // state, and markDirty() if that shows. Ui drops its own.
+    virtual void onPointerLeave() {}
     // Focus was lost or the view is going away: drop any interaction the
     // pointer hooks started, as Ui drops its own. The release may never come.
     virtual void onCancel() {}

@@ -429,12 +429,14 @@ struct Plugin final : StateAccess, Instance
         watching = on;
         updateMetering();
     }
-    bool drawEditor(double scale, Picture& picture, std::string& why) override {
+    using Instance::drawEditor;
+    bool drawEditor(double scale, std::span<const PointerInput> input, Picture& picture,
+                    std::string& why) override {
 #if SUPPLE_WITH_GUI
         std::unique_ptr<gui::EditorBase> drawn = makeEditor(*this);
-        return gui::drawOffscreen(*drawn, scale, picture, &why);
+        return gui::drawOffscreen(*drawn, scale, input, picture, &why);
 #else
-        (void)scale, (void)picture;
+        (void)scale, (void)input, (void)picture;
         why = "this build of the plugin has no editor";
         return false;
 #endif

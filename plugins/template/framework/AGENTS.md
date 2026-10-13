@@ -172,8 +172,9 @@ made with, so the same code serves plugins whose tables are made at run time.
   whatever it shows has changed. `Instance::watch(true)` sends telemetry as
   if an editor were open, and `Instance::drawEditor(scale, picture, why)`
   draws the editor without a window (`gui/Offscreen.h`), so a layer can
-  answer a host that asks what the plugin looks like. The stages example
-  does all three.
+  answer a host that asks what the plugin looks like; given pointer input
+  (`PointerInput`, `core/Picture.h`), it clicks and drags first, and what
+  that edits reaches the host. The stages example does all three.
 
 ## Parameters
 
@@ -549,6 +550,9 @@ drive example). Write your own once the product is past its sketch.
   pointer until its release: the moves and the release come to the hooks,
   and the wheel and keys wait. Override `onCancel()` to drop the drag:
   focus loss and teardown call it, and the release may never arrive.
+  `onWheel` takes the wheel before `Ui` (edit through `ui().wheelEdit`,
+  one gesture per burst), and `onPointerLeave` drops hover state. A
+  parameter only the drawing edits gets a control with `visible = false`.
 - Draw what is heard from `effective(id)` (the value plus host
   modulation); `plain(id)` is the control's own position.
 - Restyle a control by overriding `drawControl` for its `variant`.

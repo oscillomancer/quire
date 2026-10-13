@@ -364,11 +364,15 @@ class Ui {
     // keeps the one-gesture rule: this closes any other gesture, and
     // endDragEdit() closes this one. The second form edits slot k of a
     // multi-parameter control; the third, two controls' parameters as one
-    // gesture (an EQ node's frequency and gain).
+    // gesture (an EQ node's frequency and gain). For a parameter only the
+    // drawing edits, add a control for it with visible = false.
     void dragEdit(int control, double host) { dragEdit(control, 0, host); }
     void dragEdit(int control, int slot, double host);
     void dragEdit(int controlX, double hostX, int controlY, double hostY);
     void endDragEdit() { endGesture(); }
+    // The same drawing's wheel (or keys): as the controls' own, one gesture
+    // per burst, closed after kGestureIdleSeconds without another.
+    void wheelEdit(int control, double host) { edit(control, 0, host, true); }
 
     void setFocus(int control);
     void openMenu(int control);

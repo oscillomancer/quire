@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <mutex>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -134,9 +135,24 @@ struct Display {
 
 CanvasProc resolveGl(const char* name) { return reinterpret_cast<CanvasProc>(egl().getProcAddress(name)); }
 
+// The pointer input, as Window would pass it on, with the main button.
+void apply(EditorBase& editor, std::span<const PointerInput> input) {
+    for (const PointerInput& in : input) {
+        const uint32_t mods =
+            (in.shift ? mod::kShift : 0u) | (in.ctrl ? mod::kCtrl : 0u) | (in.alt ? mod::kAlt : 0u);
+        switch (in.kind) {
+            case PointerInput::Kind::Move: editor.pointerMove(in.x, in.y, mods); break;
+            case PointerInput::Kind::Press: editor.pointerDown(in.x, in.y, 0, mods, in.doubleClick); break;
+            case PointerInput::Kind::Release: editor.pointerUp(in.x, in.y, 0, mods); break;
+            case PointerInput::Kind::Wheel: editor.wheel(in.x, in.y, 0.0f, in.wheel, mods); break;
+            case PointerInput::Kind::Leave: editor.pointerLeave(); break;
+        }
+    }
+}
+
 // One picture, on the calling thread: a context, a framebuffer, the editor
 // drawn into it, read back.
-bool draw(EditorBase& editor, double scale, Picture& out, std::string& why) {
+bool draw(EditorBase& editor, double scale, std::span<const PointerInput> input, Picture& out, std::string& why) {
     const Egl& e = egl();
     if (!e.getProcAddress) {
         why = "no offscreen drawing: " + e.problem;
@@ -186,6 +202,10 @@ bool draw(EditorBase& editor, double scale, Picture& out, std::string& why) {
         if (NVGcontext* vg = canvasCreate(nullptr)) {
             if (editor.attach(vg)) {
                 editor.idle(0.0);  // telemetry drained: the meters show what played
+                if (!input.empty()) {
+                    apply(editor, input);
+                    editor.idle(0.0);
+                }
                 canvasViewport(w, h);
                 const NVGcolor bg = rgb(editor.background());
                 canvasClear(vg, bg.r, bg.g, bg.b);
@@ -204,6 +224,7 @@ bool draw(EditorBase& editor, double scale, Picture& out, std::string& why) {
                     std::memcpy(out.rgba.data() + static_cast<size_t>(y) * stride,
                                 rows.data() + static_cast<size_t>(h - 1 - y) * stride, stride);
                 ok = true;
+                editor.focusLost();  // every gesture the input opened, ended
                 editor.detach();
             } else {
                 why = "the editor's fonts would not load";
@@ -225,17 +246,18 @@ bool draw(EditorBase& editor, double scale, Picture& out, std::string& why) {
 }  // namespace
 #endif
 
-bool drawOffscreen(EditorBase& editor, double scale, Picture& out, std::string* why) {
+bool drawOffscreen(EditorBase& editor, double scale, std::span<const PointerInput> input, Picture& out,
+                   std::string* why) {
     out = Picture{};
     std::string problem;
 #if SUPPLE_OFFSCREEN_EGL
     bool ok = false;
     // A thread of its own: whatever GL context the caller has current stays
     // current, and EGL's per-thread state goes with the thread.
-    std::thread worker([&] { ok = draw(editor, scale, out, problem); });
+    std::thread worker([&] { ok = draw(editor, scale, input, out, problem); });
     worker.join();
 #else
-    (void)editor, (void)scale;
+    (void)editor, (void)scale, (void)input;
     const bool ok = false;
     problem = "drawing an editor without a window is not available on this platform yet";
 #endif

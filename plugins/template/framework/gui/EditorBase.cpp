@@ -222,10 +222,18 @@ void EditorBase::pointerUp(float x, float y, int button, uint32_t mods) {
     dirty_ = true;
 }
 
-void EditorBase::pointerLeave() { ui_.pointerLeave(); }
+void EditorBase::pointerLeave() {
+    onPointerLeave();
+    ui_.pointerLeave();
+}
 
 bool EditorBase::wheel(float x, float y, float dx, float dy, uint32_t mods) {
     if (held_ >= 0) return true;  // a custom drag is under way
+    const bool overlay = ui_.menu().open || ui_.textEdit().open;
+    if (!overlay && onWheel(x, y, dx, dy, mods)) {
+        dirty_ = true;
+        return true;
+    }
     return ui_.wheel(x, y, dx, dy, mods);
 }
 
