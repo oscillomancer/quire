@@ -301,4 +301,16 @@ TEST(an_instrument_plays_its_notes_the_same_compiled_either_way_and_ends_each) {
     for (int i = 23000; i < 24000; ++i) CHECK(a[static_cast<size_t>(i)] == 0.0);
 }
 
+TEST(a_script_reports_the_latency_it_sets_in_prepare) {
+    std::ifstream in(std::string(SUPPLE_SCRIPT_EXAMPLES) + "/drive.cpp");
+    std::stringstream text;
+    text << in.rdbuf();
+    const auto d = compileText(text.str());
+    if (!d) return;
+    Engine engine(d);
+    engine.activate(48000.0, 64, 2, 2);
+    // The oversampler's delay, which Info does not give.
+    CHECK(engine.latency() > 0 && engine.latency() < 16);
+}
+
 SUPPLE_TEST_MAIN

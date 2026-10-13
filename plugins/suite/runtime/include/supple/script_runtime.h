@@ -53,6 +53,7 @@ struct Instance {
     std::int64_t budget = std::int64_t{1} << 31;
     Status status;
     VoiceBank* voices = nullptr;  // an instrument's
+    int latency = -1;             // setLatency()'s, or -1: Info's
 
     static void bind(Plugin& plugin, Instance* instance) { plugin.instance_ = instance; }
 };

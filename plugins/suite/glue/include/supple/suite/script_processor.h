@@ -198,7 +198,8 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         endFrame_ = 0;
     }
 
-    int latencySamples() const { return latency_; }
+    // setLatency()'s, from prepare(), or Info's.
+    int latencySamples() const { return instance_.latency >= 0 ? instance_.latency : latency_; }
     uint32_t tailSamples() const { return tail_; }
 
     // --- the layer's (main thread) ---------------------------------------------------

@@ -18,10 +18,10 @@ namespace {
 // The runtime's types, as a script names them.
 const std::set<std::string>& runtimeTypes() {
     static const std::set<std::string> names = {
-        "Array",      "Buffer",       "Param",     "ParamSpec", "Info",   "Block",
-        "Channel",    "InputChannel", "Transport", "Plugin",    "Effect", "Instrument",
-        "NoteEffect", "Biquad",       "OnePole",   "DelayLine", "Random", "Noise",
-        "Oscillator", "Adsr",         "Unit",      "Curve"};
+        "Array",      "Buffer",       "Param",     "ParamSpec", "Info",        "Block",
+        "Channel",    "InputChannel", "Transport", "Plugin",    "Effect",      "Instrument",
+        "NoteEffect", "Biquad",       "OnePole",   "DelayLine", "Random",      "Noise",
+        "Oscillator", "Adsr",         "Unit",      "Curve",     "Oversampler", "VoiceMode"};
     return names;
 }
 const std::set<std::string>& runtimeTemplates() {

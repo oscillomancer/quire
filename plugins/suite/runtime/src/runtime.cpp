@@ -26,6 +26,7 @@
 #include "dsp/Interpolation.h"
 #include "dsp/Math.h"
 #include "dsp/Oscillators.h"
+#include "dsp/Oversampler.h"
 #include "supple/script.h"
 #include "supple/script_runtime.h"
 
@@ -259,6 +260,9 @@ double Plugin::sampleRate() const { return instanceOf(instance_).sampleRate; }
 int Plugin::maxBlockSize() const { return instanceOf(instance_).maxBlockSize; }
 int Plugin::channels() const { return instanceOf(instance_).channels; }
 bool Plugin::offline() const { return instanceOf(instance_).offline; }
+void Plugin::setLatency(int samples) {
+    if (instance_) instance_->latency = samples < 0 ? 0 : samples;
+}
 
 // --- instruments -----------------------------------------------------------------
 
@@ -421,6 +425,90 @@ double DelayLine::read(double delaySamples) const {
     return line(line_).read(delaySamples);
 }
 void DelayLine::clear() { line(line_).clear(); }
+
+// A resource, as a DelayLine is: its filters' buffers are allocated in
+// prepare(). Unprepared, it passes samples through.
+namespace {
+struct OversamplerState {
+    dsp::Oversampler over;
+    bool prepared = false;
+    double one = 0.0;      // the sample, unprepared
+    double* hi = nullptr;  // up()'s factor() samples, until down()
+};
+OversamplerState& over(void* p) { return *static_cast<OversamplerState*>(p); }
+}  // namespace
+Oversampler::Oversampler() : state_(new OversamplerState()) {}
+Oversampler::Oversampler(const Oversampler& other)
+    : state_(new OversamplerState(over(other.state_))) {
+    over(state_).hi = nullptr;
+}
+Oversampler& Oversampler::operator=(const Oversampler& other) {
+    // Filters of the same factor copy in place, as std::vector does.
+    if (this != &other) {
+        over(state_) = over(other.state_);
+        over(state_).hi = nullptr;
+    }
+    return *this;
+}
+Oversampler::~Oversampler() { delete &over(state_); }
+void Oversampler::prepare(int factor) {
+    OversamplerState& o = over(state_);
+    o.over.prepare(1, 1, std::clamp(factor, 2, 16), dsp::Oversampler::Phase::Minimum);
+    o.prepared = true;
+    o.hi = nullptr;
+}
+int Oversampler::factor() const {
+    const OversamplerState& o = over(state_);
+    return o.prepared ? o.over.factor() : 1;
+}
+int Oversampler::latency() const {
+    const OversamplerState& o = over(state_);
+    return o.prepared ? o.over.latency() : 0;
+}
+void Oversampler::up(double x) {
+    OversamplerState& o = over(state_);
+    if (!(x == x)) x = 0.0;
+    if (!o.prepared) {
+        o.one = x;
+        o.hi = &o.one;
+        return;
+    }
+    o.hi = o.over.up(0, &x, 1);
+}
+double Oversampler::sample(int k) const {
+    const OversamplerState& o = over(state_);
+    if (!o.hi || k < 0 || k >= factor()) {
+        detail::outOfRange(0);
+        return 0.0;
+    }
+    return o.hi[k];
+}
+void Oversampler::set(int k, double value) {
+    OversamplerState& o = over(state_);
+    if (!o.hi || k < 0 || k >= factor()) {
+        detail::outOfRange(0);
+        return;
+    }
+    o.hi[k] = value;
+}
+double Oversampler::down() {
+    OversamplerState& o = over(state_);
+    if (!o.prepared) {
+        const double y = o.hi ? o.one : 0.0;
+        o.hi = nullptr;
+        return y;
+    }
+    double y = 0.0;
+    if (o.hi) o.over.down(0, &y, 1);
+    o.hi = nullptr;
+    return y;
+}
+void Oversampler::clear() {
+    OversamplerState& o = over(state_);
+    if (o.prepared) o.over.reset();
+    o.one = 0.0;
+    o.hi = nullptr;
+}
 
 Random::Random() { new (storage_) dsp::Random(); }
 void Random::seed(int seed) {

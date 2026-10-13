@@ -127,7 +127,9 @@ There is no `reset()` to write: the runtime returns every member to what
 (`playing`, `tempo`, `beats`, `barStart`, time signature),
 `io.sidechain(c)[i]`, `io.output(bus, c)[i]`, `io.sidechainConnected`.
 From any member function: `sampleRate()`, `maxBlockSize()`, `channels()`,
-`offline()`.
+`offline()`. In `prepare()`, `setLatency(samples)` reports a delay the
+plugin adds that depends on the sample rate (an `Oversampler`'s, a
+lookahead), where Info's `.latency` is fixed.
 
 ## Instruments
 
@@ -288,6 +290,7 @@ DSP objects (each starts silent; `clear()` returns it there):
 | `DelayLine` | `prepare(maxSamples)` in `prepare()`; `push(x)` once per frame; `read(delaySamples)` (fractional, 0 is the sample just pushed) |
 | `Oscillator` | `setShape(Oscillator::Shape::Saw)` (Sine, Saw, Square, Triangle, anti-aliased), `setFrequency(hz)`, `setPulseWidth`, `setPhase`, `next()` |
 | `Adsr` | `set(attackMs, decayMs, sustain, releaseMs)`, `gate(on)`, `next()`, `active()` |
+| `Oversampler` | For anything nonlinear, one per channel: `prepare(factor)` (2, 4, 8, 16) in `prepare()`; per sample `up(x)`, then `set(k, f(sample(k)))` for `k < factor()`, then `down()`; `latency()` (report it with `setLatency`) |
 | `Random` | `seed(n)`, `next()` (0..1), `bipolar()`, `gaussian()`, `below(n)`; the same sequence everywhere for a seed |
 | `Noise` | `seed(n)`; `white()`, `pink()`, `brown()` |
 

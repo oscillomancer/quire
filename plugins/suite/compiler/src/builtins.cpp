@@ -403,6 +403,11 @@ void Builtins::addClasses() {
     r.method(
         plugin, "void setBendRange(double semitones)",
         +[](S::Instrument* p, double st) { p->setBendRange(st); });
+    for (BuiltinMethod& m : plugin->methods) m.instrument = m.intrinsic == Intrinsic::None;
+    // Every plugin's, in prepare().
+    r.method(
+        plugin, "void setLatency(int samples)", +[](S::Plugin* p, int n) { p->setLatency(n); },
+        Writes::Self, kInit);
     plugin_ = plugin;
 
     // DSP objects.
@@ -462,6 +467,24 @@ void Builtins::addClasses() {
         delay, "double read(double delaySamples) const",
         +[](const S::DelayLine* d, double samples) { return d->read(samples); });
     r.method(delay, "void clear()", +[](S::DelayLine* d) { d->clear(); });
+
+    auto* over = addClass("Oversampler", sizeof(S::Oversampler), alignof(S::Oversampler));
+    over->resource = true;
+    r.lifetime<S::Oversampler>(over);
+    r.method(
+        over, "void prepare(int factor)", +[](S::Oversampler* o, int f) { o->prepare(f); },
+        Writes::Self, kInit);
+    r.method(over, "int factor() const", +[](const S::Oversampler* o) { return o->factor(); });
+    r.method(over, "int latency() const", +[](const S::Oversampler* o) { return o->latency(); });
+    r.method(over, "void up(double x)", +[](S::Oversampler* o, double x) { o->up(x); });
+    r.method(
+        over, "double sample(int k) const",
+        +[](const S::Oversampler* o, int k) { return o->sample(k); });
+    r.method(
+        over, "void set(int k, double value)",
+        +[](S::Oversampler* o, int k, double v) { o->set(k, v); });
+    r.method(over, "double down()", +[](S::Oversampler* o) { return o->down(); });
+    r.method(over, "void clear()", +[](S::Oversampler* o) { o->clear(); });
 
     auto* random = addClass("Random", sizeof(S::Random), alignof(S::Random));
     r.lifetime<S::Random>(random);

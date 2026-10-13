@@ -487,6 +487,10 @@ class Plugin {
     int channels() const;
     // Whether the host renders offline (a bounce).
     bool offline() const;
+    // In prepare(): the delay the plugin adds, in samples, when it depends
+    // on the sample rate (an oversampler's, a lookahead); Info's .latency
+    // otherwise. The host compensates it.
+    void setLatency(int samples);
 
   private:
     friend struct detail::Instance;
@@ -597,6 +601,36 @@ class DelayLine {
 
   private:
     void* line_ = nullptr;
+};
+
+// Oversampling, for anything nonlinear: a shaper's harmonics above half the
+// sample rate fold back as aliases unless they are made at a higher rate and
+// filtered away coming down. One per channel, per sample:
+//
+//   o.up(x);
+//   for (int k = 0; k < o.factor(); ++k) o.set(k, tanh(drive * o.sample(k)));
+//   y = o.down();
+//
+// prepare(factor) in prepare(): 2, 4, 8 or 16 (until then it passes samples
+// through, at 1). Its filters are minimum phase: latency() is a few samples
+// of delay, which setLatency() reports.
+class Oversampler {
+  public:
+    Oversampler();
+    Oversampler(const Oversampler& other);
+    Oversampler& operator=(const Oversampler& other);
+    ~Oversampler();
+    void prepare(int factor);  // prepare() only: it allocates
+    int factor() const;
+    int latency() const;
+    void up(double x);
+    double sample(int k) const;  // 0 .. factor() - 1
+    void set(int k, double value);
+    double down();
+    void clear();
+
+  private:
+    void* state_ = nullptr;
 };
 
 // Pseudo-random numbers (PCG32), the same sequence everywhere for a seed.

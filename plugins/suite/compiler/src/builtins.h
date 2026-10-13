@@ -80,7 +80,8 @@ struct BuiltinMethod {
     void* thunk = nullptr;
     std::vector<Abi> abi;  // result, self, parameters
     std::uint8_t contexts = kInit | kAudio | kUi;
-    std::string doc;  // for errors: "prepare(int maxDelaySamples)"
+    std::string doc;          // for errors: "prepare(int maxDelaySamples)"
+    bool instrument = false;  // a plugin base method only an instrument has
 };
 
 struct BuiltinField {

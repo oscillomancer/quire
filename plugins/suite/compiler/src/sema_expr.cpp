@@ -1099,8 +1099,7 @@ Expr* Sema::checkCall(CallExpr* c) {
                     if (bm.name == calleeName) {
                         c->builtinMethod = &bm;
                         c->implicitThis = true;
-                        if (bm.intrinsic == Intrinsic::None && self_ &&
-                            self_->base != PluginKind::Instrument)
+                        if (bm.instrument && self_ && self_->base != PluginKind::Instrument)
                             error(c->loc, "script.plugin.instrument",
                                   calleeName + "() is an instrument's, and " + self_->name +
                                       " has no voices",
