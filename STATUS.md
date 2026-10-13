@@ -225,8 +225,12 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
   compiled as C++. Effects and instruments (voices the runtime manages,
   CLAP note expressions and per-note modulation; no note effects); samples and impulse responses
   as files a patch names (loaded whole, no streaming from disk); spectral
-  effects (an STFT), oversampling and sidechains. The automatic editor
-  only, plugin-file exports for Linux only; editor previews do not exist
-  yet.
+  effects (an STFT), oversampling and sidechains. A script may draw its
+  own editor (`editor()` for controls, `draw()` on an HTML-canvas-style
+  `Canvas`, `Shared` members for what the audio code shows it); one that
+  does not gets the automatic editor. `dsp.preview` draws a plugin's editor
+  to a PNG without a window (EGL, Linux only; the editor-picture
+  extension). Editor code cannot yet edit parameters from its own drawing
+  (pointer events); plugin-file exports are for Linux only.
 - Orrery's structural performance pass.
 - Hardening and ports beyond Linux.

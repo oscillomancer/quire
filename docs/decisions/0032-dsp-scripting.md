@@ -257,7 +257,9 @@ Where the work stands, and where it departs from the text above:
 
 - Framework items 1 to 3 of §6 are in framework 1.16.0 (Definitions and
   catalogs with `PRODUCT_RUNTIME`, the layer seam in `plugin/Layer.h`,
-  `normalizedHostValue()`); item 4 is not done. Framework 1.16.1 adds
+  `normalizedHostValue()`). Of item 4, the offscreen canvas is in 1.20.0
+  (`gui/Offscreen.h`); the build does not yet enforce `core/` and `gui/`
+  without CLAP. Framework 1.16.1 adds
   `SUPPLE_PRODUCT_DIR` (a product folder outside the template's tree) and
   `SUPPLE_BUILD_VST3`, and moves the template's CLAP SDK and dr_libs pins to
   the versions in `third_party/`.
@@ -375,6 +377,32 @@ Where the work stands, and where it departs from the text above:
   (`semantic-params-extension.md`, amendment of 2026-10-13), checked
   before anything changes. Streaming from disk is not exposed: a sample
   is loaded whole (its first ten minutes).
+- Editors, 2026-10-13: a script draws its own editor with `void
+  editor(Editor& e)` (once: `e.size()` and the framework's controls,
+  `e.knob(param, x, y, w, h)` and the rest, bound by the Param) and `void
+  draw(Canvas& g)` (each repaint: an HTML-canvas-style context over
+  NanoVG, under the controls), and gets the automatic editor without them.
+  It departs from §1 in how the audio reaches the editor: editor code runs
+  in an instance of the plugin struct of its own (the glue's
+  `ScriptEditor`, `supple/suite/script_editor.h`), where each Param reads
+  the value heard and each `Shared<T>` / `SharedArray<T, N>` member what
+  the audio code last sent. Those members are plain values on both sides
+  (`set()` and `get()`, `[]`), not atomics: the processor copies them all,
+  as of one moment, into a triple buffer whenever telemetry is due
+  (`SharedChannel`), and the editor copies the newest into its instance. A
+  member editor code and audio or init code both use is refused
+  (`script.editor.member`), as are writes to Params and Shared members from
+  editor code; editor code may format text (`format()`, printf's number
+  conversions checked at compile time; `Param::text()`), and runs on a
+  loop budget. The layer makes the editor (framework 1.20.0:
+  `Layer::createEditor`, so the player keeps the automatic editor as the
+  product's), and makes it again after a reload
+  (`Instance::rebuildEditor`). `dsp.preview` draws it to a PNG without a
+  window: the framework draws an editor offscreen through EGL
+  (`gui/Offscreen.h`; `Instance::watch` and `Instance::drawEditor`), and
+  the suite layer offers that to hosts as `com.suppleaudio.editor-picture/1`
+  (`docs/specs/editor-picture-extension.md`). Not yet: pointer events for a
+  script's own interactive drawing, and pictures on macOS and Windows.
 - The compiler's API is C++ (`supple/script_compiler.hpp`,
   `supple/script_program.hpp`); the C ABI of §2 is not written, since
   nothing loads the compiler across a library boundary yet.
