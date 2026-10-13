@@ -442,6 +442,104 @@ TEST(a_convolution_reverb_plays_its_room_the_same_compiled_either_way) {
     for (double x : dry) CHECK(x == 0.0);  // no room: no reverb
 }
 
+// Events at given frames, for one block at a time.
+struct BlockEvents {
+    const std::vector<std::pair<int, EngineEvent>>* all = nullptr;
+    int start = 0, frames = 0;
+    size_t k = 0;
+    bool next(EngineEvent& e) {
+        for (; k < all->size(); ++k) {
+            const auto& [frame, event] = (*all)[k];
+            if (frame < start || frame >= start + frames) continue;
+            e = event;
+            e.time = static_cast<uint32_t>(frame - start);
+            ++k;
+            return true;
+        }
+        return false;
+    }
+};
+
+TEST(note_expressions_and_per_note_modulation_reach_the_voice_they_address) {
+    const auto d = compileText(R"(#include <supple/script.h>
+struct E : Instrument {
+    static constexpr Info info = {.name = "E", .id = "com.example.expressive", .voices = 4};
+    Param level = decibels("Level", -24, 0, 0).polyModulated();
+    Array<double, 4> phase;
+    void startVoice(int v) { phase[v] = 0.0; }
+    void releaseVoice(int v) { voiceFinished(v); }
+    void process(Block& io) {
+        for (int v = 0; v < voiceCount(); ++v) {
+            if (!voicePlaying(v)) continue;
+            const double gain = 0.1 * dbToGain(level.forVoice(v)) * (1.0 + voiceBrightness(v));
+            for (int i = 0; i < io.frames; ++i) {
+                const double x = sin(twoPi * phase[v]) * gain;
+                phase[v] = fmod(phase[v] + voiceHz(v, i) / sampleRate(), 1.0);
+                io[0][i] += x * (1.0 - voicePan(v));
+                io[1][i] += x * voicePan(v);
+            }
+        }
+    }
+};
+)");
+    if (!d) return;
+    CHECK(d->info().noteExpressions == 0x7F);
+    CHECK(d->params().at(0).is(pflag::kPolyMod));
+    // Keys 60 and 72 together; then, for 72 alone: full brightness, pan
+    // right, and its level modulated down by a quarter of its range (6 dB).
+    auto event = [](EngineEvent::Type type) {
+        EngineEvent e;
+        e.type = type;
+        return e;
+    };
+    std::vector<std::pair<int, EngineEvent>> events;
+    for (int key : {60, 72}) {
+        EngineEvent on = event(EngineEvent::Type::Note);
+        on.note.key = static_cast<int16_t>(key);
+        on.note.velocity = 1.0;
+        events.push_back({0, on});
+    }
+    auto expression = [&](int frame, NoteExpression::Type which, double value) {
+        EngineEvent x = event(EngineEvent::Type::Expression);
+        x.address.key = 72;
+        x.expression = which;
+        x.value = value;
+        events.push_back({frame, x});
+    };
+    expression(4800, NoteExpression::Type::Brightness, 1.0);
+    expression(9600, NoteExpression::Type::Pan, 1.0);
+    EngineEvent mod = event(EngineEvent::Type::NoteModulation);
+    mod.index = 0;
+    mod.address.key = 72;
+    mod.value = -0.25;
+    events.push_back({14400, mod});
+
+    Engine engine(d);
+    engine.activate(48000.0, 64, 0, 2);
+    const int frames = 19200;
+    std::vector<double> left(frames), right(frames);
+    for (int start = 0; start < frames; start += 64) {
+        double* out[] = {left.data() + start, right.data() + start};
+        BlockEvents block{&events, start, 64};
+        engine.process<double>(nullptr, out, 64, block);
+    }
+    auto rms = [](const std::vector<double>& x, int from) {
+        double sum = 0.0;
+        for (int i = from; i < from + 2400; ++i)
+            sum += x[static_cast<size_t>(i)] * x[static_cast<size_t>(i)];
+        return std::sqrt(sum / 2400.0);
+    };
+    const double sine = 0.1 * 0.5 / std::sqrt(2.0);  // one centred voice, per channel
+    // Both centred; then 72 twice as loud; then 72 all right; then 72 at -6 dB.
+    auto near = [](double got, double want) { CHECK_NEAR(got, want, 0.02 * want); };
+    near(rms(left, 2000), sine * std::sqrt(2.0));
+    near(rms(left, 7000), sine * std::sqrt(5.0));
+    near(rms(left, 12000), sine);
+    near(rms(right, 12000), sine * std::sqrt(17.0));
+    const double down = std::pow(10.0, -6.0 / 20.0);
+    near(rms(right, 16800), sine * std::sqrt(1.0 + 16.0 * down * down));
+}
+
 TEST(a_script_reports_the_latency_it_sets_in_prepare) {
     std::ifstream in(std::string(SUPPLE_SCRIPT_EXAMPLES) + "/drive.cpp");
     std::stringstream text;

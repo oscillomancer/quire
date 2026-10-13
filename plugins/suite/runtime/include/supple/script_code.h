@@ -53,6 +53,7 @@ struct ParamModel {
     double smoothingMs = 0.0;
     bool automatable = true, modulatable = false, offAtMinimum = false, output = false,
          bypass = false, hidden = false;
+    bool polyModulatable = false;  // modulated per voice (an instrument's)
     std::vector<std::string> roles;
     int offset = 0;  // of the Param member in the plugin struct
 };

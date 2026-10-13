@@ -74,6 +74,7 @@ ParamDef paramOf(const ParamModel& m, ParamTable::Builder& b) {
     if (!m.group.empty()) p = p.in(b.text(m.group));
     if (!m.description.empty()) p = p.help(b.text(m.description));
     if (m.modulatable) p = p.modulatable();
+    if (m.polyModulatable) p = p.polyModulatable();
     if (!m.automatable) p = p.notAutomatable();
     if (m.offAtMinimum) p = p.offAtMinimum();
     if (m.bypass) p = p.bypass();
@@ -116,6 +117,8 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
     info.sidechain = i.sidechain;
     info.auxOutputs = i.outputs;
     info.voices = i.voices;
+    // Every CLAP note expression reaches an instrument's voices.
+    if (info.instrument()) info.noteExpressions = 0x7F;
 
     ParamTable::Builder b;
     Meaning meaning;

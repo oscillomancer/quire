@@ -211,6 +211,7 @@ struct ParamSpec {
     unsigned int id = 0;       // the CLAP id; a hash of the key when 0
     double smoothingMs = 0.0;  // the framework glides it; read it with at(i)
     bool automatable = true, modulatable = false, offAtMinimum = false, output = false;
+    bool polyModulatable = false;  // an instrument's, modulated per voice: forVoice(v)
     bool bypass = false, hidden = false;
     std::initializer_list<const char*> roles = {};  // "level", "time", "brightness" ...
 
@@ -235,6 +236,14 @@ struct ParamSpec {
     ParamSpec modulated() const {
         ParamSpec p = *this;
         p.modulatable = true;
+        return p;
+    }
+    // An instrument's: the host may modulate it per note (CLAP polyphonic
+    // modulation); each voice reads its own value with forVoice(v).
+    ParamSpec polyModulated() const {
+        ParamSpec p = *this;
+        p.modulatable = true;
+        p.polyModulatable = true;
         return p;
     }
     // Its minimum means off ("-inf dB" for a level).
@@ -374,6 +383,10 @@ class Param {
     double gain() const;
     // In update(): whether this parameter changed since the last update.
     bool changed() const { return changed_; }
+    // An instrument's polyModulated() parameter for voice v: the block's
+    // value with the host's modulation of that voice's note, kept in range.
+    // value() for any other.
+    double forVoice(int v) const;
     // A meter() parameter: what the plugin reports.
     void set(double value) { reported_ = value; }
 
@@ -623,6 +636,17 @@ class Instrument : public Plugin {
     // gliding, plus its channel's pitch bend), and its frequency in Hz.
     double voicePitch(int v, int i) const;
     double voiceHz(int v, int i) const;
+    // The note's expressions, as the host sends them for it (CLAP note
+    // expressions; hosts convert MPE to them): volume a linear gain 0..4,
+    // 1 until sent; pan 0..1, 0.5 (the centre) until sent; vibrato,
+    // expression, brightness and pressure 0..1, 0 until sent. Its tuning
+    // expression is already in voicePitch() and voiceHz().
+    double voiceVolume(int v) const;
+    double voicePan(int v) const;
+    double voiceVibrato(int v) const;
+    double voiceExpression(int v) const;
+    double voiceBrightness(int v) const;
+    double voicePressure(int v) const;
     void voiceFinished(int v);
     // Usually in update(): how notes take voices, the glide from one note to
     // the next (Mono and Legato), and the pitch bend's reach in semitones (2

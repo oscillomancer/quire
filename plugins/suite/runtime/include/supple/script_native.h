@@ -188,6 +188,7 @@ class NativeCode final : public Code {
         m.smoothingMs = s.smoothingMs;
         m.automatable = s.automatable;
         m.modulatable = s.modulatable;
+        m.polyModulatable = s.polyModulatable;
         m.offAtMinimum = s.offAtMinimum;
         m.output = s.output;
         m.bypass = s.bypass;

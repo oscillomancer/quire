@@ -320,6 +320,24 @@ double Instrument::voicePitch(int v, int i) const {
     return bank ? bank->pitch(v, i) : 0.0;
 }
 double Instrument::voiceHz(int v, int i) const { return mtof(voicePitch(v, i)); }
+namespace {
+double expressionOf(detail::Instance* instance, int v, int which, double neutral) {
+    const detail::VoiceBank* bank = bankFor(instance, v);
+    return bank ? bank->expression(v, which) : neutral;
+}
+}  // namespace
+double Instrument::voiceVolume(int v) const { return expressionOf(instance_, v, 0, 1.0); }
+double Instrument::voicePan(int v) const { return expressionOf(instance_, v, 1, 0.5); }
+double Instrument::voiceVibrato(int v) const { return expressionOf(instance_, v, 3, 0.0); }
+double Instrument::voiceExpression(int v) const { return expressionOf(instance_, v, 4, 0.0); }
+double Instrument::voiceBrightness(int v) const { return expressionOf(instance_, v, 5, 0.0); }
+double Instrument::voicePressure(int v) const { return expressionOf(instance_, v, 6, 0.0); }
+
+// An instrument's voices, through the instance whose hook is running.
+double Param::forVoice(int v) const {
+    const detail::VoiceBank* bank = bankFor(detail::current(), v);
+    return bank && slot_ >= 0 ? bank->modulated(slot_, v, value_) : value_;
+}
 void Instrument::voiceFinished(int v) {
     if (detail::VoiceBank* bank = bankFor(instance_, v)) bank->finished(v);
 }

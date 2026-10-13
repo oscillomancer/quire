@@ -347,6 +347,9 @@ void Builtins::addClasses() {
     r.inlineMethod(param, "int index() const", Intrinsic::ParamIndex);
     r.inlineMethod(param, "bool on() const", Intrinsic::ParamOn);
     r.inlineMethod(param, "bool changed() const", Intrinsic::ParamChanged);
+    r.method(
+        param, "double forVoice(int v) const",
+        +[](const S::Param* p, int v) { return p->forVoice(v); });
     r.inlineMethod(param, "void set(double value)", Intrinsic::ParamSet, Writes::Self);
     r.method(param, "double gain() const", +[](const S::Param* p) { return p->gain(); });
     param_ = param;
@@ -404,6 +407,24 @@ void Builtins::addClasses() {
     r.method(
         plugin, "double voiceHz(int v, int i) const",
         +[](const S::Instrument* p, int v, int i) { return p->voiceHz(v, i); });
+    r.method(
+        plugin, "double voiceVolume(int v) const",
+        +[](const S::Instrument* p, int v) { return p->voiceVolume(v); });
+    r.method(
+        plugin, "double voicePan(int v) const",
+        +[](const S::Instrument* p, int v) { return p->voicePan(v); });
+    r.method(
+        plugin, "double voiceVibrato(int v) const",
+        +[](const S::Instrument* p, int v) { return p->voiceVibrato(v); });
+    r.method(
+        plugin, "double voiceExpression(int v) const",
+        +[](const S::Instrument* p, int v) { return p->voiceExpression(v); });
+    r.method(
+        plugin, "double voiceBrightness(int v) const",
+        +[](const S::Instrument* p, int v) { return p->voiceBrightness(v); });
+    r.method(
+        plugin, "double voicePressure(int v) const",
+        +[](const S::Instrument* p, int v) { return p->voicePressure(v); });
     r.method(
         plugin, "void voiceFinished(int v)", +[](S::Instrument* p, int v) { p->voiceFinished(v); });
     r.method(

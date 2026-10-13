@@ -2061,6 +2061,9 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                 p.smoothingMs = *v;
             } else if (mod == "modulated") {
                 p.modulatable = true;
+            } else if (mod == "polyModulated") {
+                p.modulatable = true;
+                p.polyModulatable = true;
             } else if (mod == "offAtMin") {
                 p.offAtMinimum = true;
             } else if (mod == "meter") {
@@ -2100,7 +2103,7 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                 error(m->loc, "script.param.modifier",
                       "a parameter has no modifier '." + mod + "()'",
                       "the modifiers are .in(group), .help(text), .smoothed(ms), .modulated(), "
-                      ".offAtMin(), "
+                      ".polyModulated(), .offAtMin(), "
                       ".meter(), .notAutomatable(), .role({...}), .curved(Curve::..., k), "
                       ".withKey(key), .withId(n)");
                 return std::nullopt;

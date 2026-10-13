@@ -340,8 +340,7 @@ Where the work stands, and where it departs from the text above:
   when it has died away, which reports the note's end. `voiceKey`,
   `voiceVelocity`, `voicePitch(v, i)`, `voiceHz(v, i)`, `setVoiceMode`,
   `setGlide` and `setBendRange` reach the manager through the instance. A
-  recompile restarts the sounding voices in the new code. Per-note
-  expression and polyphonic modulation are not exposed yet; note effects
+  recompile restarts the sounding voices in the new code. Note effects
   stay refused until scripts send notes. `dsp.test` plays notes into an
   instrument (a note and a chord, A4 for the pitch heard, no notes).
 - Built-ins over the framework's DSP, 2026-10-13: `Oversampler`, `Stft`,
@@ -353,6 +352,13 @@ Where the work stands, and where it departs from the text above:
   (`script-examples.tests`) and played by the player through the reset
   check (`plugin.player.examples.reset`, under RealtimeSanitizer in that
   preset).
+- Per-note expression, 2026-10-13: the glue keeps each voice's CLAP note
+  expressions (neutral when its note starts) and, for parameters a script
+  marks `polyModulated()` (the framework's `polyModulatable()`), each
+  voice's modulation, both routed by note address; `voiceVolume(v)` ...
+  `voicePressure(v)` read the first, `param.forVoice(v)` the second, and
+  the tuning expression joins `voicePitch`. An instrument declares all
+  seven expressions (`noteExpressions`), so the VST3 wrapper offers them.
 - Files, 2026-10-13: a script declares `AudioFile sample =
   audioFile("Sample")` or `Convolver room = impulseResponse("Room")` as a
   member, and each is a file property of the plugin (framework 1.19.0

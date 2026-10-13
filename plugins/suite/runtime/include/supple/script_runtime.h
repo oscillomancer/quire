@@ -32,7 +32,12 @@ class VoiceBank {
     virtual int key(int v) const = 0;
     virtual int channel(int v) const = 0;
     virtual double velocity(int v) const = 0;
-    virtual double pitch(int v, int frame) const = 0;
+    virtual double pitch(int v, int frame) const = 0;  // its tuning expression included
+    // Expression `which` of the voice's note, in CLAP's order: volume, pan,
+    // tuning, vibrato, expression, brightness, pressure.
+    virtual double expression(int v, int which) const = 0;
+    // Parameter table index `slot`'s `value` with voice v's modulation.
+    virtual double modulated(int slot, int v, double value) const = 0;
     virtual void finished(int v) = 0;
     virtual void setMode(VoiceMode mode) = 0;
     virtual void setGlide(double ms) = 0;

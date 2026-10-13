@@ -194,6 +194,17 @@ TEST_CASE("the first scripts' mistakes are refused with a hint") {
     CHECK(firstError(plugin("void process(Block& io) { int k = voiceKey(0); }")) ==
           "script.plugin.instrument");
     CHECK(firstError(head + "struct T : NoteEffect {\n" + info + "};\n") == "script.plugin.kind");
+    // Per note: expressions and modulation, an instrument's only.
+    CHECK(firstError(
+              instrument("Param cutoff = frequency(\"Cutoff\", 20, 20000, 1000).polyModulated();\n"
+                         "void startVoice(int v) {}\nvoid releaseVoice(int v) {}\n"
+                         "void process(Block& io) { double f = cutoff.forVoice(0) * "
+                         "(1.0 + voiceBrightness(0)) * voiceVolume(0); }")) == "");
+    CHECK(
+        firstError(plugin("Param cutoff = frequency(\"Cutoff\", 20, 20000, 1000).polyModulated();\n"
+                          "void process(Block& io) {}")) == "script.param.poly");
+    CHECK(firstError(plugin("void process(Block& io) { double p = voicePressure(0); }")) ==
+          "script.plugin.instrument");
 }
 
 TEST_CASE("continuous() takes a unit, for the units without a factory") {

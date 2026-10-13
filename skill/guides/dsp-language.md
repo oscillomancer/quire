@@ -93,6 +93,7 @@ Modifiers chain: `decibels("Output", -24, 12, 0).smoothed(20).help("...")`.
 | `.offAtMin()` | Its minimum means off ("-inf dB"); `.gain()` is exactly 0 there |
 | `.meter()` | An output the plugin reports with `p.set(v)`: read-only, never saved |
 | `.modulated()`, `.notAutomatable()` | As named |
+| `.polyModulated()` | An instrument's: modulated per note by the host; each voice reads `p.forVoice(v)` |
 | `.role({"level"})` | What it does, for agents: `level`, `time`, `brightness` ... |
 | `.curved(Curve::Log)`, `.curved(Curve::Pow, k)` | Knob travel |
 | `.withKey("key")`, `.withId(n)` | Override the patch key or the CLAP id (see below) |
@@ -218,6 +219,8 @@ host that note is over: a voice never finished keeps its note open forever.
 | `voicePlaying(v)` | From `startVoice` until `voiceFinished` |
 | `voiceKey(v)`, `voiceChannel(v)`, `voiceVelocity(v)` | The note: MIDI key, channel, velocity 0..1 |
 | `voicePitch(v, i)`, `voiceHz(v, i)` | At frame `i`: semitones (key, glide and pitch bend), and Hz |
+| `voiceVolume(v)`, `voicePan(v)` | The note's expressions as the host sends them: a gain 0..4 (1 until sent), 0..1 (0.5, the centre) |
+| `voiceVibrato(v)`, `voiceExpression(v)`, `voiceBrightness(v)`, `voicePressure(v)` | 0..1, 0 until sent (MPE arrives as these; a tuning expression is in `voicePitch`) |
 | `setVoiceMode(VoiceMode::Poly)` | Or `Mono` (the newest key held, returning to the last), `Legato` (Mono, gliding without restarting) |
 | `setGlide(ms)`, `setBendRange(semitones)` | The slide between notes (Mono, Legato); the bend's reach (2) |
 

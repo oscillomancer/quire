@@ -1322,6 +1322,10 @@ void Sema::extractPlugin() {
     for (size_t i = 0; i < p.params.size(); ++i) {
         const ParamModel& pm = p.params[i];
         const Loc at = p.paramFields[i]->loc;
+        if (pm.polyModulatable && p.kind != PluginKind::Instrument)
+            error(at, "script.param.poly",
+                  "only an instrument's parameters are modulated per voice",
+                  "drop .polyModulated(), or derive from Instrument");
         if (!keys.insert(pm.key).second)
             error(at, "script.param.key", "two parameters have the key '" + pm.key + "'",
                   "rename one, or give it a key of its own: .withKey(\"other_key\")");

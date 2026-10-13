@@ -25,6 +25,9 @@
 //     file(), which points the member at it. A replacement takes the files
 //     over, and the code it replaces lets go of them (its convolutions go
 //     silent for the crossfade), so a reverb's tail carries on.
+//   - An instrument's note expressions (CLAP's: volume, pan, tuning ...)
+//     and per-note modulation of its polyModulated() parameters go to the
+//     voices whose notes they address, and start neutral with each note.
 //   - An instrument's notes go to the framework's voice manager
 //     (dsp/Voices.h), which calls the script's voice hooks -- startVoice,
 //     releaseVoice, stopVoice -- and which Instrument's methods read and
@@ -34,6 +37,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
@@ -69,6 +73,7 @@ class Generation {
             if (i < 0) continue;
             auto* p = reinterpret_cast<S::Param*>(static_cast<unsigned char*>(self_) + m.offset);
             params_[static_cast<size_t>(i)] = p;
+            D::ParamBinding::setSlot(*p, i);  // forVoice() finds its modulation by it
             const ParamDef& def = table.at(static_cast<size_t>(i));
             D::ParamBinding::setRange(*p, def.min, def.is(pflag::kOffAtMin));
         }
@@ -134,6 +139,13 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         instrument_ = definition_->code()->kind() == D::PluginKind::Instrument;
         voiceCount_ = std::clamp(info.voices > 0 ? info.voices : kDefaultVoices, 1, kMaxVoices);
         if (instrument_) instance_.voices = &bank_;
+        polySlot_.assign(table_->count(), -1);
+        for (size_t i = 0; i < table_->count(); ++i)
+            if (instrument_ && table_->at(i).is(pflag::kPolyMod)) {
+                polySlot_[i] = static_cast<int>(polyAmount_.size());
+                polyAmount_.emplace_back();
+            }
+        for (int v = 0; v < kMaxVoices; ++v) noteBegins(v);
     }
     ~ScriptProcessor() {
         delete incoming_.exchange(nullptr, std::memory_order_acq_rel);
@@ -229,6 +241,21 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     void midi(const MidiMessage& m) {
         if (instrument_) voices_.midi(m, *this);
     }
+    // To the voices whose notes they address.
+    void noteExpression(const NoteExpression& x) {
+        if (!instrument_) return;
+        for (int v = 0; v < voiceCount_; ++v)
+            if (voices_[v].active && x.address.matches(voices_[v].note))
+                expression_[static_cast<size_t>(v)][static_cast<size_t>(x.type)] = x.value;
+    }
+    void noteModulation(const NoteModulation& m) {
+        const int i = table_->indexOf(m.id);
+        if (i < 0 || polySlot_[static_cast<size_t>(i)] < 0) return;
+        auto& amounts = polyAmount_[static_cast<size_t>(polySlot_[static_cast<size_t>(i)])];
+        for (int v = 0; v < voiceCount_; ++v)
+            if (voices_[v].active && m.address.matches(voices_[v].note))
+                amounts[static_cast<size_t>(v)] = m.amount;
+    }
 
     void process(Block& block) {
         if (Generation* next = incoming_.exchange(nullptr, std::memory_order_acq_rel)) adopt(next);
@@ -308,6 +335,10 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     // --- the voice manager's (dsp/Voices.h): the script's voice hooks -------------
 
     void voiceStart(int v, bool retrigger) {
+        noteBegins(v);
+        startVoice(v, retrigger);
+    }
+    void startVoice(int v, bool retrigger) {
         const D::Code& code = current_->program();
         if (auto hook = code.startVoiceRetrigger())
             callVoice([&] { hook(&instance_, current_->self(), v, retrigger ? 1 : 0); });
@@ -401,9 +432,15 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         if (instrument_)
             for (int v = 0; v < voiceCount_; ++v)
                 if (voices_[v].active) {
-                    voiceStart(v, true);
+                    startVoice(v, true);  // the same note: its expressions stay
                     if (!voices_[v].held) voiceRelease(v);
                 }
+    }
+
+    // A new note on voice v: its expressions neutral, its modulation none.
+    void noteBegins(int v) {
+        expression_[static_cast<size_t>(v)] = {1.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0};
+        for (auto& amounts : polyAmount_) amounts[static_cast<size_t>(v)] = 0.0;
     }
 
     void bindFiles(Generation& g) {
@@ -440,7 +477,21 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         int key(int v) const override { return p_.voices_[v].note.key; }
         int channel(int v) const override { return p_.voices_[v].note.channel; }
         double velocity(int v) const override { return p_.voices_[v].velocity; }
-        double pitch(int v, int frame) const override { return p_.voices_.pitchAt(v, frame); }
+        double pitch(int v, int frame) const override {
+            return p_.voices_.pitchAt(v, frame) + p_.expression_[static_cast<size_t>(v)][2];
+        }
+        double expression(int v, int which) const override {
+            return which >= 0 && which < 7
+                       ? p_.expression_[static_cast<size_t>(v)][static_cast<size_t>(which)]
+                       : 0.0;
+        }
+        double modulated(int slot, int v, double value) const override {
+            if (slot < 0 || static_cast<size_t>(slot) >= p_.polySlot_.size()) return value;
+            const int k = p_.polySlot_[static_cast<size_t>(slot)];
+            if (k < 0) return value;
+            return modulatedPlain(p_.table_->at(static_cast<size_t>(slot)), value,
+                                  p_.polyAmount_[static_cast<size_t>(k)][static_cast<size_t>(v)]);
+        }
         void finished(int v) override {
             if (!p_.fadingNow_) p_.voices_.finished(v, p_);
         }
@@ -512,6 +563,11 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     Bank bank_{*this};
     int pendingMode_ = -1;
     int endFrame_ = 0;
+    // Each voice's note expressions (CLAP's order), and per poly-modulated
+    // parameter (polySlot_, by table index) each voice's modulation.
+    std::array<std::array<double, 7>, kMaxVoices> expression_{};
+    std::vector<int> polySlot_;
+    std::vector<std::array<double, kMaxVoices>> polyAmount_;
     bool fadingNow_ = false;
 };
 
