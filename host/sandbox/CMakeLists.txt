@@ -4,13 +4,16 @@ supple_add_library(sandbox-render
   SOURCES src/render.cpp
   DEPS supple::clap-host supple::audio-file supple::core-dsp)
 
+# dsp.preview writes PNGs with the system zlib (host/dsp-commands/png.h).
+find_package(ZLIB REQUIRED)
+
 supple_add_library(sandbox
   SOURCES src/session.cpp src/commands.cpp src/analysis_commands.cpp src/optimize.cpp
           src/dsp_commands.cpp
   DEPS supple::sandbox-render supple::clap-host supple::audio-file supple::core-json supple::midi
        supple::notation supple::command-bus supple::lua-bus supple::semantic-params-abi
        supple::core-analysis supple::core-dsp supple::optimize supple::core-params
-  PRIVATE_DEPS supple::script-compiler)
+  PRIVATE_DEPS supple::script-compiler ZLIB::ZLIB)
 
 if(SUPPLE_BUILD_TESTS)
   supple_add_tests(sandbox SOURCES tests/test_render.cpp tests/test_session.cpp tests/test_commands.cpp

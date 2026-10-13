@@ -150,6 +150,24 @@ q = nil
 ---@field library string
 ---@field scripts table[]
 
+---@class Quire.dsp_preview_args
+---@field plugin? string
+---@field script? string
+---@field patch? any
+---@field signal? "sine"|"sweep"|"impulse"|"noise"|"silence"|"notes"|"note"
+---@field level_db? number|string Quantity strings are range-checked by the server. (default: -12.0)
+---@field frequency_hz? number|string Quantity strings are range-checked by the server. (default: 1000.0)
+---@field seconds? number (default: 1.0)
+---@field scale? number (default: 1.0)
+
+---@class Quire.dsp_preview_result
+---@field plugin string
+---@field path string the PNG
+---@field width integer pixels
+---@field height integer pixels
+---@field problems string[]
+---@field log string[]
+
 ---@class Quire.dsp_test_args
 ---@field plugin? string
 ---@field script? string
@@ -1156,6 +1174,7 @@ q = nil
 ---@field export fun(args: Quire.dsp_export_args): Quire.dsp_export_result Export a DSP script as a plugin for other DAWs: a CLAP file, or C++ source.
 ---@field get fun(args: Quire.dsp_get_args): Quire.dsp_get_result Read a DSP script from the library.
 ---@field list fun(): Quire.dsp_list_result List the DSP scripts in the library, compiled, with their plugin ids.
+---@field preview fun(args?: Quire.dsp_preview_args): Quire.dsp_preview_result Draw a plugin's editor to a PNG, after a test signal plays through it.
 ---@field test fun(args?: Quire.dsp_test_args): Quire.dsp_test_result Play test signals or notes through a plugin and measure it: levels, THD, pitch.
 ---@field write fun(args: Quire.dsp_write_args): Quire.dsp_write_result Save a DSP script to the library and compile it, with diagnostics.
 

@@ -2,7 +2,10 @@
 // Copyright (c) 2026 Supple Audio
 #include "supple/suite/semantic_layer.h"
 
+#include <cstdint>
 #include <cstring>
+
+#include "supple/clap/editor_picture.h"
 
 namespace supple::suite {
 
@@ -45,6 +48,19 @@ const clap_plugin_supple_semantic_params_t kExtension = {
     nullptr,  // no live telemetry
 };
 
+// The editor drawn without a window (plugin/Layer.h's drawEditor): its size,
+// then its pixels.
+const clap_plugin_supple_editor_picture_t kPicture = {
+    sizeof(clap_plugin_supple_editor_picture_t),
+    [](const clap_plugin_t* p, bool on) {
+        if (SemanticLayer* l = layerOf(p)) l->watchEditor(on);
+    },
+    [](const clap_plugin_t* p, double scale, const clap_ostream_t* out, const clap_ostream_t* why) {
+        SemanticLayer* l = layerOf(p);
+        return l && l->drawEditor(scale, out, why);
+    },
+};
+
 json::Error error(std::string code, std::string message, std::string hint) {
     json::Error e;
     e.code = std::move(code);
@@ -72,7 +88,28 @@ void SemanticLayer::rebuild() {
 }
 
 const void* SemanticLayer::extension(const char* id) {
+    if (std::strcmp(id, CLAP_EXT_SUPPLE_EDITOR_PICTURE) == 0) return &kPicture;
     return codec_ && std::strcmp(id, CLAP_EXT_SUPPLE_SEMANTIC_PARAMS) == 0 ? &kExtension : nullptr;
+}
+
+void SemanticLayer::watchEditor(bool on) { instance_.watch(on); }
+
+bool SemanticLayer::drawEditor(double scale, const clap_ostream_t* out, const clap_ostream_t* why) {
+    Picture picture;
+    std::string problem;
+    if (!instance_.drawEditor(scale, picture, problem)) {
+        if (why) writeAll(why, problem);
+        return false;
+    }
+    std::string bytes(8, '\0');
+    for (int k = 0; k < 4; ++k) {
+        bytes[static_cast<size_t>(k)] =
+            static_cast<char>((static_cast<uint32_t>(picture.width) >> (8 * k)) & 0xFF);
+        bytes[static_cast<size_t>(4 + k)] =
+            static_cast<char>((static_cast<uint32_t>(picture.height) >> (8 * k)) & 0xFF);
+    }
+    bytes.append(reinterpret_cast<const char*>(picture.rgba.data()), picture.rgba.size());
+    return writeAll(out, bytes);
 }
 
 void SemanticLayer::changed(uint32_t flags) {

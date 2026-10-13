@@ -701,6 +701,12 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
         self->extSemantic_ = nullptr;  // too old to call safely
     self->info_.semantic = self->extSemantic_ != nullptr;
     if (self->extSemantic_) (void)self->semanticSchema();
+    self->extPicture_ = static_cast<const clap_plugin_supple_editor_picture_t*>(
+        ext(CLAP_EXT_SUPPLE_EDITOR_PICTURE));
+    if (self->extPicture_ &&
+        (self->extPicture_->struct_size < sizeof(clap_plugin_supple_editor_picture_t) ||
+         !self->extPicture_->watch || !self->extPicture_->draw))
+        self->extPicture_ = nullptr;
 
     // Port configuration: prefer stereo main in/out (or stereo out for instruments).
     if (auto* cfg = static_cast<const clap_plugin_audio_ports_config_t*>(
@@ -1440,6 +1446,43 @@ Result<std::string> Instance::describe(bool changedOnly) {
             &sink.stream))
         return Error("host.semantic", "describe failed");
     return sink.text;
+}
+
+Status Instance::watchEditor(bool on) {
+    if (remote_ || !extPicture_)
+        return Error("host.picture.unsupported",
+                     info_.id + " cannot draw its editor without a window here", {},
+                     "it needs com.suppleaudio.editor-picture/1, in process");
+    extPicture_->watch(plugin_, on);
+    return okStatus();
+}
+
+Result<Instance::Picture> Instance::drawEditor(double scale) {
+    if (remote_ || !extPicture_)
+        return Error("host.picture.unsupported",
+                     info_.id + " cannot draw its editor without a window here", {},
+                     "it needs com.suppleaudio.editor-picture/1, in process");
+    StringSink out, why;
+    if (!extPicture_->draw(plugin_, scale, &out.stream, &why.stream))
+        return Error("host.picture",
+                     info_.id + " drew no picture" + (why.text.empty() ? "" : ": " + why.text));
+    const auto& b = out.text;
+    auto u32 = [&](size_t at) {
+        std::uint32_t v = 0;
+        for (int k = 3; k >= 0; --k)
+            v = v << 8 | static_cast<std::uint8_t>(b[at + static_cast<size_t>(k)]);
+        return v;
+    };
+    if (b.size() < 8) return Error("host.picture", info_.id + " wrote a picture without its size");
+    const std::uint32_t w = u32(0), h = u32(4);
+    if (w == 0 || h == 0 || w > 16384 || h > 16384 ||
+        b.size() != 8 + static_cast<size_t>(w) * static_cast<size_t>(h) * 4)
+        return Error("host.picture", info_.id + " wrote a picture whose size and pixels disagree");
+    Picture p;
+    p.width = static_cast<int>(w);
+    p.height = static_cast<int>(h);
+    p.rgba.assign(b.begin() + 8, b.end());
+    return p;
 }
 
 Result<std::vector<std::uint8_t>> Instance::saveState() {

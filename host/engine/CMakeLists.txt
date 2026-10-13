@@ -1,5 +1,8 @@
 add_subdirectory(model)
 
+# dsp.preview writes PNGs with the system zlib (host/dsp-commands/png.h).
+find_package(ZLIB REQUIRED)
+
 supple_add_library(engine
   SOURCES src/offline.cpp src/plan.cpp src/workers.cpp src/live_workers.cpp src/realtime.cpp src/recording.cpp
           src/stretch.cpp src/meters.cpp src/runtime_protection.cpp src/media_files.cpp
@@ -10,7 +13,7 @@ supple_add_library(engine
   DEPS supple::model supple::clap-host supple::audio-file supple::timeline supple::semantic-params-abi
        supple::command-bus supple::lua-bus supple::notation supple::core-params supple::core-analysis
        supple::core-dsp supple::signalsmith-stretch supple::console9
-  PRIVATE_DEPS supple::product-info supple::script-compiler supple::sandbox-render ${CMAKE_DL_LIBS})
+  PRIVATE_DEPS supple::product-info supple::script-compiler supple::sandbox-render ZLIB::ZLIB ${CMAKE_DL_LIBS})
 
 if(SUPPLE_BUILD_TESTS)
   # A stand-in libjack: the JACK backend is tested without a server or device.

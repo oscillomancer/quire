@@ -1381,6 +1381,100 @@ Result:
 
 ```
 
+## `dsp.preview@1`
+
+Draw a plugin's editor to a PNG, after a test signal plays through it.
+
+Give plugin (an id) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays signal -- an effect: sine (the default, at frequency_hz), sweep, impulse, noise or silence, peaking at level_db; an instrument: notes (the default), note or silence -- for seconds while its editor watches, so meters and the script's draw() show what played. Then the editor is drawn without a window, scale times its design size, and saved as a PNG (path; width and height in pixels): read the file to see it. A script with neither editor() nor draw() shows the automatic editor. problems says what went wrong in the editor's code (a loop stopped by its budget, an index out of range), with the line.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `plugin` | string |  |  |  |  |
+| `script` | string |  |  |  |  |
+| `patch` | value |  |  |  |  |
+| `signal` | string |  |  |  |  |
+| `level_db` | value | dB | -60.0..0.0 | -12.0 | Quantity strings are range-checked by the server. |
+| `frequency_hz` | value | Hz | 10.0..20000.0 | 1000.0 | Quantity strings are range-checked by the server. |
+| `seconds` | number |  | 0.0..10.0 | 1.0 |  |
+| `scale` | number |  | 0.5..3.0 | 1.0 |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "dsp_preview_result",
+  "properties": {
+    "plugin": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string",
+      "description": "the PNG"
+    },
+    "width": {
+      "type": "integer",
+      "description": "pixels"
+    },
+    "height": {
+      "type": "integer",
+      "description": "pixels"
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "log": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["plugin", "path", "width", "height", "problems", "log"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `dsp.args`: neither or both of plugin and script Hint: give exactly one
+- `dsp.not_listed`: the script compiles but no plugin has its id Hint: put the script player on the plugin path
+- `dsp.signal`: a signal the plugin cannot play Hint: an effect plays audio signals, an instrument notes
+- `dsp.no_picture`: the plugin cannot draw its editor without a window Hint: scripts can, through the script player; other plugins need the editor-picture extension
+
+### Examples
+
+**See a script's editor** (`dsp_player`)
+
+```json
+{
+  "script": "gain"
+}
+
+```
+
+Result:
+
+```json
+{
+  "plugin": "com.example.gain",
+  "path": "<any>",
+  "width": "<any>",
+  "height": "<any>",
+  "problems": [],
+  "log": "<any>"
+}
+
+```
+
 ## `dsp.test@1`
 
 Play test signals or notes through a plugin and measure it: levels, THD, pitch.

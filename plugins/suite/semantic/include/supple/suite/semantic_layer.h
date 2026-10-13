@@ -4,7 +4,9 @@
 // The semantic-params extension (supple/clap/semantic_params.h) for any
 // plugin of the framework, as a layer (plugin/Layer.h): the schema, the
 // patch read, replaced, merged and validated, and a description, all from
-// the instance's Definition and its meaning (supple/suite/semantics.h).
+// the instance's Definition and its meaning (supple/suite/semantics.h). And
+// the editor-picture extension (supple/clap/editor_picture.h): the editor
+// drawn without a window, for a host that cannot look at a screen.
 //
 // The patch also travels in the state, as a chunk ("PTCH", framed as
 // core-patch §4) after the framework's: loading prefers its values by key to
@@ -45,6 +47,8 @@ class SemanticLayer : public plugin::Layer {
     bool getPatch(uint32_t detail, const clap_ostream_t* out) const;
     bool setPatch(uint32_t mode, const char* json, uint32_t size, const clap_ostream_t* errors);
     bool describe(uint32_t detail, const clap_ostream_t* out) const;
+    void watchEditor(bool on);
+    bool drawEditor(double scale, const clap_ostream_t* out, const clap_ostream_t* why);
 
     // What the extension works from; null while the meaning has problems
     // (the extension is then not offered: hosts use plain CLAP).

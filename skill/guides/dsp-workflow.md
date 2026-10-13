@@ -10,7 +10,8 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
 
 1. **Start from the closest example** (`generated/dsp-examples.md`: a
    gain, a tilt EQ, a sidechain compressor, an echo, an oversampled drive,
-   a spectral effect, a convolution reverb, a synth, a sampler) rather than
+   a spectral effect, a convolution reverb, a synth, a sampler, a meter
+   with an editor of its own) rather than
    from nothing, and decide the parameters first: what a person would
    turn, in which unit, over what range.
 2. **Write it**: `dsp_write {name: "tilt_eq", source: "<the whole file>"}`.
@@ -44,15 +45,24 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
    (a distortion clips on purpose). `save: true` keeps the outputs for
    `analyze` and `compare`. On real material, `analyze_track` measures the
    track before and after.
-5. **Change it** by writing the same name again. Instances already playing
+5. **Look at it.** `dsp_preview {script: "tilt_eq"}` plays a test signal
+   (notes for an instrument) through a fresh instance and draws its editor
+   to a PNG (`path`): read the file to see the controls, meters and the
+   script's own drawing as they would look. Every plugin has the automatic
+   editor; a script draws its own with `editor()` and `draw()`
+   (`guides/dsp-language.md`, The editor). Preview again after changing
+   it, and with `patch` to see other settings; `problems` names a loop or
+   an index that went wrong in the editor's code, with the line.
+6. **Change it** by writing the same name again. Instances already playing
    it switch to the new code within half a second, crossfaded, keeping
    their parameter values. Changing the parameters themselves (adding,
    removing, renaming, a new range) restarts the plugin in the host;
    values carry over by key. A version that does not compile leaves the
-   previous one playing, so a mistake never silences the track.
-6. **Tell the human** what it does, which parameters matter, and which
+   previous one playing, so a mistake never silences the track. An open
+   editor is made again from the new code.
+7. **Tell the human** what it does, which parameters matter, and which
    track to listen to. Taste is theirs.
-7. **Export it** when they want it in another DAW. `dsp_export {script:
+8. **Export it** when they want it in another DAW. `dsp_export {script:
    "tilt_eq"}` writes `<Name>.clap` (in the script's folder under
    `export/`, or `folder: "/home/<them>/.clap"` to install it) and the
    notices to ship beside it: ready now, for this platform. `format:
@@ -65,7 +75,7 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
 
 `dsp_list` shows every script in the library (and whether it compiles);
 `dsp_get {name}` returns one's source. The DAW and the sandbox share the
-library and have the same six commands.
+library and have the same seven commands.
 
 ## Follow the stock plugins
 

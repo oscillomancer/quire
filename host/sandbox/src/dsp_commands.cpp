@@ -3,6 +3,7 @@
 #include "dsp_commands.h"
 
 #include "../../dsp-commands/dsp_export.h"
+#include "../../dsp-commands/dsp_preview.h"
 #include "../../dsp-commands/dsp_test.h"
 #include "supple/sandbox/session.h"
 
@@ -29,6 +30,7 @@ void registerDspCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
     dsp_commands::registerDspCommands<Session>(registry);
     dsp_commands::registerDspTest<Session>(registry, ex.effect);
     dsp_commands::registerDspExport<Session>(registry);
+    dsp_commands::registerDspPreview<Session>(registry);
 }
 
 }  // namespace supple::sandbox

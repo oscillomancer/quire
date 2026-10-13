@@ -25,6 +25,7 @@
 #include "supple/base/rt.h"
 #include "supple/base/spsc.h"
 #include "supple/base/thread.h"
+#include "supple/clap/editor_picture.h"
 #include "supple/clap/semantic_params.h"
 #include "supple/json/value.h"
 
@@ -276,6 +277,17 @@ class Instance {
     Status setPatch(std::string_view json, std::uint32_t mode);  // CLAP_SUPPLE_SET_*
     Result<std::string> describe(bool changedOnly);
 
+    // --- the editor without a window (com.suppleaudio.editor-picture/1, in process) ---
+    struct Picture {
+        int width = 0, height = 0;
+        std::vector<std::uint8_t> rgba;  // rows from the top
+    };
+    bool drawsEditor() const { return extPicture_ != nullptr; }
+    // While on, what plays reaches the editor's meters and displays, window or not.
+    Status watchEditor(bool on);
+    // The editor as it would open now, `scale` times its design size.
+    Result<Picture> drawEditor(double scale);
+
     // --- state (main thread) ---
     // Inactive saves flush acknowledged main-thread edits into component state.
     // Active saves require those edits to have been delivered by the audio consumer.
@@ -405,6 +417,7 @@ class Instance {
     const clap_plugin_tail_t* extTail_ = nullptr;
     const clap_plugin_timer_support_t* extTimer_ = nullptr;
     const clap_plugin_supple_semantic_params_t* extSemantic_ = nullptr;
+    const clap_plugin_supple_editor_picture_t* extPicture_ = nullptr;
     const clap_plugin_gui_t* extGui_ = nullptr;
     const clap_plugin_posix_fd_support_t* extFd_ = nullptr;
     bool editorOpen_ = false;

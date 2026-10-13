@@ -65,7 +65,7 @@ that exactly duplicates structuredContent is shown once.
   "id": 2,
   "result": {
     "tools": {
-      "_elided_array_count": 30,
+      "_elided_array_count": 31,
       "names": [
         "analyze",
         "batch",
@@ -74,6 +74,7 @@ that exactly duplicates structuredContent is shown once.
         "dsp_export",
         "dsp_get",
         "dsp_list",
+        "dsp_preview",
         "dsp_test",
         "dsp_write",
         "masking",
@@ -1583,7 +1584,7 @@ that exactly duplicates structuredContent is shown once.
   "id": 2,
   "result": {
     "tools": {
-      "_elided_array_count": 30,
+      "_elided_array_count": 31,
       "names": [
         "analyze",
         "batch",
@@ -1592,6 +1593,7 @@ that exactly duplicates structuredContent is shown once.
         "dsp_export",
         "dsp_get",
         "dsp_list",
+        "dsp_preview",
         "dsp_test",
         "dsp_write",
         "masking",

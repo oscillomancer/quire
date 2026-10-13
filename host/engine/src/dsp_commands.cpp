@@ -2,6 +2,7 @@
 // dsp.list, dsp.test and dsp.export over EngineApp's script library
 // (host/dsp-commands).
 #include "../../dsp-commands/dsp_export.h"
+#include "../../dsp-commands/dsp_preview.h"
 #include "../../dsp-commands/dsp_test.h"
 #include "supple/engine/app.h"
 
@@ -29,6 +30,7 @@ void registerDspCommands(cmd::Registry& registry) {
     dsp_commands::registerDspCommands<EngineApp>(registry);
     dsp_commands::registerDspTest<EngineApp>(registry, "com.suppleaudio.test.gain");
     dsp_commands::registerDspExport<EngineApp>(registry);
+    dsp_commands::registerDspPreview<EngineApp>(registry);
 }
 
 }  // namespace supple::engine
