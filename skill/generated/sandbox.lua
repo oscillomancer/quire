@@ -29,6 +29,57 @@ q = nil
 ---@field summary string
 ---@field loss any The score the optimizer minimizes: total, per-term contributions, and the note-off_s used per side.
 
+---@class Quire.dsp_check_args
+---@field name? string
+---@field source? string
+
+---@class Quire.dsp_check_result
+---@field ok boolean
+---@field diagnostics table[]
+---@field plugin? table
+
+---@class Quire.dsp_get_args
+---@field name string
+
+---@class Quire.dsp_get_result
+---@field name string
+---@field path string
+---@field source string
+
+---@class Quire.dsp_list_result
+---@field library string
+---@field scripts table[]
+
+---@class Quire.dsp_test_args
+---@field plugin? string
+---@field script? string
+---@field patch? any
+---@field signals? "sine"|"sweep"|"impulse"|"noise"|"silence"[] default: all five
+---@field level_db? number|string Quantity strings are range-checked by the server. (default: -12.0)
+---@field frequency_hz? number|string Quantity strings are range-checked by the server. (default: 1000.0)
+---@field seconds? number (default: 1.0)
+---@field save? boolean (default: false)
+
+---@class Quire.dsp_test_result
+---@field plugin string
+---@field latency integer samples
+---@field signals table[]
+---@field cpu_percent number of real time, measured
+---@field problems string[]
+---@field log string[]
+
+---@class Quire.dsp_write_args
+---@field name string the script's folder and file name
+---@field source string the whole C++ file
+
+---@class Quire.dsp_write_result
+---@field name string
+---@field path string
+---@field ok boolean it compiled
+---@field diagnostics table[]
+---@field plugin? table
+---@field listed boolean plugin.list shows it (the script player is on the plugin path)
+
 ---@class Quire.job_cancel_args
 ---@field job string
 
@@ -227,6 +278,13 @@ q = nil
 ---@class Quire.session_set_result
 ---@field settings any
 
+---@class Quire.dsp
+---@field check fun(args?: Quire.dsp_check_args): Quire.dsp_check_result Compile a DSP script without saving it; return its diagnostics.
+---@field get fun(args: Quire.dsp_get_args): Quire.dsp_get_result Read a DSP script from the library.
+---@field list fun(): Quire.dsp_list_result List the DSP scripts in the library, compiled, with their plugin ids.
+---@field test fun(args?: Quire.dsp_test_args): Quire.dsp_test_result Play test signals through an effect and measure it: levels, THD, response.
+---@field write fun(args: Quire.dsp_write_args): Quire.dsp_write_result Save a DSP script to the library and compile it, with diagnostics.
+
 ---@class Quire.job
 ---@field cancel fun(args: Quire.job_cancel_args): table Cancel a job.
 ---@field get fun(args: Quire.job_get_args): table Get a job's status and progress.
@@ -273,6 +331,7 @@ q = nil
 ---@field set fun(args?: Quire.session_set_args): Quire.session_set_result Change session settings (rate, block size, tempo, meter, tail limit).
 
 ---@class Quire
+---@field dsp Quire.dsp Commands named dsp.*
 ---@field job Quire.job Commands named job.*
 ---@field optimize Quire.optimize Commands named optimize.*
 ---@field param Quire.param Commands named param.*

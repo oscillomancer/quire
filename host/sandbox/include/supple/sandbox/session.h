@@ -44,6 +44,9 @@ struct SessionOptions {
     // Plugin search path (dirs or .clap files). Empty = host::defaultSearchPath().
     std::vector<std::filesystem::path> pluginPath;
     std::filesystem::path presetDir;  // empty = <workdir>/presets
+    // DSP scripts (ADR-0032): <scriptDir>/<name>/<name>.cpp, each a plugin of
+    // the script player. Empty = <workdir>/scripts.
+    std::filesystem::path scriptDir;
     host::HostIdentity identity;
     // Evaluation tooling: save compiler-produced note data beside each WAV.
     bool recordMidi = false;
@@ -96,6 +99,11 @@ class Session {
     Session& operator=(const Session&) = delete;
 
     const SessionOptions& options() const { return options_; }
+    // The DSP script library (dsp.* commands); open() names it to the script
+    // player first in SUPPLE_SCRIPT_LIBRARY.
+    std::filesystem::path scriptDir() const {
+        return options_.scriptDir.empty() ? options_.workdir / "scripts" : options_.scriptDir;
+    }
 
     // --- plugins ---------------------------------------------------------------
     // The scanned catalogue (scanned on first use; `rescan` forces it).

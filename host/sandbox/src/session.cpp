@@ -1,5 +1,6 @@
 #include "supple/sandbox/session.h"
 
+#include "../../dsp-commands/script_library.h"
 #include "schema_params.h"
 
 #include <algorithm>
@@ -225,7 +226,9 @@ Result<std::unique_ptr<Session>> Session::open(SessionOptions options) {
                      "choose a writable directory");
     options.workdir = fs::absolute(options.workdir, ec);
     if (options.presetDir.empty()) options.presetDir = options.workdir / "presets";
-    return std::unique_ptr<Session>(new Session(std::move(options)));
+    auto session = std::unique_ptr<Session>(new Session(std::move(options)));
+    dsp_commands::nameScriptLibrary(session->scriptDir());
+    return session;
 }
 
 // --- plugins -------------------------------------------------------------------------

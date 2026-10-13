@@ -135,6 +135,24 @@ q = nil
 ---@field library string
 ---@field scripts table[]
 
+---@class Quire.dsp_test_args
+---@field plugin? string
+---@field script? string
+---@field patch? any
+---@field signals? "sine"|"sweep"|"impulse"|"noise"|"silence"[] default: all five
+---@field level_db? number|string Quantity strings are range-checked by the server. (default: -12.0)
+---@field frequency_hz? number|string Quantity strings are range-checked by the server. (default: 1000.0)
+---@field seconds? number (default: 1.0)
+---@field save? boolean (default: false)
+
+---@class Quire.dsp_test_result
+---@field plugin string
+---@field latency integer samples
+---@field signals table[]
+---@field cpu_percent number of real time, measured
+---@field problems string[]
+---@field log string[]
+
 ---@class Quire.dsp_write_args
 ---@field name string the script's folder and file name
 ---@field source string the whole C++ file
@@ -1122,6 +1140,7 @@ q = nil
 ---@field check fun(args?: Quire.dsp_check_args): Quire.dsp_check_result Compile a DSP script without saving it; return its diagnostics.
 ---@field get fun(args: Quire.dsp_get_args): Quire.dsp_get_result Read a DSP script from the library.
 ---@field list fun(): Quire.dsp_list_result List the DSP scripts in the library, compiled, with their plugin ids.
+---@field test fun(args?: Quire.dsp_test_args): Quire.dsp_test_result Play test signals through an effect and measure it: levels, THD, response.
 ---@field write fun(args: Quire.dsp_write_args): Quire.dsp_write_result Save a DSP script to the library and compile it, with diagnostics.
 
 ---@class Quire.engine

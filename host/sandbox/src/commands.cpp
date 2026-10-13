@@ -6,7 +6,9 @@
 #include <cmath>
 #include <fstream>
 
+#include "../../dsp-commands/dsp_shared.h"
 #include "analysis_commands.h"
+#include "dsp_commands.h"
 #include "optimize_commands.h"
 #include "supple/base/files.h"
 #include "supple/notation/notation.h"
@@ -1041,6 +1043,7 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
 
     registerAnalysisCommands(registry);
     registerOptimizeCommands(registry);
+    registerDspCommands(registry, ex);
 }
 
 // --- host ------------------------------------------------------------------------------
@@ -1179,6 +1182,11 @@ void SandboxHost::setupFixture(cmd::Dispatcher& dispatcher, std::string_view fix
     if (fixture == "empty") return;
     if (fixture == "job_running") {  // the bus's own job.* examples
         (void)dispatcher.jobs().create();
+        return;
+    }
+    if (fixture == "dsp_script") {  // gain/gain.cpp in the DSP script library
+        (void)writeFileAtomic(session_->scriptDir() / "gain" / "gain.cpp",
+                              dsp_commands::detail::kGain);
         return;
     }
     Session& s = *session_;

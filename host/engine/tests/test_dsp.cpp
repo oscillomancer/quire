@@ -89,6 +89,14 @@ TEST_CASE("a DSP script written over the bus is a plugin an agent sets through i
     call("fx.param.set", json::parse(R"({"fx": ")" + fx + R"(", "values": {"mix": 25}})").value());
     CHECK(patch()["params"]["mix"].asDouble() == doctest::Approx(25));
 
+    // The harness, through the player: -6 dB fully wet halves the sine.
+    json::Value measured = call("dsp.test", json::parse(R"({"script": "agent_gain",
+        "signals": ["sine"], "patch": {"params": {"gain": -6, "mix": 100}}})")
+                                                .value());
+    CHECK(measured["plugin"].asString() == "com.example.agent_gain");
+    CHECK(measured["signals"].at(0).find("gain_db")->asDouble() == doctest::Approx(-6.0));
+    CHECK(measured["problems"].size() == 0);
+
     // A mistake: saved, reported with its line and hint, and no longer a plugin.
     std::string broken = kScript;
     broken.replace(broken.find("dbToGain(gain.at(i))"), 20,

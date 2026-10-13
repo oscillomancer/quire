@@ -22,9 +22,16 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
 3. **Load it** on a track: `fx_add {track, plugin: "<its id>", patch:
    {params: {...}}}`. It answers `semantic: true`: `fx_describe`,
    `fx_patch_get`, `fx_patch_merge` and `fx_param_set` work in its units.
-4. **Measure** what it does to real material: `analyze_track` on the track
-   before and after, or `analyze_compare`. Set the parameters to extremes
-   and check that nothing clips, goes silent or turns to noise.
+4. **Measure it.** `dsp_test {script: "tilt_eq"}` plays a
+   sine, a sweep, an impulse, pink noise and silence through a fresh
+   instance and reports levels, the sine's `gain_db` and `thd_percent`, the
+   impulse's `response_db` at octave centres, and `problems` in words
+   (clipping, DC, sound from silence, no output, NaN, a loop that never
+   ended). Run it again with `patch: {params: {...}}` at the extremes of
+   each parameter. `problems` should be empty unless the plugin means it
+   (a distortion clips on purpose). `save: true` keeps the outputs for
+   `analyze` and `compare`. On real material, `analyze_track` measures the
+   track before and after.
 5. **Change it** by writing the same name again. Instances already playing
    it switch to the new code within half a second, crossfaded, keeping
    their parameter values. Changing the parameters themselves (adding,
@@ -35,7 +42,8 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
    track to listen to. Taste is theirs.
 
 `dsp_list` shows every script in the library (and whether it compiles);
-`dsp_get {name}` returns one's source.
+`dsp_get {name}` returns one's source. The DAW and the sandbox share the
+library and have the same five commands.
 
 ## Follow the stock plugins
 

@@ -216,9 +216,10 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
   in the script library, with the semantic-params extension, reloading a
   script when its file changes. `dsp.write`, `dsp.check`, `dsp.get` and
   `dsp.list` write and compile scripts (the app's library is
-  `<data>/<slug>/scripts`), and a script that compiles is loaded and set
+  `<data>/<slug>/scripts`, shared with the sandbox), `dsp.test` measures
+  one with standard signals, and a script that compiles is loaded and set
   like a stock plugin (`skill/guides/dsp-workflow.md`). Effects only (no
-  notes yet), the automatic editor only; the test harness, exports and the
-  sandbox's `dsp.*` do not exist yet.
+  notes yet), the automatic editor only; editor previews and exports do
+  not exist yet.
 - Orrery's structural performance pass.
 - Hardening and ports beyond Linux.

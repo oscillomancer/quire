@@ -950,6 +950,173 @@
     }
   },
   {
+    "name": "dsp_test",
+    "title": "Play test signals through an effect and measure it: levels, THD, response.",
+    "description": "Play test signals through an effect and measure it: levels, THD, response. Give plugin (an id: a script's, or any effect's) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays each signal peaking at level_db: sine (frequency_hz; gain_db and thd_percent), sweep (20 Hz to 20 kHz), impulse (response_db at octave centres), pink noise, silence. Each reports peak and RMS in dBFS, DC, samples beyond 0 dBFS and denormals; problems says in words what looks wrong (clipping, DC, sound from silence, no output, non-finite samples the framework silenced, a script stopped by its loop budget or indexing outside an array). cpu_percent is measured, so it varies between runs. save: true keeps each output as a WAV (path) for analyze and compare. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "dsp_test_args",
+      "properties": {
+        "plugin": {
+          "type": "string",
+          "minLength": 1
+        },
+        "script": {
+          "type": "string",
+          "minLength": 1
+        },
+        "patch": {},
+        "signals": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["sine", "sweep", "impulse", "noise", "silence"]
+          },
+          "description": "default: all five"
+        },
+        "level_db": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -60.0,
+              "maximum": 0.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:dB|db))?\\s*$"
+            }
+          ],
+          "x-unit": "dB",
+          "x-unit-strings": true,
+          "description": "Quantity strings are range-checked by the server. (dB; accepts quantity strings)",
+          "default": -12.0
+        },
+        "frequency_hz": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 10.0,
+              "maximum": 20000.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:[hH][zZ]|[kK][hH][zZ]|[kK]))?\\s*$"
+            }
+          ],
+          "x-unit": "Hz",
+          "x-unit-strings": true,
+          "description": "Quantity strings are range-checked by the server. (Hz; accepts quantity strings)",
+          "default": 1000.0
+        },
+        "seconds": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 10.0,
+          "default": 1.0
+        },
+        "save": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "dsp_test_result",
+      "properties": {
+        "plugin": {
+          "type": "string"
+        },
+        "latency": {
+          "type": "integer",
+          "description": "samples"
+        },
+        "signals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "dsp_signal_result",
+            "properties": {
+              "signal": {
+                "type": "string"
+              },
+              "peak_dbfs": {
+                "type": "number"
+              },
+              "rms_dbfs": {
+                "type": "number"
+              },
+              "dc": {
+                "type": "number"
+              },
+              "clipped": {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              "denormals": {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              "gain_db": {
+                "type": "number",
+                "description": "sine: the fundamental out against in"
+              },
+              "thd_percent": {
+                "type": "number"
+              },
+              "response_db": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "title": "dsp_response_point",
+                  "properties": {
+                    "hz": {
+                      "type": "number"
+                    },
+                    "db": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["hz", "db"],
+                  "additionalProperties": false
+                }
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": ["signal", "peak_dbfs", "rms_dbfs", "dc", "clipped", "denormals"],
+            "additionalProperties": false
+          }
+        },
+        "cpu_percent": {
+          "type": "number",
+          "description": "of real time, measured"
+        },
+        "problems": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "log": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["plugin", "latency", "signals", "cpu_percent", "problems", "log"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "dsp_write",
     "title": "Save a DSP script to the library and compile it, with diagnostics.",
     "description": "Save a DSP script to the library and compile it, with diagnostics. Writes <library>/<name>/<name>.cpp (replacing it), compiles it and returns the compiler's diagnostics, each with a hint. A script that compiles becomes a plugin of the script player under the id its Info gives: plugin.list shows it (listed) and fx.add loads it. Instances already playing it pick up the change within half a second, crossfaded; one that fails to compile leaves them playing the old code. Language: the dsp-language guide. See describe for errors and examples.",

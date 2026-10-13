@@ -26,6 +26,7 @@
 #include "supple/model/schemas.h"
 #include "supple/product.h"
 
+#include "../../dsp-commands/script_library.h"
 #include "meters.h"
 #include "recording.h"
 
@@ -48,19 +49,6 @@ std::string originText(const cmd::Origin& o) {
     if (!o.client.empty()) s += ":" + o.client;
     if (!o.agent.empty()) s += "/" + o.agent;
     return s;
-}
-// The script player (ADR-0032) lists a plugin for each script in the folders
-// SUPPLE_SCRIPT_LIBRARY names: read in this process, and inherited by the
-// scanner and bridge processes. This app's library comes first, then any
-// folders the environment named when the process started.
-void nameScriptLibrary(const fs::path& dir) {
-    static const std::string inherited = [] {
-        const char* v = std::getenv("SUPPLE_SCRIPT_LIBRARY");
-        return std::string(v ? v : "");
-    }();
-    std::string value = dir.string();
-    if (!inherited.empty()) value += ":" + inherited;
-    ::setenv("SUPPLE_SCRIPT_LIBRARY", value.c_str(), 1);
 }
 }  // namespace
 
@@ -88,7 +76,7 @@ Result<std::unique_ptr<EngineApp>> EngineApp::create(AppOptions options, model::
             "engine.workdir", "cannot create " + options.workdir.string(), {},
             "pass a writable workdir and ensure its parent directory exists and has space");
     auto app = std::unique_ptr<EngineApp>(new EngineApp(std::move(options)));
-    nameScriptLibrary(app->scriptDir());
+    dsp_commands::nameScriptLibrary(app->scriptDir());
     if (app->serviceFd() < 0)
         return Error("engine.service_wake", "cannot create the main-thread service descriptor", {},
                      "close unused files/descriptors and retry creating the engine app");

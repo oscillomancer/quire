@@ -1236,6 +1236,154 @@ Result:
 
 ```
 
+## `dsp.test@1`
+
+Play test signals through an effect and measure it: levels, THD, response.
+
+Give plugin (an id: a script's, or any effect's) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays each signal peaking at level_db: sine (frequency_hz; gain_db and thd_percent), sweep (20 Hz to 20 kHz), impulse (response_db at octave centres), pink noise, silence. Each reports peak and RMS in dBFS, DC, samples beyond 0 dBFS and denormals; problems says in words what looks wrong (clipping, DC, sound from silence, no output, non-finite samples the framework silenced, a script stopped by its loop budget or indexing outside an array). cpu_percent is measured, so it varies between runs. save: true keeps each output as a WAV (path) for analyze and compare.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `plugin` | string |  |  |  |  |
+| `script` | string |  |  |  |  |
+| `patch` | value |  |  |  |  |
+| `signals` | array |  |  |  | default: all five |
+| `level_db` | value | dB | -60.0..0.0 | -12.0 | Quantity strings are range-checked by the server. |
+| `frequency_hz` | value | Hz | 10.0..20000.0 | 1000.0 | Quantity strings are range-checked by the server. |
+| `seconds` | number |  | 0.1..10.0 | 1.0 |  |
+| `save` | boolean |  |  | false |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "dsp_test_result",
+  "properties": {
+    "plugin": {
+      "type": "string"
+    },
+    "latency": {
+      "type": "integer",
+      "description": "samples"
+    },
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "dsp_signal_result",
+        "properties": {
+          "signal": {
+            "type": "string"
+          },
+          "peak_dbfs": {
+            "type": "number"
+          },
+          "rms_dbfs": {
+            "type": "number"
+          },
+          "dc": {
+            "type": "number"
+          },
+          "clipped": {
+            "type": "integer",
+            "minimum": 0.0
+          },
+          "denormals": {
+            "type": "integer",
+            "minimum": 0.0
+          },
+          "gain_db": {
+            "type": "number",
+            "description": "sine: the fundamental out against in"
+          },
+          "thd_percent": {
+            "type": "number"
+          },
+          "response_db": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "dsp_response_point",
+              "properties": {
+                "hz": {
+                  "type": "number"
+                },
+                "db": {
+                  "type": "number"
+                }
+              },
+              "required": ["hz", "db"],
+              "additionalProperties": false
+            }
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": ["signal", "peak_dbfs", "rms_dbfs", "dc", "clipped", "denormals"],
+        "additionalProperties": false
+      }
+    },
+    "cpu_percent": {
+      "type": "number",
+      "description": "of real time, measured"
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "log": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["plugin", "latency", "signals", "cpu_percent", "problems", "log"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `dsp.args`: neither or both of plugin and script Hint: give exactly one
+- `dsp.not_listed`: the script compiles but no plugin has its id Hint: put the script player on the plugin path
+- `dsp.not_effect`: the plugin takes no audio Hint: test an effect
+
+### Examples
+
+**Measure an effect with a sine** (`empty`)
+
+```json
+{
+  "plugin": "com.suppleaudio.test.gain",
+  "signals": ["sine"]
+}
+
+```
+
+Result:
+
+```json
+{
+  "plugin": "<any>",
+  "latency": "<any>",
+  "signals": "<any>",
+  "cpu_percent": "<any>",
+  "problems": "<any>",
+  "log": "<any>"
+}
+
+```
+
 ## `dsp.write@1`
 
 Save a DSP script to the library and compile it, with diagnostics.

@@ -147,6 +147,539 @@
     }
   },
   {
+    "name": "dsp_check",
+    "title": "Compile a DSP script without saving it; return its diagnostics.",
+    "description": "Compile a DSP script without saving it; return its diagnostics. Give source (a whole script) or name (one in the library). ok is true when it compiles; plugin then lists its id, name and parameters as the patch shows them. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "dsp_check_args",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "dsp_check_result",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "dsp_diagnostic",
+            "properties": {
+              "severity": {
+                "type": "string",
+                "description": "error or warning"
+              },
+              "code": {
+                "type": "string",
+                "description": "script.<area>.<what>"
+              },
+              "message": {
+                "type": "string"
+              },
+              "hint": {
+                "type": "string",
+                "description": "what to write instead"
+              },
+              "line": {
+                "type": "integer"
+              },
+              "column": {
+                "type": "integer"
+              }
+            },
+            "required": ["severity", "code", "message", "hint", "line", "column"],
+            "additionalProperties": false
+          }
+        },
+        "plugin": {
+          "type": "object",
+          "title": "dsp_plugin",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "params": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "title": "dsp_param",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "description": "the patch key"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "description": "continuous, integer, choice or toggle"
+                  },
+                  "unit": {
+                    "type": "string",
+                    "description": "dB, Hz, ms, % ..."
+                  },
+                  "min": {
+                    "type": "number"
+                  },
+                  "max": {
+                    "type": "number"
+                  },
+                  "default": {
+                    "type": "number"
+                  },
+                  "choices": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "meter": {
+                    "type": "boolean",
+                    "description": "an output the plugin reports"
+                  }
+                },
+                "required": ["key", "name", "kind", "min", "max", "default", "choices", "meter"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["id", "name", "params"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["ok", "diagnostics"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "dsp_get",
+    "title": "Read a DSP script from the library.",
+    "description": "Read a DSP script from the library.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "dsp_get_args",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "dsp_get_result",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": ["name", "path", "source"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "dsp_list",
+    "title": "List the DSP scripts in the library, compiled, with their plugin ids.",
+    "description": "List the DSP scripts in the library, compiled, with their plugin ids.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "dsp_list_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "dsp_list_result",
+      "properties": {
+        "library": {
+          "type": "string"
+        },
+        "scripts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "dsp_list_entry",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "ok": {
+                "type": "boolean",
+                "description": "it compiles"
+              },
+              "errors": {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              "id": {
+                "type": "string",
+                "description": "its plugin's id"
+              },
+              "plugin_name": {
+                "type": "string"
+              }
+            },
+            "required": ["name", "path", "ok", "errors"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["library", "scripts"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "dsp_test",
+    "title": "Play test signals through an effect and measure it: levels, THD, response.",
+    "description": "Play test signals through an effect and measure it: levels, THD, response. Give plugin (an id: a script's, or any effect's) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays each signal peaking at level_db: sine (frequency_hz; gain_db and thd_percent), sweep (20 Hz to 20 kHz), impulse (response_db at octave centres), pink noise, silence. Each reports peak and RMS in dBFS, DC, samples beyond 0 dBFS and denormals; problems says in words what looks wrong (clipping, DC, sound from silence, no output, non-finite samples the framework silenced, a script stopped by its loop budget or indexing outside an array). cpu_percent is measured, so it varies between runs. save: true keeps each output as a WAV (path) for analyze and compare. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "dsp_test_args",
+      "properties": {
+        "plugin": {
+          "type": "string",
+          "minLength": 1
+        },
+        "script": {
+          "type": "string",
+          "minLength": 1
+        },
+        "patch": {},
+        "signals": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["sine", "sweep", "impulse", "noise", "silence"]
+          },
+          "description": "default: all five"
+        },
+        "level_db": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -60.0,
+              "maximum": 0.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:dB|db))?\\s*$"
+            }
+          ],
+          "x-unit": "dB",
+          "x-unit-strings": true,
+          "description": "Quantity strings are range-checked by the server. (dB; accepts quantity strings)",
+          "default": -12.0
+        },
+        "frequency_hz": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 10.0,
+              "maximum": 20000.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:[hH][zZ]|[kK][hH][zZ]|[kK]))?\\s*$"
+            }
+          ],
+          "x-unit": "Hz",
+          "x-unit-strings": true,
+          "description": "Quantity strings are range-checked by the server. (Hz; accepts quantity strings)",
+          "default": 1000.0
+        },
+        "seconds": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 10.0,
+          "default": 1.0
+        },
+        "save": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "dsp_test_result",
+      "properties": {
+        "plugin": {
+          "type": "string"
+        },
+        "latency": {
+          "type": "integer",
+          "description": "samples"
+        },
+        "signals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "dsp_signal_result",
+            "properties": {
+              "signal": {
+                "type": "string"
+              },
+              "peak_dbfs": {
+                "type": "number"
+              },
+              "rms_dbfs": {
+                "type": "number"
+              },
+              "dc": {
+                "type": "number"
+              },
+              "clipped": {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              "denormals": {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              "gain_db": {
+                "type": "number",
+                "description": "sine: the fundamental out against in"
+              },
+              "thd_percent": {
+                "type": "number"
+              },
+              "response_db": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "title": "dsp_response_point",
+                  "properties": {
+                    "hz": {
+                      "type": "number"
+                    },
+                    "db": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["hz", "db"],
+                  "additionalProperties": false
+                }
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": ["signal", "peak_dbfs", "rms_dbfs", "dc", "clipped", "denormals"],
+            "additionalProperties": false
+          }
+        },
+        "cpu_percent": {
+          "type": "number",
+          "description": "of real time, measured"
+        },
+        "problems": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "log": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["plugin", "latency", "signals", "cpu_percent", "problems", "log"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "dsp_write",
+    "title": "Save a DSP script to the library and compile it, with diagnostics.",
+    "description": "Save a DSP script to the library and compile it, with diagnostics. Writes <library>/<name>/<name>.cpp (replacing it), compiles it and returns the compiler's diagnostics, each with a hint. A script that compiles becomes a plugin of the script player under the id its Info gives: plugin.list shows it (listed) and fx.add loads it. Instances already playing it pick up the change within half a second, crossfaded; one that fails to compile leaves them playing the old code. Language: the dsp-language guide. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "dsp_write_args",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the script's folder and file name"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the whole C++ file"
+        }
+      },
+      "required": ["name", "source"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "dsp_write_result",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean",
+          "description": "it compiled"
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "dsp_diagnostic",
+            "properties": {
+              "severity": {
+                "type": "string",
+                "description": "error or warning"
+              },
+              "code": {
+                "type": "string",
+                "description": "script.<area>.<what>"
+              },
+              "message": {
+                "type": "string"
+              },
+              "hint": {
+                "type": "string",
+                "description": "what to write instead"
+              },
+              "line": {
+                "type": "integer"
+              },
+              "column": {
+                "type": "integer"
+              }
+            },
+            "required": ["severity", "code", "message", "hint", "line", "column"],
+            "additionalProperties": false
+          }
+        },
+        "plugin": {
+          "type": "object",
+          "title": "dsp_plugin",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "params": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "title": "dsp_param",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "description": "the patch key"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "description": "continuous, integer, choice or toggle"
+                  },
+                  "unit": {
+                    "type": "string",
+                    "description": "dB, Hz, ms, % ..."
+                  },
+                  "min": {
+                    "type": "number"
+                  },
+                  "max": {
+                    "type": "number"
+                  },
+                  "default": {
+                    "type": "number"
+                  },
+                  "choices": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "meter": {
+                    "type": "boolean",
+                    "description": "an output the plugin reports"
+                  }
+                },
+                "required": ["key", "name", "kind", "min", "max", "default", "choices", "meter"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["id", "name", "params"],
+          "additionalProperties": false
+        },
+        "listed": {
+          "type": "boolean",
+          "description": "plugin.list shows it (the script player is on the plugin path)"
+        }
+      },
+      "required": ["name", "path", "ok", "diagnostics", "listed"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "masking",
     "title": "Estimate where one sound masks another (critical bands).",
     "description": "Estimate where one sound masks another (critical bands). masker (e.g. the kick) and maskee (e.g. the bass): renders or files at the same sample rate. Per Bark band: % of the maskee's active frames masked and by how much; the three worst bands. An estimate for corrective mixing, not a psychoacoustic model of record. See describe for errors and examples.",

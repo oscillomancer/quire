@@ -179,6 +179,632 @@ Result:
 
 ```
 
+## `dsp.check@1`
+
+Compile a DSP script without saving it; return its diagnostics.
+
+Give source (a whole script) or name (one in the library). ok is true when it compiles; plugin then lists its id, name and parameters as the patch shows them.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `name` | string |  |  |  |  |
+| `source` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "dsp_check_result",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "dsp_diagnostic",
+        "properties": {
+          "severity": {
+            "type": "string",
+            "description": "error or warning"
+          },
+          "code": {
+            "type": "string",
+            "description": "script.<area>.<what>"
+          },
+          "message": {
+            "type": "string"
+          },
+          "hint": {
+            "type": "string",
+            "description": "what to write instead"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "column": {
+            "type": "integer"
+          }
+        },
+        "required": ["severity", "code", "message", "hint", "line", "column"],
+        "additionalProperties": false
+      }
+    },
+    "plugin": {
+      "type": "object",
+      "title": "dsp_plugin",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "params": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "dsp_param",
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "the patch key"
+              },
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "description": "continuous, integer, choice or toggle"
+              },
+              "unit": {
+                "type": "string",
+                "description": "dB, Hz, ms, % ..."
+              },
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "default": {
+                "type": "number"
+              },
+              "choices": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "meter": {
+                "type": "boolean",
+                "description": "an output the plugin reports"
+              }
+            },
+            "required": ["key", "name", "kind", "min", "max", "default", "choices", "meter"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["id", "name", "params"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["ok", "diagnostics"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `dsp.args`: neither or both of name and source Hint: give exactly one
+- `dsp.unknown`: no such script Hint: dsp.list names the library's scripts
+
+### Examples
+
+**Check a script in the library** (`dsp_script`)
+
+```json
+{
+  "name": "gain"
+}
+
+```
+
+Result:
+
+```json
+{
+  "ok": true,
+  "diagnostics": [],
+  "plugin": "<any>"
+}
+
+```
+
+**A mistake, with its hint** (`empty`)
+
+```json
+{
+  "source": "struct X : Effect {};"
+}
+
+```
+
+Result:
+
+```json
+{
+  "ok": false,
+  "diagnostics": "<any>"
+}
+
+```
+
+## `dsp.get@1`
+
+Read a DSP script from the library.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `name` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "dsp_get_result",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    }
+  },
+  "required": ["name", "path", "source"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `dsp.unknown`: no such script Hint: dsp.list names the library's scripts
+
+### Examples
+
+**Read a script** (`dsp_script`)
+
+```json
+{
+  "name": "gain"
+}
+
+```
+
+Result:
+
+```json
+{
+  "name": "gain",
+  "path": "<any>",
+  "source": "<any>"
+}
+
+```
+
+## `dsp.list@1`
+
+List the DSP scripts in the library, compiled, with their plugin ids.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "dsp_list_result",
+  "properties": {
+    "library": {
+      "type": "string"
+    },
+    "scripts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "dsp_list_entry",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean",
+            "description": "it compiles"
+          },
+          "errors": {
+            "type": "integer",
+            "minimum": 0.0
+          },
+          "id": {
+            "type": "string",
+            "description": "its plugin's id"
+          },
+          "plugin_name": {
+            "type": "string"
+          }
+        },
+        "required": ["name", "path", "ok", "errors"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["library", "scripts"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**An empty library** (`empty`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "library": "<any>",
+  "scripts": []
+}
+
+```
+
+## `dsp.test@1`
+
+Play test signals through an effect and measure it: levels, THD, response.
+
+Give plugin (an id: a script's, or any effect's) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays each signal peaking at level_db: sine (frequency_hz; gain_db and thd_percent), sweep (20 Hz to 20 kHz), impulse (response_db at octave centres), pink noise, silence. Each reports peak and RMS in dBFS, DC, samples beyond 0 dBFS and denormals; problems says in words what looks wrong (clipping, DC, sound from silence, no output, non-finite samples the framework silenced, a script stopped by its loop budget or indexing outside an array). cpu_percent is measured, so it varies between runs. save: true keeps each output as a WAV (path) for analyze and compare.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `plugin` | string |  |  |  |  |
+| `script` | string |  |  |  |  |
+| `patch` | value |  |  |  |  |
+| `signals` | array |  |  |  | default: all five |
+| `level_db` | value | dB | -60.0..0.0 | -12.0 | Quantity strings are range-checked by the server. |
+| `frequency_hz` | value | Hz | 10.0..20000.0 | 1000.0 | Quantity strings are range-checked by the server. |
+| `seconds` | number |  | 0.1..10.0 | 1.0 |  |
+| `save` | boolean |  |  | false |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "dsp_test_result",
+  "properties": {
+    "plugin": {
+      "type": "string"
+    },
+    "latency": {
+      "type": "integer",
+      "description": "samples"
+    },
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "dsp_signal_result",
+        "properties": {
+          "signal": {
+            "type": "string"
+          },
+          "peak_dbfs": {
+            "type": "number"
+          },
+          "rms_dbfs": {
+            "type": "number"
+          },
+          "dc": {
+            "type": "number"
+          },
+          "clipped": {
+            "type": "integer",
+            "minimum": 0.0
+          },
+          "denormals": {
+            "type": "integer",
+            "minimum": 0.0
+          },
+          "gain_db": {
+            "type": "number",
+            "description": "sine: the fundamental out against in"
+          },
+          "thd_percent": {
+            "type": "number"
+          },
+          "response_db": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "dsp_response_point",
+              "properties": {
+                "hz": {
+                  "type": "number"
+                },
+                "db": {
+                  "type": "number"
+                }
+              },
+              "required": ["hz", "db"],
+              "additionalProperties": false
+            }
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": ["signal", "peak_dbfs", "rms_dbfs", "dc", "clipped", "denormals"],
+        "additionalProperties": false
+      }
+    },
+    "cpu_percent": {
+      "type": "number",
+      "description": "of real time, measured"
+    },
+    "problems": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "log": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["plugin", "latency", "signals", "cpu_percent", "problems", "log"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `dsp.args`: neither or both of plugin and script Hint: give exactly one
+- `dsp.not_listed`: the script compiles but no plugin has its id Hint: put the script player on the plugin path
+- `dsp.not_effect`: the plugin takes no audio Hint: test an effect
+
+### Examples
+
+**Measure an effect with a sine** (`empty`)
+
+```json
+{
+  "plugin": "com.suppleaudio.test.gain",
+  "signals": ["sine"]
+}
+
+```
+
+Result:
+
+```json
+{
+  "plugin": "<any>",
+  "latency": "<any>",
+  "signals": "<any>",
+  "cpu_percent": "<any>",
+  "problems": "<any>",
+  "log": "<any>"
+}
+
+```
+
+## `dsp.write@1`
+
+Save a DSP script to the library and compile it, with diagnostics.
+
+Writes <library>/<name>/<name>.cpp (replacing it), compiles it and returns the compiler's diagnostics, each with a hint. A script that compiles becomes a plugin of the script player under the id its Info gives: plugin.list shows it (listed) and fx.add loads it. Instances already playing it pick up the change within half a second, crossfaded; one that fails to compile leaves them playing the old code. Language: the dsp-language guide.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `name` | string |  |  |  | the script's folder and file name |
+| `source` | string |  |  |  | the whole C++ file |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "dsp_write_result",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "it compiled"
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "dsp_diagnostic",
+        "properties": {
+          "severity": {
+            "type": "string",
+            "description": "error or warning"
+          },
+          "code": {
+            "type": "string",
+            "description": "script.<area>.<what>"
+          },
+          "message": {
+            "type": "string"
+          },
+          "hint": {
+            "type": "string",
+            "description": "what to write instead"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "column": {
+            "type": "integer"
+          }
+        },
+        "required": ["severity", "code", "message", "hint", "line", "column"],
+        "additionalProperties": false
+      }
+    },
+    "plugin": {
+      "type": "object",
+      "title": "dsp_plugin",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "params": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "dsp_param",
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "the patch key"
+              },
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "description": "continuous, integer, choice or toggle"
+              },
+              "unit": {
+                "type": "string",
+                "description": "dB, Hz, ms, % ..."
+              },
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "default": {
+                "type": "number"
+              },
+              "choices": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "meter": {
+                "type": "boolean",
+                "description": "an output the plugin reports"
+              }
+            },
+            "required": ["key", "name", "kind", "min", "max", "default", "choices", "meter"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["id", "name", "params"],
+      "additionalProperties": false
+    },
+    "listed": {
+      "type": "boolean",
+      "description": "plugin.list shows it (the script player is on the plugin path)"
+    }
+  },
+  "required": ["name", "path", "ok", "diagnostics", "listed"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `dsp.name`: not a script name Hint: use lower-case letters, digits, _ or -
+- `dsp.size`: the script is longer than 1 MiB Hint: split it up
+
+### Examples
+
+**Save a gain script** (`empty`)
+
+```json
+{
+  "name": "gain",
+  "source": "#include <supple/script.h>\n\nstruct Gain : Effect {\n    static constexpr Info info = {.name = \"Gain\", .id = \"com.example.gain\"};\n    Param gain = decibels(\"Gain\", -24, 24, 0).smoothed(20).help(\"The level change.\");\n\n    void process(Block& io) {\n        for (int c = 0; c < io.channels; ++c)\n            for (int i = 0; i < io.frames; ++i) io[c][i] *= dbToGain(gain.at(i));\n    }\n};\n"
+}
+
+```
+
+Result:
+
+```json
+{
+  "name": "gain",
+  "path": "<any>",
+  "ok": true,
+  "diagnostics": [],
+  "plugin": "<any>",
+  "listed": "<any>"
+}
+
+```
+
 ## `job.cancel@1`
 
 Cancel a job.

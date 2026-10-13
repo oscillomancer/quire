@@ -264,6 +264,8 @@ within −120 dBFS for the stock test synth).
 | `session.get` | query | — | settings, chain, instances, renders |
 | `session.set` | edit | `sample_rate?`, `block_size?`, `tempo?`, `meter?`, `tail_limit_s?` | settings |
 | `session.reset` | action | — | — |
+| `dsp.write`, `dsp.check`, `dsp.get`, `dsp.list` | action, queries | as in the engine (ADR-0032): the session's script library, `SessionOptions::scriptDir` (`<workdir>/scripts`; the CLI without `--workdir` uses the app's, `<data>/<slug>/scripts`) | diagnostics with hints, the plugin's id and parameters |
+| `dsp.test` | action | `plugin` (id) or `script` (name); `patch?` (merge); `signals?` (`sine`, `sweep`, `impulse`, `noise`, `silence`; default all); `level_db` (each signal's peak, -12); `frequency_hz` (1000); `seconds` (1); `save` | per signal: `peak_dbfs`, `rms_dbfs`, `dc`, `clipped`, `denormals`, sine `gain_db` and `thd_percent`, impulse `response_db` at octave centres, `path` when saved; `latency`, `cpu_percent` (measured), `problems` (prose), `log` |
 
 Plus `batch` and `registry.*` from the bus. Every command has at least one
 example running against fixtures (`empty`, `synth_loaded` with the probe

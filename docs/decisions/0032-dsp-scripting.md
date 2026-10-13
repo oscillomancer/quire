@@ -271,11 +271,15 @@ Where the work stands, and where it departs from the text above:
 - The library (§4, §8) is `AppOptions::scriptDir`: `<data>/<slug>/scripts`
   in the app, `<workdir>/scripts` otherwise. `EngineApp::create` names it
   first in `SUPPLE_SCRIPT_LIBRARY`, which the scanner and bridge processes
-  inherit. `dsp.write`, `dsp.check`, `dsp.get` and `dsp.list` are in the
-  engine; `dsp.write` rescans the plugins so `plugin.list` shows a new
-  script at once. `dsp.test`, `dsp.preview`, `dsp.export` and the
-  sandbox's commands are not done. The MCP server has no resources: the
-  skill carries the guides.
+  inherit. `dsp.write`, `dsp.check`, `dsp.get`, `dsp.list` and `dsp.test`
+  are in the engine and the sandbox, from `host/dsp-commands`; `dsp.write`
+  rescans the plugins so `plugin.list` shows a new script at once.
+  `dsp.test` (§9's harness) plays a sine, a sweep, an impulse, pink noise
+  and silence through a fresh instance with the sandbox's offline renderer
+  (`sandbox-render`), and reports levels, gain, THD, the impulse response
+  at octave centres and problems in words. `dsp.preview` and `dsp.export`
+  are not done. The MCP server has no resources: the skill carries the
+  guides.
 - Reloading: the layer's main-thread tick looks at the script file twice a
   second, so `dsp.write` only has to save it. An in-place swap carries the
   parameter values over; the script's members start from a fresh

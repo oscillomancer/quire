@@ -61,6 +61,16 @@ fs::path defaultWorkdir() {
            (std::to_string(now) + "-" + std::to_string(::getpid()));
 }
 
+// The user's DSP script library, the one the app uses:
+// <XDG_DATA_HOME or ~/.local/share>/<slug>/scripts.
+fs::path userScriptDir() {
+    const char* data = std::getenv("XDG_DATA_HOME");
+    const char* home = std::getenv("HOME");
+    const fs::path base =
+        data && *data ? fs::path(data) : fs::path(home ? home : "/tmp") / ".local" / "share";
+    return base / std::string(product::kSlug) / "scripts";
+}
+
 json::Value errorJson(const Error& e) {
     json::Value v = json::Value::object();
     v["code"] = e.code;
@@ -163,7 +173,10 @@ int main(int argc, char** argv) {
             else
                 return usage();
         }
-        if (options.workdir.empty()) options.workdir = defaultWorkdir();
+        if (options.workdir.empty()) {
+            options.workdir = defaultWorkdir();
+            options.scriptDir = userScriptDir();  // the app's; under --workdir, <workdir>/scripts
+        }
         if (!options.pluginPath.empty())
             for (auto& path : host::defaultSearchPath()) options.pluginPath.push_back(path);
         auto session = sandbox::Session::open(options);
@@ -250,7 +263,10 @@ int main(int argc, char** argv) {
             else
                 return usage();
         }
-        if (options.workdir.empty()) options.workdir = defaultWorkdir();
+        if (options.workdir.empty()) {
+            options.workdir = defaultWorkdir();
+            options.scriptDir = userScriptDir();  // the app's; under --workdir, <workdir>/scripts
+        }
         if (!options.pluginPath.empty()) {
             // Explicit paths come first; the standard locations still apply.
             for (auto& p : host::defaultSearchPath()) options.pluginPath.push_back(p);

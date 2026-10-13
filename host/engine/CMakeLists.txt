@@ -10,7 +10,7 @@ supple_add_library(engine
   DEPS supple::model supple::clap-host supple::audio-file supple::timeline supple::semantic-params-abi
        supple::command-bus supple::lua-bus supple::notation supple::core-params supple::core-analysis
        supple::core-dsp supple::signalsmith-stretch supple::console9
-  PRIVATE_DEPS supple::product-info supple::script-compiler ${CMAKE_DL_LIBS})
+  PRIVATE_DEPS supple::product-info supple::script-compiler supple::sandbox-render ${CMAKE_DL_LIBS})
 
 if(SUPPLE_BUILD_TESTS)
   # A stand-in libjack: the JACK backend is tested without a server or device.
