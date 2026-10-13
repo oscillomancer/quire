@@ -25,10 +25,11 @@ struct Root {
     ~Root() { fs::remove_all(path); }
 };
 
-std::unique_ptr<SandboxHost> makeHost(const fs::path& dir, fs::path log = {}) {
+std::unique_ptr<SandboxHost> makeHost(const fs::path& dir, fs::path log = {}, bool player = false) {
     SessionOptions o;
     o.workdir = dir;
     o.pluginPath = {kFixture};
+    if (player) o.pluginPath.push_back(fs::path(STOCK_CLAP_DIR) / "Script Player.clap");
     auto s = Session::open(o);
     REQUIRE(s);
     return std::make_unique<SandboxHost>(std::move(*s), std::move(log));
@@ -103,9 +104,11 @@ TEST_CASE("every sandbox command example runs against its fixture" * doctest::de
     cmd::Registry registry;
     registerCommands(registry);
     int n = 0;
-    auto st = cmd::runExamples(registry, [&](std::string_view) -> std::unique_ptr<cmd::Host> {
-        return makeHost(root.path / std::to_string(n++));
-    });
+    // The dsp_player fixture's examples need the script player built.
+    auto st =
+        cmd::runExamples(registry, [&](std::string_view fixture) -> std::unique_ptr<cmd::Host> {
+            return makeHost(root.path / std::to_string(n++), {}, fixture == "dsp_player");
+        });
     INFO((st ? std::string() : st.error().toString()));
     CHECK(st.ok());
     CHECK(n >= 16);

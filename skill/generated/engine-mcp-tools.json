@@ -852,6 +852,68 @@
     }
   },
   {
+    "name": "dsp_export",
+    "title": "Export a DSP script as a CLAP plugin file for any DAW.",
+    "description": "Export a DSP script as a CLAP plugin file for any DAW. Copies the script player that plays the script here and appends the script: the copy is a plugin of its own, under the script's id and name, that plays this version of the script in any CLAP host (it reads no library). Written to <folder>/<plugin name>.clap, by default in the script's folder under export/, with the licenses to ship beside it (notices). It runs on this platform, as fast as the player it copies (a debug build's is slow). Export again after changing the script; an installed copy does not follow the library. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "dsp_export_args",
+      "properties": {
+        "script": {
+          "type": "string",
+          "minLength": 1,
+          "description": "a name from dsp.list"
+        },
+        "folder": {
+          "type": "string",
+          "minLength": 1,
+          "description": "an absolute folder to write to (~/.clap installs it for this user); default <library>/<script>/export"
+        }
+      },
+      "required": ["script"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "dsp_export_result",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "the plugin file"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string",
+          "description": "clap"
+        },
+        "player": {
+          "type": "string",
+          "description": "the script player it was copied from"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0.0
+        },
+        "notices": {
+          "type": "string",
+          "description": "the licenses to ship with the plugin"
+        }
+      },
+      "required": ["path", "id", "name", "format", "player", "bytes"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "dsp_get",
     "title": "Read a DSP script from the library.",
     "description": "Read a DSP script from the library.  See describe for errors and examples.",

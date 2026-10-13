@@ -2577,7 +2577,9 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
             R"({"track": "tr_1", "position": 0, "audio_file": ")" + file.string() + R"("})");
         return;
     }
-    if (fixture == "dsp_script") {  // gain/gain.cpp in the DSP script library
+    // gain/gain.cpp in the DSP script library; dsp_player: and the script
+    // player on the plugin path (the harness gives it).
+    if (fixture == "dsp_script" || fixture == "dsp_player") {
         const Status st =
             writeFileAtomic(scriptDir() / "gain" / "gain.cpp", R"(#include <supple/script.h>
 

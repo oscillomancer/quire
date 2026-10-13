@@ -348,6 +348,94 @@ Result:
 
 ```
 
+## `dsp.export@1`
+
+Export a DSP script as a CLAP plugin file for any DAW.
+
+Copies the script player that plays the script here and appends the script: the copy is a plugin of its own, under the script's id and name, that plays this version of the script in any CLAP host (it reads no library). Written to <folder>/<plugin name>.clap, by default in the script's folder under export/, with the licenses to ship beside it (notices). It runs on this platform, as fast as the player it copies (a debug build's is slow). Export again after changing the script; an installed copy does not follow the library.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `script` | string |  |  |  | a name from dsp.list |
+| `folder` | string |  |  |  | an absolute folder to write to (~/.clap installs it for this user); default <library>/<script>/export |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "dsp_export_result",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "the plugin file"
+    },
+    "id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "format": {
+      "type": "string",
+      "description": "clap"
+    },
+    "player": {
+      "type": "string",
+      "description": "the script player it was copied from"
+    },
+    "bytes": {
+      "type": "integer",
+      "minimum": 0.0
+    },
+    "notices": {
+      "type": "string",
+      "description": "the licenses to ship with the plugin"
+    }
+  },
+  "required": ["path", "id", "name", "format", "player", "bytes"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `dsp.compile`: the script does not compile Hint: dsp.check gives its diagnostics
+- `dsp.not_listed`: the script compiles but no plugin has its id Hint: put the script player on the plugin path
+- `dsp.player`: the plugin with the script's id is not the script player Hint: give the script an id no other plugin has
+- `dsp.path`: the folder is relative Hint: give an absolute folder
+
+### Examples
+
+**Export a script from the library** (`dsp_player`)
+
+```json
+{
+  "script": "gain"
+}
+
+```
+
+Result:
+
+```json
+{
+  "path": "<any>",
+  "id": "com.example.gain",
+  "name": "Gain",
+  "format": "clap",
+  "player": "<any>",
+  "bytes": "<any>",
+  "notices": "<any>"
+}
+
+```
+
 ## `dsp.get@1`
 
 Read a DSP script from the library.

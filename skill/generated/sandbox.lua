@@ -38,6 +38,19 @@ q = nil
 ---@field diagnostics table[]
 ---@field plugin? table
 
+---@class Quire.dsp_export_args
+---@field script string a name from dsp.list
+---@field folder? string an absolute folder to write to (~/.clap installs it for this user); default <library>/<script>/export
+
+---@class Quire.dsp_export_result
+---@field path string the plugin file
+---@field id string
+---@field name string
+---@field format string clap
+---@field player string the script player it was copied from
+---@field bytes integer
+---@field notices? string the licenses to ship with the plugin
+
 ---@class Quire.dsp_get_args
 ---@field name string
 
@@ -280,6 +293,7 @@ q = nil
 
 ---@class Quire.dsp
 ---@field check fun(args?: Quire.dsp_check_args): Quire.dsp_check_result Compile a DSP script without saving it; return its diagnostics.
+---@field export fun(args: Quire.dsp_export_args): Quire.dsp_export_result Export a DSP script as a CLAP plugin file for any DAW.
 ---@field get fun(args: Quire.dsp_get_args): Quire.dsp_get_result Read a DSP script from the library.
 ---@field list fun(): Quire.dsp_list_result List the DSP scripts in the library, compiled, with their plugin ids.
 ---@field test fun(args?: Quire.dsp_test_args): Quire.dsp_test_result Play test signals through an effect and measure it: levels, THD, response.

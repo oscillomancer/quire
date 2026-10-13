@@ -265,6 +265,7 @@ within −120 dBFS for the stock test synth).
 | `session.set` | edit | `sample_rate?`, `block_size?`, `tempo?`, `meter?`, `tail_limit_s?` | settings |
 | `session.reset` | action | — | — |
 | `dsp.write`, `dsp.check`, `dsp.get`, `dsp.list` | action, queries | as in the engine (ADR-0032): the session's script library, `SessionOptions::scriptDir` (`<workdir>/scripts`; the CLI without `--workdir` uses the app's, `<data>/<slug>/scripts`) | diagnostics with hints, the plugin's id and parameters |
+| `dsp.export` | action | `script` (name); `folder?` (absolute; default `<library>/<script>/export`) | `path` (`<folder>/<plugin name>.clap`: the player that plays the script, copied, with the script appended; it offers that one plugin), `id`, `name`, `format` (`clap`), `player` (the module copied), `bytes`, `notices` (the player's licenses, written beside it) |
 | `dsp.test` | action | `plugin` (id) or `script` (name); `patch?` (merge); `signals?` (`sine`, `sweep`, `impulse`, `noise`, `silence`; default all); `level_db` (each signal's peak, -12); `frequency_hz` (1000); `seconds` (1); `save` | per signal: `peak_dbfs`, `rms_dbfs`, `dc`, `clipped`, `denormals`, sine `gain_db` and `thd_percent`, impulse `response_db` at octave centres, `path` when saved; `latency`, `cpu_percent` (measured), `problems` (prose), `log` |
 
 Plus `batch` and `registry.*` from the bus. Every command has at least one

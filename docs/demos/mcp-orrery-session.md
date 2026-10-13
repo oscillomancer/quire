@@ -65,12 +65,13 @@ that exactly duplicates structuredContent is shown once.
   "id": 2,
   "result": {
     "tools": {
-      "_elided_array_count": 29,
+      "_elided_array_count": 30,
       "names": [
         "analyze",
         "batch",
         "compare",
         "dsp_check",
+        "dsp_export",
         "dsp_get",
         "dsp_list",
         "dsp_test",
@@ -1582,12 +1583,13 @@ that exactly duplicates structuredContent is shown once.
   "id": 2,
   "result": {
     "tools": {
-      "_elided_array_count": 29,
+      "_elided_array_count": 30,
       "names": [
         "analyze",
         "batch",
         "compare",
         "dsp_check",
+        "dsp_export",
         "dsp_get",
         "dsp_list",
         "dsp_test",

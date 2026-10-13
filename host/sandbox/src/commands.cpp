@@ -1184,7 +1184,9 @@ void SandboxHost::setupFixture(cmd::Dispatcher& dispatcher, std::string_view fix
         (void)dispatcher.jobs().create();
         return;
     }
-    if (fixture == "dsp_script") {  // gain/gain.cpp in the DSP script library
+    // gain/gain.cpp in the DSP script library; dsp_player: and the script
+    // player on the plugin path (the harness gives it).
+    if (fixture == "dsp_script" || fixture == "dsp_player") {
         (void)writeFileAtomic(session_->scriptDir() / "gain" / "gain.cpp",
                               dsp_commands::detail::kGain);
         return;

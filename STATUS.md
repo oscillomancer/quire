@@ -218,8 +218,10 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
   `dsp.list` write and compile scripts (the app's library is
   `<data>/<slug>/scripts`, shared with the sandbox), `dsp.test` measures
   one with standard signals, and a script that compiles is loaded and set
-  like a stock plugin (`skill/guides/dsp-workflow.md`). Effects only (no
-  notes yet), the automatic editor only; editor previews and exports do
-  not exist yet.
+  like a stock plugin (`skill/guides/dsp-workflow.md`). `dsp.export` makes
+  a script a CLAP plugin for any host: a copy of the player with the script
+  appended, which offers that one plugin. Effects only (no notes yet), the
+  automatic editor only, Linux exports only; editor previews and source
+  exports do not exist yet.
 - Orrery's structural performance pass.
 - Hardening and ports beyond Linux.

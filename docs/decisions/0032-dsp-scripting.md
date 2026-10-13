@@ -277,9 +277,24 @@ Where the work stands, and where it departs from the text above:
   `dsp.test` (§9's harness) plays a sine, a sweep, an impulse, pink noise
   and silence through a fresh instance with the sandbox's offline renderer
   (`sandbox-render`), and reports levels, gain, THD, the impulse response
-  at octave centres and problems in words. `dsp.preview` and `dsp.export`
-  are not done. The MCP server has no resources: the skill carries the
-  guides.
+  at octave centres and problems in words. `dsp.preview` is not done. The
+  MCP server has no resources: the skill carries the guides.
+- Player exports (§5), 2026-10-13: `dsp.export` copies the module that
+  plays the script (the player on the plugin path, found by the script's
+  ID) and appends the trailer `supple/script_export.hpp` defines: a JSON
+  payload (`supple.script-export/1.0`: the script's name and source), its
+  length and a magic. The player finds its own file with `dladdr`
+  (`GetModuleFileNameW` on Windows) rather than CLAP's `init` path, so the
+  framework is unchanged; a module with a trailer offers its one script
+  and reads no library. Exporting an export starts again from the player.
+  Beside the plugin goes one notices file: the player's license and its
+  NOTICES (the framework's, and MIR's, which the player's own NOTICES.txt
+  adds). The payload carries no patches, assets or identity yet, and
+  only single-file CLAP modules are exported (no VST3 or bundles). The
+  exported plugin's definition, layer and state are the player's, which
+  the semantic conformance tool checks in library mode; the export is
+  tested for what differs (it offers only its own script, at the version
+  exported, and plays it) in the sandbox's tests.
 - Reloading: the layer's main-thread tick looks at the script file twice a
   second, so `dsp.write` only has to save it. An in-place swap carries the
   parameter values over; the script's members start from a fresh

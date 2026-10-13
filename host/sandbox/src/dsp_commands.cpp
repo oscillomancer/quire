@@ -1,7 +1,8 @@
 // The sandbox's DSP script commands (ADR-0032): dsp.write, dsp.check, dsp.get,
-// dsp.list and dsp.test over the session (host/dsp-commands).
+// dsp.list, dsp.test and dsp.export over the session (host/dsp-commands).
 #include "dsp_commands.h"
 
+#include "../../dsp-commands/dsp_export.h"
 #include "../../dsp-commands/dsp_test.h"
 #include "supple/sandbox/session.h"
 
@@ -27,6 +28,7 @@ namespace supple::sandbox {
 void registerDspCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
     dsp_commands::registerDspCommands<Session>(registry);
     dsp_commands::registerDspTest<Session>(registry, ex.effect);
+    dsp_commands::registerDspExport<Session>(registry);
 }
 
 }  // namespace supple::sandbox

@@ -1,9 +1,12 @@
 // The DSP script harness (dsp.test) through the real script player: what it
 // measures is what the script does, and what goes wrong is said in words.
+// And dsp.export: a copy of the player that plays one script anywhere.
 #include <doctest/doctest.h>
 #include <unistd.h>
 
+#include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 
 #include "supple/sandbox/commands.h"
@@ -104,4 +107,96 @@ TEST_CASE("dsp.test measures a script through the player and names what goes wro
     CHECK(problems.find("sound from silence") != std::string::npos);
     CHECK(problems.find("DC offset") != std::string::npos);
     CHECK(problems.find("NaN or infinity") != std::string::npos);
+}
+
+TEST_CASE("dsp.export makes a plugin that plays its version of the script, and no other") {
+    const fs::path player = kStock / "Script Player.clap";
+    if (!fs::exists(player)) {
+        MESSAGE("skipped: no script player in " << kStock.string());
+        return;
+    }
+    Root root;
+    cmd::Registry registry;
+    registerCommands(registry);
+    struct Host {
+        std::unique_ptr<SandboxHost> host;
+        std::unique_ptr<cmd::Dispatcher> bus;
+    };
+    auto open = [&](const std::string& name, const fs::path& plugins) {
+        SessionOptions o;
+        o.workdir = root.path / name;
+        o.pluginPath = {plugins};
+        auto session = Session::open(o);
+        REQUIRE(session);
+        Host h{std::make_unique<SandboxHost>(std::move(*session), fs::path{}), nullptr};
+        h.bus = std::make_unique<cmd::Dispatcher>(registry, *h.host);
+        return h;
+    };
+    auto call = [&](Host& h, std::string name, json::Value args) {
+        auto r = h.bus->execute({std::move(name), std::move(args), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    auto write = [&](Host& h, const std::string& name, const std::string& source) {
+        json::Value a = json::Value::object();
+        a["name"] = name;
+        a["source"] = source;
+        json::Value written = call(h, "dsp.write", std::move(a));
+        REQUIRE_MESSAGE(written["ok"].asBool(), json::writeCompact(written["diagnostics"]));
+    };
+    auto exportTo = [&](Host& h, const fs::path& folder) {
+        json::Value a = json::Value::object();
+        a["script"] = "boost";
+        a["folder"] = folder.string();
+        return call(h, "dsp.export", std::move(a));
+    };
+    auto gainDb = [&](Host& h) {
+        json::Value a = json::Value::object();
+        a["plugin"] = "com.example.boost";
+        a["signals"] = json::Value::array();
+        a["signals"].push_back("sine");
+        return call(h, "dsp.test", std::move(a))["signals"].at(0).find("gain_db")->asDouble();
+    };
+    auto boost = [](int db) {
+        return script("Boost", "com.example.boost",
+                      "    Param gain = decibels(\"Gain\", -24, 24, " + std::to_string(db) +
+                          ");\n"
+                          "    void process(Block& io) {\n"
+                          "        for (int c = 0; c < io.channels; ++c)\n"
+                          "            for (int i = 0; i < io.frames; ++i) io[c][i] *= "
+                          "gain.gain();\n"
+                          "    }");
+    };
+
+    // From the library's player: Boost.clap, with the notices to ship.
+    Host library = open("library", player);
+    write(library, "boost", boost(6));
+    json::Value first = exportTo(library, root.path / "out");
+    CHECK(first["path"].asString() == (root.path / "out" / "Boost.clap").string());
+    CHECK(first["id"].asString() == "com.example.boost");
+    CHECK(first["player"].asString() == player.string());
+    CHECK(fs::file_size(first["path"].asString()) ==
+          static_cast<std::uintmax_t>(first["bytes"].asInt()));
+    CHECK(fs::exists(first["notices"].asString()));
+
+    // The library changes and grows; the export keeps its own version and
+    // offers nothing else.
+    write(library, "boost", boost(12));
+    write(library, "other", script("Other", "com.example.other", "    void process(Block& io) {}"));
+    Host anywhere = open("anywhere", root.path / "out");
+    auto listed = anywhere.host->session().plugins(true);
+    REQUIRE(listed);
+    REQUIRE(listed->size() == 1);
+    CHECK(listed->front().id == "com.example.boost");
+    CHECK(gainDb(anywhere) == doctest::Approx(6.0).epsilon(0.002));
+
+    // An export exported again starts from the player, with the new script.
+    write(anywhere, "boost", boost(12));
+    json::Value second = exportTo(anywhere, root.path / "again");
+    CHECK(second["player"].asString() == first["path"].asString());
+    CHECK(second["bytes"].asInt() == first["bytes"].asInt() + 1);  // "12" for "6"
+    CHECK(fs::file_size(second["notices"].asString()) ==
+          fs::file_size(first["notices"].asString()));
+    Host again = open("again", root.path / "again");
+    CHECK(gainDb(again) == doctest::Approx(12.0).epsilon(0.002));
 }

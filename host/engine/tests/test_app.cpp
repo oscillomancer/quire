@@ -38,13 +38,14 @@ struct Root {
     ~Root() { fs::remove_all(path); }
 };
 
-std::unique_ptr<EngineApp> makeApp(const fs::path& dir) {
+std::unique_ptr<EngineApp> makeApp(const fs::path& dir, bool player = false) {
     AppOptions o;
     o.workdir = dir;
     o.chainDir = dir / "chains";  // never the user's config
     o.templateDir = dir / "templates";
     o.projectTemplateDir = dir / "project-templates";
     o.pluginPath = {kFixture};
+    if (player) o.pluginPath.push_back(fs::path(STOCK_CLAP_DIR) / "Script Player.clap");
     auto app = EngineApp::create(o, {.console9 = false});
     REQUIRE(app);
     return std::move(*app);
@@ -83,9 +84,11 @@ TEST_CASE("every engine command example runs against its fixture") {
     cmd::Registry registry;
     registerEngineCommands(registry);
     int n = 0;
-    auto st = cmd::runExamples(registry, [&](std::string_view) -> std::unique_ptr<cmd::Host> {
-        return makeApp(root.path / std::to_string(n++));
-    });
+    // The dsp_player fixture's examples need the script player built.
+    auto st =
+        cmd::runExamples(registry, [&](std::string_view fixture) -> std::unique_ptr<cmd::Host> {
+            return makeApp(root.path / std::to_string(n++), fixture == "dsp_player");
+        });
     INFO((st ? std::string() : st.error().toString()));
     CHECK(st.ok());
     CHECK(n >= 25);
