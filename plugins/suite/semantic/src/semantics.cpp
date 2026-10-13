@@ -311,6 +311,20 @@ double PatchCodec::plain(size_t index, double physical) const {
     return physical / physicalUnit(definition_.params().at(index)).scale;
 }
 
+namespace {
+// A value as the patch reports it: to 12 significant digits. Parameters are
+// kept as host positions, and a value through a log or power taper and back
+// lands an ulp or so off (507.49999999999994 for 507.5): reported rounded,
+// a value set comes back as it was given, and a patch read and set again is
+// the same patch.
+double reported(double v) {
+    if (v == 0.0 || !std::isfinite(v)) return v;
+    const double scale = std::pow(10.0, 11.0 - std::floor(std::log10(std::fabs(v))));
+    return std::isfinite(scale) && std::fabs(v * scale) < 9.0e15 ? std::round(v * scale) / scale
+                                                                 : v;
+}
+}  // namespace
+
 json::Value PatchCodec::valueJson(size_t index, double host) const {
     const ParamDef& p = definition_.params().at(index);
     const double v = toPlain(p, sanitizeHost(p, host));
@@ -326,7 +340,7 @@ json::Value PatchCodec::valueJson(size_t index, double host) const {
         case ParamKind::Integer:
             return json::Value(static_cast<long long>(std::llround(physical(index, v))));
         default:
-            return json::Value(physical(index, v));
+            return json::Value(reported(physical(index, v)));
     }
 }
 
@@ -709,6 +723,13 @@ bool PatchCodec::apply(const json::Value& document, bool merge, state::Snapshot&
                     errors.push_back(error("params.readonly",
                                            "'" + m.first + "' is a meter: the plugin reports it",
                                            path, "leave it out of the patch"));
+                    continue;
+                }
+                // What it reports now, written back: kept exactly, where the
+                // value would go through its unit and back (get, then set, is
+                // the identity).
+                if (valueJson(index, snapshot.host[index]) == m.second) {
+                    host[index] = snapshot.host[index];
                     continue;
                 }
                 double value = 0.0;

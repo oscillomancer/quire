@@ -232,3 +232,32 @@ TEST_CASE("a state's own values survive its patch exactly; the patch fills in th
     }
     CHECK(inexact > 0);
 }
+
+TEST_CASE("a patch gotten and set again changes nothing, merged or replaced") {
+    const auto d = fixture();
+    const PatchCodec codec(*d);
+    for (int k = 1; k < 97; ++k) {
+        state::Snapshot s(*d);
+        s.host[index(*d, 1)] = k / 97.0;  // through dB and back is not always exact
+        s.host[index(*d, 2)] = k / 97.0;  // nor through Hz on a log taper
+        Envelope env;
+        const json::Value patch = codec.patch(s, env, false);
+        for (bool merge : {false, true}) {
+            state::Snapshot after = s;
+            std::vector<json::Error> errors;
+            REQUIRE_MESSAGE(codec.apply(patch, merge, after, env, errors),
+                            json::errorsToJson(errors));
+            CHECK(after.host == s.host);
+        }
+    }
+    // A value set comes back as it was given, through a log taper too.
+    for (double hz : {507.5, 20.0, 1234.567, 19999.9}) {
+        state::Snapshot s(*d);
+        Envelope env;
+        std::vector<json::Error> errors;
+        json::Value doc = parsed(R"({"params": {}})");
+        doc["params"]["filter.cutoff"] = hz;
+        REQUIRE_MESSAGE(codec.apply(doc, true, s, env, errors), json::errorsToJson(errors));
+        CHECK(codec.patch(s, env, false).find("params")->find("filter.cutoff")->asDouble() == hz);
+    }
+}
