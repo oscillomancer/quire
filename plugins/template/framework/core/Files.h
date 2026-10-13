@@ -48,7 +48,8 @@ struct FileStatus {
 
 // Everything a FileProcessor's load() hears about the session.
 struct FileRequest {
-    uint32_t id = 0;  // the property
+    uint32_t id = 0;    // the property
+    uint32_t kind = 0;  // its PropertyDef::kind
     std::string path;
     double sampleRate = 48000.0;
     int maxBlockSize = 512;

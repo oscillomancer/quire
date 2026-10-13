@@ -32,7 +32,9 @@
 //   supple::property(kScale, "Scale").file("scl tun"),         // the processor's own loadFile()
 //
 // The editor shows and picks one with Ui::fileSlot: a dialog, a drop, and
-// "Missing" when it is.
+// "Missing" when it is. A product whose files are of several kinds -- a
+// sample and an impulse response -- labels each, .ofKind(n), and its
+// loadFile() reads the label from the request (FileRequest::kind).
 #pragma once
 
 #include <cstdint>
@@ -54,6 +56,8 @@ struct PropertyDef {
     uint32_t limit = 4096;     // longest value accepted, in bytes
     uint32_t flags = 0;
     const char* extensions = "";  // file(): what it accepts, space-separated, no dots; "" for anything
+    uint32_t kind = 0;            // file(): the product's own label for what loadFile() makes of it
+    const char* description = nullptr;  // a sentence of help, as a parameter's
 
     constexpr bool is(uint32_t flag) const { return (flags & flag) != 0; }
     constexpr bool perProjectOnly() const { return is(propflag::kPerProject); }
@@ -74,6 +78,16 @@ struct PropertyDef {
     }
     // A file of audio, as the default loadFile() decodes it.
     constexpr PropertyDef audioFile() const { return file(kAudioFileTypes); }
+    constexpr PropertyDef ofKind(uint32_t label) const {
+        PropertyDef d = *this;
+        d.kind = label;
+        return d;
+    }
+    constexpr PropertyDef help(const char* text) const {
+        PropertyDef d = *this;
+        d.description = text;
+        return d;
+    }
     constexpr PropertyDef maxBytes(uint32_t bytes) const {
         PropertyDef d = *this;
         d.limit = bytes;

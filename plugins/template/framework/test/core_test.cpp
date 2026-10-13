@@ -2201,6 +2201,30 @@ TEST(file_defaults_load_and_same_session_activation_waits) {
     CHECK(loaded);
 }
 
+namespace {
+struct KindFileProbe {
+    using FileContents = uint32_t;
+    static std::unique_ptr<uint32_t> loadFile(const FileRequest& r, std::string&) {
+        return std::make_unique<uint32_t>(r.kind);
+    }
+};
+}  // namespace
+
+TEST(a_file_propertys_kind_reaches_load_file) {
+    FileScratch scratch;
+    const std::string path = scratch.touch("kinds.file");
+    PropertyList::Builder b;
+    b.add(property(1, "Sample", b.text(path)).file());
+    b.add(property(2, "Room", b.text(path)).file().ofKind(7).help("A room's echo."));
+    const PropertyList list = b.build();
+    CHECK(std::string(list.at(1).description) == "A room's echo.");
+    FileSlots<KindFileProbe> slots(list);
+    slots.prepare({48000, 64, 2});
+    std::vector<uint32_t> kinds(2, 99);
+    slots.deliverAll([&](size_t i, const uint32_t* k) { kinds[i] = k ? *k : 99; });
+    CHECK(kinds[0] == 0 && kinds[1] == 7);
+}
+
 TEST(concurrent_atomic_writes_leave_a_whole_file_and_no_temporary_files) {
     FileScratch s;
     const auto target = s.root / "state";

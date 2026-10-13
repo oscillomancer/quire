@@ -4,6 +4,16 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.19.0
+
+What a product must do: nothing.
+
+- **Kinds of file, and help for properties** (`core/Property.h`). A
+  property labels what its file is, `.ofKind(n)`, and `loadFile()` reads
+  the label from `FileRequest::kind`: one product can load a sample and an
+  impulse response differently. `.help(text)` gives a property a sentence
+  of help, as a parameter has. Quire's script player uses both.
+
 ## 1.18.0
 
 What a product must do: nothing.

@@ -165,6 +165,7 @@ class FileSlots {
             if (there) {
                 FileRequest r;
                 r.id = list_->at(index).id;
+                r.kind = list_->at(index).kind;
                 r.path = path;
                 r.sampleRate = session.sampleRate;
                 r.maxBlockSize = session.maxBlockSize;
