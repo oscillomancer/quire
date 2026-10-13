@@ -403,10 +403,10 @@ void registerDspExport(cmd::Registry& registry) {
                          "put the script player's .clap on the plugin path");
         auto module = readTextFile(info->path);
         if (!module) return std::move(module).error();
-        // An export of an export starts again from the player. The player is
-        // the module that reads exports, so it carries their schema's name.
+        // An export of an export starts again from the player, which keeps
+        // its mark in its file.
         const std::string_view player = scriptc::exportPlayer(*module);
-        if (player.find(scriptc::kExportSchema) == std::string_view::npos)
+        if (player.find(scriptc::kPlayerMark) == std::string_view::npos)
             return Error(
                 "dsp.player",
                 id + " belongs to " + info->path.string() + ", which is not the script player",

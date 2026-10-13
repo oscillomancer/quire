@@ -90,6 +90,11 @@ std::shared_ptr<const ScriptDefinition> compileScript(const std::filesystem::pat
 namespace {
 // Its address names the module this code is in.
 const char kAnchor = 0;
+// What dsp.export looks for in a module's file (script_export.hpp).
+#if defined(__GNUC__) || defined(__clang__)
+[[gnu::used]]
+#endif
+const char kPlayerMark[] = SUPPLE_SCRIPT_PLAYER_MARK;
 }  // namespace
 
 std::filesystem::path ownModule() {
@@ -198,6 +203,9 @@ class Library final : public Catalog {
 
 std::unique_ptr<supple::Catalog> product::makeCatalog() {
     using namespace supple::player;
+#if defined(__GNUC__) || defined(__clang__)
+    asm volatile("" : : "r"(kPlayerMark));  // kept by the linker too
+#endif
     if (auto script = embeddedScript(ownModule())) return std::make_unique<Embedded>(*script);
     return std::make_unique<Library>();
 }

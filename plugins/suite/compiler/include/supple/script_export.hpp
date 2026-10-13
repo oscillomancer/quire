@@ -26,6 +26,13 @@
 
 namespace supple::scriptc {
 
+// Text the player keeps in its file, so a host can tell the player from
+// another plugin before it copies one (the player defines it as an object
+// the compiler and linker must keep: a string it only compares against may
+// be folded into code).
+#define SUPPLE_SCRIPT_PLAYER_MARK "supple.script-player: plays DSP scripts"
+inline constexpr std::string_view kPlayerMark = SUPPLE_SCRIPT_PLAYER_MARK;
+
 inline constexpr char kExportMagic[8] = {'S', 'P', 'L', 'S', 'C', 'R', 'P', 'T'};
 inline constexpr std::string_view kExportSchema = "supple.script-export/1.0";
 // The length and the magic, after the payload.
