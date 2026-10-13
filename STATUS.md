@@ -227,10 +227,12 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
   as files a patch names (loaded whole, no streaming from disk); spectral
   effects (an STFT), oversampling and sidechains. A script may draw its
   own editor (`editor()` for controls, `draw()` on an HTML-canvas-style
-  `Canvas`, `Shared` members for what the audio code shows it); one that
-  does not gets the automatic editor. `dsp.preview` draws a plugin's editor
-  to a PNG without a window (EGL, Linux only; the editor-picture
-  extension). Editor code cannot yet edit parameters from its own drawing
-  (pointer events); plugin-file exports are for Linux only.
+  `Canvas`, `pointer()` to drag and click what it draws, editing
+  parameters as a user would, `Shared` members for what the audio code
+  shows it); one that does not gets the automatic editor. `dsp.preview`
+  draws a plugin's editor to a PNG without a window (EGL, Linux only; the
+  editor-picture extension), after clicks, drags and wheel turns it is
+  given, and says what they edited. Plugin-file exports are for Linux
+  only.
 - Orrery's structural performance pass.
 - Hardening and ports beyond Linux.

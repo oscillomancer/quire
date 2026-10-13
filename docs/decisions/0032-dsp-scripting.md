@@ -403,6 +403,18 @@ Where the work stands, and where it departs from the text above:
   the suite layer offers that to hosts as `com.suppleaudio.editor-picture/1`
   (`docs/specs/editor-picture-extension.md`). Not yet: pointer events for a
   script's own interactive drawing, and pictures on macOS and Windows.
+- 2026-10-13: a script's drawing responds to the mouse. `pointer(const
+  Pointer& p)` hears presses and the wheel where no control is, the drags
+  and release of a press it took, hovers and the pointer leaving, and
+  edits parameters as a user would (`Param::edit`, `editNormalized`,
+  `reset`; only there, which the compiler checks). The glue sends the
+  edits through the framework's `Ui` on hidden controls, so they keep its
+  gesture rules (framework 1.21.0 adds `onWheel`, `onPointerLeave` and
+  `Ui::wheelEdit`). The editor-picture extension's `draw` takes pointer
+  input before drawing (framework: `PointerInput`, applied by
+  `drawOffscreen`), and `dsp.preview` takes clicks, drags and wheel turns
+  and reports what they edited, so an agent checks a script's interactive
+  drawing without a mouse. Not yet: pictures on macOS and Windows.
 - The compiler's API is C++ (`supple/script_compiler.hpp`,
   `supple/script_program.hpp`); the C ABI of §2 is not written, since
   nothing loads the compiler across a library boundary yet.
