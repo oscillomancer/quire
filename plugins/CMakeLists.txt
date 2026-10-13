@@ -181,8 +181,11 @@ if(SUPPLE_BUILD_PLUGINS)
       list(APPEND player_tests plugin.player.unload)
     endif()
     if(NOT SUPPLE_SANITIZE)
+      # The player has factory presets, on which 0.4.1's preset-discovery
+      # tests deadlock (the template's validate.cmake skips them too).
       add_test(NAME plugin.player.validator
-        COMMAND "${CMAKE_SOURCE_DIR}/tools/validator/run.sh" "${player_clap}")
+        COMMAND "${CMAKE_SOURCE_DIR}/tools/validator/run.sh"
+                --exclude "^preset-discovery-(crawl|load)$" "${player_clap}")
       set_tests_properties(plugin.player.validator PROPERTIES LABELS slow SKIP_RETURN_CODE 77)
       list(APPEND player_tests plugin.player.validator)
     endif()

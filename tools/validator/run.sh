@@ -2,8 +2,14 @@
 # Run the pinned validator headlessly and retain its complete JSON and text summary.
 set -euo pipefail
 
+# --exclude REGEX skips the tests it matches (clap-validator's own option).
+exclude=()
+if [[ "${1:-}" == --exclude && $# -ge 2 ]]; then
+  exclude=(--exclude "$2")
+  shift 2
+fi
 if [[ $# -eq 0 ]]; then
-  echo 'usage: tools/validator/run.sh <plugin.clap>...' >&2
+  echo 'usage: tools/validator/run.sh [--exclude REGEX] <plugin.clap>...' >&2
   exit 2
 fi
 
@@ -31,7 +37,7 @@ for input in "$@"; do
   # The validator's subprocess timeout helper is blocked by the Codex sandbox.
   # In-process mode still runs every headless validation check.
   code=0
-  "${binary}" validate --json --in-process "${plugin}" >"${json}" 2>"${stderr}" || code=$?
+  "${binary}" validate --json --in-process "${exclude[@]}" "${plugin}" >"${json}" 2>"${stderr}" || code=$?
   summary=0
   python3 - "${json}" "${report}" "${plugin}" "$("${binary}" --version)" "${code}" <<'PY' || summary=$?
 import collections
