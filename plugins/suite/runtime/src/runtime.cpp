@@ -6,11 +6,19 @@
 // the thunks in thunks.cpp. The DSP itself is the plugin framework's
 // (framework/dsp); this file only gives it script-facing names and finds the
 // sample rate.
+#include <atomic>
 #include <climits>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <new>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <pthread.h>
+#endif
 
 #include "dsp/Envelope.h"
 #include "dsp/Filters.h"
@@ -25,20 +33,73 @@ namespace supple::script {
 namespace detail {
 
 namespace {
-thread_local Instance* tCurrent = nullptr;
-thread_local ParamRegistrar* tRegistrar = nullptr;
+// Which instance each thread is running a hook of: a fixed table of
+// (thread, instance) pairs, not thread_local storage, which a dynamically
+// loaded module gets on a thread's first touch -- an allocation on the
+// audio thread's first block. A thread holds a slot only while it is inside
+// a hook (CurrentScope), so the table stays small; it is scanned up to the
+// highest slot ever taken.
+constexpr int kSlots = 128;
+struct Slot {
+    std::atomic<std::uintptr_t> thread{0};
+    Instance* instance = nullptr;  // only its thread reads or writes it
+};
+Slot gSlots[kSlots];
+std::atomic<int> gHighest{0};
+
+std::uintptr_t thisThread() {
+#ifdef _WIN32
+    return static_cast<std::uintptr_t>(GetCurrentThreadId()) + 1;
+#else
+    return static_cast<std::uintptr_t>(pthread_self()) | 1;  // never 0, the free mark
+#endif
+}
+
+Slot* slotOf(std::uintptr_t me) {
+    const int highest = gHighest.load(std::memory_order_acquire);
+    for (int i = 0; i < highest; ++i)
+        if (gSlots[i].thread.load(std::memory_order_relaxed) == me) return &gSlots[i];
+    return nullptr;
+}
+
+thread_local ParamRegistrar* tRegistrar = nullptr;  // construction: never the audio thread
 // Built-in objects used outside any instance (a test, a constant) work at
 // this rate.
 Instance gDefault;
 }  // namespace
 
-Instance* current() { return tCurrent; }
-void setCurrent(Instance* instance) { tCurrent = instance; }
+Instance* current() {
+    const Slot* slot = slotOf(thisThread());
+    return slot ? slot->instance : nullptr;
+}
+
+void setCurrent(Instance* instance) {
+    const std::uintptr_t me = thisThread();
+    if (Slot* slot = slotOf(me)) {
+        slot->instance = instance;
+        if (!instance) slot->thread.store(0, std::memory_order_release);
+        return;
+    }
+    if (!instance) return;
+    for (int i = 0; i < kSlots; ++i) {
+        std::uintptr_t free = 0;
+        if (gSlots[i].thread.compare_exchange_strong(free, me, std::memory_order_acq_rel)) {
+            gSlots[i].instance = instance;
+            int highest = gHighest.load(std::memory_order_relaxed);
+            while (highest < i + 1 &&
+                   !gHighest.compare_exchange_weak(highest, i + 1, std::memory_order_release));
+            return;
+        }
+    }
+    // More threads inside hooks at once than slots: the built-ins fall back
+    // to the default instance's rate.
+}
+
 ParamRegistrar* registrar() { return tRegistrar; }
 void setRegistrar(ParamRegistrar* registrar) { tRegistrar = registrar; }
 
 void outOfRange(int line) {
-    Instance* in = tCurrent;
+    Instance* in = current();
     if (!in) return;
     if (in->status.outOfRange.fetch_add(1, std::memory_order_relaxed) == 0)
         in->status.outOfRangeLine.store(static_cast<std::uint32_t>(line),
@@ -46,7 +107,8 @@ void outOfRange(int line) {
 }
 
 static double rate() {
-    const Instance* in = tCurrent ? tCurrent : &gDefault;
+    const Instance* found = current();
+    const Instance* in = found ? found : &gDefault;
     return in->sampleRate;
 }
 
