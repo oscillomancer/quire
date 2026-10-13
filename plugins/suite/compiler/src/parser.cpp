@@ -746,7 +746,8 @@ class Parser {
                 p->loc = cur().loc;
                 p->name = advance().text;
             } else {
-                error(cur().loc, "script.parse.parameter_name", "every parameter needs a name", "");
+                error(cur().loc, "script.parse.parameter_name", "every parameter needs a name",
+                      "name it, even when it goes unused: process(Block& io)");
             }
             if (atPunct("[")) declaratorInit(p->spec, p->name);
             if (accept("=")) p->init = assignment();
