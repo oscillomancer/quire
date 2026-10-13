@@ -12,6 +12,7 @@
 #include <sstream>
 
 #include "runner.h"
+#include "supple/script_native.h"
 
 // The examples, as a source export includes a script: inside the runtime's
 // namespace, after <supple/script.h>.
@@ -159,6 +160,62 @@ void differential(const std::string& file, const std::vector<double>& initial,
     CHECK(interpreted == native);
 }
 
+// The script compiled as C++ describes the plugin the compiler describes:
+// identity, kind and every parameter. Keys and ids too when the export's
+// keys are given (keys: true), and otherwise those withKey() sets.
+template <class T>
+void sameDescription(const char* file,
+                     std::vector<typename script::detail::NativeCode<T>::Key> keys = {}) {
+    auto result = scriptc::compile(readExample(file));
+    INFO(scriptc::toText(result.diagnostics));
+    REQUIRE(result.program);
+    const scriptc::Program& jit = *result.program;
+    const bool withKeys = !keys.empty();
+    const script::detail::NativeCode<T> native(std::move(keys));
+    CHECK(native.kind() == jit.kind());
+    const auto &a = jit.info(), &b = native.info();
+    CHECK(a.name == b.name);
+    CHECK(a.id == b.id);
+    CHECK(a.vendor == b.vendor);
+    CHECK(a.version == b.version);
+    CHECK(a.description == b.description);
+    CHECK(a.url == b.url);
+    CHECK(a.channels == b.channels);
+    CHECK(a.sidechain == b.sidechain);
+    CHECK(a.outputs == b.outputs);
+    CHECK(a.voices == b.voices);
+    CHECK(a.latency == b.latency);
+    CHECK(a.tail == b.tail);
+    REQUIRE(jit.params().size() == native.params().size());
+    for (size_t i = 0; i < jit.params().size(); ++i) {
+        const auto &p = jit.params()[i], &q = native.params()[i];
+        CAPTURE(p.key);
+        if (withKeys) {
+            CHECK(p.key == q.key);
+            CHECK(p.id == q.id);
+        }
+        CHECK(p.kind == q.kind);
+        CHECK(p.name == q.name);
+        CHECK(p.min == q.min);
+        CHECK(p.max == q.max);
+        CHECK(p.def == q.def);
+        CHECK(p.unit == q.unit);
+        CHECK(p.curve == q.curve);
+        CHECK(p.curveK == q.curveK);
+        CHECK(p.choices == q.choices);
+        CHECK(p.group == q.group);
+        CHECK(p.description == q.description);
+        CHECK(p.smoothingMs == q.smoothingMs);
+        CHECK(p.automatable == q.automatable);
+        CHECK(p.modulatable == q.modulatable);
+        CHECK(p.offAtMinimum == q.offAtMinimum);
+        CHECK(p.output == q.output);
+        CHECK(p.bypass == q.bypass);
+        CHECK(p.hidden == q.hidden);
+        CHECK(p.roles == q.roles);
+    }
+}
+
 }  // namespace
 
 TEST_CASE("gain: JIT, interpreter and C++ agree") {
@@ -187,4 +244,17 @@ TEST_CASE("the language tour: JIT, interpreter and C++ agree") {
     differential<script::ex_language::Tour>("language.cpp", {0.5, 4.0, 0.0, 1.0},
                                             {{8, 2, 1.0}, {14, 1, 9.0}, {22, 3, 0.0}, {26, 3, 1.0}},
                                             4800, 37);
+}
+
+TEST_CASE("a script compiled as C++ describes the plugin the compiler describes") {
+    using script::ex_tilt::Tilt;
+    sameDescription<Tilt>(
+        "tilt.cpp", {{&Tilt::tilt, "tilt"}, {&Tilt::pivot, "pivot"}, {&Tilt::output, "output"}});
+    sameDescription<script::ex_gain::Gain>("gain.cpp");
+    sameDescription<script::ex_echo::Echo>("echo.cpp");
+    sameDescription<script::ex_drive::Drive>("drive.cpp");
+    sameDescription<script::ex_language::Tour>("language.cpp");
+    // Without its keys, a Param's key is its name's: "Pivot" -> pivot.
+    const script::detail::NativeCode<Tilt> keyless;
+    CHECK(keyless.params()[1].key == "pivot");
 }
