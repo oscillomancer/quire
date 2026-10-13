@@ -24,8 +24,13 @@
 //       ... render; once its envelope has died away:
 //       voices_.finished(v, *this);                  // reports the note over
 //
+// A product that renders a block at a time reads pitchAt(v, i) for frame i
+// and calls advance(frames) after the block instead of tick().
+//
 // Pitch is in semitones (MIDI key numbers, fractional): the key, glided,
-// plus the bend for the voice's channel. Everything is fixed storage.
+// plus the bend for the voice's channel. N is the capacity; setCount()
+// plays fewer, for a polyphony chosen at run time. Everything is fixed
+// storage.
 #pragma once
 
 #include <algorithm>
@@ -91,7 +96,17 @@ class Voices {
         memberRange_ = memberBendRange;
     }
     // Voices the current mode can use (CLAP voice-info).
-    int voiceCount() const { return mode_ == Mode::Poly ? N : 1; }
+    int voiceCount() const { return mode_ == Mode::Poly ? count_ : 1; }
+    // Plays voices 0..n-1 only, n from 1 to N (N until this is called).
+    // Voices beyond a smaller count are stopped.
+    template <class H>
+    void setCount(int n, H& h) {
+        n = std::clamp(n, 1, N);
+        for (int v = n; v < N; ++v)
+            if (voices_[v].active) stop(v, h);
+        count_ = n;
+    }
+    int count() const { return count_; }
 
     const Voice& operator[](int v) const { return voices_[v]; }
     // The voice's pitch now, in semitones: the key, glided, and bent.
@@ -165,6 +180,24 @@ class Voices {
             if (--v.glideLeft == 0) v.key = v.note.key;
         }
     }
+    // For a block at a time: the voice's pitch `frame` samples on, and the
+    // glide moved on by a block's `frames` once it is rendered. Within a
+    // block the glide is a straight line, so pitchAt(v, frames) before
+    // advance(frames) is pitch(v) after it.
+    double pitchAt(int v, int frame) const {
+        const Voice& x = voices_[v];
+        const int steps = std::clamp(frame, 0, std::max(x.glideLeft, 0));
+        const double key = x.glideLeft > 0 && steps == x.glideLeft ? x.note.key : x.key + x.glideStep * steps;
+        return key + bend(x.note.channel);
+    }
+    void advance(int frames) {
+        for (Voice& v : voices_) {
+            if (v.glideLeft <= 0 || frames <= 0) continue;
+            const int steps = std::min(frames, v.glideLeft);
+            v.glideLeft -= steps;
+            v.key = v.glideLeft == 0 ? v.note.key : v.key + v.glideStep * steps;
+        }
+    }
 
     // The voice's sound has died away (its release is over): the note is
     // reported over, at `frame` of the block when the handler passes it on.
@@ -204,7 +237,7 @@ class Voices {
     // A free voice, else the one released longest ago, else the oldest.
     int allocate() const {
         int best = 0;
-        for (int v = 0; v < N; ++v) {
+        for (int v = 0; v < count_; ++v) {
             const Voice& c = voices_[v];
             if (!c.active) return v;
             const Voice& b = voices_[best];
@@ -332,6 +365,7 @@ class Voices {
     Voice voices_[N];
     NoteEvent held_[kHeldKeys];
     int stack_ = 0;
+    int count_ = N;
     Mode mode_ = Mode::Poly;
     Mpe mpe_ = Mpe::Off;
     double sampleRate_ = 48000.0, glideMs_ = 0.0;

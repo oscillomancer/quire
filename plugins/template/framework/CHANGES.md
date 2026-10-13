@@ -4,6 +4,18 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.17.0
+
+What a product must do: nothing.
+
+- **Voices for products that render a block at a time, with a polyphony
+  chosen at run time** (`dsp/Voices.h`). `setCount(n, handler)` plays
+  voices 0..n-1 of the N it has room for, stopping those above. `pitchAt(v,
+  i)` is a voice's pitch `i` samples on, gliding in a straight line, and
+  `advance(frames)` moves the glide on by a block; together they replace
+  `tick()` per sample. Quire's script player uses them: a script declares
+  its voice count and renders whole blocks.
+
 ## 1.16.3
 
 What a product must do: nothing.
