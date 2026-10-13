@@ -39,9 +39,10 @@ struct Tilt : Effect {
 ```
 
 - The first line is `#include <supple/script.h>`, the only include there is.
-- One struct derives from `Effect`: the plugin. Others are plain structs it
-  holds as members. Only effects for now (audio in, audio out): scripts
-  receive no notes yet, so `Instrument` and `NoteEffect` are refused.
+- One struct derives from `Effect` (audio in, audio out) or `Instrument`
+  (notes in, audio out; see Instruments below): the plugin. Others are
+  plain structs it holds as members. `NoteEffect` is refused: scripts send
+  no notes yet.
 - `static constexpr Info info` is its identity; `Param` members are its
   parameters; `prepare()`, `update()` and `process(Block&)` are the hooks.
 - Every member has a starting value (`double phase = 0.0;`), or is an object
@@ -58,6 +59,7 @@ struct Tilt : Effect {
 | `channels` | Main bus widths offered, the first the default: `{2, 1}` (the default) is stereo, then mono |
 | `sidechain` | `true`: a key input as wide as the main bus (`io.sidechain(c)`) |
 | `outputs` | Names of extra outputs (`io.output(bus, c)`) |
+| `voices` | An instrument's voices, 1 to 64 (8 when not given) |
 | `latency` | Samples of delay the plugin adds, reported to the host |
 | `tail` | Samples of output after the input stops; `-1` forever (feedback) |
 
@@ -126,6 +128,93 @@ There is no `reset()` to write: the runtime returns every member to what
 `io.sidechain(c)[i]`, `io.output(bus, c)[i]`, `io.sidechainConnected`.
 From any member function: `sampleRate()`, `maxBlockSize()`, `channels()`,
 `offline()`.
+
+## Instruments
+
+An instrument derives from `Instrument`. The runtime gives each note to one
+of its voices (stealing the oldest when all are busy, holding released
+notes while the sustain pedal is down), and calls its voice hooks. The
+script keeps each voice's sound in its own array, indexed the same way:
+
+```cpp
+#include <supple/script.h>
+
+// A polyphonic synth: a saw per voice through a low-pass filter and an
+// envelope. With Glide above 0 it plays one note at a time, sliding.
+struct Synth : Instrument {
+    static constexpr Info info = {.name = "Synth", .id = "com.example.synth", .voices = 8};
+
+    Param attack = milliseconds("Attack", 1, 2000, 5).help("How fast a note rises.");
+    Param release = milliseconds("Release", 5, 5000, 300)
+                        .help("How long a note fades once its key is up.");
+    Param cutoff = frequency("Cutoff", 200, 16000, 3000).help("The low-pass filter's corner.");
+    Param glide = milliseconds("Glide", 0, 1000, 0)
+                      .help("The slide from note to note; above 0, one note at a time.");
+    Param level = decibels("Level", -48, 0, -12).smoothed(20).help("The output level.");
+
+    struct Voice {
+        Oscillator osc;
+        Adsr env;
+        Biquad filter;
+    };
+    Array<Voice, 8> voice;
+
+    void prepare() {
+        for (Voice& v : voice) v.osc.setShape(Oscillator::Shape::Saw);
+    }
+
+    void update() {
+        for (Voice& v : voice) {
+            v.env.set(attack, 200, 0.7, release);
+            v.filter.lowpass(cutoff, 0.707);
+        }
+        setVoiceMode(glide > 0 ? VoiceMode::Legato : VoiceMode::Poly);
+        setGlide(glide);
+    }
+
+    // Voice v starts a note. retrigger is false when it glides on from the
+    // note before (Legato): its envelope keeps going.
+    void startVoice(int v, bool retrigger) {
+        if (retrigger) voice[v].env.gate(true);
+    }
+    void releaseVoice(int v) { voice[v].env.gate(false); }
+    void stopVoice(int v) { voice[v].env.kill(); }
+
+    void process(Block& io) {
+        for (int v = 0; v < voiceCount(); ++v) {
+            if (!voicePlaying(v)) continue;
+            Voice& s = voice[v];
+            const double velocity = voiceVelocity(v);
+            for (int i = 0; i < io.frames; ++i) {
+                s.osc.setFrequency(voiceHz(v, i));
+                const double tone = s.filter.process(s.osc.next());
+                const double x = tone * s.env.next() * velocity * dbToGain(level.at(i));
+                for (int c = 0; c < io.channels; ++c) io[c][i] += x;
+            }
+            if (!s.env.active()) voiceFinished(v);
+        }
+    }
+};
+```
+
+| Hook | When |
+|---|---|
+| `void startVoice(int v)` | Voice `v` starts a note. Or `startVoice(int v, bool retrigger)`: `retrigger` is false in Legato mode for a note that glides on from the one sounding |
+| `void releaseVoice(int v)` | Its key is up (and no pedal holds it): start the release |
+| `void stopVoice(int v)` | (optional) Silence it at once: stolen for a new note, or choked |
+
+`process()` receives `io` silent and adds every voice into it. Once a
+voice's release has died away it calls `voiceFinished(v)`, which tells the
+host that note is over: a voice never finished keeps its note open forever.
+
+| Method | Gives |
+|---|---|
+| `voiceCount()` | Info's `.voices` |
+| `voicePlaying(v)` | From `startVoice` until `voiceFinished` |
+| `voiceKey(v)`, `voiceChannel(v)`, `voiceVelocity(v)` | The note: MIDI key, channel, velocity 0..1 |
+| `voicePitch(v, i)`, `voiceHz(v, i)` | At frame `i`: semitones (key, glide and pitch bend), and Hz |
+| `setVoiceMode(VoiceMode::Poly)` | Or `Mono` (the newest key held, returning to the last), `Legato` (Mono, gliding without restarting) |
+| `setGlide(ms)`, `setBendRange(semitones)` | The slide between notes (Mono, Legato); the bend's reach (2) |
 
 ## Types and statements
 

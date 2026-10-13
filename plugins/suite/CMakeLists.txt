@@ -62,6 +62,8 @@ if(SUPPLE_BUILD_TESTS)
   add_executable(script-compiler.tests compiler/tests/test_compiler.cpp)
   target_include_directories(script-compiler.tests PRIVATE compiler/tests)
   target_link_libraries(script-compiler.tests PRIVATE supple::script-compiler supple::doctest-main)
+  target_compile_definitions(script-compiler.tests PRIVATE
+                             SUPPLE_SKILL_GUIDES="${PROJECT_SOURCE_DIR}/skill/guides")
   supple_target_defaults(script-compiler.tests)
   add_test(NAME script-compiler.tests COMMAND script-compiler.tests)
   set_tests_properties(script-compiler.tests PROPERTIES LABELS "script-compiler")

@@ -6,6 +6,8 @@
 #include <doctest/doctest.h>
 
 #include <cmath>
+#include <fstream>
+#include <sstream>
 
 #include "runner.h"
 
@@ -215,4 +217,29 @@ struct Synth : Instrument {
     CHECK(r.program->startVoice() == nullptr);
     CHECK(r.program->releaseVoice() != nullptr);
     CHECK(r.program->stopVoice() != nullptr);
+}
+
+TEST_CASE("every whole script in the guides compiles") {
+    // A guide's ```cpp blocks that are scripts (they include the runtime):
+    // what an agent copies first must be right.
+    int scripts = 0;
+    for (const char* guide : {"dsp-language.md", "dsp-workflow.md"}) {
+        std::ifstream in(std::string(SUPPLE_SKILL_GUIDES) + "/" + guide);
+        REQUIRE_MESSAGE(in, guide);
+        std::stringstream all;
+        all << in.rdbuf();
+        const std::string text = all.str();
+        for (size_t at = text.find("```cpp\n"); at != std::string::npos;
+             at = text.find("```cpp\n", at + 1)) {
+            const size_t begin = at + 7, end = text.find("```", begin);
+            REQUIRE(end != std::string::npos);
+            const std::string block = text.substr(begin, end - begin);
+            if (block.find("#include <supple/script.h>") == std::string::npos) continue;
+            ++scripts;
+            auto r = scriptc::compile(block);
+            INFO(guide << ":\n" << block);
+            CHECK_MESSAGE(r.program != nullptr, scriptc::toText(r.diagnostics));
+        }
+    }
+    CHECK(scripts >= 3);
 }

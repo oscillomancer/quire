@@ -9,25 +9,33 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
 ## The loop
 
 1. **Start from the closest example** in the language guide (the tilt EQ,
-   or the echo below) rather than from nothing, and decide the parameters
-   first: what a person would turn, in which unit, over what range.
+   the synth for an instrument, or the echo below) rather than from
+   nothing, and decide the parameters first: what a person would turn, in
+   which unit, over what range.
 2. **Write it**: `dsp_write {name: "tilt_eq", source: "<the whole file>"}`.
    - `ok: false`: fix the `diagnostics` in order, each at its `line` and
      `column`. The `hint` is the fix; apply it rather than guessing. Fix the
      first one first, since later ones often follow from it. Write again.
-   - `ok: true`: `plugin` gives its `id` and its parameters as the patch
-     will show them (`key`, `unit`, range, default). `listed: true` means
-     `plugin_list` shows it now.
+   - `ok: true`: `plugin` gives its `id`, its `kind` (`effect` or
+     `instrument`) and its parameters as the patch will show them (`key`,
+     `unit`, range, default). `listed: true` means `plugin_list` shows it
+     now.
    - `dsp_check {source}` compiles without saving, for trying a fragment.
 3. **Load it** on a track: `fx_add {track, plugin: "<its id>", patch:
    {params: {...}}}`. It answers `semantic: true`: `fx_describe`,
    `fx_patch_get`, `fx_patch_merge` and `fx_param_set` work in its units.
+   An instrument goes first on its track, and plays the track's notes:
+   `item_add {track, bar, notation: "..."}` (`guides/notation.md`).
 4. **Measure it.** `dsp_test {script: "tilt_eq"}` plays a
    sine, a sweep, an impulse, pink noise and silence through a fresh
    instance and reports levels, the sine's `gain_db` and `thd_percent`, the
    impulse's `response_db` at octave centres, and `problems` in words
    (clipping, DC, sound from silence, no output, NaN, a loop that never
-   ended). Run it again with `patch: {params: {...}}` at the extremes of
+   ended). An instrument gets notes instead: a note and a chord (`notes`),
+   A4 alone (`note`, with the `pitch_hz` heard) and no notes (`silence`),
+   with `release_ms`, how long it sounds after the last release; its
+   problems include a note out of tune and sound that never dies away (a
+   voice never released or never finished). Run it again with `patch: {params: {...}}` at the extremes of
    each parameter. `problems` should be empty unless the plugin means it
    (a distortion clips on purpose). `save: true` keeps the outputs for
    `analyze` and `compare`. On real material, `analyze_track` measures the
