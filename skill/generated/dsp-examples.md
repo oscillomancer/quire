@@ -523,7 +523,8 @@ struct Meter : Effect {
         g.beginPath();
         for (int k = 0; k < 256; ++k) {
             const double x = 40 + k;
-            const double y = 142 - 80 * clamp(static_cast<double>(scope[wrap(head.get() + k, 256)]), -1.0, 1.0);
+            const double y =
+                142 - 80 * clamp(static_cast<double>(scope[wrap(head.get() + k, 256)]), -1.0, 1.0);
             if (k == 0)
                 g.moveTo(x, y);
             else
