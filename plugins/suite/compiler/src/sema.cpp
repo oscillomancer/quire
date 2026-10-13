@@ -130,7 +130,8 @@ void Sema::collect() {
     auto declare = [&](Decl* d, const std::string& what) {
         if (b_.reserved(d->name)) {
             error(d->loc, "script.name.builtin",
-                  "'" + d->name + "' is the runtime's; name your " + what + " differently", "");
+                  "'" + d->name + "' is the runtime's; name your " + what + " differently",
+                  "choose another name: the runtime's names (the dsp-language guide) are taken");
             return false;
         }
         if (reservedIdentifier(d->name)) {
@@ -152,8 +153,10 @@ void Sema::collect() {
         allStructs_.push_back(s);
         for (StructDecl* n : s->nested) {
             if (b_.reserved(n->name))
-                error(n->loc, "script.name.builtin",
-                      "'" + n->name + "' is the runtime's; name your struct differently", "");
+                error(
+                    n->loc, "script.name.builtin",
+                    "'" + n->name + "' is the runtime's; name your struct differently",
+                    "choose another name: the runtime's names (the dsp-language guide) are taken");
             addStruct(n);
         }
         for (EnumDecl* e : s->enums) allEnums_.push_back(e);
@@ -164,7 +167,8 @@ void Sema::collect() {
         for (FieldDecl* f : s->fields)
             if (!names.insert(f->name).second)
                 error(f->loc, "script.name.duplicate",
-                      s->name + " declares '" + f->name + "' twice", "");
+                      s->name + " declares '" + f->name + "' twice",
+                      "give each member its own name");
         for (FunctionDecl* f : s->methods)
             if (!names.insert(f->name).second)
                 error(f->loc, "script.name.duplicate",
@@ -196,7 +200,7 @@ void Sema::collect() {
                     error(d->loc, "script.unsupported.using",
                           "using namespace " + path + " is not available",
                           path == "std" ? "the runtime has its own sin, min, clamp...; drop the std"
-                                        : "");
+                                        : "delete the line: the runtime's names need no using");
                 break;
             }
             case DeclKind::Struct: {
@@ -217,7 +221,8 @@ void Sema::collect() {
                 if (f->body) out_.functions.push_back(f);
                 if (f->name == "main")
                     error(f->loc, "script.name.main",
-                          "a script has no main(); the runtime calls the plugin's hooks", "");
+                          "a script has no main(); the runtime calls the plugin's hooks",
+                          "delete main(); the audio goes in process(Block& io)");
                 break;
             }
             case DeclKind::Var: {
@@ -324,14 +329,16 @@ const Type* Sema::resolve(TypeSpec* spec, StructDecl* scope, bool allowVoid) {
                 error(spec->loc, "script.type.template",
                       isArray ? "write Array<type, size>, such as Array<float, 512>"
                               : "write Buffer<type>, such as Buffer<float>",
-                      "");
+                      "an Array has a fixed size; a Buffer is sized in prepare()");
                 return nullptr;
             }
             const Type* element = resolve(spec->typeArgs[0], scope);
             if (!element) return nullptr;
             if (spec->typeArgs[0]->isRef || spec->typeArgs[0]->isConst) {
                 error(spec->loc, "script.type.template",
-                      "an " + first + "'s elements are plain values, not const or references", "");
+                      "an " + first + "'s elements are plain values, not const or references",
+                      "drop the const or &: " + first +
+                          (first == "Array" ? "<float, 8>" : "<float>"));
                 return nullptr;
             }
             if (isArray) {
@@ -342,7 +349,9 @@ const Type* Sema::resolve(TypeSpec* spec, StructDecl* scope, bool allowVoid) {
                 }
                 if (element->kind == TypeKind::Object && !element->builtin->declarable) {
                     error(spec->loc, "script.type.template",
-                          "an Array cannot hold " + element->name, "");
+                          "an Array cannot hold " + element->name,
+                          "keep " + element->name +
+                              " as a member of its own, or hold numbers in the Array");
                     return nullptr;
                 }
                 std::int64_t n = 0;
@@ -367,7 +376,8 @@ const Type* Sema::resolve(TypeSpec* spec, StructDecl* scope, bool allowVoid) {
                 if (!(element->kind == TypeKind::Double || element->kind == TypeKind::Float ||
                       element->kind == TypeKind::Int)) {
                     error(spec->loc, "script.type.buffer", "a Buffer holds double, float or int",
-                          "");
+                          "Buffer<float>, Buffer<double> or Buffer<int>; an Array<T, N> holds "
+                          "other types");
                     return nullptr;
                 }
                 t = bufferType(element);
@@ -421,7 +431,8 @@ const Type* Sema::resolve(TypeSpec* spec, StructDecl* scope, bool allowVoid) {
         return nullptr;
     }
     if (t->isVoid() && !allowVoid) {
-        error(spec->loc, "script.type.void", "void is only a function's result", "");
+        error(spec->loc, "script.type.void", "void is only a function's result",
+              "give it a value's type: double, float, int or bool");
         return nullptr;
     }
     spec->resolved = t;
@@ -528,7 +539,8 @@ void Sema::layout(StructDecl* s) {
             }
             if (!(ft->isScalar() || (ft->kind == TypeKind::Object && ft->builtin == b_.info()))) {
                 error(f->loc, "script.type.static_member",
-                      "static constexpr members are numbers (or the plugin's Info)", "");
+                      "static constexpr members are numbers (or the plugin's Info)",
+                      "make it a plain member, set in prepare()");
             }
             continue;
         }
@@ -538,7 +550,8 @@ void Sema::layout(StructDecl* s) {
         }
         if (ft->kind == TypeKind::Object && ft->builtin == b_.info()) {
             error(f->loc, "script.plugin.info",
-                  "Info is declared static constexpr: static constexpr Info info = {...};", "");
+                  "Info is declared static constexpr: static constexpr Info info = {...};",
+                  "static constexpr Info info = {.name = \"...\", .id = \"...\"};");
             continue;
         }
         if (ft->kind == TypeKind::Object && ft->builtin == b_.param() &&
@@ -549,10 +562,11 @@ void Sema::layout(StructDecl* s) {
             continue;
         }
         if (ft->kind == TypeKind::Object && !ft->builtin->declarable && ft->builtin != b_.param()) {
-            error(
-                f->loc, "script.type.member",
-                ft->name + " is the runtime's to make; it cannot be a member",
-                ft->builtin == b_.block() ? "process() receives it: void process(Block& io)" : "");
+            error(f->loc, "script.type.member",
+                  ft->name + " is the runtime's to make; it cannot be a member",
+                  ft->builtin == b_.block()
+                      ? "process() receives it: void process(Block& io)"
+                      : "use the one the runtime passes in, such as process()'s Block& io");
             continue;
         }
         if (ft->kind == TypeKind::Struct) layout(ft->structDecl);
@@ -590,12 +604,14 @@ void Sema::checkEnums() {
         std::set<std::string> seen;
         for (auto& [name, value] : e->enumerators) {
             if (!seen.insert(name).second)
-                error(e->loc, "script.name.duplicate", e->name + " lists '" + name + "' twice", "");
+                error(e->loc, "script.name.duplicate", e->name + " lists '" + name + "' twice",
+                      "give each enumerator its own name");
             if (value) {
                 std::int64_t v = 0;
                 if (!constantInt(value, v)) {
                     error(value->loc, "script.constant.required",
-                          "an enumerator's value must be a constant int", "");
+                          "an enumerator's value must be a constant int",
+                          "use a literal or a constexpr int: enum Mode { Soft = 0, Hard = 2 };");
                 } else {
                     next = static_cast<int>(v);
                 }
@@ -617,14 +633,16 @@ void Sema::checkStructs() {
                 if (t->kind == TypeKind::Object) continue;  // Info: the plugin's
                 if (!f->init) {
                     error(f->loc, "script.constant.required",
-                          "a static constexpr member needs its value", "");
+                          "a static constexpr member needs its value",
+                          "give it one where it is declared: static constexpr double kMax = 1.0;");
                     continue;
                 }
                 f->init = convert(check(f->init), QualType{t, false, false}, f->init->loc,
                                   "'" + f->name + "'", f->init->kind == ExprKind::InitList);
                 if (!f->init->constant)
                     error(f->init->loc, "script.constant.required",
-                          "'" + f->name + "' must be a constant", "");
+                          "'" + f->name + "' must be a constant",
+                          "use literals, constexpr constants and arithmetic on them");
                 continue;
             }
             if (t->kind == TypeKind::Object && t->builtin == b_.param()) {
@@ -685,14 +703,16 @@ void Sema::checkGlobals() {
         }
         if (!v->init) {
             error(v->loc, "script.constant.required",
-                  "the constant '" + v->name + "' needs a value", "");
+                  "the constant '" + v->name + "' needs a value",
+                  "give it a value where it is declared: constexpr int " + v->name + " = 4;");
             continue;
         }
         v->init = convert(check(v->init), QualType{t, false, false}, v->init->loc,
                           "'" + v->name + "'", v->init->kind == ExprKind::InitList);
         if (!v->init->constant)
             error(v->init->loc, "script.constant.required",
-                  "'" + v->name + "' must be a constant expression", "");
+                  "'" + v->name + "' must be a constant expression",
+                  "use literals, constexpr constants and arithmetic on them");
     }
 }
 
@@ -723,7 +743,7 @@ void Sema::signature(FunctionDecl* f) {
         if (!p->spec->isRef && !t->isScalar()) {
             if (t->kind == TypeKind::Object && t->builtin == b_.block())
                 error(p->loc, "script.function.parameter",
-                      "a Block is passed by reference: Block& io", "");
+                      "a Block is passed by reference: Block& io", "write Block& io");
             else
                 error(p->loc, "script.function.parameter",
                       "'" + p->name + "' takes " + t->name + " by value, which copies it",
@@ -735,7 +755,8 @@ void Sema::signature(FunctionDecl* f) {
                               "the default of '" + p->name + "'");
             if (!p->init->constant)
                 error(p->init->loc, "script.constant.required",
-                      "a default argument must be a constant", "");
+                      "a default argument must be a constant",
+                      "use a literal or a constexpr constant");
         }
     }
 }
@@ -744,7 +765,8 @@ void Sema::declareLocal(VarDecl* v) {
     if (scopes_.empty()) scopes_.emplace_back();
     auto& scope = scopes_.back();
     if (scope.count(v->name)) {
-        error(v->loc, "script.name.duplicate", "'" + v->name + "' is already declared here", "");
+        error(v->loc, "script.name.duplicate", "'" + v->name + "' is already declared here",
+              "give it another name, or assign to the existing one without the type");
         return;
     }
     if (reservedIdentifier(v->name))
@@ -759,7 +781,8 @@ void Sema::checkLocal(VarDecl* v) {
     TypeSpec* spec = v->spec;
     if (spec->isAuto) {
         if (!v->init) {
-            error(v->loc, "script.local.auto", "auto needs a value to take its type from", "");
+            error(v->loc, "script.local.auto", "auto needs a value to take its type from",
+                  "give it a value (auto x = 0.0;) or write its type (double x = 0.0;)");
             return;
         }
         if (v->init->kind == ExprKind::InitList) {
@@ -772,7 +795,8 @@ void Sema::checkLocal(VarDecl* v) {
         const Type* t = v->init->type();
         if (!t) return;
         if (t->isVoid() || t->kind == TypeKind::String || t->kind == TypeKind::Null) {
-            error(v->loc, "script.local.auto", "'" + v->name + "' has no value to take", "");
+            error(v->loc, "script.local.auto", "'" + v->name + "' has no value to take",
+                  "write its type instead of auto, and give it a number");
             return;
         }
         if (!spec->isRef && t->kind == TypeKind::Object && t->builtin == b_.param()) {
@@ -792,7 +816,7 @@ void Sema::checkLocal(VarDecl* v) {
                 }
                 if (!t->isScalar()) {
                     error(v->loc, "script.local.reference", "a reference to a temporary " + t->name,
-                          "");
+                          "store it in a variable: auto " + v->name + " = ...;");
                     return;
                 }
                 v->qt.isRef = false;  // const auto& to a temporary number: a constant copy
@@ -827,7 +851,7 @@ void Sema::checkLocal(VarDecl* v) {
     if (!spec->isRef) {
         if (t->kind == TypeKind::Object && t->builtin == b_.param()) {
             error(v->loc, "script.param.location", "parameters are members of the plugin struct",
-                  "");
+                  "declare it as a member of the plugin struct: Param gain = decibels(...);");
             return;
         }
         if (t->kind == TypeKind::Object && t->builtin->resource) {
@@ -844,7 +868,8 @@ void Sema::checkLocal(VarDecl* v) {
             return;
         }
         if (!declarable(t) && !(t->kind == TypeKind::Object && v->init)) {
-            error(v->loc, "script.local.type", t->name + " cannot be declared in a function", "");
+            error(v->loc, "script.local.type", t->name + " cannot be declared in a function",
+                  "make it a member of the plugin struct, set up in prepare()");
             return;
         }
         if (t->size > kMaxFrameBytes) {
@@ -858,7 +883,7 @@ void Sema::checkLocal(VarDecl* v) {
     if (!v->init) {
         if (spec->isRef) {
             error(v->loc, "script.local.reference", "a reference must be bound when it is declared",
-                  "");
+                  "bind it where it is declared: DelayLine& line = lines[c];");
             return;
         }
         if (t->isScalar()) {
@@ -869,7 +894,8 @@ void Sema::checkLocal(VarDecl* v) {
             return;
         }
         if (t->kind == TypeKind::Object && !t->builtin->declarable) {
-            error(v->loc, "script.local.uninitialized", t->name + " needs a value", "");
+            error(v->loc, "script.local.uninitialized", t->name + " needs a value",
+                  "refer to an existing one: " + t->name + "& x = ...;");
             return;
         }
         declareLocal(v);
@@ -880,7 +906,7 @@ void Sema::checkLocal(VarDecl* v) {
     v->init = convert(v->init, v->qt, v->loc, "'" + v->name + "'", braced);
     if (spec->isConstexpr && !(v->init && v->init->constant))
         error(v->loc, "script.constant.required", "a constexpr variable needs a constant value",
-              "");
+              "use literals, constexpr constants and arithmetic on them, or drop constexpr");
     declareLocal(v);
 }
 
@@ -945,7 +971,8 @@ void Sema::checkStmt(Stmt* s) {
             if (rt && (rt->kind == TypeKind::Array || rt->kind == TypeKind::Buffer)) {
                 if (!r->range->lvalue)
                     error(r->range->loc, "script.loop.range",
-                          "loop over a variable or a member, not a temporary", "");
+                          "loop over a variable or a member, not a temporary",
+                          "store it in a variable first, then loop over that");
                 const Type* et = rt->element;
                 VarDecl* v = r->var;
                 TypeSpec* spec = v->spec;
@@ -972,10 +999,12 @@ void Sema::checkStmt(Stmt* s) {
                             if (rk.rank == ConversionRank::NotViable ||
                                 (et->isFloating() && vt->kind == TypeKind::Int))
                                 error(v->loc, "script.loop.type",
-                                      "the elements are " + et->name + ", not " + vt->name, "");
+                                      "the elements are " + et->name + ", not " + vt->name,
+                                      "declare the loop variable as " + et->name);
                         } else if (vt != et) {
                             error(v->loc, "script.loop.type",
-                                  "the elements are " + et->name + ", not " + vt->name, "");
+                                  "the elements are " + et->name + ", not " + vt->name,
+                                  "declare the loop variable as " + et->name);
                         }
                     }
                     declareLocal(v);
@@ -985,7 +1014,7 @@ void Sema::checkStmt(Stmt* s) {
                       "a range-based for walks an Array or a Buffer, not " + rt->name,
                       rt->kind == TypeKind::Object && rt->builtin == b_.block()
                           ? "loop over channels and frames: for (int c = 0; c < io.channels; ++c)"
-                          : "");
+                          : "loop with an index: for (int i = 0; i < n; ++i)");
             }
             ++loopDepth_;
             scopes_.emplace_back();
@@ -1027,7 +1056,8 @@ void Sema::checkStmt(Stmt* s) {
                 else if (!(t->isIntegral() || t->kind == TypeKind::Enum))
                     error(sw->cond->loc, "script.switch.type",
                           "switch needs an int or an enum, not " + t->name,
-                          t->isFloating() ? "compare with if/else instead" : "");
+                          t->isFloating() ? "compare with if/else instead"
+                                          : "switch on an int or an enum value");
                 else if (t->kind == TypeKind::Bool)
                     sw->cond = convert(sw->cond, QualType{b_.intType(), false, false},
                                        sw->cond->loc, "the switch");
@@ -1049,7 +1079,8 @@ void Sema::checkStmt(Stmt* s) {
                               "wrap that case's statements in braces: case 1: { ... break; }");
                     if (!c->value) {
                         if (hasDefault)
-                            error(c->loc, "script.switch.default", "two default labels", "");
+                            error(c->loc, "script.switch.default", "two default labels",
+                                  "keep one default: label");
                         hasDefault = true;
                         continue;
                     }
@@ -1058,19 +1089,23 @@ void Sema::checkStmt(Stmt* s) {
                     if (!c->value->constant || !ct ||
                         !(ct->isIntegral() || ct->kind == TypeKind::Enum)) {
                         error(c->value->loc, "script.switch.case",
-                              "a case label must be a constant int or enum value", "");
+                              "a case label must be a constant int or enum value",
+                              "use a literal, a constexpr int or an enum value: case 2:");
                         continue;
                     }
                     if (t && t->kind == TypeKind::Enum && ct != t)
                         error(c->value->loc, "script.switch.case",
-                              "a case label of " + t->name + " must be one of its values", "");
+                              "a case label of " + t->name + " must be one of its values",
+                              "name one of its values: case " + t->name + "::...:");
                     if (t && t->kind != TypeKind::Enum && ct->kind == TypeKind::Enum)
                         error(c->value->loc, "script.switch.case",
-                              "an enum value as the case of an int switch", "");
+                              "an enum value as the case of an int switch",
+                              "switch on the enum value itself, so its cases are its values");
                     c->constValue = c->value->constInt;
                     if (!seen.insert(c->constValue).second)
                         error(c->value->loc, "script.switch.duplicate",
-                              "two cases with the value " + std::to_string(c->constValue), "");
+                              "two cases with the value " + std::to_string(c->constValue),
+                              "merge the two cases, or give one another value");
                     continue;
                 }
                 if (st->kind == StmtKind::Decl && !declaredSinceCase) {
@@ -1085,15 +1120,18 @@ void Sema::checkStmt(Stmt* s) {
         }
         case StmtKind::Case:
             error(s->loc, "script.switch.case_outside",
-                  "a case label belongs directly inside a switch's braces", "");
+                  "a case label belongs directly inside a switch's braces",
+                  "put it inside a switch: switch (x) { case 1: ... break; }");
             return;
         case StmtKind::Break:
             if (loopDepth_ == 0 && switchDepth_ == 0)
-                error(s->loc, "script.statement.break", "break outside a loop or a switch", "");
+                error(s->loc, "script.statement.break", "break outside a loop or a switch",
+                      "remove it, or use return to leave the function");
             return;
         case StmtKind::Continue:
             if (loopDepth_ == 0)
-                error(s->loc, "script.statement.continue", "continue outside a loop", "");
+                error(s->loc, "script.statement.continue", "continue outside a loop",
+                      "remove it: continue only skips to a loop's next turn");
             return;
         case StmtKind::Return: {
             auto* r = static_cast<ReturnStmt*>(s);
@@ -1110,7 +1148,8 @@ void Sema::checkStmt(Stmt* s) {
             }
             if (!r->value) {
                 error(r->loc, "script.return.missing",
-                      fn_->name + "() must return " + rt.type->name, "");
+                      fn_->name + "() must return " + rt.type->name,
+                      "end with return and a value: return x;");
                 return;
             }
             const bool braced = r->value->kind == ExprKind::InitList;
@@ -1217,7 +1256,8 @@ void Sema::extractPlugin() {
     }
     StructDecl* s = plugins[0];
     if (s->outer) {
-        error(s->loc, "script.plugin.nested", "the plugin struct is declared at the top level", "");
+        error(s->loc, "script.plugin.nested", "the plugin struct is declared at the top level",
+              "move the struct that derives from Effect to the top level of the file");
         return;
     }
     p.decl = s;
@@ -1255,7 +1295,8 @@ void Sema::extractPlugin() {
         const ParamModel& pm = p.params[i];
         const Loc at = p.paramFields[i]->loc;
         if (!keys.insert(pm.key).second)
-            error(at, "script.param.key", "two parameters have the key '" + pm.key + "'", "");
+            error(at, "script.param.key", "two parameters have the key '" + pm.key + "'",
+                  "rename one, or give it a key of its own: .withKey(\"other_key\")");
         auto [it, fresh] = ids.emplace(pm.id, pm.key);
         if (!fresh)
             error(at, "script.param.id",
@@ -1269,7 +1310,7 @@ void Sema::extractPlugin() {
         auto expectSignature = [&](bool ok, const std::string& want) {
             if (!ok)
                 error(f->loc, "script.plugin.hook",
-                      n + "() is a hook the runtime calls; declare it as " + want, "");
+                      n + "() is a hook the runtime calls; declare it as " + want, want);
             return ok;
         };
         const bool isVoid = f->resultType.type && f->resultType.type->isVoid();
@@ -1327,7 +1368,7 @@ void Sema::evaluateInfo(FieldDecl* f) {
     for (auto& item : list->items) {
         if (item.designator.empty()) {
             error(item.loc, "script.plugin.info", "name each of Info's members: .name = \"...\"",
-                  "");
+                  "{.name = \"Tilt\", .id = \"com.example.tilt\"}");
             continue;
         }
         auto pos = std::find(order.begin(), order.end(), item.designator);
@@ -1352,14 +1393,16 @@ void Sema::evaluateInfo(FieldDecl* f) {
         const std::string& d = item.designator;
         auto text = [&](std::string& target) {
             if (v->kind != Constant::Kind::String) {
-                error(item.loc, "script.plugin.info", "." + d + " is text in quotes", "");
+                error(item.loc, "script.plugin.info", "." + d + " is text in quotes",
+                      "." + d + " = \"...\"");
                 return;
             }
             target = v->stringValue;
         };
         auto integer = [&](int& target) {
             if (v->kind != Constant::Kind::Int) {
-                error(item.loc, "script.plugin.info", "." + d + " is a whole number", "");
+                error(item.loc, "script.plugin.info", "." + d + " is a whole number",
+                      "." + d + " = 0");
                 return;
             }
             target = static_cast<int>(v->intValue);
@@ -1378,7 +1421,8 @@ void Sema::evaluateInfo(FieldDecl* f) {
             text(info.url);
         else if (d == "sidechain") {
             if (v->kind != Constant::Kind::Bool)
-                error(item.loc, "script.plugin.info", ".sidechain is true or false", "");
+                error(item.loc, "script.plugin.info", ".sidechain is true or false",
+                      ".sidechain = true");
             info.sidechain = v->boolValue;
         } else if (d == "voices")
             integer(info.voices);
@@ -1388,39 +1432,46 @@ void Sema::evaluateInfo(FieldDecl* f) {
             integer(info.tail);
         else if (d == "channels") {
             if (v->kind != Constant::Kind::List) {
-                error(item.loc, "script.plugin.info", ".channels is a list: {2, 1}", "");
+                error(item.loc, "script.plugin.info", ".channels is a list: {2, 1}",
+                      ".channels = {2, 1}: stereo, else mono");
                 continue;
             }
             for (const Constant& c : v->list) {
                 if (c.kind != Constant::Kind::Int || c.intValue < 1 || c.intValue > 16) {
                     error(item.loc, "script.plugin.info", ".channels lists bus widths from 1 to 16",
-                          "");
+                          ".channels = {2, 1}");
                     break;
                 }
                 info.channels.push_back(static_cast<int>(c.intValue));
             }
             if (info.channels.size() > 4)
-                error(item.loc, "script.plugin.info", "at most four channel layouts", "");
+                error(item.loc, "script.plugin.info", "at most four channel layouts",
+                      "keep the four layouts the plugin needs most");
         } else if (d == "outputs") {
             if (v->kind != Constant::Kind::List) {
                 error(item.loc, "script.plugin.info",
-                      ".outputs is a list of names: {\"Kick\", \"Snare\"}", "");
+                      ".outputs is a list of names: {\"Kick\", \"Snare\"}",
+                      ".outputs = {\"Kick\", \"Snare\"}");
                 continue;
             }
             for (const Constant& c : v->list) {
                 if (c.kind != Constant::Kind::String || c.stringValue.empty()) {
-                    error(item.loc, "script.plugin.info", ".outputs lists names in quotes", "");
+                    error(item.loc, "script.plugin.info", ".outputs lists names in quotes",
+                          ".outputs = {\"Kick\", \"Snare\"}");
                     break;
                 }
                 info.outputs.push_back(c.stringValue);
             }
             if (info.outputs.size() > 8)
-                error(item.loc, "script.plugin.info", "at most eight extra outputs", "");
+                error(item.loc, "script.plugin.info", "at most eight extra outputs",
+                      "keep eight; mix the rest into the main output");
         }
     }
-    if (info.name.empty()) error(f->loc, "script.plugin.name", "Info needs a .name", "");
+    if (info.name.empty())
+        error(f->loc, "script.plugin.name", "Info needs a .name", ".name = \"My Effect\"");
     if (info.name.size() > 63)
-        error(f->loc, "script.plugin.name", "the plugin's name is longer than 63 bytes", "");
+        error(f->loc, "script.plugin.name", "the plugin's name is longer than 63 bytes",
+              "shorten it; .description holds the rest");
     if (info.id.empty()) {
         error(f->loc, "script.plugin.id",
               "Info needs an .id: a reverse-DNS name that identifies the plugin forever",
@@ -1436,9 +1487,12 @@ void Sema::evaluateInfo(FieldDecl* f) {
                   "Info's .id is a reverse-DNS name: letters, digits, '.', '-' and '_'",
                   ".id = \"com.yourname.tilt\"");
     }
-    if (info.latency < 0) error(f->loc, "script.plugin.info", ".latency cannot be negative", "");
+    if (info.latency < 0)
+        error(f->loc, "script.plugin.info", ".latency cannot be negative",
+              ".latency = 0, or the delay the plugin adds, in samples");
     if (info.tail < -1)
-        error(f->loc, "script.plugin.info", ".tail is samples, or -1 for forever", "");
+        error(f->loc, "script.plugin.info", ".tail is samples, or -1 for forever",
+              ".tail = 0 (it stops with its input), the tail in samples, or -1 (it rings forever)");
 }
 
 void Sema::evaluateParam(FieldDecl* f) {

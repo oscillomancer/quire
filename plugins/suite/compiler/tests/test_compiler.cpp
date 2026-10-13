@@ -22,11 +22,14 @@ scriptc::Result compileOk(const std::string& source, const scriptc::Options& opt
     return r;
 }
 
-// The first error's code, or "" when the script compiles.
+// The first error's code, or "" when the script compiles. Every error says
+// how to fix it.
 std::string firstError(const std::string& source) {
     auto r = scriptc::compile(source);
-    for (const auto& m : r.diagnostics)
+    for (const auto& m : r.diagnostics) {
+        CHECK_MESSAGE(!m.hint.empty(), m.code << ": " << m.message);
         if (m.error) return m.code;
+    }
     return "";
 }
 

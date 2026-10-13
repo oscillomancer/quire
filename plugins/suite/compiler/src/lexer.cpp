@@ -306,7 +306,8 @@ class Lexer {
         unsigned long long value = 0;
         bool overflow = false;
         if (from >= body.size()) {
-            diags_.error(t.loc, "script.lex.number", "'" + t.text + "' is not a number", "");
+            diags_.error(t.loc, "script.lex.number", "'" + t.text + "' is not a number",
+                         "write digits with an optional '.', exponent or f: 0.5, 1e-3, 2.0f");
             return;
         }
         for (size_t i = from; i < body.size(); ++i) {

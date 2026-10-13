@@ -206,7 +206,7 @@ smoothed cutoff, say) works too.
 
 ## Compiler messages
 
-Each message has a line, a column, a code and usually a hint that says what
+Each message has a line, a column, a code and a hint that says what
 to write instead:
 
 ```

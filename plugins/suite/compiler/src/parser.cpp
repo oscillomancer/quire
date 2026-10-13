@@ -101,7 +101,9 @@ class Parser {
         error(cur().loc, "script.parse.expected",
               "expected '" + std::string(p) + "'" + (what.empty() ? "" : " " + std::string(what)) +
                   " before " + describe(cur()),
-              "");
+              p == ";" ? std::string("add the ';' that ends the statement or declaration")
+                       : "add the '" + std::string(p) +
+                             "'; a missing ';' or bracket just before is the usual cause");
     }
     // Closes a template argument list. A '>>' closes two: the first is
     // taken and the token becomes the second '>' (C++11's rule).
@@ -426,7 +428,8 @@ class Parser {
         }
         if (!acceptCloseAngle())
             error(cur().loc, "script.parse.expected",
-                  "expected '>' to close the template arguments before " + describe(cur()), "");
+                  "expected '>' to close the template arguments before " + describe(cur()),
+                  "close them with '>': Array<float, 512>");
     }
     void skipTemplateArgs() {
         int depth = 0;
@@ -492,7 +495,7 @@ class Parser {
                       "8> voices;");
             if (accept(",")) {
                 error(cur().loc, "script.unsupported.inheritance", "a struct has at most one base",
-                      "");
+                      "derive the plugin from one: struct Tilt : Effect { ... }");
                 while (!atPunct("{") && !at(Tok::End)) advance();
             }
         }
@@ -621,7 +624,8 @@ class Parser {
             return nullptr;
         }
         if (!at(Tok::Ident)) {
-            error(cur().loc, "script.parse.name", "expected a name before " + describe(cur()), "");
+            error(cur().loc, "script.parse.name", "expected a name before " + describe(cur()),
+                  "write the type, then the name: double level = 0.0;");
             recover();
             return nullptr;
         }
@@ -660,7 +664,8 @@ class Parser {
             }
             if (!accept(",")) break;
             if (!at(Tok::Ident)) {
-                error(cur().loc, "script.parse.name", "expected a name after ','", "");
+                error(cur().loc, "script.parse.name", "expected a name after ','",
+                      "name each one: double a = 0.0, b = 0.0;");
                 break;
             }
             const Token& next = advance();
@@ -836,7 +841,8 @@ class Parser {
                 d->body = statement();
                 if (!acceptKeyword("while"))
                     error(cur().loc, "script.parse.expected",
-                          "expected 'while' after the do statement's body", "");
+                          "expected 'while' after the do statement's body",
+                          "write do { ... } while (condition);");
                 expect("(");
                 d->cond = expression();
                 expect(")");
@@ -938,7 +944,8 @@ class Parser {
         while (true) {
             if (!at(Tok::Ident)) {
                 error(cur().loc, "script.parse.name",
-                      "expected a variable name before " + describe(cur()), "");
+                      "expected a variable name before " + describe(cur()),
+                      "write the type, then the name: double y = 0.0;");
                 recover();
                 return d;
             }
@@ -1147,7 +1154,8 @@ class Parser {
             return unary();
         }
         if (t.keyword("co_await") || t.keyword("co_yield")) {
-            error(t.loc, "script.unsupported.coroutine", "coroutines are not in the subset", "");
+            error(t.loc, "script.unsupported.coroutine", "coroutines are not in the subset",
+                  "write the steps as ordinary code that runs in process()");
             advance();
             return unary();
         }
@@ -1277,13 +1285,16 @@ class Parser {
                         c->operand = list;
                     } else {
                         error(cur().loc, "script.parse.expected",
-                              "expected '(' after the type name", "");
+                              "expected '(' after the type name",
+                              "convert with parentheses: double(n), or static_cast<double>(n)");
                     }
                     return c;
                 }
                 if (t.text == "operator" || t.text == "template" || t.text == "typename") {
                     error(loc, "script.unsupported.expression",
-                          "'" + t.text + "' is not in the subset", "");
+                          "'" + t.text + "' is not in the subset",
+                          "write a named function; the subset has no templates or operator "
+                          "overloading");
                     advance();
                     return unit_.expr<IntLitExpr>(loc);
                 }
@@ -1313,7 +1324,10 @@ class Parser {
             default:
                 break;
         }
-        error(loc, "script.parse.expression", "expected an expression before " + describe(t), "");
+        error(loc, "script.parse.expression", "expected an expression before " + describe(t),
+              "put a value, a name or a call here; a missing operand or an extra operator is the "
+              "usual "
+              "cause");
         if (!at(Tok::End) && !atPunct(";") && !atPunct("}") && !atPunct(")")) advance();
         return unit_.expr<IntLitExpr>(loc);
     }
@@ -1392,7 +1406,8 @@ class Parser {
                     m->member = advance().text;
                 else
                     error(cur().loc, "script.parse.member",
-                          "expected a member name after '" + t.text + "'", "");
+                          "expected a member name after '" + t.text + "'",
+                          "write the member's name after it: io.frames");
                 e = m;
             } else if (t.punct("++") || t.punct("--")) {
                 auto* u = unit_.expr<UnaryExpr>(advance().loc);

@@ -153,7 +153,8 @@ Expr* Sema::convert(Expr* e, QualType to, Loc loc, const std::string& what, bool
         auto* list = static_cast<InitListExpr*>(e);
         if (to.isRef && !to.isConst) {
             error(loc, "script.type.reference",
-                  "a braced list cannot bind to a non-const reference", "");
+                  "a braced list cannot bind to a non-const reference",
+                  "store the list in a variable first, or take it as a const reference");
             return e;
         }
         const Type* t = to.type;
@@ -176,7 +177,8 @@ Expr* Sema::convert(Expr* e, QualType to, Loc loc, const std::string& what, bool
             }
             if (list->items.size() > 1 || !list->items[0].designator.empty()) {
                 error(loc, "script.type.init_list",
-                      what + ": " + article(t->name) + " takes one value in braces", "");
+                      what + ": " + article(t->name) + " takes one value in braces",
+                      "give one value: {0.5}, or none: {}");
                 return e;
             }
             Expr* v = check(list->items[0].value);
@@ -187,7 +189,7 @@ Expr* Sema::convert(Expr* e, QualType to, Loc loc, const std::string& what, bool
             if (static_cast<int>(list->items.size()) > t->count)
                 error(loc, "script.type.init_list",
                       what + ": " + std::to_string(list->items.size()) + " values for " + t->name,
-                      "");
+                      "give at most " + std::to_string(t->count) + " values");
             for (auto& item : list->items) {
                 if (!item.designator.empty())
                     error(item.loc, "script.type.designator", "an Array's elements are not named",
@@ -219,19 +221,22 @@ Expr* Sema::convert(Expr* e, QualType to, Loc loc, const std::string& what, bool
                                   "put ." + item.designator + " earlier in the braces");
                         else
                             error(item.loc, "script.type.designator",
-                                  s->name + " has no member '" + item.designator + "'", "");
+                                  s->name + " has no member '" + item.designator + "'",
+                                  "name one of " + s->name + "'s members");
                         continue;
                     }
                     next = k;
                 } else if (next >= fields.size()) {
-                    error(item.loc, "script.type.init_list", "too many values for " + s->name, "");
+                    error(item.loc, "script.type.init_list", "too many values for " + s->name,
+                          "give at most one value per member of " + s->name);
                     continue;
                 }
                 target = fields[next++];
                 if (target->qt.type && target->qt.type->kind == TypeKind::Object &&
                     target->qt.type->builtin && !target->qt.type->builtin->declarable) {
                     error(item.loc, "script.type.init_list",
-                          "'" + target->name + "' cannot be set in braces", "");
+                          "'" + target->name + "' cannot be set in braces",
+                          "set '" + target->name + "' in prepare() instead");
                     continue;
                 }
                 item.designator = target->name;
@@ -246,7 +251,8 @@ Expr* Sema::convert(Expr* e, QualType to, Loc loc, const std::string& what, bool
                       "write " + t->name + " name; and set it up with its member functions");
             return list;
         }
-        error(loc, "script.type.init_list", what + ": braces cannot make " + article(t->name), "");
+        error(loc, "script.type.init_list", what + ": braces cannot make " + article(t->name),
+              "declare it plainly and set it up with its member functions");
         return e;
     }
 
@@ -257,12 +263,14 @@ Expr* Sema::convert(Expr* e, QualType to, Loc loc, const std::string& what, bool
         return e;
     }
     if (ft->kind == TypeKind::Null) {
-        error(loc, "script.unsupported.pointer", "nullptr: pointers are not in the subset", "");
+        error(loc, "script.unsupported.pointer", "nullptr: pointers are not in the subset",
+              "hold an index or a flag instead: int which = -1;");
         return e;
     }
     if (ft->isVoid()) {
         error(loc, "script.type.void",
-              what + ": this expression has no value (it calls a function returning void)", "");
+              what + ": this expression has no value (it calls a function returning void)",
+              "call it on its own line; it returns nothing to use");
         return e;
     }
 
@@ -288,12 +296,13 @@ Expr* Sema::convert(Expr* e, QualType to, Loc loc, const std::string& what, bool
                 error(loc, "script.type.reference",
                       what + ": cannot bind " + typeName(QualType{to.type, false, true}) + " to " +
                           article(ft->name),
-                      "");
+                      "take it by value, or as const " + to.type->name + "&");
             return e;
         }
         if (!to.type->isScalar()) {
             error(loc, "script.type.reference",
-                  what + ": cannot bind " + toName + " to " + article(ft->name), "");
+                  what + ": cannot bind " + toName + " to " + article(ft->name),
+                  "pass " + article(to.type->name));
             return e;
         }
         // const T& to a converted value: C++ makes a temporary.
@@ -304,7 +313,8 @@ Expr* Sema::convert(Expr* e, QualType to, Loc loc, const std::string& what, bool
     // Param's operator double.
     if (ft->kind == TypeKind::Object && ft->builtin == b_.param()) {
         if (!t->isArithmetic()) {
-            error(loc, "script.type.param", what + ": a parameter converts only to a number", "");
+            error(loc, "script.type.param", what + ": a parameter converts only to a number",
+                  "use its value (gain), or its .index() or .on()");
             return e;
         }
         if (t->kind == TypeKind::Int) {
@@ -327,7 +337,10 @@ Expr* Sema::convert(Expr* e, QualType to, Loc loc, const std::string& what, bool
     if (t->isScalar()) {
         if (!ft->isScalar()) {
             error(loc, "script.type.mismatch",
-                  what + ": expected " + article(t->name) + ", not " + article(ft->name), "");
+                  what + ": expected " + article(t->name) + ", not " + article(ft->name),
+                  ft->kind == TypeKind::Array || ft->kind == TypeKind::Buffer
+                      ? std::string("take one element: name[i]")
+                      : "give " + article(t->name) + " here");
             return e;
         }
         if (ft == t) return e;
@@ -373,7 +386,8 @@ Expr* Sema::convert(Expr* e, QualType to, Loc loc, const std::string& what, bool
     // Class types: a copy of the same type.
     if (!sameType(ft, t)) {
         error(loc, "script.type.mismatch",
-              what + ": expected " + article(t->name) + ", not " + article(ft->name), "");
+              what + ": expected " + article(t->name) + ", not " + article(ft->name),
+              "give " + article(t->name) + " here");
         return e;
     }
     if (!copyable(t)) {
@@ -407,7 +421,7 @@ bool Sema::requireModifiable(Expr* e, Loc loc, const std::string& what) {
     if (!e->type()) return false;
     if (!e->lvalue) {
         error(loc, "script.type.not_assignable", what + " needs a variable or a member to change",
-              "");
+              "assign to a variable or a member, not to a value");
         return false;
     }
     if (e->type()->kind == TypeKind::Object && e->type()->builtin == b_.param()) {
@@ -419,7 +433,9 @@ bool Sema::requireModifiable(Expr* e, Loc loc, const std::string& what) {
     if (e->qt.isConst) {
         std::string why = "it is const";
         if (fn_ && fn_->isConst) why += " (inside a const member function, members are read-only)";
-        error(loc, "script.type.const", what + ": cannot change this, " + why, "");
+        error(loc, "script.type.const", what + ": cannot change this, " + why,
+              fn_ && fn_->isConst ? std::string("drop the const from the member function")
+                                  : "copy it into a variable first: auto x = ...;");
         return false;
     }
     return true;
@@ -503,7 +519,8 @@ Expr* Sema::checkName(NameExpr* n) {
             if (FunctionDecl* m = findMethod(s, first)) {
                 if (s != self_) {
                     error(n->loc, "script.name.outer_member",
-                          "'" + first + "' belongs to " + s->name, "");
+                          "'" + first + "' belongs to " + s->name,
+                          "call it from a member function of " + s->name);
                     return n;
                 }
                 n->ref = RefKind::Method;
@@ -628,7 +645,7 @@ Expr* Sema::checkName(NameExpr* n) {
                     return s;
                 }() +
                 "'",
-            "");
+            "check the spelling; write the runtime's names without a namespace");
         return n;
     }
     if (scopeEnum) {
@@ -644,7 +661,7 @@ Expr* Sema::checkName(NameExpr* n) {
                 return n;
             }
         error(n->loc, "script.name.enumerator", scopeEnum->name + " has no value '" + last + "'",
-              "");
+              "check the spelling against " + scopeEnum->name + "'s declaration");
         return n;
     }
     if (scopeBuiltinEnum) {
@@ -693,7 +710,8 @@ Expr* Sema::checkName(NameExpr* n) {
             n->ref = RefKind::Type;
             return n;
         }
-        error(n->loc, "script.name.qualified", scopeClass->name + " has no '" + last + "'", "");
+        error(n->loc, "script.name.qualified", scopeClass->name + " has no '" + last + "'",
+              "check the spelling, or drop the " + scopeClass->name + ":: prefix");
         return n;
     }
     // supple::script::name: the runtime's, explicitly.
@@ -710,7 +728,8 @@ Expr* Sema::checkMember(MemberExpr* m) {
         auto* n = unit_.expr<NameExpr>(m->loc);
         n->path = {m->member};
         if (!self_) {
-            error(m->loc, "script.name.this", "'this' outside a member function", "");
+            error(m->loc, "script.name.this", "'this' outside a member function",
+                  "use the member's name alone, inside a member function");
             return n;
         }
         if (FieldDecl* f = findField(self_, m->member)) {
@@ -732,7 +751,8 @@ Expr* Sema::checkMember(MemberExpr* m) {
             n->function = fm;
             return n;
         }
-        error(m->loc, "script.name.member", self_->name + " has no member '" + m->member + "'", "");
+        error(m->loc, "script.name.member", self_->name + " has no member '" + m->member + "'",
+              "check the spelling, or declare it in " + self_->name);
         return n;
     }
     m->object = check(m->object);
@@ -769,7 +789,8 @@ Expr* Sema::checkMember(MemberExpr* m) {
             m->method = f;
             return m;
         }
-        error(m->loc, "script.name.member", s->name + " has no member '" + m->member + "'", "");
+        error(m->loc, "script.name.member", s->name + " has no member '" + m->member + "'",
+              "check the spelling, or declare it in " + s->name);
         return m;
     }
     if (t->kind == TypeKind::Array || t->kind == TypeKind::Buffer) {
@@ -809,7 +830,8 @@ Expr* Sema::checkMember(MemberExpr* m) {
               names.empty() ? "" : c->name + " has: " + names);
         return m;
     }
-    error(m->loc, "script.name.member", article(t->name) + " has no members", "");
+    error(m->loc, "script.name.member", article(t->name) + " has no members",
+          "it is a plain value: use it directly");
     return m;
 }
 
@@ -849,7 +871,8 @@ Expr* Sema::checkIndex(IndexExpr* x) {
         x->lvalue = false;
         return x;
     }
-    error(x->loc, "script.type.index", t->name + " cannot be indexed", "");
+    error(x->loc, "script.type.index", t->name + " cannot be indexed",
+          "index an Array, a Buffer or the block: io[c][i]");
     return x;
 }
 
@@ -865,14 +888,20 @@ std::vector<Expr*> Sema::callArguments(CallExpr* c, const std::vector<QualType>&
         return r;
     }();
     if (c->args.size() < required || c->args.size() > params.size()) {
-        error(c->loc, "script.call.arguments",
-              what + " takes " +
-                  (required == params.size()
-                       ? std::to_string(params.size())
-                       : std::to_string(required) + " to " + std::to_string(params.size())) +
-                  " argument" + (params.size() == 1 ? "" : "s") + ", not " +
-                  std::to_string(c->args.size()),
-              "");
+        error(
+            c->loc, "script.call.arguments",
+            what + " takes " +
+                (required == params.size()
+                     ? std::to_string(params.size())
+                     : std::to_string(required) + " to " + std::to_string(params.size())) +
+                " argument" + (params.size() == 1 ? "" : "s") + ", not " +
+                std::to_string(c->args.size()),
+            params.empty() ? std::string("call it with none: ()") : "its parameters: " + [&] {
+                std::string s;
+                for (size_t i = 0; i < params.size(); ++i)
+                    s += (i ? ", " : "") + typeName(params[i]);
+                return s;
+            }());
         return c->args;
     }
     for (size_t i = 0; i < c->args.size(); ++i)
@@ -910,7 +939,8 @@ Expr* Sema::checkCall(CallExpr* c) {
                           "declare " + f->name + "() const if it changes nothing");
                 if (!m->object->lvalue)
                     error(c->loc, "script.type.temporary",
-                          "calling a member function on a temporary value", "");
+                          "calling a member function on a temporary value",
+                          "store the value in a variable first, then call it");
                 std::vector<QualType> params;
                 std::vector<Expr*> defaults;
                 for (VarDecl* p : f->params) {
@@ -929,7 +959,8 @@ Expr* Sema::checkCall(CallExpr* c) {
                 c->object = m->object;
                 if (m->member == "size") {
                     if (!c->args.empty())
-                        error(c->loc, "script.call.arguments", "size() takes no arguments", "");
+                        error(c->loc, "script.call.arguments", "size() takes no arguments",
+                              "write size()");
                     c->qt = QualType{b_.intType(), false, false};
                     if (ot->kind == TypeKind::Array) {
                         c->constant = true;
@@ -940,15 +971,17 @@ Expr* Sema::checkCall(CallExpr* c) {
                 }
                 if (m->member == "fill") {
                     if (c->args.size() != 1) {
-                        error(c->loc, "script.call.arguments", "fill() takes one value", "");
+                        error(c->loc, "script.call.arguments", "fill() takes one value",
+                              "fill(0.0)");
                         return c;
                     }
                     if (m->object->qt.isConst)
-                        error(c->loc, "script.call.const", "fill() on something read-only", "");
+                        error(c->loc, "script.call.const", "fill() on something read-only",
+                              "fill a member or variable that is not const");
                     if (!copyable(ot->element))
                         error(c->loc, "script.type.copy",
                               "fill() would copy " + ot->element->name + ", which holds memory",
-                              "");
+                              "set each element in a loop instead");
                     c->args[0] = convert(c->args[0], QualType{ot->element, true, true},
                                          c->args[0]->loc, "fill()");
                     c->qt = QualType{b_.voidType(), false, false};
@@ -956,11 +989,13 @@ Expr* Sema::checkCall(CallExpr* c) {
                 }
                 if (m->member == "resize") {
                     if (c->args.size() != 1) {
-                        error(c->loc, "script.call.arguments", "resize() takes the new size", "");
+                        error(c->loc, "script.call.arguments", "resize() takes the new size",
+                              "resize(n), in prepare()");
                         return c;
                     }
                     if (m->object->qt.isConst)
-                        error(c->loc, "script.call.const", "resize() on something read-only", "");
+                        error(c->loc, "script.call.const", "resize() on something read-only",
+                              "resize a member that is not const, in prepare()");
                     c->args[0] = convert(c->args[0], QualType{b_.intType(), false, false},
                                          c->args[0]->loc, "resize()");
                     c->qt = QualType{b_.voidType(), false, false};
@@ -989,10 +1024,11 @@ Expr* Sema::checkCall(CallExpr* c) {
                     error(c->loc, "script.call.const",
                           "calling " + chosen->name + "(), which changes the " + ot->name +
                               ", on something read-only",
-                          "");
+                          "call it on a member or variable that is not const");
                 if (!m->object->lvalue && !chosen->isConst)
                     error(c->loc, "script.type.temporary",
-                          "calling " + chosen->name + "() on a temporary value", "");
+                          "calling " + chosen->name + "() on a temporary value",
+                          "store it in a variable first, then call " + chosen->name + "()");
                 c->args =
                     callArguments(c, chosen->params, {}, ot->name + "::" + chosen->name + "()");
                 c->qt = chosen->result;
@@ -1007,7 +1043,8 @@ Expr* Sema::checkCall(CallExpr* c) {
             }
             if (m->ref == RefKind::Field) {
                 error(c->loc, "script.call.not_function",
-                      "'" + m->member + "' is a member, not a function", "");
+                      "'" + m->member + "' is a member, not a function",
+                      "drop the (): " + m->member);
                 return c;
             }
             return c;
@@ -1048,7 +1085,8 @@ Expr* Sema::checkCall(CallExpr* c) {
                               f->name + "() is called by the runtime, not by the script",
                               f->name == "process"
                                   ? "move the shared work into a member function both can call"
-                                  : "");
+                                  : "the runtime calls prepare() itself; put the shared work in a "
+                                    "member function");
                 }
                 return c;
             }
@@ -1060,7 +1098,7 @@ Expr* Sema::checkCall(CallExpr* c) {
                         c->implicitThis = true;
                         if (!c->args.empty())
                             error(c->loc, "script.call.arguments",
-                                  calleeName + "() takes no arguments", "");
+                                  calleeName + "() takes no arguments", calleeName + "()");
                         c->qt = bm.result;
                         return c;
                     }
@@ -1069,7 +1107,8 @@ Expr* Sema::checkCall(CallExpr* c) {
             case RefKind::Builtin: {
                 if (n->builtins.empty()) {
                     error(c->loc, "script.call.not_function",
-                          "'" + calleeName + "' is a value, not a function", "");
+                          "'" + calleeName + "' is a value, not a function",
+                          "drop the (): " + calleeName);
                     return c;
                 }
                 // Overload resolution among the runtime's functions.
@@ -1154,13 +1193,15 @@ Expr* Sema::checkCall(CallExpr* c) {
             case RefKind::Global:
             case RefKind::StaticConst:
                 error(c->loc, "script.call.not_function",
-                      "'" + calleeName + "' is a value, not a function", "");
+                      "'" + calleeName + "' is a value, not a function",
+                      "drop the (): " + calleeName);
                 return c;
             default:
                 return c;
         }
     }
-    error(c->loc, "script.call.callee", "this cannot be called", "");
+    error(c->loc, "script.call.callee", "this cannot be called",
+          "call a function by its name: f(x)");
     return c;
 }
 
@@ -1175,7 +1216,8 @@ Expr* Sema::checkUnary(UnaryExpr* u) {
         if (!requireModifiable(u->operand, u->loc, "'" + u->op + "'")) return u;
         if (!t->isArithmetic() || t->kind == TypeKind::Bool) {
             error(u->loc, "script.type.operator",
-                  "'" + u->op + "' needs an int, float or double, not " + t->name, "");
+                  "'" + u->op + "' needs an int, float or double, not " + t->name,
+                  "use it on a number; for a bool write b = !b");
             return u;
         }
         u->qt = QualType{t, false, false};
@@ -1194,12 +1236,14 @@ Expr* Sema::checkUnary(UnaryExpr* u) {
     }
     if (!(t->isArithmetic() || isParam)) {
         error(u->loc, "script.type.operator",
-              "'" + u->op + "' needs a number, not " + article(t->name), "");
+              "'" + u->op + "' needs a number, not " + article(t->name),
+              "apply it to a number or a parameter");
         return u;
     }
     const Type* operandType = isParam ? b_.doubleType() : promoted(t);
     if (u->op == "~" && operandType->kind != TypeKind::Int) {
-        error(u->loc, "script.type.operator", "'~' needs an int, not " + operandType->name, "");
+        error(u->loc, "script.type.operator", "'~' needs an int, not " + operandType->name,
+              "convert first: ~toInt(x)");
         return u;
     }
     u->operand = convert(u->operand, QualType{operandType, false, false}, u->loc,
@@ -1300,7 +1344,8 @@ Expr* Sema::checkBinary(BinaryExpr* bin) {
     if (!numeric(lt) || !numeric(rt)) {
         const Type* bad = numeric(lt) ? rt : lt;
         error(bin->loc, "script.type.operator",
-              "'" + op + "' needs numbers, not " + article(bad->name), "");
+              "'" + op + "' needs numbers, not " + article(bad->name),
+              "use it on numbers; index an Array or a Buffer for one of its elements");
         return bin;
     }
     const bool integralOnly =
@@ -1310,7 +1355,8 @@ Expr* Sema::checkBinary(BinaryExpr* bin) {
     if (integralOnly && (l->isFloating() || r->isFloating())) {
         error(bin->loc, "script.type.operator",
               "'" + op + "' needs ints, not " + (l->isFloating() ? l->name : r->name),
-              op == "%" ? "for the remainder of doubles use fmod(x, y)" : "");
+              op == "%" ? "for the remainder of doubles use fmod(x, y)"
+                        : "convert with toInt(x) first, or keep the arithmetic in double");
         return bin;
     }
     const Type* common = (op == "<<" || op == ">>") ? l : arithmeticResult(l, r);
@@ -1411,7 +1457,8 @@ Expr* Sema::checkAssign(AssignExpr* a) {
     const Type* vt = a->value->type();
     const bool vParam = vt->kind == TypeKind::Object && vt->builtin == b_.param();
     if (!t->isArithmetic() || !(vt->isArithmetic() || vParam)) {
-        error(a->loc, "script.type.operator", "'" + a->op + "' needs numbers", "");
+        error(a->loc, "script.type.operator", "'" + a->op + "' needs numbers",
+              "use it on numbers; index an Array or a Buffer for one of its elements");
         return a;
     }
     const Type* l = promoted(t);
@@ -1419,7 +1466,9 @@ Expr* Sema::checkAssign(AssignExpr* a) {
     const bool integralOnly =
         op == "%" || op == "<<" || op == ">>" || op == "&" || op == "|" || op == "^";
     if (integralOnly && (l->isFloating() || r->isFloating())) {
-        error(a->loc, "script.type.operator", "'" + a->op + "' needs ints", "");
+        error(a->loc, "script.type.operator", "'" + a->op + "' needs ints",
+              a->op == "%=" ? std::string("for doubles write x = fmod(x, y)")
+                            : "convert with toInt(x) first");
         return a;
     }
     const Type* common = (op == "<<" || op == ">>") ? l : arithmeticResult(l, r);
@@ -1444,7 +1493,7 @@ Expr* Sema::checkAssign(AssignExpr* a) {
     if ((op == "<<" || op == ">>") &&
         (!a->value->constant || a->value->constInt < 0 || a->value->constInt > 31))
         error(a->value->loc, "script.ub.shift", "a shift amount must be a constant from 0 to 31",
-              "");
+              "shift by a literal from 0 to 31, or multiply instead");
     return a;
 }
 
@@ -1460,7 +1509,8 @@ Expr* Sema::checkConditional(ConditionalExpr* c) {
         c->lvalue = c->then->lvalue && c->otherwise->lvalue;
         if (!a->isScalar() && !c->lvalue && a->kind != TypeKind::Object)
             error(c->loc, "script.type.conditional",
-                  "both branches of ?: must be variables to choose between " + a->name, "");
+                  "both branches of ?: must be variables to choose between " + a->name,
+                  "choose with if/else instead");
         if (c->cond->constant && c->then->constant && c->otherwise->constant) {
             c->constant = true;
             c->constInt = c->cond->constInt ? c->then->constInt : c->otherwise->constInt;
@@ -1478,7 +1528,8 @@ Expr* Sema::checkConditional(ConditionalExpr* c) {
     const Type* y = arith(b);
     if (!x || !y) {
         error(c->loc, "script.type.conditional",
-              "the branches of ?: have different types: " + a->name + " and " + b->name, "");
+              "the branches of ?: have different types: " + a->name + " and " + b->name,
+              "convert one branch so both have the same type");
         return c;
     }
     const Type* common = arithmeticResult(promoted(x), promoted(y));
@@ -1508,7 +1559,8 @@ Expr* Sema::checkCast(CastExpr* c) {
         c->constInt = v->constInt;
         c->constValue = v->constValue;
         if (!t->isScalar() && !declarable(t))
-            error(c->loc, "script.type.temporary", t->name + " cannot be made as a temporary", "");
+            error(c->loc, "script.type.temporary", t->name + " cannot be made as a temporary",
+                  "declare a member or a variable of it, then use that");
         return c;
     }
     c->operand = check(c->operand);
@@ -1517,14 +1569,16 @@ Expr* Sema::checkCast(CastExpr* c) {
     c->qt = QualType{t, false, false};
     if (!t->isScalar()) {
         error(c->loc, "script.type.cast",
-              "a cast converts between numbers and enums, not to " + t->name, "");
+              "a cast converts between numbers and enums, not to " + t->name,
+              "convert to double, float, int, bool or an enum");
         return c;
     }
     const bool fromParam = f->kind == TypeKind::Object && f->builtin == b_.param();
     if (fromParam) f = b_.doubleType();
     if (!f->isScalar()) {
         error(c->loc, "script.type.cast",
-              "cannot convert " + article(c->operand->type()->name) + " to " + t->name, "");
+              "cannot convert " + article(c->operand->type()->name) + " to " + t->name,
+              "a cast converts numbers and enums; read one element or field first");
         return c;
     }
     if (f->isFloating() && (t->kind == TypeKind::Int || t->kind == TypeKind::Enum)) {
@@ -1534,11 +1588,13 @@ Expr* Sema::checkCast(CastExpr* c) {
     }
     if (t->kind == TypeKind::Enum && f->kind != TypeKind::Int && f != t) {
         error(c->loc, "script.type.cast",
-              "an enum is made from an int: static_cast<" + t->name + ">(i)", "");
+              "an enum is made from an int: static_cast<" + t->name + ">(i)",
+              "static_cast<" + t->name + ">(i)");
         return c;
     }
     if (f->kind == TypeKind::Enum && t != f && t->kind != TypeKind::Int) {
-        error(c->loc, "script.type.cast", "an enum converts to int: static_cast<int>(value)", "");
+        error(c->loc, "script.type.cast", "an enum converts to int: static_cast<int>(value)",
+              "static_cast<int>(value)");
         return c;
     }
     if (fromParam) c->operand = implicitCast(c->operand, b_.doubleType(), true);
@@ -1608,11 +1664,13 @@ Expr* Sema::check(Expr* e) {
                     if (!inCallee_)
                         error(e->loc, "script.call.missing_parens",
                               "'" + rn->path.back() + "' is a function; call it with ()",
-                              rn->path.back() == "sampleRate" ? "sampleRate()" : "");
+                              rn->path.back() == "sampleRate" ? "sampleRate()"
+                                                              : rn->path.back() + "()");
                 } else if (!rn->qt.type && rn->ref == RefKind::Type) {
                     rn->qt = QualType{b_.voidType(), true, false};
                     error(e->loc, "script.name.type",
-                          "'" + rn->path.back() + "' is a type, not a value", "");
+                          "'" + rn->path.back() + "' is a type, not a value",
+                          "use a variable of that type");
                 }
             }
             return r;
@@ -1626,7 +1684,8 @@ Expr* Sema::check(Expr* e) {
                     m->qt = QualType{b_.voidType(), true, false};
                     if (!inCallee_)
                         error(e->loc, "script.call.missing_parens",
-                              "'" + m->member + "' is a member function; call it with ()", "");
+                              "'" + m->member + "' is a member function; call it with ()",
+                              m->member + "()");
                 }
             } else if (r->kind == ExprKind::Name && !r->qt.type) {
                 r->qt = QualType{b_.voidType(), true, false};
@@ -1660,11 +1719,13 @@ Expr* Sema::check(Expr* e) {
             e->qt = QualType{b_.initListType(), false, false};
             return e;
         case ExprKind::This:
-            error(e->loc, "script.unsupported.this", "'this' is only usable as this->member", "");
+            error(e->loc, "script.unsupported.this", "'this' is only usable as this->member",
+                  "write this->member, or the member's name alone");
             e->qt = QualType{b_.voidType(), false, false};
             return e;
         case ExprKind::TypeName:
-            error(e->loc, "script.name.type", "a type is not a value", "");
+            error(e->loc, "script.name.type", "a type is not a value",
+                  "use a variable of that type");
             e->qt = QualType{b_.voidType(), false, false};
             return e;
     }
@@ -1760,7 +1821,11 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                                   (kind == Constant::Kind::String ? "text in quotes"
                                    : kind == Constant::Kind::List ? "a list of names in braces"
                                                                   : "a constant number"),
-                              "");
+                              kind == Constant::Kind::String
+                                  ? std::string("write it in quotes: \"Gain\"")
+                              : kind == Constant::Kind::List
+                                  ? std::string("{\"Low Pass\", \"High Pass\"}")
+                                  : std::string("a literal or a constexpr constant"));
                         return false;
                     }
                     return true;
@@ -1800,7 +1865,8 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                     for (const Constant& o : args[1].list) {
                         if (o.kind != Constant::Kind::String) {
                             error(call->args[1]->loc, "script.param.argument",
-                                  "choice(): each option is text in quotes", "");
+                                  "choice(): each option is text in quotes",
+                                  "choice(\"Mode\", {\"Clean\", \"Warm\"}, 0)");
                             return std::nullopt;
                         }
                         p.choices.push_back(o.stringValue);
@@ -1858,7 +1924,9 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
             if (!base) return std::nullopt;
             if (base->kind != Constant::Kind::Spec) {
                 error(call->loc, "script.param.modifier",
-                      "'." + m->member + "()' applies to a parameter's description", "");
+                      "'." + m->member + "()' applies to a parameter's description",
+                      "chain it onto the factory: decibels(\"Gain\", -24, 24, 0)." + m->member +
+                          "(...)");
                 return std::nullopt;
             }
             Constant c = *base;
@@ -1873,13 +1941,14 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                 if (i < args.size() && args[i].kind == Constant::Kind::String)
                     return args[i].stringValue;
                 error(call->loc, "script.param.modifier",
-                      "." + m->member + "() takes text in quotes", "");
+                      "." + m->member + "() takes text in quotes", "." + m->member + "(\"...\")");
                 return std::nullopt;
             };
             auto number = [&](size_t i) -> std::optional<double> {
                 if (i < args.size() && args[i].numeric()) return args[i].asDouble();
                 error(call->loc, "script.param.modifier",
-                      "." + m->member + "() takes a constant number", "");
+                      "." + m->member + "() takes a constant number",
+                      "." + m->member + "(20), with a literal or a constexpr constant");
                 return std::nullopt;
             };
             const std::string& mod = m->member;
@@ -1900,7 +1969,7 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                 if (!v) return std::nullopt;
                 if (*v < 1 || *v > 4294967294.0 || *v != std::floor(*v)) {
                     error(call->loc, "script.param.id",
-                          "a parameter id is a whole number from 1 to 4294967294", "");
+                          "a parameter id is a whole number from 1 to 4294967294", ".withId(7)");
                     return std::nullopt;
                 }
                 p.id = static_cast<std::uint32_t>(*v);
@@ -1920,12 +1989,13 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
             } else if (mod == "role") {
                 if (args.size() != 1 || args[0].kind != Constant::Kind::List) {
                     error(call->loc, "script.param.modifier",
-                          ".role() takes a list: .role({\"level\"})", "");
+                          ".role() takes a list: .role({\"level\"})", ".role({\"level\"})");
                     return std::nullopt;
                 }
                 for (const Constant& r : args[0].list) {
                     if (r.kind != Constant::Kind::String) {
-                        error(call->loc, "script.param.modifier", ".role(): each role is text", "");
+                        error(call->loc, "script.param.modifier", ".role(): each role is text",
+                              ".role({\"level\", \"time\"})");
                         return std::nullopt;
                     }
                     p.roles.push_back(r.stringValue);
@@ -1933,7 +2003,8 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
             } else if (mod == "curved") {
                 if (args.empty() || args[0].builtinEnum != "Curve") {
                     error(call->loc, "script.param.modifier",
-                          ".curved() takes Curve::Linear, Curve::Log or Curve::Pow", "");
+                          ".curved() takes Curve::Linear, Curve::Log or Curve::Pow",
+                          ".curved(Curve::Log), or .curved(Curve::Pow, 3)");
                     return std::nullopt;
                 }
                 p.curve = static_cast<ParamModel::Curve>(args[0].intValue);
