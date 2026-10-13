@@ -82,8 +82,8 @@ void setCurrent(Instance* instance) {
     }
     if (!instance) return;
     for (int i = 0; i < kSlots; ++i) {
-        std::uintptr_t free = 0;
-        if (gSlots[i].thread.compare_exchange_strong(free, me, std::memory_order_acq_rel)) {
+        std::uintptr_t unused = 0;
+        if (gSlots[i].thread.compare_exchange_strong(unused, me, std::memory_order_acq_rel)) {
             gSlots[i].instance = instance;
             int highest = gHighest.load(std::memory_order_relaxed);
             while (highest < i + 1 &&
