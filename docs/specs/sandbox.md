@@ -242,6 +242,20 @@ resampler), then runs the chain offline:
 - compensate total chain latency by discarding that many leading samples;
 - write float32 WAV; analyze if requested.
 
+The C++ `RenderRequest` also accepts `sidechain` (a borrowed
+`const audio::AudioData*`, default null), feeding only the first chain stage.
+It shares the main input's sample origin and render rate; one channel is
+duplicated to stereo, two are used as supplied. A short key is zero-padded
+through the remaining input and tail. It does not extend the musical length.
+The renderer validates the rate, channel lengths, mono/stereo layout, frame
+cap and destination key input before starting audio; errors identify
+`/sidechain` (`render.input_rate`, `render.input_layout`, `render.too_long`,
+`render.sidechain`). Key activation is set before plugin activation, with
+reactivation if it changes. Buffers are allocated on main; the audio loop
+only copies samples into them and passes them to the first stage. Other
+stages receive no key from this request. The sandbox `render` command does
+not expose this pointer; `dsp.test` uses it for its generated key.
+
 **Determinism:** two renders of the same session state and arguments are
 bit-identical (test: render twice, compare bytes). Block-size invariance for
 stock plugins is tested separately (render at block 1, 64, 256, 1024; null
@@ -274,7 +288,75 @@ within −120 dBFS for the stock test synth).
 | `dsp.write`, `dsp.check`, `dsp.get`, `dsp.list` | action, queries | as in the engine (ADR-0032): the session's script library, `SessionOptions::scriptDir` (`<workdir>/scripts`; the CLI without `--workdir` uses the app's, `<data>/<slug>/scripts`) | diagnostics with hints, the plugin's id, parameters and files (keys for a patch's `properties`) |
 | `dsp.export` | action | `script` (name); `format?` (`clap`, the default, or `source`); `folder?` (absolute; default `<library>/<script>/export`, for source `export/<script>-source`, which must be new or empty); `license?` (source: `MIT`, the default, or `GPL-3.0-or-later`) | `path`, `id`, `name`, `format`. clap: `path` is `<folder>/<plugin name>.clap`, the player that plays the script copied with the script appended (it offers that one plugin), `player` (the module copied), `bytes`, `notices` (the player's licenses, written beside it). source: `path` is a project of the plugin template (the framework, the suite without its compiler, the script under `product/script/`, the product's files) that builds the same plugin |
 | `dsp.preview` | action | `plugin` (id) or `script` (name); `patch?` (merge); `signal?` (an effect's `sine`, the default, `sweep`, `impulse`, `noise`, `silence`; an instrument's `notes`, the default, `note`, `silence`); `level_db` (-12); `frequency_hz` (1000); `seconds` (1; 0 plays nothing); `scale` (1, 0.5 to 3); `pointer?` (up to 64 steps before the picture, in its pixels at scale 1: `{action, x, y}` with `action` `move`, `press`, `release`, `click`, `double_click`, `drag` (with `to_x`, `to_y`) or `wheel` (`steps`, 1; up positive), and `shift`, `ctrl`, `alt`) | `path` (a PNG of the editor, drawn without a window after the signal played through a fresh instance and the pointer acted, in the renders folder), `width` and `height` in pixels, `plugin`, `edits` (a merge patch: what the pointer changed), `problems` (the editor code's loop budget or out-of-range index, with the line), `log`. Needs the plugin's `com.suppleaudio.editor-picture/1` (`docs/specs/editor-picture-extension.md`), which the script player has |
-| `dsp.test` | action | `plugin` (id) or `script` (name); `patch?` (merge); `signals?` (an effect's `sine`, `sweep`, `impulse`, `noise`, `silence`, all by default; an instrument's `notes`, `note`, `silence`, all by default); `level_db` (each audio signal's peak, -12); `frequency_hz` (1000); `seconds` (1); `save` | per signal: `peak_dbfs`, `rms_dbfs`, `dc`, `clipped`, `denormals`, sine `gain_db` and `thd_percent`, impulse `response_db` at octave centres, note `pitch_hz`, an instrument's `release_ms`, `path` when saved; `latency`, `cpu_percent` (measured), `problems` (prose), `log` |
+| `dsp.test` | action | `plugin` (id) or `script` (name); `patch?` (merge); `signals?` (an effect's `sine`, `sweep`, `impulse`, `noise`, `silence`, all by default; an instrument's `notes`, `note`, `silence`, all by default); `level_db` (each audio signal's peak, -12); `frequency_hz` (1000); `seconds` (1); `save`; `automation?`, `sidechain?`, `notes?` (below) | per signal: `peak_dbfs`, `rms_dbfs`, `dc`, `clipped`, `denormals`, sine `gain_db` and `thd_percent`, impulse `response_db` at octave centres, note `pitch_hz`, an instrument's `release_ms`, `path` when saved, optional `automation` and `sidechain` measurements (below); `latency`, `cpu_percent` (measured), `problems` (prose), `log` |
+
+### `dsp.test`: changes during a render
+
+All previous arguments/defaults remain. These optional inputs apply to each
+selected signal, including silence, with a fresh instance and the initial
+patch for every primary/reference pass:
+
+- `automation`: 1..1024 `{param, at_s, value}` entries, all fields required.
+  `param` is a semantic patch key; `value` uses physical-unit numbers, enum
+  keys, booleans or unit-bearing text as accepted by core-params. Resolve
+  through `fromDescription`/`fromJson`/`toClap` before audio starts. Require
+  the semantic extension, an active, writable, automatable parameter and a
+  matching live parameter ID/flags. Values are validated without clamping.
+  `at_s >= 0` must round to a sample before musical end. Discrete events
+  hold their value until the next point; no ramp is inferred. Same-time
+  parameter changes retain caller order.
+- `sidechain`: `{signal?, level_db?, frequency_hz?, start_s?, length_s?}`.
+  `signal` is sine (default), sweep, impulse, noise or silence. Level is
+  -60..0 dB (default -6), frequency 10..20000 Hz (default 100). Start
+  defaults to `0.25 * seconds`, length to `0.5 * seconds`, independently.
+  A nonempty key span must fit in the musical render. The generated stereo
+  signal starts at its own phase origin; a sweep spans its own length;
+  outside the span the connected key is silent. Reject a plugin without
+  a key input.
+- `notes`: instrument-only, 1..1024 `{key, velocity?, start_s, length_s}`.
+  Key is integer 0..127; velocity is (0,1], default 0.8. Notes must start
+  inside the musical render and end at or before it; reject zero samples
+  after rounding. Overlapping notes have distinct note IDs, on port and
+  channel 0. This replaces the `notes` stimulus; defaults become `notes`
+  and `silence`. An explicit `note` (the A4 check), or selecting only
+  silence with custom notes, is an error. At equal sample times, parameter
+  events precede note-offs, which precede note-ons.
+
+Times convert once using `llround(time * sample_rate)`. Span ends use
+`llround((start_s + length_s) * sample_rate)`. Errors carry code, message,
+JSON Pointer and corrective hint: `dsp.automation`, `dsp.sidechain`,
+`dsp.notes`, or the core-params value error rebased to `/automation/i/value`.
+The command boundary prefixes runtime paths with `/args`; schema errors
+appear in its `/args/...` details.
+
+Per-signal additions:
+
+- `automation: {max_step, baseline_max_step, excess_step}`: the largest
+  absolute difference between adjacent samples over all output channels,
+  including block boundaries, in linear full-scale amplitude. Baseline is
+  the same stimulus/patch/notes/key without automation; excess is
+  `max(0, max_step - baseline_max_step)`. A step above both four times
+  baseline and 0.05 produces a prose warning about possible clicks/zipper
+  noise and parameter smoothing. This is a cheap screening heuristic:
+  intended timbre/level changes can increase it; small values do not prove
+  inaudibility. Existing clipping/DC/nonfinite/loop/tail diagnostics also
+  run on reference outputs, labeled by pass.
+- `sidechain: {rms_dbfs, reference_rms_dbfs, gain_change_db}`: compare
+  output RMS in the middle half of the active key span against the same
+  samples with a connected silent key, keeping automation and notes.
+  Fractional sample boundaries round outward (floor at the beginning,
+  ceiling at the end); outputs are latency-compensated. RMS uses the
+  existing finite -200 dBFS floor. Gain change is active minus reference
+  in dB, negative for ducking; it is null if either output is below
+  -120 dBFS. This measures that window, not guaranteed steady state for
+  slow attack. No required reduction threshold is imposed on keyed effects.
+
+Custom `release_ms` starts at the sequence's actual last note-off, without
+an A4 pitch/tuning measurement. Static THD and impulse response are omitted
+with automation or a non-silent key; sine `gain_db` then describes the
+changing render, not static gain. Only primary output is saved. There are
+two passes with automation or a key, at most three with both; `cpu_percent`
+includes the render time and audio duration of all passes.
 
 Plus `batch` and `registry.*` from the bus. Every command has at least one
 example running against fixtures (`empty`, `synth_loaded` with the probe
@@ -346,6 +428,16 @@ render again → compare → save preset. Its transcript is committed as `docs/d
 (the `mcp.demo` test, with Orrery). A second test runs the same flow with an
 invalid patch and an invalid notation string and asserts the errors carry
 paths, locations and hints.
+
+The slow `plugin.export.source` test builds fresh source exports for every
+script in `plugins/suite/examples`, plus the library tilt regression with
+its non-default patch. Each export passes the semantic conformance tool,
+then renders the same explicit signal list as the player. The library tilt
+also retains the full exported template test suite.
+The test checks signal names/counts, WAV frame counts and byte equality.
+Sampler/reverb receive generated audio files with audible patches; the
+compressor receives a timed key, and instruments receive custom notes.
+Factory-patch export verification is reserved for the subsequent patch work.
 
 ## Implementation notes — `host/clap-host` (2026-09-26)
 

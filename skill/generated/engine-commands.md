@@ -1522,7 +1522,7 @@ Result:
 
 Play test signals or notes through a plugin and measure it: levels, THD, pitch.
 
-Give plugin (an id: a script's, or any effect's or instrument's) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays each signal. An effect: sine (frequency_hz; gain_db and thd_percent), sweep (20 Hz to 20 kHz), impulse (response_db at octave centres), pink noise and silence, each peaking at level_db. An instrument, at velocity 0.8: notes (a note, then a chord), note (A4; pitch_hz, the pitch heard), and silence (no notes); release_ms is how long the sound lasts after the last release. Each reports peak and RMS in dBFS, DC, samples beyond 0 dBFS and denormals; problems says in words what looks wrong (clipping, DC, sound from silence, no output, a note out of tune, sound that never dies away, non-finite samples the framework silenced, a script stopped by its loop budget or indexing outside an array). cpu_percent is measured, so it varies between runs. save: true keeps each output as a WAV (path) for analyze and compare.
+Give plugin (an id: a script's, or any effect's or instrument's) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays each signal. An effect: sine (frequency_hz; gain_db and thd_percent), sweep (20 Hz to 20 kHz), impulse (response_db at octave centres), pink noise and silence, each peaking at level_db. An instrument, at velocity 0.8: notes (a note, then a chord), note (A4; pitch_hz, the pitch heard), and silence (no notes); release_ms is how long the sound lasts after the last release. Each reports peak and RMS in dBFS, DC, samples beyond 0 dBFS and denormals; problems says in words what looks wrong (clipping, DC, sound from silence, no output, a note out of tune, sound that never dies away, non-finite samples the framework silenced, a script stopped by its loop budget or indexing outside an array). cpu_percent is measured, so it varies between runs. save: true keeps each output as a WAV (path) for analyze and compare. automation is a list of {param, at_s, value}: semantic patch keys and physical values, as discrete sample-accurate changes applied to every signal (no implicit ramps). automation.max_step is the largest adjacent-sample change in full-scale amplitude; baseline_max_step uses the same render without automation; excess_step is their positive difference. A step above both four times baseline and 0.05 suggests clicks or zipper noise: a screening heuristic, not proof of an artifact or of inaudibility. sidechain supplies a timed key; its middle half is measured against a connected silent key with identical automation: gain_change_db is negative for ducking, null if either output is below -120 dBFS. Slow attack may not settle in that window. Each pass has a fresh instance and initial patch. THD and impulse response are omitted during automation or a non-silent key; gain_db then describes the changing render, not static gain. notes supplies an instrument's sequence ({key, velocity, start_s, length_s}), replacing the notes signal; defaults become notes and silence. Do not combine it with the A4 note signal or select only silence. release_ms starts at its last note-off. Times round to samples at the render rate; spans must fit within seconds.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -1533,7 +1533,10 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `plugin` | string |  |  |  |  |
 | `script` | string |  |  |  |  |
 | `patch` | value |  |  |  |  |
-| `signals` | array |  |  |  | default: an effect's five, an instrument's three |
+| `signals` | array |  |  |  | default: effects five; instruments three, or notes and silence with custom notes |
+| `automation` | array |  |  |  | discrete physical-value changes on every signal |
+| `sidechain` | object |  |  |  | timed generated key input |
+| `notes` | array |  |  |  | instrument sequence replacing the notes stimulus |
 | `level_db` | value | dB | -60.0..0.0 | -12.0 | Quantity strings are range-checked by the server. |
 | `frequency_hz` | value | Hz | 10.0..20000.0 | 1000.0 | Quantity strings are range-checked by the server. |
 | `seconds` | number |  | 0.1..10.0 | 1.0 |  |
@@ -1613,6 +1616,40 @@ Kind: `action`. Exposure: `mcp-tool`.
           },
           "path": {
             "type": "string"
+          },
+          "automation": {
+            "type": "object",
+            "title": "dsp_automation_result",
+            "properties": {
+              "max_step": {
+                "type": "number"
+              },
+              "baseline_max_step": {
+                "type": "number"
+              },
+              "excess_step": {
+                "type": "number"
+              }
+            },
+            "required": ["max_step", "baseline_max_step", "excess_step"],
+            "additionalProperties": false
+          },
+          "sidechain": {
+            "type": "object",
+            "title": "dsp_sidechain_result",
+            "properties": {
+              "rms_dbfs": {
+                "type": "number"
+              },
+              "reference_rms_dbfs": {
+                "type": "number"
+              },
+              "gain_change_db": {
+                "type": ["number", "null"]
+              }
+            },
+            "required": ["rms_dbfs", "reference_rms_dbfs", "gain_change_db"],
+            "additionalProperties": false
           }
         },
         "required": ["signal", "peak_dbfs", "rms_dbfs", "dc", "clipped", "denormals"],
@@ -1648,6 +1685,9 @@ Kind: `action`. Exposure: `mcp-tool`.
 - `dsp.not_listed`: the script compiles but no plugin has its id Hint: put the script player on the plugin path
 - `dsp.not_effect`: the plugin takes no audio and no notes Hint: test an effect or an instrument
 - `dsp.signal`: a signal the plugin cannot play Hint: an effect plays audio signals, an instrument notes
+- `dsp.automation`: unavailable parameter or automation time outside the render Hint: choose a writable semantic parameter and a time before seconds
+- `dsp.sidechain`: no key input or invalid key timing Hint: choose a plugin with a key and a nonempty span within seconds
+- `dsp.notes`: invalid custom sequence or signal selection Hint: use an instrument, notes or notes and silence, and spans within seconds
 
 ### Examples
 
@@ -1657,6 +1697,105 @@ Kind: `action`. Exposure: `mcp-tool`.
 {
   "plugin": "com.suppleaudio.test.gain",
   "signals": ["sine"]
+}
+
+```
+
+Result:
+
+```json
+{
+  "plugin": "<any>",
+  "latency": "<any>",
+  "signals": "<any>",
+  "cpu_percent": "<any>",
+  "problems": "<any>",
+  "log": "<any>"
+}
+
+```
+
+**Automate an effect in dB** (`empty`)
+
+```json
+{
+  "plugin": "com.suppleaudio.test.gain",
+  "signals": ["sine"],
+  "automation": [
+    {
+      "param": "gain",
+      "at_s": 0.253,
+      "value": -12
+    },
+    {
+      "param": "gain",
+      "at_s": 0.753,
+      "value": 0
+    }
+  ]
+}
+
+```
+
+Result:
+
+```json
+{
+  "plugin": "<any>",
+  "latency": "<any>",
+  "signals": "<any>",
+  "cpu_percent": "<any>",
+  "problems": "<any>",
+  "log": "<any>"
+}
+
+```
+
+**Measure a timed sidechain** (`empty`)
+
+```json
+{
+  "plugin": "com.suppleaudio.test.keymix",
+  "signals": ["sine"],
+  "sidechain": {
+    "level_db": -6
+  }
+}
+
+```
+
+Result:
+
+```json
+{
+  "plugin": "<any>",
+  "latency": "<any>",
+  "signals": "<any>",
+  "cpu_percent": "<any>",
+  "problems": "<any>",
+  "log": "<any>"
+}
+
+```
+
+**Play a custom note sequence** (`empty`)
+
+```json
+{
+  "plugin": "com.suppleaudio.test.sine",
+  "notes": [
+    {
+      "key": 60,
+      "start_s": 0.013,
+      "length_s": 0.2
+    },
+    {
+      "key": 67,
+      "velocity": 0.6,
+      "start_s": 0.303,
+      "length_s": 0.4
+    }
+  ]
 }
 
 ```

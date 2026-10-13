@@ -102,6 +102,71 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
 `dsp_get {name}` returns one's source. The DAW and the sandbox share the
 library and have the same seven commands.
 
+## Test what changes over time
+
+A static patch cannot show whether moving a knob clicks or becomes unstable.
+Use `automation` to send discrete changes during every selected signal, in
+physical units and at sample offsets rounded from seconds:
+
+```json
+{"script":"tilt_eq","signals":["sine"],"automation":[
+  {"param":"output","at_s":0.253,"value":-12},
+  {"param":"output","at_s":0.753,"value":0}
+]}
+```
+
+Use the plugin's patch keys and ranges; enum keys and booleans work too.
+There is no automatic ramp: supply intermediate points for gradual motion
+or a dense staircase to probe zipper noise (up to 1024 points). Each signal
+gets a fresh instance/initial patch. `automation.max_step` is the largest
+adjacent-sample change, `baseline_max_step` the same render without changes,
+`excess_step` their positive difference, all in full-scale amplitude. A step
+over 0.05 and four times baseline suggests checking `.smoothed()` and
+`.at(i)`. Intended changes can also increase it, and a small step does not
+prove inaudibility. Read `problems` for clipping, nonfinite output and loops
+from both passes, then save and inspect/listen to the primary audio.
+
+For a sidechain compressor, send a key while the main sine plays:
+
+```json
+{"script":"compressor","signals":["sine"],"level_db":-30,
+ "sidechain":{"signal":"sine","level_db":-6,"frequency_hz":100,
+              "start_s":0.25,"length_s":0.5}}
+```
+
+Only a plugin with a key input accepts it. The key is connected and silent
+outside its span. All those key fields are optional: the example's values
+are defaults for `seconds: 1`; default start/length scale with `seconds`.
+`sidechain.gain_change_db` compares output in the middle half of the span
+against a fresh render with a connected silent key and the same automation:
+a negative value measures ducking. `rms_dbfs`/`reference_rms_dbfs` give the
+levels. Gain change is null if either output is below -120 dBFS (e.g. main
+silence); slow attack may need a longer key/longer `seconds` to settle.
+Repeat with `sidechain: {signal: "silence"}` as a control.
+
+For an instrument, use a note sequence to check velocity, overlapping
+notes, repeated keys and release:
+
+```json
+{"script":"synth","notes":[
+  {"key":60,"velocity":0.8,"start_s":0.013,"length_s":0.2},
+  {"key":67,"velocity":0.6,"start_s":0.303,"length_s":0.4}
+]}
+```
+
+Keys are 0..127, velocity (0,1] (default 0.8); spans must fit within
+`seconds` (the final release may be exactly at its end). Distinct note IDs
+let repeated keys overlap. With custom notes the default signals are
+`notes` and `silence`; don't select the A4 `note` signal or only silence.
+`release_ms` starts at the actual final note-off, and no A4 tuning check is
+reported for a custom sequence. Without `notes`, the usual A4 check remains.
+At the same sample, parameter changes precede note-offs, then note-ons.
+
+Automation and a key may be combined. THD/impulse response are omitted with
+automation or a non-silent key because they no longer describe static
+behavior; sine gain is measured across the changing render. Only primary
+outputs are saved; `cpu_percent` includes reference renders too.
+
 ## Follow the stock plugins
 
 Scripted plugins are controlled by agents through their patches, so they

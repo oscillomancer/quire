@@ -217,20 +217,22 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
   script when its file changes. `dsp.write`, `dsp.check`, `dsp.get` and
   `dsp.list` write and compile scripts (the app's library is
   `<data>/<slug>/scripts`, shared with the sandbox), `dsp.test` measures
-  one with standard signals, and a script that compiles is loaded and set
-  like a stock plugin (`skill/guides/dsp-workflow.md`). `fx.describe` and
-  the sandbox's `plugin.describe` report a live instance's loop-budget stops,
-  invalid indices and failed reloads as structured problems, also through
-  isolation; unavailable status is explicit. Scripts declare read-only factory
-  patches with `factoryPatches(Patches&)`, checked in physical units, listed
-  and applied through `fx.patch.list` / `fx.patch.set {name}` or sandbox
-  `preset.list/load {source: "factory"}`. The same patches populate the
-  native preset bar and discovery in player and source exports. `dsp.export` makes
-  a script a CLAP plugin for any host (a copy of the player with the script
-  appended, which offers that one plugin), or a C++ project of the plugin
-  template that builds the same plugin, bit for bit, with the script
-  compiled as C++. Effects and instruments (voices the runtime manages,
-  CLAP note expressions and per-note modulation; no note effects); samples and impulse responses
+  one with standard signals (and, when asked, parameter automation, a timed
+  sidechain key or a note sequence), and a script that compiles is loaded
+  and set like a stock plugin (`skill/guides/dsp-workflow.md`).
+  `fx.describe` and the sandbox's `plugin.describe` report a live
+  instance's loop-budget stops, out-of-range indices and failed reloads as
+  structured problems. Scripts declare read-only factory patches
+  (`factoryPatches(Patches&)`), listed and applied with `fx.patch.list` and
+  `fx.patch.set {name}` or the sandbox's `preset.list/load {source:
+  "factory"}`, and offered by exports' preset bar and hosts' preset
+  browsers. `dsp.export` makes a script a CLAP plugin for any host (a copy
+  of the player with the script appended, which offers that one plugin), or
+  a C++ project of the plugin template that builds the same plugin, bit for
+  bit, with the script compiled as C++ (every example's export is checked
+  against the player and for semantic conformance). Effects and instruments
+  (voices the runtime manages, CLAP note expressions and per-note
+  modulation; no note effects); samples and impulse responses
   as files a patch names (loaded whole, no streaming from disk); spectral
   effects (an STFT), oversampling and sidechains. A script may draw its
   own editor (`editor()` for controls, `draw()` on an HTML-canvas-style

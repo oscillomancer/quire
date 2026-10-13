@@ -252,33 +252,6 @@ tool runs against scripts in the player and against both exports.
 
 ### Implementation notes (2026-10-12)
 
-- Factory patches, 2026-10-13: a declaration-only
-  `void factoryPatches(Patches& p)` hook declares `p.add("Name").set(param, value)`
-  chains in the script. Values are physical patch values, percent as 30;
-  keys come from Param members (including withKey). The compiler checks
-  names, writable members, constants, ranges and duplicate assignments.
-  JIT and NativeCode descriptions contain the same factory-patch model;
-  the suite derives canonical JSON and the framework's runtime preset
-  table from it. `get_factory_patches` is an optional size-checked append
-  to semantic-params `/1`; bridge protocol 13 forwards it. `fx.patch.list`
-  and `fx.patch.set {name}` expose it in the engine; sandbox `preset.list`
-  and `preset.load` select it with `source: "factory"`. Patch-table edits
-  redefine the plugin so the framework's immutable presets stay current.
-  Player exports carry the script's declarations; native source exports
-  collect them from the verbatim script without a second generated table.
-  Runtime framework presets already support this; the template is unchanged.
-
-- Live problems, 2026-10-13: the suite implements the independent generic
-  `com.suppleaudio.plugin-status/1` extension (spec:
-  `docs/specs/plugin-status-extension.md`). `fx.describe` and sandbox
-  `plugin.describe` expose current runtime, editor and failed-reload
-  problems with codes, scopes, source lines where known, corrective hints
-  and whether they silence audio. Engine inspection queries the live
-  instance, and bridge protocol 12 forwards the same report. Runtime
-  observations clear when replacement code is adopted, on reset or on
-  activation; a faulty old generation is not crossfaded into its replacement.
-  Failed saves keep the previous code loaded until a good revision is accepted.
-
 Where the work stands, and where it departs from the text above:
 
 - Framework items 1 to 3 of §6 are in framework 1.16.0 (Definitions and
@@ -445,6 +418,38 @@ Where the work stands, and where it departs from the text above:
 - The compiler's API is C++ (`supple/script_compiler.hpp`,
   `supple/script_program.hpp`); the C ABI of §2 is not written, since
   nothing loads the compiler across a library boundary yet.
+- 2026-10-13: agents see what went wrong in a live script. The suite
+  offers `com.suppleaudio.plugin-status/1`
+  (`docs/specs/plugin-status-extension.md`), a generic extension any
+  plugin may implement: current problems, each with a code, a scope, the
+  source line where known, a hint, and whether it silences the plugin.
+  `fx.describe` and the sandbox's `plugin.describe` read it from the live
+  instance (bridge protocol 12 forwards it): loop-budget stops,
+  out-of-range indices, editor-code problems, and saves that failed to
+  reload while the previous version plays on. Audio observations clear
+  when new code is adopted, on reset and on activation.
+- 2026-10-13: factory patches. A script declares them in `void
+  factoryPatches(Patches& p)` (`p.add("Warm").set(tilt, -3)`), in patch
+  values (a percent as 30), which the compiler checks against each Param.
+  The JIT and the script compiled as C++ give the same table, from which
+  the suite makes canonical patches and the framework's run-time presets
+  (its preset bar and CLAP preset discovery; the framework is unchanged).
+  `get_factory_patches` is an optional, size-checked addition to
+  semantic-params `/1`, forwarded by bridge protocol 13. The engine lists
+  and applies them with `fx.patch.list` and `fx.patch.set {name}`, the
+  sandbox with `preset.list/load {source: "factory"}`. A change to a
+  script's patches redefines the plugin.
+- 2026-10-13: `dsp.test` drives what changes over time: parameter
+  automation (sample-accurate, in physical units), a timed sidechain key
+  (the sandbox renderer's `RenderRequest::sidechain`) and an instrument's
+  note sequence. It compares the largest sample-to-sample step with a
+  render without the automation (a screen for clicks and zipper noise),
+  and the output while the key plays with a silent key (ducking).
+- 2026-10-13: `plugin.export.source` (slow) exports and builds every
+  example, runs the semantic conformance tool on each, and compares its
+  signals, lengths and bytes with the player's (the sampler and reverb
+  with generated files, the compressor with a key, instruments with a
+  note sequence); the library's tilt also runs its export's own tests.
 
 ## Consequences
 

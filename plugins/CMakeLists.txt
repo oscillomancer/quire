@@ -202,16 +202,20 @@ if(SUPPLE_BUILD_PLUGINS)
     add_test(NAME plugin.player.examples.reset COMMAND clap-reset-check "${player_clap}")
     set_tests_properties(plugin.player.examples.reset PROPERTIES LABELS "rt;plugin-reset" TIMEOUT 300
       ENVIRONMENT "SUPPLE_SCRIPT_LIBRARY=${example_library}")
-    # A source export of the player's tilt script, built and tested as a
-    # user would, then played against the player (suite/tests).
+    # Fresh source exports of every example plus the non-default library
+    # tilt regression: own tests, semantic conformance and player audio parity.
     add_test(NAME plugin.export.source
       COMMAND ${CMAKE_COMMAND} -DSANDBOX=$<TARGET_FILE:${PRODUCT_SLUG}-sandbox>
               -DPLAYER=${player_clap} -DKIT=${CMAKE_BINARY_DIR}/plugins/script-export
               -DSCRIPT=${player_scripts}/library/tilt/tilt.cpp
+              -DEXAMPLES=${CMAKE_CURRENT_SOURCE_DIR}/suite/examples
+              -DGAIN_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/suite/examples/gain.cpp
+              -DCONFORMANCE=$<TARGET_FILE:semantic-conformance>
               "-DPATCH={\"tilt\": 4.5, \"pivot\": 700, \"output\": -2}"
               -DWORK=${CMAKE_BINARY_DIR}/plugins/export-test -DTHIRD_PARTY=${CMAKE_SOURCE_DIR}/third_party
               -DCC=${CMAKE_C_COMPILER} -DCXX=${CMAKE_CXX_COMPILER} -DBUILD_TYPE=${CMAKE_BUILD_TYPE}
               -P ${CMAKE_CURRENT_SOURCE_DIR}/suite/tests/source_export.cmake)
-    set_tests_properties(plugin.export.source PROPERTIES LABELS slow TIMEOUT 1800)
+    # Nested builds use three jobs too; do not overlap them with other tests.
+    set_tests_properties(plugin.export.source PROPERTIES LABELS slow TIMEOUT 1800 RUN_SERIAL TRUE)
   endif()
 endif()
