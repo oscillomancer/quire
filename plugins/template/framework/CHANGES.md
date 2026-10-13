@@ -4,6 +4,15 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.16.3
+
+What a product must do: nothing.
+
+- **No unused timer constants.** A build without the editor
+  (`SUPPLE_BUILD_GUI` off), or of a product without a layer, no longer
+  warns about the editor's and the layer's timer intervals, which only
+  those use.
+
 ## 1.16.2
 
 What a product must do: nothing.

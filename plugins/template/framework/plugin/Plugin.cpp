@@ -65,8 +65,12 @@ namespace {
 
 using Processor = product::Processor;
 
-constexpr uint32_t kTimerMs = 16;       // ~60 Hz editor ticks
+#if SUPPLE_WITH_GUI
+constexpr uint32_t kTimerMs = 16;  // ~60 Hz editor ticks
+#endif
+#if SUPPLE_PRODUCT_LAYER
 constexpr uint32_t kLayerTimerMs = 33;  // ~30 Hz layer ticks
+#endif
 
 #ifdef NDEBUG
 constexpr bool kDebugBuild = false;
