@@ -1,9 +1,9 @@
-# The suite in a player build: the script runtime and compiler (with MIR),
-# the semantic documents and layer, and the glue that runs scripts. The
-# suite is the folder above this one (Quire's plugins/suite); SUPPLE_MIR_DIR
-# is where MIR's sources are (Quire's third_party/mir-1.0.0).
+# The suite in a player build (the folder above this one, Quire's
+# plugins/suite: suite.cmake), and the script compiler with MIR, whose
+# sources are in SUPPLE_MIR_DIR (Quire's third_party/mir-1.0.0).
 
 get_filename_component(SUPPLE_SUITE "${SUPPLE_PRODUCT}/.." ABSOLUTE)
+include(${SUPPLE_SUITE}/suite.cmake)
 set(SUPPLE_MIR_DIR "${SUPPLE_SUITE}/../../third_party/mir-1.0.0" CACHE PATH "MIR 1.0.0's sources")
 
 add_library(suite-mir STATIC ${SUPPLE_MIR_DIR}/mir.c ${SUPPLE_MIR_DIR}/mir-gen.c)
@@ -17,8 +17,7 @@ if (SUPPLE_SANITIZE MATCHES "address")
     target_compile_options(suite-mir PRIVATE -fno-sanitize=alignment)
 endif()
 
-add_library(suite-script STATIC
-    ${SUPPLE_SUITE}/runtime/src/runtime.cpp
+add_library(suite-compiler STATIC
     ${SUPPLE_SUITE}/compiler/src/lexer.cpp
     ${SUPPLE_SUITE}/compiler/src/parser.cpp
     ${SUPPLE_SUITE}/compiler/src/builtins.cpp
@@ -26,21 +25,14 @@ add_library(suite-script STATIC
     ${SUPPLE_SUITE}/compiler/src/sema_expr.cpp
     ${SUPPLE_SUITE}/compiler/src/codegen.cpp
     ${SUPPLE_SUITE}/compiler/src/compiler.cpp)
-target_include_directories(suite-script PUBLIC ${SUPPLE_SUITE}/runtime/include ${SUPPLE_SUITE}/compiler/include
-                                        PRIVATE ${SUPPLE_SUITE}/compiler/src)
-target_include_directories(suite-script SYSTEM PRIVATE ${SUPPLE_FRAMEWORK})
-target_link_libraries(suite-script PRIVATE suite-mir)
-supple_defaults(suite-script)
+target_include_directories(suite-compiler PUBLIC ${SUPPLE_SUITE}/compiler/include
+                                          PRIVATE ${SUPPLE_SUITE}/compiler/src)
+target_include_directories(suite-compiler SYSTEM PRIVATE ${SUPPLE_FRAMEWORK})
+target_link_libraries(suite-compiler PUBLIC suite-runtime PRIVATE suite-mir)
+supple_defaults(suite-compiler)
 
-target_sources(product-core PRIVATE ${SUPPLE_SUITE}/semantic/src/json.cpp ${SUPPLE_SUITE}/semantic/src/semantics.cpp
-                                    ${SUPPLE_SUITE}/glue/src/script_definition.cpp)
-target_include_directories(product-core PUBLIC ${SUPPLE_SUITE}/semantic/include ${SUPPLE_SUITE}/glue/include)
 # dladdr (product/Catalog.cpp), in libdl before glibc 2.34.
-target_link_libraries(product-core PUBLIC suite-script ${CMAKE_DL_LIBS})
-if (TARGET product-impl)
-    target_sources(product-impl PRIVATE ${SUPPLE_SUITE}/semantic/src/semantic_layer.cpp
-                                        ${SUPPLE_SUITE}/glue/src/script_layer.cpp)
-endif()
+target_link_libraries(product-core PUBLIC suite-compiler ${CMAKE_DL_LIBS})
 
 if (SUPPLE_BUILD_TESTS AND COMMAND supple_test)
     # Scripts the tests play (SUPPLE_SCRIPT_LIBRARY): host-smoke and the
