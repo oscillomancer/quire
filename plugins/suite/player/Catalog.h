@@ -7,6 +7,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -26,8 +27,19 @@ std::vector<std::filesystem::path> libraryScripts(const std::filesystem::path& f
 bool readScript(const std::filesystem::path& file, std::string& text);
 // A script compiled into a plugin (the interpreter instead of machine code
 // when SUPPLE_SCRIPT_INTERPRET is set); null with the reasons in `problems`.
+// `file` is where it came from, which the layer follows; empty for an
+// embedded script.
 std::shared_ptr<const ScriptDefinition> compileScript(const std::filesystem::path& file,
                                                       const std::string& source,
                                                       std::string* problems);
+
+// The file of the module this code is in (the player's .clap), or empty.
+std::filesystem::path ownModule();
+// The script an export carries at the end of its module file
+// (supple/script_export.hpp), or nothing: a player, not an export.
+struct EmbeddedScript {
+    std::string name, source;
+};
+std::optional<EmbeddedScript> embeddedScript(const std::filesystem::path& module);
 
 }  // namespace supple::player

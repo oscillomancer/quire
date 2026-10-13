@@ -34,7 +34,8 @@ supple_defaults(suite-script)
 
 target_sources(product-core PRIVATE ${SUPPLE_SUITE}/semantic/src/json.cpp ${SUPPLE_SUITE}/semantic/src/semantics.cpp)
 target_include_directories(product-core PUBLIC ${SUPPLE_SUITE}/semantic/include)
-target_link_libraries(product-core PUBLIC suite-script)
+# dladdr (product/Catalog.cpp), in libdl before glibc 2.34.
+target_link_libraries(product-core PUBLIC suite-script ${CMAKE_DL_LIBS})
 if (TARGET product-impl)
     target_sources(product-impl PRIVATE ${SUPPLE_SUITE}/semantic/src/semantic_layer.cpp)
 endif()
