@@ -411,6 +411,16 @@ render again → compare → save preset. Its transcript is committed as `docs/d
 invalid patch and an invalid notation string and asserts the errors carry
 paths, locations and hints.
 
+The slow `plugin.export.source` test builds fresh source exports for every
+script in `plugins/suite/examples`, plus the library tilt regression with
+its non-default patch. Each export passes the semantic conformance tool,
+then renders the same explicit signal list as the player. The library tilt
+also retains the full exported template test suite.
+The test checks signal names/counts, WAV frame counts and byte equality.
+Sampler/reverb receive generated audio files with audible patches; the
+compressor receives a timed key, and instruments receive custom notes.
+Factory-patch export verification is reserved for the subsequent patch work.
+
 ## Implementation notes — `host/clap-host` (2026-09-26)
 
 - Output events go to a caller-preallocated `OutputEvents` sink (fixed

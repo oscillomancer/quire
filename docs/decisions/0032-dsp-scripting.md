@@ -431,6 +431,17 @@ Where the work stands, and where it departs from the text above:
   during automation/non-silent keys; contracts and limitations are in
   `docs/specs/sandbox.md`, usage in `skill/guides/dsp-workflow.md`.
 
+- 2026-10-13: `plugin.export.source` now checks every example plus the
+  existing non-default library tilt regression, with independent fresh
+  offline export builds. Each runs semantic conformance, then compares
+  the expected signal names/counts, WAV frame counts and rendered bytes
+  with the player; library tilt retains its full exported template test
+  suite. Sampler and reverb load generated files and must produce audible
+  output; the compressor must duck under a timed
+  key; instruments receive a custom note sequence. Nested builds/tests use
+  three jobs, and the matrix runs serially relative to other CTest tests.
+  A marked point in the test reserves factory-patch checks for that merge.
+
 ## Consequences
 
 Scripts reuse all of Quire's hosting and agent tooling with no special

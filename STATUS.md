@@ -225,7 +225,11 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
   a script a CLAP plugin for any host (a copy of the player with the script
   appended, which offers that one plugin), or a C++ project of the plugin
   template that builds the same plugin, bit for bit, with the script
-  compiled as C++. Effects and instruments (voices the runtime manages,
+  compiled as C++. Every example's source export is built independently,
+  checked for semantic conformance and compared with the player's signal
+  set, frame lengths and audio bytes, including file-backed sampler/reverb,
+  keyed compression and instrument note sequences. Effects and instruments
+  (voices the runtime manages,
   CLAP note expressions and per-note modulation; no note effects); samples and impulse responses
   as files a patch names (loaded whole, no streaming from disk); spectral
   effects (an STFT), oversampling and sidechains. A script may draw its
