@@ -355,7 +355,10 @@ class Dispatcher {
 };
 
 using FixtureFactory = std::function<std::unique_ptr<Host>(std::string_view)>;
-Status runExamples(const Registry&, const FixtureFactory&);
+// Whether this build can provide a fixture (one that needs plugin editors,
+// say); examples whose fixture it cannot are skipped. Every fixture when absent.
+using FixtureAvailable = std::function<bool(std::string_view)>;
+Status runExamples(const Registry&, const FixtureFactory&, const FixtureAvailable& = {});
 json::Value mcpToolList(const Registry&);
 std::string markdownReference(const Registry&);
 // LuaLS annotations of the generated bindings (ADR-0006): the `q` table a

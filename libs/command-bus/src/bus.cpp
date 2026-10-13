@@ -826,10 +826,12 @@ Result<json::Value> Dispatcher::batch(const json::Value& args, const Origin& ori
     });
 }
 
-Status runExamples(const Registry& registry, const FixtureFactory& factory) {
+Status runExamples(const Registry& registry, const FixtureFactory& factory,
+                   const FixtureAvailable& available) {
     for (auto* info : registry.all()) {
         if (info->exposure == Exposure::Internal) continue;
         for (const auto& example : info->examples) {
+            if (available && !available(example.fixture)) continue;
             auto host = factory(example.fixture);
             if (!host)
                 return Error("command.example", "unknown example fixture", "",

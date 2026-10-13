@@ -213,12 +213,12 @@ void registerDspPreview(cmd::Registry& registry) {
         c.examples = {{"See a script's editor", std::move(args),
                        detail::j(R"({"plugin":"com.example.gain","path":"<any>","width":"<any>",
                                      "height":"<any>","edits":{},"problems":[],"log":"<any>"})"),
-                       "dsp_player"},
+                       "dsp_player_editor"},
                       {"Drag a knob, then see the editor", std::move(drag),
                        detail::j(R"({"plugin":"com.example.gain","path":"<any>","width":"<any>",
                                      "height":"<any>","edits":{"params":{"gain":"<any>"}},"problems":[],
                                      "log":"<any>"})"),
-                       "dsp_player"}};
+                       "dsp_player_editor"}};
     }
     c.run = [](const PreviewArgs& a, Context& ctx) -> Result<PreviewResult> {
         Host& s = ctx.service<Host>();

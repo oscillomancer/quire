@@ -52,7 +52,8 @@ target_compile_definitions(engine-bench PRIVATE
 if(SUPPLE_BUILD_TESTS)
   target_sources(engine.tests PRIVATE tests/test_bench.cpp bench/session.cpp)
   target_include_directories(engine.tests PRIVATE bench)
-  target_compile_definitions(engine.tests PRIVATE BENCH_RECIPE="${CMAKE_CURRENT_SOURCE_DIR}/bench/session.json")
+  target_compile_definitions(engine.tests PRIVATE BENCH_RECIPE="${CMAKE_CURRENT_SOURCE_DIR}/bench/session.json"
+                             SUPPLE_EDITORS=$<BOOL:${SUPPLE_BUILD_GUI}>)
   add_test(NAME engine.tests.test_bench COMMAND engine.tests "-sf=*/test_bench.cpp")
   set_tests_properties(engine.tests.test_bench PROPERTIES LABELS "engine;rt" ENVIRONMENT
     "RTSAN_OPTIONS=halt_on_error=1;UBSAN_OPTIONS=print_stacktrace=1")

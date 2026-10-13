@@ -1457,7 +1457,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 
 ### Examples
 
-**See a script's editor** (`dsp_player`)
+**See a script's editor** (`dsp_player_editor`)
 
 ```json
 {
@@ -1481,7 +1481,7 @@ Result:
 
 ```
 
-**Drag a knob, then see the editor** (`dsp_player`)
+**Drag a knob, then see the editor** (`dsp_player_editor`)
 
 ```json
 {

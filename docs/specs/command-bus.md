@@ -219,10 +219,14 @@ sandbox to an NDJSON file per session; the engine into the session history).
 
 ### 1.8 Examples are tests
 
-`runExamples(const Registry&, FixtureFactory)` (test helper in the library)
-executes every example against `factory(example.fixture)` and checks the
-result matches (`"<any>"` wildcards allowed); every Example of every
-non-Internal command must pass. Each application registers its fixtures.
+`runExamples(const Registry&, FixtureFactory, FixtureAvailable = {})` (test
+helper in the library) executes every example against
+`factory(example.fixture)` and checks the result matches (`"<any>"`
+wildcards allowed); every Example of every non-Internal command must pass.
+Each application registers its fixtures. `available(fixture)`, when given,
+says whether this build can provide a fixture, and examples whose fixture it
+cannot are skipped: `dsp_player_editor`, a script player with its editor,
+in builds without a GUI (the sanitizer presets).
 
 ### 1.9 Error codes owned by the bus
 

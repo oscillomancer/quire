@@ -104,11 +104,14 @@ TEST_CASE("every sandbox command example runs against its fixture" * doctest::de
     cmd::Registry registry;
     registerCommands(registry);
     int n = 0;
-    // The dsp_player fixture's examples need the script player built.
-    auto st =
-        cmd::runExamples(registry, [&](std::string_view fixture) -> std::unique_ptr<cmd::Host> {
-            return makeHost(root.path / std::to_string(n++), {}, fixture == "dsp_player");
-        });
+    // The dsp_player fixtures' examples need the script player built, and
+    // dsp_player_editor's its editor, which builds without a GUI lack.
+    auto st = cmd::runExamples(
+        registry,
+        [&](std::string_view fixture) -> std::unique_ptr<cmd::Host> {
+            return makeHost(root.path / std::to_string(n++), {}, fixture.starts_with("dsp_player"));
+        },
+        [](std::string_view fixture) { return SUPPLE_EDITORS || fixture != "dsp_player_editor"; });
     INFO((st ? std::string() : st.error().toString()));
     CHECK(st.ok());
     CHECK(n >= 16);

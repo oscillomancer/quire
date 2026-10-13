@@ -2585,8 +2585,9 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
         return;
     }
     // gain/gain.cpp in the DSP script library; dsp_player: and the script
-    // player on the plugin path (the harness gives it).
-    if (fixture == "dsp_script" || fixture == "dsp_player") {
+    // player on the plugin path (the harness gives it); dsp_player_editor:
+    // a player built with its editor.
+    if (fixture == "dsp_script" || fixture == "dsp_player" || fixture == "dsp_player_editor") {
         const Status st =
             writeFileAtomic(scriptDir() / "gain" / "gain.cpp", R"(#include <supple/script.h>
 
