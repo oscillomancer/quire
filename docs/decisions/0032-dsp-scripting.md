@@ -1,7 +1,6 @@
 # ADR-0032: DSP scripting
 
-**Status:** Proposed, 2026-10-12 (awaiting the maintainer's review; work
-proceeds on it). Language reference: `skill/guides/dsp-language.md` (the
+**Status:** Accepted, 2026-10-13 (proposed 2026-10-12). Language reference: `skill/guides/dsp-language.md` (the
 canonical spec, shared by the skill and the MCP tools). Builds on ADR-0010,
 ADR-0011 and the plugin template's `framework/AGENTS.md`.
 
