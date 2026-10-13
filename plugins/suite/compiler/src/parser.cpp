@@ -10,19 +10,19 @@
 #include <string>
 
 #include "ast.h"
+#include "builtins.h"
 
 namespace supple::scriptc {
 
 namespace {
 
-// The runtime's types, as a script names them.
-const std::set<std::string>& runtimeTypes() {
-    static const std::set<std::string> names = {
-        "Array",      "Buffer",       "Param",     "ParamSpec", "Info",        "Block",
-        "Channel",    "InputChannel", "Transport", "Plugin",    "Effect",      "Instrument",
-        "NoteEffect", "Biquad",       "OnePole",   "DelayLine", "Random",      "Noise",
-        "Oscillator", "Adsr",         "Unit",      "Curve",     "Oversampler", "VoiceMode"};
-    return names;
+// The runtime's types, as a script names them: its classes and top-level
+// enums (from the registry), and the names it gives no class of its own.
+bool isRuntimeType(const std::string& name) {
+    static const std::set<std::string> others = {"Array",      "Buffer", "Effect", "Instrument",
+                                                 "NoteEffect", "Unit",   "Curve"};
+    const Builtins& b = Builtins::get();
+    return others.count(name) || b.cls(name) || b.enumNamed(name);
 }
 const std::set<std::string>& runtimeTemplates() {
     static const std::set<std::string> names = {"Array", "Buffer"};
@@ -261,7 +261,7 @@ class Parser {
         if (t.kind == Tok::Ident) {
             // std::array, std::vector and friends: a type, refused later.
             if (t.text == "std" && peek(at + 1).punct("::")) return isStdType(peek(at + 2).text);
-            if (types_.count(t.text) || runtimeTypes().count(t.text)) {
+            if (types_.count(t.text) || isRuntimeType(t.text)) {
                 // A qualified name that ends in a value is an expression:
                 // Oscillator::Shape::Saw.
                 size_t k = at;
@@ -276,7 +276,7 @@ class Parser {
         return false;
     }
     bool isTypeLike(const std::string& name) const {
-        return types_.count(name) || runtimeTypes().count(name) || runtimeNestedTypes().count(name);
+        return types_.count(name) || isRuntimeType(name) || runtimeNestedTypes().count(name);
     }
     // A template argument that is a type: a type keyword or a type's name.
     bool startsTypeArgument() const {
@@ -1168,7 +1168,7 @@ class Parser {
         const Token& first = peek(k);
         if (!(isTypeKeyword(first) || first.keyword("const") ||
               (first.kind == Tok::Ident &&
-               (types_.count(first.text) || runtimeTypes().count(first.text)))))
+               (types_.count(first.text) || isRuntimeType(first.text)))))
             return false;
         if (first.text == "auto") return false;
         // Walk the type: names, ::, template args, const, &, *.
