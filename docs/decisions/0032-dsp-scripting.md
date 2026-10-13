@@ -410,7 +410,8 @@ Where the work stands, and where it departs from the text above:
   `reset`; only there, which the compiler checks). The glue sends the
   edits through the framework's `Ui` on hidden controls, so they keep its
   gesture rules (framework 1.21.0 adds `onWheel`, `onPointerLeave` and
-  `Ui::wheelEdit`). The editor-picture extension's `draw` takes pointer
+  `Ui::wheelEdit`; in 1.22.0 one gesture holds every parameter a press
+  edits, where it held two). The editor-picture extension's `draw` takes pointer
   input before drawing (framework: `PointerInput`, applied by
   `drawOffscreen`), and `dsp.preview` takes clicks, drags and wheel turns
   and reports what they edited, so an agent checks a script's interactive

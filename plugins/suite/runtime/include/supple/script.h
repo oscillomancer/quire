@@ -406,9 +406,9 @@ class Param {
     // to a value in its units (kept in its range), to a position from 0 to
     // 1 (as normalized()), or back to its default. The host records it and
     // the audio code hears it; value() has it at once. One press's edits,
-    // through its drags to its release, are one gesture (two parameters to
-    // a gesture; more make more); a wheel's, one per burst. Edits on a Move
-    // or a Leave do nothing.
+    // through its drags to its release, are one gesture, however many
+    // parameters they change; a wheel's, one per burst. Edits on a Move or
+    // a Leave do nothing.
     void edit(double value) const;
     void editNormalized(double position) const;
     void reset() const;

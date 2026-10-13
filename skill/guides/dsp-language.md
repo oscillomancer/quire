@@ -365,8 +365,8 @@ changes as a user turning its knob would change it: `p.edit(value)` (in its
 units, kept in range), `p.editNormalized(position)` (0 to 1, as its knob
 travels; `p.normalized()` reads it) or `p.reset()` (its default). The host
 records it, the audio code hears it, and `value()` has it at once. A
-press's edits, through its drags to its release, are one gesture (two
-parameters to a gesture; more make more), a wheel's are one per burst, and
+press's edits, through its drags to its release, are one gesture, however
+many parameters they change; a wheel's are one per burst, and
 edits on a `Move` or a `Leave` do nothing. Only `pointer()` (and what it
 calls) may edit; `draw()` runs with no user acting. A hover or a drag
 state is a member of the editor's own:

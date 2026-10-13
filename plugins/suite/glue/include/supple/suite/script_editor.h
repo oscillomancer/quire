@@ -18,7 +18,7 @@
 //     move, the drags and release of a press it got, and the pointer
 //     leaving. Its edits (Param::edit) go to the host through Ui, on hidden
 //     controls, so they keep Ui's gesture rules: a press's are one gesture
-//     until its release (two parameters to a gesture), a wheel's a burst.
+//     until its release, a wheel's one per burst.
 //   - It repaints when a parameter moves, when new Shared values differ from
 //     those drawn, and as the controls ask; an idle editor draws nothing.
 //   - A hook that loops past its budget is stopped, and the editor shows

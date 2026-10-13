@@ -602,8 +602,8 @@ class ScriptEditor final : public gui::EditorBase {
     }
 
     // pointer() told what the pointer did, then its edits sent to the host
-    // through Ui: a press's as one gesture until the release (two
-    // parameters to a gesture), a wheel's as a burst.
+    // through Ui: a press's as one gesture until the release, a wheel's as
+    // one per burst.
     void point(S::PointerAction action, float x, float y, uint32_t mods, double wheel,
                bool doubleClick, bool editing = true) {
         using A = S::PointerAction;
@@ -621,19 +621,11 @@ class ScriptEditor final : public gui::EditorBase {
         stopped_ = !copy_->run(copy_->code().pointer(), &p);
         copy_->allowEdits(false);
         report("pointer()");
-        std::vector<Copy::Edited> edits = copy_->takeEdits();
-        std::sort(edits.begin(), edits.end(),
-                  [](const Copy::Edited& a, const Copy::Edited& b) { return a.index < b.index; });
-        for (size_t k = 0; k < edits.size(); ++k) {
-            const int c = hidden_[edits[k].index];
-            if (action == A::Wheel) {
-                ui().wheelEdit(c, edits[k].host);
-            } else if (k + 1 < edits.size()) {
-                ui().dragEdit(c, edits[k].host, hidden_[edits[k + 1].index], edits[k + 1].host);
-                ++k;
-            } else {
-                ui().dragEdit(c, edits[k].host);
-            }
+        for (const Copy::Edited& e : copy_->takeEdits()) {
+            if (action == A::Wheel)
+                ui().wheelEdit(hidden_[e.index], e.host);
+            else
+                ui().dragEdit(hidden_[e.index], e.host);
         }
         markDirty();
     }
