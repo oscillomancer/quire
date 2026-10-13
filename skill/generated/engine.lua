@@ -159,12 +159,14 @@ q = nil
 ---@field frequency_hz? number|string Quantity strings are range-checked by the server. (default: 1000.0)
 ---@field seconds? number (default: 1.0)
 ---@field scale? number (default: 1.0)
+---@field pointer? table[]
 
 ---@class Quire.dsp_preview_result
 ---@field plugin string
 ---@field path string the PNG
 ---@field width integer pixels
 ---@field height integer pixels
+---@field edits any what pointer changed, as a merge patch
 ---@field problems string[]
 ---@field log string[]
 

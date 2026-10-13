@@ -1,12 +1,15 @@
 // dsp.preview, a plugin's editor as a picture (ADR-0032 §8), shared by the
 // engine and the sandbox: a fresh instance, set by a patch, plays a test
 // signal (or notes) while its editor is watched, so meters and the
-// script's own displays show what played; then the editor is drawn without
-// a window (com.suppleaudio.editor-picture/1) and saved as a PNG for an agent
-// to look at. Renders as dsp.test does (TestTraits<Host>).
+// script's own displays show what played; then the editor takes the
+// pointer actions given (clicks, drags, turns of the wheel), is drawn
+// without a window (com.suppleaudio.editor-picture/1) and saved as a PNG for
+// an agent to look at, with what the actions edited as a merge patch.
+// Renders as dsp.test does (TestTraits<Host>).
 #pragma once
 
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -14,10 +17,22 @@
 
 #include "dsp_test.h"
 #include "png.h"
+#include "supple/json/merge.h"
 
 namespace supple::dsp_commands {
 
 namespace preview {
+
+// What the pointer does before the picture, in the editor's design units.
+enum class Action { Move, Press, Release, Click, DoubleClick, Drag, Wheel };
+struct PointerStep {
+    Action action = Action::Click;
+    double x = 0.0, y = 0.0;
+    std::optional<double> toX, toY;  // a drag's end
+    double steps = 1.0;              // the wheel's notches, positive up
+    bool shift = false, ctrl = false, alt = false;
+};
+inline constexpr std::size_t kMaxSteps = 64;
 
 struct PreviewArgs {
     std::optional<std::string> plugin, script;
@@ -27,14 +42,63 @@ struct PreviewArgs {
     double frequencyHz = 1000.0;
     double seconds = 1.0;
     double scale = 1.0;
+    std::optional<std::vector<PointerStep>> pointer;
 };
 struct PreviewResult {
     std::string plugin;
     std::string path;
     std::int64_t width = 0, height = 0;
+    json::Value edits = json::Value::object();
     std::vector<std::string> problems;
     std::vector<std::string> log;
 };
+
+// The steps as a mouse would make them: a click is a move there, a press
+// and a release; a drag, a press, moves in eight steps, and a release.
+inline std::vector<clap_supple_pointer_input_t> pointerInput(
+    const std::vector<PointerStep>& steps) {
+    std::vector<clap_supple_pointer_input_t> out;
+    for (const PointerStep& s : steps) {
+        const std::uint32_t keys = (s.shift ? CLAP_SUPPLE_POINTER_SHIFT : 0u) |
+                                   (s.ctrl ? CLAP_SUPPLE_POINTER_CTRL : 0u) |
+                                   (s.alt ? CLAP_SUPPLE_POINTER_ALT : 0u);
+        auto add = [&](std::uint32_t kind, double x, double y, std::uint32_t more = 0,
+                       double wheel = 0.0) { out.push_back({kind, keys | more, x, y, wheel}); };
+        add(CLAP_SUPPLE_POINTER_MOVE, s.x, s.y);
+        switch (s.action) {
+            case Action::Move:
+                break;
+            case Action::Press:
+                add(CLAP_SUPPLE_POINTER_PRESS, s.x, s.y);
+                break;
+            case Action::Release:
+                add(CLAP_SUPPLE_POINTER_RELEASE, s.x, s.y);
+                break;
+            case Action::Click:
+            case Action::DoubleClick:
+                add(CLAP_SUPPLE_POINTER_PRESS, s.x, s.y);
+                add(CLAP_SUPPLE_POINTER_RELEASE, s.x, s.y);
+                if (s.action == Action::DoubleClick) {
+                    add(CLAP_SUPPLE_POINTER_PRESS, s.x, s.y, CLAP_SUPPLE_POINTER_DOUBLE_CLICK);
+                    add(CLAP_SUPPLE_POINTER_RELEASE, s.x, s.y);
+                }
+                break;
+            case Action::Drag: {
+                const double toX = s.toX.value_or(s.x), toY = s.toY.value_or(s.y);
+                add(CLAP_SUPPLE_POINTER_PRESS, s.x, s.y);
+                for (int k = 1; k <= 8; ++k)
+                    add(CLAP_SUPPLE_POINTER_MOVE, s.x + (toX - s.x) * k / 8.0,
+                        s.y + (toY - s.y) * k / 8.0);
+                add(CLAP_SUPPLE_POINTER_RELEASE, toX, toY);
+                break;
+            }
+            case Action::Wheel:
+                add(CLAP_SUPPLE_POINTER_WHEEL, s.x, s.y, 0, s.steps);
+                break;
+        }
+    }
+    return out;
+}
 
 }  // namespace preview
 
@@ -58,9 +122,44 @@ void registerDspPreview(cmd::Registry& registry) {
         "script's draw() show what played. Then the editor is drawn without a window, scale "
         "times its design size, and saved as a PNG (path; width and height in pixels): read the "
         "file to see it. A script with neither editor() nor draw() shows the automatic editor. "
+        "pointer, if given, acts on the editor first, in its design units (the picture's pixels "
+        "at scale 1): move (a hover; a drag after a press), press, release, click, double_click, "
+        "drag (from x, y to to_x, to_y) and wheel (steps notches, up positive), with shift, ctrl "
+        "or alt held; edits is a merge patch of what they changed, as a user's edits would. "
         "problems says what went wrong in the editor's code (a loop stopped by its budget, an "
         "index out of range), with the line.";
     c.tags = {"dsp", "editor"};
+    const auto place = [] {
+        return schema::number()
+            .range(-1000, 5000)
+            .doc(
+                "design units: the picture's pixels at "
+                "scale 1");
+    };
+    auto step =
+        schema::object<PointerStep>("dsp_pointer_step")
+            .field("action", &PointerStep::action,
+                   schema::enumeration<Action>({{Action::Move, "move"},
+                                                {Action::Press, "press"},
+                                                {Action::Release, "release"},
+                                                {Action::Click, "click"},
+                                                {Action::DoubleClick, "double_click"},
+                                                {Action::Drag, "drag"},
+                                                {Action::Wheel, "wheel"}}))
+            .field("x", &PointerStep::x, place())
+            .field("y", &PointerStep::y, place())
+            .field("to_x", &PointerStep::toX, place().doc("drag: where it ends"))
+            .field("to_y", &PointerStep::toY, place().doc("drag: where it ends"))
+            .field("steps", &PointerStep::steps,
+                   schema::number().range(-20, 20).doc("wheel: notches turned, up positive"))
+            .defaultValue(1.0)
+            .field("shift", &PointerStep::shift, schema::boolean())
+            .defaultValue(false)
+            .field("ctrl", &PointerStep::ctrl, schema::boolean())
+            .defaultValue(false)
+            .field("alt", &PointerStep::alt, schema::boolean())
+            .defaultValue(false)
+            .build();
     c.args = schema::object<PreviewArgs>("dsp_preview_args")
                  .field("plugin", &PreviewArgs::plugin, schema::string().minLength(1))
                  .field("script", &PreviewArgs::script, schema::string().minLength(1))
@@ -83,12 +182,15 @@ void registerDspPreview(cmd::Registry& registry) {
                  .defaultValue(1.0)
                  .field("scale", &PreviewArgs::scale, schema::number().range(0.5, 3))
                  .defaultValue(1.0)
+                 .field("pointer", &PreviewArgs::pointer, schema::arrayOf(step))
                  .build();
     c.result = schema::object<PreviewResult>("dsp_preview_result")
                    .field("plugin", &PreviewResult::plugin, schema::string())
                    .field("path", &PreviewResult::path, schema::string().doc("the PNG"))
                    .field("width", &PreviewResult::width, schema::integer().doc("pixels"))
                    .field("height", &PreviewResult::height, schema::integer().doc("pixels"))
+                   .field("edits", &PreviewResult::edits,
+                          schema::any().doc("what pointer changed, as a merge patch"))
                    .field("problems", &PreviewResult::problems, schema::arrayOf(schema::string()))
                    .field("log", &PreviewResult::log, schema::arrayOf(schema::string()))
                    .build();
@@ -97,15 +199,25 @@ void registerDspPreview(cmd::Registry& registry) {
                  "put the script player on the plugin path"},
                 {"dsp.signal", "a signal the plugin cannot play",
                  "an effect plays audio signals, an instrument notes"},
+                {"dsp.pointer", "a drag without its end, or too many steps",
+                 "give a drag to_x and to_y; at most 64 steps"},
                 {"dsp.no_picture", "the plugin cannot draw its editor without a window",
                  "scripts can, through the script player; other plugins need the editor-picture "
                  "extension"}};
     {
         json::Value args = json::Value::object();
         args["script"] = "gain";
+        json::Value drag = json::Value::object();
+        drag["script"] = "gain";
+        drag["pointer"] = detail::j(R"([{"action":"drag","x":86,"y":132,"to_x":86,"to_y":92}])");
         c.examples = {{"See a script's editor", std::move(args),
                        detail::j(R"({"plugin":"com.example.gain","path":"<any>","width":"<any>",
-                                     "height":"<any>","problems":[],"log":"<any>"})"),
+                                     "height":"<any>","edits":{},"problems":[],"log":"<any>"})"),
+                       "dsp_player"},
+                      {"Drag a knob, then see the editor", std::move(drag),
+                       detail::j(R"({"plugin":"com.example.gain","path":"<any>","width":"<any>",
+                                     "height":"<any>","edits":{"params":{"gain":"<any>"}},"problems":[],
+                                     "log":"<any>"})"),
                        "dsp_player"}};
     }
     c.run = [](const PreviewArgs& a, Context& ctx) -> Result<PreviewResult> {
@@ -114,6 +226,17 @@ void registerDspPreview(cmd::Registry& registry) {
         if (a.plugin.has_value() == a.script.has_value())
             return Error("dsp.args", "give exactly one of plugin and script", "",
                          "plugin is an id from plugin.list; script is a name from dsp.list");
+        const std::vector<PointerStep> steps = a.pointer.value_or(std::vector<PointerStep>{});
+        if (steps.size() > kMaxSteps)
+            return Error("dsp.pointer",
+                         std::to_string(steps.size()) + " pointer steps; at most " +
+                             std::to_string(kMaxSteps),
+                         "/pointer", "split the actions over more than one call");
+        for (std::size_t i = 0; i < steps.size(); ++i)
+            if (steps[i].action == Action::Drag && !(steps[i].toX && steps[i].toY))
+                return Error("dsp.pointer", "a drag needs where it ends",
+                             "/pointer/" + std::to_string(i),
+                             "give to_x and to_y: the drag goes from (x, y) to there");
         std::string id;
         if (a.plugin) {
             id = *a.plugin;
@@ -183,12 +306,25 @@ void registerDspPreview(cmd::Registry& registry) {
             if (!r) return std::move(r).error();
             out.log = r->log;
         }
-        auto picture = instance.drawEditor(a.scale);
+        // What the pointer edits: the patch before and after.
+        auto patchNow = [&]() -> json::Value {
+            if (steps.empty() || !instance.info().semantic) return json::Value::object();
+            auto text = instance.getPatch(false);
+            if (!text) return json::Value::object();
+            auto parsed = json::parse(*text);
+            return parsed ? std::move(*parsed) : json::Value::object();
+        };
+        const json::Value before = patchNow();
+        const std::vector<clap_supple_pointer_input_t> input = pointerInput(steps);
+        auto picture = instance.drawEditor(a.scale, input);
         (void)instance.watchEditor(false);
         if (!picture)
             return Error(
                 "dsp.no_picture", picture.error().message, a.plugin ? "/plugin" : "/script",
                 "drawing without a window needs EGL (Mesa's libEGL), with or without a GPU");
+        if (!steps.empty())
+            if (auto edits = json::createMergePatch(before, patchNow()))
+                out.edits = std::move(*edits);
         for (auto& line : instance.takeLog()) {
             if (line.find("loop budget") != std::string::npos ||
                 line.find("outside an array") != std::string::npos)

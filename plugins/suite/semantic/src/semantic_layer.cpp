@@ -2,6 +2,8 @@
 // Copyright (c) 2026 Supple Audio
 #include "supple/suite/semantic_layer.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 
@@ -48,16 +50,22 @@ const clap_plugin_supple_semantic_params_t kExtension = {
     nullptr,  // no live telemetry
 };
 
-// The editor drawn without a window (plugin/Layer.h's drawEditor): its size,
-// then its pixels.
+static_assert(static_cast<int>(PointerInput::Kind::Leave) == CLAP_SUPPLE_POINTER_LEAVE &&
+              static_cast<int>(PointerInput::Kind::Wheel) == CLAP_SUPPLE_POINTER_WHEEL &&
+              static_cast<int>(PointerInput::Kind::Release) == CLAP_SUPPLE_POINTER_RELEASE &&
+              static_cast<int>(PointerInput::Kind::Press) == CLAP_SUPPLE_POINTER_PRESS);
+
+// The editor drawn without a window (plugin/Layer.h's drawEditor), after
+// the pointer input: its size, then its pixels.
 const clap_plugin_supple_editor_picture_t kPicture = {
     sizeof(clap_plugin_supple_editor_picture_t),
     [](const clap_plugin_t* p, bool on) {
         if (SemanticLayer* l = layerOf(p)) l->watchEditor(on);
     },
-    [](const clap_plugin_t* p, double scale, const clap_ostream_t* out, const clap_ostream_t* why) {
+    [](const clap_plugin_t* p, double scale, const clap_supple_pointer_input_t* input,
+       uint32_t count, const clap_ostream_t* out, const clap_ostream_t* why) {
         SemanticLayer* l = layerOf(p);
-        return l && l->drawEditor(scale, out, why);
+        return l && l->drawEditor(scale, input, count, out, why);
     },
 };
 
@@ -94,10 +102,32 @@ const void* SemanticLayer::extension(const char* id) {
 
 void SemanticLayer::watchEditor(bool on) { instance_.watch(on); }
 
-bool SemanticLayer::drawEditor(double scale, const clap_ostream_t* out, const clap_ostream_t* why) {
+bool SemanticLayer::drawEditor(double scale, const clap_supple_pointer_input_t* input,
+                               uint32_t count, const clap_ostream_t* out,
+                               const clap_ostream_t* why) {
+    std::vector<PointerInput> pointer;
+    if (input)
+        for (uint32_t i = 0; i < count; ++i) {
+            const clap_supple_pointer_input_t& in = input[i];
+            if (in.kind > CLAP_SUPPLE_POINTER_LEAVE) continue;
+            auto place = [](double v) {
+                return static_cast<float>(std::isfinite(v) ? std::clamp(v, -1e5, 1e5) : 0.0);
+            };
+            PointerInput p;
+            p.kind = static_cast<PointerInput::Kind>(in.kind);
+            p.x = place(in.x);
+            p.y = place(in.y);
+            p.wheel = static_cast<float>(
+                std::isfinite(in.wheel) ? std::clamp(in.wheel, -100.0, 100.0) : 0.0);
+            p.doubleClick = (in.flags & CLAP_SUPPLE_POINTER_DOUBLE_CLICK) != 0;
+            p.shift = (in.flags & CLAP_SUPPLE_POINTER_SHIFT) != 0;
+            p.ctrl = (in.flags & CLAP_SUPPLE_POINTER_CTRL) != 0;
+            p.alt = (in.flags & CLAP_SUPPLE_POINTER_ALT) != 0;
+            pointer.push_back(p);
+        }
     Picture picture;
     std::string problem;
-    if (!instance_.drawEditor(scale, picture, problem)) {
+    if (!instance_.drawEditor(scale, pointer, picture, problem)) {
         if (why) writeAll(why, problem);
         return false;
     }

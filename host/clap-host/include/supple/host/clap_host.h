@@ -285,8 +285,11 @@ class Instance {
     bool drawsEditor() const { return extPicture_ != nullptr; }
     // While on, what plays reaches the editor's meters and displays, window or not.
     Status watchEditor(bool on);
-    // The editor as it would open now, `scale` times its design size.
-    Result<Picture> drawEditor(double scale);
+    // The editor as it would open now, after the pointer input (its edits
+    // reach the plugin's parameters as a user's would), `scale` times its
+    // design size.
+    Result<Picture> drawEditor(double scale,
+                               std::span<const clap_supple_pointer_input_t> input = {});
 
     // --- state (main thread) ---
     // Inactive saves flush acknowledged main-thread edits into component state.

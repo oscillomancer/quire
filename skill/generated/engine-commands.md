@@ -1385,7 +1385,7 @@ Result:
 
 Draw a plugin's editor to a PNG, after a test signal plays through it.
 
-Give plugin (an id) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays signal -- an effect: sine (the default, at frequency_hz), sweep, impulse, noise or silence, peaking at level_db; an instrument: notes (the default), note or silence -- for seconds while its editor watches, so meters and the script's draw() show what played. Then the editor is drawn without a window, scale times its design size, and saved as a PNG (path; width and height in pixels): read the file to see it. A script with neither editor() nor draw() shows the automatic editor. problems says what went wrong in the editor's code (a loop stopped by its budget, an index out of range), with the line.
+Give plugin (an id) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays signal -- an effect: sine (the default, at frequency_hz), sweep, impulse, noise or silence, peaking at level_db; an instrument: notes (the default), note or silence -- for seconds while its editor watches, so meters and the script's draw() show what played. Then the editor is drawn without a window, scale times its design size, and saved as a PNG (path; width and height in pixels): read the file to see it. A script with neither editor() nor draw() shows the automatic editor. pointer, if given, acts on the editor first, in its design units (the picture's pixels at scale 1): move (a hover; a drag after a press), press, release, click, double_click, drag (from x, y to to_x, to_y) and wheel (steps notches, up positive), with shift, ctrl or alt held; edits is a merge patch of what they changed, as a user's edits would. problems says what went wrong in the editor's code (a loop stopped by its budget, an index out of range), with the line.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -1401,6 +1401,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `frequency_hz` | value | Hz | 10.0..20000.0 | 1000.0 | Quantity strings are range-checked by the server. |
 | `seconds` | number |  | 0.0..10.0 | 1.0 |  |
 | `scale` | number |  | 0.5..3.0 | 1.0 |  |
+| `pointer` | array |  |  |  |  |
 
 ### Result
 
@@ -1424,6 +1425,9 @@ Kind: `action`. Exposure: `mcp-tool`.
       "type": "integer",
       "description": "pixels"
     },
+    "edits": {
+      "description": "what pointer changed, as a merge patch"
+    },
     "problems": {
       "type": "array",
       "items": {
@@ -1437,7 +1441,7 @@ Kind: `action`. Exposure: `mcp-tool`.
       }
     }
   },
-  "required": ["plugin", "path", "width", "height", "problems", "log"],
+  "required": ["plugin", "path", "width", "height", "edits", "problems", "log"],
   "additionalProperties": false
 }
 
@@ -1448,6 +1452,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 - `dsp.args`: neither or both of plugin and script Hint: give exactly one
 - `dsp.not_listed`: the script compiles but no plugin has its id Hint: put the script player on the plugin path
 - `dsp.signal`: a signal the plugin cannot play Hint: an effect plays audio signals, an instrument notes
+- `dsp.pointer`: a drag without its end, or too many steps Hint: give a drag to_x and to_y; at most 64 steps
 - `dsp.no_picture`: the plugin cannot draw its editor without a window Hint: scripts can, through the script player; other plugins need the editor-picture extension
 
 ### Examples
@@ -1469,6 +1474,44 @@ Result:
   "path": "<any>",
   "width": "<any>",
   "height": "<any>",
+  "edits": {},
+  "problems": [],
+  "log": "<any>"
+}
+
+```
+
+**Drag a knob, then see the editor** (`dsp_player`)
+
+```json
+{
+  "script": "gain",
+  "pointer": [
+    {
+      "action": "drag",
+      "x": 86,
+      "y": 132,
+      "to_x": 86,
+      "to_y": 92
+    }
+  ]
+}
+
+```
+
+Result:
+
+```json
+{
+  "plugin": "com.example.gain",
+  "path": "<any>",
+  "width": "<any>",
+  "height": "<any>",
+  "edits": {
+    "params": {
+      "gain": "<any>"
+    }
+  },
   "problems": [],
   "log": "<any>"
 }

@@ -49,10 +49,16 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
    (notes for an instrument) through a fresh instance and draws its editor
    to a PNG (`path`): read the file to see the controls, meters and the
    script's own drawing as they would look. Every plugin has the automatic
-   editor; a script draws its own with `editor()` and `draw()`
+   editor; a script draws its own with `editor()` and `draw()`, and makes
+   the drawing respond to the mouse with `pointer()`
    (`guides/dsp-language.md`, The editor). Preview again after changing
-   it, and with `patch` to see other settings; `problems` names a loop or
-   an index that went wrong in the editor's code, with the line.
+   it, and with `patch` to see other settings. `pointer` acts first, in the
+   picture's pixels at scale 1: `[{action: "drag", x: 240, y: 132, to_x:
+   330, to_y: 60}]` (also `move`, `press`, `release`, `click`,
+   `double_click`, `wheel` with `steps`); `edits` is the merge patch of
+   what it changed, so a check that a drag edits what it should needs no
+   mouse. `problems` names a loop or an index that went wrong in the
+   editor's code, with the line.
 6. **Change it** by writing the same name again. Instances already playing
    it switch to the new code within half a second, crossfaded, keeping
    their parameter values. Changing the parameters themselves (adding,

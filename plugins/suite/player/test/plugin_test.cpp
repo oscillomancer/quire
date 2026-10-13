@@ -17,6 +17,7 @@
 
 #include "Check.h"
 #include "plugin/Entry.h"
+#include "supple/clap/editor_picture.h"
 #include "supple/clap/semantic_params.h"
 #include "supple/suite/json.h"
 
@@ -358,6 +359,34 @@ TEST(a_script_whose_parameters_change_redefines_the_plugin) {
     CHECK(patch.find("params")->find("gain")->asDouble() == -6.0);  // by key
     CHECK(patch.find("params")->find("trim")->asDouble() == 0.0);
     CHECK(a.host.semanticChanges >= 2);
+}
+
+TEST(a_scripts_pointer_edits_its_parameters_in_a_picture) {
+    Library library("smoke");
+    library.edit("smoke", "    void process(Block& io) {",
+                 "    void draw(Canvas& g) {}\n"
+                 "    void pointer(const Pointer& p) {\n"
+                 "        if (p.action() == PointerAction::Drag) gain.edit(gain - p.dy() / 4);\n"
+                 "    }\n"
+                 "    void process(Block& io) {",
+                 0);
+    Instance a("com.suppleaudio.script-player");
+    const auto* picture = static_cast<const clap_plugin_supple_editor_picture_t*>(
+        a.plugin->get_extension(a.plugin, CLAP_EXT_SUPPLE_EDITOR_PICTURE));
+    CHECK(picture != nullptr);
+    if (!picture) return;
+    // Dragged up 40 units: two moves of +5 dB each.
+    const clap_supple_pointer_input_t drag[] = {{CLAP_SUPPLE_POINTER_PRESS, 0, 200, 200, 0},
+                                                {CLAP_SUPPLE_POINTER_MOVE, 0, 200, 180, 0},
+                                                {CLAP_SUPPLE_POINTER_MOVE, 0, 200, 160, 0},
+                                                {CLAP_SUPPLE_POINTER_RELEASE, 0, 200, 160, 0}};
+    Text out, why;
+    if (!picture->draw(a.plugin, 1.0, drag, 4, &out.out, &why.out)) {
+        std::printf("    (%s: skipped)\n", why.text.c_str());
+        return;
+    }
+    const json::Value patch = parsed(a.patch());
+    CHECK_NEAR(patch.find("params")->find("gain")->asDouble(), 10.0, 1e-9);
 }
 
 SUPPLE_TEST_MAIN

@@ -1457,13 +1457,15 @@ Status Instance::watchEditor(bool on) {
     return okStatus();
 }
 
-Result<Instance::Picture> Instance::drawEditor(double scale) {
+Result<Instance::Picture> Instance::drawEditor(double scale,
+                                               std::span<const clap_supple_pointer_input_t> input) {
     if (remote_ || !extPicture_)
         return Error("host.picture.unsupported",
                      info_.id + " cannot draw its editor without a window here", {},
                      "it needs com.suppleaudio.editor-picture/1, in process");
     StringSink out, why;
-    if (!extPicture_->draw(plugin_, scale, &out.stream, &why.stream))
+    if (!extPicture_->draw(plugin_, scale, input.empty() ? nullptr : input.data(),
+                           static_cast<std::uint32_t>(input.size()), &out.stream, &why.stream))
         return Error("host.picture",
                      info_.id + " drew no picture" + (why.text.empty() ? "" : ": " + why.text));
     const auto& b = out.text;

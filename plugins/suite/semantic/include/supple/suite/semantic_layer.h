@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "plugin/Layer.h"
+#include "supple/clap/editor_picture.h"
 #include "supple/clap/semantic_params.h"
 #include "supple/suite/semantics.h"
 
@@ -48,7 +49,8 @@ class SemanticLayer : public plugin::Layer {
     bool setPatch(uint32_t mode, const char* json, uint32_t size, const clap_ostream_t* errors);
     bool describe(uint32_t detail, const clap_ostream_t* out) const;
     void watchEditor(bool on);
-    bool drawEditor(double scale, const clap_ostream_t* out, const clap_ostream_t* why);
+    bool drawEditor(double scale, const clap_supple_pointer_input_t* input, uint32_t count,
+                    const clap_ostream_t* out, const clap_ostream_t* why);
 
     // What the extension works from; null while the meaning has problems
     // (the extension is then not offered: hosts use plain CLAP).
