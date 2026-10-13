@@ -41,7 +41,7 @@ struct ParamEntry {
     bool meter = false;
 };
 struct PluginSummary {
-    std::string id, name;
+    std::string id, name, kind;
     std::vector<ParamEntry> params;
 };
 struct Compiled {
@@ -133,7 +133,11 @@ inline Compiled compile(const std::string& source) {
         out.diagnostics.push_back(
             {m.error ? "error" : "warning", m.code, m.message, m.hint, m.line, m.column});
     if (r.program) {
-        PluginSummary p{r.program->info().id, r.program->info().name, {}};
+        PluginSummary p{
+            r.program->info().id,
+            r.program->info().name,
+            r.program->kind() == scriptc::PluginKind::Instrument ? "instrument" : "effect",
+            {}};
         for (const scriptc::ParamModel& m : r.program->params()) {
             ParamEntry e{m.key, m.name, kindName(m.kind), {},      m.min,
                          m.max, m.def,  m.choices,        m.output};
@@ -210,6 +214,8 @@ inline schema::Schema<PluginSummary> pluginSchema() {
     return schema::object<PluginSummary>("dsp_plugin")
         .field("id", &PluginSummary::id, schema::string())
         .field("name", &PluginSummary::name, schema::string())
+        .field("kind", &PluginSummary::kind,
+               schema::string().doc("effect (audio in, audio out) or instrument (notes in)"))
         .field("params", &PluginSummary::params, schema::arrayOf(param))
         .build();
 }

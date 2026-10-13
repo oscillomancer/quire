@@ -792,6 +792,10 @@
             "name": {
               "type": "string"
             },
+            "kind": {
+              "type": "string",
+              "description": "effect (audio in, audio out) or instrument (notes in)"
+            },
             "params": {
               "type": "array",
               "items": {
@@ -838,7 +842,7 @@
               }
             }
           },
-          "required": ["id", "name", "params"],
+          "required": ["id", "name", "kind", "params"],
           "additionalProperties": false
         }
       },
@@ -1023,8 +1027,8 @@
   },
   {
     "name": "dsp_test",
-    "title": "Play test signals through an effect and measure it: levels, THD, response.",
-    "description": "Play test signals through an effect and measure it: levels, THD, response. Give plugin (an id: a script's, or any effect's) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays each signal peaking at level_db: sine (frequency_hz; gain_db and thd_percent), sweep (20 Hz to 20 kHz), impulse (response_db at octave centres), pink noise, silence. Each reports peak and RMS in dBFS, DC, samples beyond 0 dBFS and denormals; problems says in words what looks wrong (clipping, DC, sound from silence, no output, non-finite samples the framework silenced, a script stopped by its loop budget or indexing outside an array). cpu_percent is measured, so it varies between runs. save: true keeps each output as a WAV (path) for analyze and compare. See describe for errors and examples.",
+    "title": "Play test signals or notes through a plugin and measure it: levels, THD, pitch.",
+    "description": "Play test signals or notes through a plugin and measure it: levels, THD, pitch. Give plugin (an id: a script's, or any effect's or instrument's) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays each signal. An effect: sine (frequency_hz; gain_db and thd_percent), sweep (20 Hz to 20 kHz), impulse (response_db at octave centres), pink noise and silence, each peaking at level_db. An instrument, at velocity 0.8: notes (a note, then a chord), note (A4; pitch_hz, the pitch heard), and silence (no notes); release_ms is how long the sound lasts after the last release. Each reports peak and RMS in dBFS, DC, samples beyond 0 dBFS and denormals; problems says in words what looks wrong (clipping, DC, sound from silence, no output, a note out of tune, sound that never dies away, non-finite samples the framework silenced, a script stopped by its loop budget or indexing outside an array). cpu_percent is measured, so it varies between runs. save: true keeps each output as a WAV (path) for analyze and compare. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "dsp_test_args",
@@ -1042,9 +1046,9 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["sine", "sweep", "impulse", "noise", "silence"]
+            "enum": ["sine", "sweep", "impulse", "noise", "silence", "notes", "note"]
           },
-          "description": "default: all five"
+          "description": "default: an effect's five, an instrument's three"
         },
         "level_db": {
           "anyOf": [
@@ -1153,6 +1157,14 @@
                   "required": ["hz", "db"],
                   "additionalProperties": false
                 }
+              },
+              "pitch_hz": {
+                "type": "number",
+                "description": "note: the pitch heard (A4 is 440 Hz)"
+              },
+              "release_ms": {
+                "type": "number",
+                "description": "an instrument's: sound after the last release"
               },
               "path": {
                 "type": "string"
@@ -1266,6 +1278,10 @@
             "name": {
               "type": "string"
             },
+            "kind": {
+              "type": "string",
+              "description": "effect (audio in, audio out) or instrument (notes in)"
+            },
             "params": {
               "type": "array",
               "items": {
@@ -1312,7 +1328,7 @@
               }
             }
           },
-          "required": ["id", "name", "params"],
+          "required": ["id", "name", "kind", "params"],
           "additionalProperties": false
         },
         "listed": {

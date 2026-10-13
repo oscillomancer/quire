@@ -6,7 +6,9 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <memory>
+#include <sstream>
 #include <string>
 
 #include "supple/sandbox/commands.h"
@@ -199,4 +201,56 @@ TEST_CASE("dsp.export makes a plugin that plays its version of the script, and n
           fs::file_size(first["notices"].asString()));
     Host again = open("again", root.path / "again");
     CHECK(gainDb(again) == doctest::Approx(12.0).epsilon(0.002));
+}
+
+TEST_CASE("dsp.test plays notes into an instrument and hears its pitch") {
+    const fs::path player = kStock / "Script Player.clap";
+    if (!fs::exists(player)) {
+        MESSAGE("skipped: no script player in " << kStock.string());
+        return;
+    }
+    Root root;
+    SessionOptions o;
+    o.workdir = root.path;
+    o.pluginPath = {player};
+    auto session = Session::open(o);
+    REQUIRE(session);
+    SandboxHost host(std::move(*session), {});
+    cmd::Registry registry;
+    registerCommands(registry);
+    cmd::Dispatcher bus(registry, host);
+    auto call = [&](std::string name, json::Value args) {
+        return bus.execute({std::move(name), std::move(args), kTest});
+    };
+    std::ifstream in(std::string(SUPPLE_SCRIPT_EXAMPLES) + "/synth.cpp");
+    std::stringstream text;
+    text << in.rdbuf();
+    json::Value w = json::Value::object();
+    w["name"] = "synth";
+    w["source"] = text.str();
+    auto written = call("dsp.write", std::move(w));
+    REQUIRE_MESSAGE(written, (written ? std::string() : written.error().toString()));
+    REQUIRE((*written)["ok"].asBool());
+
+    json::Value t = json::Value::object();
+    t["script"] = "synth";
+    auto tested = call("dsp.test", t);
+    REQUIRE_MESSAGE(tested, (tested ? std::string() : tested.error().toString()));
+    json::Value result = *tested;
+    std::string problems;
+    for (const json::Value& p : result["problems"].asArray()) problems += p.asString() + "\n";
+    CHECK_MESSAGE(problems.empty(), problems);
+    REQUIRE(result["signals"].size() == 3);
+    CHECK(result["signals"].at(0).find("peak_dbfs")->asDouble() > -40.0);  // notes
+    const json::Value& note = result["signals"].at(1);
+    REQUIRE(note.find("pitch_hz"));
+    CHECK(note.find("pitch_hz")->asDouble() == doctest::Approx(440.0).epsilon(0.002));
+    CHECK(result["signals"].at(2).find("peak_dbfs")->asDouble() < -150.0);  // no notes
+
+    // An instrument takes notes, not audio.
+    t["signals"] = json::Value::array();
+    t["signals"].push_back("sine");
+    auto refused = call("dsp.test", t);
+    REQUIRE_FALSE(refused);
+    CHECK(refused.error().code == "dsp.signal");
 }

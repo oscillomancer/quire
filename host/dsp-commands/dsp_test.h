@@ -1,7 +1,7 @@
 // dsp.test, the DSP script harness (ADR-0032), shared by the engine and the
-// sandbox: standard signals through a fresh instance of an effect (a
-// script's, through the script player, or any other), each measured, with
-// what looks wrong said in words. It renders with the sandbox's offline
+// sandbox: standard signals through a fresh instance of an effect, or notes
+// into an instrument (a script's, through the script player, or any other),
+// each measured, with what looks wrong said in words. It renders with the sandbox's offline
 // renderer (supple/sandbox/render.h), the same in both.
 //
 // Host is the Context's service and has findPlugin(id), plugins(rescan) and
@@ -37,9 +37,11 @@ struct TestTraits;  // static settings(h), identity(h), outputDir(h)
 namespace test {
 namespace fs = std::filesystem;
 
-enum class Signal { Sine, Sweep, Impulse, Noise, Silence };
-inline constexpr Signal kAllSignals[] = {Signal::Sine, Signal::Sweep, Signal::Impulse,
-                                         Signal::Noise, Signal::Silence};
+enum class Signal { Sine, Sweep, Impulse, Noise, Silence, Notes, Note };
+inline constexpr Signal kEffectSignals[] = {Signal::Sine, Signal::Sweep, Signal::Impulse,
+                                            Signal::Noise, Signal::Silence};
+inline constexpr Signal kInstrumentSignals[] = {Signal::Notes, Signal::Note, Signal::Silence};
+inline bool forInstruments(Signal s) { return s == Signal::Notes || s == Signal::Note; }
 
 inline const char* signalName(Signal s) {
     switch (s) {
@@ -51,6 +53,10 @@ inline const char* signalName(Signal s) {
             return "impulse";
         case Signal::Noise:
             return "noise";
+        case Signal::Notes:
+            return "notes";
+        case Signal::Note:
+            return "note";
         default:
             return "silence";
     }
@@ -74,6 +80,7 @@ struct SignalResult {
     std::int64_t clipped = 0, denormals = 0;
     std::optional<double> gainDb, thdPercent;
     std::optional<std::vector<ResponsePoint>> response;
+    std::optional<double> pitchHz, releaseMs;
     std::optional<std::string> path;
 };
 struct TestResult {
@@ -150,10 +157,71 @@ inline audio::AudioData stimulus(Signal s, double rate, double seconds, double l
             break;
         }
         case Signal::Silence:
+        case Signal::Notes:  // an instrument's: notes, no audio
+        case Signal::Note:
             break;
     }
     a.channels.assign(2, x);
     return a;
+}
+
+// An instrument's stimulus: its notes (key, on, at a fraction of `seconds`),
+// at velocity 0.8. notes: a note, then a chord, released 0.2 s before the
+// end; note: A4 (key 69), released likewise; silence: none.
+inline std::vector<sandbox::TimedEvent> noteEvents(Signal s, double rate, double seconds) {
+    std::vector<sandbox::TimedEvent> out;
+    auto add = [&](double at, int key, bool on) {
+        sandbox::TimedEvent e;
+        e.sample = static_cast<std::int64_t>(std::llround(at * seconds * rate));
+        e.event.kind = on ? host::Event::Kind::NoteOn : host::Event::Kind::NoteOff;
+        e.event.key = static_cast<std::int16_t>(key);
+        e.event.velocity = 0.8;
+        out.push_back(e);
+    };
+    if (s == Signal::Notes) {
+        add(0.0, 60, true);
+        add(0.2, 60, false);
+        for (int key : {60, 64, 67}) add(0.3, key, true);
+        for (int key : {60, 64, 67}) add(0.8, key, false);
+    } else if (s == Signal::Note) {
+        add(0.0, 69, true);
+        add(0.8, 69, false);
+    }
+    return out;
+}
+// When the last note is released, as a fraction of `seconds`.
+inline constexpr double kReleaseAt = 0.8;
+
+// The fundamental of x over 4096 samples from `begin` (the difference
+// function's first dip, as YIN finds it), between 40 Hz and 2 kHz, and how
+// periodic the sound is there (1: exactly); nothing when it is not a tone.
+inline std::optional<std::pair<double, double>> pitchOf(const std::vector<float>& x,
+                                                        std::size_t begin, double rate) {
+    constexpr std::size_t kWindow = 4096;
+    const auto minLag = static_cast<std::size_t>(rate / 2000.0);
+    const auto maxLag = static_cast<std::size_t>(rate / 40.0);
+    if (begin + kWindow + maxLag + 2 > x.size()) return std::nullopt;
+    std::vector<double> d(maxLag + 2, 0.0);
+    double running = 0.0;
+    d[0] = 1.0;
+    for (std::size_t tau = 1; tau <= maxLag + 1; ++tau) {
+        double sum = 0.0;
+        for (std::size_t i = begin; i < begin + kWindow; ++i) {
+            const double diff = static_cast<double>(x[i]) - static_cast<double>(x[i + tau]);
+            sum += diff * diff;
+        }
+        running += sum;
+        d[tau] = running > 0.0 ? sum * static_cast<double>(tau) / running : 1.0;
+    }
+    for (std::size_t tau = std::max<std::size_t>(minLag, 2); tau <= maxLag; ++tau) {
+        if (d[tau] > 0.15) continue;
+        while (tau + 1 <= maxLag && d[tau + 1] < d[tau]) ++tau;  // to the dip's bottom
+        const double a = d[tau - 1], b = d[tau], c = d[tau + 1];
+        const double denom = a - 2.0 * b + c;
+        const double shift = denom > 0.0 ? 0.5 * (a - c) / denom : 0.0;
+        return std::make_pair(rate / (static_cast<double>(tau) + shift), 1.0 - b);
+    }
+    return std::nullopt;
 }
 
 // The amplitude of a tone at hz in x[begin, end): a Hann-windowed DFT bin.
@@ -200,6 +268,24 @@ inline SignalResult measure(Signal s, const audio::AudioData& out, std::size_t i
     const std::vector<float>& x = out.channels[0];
     const double rate = out.sampleRate;
     const double amp = std::pow(10.0, a.levelDb / 20.0);
+    if (s == Signal::Note) {
+        // Past the attack, before any envelope has had long to fall.
+        if (auto pitch = pitchOf(x, static_cast<std::size_t>(0.03 * rate), rate))
+            r.pitchHz = rounded(pitch->first, 2);
+    }
+    if (forInstruments(s)) {
+        // From the last release to the last sample above -80 dBFS.
+        const auto released = static_cast<std::size_t>(kReleaseAt * a.seconds * rate);
+        std::size_t last = 0;
+        for (const auto& ch : out.channels)
+            for (std::size_t i = ch.size(); i-- > 0;)
+                if (std::abs(ch[i]) > 1e-4f) {
+                    last = std::max(last, i + 1);
+                    break;
+                }
+        r.releaseMs = rounded(
+            last > released ? 1000.0 * static_cast<double>(last - released) / rate : 0.0, 1);
+    }
     if (s == Signal::Sine) {
         // The steady part: past the first 100 ms, within the input.
         const std::size_t end = std::min(inputFrames, x.size());
@@ -254,18 +340,20 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
     c.name = "dsp.test";
     c.kind = Kind::Action;
     c.exposure = cmd::Exposure::McpTool;
-    c.summary = "Play test signals through an effect and measure it: levels, THD, response.";
+    c.summary = "Play test signals or notes through a plugin and measure it: levels, THD, pitch.";
     c.description =
-        "Give plugin (an id: a script's, or any effect's) or script (a name in the library). A "
-        "fresh instance, set by patch (a merge patch) when given, plays each signal peaking at "
-        "level_db: "
-        "sine (frequency_hz; gain_db and thd_percent), sweep (20 Hz to 20 kHz), impulse "
-        "(response_db at octave centres), pink noise, silence. Each reports peak and RMS in "
-        "dBFS, DC, samples beyond 0 dBFS and denormals; problems says in words what looks wrong "
-        "(clipping, DC, sound from silence, no output, non-finite samples the framework "
-        "silenced, a script stopped by its loop budget or indexing outside an array). "
-        "cpu_percent is measured, so it varies between runs. save: true keeps each output as a "
-        "WAV (path) for analyze and compare.";
+        "Give plugin (an id: a script's, or any effect's or instrument's) or script (a name in "
+        "the library). A fresh instance, set by patch (a merge patch) when given, plays each "
+        "signal. An effect: sine (frequency_hz; gain_db and thd_percent), sweep (20 Hz to 20 "
+        "kHz), impulse (response_db at octave centres), pink noise and silence, each peaking at "
+        "level_db. An instrument, at velocity 0.8: notes (a note, then a chord), note (A4; "
+        "pitch_hz, the pitch heard), and silence (no notes); release_ms is how long the sound "
+        "lasts after the last release. Each reports peak and RMS in dBFS, DC, samples beyond 0 "
+        "dBFS and denormals; problems says in words what looks wrong (clipping, DC, sound from "
+        "silence, no output, a note out of tune, sound that never dies away, non-finite "
+        "samples the framework silenced, a script stopped by its loop budget or indexing "
+        "outside an array). cpu_percent is measured, so it varies between runs. save: true "
+        "keeps each output as a WAV (path) for analyze and compare.";
     c.tags = {"dsp", "analysis"};
     c.args = schema::object<TestArgs>("dsp_test_args")
                  .field("plugin", &TestArgs::plugin, schema::string().minLength(1))
@@ -276,8 +364,10 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                                                                      {Signal::Sweep, "sweep"},
                                                                      {Signal::Impulse, "impulse"},
                                                                      {Signal::Noise, "noise"},
-                                                                     {Signal::Silence, "silence"}}))
-                            .doc("default: all five"))
+                                                                     {Signal::Silence, "silence"},
+                                                                     {Signal::Notes, "notes"},
+                                                                     {Signal::Note, "note"}}))
+                            .doc("default: an effect's five, an instrument's three"))
                  .field("level_db", &TestArgs::levelDb,
                         schema::number().range(-60, 0).unit(units::Unit::dB))
                  .defaultValue(-12.0)
@@ -304,6 +394,10 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                              schema::number().doc("sine: the fundamental out against in"))
                       .field("thd_percent", &SignalResult::thdPercent, schema::number())
                       .field("response_db", &SignalResult::response, schema::arrayOf(point))
+                      .field("pitch_hz", &SignalResult::pitchHz,
+                             schema::number().doc("note: the pitch heard (A4 is 440 Hz)"))
+                      .field("release_ms", &SignalResult::releaseMs,
+                             schema::number().doc("an instrument's: sound after the last release"))
                       .field("path", &SignalResult::path, schema::string())
                       .build();
     c.result = schema::object<TestResult>("dsp_test_result")
@@ -318,7 +412,10 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
     c.errors = {{"dsp.args", "neither or both of plugin and script", "give exactly one"},
                 {"dsp.not_listed", "the script compiles but no plugin has its id",
                  "put the script player on the plugin path"},
-                {"dsp.not_effect", "the plugin takes no audio", "test an effect"}};
+                {"dsp.not_effect", "the plugin takes no audio and no notes",
+                 "test an effect or an instrument"},
+                {"dsp.signal", "a signal the plugin cannot play",
+                 "an effect plays audio signals, an instrument notes"}};
     if (!exampleEffect.empty()) {
         json::Value args = json::Value::object();
         args["plugin"] = exampleEffect;
@@ -360,9 +457,11 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
         auto created = host::Instance::create(*info, Traits::identity(s));
         if (!created) return std::move(created).error();
         host::Instance& instance = **created;
-        if (instance.audioInputChannels() == 0)
-            return Error("dsp.not_effect", info->name + " takes no audio",
-                         a.plugin ? "/plugin" : "/script", "dsp.test measures effects");
+        const bool instrument = instance.audioInputChannels() == 0;
+        if (instrument && !info->instrument)
+            return Error("dsp.not_effect", info->name + " takes no audio and no notes",
+                         a.plugin ? "/plugin" : "/script",
+                         "dsp.test measures effects and instruments");
         if (a.patch) {
             if (!instance.info().semantic)
                 return Error("dsp.not_semantic", info->name + " takes no patch", "/patch",
@@ -373,19 +472,39 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
         TestResult out;
         out.plugin = info->id;
         const std::vector<Signal> signals =
-            a.signals && !a.signals->empty()
-                ? *a.signals
-                : std::vector<Signal>(std::begin(kAllSignals), std::end(kAllSignals));
+            a.signals && !a.signals->empty() ? *a.signals
+            : instrument
+                ? std::vector<Signal>(std::begin(kInstrumentSignals), std::end(kInstrumentSignals))
+                : std::vector<Signal>(std::begin(kEffectSignals), std::end(kEffectSignals));
+        for (size_t k = 0; k < signals.size(); ++k)
+            if (signals[k] != Signal::Silence && forInstruments(signals[k]) != instrument)
+                return Error("dsp.signal",
+                             info->name +
+                                 (instrument ? " is an instrument: it plays notes, not "
+                                             : " is an effect: it takes audio, not ") +
+                                 signalName(signals[k]),
+                             "/signals/" + std::to_string(k),
+                             instrument ? "use notes, note or silence"
+                                        : "use sine, sweep, impulse, noise or silence");
         std::set<std::string> logged;
         double rendered = 0.0, spent = 0.0;
         host::Instance* chain[] = {&instance};
         const sandbox::RenderSettings settings = Traits::settings(s);
         for (const Signal sig : signals) {
             const audio::AudioData input =
-                stimulus(sig, settings.sampleRate, a.seconds, a.levelDb, a.frequencyHz);
-            const std::size_t inputFrames = input.frames();
+                instrument
+                    ? audio::AudioData{}
+                    : stimulus(sig, settings.sampleRate, a.seconds, a.levelDb, a.frequencyHz);
+            const std::size_t inputFrames =
+                instrument ? static_cast<std::size_t>(std::llround(a.seconds * settings.sampleRate))
+                           : input.frames();
             sandbox::RenderRequest request;
-            request.input = &input;
+            if (instrument) {
+                request.events = noteEvents(sig, settings.sampleRate, a.seconds);
+                request.lengthSamples = static_cast<std::int64_t>(inputFrames);
+            } else {
+                request.input = &input;
+            }
             const auto start = std::chrono::steady_clock::now();
             auto r = sandbox::render(chain, settings, request);
             spent +=
@@ -408,11 +527,33 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                                        " (peak " + fixed(m.peakDbfs) + " dBFS)");
             if (m.dc > 0.01) out.problems.push_back("a DC offset of " + fixed(m.dc, 3) + with);
             if (sig == Signal::Silence && m.peakDbfs > -100.0)
-                out.problems.push_back("sound from silence: peak " + fixed(m.peakDbfs) +
-                                       " dBFS (feedback that sustains itself, or a source "
-                                       "that runs free)");
+                out.problems.push_back(
+                    (instrument ? "sound with no notes: peak " : "sound from silence: peak ") +
+                    fixed(m.peakDbfs) +
+                    (instrument ? " dBFS (a voice that plays without a note, or a source that "
+                                  "runs free)"
+                                : " dBFS (feedback that sustains itself, or a source that runs "
+                                  "free)"));
             if (sig != Signal::Silence && m.peakDbfs < -120.0)
-                out.problems.push_back("no output" + with);
+                out.problems.push_back(
+                    instrument ? "no sound" + with +
+                                     " (does startVoice start the voice, and process() add "
+                                     "each voice that voicePlaying(v) into io?)"
+                               : "no output" + with);
+            if (instrument && sig != Signal::Silence && r->tailCapped)
+                out.problems.push_back(
+                    "still sounding " + fixed(settings.tailLimitSeconds) +
+                    " s after every note was released" + with +
+                    " (does releaseVoice start each voice's release, and process() call "
+                    "voiceFinished(v) once it has died away?)");
+            if (sig == Signal::Note && m.pitchHz) {
+                const double cents = 1200.0 * std::log2(*m.pitchHz / 440.0);
+                if (std::abs(cents) > 50.0)
+                    out.problems.push_back("A4 (key 69) sounded at " + fixed(*m.pitchHz) + " Hz, " +
+                                           fixed(cents, 0) +
+                                           " cents from 440 Hz (voiceHz(v, i) is the note's "
+                                           "frequency)");
+            }
             out.signals.push_back(std::move(m));
         }
         out.cpuPercent = rendered > 0.0 ? rounded(100.0 * spent / rendered, 2) : 0.0;

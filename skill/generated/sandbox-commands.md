@@ -246,6 +246,10 @@ Kind: `query`. Exposure: `mcp-tool`.
         "name": {
           "type": "string"
         },
+        "kind": {
+          "type": "string",
+          "description": "effect (audio in, audio out) or instrument (notes in)"
+        },
         "params": {
           "type": "array",
           "items": {
@@ -292,7 +296,7 @@ Kind: `query`. Exposure: `mcp-tool`.
           }
         }
       },
-      "required": ["id", "name", "params"],
+      "required": ["id", "name", "kind", "params"],
       "additionalProperties": false
     }
   },
@@ -609,9 +613,9 @@ Result:
 
 ## `dsp.test@1`
 
-Play test signals through an effect and measure it: levels, THD, response.
+Play test signals or notes through a plugin and measure it: levels, THD, pitch.
 
-Give plugin (an id: a script's, or any effect's) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays each signal peaking at level_db: sine (frequency_hz; gain_db and thd_percent), sweep (20 Hz to 20 kHz), impulse (response_db at octave centres), pink noise, silence. Each reports peak and RMS in dBFS, DC, samples beyond 0 dBFS and denormals; problems says in words what looks wrong (clipping, DC, sound from silence, no output, non-finite samples the framework silenced, a script stopped by its loop budget or indexing outside an array). cpu_percent is measured, so it varies between runs. save: true keeps each output as a WAV (path) for analyze and compare.
+Give plugin (an id: a script's, or any effect's or instrument's) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays each signal. An effect: sine (frequency_hz; gain_db and thd_percent), sweep (20 Hz to 20 kHz), impulse (response_db at octave centres), pink noise and silence, each peaking at level_db. An instrument, at velocity 0.8: notes (a note, then a chord), note (A4; pitch_hz, the pitch heard), and silence (no notes); release_ms is how long the sound lasts after the last release. Each reports peak and RMS in dBFS, DC, samples beyond 0 dBFS and denormals; problems says in words what looks wrong (clipping, DC, sound from silence, no output, a note out of tune, sound that never dies away, non-finite samples the framework silenced, a script stopped by its loop budget or indexing outside an array). cpu_percent is measured, so it varies between runs. save: true keeps each output as a WAV (path) for analyze and compare.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -622,7 +626,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `plugin` | string |  |  |  |  |
 | `script` | string |  |  |  |  |
 | `patch` | value |  |  |  |  |
-| `signals` | array |  |  |  | default: all five |
+| `signals` | array |  |  |  | default: an effect's five, an instrument's three |
 | `level_db` | value | dB | -60.0..0.0 | -12.0 | Quantity strings are range-checked by the server. |
 | `frequency_hz` | value | Hz | 10.0..20000.0 | 1000.0 | Quantity strings are range-checked by the server. |
 | `seconds` | number |  | 0.1..10.0 | 1.0 |  |
@@ -692,6 +696,14 @@ Kind: `action`. Exposure: `mcp-tool`.
               "additionalProperties": false
             }
           },
+          "pitch_hz": {
+            "type": "number",
+            "description": "note: the pitch heard (A4 is 440 Hz)"
+          },
+          "release_ms": {
+            "type": "number",
+            "description": "an instrument's: sound after the last release"
+          },
           "path": {
             "type": "string"
           }
@@ -727,7 +739,8 @@ Kind: `action`. Exposure: `mcp-tool`.
 
 - `dsp.args`: neither or both of plugin and script Hint: give exactly one
 - `dsp.not_listed`: the script compiles but no plugin has its id Hint: put the script player on the plugin path
-- `dsp.not_effect`: the plugin takes no audio Hint: test an effect
+- `dsp.not_effect`: the plugin takes no audio and no notes Hint: test an effect or an instrument
+- `dsp.signal`: a signal the plugin cannot play Hint: an effect plays audio signals, an instrument notes
 
 ### Examples
 
@@ -829,6 +842,10 @@ Kind: `action`. Exposure: `mcp-tool`.
         "name": {
           "type": "string"
         },
+        "kind": {
+          "type": "string",
+          "description": "effect (audio in, audio out) or instrument (notes in)"
+        },
         "params": {
           "type": "array",
           "items": {
@@ -875,7 +892,7 @@ Kind: `action`. Exposure: `mcp-tool`.
           }
         }
       },
-      "required": ["id", "name", "params"],
+      "required": ["id", "name", "kind", "params"],
       "additionalProperties": false
     },
     "listed": {
