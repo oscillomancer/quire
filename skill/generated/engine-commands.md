@@ -1094,9 +1094,9 @@ Result:
 
 ## `dsp.export@1`
 
-Export a DSP script as a CLAP plugin file for any DAW.
+Export a DSP script as a plugin for other DAWs: a CLAP file, or C++ source.
 
-Copies the script player that plays the script here and appends the script: the copy is a plugin of its own, under the script's id and name, that plays this version of the script in any CLAP host (it reads no library). Written to <folder>/<plugin name>.clap, by default in the script's folder under export/, with the licenses to ship beside it (notices). It runs on this platform, as fast as the player it copies (a debug build's is slow). Export again after changing the script; an installed copy does not follow the library.
+format clap (the default): copies the script player that plays the script here and appends the script. The copy is a plugin of its own, under the script's id and name, that plays this version of the script in any CLAP host (it reads no library), written to <folder>/<plugin name>.clap (default: the script's folder, under export/) with the licenses to ship beside it (notices). It runs on this platform, as fast as the player it copies (a debug build's is slow). format source: a C++ project of the plugin template that builds the same plugin (same id, parameters and state) as CLAP, VST3 and AU on any platform, the script compiled as C++, written to the empty <folder> (default: the script's folder, under export/<script>-source); its README says how to build it, and license (MIT unless GPL-3.0-or-later) is the license of its own files. Export again after changing the script; an export does not follow the library.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -1105,7 +1105,9 @@ Kind: `action`. Exposure: `mcp-tool`.
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
 | `script` | string |  |  |  | a name from dsp.list |
-| `folder` | string |  |  |  | an absolute folder to write to (~/.clap installs it for this user); default <library>/<script>/export |
+| `format` | string |  |  |  | clap (default): a plugin file; source: a C++ project |
+| `folder` | string |  |  |  | an absolute folder to write to (for clap, ~/.clap installs it for this user); for source, empty or new |
+| `license` | string |  |  |  | source: the license of the project's own files (default MIT) |
 
 ### Result
 
@@ -1116,7 +1118,7 @@ Kind: `action`. Exposure: `mcp-tool`.
   "properties": {
     "path": {
       "type": "string",
-      "description": "the plugin file"
+      "description": "the plugin file, or the project's folder"
     },
     "id": {
       "type": "string"
@@ -1126,11 +1128,11 @@ Kind: `action`. Exposure: `mcp-tool`.
     },
     "format": {
       "type": "string",
-      "description": "clap"
+      "description": "clap or source"
     },
     "player": {
       "type": "string",
-      "description": "the script player it was copied from"
+      "description": "clap: the script player it was copied from"
     },
     "bytes": {
       "type": "integer",
@@ -1138,10 +1140,10 @@ Kind: `action`. Exposure: `mcp-tool`.
     },
     "notices": {
       "type": "string",
-      "description": "the licenses to ship with the plugin"
+      "description": "clap: the licenses to ship with the plugin"
     }
   },
-  "required": ["path", "id", "name", "format", "player", "bytes"],
+  "required": ["path", "id", "name", "format"],
   "additionalProperties": false
 }
 
@@ -1152,11 +1154,14 @@ Kind: `action`. Exposure: `mcp-tool`.
 - `dsp.compile`: the script does not compile Hint: dsp.check gives its diagnostics
 - `dsp.not_listed`: the script compiles but no plugin has its id Hint: put the script player on the plugin path
 - `dsp.player`: the plugin with the script's id is not the script player Hint: give the script an id no other plugin has
-- `dsp.path`: the folder is relative Hint: give an absolute folder
+- `dsp.path`: the folder is relative, or (source) not empty Hint: give an absolute folder; for source, a new one
+- `dsp.plugin_name`: source: the plugin's name cannot name a project Hint: rename it in Info.name
+- `dsp.no_parameter`: source: the project's tests need a parameter a host can automate Hint: declare one
+- `dsp.kit`: source: no export kit beside the stock plugins Hint: build the script-export-kit target
 
 ### Examples
 
-**Export a script from the library** (`dsp_player`)
+**Export a script from the library as a plugin file** (`dsp_player`)
 
 ```json
 {
@@ -1176,6 +1181,28 @@ Result:
   "player": "<any>",
   "bytes": "<any>",
   "notices": "<any>"
+}
+
+```
+
+**Export it as a C++ project** (`dsp_script`)
+
+```json
+{
+  "script": "gain",
+  "format": "source"
+}
+
+```
+
+Result:
+
+```json
+{
+  "path": "<any>",
+  "id": "com.example.gain",
+  "name": "Gain",
+  "format": "source"
 }
 
 ```

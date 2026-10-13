@@ -295,6 +295,31 @@ Where the work stands, and where it departs from the text above:
   the semantic conformance tool checks in library mode; the export is
   tested for what differs (it offers only its own script, at the version
   exported, and plays it) in the sandbox's tests.
+- Source exports (§5), 2026-10-13: `dsp.export {format: "source"}`. The
+  player's definition builder, processor and status layer moved to
+  `plugins/suite/glue` and run any `script::detail::Code`
+  (`supple/script_code.h`, in the runtime with the description models the
+  compiler used to own): the player's compiled `Program`, or
+  `NativeCode<T>` (`supple/script_native.h`), the script compiled as C++,
+  which takes its description from the script's own `Info` and each
+  `Param`'s spec as it is constructed. A patch key comes from a member's
+  name, which C++ cannot see, so the generated `product/Catalog.cpp` lists
+  the keys the compiler worked out by member pointer (a renamed member
+  fails to compile; a `Param` missing from the list takes its `withKey()`
+  key or its name in snake_case). This is the one generated table, and
+  holds keys only; the parameters stay the script's. The project is not
+  made by `new_product.cmake`, which writes Supple Audio's identity:
+  Quire copies the template's framework and root files and the suite
+  without its compiler (`suite.cmake`, which the player includes too)
+  from a kit staged beside the stock plugins (`plugins/script-export`),
+  and writes the product's files from `plugins/suite/export` with the
+  script's identity, the player's state tag for its ID, and a license
+  the caller chooses (MIT or GPL-3.0-or-later). To make every script
+  exportable, ids are reverse-DNS without `_` and versions
+  major.minor.patch. `plugin.export.source` (slow) exports the player's
+  tilt script, builds the project offline with its own tests passing,
+  and checks that it and the player play the same bytes.
+  `suite/tools/update_suite.cmake` is not written.
 - Reloading: the layer's main-thread tick looks at the script file twice a
   second, so `dsp.write` only has to save it. An in-place swap carries the
   parameter values over; the script's members start from a fresh

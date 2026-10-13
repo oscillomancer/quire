@@ -40,16 +40,18 @@ q = nil
 
 ---@class Quire.dsp_export_args
 ---@field script string a name from dsp.list
----@field folder? string an absolute folder to write to (~/.clap installs it for this user); default <library>/<script>/export
+---@field format? "clap"|"source" clap (default): a plugin file; source: a C++ project
+---@field folder? string an absolute folder to write to (for clap, ~/.clap installs it for this user); for source, empty or new
+---@field license? "MIT"|"GPL-3.0-or-later" source: the license of the project's own files (default MIT)
 
 ---@class Quire.dsp_export_result
----@field path string the plugin file
+---@field path string the plugin file, or the project's folder
 ---@field id string
 ---@field name string
----@field format string clap
----@field player string the script player it was copied from
----@field bytes integer
----@field notices? string the licenses to ship with the plugin
+---@field format string clap or source
+---@field player? string clap: the script player it was copied from
+---@field bytes? integer
+---@field notices? string clap: the licenses to ship with the plugin
 
 ---@class Quire.dsp_get_args
 ---@field name string
@@ -293,7 +295,7 @@ q = nil
 
 ---@class Quire.dsp
 ---@field check fun(args?: Quire.dsp_check_args): Quire.dsp_check_result Compile a DSP script without saving it; return its diagnostics.
----@field export fun(args: Quire.dsp_export_args): Quire.dsp_export_result Export a DSP script as a CLAP plugin file for any DAW.
+---@field export fun(args: Quire.dsp_export_args): Quire.dsp_export_result Export a DSP script as a plugin for other DAWs: a CLAP file, or C++ source.
 ---@field get fun(args: Quire.dsp_get_args): Quire.dsp_get_result Read a DSP script from the library.
 ---@field list fun(): Quire.dsp_list_result List the DSP scripts in the library, compiled, with their plugin ids.
 ---@field test fun(args?: Quire.dsp_test_args): Quire.dsp_test_result Play test signals through an effect and measure it: levels, THD, response.

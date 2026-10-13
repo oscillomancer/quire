@@ -184,5 +184,15 @@ if(SUPPLE_BUILD_PLUGINS)
       list(APPEND player_tests plugin.player.validator)
     endif()
     set_tests_properties(${player_tests} PROPERTIES ENVIRONMENT "${player_env}")
+    # A source export of the player's tilt script, built and tested as a
+    # user would, then played against the player (suite/tests).
+    add_test(NAME plugin.export.source
+      COMMAND ${CMAKE_COMMAND} -DSANDBOX=$<TARGET_FILE:${PRODUCT_SLUG}-sandbox>
+              -DPLAYER=${player_clap} -DSCRIPT=${player_scripts}/library/tilt/tilt.cpp
+              "-DPATCH={\"tilt\": 4.5, \"pivot\": 700, \"output\": -2}"
+              -DWORK=${CMAKE_BINARY_DIR}/plugins/export-test -DTHIRD_PARTY=${CMAKE_SOURCE_DIR}/third_party
+              -DCC=${CMAKE_C_COMPILER} -DCXX=${CMAKE_CXX_COMPILER} -DBUILD_TYPE=${CMAKE_BUILD_TYPE}
+              -P ${CMAKE_CURRENT_SOURCE_DIR}/suite/tests/source_export.cmake)
+    set_tests_properties(plugin.export.source PROPERTIES LABELS slow TIMEOUT 1800)
   endif()
 endif()

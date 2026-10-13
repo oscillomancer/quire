@@ -219,9 +219,11 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
   `<data>/<slug>/scripts`, shared with the sandbox), `dsp.test` measures
   one with standard signals, and a script that compiles is loaded and set
   like a stock plugin (`skill/guides/dsp-workflow.md`). `dsp.export` makes
-  a script a CLAP plugin for any host: a copy of the player with the script
-  appended, which offers that one plugin. Effects only (no notes yet), the
-  automatic editor only, Linux exports only; editor previews and source
-  exports do not exist yet.
+  a script a CLAP plugin for any host (a copy of the player with the script
+  appended, which offers that one plugin), or a C++ project of the plugin
+  template that builds the same plugin, bit for bit, with the script
+  compiled as C++. Effects only (no notes yet), the automatic editor only,
+  plugin-file exports for Linux only; editor previews and the suite's
+  update tool for source exports do not exist yet.
 - Orrery's structural performance pass.
 - Hardening and ports beyond Linux.

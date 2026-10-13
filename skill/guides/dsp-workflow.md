@@ -40,12 +40,16 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
    previous one playing, so a mistake never silences the track.
 6. **Tell the human** what it does, which parameters matter, and which
    track to listen to. Taste is theirs.
-7. **Export it** when they want it in another DAW: `dsp_export {script:
+7. **Export it** when they want it in another DAW. `dsp_export {script:
    "tilt_eq"}` writes `<Name>.clap` (in the script's folder under
    `export/`, or `folder: "/home/<them>/.clap"` to install it) and the
-   notices to ship beside it. The export plays the script as it was when
-   exported; export again after changing it. Projects here keep using the
-   library's version, under the same id.
+   notices to ship beside it: ready now, for this platform. `format:
+   "source"` writes a C++ project instead, which builds the same plugin
+   (same id, parameters and state) as CLAP, VST3 and AU anywhere; its
+   README says how, and `license` (`MIT` unless `GPL-3.0-or-later`) is
+   theirs to choose. Either plays the script as it was when exported;
+   export again after changing it. Projects here keep using the library's
+   version, under the same id.
 
 `dsp_list` shows every script in the library (and whether it compiles);
 `dsp_get {name}` returns one's source. The DAW and the sandbox share the

@@ -275,8 +275,8 @@
   },
   {
     "name": "dsp_export",
-    "title": "Export a DSP script as a CLAP plugin file for any DAW.",
-    "description": "Export a DSP script as a CLAP plugin file for any DAW. Copies the script player that plays the script here and appends the script: the copy is a plugin of its own, under the script's id and name, that plays this version of the script in any CLAP host (it reads no library). Written to <folder>/<plugin name>.clap, by default in the script's folder under export/, with the licenses to ship beside it (notices). It runs on this platform, as fast as the player it copies (a debug build's is slow). Export again after changing the script; an installed copy does not follow the library. See describe for errors and examples.",
+    "title": "Export a DSP script as a plugin for other DAWs: a CLAP file, or C++ source.",
+    "description": "Export a DSP script as a plugin for other DAWs: a CLAP file, or C++ source. format clap (the default): copies the script player that plays the script here and appends the script. The copy is a plugin of its own, under the script's id and name, that plays this version of the script in any CLAP host (it reads no library), written to <folder>/<plugin name>.clap (default: the script's folder, under export/) with the licenses to ship beside it (notices). It runs on this platform, as fast as the player it copies (a debug build's is slow). format source: a C++ project of the plugin template that builds the same plugin (same id, parameters and state) as CLAP, VST3 and AU on any platform, the script compiled as C++, written to the empty <folder> (default: the script's folder, under export/<script>-source); its README says how to build it, and license (MIT unless GPL-3.0-or-later) is the license of its own files. Export again after changing the script; an export does not follow the library. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "dsp_export_args",
@@ -286,10 +286,20 @@
           "minLength": 1,
           "description": "a name from dsp.list"
         },
+        "format": {
+          "type": "string",
+          "enum": ["clap", "source"],
+          "description": "clap (default): a plugin file; source: a C++ project"
+        },
         "folder": {
           "type": "string",
           "minLength": 1,
-          "description": "an absolute folder to write to (~/.clap installs it for this user); default <library>/<script>/export"
+          "description": "an absolute folder to write to (for clap, ~/.clap installs it for this user); for source, empty or new"
+        },
+        "license": {
+          "type": "string",
+          "enum": ["MIT", "GPL-3.0-or-later"],
+          "description": "source: the license of the project's own files (default MIT)"
         }
       },
       "required": ["script"],
@@ -301,7 +311,7 @@
       "properties": {
         "path": {
           "type": "string",
-          "description": "the plugin file"
+          "description": "the plugin file, or the project's folder"
         },
         "id": {
           "type": "string"
@@ -311,11 +321,11 @@
         },
         "format": {
           "type": "string",
-          "description": "clap"
+          "description": "clap or source"
         },
         "player": {
           "type": "string",
-          "description": "the script player it was copied from"
+          "description": "clap: the script player it was copied from"
         },
         "bytes": {
           "type": "integer",
@@ -323,10 +333,10 @@
         },
         "notices": {
           "type": "string",
-          "description": "the licenses to ship with the plugin"
+          "description": "clap: the licenses to ship with the plugin"
         }
       },
-      "required": ["path", "id", "name", "format", "player", "bytes"],
+      "required": ["path", "id", "name", "format"],
       "additionalProperties": false
     },
     "annotations": {
