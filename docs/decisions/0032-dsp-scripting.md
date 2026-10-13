@@ -328,7 +328,10 @@ Where the work stands, and where it departs from the text above:
   rescan).
 - State (§7): the chunk is `PTCH` (magic, version, length, canonical
   patch). The patch holds parameters only, since scripts have no properties
-  yet. The amendment to `semantic-params-extension.md` §5 is not written.
+  yet. `semantic-params-extension.md` has the amendment to §5 (2026-10-13).
+- The compiler's API is C++ (`supple/script_compiler.hpp`,
+  `supple/script_program.hpp`); the C ABI of §2 is not written, since
+  nothing loads the compiler across a library boundary yet.
 
 ## Consequences
 

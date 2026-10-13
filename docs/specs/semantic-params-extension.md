@@ -210,3 +210,25 @@ round trip; `describe` is non-empty and ≤ 600 chars.
   `plugins/common`'s `SemanticModel` / `SemanticAdapter` (same wire formats as
   `FlatSemantic`); `semantic-conformance` exercises them with whole-document
   replaces during processing.
+
+## Amendments (2026-10-13, the patch as a state chunk)
+
+ADR-0032 §7 allows a second state layout; §5's last bullet now reads:
+the CLAP state is either the canonical patch JSON framed as in core-patch
+§4 (the stock plugins), or a plugin framework's own state followed by the
+patch as a chunk.
+
+- **The chunk.** Plugins of the template with the suite's layer (the
+  script player, its plugin-file exports and source exports;
+  `plugins/suite/semantic/include/supple/suite/semantic_layer.h`) write the
+  framework's state, then a chunk tagged `PTCH` holding the canonical patch
+  framed as in core-patch §4.
+- **Loading** reads the framework's values, then applies the chunk's
+  values by key with REPLACE semantics, so a session survives a parameter's
+  CLAP id changing and keeps the patch's name, author, tags and notes. A key
+  the plugin no longer has is skipped there, not refused: a session must
+  load. A state without the chunk loads by id alone.
+- **Hosts** read and set a plugin's patch with `get_patch` and `set_patch`,
+  never by parsing state bytes, so they need not know which layout a plugin
+  uses. §7's check that a state save and load equals the patch round trip
+  applies to both layouts.
