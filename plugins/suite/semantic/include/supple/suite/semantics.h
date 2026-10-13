@@ -106,7 +106,9 @@ class PatchCodec {
 
     // A saved patch onto a snapshot being loaded, leniently: values of keys
     // the plugin has replace the snapshot's, anything else is skipped, so a
-    // session saved before a parameter went still loads.
+    // session saved before a parameter went still loads. A snapshot value
+    // that writes the patch's own value stays as it is, exactly: a state
+    // saved and loaded saves the same bytes again.
     void restore(const json::Value& document, state::Snapshot& snapshot, Envelope& envelope) const;
 
     // Compact prose: "Tilt: Tilt +3.0 dB; Pivot 1.20 kHz", or "default

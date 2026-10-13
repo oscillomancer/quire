@@ -776,6 +776,9 @@ void PatchCodec::restore(const json::Value& doc, state::Snapshot& snapshot,
         for (const json::Member& m : params->asObject()) {
             for (size_t i = 0; i < meaning_.params.size(); ++i) {
                 if (meaning_.params[i].key != m.first || table.at(i).isOutput()) continue;
+                // The snapshot's own value when it writes this one: exact, where
+                // the patch's has been through a unit and back.
+                if (valueJson(i, snapshot.host[i]) == m.second) continue;
                 double host = 0.0;
                 if (readValue(i, m.second, "", host, ignored)) snapshot.host[i] = host;
             }

@@ -209,3 +209,26 @@ TEST_CASE("a saved patch restores leniently and frames round trip") {
     CHECK_FALSE(unframe(framed.data(), framed.size() - 1, state::fourcc("FiXt"), back));
     CHECK_FALSE(unframe(framed.data(), framed.size(), state::fourcc("Othr"), back));
 }
+
+TEST_CASE("a state's own values survive its patch exactly; the patch fills in the rest") {
+    const auto d = fixture();
+    const PatchCodec codec(*d);
+    const Envelope none;
+    int inexact = 0;
+    for (int k = 1; k < 97; ++k) {
+        state::Snapshot saved(*d);
+        saved.host[index(*d, 1)] = k / 97.0;  // normalized: dB through a position
+        saved.host[index(*d, 6)] = k / 97.0;  // a fraction written as a percent
+        const json::Value patch = codec.patch(saved, none, false);
+        state::Snapshot loaded = saved;  // what the framework's own chunk restored
+        Envelope env;
+        codec.restore(patch, loaded, env);
+        CHECK(loaded.host == saved.host);
+        // The patch alone would not have been exact for every value.
+        state::Snapshot fresh(*d);
+        codec.restore(patch, fresh, env);
+        CHECK(json::writeCanonical(codec.patch(fresh, none, false)) == json::writeCanonical(patch));
+        if (fresh.host != saved.host) ++inexact;
+    }
+    CHECK(inexact > 0);
+}
