@@ -48,6 +48,7 @@ class SemanticLayer : public plugin::Layer {
     bool getPatch(uint32_t detail, const clap_ostream_t* out) const;
     bool setPatch(uint32_t mode, const char* json, uint32_t size, const clap_ostream_t* errors);
     bool describe(uint32_t detail, const clap_ostream_t* out) const;
+    bool getFactoryPatches(const clap_ostream_t* out) const;
     void watchEditor(bool on);
     bool drawEditor(double scale, const clap_supple_pointer_input_t* input, uint32_t count,
                     const clap_ostream_t* out, const clap_ostream_t* why);

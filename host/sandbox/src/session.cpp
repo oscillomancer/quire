@@ -672,10 +672,29 @@ Result<fs::path> Session::presetSave(std::string_view id, std::string_view name,
     return path;
 }
 
-Result<std::string> Session::presetLoad(std::string_view id, std::string_view name) {
+Result<std::string> Session::presetLoad(std::string_view id, std::string_view name, bool factory) {
     auto lr = loaded(id);
     if (!lr) return std::move(lr).error();
     Loaded& l = **lr;
+    if (factory) {
+        auto patches = l.instance->factoryPatches();
+        if (!patches) return std::move(patches).error();
+        std::vector<std::string> names;
+        for (const auto& patch : patches->asArray()) {
+            const auto& candidate = patch.find("name")->asString();
+            if (candidate == name) {
+                SUPPLE_TRY(
+                    l.instance->setPatch(json::writeCanonical(patch), CLAP_SUPPLE_SET_REPLACE));
+                return l.instance->describe(true);
+            }
+            names.push_back(candidate);
+        }
+        return Error("sandbox.unknown_preset",
+                     "no factory preset '" + std::string(name) + "' for " + l.info.name, "/name",
+                     names.empty()
+                         ? "this plugin has no factory patches; use source: user for saved presets"
+                         : closestHint(name, names, "preset.list with source: factory"));
+    }
     if (!validPresetName(name))
         return Error("sandbox.preset_name", "invalid preset name '" + std::string(name) + "'",
                      "/name", "see preset.list");
@@ -720,8 +739,41 @@ Result<std::string> Session::presetLoad(std::string_view id, std::string_view na
     return std::string("loaded preset ") + std::string(name);
 }
 
-Result<std::vector<PresetInfo>> Session::presetList(std::string_view plugin) {
+Result<std::vector<PresetInfo>> Session::presetList(std::string_view plugin, bool factory) {
     std::vector<PresetInfo> out;
+    if (factory) {
+        if (plugin.empty())
+            return Error("sandbox.preset_plugin", "factory preset listing needs a plugin id",
+                         "/plugin", "provide plugin from plugin.list and source: factory");
+        host::Instance* in = nullptr;
+        for (const auto& [id, l] : instances_)
+            if (l->info.id == plugin) {
+                in = l->instance.get();
+                break;
+            }
+        std::unique_ptr<host::Instance> probe;
+        if (!in) {
+            auto info = findPlugin(plugin);
+            if (!info) return std::move(info).error();
+            auto made = host::Instance::create(*info, options_.identity);
+            if (!made) return std::move(made).error();
+            probe = std::move(*made);
+            in = probe.get();
+        }
+        auto patches = in->factoryPatches();
+        if (!patches) return std::move(patches).error();
+        for (const auto& patch : patches->asArray()) {
+            PresetInfo p;
+            p.plugin = in->info().id;
+            p.name = patch.find("name")->asString();
+            p.readOnly = true;
+            if (const auto* tags = patch.find("tags"); tags && tags->isArray())
+                for (const auto& t : tags->asArray())
+                    if (t.isString()) p.tags.push_back(t.asString());
+            out.push_back(std::move(p));
+        }
+        return out;
+    }
     std::error_code ec;
     if (!fs::is_directory(options_.presetDir, ec)) return out;
     for (const auto& dir : fs::directory_iterator(options_.presetDir, ec)) {

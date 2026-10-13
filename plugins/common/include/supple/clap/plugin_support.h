@@ -145,7 +145,8 @@ class FlatSemantic {
             },
             HasTelemetry ? +[](const clap_plugin_t* p,
                                const clap_ostream_t* o) { return R(p)->getTelemetry(o); }
-                         : nullptr};
+                         : nullptr,
+            nullptr};
         return &ext;
     }
 

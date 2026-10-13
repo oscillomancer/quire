@@ -83,6 +83,9 @@ patch says `"gain": -3`), exactly as with the stock plugins.
 | `toggle(name, def)` | on or off; read `.on()` |
 | `continuous(name, min, max, def, Unit::...)` | anything else: `Unit::Bpm`, `Unit::Samples`, or no unit (`Unit::None`, the default) |
 
+**Factory patches use patch values:** a percent is **30**, as the patch
+shows it, even though the audio code reads that parameter as **0.3**.
+
 Modifiers chain: `decibels("Output", -24, 12, 0).smoothed(20).help("...")`.
 
 | Modifier | Effect |
@@ -101,6 +104,28 @@ Modifiers chain: `decibels("Output", -24, 12, 0).smoothed(20).help("...")`.
 Reading: a `Param` reads as a `double` in its unit (`gain * 0.5`), with
 `.value()`, `.at(i)` (the glide at frame `i`), `.index()`, `.on()`,
 `.gain()` (dB as linear gain) and, in `update()`, `.changed()`.
+
+**Factory patches.** Add a declaration-only hook inside the plugin struct:
+
+```cpp
+void factoryPatches(Patches& p) {
+    p.add("Flat").set(tilt, 0).set(pivot, 1000).set(output, 0);
+    p.add("Warm").set(tilt, -3).set(pivot, 800).set(output, 0);
+    p.add("Air").set(tilt, 3).set(pivot, 2500).set(output, -1);
+}
+```
+
+These are the tilt example's three patches. Each statement starts with
+`p.add("Name")`, followed by zero or more `.set(ParamMember, value)` calls.
+Names are unique, nonempty, at most 64 bytes; values are constants in patch
+units, bools, or choice keys (`.set(shape, "soft")`). The compiler checks
+ranges and rejects readonly meters, duplicate assignments, unknown members
+and choices. Omitted parameters take defaults. Use the Param member, not a
+quoted key; `withKey()` still controls its serialized key. No loops,
+branches, locals or other calls belong here, and other hooks cannot call
+`factoryPatches()`. It is metadata, never audio code. Patches stay in this
+one file and reach the player, plugin exports and native source exports;
+no sidecar or separate preset table is needed.
 
 **Keys and IDs.** A parameter's patch key is its member's name in
 snake_case (`lowCut` is `low_cut`), and its CLAP id is a hash of the key.

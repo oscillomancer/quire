@@ -61,6 +61,10 @@ typedef struct clap_plugin_supple_semantic_params {
      * struct_size through this member AND this pointer before calling it.
      * NULL means no telemetry; false means unavailable or stream failure. */
     bool(CLAP_ABI* get_telemetry)(const clap_plugin_t* plugin, const clap_ostream_t* out);
+    /* [main-thread] Optional supple.factory-patches/1.0 JSON: read-only
+     * canonical patches. Check struct_size through this member and pointer.
+     * NULL means no factory patches; false means stream/report failure. */
+    bool(CLAP_ABI* get_factory_patches)(const clap_plugin_t* plugin, const clap_ostream_t* out);
 } clap_plugin_supple_semantic_params_t;
 
 enum {

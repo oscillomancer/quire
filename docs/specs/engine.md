@@ -521,7 +521,18 @@ first use, and no plug-in code runs early to warm it.
 Protocol 12 appends a main-thread `PluginStatus` query to the existing
 control plane, with no shared-memory change. It forwards the generic
 [plugin-status extension](plugin-status-extension.md) for shared and
-dedicated instances. The version subscription now negotiates 12.
+dedicated instances. Protocol 13 appends `FactoryPatches` after it (no
+payload, canonical JSON patch array string reply); the version subscription
+now negotiates 13. Earlier operation numbers and the data plane stay unchanged.
+
+`fx.patch.list {fx}` lists read-only factory patch documents as `patches`
+in declaration order (empty if unsupported). `fx.patch.set` takes exactly
+one of `patch` or factory `name`, using the existing validated replacement
+path and undo transaction. Omitted parameters take defaults. Names are
+case-sensitive; unknown names fail with `fx.unknown_factory_patch` at
+`/name` and a hint listing available names; missing/both inputs fail with
+`fx.patch_args`. Listing uses the live instance when present, otherwise a
+scratch instance. It never changes the plugin or writes preset files.
 
 `fx.describe` returns `status_available` in both summary and full modes.
 When a live instance supports the extension it also returns `problems`,

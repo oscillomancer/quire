@@ -76,6 +76,7 @@ TEST_CASE("dsp.test measures a script through the player and names what goes wro
     write("boost",
           script("Boost", "com.example.boost",
                  "    Param gain = decibels(\"Gain\", -12, 12, 6);\n"
+                 "    void factoryPatches(Patches& p) { p.add(\"Unity\").set(gain, 0); }\n"
                  "    void process(Block& io) {\n"
                  "        for (int c = 0; c < io.channels; ++c)\n"
                  "            for (int i = 0; i < io.frames; ++i) io[c][i] *= gain.gain();\n"
@@ -93,6 +94,15 @@ TEST_CASE("dsp.test measures a script through the player and names what goes wro
     auto described = call("plugin.describe", inspect);
     CHECK(described["status_available"].asBool());
     CHECK(described["problems"].size() == 0);
+    auto factories = call(
+        "preset.list", json::parse(R"({"plugin":"com.example.boost","source":"factory"})").value());
+    REQUIRE(factories["presets"].size() == 1);
+    CHECK(factories["presets"].at(0).find("read_only")->asBool());
+    auto load = inspect;
+    load["name"] = "Unity";
+    load["source"] = "factory";
+    call("preset.load", std::move(load));
+    CHECK(call("patch.get", inspect)["patch"]["params"]["gain"].asDouble() == 0.0);
     const json::Value& sine = boost["signals"].at(0);
     CHECK(sine.find("signal")->asString() == "sine");
     CHECK(sine.find("gain_db")->asDouble() == doctest::Approx(6.0).epsilon(0.002));

@@ -155,6 +155,15 @@ class EditorBuilder {
     ~EditorBuilder() = default;
 };
 
+// Only used while a native plugin's metadata is collected, never by hooks.
+class PatchBuilder {
+  public:
+    virtual void add(const char* name) = 0;
+    virtual void set(const Param& param, double physical) = 0;
+    virtual void set(const Param& param, const char* choiceKey) = 0;
+    virtual ~PatchBuilder() = default;
+};
+
 // One running plugin instance as the runtime sees it. The plugin struct's
 // Plugin base points here; built-in objects reach it through current().
 struct Instance {

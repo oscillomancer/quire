@@ -161,6 +161,7 @@ class Sema {
     void evaluateInfo(FieldDecl* f);
     void evaluateParam(FieldDecl* f);
     void evaluateFile(FieldDecl* f);
+    void evaluatePatches(FunctionDecl* f);
     void buildConstruction();
     void initialValues(const Type* type, int base, Expr* init, StructDecl* scope);
     void contexts();

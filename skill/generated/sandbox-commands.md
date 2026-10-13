@@ -2220,9 +2220,9 @@ Result:
 
 ## `preset.list@1`
 
-List saved presets, optionally for one plugin id.
+List user presets, or a plugin's read-only factory patches.
 
-
+source: user (default) lists saved presets. source: factory requires plugin and lists its immutable factory patches in declaration order.
 
 Kind: `query`. Exposure: `mcp-tool`.
 
@@ -2231,6 +2231,7 @@ Kind: `query`. Exposure: `mcp-tool`.
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
 | `plugin` | string |  |  |  |  |
+| `source` | string |  |  | "user" |  |
 
 ### Result
 
@@ -2256,6 +2257,9 @@ Kind: `query`. Exposure: `mcp-tool`.
             "items": {
               "type": "string"
             }
+          },
+          "read_only": {
+            "type": "boolean"
           }
         },
         "required": ["plugin", "name", "tags"],
@@ -2299,7 +2303,7 @@ Result:
 
 Load a named preset into an instance.
 
-The preset must belong to the instance's plugin (see preset.list).
+The preset must belong to the instance's plugin (see preset.list). source: factory applies a read-only factory patch; user (default) loads a saved preset.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -2309,6 +2313,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | --- | --- | --- | --- | --- | --- |
 | `instance` | string |  |  |  | Instance id from plugin.load, e.g. "in_1". |
 | `name` | string |  |  |  |  |
+| `source` | string |  |  | "user" |  |
 
 ### Result
 

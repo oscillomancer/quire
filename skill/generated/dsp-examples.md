@@ -53,6 +53,12 @@ struct Tilt : Effect {
     Param pivot = frequency("Pivot", 200, 5000, 1000).help("Where the two shelves meet.");
     Param output = decibels("Output", -12, 12, 0).smoothed(20);
 
+    void factoryPatches(Patches& p) {
+        p.add("Flat").set(tilt, 0).set(pivot, 1000).set(output, 0);
+        p.add("Warm").set(tilt, -3).set(pivot, 800).set(output, 0);
+        p.add("Air").set(tilt, 3).set(pivot, 2500).set(output, -1);
+    }
+
     Array<Biquad, 2> low, high;
 
     void update() {
@@ -131,6 +137,12 @@ struct Echo : Effect {
     Param feedback = percent("Feedback", 40, 0, 95).help("How much of each repeat returns.");
     Param mix = percent("Mix", 30).help("Dry to wet.");
 
+    void factoryPatches(Patches& p) {
+        p.add("Dry").set(mix, 0);
+        p.add("Slap").set(time, 80).set(feedback, 10).set(mix, 15);
+        p.add("Spacious").set(time, 500).set(feedback, 45).set(mix, 25);
+    }
+
     Array<DelayLine, 2> lines;
 
     void prepare() {
@@ -180,6 +192,12 @@ struct Drive : Effect {
     Param shape = choice("Shape", {"Soft", "Hard", "Fold"}, 0);
     Param tone = frequency("Tone", 500, 18000, 8000).help("Low-pass after the shaper.");
     Param mix = percent("Mix", 100);
+
+    void factoryPatches(Patches& p) {
+        p.add("Gentle warmth").set(drive, 6).set(shape, "soft").set(tone, 12000).set(mix, 100);
+        p.add("Parallel crunch").set(drive, 18).set(shape, "hard").set(tone, 6000).set(mix, 35);
+        p.add("Folded texture").set(drive, 24).set(shape, "fold").set(tone, 4000).set(mix, 50);
+    }
 
     Array<OnePole, 2> filters;
     Array<Oversampler, 2> over;

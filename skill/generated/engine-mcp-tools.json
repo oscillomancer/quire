@@ -3116,6 +3116,37 @@
     }
   },
   {
+    "name": "fx_patch_list",
+    "title": "List an instance's read-only factory patches, by name.",
+    "description": "List an instance's read-only factory patches, by name.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_patch_list_args",
+      "properties": {
+        "fx": {
+          "type": "string",
+          "pattern": "^fx_[0-9]+$"
+        }
+      },
+      "required": ["fx"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "fx_patch_list_result",
+      "properties": {
+        "patches": {}
+      },
+      "required": ["patches"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "fx_patch_merge",
     "title": "Merge a partial patch into a plugin instance; returns the effective change.",
     "description": "Merge a partial patch into a plugin instance; returns the effective change. Semantic plugins only. Values in physical units: {\"params\": {\"gain\": \"-6 dB\"}}. See describe for errors and examples.",
@@ -3153,8 +3184,8 @@
   },
   {
     "name": "fx_patch_set",
-    "title": "Replace a semantic plugin's complete patch.",
-    "description": "Replace a semantic plugin's complete patch.  See describe for errors and examples.",
+    "title": "Replace a semantic patch, or apply a factory patch by name.",
+    "description": "Replace a semantic patch, or apply a factory patch by name. Give exactly one of patch or name. Factory names come from fx.patch.list; omitted parameters take defaults. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "fx_patch_set_args",
@@ -3163,9 +3194,14 @@
           "type": "string",
           "pattern": "^fx_[0-9]+$"
         },
-        "patch": {}
+        "patch": {},
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
       },
-      "required": ["fx", "patch"],
+      "required": ["fx"],
       "additionalProperties": false
     },
     "outputSchema": {

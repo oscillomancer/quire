@@ -18,6 +18,7 @@ set(PRODUCT_COPYRIGHT   "Copyright (c) 2026 Supple Audio")
 # What its plugins are is decided when it runs. The kind and layouts below
 # are those of the script host-smoke tests (test/library/smoke).
 set(PRODUCT_RUNTIME     ON)
+set(PRODUCT_PRESETS     ON)
 set(PRODUCT_KIND        "effect")
 set(PRODUCT_CHANNELS    2 1)
 set(PRODUCT_FEATURES    "utility")

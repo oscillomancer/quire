@@ -24,6 +24,7 @@
 #include <cctype>
 #include <cstddef>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -85,12 +86,20 @@ class NativeCode final : public Code {
         for (const auto& [member, bytes] : collector.shared)
             shared_.push_back(SharedModel{
                 {}, static_cast<int>(static_cast<const unsigned char*>(member) - base), bytes});
+        if constexpr (requires(T& t, Patches& p) { t.factoryPatches(p); }) {
+            FactoryCollector builder(params_, collector.params, factoryPatches_);
+            Patches patches(builder);
+            probe->factoryPatches(patches);
+        }
     }
 
     const InfoModel& info() const override { return info_; }
     PluginKind kind() const override { return kind_; }
     const std::vector<ParamModel>& params() const override { return params_; }
     const std::vector<FileModel>& files() const override { return files_; }
+    const std::vector<FactoryPatchModel>& factoryPatches() const override {
+        return factoryPatches_;
+    }
     const std::vector<SharedModel>& shared() const override { return shared_; }
 
     void* create() const override { return new T(); }
@@ -167,6 +176,35 @@ class NativeCode final : public Code {
     }
 
   private:
+    struct FactoryCollector final : PatchBuilder {
+        const std::vector<ParamModel>& params;
+        const std::vector<const Param*>& members;
+        std::vector<FactoryPatchModel>& patches;
+        FactoryCollector(const std::vector<ParamModel>& p, const std::vector<const Param*>& m,
+                         std::vector<FactoryPatchModel>& out)
+            : params(p), members(m), patches(out) {}
+        void add(const char* name) override { patches.push_back({name ? name : "", {}}); }
+        size_t index(const Param& p) const {
+            for (size_t i = 0; i < members.size(); ++i)
+                if (members[i] == &p) return i;
+            return members.size();
+        }
+        void set(const Param& param, double physical) override {
+            if (patches.empty()) add("");
+            const size_t i = index(param);
+            patches.back().values.emplace_back(i < params.size() ? params[i].id : 0, physical);
+        }
+        void set(const Param& param, const char* key) override {
+            const size_t i = index(param);
+            double value = std::numeric_limits<double>::quiet_NaN();
+            if (i < params.size() && params[i].kind == ParamModel::Kind::Choice && key)
+                for (size_t j = 0; j < params[i].choices.size(); ++j)
+                    if (factoryChoiceKey(params[i].choices[j]) == key)
+                        value = static_cast<double>(j);
+            set(param, value);
+        }
+    };
+
     struct Collector final : ParamRegistrar {
         std::vector<const Param*> params;
         std::vector<ParamModel> models;
@@ -264,6 +302,7 @@ class NativeCode final : public Code {
     PluginKind kind_ = PluginKind::Effect;
     std::vector<ParamModel> params_;
     std::vector<FileModel> files_;
+    std::vector<FactoryPatchModel> factoryPatches_;
     std::vector<SharedModel> shared_;
 };
 

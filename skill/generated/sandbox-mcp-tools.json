@@ -1603,14 +1603,19 @@
   },
   {
     "name": "preset_list",
-    "title": "List saved presets, optionally for one plugin id.",
-    "description": "List saved presets, optionally for one plugin id.  See describe for errors and examples.",
+    "title": "List user presets, or a plugin's read-only factory patches.",
+    "description": "List user presets, or a plugin's read-only factory patches. source: user (default) lists saved presets. source: factory requires plugin and lists its immutable factory patches in declaration order. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "preset_list_args",
       "properties": {
         "plugin": {
           "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": ["user", "factory"],
+          "default": "user"
         }
       },
       "additionalProperties": false
@@ -1636,6 +1641,9 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "read_only": {
+                "type": "boolean"
               }
             },
             "required": ["plugin", "name", "tags"],
@@ -1655,7 +1663,7 @@
   {
     "name": "preset_load",
     "title": "Load a named preset into an instance.",
-    "description": "Load a named preset into an instance. The preset must belong to the instance's plugin (see preset.list). See describe for errors and examples.",
+    "description": "Load a named preset into an instance. The preset must belong to the instance's plugin (see preset.list). source: factory applies a read-only factory patch; user (default) loads a saved preset. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "preset_load_args",
@@ -1668,6 +1676,11 @@
         "name": {
           "type": "string",
           "minLength": 1
+        },
+        "source": {
+          "type": "string",
+          "enum": ["user", "factory"],
+          "default": "user"
         }
       },
       "required": ["instance", "name"],

@@ -280,6 +280,8 @@ class Instance {
     // Current problems on the main thread; null means the plugin offers no
     // status extension. Queries never consume or clear problems. Bridged too.
     Result<json::Value> pluginStatus();
+    // Canonical read-only factory patches; empty when not offered. Main thread.
+    Result<json::Value> factoryPatches();
 
     // --- the editor without a window (com.suppleaudio.editor-picture/1, in process) ---
     struct Picture {

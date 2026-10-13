@@ -21,6 +21,7 @@ using ParamModel = script::detail::ParamModel;
 using FileModel = script::detail::FileModel;
 using SharedModel = script::detail::SharedModel;
 using InfoModel = script::detail::InfoModel;
+using FactoryPatchModel = script::detail::FactoryPatchModel;
 
 struct ProgramData;
 
@@ -34,6 +35,7 @@ class Program final : public script::detail::Code {
     PluginKind kind() const override;
     const std::vector<ParamModel>& params() const override;
     const std::vector<FileModel>& files() const override;
+    const std::vector<FactoryPatchModel>& factoryPatches() const override;
     const std::vector<SharedModel>& shared() const override;
     // The plugin struct's name, as the script declares it.
     const std::string& typeName() const;

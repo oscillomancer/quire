@@ -48,6 +48,10 @@ const clap_plugin_supple_semantic_params_t kExtension = {
         return l && l->describe(detail, out);
     },
     nullptr,  // no live telemetry
+    [](const clap_plugin_t* p, const clap_ostream_t* out) {
+        const SemanticLayer* l = layerOf(p);
+        return l && l->getFactoryPatches(out);
+    },
 };
 
 static_assert(static_cast<int>(PointerInput::Kind::Leave) == CLAP_SUPPLE_POINTER_LEAVE &&
@@ -206,6 +210,33 @@ bool SemanticLayer::setPatch(uint32_t mode, const char* text, uint32_t size,
 bool SemanticLayer::describe(uint32_t detail, const clap_ostream_t* out) const {
     return codec_ && writeAll(out, codec_->describe(instance_.snapshot(),
                                                     detail == CLAP_SUPPLE_PATCH_DETAIL_CHANGED));
+}
+
+bool SemanticLayer::getFactoryPatches(const clap_ostream_t* out) const {
+    if (!codec_) return false;
+    json::Value doc = json::Value::object();
+    doc["schema"] = "supple.factory-patches/1.0";
+    json::Value patches = json::Value::array();
+    const Definition& d = *instance_.currentDefinition();
+    for (const auto& preset : d.presets()) {
+        state::Snapshot s(d);
+        s.defaultProperties();
+        for (const auto& [id, plain] : preset.values) {
+            const int i = d.params().indexOf(id);
+            if (i >= 0)
+                s.host[static_cast<size_t>(i)] =
+                    toHost(d.params().at(static_cast<size_t>(i)), plain);
+        }
+        for (const auto& [id, text] : preset.texts) {
+            const int i = d.properties().indexOf(id);
+            if (i >= 0) s.property[static_cast<size_t>(i)] = text;
+        }
+        Envelope envelope;
+        envelope.name = preset.name;
+        patches.push_back(codec_->patch(s, envelope, false));
+    }
+    doc["patches"] = std::move(patches);
+    return writeAll(out, json::writeCanonical(doc));
 }
 
 std::vector<uint8_t> SemanticLayer::saveChunk(const state::Snapshot& snapshot, state::Context) {

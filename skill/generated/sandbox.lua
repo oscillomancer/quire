@@ -229,6 +229,7 @@ q = nil
 
 ---@class Quire.preset_list_args
 ---@field plugin? string
+---@field source? "user"|"factory" (default: "user")
 
 ---@class Quire.preset_list_result
 ---@field presets table[]
@@ -236,6 +237,7 @@ q = nil
 ---@class Quire.preset_load_args
 ---@field instance string Instance id from plugin.load, e.g. "in_1".
 ---@field name string
+---@field source? "user"|"factory" (default: "user")
 
 ---@class Quire.preset_load_result
 ---@field description string
@@ -350,7 +352,7 @@ q = nil
 ---@field remove fun(args: Quire.plugin_remove_args): Quire.plugin_remove_result Remove a plugin instance from the chain.
 
 ---@class Quire.preset
----@field list fun(args?: Quire.preset_list_args): Quire.preset_list_result List saved presets, optionally for one plugin id.
+---@field list fun(args?: Quire.preset_list_args): Quire.preset_list_result List user presets, or a plugin's read-only factory patches.
 ---@field load fun(args: Quire.preset_load_args): Quire.preset_load_result Load a named preset into an instance.
 ---@field save fun(args: Quire.preset_save_args): Quire.preset_save_result Save an instance's current settings as a named preset.
 

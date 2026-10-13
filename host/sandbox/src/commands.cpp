@@ -184,15 +184,23 @@ struct PresetSaveArgs {
 struct PathResult {
     std::string path;
 };
+enum class PresetSource { User, Factory };
+auto presetSourceSchema() {
+    return schema::enumeration<PresetSource>(
+        {{PresetSource::User, "user"}, {PresetSource::Factory, "factory"}});
+}
 struct PresetLoadArgs {
     std::string instance, name;
+    PresetSource source = PresetSource::User;
 };
 struct PresetListArgs {
     std::optional<std::string> plugin;
+    PresetSource source = PresetSource::User;
 };
 struct PresetEntry {
     std::string plugin, name;
     std::vector<std::string> tags;
+    std::optional<bool> readOnly;
 };
 struct PresetListResult {
     std::vector<PresetEntry> presets;
@@ -814,11 +822,15 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
         c.kind = Kind::Edit;
         c.exposure = Exposure::McpTool;
         c.summary = "Load a named preset into an instance.";
-        c.description = "The preset must belong to the instance's plugin (see preset.list).";
+        c.description =
+            "The preset must belong to the instance's plugin (see preset.list). source: factory "
+            "applies a read-only factory patch; user (default) loads a saved preset.";
         c.tags = {"preset"};
         c.args = schema::object<PresetLoadArgs>("preset_load_args")
                      .field("instance", &PresetLoadArgs::instance, instanceField())
                      .field("name", &PresetLoadArgs::name, schema::string().minLength(1))
+                     .field("source", &PresetLoadArgs::source, presetSourceSchema())
+                     .defaultValue(PresetSource::User)
                      .build();
         c.result = schema::object<DescriptionResult>("description")
                        .field("description", &DescriptionResult::description, schema::string())
@@ -828,7 +840,7 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
         c.examples = {{"Load", obj(R"({"instance": "in_2", "name": "Quiet"})"),
                        obj(R"({"description": "<any>"})"), "synth_with_preset"}};
         c.run = [](const PresetLoadArgs& a, Context& ctx) -> Result<DescriptionResult> {
-            auto d = S(ctx).presetLoad(a.instance, a.name);
+            auto d = S(ctx).presetLoad(a.instance, a.name, a.source == PresetSource::Factory);
             if (!d) return std::move(d).error();
             return DescriptionResult{std::move(*d)};
         };
@@ -839,15 +851,21 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
         c.name = "preset.list";
         c.kind = Kind::Query;
         c.exposure = Exposure::McpTool;
-        c.summary = "List saved presets, optionally for one plugin id.";
+        c.summary = "List user presets, or a plugin's read-only factory patches.";
+        c.description =
+            "source: user (default) lists saved presets. source: factory requires plugin and lists "
+            "its immutable factory patches in declaration order.";
         c.tags = {"preset"};
         c.args = schema::object<PresetListArgs>("preset_list_args")
                      .field("plugin", &PresetListArgs::plugin, schema::string())
+                     .field("source", &PresetListArgs::source, presetSourceSchema())
+                     .defaultValue(PresetSource::User)
                      .build();
         auto entry = schema::object<PresetEntry>("preset")
                          .field("plugin", &PresetEntry::plugin, schema::string())
                          .field("name", &PresetEntry::name, schema::string())
                          .field("tags", &PresetEntry::tags, stringList())
+                         .field("read_only", &PresetEntry::readOnly, schema::boolean())
                          .build();
         c.result = schema::object<PresetListResult>("preset_list")
                        .field("presets", &PresetListResult::presets, schema::arrayOf(entry))
@@ -857,10 +875,12 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
              obj(R"({"presets": [{"plugin": ")" + F + R"(", "name": "Quiet", "tags": ["soft"]}]})"),
              "synth_with_preset"}};
         c.run = [](const PresetListArgs& a, Context& ctx) -> Result<PresetListResult> {
-            auto l = S(ctx).presetList(a.plugin.value_or(""));
+            auto l = S(ctx).presetList(a.plugin.value_or(""), a.source == PresetSource::Factory);
             if (!l) return std::move(l).error();
             PresetListResult r;
-            for (auto& p : *l) r.presets.push_back({p.plugin, p.name, p.tags});
+            for (auto& p : *l)
+                r.presets.push_back({p.plugin, p.name, p.tags,
+                                     p.readOnly ? std::optional<bool>(true) : std::nullopt});
             return r;
         };
         registry.add(std::move(c));

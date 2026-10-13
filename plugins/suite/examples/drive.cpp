@@ -23,6 +23,12 @@ struct Drive : Effect {
     Param tone = frequency("Tone", 500, 18000, 8000).help("Low-pass after the shaper.");
     Param mix = percent("Mix", 100);
 
+    void factoryPatches(Patches& p) {
+        p.add("Gentle warmth").set(drive, 6).set(shape, "soft").set(tone, 12000).set(mix, 100);
+        p.add("Parallel crunch").set(drive, 18).set(shape, "hard").set(tone, 6000).set(mix, 35);
+        p.add("Folded texture").set(drive, 24).set(shape, "fold").set(tone, 4000).set(mix, 50);
+    }
+
     Array<OnePole, 2> filters;
     Array<Oversampler, 2> over;
     Array<DelayLine, 2> dryDelay;

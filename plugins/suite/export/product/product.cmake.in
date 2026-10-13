@@ -17,6 +17,7 @@ set(PRODUCT_COPYRIGHT   "@COPYRIGHT@")
 set(PRODUCT_CODE        "@CODE@")
 
 set(PRODUCT_RUNTIME     ON)
+set(PRODUCT_PRESETS     ON)
 set(PRODUCT_KIND        "effect")
 set(PRODUCT_CHANNELS    @CHANNELS@)
 set(PRODUCT_FEATURES    "audio-effect")

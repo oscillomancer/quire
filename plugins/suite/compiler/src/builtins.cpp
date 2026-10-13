@@ -345,6 +345,9 @@ bool Builtins::isFile(const Type* t) const {
 int Builtins::pluginBaseSize() const { return static_cast<int>(sizeof(S::Plugin)); }
 
 void Builtins::addClasses() {
+    // A metadata-hook argument, never an object created by script code.
+    auto* patches = addClass("Patches", sizeof(S::Patches), alignof(S::Patches));
+    patches->declarable = false;
     Registrar r{*this};
     using L = S::detail::Layout;
 

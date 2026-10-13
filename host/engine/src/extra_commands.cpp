@@ -284,7 +284,14 @@ struct FxParamResult {
 };
 struct FxPatchSetArgs {
     std::string fx;
-    json::Value patch;
+    std::optional<json::Value> patch;
+    std::optional<std::string> name;
+};
+struct FxPatchListArgs {
+    std::string fx;
+};
+struct FxPatchListResult {
+    json::Value patches;
 };
 
 auto tapSchema() {
@@ -1932,16 +1939,46 @@ void registerExtraCommands(cmd::Registry& registry) {
         addChecked(registry, std::move(c));
     }
     {
+        Command<FxPatchListArgs, FxPatchListResult> c;
+        c.name = "fx.patch.list";
+        c.kind = Kind::Query;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "List an instance's read-only factory patches, by name.";
+        c.tags = {"fx", "patch"};
+        c.args = schema::object<FxPatchListArgs>("fx_patch_list_args")
+                     .field("fx", &FxPatchListArgs::fx, idSchema("fx"))
+                     .build();
+        c.result = schema::object<FxPatchListResult>("fx_patch_list_result")
+                       .field("patches", &FxPatchListResult::patches, schema::any())
+                       .build();
+        c.examples = {{"List factory patches", j(R"({"fx":"fx_2"})"), j(R"({"patches":[]})"),
+                       "song_with_fx"}};
+        c.run = [](const FxPatchListArgs& a, Context& ctx) -> Result<FxPatchListResult> {
+            const auto s = app(ctx).view();
+            auto id = require<model::FxInstance>(s, a.fx, "/fx");
+            if (!id) return std::move(id).error();
+            auto patches = app(ctx).fxFactoryPatches(*id, *s.fx.find(*id));
+            if (!patches) return std::move(patches).error();
+            return FxPatchListResult{std::move(*patches)};
+        };
+        addChecked(registry, std::move(c));
+    }
+    {
         Command<FxPatchSetArgs, FxPatchResult> c;
         c.name = "fx.patch.set";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary = "Replace a semantic plugin's complete patch.";
+        c.summary = "Replace a semantic patch, or apply a factory patch by name.";
+        c.description =
+            "Give exactly one of patch or name. Factory names come from fx.patch.list; omitted "
+            "parameters take defaults.";
         c.tags = {"fx", "patch"};
-        c.args = schema::object<FxPatchSetArgs>("fx_patch_set_args")
-                     .field("fx", &FxPatchSetArgs::fx, idSchema("fx"))
-                     .field("patch", &FxPatchSetArgs::patch, schema::any())
-                     .build();
+        c.args =
+            schema::object<FxPatchSetArgs>("fx_patch_set_args")
+                .field("fx", &FxPatchSetArgs::fx, idSchema("fx"))
+                .field("patch", &FxPatchSetArgs::patch, schema::any())
+                .field("name", &FxPatchSetArgs::name, schema::string().minLength(1).maxLength(64))
+                .build();
         c.result = schema::object<FxPatchResult>("fx_patch_result")
                        .field("patch", &FxPatchResult::patch, schema::any())
                        .build();
@@ -1950,10 +1987,32 @@ void registerExtraCommands(cmd::Registry& registry) {
              j(R"({"fx":"fx_2","patch":{"schema":"supple.test-gain-patch/1.0","params":{"gain":-6}}})"),
              j(R"({"patch":"<any>"})"), "song_with_fx"}};
         c.run = [](const FxPatchSetArgs& a, Context& ctx) -> Result<FxPatchResult> {
+            if (a.patch.has_value() == a.name.has_value())
+                return Error("fx.patch_args", "give exactly one of patch or name", "/patch",
+                             "provide a complete patch, or a factory name from fx.patch.list");
             const auto s = app(ctx).view();
             auto id = require<model::FxInstance>(s, a.fx, "/fx");
             if (!id) return std::move(id).error();
-            auto patch = app(ctx).mergedPatch(*s.fx.find(*id), a.patch, true);
+            json::Value document;
+            if (a.patch)
+                document = *a.patch;
+            else {
+                auto patches = app(ctx).fxFactoryPatches(*id, *s.fx.find(*id));
+                if (!patches) return std::move(patches).error();
+                std::string names;
+                for (const auto& candidate : patches->asArray()) {
+                    const auto& name = candidate.find("name")->asString();
+                    if (name == *a.name) document = candidate;
+                    names += (names.empty() ? "" : ", ") + name;
+                }
+                if (document.isNull())
+                    return Error("fx.unknown_factory_patch",
+                                 "no factory patch named '" + *a.name + "'", "/name",
+                                 names.empty()
+                                     ? "this plugin has no factory patches; provide patch instead"
+                                     : "choose a name from fx.patch.list: " + names);
+            }
+            auto patch = app(ctx).mergedPatch(*s.fx.find(*id), document, true);
             if (!patch) {
                 Error e = std::move(patch).error();
                 e.path = "/patch" + e.path;

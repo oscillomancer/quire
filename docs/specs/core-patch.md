@@ -154,6 +154,14 @@ A preset file is a patch document saved with extension `.json` under
 the plugin). The file name is the slugified `name`. Nothing else is needed:
 presets and patches are the same format.
 
+DSP scripts (ADR-0032) may embed read-only factory patches in their one
+source file through `factoryPatches(Patches&)`. The semantic-params
+extension lists them as canonical patch documents with this envelope and
+the plugin's body. They need no writable user preset file or sidecar;
+player and source exports carry the declarations with the script. Native
+host preset discovery and the template's preset bar expose the same values
+through the framework's existing preset/state mechanism.
+
 ## 7. Tests required
 
 A fixture plugin with a structured body (nested objects, an ID-keyed map of

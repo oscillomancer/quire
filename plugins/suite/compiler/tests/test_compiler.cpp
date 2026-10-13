@@ -52,6 +52,47 @@ struct Gain : Effect {
 
 }  // namespace
 
+TEST_CASE("factory patches are constant checked declarations with physical values") {
+    const auto source = [](const std::string& declarations, const std::string& extra = "") {
+        std::string s = kGain;
+        s.insert(s.find("    void update()"),
+                 extra + "    void factoryPatches(Patches& p) { " + declarations + " }\n");
+        return s;
+    };
+    CHECK(firstError(source("p.add(\"A\"); p.add(\"A\");")) == "script.patch.name");
+    CHECK(firstError(source("p.add(\"A\").set(gain, 25);")) == "script.patch.range");
+    CHECK(firstError(source("p.add(\"A\").set(gain, 1).set(gain, 2);")) ==
+          "script.patch.duplicate");
+    CHECK(firstError(source("p.add(\"A\").set(unknown, 0);")) == "script.patch.param");
+    CHECK(firstError(source("p.add(\"A\").set(p, 30);", "    Param p = percent(\"P\", 100);\n")) ==
+          "script.patch.param");
+    CHECK(firstError(source("p.add(\"A\").set(peak, 0);",
+                            "    Param peak = decibels(\"Peak\", -60, 6, -60).meter();\n")) ==
+          "script.patch.param");
+    CHECK(firstError(
+              source("p.add(\"A\").set(mode, \"wrong\");",
+                     "    Param mode = choice(\"Mode\", {\"Low Pass\", \"HighPass\"}, 0);\n")) ==
+          "script.patch.choice");
+    CHECK(firstError(source("p.add(\"A\").set(gain, gain.value());")) ==
+          "script.constant.required");
+    CHECK(firstError(source("for (int i = 0; i < 2; ++i) p.add(\"A\");")) ==
+          "script.patch.declaration");
+    CHECK(firstError(source("p.add(\"A\").set(gain, 1e308 * 1e308);")) == "script.patch.range");
+    auto good = source("p.add(\"Useful\").set(gain, -3).set(mix, 30).set(mode, \"highpass\");",
+                       "    Param mix = percent(\"Mix\", 100);\n    Param mode = choice(\"Mode\", "
+                       "{\"Low Pass\", \"HighPass\"}, 0);\n");
+    good.replace(good.find("decibels(\"Gain\", -24, 24, 0)"),
+                 std::string("decibels(\"Gain\", -24, 24, 0)").size(),
+                 "decibels(\"Gain\", -24, 24, 0).withKey(\"level\")");
+    auto compiled = compileOk(good);
+    const auto& patch = compiled.program->factoryPatches().at(0);
+    CHECK(patch.name == "Useful");
+    REQUIRE(patch.values.size() == 3);
+    CHECK(patch.values[0].first == script::detail::keyId("level"));
+    CHECK(patch.values[1].second == 30.0);
+    CHECK(patch.values[2].second == 1.0);
+}
+
 TEST_CASE("a gain script compiles and applies its gain") {
     for (bool interpret : {false, true}) {
         CAPTURE(interpret);

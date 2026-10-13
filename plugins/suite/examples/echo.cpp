@@ -9,6 +9,12 @@ struct Echo : Effect {
     Param feedback = percent("Feedback", 40, 0, 95).help("How much of each repeat returns.");
     Param mix = percent("Mix", 30).help("Dry to wet.");
 
+    void factoryPatches(Patches& p) {
+        p.add("Dry").set(mix, 0);
+        p.add("Slap").set(time, 80).set(feedback, 10).set(mix, 15);
+        p.add("Spacious").set(time, 500).set(feedback, 45).set(mix, 25);
+    }
+
     Array<DelayLine, 2> lines;
 
     void prepare() {

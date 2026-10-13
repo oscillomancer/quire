@@ -63,6 +63,9 @@ typedef struct clap_plugin_supple_semantic_params {
      * NULL for plugins without telemetry; false when unavailable or the stream
      * fails. Check struct_size through this member and its pointer first. */
     bool(CLAP_ABI *get_telemetry)(const clap_plugin_t *plugin, const clap_ostream_t *out);
+    /* [main-thread] Optional read-only supple.factory-patches/1.0 document.
+     * Check struct_size through this member and a non-null pointer first. */
+    bool(CLAP_ABI *get_factory_patches)(const clap_plugin_t *plugin, const clap_ostream_t *out);
 } clap_plugin_supple_semantic_params_t;
 ```
 
@@ -103,6 +106,23 @@ A JSON array of `supple::Error` objects:
 A `set_patch` failure caused by a stream write error returns false with an
 empty array.
 
+### 3.4 Factory patches
+
+`get_factory_patches` writes canonical JSON:
+`{"schema":"supple.factory-patches/1.0","patches":[<patch document>, ...]}`.
+Every entry is a complete patch in the plugin's own schema, including a
+unique `name` of 1..64 UTF-8 bytes. Values use the ordinary patch domains
+(physical units, enum keys and booleans); omitted parameters take defaults.
+Declaration order is preserved. The call is non-destructive, changes no
+state and returns false on stream/report failure. An empty array means no
+factory patches. The documents are read-only: applying one does not edit
+the factory table; saving a user copy remains a separate operation.
+
+The suite derives this view and the framework's `FactoryPreset` table
+from one script declaration. The framework table uses its own plain
+parameter domain (percent as a fraction); the extension converts back
+through the same patch codec as `get_patch`.
+
 ## 4. Versioning within `/1`
 
 Hosts read `struct_size` and must not call members beyond it. Plugins set it
@@ -118,6 +138,12 @@ plugins expose a null callback. A telemetry report does not change patch state.
 Gauge reports the existing analysis-report source/loudness/spectral/stereo
 fields it measures, single-point current M/S series, the 31-band live spectrum,
 and additive `live` window/hold/dropped-frame metadata. See stock-effects §9.
+
+`get_factory_patches` was appended on 2026-10-13. Calling it requires
+`struct_size >= offsetof(type, get_factory_patches) + sizeof(extension->get_factory_patches)`
+and a non-null pointer. A shorter struct or null callback offers no factory
+patches; its earlier methods remain usable. In particular, neither the
+original methods nor `get_telemetry` require the new full struct size.
 
 ## 5. Threading, real-time safety, parameter sync
 

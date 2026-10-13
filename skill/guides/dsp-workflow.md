@@ -28,6 +28,14 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
    `fx_patch_get`, `fx_patch_merge` and `fx_param_set` work in its units.
    An instrument goes first on its track, and plays the track's notes:
    `item_add {track, bar, notation: "..."}` (`guides/notation.md`).
+   `fx_patch_list {fx}` lists its read-only factory patches as canonical
+   patch documents; `fx_patch_set {fx, name: "Warm"}` applies one as a
+   complete replacement, undoable like any patch edit. Give exactly one of
+   `name` or `patch` to `fx_patch_set`. In the sandbox, use
+   `preset_list {plugin: "<id>", source: "factory"}` and
+   `preset_load {instance, name: "Warm", source: "factory"}`; listing marks
+   them `read_only: true`. User presets remain the default source and may
+   share a name with a factory patch.
 4. **Measure it.** `dsp_test {script: "tilt_eq"}` plays a
    sine, a sweep, an impulse, pink noise and silence through a fresh
    instance and reports levels, the sine's `gain_db` and `thd_percent`, the
@@ -106,6 +114,16 @@ follow the same conventions as the stock plugins:
   sentence each, `.in()` groups when there are more than five or six.
 - **Defaults that do something sensible**, and a neutral setting reachable
   (0 dB, 0% wet, a flat tilt).
+- **Useful factory patches** in `factoryPatches(Patches& p)`: a neutral
+  reference, a subtle everyday setting, and a stronger useful contrast.
+  Name the sound or use ("Warm", "Slap", "Parallel crunch"); balance output
+  levels so louder does not win by accident. For a percent write 30, as in
+  the patch. Start with the tilt, echo and drive examples. Measure each
+  patch with `dsp_test {script, patch: <the listed patch>}` and listen on
+  suitable material. They also appear in other hosts' factory discovery
+  and the preset bar. Editing factory declarations refreshes the immutable
+  preset table through a plugin restart; ordinary DSP-only edits still swap
+  in place.
 - **`.smoothed(20)`** on anything that scales the audio directly (levels,
   mix, pan), read with `.at(i)`, so automation and edits never click.
 - **A stable id**: `Info.id` is how projects find the plugin. Pick it once

@@ -506,6 +506,10 @@ struct Bridge {
                 return replyOr(instance->pluginStatus(), [](Writer& w, const json::Value& v) {
                     w.str(json::writeCompact(v));
                 });
+            case Op::FactoryPatches:
+                return replyOr(instance->factoryPatches(), [](Writer& w, const json::Value& v) {
+                    w.str(json::writeCanonical(v));
+                });
             case Op::GetPatch:
                 return replyOr(instance->getPatch(r.u8() != 0),
                                [](Writer& w, const std::string& s) { w.str(s); });

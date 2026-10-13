@@ -89,6 +89,7 @@ struct PresetInfo {
     std::string plugin, name;
     std::vector<std::string> tags;
     std::filesystem::path path;
+    bool readOnly = false;
 };
 
 class Session {
@@ -155,8 +156,9 @@ class Session {
     Result<std::filesystem::path> presetSave(std::string_view instance, std::string_view name,
                                              std::span<const std::string> tags = {},
                                              std::string_view notes = {});
-    Result<std::string> presetLoad(std::string_view instance, std::string_view name);
-    Result<std::vector<PresetInfo>> presetList(std::string_view plugin = {});
+    Result<std::string> presetLoad(std::string_view instance, std::string_view name,
+                                   bool factory = false);
+    Result<std::vector<PresetInfo>> presetList(std::string_view plugin = {}, bool factory = false);
 
     // --- rendering -------------------------------------------------------------
     Result<const RenderRecord*> render(const RenderInput& input);

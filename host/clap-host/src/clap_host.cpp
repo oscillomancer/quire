@@ -1490,6 +1490,45 @@ Result<json::Value> Instance::pluginStatus() {
     return *doc;
 }
 
+Result<json::Value> Instance::factoryPatches() {
+    if (remote_) {
+        auto text = remote_->text(bridge::Op::FactoryPatches);
+        if (!text) return std::move(text).error();
+        return json::parse(*text);
+    }
+    if (!extSemantic_ ||
+        extSemantic_->struct_size <
+            offsetof(clap_plugin_supple_semantic_params_t, get_factory_patches) +
+                sizeof(extSemantic_->get_factory_patches) ||
+        !extSemantic_->get_factory_patches)
+        return json::Value::array();
+    StringSink sink;
+    if (!extSemantic_->get_factory_patches(plugin_, &sink.stream))
+        return Error("host.factory_patches", "The plugin could not report its factory patches.", {},
+                     "Restart or replace the plugin, then list its factory patches again.");
+    auto doc = json::parse(sink.text);
+    if (!doc) return std::move(doc).error();
+    const auto* schema = doc->find("schema");
+    const auto* patches = doc->find("patches");
+    bool valid = schema && schema->isString() &&
+                 schema->asString() == "supple.factory-patches/1.0" && patches &&
+                 patches->isArray();
+    std::set<std::string> names;
+    if (valid)
+        for (const auto& patch : patches->asArray()) {
+            const auto* name = patch.find("name");
+            const auto* type = patch.find("schema");
+            valid = valid && name && name->isString() && !name->asString().empty() &&
+                    name->asString().size() <= 64 && names.insert(name->asString()).second &&
+                    type && type->isString();
+        }
+    if (!valid)
+        return Error("host.factory_patches_contract",
+                     "The plugin returned invalid factory patches.", {},
+                     "Restart or replace the plugin; it must report supple.factory-patches/1.0.");
+    return *patches;
+}
+
 Status Instance::watchEditor(bool on) {
     if (remote_ || !extPicture_)
         return Error("host.picture.unsupported",

@@ -9,6 +9,12 @@ struct Tilt : Effect {
     Param pivot = frequency("Pivot", 200, 5000, 1000).help("Where the two shelves meet.");
     Param output = decibels("Output", -12, 12, 0).smoothed(20);
 
+    void factoryPatches(Patches& p) {
+        p.add("Flat").set(tilt, 0).set(pivot, 1000).set(output, 0);
+        p.add("Warm").set(tilt, -3).set(pivot, 800).set(output, 0);
+        p.add("Air").set(tilt, 3).set(pivot, 2500).set(output, -1);
+    }
+
     Array<Biquad, 2> low, high;
 
     void update() {

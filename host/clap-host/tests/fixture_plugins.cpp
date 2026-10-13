@@ -436,6 +436,7 @@ const clap_plugin_supple_semantic_params_t kGainSemantic = {
     semGetPatch,
     semSetPatch,
     semDescribe,
+    nullptr,
     nullptr};
 
 struct GainControl {

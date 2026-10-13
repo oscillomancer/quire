@@ -221,7 +221,11 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
   like a stock plugin (`skill/guides/dsp-workflow.md`). `fx.describe` and
   the sandbox's `plugin.describe` report a live instance's loop-budget stops,
   invalid indices and failed reloads as structured problems, also through
-  isolation; unavailable status is explicit. `dsp.export` makes
+  isolation; unavailable status is explicit. Scripts declare read-only factory
+  patches with `factoryPatches(Patches&)`, checked in physical units, listed
+  and applied through `fx.patch.list` / `fx.patch.set {name}` or sandbox
+  `preset.list/load {source: "factory"}`. The same patches populate the
+  native preset bar and discovery in player and source exports. `dsp.export` makes
   a script a CLAP plugin for any host (a copy of the player with the script
   appended, which offers that one plugin), or a C++ project of the plugin
   template that builds the same plugin, bit for bit, with the script

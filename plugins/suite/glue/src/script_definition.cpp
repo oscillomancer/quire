@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Supple Audio
 #include "supple/suite/script_definition.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace supple::suite {
@@ -117,6 +118,13 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
     info.sidechain = i.sidechain;
     info.auxOutputs = i.outputs;
     info.voices = i.voices;
+    info.presets = !code->factoryPatches().empty();
+    if (const auto found =
+            script::detail::factoryPatchProblems(code->params(), code->factoryPatches());
+        !found.empty()) {
+        if (problems) *problems = found;
+        return nullptr;
+    }
     // Every CLAP note expression reaches an instrument's voices.
     if (info.instrument()) info.noteExpressions = 0x7F;
 
@@ -144,9 +152,21 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
         files.add(p);
         meaning.properties.push_back({m.key});
     }
+    std::vector<FactoryPreset> presets;
+    for (const auto& patch : code->factoryPatches()) {
+        FactoryPreset preset;
+        preset.name = patch.name;
+        for (const auto& [id, physical] : patch.values) {
+            const auto p = std::find_if(code->params().begin(), code->params().end(),
+                                        [id](const ParamModel& m) { return m.id == id; });
+            preset.values.emplace_back(
+                id, physical * (p->unit == ParamModel::Unit::Percent ? 0.01 : 1.0));
+        }
+        presets.push_back(std::move(preset));
+    }
     auto definition = std::make_shared<const ScriptDefinition>(
         std::move(info), b.build(), files.build(), std::move(meaning), std::move(code),
-        std::move(file), std::move(source));
+        std::move(file), std::move(source), std::move(presets));
     std::string found = definition->problems();
     if (found.empty()) found = meaningProblems(*definition, definition->meaning());
     if (!found.empty()) {
@@ -157,6 +177,13 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
 }
 
 bool sameShape(const Definition& a, const Definition& b) {
+    // The framework's preset table is immutable; patch edits need redefinition.
+    if (a.info().presets != b.info().presets || a.presets().size() != b.presets().size())
+        return false;
+    for (size_t i = 0; i < a.presets().size(); ++i)
+        if (a.presets()[i].name != b.presets()[i].name ||
+            a.presets()[i].values != b.presets()[i].values)
+            return false;
     const PluginInfo &x = a.info(), &y = b.info();
     if (x.id != y.id || x.name != y.name || x.kind != y.kind || x.layouts != y.layouts ||
         x.sidechain != y.sidechain || x.auxOutputs != y.auxOutputs || x.voices != y.voices ||

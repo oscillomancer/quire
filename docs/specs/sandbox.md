@@ -123,11 +123,11 @@ publication (or overflow) notifies after updating its queue/counter. The engine
 app subscribes persistent instances and probes to its one relay and includes
 all local subscriptions in its service deadline/FD snapshot (ADR-0030).
 
-### Bridge notifications (protocol v12; notification design ADR-0031)
+### Bridge notifications (protocol v13; notification design ADR-0031)
 
 Before Create, the parent sends process-level `SubscribeNotifications` with
 instance id 0, exactly one dedicated nonblocking eventfd via SCM_RIGHTS, and
-`u32 version = 12`; the reply is `u32 version = 12`. The descriptor is checked
+`u32 version = 13`; the reply is `u32 version = 13`. The descriptor is checked
 for eventfd type, read/write access and O_NONBLOCK; received copies are CLOEXEC.
 Missing, wrong-type, extra or duplicate descriptors, duplicate subscriptions,
 wrong versions/instance ids and trailing payloads are rejected with structured
@@ -138,6 +138,10 @@ SubscribeNotifications and AckNotifications are appended after TakeIdleOutputs.
 Protocol 12 appends the main-thread `PluginStatus` query after it (no payload,
 one JSON string reply); the data plane and earlier operation numbers are
 unchanged. See [plugin-status](plugin-status-extension.md).
+Protocol 13 appends `FactoryPatches` after `PluginStatus`: no payload,
+one JSON string reply containing the canonical patch array, empty when
+unsupported. See semantic-params §3.4. Existing operations and data-plane
+layout remain unchanged.
 It requires an established subscription. Replies never carry unsolicited fds
 or asynchronous notification frames. Scan-only mode is unaffected.
 
@@ -257,8 +261,8 @@ within −120 dBFS for the stock test synth).
 | `patch.set` | edit | `instance`, `patch` (complete) | `description` |
 | `patch.merge` | edit | `instance`, `patch` (RFC 7396 merge patch) | `changed` (the effective diff), `description` |
 | `preset.save` | action | `instance`, `name`, `tags?`, `notes?` | `path` |
-| `preset.load` | edit | `instance`, `name` | `description` |
-| `preset.list` | query | `plugin?` | `presets: [{plugin, name, tags}]` |
+| `preset.load` | edit | `instance`, `name`, `source?` (`user` default / `factory`) | `description` |
+| `preset.list` | query | `plugin?`, `source?` (`user` default / `factory`) | `presets: [{plugin, name, tags, read_only?}]` |
 | `render` | action | one of `notation`, `midi_file`, `audio_file`; `bars?`/`seconds?`; `tempo?`; `tail_s?`; `name?`; `analyze?` (`none`/`summary`/`standard`/`full`) | `render` (id), `path`, `seconds`, `peak_dbfs`, `analysis?` |
 | `analyze` | query | `render` or `file`, `detail`, `note_off_s?` | `report` |
 | `compare` | query | `reference` (render/file), `test` (render/file), `reference_note_off_s?`, `test_note_off_s?` | `deltas` (notable first), `ltas_rms_db`, `summary` (prose), `loss` (the optimizer's score: `total`, `terms`, `note_off_s`) |
@@ -294,6 +298,17 @@ also emit `sandbox.savepoint_failed` with the same structured error fields.
 Preset documents accept `supple.preset/1.0` (optional numeric `version: 1`).
 An absent schema is legacy; unknown/newer schemas or explicit versions fail
 with `sandbox.preset_schema` or `sandbox.preset_version` before state changes.
+
+Factory listing requires `plugin` and reads the semantic-params factory
+patches (from a loaded instance of that ID, or a temporary instance).
+Entries retain declaration order and have `read_only: true`. Factory loads
+use case-sensitive names and apply the canonical patch with REPLACE
+semantics, including defaults for omitted parameters. No user file is read
+or written. `preset.save` still writes user presets only, so a user copy
+may share a factory name; `source` disambiguates them. User listing/loading
+and its file-name restrictions are unchanged. Unknown factory names use
+`sandbox.unknown_preset` at `/name` with an available-name hint; missing
+`plugin` for factory listing uses `sandbox.preset_plugin` at `/plugin`.
 Semantic schema entries require a numeric id, name, recognized type and the
 range/choices for that type; their ID set must match `clap.params`. Invalid
 schemas warn and fall back to plain CLAP parameters. `param.get` and

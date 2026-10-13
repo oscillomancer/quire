@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace supple::script::detail {
@@ -87,6 +88,18 @@ struct InfoModel {
     int voices = 0, latency = 0, tail = 0;
 };
 
+// Parameter values in patch/physical units, keyed by the permanent CLAP id.
+// Omitted parameters take their defaults when the patch is applied.
+struct FactoryPatchModel {
+    std::string name;
+    std::vector<std::pair<std::uint32_t, double>> values;
+    bool operator==(const FactoryPatchModel&) const = default;
+};
+
+std::string factoryPatchProblems(const std::vector<ParamModel>& params,
+                                 const std::vector<FactoryPatchModel>& patches);
+std::string factoryChoiceKey(std::string_view label);
+
 // A parameter's CLAP id from its key (FNV-1a), stable however the members
 // are ordered; never CLAP's invalid id, never 0.
 inline std::uint32_t keyId(std::string_view key) {
@@ -125,6 +138,7 @@ class Code {
     // In declaration order.
     virtual const std::vector<ParamModel>& params() const = 0;
     virtual const std::vector<FileModel>& files() const = 0;
+    virtual const std::vector<FactoryPatchModel>& factoryPatches() const = 0;
     // In declaration order.
     virtual const std::vector<SharedModel>& shared() const = 0;
 

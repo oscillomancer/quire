@@ -388,6 +388,7 @@ void sameDescription(const char* file,
     const scriptc::Program& jit = *result.program;
     const bool withKeys = !keys.empty();
     const script::detail::NativeCode<T> native(std::move(keys));
+    CHECK(native.factoryPatches() == jit.factoryPatches());
     CHECK(native.kind() == jit.kind());
     const auto &a = jit.info(), &b = native.info();
     CHECK(a.name == b.name);

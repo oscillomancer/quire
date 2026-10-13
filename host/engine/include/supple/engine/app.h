@@ -191,6 +191,7 @@ class EngineApp : public cmd::Host {
     MediaCache& media() { return media_; }
     // The plugin's semantic schema (null for plugins without the extension).
     Result<json::Value> fxSchema(const model::FxInstance& fx);
+    Result<json::Value> fxFactoryPatches(model::Id id, const model::FxInstance& fx);
     // The plugin's CLAP parameters (from a scratch instance).
     Result<std::vector<host::ParamInfo>> fxParams(const model::FxInstance& fx);
     Result<std::uint32_t> fxSidechainChannels(const model::FxInstance& fx);  // 0: no key input

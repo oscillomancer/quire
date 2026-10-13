@@ -100,6 +100,10 @@ void Sema::run() {
     for (FunctionDecl* f : out_.functions) signature(f);
     extractPlugin();
     if (diags_.hasErrors()) return;
+    // Metadata is checked above and never emitted as executable script code.
+    std::erase_if(out_.functions, [&](FunctionDecl* f) {
+        return f->owner == out_.plugin.decl && f->name == "factoryPatches";
+    });
     for (FunctionDecl* f : out_.functions) checkFunction(f);
     if (diags_.hasErrors()) return;
     contexts();
@@ -1434,7 +1438,12 @@ void Sema::extractPlugin() {
             return ok;
         };
         const bool isVoid = f->resultType.type && f->resultType.type->isVoid();
-        if (n == "prepare") {
+        if (n == "factoryPatches") {
+            const bool ok = isVoid && !f->isConst && f->params.size() == 1 &&
+                            f->params[0]->qt.type == b_.cls("Patches")->type &&
+                            f->params[0]->qt.isRef && !f->params[0]->qt.isConst;
+            if (expectSignature(ok, "void factoryPatches(Patches& p)")) evaluatePatches(f);
+        } else if (n == "prepare") {
             if (expectSignature(isVoid && f->params.empty() && !f->isConst, "void prepare()"))
                 p.prepare = f;
         } else if (n == "update") {
@@ -1539,6 +1548,125 @@ void Sema::extractPlugin() {
               p.kind == PluginKind::Effect
                   ? "io[channel][frame] holds the input; write the output in place"
                   : "write the output into io[channel][frame] (it arrives silent)");
+}
+
+void Sema::evaluatePatches(FunctionDecl* f) {
+    const auto syntax = [&](Loc loc) {
+        error(
+            loc, "script.patch.declaration", "factoryPatches() contains only patch declarations",
+            "write p.add(\"Name\").set(parameter, physicalValue); with constant names and values");
+    };
+    if (!f->body || f->body->kind != StmtKind::Compound) {
+        syntax(f->loc);
+        return;
+    }
+    // Constant expressions obey the hook's C++ scope too: its builder
+    // argument may hide a member/constant of the same name.
+    auto savedScopes = std::move(scopes_);
+    auto* savedFn = fn_;
+    auto* savedSelf = self_;
+    fn_ = f;
+    self_ = f->owner;
+    scopes_.emplace_back();
+    declareLocal(f->params[0]);
+    std::set<std::string> names;
+    for (Stmt* stmt : static_cast<CompoundStmt*>(f->body)->body) {
+        if (stmt->kind != StmtKind::Expr) {
+            syntax(stmt->loc);
+            continue;
+        }
+        Expr* e = static_cast<ExprStmt*>(stmt)->expr;
+        std::vector<CallExpr*> chain;
+        while (e && e->kind == ExprKind::Call) {
+            auto* call = static_cast<CallExpr*>(e);
+            if (call->callee->kind != ExprKind::Member) break;
+            chain.push_back(call);
+            e = static_cast<MemberExpr*>(call->callee)->object;
+        }
+        if (!e || e->kind != ExprKind::Name ||
+            static_cast<NameExpr*>(e)->path != std::vector<std::string>{f->params[0]->name} ||
+            chain.empty()) {
+            syntax(stmt->loc);
+            continue;
+        }
+        std::reverse(chain.begin(), chain.end());
+        auto* add = chain.front();
+        if (static_cast<MemberExpr*>(add->callee)->member != "add" || add->args.size() != 1) {
+            syntax(add->loc);
+            continue;
+        }
+        auto name = evaluate(add->args[0], out_.plugin.decl);
+        if (!name || name->kind != Constant::Kind::String) {
+            syntax(add->loc);
+            continue;
+        }
+        FactoryPatchModel patch;
+        patch.name = name->stringValue;
+        if (patch.name.empty() || patch.name.size() > 64 ||
+            patch.name.find('\0') != std::string::npos || !names.insert(patch.name).second)
+            error(add->loc, "script.patch.name",
+                  "factory patch names must be unique, nonempty and at most 64 bytes",
+                  "give each patch a distinct short name");
+        std::set<uint32_t> assigned;
+        for (size_t i = 1; i < chain.size(); ++i) {
+            auto* set = chain[i];
+            if (static_cast<MemberExpr*>(set->callee)->member != "set" || set->args.size() != 2 ||
+                set->args[0]->kind != ExprKind::Name) {
+                syntax(set->loc);
+                continue;
+            }
+            const auto& path = static_cast<NameExpr*>(set->args[0])->path;
+            auto p = std::find_if(
+                out_.plugin.params.begin(), out_.plugin.params.end(),
+                [&](const ParamModel& m) { return path == std::vector<std::string>{m.member}; });
+            if (p == out_.plugin.params.end() || p->output ||
+                path == std::vector<std::string>{f->params[0]->name}) {
+                error(set->args[0]->loc, "script.patch.param",
+                      "a factory patch sets a writable Param member",
+                      "use a Param member of this plugin, not a meter or a text key");
+                continue;
+            }
+            if (!assigned.insert(p->id).second)
+                error(set->loc, "script.patch.duplicate",
+                      "a factory patch sets '" + p->key + "' twice",
+                      "keep one .set() for each parameter in this patch");
+            auto value = evaluate(set->args[1], out_.plugin.decl);
+            if (!value) continue;
+            double physical = 0;
+            if (value->kind == Constant::Kind::String && p->kind == ParamModel::Kind::Choice) {
+                auto choice = std::find_if(
+                    p->choices.begin(), p->choices.end(), [&](const std::string& label) {
+                        return script::detail::factoryChoiceKey(label) == value->stringValue;
+                    });
+                if (choice == p->choices.end()) {
+                    error(set->loc, "script.patch.choice",
+                          "unknown choice key '" + value->stringValue + "'",
+                          "use a choice key as shown in the parameter's patch schema");
+                    continue;
+                }
+                physical = static_cast<double>(choice - p->choices.begin());
+            } else if (value->numeric()) {
+                physical = value->asDouble();
+            } else {
+                error(set->loc, "script.patch.value",
+                      "a factory patch value is a constant physical number, boolean or choice key",
+                      "write a number in the parameter's unit, a bool, or a choice key in quotes");
+                continue;
+            }
+            if (!std::isfinite(physical) || physical < p->min || physical > p->max ||
+                (p->kind != ParamModel::Kind::Continuous && physical != std::floor(physical)))
+                error(
+                    set->loc, "script.patch.range",
+                    "factory patch value for '" + p->key +
+                        "' is outside its range or not a whole step",
+                    "use a value in the Param's declared physical range (percent as 30, not 0.3)");
+            patch.values.emplace_back(p->id, physical);
+        }
+        out_.plugin.factoryPatches.push_back(std::move(patch));
+    }
+    scopes_ = std::move(savedScopes);
+    fn_ = savedFn;
+    self_ = savedSelf;
 }
 
 void Sema::evaluateInfo(FieldDecl* f) {

@@ -20,6 +20,7 @@ struct ProgramData {
     PluginKind kind = PluginKind::None;
     std::vector<ParamModel> params;
     std::vector<FileModel> files;
+    std::vector<FactoryPatchModel> factoryPatches;
     std::vector<SharedModel> shared;
     int size = 0, align = 8;
     std::vector<ObjectSlot> objects;

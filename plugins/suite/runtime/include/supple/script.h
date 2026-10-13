@@ -359,6 +359,7 @@ struct ParamBinding;
 struct Instance;
 class Painter;
 class EditorBuilder;
+class PatchBuilder;
 }  // namespace detail
 
 // A parameter: a member of the plugin, read as a number in its unit (a
@@ -1116,6 +1117,22 @@ class Pointer {
     PointerAction action_ = PointerAction::Move;
     double x_ = 0.0, y_ = 0.0, dx_ = 0.0, dy_ = 0.0, wheel_ = 0.0;
     bool doubleClick_ = false, shift_ = false, ctrl_ = false, alt_ = false;
+};
+
+// Metadata only: factoryPatches(Patches& p) declares read-only patches.
+// Values are patch values in physical units: percent is 30, not 0.3.
+class Patches {
+  public:
+    explicit Patches(detail::PatchBuilder& builder) : builder_(&builder) {}
+    Patches& add(const char* name);
+    Patches& set(const Param& param, double physical);
+    Patches& set(const Param& param, int physical) {
+        return set(param, static_cast<double>(physical));
+    }
+    Patches& set(const Param& param, const char* choiceKey);
+
+  private:
+    detail::PatchBuilder* builder_;
 };
 
 // What editor() builds: its size (480 x 320 unless given) and its controls,

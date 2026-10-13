@@ -8,6 +8,7 @@
 // sample rate.
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <climits>
 #include <cmath>
 #include <complex>
@@ -16,6 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <new>
+#include <set>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -32,12 +34,61 @@
 #include "dsp/Oversampler.h"
 #include "dsp/Stft.h"
 #include "supple/script.h"
+#include "supple/script_code.h"
 #include "supple/script_files.h"
 #include "supple/script_runtime.h"
 
 namespace supple::script {
 
+Patches& Patches::add(const char* name) {
+    builder_->add(name);
+    return *this;
+}
+Patches& Patches::set(const Param& param, double physical) {
+    builder_->set(param, physical);
+    return *this;
+}
+Patches& Patches::set(const Param& param, const char* choiceKey) {
+    builder_->set(param, choiceKey);
+    return *this;
+}
+
 namespace detail {
+
+std::string factoryChoiceKey(std::string_view label) {
+    std::string key;
+    bool gap = false;
+    for (unsigned char c : label) {
+        if (std::isalnum(c)) {
+            if (gap && !key.empty()) key += '_';
+            gap = false;
+            key += static_cast<char>(std::tolower(c));
+        } else
+            gap = true;
+    }
+    if (!key.empty() && std::isdigit(static_cast<unsigned char>(key.front()))) key = "p" + key;
+    return key;
+}
+
+std::string factoryPatchProblems(const std::vector<ParamModel>& params,
+                                 const std::vector<FactoryPatchModel>& patches) {
+    std::set<std::string> names;
+    for (const auto& patch : patches) {
+        if (patch.name.empty() || patch.name.size() > 64 || !names.insert(patch.name).second)
+            return "factory patch names must be unique, nonempty and at most 64 bytes";
+        std::set<uint32_t> ids;
+        for (const auto& [id, value] : patch.values) {
+            auto p = std::find_if(params.begin(), params.end(),
+                                  [id](const auto& m) { return m.id == id; });
+            if (p == params.end() || p->output || !ids.insert(id).second || !std::isfinite(value) ||
+                value < p->min || value > p->max ||
+                (p->kind != ParamModel::Kind::Continuous && value != std::floor(value)))
+                return "factory patch '" + patch.name +
+                       "' sets an unknown, readonly, duplicate or invalid parameter value";
+        }
+    }
+    return {};
+}
 
 namespace {
 // Which instance each thread is running a hook of: a fixed table of

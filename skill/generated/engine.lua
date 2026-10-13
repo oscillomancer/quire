@@ -412,6 +412,12 @@ q = nil
 ---@class Quire.fx_patch_get_result
 ---@field patch any
 
+---@class Quire.fx_patch_list_args
+---@field fx string
+
+---@class Quire.fx_patch_list_result
+---@field patches any
+
 ---@class Quire.fx_patch_merge_args
 ---@field fx string Plugin instance id, e.g. "fx_1".
 ---@field patch any
@@ -422,7 +428,8 @@ q = nil
 
 ---@class Quire.fx_patch_set_args
 ---@field fx string
----@field patch any
+---@field patch? any
+---@field name? string
 
 ---@class Quire.fx_patch_set_result
 ---@field patch any
@@ -1223,8 +1230,9 @@ q = nil
 
 ---@class Quire.fx.patch
 ---@field get fun(args: Quire.fx_patch_get_args): Quire.fx_patch_get_result Read a semantic plugin's saved patch.
+---@field list fun(args: Quire.fx_patch_list_args): Quire.fx_patch_list_result List an instance's read-only factory patches, by name.
 ---@field merge fun(args: Quire.fx_patch_merge_args): Quire.fx_patch_merge_result Merge a partial patch into a plugin instance; returns the effective change.
----@field set fun(args: Quire.fx_patch_set_args): Quire.fx_patch_set_result Replace a semantic plugin's complete patch.
+---@field set fun(args: Quire.fx_patch_set_args): Quire.fx_patch_set_result Replace a semantic patch, or apply a factory patch by name.
 
 ---@class Quire.history
 ---@field list fun(): Quire.history_list_result List the current branch's recent versions (newest first).

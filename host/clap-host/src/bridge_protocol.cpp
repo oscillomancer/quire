@@ -214,6 +214,7 @@ bool validRequest(Op op, Reader r) {
         case Op::Latency:
         case Op::SemanticSchema:
         case Op::PluginStatus:
+        case Op::FactoryPatches:
         case Op::SaveState:
         case Op::Service:
         case Op::Destroy:
@@ -269,6 +270,7 @@ bool validReply(Op op, Reader r) {
         case Op::ParamText:
         case Op::SemanticSchema:
         case Op::PluginStatus:
+        case Op::FactoryPatches:
         case Op::GetPatch:
         case Op::Describe:
         case Op::SaveState:

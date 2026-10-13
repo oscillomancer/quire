@@ -39,6 +39,9 @@ struct AgentGain : Effect {
             for (int i = 0; i < io.frames; ++i)
                 io[c][i] = lerp(io[c][i], io[c][i] * dbToGain(gain.at(i)), mix);
     }
+    void factoryPatches(Patches& p) {
+        p.add("Quiet").set(gain, -9).set(mix, 30);
+    }
 };
 )";
 
@@ -74,6 +77,7 @@ struct LiveStatus : Effect {
     void process(Block& io) {
         io[0][io.frames] = 1.0;
     }
+    void factoryPatches(Patches& p) { p.add("Default"); }
 };
 )";
         REQUIRE(call("dsp.write", std::move(write))["ok"].asBool());
@@ -115,6 +119,10 @@ struct LiveStatus : Effect {
         CHECK(p.find("code")->asString() == "script.runtime.index");
         CHECK(p.find("line")->asInt() == 5);
         CHECK_FALSE(p.find("silent")->asBool());
+        // The optional semantic callback has the same view through isolation.
+        auto factories = call("fx.patch.list", args);
+        REQUIRE(factories["patches"].size() == 1);
+        CHECK(factories["patches"].at(0).find("name")->asString() == "Default");
         app->stopEngine();
     }
 }
@@ -165,6 +173,16 @@ TEST_CASE("a DSP script written over the bus is a plugin an agent sets through i
     CHECK(patch()["params"]["gain"].asDouble() == doctest::Approx(-6));
     CHECK(patch()["params"]["mix"].asDouble() == doctest::Approx(50));
     call("fx.param.set", json::parse(R"({"fx": ")" + fx + R"(", "values": {"mix": 25}})").value());
+    CHECK(patch()["params"]["mix"].asDouble() == doctest::Approx(25));
+
+    auto factory = call("fx.patch.list", json::parse(R"({"fx": ")" + fx + R"("})").value());
+    REQUIRE(factory["patches"].size() == 1);
+    CHECK(factory["patches"].at(0).find("name")->asString() == "Quiet");
+    call("fx.patch.set", json::parse(R"({"fx": ")" + fx + R"(", "name":"Quiet"})").value());
+    CHECK(patch()["params"]["gain"].asDouble() == doctest::Approx(-9));
+    CHECK(patch()["params"]["mix"].asDouble() == doctest::Approx(30));
+    call("history.undo", json::Value::object());
+    CHECK(patch()["params"]["gain"].asDouble() == doctest::Approx(-6));
     CHECK(patch()["params"]["mix"].asDouble() == doctest::Approx(25));
 
     // The harness, through the player: -6 dB fully wet halves the sine.

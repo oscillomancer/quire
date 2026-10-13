@@ -30,9 +30,9 @@ class ScriptDefinition final : public SemanticDefinition {
   public:
     ScriptDefinition(PluginInfo info, ParamTable params, PropertyList properties, Meaning meaning,
                      std::shared_ptr<const script::detail::Code> code, std::filesystem::path file,
-                     std::string source)
+                     std::string source, std::vector<FactoryPreset> presets = {})
         : SemanticDefinition(std::move(info), std::move(params), std::move(properties),
-                             std::move(meaning)),
+                             std::move(meaning), std::move(presets)),
           code_(std::move(code)),
           file_(std::move(file)),
           source_(std::move(source)) {}
@@ -55,9 +55,8 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
     std::shared_ptr<const script::detail::Code> code, std::filesystem::path file = {},
     std::string source = {}, std::string* problems = nullptr);
 
-// Whether two plugins have the same parameters, files, kinds, ranges and buses: a
-// script whose code changed but whose table did not swaps in place, without
-// the host restarting it.
+// Whether two plugins have the same parameters, files, factory patches,
+// kinds, ranges and buses: DSP-only edits swap in place without a restart.
 bool sameShape(const Definition& a, const Definition& b);
 
 // Four ASCII characters made from an ID, for the state tag.

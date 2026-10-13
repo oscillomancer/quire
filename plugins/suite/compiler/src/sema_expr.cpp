@@ -949,6 +949,16 @@ std::vector<Expr*> Sema::callArguments(CallExpr* c, const std::vector<QualType>&
 }
 
 Expr* Sema::checkCall(CallExpr* c) {
+    const auto* target = c->callee;
+    if ((target->kind == ExprKind::Name &&
+         static_cast<const NameExpr*>(target)->path.back() == "factoryPatches") ||
+        (target->kind == ExprKind::Member &&
+         static_cast<const MemberExpr*>(target)->member == "factoryPatches")) {
+        error(c->loc, "script.patch.context",
+              "factoryPatches() is metadata, not an executable hook",
+              "declare its patches once; never call factoryPatches() from script code");
+        return c;
+    }
     for (Expr*& a : c->args)
         if (a->kind != ExprKind::InitList)
             a = check(a);

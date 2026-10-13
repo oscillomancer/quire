@@ -333,6 +333,25 @@ TEST(the_state_carries_the_patch_and_restores_it) {
     CHECK(patch.find("params")->find("output")->asDouble() == -1.0);
 }
 
+TEST(factory_patches_populate_framework_presets_and_the_semantic_list) {
+    Instance tilt("com.example.tilt");
+    CHECK(tilt.semantic->get_factory_patches != nullptr);
+    Text text;
+    CHECK(tilt.semantic->get_factory_patches(tilt.plugin, &text.out));
+    const auto doc = parsed(text.text);
+    CHECK(doc.find("schema")->asString() == "supple.factory-patches/1.0");
+    CHECK(doc.find("patches")->size() == 3);
+    CHECK(doc.find("patches")->asArray()[1].find("name")->asString() == "Warm");
+    const auto* presets = static_cast<const clap_plugin_preset_load_t*>(
+        tilt.plugin->get_extension(tilt.plugin, CLAP_EXT_PRESET_LOAD));
+    CHECK(presets != nullptr);
+    if (presets)
+        CHECK(presets->from_location(tilt.plugin, CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN, nullptr,
+                                     "Warm"));
+    CHECK(parsed(tilt.patch()).find("params")->find("tilt")->asDouble() == -3.0);
+    CHECK(std::fabs(parsed(tilt.patch()).find("params")->find("pivot")->asDouble() - 800.0) < 1e-8);
+}
+
 TEST(a_changed_script_replaces_the_playing_one_in_place) {
     Library library("smoke");
     Instance a("com.suppleaudio.script-player");

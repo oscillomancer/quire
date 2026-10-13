@@ -159,6 +159,13 @@ Result<json::Value> EngineApp::fxSchema(const model::FxInstance& fx) {
     return (*in)->semanticSchema();
 }
 
+Result<json::Value> EngineApp::fxFactoryPatches(model::Id id, const model::FxInstance& fx) {
+    if (auto* live = instanceOf(id)) return live->factoryPatches();
+    auto in = scratch(fx);
+    if (!in) return std::move(in).error();
+    return (*in)->factoryPatches();
+}
+
 Result<std::vector<host::ParamInfo>> EngineApp::fxParams(const model::FxInstance& fx) {
     auto in = scratch(fx);
     if (!in) return std::move(in).error();

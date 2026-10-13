@@ -252,6 +252,22 @@ tool runs against scripts in the player and against both exports.
 
 ### Implementation notes (2026-10-12)
 
+- Factory patches, 2026-10-13: a declaration-only
+  `void factoryPatches(Patches& p)` hook declares `p.add("Name").set(param, value)`
+  chains in the script. Values are physical patch values, percent as 30;
+  keys come from Param members (including withKey). The compiler checks
+  names, writable members, constants, ranges and duplicate assignments.
+  JIT and NativeCode descriptions contain the same factory-patch model;
+  the suite derives canonical JSON and the framework's runtime preset
+  table from it. `get_factory_patches` is an optional size-checked append
+  to semantic-params `/1`; bridge protocol 13 forwards it. `fx.patch.list`
+  and `fx.patch.set {name}` expose it in the engine; sandbox `preset.list`
+  and `preset.load` select it with `source: "factory"`. Patch-table edits
+  redefine the plugin so the framework's immutable presets stay current.
+  Player exports carry the script's declarations; native source exports
+  collect them from the verbatim script without a second generated table.
+  Runtime framework presets already support this; the template is unchanged.
+
 - Live problems, 2026-10-13: the suite implements the independent generic
   `com.suppleaudio.plugin-status/1` extension (spec:
   `docs/specs/plugin-status-extension.md`). `fx.describe` and sandbox

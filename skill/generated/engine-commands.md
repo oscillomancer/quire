@@ -3923,6 +3923,55 @@ Result:
 
 ```
 
+## `fx.patch.list@1`
+
+List an instance's read-only factory patches, by name.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_patch_list_result",
+  "properties": {
+    "patches": {}
+  },
+  "required": ["patches"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**List factory patches** (`song_with_fx`)
+
+```json
+{
+  "fx": "fx_2"
+}
+
+```
+
+Result:
+
+```json
+{
+  "patches": []
+}
+
+```
+
 ## `fx.patch.merge@1`
 
 Merge a partial patch into a plugin instance; returns the effective change.
@@ -3984,9 +4033,9 @@ Result:
 
 ## `fx.patch.set@1`
 
-Replace a semantic plugin's complete patch.
+Replace a semantic patch, or apply a factory patch by name.
 
-
+Give exactly one of patch or name. Factory names come from fx.patch.list; omitted parameters take defaults.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -3996,6 +4045,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | --- | --- | --- | --- | --- | --- |
 | `fx` | string |  |  |  |  |
 | `patch` | value |  |  |  |  |
+| `name` | string |  |  |  |  |
 
 ### Result
 
