@@ -35,6 +35,9 @@ namespace ex_language {
 namespace ex_compressor {
 #include "compressor.cpp"
 }
+namespace ex_spectral {
+#include "spectral.cpp"
+}
 }  // namespace supple::script
 
 using namespace supple;
@@ -284,6 +287,35 @@ TEST_CASE("compressor: JIT, interpreter and C++ agree, with and without a key") 
                 runNative<Compressor>(settings, {}, 4800, 128, true));
 }
 
+TEST_CASE("spectral: JIT, interpreter and C++ agree") {
+    for (double mode : {0.0, 1.0, 2.0}) {
+        CAPTURE(mode);
+        differential<script::ex_spectral::Spectral>("spectral.cpp", {mode, -40.0, 1.0},
+                                                    {{30, 1, -20.0}, {50, 2, 0.6}}, 9600, 128);
+    }
+}
+
+TEST_CASE("Stft: a sine reads its amplitude, and a spectrum left alone is a delay") {
+    script::detail::Instance instance;
+    script::detail::CurrentScope scope(&instance);
+    script::Stft s;
+    s.prepare(1024, 4);
+    const int k = 64;  // 3000 Hz at 48 kHz
+    CHECK(s.binHz(k) == 3000.0);
+    std::vector<double> in(8192), out(8192);
+    double read = 0.0;
+    for (size_t n = 0; n < in.size(); ++n) {
+        in[n] = 0.5 * std::sin(6.283185307179586 * k * static_cast<double>(n) / 1024.0);
+        if (s.push(in[n])) read = s.magnitude(k);
+        out[n] = s.pull();
+    }
+    CHECK(read == doctest::Approx(0.5).epsilon(1e-9));
+    double worst = 0.0;
+    for (size_t n = 2048; n < in.size(); ++n)
+        worst = std::max(worst, std::abs(out[n] - in[n - static_cast<size_t>(s.latency())]));
+    CHECK(worst < 1e-12);
+}
+
 TEST_CASE("a script compiled as C++ describes the plugin the compiler describes") {
     using script::ex_tilt::Tilt;
     sameDescription<Tilt>(
@@ -293,6 +325,7 @@ TEST_CASE("a script compiled as C++ describes the plugin the compiler describes"
     sameDescription<script::ex_drive::Drive>("drive.cpp");
     sameDescription<script::ex_language::Tour>("language.cpp");
     sameDescription<script::ex_compressor::Compressor>("compressor.cpp");
+    sameDescription<script::ex_spectral::Spectral>("spectral.cpp");
     // Without its keys, a Param's key is its name's: "Pivot" -> pivot.
     const script::detail::NativeCode<Tilt> keyless;
     CHECK(keyless.params()[1].key == "pivot");

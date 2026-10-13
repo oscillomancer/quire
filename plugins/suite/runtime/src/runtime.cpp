@@ -10,6 +10,7 @@
 #include <atomic>
 #include <climits>
 #include <cmath>
+#include <complex>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -28,6 +29,7 @@
 #include "dsp/Math.h"
 #include "dsp/Oscillators.h"
 #include "dsp/Oversampler.h"
+#include "dsp/Stft.h"
 #include "supple/script.h"
 #include "supple/script_runtime.h"
 
@@ -525,6 +527,106 @@ void Oversampler::clear() {
     if (o.prepared) o.over.reset();
     o.one = 0.0;
     o.hi = nullptr;
+}
+
+// A resource, like DelayLine: one lane of the framework's STFT.
+namespace {
+struct StftState {
+    dsp::Stft stft;
+    bool prepared = false;
+    bool ready = false;  // a spectrum to read and change, until pull()
+    double one = 0.0;    // the sample, unprepared
+};
+StftState& stft(void* p) { return *static_cast<StftState*>(p); }
+const StftState& stft(const void* p) { return *static_cast<const StftState*>(p); }
+// Bin k of the ready spectrum, or null.
+std::complex<double>* binOf(void* p, int k) {
+    StftState& s = stft(p);
+    if (!s.ready || k < 0 || k >= s.stft.bins()) return nullptr;
+    return s.stft.spectrum(0) + k;
+}
+}  // namespace
+Stft::Stft() : state_(new StftState()) {}
+Stft::Stft(const Stft& other) : state_(new StftState(stft(other.state_))) {}
+Stft& Stft::operator=(const Stft& other) {
+    // Transforms of one size copy in place, as std::vector does.
+    if (this != &other) stft(state_) = stft(other.state_);
+    return *this;
+}
+Stft::~Stft() { delete &stft(state_); }
+void Stft::prepare(int size, int overlap) {
+    StftState& s = stft(state_);
+    s.stft.prepare(1, std::clamp(size, 16, 32768), overlap);
+    s.prepared = true;
+    s.ready = false;
+}
+int Stft::size() const { return stft(state_).prepared ? stft(state_).stft.size() : 0; }
+int Stft::bins() const { return stft(state_).prepared ? stft(state_).stft.bins() : 0; }
+int Stft::hop() const { return stft(state_).prepared ? stft(state_).stft.hop() : 0; }
+int Stft::latency() const { return stft(state_).prepared ? stft(state_).stft.latency() : 0; }
+double Stft::binHz(int k) const {
+    const StftState& s = stft(state_);
+    return s.prepared ? s.stft.binHz(k, detail::rate()) : 0.0;
+}
+bool Stft::push(double x) {
+    StftState& s = stft(state_);
+    if (!(x == x)) x = 0.0;
+    if (!s.prepared) {
+        s.one = x;
+        return false;
+    }
+    s.ready = s.stft.push(0, x);
+    return s.ready;
+}
+double Stft::pull() {
+    StftState& s = stft(state_);
+    s.ready = false;
+    if (!s.prepared) {
+        const double y = s.one;
+        s.one = 0.0;
+        return y;
+    }
+    return s.stft.pull(0);
+}
+// Bins as scripts see them: a sine of amplitude 1 at a bin's centre reads 1
+// there (the transform's own value is size / 4 under a Hann window). Both
+// factors are powers of two, so the scaling is exact.
+namespace {
+double toScript(const void* p) { return 4.0 / stft(p).stft.size(); }
+double fromScript(const void* p) { return stft(p).stft.size() / 4.0; }
+}  // namespace
+double Stft::real(int k) const {
+    const auto* b = binOf(state_, k);
+    return b ? b->real() * toScript(state_) : 0.0;
+}
+double Stft::imag(int k) const {
+    const auto* b = binOf(state_, k);
+    return b ? b->imag() * toScript(state_) : 0.0;
+}
+double Stft::magnitude(int k) const {
+    const auto* b = binOf(state_, k);
+    return b ? std::abs(*b) * toScript(state_) : 0.0;
+}
+double Stft::phase(int k) const {
+    const auto* b = binOf(state_, k);
+    return b ? std::arg(*b) : 0.0;
+}
+void Stft::set(int k, double real, double imag) {
+    if (auto* b = binOf(state_, k)) *b = std::complex<double>{real, imag} * fromScript(state_);
+}
+void Stft::setPolar(int k, double magnitude, double phase) {
+    if (auto* b = binOf(state_, k))
+        *b = std::complex<double>{magnitude * std::cos(phase), magnitude * std::sin(phase)} *
+             fromScript(state_);
+}
+void Stft::scale(int k, double gain) {
+    if (auto* b = binOf(state_, k)) *b *= gain;
+}
+void Stft::clear() {
+    StftState& s = stft(state_);
+    if (s.prepared) s.stft.reset();
+    s.ready = false;
+    s.one = 0.0;
 }
 
 Random::Random() { new (storage_) dsp::Random(); }

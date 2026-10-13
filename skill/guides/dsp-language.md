@@ -297,6 +297,7 @@ DSP objects (each starts silent; `clear()` returns it there):
 | `Oscillator` | `setShape(Oscillator::Shape::Saw)` (Sine, Saw, Square, Triangle, anti-aliased), `setFrequency(hz)`, `setPulseWidth`, `setPhase`, `next()` |
 | `Adsr` | `set(attackMs, decayMs, sustain, releaseMs)`, `gate(on)`, `next()`, `active()` |
 | `Oversampler` | For anything nonlinear, one per channel: `prepare(factor)` (2, 4, 8, 16) in `prepare()`; per sample `up(x)`, then `set(k, f(sample(k)))` for `k < factor()`, then `down()`; `latency()` (report it with `setLatency`) |
+| `Stft` | Spectral effects, one per channel: `prepare(size, overlap)` in `prepare()` (`1024, 4`); per sample `if (s.push(x))` change bins `0 .. bins()-1`, then `y = s.pull()`, `latency()` samples late (report it). Bins: `magnitude(k)` (a sine of amplitude 1 reads 1), `phase(k)`, `real(k)`, `imag(k)`, `set(k, re, im)`, `setPolar(k, mag, phase)`, `scale(k, gain)`, `binHz(k)` |
 | `Random` | `seed(n)`, `next()` (0..1), `bipolar()`, `gaussian()`, `below(n)`; the same sequence everywhere for a seed |
 | `Noise` | `seed(n)`; `white()`, `pink()`, `brown()` |
 

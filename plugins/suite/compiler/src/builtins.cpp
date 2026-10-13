@@ -504,6 +504,38 @@ void Builtins::addClasses() {
     r.method(over, "double down()", +[](S::Oversampler* o) { return o->down(); });
     r.method(over, "void clear()", +[](S::Oversampler* o) { o->clear(); });
 
+    auto* stft = addClass("Stft", sizeof(S::Stft), alignof(S::Stft));
+    stft->resource = true;
+    r.lifetime<S::Stft>(stft);
+    r.method(
+        stft, "void prepare(int size, int overlap)",
+        +[](S::Stft* s, int size, int overlap) { s->prepare(size, overlap); }, Writes::Self, kInit);
+    r.method(stft, "int size() const", +[](const S::Stft* s) { return s->size(); });
+    r.method(stft, "int bins() const", +[](const S::Stft* s) { return s->bins(); });
+    r.method(stft, "int hop() const", +[](const S::Stft* s) { return s->hop(); });
+    r.method(stft, "int latency() const", +[](const S::Stft* s) { return s->latency(); });
+    r.method(
+        stft, "double binHz(int k) const", +[](const S::Stft* s, int k) { return s->binHz(k); });
+    r.method(stft, "bool push(double x)", +[](S::Stft* s, double x) -> int { return s->push(x); });
+    r.method(stft, "double pull()", +[](S::Stft* s) { return s->pull(); });
+    r.method(stft, "double real(int k) const", +[](const S::Stft* s, int k) { return s->real(k); });
+    r.method(stft, "double imag(int k) const", +[](const S::Stft* s, int k) { return s->imag(k); });
+    r.method(
+        stft, "double magnitude(int k) const",
+        +[](const S::Stft* s, int k) { return s->magnitude(k); });
+    r.method(
+        stft, "double phase(int k) const", +[](const S::Stft* s, int k) { return s->phase(k); });
+    r.method(
+        stft, "void set(int k, double real, double imag)",
+        +[](S::Stft* s, int k, double re, double im) { s->set(k, re, im); });
+    r.method(
+        stft, "void setPolar(int k, double magnitude, double phase)",
+        +[](S::Stft* s, int k, double m, double p) { s->setPolar(k, m, p); });
+    r.method(
+        stft, "void scale(int k, double gain)",
+        +[](S::Stft* s, int k, double g) { s->scale(k, g); });
+    r.method(stft, "void clear()", +[](S::Stft* s) { s->clear(); });
+
     auto* random = addClass("Random", sizeof(S::Random), alignof(S::Random));
     r.lifetime<S::Random>(random);
     r.method(random, "void seed(int seed)", +[](S::Random* g, int s) { g->seed(s); });

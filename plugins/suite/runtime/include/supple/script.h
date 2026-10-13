@@ -657,6 +657,49 @@ class Oversampler {
     void* state_ = nullptr;
 };
 
+// The short-time Fourier transform, for spectral effects and analysis: one
+// per channel. Each sample, push() the input; when it returns true a frame's
+// spectrum is ready, bins 0 to bins() - 1, to read and change; pull() then
+// gives the output, latency() samples behind the input:
+//
+//   if (s.push(x))
+//       for (int k = 0; k < s.bins(); ++k) s.scale(k, gainAt(s.binHz(k)));
+//   y = s.pull();
+//
+// prepare(size, overlap) in prepare(): size a power of two from 16 to 32768
+// (rounded down), overlap 4 or 8 frames over each sample. Frames are Hann
+// windowed both ways, so a spectrum left alone gives back the input. Until
+// prepared it passes samples through. The bins are readable and writable
+// from a push() that returned true until the pull() after it; otherwise
+// they read 0 and writes are lost. A sine of amplitude 1 at a bin's centre
+// frequency reads magnitude 1 there.
+class Stft {
+  public:
+    Stft();
+    Stft(const Stft& other);
+    Stft& operator=(const Stft& other);
+    ~Stft();
+    void prepare(int size, int overlap);  // prepare() only: it allocates
+    int size() const;
+    int bins() const;  // size() / 2 + 1
+    int hop() const;   // samples between frames: size() / overlap
+    int latency() const;
+    double binHz(int k) const;  // bin k's centre frequency
+    bool push(double x);
+    double pull();
+    double real(int k) const;
+    double imag(int k) const;
+    double magnitude(int k) const;
+    double phase(int k) const;  // radians
+    void set(int k, double real, double imag);
+    void setPolar(int k, double magnitude, double phase);
+    void scale(int k, double gain);
+    void clear();
+
+  private:
+    void* state_ = nullptr;
+};
+
 // Pseudo-random numbers (PCG32), the same sequence everywhere for a seed.
 class Random {
   public:
