@@ -1,14 +1,16 @@
 # A source export end to end (ctest plugin.export.source): the sandbox
-# exports SCRIPT as a C++ project, which is configured, built and tested as
-# a user would, offline, with this repository's third_party copies. Then
-# the built plugin and the script player play the same signals (dsp.test,
-# with PATCH) and must write the same bytes.
+# exports SCRIPT as a C++ project, whose suite is then updated from the
+# export kit KIT (suite/tools/update_suite.cmake), and which is configured,
+# built and tested as a user would, offline, with this repository's
+# third_party copies. Then the built plugin and the script player play the
+# same signals (dsp.test, with PATCH) and must write the same bytes.
 #
-#   cmake -DSANDBOX=<sandbox CLI> -DPLAYER=<Script Player.clap> -DSCRIPT=<script.cpp>
-#         -DPATCH=<a patch's params, JSON> -DWORK=<folder> -DTHIRD_PARTY=<third_party>
-#         -DCC=<C compiler> -DCXX=<C++ compiler> -DBUILD_TYPE=<type> -P source_export.cmake
+#   cmake -DSANDBOX=<sandbox CLI> -DPLAYER=<Script Player.clap> -DKIT=<export kit>
+#         -DSCRIPT=<script.cpp> -DPATCH=<a patch's params, JSON> -DWORK=<folder>
+#         -DTHIRD_PARTY=<third_party> -DCC=<C compiler> -DCXX=<C++ compiler>
+#         -DBUILD_TYPE=<type> -P source_export.cmake
 
-foreach(var SANDBOX PLAYER SCRIPT PATCH WORK THIRD_PARTY CC CXX BUILD_TYPE)
+foreach(var SANDBOX PLAYER KIT SCRIPT PATCH WORK THIRD_PARTY CC CXX BUILD_TYPE)
     if (NOT DEFINED ${var} OR "${${var}}" STREQUAL "")
         message(FATAL_ERROR "source_export: -D${var}=... is required")
     endif()
@@ -31,6 +33,11 @@ run("the export" "${SANDBOX}" exec
     --workdir "${WORK}/workdir")
 message(STATUS "exported: ${output}")
 string(JSON id GET "${output}" id)
+
+run("updating the suite" ${CMAKE_COMMAND} -DFROM=${KIT} -P "${WORK}/project/suite/tools/update_suite.cmake")
+if (NOT output MATCHES "suite [0-9.]+ -> [0-9.]+")
+    message(FATAL_ERROR "the suite was not updated: ${output}")
+endif()
 
 set(tp "${THIRD_PARTY}")
 run("configuring the export" ${CMAKE_COMMAND} -S "${WORK}/project" -B "${WORK}/build" -G Ninja

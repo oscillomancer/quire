@@ -318,8 +318,11 @@ Where the work stands, and where it departs from the text above:
   exportable, ids are reverse-DNS without `_` and versions
   major.minor.patch. `plugin.export.source` (slow) exports the player's
   tilt script, builds the project offline with its own tests passing,
-  and checks that it and the player play the same bytes.
-  `suite/tools/update_suite.cmake` is not written.
+  and checks that it and the player play the same bytes. An export's
+  `suite/tools/update_suite.cmake` replaces its `suite/` with a newer one
+  (another export's, or a newer kit's), as `update_framework.cmake` does
+  for `framework/`; the suite carries a `VERSION.txt` for it, and the slow
+  test runs it before building.
 - Reloading: the layer's main-thread tick looks at the script file twice a
   second, so `dsp.write` only has to save it. An in-place swap carries the
   parameter values over; the script's members start from a fresh

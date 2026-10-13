@@ -223,7 +223,6 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
   appended, which offers that one plugin), or a C++ project of the plugin
   template that builds the same plugin, bit for bit, with the script
   compiled as C++. Effects only (no notes yet), the automatic editor only,
-  plugin-file exports for Linux only; editor previews and the suite's
-  update tool for source exports do not exist yet.
+  plugin-file exports for Linux only; editor previews do not exist yet.
 - Orrery's structural performance pass.
 - Hardening and ports beyond Linux.

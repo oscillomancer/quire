@@ -30,7 +30,8 @@ sanitizers, validators and installing.
 - `product/Catalog.cpp`: makes the plugin from the script and lists each
   parameter's patch key, since C++ cannot see member names. List a `Param`
   you add there.
-- `suite/`: the script runtime, the semantic-params layer and the glue.
+- `suite/`: the script runtime, the semantic-params layer and the glue;
+  update it from a newer export with `suite/tools/update_suite.cmake`.
 - `framework/`: the plugin framework, unchanged from the template; update
   it with `framework/tools/update_framework.cmake`.
 

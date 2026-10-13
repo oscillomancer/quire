@@ -100,8 +100,9 @@ add_custom_target(script-export-kit ALL
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/semantic/src
           ${kit}/suite/semantic/src
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/glue ${kit}/suite/glue
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/tools ${kit}/suite/tools
   COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/suite.cmake
-          ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE ${kit}/suite
+          ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE ${CMAKE_CURRENT_SOURCE_DIR}/VERSION.txt ${kit}/suite
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/export ${kit}/files
   COMMENT "Staging the script export kit"
   VERBATIM)
