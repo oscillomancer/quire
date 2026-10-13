@@ -77,6 +77,12 @@ double gainToDb(double gain);  // floored at -120 dB (0 gives -120)
 double mtof(double note);      // MIDI note to Hz: 69 is 440 Hz
 double ftom(double hz);        // Hz to MIDI note (fractional)
 
+// A downward compressor's curve: the gain change in dB (0 or less) for a
+// level in dB. Nothing below the threshold; above it, `ratio` dB in for each
+// dB out (1 changes nothing, 100 limits), with a soft knee `kneeDb` wide
+// (0: a hard knee) centred on the threshold.
+double compressorGainDb(double levelDb, double thresholdDb, double ratio, double kneeDb);
+
 // Float to int, defined for every input: truncated toward zero, rounded down,
 // rounded up or rounded half away from zero; saturated to the int range;
 // NaN gives 0. C++'s own conversion is undefined out of range, so scripts
@@ -455,7 +461,7 @@ class Block {
             return Channel{data_[c], frames, spare_};
         return Channel{spare_, 0, spare_};
     }
-    // PRODUCT sidechain (Info::sidechain): the key input, silent when unconnected.
+    // The sidechain (Info::sidechain): the key input, silent when unconnected.
     InputChannel sidechain(int c) const {
         if (static_cast<unsigned>(c) < static_cast<unsigned>(sidechainChannels_))
             return InputChannel{sidechain_[c], frames};
@@ -580,6 +586,24 @@ class OnePole {
     void setCutoff(double hz);
     double lowpass(double x);
     double highpass(double x);
+    void clear();
+
+  private:
+    alignas(8) unsigned char storage_[24];
+};
+
+// A compressor's detector: the signal's level (rectified) through a one-pole
+// that rises at the attack time and falls at the release time. Pair it with
+// compressorGainDb:
+//
+//   double level = follower.process(key);
+//   y = x * dbToGain(compressorGainDb(gainToDb(level), threshold, ratio, 6));
+class EnvelopeFollower {
+  public:
+    EnvelopeFollower();
+    void set(double attackMs, double releaseMs);
+    double process(double x);  // the level now, linear
+    double level() const;
     void clear();
 
   private:

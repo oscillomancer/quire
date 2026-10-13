@@ -21,6 +21,7 @@
 #include <pthread.h>
 #endif
 
+#include "dsp/Dynamics.h"
 #include "dsp/Envelope.h"
 #include "dsp/Filters.h"
 #include "dsp/Interpolation.h"
@@ -147,6 +148,10 @@ double dbToGain(double db) { return dsp::dbToGain(db); }
 double gainToDb(double gain) { return dsp::gainToDb(gain); }
 double mtof(double note) { return 440.0 * std::exp2((note - 69.0) / 12.0); }
 double ftom(double hz) { return 69.0 + 12.0 * std::log2(hz / 440.0); }
+double compressorGainDb(double levelDb, double thresholdDb, double ratio, double kneeDb) {
+    const dsp::GainComputer curve{thresholdDb, ratio, kneeDb};
+    return curve.gainDb(levelDb);
+}
 
 namespace {
 int saturate(double x) {
@@ -334,8 +339,9 @@ struct OnePoleState {
     dsp::OnePole filter;
     dsp::OnePole::State state;
 };
-struct SmootherState {
-    double current = 0.0, target = 0.0, coefficient = 0.0, ms = 0.0;
+struct FollowerState {
+    dsp::EnvelopeFollower follower;
+    dsp::EnvelopeFollower::State state;
 };
 
 template <class T, class Storage>
@@ -400,6 +406,17 @@ double OnePole::highpass(double x) {
     return f.filter.highpass(f.state, x);
 }
 void OnePole::clear() { as<OnePoleState>(storage_).state = {}; }
+
+EnvelopeFollower::EnvelopeFollower() { new (storage_) FollowerState(); }
+void EnvelopeFollower::set(double attackMs, double releaseMs) {
+    as<FollowerState>(storage_).follower.setTimes(attackMs, releaseMs, detail::rate());
+}
+double EnvelopeFollower::process(double x) {
+    auto& f = as<FollowerState>(storage_);
+    return f.follower.tick(f.state, x);
+}
+double EnvelopeFollower::level() const { return as<FollowerState>(storage_).state.envelope; }
+void EnvelopeFollower::clear() { as<FollowerState>(storage_).state = {}; }
 
 // A resource: the line's buffer is allocated, so the object holds it by
 // pointer. Constructed with the plugin (main thread); prepare() sizes it.

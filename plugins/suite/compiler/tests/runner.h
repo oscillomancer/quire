@@ -44,22 +44,33 @@ class RunnerBase {
   public:
     D::Instance instance;
     double spare = 0.0;
+    // A sidechain input, as long as the audio and as wide, when set.
+    const Audio* key = nullptr;
 
     // Runs process over `audio` in blocks of `block` frames.
     template <class Call>
     void blocks(Audio& audio, int block, Call&& call) {
         const int frames = audio.frames();
         std::vector<double*> pointers(static_cast<size_t>(audio.channels()));
+        std::vector<const double*> keys(static_cast<size_t>(audio.channels()));
         for (int start = 0; start < frames; start += block) {
             const int n = std::min(block, frames - start);
-            for (int c = 0; c < audio.channels(); ++c)
+            for (int c = 0; c < audio.channels(); ++c) {
                 pointers[static_cast<size_t>(c)] =
                     audio.data[static_cast<size_t>(c)].data() + start;
+                if (key)
+                    keys[static_cast<size_t>(c)] = key->data[static_cast<size_t>(c)].data() + start;
+            }
             S::Block io;
             io.channels = audio.channels();
             io.frames = n;
             io.data_ = pointers.data();
             io.spare_ = &spare;
+            if (key) {
+                io.sidechainConnected = true;
+                io.sidechain_ = keys.data();
+                io.sidechainChannels_ = audio.channels();
+            }
             call(io);
         }
     }

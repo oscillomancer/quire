@@ -32,6 +32,9 @@ namespace ex_drive {
 namespace ex_language {
 #include "language.cpp"
 }
+namespace ex_compressor {
+#include "compressor.cpp"
+}
 }  // namespace supple::script
 
 using namespace supple;
@@ -66,6 +69,28 @@ Audio signal(int frames) {
     return a;
 }
 
+// A sidechain key: a decaying 60 Hz thump every 2400 frames, like a kick.
+Audio key(int frames) {
+    Audio a(2, frames);
+    for (int i = 0; i < frames; ++i) {
+        const double t = (i % 2400) / 48000.0;
+        const double x = 0.9 * std::exp(-t * 30.0) * std::sin(6.283185307179586 * 60.0 * t);
+        a.data[0][static_cast<size_t>(i)] = x;
+        a.data[1][static_cast<size_t>(i)] = x;
+    }
+    return a;
+}
+
+// The frames [start, start + n) of `audio`.
+Audio slice(const Audio& audio, int start, int n) {
+    Audio piece(audio.channels(), n);
+    for (int c = 0; c < audio.channels(); ++c)
+        for (int i = 0; i < n; ++i)
+            piece.data[static_cast<size_t>(c)][static_cast<size_t>(i)] =
+                audio.data[static_cast<size_t>(c)][static_cast<size_t>(start + i)];
+    return piece;
+}
+
 // One parameter change: at block `block`, parameter `index` takes `value`
 // (the value the script reads).
 struct Change {
@@ -76,12 +101,13 @@ struct Change {
 
 template <class T>
 Audio runNative(const std::vector<double>& initial, const std::vector<Change>& changes, int frames,
-                int block) {
+                int block, bool sidechain) {
     NativeRunner<T> run;
     for (size_t i = 0; i < initial.size(); ++i) run.set(i, initial[i]);
     run.prepare();
     run.update();
     Audio audio = signal(frames);
+    const Audio keys = key(frames);
     Audio out(2, 0);
     for (int start = 0, b = 0; start < frames; start += block, ++b) {
         bool changed = false;
@@ -91,11 +117,9 @@ Audio runNative(const std::vector<double>& initial, const std::vector<Change>& c
                 changed = true;
             }
         if (changed) run.update();
-        Audio piece(2, std::min(block, frames - start));
-        for (int c = 0; c < 2; ++c)
-            for (int i = 0; i < piece.frames(); ++i)
-                piece.data[static_cast<size_t>(c)][static_cast<size_t>(i)] =
-                    audio.data[static_cast<size_t>(c)][static_cast<size_t>(start + i)];
+        Audio piece = slice(audio, start, std::min(block, frames - start));
+        const Audio keyPiece = slice(keys, start, piece.frames());
+        run.key = sidechain ? &keyPiece : nullptr;
         run.process(piece, block);
         for (int c = 0; c < 2; ++c)
             out.data[static_cast<size_t>(c)].insert(out.data[static_cast<size_t>(c)].end(),
@@ -106,7 +130,7 @@ Audio runNative(const std::vector<double>& initial, const std::vector<Change>& c
 }
 
 Audio runCompiled(const std::string& source, bool interpret, const std::vector<double>& initial,
-                  const std::vector<Change>& changes, int frames, int block) {
+                  const std::vector<Change>& changes, int frames, int block, bool sidechain) {
     scriptc::Options options;
     options.interpret = interpret;
     auto result = scriptc::compile(source, options);
@@ -117,6 +141,7 @@ Audio runCompiled(const std::string& source, bool interpret, const std::vector<d
     run.prepare();
     run.update();
     Audio audio = signal(frames);
+    const Audio keys = key(frames);
     Audio out(2, 0);
     for (int start = 0, b = 0; start < frames; start += block, ++b) {
         bool changed = false;
@@ -126,11 +151,9 @@ Audio runCompiled(const std::string& source, bool interpret, const std::vector<d
                 changed = true;
             }
         if (changed) run.update();
-        Audio piece(2, std::min(block, frames - start));
-        for (int c = 0; c < 2; ++c)
-            for (int i = 0; i < piece.frames(); ++i)
-                piece.data[static_cast<size_t>(c)][static_cast<size_t>(i)] =
-                    audio.data[static_cast<size_t>(c)][static_cast<size_t>(start + i)];
+        Audio piece = slice(audio, start, std::min(block, frames - start));
+        const Audio keyPiece = slice(keys, start, piece.frames());
+        run.key = sidechain ? &keyPiece : nullptr;
         run.process(piece, block);
         for (int c = 0; c < 2; ++c)
             out.data[static_cast<size_t>(c)].insert(out.data[static_cast<size_t>(c)].end(),
@@ -142,11 +165,12 @@ Audio runCompiled(const std::string& source, bool interpret, const std::vector<d
 
 template <class T>
 void differential(const std::string& file, const std::vector<double>& initial,
-                  const std::vector<Change>& changes, int frames = 4800, int block = 128) {
+                  const std::vector<Change>& changes, int frames = 4800, int block = 128,
+                  bool sidechain = false) {
     const std::string source = readExample(file);
-    const Audio native = runNative<T>(initial, changes, frames, block);
-    const Audio jit = runCompiled(source, false, initial, changes, frames, block);
-    const Audio interpreted = runCompiled(source, true, initial, changes, frames, block);
+    const Audio native = runNative<T>(initial, changes, frames, block, sidechain);
+    const Audio jit = runCompiled(source, false, initial, changes, frames, block, sidechain);
+    const Audio interpreted = runCompiled(source, true, initial, changes, frames, block, sidechain);
     bool finite = true;
     double energy = 0.0;
     for (const auto& ch : native.data)
@@ -246,6 +270,20 @@ TEST_CASE("the language tour: JIT, interpreter and C++ agree") {
                                             4800, 37);
 }
 
+TEST_CASE("compressor: JIT, interpreter and C++ agree, with and without a key") {
+    for (bool sidechain : {false, true}) {
+        CAPTURE(sidechain);
+        differential<script::ex_compressor::Compressor>(
+            "compressor.cpp", {-30.0, 6.0, 2.0, 80.0, 3.0, 0.0}, {{10, 0, -40.0}, {20, 3, 400.0}},
+            9600, 128, sidechain);
+    }
+    // The key, not the input, decides the turning down once connected.
+    using script::ex_compressor::Compressor;
+    const std::vector<double> settings = {-30.0, 6.0, 2.0, 80.0, 0.0, 0.0};
+    CHECK_FALSE(runNative<Compressor>(settings, {}, 4800, 128, false) ==
+                runNative<Compressor>(settings, {}, 4800, 128, true));
+}
+
 TEST_CASE("a script compiled as C++ describes the plugin the compiler describes") {
     using script::ex_tilt::Tilt;
     sameDescription<Tilt>(
@@ -254,6 +292,7 @@ TEST_CASE("a script compiled as C++ describes the plugin the compiler describes"
     sameDescription<script::ex_echo::Echo>("echo.cpp");
     sameDescription<script::ex_drive::Drive>("drive.cpp");
     sameDescription<script::ex_language::Tour>("language.cpp");
+    sameDescription<script::ex_compressor::Compressor>("compressor.cpp");
     // Without its keys, a Param's key is its name's: "Pivot" -> pivot.
     const script::detail::NativeCode<Tilt> keyless;
     CHECK(keyless.params()[1].key == "pivot");

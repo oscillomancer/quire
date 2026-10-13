@@ -127,7 +127,8 @@ There is no `reset()` to write: the runtime returns every member to what
 `Block`: `io.channels`, `io.frames` (a block may be a single frame),
 `io[c][i]` (read the input, write the output, in place), `io.transport`
 (`playing`, `tempo`, `beats`, `barStart`, time signature),
-`io.sidechain(c)[i]`, `io.output(bus, c)[i]`, `io.sidechainConnected`.
+`io.sidechain(c)[i]` (the key input with Info's `.sidechain`; silent until
+`io.sidechainConnected`), `io.output(bus, c)[i]`.
 From any member function: `sampleRate()`, `maxBlockSize()`, `channels()`,
 `offline()`. In `prepare()`, `setLatency(samples)` reports a delay the
 plugin adds that depends on the sample rate (an `Oversampler`'s, a
@@ -281,7 +282,9 @@ and the constants `pi`, `twoPi`.
 
 Conversions: `dbToGain(db)`, `gainToDb(g)` (floored at -120), `mtof(note)`,
 `ftom(hz)`, `toInt` `floorToInt` `ceilToInt` `roundToInt`, `idiv` `imod`
-`wrap`.
+`wrap`. `compressorGainDb(levelDb, thresholdDb, ratio, kneeDb)` is a
+compressor's curve: the gain change in dB (0 or less) for a level, with a
+soft knee `kneeDb` wide (0 is hard).
 
 DSP objects (each starts silent; `clear()` returns it there):
 
@@ -289,6 +292,7 @@ DSP objects (each starts silent; `clear()` returns it there):
 |---|---|
 | `Biquad` | `lowpass` `highpass` `bandpass` `notch` `allpass` `(hz, q)`, `peak` `lowShelf` `highShelf` `(hz, q, gainDb)`; `process(x)`; `responseDb(hz)` |
 | `OnePole` | `setCutoff(hz)`; `lowpass(x)`, `highpass(x)` |
+| `EnvelopeFollower` | A compressor's detector: `set(attackMs, releaseMs)`; `process(x)` gives the level (linear, rectified); `level()` |
 | `DelayLine` | `prepare(maxSamples)` in `prepare()`; `push(x)` once per frame; `read(delaySamples)` (fractional, 0 is the sample just pushed) |
 | `Oscillator` | `setShape(Oscillator::Shape::Saw)` (Sine, Saw, Square, Triangle, anti-aliased), `setFrequency(hz)`, `setPulseWidth`, `setPhase`, `next()` |
 | `Adsr` | `set(attackMs, decayMs, sustain, releaseMs)`, `gate(on)`, `next()`, `active()` |

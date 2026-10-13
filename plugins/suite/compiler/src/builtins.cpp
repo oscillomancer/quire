@@ -461,6 +461,19 @@ void Builtins::addClasses() {
         +[](S::OnePole* f, double x) { return f->highpass(x); });
     r.method(onePole, "void clear()", +[](S::OnePole* f) { f->clear(); });
 
+    auto* follower =
+        addClass("EnvelopeFollower", sizeof(S::EnvelopeFollower), alignof(S::EnvelopeFollower));
+    r.lifetime<S::EnvelopeFollower>(follower);
+    r.method(
+        follower, "void set(double attackMs, double releaseMs)",
+        +[](S::EnvelopeFollower* f, double a, double r) { f->set(a, r); });
+    r.method(
+        follower, "double process(double x)",
+        +[](S::EnvelopeFollower* f, double x) { return f->process(x); });
+    r.method(
+        follower, "double level() const", +[](const S::EnvelopeFollower* f) { return f->level(); });
+    r.method(follower, "void clear()", +[](S::EnvelopeFollower* f) { f->clear(); });
+
     auto* delay = addClass("DelayLine", sizeof(S::DelayLine), alignof(S::DelayLine));
     delay->resource = true;
     r.lifetime<S::DelayLine>(delay);
@@ -597,6 +610,9 @@ void Builtins::addFunctions() {
     r.fn("double gainToDb(double gain)", +[](double x) { return S::gainToDb(x); });
     r.fn("double mtof(double note)", +[](double x) { return S::mtof(x); });
     r.fn("double ftom(double hz)", +[](double x) { return S::ftom(x); });
+    r.fn(
+        "double compressorGainDb(double levelDb, double thresholdDb, double ratio, double kneeDb)",
+        +[](double l, double t, double r, double k) { return S::compressorGainDb(l, t, r, k); });
     r.fn("int toInt(double x)", +[](double x) { return S::toInt(x); });
     r.fn("int floorToInt(double x)", +[](double x) { return S::floorToInt(x); });
     r.fn("int ceilToInt(double x)", +[](double x) { return S::ceilToInt(x); });
