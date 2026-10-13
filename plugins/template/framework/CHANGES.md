@@ -4,6 +4,28 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.16.1
+
+Two pins moved, the VST3 is optional, and a product's folder can be
+elsewhere. What a product must do: run `framework/tools/vendor.cmake` again
+if it vendors its sources.
+
+- **CLAP SDK 1.2.10.** The framework fetches it and hands it to clap-wrapper,
+  whose own pin (1.2.6) is older; the configure no longer requires
+  clap-wrapper to name the CLAP SDK's pin.
+- **dr_libs `fa931f3`** (dr_wav 0.14.5, dr_flac 0.13.3), so a product built
+  inside a repository that already vendors dr_libs builds from that copy.
+- **`SUPPLE_BUILD_VST3`** (on). Off builds the CLAP, and on macOS the AU,
+  without the rest of the VST3 SDK; the VST3 tests, packaging and validation
+  follow it.
+- **`SUPPLE_PRODUCT_DIR`**: the product's folder, `product/` by default. A
+  repository with several products and one framework builds each from the
+  same tree, `-DSUPPLE_PRODUCT_DIR=<its folder>`. Paths in `product.cmake`
+  that start `product/` are in that folder; others are from the root, or
+  absolute. The folder's own `LICENSE`, when it has one, ships with the
+  plugins. Only a new product's root `CMakeLists.txt` reads the option (an
+  existing one keeps `product/`); copy the template's to use it.
+
 ## 1.16.0
 
 Run-time products: a plugin the framework learns about when it runs, not

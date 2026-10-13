@@ -223,10 +223,15 @@ if (SUPPLE_BUILD_PLUGIN)
             string(REPLACE ":" ";" parts "${spec}")
             list(GET parts 0 format)
             list(GET parts 1 expected)
-            add_test(NAME exports-${format}
-                COMMAND ${CMAKE_COMMAND} -DMODULE=$<TARGET_FILE:product-plugin_${format}> "-DEXPECTED=${expected}"
-                        -P ${SUPPLE_FRAMEWORK}/cmake/CheckExports.cmake)
+            if (TARGET product-plugin_${format})
+                add_test(NAME exports-${format}
+                    COMMAND ${CMAKE_COMMAND} -DMODULE=$<TARGET_FILE:product-plugin_${format}> "-DEXPECTED=${expected}"
+                            -P ${SUPPLE_FRAMEWORK}/cmake/CheckExports.cmake)
+            endif()
         endforeach()
+    endif()
+
+    if (UNIX AND NOT APPLE AND TARGET product-plugin_vst3)
         add_executable(vst3-unload-probe ${SUPPLE_FRAMEWORK}/test/vst3_unload_probe.cpp)
         target_link_libraries(vst3-unload-probe PRIVATE ${CMAKE_DL_LIBS})
         supple_defaults(vst3-unload-probe)
@@ -256,7 +261,9 @@ if (SUPPLE_BUILD_PLUGIN)
             add_test(NAME vst3-host COMMAND vst3-host-tests $<TARGET_FILE:product-plugin_vst3>
                 $<TARGET_FILE:product-plugin_clap>)
         endif()
+    endif()
 
+    if (UNIX AND NOT APPLE)
         if (SUPPLE_BUILD_GUI)
             # A real X11 parent: embedding, pixels, resize, scale, reopen,
             # teardown while audio runs. Skipped (77) without a display.

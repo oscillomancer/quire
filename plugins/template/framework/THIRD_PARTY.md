@@ -8,7 +8,7 @@ whenever a pinned dependency moves.
 
 | Component | License | Notes |
 | --- | --- | --- |
-| CLAP SDK | MIT | via clap-wrapper |
+| CLAP SDK | MIT | 1.2.10 (newer than clap-wrapper's own pin) |
 | clap-wrapper | MIT | v0.16.0, ten local patches in `cmake/patches` |
 | VST3 SDK | MIT | v3.8.0 as pinned by clap-wrapper (earlier releases were GPLv3/proprietary; vstgui is not used) |
 | Apple AudioUnit SDK | Apache-2.0 | macOS only, via clap-wrapper |

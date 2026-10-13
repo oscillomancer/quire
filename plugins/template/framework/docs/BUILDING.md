@@ -29,12 +29,16 @@ ctest --preset release
 ```
 
 Options, for a hand-made build directory: `SUPPLE_BUILD_PLUGIN`,
-`SUPPLE_BUILD_GUI`, `SUPPLE_BUILD_TESTS` (all on), `SUPPLE_WARNINGS_AS_ERRORS`,
-`SUPPLE_SANITIZE` (`address`, `thread` or `realtime`), `SUPPLE_FUZZ` (clang),
-`SUPPLE_METAL` (macOS, on), `SUPPLE_CLAP_VALIDATOR` (path to clap-validator),
-`SUPPLE_VENDOR_DIR` (below), and the signing options under Packaging. A
-configure without a build type defaults to Release. MSVC rejects nonempty
-`SUPPLE_SANITIZE`: sanitizer presets require a supported Clang/GCC toolchain.
+`SUPPLE_BUILD_VST3`, `SUPPLE_BUILD_GUI`, `SUPPLE_BUILD_TESTS` (all on),
+`SUPPLE_WARNINGS_AS_ERRORS`, `SUPPLE_SANITIZE` (`address`, `thread` or
+`realtime`), `SUPPLE_FUZZ` (clang), `SUPPLE_METAL` (macOS, on),
+`SUPPLE_CLAP_VALIDATOR` (path to clap-validator), `SUPPLE_VENDOR_DIR`
+(below), `SUPPLE_PRODUCT_DIR` (the product's folder, `product/` unless a
+build names one elsewhere: `product/...` paths in its `product.cmake` are
+in it, and its own `LICENSE`, if it has one, ships with the plugins), and
+the signing options under Packaging. A configure without a build type
+defaults to Release. MSVC rejects nonempty `SUPPLE_SANITIZE`:
+sanitizer presets require a supported Clang/GCC toolchain.
 
 ## Offline builds
 

@@ -8,20 +8,21 @@
 #   SUPPLE_PIN_<name>_WHEN     when it is needed: always, plugin, gui, metal
 #                              (macOS), tuning (PRODUCT_TUNING), auv2 (macOS)
 #
-# clap, vst3sdk and AudioUnitSDK are clap-wrapper's own pins, repeated here
-# so a vendored copy can supply them; Dependencies.cmake stops the configure
-# if clap-wrapper's base_sdks.cmake ever names different ones. Revalidate
-# every format before moving any of these, and regenerate NOTICES.txt when
-# one moves.
+# vst3sdk and AudioUnitSDK are clap-wrapper's own pins, repeated here so a
+# vendored copy can supply them; Dependencies.cmake stops the configure if
+# clap-wrapper's base_sdks.cmake ever names different ones. The CLAP SDK is
+# ours: newer than the one clap-wrapper names, fetched like the rest and
+# handed to it. Revalidate every format before moving any of these, and
+# regenerate NOTICES.txt when one moves.
 
 set(SUPPLE_PINS dr_libs clap-wrapper clap vst3sdk AudioUnitSDK mts-esp pugl nanovg nanosvg nanovg_metal)
 
-set(SUPPLE_PIN_dr_libs https://github.com/mackron/dr_libs.git dfe8377631000664666519fdb83da193fd8037f4)  # dr_wav 0.14.6, dr_flac 0.13.4
+set(SUPPLE_PIN_dr_libs https://github.com/mackron/dr_libs.git fa931f3285ced10ace628f7f1ac951e1951e7ea6)  # dr_wav 0.14.5, dr_flac 0.13.3
 set(SUPPLE_PIN_dr_libs_WHEN always)
 
 set(SUPPLE_PIN_clap-wrapper https://github.com/free-audio/clap-wrapper.git 1cca996e96f29ab2be7ae9f8cfe532bbc92e1dd6)  # v0.16.0
 set(SUPPLE_PIN_clap-wrapper_WHEN plugin)
-set(SUPPLE_PIN_clap https://github.com/free-audio/clap.git 1.2.6)
+set(SUPPLE_PIN_clap https://github.com/free-audio/clap.git 1.2.10)
 set(SUPPLE_PIN_clap_WHEN plugin)
 set(SUPPLE_PIN_vst3sdk https://github.com/steinbergmedia/vst3sdk.git v3.8.0_build_66)
 set(SUPPLE_PIN_vst3sdk_MODULES base public.sdk pluginterfaces cmake)

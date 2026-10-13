@@ -140,13 +140,19 @@ supple_vendored(supple-drlibs)
 
 if (SUPPLE_BUILD_PLUGIN)
     set(CLAP_WRAPPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    # clap-wrapper fetches the CLAP, VST3 and AU SDKs itself, at the pins it
-    # names, unless it is handed them.
-    supple_vendored_source(clap clap_sdk)
-    if (clap_sdk)
+    # The CLAP SDK is pinned here (clap-wrapper's own pin is older) and
+    # handed to clap-wrapper, which uses a root it is given over its own.
+    supple_declare(clap HEADER_ONLY)
+    FetchContent_MakeAvailable(clap)
+    set(CLAP_SDK_ROOT "${clap_SOURCE_DIR}")
+    # The VST3 and AU SDKs clap-wrapper fetches itself, at the pins it names,
+    # unless it is handed them: from the vendor folder, or by the caller
+    # (-DVST3_SDK_ROOT=...).
+    if (supple_vendor)
         set(CLAP_WRAPPER_DOWNLOAD_DEPENDENCIES OFF CACHE BOOL "" FORCE)
-        set(CLAP_SDK_ROOT "${clap_sdk}")
-        supple_vendored_source(vst3sdk VST3_SDK_ROOT)
+        if (SUPPLE_BUILD_VST3)
+            supple_vendored_source(vst3sdk VST3_SDK_ROOT)
+        endif()
         if (APPLE)
             supple_vendored_source(AudioUnitSDK AUDIOUNIT_SDK_ROOT)
         endif()
@@ -158,7 +164,7 @@ if (SUPPLE_BUILD_PLUGIN)
     # The SDK pins in Pins.cmake are the ones this clap-wrapper fetches, or a
     # vendored build would be made of different SDKs from a downloaded one.
     file(READ "${clap-wrapper_SOURCE_DIR}/cmake/base_sdks.cmake" base_sdks)
-    foreach(sdk clap vst3sdk AudioUnitSDK)
+    foreach(sdk vst3sdk AudioUnitSDK)
         list(GET SUPPLE_PIN_${sdk} 1 ref)
         string(FIND "${base_sdks}" "GIT_TAG \"${ref}\"" at)
         if (at EQUAL -1)

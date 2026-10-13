@@ -62,7 +62,7 @@ License:  MIT
 Upstream: https://github.com/free-audio/clap
 
 The plugin format itself. Every format this project ships is built from one
-CLAP implementation.
+CLAP implementation. Pinned at 1.2.10.
 
 ------------------------------------------------------------------------------
 MIT License
@@ -726,7 +726,7 @@ License:  MIT No Attribution (each is offered as public domain or MIT-0; this
 Upstream: https://github.com/mackron/dr_libs
 
 Audio file decoding (framework/dsp/AudioFile.h): WAV, AIFF and FLAC. Pinned at
-commit dfe8377631000664666519fdb83da193fd8037f4 (dr_wav 0.14.6, dr_flac 0.13.4).
+commit fa931f3285ced10ace628f7f1ac951e1951e7ea6 (dr_wav 0.14.5, dr_flac 0.13.3).
 
 ------------------------------------------------------------------------------
 Copyright 2023 David Reid
