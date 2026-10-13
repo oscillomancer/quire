@@ -294,6 +294,32 @@ Kind: `query`. Exposure: `mcp-tool`.
             "required": ["key", "name", "kind", "min", "max", "default", "choices", "meter"],
             "additionalProperties": false
           }
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "dsp_file",
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "the patch's properties key"
+              },
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "description": "audio (a sample) or impulse (a Convolver's response)"
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "required": ["key", "name", "kind"],
+            "additionalProperties": false
+          },
+          "description": "the script's files (AudioFile, Convolver), when it has any: give each an absolute path in a patch, {\"properties\": {\"<key>\": \"/path.wav\"}}"
         }
       },
       "required": ["id", "name", "kind", "params"],
@@ -890,6 +916,32 @@ Kind: `action`. Exposure: `mcp-tool`.
             "required": ["key", "name", "kind", "min", "max", "default", "choices", "meter"],
             "additionalProperties": false
           }
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "dsp_file",
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "the patch's properties key"
+              },
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "description": "audio (a sample) or impulse (a Convolver's response)"
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "required": ["key", "name", "kind"],
+            "additionalProperties": false
+          },
+          "description": "the script's files (AudioFile, Convolver), when it has any: give each an absolute path in a patch, {\"properties\": {\"<key>\": \"/path.wav\"}}"
         }
       },
       "required": ["id", "name", "kind", "params"],

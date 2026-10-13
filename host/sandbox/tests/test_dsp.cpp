@@ -4,6 +4,7 @@
 #include <doctest/doctest.h>
 #include <unistd.h>
 
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -11,6 +12,7 @@
 #include <sstream>
 #include <string>
 
+#include "supple/audio/audio_file.h"
 #include "supple/sandbox/commands.h"
 
 using namespace supple;
@@ -253,4 +255,68 @@ TEST_CASE("dsp.test plays notes into an instrument and hears its pitch") {
     auto refused = call("dsp.test", t);
     REQUIRE_FALSE(refused);
     CHECK(refused.error().code == "dsp.signal");
+}
+
+TEST_CASE("dsp.test gives a convolution reverb its room through a patch") {
+    const fs::path player = kStock / "Script Player.clap";
+    if (!fs::exists(player)) {
+        MESSAGE("skipped: no script player in " << kStock.string());
+        return;
+    }
+    Root root;
+    SessionOptions o;
+    o.workdir = root.path;
+    o.pluginPath = {player};
+    auto session = Session::open(o);
+    REQUIRE(session);
+    SandboxHost host(std::move(*session), {});
+    cmd::Registry registry;
+    registerCommands(registry);
+    cmd::Dispatcher bus(registry, host);
+    auto call = [&](std::string name, json::Value args) {
+        return bus.execute({std::move(name), std::move(args), kTest});
+    };
+    std::ifstream in(std::string(SUPPLE_SCRIPT_EXAMPLES) + "/reverb.cpp");
+    std::stringstream text;
+    text << in.rdbuf();
+    json::Value w = json::Value::object();
+    w["name"] = "reverb";
+    w["source"] = text.str();
+    auto written = call("dsp.write", std::move(w));
+    REQUIRE_MESSAGE(written, (written ? std::string() : written.error().toString()));
+    // The script's file, and how to give it one.
+    const json::Value* files = (*written)["plugin"].find("files");
+    REQUIRE(files);
+    CHECK(files->at(0).find("key")->asString() == "room");
+    CHECK(files->at(0).find("kind")->asString() == "impulse");
+
+    // Half a second of a fading echo.
+    audio::AudioData room;
+    room.channels.assign(1, std::vector<float>(24000));
+    for (size_t n = 0; n < room.channels[0].size(); ++n)
+        room.channels[0][n] = static_cast<float>((n % 997 == 0 ? 0.5 : 0.0) *
+                                                 std::exp(-static_cast<double>(n) / 6000.0));
+    const fs::path ir = root.path / "room.wav";
+    fs::create_directories(root.path);
+    REQUIRE(audio::writeWav(ir, room));
+    auto test = [&](const std::string& path) {
+        json::Value t = json::Value::object();
+        t["script"] = "reverb";
+        t["signals"] = json::Value::array();
+        t["signals"].push_back("impulse");
+        t["patch"]["params"]["mix"] = 100;
+        t["patch"]["properties"]["room"] = path;
+        return call("dsp.test", std::move(t));
+    };
+    auto dry = test("");
+    auto wet = test(ir.string());
+    REQUIRE_MESSAGE(wet, (wet ? std::string() : wet.error().toString()));
+    REQUIRE(dry);
+    // The room's echo comes back: a tail the dry render does not have.
+    CHECK((*wet)["signals"].at(0).find("peak_dbfs")->asDouble() > -30.0);
+    CHECK((*dry)["signals"].at(0).find("peak_dbfs")->asDouble() < -150.0);
+    // A path that names nothing is refused, saying which and why.
+    auto missing = test((root.path / "nowhere.wav").string());
+    REQUIRE_FALSE(missing);
+    CHECK(missing.error().toString().find("there is no file there") != std::string::npos);
 }

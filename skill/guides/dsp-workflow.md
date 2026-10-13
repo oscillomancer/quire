@@ -18,8 +18,8 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
      first one first, since later ones often follow from it. Write again.
    - `ok: true`: `plugin` gives its `id`, its `kind` (`effect` or
      `instrument`) and its parameters as the patch will show them (`key`,
-     `unit`, range, default). `listed: true` means `plugin_list` shows it
-     now.
+     `unit`, range, default), and its `files` when it has any (a sample, an
+     impulse response). `listed: true` means `plugin_list` shows it now.
    - `dsp_check {source}` compiles without saving, for trying a fragment.
 3. **Load it** on a track: `fx_add {track, plugin: "<its id>", patch:
    {params: {...}}}`. It answers `semantic: true`: `fx_describe`,
@@ -36,7 +36,10 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
    with `release_ms`, how long it sounds after the last release; its
    problems include a note out of tune and sound that never dies away (a
    voice never released or never finished). Run it again with `patch: {params: {...}}` at the extremes of
-   each parameter. `problems` should be empty unless the plugin means it
+   each parameter. A script with files plays nothing from them until it
+   has them: give each an absolute path, `patch: {properties: {room:
+   "/path/hall.wav"}}`, here and in `fx_add`/`fx_patch_merge`; a path that
+   names no readable WAV, AIFF or FLAC file is refused, saying why. `problems` should be empty unless the plugin means it
    (a distortion clips on purpose). `save: true` keeps the outputs for
    `analyze` and `compare`. On real material, `analyze_track` measures the
    track before and after.

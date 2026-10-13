@@ -40,9 +40,14 @@ struct ParamEntry {
     std::vector<std::string> choices;
     bool meter = false;
 };
+struct FileEntry {
+    std::string key, name, kind;
+    std::optional<std::string> description;
+};
 struct PluginSummary {
     std::string id, name, kind;
     std::vector<ParamEntry> params;
+    std::optional<std::vector<FileEntry>> files;
 };
 struct Compiled {
     bool ok = false;
@@ -137,12 +142,22 @@ inline Compiled compile(const std::string& source) {
             r.program->info().id,
             r.program->info().name,
             r.program->kind() == scriptc::PluginKind::Instrument ? "instrument" : "effect",
+            {},
             {}};
         for (const scriptc::ParamModel& m : r.program->params()) {
             ParamEntry e{m.key, m.name, kindName(m.kind), {},      m.min,
                          m.max, m.def,  m.choices,        m.output};
             if (const char* u = unitName(m.unit)) e.unit = u;
             p.params.push_back(std::move(e));
+        }
+        for (const scriptc::FileModel& m : r.program->files()) {
+            FileEntry e{m.key,
+                        m.name,
+                        m.kind == scriptc::FileModel::Kind::Impulse ? "impulse" : "audio",
+                        {}};
+            if (!m.description.empty()) e.description = m.description;
+            if (!p.files) p.files.emplace();
+            p.files->push_back(std::move(e));
         }
         out.plugin = std::move(p);
     }
@@ -211,12 +226,24 @@ inline schema::Schema<PluginSummary> pluginSchema() {
                      .field("meter", &ParamEntry::meter,
                             schema::boolean().doc("an output the plugin reports"))
                      .build();
+    auto file =
+        schema::object<FileEntry>("dsp_file")
+            .field("key", &FileEntry::key, schema::string().doc("the patch's properties key"))
+            .field("name", &FileEntry::name, schema::string())
+            .field("kind", &FileEntry::kind,
+                   schema::string().doc("audio (a sample) or impulse (a Convolver's response)"))
+            .field("description", &FileEntry::description, schema::string())
+            .build();
     return schema::object<PluginSummary>("dsp_plugin")
         .field("id", &PluginSummary::id, schema::string())
         .field("name", &PluginSummary::name, schema::string())
         .field("kind", &PluginSummary::kind,
                schema::string().doc("effect (audio in, audio out) or instrument (notes in)"))
         .field("params", &PluginSummary::params, schema::arrayOf(param))
+        .field("files", &PluginSummary::files,
+               schema::arrayOf(file).doc(
+                   "the script's files (AudioFile, Convolver), when it has any: give each an "
+                   "absolute path in a patch, {\"properties\": {\"<key>\": \"/path.wav\"}}"))
         .build();
 }
 
