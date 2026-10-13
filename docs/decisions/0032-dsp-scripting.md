@@ -344,6 +344,15 @@ Where the work stands, and where it departs from the text above:
   expression and polyphonic modulation are not exposed yet; note effects
   stay refused until scripts send notes. `dsp.test` plays notes into an
   instrument (a note and a chord, A4 for the pitch heard, no notes).
+- Built-ins over the framework's DSP, 2026-10-13: `Oversampler`, `Stft`,
+  `EnvelopeFollower` and `compressorGainDb`, with an example each
+  (`plugins/suite/examples`: drive, spectral, a sidechain compressor).
+  Scripts pass no callbacks, so framework 1.18.0 gives `dsp::Stft` a
+  sample-at-a-time form (`push`, `spectrum`, `pull`) that its callback
+  form now runs on. Every example is compiled three ways and compared
+  (`script-examples.tests`) and played by the player through the reset
+  check (`plugin.player.examples.reset`, under RealtimeSanitizer in that
+  preset).
 - The compiler's API is C++ (`supple/script_compiler.hpp`,
   `supple/script_program.hpp`); the C ABI of §2 is not written, since
   nothing loads the compiler across a library boundary yet.

@@ -187,6 +187,17 @@ if(SUPPLE_BUILD_PLUGINS)
       list(APPEND player_tests plugin.player.validator)
     endif()
     set_tests_properties(${player_tests} PROPERTIES ENVIRONMENT "${player_env}")
+    # Every example script as the player's library, through the reset check
+    # (and so, in the rtsan preset, under RealtimeSanitizer).
+    set(example_library "${CMAKE_CURRENT_BINARY_DIR}/script-examples")
+    file(GLOB example_scripts CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/suite/examples/*.cpp")
+    foreach(script IN LISTS example_scripts)
+      get_filename_component(name "${script}" NAME_WE)
+      configure_file("${script}" "${example_library}/${name}/${name}.cpp" COPYONLY)
+    endforeach()
+    add_test(NAME plugin.player.examples.reset COMMAND clap-reset-check "${player_clap}")
+    set_tests_properties(plugin.player.examples.reset PROPERTIES LABELS "rt;plugin-reset" TIMEOUT 300
+      ENVIRONMENT "SUPPLE_SCRIPT_LIBRARY=${example_library}")
     # A source export of the player's tilt script, built and tested as a
     # user would, then played against the player (suite/tests).
     add_test(NAME plugin.export.source
