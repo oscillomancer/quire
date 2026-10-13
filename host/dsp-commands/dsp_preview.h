@@ -59,9 +59,9 @@ inline std::vector<clap_supple_pointer_input_t> pointerInput(
     const std::vector<PointerStep>& steps) {
     std::vector<clap_supple_pointer_input_t> out;
     for (const PointerStep& s : steps) {
-        const std::uint32_t keys = (s.shift ? CLAP_SUPPLE_POINTER_SHIFT : 0u) |
-                                   (s.ctrl ? CLAP_SUPPLE_POINTER_CTRL : 0u) |
-                                   (s.alt ? CLAP_SUPPLE_POINTER_ALT : 0u);
+        const std::uint32_t keys = (s.shift ? std::uint32_t{CLAP_SUPPLE_POINTER_SHIFT} : 0u) |
+                                   (s.ctrl ? std::uint32_t{CLAP_SUPPLE_POINTER_CTRL} : 0u) |
+                                   (s.alt ? std::uint32_t{CLAP_SUPPLE_POINTER_ALT} : 0u);
         auto add = [&](std::uint32_t kind, double x, double y, std::uint32_t more = 0,
                        double wheel = 0.0) { out.push_back({kind, keys | more, x, y, wheel}); };
         add(CLAP_SUPPLE_POINTER_MOVE, s.x, s.y);
