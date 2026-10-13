@@ -5,12 +5,12 @@ supple_add_library(engine
           src/stretch.cpp src/meters.cpp src/runtime_protection.cpp src/media_files.cpp
           src/jack_backend.cpp
           src/app.cpp src/plugin_outputs.cpp src/commands.cpp src/extra_commands.cpp src/midi_commands.cpp src/analysis_commands.cpp
-          src/render_commands.cpp src/chain_commands.cpp src/take_commands.cpp src/learn.cpp
+          src/render_commands.cpp src/chain_commands.cpp src/take_commands.cpp src/learn.cpp src/dsp_commands.cpp
           src/midi_control.cpp
   DEPS supple::model supple::clap-host supple::audio-file supple::timeline supple::semantic-params-abi
        supple::command-bus supple::lua-bus supple::notation supple::core-params supple::core-analysis
        supple::core-dsp supple::signalsmith-stretch supple::console9
-  PRIVATE_DEPS supple::product-info ${CMAKE_DL_LIBS})
+  PRIVATE_DEPS supple::product-info supple::script-compiler ${CMAKE_DL_LIBS})
 
 if(SUPPLE_BUILD_TESTS)
   # A stand-in libjack: the JACK backend is tested without a server or device.
@@ -24,14 +24,15 @@ if(SUPPLE_BUILD_TESTS)
   supple_add_tests(engine SOURCES tests/test_offline.cpp tests/test_realtime.cpp tests/test_app.cpp
                    tests/test_commands.cpp tests/test_scripts.cpp tests/test_strips.cpp
                    tests/test_runtime_protection.cpp tests/test_jack.cpp tests/test_workers.cpp tests/test_live_workers.cpp tests/test_meters.cpp
-                   tests/test_learn.cpp LABELS rt SPLIT)
+                   tests/test_learn.cpp tests/test_dsp.cpp LABELS rt SPLIT)
   target_include_directories(engine.tests PRIVATE src)
   target_include_directories(engine.tests PRIVATE ${PROJECT_SOURCE_DIR}/tests/fuzz)
   add_dependencies(engine.tests clap-host-fixtures clap-host-vst3-fixtures engine-fake-jack ${PRODUCT_SLUG}-bridge)
   target_compile_definitions(engine.tests PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>"
                              FIXTURE_VST3_PATH="${CMAKE_BINARY_DIR}/host/clap-host/test-vst3.vst3"
                              FAKE_JACK_PATH="$<TARGET_FILE:engine-fake-jack>"
-                             BRIDGE_PATH="$<TARGET_FILE:${PRODUCT_SLUG}-bridge>")
+                             BRIDGE_PATH="$<TARGET_FILE:${PRODUCT_SLUG}-bridge>"
+                             STOCK_CLAP_DIR="${CMAKE_BINARY_DIR}/plugins/clap")
   target_link_libraries(engine.tests PRIVATE ${CMAKE_DL_LIBS})
 endif()
 

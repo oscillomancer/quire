@@ -49,6 +49,19 @@ std::string originText(const cmd::Origin& o) {
     if (!o.agent.empty()) s += "/" + o.agent;
     return s;
 }
+// The script player (ADR-0032) lists a plugin for each script in the folders
+// SUPPLE_SCRIPT_LIBRARY names: read in this process, and inherited by the
+// scanner and bridge processes. This app's library comes first, then any
+// folders the environment named when the process started.
+void nameScriptLibrary(const fs::path& dir) {
+    static const std::string inherited = [] {
+        const char* v = std::getenv("SUPPLE_SCRIPT_LIBRARY");
+        return std::string(v ? v : "");
+    }();
+    std::string value = dir.string();
+    if (!inherited.empty()) value += ":" + inherited;
+    ::setenv("SUPPLE_SCRIPT_LIBRARY", value.c_str(), 1);
+}
 }  // namespace
 
 EngineApp::EngineApp(AppOptions options) : options_(std::move(options)) {
@@ -75,6 +88,7 @@ Result<std::unique_ptr<EngineApp>> EngineApp::create(AppOptions options, model::
             "engine.workdir", "cannot create " + options.workdir.string(), {},
             "pass a writable workdir and ensure its parent directory exists and has space");
     auto app = std::unique_ptr<EngineApp>(new EngineApp(std::move(options)));
+    nameScriptLibrary(app->scriptDir());
     if (app->serviceFd() < 0)
         return Error("engine.service_wake", "cannot create the main-thread service descriptor", {},
                      "close unused files/descriptors and retry creating the engine app");
@@ -2573,6 +2587,24 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
         (void)st;
         run("item.add",
             R"({"track": "tr_1", "position": 0, "audio_file": ")" + file.string() + R"("})");
+        return;
+    }
+    if (fixture == "dsp_script") {  // gain/gain.cpp in the DSP script library
+        const Status st =
+            writeFileAtomic(scriptDir() / "gain" / "gain.cpp", R"(#include <supple/script.h>
+
+struct Gain : Effect {
+    static constexpr Info info = {.name = "Gain", .id = "com.example.gain"};
+    Param gain = decibels("Gain", -24, 24, 0);
+
+    void process(Block& io) {
+        for (int c = 0; c < io.channels; ++c)
+            for (int i = 0; i < io.frames; ++i) io[c][i] *= gain.gain();
+    }
+};
+)");
+        assert(st && "fixture script failed");
+        (void)st;
         return;
     }
     if (fixture == "meter_change") {  // 3/4 from bar 9

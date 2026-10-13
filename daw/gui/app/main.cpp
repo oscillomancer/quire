@@ -208,19 +208,20 @@ Result<ui::Theme> loadTheme(const std::string& spec, gui::Appearance& look) {
     return ui::Theme::fromJson(*doc, look.theme());
 }
 
+// The user's data folder: <XDG_DATA_HOME or ~/.local/share>/<slug>.
+fs::path dataFolder() {
+    if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg && *xdg)
+        return fs::path(xdg) / std::string(product::kSlug);
+    if (const char* home = std::getenv("HOME"); home && *home)
+        return fs::path(home) / ".local" / "share" / std::string(product::kSlug);
+    return fs::temp_directory_path() / std::string(product::kSlug);
+}
+
 // An unsaved project's own folder, one per run (crashed runs' folders stay, with
 // their recordings): <data>/<slug>/unsaved/<start time>-<pid>; under --workdir
 // when one is given (tests), so nothing lands in the user's data folder.
 fs::path scratchFolder(const Options& o) {
-    fs::path base;
-    if (!o.workdir.empty())
-        base = o.workdir;
-    else if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg && *xdg)
-        base = fs::path(xdg) / std::string(product::kSlug);
-    else if (const char* home = std::getenv("HOME"); home && *home)
-        base = fs::path(home) / ".local" / "share" / std::string(product::kSlug);
-    else
-        base = fs::temp_directory_path() / std::string(product::kSlug);
+    const fs::path base = !o.workdir.empty() ? o.workdir : dataFolder();
     char stamp[32] = {};
     const std::time_t now = std::time(nullptr);
     std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", std::localtime(&now));
@@ -315,6 +316,9 @@ int main(int argc, char** argv) {
     // Renders go to the user's media folder (or the folder chosen in the render
     // dialog, a preference); under --workdir (tests) to <workdir>/renders.
     if (o.workdir.empty()) options.rendersDir = gui::mediaHome();
+    // DSP scripts are the user's, shared by every project: <data>/<slug>/scripts;
+    // under --workdir (tests) <workdir>/scripts.
+    if (o.workdir.empty()) options.scriptDir = dataFolder() / "scripts";
     auto app = engine::EngineApp::create(options);
     if (!app) {
         std::fprintf(stderr, "%s\n", app.error().toString().c_str());

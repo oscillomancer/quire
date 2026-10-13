@@ -114,6 +114,39 @@ q = nil
 ---@class Quire.branch_switch_result
 ---@field name string
 
+---@class Quire.dsp_check_args
+---@field name? string
+---@field source? string
+
+---@class Quire.dsp_check_result
+---@field ok boolean
+---@field diagnostics table[]
+---@field plugin? table
+
+---@class Quire.dsp_get_args
+---@field name string
+
+---@class Quire.dsp_get_result
+---@field name string
+---@field path string
+---@field source string
+
+---@class Quire.dsp_list_result
+---@field library string
+---@field scripts table[]
+
+---@class Quire.dsp_write_args
+---@field name string the script's folder and file name
+---@field source string the whole C++ file
+
+---@class Quire.dsp_write_result
+---@field name string
+---@field path string
+---@field ok boolean it compiled
+---@field diagnostics table[]
+---@field plugin? table
+---@field listed boolean plugin.list shows it (the script player is on the plugin path)
+
 ---@class Quire.engine_start_args
 ---@field backend? "jack"|"dummy"
 ---@field block? integer
@@ -1085,6 +1118,12 @@ q = nil
 ---@field ["render-ab"] fun(args: Quire.branch_render_ab_args): table Render two branch heads over the same range and compare them.
 ---@field switch fun(args: Quire.branch_switch_args): Quire.branch_switch_result Make another branch current (edits, undo and playback follow it).
 
+---@class Quire.dsp
+---@field check fun(args?: Quire.dsp_check_args): Quire.dsp_check_result Compile a DSP script without saving it; return its diagnostics.
+---@field get fun(args: Quire.dsp_get_args): Quire.dsp_get_result Read a DSP script from the library.
+---@field list fun(): Quire.dsp_list_result List the DSP scripts in the library, compiled, with their plugin ids.
+---@field write fun(args: Quire.dsp_write_args): Quire.dsp_write_result Save a DSP script to the library and compile it, with diagnostics.
+
 ---@class Quire.engine
 ---@field inputs fun(): table The device inputs a track can record: audio channels and MIDI devices.
 ---@field start fun(args?: Quire.engine_start_args): Quire.engine_start_result Start real-time playback on the audio device (jack) or without one (dummy).
@@ -1266,6 +1305,7 @@ q = nil
 ---@field analyze Quire.analyze Commands named analyze.*
 ---@field autoitem Quire.autoitem Commands named autoitem.*
 ---@field branch Quire.branch Commands named branch.*
+---@field dsp Quire.dsp Commands named dsp.*
 ---@field engine Quire.engine Commands named engine.*
 ---@field env Quire.env Commands named env.*
 ---@field fx Quire.fx Commands named fx.*

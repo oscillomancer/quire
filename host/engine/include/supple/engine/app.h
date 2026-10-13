@@ -47,6 +47,9 @@ struct AppOptions {
     std::filesystem::path projectTemplateDir;  // empty = … / <slug> / templates
     std::filesystem::path workdir;
     std::filesystem::path rendersDir;  // empty = <workdir>/renders; setRendersDir changes it
+    // DSP scripts (ADR-0032): <scriptDir>/<name>/<name>.cpp, each a plugin of
+    // the script player. Empty = <workdir>/scripts.
+    std::filesystem::path scriptDir;
     // An unsaved project's own folder (the GUI's, one per run): its media (the
     // recordings) live in <scratchDir>/<media_dir> until the first save moves
     // them beside the project file; clearScratch() deletes it when the
@@ -254,6 +257,13 @@ class EngineApp : public cmd::Host {
         return options_.rendersDir.empty() ? options_.workdir / "renders" : options_.rendersDir;
     }
     void setRendersDir(std::filesystem::path dir) { options_.rendersDir = std::move(dir); }
+    // The DSP script library (dsp.* commands). create() names it to the
+    // script player, which lists a plugin for each script there, in
+    // SUPPLE_SCRIPT_LIBRARY: first, before any folders the environment
+    // already named.
+    std::filesystem::path scriptDir() const {
+        return options_.scriptDir.empty() ? options_.workdir / "scripts" : options_.scriptDir;
+    }
     std::string rememberRender(const std::filesystem::path& path);
     std::string reserveRenderId();
     void publishRender(std::string id, const std::filesystem::path& path);
