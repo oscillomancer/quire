@@ -4,8 +4,9 @@
 // A plugin made from a script, as the glue that runs it sees it, however it
 // was built: by the script compiler (the player's JIT, scriptc::Program) or
 // by a C++ compiler (a source export, supple/script_native.h). Its
-// description -- identity, buses, parameters and files, as the script
-// declares them -- and what an instance needs to be made, copied, destroyed and run.
+// description -- identity, buses, parameters, files and shared state, as the
+// script declares them -- and what an instance needs to be made, copied,
+// destroyed and run, and its editor drawn.
 // Scripts never see it.
 #pragma once
 
@@ -71,6 +72,13 @@ struct FileModel {
     int offset = 0;  // of the member in the plugin struct
 };
 
+// A Shared or SharedArray member: bytes the audio code sends the editor.
+struct SharedModel {
+    std::string member;  // the member's name (empty when compiled as C++)
+    int offset = 0;      // in the plugin struct
+    int bytes = 0;
+};
+
 struct InfoModel {
     std::string name, id, vendor, version = "1.0.0", description, url;
     std::vector<int> channels;  // main bus widths, the default first; empty: the kind's default
@@ -117,6 +125,8 @@ class Code {
     // In declaration order.
     virtual const std::vector<ParamModel>& params() const = 0;
     virtual const std::vector<FileModel>& files() const = 0;
+    // In declaration order.
+    virtual const std::vector<SharedModel>& shared() const = 0;
 
     // An instance: the plugin struct, constructed (each Param at its
     // default). Main thread: it allocates.
@@ -146,6 +156,14 @@ class Code {
     virtual StartHook startVoiceRetrigger() const { return nullptr; }
     virtual VoiceHook releaseVoice() const { return nullptr; }
     virtual VoiceHook stopVoice() const { return nullptr; }
+
+    // The editor's hooks, on the main thread in the editor's own instance:
+    // editor(Editor&) and draw(Canvas&), the object a script::Editor or
+    // script::Canvas. Null when the script has none; with neither, the
+    // plugin has the automatic editor.
+    using UiHook = void (*)(void* ctx, void* self, void* object);
+    virtual UiHook editor() const { return nullptr; }
+    virtual UiHook draw() const { return nullptr; }
 };
 
 }  // namespace supple::script::detail

@@ -19,13 +19,14 @@ namespace {
 // The runtime's types, as a script names them: its classes and top-level
 // enums (from the registry), and the names it gives no class of its own.
 bool isRuntimeType(const std::string& name) {
-    static const std::set<std::string> others = {"Array",      "Buffer", "Effect", "Instrument",
-                                                 "NoteEffect", "Unit",   "Curve"};
+    static const std::set<std::string> others = {"Array",       "Buffer", "Shared",
+                                                 "SharedArray", "Effect", "Instrument",
+                                                 "NoteEffect",  "Unit",   "Curve"};
     const Builtins& b = Builtins::get();
     return others.count(name) || b.cls(name) || b.enumNamed(name);
 }
 const std::set<std::string>& runtimeTemplates() {
-    static const std::set<std::string> names = {"Array", "Buffer"};
+    static const std::set<std::string> names = {"Array", "Buffer", "Shared", "SharedArray"};
     return names;
 }
 // Types the runtime declares inside its classes: Oscillator::Shape.
@@ -329,6 +330,12 @@ class Parser {
                 s->isAuto = true;
                 s->path = {"auto"};
                 advance();
+            } else if (t.text == "char" && s->isConst && peek().punct("*")) {
+                // const char*: text, for the editor.
+                s->path = {"const char*"};
+                s->isConst = false;
+                advance();
+                advance();
             } else if (t.text == "unsigned" || t.text == "signed" || t.text == "long" ||
                        t.text == "short" || t.text == "char" || t.text == "wchar_t" ||
                        t.text == "char8_t" || t.text == "char16_t" || t.text == "char32_t") {
@@ -351,12 +358,14 @@ class Parser {
                 error(
                     t.loc, "script.unsupported.std",
                     "std::" + name + " is not available in a script",
-                    name == "array"     ? "write Array<float, 16> (indexing is checked)"
-                    : name == "vector"  ? "declare Buffer<float> buffer; and resize it in prepare()"
-                    : name == "string"  ? "text is only for the editor; use a string literal there"
+                    name == "array"    ? "write Array<float, 16> (indexing is checked)"
+                    : name == "vector" ? "declare Buffer<float> buffer; and resize it in prepare()"
+                    : name == "string"
+                        ? "text is only for the editor: a string literal, or format(\"%.1f dB\", x)"
                     : name == "complex" ? "keep the real and imaginary parts in two doubles"
-                    : name == "atomic"  ? "share values with the editor through a meter() parameter"
-                                        : "use int for whole numbers and double for the rest");
+                    : name == "atomic"
+                        ? "share values with the editor through a Shared<double> member"
+                        : "use int for whole numbers and double for the rest");
                 s->unsupported = true;
                 s->path = {"int"};
                 if (at(Tok::Ident)) advance();
@@ -368,7 +377,9 @@ class Parser {
                 else if (atPunct("<")) {
                     error(cur().loc, "script.unsupported.template",
                           "'" + s->path.back() + "' is not a template",
-                          "only Array<T, N> and Buffer<T> take template arguments");
+                          "only Array<T, N>, Buffer<T>, Shared<T> and SharedArray<T, N> take "
+                          "template "
+                          "arguments");
                     skipTemplateArgs();
                 }
                 while (atPunct("::") && peek().kind == Tok::Ident) {

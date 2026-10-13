@@ -17,7 +17,8 @@
 // keys come with the code, by member (what the script compiler worked out).
 // A Param with no key there takes the one withKey() gives, or else its
 // name's in snake_case; file members (AudioFile, Convolver) the same, from
-// a second list. Scripts never see this header.
+// a second list. Shared members report where they are as they are
+// constructed, as Params do. Scripts never see this header.
 #pragma once
 
 #include <cctype>
@@ -81,12 +82,16 @@ class NativeCode final : public Code {
             m.id = keyId(m.key);
             files_.push_back(std::move(m));
         }
+        for (const auto& [member, bytes] : collector.shared)
+            shared_.push_back(SharedModel{
+                {}, static_cast<int>(static_cast<const unsigned char*>(member) - base), bytes});
     }
 
     const InfoModel& info() const override { return info_; }
     PluginKind kind() const override { return kind_; }
     const std::vector<ParamModel>& params() const override { return params_; }
     const std::vector<FileModel>& files() const override { return files_; }
+    const std::vector<SharedModel>& shared() const override { return shared_; }
 
     void* create() const override { return new T(); }
     void destroy(void* self) const override { delete static_cast<T*>(self); }
@@ -139,6 +144,20 @@ class NativeCode final : public Code {
             };
         return nullptr;
     }
+    UiHook editor() const override {
+        if constexpr (requires(T& t, Editor& e) { t.editor(e); })
+            return [](void*, void* self, void* e) {
+                static_cast<T*>(self)->editor(*static_cast<Editor*>(e));
+            };
+        return nullptr;
+    }
+    UiHook draw() const override {
+        if constexpr (requires(T& t, Canvas& g) { t.draw(g); })
+            return [](void*, void* self, void* g) {
+                static_cast<T*>(self)->draw(*static_cast<Canvas*>(g));
+            };
+        return nullptr;
+    }
 
   private:
     struct Collector final : ParamRegistrar {
@@ -146,6 +165,8 @@ class NativeCode final : public Code {
         std::vector<ParamModel> models;
         std::vector<const void*> files;
         std::vector<FileModel> fileModels;
+        std::vector<std::pair<const void*, int>> shared;
+        void declareShared(void* member, int bytes) override { shared.emplace_back(member, bytes); }
         void declare(Param& param, const ParamSpec& spec) override {
             params.push_back(&param);
             models.push_back(model(spec));
@@ -236,6 +257,7 @@ class NativeCode final : public Code {
     PluginKind kind_ = PluginKind::Effect;
     std::vector<ParamModel> params_;
     std::vector<FileModel> files_;
+    std::vector<SharedModel> shared_;
 };
 
 }  // namespace supple::script::detail

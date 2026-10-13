@@ -207,6 +207,79 @@ TEST_CASE("the first scripts' mistakes are refused with a hint") {
           "script.plugin.instrument");
 }
 
+TEST_CASE("editor code reads parameters and Shared members, and keeps the rest apart") {
+    const std::string head = "#include <supple/script.h>\n";
+    auto plugin = [&](const std::string& body) {
+        return head + "struct T : Effect {\n" +
+               "static constexpr Info info = {.name = \"T\", .id = \"com.example.t\"};\n" +
+               "Param gain = decibels(\"Gain\", -24, 24, 0);\n" +
+               "Param out = decibels(\"Out\", -60, 0, 0).meter();\n" + body + "\n};\n";
+    };
+    const std::string process = "void process(Block& io) {}\n";
+    // What editor code may do: read parameters and Shared members, keep
+    // members of its own, format text, place controls.
+    CHECK(firstError(
+              plugin("Shared<double> level;\nSharedArray<float, 8> scope;\n" + process +
+                     "void draw(Canvas& g) {\n"
+                     "  const char* text = format(\"%.1f dB\", level.get() + gain + scope[1]);\n"
+                     "  g.fillText(text, 10, 20);\n"
+                     "  g.fillStyle(Theme::accent);\n"
+                     "  g.textAlign(TextAlign::Center);\n"
+                     "  g.fillText(gain.text(), 10, 40);\n"
+                     "}")) == "");
+    CHECK(firstError(plugin("double zoom = 1.0;\nAudioFile s = audioFile(\"S\");\n" + process +
+                            "void editor(Editor& e) {\n"
+                            "  e.size(300, 200);\n"
+                            "  e.knob(gain, 10, 10, 80, 90);\n"
+                            "  e.readout(out, 100, 10, 120, 30);\n"
+                            "  e.file(s, 10, 110, 200, 40);\n"
+                            "  zoom = 2.0;\n"
+                            "}\n"
+                            "void draw(Canvas& g) { g.scale(zoom, zoom); }")) == "");
+    // A member both sides use, and one only prepare() fills.
+    CHECK(firstError(plugin("double peak = 0.0;\nvoid process(Block& io) { peak = 1.0; }\n"
+                            "void draw(Canvas& g) { g.fillRect(0, 0, peak, 1); }")) ==
+          "script.editor.member");
+    CHECK(firstError(plugin("double table = 0.0;\nvoid prepare() { table = 2.0; }\n" + process +
+                            "void draw(Canvas& g) { g.fillRect(0, 0, table, 1); }")) ==
+          "script.editor.member");
+    CHECK(firstError(plugin("AudioFile s = audioFile(\"S\");\n" + process +
+                            "void draw(Canvas& g) { double n = s.frames(); }")) ==
+          "script.editor.file");
+    // What editor code may not change.
+    CHECK(firstError(plugin("Shared<double> level;\n" + process +
+                            "void draw(Canvas& g) { level.set(0.0); }")) ==
+          "script.editor.shared_write");
+    CHECK(firstError(plugin("SharedArray<float, 4> s;\n" + process +
+                            "void draw(Canvas& g) { s[0] = 1; }")) == "script.editor.shared_write");
+    CHECK(firstError(plugin(process + "void draw(Canvas& g) { out.set(1.0); }")) ==
+          "script.editor.param_write");
+    // Each side's built-ins.
+    CHECK(firstError(plugin("void process(Block& io) { const char* t = format(\"%d\", 1); }")) ==
+          "script.editor.call");
+    CHECK(firstError(plugin("DelayLine d;\n" + process +
+                            "void draw(Canvas& g) { d.prepare(10); }")) == "script.editor.call");
+    // format()'s pattern is checked as it is written.
+    CHECK(firstError(plugin(process +
+                            "void draw(Canvas& g) { g.fillText(format(\"%s\", 1.0), 0, 0); }")) ==
+          "script.format.conversion");
+    CHECK(
+        firstError(plugin(
+            process + "void draw(Canvas& g) { g.fillText(format(\"%d and %d\", 1.0), 0, 0); }")) ==
+        "script.format.count");
+    // Shared state belongs to the plugin struct, starts at zero, holds numbers.
+    CHECK(firstError(plugin(process + "void draw(Canvas& g) { Shared<double> x; }")) ==
+          "script.shared.where");
+    CHECK(firstError(plugin("Shared<double> level = 1;\n" + process)) == "script.shared.initial");
+    CHECK(firstError(plugin("Shared<Biquad> f;\n" + process)) == "script.shared.type");
+    CHECK(firstError(head + "struct V { Shared<double> x; };\nstruct T : Effect {\n" +
+                     "static constexpr Info info = {.name = \"T\", .id = \"com.example.t\"};\n" +
+                     process + "};\n") == "script.shared.where");
+    // The hooks, as the runtime calls them.
+    CHECK(firstError(plugin(process + "void draw() {}")) == "script.plugin.hook");
+    CHECK(firstError(plugin(process + "void paint(Canvas& g) {}")) == "script.plugin.hook_name");
+}
+
 TEST_CASE("continuous() takes a unit, for the units without a factory") {
     const std::string source = R"(#include <supple/script.h>
 

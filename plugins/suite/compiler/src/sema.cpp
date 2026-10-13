@@ -106,6 +106,7 @@ void Sema::run() {
     effects();
     sequencing();
     checkRules();
+    editorRules();
     if (diags_.hasErrors()) return;
     buildConstruction();
 }
@@ -253,8 +254,9 @@ std::string Sema::typeName(const QualType& q) const {
     return (q.isConst ? "const " : "") + q.type->name + (q.isRef ? "&" : "");
 }
 
-const Type* Sema::arrayType(const Type* element, int count) {
-    const std::string name = "Array<" + element->name + ", " + std::to_string(count) + ">";
+const Type* Sema::arrayType(const Type* element, int count, bool shared) {
+    const std::string name =
+        (shared ? "SharedArray<" : "Array<") + element->name + ", " + std::to_string(count) + ">";
     auto it = arrays_.find(name);
     if (it != arrays_.end()) return it->second;
     auto t = std::make_unique<Type>();
@@ -262,6 +264,7 @@ const Type* Sema::arrayType(const Type* element, int count) {
     t->name = name;
     t->element = element;
     t->count = count;
+    t->shared = shared;
     t->align = element->align;
     const long long bytes =
         static_cast<long long>(element->size) * (count + 1);  // the spare element too
@@ -298,7 +301,22 @@ const Type* Sema::resolve(TypeSpec* spec, StructDecl* scope, bool allowVoid) {
     const std::string& first = path.empty() ? std::string() : path[0];
     if (spec->unsupported) return nullptr;
     if (path.size() == 1) {
-        if (first == "void")
+        if (first == "const char*")
+            t = b_.stringType();
+        else if (first == "Shared") {
+            const Type* value = spec->typeArgs.size() == 1 && spec->valueArgs.empty()
+                                    ? resolve(spec->typeArgs[0], scope)
+                                    : nullptr;
+            const BuiltinClass* c = value ? b_.shared(value) : nullptr;
+            if (!c) {
+                if (spec->typeArgs.size() != 1 || value)
+                    error(spec->loc, "script.shared.type",
+                          "a Shared holds one double, float, int or bool",
+                          "Shared<double> level;  (and SharedArray<float, 256> for many)");
+                return nullptr;
+            }
+            t = c->type;
+        } else if (first == "void")
             t = b_.voidType();
         else if (first == "bool")
             t = b_.boolType();
@@ -308,14 +326,16 @@ const Type* Sema::resolve(TypeSpec* spec, StructDecl* scope, bool allowVoid) {
             t = b_.floatType();
         else if (first == "double")
             t = b_.doubleType();
-        else if (first == "Array" || first == "Buffer") {
-            const bool isArray = first == "Array";
+        else if (first == "Array" || first == "Buffer" || first == "SharedArray") {
+            const bool isArray = first != "Buffer";
             if (spec->typeArgs.empty() || (isArray && spec->valueArgs.size() != 1) ||
                 (!isArray && spec->typeArgs.size() != 1) || spec->argIsType.empty() ||
                 !spec->argIsType[0]) {
                 error(spec->loc, "script.type.template",
-                      isArray ? "write Array<type, size>, such as Array<float, 512>"
-                              : "write Buffer<type>, such as Buffer<float>",
+                      first == "SharedArray"
+                          ? "write SharedArray<type, size>, such as SharedArray<float, 256>"
+                      : isArray ? "write Array<type, size>, such as Array<float, 512>"
+                                : "write Buffer<type>, such as Buffer<float>",
                       "an Array has a fixed size; a Buffer is sized in prepare()");
                 return nullptr;
             }
@@ -326,6 +346,20 @@ const Type* Sema::resolve(TypeSpec* spec, StructDecl* scope, bool allowVoid) {
                       "an " + first + "'s elements are plain values, not const or references",
                       "drop the const or &: " + first +
                           (first == "Array" ? "<float, 8>" : "<float>"));
+                return nullptr;
+            }
+            if (first == "SharedArray" &&
+                !(element->kind == TypeKind::Double || element->kind == TypeKind::Float ||
+                  element->kind == TypeKind::Int || element->kind == TypeKind::Bool)) {
+                error(spec->loc, "script.shared.type",
+                      "a SharedArray holds double, float, int or bool",
+                      "SharedArray<float, 256> scope;");
+                return nullptr;
+            }
+            if (isArray && Builtins::isShared(element)) {
+                error(spec->loc, "script.shared.array",
+                      "an Array of Shared values is a SharedArray",
+                      "SharedArray<" + element->builtin->sharedValue->name + ", N> name;");
                 return nullptr;
             }
             if (isArray) {
@@ -361,7 +395,7 @@ const Type* Sema::resolve(TypeSpec* spec, StructDecl* scope, bool allowVoid) {
                           "use a Buffer<T> and resize it in prepare()");
                     return nullptr;
                 }
-                t = arrayType(element, static_cast<int>(n));
+                t = arrayType(element, static_cast<int>(n), first == "SharedArray");
                 if (t->size > kMaxStructBytes)
                     error(spec->loc, "script.type.array_size", t->name + " is larger than 64 MiB",
                           "use a Buffer<T> and resize it in prepare()");
@@ -653,6 +687,25 @@ void Sema::checkStructs() {
                           "Param " + f->name + " = decibels(\"Gain\", -24, 24, 0);");
                 continue;  // evaluated with the plugin
             }
+            if (Builtins::isShared(t)) {
+                if (s->base == PluginKind::None)
+                    error(f->loc, "script.shared.where",
+                          "Shared members belong to the plugin struct",
+                          "declare '" + f->name +
+                              "' in the struct that derives from Effect or Instrument");
+                else if (f->init)
+                    error(f->init->loc, "script.shared.initial",
+                          "'" + f->name + "' starts at zero; the audio code sets it",
+                          "declare it as " + t->name + " " + f->name +
+                              "; and set() it in prepare() or process()");
+                continue;
+            }
+            if (t->kind == TypeKind::String) {
+                error(f->loc, "script.text.member",
+                      "text lasts only while the editor draws, so it is not a member",
+                      "keep the number, and format it in draw(): format(\"%.1f\", x)");
+                continue;
+            }
             if (b_.isFile(t)) {
                 if (!f->init)
                     error(f->loc, "script.file.declaration", "a file is declared with its name",
@@ -749,7 +802,7 @@ void Sema::signature(FunctionDecl* f) {
         const Type* t = resolve(p->spec, scope);
         p->qt = QualType{t, p->spec->isConst, p->spec->isRef};
         if (!t) continue;
-        if (!p->spec->isRef && !t->isScalar()) {
+        if (!p->spec->isRef && !t->isScalar() && t->kind != TypeKind::String) {
             if (t->kind == TypeKind::Object && t->builtin == b_.block())
                 error(p->loc, "script.function.parameter",
                       "a Block is passed by reference: Block& io", "write Block& io");
@@ -810,9 +863,15 @@ void Sema::checkLocalDecl(VarDecl* v) {
         v->init = check(v->init);
         const Type* t = v->init->type();
         if (!t) return;
-        if (t->isVoid() || t->kind == TypeKind::String || t->kind == TypeKind::Null) {
+        if (t->isVoid() || t->kind == TypeKind::Null) {
             error(v->loc, "script.local.auto", "'" + v->name + "' has no value to take",
                   "write its type instead of auto, and give it a number");
+            return;
+        }
+        if (!spec->isRef && Builtins::isShared(t)) {
+            error(v->loc, "script.shared.where", "auto would copy the " + t->name + " member",
+                  t->kind == TypeKind::Array ? "refer to it: const auto& " + v->name + " = ...;"
+                                             : "read it: auto " + v->name + " = ....get();");
             return;
         }
         if (!spec->isRef && t->kind == TypeKind::Object && t->builtin == b_.param()) {
@@ -870,6 +929,21 @@ void Sema::checkLocalDecl(VarDecl* v) {
         error(v->loc, "script.local.static", "a static local would be shared by every instance",
               "make it a member");
     if (!spec->isRef) {
+        if (Builtins::isShared(t)) {
+            error(
+                v->loc, "script.shared.where", "Shared members belong to the plugin struct",
+                "declare it there, or use a plain " +
+                    (t->kind == TypeKind::Array ? std::string("Array<") + t->element->name + ", N>"
+                                                : t->builtin->sharedValue->name) +
+                    " here");
+            return;
+        }
+        if (t->kind == TypeKind::String && !v->init) {
+            error(v->loc, "script.local.uninitialized",
+                  "give '" + v->name + "' its text where it is declared",
+                  "const char* " + v->name + " = format(\"%.1f\", x);");
+            return;
+        }
         if (t->kind == TypeKind::Object && t->builtin == b_.param()) {
             error(v->loc, "script.param.location", "parameters are members of the plugin struct",
                   "declare it as a member of the plugin struct: Param gain = decibels(...);");
@@ -1345,6 +1419,10 @@ void Sema::extractPlugin() {
             error(p.fileFields[i]->loc, "script.file.key",
                   "two files have the key '" + p.files[i].key + "'",
                   "rename one, or give it a key of its own: .withKey(\"other_key\")");
+    // State the editor sees.
+    for (FieldDecl* f : s->fields)
+        if (!f->isStatic && Builtins::isShared(f->qt.type))
+            p.shared.push_back(SharedModel{f->name, f->offset, f->qt.type->size});
     // Hooks.
     for (FunctionDecl* f : s->methods) {
         const std::string& n = f->name;
@@ -1388,6 +1466,27 @@ void Sema::extractPlugin() {
                                        "void " + n + "(int v)")) {
                 (n == "releaseVoice" ? p.releaseVoice : p.stopVoice) = f;
             }
+        } else if (n == "editor" || n == "draw") {
+            const bool isDraw = n == "draw";
+            const BuiltinClass* want = isDraw ? b_.canvas() : b_.editor();
+            const bool ok = isVoid && f->params.size() == 1 && f->params[0]->qt.type &&
+                            f->params[0]->qt.type->kind == TypeKind::Object &&
+                            f->params[0]->qt.type->builtin == want && f->params[0]->qt.isRef &&
+                            !f->params[0]->qt.isConst && !f->isConst;
+            if (expectSignature(ok, isDraw ? "void draw(Canvas& g)" : "void editor(Editor& e)"))
+                (isDraw ? p.draw : p.editor) = f;
+        } else if (n == "paint" || n == "onDraw" || n == "drawEditor" || n == "drawUi" ||
+                   n == "drawUI" || n == "gui" || n == "ui") {
+            error(f->loc, "script.plugin.hook_name",
+                  "the runtime calls draw(Canvas& g) to draw the editor, not " + n + "()",
+                  "rename it: void draw(Canvas& g)");
+        } else if (n == "createEditor" || n == "layout" || n == "buildEditor" ||
+                   n == "setupEditor") {
+            error(f->loc, "script.plugin.hook_name",
+                  "the runtime calls editor(Editor& e) once, to size the editor and add controls, "
+                  "not " +
+                      n + "()",
+                  "rename it: void editor(Editor& e)");
         } else if (n == "reset") {
             error(
                 f->loc, "script.plugin.reset",
@@ -1790,6 +1889,8 @@ void Sema::contexts() {
     mark(p.startVoiceRetrigger, kAudio);
     mark(p.releaseVoice, kAudio);
     mark(p.stopVoice, kAudio);
+    mark(p.editor, kUi);
+    mark(p.draw, kUi);
     // Recursion: a cycle in the call graph.
     std::map<FunctionDecl*, int> state;  // 1: on the stack, 2: done
     std::function<bool(FunctionDecl*)> visit = [&](FunctionDecl* f) -> bool {
@@ -2291,7 +2392,12 @@ void Sema::checkRules() {
             switch (e->kind) {
                 case ExprKind::Call: {
                     auto* c = static_cast<CallExpr*>(e);
-                    if (c->builtinMethod && !(c->builtinMethod->contexts & kAudio))
+                    // The editor's own built-ins: editorRules() says so.
+                    const bool editorOnly =
+                        (c->builtinMethod && c->builtinMethod->contexts == kUi) ||
+                        (c->builtin && c->builtin->contexts == kUi);
+                    if (editorOnly) {
+                    } else if (c->builtinMethod && !(c->builtinMethod->contexts & kAudio))
                         error(c->loc, "script.rt.allocation",
                               c->builtinMethod->owner->name + "::" + c->builtinMethod->name +
                                   "() allocates memory, which audio code (" + f->name +
@@ -2299,7 +2405,7 @@ void Sema::checkRules() {
                                   "update()) may not do",
                               "call it in prepare(), where the sample rate is known and allocating "
                               "is allowed");
-                    if (c->builtin && !(c->builtin->contexts & kAudio))
+                    if (c->builtin && !editorOnly && !(c->builtin->contexts & kAudio))
                         error(c->loc, "script.rt.allocation",
                               c->builtin->name + "() is not available in audio code",
                               "call it in prepare()");
@@ -2394,6 +2500,327 @@ void Sema::checkRules() {
             }
         };
         walkStmt(f->body);
+    }
+}
+
+namespace {
+
+// Every expression in a statement, outermost first; `visit` returns false to
+// skip an expression's own subexpressions.
+void walkExpr(Expr* e, const std::function<bool(Expr*)>& visit);
+void walkStmt(Stmt* s, const std::function<bool(Expr*)>& visit) {
+    if (!s) return;
+    switch (s->kind) {
+        case StmtKind::Compound:
+            for (Stmt* x : static_cast<CompoundStmt*>(s)->body) walkStmt(x, visit);
+            return;
+        case StmtKind::Expr:
+            walkExpr(static_cast<ExprStmt*>(s)->expr, visit);
+            return;
+        case StmtKind::Decl:
+            for (VarDecl* v : static_cast<DeclStmt*>(s)->vars) walkExpr(v->init, visit);
+            return;
+        case StmtKind::If:
+            walkExpr(static_cast<IfStmt*>(s)->cond, visit);
+            walkStmt(static_cast<IfStmt*>(s)->then, visit);
+            walkStmt(static_cast<IfStmt*>(s)->otherwise, visit);
+            return;
+        case StmtKind::For:
+            walkStmt(static_cast<ForStmt*>(s)->init, visit);
+            walkExpr(static_cast<ForStmt*>(s)->cond, visit);
+            walkExpr(static_cast<ForStmt*>(s)->step, visit);
+            walkStmt(static_cast<ForStmt*>(s)->body, visit);
+            return;
+        case StmtKind::RangeFor:
+            walkExpr(static_cast<RangeForStmt*>(s)->range, visit);
+            walkStmt(static_cast<RangeForStmt*>(s)->body, visit);
+            return;
+        case StmtKind::While:
+            walkExpr(static_cast<WhileStmt*>(s)->cond, visit);
+            walkStmt(static_cast<WhileStmt*>(s)->body, visit);
+            return;
+        case StmtKind::DoWhile:
+            walkStmt(static_cast<DoWhileStmt*>(s)->body, visit);
+            walkExpr(static_cast<DoWhileStmt*>(s)->cond, visit);
+            return;
+        case StmtKind::Switch:
+            walkExpr(static_cast<SwitchStmt*>(s)->cond, visit);
+            walkStmt(static_cast<SwitchStmt*>(s)->body, visit);
+            return;
+        case StmtKind::Return:
+            walkExpr(static_cast<ReturnStmt*>(s)->value, visit);
+            return;
+        default:
+            return;
+    }
+}
+void walkExpr(Expr* e, const std::function<bool(Expr*)>& visit) {
+    if (!e || !visit(e)) return;
+    switch (e->kind) {
+        case ExprKind::Member:
+            walkExpr(static_cast<MemberExpr*>(e)->object, visit);
+            return;
+        case ExprKind::Index:
+            walkExpr(static_cast<IndexExpr*>(e)->object, visit);
+            walkExpr(static_cast<IndexExpr*>(e)->index, visit);
+            return;
+        case ExprKind::Call: {
+            auto* c = static_cast<CallExpr*>(e);
+            walkExpr(c->object, visit);
+            for (Expr* a : c->args) walkExpr(a, visit);
+            return;
+        }
+        case ExprKind::Unary:
+            walkExpr(static_cast<UnaryExpr*>(e)->operand, visit);
+            return;
+        case ExprKind::Binary:
+            walkExpr(static_cast<BinaryExpr*>(e)->left, visit);
+            walkExpr(static_cast<BinaryExpr*>(e)->right, visit);
+            return;
+        case ExprKind::Assign:
+            walkExpr(static_cast<AssignExpr*>(e)->target, visit);
+            walkExpr(static_cast<AssignExpr*>(e)->value, visit);
+            return;
+        case ExprKind::Conditional:
+            walkExpr(static_cast<ConditionalExpr*>(e)->cond, visit);
+            walkExpr(static_cast<ConditionalExpr*>(e)->then, visit);
+            walkExpr(static_cast<ConditionalExpr*>(e)->otherwise, visit);
+            return;
+        case ExprKind::Cast:
+            walkExpr(static_cast<CastExpr*>(e)->operand, visit);
+            return;
+        case ExprKind::InitList:
+            for (auto& item : static_cast<InitListExpr*>(e)->items) walkExpr(item.value, visit);
+            return;
+        default:
+            return;
+    }
+}
+
+// The member of `owner` an expression designates, or is part of: gain, for
+// gain, voices[2].env or this->gain. Null for anything else.
+FieldDecl* rootField(Expr* e, const StructDecl* owner) {
+    while (e) {
+        switch (e->kind) {
+            case ExprKind::Name: {
+                auto* n = static_cast<NameExpr*>(e);
+                return n->ref == RefKind::Field && n->field && n->field->owner == owner ? n->field
+                                                                                        : nullptr;
+            }
+            case ExprKind::Member: {
+                auto* m = static_cast<MemberExpr*>(e);
+                if (m->object && m->object->kind == ExprKind::This)
+                    return m->ref == RefKind::Field && m->field && m->field->owner == owner
+                               ? m->field
+                               : nullptr;
+                e = m->object;
+                continue;
+            }
+            case ExprKind::Index:
+                e = static_cast<IndexExpr*>(e)->object;
+                continue;
+            case ExprKind::Cast:
+                e = static_cast<CastExpr*>(e)->operand;
+                continue;
+            default:
+                return nullptr;
+        }
+    }
+    return nullptr;
+}
+
+std::string hookList(std::uint8_t contexts) {
+    std::string out;
+    if (contexts & kInit) out += "prepare()";
+    if (contexts & kAudio) out += std::string(out.empty() ? "" : " and ") + "process()";
+    if (contexts & kUi) out += std::string(out.empty() ? "" : " and ") + "the editor";
+    return out;
+}
+
+}  // namespace
+
+// The editor's rules. Editor code (editor(), draw() and what they call) runs
+// on the main thread, in an instance of the plugin struct of its own that
+// shares only parameters and Shared members with the audio code's. So a
+// member only one side uses is that side's, and one both use is refused;
+// editor code reads parameters and Shared members and never changes them;
+// and each side calls only the built-ins it has.
+void Sema::editorRules() {
+    const PluginModel& p = out_.plugin;
+    if (!p.decl) return;
+    const StructDecl* plugin = p.decl;
+    struct Use {
+        FunctionDecl* f = nullptr;
+        Loc loc;
+    };
+    std::map<FieldDecl*, std::vector<Use>> uses;
+    for (FunctionDecl* f : out_.functions) {
+        if (!f->contexts) continue;
+        const bool ui = f->contexts & kUi;
+        const bool other = f->contexts & (kInit | kAudio);
+        auto changes = [&](Expr* target, Loc loc) {
+            if (!ui) return;
+            FieldDecl* field = rootField(target, plugin);
+            if (!field || !field->qt.type) return;
+            if (Builtins::isShared(field->qt.type))
+                error(loc, "script.editor.shared_write",
+                      "editor code reads '" + field->name + "'; only the audio code sets it",
+                      "draw what " +
+                          std::string(field->qt.type->kind == TypeKind::Array ? "it holds"
+                                                                              : "get() returns") +
+                          ", and keep the editor's own state in a member only editor code uses");
+            else if (field->qt.type->kind == TypeKind::Object &&
+                     field->qt.type->builtin == b_.param())
+                error(loc, "script.editor.param_write",
+                      "editor code cannot change the parameter '" + field->name + "'",
+                      "give it a control in editor(): e.knob(" + field->name + ", x, y, w, h)");
+        };
+        std::function<bool(Expr*)> visit = [&](Expr* e) -> bool {
+            switch (e->kind) {
+                case ExprKind::Name:
+                case ExprKind::Member:
+                    if (FieldDecl* field = rootField(e, plugin);
+                        field && !field->isStatic &&
+                        (e->kind == ExprKind::Name ||
+                         static_cast<MemberExpr*>(e)->object->kind == ExprKind::This))
+                        uses[field].push_back(Use{f, e->loc});
+                    return true;
+                case ExprKind::Assign:
+                    changes(static_cast<AssignExpr*>(e)->target, e->loc);
+                    return true;
+                case ExprKind::Unary: {
+                    auto* u = static_cast<UnaryExpr*>(e);
+                    if (u->op == "++" || u->op == "--") changes(u->operand, e->loc);
+                    return true;
+                }
+                case ExprKind::Call: {
+                    auto* c = static_cast<CallExpr*>(e);
+                    // Built-ins each side has.
+                    const std::uint8_t has = c->builtinMethod ? c->builtinMethod->contexts
+                                             : c->builtin     ? c->builtin->contexts
+                                                              : (kInit | kAudio | kUi);
+                    const std::string name = c->builtinMethod ? c->builtinMethod->name
+                                             : c->builtin     ? c->builtin->name
+                                                              : std::string();
+                    if (ui && !(has & kUi))
+                        error(c->loc, "script.editor.call",
+                              name + "() is not available in editor code (" + f->name + "())",
+                              "editor code draws and reads; leave " + name + "() to " +
+                                  hookList(has));
+                    if (other && has == kUi)
+                        error(c->loc, "script.editor.call",
+                              name + "() is the editor's, and " + f->name + "() is " +
+                                  hookList(f->contexts & (kInit | kAudio)) + " code",
+                              "call it from draw() or editor(); share what they need with a Shared "
+                              "member");
+                    // What a call changes: its object, through a method that
+                    // changes it, and arguments bound to non-const references.
+                    if (c->builtinMethod && c->builtinMethod->writes == Writes::Self && c->object)
+                        changes(c->object, c->loc);
+                    if (!c->builtinMethod && !c->builtin && !c->function && c->object &&
+                        c->callee->kind == ExprKind::Member) {
+                        const std::string& m = static_cast<MemberExpr*>(c->callee)->member;
+                        if (m == "fill" || m == "resize") changes(c->object, c->loc);
+                    }
+                    if (c->function) {
+                        if (c->object && !c->function->isConst) changes(c->object, c->loc);
+                        for (size_t i = 0; i < c->args.size() && i < c->function->params.size();
+                             ++i)
+                            if (c->function->params[i]->qt.isRef &&
+                                !c->function->params[i]->qt.isConst)
+                                changes(c->args[i], c->args[i]->loc);
+                    }
+                    // A control's parameter or file, named in editor(), is
+                    // not a use of it: the control finds it by name.
+                    if (c->builtinMethod && c->builtinMethod->owner == b_.editor()) {
+                        walkExpr(c->object, visit);
+                        for (size_t i = 0; i < c->args.size(); ++i) {
+                            const Type* pt = i < c->builtinMethod->params.size()
+                                                 ? c->builtinMethod->params[i].type
+                                                 : nullptr;
+                            if (!(pt && pt->kind == TypeKind::Object)) walkExpr(c->args[i], visit);
+                        }
+                        return false;
+                    }
+                    return true;
+                }
+                default:
+                    return true;
+            }
+        };
+        walkStmt(f->body, visit);
+        // A reference that could change a parameter or a Shared member.
+        std::function<void(Stmt*)> refs = [&](Stmt* st) {
+            if (!st) return;
+            switch (st->kind) {
+                case StmtKind::Compound:
+                    for (Stmt* x : static_cast<CompoundStmt*>(st)->body) refs(x);
+                    return;
+                case StmtKind::Decl:
+                    for (VarDecl* v : static_cast<DeclStmt*>(st)->vars)
+                        if (v->qt.isRef && !v->qt.isConst && v->init) changes(v->init, v->loc);
+                    return;
+                case StmtKind::RangeFor: {
+                    auto* r = static_cast<RangeForStmt*>(st);
+                    if (r->var && r->var->qt.isRef && !r->var->qt.isConst)
+                        changes(r->range, r->var->loc);
+                    refs(r->body);
+                    return;
+                }
+                case StmtKind::If:
+                    refs(static_cast<IfStmt*>(st)->then);
+                    refs(static_cast<IfStmt*>(st)->otherwise);
+                    return;
+                case StmtKind::For:
+                    refs(static_cast<ForStmt*>(st)->init);
+                    refs(static_cast<ForStmt*>(st)->body);
+                    return;
+                case StmtKind::While:
+                    refs(static_cast<WhileStmt*>(st)->body);
+                    return;
+                case StmtKind::DoWhile:
+                    refs(static_cast<DoWhileStmt*>(st)->body);
+                    return;
+                case StmtKind::Switch:
+                    refs(static_cast<SwitchStmt*>(st)->body);
+                    return;
+                default:
+                    return;
+            }
+        };
+        refs(f->body);
+    }
+    for (FieldDecl* field : plugin->fields) {
+        auto found = uses.find(field);
+        if (found == uses.end()) continue;
+        const std::vector<Use>& list = found->second;
+        const Type* t = field->qt.type;
+        if (!t || Builtins::isShared(t) ||
+            (t->kind == TypeKind::Object && t->builtin == b_.param()))
+            continue;
+        const Use* firstUi = nullptr;
+        const Use* firstOther = nullptr;
+        for (const Use& u : list) {
+            if ((u.f->contexts & kUi) && !firstUi) firstUi = &u;
+            if ((u.f->contexts & (kInit | kAudio)) && !firstOther) firstOther = &u;
+        }
+        if (!firstUi) continue;
+        if (b_.isFile(t)) {
+            error(firstUi->loc, "script.editor.file",
+                  "editor code cannot read the file member '" + field->name + "'",
+                  "show it with e.file(" + field->name +
+                      ", x, y, w, h) in editor(), and share what draw() needs through a Shared "
+                      "member");
+            continue;
+        }
+        if (firstOther)
+            error(firstUi->loc, "script.editor.member",
+                  "'" + field->name + "' is the audio code's (" + firstOther->f->name +
+                      "() uses it), and " + firstUi->f->name +
+                      "() is editor code, which has a copy of the plugin of its own",
+                  "share what the editor needs: a Shared<double> member set() in process() and "
+                  "read with "
+                  "get() in draw(); or give the editor a member of its own");
     }
 }
 

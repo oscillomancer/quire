@@ -121,6 +121,7 @@ that scales audio directly (levels, mix) so that moving it does not click.
 | `void prepare()` | Before audio starts, and when the sample rate or block size changes. `sampleRate()` and `maxBlockSize()` are known | Allocation (`DelayLine::prepare`, `Buffer::resize`), seeding, anything sized from the sample rate |
 | `void update()` | After `prepare()`, then at the start of a block whenever a parameter changed (blocks are split at each change, so automation is sample-accurate) | Turning parameters into coefficients; `p.changed()` says which moved |
 | `void process(Block& io)` | Every block | The audio |
+| `void editor(Editor& e)`, `void draw(Canvas& g)` | The editor's (optional) | Its controls and drawing: see The editor |
 
 There is no `reset()` to write: the runtime returns every member to what
 `prepare()` left, by itself. The script never calls a hook.
@@ -250,6 +251,97 @@ Files are members of the plugin struct only, one per member (no arrays),
 and never assigned: read them, or keep what you need in members of your
 own.
 
+## The editor
+
+With no editor code a plugin gets the automatic editor: every parameter, by
+group (`.in()`), with meters. To draw its own, it adds either hook or both:
+
+| Hook | When | What goes there |
+|---|---|---|
+| `void editor(Editor& e)` | Once, as the editor opens (and after a reload) | Its size and its controls |
+| `void draw(Canvas& g)` | At each repaint | What lies under the controls: panels, graphs, meters, text |
+
+```cpp
+#include <supple/script.h>
+
+struct Level : Effect {
+    static constexpr Info info = {.name = "Level", .id = "com.example.level"};
+
+    Param gain = decibels("Gain", -24, 24, 0).smoothed(20).help("The level out.");
+    Shared<double> peak;  // what the editor shows, sent by the audio code
+    double held = 0.0;    // the audio code's own
+
+    void process(Block& io) {
+        for (int i = 0; i < io.frames; ++i)
+            for (int c = 0; c < io.channels; ++c) {
+                io[c][i] *= dbToGain(gain.at(i));
+                held = max(abs(io[c][i]), held * 0.9999);
+            }
+        peak.set(gainToDb(held));
+    }
+    void editor(Editor& e) {
+        e.size(240, 180);
+        e.knob(gain, 20, 50, 88, 100);
+    }
+    void draw(Canvas& g) {
+        g.panel(8, 8, 224, 164, "Level");
+        g.meter(peak.get(), 150, 50, 20, 100);
+        g.fillStyle(Theme::textMuted);
+        g.monoFont(11);
+        g.fillText(format("%.1f dB", peak.get()), 140, 166);
+    }
+};
+```
+
+Editor code runs on the host's main thread, in a copy of the plugin of its
+own. There each `Param` reads the value being heard (with the host's
+modulation; a `.meter()` what the plugin reports) and each `Shared` member
+what the audio code last sent; any other member it uses is the editor's own
+(a zoom, a hover). A member both editor code and `prepare()` or `process()`
+use is refused, so the audio code shares what the editor shows:
+
+| Member | Audio code | Editor code |
+|---|---|---|
+| `Shared<double> level;` (or `float`, `int`, `bool`) | `level.set(x)` | `level.get()` |
+| `SharedArray<float, 256> scope;` (an `Array`) | `scope[i] = x` | `scope[i]` |
+
+They are members of the plugin struct, start at zero, and arrive together,
+as of one moment, about 120 times a second while the editor is open. Editor
+code never changes them, or a parameter: controls do that.
+
+Controls, `e.knob(p, x, y, w, h)` and the like, are the framework's own,
+bound to a parameter and labelled with its name, in design units (the
+window scales everything): `knob`, `slider` (along its longer side),
+`toggle`, `choice` (buttons for up to four options, a menu for more),
+`readout` (shown, not edited: a `.meter()`), `xyPad(across, up, ...)`,
+`envelope(attack, decay, sustain, release, ...)`, `file(member, ...)` (an
+`AudioFile` or `Convolver`: its name; a click chooses, a dropped file is
+taken), `keyboard(lowKey, highKey, ...)` (an instrument's) and
+`meters(...)` (the input and output peak meters). `e.size(w, h)`: 480 by
+320 unless given.
+
+`Canvas` is HTML canvas's 2D context, as methods:
+
+| Calls | |
+|---|---|
+| `fillStyle(c)` `strokeStyle(c)` `globalAlpha(a)` `lineWidth(w)` `lineCap(LineCap::Round)` `lineJoin(LineJoin::Round)` `linearGradient(x0, y0, x1, y1, from, to)` `radialGradient(x, y, r0, r1, from, to)` | Styles, until changed or `restore()`d. A colour is `0xRRGGBB` or one of the palette's: `Theme::ground` `surface` `raised` `recess` `line` `lineLit` `textFaint` `textMuted` `text` `accent` `accent2` `modulation` `alert`. Fill and stroke start as `Theme::text` |
+| `fillRect` `strokeRect` `clearRect` `(x, y, w, h)` | Each a path of its own |
+| `beginPath()` `moveTo` `lineTo` `bezierCurveTo` `quadraticCurveTo` `arc(x, y, r, start, end)` `arcTo` `rect` `roundRect(x, y, w, h, r)` `ellipse(x, y, rx, ry)` `circle(x, y, r)` `closePath()`, then `fill()` or `stroke()` | Paths. Angles in radians, 0 to the right, clockwise |
+| `save()` `restore()` `translate` `rotate` `scale` `clip(x, y, w, h)` | Transforms and a rectangular clip |
+| `font(size)` `boldFont(size)` `monoFont(size)` `textAlign(TextAlign::Center)` `textBaseline(TextBaseline::Middle)` `fillText(text, x, y)` `measureText(text)` | Text (`monoFont` for numbers) |
+| `panel(x, y, w, h, "Title")` `well` `meter(levelDb, ...)` `frequencyGrid(x, y, w, h, lowHz, highHz)` `levelGrid(x, y, w, h, lowDb, highDb, stepDb)` | The editor's furniture, in its look |
+| `width()` `height()` | The editor's size |
+
+Text is a string literal, `format("%.1f dB", x)` (printf's number
+conversions, up to four values), or a parameter's `p.text()` (its value as
+hosts show it) and `p.name()`; it lasts until the hook returns, so a local
+`const char*` holds it but a member cannot. `hzToX(hz, lowHz, highHz, x, w)`
+and `dbToY(db, lowDb, highDb, y, h)` place a graph's points on the grids'
+lines. To draw a filter's response, give the editor a `Biquad` of its own,
+designed from the parameters in `draw()`, and plot its `responseDb(hz)`.
+Editor code may loop freely within a generous budget; a hook that spends it
+stops, and the editor says where. `dsp.preview` saves the editor as a PNG.
+
 ## Types and statements
 
 - Numbers: `double` (use it by default), `float`, `int`, `bool`. Integer
@@ -348,4 +440,5 @@ Fix the first error first: later ones often follow from it. The codes group
 by area: `script.parse.*` (syntax), `script.unsupported.*` (outside the
 subset), `script.type.*`, `script.name.*`, `script.call.*`,
 `script.plugin.*` and `script.param.*` (the plugin's shape), `script.ub.*`
-(undefined in C++), `script.rt.*` (real-time rules).
+(undefined in C++), `script.rt.*` (real-time rules), `script.editor.*`,
+`script.shared.*` and `script.format.*` (the editor's rules).

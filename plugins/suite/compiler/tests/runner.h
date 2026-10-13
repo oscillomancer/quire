@@ -127,6 +127,21 @@ class JitRunner : public RunnerBase {
             program_->process()(&instance, self_, &io);
         });
     }
+    // The editor's hooks, building and drawing with these.
+    void editor(D::EditorBuilder* builder) {
+        S::Editor e;
+        D::Layout::bind(e, builder);
+        D::CurrentScope scope(&instance);
+        instance.budget = std::int64_t{1} << 40;
+        if (auto f = program_->editor()) f(&instance, self_, &e);
+    }
+    void draw(D::Painter* painter) {
+        S::Canvas g;
+        D::Layout::bind(g, painter);
+        D::CurrentScope scope(&instance);
+        instance.budget = std::int64_t{1} << 40;
+        if (auto f = program_->draw()) f(&instance, self_, &g);
+    }
 
   private:
     std::shared_ptr<const scriptc::Program> program_;
@@ -146,6 +161,9 @@ class NativeRunner : public RunnerBase {
         plugin_ = std::make_unique<T>();
         D::setRegistrar(nullptr);
         params_ = collector.params;
+        // Each Param's place in the table, as the glue binds it.
+        for (size_t i = 0; i < params_.size(); ++i)
+            D::ParamBinding::setSlot(*params_[i], static_cast<int>(i));
         D::Instance::bind(*plugin_, &instance);
     }
     T& plugin() { return *plugin_; }
@@ -168,6 +186,18 @@ class NativeRunner : public RunnerBase {
     void process(Audio& audio, int block = 512) {
         D::CurrentScope scope(&instance);
         blocks(audio, block, [&](S::Block& io) { plugin_->process(io); });
+    }
+    void editor(D::EditorBuilder* builder) {
+        S::Editor e;
+        D::Layout::bind(e, builder);
+        D::CurrentScope scope(&instance);
+        if constexpr (requires(T& t, S::Editor& x) { t.editor(x); }) plugin_->editor(e);
+    }
+    void draw(D::Painter* painter) {
+        S::Canvas g;
+        D::Layout::bind(g, painter);
+        D::CurrentScope scope(&instance);
+        if constexpr (requires(T& t, S::Canvas& x) { t.draw(x); }) plugin_->draw(g);
     }
 
   private:

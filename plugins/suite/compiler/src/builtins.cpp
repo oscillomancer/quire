@@ -100,6 +100,13 @@ struct Registrar {
                 q.isConst = true;
                 w = word();
             }
+            skip();
+            if (w == "char" && i < text.size() && text[i] == '*') {  // const char*: text
+                ++i;
+                q.type = b.string_;
+                q.isConst = false;
+                return;
+            }
             q.type = typeNamed(w, scope);
             skip();
             if (i < text.size() && text[i] == '&') {
@@ -247,6 +254,22 @@ BuiltinClass* Builtins::addClass(const std::string& name, int size, int align) {
     return classes_.back().get();
 }
 
+const Type* Builtins::addEnum(const std::string& name,
+                              std::vector<std::pair<std::string, int>> values) {
+    auto e = std::make_unique<BuiltinEnum>();
+    auto t = std::make_unique<Type>();
+    t->kind = TypeKind::Enum;
+    t->name = name;
+    t->size = 4;
+    t->align = 4;
+    e->type = t.get();
+    types_.push_back(std::move(t));
+    e->values = std::move(values);
+    enumByName_[name] = e->type;
+    enums_.push_back(std::move(e));
+    return enums_.back()->type;
+}
+
 Builtins::Builtins() {
     void_ = scalar(TypeKind::Void, "void", 0);
     bool_ = scalar(TypeKind::Bool, "bool", 1);
@@ -257,6 +280,7 @@ Builtins::Builtins() {
     initList_ = scalar(TypeKind::InitList, "{...}", 0);
     null_ = scalar(TypeKind::Null, "nullptr", 8);
     addClasses();
+    addEditor();
     addFunctions();
 }
 
@@ -293,8 +317,24 @@ bool Builtins::reserved(const std::string& name) const {
         "ratio",      "semitones", "cents",     "octaves",      "degrees",
         "integer",    "choice",    "toggle",    "audioFile",    "impulseResponse"};
     return byName_.count(name) || classByName_.count(name) || enumByName_.count(name) ||
-           factories.count(name) || name == "pi" || name == "twoPi" || name == "Array" ||
-           name == "Buffer" || name == "Unit" || name == "Curve";
+           constants_.count(name) || factories.count(name) || name == "pi" || name == "twoPi" ||
+           name == "Array" || name == "Buffer" || name == "Unit" || name == "Curve" ||
+           name == "Shared" || name == "SharedArray";
+}
+
+const BuiltinClass* Builtins::shared(const Type* value) const {
+    auto it = sharedByValue_.find(value);
+    return it == sharedByValue_.end() ? nullptr : it->second;
+}
+
+bool Builtins::isShared(const Type* t) {
+    return t && ((t->kind == TypeKind::Object && t->builtin->sharedValue) ||
+                 (t->kind == TypeKind::Array && t->shared));
+}
+
+const std::map<std::string, int>* Builtins::constants(const std::string& group) const {
+    auto it = constants_.find(group);
+    return it == constants_.end() ? nullptr : &it->second;
 }
 
 bool Builtins::isFile(const Type* t) const {
@@ -352,6 +392,13 @@ void Builtins::addClasses() {
         +[](const S::Param* p, int v) { return p->forVoice(v); });
     r.inlineMethod(param, "void set(double value)", Intrinsic::ParamSet, Writes::Self);
     r.method(param, "double gain() const", +[](const S::Param* p) { return p->gain(); });
+    // The editor's.
+    r.method(
+        param, "const char* text() const", +[](const S::Param* p) { return p->text(); },
+        Writes::Nothing, kUi);
+    r.method(
+        param, "const char* name() const", +[](const S::Param* p) { return p->name(); },
+        Writes::Nothing, kUi);
     param_ = param;
     (void)L::paramValue;
 
@@ -435,7 +482,11 @@ void Builtins::addClasses() {
     r.method(
         plugin, "void setBendRange(double semitones)",
         +[](S::Instrument* p, double st) { p->setBendRange(st); });
-    for (BuiltinMethod& m : plugin->methods) m.instrument = m.intrinsic == Intrinsic::None;
+    // The voices are the audio code's: the editor's copy of the plugin has none.
+    for (BuiltinMethod& m : plugin->methods) {
+        m.instrument = m.intrinsic == Intrinsic::None;
+        if (m.instrument) m.contexts = kInit | kAudio;
+    }
     // Every plugin's, in prepare().
     r.method(
         plugin, "void setLatency(int samples)", +[](S::Plugin* p, int n) { p->setLatency(n); },
@@ -648,6 +699,282 @@ void Builtins::addClasses() {
     r.method(adsr, "bool active() const", +[](const S::Adsr* e) -> int { return e->active(); });
 }
 
+void Builtins::addEditor() {
+    Registrar r{*this};
+
+    // Shared<T>: a T at the member's start, read and written inline.
+    auto shared = [&](const Type* value, int size) {
+        auto* c = addClass("Shared<" + value->name + ">", size, size);
+        c->sharedValue = value;
+        r.inlineMethod(c, value->name + " get() const", Intrinsic::SharedGet);
+        r.inlineMethod(c, "void set(" + value->name + " value)", Intrinsic::SharedSet,
+                       Writes::Self);
+        sharedByValue_[value] = c;
+    };
+    shared(double_, sizeof(S::Shared<double>));
+    shared(float_, sizeof(S::Shared<float>));
+    shared(int_, sizeof(S::Shared<int>));
+    shared(bool_, sizeof(S::Shared<bool>));
+    static_assert(sizeof(S::Shared<double>) == 8 && sizeof(S::Shared<bool>) == 1);
+    static_assert(sizeof(S::SharedArray<float, 4>) == sizeof(S::Array<float, 4>));
+
+    // The palette's names: Theme::accent.
+    constants_["Theme"] = {{"ground", S::Theme::ground},       {"surface", S::Theme::surface},
+                           {"raised", S::Theme::raised},       {"recess", S::Theme::recess},
+                           {"line", S::Theme::line},           {"lineLit", S::Theme::lineLit},
+                           {"textFaint", S::Theme::textFaint}, {"textMuted", S::Theme::textMuted},
+                           {"text", S::Theme::text},           {"accent", S::Theme::accent},
+                           {"accent2", S::Theme::accent2},     {"modulation", S::Theme::modulation},
+                           {"alert", S::Theme::alert}};
+
+    addEnum("TextAlign", {{"Left", 0}, {"Center", 1}, {"Right", 2}});
+    addEnum("TextBaseline", {{"Top", 0}, {"Middle", 1}, {"Alphabetic", 2}, {"Bottom", 3}});
+    addEnum("LineCap", {{"Butt", 0}, {"Round", 1}, {"Square", 2}});
+    addEnum("LineJoin", {{"Miter", 0}, {"Round", 1}, {"Bevel", 2}});
+    static_assert(static_cast<int>(S::TextBaseline::Bottom) == 3 &&
+                  static_cast<int>(S::LineJoin::Bevel) == 2 &&
+                  static_cast<int>(S::LineCap::Square) == 2 &&
+                  static_cast<int>(S::TextAlign::Right) == 2);
+
+    // Canvas: draw()'s, every method the editor's alone.
+    auto* g = addClass("Canvas", sizeof(S::Canvas), alignof(S::Canvas));
+    g->declarable = false;
+    canvas_ = g;
+    const std::uint8_t ui = kUi;
+    using C = S::Canvas;
+    r.method(
+        g, "double width() const", +[](const C* c) { return c->width(); }, Writes::Nothing, ui);
+    r.method(
+        g, "double height() const", +[](const C* c) { return c->height(); }, Writes::Nothing, ui);
+    r.method(g, "void save()", +[](C* c) { c->save(); }, Writes::Self, ui);
+    r.method(g, "void restore()", +[](C* c) { c->restore(); }, Writes::Self, ui);
+    r.method(
+        g, "void translate(double x, double y)",
+        +[](C* c, double x, double y) { c->translate(x, y); }, Writes::Self, ui);
+    r.method(
+        g, "void rotate(double radians)", +[](C* c, double a) { c->rotate(a); }, Writes::Self, ui);
+    r.method(
+        g, "void scale(double x, double y)", +[](C* c, double x, double y) { c->scale(x, y); },
+        Writes::Self, ui);
+    r.method(
+        g, "void fillStyle(int colour)", +[](C* c, int v) { c->fillStyle(v); }, Writes::Self, ui);
+    r.method(
+        g, "void strokeStyle(int colour)", +[](C* c, int v) { c->strokeStyle(v); }, Writes::Self,
+        ui);
+    r.method(
+        g, "void globalAlpha(double alpha)", +[](C* c, double a) { c->globalAlpha(a); },
+        Writes::Self, ui);
+    r.method(
+        g, "void lineWidth(double width)", +[](C* c, double w) { c->lineWidth(w); }, Writes::Self,
+        ui);
+    r.method(
+        g, "void lineCap(LineCap cap)",
+        +[](C* c, int v) { c->lineCap(static_cast<S::LineCap>(v)); }, Writes::Self, ui);
+    r.method(
+        g, "void lineJoin(LineJoin join)",
+        +[](C* c, int v) { c->lineJoin(static_cast<S::LineJoin>(v)); }, Writes::Self, ui);
+    r.method(
+        g, "void linearGradient(double x0, double y0, double x1, double y1, int from, int to)",
+        +[](C* c, double x0, double y0, double x1, double y1, int a, int b) {
+            c->linearGradient(x0, y0, x1, y1, a, b);
+        },
+        Writes::Self, ui);
+    r.method(
+        g,
+        "void radialGradient(double x, double y, double innerRadius, double outerRadius, int from, "
+        "int to)",
+        +[](C* c, double x, double y, double ri, double ro, int a, int b) {
+            c->radialGradient(x, y, ri, ro, a, b);
+        },
+        Writes::Self, ui);
+    r.method(
+        g, "void fillRect(double x, double y, double w, double h)",
+        +[](C* c, double x, double y, double w, double h) { c->fillRect(x, y, w, h); },
+        Writes::Self, ui);
+    r.method(
+        g, "void strokeRect(double x, double y, double w, double h)",
+        +[](C* c, double x, double y, double w, double h) { c->strokeRect(x, y, w, h); },
+        Writes::Self, ui);
+    r.method(
+        g, "void clearRect(double x, double y, double w, double h)",
+        +[](C* c, double x, double y, double w, double h) { c->clearRect(x, y, w, h); },
+        Writes::Self, ui);
+    r.method(g, "void beginPath()", +[](C* c) { c->beginPath(); }, Writes::Self, ui);
+    r.method(g, "void closePath()", +[](C* c) { c->closePath(); }, Writes::Self, ui);
+    r.method(
+        g, "void moveTo(double x, double y)", +[](C* c, double x, double y) { c->moveTo(x, y); },
+        Writes::Self, ui);
+    r.method(
+        g, "void lineTo(double x, double y)", +[](C* c, double x, double y) { c->lineTo(x, y); },
+        Writes::Self, ui);
+    r.method(
+        g, "void bezierCurveTo(double c1x, double c1y, double c2x, double c2y, double x, double y)",
+        +[](C* c, double a, double b, double d, double e, double x, double y) {
+            c->bezierCurveTo(a, b, d, e, x, y);
+        },
+        Writes::Self, ui);
+    r.method(
+        g, "void quadraticCurveTo(double cx, double cy, double x, double y)",
+        +[](C* c, double cx, double cy, double x, double y) { c->quadraticCurveTo(cx, cy, x, y); },
+        Writes::Self, ui);
+    r.method(
+        g, "void arc(double x, double y, double radius, double startAngle, double endAngle)",
+        +[](C* c, double x, double y, double rad, double a0, double a1) {
+            c->arc(x, y, rad, a0, a1);
+        },
+        Writes::Self, ui);
+    r.method(
+        g, "void arcTo(double x1, double y1, double x2, double y2, double radius)",
+        +[](C* c, double x1, double y1, double x2, double y2, double rad) {
+            c->arcTo(x1, y1, x2, y2, rad);
+        },
+        Writes::Self, ui);
+    r.method(
+        g, "void rect(double x, double y, double w, double h)",
+        +[](C* c, double x, double y, double w, double h) { c->rect(x, y, w, h); }, Writes::Self,
+        ui);
+    r.method(
+        g, "void roundRect(double x, double y, double w, double h, double radius)",
+        +[](C* c, double x, double y, double w, double h, double rad) {
+            c->roundRect(x, y, w, h, rad);
+        },
+        Writes::Self, ui);
+    r.method(
+        g, "void ellipse(double x, double y, double radiusX, double radiusY)",
+        +[](C* c, double x, double y, double rx, double ry) { c->ellipse(x, y, rx, ry); },
+        Writes::Self, ui);
+    r.method(
+        g, "void circle(double x, double y, double radius)",
+        +[](C* c, double x, double y, double rad) { c->circle(x, y, rad); }, Writes::Self, ui);
+    r.method(g, "void fill()", +[](C* c) { c->fill(); }, Writes::Self, ui);
+    r.method(g, "void stroke()", +[](C* c) { c->stroke(); }, Writes::Self, ui);
+    r.method(
+        g, "void clip(double x, double y, double w, double h)",
+        +[](C* c, double x, double y, double w, double h) { c->clip(x, y, w, h); }, Writes::Self,
+        ui);
+    r.method(g, "void font(double size)", +[](C* c, double v) { c->font(v); }, Writes::Self, ui);
+    r.method(
+        g, "void boldFont(double size)", +[](C* c, double v) { c->boldFont(v); }, Writes::Self, ui);
+    r.method(
+        g, "void monoFont(double size)", +[](C* c, double v) { c->monoFont(v); }, Writes::Self, ui);
+    r.method(
+        g, "void textAlign(TextAlign align)",
+        +[](C* c, int v) { c->textAlign(static_cast<S::TextAlign>(v)); }, Writes::Self, ui);
+    r.method(
+        g, "void textBaseline(TextBaseline baseline)",
+        +[](C* c, int v) { c->textBaseline(static_cast<S::TextBaseline>(v)); }, Writes::Self, ui);
+    r.method(
+        g, "void fillText(const char* text, double x, double y)",
+        +[](C* c, const char* t, double x, double y) { c->fillText(t, x, y); }, Writes::Self, ui);
+    r.method(
+        g, "double measureText(const char* text) const",
+        +[](const C* c, const char* t) { return c->measureText(t); }, Writes::Nothing, ui);
+    r.method(
+        g, "void panel(double x, double y, double w, double h, const char* title)",
+        +[](C* c, double x, double y, double w, double h, const char* t) {
+            c->panel(x, y, w, h, t);
+        },
+        Writes::Self, ui);
+    r.method(
+        g, "void well(double x, double y, double w, double h)",
+        +[](C* c, double x, double y, double w, double h) { c->well(x, y, w, h); }, Writes::Self,
+        ui);
+    r.method(
+        g, "void meter(double levelDb, double x, double y, double w, double h)",
+        +[](C* c, double db, double x, double y, double w, double h) { c->meter(db, x, y, w, h); },
+        Writes::Self, ui);
+    r.method(
+        g,
+        "void frequencyGrid(double x, double y, double w, double h, double lowHz, double highHz)",
+        +[](C* c, double x, double y, double w, double h, double lo, double hi) {
+            c->frequencyGrid(x, y, w, h, lo, hi);
+        },
+        Writes::Self, ui);
+    r.method(
+        g,
+        "void levelGrid(double x, double y, double w, double h, double lowDb, double highDb, "
+        "double stepDb)",
+        +[](C* c, double x, double y, double w, double h, double lo, double hi, double step) {
+            c->levelGrid(x, y, w, h, lo, hi, step);
+        },
+        Writes::Self, ui);
+
+    // Editor: editor()'s.
+    auto* e = addClass("Editor", sizeof(S::Editor), alignof(S::Editor));
+    e->declarable = false;
+    editor_ = e;
+    using E = S::Editor;
+    using P = S::Param;
+    r.method(
+        e, "void size(double width, double height)",
+        +[](E* x, double w, double h) { x->size(w, h); }, Writes::Self, ui);
+    r.method(
+        e, "void knob(const Param& p, double x, double y, double w, double h)",
+        +[](E* d, const P* p, double x, double y, double w, double h) { d->knob(*p, x, y, w, h); },
+        Writes::Self, ui);
+    r.method(
+        e, "void slider(const Param& p, double x, double y, double w, double h)",
+        +[](E* d, const P* p, double x, double y, double w, double h) {
+            d->slider(*p, x, y, w, h);
+        },
+        Writes::Self, ui);
+    r.method(
+        e, "void toggle(const Param& p, double x, double y, double w, double h)",
+        +[](E* d, const P* p, double x, double y, double w, double h) {
+            d->toggle(*p, x, y, w, h);
+        },
+        Writes::Self, ui);
+    r.method(
+        e, "void choice(const Param& p, double x, double y, double w, double h)",
+        +[](E* d, const P* p, double x, double y, double w, double h) {
+            d->choice(*p, x, y, w, h);
+        },
+        Writes::Self, ui);
+    r.method(
+        e, "void readout(const Param& p, double x, double y, double w, double h)",
+        +[](E* d, const P* p, double x, double y, double w, double h) {
+            d->readout(*p, x, y, w, h);
+        },
+        Writes::Self, ui);
+    r.method(
+        e,
+        "void xyPad(const Param& across, const Param& up, double x, double y, double w, double h)",
+        +[](E* d, const P* a, const P* u, double x, double y, double w, double h) {
+            d->xyPad(*a, *u, x, y, w, h);
+        },
+        Writes::Self, ui);
+    r.method(
+        e,
+        "void envelope(const Param& attack, const Param& decay, const Param& sustain, const Param& "
+        "release, "
+        "double x, double y, double w, double h)",
+        +[](E* d, const P* a, const P* dc, const P* s, const P* rl, double x, double y, double w,
+            double h) { d->envelope(*a, *dc, *s, *rl, x, y, w, h); },
+        Writes::Self, ui);
+    r.method(
+        e, "void file(const AudioFile& f, double x, double y, double w, double h)",
+        +[](E* d, const S::AudioFile* f, double x, double y, double w, double h) {
+            d->file(*f, x, y, w, h);
+        },
+        Writes::Self, ui);
+    r.method(
+        e, "void file(const Convolver& c, double x, double y, double w, double h)",
+        +[](E* d, const S::Convolver* f, double x, double y, double w, double h) {
+            d->file(*f, x, y, w, h);
+        },
+        Writes::Self, ui);
+    r.method(
+        e, "void keyboard(int lowKey, int highKey, double x, double y, double w, double h)",
+        +[](E* d, int lo, int hi, double x, double y, double w, double h) {
+            d->keyboard(lo, hi, x, y, w, h);
+        },
+        Writes::Self, ui);
+    r.method(
+        e, "void meters(double x, double y, double w, double h)",
+        +[](E* d, double x, double y, double w, double h) { d->meters(x, y, w, h); }, Writes::Self,
+        ui);
+}
+
 void Builtins::addFunctions() {
     Registrar r{*this};
     // Math: the runtime's own functions, one compiled copy for every path.
@@ -704,6 +1031,33 @@ void Builtins::addFunctions() {
     r.fn("int idiv(int a, int b)", +[](int a, int b) { return S::idiv(a, b); });
     r.fn("int imod(int a, int b)", +[](int a, int b) { return S::imod(a, b); });
     r.fn("int wrap(int i, int n)", +[](int i, int n) { return S::wrap(i, n); });
+
+    // The editor's.
+    r.fn(
+        "double hzToX(double hz, double lowHz, double highHz, double x, double w)",
+        +[](double hz, double lo, double hi, double x, double w) {
+            return S::hzToX(hz, lo, hi, x, w);
+        });
+    r.fn(
+        "double dbToY(double db, double lowDb, double highDb, double y, double h)",
+        +[](double db, double lo, double hi, double y, double h) {
+            return S::dbToY(db, lo, hi, y, h);
+        });
+    r.fn(
+        "const char* format(const char* pattern, double a)",
+        +[](const char* p, double a) { return S::format(p, a); }, kUi);
+    r.fn(
+        "const char* format(const char* pattern, double a, double b)",
+        +[](const char* p, double a, double b) { return S::format(p, a, b); }, kUi);
+    r.fn(
+        "const char* format(const char* pattern, double a, double b, double c)",
+        +[](const char* p, double a, double b, double c) { return S::format(p, a, b, c); }, kUi);
+    r.fn(
+        "const char* format(const char* pattern, double a, double b, double c, double d)",
+        +[](const char* p, double a, double b, double c, double d) {
+            return S::format(p, a, b, c, d);
+        },
+        kUi);
 }
 
 }  // namespace supple::scriptc

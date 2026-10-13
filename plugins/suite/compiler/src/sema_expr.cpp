@@ -257,8 +257,9 @@ Expr* Sema::convert(Expr* e, QualType to, Loc loc, const std::string& what, bool
     }
 
     if (ft->kind == TypeKind::String) {
+        if (to.type && to.type->kind == TypeKind::String && !to.isRef) return e;
         error(loc, "script.type.string",
-              what + ": text is only used in declarations (parameter names, Info)",
+              what + ": text is only for the editor (fillText, format) and declarations",
               "a script computes with numbers");
         return e;
     }
@@ -620,9 +621,11 @@ Expr* Sema::checkName(NameExpr* n) {
     EnumDecl* scopeEnum = nullptr;
     const BuiltinClass* scopeClass = nullptr;
     const Type* scopeBuiltinEnum = nullptr;
+    const std::map<std::string, int>* scopeConstants = nullptr;
     for (size_t i = 0; i + 1 < n->path.size(); ++i) {
         const std::string& part = n->path[i];
         if (i == 0) {
+            if ((scopeConstants = b_.constants(part)) && n->path.size() == 2) continue;
             if ((scopeStruct = findStruct(part, self_))) continue;
             if ((scopeEnum = findEnum(part, self_))) continue;
             if ((scopeClass = b_.cls(part))) continue;
@@ -664,6 +667,23 @@ Expr* Sema::checkName(NameExpr* n) {
                 }() +
                 "'",
             "check the spelling; write the runtime's names without a namespace");
+        return n;
+    }
+    if (scopeConstants) {
+        auto it = scopeConstants->find(last);
+        if (it == scopeConstants->end()) {
+            std::string names;
+            for (const auto& [name, value] : *scopeConstants)
+                names += (names.empty() ? "" : ", ") + name;
+            error(n->loc, "script.name.qualified", n->path[0] + " has no '" + last + "'",
+                  "it has " + names);
+            return n;
+        }
+        n->ref = RefKind::Global;
+        n->qt = QualType{b_.intType(), true, false};
+        n->constant = true;
+        n->constInt = it->second;
+        n->constValue = it->second;
         return n;
     }
     if (scopeEnum) {
@@ -1021,11 +1041,24 @@ Expr* Sema::checkCall(CallExpr* c) {
                 }
             }
             if (m->ref == RefKind::BuiltinMethod && ot->kind == TypeKind::Object) {
-                // Overloads of a runtime method: none today, so the first by
-                // arity. Resolution mirrors the free functions' below.
+                // Overloads of a runtime method (Editor's file()): by arity,
+                // then the one whose parameters the arguments fit best.
                 const BuiltinMethod* chosen = nullptr;
-                for (const BuiltinMethod* bm : m->builtinMethods)
-                    if (bm->params.size() == c->args.size()) chosen = bm;
+                std::vector<ConversionRank> chosenRanks;
+                for (const BuiltinMethod* bm : m->builtinMethods) {
+                    if (bm->params.size() != c->args.size()) continue;
+                    std::vector<ConversionRank> ranks;
+                    bool viable = true;
+                    for (size_t i = 0; i < c->args.size(); ++i) {
+                        ranks.push_back(rank(c->args[i], bm->params[i]));
+                        viable = viable && ranks.back().rank != ConversionRank::NotViable;
+                    }
+                    if (!chosen ||
+                        (viable && (chosenRanks.empty() || better(ranks, chosenRanks)))) {
+                        chosen = bm;
+                        chosenRanks = viable ? ranks : std::vector<ConversionRank>{};
+                    }
+                }
                 if (!chosen) {
                     const BuiltinMethod* any = m->builtinMethods.front();
                     error(c->loc, "script.call.arguments",
@@ -1098,7 +1131,8 @@ Expr* Sema::checkCall(CallExpr* c) {
                 c->qt.isRef = false;
                 if (fn_) fn_->calls.push_back(f);
                 if (f->name == "prepare" || f->name == "process" || f->name == "startVoice" ||
-                    f->name == "releaseVoice" || f->name == "stopVoice") {
+                    f->name == "releaseVoice" || f->name == "stopVoice" || f->name == "draw" ||
+                    f->name == "editor") {
                     if (self_ && self_->base != PluginKind::None && f->owner == self_)
                         error(c->loc, "script.call.hook",
                               f->name + "() is called by the runtime, not by the script",
@@ -1204,6 +1238,7 @@ Expr* Sema::checkCall(CallExpr* c) {
                 n->builtin = best;
                 c->args = callArguments(c, best->params, {}, calleeName + "()");
                 c->qt = best->result;
+                if (calleeName == "format") checkFormat(c);
                 // Constant folding of a few pure intrinsics keeps size
                 // expressions constant: max(1, kVoices).
                 return c;
@@ -1231,6 +1266,53 @@ Expr* Sema::checkCall(CallExpr* c) {
     error(c->loc, "script.call.callee", "this cannot be called",
           "call a function by its name: f(x)");
     return c;
+}
+
+// format(pattern, values...): a literal pattern whose conversions are the
+// runtime's (numbers only), one per value, so what the script asks for is
+// what it gets in the JIT and in C++ alike.
+void Sema::checkFormat(CallExpr* c) {
+    Expr* pattern = c->args.empty() ? nullptr : c->args[0];
+    while (pattern && pattern->kind == ExprKind::Cast)
+        pattern = static_cast<CastExpr*>(pattern)->operand;
+    if (!pattern || pattern->kind != ExprKind::StringLit) {
+        error(c->loc, "script.format.pattern", "format()'s pattern is a string literal",
+              "format(\"%.1f dB\", level)");
+        return;
+    }
+    const std::string& text = static_cast<StringLitExpr*>(pattern)->value;
+    int conversions = 0;
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] != '%') continue;
+        if (i + 1 < text.size() && text[i + 1] == '%') {
+            ++i;
+            continue;
+        }
+        size_t j = i + 1;
+        while (j < text.size() &&
+               std::string("-+ #0123456789.lh").find(text[j]) != std::string::npos)
+            ++j;
+        const char letter = j < text.size() ? text[j] : '\0';
+        if (std::string("dixXfFeEgG").find(letter) == std::string::npos || letter == '\0') {
+            error(pattern->loc, "script.format.conversion",
+                  letter == 's'
+                      ? "format() places numbers; %s is not one of its conversions"
+                      : "'" + text.substr(i, j - i + 1) + "' is not one of format()'s conversions",
+                  letter == 's'
+                      ? "draw text with fillText, and the number beside it with format(\"%.1f\", x)"
+                      : "use %d, %f, %e, %g or %x, with flags, width and precision: %6.2f");
+            return;
+        }
+        ++conversions;
+        i = j;
+    }
+    const int values = static_cast<int>(c->args.size()) - 1;
+    if (conversions != values)
+        error(c->loc, "script.format.count",
+              "the pattern has " + std::to_string(conversions) + " conversion" +
+                  (conversions == 1 ? "" : "s") + " for " + std::to_string(values) + " value" +
+                  (values == 1 ? "" : "s"),
+              "give one value per %: format(\"%.0f Hz, %.1f dB\", freq, gain)");
 }
 
 // --- operators ----------------------------------------------------------------------
@@ -1535,7 +1617,8 @@ Expr* Sema::checkConditional(ConditionalExpr* c) {
     if (a == b) {
         c->qt = QualType{a, c->then->qt.isConst || c->otherwise->qt.isConst, false};
         c->lvalue = c->then->lvalue && c->otherwise->lvalue;
-        if (!a->isScalar() && !c->lvalue && a->kind != TypeKind::Object)
+        if (!a->isScalar() && !c->lvalue && a->kind != TypeKind::Object &&
+            a->kind != TypeKind::String)
             error(c->loc, "script.type.conditional",
                   "both branches of ?: must be variables to choose between " + a->name,
                   "choose with if/else instead");

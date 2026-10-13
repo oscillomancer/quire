@@ -12,6 +12,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <new>
@@ -103,6 +104,10 @@ void setCurrent(Instance* instance) {
 
 ParamRegistrar* registrar() { return tRegistrar; }
 void setRegistrar(ParamRegistrar* registrar) { tRegistrar = registrar; }
+
+void declareShared(void* member, int bytes) {
+    if (auto* r = registrar()) r->declareShared(member, bytes);
+}
 
 void outOfRange(int line) {
     Instance* in = current();
@@ -739,5 +744,308 @@ void Adsr::kill() { as<dsp::Adsr>(storage_).kill(); }
 double Adsr::next() { return as<dsp::Adsr>(storage_).tick(); }
 double Adsr::level() const { return as<dsp::Adsr>(storage_).level(); }
 bool Adsr::active() const { return as<dsp::Adsr>(storage_).active(); }
+
+// --- the editor ------------------------------------------------------------------
+
+namespace {
+detail::EditorServices* services() {
+    detail::Instance* in = detail::current();
+    return in ? in->editor : nullptr;
+}
+
+// One printf conversion of `value`, checked: flags, width and precision
+// within reason, and only the number conversions, so nothing a script
+// writes reaches snprintf unexamined.
+int formatOne(char* out, int room, const char* spec, int length, double value) {
+    const char conversion = spec[length - 1];
+    const bool integer = conversion == 'd' || conversion == 'i';
+    const bool hex = conversion == 'x' || conversion == 'X';
+    char safe[32];
+    int n = 0;
+    safe[n++] = '%';
+    int i = 1;
+    for (; i < length && std::strchr("-+ #0", spec[i]); ++i)
+        if (n < 8 && !(spec[i] == '#' && integer) && !((spec[i] == '+' || spec[i] == ' ') && hex))
+            safe[n++] = spec[i];
+    int width = 0, precision = -1;
+    while (i < length && spec[i] >= '0' && spec[i] <= '9')
+        width = std::min(64, width * 10 + (spec[i++] - '0'));
+    if (i < length && spec[i] == '.') {
+        precision = 0;
+        ++i;
+        while (i < length && spec[i] >= '0' && spec[i] <= '9')
+            precision = std::min(32, precision * 10 + (spec[i++] - '0'));
+    }
+    if (width > 0) n += std::snprintf(safe + n, sizeof(safe) - static_cast<size_t>(n), "%d", width);
+    if (precision >= 0)
+        n += std::snprintf(safe + n, sizeof(safe) - static_cast<size_t>(n), ".%d", precision);
+    if (integer || hex) {
+        safe[n++] = 'l';
+        safe[n++] = 'l';
+        safe[n++] = conversion;
+        safe[n] = '\0';
+        long long whole = 0;
+        if (value >= 9.2e18)
+            whole = LLONG_MAX;
+        else if (value <= -9.2e18)
+            whole = LLONG_MIN;
+        else if (value == value)
+            whole = static_cast<long long>(value);
+        if (hex)
+            return std::snprintf(out, static_cast<size_t>(room), safe,
+                                 static_cast<unsigned long long>(whole));
+        return std::snprintf(out, static_cast<size_t>(room), safe, whole);
+    }
+    safe[n++] = conversion;
+    safe[n] = '\0';
+    return std::snprintf(out, static_cast<size_t>(room), safe, value);
+}
+
+const char* formatValues(const char* pattern, const double* values, int count) {
+    detail::EditorServices* ui = services();
+    constexpr int kRoom = 256;
+    char* out = ui ? ui->text(kRoom) : nullptr;
+    if (!out) return "";
+    int used = 0, next = 0;
+    for (const char* p = pattern ? pattern : ""; *p && used < kRoom - 1;) {
+        if (*p != '%') {
+            out[used++] = *p++;
+            continue;
+        }
+        if (p[1] == '%') {
+            out[used++] = '%';
+            p += 2;
+            continue;
+        }
+        // The conversion's extent: flags, width, precision, length, letter.
+        int length = 1;
+        while (p[length] && std::strchr("-+ #0123456789.lh", p[length])) ++length;
+        if (!p[length] || !std::strchr("dixXfFeEgG", p[length])) {
+            out[used++] = *p++;  // not one of ours: as written
+            continue;
+        }
+        ++length;
+        if (next < count) {
+            const int wrote = formatOne(out + used, kRoom - used, p, length, values[next++]);
+            if (wrote > 0) used = std::min(kRoom - 1, used + wrote);
+        }
+        p += length;
+    }
+    out[used] = '\0';
+    return out;
+}
+}  // namespace
+
+const char* format(const char* pattern, double a) { return formatValues(pattern, &a, 1); }
+const char* format(const char* pattern, double a, double b) {
+    const double v[] = {a, b};
+    return formatValues(pattern, v, 2);
+}
+const char* format(const char* pattern, double a, double b, double c) {
+    const double v[] = {a, b, c};
+    return formatValues(pattern, v, 3);
+}
+const char* format(const char* pattern, double a, double b, double c, double d) {
+    const double v[] = {a, b, c, d};
+    return formatValues(pattern, v, 4);
+}
+
+const char* Param::text() const {
+    detail::EditorServices* ui = services();
+    return ui ? ui->paramText(slot_, value_) : "";
+}
+const char* Param::name() const {
+    detail::EditorServices* ui = services();
+    return ui ? ui->paramName(slot_) : "";
+}
+
+double hzToX(double hz, double lowHz, double highHz, double x, double w) {
+    if (!(lowHz > 0.0) || !(highHz > lowHz) || !(hz > 0.0)) return x;
+    return x + w * std::log(hz / lowHz) / std::log(highHz / lowHz);
+}
+double dbToY(double db, double lowDb, double highDb, double y, double h) {
+    if (!(highDb > lowDb)) return y + h;
+    return y + h * (highDb - db) / (highDb - lowDb);
+}
+
+// Every method draws through the glue's painter; a Canvas without one (none
+// is made outside draw()) draws nothing.
+double Canvas::width() const { return painter_ ? painter_->width() : 0.0; }
+double Canvas::height() const { return painter_ ? painter_->height() : 0.0; }
+void Canvas::save() {
+    if (painter_) painter_->save();
+}
+void Canvas::restore() {
+    if (painter_) painter_->restore();
+}
+void Canvas::translate(double x, double y) {
+    if (painter_) painter_->translate(x, y);
+}
+void Canvas::rotate(double radians) {
+    if (painter_) painter_->rotate(radians);
+}
+void Canvas::scale(double x, double y) {
+    if (painter_) painter_->scale(x, y);
+}
+void Canvas::fillStyle(int colour) {
+    if (painter_) painter_->fillStyle(colour);
+}
+void Canvas::strokeStyle(int colour) {
+    if (painter_) painter_->strokeStyle(colour);
+}
+void Canvas::globalAlpha(double alpha) {
+    if (painter_) painter_->globalAlpha(alpha);
+}
+void Canvas::lineWidth(double width) {
+    if (painter_) painter_->lineWidth(width);
+}
+void Canvas::lineCap(LineCap cap) {
+    if (painter_) painter_->lineCap(cap);
+}
+void Canvas::lineJoin(LineJoin join) {
+    if (painter_) painter_->lineJoin(join);
+}
+void Canvas::linearGradient(double x0, double y0, double x1, double y1, int from, int to) {
+    if (painter_) painter_->linearGradient(x0, y0, x1, y1, from, to);
+}
+void Canvas::radialGradient(double x, double y, double innerRadius, double outerRadius, int from,
+                            int to) {
+    if (painter_) painter_->radialGradient(x, y, innerRadius, outerRadius, from, to);
+}
+void Canvas::fillRect(double x, double y, double w, double h) {
+    if (painter_) painter_->fillRect(x, y, w, h);
+}
+void Canvas::strokeRect(double x, double y, double w, double h) {
+    if (painter_) painter_->strokeRect(x, y, w, h);
+}
+void Canvas::clearRect(double x, double y, double w, double h) {
+    if (painter_) painter_->clearRect(x, y, w, h);
+}
+void Canvas::beginPath() {
+    if (painter_) painter_->beginPath();
+}
+void Canvas::closePath() {
+    if (painter_) painter_->closePath();
+}
+void Canvas::moveTo(double x, double y) {
+    if (painter_) painter_->moveTo(x, y);
+}
+void Canvas::lineTo(double x, double y) {
+    if (painter_) painter_->lineTo(x, y);
+}
+void Canvas::bezierCurveTo(double c1x, double c1y, double c2x, double c2y, double x, double y) {
+    if (painter_) painter_->bezierCurveTo(c1x, c1y, c2x, c2y, x, y);
+}
+void Canvas::quadraticCurveTo(double cx, double cy, double x, double y) {
+    if (painter_) painter_->quadraticCurveTo(cx, cy, x, y);
+}
+void Canvas::arc(double x, double y, double radius, double startAngle, double endAngle) {
+    if (painter_) painter_->arc(x, y, radius, startAngle, endAngle);
+}
+void Canvas::arcTo(double x1, double y1, double x2, double y2, double radius) {
+    if (painter_) painter_->arcTo(x1, y1, x2, y2, radius);
+}
+void Canvas::rect(double x, double y, double w, double h) {
+    if (painter_) painter_->rect(x, y, w, h);
+}
+void Canvas::roundRect(double x, double y, double w, double h, double radius) {
+    if (painter_) painter_->roundRect(x, y, w, h, radius);
+}
+void Canvas::ellipse(double x, double y, double radiusX, double radiusY) {
+    if (painter_) painter_->ellipse(x, y, radiusX, radiusY);
+}
+void Canvas::circle(double x, double y, double radius) {
+    if (painter_) painter_->circle(x, y, radius);
+}
+void Canvas::fill() {
+    if (painter_) painter_->fill();
+}
+void Canvas::stroke() {
+    if (painter_) painter_->stroke();
+}
+void Canvas::clip(double x, double y, double w, double h) {
+    if (painter_) painter_->clip(x, y, w, h);
+}
+void Canvas::font(double size) {
+    if (painter_) painter_->font(detail::Painter::Face::Regular, size);
+}
+void Canvas::boldFont(double size) {
+    if (painter_) painter_->font(detail::Painter::Face::Bold, size);
+}
+void Canvas::monoFont(double size) {
+    if (painter_) painter_->font(detail::Painter::Face::Mono, size);
+}
+void Canvas::textAlign(TextAlign align) {
+    if (painter_) painter_->textAlign(align);
+}
+void Canvas::textBaseline(TextBaseline baseline) {
+    if (painter_) painter_->textBaseline(baseline);
+}
+void Canvas::fillText(const char* text, double x, double y) {
+    if (painter_ && text) painter_->fillText(text, x, y);
+}
+double Canvas::measureText(const char* text) const {
+    return painter_ && text ? painter_->measureText(text) : 0.0;
+}
+void Canvas::panel(double x, double y, double w, double h, const char* title) {
+    if (painter_) painter_->panel(x, y, w, h, title ? title : "");
+}
+void Canvas::well(double x, double y, double w, double h) {
+    if (painter_) painter_->well(x, y, w, h);
+}
+void Canvas::meter(double levelDb, double x, double y, double w, double h) {
+    if (painter_) painter_->meter(levelDb, x, y, w, h);
+}
+void Canvas::frequencyGrid(double x, double y, double w, double h, double lowHz, double highHz) {
+    if (painter_) painter_->frequencyGrid(x, y, w, h, lowHz, highHz);
+}
+void Canvas::levelGrid(double x, double y, double w, double h, double lowDb, double highDb,
+                       double stepDb) {
+    if (painter_) painter_->levelGrid(x, y, w, h, lowDb, highDb, stepDb);
+}
+
+namespace {
+int slotOf(const Param& p) { return detail::ParamBinding::slot(p); }
+}  // namespace
+
+void Editor::size(double width, double height) {
+    if (builder_) builder_->size(width, height);
+}
+void Editor::knob(const Param& p, double x, double y, double w, double h) {
+    if (builder_) builder_->control(detail::EditorBuilder::Control::Knob, slotOf(p), x, y, w, h);
+}
+void Editor::slider(const Param& p, double x, double y, double w, double h) {
+    if (builder_) builder_->control(detail::EditorBuilder::Control::Slider, slotOf(p), x, y, w, h);
+}
+void Editor::toggle(const Param& p, double x, double y, double w, double h) {
+    if (builder_) builder_->control(detail::EditorBuilder::Control::Toggle, slotOf(p), x, y, w, h);
+}
+void Editor::choice(const Param& p, double x, double y, double w, double h) {
+    if (builder_) builder_->control(detail::EditorBuilder::Control::Choice, slotOf(p), x, y, w, h);
+}
+void Editor::readout(const Param& p, double x, double y, double w, double h) {
+    if (builder_) builder_->control(detail::EditorBuilder::Control::Readout, slotOf(p), x, y, w, h);
+}
+void Editor::xyPad(const Param& across, const Param& up, double x, double y, double w, double h) {
+    if (builder_) builder_->xyPad(slotOf(across), slotOf(up), x, y, w, h);
+}
+void Editor::envelope(const Param& attack, const Param& decay, const Param& sustain,
+                      const Param& release, double x, double y, double w, double h) {
+    if (builder_)
+        builder_->envelope(slotOf(attack), slotOf(decay), slotOf(sustain), slotOf(release), x, y, w,
+                           h);
+}
+void Editor::file(const AudioFile& f, double x, double y, double w, double h) {
+    if (builder_) builder_->file(&f, x, y, w, h);
+}
+void Editor::file(const Convolver& c, double x, double y, double w, double h) {
+    if (builder_) builder_->file(&c, x, y, w, h);
+}
+void Editor::keyboard(int lowKey, int highKey, double x, double y, double w, double h) {
+    if (builder_) builder_->keyboard(lowKey, highKey, x, y, w, h);
+}
+void Editor::meters(double x, double y, double w, double h) {
+    if (builder_) builder_->meters(x, y, w, h);
+}
 
 }  // namespace supple::script

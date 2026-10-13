@@ -795,6 +795,12 @@ MIR_op_t Codegen::value(Expr* e) {
     const Type* t = e->type();
     if (e->constant && t && t->isScalar()) return constant(e);
     switch (e->kind) {
+        case ExprKind::StringLit: {
+            // Text the program keeps, for as long as its code exists.
+            program_->strings.push_back(
+                std::make_unique<std::string>(static_cast<StringLitExpr*>(e)->value));
+            return imm(reinterpret_cast<std::int64_t>(program_->strings.back()->c_str()));
+        }
         case ExprKind::Name: {
             auto* n = static_cast<NameExpr*>(e);
             if (n->ref == RefKind::Local || n->ref == RefKind::Field) return load(t, placeOf(e));
@@ -904,7 +910,7 @@ MIR_op_t Codegen::value(Expr* e) {
             auto* a = static_cast<AssignExpr*>(e);
             const Type* tt = a->target->type();
             if (a->op == "=") {
-                if (tt->isScalar()) {
+                if (tt->isScalar() || tt->kind == TypeKind::String) {
                     // C++17: the value is computed before the target.
                     MIR_op_t v = value(a->value);
                     if (v.mode == MIR_OP_REG) v = reg(toReg(v, kindOf(tt)));
@@ -1143,6 +1149,15 @@ MIR_op_t Codegen::intrinsic(CallExpr* c, Intrinsic which) {
             emit(MIR_DMOV, mem(MIR_T_D, p, D::Layout::paramReported), v);
             return imm(0);
         }
+        case Intrinsic::SharedGet:
+            // Shared<T>: its T, at the start of the member.
+            return load(t, Place{false, objectAddress(), 0});
+        case Intrinsic::SharedSet: {
+            const Type* vt = c->builtinMethod->owner->sharedValue;
+            MIR_op_t v = args(0);
+            store(vt, Place{false, objectAddress(), 0}, v);
+            return imm(0);
+        }
         case Intrinsic::SampleRate:
         case Intrinsic::MaxBlockSize:
         case Intrinsic::Channels:
@@ -1254,6 +1269,12 @@ MIR_op_t Codegen::call(CallExpr* c) {
         MIR_reg_t self = c->object ? aggregate(c->object) : selfReg_;
         std::vector<MIR_op_t> args{reg(self)};
         for (size_t i = 0; i < c->args.size(); ++i) {
+            // An object by reference (the Editor's Param and file
+            // arguments): its address.
+            if (i < bm->params.size() && bm->params[i].isRef) {
+                args.push_back(reg(aggregate(c->args[i])));
+                continue;
+            }
             MIR_op_t v = value(c->args[i]);
             if (c->args[i]->lvalue && v.mode == MIR_OP_REG) {
                 MIR_reg_t copy = temp(kindOf(c->args[i]->type()));
@@ -1398,7 +1419,7 @@ void Codegen::statement(Stmt* s) {
                     emit(MIR_MOV, reg(l.reg), reg(addressOf(placeOf(v->init))));
                     continue;
                 }
-                if (t->isScalar() && !v->addressTaken) {
+                if ((t->isScalar() || t->kind == TypeKind::String) && !v->addressTaken) {
                     l.inReg = true;
                     l.reg = temp(kindOf(t));
                     move(kindOf(t), reg(l.reg), v->init ? value(v->init) : zero(kindOf(t)));
@@ -1660,6 +1681,7 @@ std::shared_ptr<const Program> Codegen::run() {
     d.kind = model.kind;
     d.params = model.params;
     d.files = model.files;
+    d.shared = model.shared;
     d.size = model.size;
     d.align = model.align;
     d.objects = model.objects;
@@ -1742,6 +1764,8 @@ std::shared_ptr<const Program> Codegen::run() {
     d.startVoiceRetrigger = reinterpret_cast<Program::StartHook>(hook(model.startVoiceRetrigger));
     d.releaseVoice = reinterpret_cast<Program::VoiceHook>(hook(model.releaseVoice));
     d.stopVoice = reinterpret_cast<Program::VoiceHook>(hook(model.stopVoice));
+    d.editor = reinterpret_cast<Program::UiHook>(hook(model.editor));
+    d.draw = reinterpret_cast<Program::UiHook>(hook(model.draw));
     program_ = nullptr;
     return program;
 }
@@ -1769,6 +1793,7 @@ const std::string& Program::typeName() const { return d_->typeName; }
 PluginKind Program::kind() const { return d_->kind; }
 const std::vector<ParamModel>& Program::params() const { return d_->params; }
 const std::vector<FileModel>& Program::files() const { return d_->files; }
+const std::vector<SharedModel>& Program::shared() const { return d_->shared; }
 bool Program::interpreted() const { return d_->interpreted; }
 const std::string& Program::listing() const { return d_->listing; }
 std::size_t Program::size() const { return static_cast<std::size_t>(d_->size); }
@@ -1779,6 +1804,8 @@ Program::VoiceHook Program::startVoice() const { return d_->startVoice; }
 Program::StartHook Program::startVoiceRetrigger() const { return d_->startVoiceRetrigger; }
 Program::VoiceHook Program::releaseVoice() const { return d_->releaseVoice; }
 Program::VoiceHook Program::stopVoice() const { return d_->stopVoice; }
+Program::UiHook Program::editor() const { return d_->editor; }
+Program::UiHook Program::draw() const { return d_->draw; }
 
 void* Program::create() const {
     const std::size_t bytes = (static_cast<std::size_t>(d_->size) + 63) / 64 * 64;

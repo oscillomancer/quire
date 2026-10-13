@@ -19,6 +19,7 @@ namespace supple::scriptc {
 using PluginKind = script::detail::PluginKind;
 using ParamModel = script::detail::ParamModel;
 using FileModel = script::detail::FileModel;
+using SharedModel = script::detail::SharedModel;
 using InfoModel = script::detail::InfoModel;
 
 struct ProgramData;
@@ -33,6 +34,7 @@ class Program final : public script::detail::Code {
     PluginKind kind() const override;
     const std::vector<ParamModel>& params() const override;
     const std::vector<FileModel>& files() const override;
+    const std::vector<SharedModel>& shared() const override;
     // The plugin struct's name, as the script declares it.
     const std::string& typeName() const;
     bool interpreted() const;
@@ -57,6 +59,8 @@ class Program final : public script::detail::Code {
     StartHook startVoiceRetrigger() const override;
     VoiceHook releaseVoice() const override;
     VoiceHook stopVoice() const override;
+    UiHook editor() const override;
+    UiHook draw() const override;
 
   private:
     friend class Codegen;

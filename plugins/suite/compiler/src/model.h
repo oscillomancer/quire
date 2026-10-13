@@ -55,6 +55,10 @@ struct PluginModel {
     FunctionDecl* startVoiceRetrigger = nullptr;
     FunctionDecl* releaseVoice = nullptr;
     FunctionDecl* stopVoice = nullptr;
+    // The editor's: editor(Editor&) and draw(Canvas&).
+    FunctionDecl* editor = nullptr;
+    FunctionDecl* draw = nullptr;
+    std::vector<SharedModel> shared;  // Shared and SharedArray members, in order
     int size = 0, align = 8;
     std::vector<ObjectSlot> objects;
     std::vector<InitialValue> initial;

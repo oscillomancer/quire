@@ -8,7 +8,7 @@
 
 # In the order an agent should meet them; the tour of the language is a test,
 # not an example.
-set(order gain tilt compressor echo drive spectral reverb synth sampler)
+set(order gain tilt compressor echo drive spectral reverb synth sampler meter)
 set(skip language)
 
 file(GLOB found RELATIVE "${EXAMPLES}" "${EXAMPLES}/*.cpp")

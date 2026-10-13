@@ -20,6 +20,7 @@ struct ProgramData {
     PluginKind kind = PluginKind::None;
     std::vector<ParamModel> params;
     std::vector<FileModel> files;
+    std::vector<SharedModel> shared;
     int size = 0, align = 8;
     std::vector<ObjectSlot> objects;
     std::vector<InitialValue> initial;
@@ -28,6 +29,9 @@ struct ProgramData {
     Program::ProcessHook process = nullptr;
     Program::VoiceHook startVoice = nullptr, releaseVoice = nullptr, stopVoice = nullptr;
     Program::StartHook startVoiceRetrigger = nullptr;
+    Program::UiHook editor = nullptr, draw = nullptr;
+    // String literals the code points at.
+    std::vector<std::unique_ptr<std::string>> strings;
     void* mir = nullptr;  // MIR_context_t: owns the code
     bool generator = false;
     bool interpreted = false;

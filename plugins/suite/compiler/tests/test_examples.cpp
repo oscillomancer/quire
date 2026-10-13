@@ -8,6 +8,9 @@
 #include <doctest/doctest.h>
 
 #include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <deque>
 #include <fstream>
 #include <sstream>
 
@@ -37,6 +40,9 @@ namespace ex_compressor {
 }
 namespace ex_spectral {
 #include "spectral.cpp"
+}
+namespace ex_meter {
+#include "meter.cpp"
 }
 }  // namespace supple::script
 
@@ -187,6 +193,165 @@ void differential(const std::string& file, const std::vector<double>& initial,
     CHECK(interpreted == native);
 }
 
+// What an editor hook does, as text: every Canvas call and Editor control in
+// order, numbers to the last bit, so two paths can be compared.
+class Recorder final : public script::detail::Painter,
+                       public script::detail::EditorBuilder,
+                       public script::detail::EditorServices {
+  public:
+    std::vector<std::string> calls;
+
+    // --- EditorServices ---
+    char* text(int bytes) override {
+        texts_.emplace_back(static_cast<size_t>(bytes), '\0');
+        return texts_.back().data();
+    }
+    const char* paramText(int slot, double value) override {
+        texts_.push_back(std::to_string(slot) + ":" + number(value));
+        return texts_.back().c_str();
+    }
+    const char* paramName(int slot) override {
+        texts_.push_back("param" + std::to_string(slot));
+        return texts_.back().c_str();
+    }
+
+    // --- Painter ---
+    double width() const override { return 400; }
+    double height() const override { return 300; }
+    void save() override { add("save"); }
+    void restore() override { add("restore"); }
+    void translate(double x, double y) override { add("translate", {x, y}); }
+    void rotate(double a) override { add("rotate", {a}); }
+    void scale(double x, double y) override { add("scale", {x, y}); }
+    void fillStyle(int c) override { add("fillStyle", {double(c)}); }
+    void strokeStyle(int c) override { add("strokeStyle", {double(c)}); }
+    void globalAlpha(double a) override { add("globalAlpha", {a}); }
+    void lineWidth(double w) override { add("lineWidth", {w}); }
+    void lineCap(script::LineCap c) override { add("lineCap", {double(int(c))}); }
+    void lineJoin(script::LineJoin j) override { add("lineJoin", {double(int(j))}); }
+    void linearGradient(double a, double b, double c, double d, int e, int f) override {
+        add("linearGradient", {a, b, c, d, double(e), double(f)});
+    }
+    void radialGradient(double a, double b, double c, double d, int e, int f) override {
+        add("radialGradient", {a, b, c, d, double(e), double(f)});
+    }
+    void fillRect(double x, double y, double w, double h) override {
+        add("fillRect", {x, y, w, h});
+    }
+    void strokeRect(double x, double y, double w, double h) override {
+        add("strokeRect", {x, y, w, h});
+    }
+    void clearRect(double x, double y, double w, double h) override {
+        add("clearRect", {x, y, w, h});
+    }
+    void beginPath() override { add("beginPath"); }
+    void closePath() override { add("closePath"); }
+    void moveTo(double x, double y) override { add("moveTo", {x, y}); }
+    void lineTo(double x, double y) override { add("lineTo", {x, y}); }
+    void bezierCurveTo(double a, double b, double c, double d, double x, double y) override {
+        add("bezierCurveTo", {a, b, c, d, x, y});
+    }
+    void quadraticCurveTo(double a, double b, double x, double y) override {
+        add("quadraticCurveTo", {a, b, x, y});
+    }
+    void arc(double x, double y, double r, double a, double b) override {
+        add("arc", {x, y, r, a, b});
+    }
+    void arcTo(double a, double b, double c, double d, double r) override {
+        add("arcTo", {a, b, c, d, r});
+    }
+    void rect(double x, double y, double w, double h) override { add("rect", {x, y, w, h}); }
+    void roundRect(double x, double y, double w, double h, double r) override {
+        add("roundRect", {x, y, w, h, r});
+    }
+    void ellipse(double x, double y, double a, double b) override { add("ellipse", {x, y, a, b}); }
+    void circle(double x, double y, double r) override { add("circle", {x, y, r}); }
+    void fill() override { add("fill"); }
+    void stroke() override { add("stroke"); }
+    void clip(double x, double y, double w, double h) override { add("clip", {x, y, w, h}); }
+    void font(Face f, double size) override { add("font", {double(int(f)), size}); }
+    void textAlign(script::TextAlign a) override { add("textAlign", {double(int(a))}); }
+    void textBaseline(script::TextBaseline b) override { add("textBaseline", {double(int(b))}); }
+    void fillText(const char* t, double x, double y) override {
+        add(std::string("fillText ") + t, {x, y});
+    }
+    double measureText(const char* t) override { return 7.0 * static_cast<double>(std::strlen(t)); }
+    void panel(double x, double y, double w, double h, const char* t) override {
+        add(std::string("panel ") + t, {x, y, w, h});
+    }
+    void well(double x, double y, double w, double h) override { add("well", {x, y, w, h}); }
+    void meter(double db, double x, double y, double w, double h) override {
+        add("meter", {db, x, y, w, h});
+    }
+    void frequencyGrid(double x, double y, double w, double h, double a, double b) override {
+        add("frequencyGrid", {x, y, w, h, a, b});
+    }
+    void levelGrid(double x, double y, double w, double h, double a, double b, double c) override {
+        add("levelGrid", {x, y, w, h, a, b, c});
+    }
+
+    // --- EditorBuilder ---
+    void size(double w, double h) override { add("size", {w, h}); }
+    void control(Control kind, int slot, double x, double y, double w, double h) override {
+        add("control", {double(int(kind)), double(slot), x, y, w, h});
+    }
+    void xyPad(int a, int b, double x, double y, double w, double h) override {
+        add("xyPad", {double(a), double(b), x, y, w, h});
+    }
+    void envelope(int a, int d, int s, int r, double x, double y, double w, double h) override {
+        add("envelope", {double(a), double(d), double(s), double(r), x, y, w, h});
+    }
+    void file(const void*, double x, double y, double w, double h) override {
+        add("file", {x, y, w, h});
+    }
+    void keyboard(int lo, int hi, double x, double y, double w, double h) override {
+        add("keyboard", {double(lo), double(hi), x, y, w, h});
+    }
+    void meters(double x, double y, double w, double h) override { add("meters", {x, y, w, h}); }
+
+  private:
+    static std::string number(double v) {
+        char b[40];
+        std::snprintf(b, sizeof(b), "%.17g", v);
+        return b;
+    }
+    void add(const std::string& name, std::initializer_list<double> args = {}) {
+        std::string line = name;
+        for (double a : args) line += " " + number(a);
+        calls.push_back(std::move(line));
+    }
+    std::deque<std::string> texts_;
+};
+
+// The editor's hooks in each path after the same audio: the same calls.
+template <class T>
+void sameDrawing(const std::string& file, int frames = 4800) {
+    const std::string source = readExample(file);
+    auto drawn = [&](auto& run) {
+        Recorder r;
+        run.instance.editor = &r;
+        run.prepare();
+        run.update();
+        Audio a = signal(frames);
+        run.process(a, 128);
+        run.editor(&r);
+        run.draw(&r);
+        return r.calls;
+    };
+    NativeRunner<T> native;
+    const std::vector<std::string> expected = drawn(native);
+    CHECK(expected.size() > 4);
+    for (bool interpret : {false, true}) {
+        scriptc::Options options;
+        options.interpret = interpret;
+        auto compiled = scriptc::compile(source, options);
+        INFO(scriptc::toText(compiled.diagnostics));
+        REQUIRE(compiled.program);
+        JitRunner jit(compiled.program);
+        CHECK(drawn(jit) == expected);
+    }
+}
+
 // The script compiled as C++ describes the plugin the compiler describes:
 // identity, kind and every parameter. Keys and ids too when the export's
 // keys are given (keys: true), and otherwise those withKey() sets.
@@ -242,6 +407,13 @@ void sameDescription(const char* file,
         CHECK(p.hidden == q.hidden);
         CHECK(p.roles == q.roles);
     }
+    REQUIRE(jit.shared().size() == native.shared().size());
+    for (size_t i = 0; i < jit.shared().size(); ++i) {
+        CHECK(jit.shared()[i].offset == native.shared()[i].offset);
+        CHECK(jit.shared()[i].bytes == native.shared()[i].bytes);
+    }
+    CHECK((jit.editor() != nullptr) == (native.editor() != nullptr));
+    CHECK((jit.draw() != nullptr) == (native.draw() != nullptr));
 }
 
 }  // namespace
@@ -296,6 +468,11 @@ TEST_CASE("spectral: JIT, interpreter and C++ agree") {
     }
 }
 
+TEST_CASE("meter: JIT, interpreter and C++ agree, and draw alike") {
+    differential<script::ex_meter::Meter>("meter.cpp", {-3.0}, {{20, 0, 6.0}});
+    sameDrawing<script::ex_meter::Meter>("meter.cpp");
+}
+
 TEST_CASE("Stft: a sine reads its amplitude, and a spectrum left alone is a delay") {
     script::detail::Instance instance;
     script::detail::CurrentScope scope(&instance);
@@ -327,6 +504,7 @@ TEST_CASE("a script compiled as C++ describes the plugin the compiler describes"
     sameDescription<script::ex_language::Tour>("language.cpp");
     sameDescription<script::ex_compressor::Compressor>("compressor.cpp");
     sameDescription<script::ex_spectral::Spectral>("spectral.cpp");
+    sameDescription<script::ex_meter::Meter>("meter.cpp");
     // Without its keys, a Param's key is its name's: "Pivot" -> pivot.
     const script::detail::NativeCode<Tilt> keyless;
     CHECK(keyless.params()[1].key == "pivot");

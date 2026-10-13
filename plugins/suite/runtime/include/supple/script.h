@@ -102,7 +102,10 @@ int wrap(int i, int n);
 
 namespace detail {
 struct Layout;
-}
+// Reports a Shared or SharedArray member to the plugin under construction
+// (a source export's glue listens; nothing else does).
+void declareShared(void* member, int bytes);
+}  // namespace detail
 
 // A fixed-size array. Indexing is checked: an index outside 0..N-1 refers to
 // a spare element instead (for numbers it reads 0, and what is written to it
@@ -354,6 +357,8 @@ inline ParamSpec toggle(const char* name, bool def) {
 namespace detail {
 struct ParamBinding;
 struct Instance;
+class Painter;
+class EditorBuilder;
 }  // namespace detail
 
 // A parameter: a member of the plugin, read as a number in its unit (a
@@ -389,6 +394,11 @@ class Param {
     double forVoice(int v) const;
     // A meter() parameter: what the plugin reports.
     void set(double value) { reported_ = value; }
+    // In editor code: the value as the host shows it ("-3.0 dB",
+    // "1.20 kHz"), and the parameter's name. Each lasts until the hook
+    // returns.
+    const char* text() const;
+    const char* name() const;
 
   private:
     friend struct detail::ParamBinding;
@@ -867,6 +877,208 @@ class Adsr {
 
   private:
     alignas(8) unsigned char storage_[192];
+};
+
+// --- the editor ------------------------------------------------------------------
+//
+// A plugin may draw its own editor with two hooks, both optional:
+//
+//   void editor(Editor& e)   once, as the editor opens: its size and controls
+//   void draw(Canvas& g)     at each repaint: what lies under the controls
+//
+// A plugin with neither gets the automatic editor: every parameter, by group.
+// Editor code runs on the host's main thread, in a copy of the plugin struct
+// of its own. There each Param reads its current value (with the host's
+// modulation) and each Shared member what the audio code last sent; members
+// only editor code uses are the editor's own (a hover state, a scale). It
+// sees nothing else of the audio code's: a member both use is refused.
+// Editor code may format text (format(), Param::text()) and loops as long as
+// it likes within a generous budget.
+
+// A value the audio code shows the editor: a level, a position, a count. The
+// audio code set()s it; the editor get()s it as it was when last sent (about
+// 120 times a second while the editor is open; every Shared member at the same
+// moment). A member of the plugin struct, never set by editor code.
+template <class T>
+class Shared {
+    static_assert(std::is_same_v<T, double> || std::is_same_v<T, float> || std::is_same_v<T, int> ||
+                      std::is_same_v<T, bool>,
+                  "a Shared holds double, float, int or bool");
+
+  public:
+    Shared() { detail::declareShared(this, static_cast<int>(sizeof(Shared))); }
+    Shared(const Shared& other) : value_(other.value_) {}
+    Shared& operator=(const Shared& other) = default;
+    T get() const { return value_; }
+    void set(T value) { value_ = value; }
+
+    T value_ = T();
+};
+
+// An Array the audio code shows the editor: a scope's samples, a spectrum's
+// bins. Indexed like an Array; sent whole, with the Shared members.
+template <class T, int N>
+class SharedArray : public Array<T, N> {
+    static_assert(std::is_same_v<T, double> || std::is_same_v<T, float> || std::is_same_v<T, int> ||
+                      std::is_same_v<T, bool>,
+                  "a SharedArray holds double, float, int or bool");
+
+  public:
+    SharedArray() : Array<T, N>() {
+        detail::declareShared(this, static_cast<int>(sizeof(SharedArray)));
+    }
+    SharedArray(const SharedArray& other) : Array<T, N>(other) {}
+    SharedArray& operator=(const SharedArray& other) = default;
+};
+
+// Colours are 0xRRGGBB (CSS's #6fb3a8 is 0x6fb3a8), or one of the editor's
+// palette by name, Theme::accent: the palette the automatic editor and the
+// controls draw with, which an exported plugin may change.
+struct Theme {
+    enum : int {
+        ground = 0x1000000,  // the background
+        surface,             // raised panels
+        raised,              // buttons, menus
+        recess,              // wells: graph floors, meter tracks
+        line,                // hairlines, panel edges
+        lineLit,             // grid lines picked out
+        textFaint,
+        textMuted,
+        text,
+        accent,      // values, active toggles
+        accent2,     // a second series: input meters, a second curve
+        modulation,  // modulation ranges
+        alert,       // clipping, errors
+    };
+};
+
+enum class TextAlign { Left, Center, Right };
+enum class TextBaseline { Top, Middle, Alphabetic, Bottom };
+enum class LineCap { Butt, Round, Square };
+enum class LineJoin { Miter, Round, Bevel };
+
+// Where draw() draws: like an HTML canvas's 2D context, in the editor's
+// design units (the window scales everything). Styles and transforms hold
+// until changed, or until restore() brings back what save() kept.
+//
+//   g.fillStyle(Theme::accent);
+//   g.beginPath();
+//   g.arc(100, 100, 40, 0, twoPi);
+//   g.fill();
+class Canvas {
+  public:
+    double width() const;  // the editor's size
+    double height() const;
+
+    void save();
+    void restore();
+    void translate(double x, double y);
+    void rotate(double radians);  // clockwise, as on screen
+    void scale(double x, double y);
+
+    void fillStyle(int colour);
+    void strokeStyle(int colour);
+    void globalAlpha(double alpha);  // 0..1, on everything drawn after
+    void lineWidth(double width);
+    void lineCap(LineCap cap);
+    void lineJoin(LineJoin join);
+    // The fill, until the next fillStyle(): a gradient from one colour to
+    // another, along a line or out from a centre.
+    void linearGradient(double x0, double y0, double x1, double y1, int from, int to);
+    void radialGradient(double x, double y, double innerRadius, double outerRadius, int from,
+                        int to);
+
+    void fillRect(double x, double y, double w, double h);
+    void strokeRect(double x, double y, double w, double h);
+    void clearRect(double x, double y, double w, double h);  // to the background
+
+    void beginPath();
+    void closePath();
+    void moveTo(double x, double y);
+    void lineTo(double x, double y);
+    void bezierCurveTo(double c1x, double c1y, double c2x, double c2y, double x, double y);
+    void quadraticCurveTo(double cx, double cy, double x, double y);
+    // Angles in radians, 0 to the right, growing clockwise.
+    void arc(double x, double y, double radius, double startAngle, double endAngle);
+    void arcTo(double x1, double y1, double x2, double y2, double radius);
+    void rect(double x, double y, double w, double h);
+    void roundRect(double x, double y, double w, double h, double radius);
+    void ellipse(double x, double y, double radiusX, double radiusY);
+    void circle(double x, double y, double radius);
+    void fill();
+    void stroke();
+    // Drawing after it stays inside this rectangle (and any clip before it),
+    // until restore().
+    void clip(double x, double y, double w, double h);
+
+    // Text: Inter, a bold Inter, or Plex Mono for numbers, at a size.
+    void font(double size);
+    void boldFont(double size);
+    void monoFont(double size);
+    void textAlign(TextAlign align);
+    void textBaseline(TextBaseline baseline);
+    void fillText(const char* text, double x, double y);
+    double measureText(const char* text) const;  // its width
+
+    // The editor's furniture, in its palette: a raised panel with a title
+    // ("" for none), a recessed well, a level meter (dBFS, -72 to +6), and a
+    // graph's grid lines, at 1, 2 and 5 of each decade from lowHz to highHz
+    // across, every stepDb from lowDb (bottom) to highDb (top) up.
+    void panel(double x, double y, double w, double h, const char* title);
+    void well(double x, double y, double w, double h);
+    void meter(double levelDb, double x, double y, double w, double h);
+    void frequencyGrid(double x, double y, double w, double h, double lowHz, double highHz);
+    void levelGrid(double x, double y, double w, double h, double lowDb, double highDb,
+                   double stepDb);
+
+  private:
+    friend struct detail::Layout;
+    detail::Painter* painter_ = nullptr;
+};
+
+// For graphs: where hz falls across x .. x + w on a log scale from lowHz to
+// highHz (as frequencyGrid draws it), and where db falls up from y + h (at
+// lowDb) to y (at highDb).
+double hzToX(double hz, double lowHz, double highHz, double x, double w);
+double dbToY(double db, double lowDb, double highDb, double y, double h);
+
+// Text, printf-style: format("%.1f dB", level). Numbers only -- %d, %i, %f,
+// %e, %g, %x with their flags, width and precision, and %% -- up to four of
+// them. The text lasts until the editor hook returns.
+const char* format(const char* pattern, double a);
+const char* format(const char* pattern, double a, double b);
+const char* format(const char* pattern, double a, double b, double c);
+const char* format(const char* pattern, double a, double b, double c, double d);
+
+// What editor() builds: its size (480 x 320 unless given) and its controls,
+// the framework's own, each bound to a parameter (or a file) and drawn over
+// draw()'s canvas. A control's label is its parameter's name.
+class Editor {
+  public:
+    void size(double width, double height);
+    void knob(const Param& p, double x, double y, double w, double h);
+    void slider(const Param& p, double x, double y, double w, double h);  // along its longer side
+    void toggle(const Param& p, double x, double y, double w, double h);
+    // A choice's options: buttons side by side for up to four, a menu for more.
+    void choice(const Param& p, double x, double y, double w, double h);
+    // A value shown, not edited: a meter().
+    void readout(const Param& p, double x, double y, double w, double h);
+    // Two parameters dragged together, across and up.
+    void xyPad(const Param& across, const Param& up, double x, double y, double w, double h);
+    // An envelope's four stages, each dragged by a handle.
+    void envelope(const Param& attack, const Param& decay, const Param& sustain,
+                  const Param& release, double x, double y, double w, double h);
+    // A file member's file: its name and state; click to choose, drop to take.
+    void file(const AudioFile& f, double x, double y, double w, double h);
+    void file(const Convolver& c, double x, double y, double w, double h);
+    // An instrument's keyboard, lowKey to highKey: playing it plays the plugin.
+    void keyboard(int lowKey, int highKey, double x, double y, double w, double h);
+    // The input and output peak meters the framework keeps.
+    void meters(double x, double y, double w, double h);
+
+  private:
+    friend struct detail::Layout;
+    detail::EditorBuilder* builder_ = nullptr;
 };
 
 }  // namespace supple::script

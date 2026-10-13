@@ -52,6 +52,9 @@ enum class Intrinsic : std::uint8_t {
     // Block
     BlockSidechain,
     BlockOutput,
+    // Shared<T>
+    SharedGet,
+    SharedSet,
 };
 
 // What a call may change, for the evaluation-order rule.
@@ -105,6 +108,9 @@ struct BuiltinClass {
     std::vector<BuiltinMethod> methods;
     std::vector<BuiltinField> fields;
     std::map<std::string, const Type*> nestedTypes;  // Oscillator::Shape
+    // Shared<T>: T. A member of the plugin struct the audio code sends the
+    // editor (with SharedArray<T, N>, an Array type marked shared).
+    const Type* sharedValue = nullptr;
 };
 
 // A runtime enum: its type and enumerators.
@@ -144,8 +150,16 @@ class Builtins {
     const BuiltinClass* pluginBase() const { return plugin_; }
     const BuiltinClass* audioFile() const { return audioFile_; }
     const BuiltinClass* convolver() const { return convolver_; }
+    const BuiltinClass* canvas() const { return canvas_; }
+    const BuiltinClass* editor() const { return editor_; }
     // An AudioFile or Convolver: a file member, declared from a FileSpec.
     bool isFile(const Type* t) const;
+    // Shared<T> for T (double, float, int, bool), or null.
+    const BuiltinClass* shared(const Type* value) const;
+    // A Shared<T> or a SharedArray<T, N>: state the audio code sends the editor.
+    static bool isShared(const Type* t);
+    // A runtime group of named int constants (Theme::accent), or null.
+    const std::map<std::string, int>* constants(const std::string& group) const;
 
     // The plugin base's size: where a plugin struct's own members start.
     int pluginBaseSize() const;
@@ -156,6 +170,8 @@ class Builtins {
 
     Type* scalar(TypeKind kind, const char* name, int size);
     BuiltinClass* addClass(const std::string& name, int size, int align);
+    const Type* addEnum(const std::string& name, std::vector<std::pair<std::string, int>> values);
+    void addEditor();
     void addFunctions();
     void addClasses();
 
@@ -166,12 +182,14 @@ class Builtins {
     std::map<std::string, std::vector<const BuiltinFunction*>> byName_;
     std::map<std::string, const BuiltinClass*> classByName_;
     std::map<std::string, const Type*> enumByName_;
+    std::map<std::string, std::map<std::string, int>> constants_;
+    std::map<const Type*, const BuiltinClass*> sharedByValue_;
 
     Type *void_, *bool_, *int_, *float_, *double_, *string_, *initList_, *null_;
     const BuiltinClass *param_ = nullptr, *block_ = nullptr, *channel_ = nullptr,
                        *inputChannel_ = nullptr, *transport_ = nullptr, *paramSpec_ = nullptr,
                        *info_ = nullptr, *plugin_ = nullptr, *audioFile_ = nullptr,
-                       *convolver_ = nullptr;
+                       *convolver_ = nullptr, *canvas_ = nullptr, *editor_ = nullptr;
 
     friend struct Registrar;
 };

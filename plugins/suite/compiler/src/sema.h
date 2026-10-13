@@ -101,7 +101,7 @@ class Sema {
 
     // Types.
     const Type* resolve(TypeSpec* spec, StructDecl* scope, bool allowVoid = false);
-    const Type* arrayType(const Type* element, int count);
+    const Type* arrayType(const Type* element, int count, bool shared = false);
     const Type* bufferType(const Type* element);
     StructDecl* findStruct(const std::string& name, StructDecl* scope) const;
     EnumDecl* findEnum(const std::string& name, StructDecl* scope) const;
@@ -126,6 +126,7 @@ class Sema {
     Expr* checkMember(MemberExpr* m);
     Expr* checkIndex(IndexExpr* x);
     Expr* checkCall(CallExpr* c);
+    void checkFormat(CallExpr* c);
     Expr* checkUnary(UnaryExpr* u);
     Expr* checkBinary(BinaryExpr* bin);
     Expr* checkAssign(AssignExpr* a);
@@ -166,6 +167,7 @@ class Sema {
     void effects();
     void sequencing();
     void checkRules();
+    void editorRules();
 
     // Effects (sema.cpp).
     struct Effects {

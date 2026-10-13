@@ -47,6 +47,96 @@ class VoiceBank {
     ~VoiceBank() = default;
 };
 
+// What editor code reaches through its instance: the glue's script editor
+// implements it, on the main thread.
+class EditorServices {
+  public:
+    // Room for `bytes` of text that lasts until the hook returns; null when
+    // the hook has used all there is.
+    virtual char* text(int bytes) = 0;
+    // Parameter table index `slot`'s value as the host shows it, and its name.
+    virtual const char* paramText(int slot, double value) = 0;
+    virtual const char* paramName(int slot) = 0;
+
+  protected:
+    ~EditorServices() = default;
+};
+
+// What a Canvas draws with (the glue's, over the framework's renderer). Every
+// call is script.h's Canvas method of the same name; colours are as there.
+class Painter {
+  public:
+    virtual double width() const = 0;
+    virtual double height() const = 0;
+    virtual void save() = 0;
+    virtual void restore() = 0;
+    virtual void translate(double x, double y) = 0;
+    virtual void rotate(double radians) = 0;
+    virtual void scale(double x, double y) = 0;
+    virtual void fillStyle(int colour) = 0;
+    virtual void strokeStyle(int colour) = 0;
+    virtual void globalAlpha(double alpha) = 0;
+    virtual void lineWidth(double width) = 0;
+    virtual void lineCap(LineCap cap) = 0;
+    virtual void lineJoin(LineJoin join) = 0;
+    virtual void linearGradient(double x0, double y0, double x1, double y1, int from, int to) = 0;
+    virtual void radialGradient(double x, double y, double inner, double outer, int from,
+                                int to) = 0;
+    virtual void fillRect(double x, double y, double w, double h) = 0;
+    virtual void strokeRect(double x, double y, double w, double h) = 0;
+    virtual void clearRect(double x, double y, double w, double h) = 0;
+    virtual void beginPath() = 0;
+    virtual void closePath() = 0;
+    virtual void moveTo(double x, double y) = 0;
+    virtual void lineTo(double x, double y) = 0;
+    virtual void bezierCurveTo(double c1x, double c1y, double c2x, double c2y, double x,
+                               double y) = 0;
+    virtual void quadraticCurveTo(double cx, double cy, double x, double y) = 0;
+    virtual void arc(double x, double y, double radius, double start, double end) = 0;
+    virtual void arcTo(double x1, double y1, double x2, double y2, double radius) = 0;
+    virtual void rect(double x, double y, double w, double h) = 0;
+    virtual void roundRect(double x, double y, double w, double h, double radius) = 0;
+    virtual void ellipse(double x, double y, double rx, double ry) = 0;
+    virtual void circle(double x, double y, double radius) = 0;
+    virtual void fill() = 0;
+    virtual void stroke() = 0;
+    virtual void clip(double x, double y, double w, double h) = 0;
+    enum class Face { Regular, Bold, Mono };
+    virtual void font(Face face, double size) = 0;
+    virtual void textAlign(TextAlign align) = 0;
+    virtual void textBaseline(TextBaseline baseline) = 0;
+    virtual void fillText(const char* text, double x, double y) = 0;
+    virtual double measureText(const char* text) = 0;
+    virtual void panel(double x, double y, double w, double h, const char* title) = 0;
+    virtual void well(double x, double y, double w, double h) = 0;
+    virtual void meter(double db, double x, double y, double w, double h) = 0;
+    virtual void frequencyGrid(double x, double y, double w, double h, double lowHz,
+                               double highHz) = 0;
+    virtual void levelGrid(double x, double y, double w, double h, double lowDb, double highDb,
+                           double stepDb) = 0;
+
+  protected:
+    ~Painter() = default;
+};
+
+// What an Editor builds with (the glue's). Parameters are by table index
+// (Param's slot); a file by its member's address in the plugin struct.
+class EditorBuilder {
+  public:
+    enum class Control { Knob, Slider, Toggle, Choice, Readout };
+    virtual void size(double width, double height) = 0;
+    virtual void control(Control kind, int slot, double x, double y, double w, double h) = 0;
+    virtual void xyPad(int across, int up, double x, double y, double w, double h) = 0;
+    virtual void envelope(int attack, int decay, int sustain, int release, double x, double y,
+                          double w, double h) = 0;
+    virtual void file(const void* member, double x, double y, double w, double h) = 0;
+    virtual void keyboard(int lowKey, int highKey, double x, double y, double w, double h) = 0;
+    virtual void meters(double x, double y, double w, double h) = 0;
+
+  protected:
+    ~EditorBuilder() = default;
+};
+
 // One running plugin instance as the runtime sees it. The plugin struct's
 // Plugin base points here; built-in objects reach it through current().
 struct Instance {
@@ -57,8 +147,9 @@ struct Instance {
     // Back-edges a hook may take before it is stopped (audio hooks only).
     std::int64_t budget = std::int64_t{1} << 31;
     Status status;
-    VoiceBank* voices = nullptr;  // an instrument's
-    int latency = -1;             // setLatency()'s, or -1: Info's
+    VoiceBank* voices = nullptr;       // an instrument's
+    int latency = -1;                  // setLatency()'s, or -1: Info's
+    EditorServices* editor = nullptr;  // the editor's copy of the plugin: text, names
 
     static void bind(Plugin& plugin, Instance* instance) { plugin.instance_ = instance; }
 };
@@ -91,6 +182,9 @@ struct Layout {
     static constexpr int paramChanged = offsetof(Param, changed_);
     static constexpr int paramReported = offsetof(Param, reported_);
     static constexpr int pluginInstance = offsetof(Plugin, instance_);
+    // The glue's: a Canvas or Editor made for a hook.
+    static void bind(Canvas& canvas, Painter* painter) { canvas.painter_ = painter; }
+    static void bind(Editor& editor, EditorBuilder* builder) { editor.builder_ = builder; }
     template <class T>
     static constexpr int bufferItems() {
         return offsetof(Buffer<T>, items_);
@@ -147,6 +241,8 @@ class ParamRegistrar {
     virtual void declare(Param& param, const ParamSpec& spec) = 0;
     // An AudioFile or Convolver member (`member` points at it).
     virtual void declareFile(void* member, const FileSpec& spec) { (void)member, (void)spec; }
+    // A Shared or SharedArray member, `bytes` long.
+    virtual void declareShared(void* member, int bytes) { (void)member, (void)bytes; }
 };
 ParamRegistrar* registrar();
 void setRegistrar(ParamRegistrar* registrar);
