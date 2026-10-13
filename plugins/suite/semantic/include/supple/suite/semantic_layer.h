@@ -53,6 +53,13 @@ class SemanticLayer : public plugin::Layer {
 
   protected:
     plugin::Instance& instance() { return instance_; }
+    // Whether file property `index` can use the existing file at `path`, and
+    // if not why, before a patch sets it: a layer whose files are decoded
+    // checks that they decode.
+    virtual bool fileReadable(size_t index, const std::string& path, std::string& why) const {
+        (void)index, (void)path, (void)why;
+        return true;
+    }
     // Tells a host that understands the extension what changed.
     void changed(uint32_t flags);
 

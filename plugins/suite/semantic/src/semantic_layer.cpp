@@ -65,6 +65,9 @@ void SemanticLayer::rebuild() {
         codec_.reset();
         return;
     }
+    codec->setFileCheck([this](size_t index, const std::string& path, std::string& why) {
+        return fileReadable(index, path, why);
+    });
     codec_ = std::move(codec);
 }
 

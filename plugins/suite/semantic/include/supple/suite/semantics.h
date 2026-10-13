@@ -22,6 +22,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -100,7 +101,10 @@ class PatchCodec {
     // A document onto `snapshot` and `envelope`: replacing everything (what it
     // leaves out takes its default) or merged into what they hold (RFC 7396).
     // Transactional: false with errors, nothing changed, otherwise both
-    // updated. Error paths point into the document as merged.
+    // updated. Error paths point into the document as merged. A file
+    // property the document changes must name an existing file of a type it
+    // accepts, by absolute path, that the file check (when set) can read;
+    // "" means none.
     bool apply(const json::Value& document, bool merge, state::Snapshot& snapshot,
                Envelope& envelope, std::vector<json::Error>& errors) const;
 
@@ -110,6 +114,11 @@ class PatchCodec {
     // that writes the patch's own value stays as it is, exactly: a state
     // saved and loaded saves the same bytes again.
     void restore(const json::Value& document, state::Snapshot& snapshot, Envelope& envelope) const;
+
+    // Whether property `index` can use the file at `path` (which exists), and
+    // if not, why: for instance, whether its decoder reads it.
+    using FileCheck = std::function<bool(size_t index, const std::string& path, std::string& why)>;
+    void setFileCheck(FileCheck check) { fileCheck_ = std::move(check); }
 
     // Compact prose: "Tilt: Tilt +3.0 dB; Pivot 1.20 kHz", or "default
     // settings". With `changedOnly`, values that differ from their defaults.
@@ -124,9 +133,12 @@ class PatchCodec {
   private:
     bool readValue(size_t index, const json::Value& v, const std::string& path, double& host,
                    std::vector<json::Error>& errors) const;
+    bool fileUsable(size_t index, const std::string& path, const state::Snapshot& current,
+                    std::string& why) const;
 
     const Definition& definition_;
     Meaning meaning_;
+    FileCheck fileCheck_;
 };
 
 // The patch framed as a state chunk (core-patch §4): the magic, version 2,

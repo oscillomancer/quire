@@ -2,8 +2,12 @@
 // Copyright (c) 2026 Supple Audio
 #include <doctest/doctest.h>
 
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
+
+#include <unistd.h>
 
 #include "supple/suite/semantics.h"
 
@@ -14,7 +18,8 @@ namespace {
 
 const char* const kModes[] = {"Low Pass", "High Pass"};
 
-// A plugin with one of each kind of parameter, a meter and two properties.
+// A plugin with one of each kind of parameter, a meter and three properties
+// (one of them a file).
 std::shared_ptr<const Definition> fixture(bool normalized = true) {
     PluginInfo info;
     info.id = "com.example.fixture";
@@ -33,6 +38,7 @@ std::shared_ptr<const Definition> fixture(bool normalized = true) {
     PropertyList::Builder pb;
     pb.add(property(1, "Label").perProject().maxBytes(16));
     pb.add(property(2, "Text", "hello"));
+    pb.add(property(3, "Sample").audioFile().help("The sound it plays."));
     return std::make_shared<Definition>(info, b.build(), pb.build());
 }
 
@@ -95,6 +101,15 @@ TEST_CASE("the schema lists every CLAP parameter the way core-params describes i
               ->find("params")
               ->find("properties")
               ->find("meter") == nullptr);
+    // A file property says it takes a path, after its own help.
+    const std::string sample = schema.find("patch")
+                                   ->find("properties")
+                                   ->find("properties")
+                                   ->find("properties")
+                                   ->find("sample")
+                                   ->find("description")
+                                   ->asString();
+    CHECK(sample.rfind("The sound it plays. The path of a file (wav ", 0) == 0);
 }
 
 TEST_CASE("a patch says each value in physical units, and only what changed when asked") {
@@ -136,6 +151,44 @@ TEST_CASE("a replacing patch sets what it says and defaults the rest") {
     const std::string prose = codec.describe(s, true);
     CHECK(prose.find("Filter: Cutoff") != std::string::npos);
     CHECK(prose.size() <= 600);
+}
+
+TEST_CASE("a file property takes an existing file by absolute path, or none") {
+    const auto d = fixture();
+    PatchCodec codec(*d);
+    state::Snapshot s(*d);
+    Envelope env;
+    const std::filesystem::path folder =
+        std::filesystem::temp_directory_path() / ("supple-semantic-" + std::to_string(::getpid()));
+    std::filesystem::create_directories(folder);
+    const std::string wav = (folder / "kick.wav").string(), text = (folder / "kick.txt").string();
+    const std::string other = (folder / "snare.wav").string();
+    std::ofstream(wav) << "RIFF";
+    std::ofstream(other) << "RIFF";
+    std::ofstream(text) << "text";
+    auto set = [&](const std::string& path) {
+        std::vector<json::Error> errors;
+        json::Value doc = json::Value::object();
+        doc["properties"]["sample"] = path;
+        const bool ok = codec.apply(doc, true, s, env, errors);
+        return ok ? std::string() : errors.at(0).code + " " + errors.at(0).message;
+    };
+    CHECK(set("kick.wav").rfind("properties.file 'sample': the path is not absolute", 0) == 0);
+    CHECK(set((folder / "none.wav").string()).find("there is no file there") != std::string::npos);
+    CHECK(set(text).find("it takes wav ") != std::string::npos);
+    CHECK(set(wav).empty());
+    CHECK(s.property[2] == wav);
+    // The file check has the last word; a path it holds stays, found or not.
+    codec.setFileCheck([](size_t, const std::string&, std::string& why) {
+        why = "not audio";
+        return false;
+    });
+    CHECK(set(wav).empty());
+    CHECK(set(other).find("'sample': not audio") != std::string::npos);
+    std::filesystem::remove_all(folder);
+    CHECK(set(wav).empty());
+    CHECK(set("").empty());
+    CHECK(set(wav).find("there is no file there") != std::string::npos);
 }
 
 TEST_CASE("a merge changes only what it names") {

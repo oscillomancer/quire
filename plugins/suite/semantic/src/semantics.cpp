@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <set>
 
 namespace supple::suite {
@@ -443,9 +444,20 @@ json::Value PatchCodec::jsonSchema() const {
         json::Value& byKey = properties["properties"];
         byKey = json::Value::object();
         for (size_t i = 0; i < definition_.properties().count(); ++i) {
+            const PropertyDef& def = definition_.properties().at(i);
             json::Value v = json::Value::object();
             v["type"] = "string";
-            v["maxLength"] = static_cast<long long>(definition_.properties().at(i).limit);
+            v["maxLength"] = static_cast<long long>(def.limit);
+            std::string about = def.description ? def.description : "";
+            if (def.isFile()) {
+                // What a caller needs to know to fill it in.
+                if (!about.empty()) about += " ";
+                about += "The path of a file";
+                if (def.extensions && *def.extensions)
+                    about += " (" + std::string(def.extensions) + ")";
+                about += "; \"\" for none.";
+            }
+            if (!about.empty()) v["description"] = about;
             byKey[meaning_.properties[i].key] = std::move(v);
         }
     }
@@ -603,6 +615,59 @@ bool PatchCodec::readValue(size_t index, const json::Value& v, const std::string
     }
     host = sanitizeHost(p, toHost(p, plain(index, physical)));
     return true;
+}
+
+namespace {
+
+// A path from UTF-8 text, on any system.
+std::filesystem::path pathOf(const std::string& utf8) {
+    return std::filesystem::path(std::u8string(utf8.begin(), utf8.end()));
+}
+
+// Whether `path` ends in one of `extensions` (space-separated, without dots;
+// empty takes anything), ignoring case.
+bool hasExtension(const std::string& path, std::string_view extensions) {
+    if (extensions.empty()) return true;
+    const size_t dot = path.find_last_of('.');
+    const size_t slash = path.find_last_of("/\\");
+    if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) return false;
+    std::string ext;
+    for (char c : path.substr(dot + 1))
+        ext += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    size_t at = 0;
+    while (at < extensions.size()) {
+        size_t end = extensions.find(' ', at);
+        if (end == std::string_view::npos) end = extensions.size();
+        if (extensions.substr(at, end - at) == ext) return true;
+        at = end + 1;
+    }
+    return false;
+}
+
+}  // namespace
+
+// A path a file property may take: "" (none), the one it holds (a session's
+// reference stays, found or not), or an existing file of its types that the
+// file check can read.
+bool PatchCodec::fileUsable(size_t index, const std::string& path, const state::Snapshot& current,
+                            std::string& why) const {
+    const PropertyDef& def = definition_.properties().at(index);
+    if (!def.isFile() || path.empty()) return true;
+    const std::string held = current.hasProperty[index] ? current.property[index] : def.def;
+    if (path == held) return true;
+    const std::filesystem::path p = pathOf(path);
+    std::error_code ec;
+    if (!p.is_absolute())
+        why = "the path is not absolute";
+    else if (!std::filesystem::is_regular_file(p, ec))
+        why = "there is no file there";
+    else if (!hasExtension(path, def.extensions ? def.extensions : ""))
+        why = "it takes " + std::string(def.extensions) + " files";
+    else if (fileCheck_ && !fileCheck_(index, path, why)) {
+        if (why.empty()) why = "the file cannot be read";
+    } else
+        return true;
+    return false;
 }
 
 bool PatchCodec::apply(const json::Value& document, bool merge, state::Snapshot& snapshot,
@@ -764,6 +829,15 @@ bool PatchCodec::apply(const json::Value& document, bool merge, state::Snapshot&
                     errors.push_back(error(
                         "properties.too_long", "'" + m.first + "' is longer than its limit", path,
                         "keep it to " + std::to_string(properties.at(index).limit) + " bytes"));
+                } else if (std::string why;
+                           !fileUsable(index, m.second.asString(), snapshot, why)) {
+                    errors.push_back(error(
+                        "properties.file", "'" + m.first + "': " + why, path,
+                        "give the absolute path of an existing " +
+                            (properties.at(index).extensions && *properties.at(index).extensions
+                                 ? std::string(properties.at(index).extensions) + " "
+                                 : std::string()) +
+                            "file, or \"\" for none"));
                 } else {
                     texts[index] = m.second.asString();
                 }

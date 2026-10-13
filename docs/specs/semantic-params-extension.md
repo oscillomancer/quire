@@ -232,3 +232,25 @@ patch as a chunk.
   never by parsing state bytes, so they need not know which layout a plugin
   uses. §7's check that a state save and load equals the patch round trip
   applies to both layouts.
+
+## Amendments (2026-10-13, properties and files)
+
+- **Properties.** A plugin of the template with the suite's layer may have
+  properties (the framework's `core/Property.h`): state that is not a
+  parameter, such as a file's path. Its patch has a top-level
+  `"properties"` object of text by key beside `"params"`, and the schema's
+  `patch` lists each as a string with its `maxLength` and, when it has
+  one, a `description`. A DSP script's file member (`AudioFile`,
+  `Convolver`) is a file property keyed by the member's name in
+  snake_case, or by its `withKey()`.
+- **Files.** A file property holds a path, and its description says so
+  (with the file types it takes). A path a `set_patch` document changes,
+  `VALIDATE_ONLY` included, must be absolute and name an existing file of
+  one of those types that the plugin can read (the script player opens it
+  with its decoder); otherwise the call fails with `properties.file` at
+  `/properties/<key>`, saying why, and nothing changes. `""` means none. A
+  path the plugin already holds passes as it is, found or not, so a patch
+  read and set again still applies; loading state never refuses a missing
+  file (the framework relocates a moved one, or reports it missing).
+  `set_patch` returns once the file is loaded, so the next block, offline
+  renders included, plays it.
