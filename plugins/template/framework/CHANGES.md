@@ -4,6 +4,17 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.18.0
+
+What a product must do: nothing.
+
+- **The STFT a sample at a time** (`dsp/Stft.h`). `push(channel, x)` takes
+  a sample and says when a frame's spectrum is ready in
+  `spectrum(channel)`; `pull(channel)` gives the output sample. It is the
+  same transform as `process()` with a callback, bit for bit (`process()`
+  now runs on it), for code that cannot pass a callback: Quire's DSP
+  scripts. Each channel now keeps its own spectrum.
+
 ## 1.17.0
 
 What a product must do: nothing.

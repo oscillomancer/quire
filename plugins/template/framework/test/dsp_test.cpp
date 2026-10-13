@@ -483,6 +483,22 @@ TEST(stft_bins_filter_what_they_say) {
     CHECK(db(amplitudeAt(x, 9000.0, 24000)) < -60.0);
 }
 
+TEST(stft_a_sample_at_a_time_is_the_callback_form) {
+    Stft a, b;
+    a.prepare(1, 256);
+    b.prepare(1, 256);
+    std::vector<double> x = noise(3000), y = x;
+    const auto change = [](std::complex<double>* bins, int count) {
+        for (int k = count / 3; k < count; ++k) bins[k] *= 0.25;
+    };
+    a.process(0, x.data(), static_cast<int>(x.size()), change);
+    for (double& v : y) {
+        if (b.push(0, v)) change(b.spectrum(0), b.bins());
+        v = b.pull(0);
+    }
+    CHECK(x == y);
+}
+
 // --- sources ------------------------------------------------------------------------
 
 TEST(random_is_the_same_everywhere) {
