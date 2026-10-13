@@ -144,6 +144,17 @@
       "linkage": "static (macOS plugins only)"
     },
     {
+      "name": "nanosvg",
+      "dir": "nanosvg",
+      "license": "Zlib",
+      "license_file": "nanosvg/LICENSE.txt",
+      "version": "master @ 2026-07-10 (the plugin template's pin)",
+      "source": "https://github.com/memononen/nanosvg",
+      "commit": "239e102ec2c691f2902e20ace2ed36ee4a35cfe6",
+      "purpose": "SVG parsing for plugin editors built on the plugin template (framework/gui/Images.h); only the parser header is vendored (src/nanosvg.h, unmodified)",
+      "linkage": "static (plugins only)"
+    },
+    {
       "name": "lua",
       "dir": "lua-5.4.9",
       "license": "MIT",
