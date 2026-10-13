@@ -1,6 +1,8 @@
 # The player: the plugin that runs DSP scripts (Quire's ADR-0032). Its
 # plugins are the scripts it finds (product/Catalog.cpp); it is a run-time
-# product of the plugin template with the suite's layer.
+# product of the plugin template with the suite's layer. It builds from the
+# template's tree with this folder as the product
+# (-DSUPPLE_PRODUCT_DIR=<this folder>); the suite is the folder above.
 #
 # PRODUCT_ID and PRODUCT_STATE_TAG name the module, not its plugins: each
 # script's plugin has its own ID and a state tag made from it.
@@ -20,9 +22,10 @@ set(PRODUCT_KIND        "effect")
 set(PRODUCT_CHANNELS    2 1)
 set(PRODUCT_FEATURES    "utility")
 
-# The suite's layer: the semantic-params extension, and scripts reloaded.
+# The suite's layer: the semantic-params extension (targets.cmake adds the
+# suite's half), and scripts reloaded.
 set(PRODUCT_LAYER           ON)
-set(PRODUCT_LAYER_SOURCES   product/Layer.cpp suite/semantic/src/semantic_layer.cpp)
+set(PRODUCT_LAYER_SOURCES   product/Layer.cpp)
 
 set(PRODUCT_AU_MANUFACTURER "Supl")
 set(PRODUCT_AU_SUBTYPE      "ScPl")

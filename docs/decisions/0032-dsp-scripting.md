@@ -251,6 +251,32 @@ test executable), and their outputs must be bit-identical; later also
 through a built player and a built source export. The semantic conformance
 tool runs against scripts in the player and against both exports.
 
+### Implementation notes (2026-10-12)
+
+Where the work stands, and where it departs from the text above:
+
+- Framework items 1 to 3 of §6 are in framework 1.16.0 (Definitions and
+  catalogs with `PRODUCT_RUNTIME`, the layer seam in `plugin/Layer.h`,
+  `normalizedHostValue()`); item 4 is not done. Framework 1.16.1 adds
+  `SUPPLE_PRODUCT_DIR` (a product folder outside the template's tree) and
+  `SUPPLE_BUILD_VST3`, and moves the template's CLAP SDK and dr_libs pins to
+  the versions in `third_party/`.
+- The player (§4) builds from `plugins/template` with
+  `-DSUPPLE_PRODUCT_DIR=plugins/suite/player` and this repository's
+  `third_party` copies, CLAP only unless `SUPPLE_PLUGIN_VST3`. It is not yet
+  staged in `plugins/clap/`, so Quire does not load it. Its processor is
+  `supple::player::ScriptProcessor`; its editor is the framework's
+  automatic one, since scripts have no UI yet.
+- Reloading: the layer's main-thread tick looks at the script file twice a
+  second, so `dsp.write` only has to save it. An in-place swap carries the
+  parameter values over; the script's members start from a fresh
+  `prepare()`, under the 10 ms crossfade, rather than being carried by name
+  and type. A changed parameter table redefines the plugin (restart and
+  rescan).
+- State (§7): the chunk is `PTCH` (magic, version, length, canonical
+  patch). The patch holds parameters only, since scripts have no properties
+  yet. The amendment to `semantic-params-extension.md` §5 is not written.
+
 ## Consequences
 
 Scripts reuse all of Quire's hosting and agent tooling with no special

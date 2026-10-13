@@ -32,6 +32,15 @@ The monorepo builds each plugin as an isolated ExternalProject
 (`plugins/CMakeLists.txt`); its own test suite runs as
 `plugin.<dir>.ctest`. Built plugins land in `build/<preset>/plugins/clap/`.
 
+`template/` is the plugin template at a released framework version, a
+byte-identical copy (`git archive` of the template's commit): change the
+template first, then copy it here, never edit it in place. `suite/` is DSP
+scripting (ADR-0032): the script compiler and runtime, the semantic layer
+(the extension as a framework layer), and the player, a run-time product
+that `plugins/CMakeLists.txt` builds from `template/` with
+`-DSUPPLE_PRODUCT_DIR=suite/player` and this repository's `third_party`
+copies (`supple_add_template_product`).
+
 ## Rules
 
 - **Shared stack.** Files that come from the template's shared stack stay

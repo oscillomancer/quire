@@ -211,6 +211,11 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
 - DSP scripting (ADR-0032, proposed): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The
   compiler and runtime exist (`plugins/suite`, tested against the same scripts
-  compiled as C++); the player, the commands and exports do not yet.
+  compiled as C++). So does the player (`plugins/suite/player`, built from
+  `plugins/template` as `plugin.player.*`): one plugin per script in
+  `SUPPLE_SCRIPT_LIBRARY`, with the semantic-params extension, reloading a
+  script when its file changes. Quire does not load it yet (it stays in
+  `build/<preset>/plugins/player/`), and the `dsp.*` commands and exports do
+  not exist yet.
 - Orrery's structural performance pass.
 - Hardening and ports beyond Linux.

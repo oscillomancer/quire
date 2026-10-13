@@ -1,8 +1,9 @@
 # The suite in a player build: the script runtime and compiler (with MIR),
-# and the semantic documents. suite/ is Quire's plugins/suite; SUPPLE_MIR_DIR
-# is where MIR's sources are (Quire's third_party/mir-1.0.0).
+# the semantic documents and the layer. The suite is the folder above this
+# one (Quire's plugins/suite); SUPPLE_MIR_DIR is where MIR's sources are
+# (Quire's third_party/mir-1.0.0).
 
-set(SUPPLE_SUITE ${SUPPLE_ROOT}/suite)
+get_filename_component(SUPPLE_SUITE "${SUPPLE_PRODUCT}/.." ABSOLUTE)
 set(SUPPLE_MIR_DIR "${SUPPLE_SUITE}/../../third_party/mir-1.0.0" CACHE PATH "MIR 1.0.0's sources")
 
 add_library(suite-mir STATIC ${SUPPLE_MIR_DIR}/mir.c ${SUPPLE_MIR_DIR}/mir-gen.c)
@@ -34,6 +35,9 @@ supple_defaults(suite-script)
 target_sources(product-core PRIVATE ${SUPPLE_SUITE}/semantic/src/json.cpp ${SUPPLE_SUITE}/semantic/src/semantics.cpp)
 target_include_directories(product-core PUBLIC ${SUPPLE_SUITE}/semantic/include)
 target_link_libraries(product-core PUBLIC suite-script)
+if (TARGET product-impl)
+    target_sources(product-impl PRIVATE ${SUPPLE_SUITE}/semantic/src/semantic_layer.cpp)
+endif()
 
 if (SUPPLE_BUILD_TESTS AND COMMAND supple_test)
     # Scripts the tests play (SUPPLE_SCRIPT_LIBRARY): host-smoke and the
