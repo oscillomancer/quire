@@ -29,6 +29,7 @@
 #include "core/Files.h"
 #include "supple/script_compiler.hpp"
 #include "supple/script_export.hpp"
+#include "supple/script_program.hpp"
 #include "supple/suite/json.h"
 
 namespace supple::player {
@@ -83,7 +84,7 @@ std::shared_ptr<const ScriptDefinition> compileScript(const std::filesystem::pat
             *problems = scriptc::toText(result.diagnostics, files::toUtf8(file.filename()));
         return nullptr;
     }
-    return makeScriptDefinition(std::move(result.program), file, source, problems);
+    return suite::makeScriptDefinition(std::move(result.program), file, source, problems);
 }
 
 namespace {

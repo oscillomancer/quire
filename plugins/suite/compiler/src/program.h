@@ -16,6 +16,7 @@ namespace supple::scriptc {
 
 struct ProgramData {
     InfoModel info;
+    std::string typeName;
     PluginKind kind = PluginKind::None;
     std::vector<ParamModel> params;
     int size = 0, align = 8;

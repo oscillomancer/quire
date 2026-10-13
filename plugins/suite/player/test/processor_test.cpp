@@ -19,6 +19,7 @@
 
 using namespace supple;
 using namespace supple::player;
+using namespace supple::suite;
 
 namespace {
 
@@ -114,7 +115,8 @@ TEST(the_engine_plays_a_script_as_its_own_runner_does_bit_for_bit) {
 
     // The runner gets what the engine hands the script: the host value's
     // plain value, which a log taper rounds to its own grid.
-    scripttest::JitRunner runner(d->program(), 48000.0, 64, 2);
+    scripttest::JitRunner runner(std::static_pointer_cast<const scriptc::Program>(d->code()),
+                                 48000.0, 64, 2);
     const ParamTable& t = d->params();
     runner.setScript(0, toPlain(t.at(0), toHost(t.at(0), 4.5)));
     runner.setScript(1, toPlain(t.at(1), toHost(t.at(1), 700.0)));
@@ -184,7 +186,7 @@ struct L : Effect {
     engine.activate(48000.0, 64, 2, 2);
     const std::vector<double> before = render(engine, 512);
     ParamValues values(d->params());
-    engine.processor().swap(next->program(), values);
+    engine.processor().swap(next->code(), values);
     // During the fade the output lies between the two; past it, the new code's.
     const std::vector<double> fading = render(engine, 64);
     CHECK(std::fabs(fading[32]) > std::fabs(before[32]) &&

@@ -11,9 +11,11 @@
 #include <string>
 #include <vector>
 
-#include "ScriptDefinition.h"
+#include "supple/suite/script_definition.h"
 
 namespace supple::player {
+
+using suite::ScriptDefinition;
 
 // The longest script read: a page of C++ is a few kilobytes.
 inline constexpr size_t kMaxScriptBytes = 1u << 20;

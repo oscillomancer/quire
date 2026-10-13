@@ -1,7 +1,7 @@
 # The suite in a player build: the script runtime and compiler (with MIR),
-# the semantic documents and the layer. The suite is the folder above this
-# one (Quire's plugins/suite); SUPPLE_MIR_DIR is where MIR's sources are
-# (Quire's third_party/mir-1.0.0).
+# the semantic documents and layer, and the glue that runs scripts. The
+# suite is the folder above this one (Quire's plugins/suite); SUPPLE_MIR_DIR
+# is where MIR's sources are (Quire's third_party/mir-1.0.0).
 
 get_filename_component(SUPPLE_SUITE "${SUPPLE_PRODUCT}/.." ABSOLUTE)
 set(SUPPLE_MIR_DIR "${SUPPLE_SUITE}/../../third_party/mir-1.0.0" CACHE PATH "MIR 1.0.0's sources")
@@ -32,12 +32,14 @@ target_include_directories(suite-script SYSTEM PRIVATE ${SUPPLE_FRAMEWORK})
 target_link_libraries(suite-script PRIVATE suite-mir)
 supple_defaults(suite-script)
 
-target_sources(product-core PRIVATE ${SUPPLE_SUITE}/semantic/src/json.cpp ${SUPPLE_SUITE}/semantic/src/semantics.cpp)
-target_include_directories(product-core PUBLIC ${SUPPLE_SUITE}/semantic/include)
+target_sources(product-core PRIVATE ${SUPPLE_SUITE}/semantic/src/json.cpp ${SUPPLE_SUITE}/semantic/src/semantics.cpp
+                                    ${SUPPLE_SUITE}/glue/src/script_definition.cpp)
+target_include_directories(product-core PUBLIC ${SUPPLE_SUITE}/semantic/include ${SUPPLE_SUITE}/glue/include)
 # dladdr (product/Catalog.cpp), in libdl before glibc 2.34.
 target_link_libraries(product-core PUBLIC suite-script ${CMAKE_DL_LIBS})
 if (TARGET product-impl)
-    target_sources(product-impl PRIVATE ${SUPPLE_SUITE}/semantic/src/semantic_layer.cpp)
+    target_sources(product-impl PRIVATE ${SUPPLE_SUITE}/semantic/src/semantic_layer.cpp
+                                        ${SUPPLE_SUITE}/glue/src/script_layer.cpp)
 endif()
 
 if (SUPPLE_BUILD_TESTS AND COMMAND supple_test)

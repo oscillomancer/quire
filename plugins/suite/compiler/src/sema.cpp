@@ -72,19 +72,6 @@ bool validKey(const std::string& k) {
     return !start && !k.empty();
 }
 
-// FNV-1a: a parameter's CLAP id from its key, stable however the members
-// are ordered.
-std::uint32_t keyId(const std::string& key) {
-    std::uint32_t h = 2166136261u;
-    for (unsigned char c : key) {
-        h ^= c;
-        h *= 16777619u;
-    }
-    if (h == 0xFFFFFFFFu) h = 0xFFFFFFFEu;  // CLAP_INVALID_ID
-    if (h == 0) h = 1;
-    return h;
-}
-
 const std::set<std::string>& roleVocabulary() {
     static const std::set<std::string> roles = {
         "level",  "gain",    "mix",       "brightness", "resonance", "time",      "rate",
@@ -1513,7 +1500,7 @@ void Sema::evaluateParam(FieldDecl* f) {
         error(f->loc, "script.param.key", "'" + p.key + "' is not a usable patch key",
               "keys are lowercase letters, digits and _: rename the member, or give "
               ".withKey(\"low_cut\")");
-    if (p.id == 0) p.id = keyId(p.key);
+    if (p.id == 0) p.id = script::detail::keyId(p.key);
     p.offset = f->offset;
     auto bad = [&](const std::string& what, const std::string& hint = {}) {
         error(f->init->loc, "script.param.range", p.name + ": " + what, hint);

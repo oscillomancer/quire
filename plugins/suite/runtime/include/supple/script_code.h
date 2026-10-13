@@ -1,0 +1,110 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
+//
+// A plugin made from a script, as the glue that runs it sees it, however it
+// was built: by the script compiler (the player's JIT, scriptc::Program) or
+// by a C++ compiler (a source export, supple/script_native.h). Its
+// description -- identity, buses and parameters, as the script declares
+// them -- and what an instance needs to be made, copied, destroyed and run.
+// Scripts never see it.
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace supple::script::detail {
+
+enum class PluginKind : std::uint8_t { None, Effect, Instrument, NoteEffect };
+
+// A parameter as the script declares it (script.h's ParamSpec, evaluated).
+// min, max and def are physical: a percent in percent, a choice an index.
+struct ParamModel {
+    enum class Kind { Continuous, Integer, Choice, Toggle };
+    enum class Unit {
+        None,
+        Decibels,
+        Hertz,
+        Milliseconds,
+        Percent,
+        Ratio,
+        Semitones,
+        Cents,
+        Octaves,
+        Degrees,
+        Bpm,
+        Samples
+    };
+    enum class Curve { Linear, Log, Pow };
+
+    std::string member;    // the member's name
+    std::string key;       // the patch key (the member's name in snake_case unless given)
+    std::uint32_t id = 0;  // the CLAP id (keyId(key) unless given)
+    Kind kind = Kind::Continuous;
+    std::string name;
+    double min = 0.0, max = 1.0, def = 0.0;
+    Unit unit = Unit::None;
+    Curve curve = Curve::Linear;
+    double curveK = 1.0;
+    std::vector<std::string> choices;
+    std::string group, description;
+    double smoothingMs = 0.0;
+    bool automatable = true, modulatable = false, offAtMinimum = false, output = false,
+         bypass = false, hidden = false;
+    std::vector<std::string> roles;
+    int offset = 0;  // of the Param member in the plugin struct
+};
+
+struct InfoModel {
+    std::string name, id, vendor, version = "1.0.0", description, url;
+    std::vector<int> channels;  // main bus widths, the default first; empty: the kind's default
+    bool sidechain = false;
+    std::vector<std::string> outputs;
+    int voices = 0, latency = 0, tail = 0;
+};
+
+// A parameter's CLAP id from its key (FNV-1a), stable however the members
+// are ordered; never CLAP's invalid id, never 0.
+inline std::uint32_t keyId(std::string_view key) {
+    std::uint32_t h = 2166136261u;
+    for (unsigned char c : key) {
+        h ^= c;
+        h *= 16777619u;
+    }
+    if (h == 0xFFFFFFFFu) h = 0xFFFFFFFEu;
+    if (h == 0) h = 1;
+    return h;
+}
+
+// Immutable once made; any number of instances share it, on any thread.
+class Code {
+  public:
+    virtual ~Code() = default;
+
+    virtual const InfoModel& info() const = 0;
+    virtual PluginKind kind() const = 0;
+    // In declaration order.
+    virtual const std::vector<ParamModel>& params() const = 0;
+
+    // An instance: the plugin struct, constructed (each Param at its
+    // default). Main thread: it allocates.
+    virtual void* create() const = 0;
+    virtual void destroy(void* self) const = 0;
+    // The whole struct, as its copy assignment does it: runtime objects by
+    // their own copy (a DelayLine of the same capacity copies in place,
+    // without allocating).
+    virtual void copy(void* dst, const void* src) const = 0;
+
+    // The hooks: (ctx: the instance's runtime record, self: the struct
+    // [, block: a script::Block]). Null when the script has none. The glue
+    // sets the current instance (CurrentScope) around each call.
+    using Hook = void (*)(void* ctx, void* self);
+    using ProcessHook = void (*)(void* ctx, void* self, void* block);
+    virtual Hook prepare() const = 0;
+    virtual Hook update() const = 0;
+    virtual ProcessHook process() const = 0;
+};
+
+}  // namespace supple::script::detail

@@ -31,7 +31,7 @@ set(PRODUCT_AU_MANUFACTURER "Supl")
 set(PRODUCT_AU_SUBTYPE      "ScPl")
 set(PRODUCT_STATE_TAG       "ScPl")
 
-set(PRODUCT_DSP_SOURCES     product/Catalog.cpp product/ScriptDefinition.cpp)
+set(PRODUCT_DSP_SOURCES     product/Catalog.cpp)
 # The automatic editor, laid out from each script's parameters.
 set(PRODUCT_EDITOR_SOURCES  "")
 set(PRODUCT_TEST_SOURCES    product/test/processor_test.cpp)

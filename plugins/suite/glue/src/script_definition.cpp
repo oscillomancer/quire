@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Supple Audio
-#include "ScriptDefinition.h"
+#include "supple/suite/script_definition.h"
 
 #include <cmath>
 
-namespace supple::player {
+namespace supple::suite {
 
-using scriptc::ParamModel;
+using script::detail::ParamModel;
 
 std::string stateTagFor(std::string_view id) {
     uint32_t h = 2166136261u;
@@ -95,9 +95,10 @@ ParamDef paramOf(const ParamModel& m, ParamTable::Builder& b) {
 }  // namespace
 
 std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
-    std::shared_ptr<const scriptc::Program> program, std::filesystem::path file, std::string source,
-    std::string* problems) {
-    const scriptc::InfoModel& i = program->info();
+    std::shared_ptr<const script::detail::Code> code, std::filesystem::path file,
+    std::string source, std::string* problems) {
+    using script::detail::PluginKind;
+    const script::detail::InfoModel& i = code->info();
     PluginInfo info;
     info.id = i.id;
     info.name = i.name;
@@ -106,9 +107,9 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
     info.version = i.version;
     info.description = i.description;
     info.stateTag = stateTagFor(i.id);
-    info.kind = program->kind() == scriptc::PluginKind::Instrument   ? PluginKind::Instrument
-                : program->kind() == scriptc::PluginKind::NoteEffect ? PluginKind::NoteEffect
-                                                                     : PluginKind::Effect;
+    info.kind = code->kind() == PluginKind::Instrument   ? supple::PluginKind::Instrument
+                : code->kind() == PluginKind::NoteEffect ? supple::PluginKind::NoteEffect
+                                                         : supple::PluginKind::Effect;
     info.features = {info.instrument()   ? "instrument"
                      : info.noteEffect() ? "note-effect"
                                          : "audio-effect"};
@@ -127,26 +128,25 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
     info.voices = i.voices;
 
     ParamTable::Builder b;
-    suite::Meaning meaning;
-    std::string slug = suite::snakeCase(i.name.empty() ? i.id : i.name);
+    Meaning meaning;
+    std::string slug = snakeCase(i.name.empty() ? i.id : i.name);
     for (char& c : slug)
         if (c == '_') c = '-';
     meaning.patchType = "supple." + slug + "-patch/1.0";
     meaning.docs = i.description;
-    for (const ParamModel& m : program->params()) {
+    for (const ParamModel& m : code->params()) {
         b.add(paramOf(m, b));
-        suite::ParamMeaning pm;
+        ParamMeaning pm;
         pm.key = m.key;
         for (const std::string& role : m.roles) pm.tags.push_back("role:" + role);
-        for (const std::string& choice : m.choices)
-            pm.choiceKeys.push_back(suite::snakeCase(choice));
+        for (const std::string& choice : m.choices) pm.choiceKeys.push_back(snakeCase(choice));
         meaning.params.push_back(std::move(pm));
     }
-    auto definition = std::make_shared<const ScriptDefinition>(
-        std::move(info), b.build(), std::move(meaning), std::move(program), std::move(file),
-        std::move(source));
+    auto definition = std::make_shared<const ScriptDefinition>(std::move(info), b.build(),
+                                                               std::move(meaning), std::move(code),
+                                                               std::move(file), std::move(source));
     std::string found = definition->problems();
-    if (found.empty()) found = suite::meaningProblems(*definition, definition->meaning());
+    if (found.empty()) found = meaningProblems(*definition, definition->meaning());
     if (!found.empty()) {
         if (problems) *problems = found;
         return nullptr;
@@ -173,4 +173,4 @@ bool sameShape(const Definition& a, const Definition& b) {
     return true;
 }
 
-}  // namespace supple::player
+}  // namespace supple::suite

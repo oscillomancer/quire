@@ -8,72 +8,31 @@
 #pragma once
 
 #include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <string>
-#include <vector>
+
+#include "supple/script_code.h"
 
 namespace supple::scriptc {
 
-enum class PluginKind : std::uint8_t { None, Effect, Instrument, NoteEffect };
-
-// A parameter as the script declares it (script.h's ParamSpec, evaluated).
-// min, max and def are physical: a percent in percent, a choice an index.
-struct ParamModel {
-    enum class Kind { Continuous, Integer, Choice, Toggle };
-    enum class Unit {
-        None,
-        Decibels,
-        Hertz,
-        Milliseconds,
-        Percent,
-        Ratio,
-        Semitones,
-        Cents,
-        Octaves,
-        Degrees,
-        Bpm,
-        Samples
-    };
-    enum class Curve { Linear, Log, Pow };
-
-    std::string member;    // the member's name
-    std::string key;       // the patch key (the member's name in snake_case unless given)
-    std::uint32_t id = 0;  // the CLAP id (FNV-1a of the key unless given)
-    Kind kind = Kind::Continuous;
-    std::string name;
-    double min = 0.0, max = 1.0, def = 0.0;
-    Unit unit = Unit::None;
-    Curve curve = Curve::Linear;
-    double curveK = 1.0;
-    std::vector<std::string> choices;
-    std::string group, description;
-    double smoothingMs = 0.0;
-    bool automatable = true, modulatable = false, offAtMinimum = false, output = false,
-         bypass = false, hidden = false;
-    std::vector<std::string> roles;
-    int offset = 0;  // of the Param member in the plugin struct
-};
-
-struct InfoModel {
-    std::string name, id, vendor, version = "1.0.0", description, url;
-    std::vector<int> channels;  // main bus widths, the default first; empty: the kind's default
-    bool sidechain = false;
-    std::vector<std::string> outputs;
-    int voices = 0, latency = 0, tail = 0;
-};
+// The description of a script's plugin (the runtime's, which the glue reads).
+using PluginKind = script::detail::PluginKind;
+using ParamModel = script::detail::ParamModel;
+using InfoModel = script::detail::InfoModel;
 
 struct ProgramData;
 
-class Program {
+class Program final : public script::detail::Code {
   public:
-    ~Program();
+    ~Program() override;
     Program(const Program&) = delete;
     Program& operator=(const Program&) = delete;
 
-    const InfoModel& info() const;
-    PluginKind kind() const;
-    const std::vector<ParamModel>& params() const;
+    const InfoModel& info() const override;
+    PluginKind kind() const override;
+    const std::vector<ParamModel>& params() const override;
+    // The plugin struct's name, as the script declares it.
+    const std::string& typeName() const;
     bool interpreted() const;
     // The generated MIR, when Options::listing asked for it.
     const std::string& listing() const;
@@ -81,21 +40,17 @@ class Program {
     // An instance: the plugin struct's memory, constructed as C++ would
     // construct it (zeroed, members' starting values, runtime objects, each
     // Param at its default). Main thread: it allocates.
-    void* create() const;
-    void destroy(void* self) const;
+    void* create() const override;
+    void destroy(void* self) const override;
     // The whole struct, as its copy assignment does it: runtime objects by
     // their own copy (a DelayLine of the same capacity copies in place,
     // without allocating).
-    void copy(void* dst, const void* src) const;
+    void copy(void* dst, const void* src) const override;
     std::size_t size() const;
 
-    // The hooks: (ctx: the instance's runtime record, self: the struct
-    // [, block]). Null when the script has none.
-    using Hook = void (*)(void* ctx, void* self);
-    using ProcessHook = void (*)(void* ctx, void* self, void* block);
-    Hook prepare() const;
-    Hook update() const;
-    ProcessHook process() const;
+    Hook prepare() const override;
+    Hook update() const override;
+    ProcessHook process() const override;
 
   private:
     friend class Codegen;
