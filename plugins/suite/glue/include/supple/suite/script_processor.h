@@ -106,6 +106,11 @@ class Generation {
     void reset() {
         if (reset_) program_->copy(self_, reset_);
     }
+    // The runtime record its code runs with, in the struct and its copy.
+    void bindInstance(D::Instance* instance) {
+        D::Instance::bind(*static_cast<S::Plugin*>(self_), instance);
+        if (reset_) D::Instance::bind(*static_cast<S::Plugin*>(reset_), instance);
+    }
 
   private:
     std::shared_ptr<const D::Code> program_;
@@ -279,7 +284,18 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         auto next = std::make_unique<Generation>(std::move(code), *table_,
                                                  definition_->properties(), &instance_);
         load(*next, values, true);
-        next->prepare(&instance_);
+        // Prepared here while the audio thread runs the current code, so
+        // against a record of its own -- the same rate and sizes, no voices
+        // -- that its hooks' budget and setLatency() write; the real one
+        // from the swap on.
+        D::Instance own;
+        own.sampleRate = instance_.sampleRate;
+        own.maxBlockSize = instance_.maxBlockSize;
+        own.channels = instance_.channels;
+        own.offline = instance_.offline;
+        next->bindInstance(&own);
+        next->prepare(&own);
+        next->bindInstance(&instance_);
         delete incoming_.exchange(next.release(), std::memory_order_acq_rel);
     }
 

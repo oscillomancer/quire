@@ -5,12 +5,14 @@
 // the compiler's own runner, stopped when they spin, reset to what prepare
 // left, and replaced while they play.
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <vector>
 
@@ -279,6 +281,41 @@ struct L : Effect {
     reference.activate(48000.0, 64, 2, 2);
     CHECK(render(engine, 512) == render(reference, 512));
     engine.processor().collect();
+}
+
+TEST(a_new_compile_is_prepared_beside_the_one_playing) {
+    // swap() runs the new code's prepare() on this thread while another
+    // plays the old: they must share nothing a hook writes (TSan says if
+    // they do), such as the loop budget.
+    const auto d = compileText(R"(#include <supple/script.h>
+struct W : Effect {
+    static constexpr Info info = {.name = "W", .id = "com.example.work"};
+    double sum = 0.0;
+    void prepare() {
+        for (int k = 0; k < 1000; ++k) sum += 1.0;
+    }
+    void process(Block& io) {
+        for (int c = 0; c < io.channels; ++c)
+            for (int i = 0; i < io.frames; ++i) io[c][i] *= 0.5;
+    }
+};
+)");
+    if (!d) return;
+    Engine engine(d);
+    engine.activate(48000.0, 64, 2, 2);
+    std::atomic<bool> done{false};
+    std::thread audio([&] {
+        while (!done.load()) render(engine, 256);
+    });
+    const ParamValues values(d->params());
+    for (int k = 0; k < 20; ++k) {
+        engine.processor().swap(d->code(), values);
+        engine.processor().collect();
+    }
+    done = true;
+    audio.join();
+    engine.processor().collect();
+    CHECK(engine.processor().instance().status.budgetExceeded.load() == 0);
 }
 
 TEST(the_library_lists_a_plugin_per_script_that_compiles) {
