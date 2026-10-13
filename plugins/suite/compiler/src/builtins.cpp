@@ -472,7 +472,7 @@ void Builtins::addClasses() {
     r.lifetime<S::EnvelopeFollower>(follower);
     r.method(
         follower, "void set(double attackMs, double releaseMs)",
-        +[](S::EnvelopeFollower* f, double a, double r) { f->set(a, r); });
+        +[](S::EnvelopeFollower* f, double attack, double release) { f->set(attack, release); });
     r.method(
         follower, "double process(double x)",
         +[](S::EnvelopeFollower* f, double x) { return f->process(x); });
@@ -673,7 +673,9 @@ void Builtins::addFunctions() {
     r.fn("double ftom(double hz)", +[](double x) { return S::ftom(x); });
     r.fn(
         "double compressorGainDb(double levelDb, double thresholdDb, double ratio, double kneeDb)",
-        +[](double l, double t, double r, double k) { return S::compressorGainDb(l, t, r, k); });
+        +[](double l, double t, double ratio, double k) {
+            return S::compressorGainDb(l, t, ratio, k);
+        });
     r.fn("int toInt(double x)", +[](double x) { return S::toInt(x); });
     r.fn("int floorToInt(double x)", +[](double x) { return S::floorToInt(x); });
     r.fn("int ceilToInt(double x)", +[](double x) { return S::ceilToInt(x); });
