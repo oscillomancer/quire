@@ -27,7 +27,7 @@ struct Root {
 const char* const kScript = R"(#include <supple/script.h>
 
 struct AgentGain : Effect {
-    static constexpr Info info = {.name = "Agent Gain", .id = "com.example.agent_gain"};
+    static constexpr Info info = {.name = "Agent Gain", .id = "com.example.agent-gain"};
     Param gain = decibels("Gain", -24, 24, 0).smoothed(20).help("The level change.");
     Param mix = percent("Mix", 50).help("Dry to processed.");
 
@@ -71,13 +71,13 @@ TEST_CASE("a DSP script written over the bus is a plugin an agent sets through i
     json::Value written = write(kScript);
     CHECK(written["ok"].asBool());
     CHECK(written["listed"].asBool());
-    CHECK(written["plugin"]["id"].asString() == "com.example.agent_gain");
+    CHECK(written["plugin"]["id"].asString() == "com.example.agent-gain");
     CHECK(written["plugin"]["params"].at(1).find("unit")->asString() == "%");
     CHECK(written["plugin"]["params"].at(1).find("default")->asDouble() == 50.0);
 
     call("track.add", json::parse(R"({"name": "Vocal"})").value());
     json::Value added = call("fx.add", json::parse(R"({"track": "tr_1",
-        "plugin": "com.example.agent_gain", "patch": {"params": {"gain": -6}}})")
+        "plugin": "com.example.agent-gain", "patch": {"params": {"gain": -6}}})")
                                            .value());
     CHECK(added["semantic"].asBool());
     const std::string fx = added["fx"].asString();
@@ -93,7 +93,7 @@ TEST_CASE("a DSP script written over the bus is a plugin an agent sets through i
     json::Value measured = call("dsp.test", json::parse(R"({"script": "agent_gain",
         "signals": ["sine"], "patch": {"params": {"gain": -6, "mix": 100}}})")
                                                 .value());
-    CHECK(measured["plugin"].asString() == "com.example.agent_gain");
+    CHECK(measured["plugin"].asString() == "com.example.agent-gain");
     CHECK(measured["signals"].at(0).find("gain_db")->asDouble() == doctest::Approx(-6.0));
     CHECK(measured["problems"].size() == 0);
 

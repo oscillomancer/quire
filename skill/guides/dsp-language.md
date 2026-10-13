@@ -52,8 +52,9 @@ struct Tilt : Effect {
 | Field | Meaning |
 |---|---|
 | `name` | Shown in hosts and in `plugin.list` |
-| `id` | Reverse DNS, `com.example.tilt`. Saved sessions find the plugin by it: never change it once the plugin is used |
-| `vendor`, `version` (`"1.0.0"`), `description`, `url` | As they say |
+| `id` | Reverse DNS, `com.example.tilt-eq`: words of letters, digits and `-` joined by `.` (no `_`). Saved sessions find the plugin by it: never change it once the plugin is used |
+| `version` | Major, minor, patch: `"1.0.0"` (the default) |
+| `vendor`, `description`, `url` | As they say |
 | `channels` | Main bus widths offered, the first the default: `{2, 1}` (the default) is stereo, then mono |
 | `sidechain` | `true`: a key input as wide as the main bus (`io.sidechain(c)`) |
 | `outputs` | Names of extra outputs (`io.output(bus, c)`) |

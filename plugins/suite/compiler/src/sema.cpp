@@ -1459,20 +1459,44 @@ void Sema::evaluateInfo(FieldDecl* f) {
     if (info.name.size() > 63)
         error(f->loc, "script.plugin.name", "the plugin's name is longer than 63 bytes",
               "shorten it; .description holds the rest");
+    // Reverse-DNS, as plugin formats and the framework take it: labels of
+    // letters, digits and '-', two or more, joined by '.'.
+    std::string suggested = snakeCase(info.name.empty() ? std::string("plugin") : info.name);
+    for (char& c : suggested)
+        if (c == '_') c = '-';
     if (info.id.empty()) {
         error(f->loc, "script.plugin.id",
               "Info needs an .id: a reverse-DNS name that identifies the plugin forever",
-              ".id = \"com.yourname." +
-                  snakeCase(info.name.empty() ? std::string("plugin") : info.name) + "\"");
+              ".id = \"com.yourname." + suggested + "\"");
     } else {
-        bool ok = info.id.find('.') != std::string::npos && info.id.size() <= 255;
+        bool ok = info.id.size() <= 255 && info.id.find('.') != std::string::npos &&
+                  info.id.front() != '.' && info.id.back() != '.' &&
+                  info.id.find("..") == std::string::npos;
         for (char c : info.id)
-            ok = ok &&
-                 (std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '-' || c == '_');
+            ok = ok && (std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '-');
         if (!ok)
             error(f->loc, "script.plugin.id",
-                  "Info's .id is a reverse-DNS name: letters, digits, '.', '-' and '_'",
-                  ".id = \"com.yourname.tilt\"");
+                  "Info's .id is a reverse-DNS name: words of letters, digits and '-', joined by "
+                  "'.'",
+                  ".id = \"com.yourname." + suggested + "\"");
+    }
+    {
+        // MAJOR.MINOR.PATCH, which every plugin format can show.
+        int parts = 0;
+        bool digits = false, ok = true;
+        for (char c : info.version) {
+            if (std::isdigit(static_cast<unsigned char>(c))) {
+                digits = true;
+            } else if (c == '.' && digits) {
+                ++parts;
+                digits = false;
+            } else {
+                ok = false;
+            }
+        }
+        if (!ok || !digits || parts != 2)
+            error(f->loc, "script.plugin.info", "'" + info.version + "' is not a version",
+                  ".version = \"1.2.0\" (major, minor, patch)");
     }
     if (info.latency < 0)
         error(f->loc, "script.plugin.info", ".latency cannot be negative",

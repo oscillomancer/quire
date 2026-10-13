@@ -128,6 +128,17 @@ TEST_CASE("the first scripts' mistakes are refused with a hint") {
                             "void process(Block& io) {}")) == "script.param.unit");
     CHECK(firstError(plugin("Param p = decibels(\"P\", 0, 1, 0).curved(Unit::Hertz);\n"
                             "void process(Block& io) {}")) == "script.param.modifier");
+    // Identities every plugin format and the framework accept.
+    auto withInfo = [&](const std::string& fields) {
+        return head + "struct T : Effect {\nstatic constexpr Info info = {.name = \"T\", " +
+               fields + "};\nvoid process(Block& io) {}\n};\n";
+    };
+    CHECK(firstError(withInfo(".id = \"com.example.tilt_eq\"")) == "script.plugin.id");
+    CHECK(firstError(withInfo(".id = \"com..tilt\"")) == "script.plugin.id");
+    CHECK(firstError(withInfo(".id = \"com.example.tilt-eq\"")) == "");
+    CHECK(firstError(withInfo(".id = \"com.example.t\", .version = \"1.2\"")) ==
+          "script.plugin.info");
+    CHECK(firstError(withInfo(".id = \"com.example.t\", .version = \"1.2.10\"")) == "");
     // Scripts receive no notes yet: an instrument would compile and stay silent.
     CHECK(firstError(head + "struct T : Instrument {\n" + info +
                      "void process(Block& io) {}\n};\n") == "script.plugin.kind");
