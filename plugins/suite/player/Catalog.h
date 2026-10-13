@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "supple/script_compiler.hpp"
 #include "supple/suite/script_definition.h"
 
 namespace supple::player {
@@ -33,7 +34,8 @@ bool readScript(const std::filesystem::path& file, std::string& text);
 // embedded script.
 std::shared_ptr<const ScriptDefinition> compileScript(const std::filesystem::path& file,
                                                       const std::string& source,
-                                                      std::string* problems);
+                                                      std::string* problems,
+                                                      scriptc::Message* firstError = nullptr);
 
 // The file of the module this code is in (the player's .clap), or empty.
 std::filesystem::path ownModule();

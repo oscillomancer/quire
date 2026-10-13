@@ -172,6 +172,8 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     // --- the framework's ---------------------------------------------------------
 
     void prepare(const ProcessSetup& setup, const ParamValues& v) {
+        instance_.status.clear();
+        budgetSeen_ = 0;
         instance_.sampleRate = setup.sampleRate;
         instance_.maxBlockSize = setup.maxBlockSize;
         instance_.channels = setup.channels;
@@ -197,12 +199,14 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     }
 
     void update(const ParamValues& v) {
-        if (fading_) run(*fading_, v, false);
+        if (fading_ && !fadingFaulty_) run(*fading_, v, false);
         run(*current_, v, false);
         applyVoiceMode();
     }
 
     void reset() {
+        instance_.status.clear();
+        budgetSeen_ = 0;
         if (instrument_) voices_.reset(*this);
         current_->reset();  // which restores the files prepare() saw
         bindFiles(*current_);
@@ -282,7 +286,10 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         }
         if (instrument_) silence(block);  // the voices add into it
         endFrame_ = std::max(block.frames - 1, 0);
-        if (fading_) {
+        if (fading_ && fadingFaulty_) {
+            runProcess(*current_, block);
+            retire(std::move(fading_));
+        } else if (fading_) {
             // The old generation plays on a copy of the input; the two meet
             // along a linear fade.
             for (size_t c = 0; c < fadePointers_.size() && static_cast<int>(c) < block.channels;
@@ -440,6 +447,11 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     }
 
     void adopt(Generation* next) {
+        // Faulty old code must not fault again during the replacement's fade.
+        const bool faulty = instance_.status.budgetExceeded.load(std::memory_order_relaxed) ||
+                            instance_.status.outOfRange.load(std::memory_order_relaxed);
+        instance_.status.clear();
+        budgetSeen_ = 0;
         // Its values are the running one's; it starts from them, snapped.
         for (size_t i = 0; i < next->paramCount() && i < current_->paramCount(); ++i)
             if (S::Param* p = next->param(i); p && current_->param(i))
@@ -451,12 +463,15 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         }
         if (fading_) retire(std::move(fading_));
         fading_ = std::move(current_);
+        fadingFaulty_ = faulty;
         current_.reset(next);
         // The files are the new code's now; the old lets go of them.
         bindFiles(*current_);
-        for (size_t i = 0; i < files_.size(); ++i) fading_->bindFile(i, nullptr);
+        if (fading_)
+            for (size_t i = 0; i < files_.size(); ++i) fading_->bindFile(i, nullptr);
         fadeDone_ = 0;
         stopped_ = false;
+        checkBudget();
         // The voices sounding carry on in the new code: each starts again,
         // and a released one is released again.
         if (instrument_)
@@ -544,6 +559,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         if (exceeded != budgetSeen_) {
             budgetSeen_ = exceeded;
             stopped_ = true;
+            instance_.status.silent.store(true, std::memory_order_relaxed);
         }
     }
 
@@ -586,6 +602,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     int fadeLength_ = 480, fadeDone_ = 0;
     double spare_ = 0.0;
     bool stopped_ = false;
+    bool fadingFaulty_ = false;
     uint32_t budgetSeen_ = 0;
     int latency_ = 0;
     uint32_t tail_ = 0;

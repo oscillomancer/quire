@@ -75,11 +75,18 @@ std::vector<std::filesystem::path> libraryScripts(const std::filesystem::path& f
 
 std::shared_ptr<const ScriptDefinition> compileScript(const std::filesystem::path& file,
                                                       const std::string& source,
-                                                      std::string* problems) {
+                                                      std::string* problems,
+                                                      scriptc::Message* firstError) {
     scriptc::Options options;
     options.interpret = std::getenv("SUPPLE_SCRIPT_INTERPRET") != nullptr;
     scriptc::Result result = scriptc::compile(source, options);
     if (!result.program) {
+        if (firstError)
+            for (const auto& d : result.diagnostics)
+                if (d.error) {
+                    *firstError = d;
+                    break;
+                }
         if (problems)
             *problems = scriptc::toText(result.diagnostics, files::toUtf8(file.filename()));
         return nullptr;

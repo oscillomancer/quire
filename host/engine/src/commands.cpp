@@ -631,6 +631,8 @@ struct FxDescribeArgs {
 struct FxDescription {
     std::string plugin, name, description;
     std::optional<json::Value> params, patch;
+    bool statusAvailable = false;
+    std::optional<json::Value> problems;
     std::optional<std::int64_t> paramsTotal;
     std::optional<std::int64_t> sidechainChannels;  // a key input (ADR-0018)
     std::optional<std::int64_t> latencySamples;     // the instance's reported latency
@@ -2410,7 +2412,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.name = "fx.describe";
         c.kind = Kind::Query;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary = "Describe a plugin instance in words; full adds its parameters and patch.";
+        c.summary = "Describe an instance and its live problems; full adds parameters and patch.";
         c.tags = {"fx"};
         c.args = schema::object<FxDescribeArgs>("fx_describe_args")
                      .field("fx", &FxDescribeArgs::fx, idArg("fx", "Plugin instance"))
@@ -2428,6 +2430,11 @@ void registerEngineCommands(cmd::Registry& registry) {
                 .field("description", &FxDescription::description, schema::string())
                 .field("params", &FxDescription::params, schema::any())
                 .field("patch", &FxDescription::patch, schema::any())
+                .field("status_available", &FxDescription::statusAvailable,
+                       schema::boolean().doc("A live instance supplied its current problems"))
+                .field("problems", &FxDescription::problems,
+                       schema::any().doc("Current plugin problems: code, message, scope, line when "
+                                         "known, hint, silent"))
                 .field("sidechain_channels", &FxDescription::sidechainChannels,
                        schema::integer().doc("The plug-in's key input: route.add {fx} feeds it"))
                 .field("latency_samples", &FxDescription::latencySamples,
@@ -2438,7 +2445,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 .build();
         c.examples = {
             {"Describe", obj(R"({"fx": "fx_2"})"),
-             obj(R"({"plugin": "com.suppleaudio.test.gain", "name": "<any>", "description": "<any>", "latency_samples": "<any>"})"),
+             obj(R"({"plugin": "com.suppleaudio.test.gain", "name": "<any>", "description": "<any>", "latency_samples": "<any>", "status_available": false})"),
              "song_with_fx"}};
         c.run = [](const FxDescribeArgs& a, Context& ctx) -> Result<FxDescription> {
             EngineApp& app = A(ctx);
@@ -2449,13 +2456,29 @@ void registerEngineCommands(cmd::Registry& registry) {
             FxDescription r;
             r.plugin = fx.plugin.id;
             r.name = fx.plugin.name;
+            // A scratch instance cannot know what went wrong in the one playing.
+            host::Instance* live = app.instanceOf(*id);
+            if (live) {
+                auto status = live->pluginStatus();
+                if (!status) return std::move(status).error();
+                if (!status->isNull()) {
+                    r.statusAvailable = true;
+                    r.problems = *status->find("problems");
+                }
+            }
             auto d = app.describeFx(fx, !a.full);
+            // A bad saved revision may prevent creating a scratch instance.
+            // Still inspect the older version that is actually loaded.
+            if (!d && live)
+                d = live->info().semantic ? live->describe(!a.full)
+                                          : Result<std::string>(live->info().name);
             if (!d) return std::move(d).error();
             r.description = *d;
             if (auto key = app.fxSidechainChannels(fx); key && *key > 0) r.sidechainChannels = *key;
             if (auto latency = app.fxLatencySamples(*id, fx)) r.latencySamples = *latency;
             if (a.full) {
                 auto schema = app.fxSchema(fx);
+                if (!schema && live) schema = live->semanticSchema();
                 if (schema && schema->isObject() && schema->find("params"))
                     r.params = *schema->find("params");
                 else if (auto list = app.fxParams(fx)) {

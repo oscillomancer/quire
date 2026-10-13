@@ -421,11 +421,13 @@ class Painter final : public D::Painter {
 class ScriptEditor final : public gui::EditorBase {
   public:
     ScriptEditor(gui::EditorHost& host, std::unique_ptr<Copy> copy, Recorder layout,
-                 std::shared_ptr<SharedChannel> channel, bool stopped)
+                 std::shared_ptr<SharedChannel> channel, bool stopped,
+                 std::shared_ptr<json::Value> problems)
         : EditorBase(host, product::kTheme, static_cast<float>(layout.width),
                      static_cast<float>(layout.height)),
           copy_(std::move(copy)),
           channel_(std::move(channel)),
+          problems_(std::move(problems)),
           stopped_(stopped) {
         const ParamTable& table = paramTable();
         auto id = [&](int slot) {
@@ -635,6 +637,26 @@ class ScriptEditor final : public gui::EditorBase {
         const D::Status& s = copy_->status();
         const std::uint32_t budget = s.budgetExceeded.load(std::memory_order_relaxed);
         const std::uint32_t range = s.outOfRange.load(std::memory_order_relaxed);
+        if (problems_) {
+            *problems_ = json::Value::array();
+            const auto add = [&](const char* code, const char* message, uint32_t at) {
+                json::Value p = json::Value::object();
+                p["code"] = code;
+                p["message"] = message;
+                p["scope"] = "editor";
+                if (at) p["line"] = static_cast<long long>(at);
+                p["hint"] = "Fix the editor hook and save the script again.";
+                p["silent"] = false;
+                problems_->push_back(std::move(p));
+            };
+            if (budget)
+                add("script.editor.budget",
+                    "An editor hook exceeded its loop budget and was stopped.",
+                    s.budgetLine.load(std::memory_order_relaxed));
+            if (range)
+                add("script.editor.index", "An editor hook indexed outside an array.",
+                    s.outOfRangeLine.load(std::memory_order_relaxed));
+        }
         char line[200];
         if (budget != budgetReported_) {
             budgetReported_ = budget;
@@ -653,6 +675,7 @@ class ScriptEditor final : public gui::EditorBase {
 
     std::unique_ptr<Copy> copy_;
     std::shared_ptr<SharedChannel> channel_;
+    std::shared_ptr<json::Value> problems_;
     std::vector<unsigned char> arrived_, shown_;
     std::vector<gui::Rect> meters_;
     std::vector<int> hidden_;  // each parameter's hidden control, by table index
@@ -667,7 +690,8 @@ class ScriptEditor final : public gui::EditorBase {
 
 std::unique_ptr<gui::EditorBase> makeScriptEditor(gui::EditorHost& host,
                                                   std::shared_ptr<const D::Code> code,
-                                                  std::shared_ptr<SharedChannel> channel) {
+                                                  std::shared_ptr<SharedChannel> channel,
+                                                  std::shared_ptr<json::Value> problems) {
     if (!code || (!code->editor() && !code->draw())) return nullptr;
     auto copy = std::make_unique<Copy>(code, host.pluginDefinition().params(), host.sampleRate());
     Recorder layout;
@@ -679,7 +703,7 @@ std::unique_ptr<gui::EditorBase> makeScriptEditor(gui::EditorHost& host,
         stopped = !copy->run(hook, &e);
     }
     return std::make_unique<ScriptEditor>(host, std::move(copy), std::move(layout),
-                                          std::move(channel), stopped);
+                                          std::move(channel), stopped, std::move(problems));
 }
 
 }  // namespace supple::suite

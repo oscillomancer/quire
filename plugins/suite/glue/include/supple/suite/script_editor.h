@@ -30,6 +30,7 @@
 
 #include "gui/EditorBase.h"
 #include "supple/script_code.h"
+#include "supple/suite/json.h"
 #include "supple/suite/script_shared.h"
 
 namespace supple::suite {
@@ -39,6 +40,7 @@ namespace supple::suite {
 // has the automatic editor.
 std::unique_ptr<gui::EditorBase> makeScriptEditor(gui::EditorHost& host,
                                                   std::shared_ptr<const script::detail::Code> code,
-                                                  std::shared_ptr<SharedChannel> channel);
+                                                  std::shared_ptr<SharedChannel> channel,
+                                                  std::shared_ptr<json::Value> problems = {});
 
 }  // namespace supple::suite

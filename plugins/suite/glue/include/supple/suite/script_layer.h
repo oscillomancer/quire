@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <memory>
 
+#include "supple/clap/plugin_status.h"
 #include "supple/suite/script_definition.h"
 #include "supple/suite/script_processor.h"
 #include "supple/suite/semantic_layer.h"
@@ -26,6 +27,8 @@ class ScriptLayer : public SemanticLayer {
 
     void tick() override;
     void redefined() override;
+    const void* extension(const char* id) override;
+    bool getStatus(const clap_ostream_t* out);
 #if SUPPLE_WITH_GUI
     std::unique_ptr<gui::EditorBase> createEditor(gui::EditorHost& host) override;
 #endif
@@ -36,12 +39,21 @@ class ScriptLayer : public SemanticLayer {
     const ScriptDefinition& definition();
     ScriptProcessor& processor();
     // The status is for code now running: what was reported is forgotten.
-    void statusRestarted() { budgetReported_ = outOfRangeReported_ = 0; }
+    void statusRestarted() {
+        budgetReported_ = outOfRangeReported_ = 0;
+        reloadResolved();
+    }
+    void reloadResolved() { reloadProblem_ = json::Value(); }
+    void reloadFailed(std::string message, std::string hint, int line = 0);
 
   private:
     void reportStatus();
 
     uint32_t budgetReported_ = 0, outOfRangeReported_ = 0;
+    json::Value reloadProblem_;
+    std::shared_ptr<json::Value> editorProblems_ =
+        std::make_shared<json::Value>(json::Value::array());
+    std::shared_ptr<const script::detail::Code> editorProblemsCode_;
 };
 
 }  // namespace supple::suite

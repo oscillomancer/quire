@@ -18,6 +18,7 @@
 #include "Check.h"
 #include "plugin/Entry.h"
 #include "supple/clap/editor_picture.h"
+#include "supple/clap/plugin_status.h"
 #include "supple/clap/semantic_params.h"
 #include "supple/suite/json.h"
 
@@ -156,6 +157,14 @@ struct Instance {
     std::string describe() const {
         Text t;
         semantic->describe(plugin, CLAP_SUPPLE_PATCH_DETAIL_CHANGED, &t.out);
+        return t.text;
+    }
+    std::string status() const {
+        const auto* ext = static_cast<const clap_plugin_supple_plugin_status_t*>(
+            plugin->get_extension(plugin, CLAP_EXT_SUPPLE_PLUGIN_STATUS));
+        CHECK(ext != nullptr);
+        Text t;
+        if (ext) CHECK(ext->get_status(plugin, &t.out));
         return t.text;
     }
     double clapValue(const char* name) const {
@@ -341,6 +350,48 @@ TEST(a_changed_script_replaces_the_playing_one_in_place) {
     a.tick(15);
     CHECK(a.host.loggedContaining("not reloaded"));
     CHECK(std::fabs(a.play() - 0.25f) < 1e-6f);
+    const json::Value failed = parsed(a.status());
+    CHECK(failed.find("problems")->size() == 1);
+    const auto& problem = failed.find("problems")->asArray().at(0);
+    CHECK(problem.find("code")->asString() == "script.reload.failed");
+    CHECK(problem.find("scope")->asString() == "reload");
+    CHECK(problem.find("line")->asInt() == 14);
+    CHECK(!problem.find("silent")->asBool());
+    CHECK(!problem.find("hint")->asString().empty());
+    library.edit("smoke", "0.5 * undefinedThing", "0.75 * dbToGain", 6);
+    a.tick(15);
+    for (int i = 0; i < 20; ++i) a.play();
+    CHECK(std::fabs(a.play() - 0.375f) < 1e-6f);
+    CHECK(parsed(a.status()).find("problems")->size() == 0);
+}
+
+TEST(runtime_problems_have_lines_and_reload_clears_them) {
+    for (const bool budget : {true, false}) {
+        Library library("smoke");
+        const std::string good = "io[c][i] *= dbToGain(gain.at(i));";
+        const std::string bad = budget ? "while (true) {}" : "io[c][io.frames] = 1.0;";
+        library.edit("smoke", good, bad, 2);
+        Instance a("com.suppleaudio.script-player");
+        CHECK(a.plugin != nullptr);
+        a.activate();
+        const float output = a.play();
+        if (budget) CHECK(output == 0.0f);
+        const json::Value status = parsed(a.status());
+        CHECK(status.find("problems")->size() == 1);
+        const auto& p = status.find("problems")->asArray().at(0);
+        CHECK(p.find("code")->asString() ==
+              (budget ? "script.runtime.budget" : "script.runtime.index"));
+        CHECK(p.find("scope")->asString() == "audio");
+        CHECK(p.find("line")->asInt() == 14);
+        CHECK(p.find("silent")->asBool() == budget);
+        CHECK(!p.find("hint")->asString().empty());
+        CHECK(a.status() == a.status());  // reading does not consume problems
+        library.edit("smoke", bad, good, 4);
+        a.tick(15);
+        for (int i = 0; i < 20; ++i) a.play();
+        CHECK(std::fabs(a.play() - 0.5f) < 1e-6f);
+        CHECK(parsed(a.status()).find("problems")->size() == 0);
+    }
 }
 
 TEST(a_script_whose_parameters_change_redefines_the_plugin) {

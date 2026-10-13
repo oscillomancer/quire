@@ -355,6 +355,8 @@ q = nil
 ---@field description string
 ---@field params? any
 ---@field patch? any
+---@field status_available boolean A live instance supplied its current problems
+---@field problems? any Current plugin problems: code, message, scope, line when known, hint, silent
 ---@field sidechain_channels? integer The plug-in's key input: route.add {fx} feeds it
 ---@field latency_samples? integer The instance's reported latency, in samples
 ---@field params_total? integer Plain parameters matching; at most 512 are listed.
@@ -1198,7 +1200,7 @@ q = nil
 ---@class Quire.fx
 ---@field add fun(args: Quire.fx_add_args): Quire.fx_add_result Insert a plugin into a track's (or a take's) FX chain and return its id.
 ---@field copy fun(args: Quire.fx_copy_args): Quire.fx_copy_result Copy a plugin and its current settings into a track's FX chain.
----@field describe fun(args: Quire.fx_describe_args): Quire.fx_describe_result Describe a plugin instance in words; full adds its parameters and patch.
+---@field describe fun(args: Quire.fx_describe_args): Quire.fx_describe_result Describe an instance and its live problems; full adds parameters and patch.
 ---@field move fun(args: Quire.fx_move_args): table Move a plugin within a track chain or to another track.
 ---@field remove fun(args: Quire.fx_remove_args): table Remove a plugin instance (and its envelopes).
 ---@field restart fun(args: Quire.fx_restart_args): table Re-create a plugin instance from its saved patch/state (after a crash).

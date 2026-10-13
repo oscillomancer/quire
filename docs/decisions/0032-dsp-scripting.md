@@ -252,6 +252,17 @@ tool runs against scripts in the player and against both exports.
 
 ### Implementation notes (2026-10-12)
 
+- Live problems, 2026-10-13: the suite implements the independent generic
+  `com.suppleaudio.plugin-status/1` extension (spec:
+  `docs/specs/plugin-status-extension.md`). `fx.describe` and sandbox
+  `plugin.describe` expose current runtime, editor and failed-reload
+  problems with codes, scopes, source lines where known, corrective hints
+  and whether they silence audio. Engine inspection queries the live
+  instance, and bridge protocol 12 forwards the same report. Runtime
+  observations clear when replacement code is adopted, on reset or on
+  activation; a faulty old generation is not crossfaded into its replacement.
+  Failed saves keep the previous code loaded until a good revision is accepted.
+
 Where the work stands, and where it departs from the text above:
 
 - Framework items 1 to 3 of §6 are in framework 1.16.0 (Definitions and

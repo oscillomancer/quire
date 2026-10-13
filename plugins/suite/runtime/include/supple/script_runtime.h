@@ -21,7 +21,18 @@ struct Status {
     std::atomic<std::uint32_t> outOfRangeLine{0};
     std::atomic<std::uint32_t> budgetExceeded{0};
     std::atomic<std::uint32_t> budgetLine{0};
+    std::atomic<bool> silent{false};
+
+    // The hook-owning thread clears observations when code is replaced/reset.
+    void clear() {
+        silent.store(false, std::memory_order_relaxed);
+        outOfRange.store(0, std::memory_order_relaxed);
+        outOfRangeLine.store(0, std::memory_order_relaxed);
+        budgetExceeded.store(0, std::memory_order_relaxed);
+        budgetLine.store(0, std::memory_order_relaxed);
+    }
 };
+static_assert(std::atomic<bool>::is_always_lock_free);
 
 // An instrument's voices as the glue keeps them (the framework's voice
 // manager): what Instrument's methods read and do. Indexes are in range.

@@ -140,6 +140,8 @@ struct DescribeResult {
     std::optional<json::Value> patchSchema;
     std::string description;
     std::optional<std::string> docs;
+    bool statusAvailable = false;
+    std::optional<json::Value> problems;
 };
 
 struct ParamGetArgs {
@@ -261,6 +263,12 @@ Result<DescribeResult> describePlugin(Session& s, const DescribeArgs& a) {
     DescribeResult r;
     r.plugin = in.info().id;
     r.name = in.info().name;
+    auto status = in.pluginStatus();
+    if (!status) return std::move(status).error();
+    if (!status->isNull()) {
+        r.statusAvailable = true;
+        r.problems = *status->find("problems");
+    }
     const bool full = a.detail == Detail::Full;
     if (in.info().semantic) {
         // The values first: reading them may refresh the schema cache, so take
@@ -558,7 +566,7 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
         c.name = "plugin.describe";
         c.kind = Kind::Query;
         c.exposure = Exposure::McpTool;
-        c.summary = "Describe a plugin instance: parameters, current values, patch format.";
+        c.summary = "Describe an instance: parameters, patch format, and current problems.";
         c.description =
             "detail summary: parameters grouped as compact 'key = value (range)' lines plus a "
             "prose description of the current sound. detail full: every parameter's schema entry "
@@ -581,11 +589,16 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
                        .field("patch_schema", &DescribeResult::patchSchema, schema::any())
                        .field("description", &DescribeResult::description, schema::string())
                        .field("docs", &DescribeResult::docs, schema::string())
+                       .field("status_available", &DescribeResult::statusAvailable,
+                              schema::boolean().doc("The instance supplied its current problems"))
+                       .field("problems", &DescribeResult::problems,
+                              schema::any().doc("Current plugin problems: code, message, scope, "
+                                                "line when known, hint, silent"))
                        .build();
         c.examples = {
             {"Summarize the effect", obj(R"({"instance": "in_2"})"),
              obj(R"({"plugin": ")" + F +
-                 R"(", "name": "<any>", "params": "<any>", "patch_type": "<any>", "description": "<any>"})"),
+                 R"(", "name": "<any>", "params": "<any>", "patch_type": "<any>", "description": "<any>", "status_available": false})"),
              "synth_loaded"}};
         c.run = [](const DescribeArgs& a, Context& ctx) { return describePlugin(S(ctx), a); };
         registry.add(std::move(c));

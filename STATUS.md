@@ -218,7 +218,10 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
   `dsp.list` write and compile scripts (the app's library is
   `<data>/<slug>/scripts`, shared with the sandbox), `dsp.test` measures
   one with standard signals, and a script that compiles is loaded and set
-  like a stock plugin (`skill/guides/dsp-workflow.md`). `dsp.export` makes
+  like a stock plugin (`skill/guides/dsp-workflow.md`). `fx.describe` and
+  the sandbox's `plugin.describe` report a live instance's loop-budget stops,
+  invalid indices and failed reloads as structured problems, also through
+  isolation; unavailable status is explicit. `dsp.export` makes
   a script a CLAP plugin for any host (a copy of the player with the script
   appended, which offers that one plugin), or a C++ project of the plugin
   template that builds the same plugin, bit for bit, with the script

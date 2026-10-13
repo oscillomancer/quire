@@ -66,6 +66,17 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
    values carry over by key. A version that does not compile leaves the
    previous one playing, so a mistake never silences the track. An open
    editor is made again from the new code.
+   If a track sounds wrong or goes silent, inspect its **live instance**:
+   `fx_describe {fx}` in the DAW, `plugin_describe {instance}` in the sandbox.
+   `status_available: true` adds structured `problems` with `code`, `message`,
+   `scope`, `line` when known, `hint` and `silent`. Follow the hint: a loop
+   budget stops the audio; an array index outside its bounds reads zero and
+   drops writes; a failed saved edit keeps the older code loaded. Fix and
+   save again, then inspect again. Editor problems have `scope: "editor"`
+   and do not mean the audio is silent. `status_available: false` means no
+   report is available (the DAW needs a live instance), not that it is healthy.
+   `dsp_test` measures a fresh instance, so it cannot diagnose the existing
+   instance's stopped state.
 7. **Tell the human** what it does, which parameters matter, and which
    track to listen to. Taste is theirs.
 8. **Export it** when they want it in another DAW. `dsp_export {script:

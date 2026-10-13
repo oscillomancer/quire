@@ -1765,7 +1765,7 @@ TEST_CASE("bridge protocol v6 retains nested structured error details") {
     CHECK(decoded.details[0].hint == "correct it");
     REQUIRE(decoded.details[0].details.size() == 1);
     CHECK(decoded.details[0].details[0].code == "leaf");
-    CHECK(bridge::kVersion == 11);
+    CHECK(bridge::kVersion == 12);
 }
 
 TEST_CASE("malformed semantic schema falls back to plain CLAP parameters with a warning") {

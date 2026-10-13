@@ -86,6 +86,13 @@ TEST_CASE("dsp.test measures a script through the player and names what goes wro
     for (const json::Value& p : boost["problems"].asArray()) clean += p.asString() + "\n";
     CHECK_MESSAGE(clean.empty(), clean);
     REQUIRE(boost["signals"].size() == 5);
+    // Inspection addresses the loaded instance, independently of dsp.test.
+    auto loaded = call("plugin.load", json::parse(R"({"plugin":"com.example.boost"})").value());
+    json::Value inspect = json::Value::object();
+    inspect["instance"] = loaded["instance"];
+    auto described = call("plugin.describe", inspect);
+    CHECK(described["status_available"].asBool());
+    CHECK(described["problems"].size() == 0);
     const json::Value& sine = boost["signals"].at(0);
     CHECK(sine.find("signal")->asString() == "sine");
     CHECK(sine.find("gain_db")->asDouble() == doctest::Approx(6.0).epsilon(0.002));

@@ -3464,7 +3464,7 @@ Result:
 
 ## `fx.describe@1`
 
-Describe a plugin instance in words; full adds its parameters and patch.
+Describe an instance and its live problems; full adds parameters and patch.
 
 
 
@@ -3496,6 +3496,13 @@ Kind: `query`. Exposure: `mcp-tool`.
     },
     "params": {},
     "patch": {},
+    "status_available": {
+      "type": "boolean",
+      "description": "A live instance supplied its current problems"
+    },
+    "problems": {
+      "description": "Current plugin problems: code, message, scope, line when known, hint, silent"
+    },
     "sidechain_channels": {
       "type": "integer",
       "description": "The plug-in's key input: route.add {fx} feeds it"
@@ -3509,7 +3516,7 @@ Kind: `query`. Exposure: `mcp-tool`.
       "description": "Plain parameters matching; at most 512 are listed."
     }
   },
-  "required": ["plugin", "name", "description"],
+  "required": ["plugin", "name", "description", "status_available"],
   "additionalProperties": false
 }
 
@@ -3533,7 +3540,8 @@ Result:
   "plugin": "com.suppleaudio.test.gain",
   "name": "<any>",
   "description": "<any>",
-  "latency_samples": "<any>"
+  "latency_samples": "<any>",
+  "status_available": false
 }
 
 ```

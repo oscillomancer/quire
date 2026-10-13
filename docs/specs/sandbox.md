@@ -123,11 +123,11 @@ publication (or overflow) notifies after updating its queue/counter. The engine
 app subscribes persistent instances and probes to its one relay and includes
 all local subscriptions in its service deadline/FD snapshot (ADR-0030).
 
-### Bridge notifications (protocol v11, ADR-0031)
+### Bridge notifications (protocol v12; notification design ADR-0031)
 
 Before Create, the parent sends process-level `SubscribeNotifications` with
 instance id 0, exactly one dedicated nonblocking eventfd via SCM_RIGHTS, and
-`u32 version = 11`; the reply is `u32 version = 11`. The descriptor is checked
+`u32 version = 12`; the reply is `u32 version = 12`. The descriptor is checked
 for eventfd type, read/write access and O_NONBLOCK; received copies are CLOEXEC.
 Missing, wrong-type, extra or duplicate descriptors, duplicate subscriptions,
 wrong versions/instance ids and trailing payloads are rejected with structured
@@ -135,6 +135,9 @@ errors; rejected descriptors are closed. A host/bridge mismatch is detected
 even when no instance is activated. Existing operation numbers are preserved;
 SubscribeNotifications and AckNotifications are appended after TakeIdleOutputs.
 `AckNotifications` uses instance 0, no payload/fd and an empty success reply.
+Protocol 12 appends the main-thread `PluginStatus` query after it (no payload,
+one JSON string reply); the data plane and earlier operation numbers are
+unchanged. See [plugin-status](plugin-status-extension.md).
 It requires an established subscription. Replies never carry unsolicited fds
 or asynchronous notification frames. Scan-only mode is unaffected.
 
@@ -247,7 +250,7 @@ within −120 dBFS for the stock test synth).
 | `plugin.list` | query | `filter?` (text), `rescan?` | `plugins: [{id, name, instrument, semantic, features}]` |
 | `plugin.load` | edit | `plugin` (id or path), `position?` (chain index, default: instrument first else end) | `instance`, `name`, `semantic`, `chain` |
 | `plugin.remove` | edit | `instance` | `chain` |
-| `plugin.describe` | query | `instance`, `detail` (`summary`/`full`) | `params` (key/unit/range/current, summary: grouped compact list; `active: false` while the parameter's module is not in the patch), `patch_type`, `patch_schema` (full only), `description` (prose), `docs` |
+| `plugin.describe` | query | `instance`, `detail` (`summary`/`full`) | `params` (key/unit/range/current, summary: grouped compact list; `active: false` while the parameter's module is not in the patch), `patch_type`, `patch_schema` (full only), `description` (prose), `docs`, `status_available`, `problems` when available |
 | `param.get` | query | `instance`, `keys?` | `values: {key: {value, text}}` |
 | `param.set` | edit | `instance`, `values: {key: number \| "unit string" \| enum key \| bool}` (third-party: CLAP id or name, `{"text": "…"}` allowed) | `values` as applied with text |
 | `patch.get` | query | `instance`, `detail` (`changed`/`full`) | `patch` |

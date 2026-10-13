@@ -700,6 +700,12 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
                                   offsetof(clap_plugin_supple_semantic_params_t, get_telemetry))
         self->extSemantic_ = nullptr;  // too old to call safely
     self->info_.semantic = self->extSemantic_ != nullptr;
+    self->extStatus_ = static_cast<const clap_plugin_supple_plugin_status_t*>(
+        self->plugin_->get_extension(self->plugin_, CLAP_EXT_SUPPLE_PLUGIN_STATUS));
+    if (self->extStatus_ &&
+        (self->extStatus_->struct_size < sizeof(clap_plugin_supple_plugin_status_t) ||
+         !self->extStatus_->get_status))
+        self->extStatus_ = nullptr;
     if (self->extSemantic_) (void)self->semanticSchema();
     self->extPicture_ = static_cast<const clap_plugin_supple_editor_picture_t*>(
         ext(CLAP_EXT_SUPPLE_EDITOR_PICTURE));
@@ -1446,6 +1452,42 @@ Result<std::string> Instance::describe(bool changedOnly) {
             &sink.stream))
         return Error("host.semantic", "describe failed");
     return sink.text;
+}
+
+Result<json::Value> Instance::pluginStatus() {
+    Result<std::string> text = std::string();
+    if (remote_) {
+        text = remote_->text(bridge::Op::PluginStatus);
+    } else {
+        if (!extStatus_) return json::Value();
+        StringSink sink;
+        if (!extStatus_->get_status(plugin_, &sink.stream))
+            return Error("host.status", "The plugin could not report its current problems.", {},
+                         "Restart or replace the plugin, then inspect it again.");
+        text = std::move(sink.text);
+    }
+    if (!text) return std::move(text).error();
+    auto doc = json::parse(*text);
+    if (!doc) return std::move(doc).error();
+    if (remote_ && doc->isNull()) return *doc;  // bridge: unsupported
+    const auto* schema = doc->find("schema");
+    const auto* problems = doc->find("problems");
+    bool valid = schema && schema->isString() && schema->asString() == "supple.plugin-status/1.0" &&
+                 problems && problems->isArray();
+    if (valid)
+        for (const auto& p : problems->asArray()) {
+            for (const char* key : {"code", "message", "scope", "hint"})
+                valid = valid && p.find(key) && p.find(key)->isString() &&
+                        !p.find(key)->asString().empty();
+            const auto* silent = p.find("silent");
+            const auto* line = p.find("line");
+            valid = valid && silent && silent->isBool() &&
+                    (!line || (line->isInt() && line->asInt() > 0));
+        }
+    if (!valid)
+        return Error("host.status_contract", "The plugin returned an invalid status document.", {},
+                     "Restart or replace the plugin; it must implement supple.plugin-status/1.0.");
+    return *doc;
 }
 
 Status Instance::watchEditor(bool on) {

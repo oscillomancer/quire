@@ -502,6 +502,10 @@ struct Bridge {
                 return replyOr(instance->semanticSchema(), [](Writer& w, const json::Value& v) {
                     w.str(json::writeCompact(v));
                 });
+            case Op::PluginStatus:
+                return replyOr(instance->pluginStatus(), [](Writer& w, const json::Value& v) {
+                    w.str(json::writeCompact(v));
+                });
             case Op::GetPatch:
                 return replyOr(instance->getPatch(r.u8() != 0),
                                [](Writer& w, const std::string& s) { w.str(s); });

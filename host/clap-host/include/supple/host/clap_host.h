@@ -26,6 +26,7 @@
 #include "supple/base/spsc.h"
 #include "supple/base/thread.h"
 #include "supple/clap/editor_picture.h"
+#include "supple/clap/plugin_status.h"
 #include "supple/clap/semantic_params.h"
 #include "supple/json/value.h"
 
@@ -276,6 +277,9 @@ class Instance {
     Result<std::string> getPatch(bool changedOnly);
     Status setPatch(std::string_view json, std::uint32_t mode);  // CLAP_SUPPLE_SET_*
     Result<std::string> describe(bool changedOnly);
+    // Current problems on the main thread; null means the plugin offers no
+    // status extension. Queries never consume or clear problems. Bridged too.
+    Result<json::Value> pluginStatus();
 
     // --- the editor without a window (com.suppleaudio.editor-picture/1, in process) ---
     struct Picture {
@@ -421,6 +425,7 @@ class Instance {
     const clap_plugin_timer_support_t* extTimer_ = nullptr;
     const clap_plugin_supple_semantic_params_t* extSemantic_ = nullptr;
     const clap_plugin_supple_editor_picture_t* extPicture_ = nullptr;
+    const clap_plugin_supple_plugin_status_t* extStatus_ = nullptr;
     const clap_plugin_gui_t* extGui_ = nullptr;
     const clap_plugin_posix_fd_support_t* extFd_ = nullptr;
     bool editorOpen_ = false;

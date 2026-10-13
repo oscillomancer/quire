@@ -494,7 +494,8 @@ that exactly duplicates structuredContent is shown once.
       },
       "patch_type": "supple.orrery-patch/1.0",
       "description": "Poly. osc1 va saw. Amp A 5.00 ms D 300 ms S 70.0 % R 300 ms.",
-      "docs": "Orrery is a constrained-modular synthesizer. A patch (supple.orrery-patch/1.0) chooses which slots exist — oscillators osc1..osc4 (va, wavetable, fm, noise, sub), filters filter1/filter2 (ladder, svf, comb, formant; serial or parallel), drive, envelopes amp/env2..env4, lfos lfo1..lfo4, steps step1/step2, eight macros and up to five post-FX in fx.chain — and routes modulation as \"<source>><destination>\": {\"amount\": ...} in the destination's unit (oct for frequencies, st for pitch, dB for levels, x for oscN.fm, % otherwise). Values are CLAP parameters keyed by patch path (osc1.level, filter1.cutoff, amp.attack); structure lives only in the patch. Macros are the automation surface for modulation."
+      "docs": "Orrery is a constrained-modular synthesizer. A patch (supple.orrery-patch/1.0) chooses which slots exist — oscillators osc1..osc4 (va, wavetable, fm, noise, sub), filters filter1/filter2 (ladder, svf, comb, formant; serial or parallel), drive, envelopes amp/env2..env4, lfos lfo1..lfo4, steps step1/step2, eight macros and up to five post-FX in fx.chain — and routes modulation as \"<source>><destination>\": {\"amount\": ...} in the destination's unit (oct for frequencies, st for pitch, dB for levels, x for oscN.fm, % otherwise). Values are CLAP parameters keyed by patch path (osc1.level, filter1.cutoff, amp.attack); structure lives only in the patch. Macros are the automation surface for modulation.",
+      "status_available": false
     }
   }
 }
@@ -2013,7 +2014,8 @@ that exactly duplicates structuredContent is shown once.
       },
       "patch_type": "supple.orrery-patch/1.0",
       "description": "Poly. osc1 va saw. Amp A 5.00 ms D 300 ms S 70.0 % R 300 ms.",
-      "docs": "Orrery is a constrained-modular synthesizer. A patch (supple.orrery-patch/1.0) chooses which slots exist — oscillators osc1..osc4 (va, wavetable, fm, noise, sub), filters filter1/filter2 (ladder, svf, comb, formant; serial or parallel), drive, envelopes amp/env2..env4, lfos lfo1..lfo4, steps step1/step2, eight macros and up to five post-FX in fx.chain — and routes modulation as \"<source>><destination>\": {\"amount\": ...} in the destination's unit (oct for frequencies, st for pitch, dB for levels, x for oscN.fm, % otherwise). Values are CLAP parameters keyed by patch path (osc1.level, filter1.cutoff, amp.attack); structure lives only in the patch. Macros are the automation surface for modulation."
+      "docs": "Orrery is a constrained-modular synthesizer. A patch (supple.orrery-patch/1.0) chooses which slots exist — oscillators osc1..osc4 (va, wavetable, fm, noise, sub), filters filter1/filter2 (ladder, svf, comb, formant; serial or parallel), drive, envelopes amp/env2..env4, lfos lfo1..lfo4, steps step1/step2, eight macros and up to five post-FX in fx.chain — and routes modulation as \"<source>><destination>\": {\"amount\": ...} in the destination's unit (oct for frequencies, st for pitch, dB for levels, x for oscN.fm, % otherwise). Values are CLAP parameters keyed by patch path (osc1.level, filter1.cutoff, amp.attack); structure lives only in the patch. Macros are the automation surface for modulation.",
+      "status_available": false
     }
   }
 }

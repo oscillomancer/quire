@@ -1812,7 +1812,7 @@ Result:
 
 ## `plugin.describe@1`
 
-Describe a plugin instance: parameters, current values, patch format.
+Describe an instance: parameters, patch format, and current problems.
 
 detail summary: parameters grouped as compact 'key = value (range)' lines plus a prose description of the current sound. detail full: every parameter's schema entry with current value and text, and the patch JSON Schema. An entry whose module is not in the patch carries "active": false (add the module with patch.merge to use it). Semantic plugins are programmed with param.set (physical units) or patch.merge.
 
@@ -1848,9 +1848,16 @@ Kind: `query`. Exposure: `mcp-tool`.
     },
     "docs": {
       "type": "string"
+    },
+    "status_available": {
+      "type": "boolean",
+      "description": "The instance supplied its current problems"
+    },
+    "problems": {
+      "description": "Current plugin problems: code, message, scope, line when known, hint, silent"
     }
   },
-  "required": ["plugin", "name", "params", "description"],
+  "required": ["plugin", "name", "params", "description", "status_available"],
   "additionalProperties": false
 }
 
@@ -1875,7 +1882,8 @@ Result:
   "name": "<any>",
   "params": "<any>",
   "patch_type": "<any>",
-  "description": "<any>"
+  "description": "<any>",
+  "status_available": false
 }
 
 ```

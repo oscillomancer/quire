@@ -2760,8 +2760,8 @@
   },
   {
     "name": "fx_describe",
-    "title": "Describe a plugin instance in words; full adds its parameters and patch.",
-    "description": "Describe a plugin instance in words; full adds its parameters and patch.  See describe for errors and examples.",
+    "title": "Describe an instance and its live problems; full adds parameters and patch.",
+    "description": "Describe an instance and its live problems; full adds parameters and patch.  See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "fx_describe_args",
@@ -2798,6 +2798,13 @@
         },
         "params": {},
         "patch": {},
+        "status_available": {
+          "type": "boolean",
+          "description": "A live instance supplied its current problems"
+        },
+        "problems": {
+          "description": "Current plugin problems: code, message, scope, line when known, hint, silent"
+        },
         "sidechain_channels": {
           "type": "integer",
           "description": "The plug-in's key input: route.add {fx} feeds it"
@@ -2811,7 +2818,7 @@
           "description": "Plain parameters matching; at most 512 are listed."
         }
       },
-      "required": ["plugin", "name", "description"],
+      "required": ["plugin", "name", "description", "status_available"],
       "additionalProperties": false
     },
     "annotations": {

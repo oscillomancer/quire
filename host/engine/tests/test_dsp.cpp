@@ -44,6 +44,81 @@ struct AgentGain : Effect {
 
 }  // namespace
 
+TEST_CASE("fx.describe reports the live script's problems in process and through the bridge") {
+    host::setBridgeExecutable(BRIDGE_PATH);
+    REQUIRE(fs::exists(kStock / "Script Player.clap"));
+    for (const bool isolated : {false, true}) {
+        Root root;
+        AppOptions o;
+        o.workdir = root.path;
+        o.chainDir = root.path / "chains";
+        o.pluginPath = {kStock / "Script Player.clap"};
+        // Backend outlives the app even if an assertion aborts the test.
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+        auto made = EngineApp::create(o, {.console9 = false});
+        REQUIRE(made);
+        auto app = std::move(*made);
+        cmd::Registry registry;
+        registerEngineCommands(registry);
+        cmd::Dispatcher bus(registry, *app);
+        auto call = [&](std::string name, json::Value args) {
+            auto r = bus.execute({std::move(name), std::move(args), kTest});
+            REQUIRE_MESSAGE(r, (r ? "" : r.error().toString()));
+            return *r;
+        };
+        json::Value write = json::Value::object();
+        write["name"] = "live_status";
+        write["source"] = R"(#include <supple/script.h>
+struct LiveStatus : Effect {
+    static constexpr Info info = {.name = "Live Status", .id = "com.example.live-status"};
+    void process(Block& io) {
+        io[0][io.frames] = 1.0;
+    }
+};
+)";
+        REQUIRE(call("dsp.write", std::move(write))["ok"].asBool());
+        call("track.add", json::parse(R"({"name":"Live"})").value());
+        call("track.set", json::parse(R"({"track":"tr_1","armed":true})").value());
+        auto added =
+            call("fx.add",
+                 json::parse(R"({"track":"tr_1","plugin":"com.example.live-status"})").value());
+        const std::string fx = added["fx"].asString();
+        json::Value args = json::Value::object();
+        args["fx"] = fx;
+        CHECK_FALSE(call("fx.describe", args)["status_available"].asBool());
+        if (isolated) {
+            auto set = args;
+            set["isolation"] = "dedicated";
+            call("fx.set", std::move(set));
+        }
+        REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 64},
+                                 {.anticipative = false}));
+        auto* live = app->instanceOf(*model::Id::parse(fx));
+        REQUIRE(live);
+        CHECK(live->isolated() == isolated);
+        // Drive the actual pooled instance deterministically. Live callback
+        // nodes intentionally bypass synchronous bridges; this query test
+        // exercises their ordinary host processing API instead.
+        float left[64]{}, right[64]{};
+        float* channels[]{left, right};
+        REQUIRE(live->startProcessing());
+        REQUIRE(live->process({.inputs = channels,
+                               .inputChannels = 2,
+                               .outputs = channels,
+                               .outputChannels = 2,
+                               .frames = 64}));
+        live->stopProcessing();
+        auto described = call("fx.describe", args);
+        CHECK(described["status_available"].asBool());
+        REQUIRE(described["problems"].size() == 1);
+        const auto& p = described["problems"].at(0);
+        CHECK(p.find("code")->asString() == "script.runtime.index");
+        CHECK(p.find("line")->asInt() == 5);
+        CHECK_FALSE(p.find("silent")->asBool());
+        app->stopEngine();
+    }
+}
+
 TEST_CASE("a DSP script written over the bus is a plugin an agent sets through its patch") {
     if (!fs::exists(kStock / "Script Player.clap")) {
         MESSAGE("skipped: no script player in " << kStock.string());

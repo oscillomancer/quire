@@ -431,8 +431,14 @@ A script cannot do what C++ leaves undefined. The compiler refuses:
 At run time: an index outside an `Array`, `Buffer` or channel reads 0 and a
 write to it goes nowhere, and the host's log names the line. Each hook has a
 budget of loop iterations (65,536 per frame in `process`); a script that
-spends it is stopped and silent until it is reloaded, and the log names the
+spends it is stopped and silent until it is reset or reloaded, and the log names the
 line.
+
+Inspect a loaded instance with `fx_describe` (DAW) or `plugin_describe`
+(sandbox): its `problems` report loop budgets, invalid indices and failed
+reloads with a source line when known and a corrective hint. `silent: true`
+means that problem stopped the audio. Audio observations clear on reset,
+activation or adoption of replacement code; reads never clear them.
 
 ## Real time
 

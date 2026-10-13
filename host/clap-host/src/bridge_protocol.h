@@ -35,7 +35,8 @@ inline constexpr std::uint32_t kMagic = 0x31474253;  // "SBG1"
 // 9: the Activate reply carries the widths the plug-in settled on.
 // 10: the Header carries the audio thread's scheduling (ADR-0026).
 // 11: a versioned outward notification subscription and process-level rearm.
-inline constexpr std::uint32_t kVersion = 11;
+// 12: a main-thread plugin-status query (no data-plane change).
+inline constexpr std::uint32_t kVersion = 12;
 inline constexpr int kControlFd = 3;  // the bridge's end of the socketpair
 inline constexpr std::uint32_t kMaxChannels = 16;
 // Auxiliary output channels carried (ADR-0021); a plug-in's further ones go
@@ -81,6 +82,7 @@ enum class Op : std::uint32_t {
     TakeIdleOutputs,         // → u64 dropped, u32 count, [OutputEvent]
     SubscribeNotifications,  // process id 0: u32 version (+ eventfd) → u32 version
     AckNotifications,        // process id 0: no payload → ok
+    PluginStatus,            // no payload → JSON text (null if unsupported)
 };
 
 enum class Reply : std::uint32_t { Ok = 0, Error = 1 };

@@ -518,6 +518,21 @@ first use, and no plug-in code runs early to warm it.
 
 ## 5. Plugin isolation (`host/clap-host/bridge`)
 
+Protocol 12 appends a main-thread `PluginStatus` query to the existing
+control plane, with no shared-memory change. It forwards the generic
+[plugin-status extension](plugin-status-extension.md) for shared and
+dedicated instances. The version subscription now negotiates 12.
+
+`fx.describe` returns `status_available` in both summary and full modes.
+When a live instance supports the extension it also returns `problems`,
+an array of `code`, `message`, `scope`, optional source `line`, `hint` and
+`silent` (audio silenced because of that problem). Queries never clear
+observations. Without a live instance or extension, status is unavailable
+and `problems` is omitted; a scratch instance cannot establish live health.
+Descriptions and semantic schemas fall back to the live instance when a
+scratch query fails, so a saved script that no longer compiles can still
+be inspected; normal descriptions continue reflecting model edits.
+
 Modes per instance (session-model §1.7): `in_process`, `shared_bridge` (one
 bridge process for all instances in that mode), `dedicated` (one process per
 instance).

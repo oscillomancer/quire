@@ -52,15 +52,35 @@ class PlayerLayer final : public suite::ScriptLayer {
         if (ec || stamp == stamp_) return;
         stamp_ = stamp;
         std::string source;
-        if (!readScript(file, source) || source == source_) return;
+        if (!readScript(file, source)) {
+            reloadFailed(
+                "The latest script could not be read; the previous version is still loaded.",
+                "Restore a readable script file and save it again.");
+            return;
+        }
+        if (source == source_) {
+            // Restoring the last good source also resolves a failed edit.
+            reloadResolved();
+            return;
+        }
         std::string problems;
-        const auto next = compileScript(file, source, &problems);
+        scriptc::Message first;
+        const auto next = compileScript(file, source, &problems, &first);
         if (!next) {
+            reloadFailed(
+                "The latest save was not loaded; the previous version is still loaded. " +
+                    (first.message.empty() ? problems : first.message),
+                first.hint.empty()
+                    ? "Run dsp.check on the saved source, fix the first error, and save again."
+                    : first.hint + "; fix the saved script and save again.",
+                first.line);
             instance().log(CLAP_LOG_WARNING, "the script was not reloaded:\n" + problems);
             return;
         }
-        source_ = source;
         if (next->info().id != definition().info().id) {
+            reloadFailed(
+                "The script ID changed; this instance still has the previous version.",
+                "Restore the original Info.id, or load the new plugin as another instance.");
             instance().log(CLAP_LOG_WARNING,
                            "the script's ID changed; it becomes another plugin when the host "
                            "lists plugins again, and this instance keeps the old one");
@@ -72,12 +92,17 @@ class PlayerLayer final : public suite::ScriptLayer {
             for (size_t i = 0; i < definition().params().count(); ++i)
                 values.setIndex(i, toPlain(definition().params().at(i), s.host[i]));
             processor().swap(next->code(), values);
+            source_ = source;
             statusRestarted();
             instance().rebuildEditor();
             return;
         }
-        if (!instance().redefine(next))
+        if (!instance().redefine(next)) {
+            reloadFailed(
+                "The new plugin definition was refused; the previous version is still loaded.",
+                "Run dsp.check on the saved source and fix its plugin definition.");
             instance().log(CLAP_LOG_WARNING, "the script's new plugin was refused");
+        }
     }
 
     std::string source_;

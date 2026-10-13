@@ -200,6 +200,8 @@ q = nil
 ---@field patch_schema? any
 ---@field description string
 ---@field docs? string
+---@field status_available boolean The instance supplied its current problems
+---@field problems? any Current plugin problems: code, message, scope, line when known, hint, silent
 
 ---@class Quire.plugin_list_args
 ---@field filter? string Text to match in the id or name.
@@ -342,7 +344,7 @@ q = nil
 ---@field set fun(args: Quire.patch_set_args): Quire.patch_set_result Replace an instance's whole patch; returns a description of the result.
 
 ---@class Quire.plugin
----@field describe fun(args: Quire.plugin_describe_args): Quire.plugin_describe_result Describe a plugin instance: parameters, current values, patch format.
+---@field describe fun(args: Quire.plugin_describe_args): Quire.plugin_describe_result Describe an instance: parameters, patch format, and current problems.
 ---@field list fun(args?: Quire.plugin_list_args): Quire.plugin_list_result List the CLAP plugins the sandbox can load.
 ---@field load fun(args: Quire.plugin_load_args): Quire.plugin_load_result Load a plugin into the chain and return its instance id.
 ---@field remove fun(args: Quire.plugin_remove_args): Quire.plugin_remove_result Remove a plugin instance from the chain.
