@@ -17,6 +17,8 @@ Regenerate with `tools/gen/update-generated.sh`.
 - `plugins/<plugin>.md` — from each stock plugin's semantic schema.
 - `notation-reference.md` — from the syntax and tables compiled into
   `libs/notation`, with examples compiled and decompiled by the generator.
+- `dsp-examples.md` — the example DSP scripts (`plugins/suite/examples`),
+  each tested, with a table of what each one is.
 
 A test regenerates these files and fails when they differ from what is
 committed, so the skill can never drift from the installed version.

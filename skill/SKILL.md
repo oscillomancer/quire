@@ -54,7 +54,7 @@ their undo history and can be reviewed.
 | Saturation: drive, asymmetry, wavefolding (Kiln/drive) | `guides/drive.md` |
 | Onset punch, softer attacks, shorter or longer decays (Flint/transient) | `guides/transient.md` |
 | Writing a Lua script (loops, conditionals, subscriptions, one transaction) | `guides/lua.md`, `generated/engine.lua` |
-| Writing a plugin of your own: an effect or an instrument as a DSP script (`dsp_write`, then `fx_add`) | `guides/dsp-workflow.md`, `guides/dsp-language.md` |
+| Writing a plugin of your own: an effect or an instrument as a DSP script (`dsp_write`, then `fx_add`) | `guides/dsp-workflow.md`, `guides/dsp-language.md`, `generated/dsp-examples.md` |
 | Exact command arguments and results | `generated/sandbox-commands.md` (sandbox), `generated/engine-commands.md` (DAW), or the `describe` tool |
 | A stock plugin's parameters and patch format | its guide, and `plugin_describe` (sandbox) or `fx_describe` (DAW) for every field, unit and range |
 | Tempo-synced echoes, ping-pong, freeze and wet ducking (Echelon/delay) | `guides/delay.md` |

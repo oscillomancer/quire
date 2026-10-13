@@ -8,10 +8,11 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
 
 ## The loop
 
-1. **Start from the closest example** in the language guide (the tilt EQ,
-   the synth for an instrument, or the echo below) rather than from
-   nothing, and decide the parameters first: what a person would turn, in
-   which unit, over what range.
+1. **Start from the closest example** (`generated/dsp-examples.md`: a
+   gain, a tilt EQ, a sidechain compressor, an echo, an oversampled drive,
+   a spectral effect, a convolution reverb, a synth, a sampler) rather than
+   from nothing, and decide the parameters first: what a person would
+   turn, in which unit, over what range.
 2. **Write it**: `dsp_write {name: "tilt_eq", source: "<the whole file>"}`.
    - `ok: false`: fix the `diagnostics` in order, each at its `line` and
      `column`. The `hint` is the fix; apply it rather than guessing. Fix the

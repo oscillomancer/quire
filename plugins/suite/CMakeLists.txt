@@ -81,6 +81,11 @@ if(SUPPLE_BUILD_TESTS)
   target_compile_definitions(script-examples.tests PRIVATE SUPPLE_SCRIPT_EXAMPLES="${CMAKE_CURRENT_SOURCE_DIR}/examples")
   add_test(NAME script-examples.tests COMMAND script-examples.tests)
   set_tests_properties(script-examples.tests PROPERTIES LABELS "script-compiler")
+  # The skill's copy of the examples (skill/generated/dsp-examples.md).
+  add_test(NAME script-examples.guide-drift
+    COMMAND ${CMAKE_COMMAND} -DEXAMPLES=${CMAKE_CURRENT_SOURCE_DIR}/examples
+            -DOUT=${PROJECT_SOURCE_DIR}/skill/generated/dsp-examples.md -DCHECK=ON
+            -P ${PROJECT_SOURCE_DIR}/tools/gen/dsp_examples.cmake)
 endif()
 
 # What dsp.export's source exports are made of (host/dsp-commands), staged
