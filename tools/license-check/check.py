@@ -24,6 +24,10 @@ SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hh", ".m", ".mm"
 # Built by concatenation so this file does not match its own pattern.
 FORBIDDEN_SPDX = re.compile("SPDX-License-" + r"Identifier:[ \t]*[^\n]*\b(A?GPL|LGPL)", re.IGNORECASE)
 FETCH_RE = re.compile(r"(?:FetchContent_Declare|ExternalProject_Add)\s*\(\s*([A-Za-z0-9_.+-]+)", re.IGNORECASE)
+# What may follow "ExternalProject_Add(plugin-" in plugins/CMakeLists.txt: a
+# variable name and a SOURCE_DIR that is a folder of plugins/ (no "..").
+LOCAL_PLUGIN_RE = re.compile(r'\$\{\w+\}\s+SOURCE_DIR\s+"\$\{CMAKE_CURRENT_SOURCE_DIR\}'
+                             r'(?:/(?:[\w-]+|\$\{\w+\}))+"')
 SKIP_PARTS = {"build", "_deps", ".git", "third_party", "node_modules"}
 # Files that name a GPL licence without being under it. The plugin template's
 # product generator offers GPL-3.0-or-later as a licence for the product it
@@ -160,11 +164,12 @@ def main() -> int:
             if p.name == "CMakeLists.txt" or p.suffix == ".cmake":
                 for m in FETCH_RE.finditer(text):
                     dep = m.group(1).lower()
-                    # Template-derived plugins are local first-party sources,
-                    # built in isolation to avoid CMake target collisions.
+                    # Template-derived plugins are local first-party sources
+                    # (a plugin's folder, or the template's tree for a
+                    # product kept elsewhere in plugins/), built in isolation
+                    # to avoid CMake target collisions.
                     if (dep == "plugin-" and rel == pathlib.Path("plugins/CMakeLists.txt")
-                            and "SOURCE_DIR \"${CMAKE_CURRENT_SOURCE_DIR}/${dir}\""
-                            in text[m.end():m.end() + 160]):
+                            and LOCAL_PLUGIN_RE.match(text, m.end())):
                         continue
                     if dep not in names:
                         errors.append(f"{rel}: fetches '{m.group(1)}', which is not in third_party/manifest.json")

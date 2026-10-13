@@ -59,6 +59,22 @@ class BuildFiles(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("SPDX identifier", errors)
 
+    def test_local_plugin_projects_are_first_party(self):
+        local = ('ExternalProject_Add(plugin-${dir}\n  SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/${dir}"\n)\n',
+                 'ExternalProject_Add(plugin-${name}\n  SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/template"\n)\n')
+        for text in local:
+            with self.subTest(text=text):
+                result, errors = self.check_fixture("plugins/CMakeLists.txt", text)
+                self.assertEqual(result, 0, errors)
+                result, errors = self.check_fixture("libs/test/CMakeLists.txt", text)
+                self.assertEqual(result, 1)
+        for text in ('ExternalProject_Add(plugin-${name}\n  SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../x"\n)\n',
+                     'ExternalProject_Add(plugin-${name}\n  URL https://example.com/x.tar.gz\n)\n'):
+            with self.subTest(text=text):
+                result, errors = self.check_fixture("plugins/CMakeLists.txt", text)
+                self.assertEqual(result, 1)
+                self.assertIn("fetches 'plugin-'", errors)
+
     def test_cmake_commands_are_case_insensitive(self):
         for command in ("fetchcontent_declare", "externalproject_add"):
             with self.subTest(command=command):
