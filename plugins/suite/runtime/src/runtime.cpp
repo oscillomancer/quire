@@ -31,6 +31,7 @@
 #include "dsp/Oversampler.h"
 #include "dsp/Stft.h"
 #include "supple/script.h"
+#include "supple/script_files.h"
 #include "supple/script_runtime.h"
 
 namespace supple::script {
@@ -233,6 +234,13 @@ Param::Param(const ParamSpec& spec) {
     min_ = spec.min;
     offAtMinimum_ = spec.offAtMinimum;
     if (auto* r = detail::registrar()) r->declare(*this, spec);
+}
+
+AudioFile::AudioFile(const FileSpec& spec) {
+    if (auto* r = detail::registrar()) r->declareFile(this, spec);
+}
+Convolver::Convolver(const FileSpec& spec) {
+    if (auto* r = detail::registrar()) r->declareFile(this, spec);
 }
 
 Param::Param(const Param& other) { *this = other; }
@@ -627,6 +635,41 @@ void Stft::clear() {
     if (s.prepared) s.stft.reset();
     s.ready = false;
     s.one = 0.0;
+}
+
+// --- files ----------------------------------------------------------------------
+
+bool AudioFile::loaded() const { return contents_ && contents_->audio.frames() > 0; }
+int AudioFile::channels() const { return contents_ ? contents_->audio.channels() : 0; }
+int AudioFile::frames() const {
+    return contents_ ? static_cast<int>(contents_->audio.frames()) : 0;
+}
+double AudioFile::sample(int channel, int frame) const {
+    if (!contents_ || channel < 0) return 0.0;
+    const auto& all = contents_->audio.channel;
+    if (all.empty()) return 0.0;
+    const std::vector<float>& c = all[std::min(static_cast<size_t>(channel), all.size() - 1)];
+    return static_cast<unsigned>(frame) < c.size()
+               ? static_cast<double>(c[static_cast<size_t>(frame)])
+               : 0.0;
+}
+double AudioFile::read(int channel, double frame) const {
+    if (!(frame == frame) || frame < -2.0 || frame > 2147483000.0) return 0.0;
+    const double whole = std::floor(frame);
+    const int i = static_cast<int>(whole);
+    return dsp::hermite(sample(channel, i - 1), sample(channel, i), sample(channel, i + 1),
+                        sample(channel, i + 2), frame - whole);
+}
+
+bool Convolver::loaded() const { return contents_ && contents_->convolution; }
+int Convolver::length() const { return contents_ ? contents_->length : 0; }
+double Convolver::process(int channel, double x) {
+    if (!contents_ || !contents_->convolution || channel < 0 ||
+        channel >= contents_->convolution->channels())
+        return 0.0;
+    if (!(x == x)) x = 0.0;
+    contents_->convolution->process(channel, &x, 1);
+    return x;
 }
 
 Random::Random() { new (storage_) dsp::Random(); }

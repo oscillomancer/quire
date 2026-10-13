@@ -5,7 +5,14 @@
 #include <atomic>
 #include <string>
 
+#include "dsp/AudioFile.h"
+
 namespace supple::suite {
+
+bool ScriptLayer::fileReadable(size_t, const std::string& path, std::string& why) const {
+    dsp::AudioReader reader;
+    return reader.open(path, &why);
+}
 
 void ScriptLayer::tick() {
     processor().collect();

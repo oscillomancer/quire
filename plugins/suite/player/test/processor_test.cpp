@@ -14,18 +14,27 @@
 #include <tuple>
 #include <vector>
 
+#include <unistd.h>
+
 #include "Catalog.h"
 #include "Check.h"
 #include "Processor.h"
 #include "core/Catalog.h"
 #include "core/Engine.h"
+#include "dsp/AudioFile.h"
 #include "runner.h"
 #include "supple/script_native.h"
 
-// The example synth compiled as C++, as a source export builds it.
+// Example scripts compiled as C++, as a source export builds them.
 namespace supple::script::native_synth {
 #include "synth.cpp"
 }  // namespace supple::script::native_synth
+namespace supple::script::native_sampler {
+#include "sampler.cpp"
+}  // namespace supple::script::native_sampler
+namespace supple::script::native_reverb {
+#include "reverb.cpp"
+}  // namespace supple::script::native_reverb
 
 using namespace supple;
 using namespace supple::player;
@@ -48,6 +57,27 @@ std::string libraryScript(const char* name) {
         if (readScript(folder / name / (std::string(name) + ".cpp"), text)) return text;
     CHECK_MSG(false, "no script %s in the library", name);
     return text;
+}
+
+std::string exampleScript(const char* file) {
+    std::ifstream in(std::string(SUPPLE_SCRIPT_EXAMPLES) + "/" + file);
+    std::stringstream text;
+    text << in.rdbuf();
+    return text.str();
+}
+
+// A mono WAV file of `frames` samples of make(n), in the temporary folder.
+std::string writeWav(const char* name, int frames, double (*make)(int)) {
+    dsp::AudioData a;
+    a.sampleRate = 48000.0;
+    a.channel.assign(1, std::vector<float>(static_cast<size_t>(frames)));
+    for (int n = 0; n < frames; ++n)
+        a.channel[0][static_cast<size_t>(n)] = static_cast<float>(make(n));
+    const std::string path = (std::filesystem::temp_directory_path() /
+                              ("supple-processor-" + std::to_string(::getpid()) + "-" + name))
+                                 .string();
+    CHECK(dsp::saveWavFile(path, a));
+    return path;
 }
 
 // A noise burst, rendered in blocks of `block` through an activated engine.
@@ -99,9 +129,10 @@ struct BlockNotes {
 // the keys of the notes it reported over.
 std::vector<double> playNotes(const DefinitionPtr& d,
                               const std::vector<std::tuple<int, int, bool>>& notes, int frames,
-                              std::vector<int>& ended) {
+                              std::vector<int>& ended, const std::string& file = {}) {
     Engine engine(d);
     engine.activate(48000.0, 64, 0, 2);
+    if (!file.empty()) engine.setProperty(0, file, true);
     std::vector<double> left(static_cast<size_t>(frames)), right(static_cast<size_t>(frames));
     for (int start = 0; start < frames; start += 64) {
         const int n = std::min(64, frames - start);
@@ -299,6 +330,79 @@ TEST(an_instrument_plays_its_notes_the_same_compiled_either_way_and_ends_each) {
     std::sort(sorted.begin(), sorted.end());
     CHECK(sorted == (std::vector<int>{60, 64, 67, 70, 71, 72, 73, 74, 75}));
     for (int i = 23000; i < 24000; ++i) CHECK(a[static_cast<size_t>(i)] == 0.0);
+}
+
+TEST(a_sampler_plays_its_file_the_same_compiled_either_way_and_ends_with_it) {
+    const auto jit = compileText(exampleScript("sampler.cpp"));
+    using Native = supple::script::native_sampler::Sampler;
+    using Code = supple::script::detail::NativeCode<Native>;
+    const auto native = makeScriptDefinition(
+        std::make_shared<const Code>(std::vector<Code::Key>{{&Native::root, "root"},
+                                                            {&Native::attack, "attack"},
+                                                            {&Native::release, "release"},
+                                                            {&Native::level, "level"}},
+                                     std::vector<Code::FileKey>{{&Native::sample, "sample"}}));
+    CHECK(jit != nullptr && native != nullptr);
+    if (!jit || !native) return;
+    CHECK(jit->properties().count() == 1 && jit->properties().at(0).isFile());
+    CHECK(jit->meaning().properties.at(0).key == "sample");
+    // A tenth of a second of a fading 440 Hz tone.
+    const std::string tone = writeWav("tone.wav", 4800, [](int n) {
+        return 0.5 * std::sin(2.0 * 3.141592653589793 * 440.0 * n / 48000.0) *
+               std::exp(-n / 2000.0);
+    });
+    // The root key, and an octave up (twice as fast), both held long.
+    const std::vector<std::tuple<int, int, bool>> notes = {
+        {10, 60, true}, {500, 72, true}, {20000, 60, false}, {20000, 72, false}};
+    std::vector<int> jitEnded, nativeEnded;
+    const auto a = playNotes(jit, notes, 24000, jitEnded, tone);
+    const auto b = playNotes(native, notes, 24000, nativeEnded, tone);
+    std::filesystem::remove(tone);
+    CHECK(a == b);
+    double peak = 0.0;
+    for (double x : a) peak = std::max(peak, std::abs(x));
+    CHECK(peak > 0.05);
+    // Each note ended with the sample, its key still down, and then silence.
+    std::sort(jitEnded.begin(), jitEnded.end());
+    CHECK(jitEnded == (std::vector<int>{60, 72}));
+    for (int i = 5000; i < 24000; ++i) CHECK(a[static_cast<size_t>(i)] == 0.0);
+}
+
+TEST(a_convolution_reverb_plays_its_room_the_same_compiled_either_way) {
+    const auto jit = compileText(exampleScript("reverb.cpp"));
+    using Native = supple::script::native_reverb::Reverb;
+    using Code = supple::script::detail::NativeCode<Native>;
+    const auto native = makeScriptDefinition(std::make_shared<const Code>(
+        std::vector<Code::Key>{
+            {&Native::predelay, "predelay"}, {&Native::tone, "tone"}, {&Native::mix, "mix"}},
+        std::vector<Code::FileKey>{{&Native::room, "room"}}));
+    CHECK(jit != nullptr && native != nullptr);
+    if (!jit || !native) return;
+    // A quarter second of fading noise: a small room.
+    const std::string room = writeWav("room.wav", 12000, [](int n) {
+        const uint32_t h = static_cast<uint32_t>(n) * 2654435761u;
+        return ((h >> 8) / 8388608.0 - 1.0) * std::exp(-n / 2500.0);
+    });
+    auto play = [&](const DefinitionPtr& d, bool withRoom) {
+        Engine engine(d);
+        engine.activate(48000.0, 64, 2, 2);
+        if (withRoom) engine.setProperty(0, room, true);
+        setPlain(engine, d->params().at(2).id, 100.0);  // all reverb
+        std::vector<double> first = render(engine, 4096);
+        // A reset clears the room's tail too.
+        engine.reset();
+        CHECK(render(engine, 4096) == first);
+        return first;
+    };
+    const auto a = play(jit, true);
+    const auto b = play(native, true);
+    const auto dry = play(jit, false);
+    std::filesystem::remove(room);
+    CHECK(a == b);
+    double energy = 0.0;
+    for (double x : a) energy += x * x;
+    CHECK(energy > 1.0);
+    for (double x : dry) CHECK(x == 0.0);  // no room: no reverb
 }
 
 TEST(a_script_reports_the_latency_it_sets_in_prepare) {

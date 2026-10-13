@@ -19,6 +19,7 @@ struct ProgramData {
     std::string typeName;
     PluginKind kind = PluginKind::None;
     std::vector<ParamModel> params;
+    std::vector<FileModel> files;
     int size = 0, align = 8;
     std::vector<ObjectSlot> objects;
     std::vector<InitialValue> initial;

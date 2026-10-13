@@ -25,6 +25,8 @@ class ScriptLayer : public SemanticLayer {
     void redefined() override;
 
   protected:
+    // A file member's file decodes as audio.
+    bool fileReadable(size_t index, const std::string& path, std::string& why) const override;
     const ScriptDefinition& definition();
     ScriptProcessor& processor();
     // The status is for code now running: what was reported is forgotten.

@@ -289,11 +289,17 @@ std::vector<const BuiltinFunction*> Builtins::functions(const std::string& name)
 bool Builtins::reserved(const std::string& name) const {
     // The parameter factories, which Sema::evaluate knows by name.
     static const std::set<std::string> factories = {
-        "continuous", "decibels", "frequency", "milliseconds", "percent", "ratio", "semitones",
-        "cents",      "octaves",  "degrees",   "integer",      "choice",  "toggle"};
+        "continuous", "decibels",  "frequency", "milliseconds", "percent",
+        "ratio",      "semitones", "cents",     "octaves",      "degrees",
+        "integer",    "choice",    "toggle",    "audioFile",    "impulseResponse"};
     return byName_.count(name) || classByName_.count(name) || enumByName_.count(name) ||
            factories.count(name) || name == "pi" || name == "twoPi" || name == "Array" ||
            name == "Buffer" || name == "Unit" || name == "Curve";
+}
+
+bool Builtins::isFile(const Type* t) const {
+    return t && t->kind == TypeKind::Object &&
+           (t->builtin == audioFile_ || t->builtin == convolver_);
 }
 
 int Builtins::pluginBaseSize() const { return static_cast<int>(sizeof(S::Plugin)); }
@@ -473,6 +479,29 @@ void Builtins::addClasses() {
     r.method(
         follower, "double level() const", +[](const S::EnvelopeFollower* f) { return f->level(); });
     r.method(follower, "void clear()", +[](S::EnvelopeFollower* f) { f->clear(); });
+
+    // File members: a pointer the glue sets (no construction; copied as bytes).
+    auto* file = addClass("AudioFile", sizeof(S::AudioFile), alignof(S::AudioFile));
+    audioFile_ = file;
+    r.method(
+        file, "bool loaded() const", +[](const S::AudioFile* f) -> int { return f->loaded(); });
+    r.method(file, "int channels() const", +[](const S::AudioFile* f) { return f->channels(); });
+    r.method(file, "int frames() const", +[](const S::AudioFile* f) { return f->frames(); });
+    r.method(
+        file, "double sample(int channel, int frame) const",
+        +[](const S::AudioFile* f, int c, int i) { return f->sample(c, i); });
+    r.method(
+        file, "double read(int channel, double frame) const",
+        +[](const S::AudioFile* f, int c, double at) { return f->read(c, at); });
+    auto* convolver = addClass("Convolver", sizeof(S::Convolver), alignof(S::Convolver));
+    convolver_ = convolver;
+    r.method(
+        convolver, "bool loaded() const",
+        +[](const S::Convolver* f) -> int { return f->loaded(); });
+    r.method(convolver, "int length() const", +[](const S::Convolver* f) { return f->length(); });
+    r.method(
+        convolver, "double process(int channel, double x)",
+        +[](S::Convolver* f, int c, double x) { return f->process(c, x); });
 
     auto* delay = addClass("DelayLine", sizeof(S::DelayLine), alignof(S::DelayLine));
     delay->resource = true;

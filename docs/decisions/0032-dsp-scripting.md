@@ -353,6 +353,22 @@ Where the work stands, and where it departs from the text above:
   (`script-examples.tests`) and played by the player through the reset
   check (`plugin.player.examples.reset`, under RealtimeSanitizer in that
   preset).
+- Files, 2026-10-13: a script declares `AudioFile sample =
+  audioFile("Sample")` or `Convolver room = impulseResponse("Room")` as a
+  member, and each is a file property of the plugin (framework 1.19.0
+  gives properties a kind, which reaches the loader, and help). The
+  framework's file slots load it off the audio thread with the glue's
+  `loadFile()` (the audio, resampled; for an impulse response also a
+  `dsp::Convolution`, prepared for the session's channels) and hand it to
+  the processor at the start of a block, which points the member at it
+  (`supple/script_files.h`); the member is only that pointer, so
+  generated code copies it as bytes. A reset rebinds the files and clears
+  their convolutions; a hot swap moves them to the new code and the old
+  lets go (its convolution is silent for the 10 ms crossfade, and the
+  tail carries on). Paths travel in the patch's `properties`
+  (`semantic-params-extension.md`, amendment of 2026-10-13), checked
+  before anything changes. Streaming from disk is not exposed: a sample
+  is loaded whole (its first ten minutes).
 - The compiler's API is C++ (`supple/script_compiler.hpp`,
   `supple/script_program.hpp`); the C ABI of §2 is not written, since
   nothing loads the compiler across a library boundary yet.

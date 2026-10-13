@@ -4,8 +4,8 @@
 // A plugin made from a script, as the glue that runs it sees it, however it
 // was built: by the script compiler (the player's JIT, scriptc::Program) or
 // by a C++ compiler (a source export, supple/script_native.h). Its
-// description -- identity, buses and parameters, as the script declares
-// them -- and what an instance needs to be made, copied, destroyed and run.
+// description -- identity, buses, parameters and files, as the script
+// declares them -- and what an instance needs to be made, copied, destroyed and run.
 // Scripts never see it.
 #pragma once
 
@@ -57,6 +57,19 @@ struct ParamModel {
     int offset = 0;  // of the Param member in the plugin struct
 };
 
+// A file member (AudioFile, Convolver) as the script declares it: a file
+// property of the plugin.
+struct FileModel {
+    enum class Kind { Audio, Impulse };  // audioFile(), impulseResponse()
+
+    std::string member;    // the member's name
+    std::string key;       // the patch key (the member's name in snake_case unless given)
+    std::uint32_t id = 0;  // the property's id: keyId(key)
+    Kind kind = Kind::Audio;
+    std::string name, description;
+    int offset = 0;  // of the member in the plugin struct
+};
+
 struct InfoModel {
     std::string name, id, vendor, version = "1.0.0", description, url;
     std::vector<int> channels;  // main bus widths, the default first; empty: the kind's default
@@ -102,6 +115,7 @@ class Code {
     virtual PluginKind kind() const = 0;
     // In declaration order.
     virtual const std::vector<ParamModel>& params() const = 0;
+    virtual const std::vector<FileModel>& files() const = 0;
 
     // An instance: the plugin struct, constructed (each Param at its
     // default). Main thread: it allocates.

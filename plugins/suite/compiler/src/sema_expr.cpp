@@ -430,6 +430,13 @@ bool Sema::requireModifiable(Expr* e, Loc loc, const std::string& what) {
               "need one");
         return false;
     }
+    if (b_.isFile(e->type())) {
+        error(loc, "script.file.read_only",
+              what + ": " + e->type()->name + " members hold the file their property names",
+              "the user, the editor and patches choose the file; read it, or keep what you need "
+              "in members of your own");
+        return false;
+    }
     if (e->qt.isConst) {
         std::string why = "it is const";
         if (fn_ && fn_->isConst) why += " (inside a const member function, members are read-only)";
@@ -1823,18 +1830,39 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                 {"choice", {ParamModel::Unit::None, 3}},
                 {"toggle", {ParamModel::Unit::None, 2}}};
             auto it = factories.find(name);
+            const bool fileFactory = name == "audioFile" || name == "impulseResponse";
             // As in C++, a member of that name hides the factory (in a member
             // initializer, every member is in scope).
-            if (it != factories.end())
+            if (it != factories.end() || fileFactory)
                 for (StructDecl* s = self_; s; s = s->outer)
                     if (findField(s, name) || findMethod(s, name)) {
                         error(call->callee->loc, "script.name.hidden",
                               "the member '" + name + "' hides the factory " + name +
                                   "() here, as in C++",
-                              "rename the member and keep its key: Param " + name +
-                                  "Param = " + name + "(...).withKey(\"" + name + "\")");
+                              "rename the member and keep its key: " +
+                                  std::string(fileFactory ? name == "audioFile" ? "AudioFile "
+                                                                                : "Convolver "
+                                                          : "Param ") +
+                                  name + "Member = " + name + "(...).withKey(\"" + name + "\")");
                         return std::nullopt;
                     }
+            // A file member's: audioFile("Sample"), impulseResponse("Room").
+            if (fileFactory) {
+                std::optional<Constant> label;
+                if (call->args.size() == 1) label = evaluate(call->args[0], scope);
+                if (!label || label->kind != Constant::Kind::String) {
+                    error(call->loc, "script.file.declaration",
+                          name + "() takes the name people see, in quotes",
+                          name + "(\"" + (name == "audioFile" ? "Sample" : "Room") + "\")");
+                    return std::nullopt;
+                }
+                Constant c;
+                c.kind = Constant::Kind::File;
+                c.file.kind =
+                    name == "audioFile" ? FileModel::Kind::Audio : FileModel::Kind::Impulse;
+                c.file.name = label->stringValue;
+                return c;
+            }
             if (it != factories.end()) {
                 Constant c;
                 c.kind = Constant::Kind::Spec;
@@ -1955,6 +1983,27 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
             auto* m = static_cast<MemberExpr*>(call->callee);
             auto base = evaluate(m->object, scope);
             if (!base) return std::nullopt;
+            if (base->kind == Constant::Kind::File) {
+                Constant c = *base;
+                std::optional<Constant> arg;
+                if (call->args.size() == 1) arg = evaluate(call->args[0], scope);
+                if (m->member != "help" && m->member != "withKey") {
+                    error(call->loc, "script.file.modifier",
+                          "'." + m->member +
+                              "()' is a parameter's; a file takes .help() and "
+                              ".withKey()",
+                          "audioFile(\"Sample\").help(\"...\")");
+                    return std::nullopt;
+                }
+                if (!arg || arg->kind != Constant::Kind::String) {
+                    error(call->loc, "script.file.modifier",
+                          "." + m->member + "() takes text in quotes",
+                          "." + m->member + "(\"...\")");
+                    return std::nullopt;
+                }
+                (m->member == "help" ? c.file.description : c.file.key) = arg->stringValue;
+                return c;
+            }
             if (base->kind != Constant::Kind::Spec) {
                 error(call->loc, "script.param.modifier",
                       "'." + m->member + "()' applies to a parameter's description",

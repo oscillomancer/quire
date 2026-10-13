@@ -390,6 +390,90 @@ class Param {
     int slot_ = -1;
 };
 
+// --- files ---------------------------------------------------------------------
+
+// A file member as the script declares it: audioFile("Sample") or
+// impulseResponse("Room"), with .help() and .withKey() as a parameter has.
+struct FileSpec {
+    enum class Kind { Audio, Impulse };
+    Kind kind = Kind::Audio;
+    const char* name = "";
+    const char* description = "";
+    const char* key = "";  // the patch key; the member's name when empty
+
+    FileSpec help(const char* text) const {
+        FileSpec f = *this;
+        f.description = text;
+        return f;
+    }
+    FileSpec withKey(const char* k) const {
+        FileSpec f = *this;
+        f.key = k;
+        return f;
+    }
+};
+// A file of audio -- WAV, AIFF or FLAC -- for an AudioFile: a sample, a loop,
+// a wavetable.
+inline FileSpec audioFile(const char* name) {
+    FileSpec f;
+    f.name = name;
+    return f;
+}
+// An impulse response -- WAV, AIFF or FLAC -- for a Convolver: a room, a
+// speaker cabinet.
+inline FileSpec impulseResponse(const char* name) {
+    FileSpec f;
+    f.kind = FileSpec::Kind::Impulse;
+    f.name = name;
+    return f;
+}
+
+namespace detail {
+struct FileContents;
+struct FileBinding;
+}  // namespace detail
+
+// A file of audio: a member of the plugin struct, AudioFile sample =
+// audioFile("Sample"). Its path is a property of the plugin, saved with it
+// and set by the user or a patch ("properties": {"sample": "/path.wav"}).
+// The file is loaded off the audio thread and resampled to the session's
+// rate; it appears at the start of a block, and loaded() is false until
+// then, or when there is none.
+class AudioFile {
+  public:
+    AudioFile(const FileSpec& spec);  // registers it with the plugin under construction
+    bool loaded() const;
+    int channels() const;  // 0 when nothing is loaded
+    int frames() const;
+    // Sample `frame` of `channel`, 0 outside the file. A channel past the
+    // file's last reads its last, so a mono file serves every channel.
+    double sample(int channel, int frame) const;
+    // Between samples, interpolated (cubic): for playing at another speed.
+    double read(int channel, double frame) const;
+
+  private:
+    friend struct detail::FileBinding;
+    detail::FileContents* contents_ = nullptr;
+};
+
+// Convolution with an impulse response: a member of the plugin struct,
+// Convolver room = impulseResponse("Room"), whose path is a property as an
+// AudioFile's is. Loaded and prepared off the audio thread (its first 20
+// seconds); no latency. Until one is loaded, process() gives 0.
+class Convolver {
+  public:
+    Convolver(const FileSpec& spec);  // registers it with the plugin under construction
+    bool loaded() const;
+    int length() const;  // the response's frames
+    // The next output of channel c for input x. Each channel uses the
+    // response's channel of the same number, or its last.
+    double process(int channel, double x);
+
+  private:
+    friend struct detail::FileBinding;
+    detail::FileContents* contents_ = nullptr;
+};
+
 // --- the plugin ----------------------------------------------------------------
 
 // The plugin's identity and buses, `static constexpr Info info = {...}` in the

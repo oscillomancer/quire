@@ -18,6 +18,7 @@ namespace supple::scriptc {
 // The description of a script's plugin (the runtime's, which the glue reads).
 using PluginKind = script::detail::PluginKind;
 using ParamModel = script::detail::ParamModel;
+using FileModel = script::detail::FileModel;
 using InfoModel = script::detail::InfoModel;
 
 struct ProgramData;
@@ -31,6 +32,7 @@ class Program final : public script::detail::Code {
     const InfoModel& info() const override;
     PluginKind kind() const override;
     const std::vector<ParamModel>& params() const override;
+    const std::vector<FileModel>& files() const override;
     // The plugin struct's name, as the script declares it.
     const std::string& typeName() const;
     bool interpreted() const;

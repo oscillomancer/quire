@@ -28,10 +28,11 @@ namespace supple::suite {
 
 class ScriptDefinition final : public SemanticDefinition {
   public:
-    ScriptDefinition(PluginInfo info, ParamTable params, Meaning meaning,
+    ScriptDefinition(PluginInfo info, ParamTable params, PropertyList properties, Meaning meaning,
                      std::shared_ptr<const script::detail::Code> code, std::filesystem::path file,
                      std::string source)
-        : SemanticDefinition(std::move(info), std::move(params), {}, std::move(meaning)),
+        : SemanticDefinition(std::move(info), std::move(params), std::move(properties),
+                             std::move(meaning)),
           code_(std::move(code)),
           file_(std::move(file)),
           source_(std::move(source)) {}
@@ -54,7 +55,7 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
     std::shared_ptr<const script::detail::Code> code, std::filesystem::path file = {},
     std::string source = {}, std::string* problems = nullptr);
 
-// Whether two plugins have the same parameters, kinds, ranges and buses: a
+// Whether two plugins have the same parameters, files, kinds, ranges and buses: a
 // script whose code changed but whose table did not swaps in place, without
 // the host restarting it.
 bool sameShape(const Definition& a, const Definition& b);

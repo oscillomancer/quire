@@ -45,6 +45,8 @@ struct PluginModel {
     InfoModel info;
     std::vector<ParamModel> params;
     std::vector<FieldDecl*> paramFields;  // params[i]'s member
+    std::vector<FileModel> files;
+    std::vector<FieldDecl*> fileFields;  // files[i]'s member
     FunctionDecl* prepare = nullptr;
     FunctionDecl* update = nullptr;
     FunctionDecl* process = nullptr;

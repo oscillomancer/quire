@@ -190,7 +190,11 @@ if(SUPPLE_BUILD_PLUGINS)
     # Every example script as the player's library, through the reset check
     # (and so, in the rtsan preset, under RealtimeSanitizer).
     set(example_library "${CMAKE_CURRENT_BINARY_DIR}/script-examples")
+    file(REMOVE_RECURSE "${example_library}")
+    # (Not the sampler, which is silent without a sample: processor-tests
+    # plays it a file.)
     file(GLOB example_scripts CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/suite/examples/*.cpp")
+    list(FILTER example_scripts EXCLUDE REGEX "/sampler\\.cpp$")
     foreach(script IN LISTS example_scripts)
       get_filename_component(name "${script}" NAME_WE)
       configure_file("${script}" "${example_library}/${name}/${name}.cpp" COPYONLY)

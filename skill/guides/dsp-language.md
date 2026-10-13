@@ -221,6 +221,32 @@ host that note is over: a voice never finished keeps its note open forever.
 | `setVoiceMode(VoiceMode::Poly)` | Or `Mono` (the newest key held, returning to the last), `Legato` (Mono, gliding without restarting) |
 | `setGlide(ms)`, `setBendRange(semitones)` | The slide between notes (Mono, Legato); the bend's reach (2) |
 
+## Files
+
+A sampler's sample or a reverb's room is a file the user (or an agent)
+picks, declared as a member of the plugin struct like a parameter:
+
+```cpp
+AudioFile sample = audioFile("Sample").help("The sound every key plays.");
+Convolver room = impulseResponse("Room").help("A recording of a space's echo.");
+```
+
+Its path is a property of the plugin, saved with it and set in a patch,
+`{"properties": {"sample": "/home/me/kick.wav"}}` (the key is the member's
+name in snake_case, or `.withKey("...")`). The runtime loads it off the
+audio thread (WAV, AIFF or FLAC, resampled to the session's rate) and hands
+it over at the start of a block; until then, and with no file, `loaded()`
+is false. Not in `prepare()`: files arrive after it.
+
+| Object | Use |
+|---|---|
+| `AudioFile` | `loaded()`, `channels()`, `frames()`; `sample(c, i)` (0 outside; a channel past the file's last reads its last), `read(c, position)` between samples (cubic), for playing at another speed |
+| `Convolver` | `process(c, x)`: channel `c` through the impulse response (its first 20 s), no latency; 0 until loaded. `loaded()`, `length()` |
+
+Files are members of the plugin struct only, one per member (no arrays),
+and never assigned: read them, or keep what you need in members of your
+own.
+
 ## Types and statements
 
 - Numbers: `double` (use it by default), `float`, `int`, `bool`. Integer
@@ -270,7 +296,8 @@ line.
 
 `process()`, and everything it calls, never allocates: `DelayLine::prepare`
 and `Buffer::resize` belong in `prepare()`, and the compiler says so
-anywhere else. There is no file, network or clock access at all.
+anywhere else. There is no network or clock access, and files come only
+through `AudioFile` and `Convolver` members.
 
 ## The runtime library
 

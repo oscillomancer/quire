@@ -223,7 +223,10 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
   appended, which offers that one plugin), or a C++ project of the plugin
   template that builds the same plugin, bit for bit, with the script
   compiled as C++. Effects and instruments (voices the runtime manages;
-  no per-note expression, no note effects), the automatic editor only,
-  plugin-file exports for Linux only; editor previews do not exist yet.
+  no per-note expression, no note effects); samples and impulse responses
+  as files a patch names (loaded whole, no streaming from disk); spectral
+  effects (an STFT), oversampling and sidechains. The automatic editor
+  only, plugin-file exports for Linux only; editor previews do not exist
+  yet.
 - Orrery's structural performance pass.
 - Hardening and ports beyond Linux.

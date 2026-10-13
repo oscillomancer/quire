@@ -100,6 +100,20 @@ struct Layout {
     }
 };
 
+// How the glue gives an AudioFile or Convolver member its file (or none):
+// both hold only the pointer, so the glue needs no more than the member's
+// offset.
+struct FileBinding {
+    static void bind(void* member, FileContents* contents) {
+        *static_cast<FileContents**>(member) = contents;
+    }
+    static_assert(sizeof(AudioFile) == sizeof(FileContents*) &&
+                  sizeof(Convolver) == sizeof(FileContents*));
+    static constexpr int audioFileContents() { return offsetof(AudioFile, contents_); }
+    static constexpr int convolverContents() { return offsetof(Convolver, contents_); }
+};
+static_assert(FileBinding::audioFileContents() == 0 && FileBinding::convolverContents() == 0);
+
 // How the glue reaches a Param's fields.
 struct ParamBinding {
     static void setValue(Param& p, double value, bool changed) {
@@ -126,6 +140,8 @@ class ParamRegistrar {
   public:
     virtual ~ParamRegistrar() = default;
     virtual void declare(Param& param, const ParamSpec& spec) = 0;
+    // An AudioFile or Convolver member (`member` points at it).
+    virtual void declareFile(void* member, const FileSpec& spec) { (void)member, (void)spec; }
 };
 ParamRegistrar* registrar();
 void setRegistrar(ParamRegistrar* registrar);

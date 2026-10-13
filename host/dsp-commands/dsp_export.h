@@ -183,6 +183,10 @@ inline Status writeSource(const fs::path& kit, const fs::path& dest, const std::
     for (const scriptc::ParamModel& p : program.params())
         keys += "                {&Script::" + p.member + ", \"" + p.key + "\"},\n";
     if (!keys.empty()) keys.pop_back();
+    std::string fileKeys;
+    for (const scriptc::FileModel& f : program.files())
+        fileKeys += "                {&Script::" + f.member + ", \"" + f.key + "\"},\n";
+    if (!fileKeys.empty()) fileKeys.pop_back();
     std::string code;
     for (const char c : name)
         if (std::isalnum(static_cast<unsigned char>(c))) code += c;
@@ -214,6 +218,7 @@ inline Status writeSource(const fs::path& kit, const fs::path& dest, const std::
         {"FILE", name + ".cpp"},
         {"TYPE", program.typeName()},
         {"KEYS", keys},
+        {"FILE_KEYS", fileKeys},
         {"LICENSE", gpl ? "GPL-3.0-or-later" : "MIT"},
         {"LICENSE_TEXT", gpl ? info.name +
                                    " is free software, licensed under the GNU General Public "

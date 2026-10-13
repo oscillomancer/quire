@@ -132,9 +132,18 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
         for (const std::string& choice : m.choices) pm.choiceKeys.push_back(snakeCase(choice));
         meaning.params.push_back(std::move(pm));
     }
-    auto definition = std::make_shared<const ScriptDefinition>(std::move(info), b.build(),
-                                                               std::move(meaning), std::move(code),
-                                                               std::move(file), std::move(source));
+    // Each file member is a file property: its path, saved and set by patch.
+    PropertyList::Builder files;
+    for (const script::detail::FileModel& m : code->files()) {
+        PropertyDef p =
+            property(m.id, files.text(m.name)).audioFile().ofKind(static_cast<uint32_t>(m.kind));
+        if (!m.description.empty()) p = p.help(files.text(m.description));
+        files.add(p);
+        meaning.properties.push_back({m.key});
+    }
+    auto definition = std::make_shared<const ScriptDefinition>(
+        std::move(info), b.build(), files.build(), std::move(meaning), std::move(code),
+        std::move(file), std::move(source));
     std::string found = definition->problems();
     if (found.empty()) found = meaningProblems(*definition, definition->meaning());
     if (!found.empty()) {
@@ -148,8 +157,13 @@ bool sameShape(const Definition& a, const Definition& b) {
     const PluginInfo &x = a.info(), &y = b.info();
     if (x.id != y.id || x.name != y.name || x.kind != y.kind || x.layouts != y.layouts ||
         x.sidechain != y.sidechain || x.auxOutputs != y.auxOutputs || x.voices != y.voices ||
-        a.params().count() != b.params().count())
+        a.params().count() != b.params().count() ||
+        a.properties().count() != b.properties().count())
         return false;
+    for (size_t k = 0; k < a.properties().count(); ++k) {
+        const PropertyDef &p = a.properties().at(k), &q = b.properties().at(k);
+        if (p.id != q.id || p.kind != q.kind || std::string(p.name) != q.name) return false;
+    }
     for (size_t k = 0; k < a.params().count(); ++k) {
         const ParamDef &p = a.params().at(k), &q = b.params().at(k);
         if (p.id != q.id || p.kind != q.kind || p.unit != q.unit || p.taper != q.taper ||

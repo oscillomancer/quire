@@ -142,6 +142,10 @@ class Builtins {
     const BuiltinClass* paramSpec() const { return paramSpec_; }
     const BuiltinClass* info() const { return info_; }
     const BuiltinClass* pluginBase() const { return plugin_; }
+    const BuiltinClass* audioFile() const { return audioFile_; }
+    const BuiltinClass* convolver() const { return convolver_; }
+    // An AudioFile or Convolver: a file member, declared from a FileSpec.
+    bool isFile(const Type* t) const;
 
     // The plugin base's size: where a plugin struct's own members start.
     int pluginBaseSize() const;
@@ -166,7 +170,8 @@ class Builtins {
     Type *void_, *bool_, *int_, *float_, *double_, *string_, *initList_, *null_;
     const BuiltinClass *param_ = nullptr, *block_ = nullptr, *channel_ = nullptr,
                        *inputChannel_ = nullptr, *transport_ = nullptr, *paramSpec_ = nullptr,
-                       *info_ = nullptr, *plugin_ = nullptr;
+                       *info_ = nullptr, *plugin_ = nullptr, *audioFile_ = nullptr,
+                       *convolver_ = nullptr;
 
     friend struct Registrar;
 };

@@ -1659,6 +1659,7 @@ std::shared_ptr<const Program> Codegen::run() {
     d.typeName = model.decl ? model.decl->name : std::string();
     d.kind = model.kind;
     d.params = model.params;
+    d.files = model.files;
     d.size = model.size;
     d.align = model.align;
     d.objects = model.objects;
@@ -1767,6 +1768,7 @@ const InfoModel& Program::info() const { return d_->info; }
 const std::string& Program::typeName() const { return d_->typeName; }
 PluginKind Program::kind() const { return d_->kind; }
 const std::vector<ParamModel>& Program::params() const { return d_->params; }
+const std::vector<FileModel>& Program::files() const { return d_->files; }
 bool Program::interpreted() const { return d_->interpreted; }
 const std::string& Program::listing() const { return d_->listing; }
 std::size_t Program::size() const { return static_cast<std::size_t>(d_->size); }

@@ -19,6 +19,12 @@
 //     the running one without the host noticing (swap()): prepared on the
 //     main thread, taken at the start of a block, crossfaded over 10 ms. The
 //     one it replaced goes back to the main thread to be freed (collect()).
+//   - Files (AudioFile, Convolver members) are file properties: the
+//     framework loads each off the audio thread with loadFile() -- the
+//     audio, and an impulse response's convolution too -- and hands it to
+//     file(), which points the member at it. A replacement takes the files
+//     over, and the code it replaces lets go of them (its convolutions go
+//     silent for the crossfade), so a reverb's tail carries on.
 //   - An instrument's notes go to the framework's voice manager
 //     (dsp/Voices.h), which calls the script's voice hooks -- startVoice,
 //     releaseVoice, stopVoice -- and which Instrument's methods read and
@@ -30,7 +36,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "core/Notes.h"
@@ -38,6 +46,7 @@
 #include "core/ProcessorBase.h"
 #include "core/Ring.h"
 #include "dsp/Voices.h"
+#include "supple/script_files.h"
 #include "supple/script_runtime.h"
 #include "supple/suite/script_definition.h"
 
@@ -46,11 +55,12 @@ namespace supple::suite {
 namespace S = supple::script;
 namespace D = supple::script::detail;
 
-// One build of a script's running struct, its post-prepare copy, and its
-// Param members by parameter table index.
+// One build of a script's running struct, its post-prepare copy, its Param
+// members by parameter table index, and its file members by property index.
 class Generation {
   public:
-    Generation(std::shared_ptr<const D::Code> code, const ParamTable& table, D::Instance* instance)
+    Generation(std::shared_ptr<const D::Code> code, const ParamTable& table,
+               const PropertyList& properties, D::Instance* instance)
         : program_(std::move(code)), self_(program_->create()) {
         D::Instance::bind(*static_cast<S::Plugin*>(self_), instance);
         params_.assign(table.count(), nullptr);
@@ -62,6 +72,10 @@ class Generation {
             const ParamDef& def = table.at(static_cast<size_t>(i));
             D::ParamBinding::setRange(*p, def.min, def.is(pflag::kOffAtMin));
         }
+        files_.assign(properties.count(), -1);
+        for (const D::FileModel& m : program_->files())
+            if (const int i = properties.indexOf(m.id); i >= 0)
+                files_[static_cast<size_t>(i)] = m.offset;
     }
     ~Generation() {
         if (reset_) program_->destroy(reset_);
@@ -74,6 +88,11 @@ class Generation {
     void* self() const { return self_; }
     S::Param* param(size_t index) const { return params_[index]; }
     size_t paramCount() const { return params_.size(); }
+    // Points file property `index`'s member at `contents` (null: none).
+    void bindFile(size_t index, D::FileContents* contents) {
+        if (index < files_.size() && files_[index] >= 0)
+            D::FileBinding::bind(static_cast<unsigned char*>(self_) + files_[index], contents);
+    }
 
     // Main thread: the script's prepare(), then the copy reset() returns to.
     void prepare(D::Instance* instance) {
@@ -93,6 +112,7 @@ class Generation {
     void* self_;
     void* reset_ = nullptr;
     std::vector<S::Param*> params_;
+    std::vector<int> files_;  // each file property's member offset, or -1
 };
 
 class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
@@ -100,7 +120,9 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     explicit ScriptProcessor(const DefinitionPtr& definition)
         : definition_(std::static_pointer_cast<const ScriptDefinition>(definition)),
           table_(&definition_->params()),
-          current_(std::make_unique<Generation>(definition_->code(), *table_, &instance_)) {
+          current_(std::make_unique<Generation>(definition_->code(), *table_,
+                                                definition_->properties(), &instance_)),
+          files_(definition_->properties().count(), nullptr) {
         const D::InfoModel& info = definition_->code()->info();
         latency_ = std::max(0, info.latency);
         tail_ = info.tail < 0 ? UINT32_MAX : static_cast<uint32_t>(info.tail);
@@ -129,6 +151,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
             voices_.setCount(voiceCount_, *this);
         }
         load(*current_, v, true);
+        bindFiles(*current_);
         current_->prepare(&instance_);
         stopped_ = false;
         const size_t channels = static_cast<size_t>(std::max(setup.channels, 0));
@@ -147,9 +170,51 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
 
     void reset() {
         if (instrument_) voices_.reset(*this);
-        current_->reset();
+        current_->reset();  // which restores the files prepare() saw
+        bindFiles(*current_);
+        for (D::FileContents* f : files_)
+            if (f) f->reset();
         if (fading_) retire(std::move(fading_));
         stopped_ = false;
+    }
+
+    // Files: what loadFile() made of a file property's file, at the start of
+    // a block (null: none, a missing one, one that failed).
+    using FileContents = D::FileContents;
+    void file(uint32_t id, D::FileContents* contents) {
+        const int i = definition_->properties().indexOf(id);
+        if (i < 0) return;
+        files_[static_cast<size_t>(i)] = contents;
+        current_->bindFile(static_cast<size_t>(i), contents);
+        if (fading_) fading_->bindFile(static_cast<size_t>(i), nullptr);  // may be freed soon
+    }
+    // On the framework's loading thread: the file's audio, resampled to the
+    // session's rate (an impulse response's first 20 seconds, a sample's
+    // first 10 minutes), and an impulse response's convolution, prepared for
+    // the session's channels.
+    static std::unique_ptr<D::FileContents> loadFile(const FileRequest& r, std::string& error) {
+        const bool impulse = r.kind == static_cast<uint32_t>(D::FileModel::Kind::Impulse);
+        auto audio = ProcessorBase<ScriptProcessor>::loadFile(r, error, impulse ? 20.0 : 600.0);
+        if (!audio) return nullptr;
+        if (audio->frames() == 0 || audio->channels() == 0) {
+            error = "the file holds no audio";
+            return nullptr;
+        }
+        auto contents = std::make_unique<D::FileContents>();
+        contents->audio = std::move(*audio);
+        if (impulse) {
+            const dsp::AudioData& ir = contents->audio;
+            contents->length = static_cast<int>(ir.frames());
+            contents->convolution = std::make_unique<dsp::Convolution>();
+            contents->convolution->prepare(ir.data().data(), ir.channels(), ir.frames(),
+                                           std::max(1, r.channels));
+        }
+        return contents;
+    }
+    static std::string describeFile(const D::FileContents& c) {
+        char line[64];
+        std::snprintf(line, sizeof(line), "%d ch, %.2f s", c.audio.channels(), c.audio.seconds());
+        return line;
     }
 
     // An instrument's notes and controllers (pitch bend, the sustain pedal).
@@ -211,7 +276,8 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     // replace the running one at the start of a block. Main thread, after
     // the first prepare.
     void swap(std::shared_ptr<const D::Code> code, const ParamValues& values) {
-        auto next = std::make_unique<Generation>(std::move(code), *table_, &instance_);
+        auto next = std::make_unique<Generation>(std::move(code), *table_,
+                                                 definition_->properties(), &instance_);
         load(*next, values, true);
         next->prepare(&instance_);
         delete incoming_.exchange(next.release(), std::memory_order_acq_rel);
@@ -309,6 +375,9 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         if (fading_) retire(std::move(fading_));
         fading_ = std::move(current_);
         current_.reset(next);
+        // The files are the new code's now; the old lets go of them.
+        bindFiles(*current_);
+        for (size_t i = 0; i < files_.size(); ++i) fading_->bindFile(i, nullptr);
         fadeDone_ = 0;
         stopped_ = false;
         // The voices sounding carry on in the new code: each starts again,
@@ -319,6 +388,10 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
                     voiceStart(v, true);
                     if (!voices_[v].held) voiceRelease(v);
                 }
+    }
+
+    void bindFiles(Generation& g) {
+        for (size_t i = 0; i < files_.size(); ++i) g.bindFile(i, files_[i]);
     }
 
     // A voice hook: the script runs inside its instance, on a budget.
@@ -405,6 +478,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     D::Instance instance_;
     std::unique_ptr<Generation> current_;
     std::unique_ptr<Generation> fading_;
+    std::vector<D::FileContents*> files_;  // by property index: the framework's, lent
     std::atomic<Generation*> incoming_{nullptr};
     Ring<Generation*, 3> retired_;
     std::vector<std::vector<double>> fadeBuffer_;

@@ -145,6 +145,29 @@ TEST_CASE("the first scripts' mistakes are refused with a hint") {
     CHECK(firstError(head + "double percent(double x) { return x * 0.01; }\n" +
                      "struct T : Effect {\n" + info + "void process(Block& io) {}\n};\n") ==
           "script.name.builtin");
+    // Files: members of the plugin, declared with their kind, never copied
+    // or assigned.
+    CHECK(firstError(plugin("AudioFile s = audioFile(\"Sample\").help(\"A sound.\");\n"
+                            "Convolver r = impulseResponse(\"Room\");\n"
+                            "void process(Block& io) { double x = s.read(0, 1.5) + "
+                            "r.process(0, 0.5); }")) == "");
+    CHECK(firstError(plugin("AudioFile s;\nvoid process(Block& io) {}")) ==
+          "script.file.declaration");
+    CHECK(firstError(plugin("Convolver r = audioFile(\"Room\");\nvoid process(Block& io) {}")) ==
+          "script.file.kind");
+    CHECK(firstError(plugin("AudioFile s = audioFile(\"S\").smoothed(5);\n"
+                            "void process(Block& io) {}")) == "script.file.modifier");
+    CHECK(firstError(plugin("AudioFile s = audioFile(\"S\");\n"
+                            "void process(Block& io) { auto t = s; }")) == "script.local.file");
+    CHECK(firstError(plugin("AudioFile s = audioFile(\"S\");\nAudioFile t = audioFile(\"T\");\n"
+                            "void process(Block& io) { s = t; }")) == "script.file.read_only");
+    CHECK(firstError(plugin("Array<AudioFile, 2> kit;\nvoid process(Block& io) {}")) ==
+          "script.file.array");
+    CHECK(firstError(plugin("AudioFile a = audioFile(\"S\");\n"
+                            "AudioFile b = audioFile(\"T\").withKey(\"a\");\n"
+                            "void process(Block& io) {}")) == "script.file.key");
+    CHECK(firstError(head + "struct V { AudioFile s = audioFile(\"S\"); };\nstruct T : Effect {\n" +
+                     info + "void process(Block& io) {}\n};\n") == "script.file.location");
     // Identities every plugin format and the framework accept.
     auto withInfo = [&](const std::string& fields) {
         return head + "struct T : Effect {\nstatic constexpr Info info = {.name = \"T\", " +

@@ -16,11 +16,13 @@
 // see is a member's name, which a parameter's patch key is made from: the
 // keys come with the code, by member (what the script compiler worked out).
 // A Param with no key there takes the one withKey() gives, or else its
-// name's in snake_case. Scripts never see this header.
+// name's in snake_case; file members (AudioFile, Convolver) the same, from
+// a second list. Scripts never see this header.
 #pragma once
 
 #include <cctype>
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -37,8 +39,17 @@ template <class T>
 class NativeCode final : public Code {
   public:
     using Key = std::pair<Param T::*, const char*>;
+    // A file member's key: {&Sampler::sample, "sample"} (an AudioFile or a
+    // Convolver).
+    struct FileKey {
+        template <class M>
+        FileKey(M T::* m, const char* k)
+            : of([m](const T& t) -> const void* { return &(t.*m); }), key(k) {}
+        std::function<const void*(const T&)> of;
+        const char* key;
+    };
 
-    explicit NativeCode(std::vector<Key> keys = {}) {
+    explicit NativeCode(std::vector<Key> keys = {}, std::vector<FileKey> fileKeys = {}) {
         static_assert(std::is_base_of_v<Plugin, T>, "a plugin struct derives from Effect");
         describe(T::info);
         kind_ = std::is_base_of_v<Instrument, T>   ? PluginKind::Instrument
@@ -60,11 +71,22 @@ class NativeCode final : public Code {
             if (m.id == 0) m.id = keyId(m.key);
             params_.push_back(std::move(m));
         }
+        for (size_t i = 0; i < collector.files.size(); ++i) {
+            FileModel& m = collector.fileModels[i];
+            const void* member = collector.files[i];
+            m.offset = static_cast<int>(static_cast<const unsigned char*>(member) - base);
+            for (const FileKey& k : fileKeys)
+                if (k.of(*probe) == member && m.key.empty()) m.key = k.key;
+            if (m.key.empty()) m.key = snakeCase(m.name);
+            m.id = keyId(m.key);
+            files_.push_back(std::move(m));
+        }
     }
 
     const InfoModel& info() const override { return info_; }
     PluginKind kind() const override { return kind_; }
     const std::vector<ParamModel>& params() const override { return params_; }
+    const std::vector<FileModel>& files() const override { return files_; }
 
     void* create() const override { return new T(); }
     void destroy(void* self) const override { delete static_cast<T*>(self); }
@@ -122,11 +144,24 @@ class NativeCode final : public Code {
     struct Collector final : ParamRegistrar {
         std::vector<const Param*> params;
         std::vector<ParamModel> models;
+        std::vector<const void*> files;
+        std::vector<FileModel> fileModels;
         void declare(Param& param, const ParamSpec& spec) override {
             params.push_back(&param);
             models.push_back(model(spec));
         }
+        void declareFile(void* member, const FileSpec& spec) override {
+            files.push_back(member);
+            FileModel m;
+            m.key = spec.key;
+            m.kind = static_cast<FileModel::Kind>(spec.kind);
+            m.name = spec.name;
+            m.description = spec.description;
+            fileModels.push_back(std::move(m));
+        }
     };
+    static_assert(static_cast<int>(FileSpec::Kind::Impulse) ==
+                  static_cast<int>(FileModel::Kind::Impulse));
 
     // What the script compiler makes of the same spec. The enums match
     // script.h's, value for value.
@@ -199,6 +234,7 @@ class NativeCode final : public Code {
     InfoModel info_;
     PluginKind kind_ = PluginKind::Effect;
     std::vector<ParamModel> params_;
+    std::vector<FileModel> files_;
 };
 
 }  // namespace supple::script::detail

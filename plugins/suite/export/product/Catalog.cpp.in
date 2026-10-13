@@ -35,6 +35,8 @@ class OneScript final : public supple::Catalog {
             made_ = true;
             auto code = std::make_shared<const Code>(std::vector<Code::Key>{
 @KEYS@
+            }, std::vector<Code::FileKey>{
+@FILE_KEYS@
             });
             std::string problems;
             definition_ = supple::suite::makeScriptDefinition(std::move(code), {}, {}, &problems);

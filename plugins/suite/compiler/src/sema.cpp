@@ -334,6 +334,12 @@ const Type* Sema::resolve(TypeSpec* spec, StructDecl* scope, bool allowVoid) {
                           "Param band1Gain = decibels(...); Param band2Gain = ...;");
                     return nullptr;
                 }
+                if (b_.isFile(element)) {
+                    error(spec->loc, "script.file.array", "files are declared one by one",
+                          element->name + " kick = audioFile(\"Kick\"); " + element->name +
+                              " snare = ...;");
+                    return nullptr;
+                }
                 if (element->kind == TypeKind::Object && !element->builtin->declarable) {
                     error(spec->loc, "script.type.template",
                           "an Array cannot hold " + element->name,
@@ -450,7 +456,8 @@ bool Sema::declarable(const Type* t) const {
     if (!t) return true;
     switch (t->kind) {
         case TypeKind::Object:
-            return t->builtin->declarable && !t->builtin->resource && t->builtin != b_.param();
+            return t->builtin->declarable && !t->builtin->resource && t->builtin != b_.param() &&
+                   !b_.isFile(t);
         case TypeKind::Buffer:
             return false;
         case TypeKind::Array:
@@ -550,6 +557,11 @@ void Sema::layout(StructDecl* s) {
                   "move '" + f->name + "' into the struct that derives from Effect");
             continue;
         }
+        if (b_.isFile(ft) && s->base == PluginKind::None) {
+            error(f->loc, "script.file.location", "files are members of the plugin struct itself",
+                  "move '" + f->name + "' into the struct that derives from Effect");
+            continue;
+        }
         if (ft->kind == TypeKind::Object && !ft->builtin->declarable && ft->builtin != b_.param()) {
             error(f->loc, "script.type.member",
                   ft->name + " is the runtime's to make; it cannot be a member",
@@ -639,6 +651,14 @@ void Sema::checkStructs() {
                     error(f->loc, "script.param.declaration",
                           "a parameter is declared with its description",
                           "Param " + f->name + " = decibels(\"Gain\", -24, 24, 0);");
+                continue;  // evaluated with the plugin
+            }
+            if (b_.isFile(t)) {
+                if (!f->init)
+                    error(f->loc, "script.file.declaration", "a file is declared with its name",
+                          t->builtin == b_.convolver()
+                              ? "Convolver " + f->name + " = impulseResponse(\"Room\");"
+                              : "AudioFile " + f->name + " = audioFile(\"Sample\");");
                 continue;  // evaluated with the plugin
             }
             if (!f->init) {
@@ -800,6 +820,11 @@ void Sema::checkLocalDecl(VarDecl* v) {
                   "write double " + v->name + " = " + "...; to read its value");
             return;
         }
+        if (!spec->isRef && b_.isFile(t)) {
+            error(v->loc, "script.local.file", "auto would copy the " + t->name + " member",
+                  "refer to it: auto& " + v->name + " = ...;");
+            return;
+        }
         v->qt = QualType{t, spec->isConst || spec->isConstexpr, spec->isRef};
         if (spec->isRef) {
             // auto& binds what it is given, keeping its constness.
@@ -848,6 +873,14 @@ void Sema::checkLocalDecl(VarDecl* v) {
         if (t->kind == TypeKind::Object && t->builtin == b_.param()) {
             error(v->loc, "script.param.location", "parameters are members of the plugin struct",
                   "declare it as a member of the plugin struct: Param gain = decibels(...);");
+            return;
+        }
+        if (b_.isFile(t)) {
+            error(v->loc, "script.file.location", "files are members of the plugin struct",
+                  "refer to one (" + t->name + "& " + v->name +
+                      " = ...;), or declare it as a member: " +
+                      (t->builtin == b_.convolver() ? "Convolver room = impulseResponse(\"Room\");"
+                                                    : "AudioFile sample = audioFile(\"Sample\");"));
             return;
         }
         if (t->kind == TypeKind::Object && t->builtin->resource) {
@@ -1299,6 +1332,15 @@ void Sema::extractPlugin() {
                       std::to_string(pm.id),
                   "give one an explicit id: .withId(n)");
     }
+    // Files.
+    for (FieldDecl* f : s->fields)
+        if (!f->isStatic && f->init && b_.isFile(f->qt.type)) evaluateFile(f);
+    std::set<std::string> fileKeys;
+    for (size_t i = 0; i < p.files.size(); ++i)
+        if (!fileKeys.insert(p.files[i].key).second)
+            error(p.fileFields[i]->loc, "script.file.key",
+                  "two files have the key '" + p.files[i].key + "'",
+                  "rename one, or give it a key of its own: .withKey(\"other_key\")");
     // Hooks.
     for (FunctionDecl* f : s->methods) {
         const std::string& n = f->name;
@@ -1546,6 +1588,40 @@ void Sema::evaluateInfo(FieldDecl* f) {
     if (info.tail < -1)
         error(f->loc, "script.plugin.info", ".tail is samples, or -1 for forever",
               ".tail = 0 (it stops with its input), the tail in samples, or -1 (it rings forever)");
+}
+
+void Sema::evaluateFile(FieldDecl* f) {
+    const bool convolver = f->qt.type->builtin == b_.convolver();
+    const std::string want = convolver ? "Convolver " + f->name + " = impulseResponse(\"Room\");"
+                                       : "AudioFile " + f->name + " = audioFile(\"Sample\");";
+    auto value = evaluate(f->init, out_.plugin.decl);
+    if (!value) return;
+    if (value->kind != Constant::Kind::File) {
+        error(f->init->loc, "script.file.declaration", "a file is declared with its name", want);
+        return;
+    }
+    FileModel m = value->file;
+    if ((m.kind == FileModel::Kind::Impulse) != convolver) {
+        error(f->init->loc, "script.file.kind",
+              convolver ? "a Convolver's file is an impulse response"
+                        : "an AudioFile is declared with audioFile(); impulse responses are a "
+                          "Convolver's",
+              want);
+        return;
+    }
+    m.member = f->name;
+    if (m.key.empty()) m.key = snakeCase(f->name);
+    if (!validKey(m.key))
+        error(f->loc, "script.file.key", "'" + m.key + "' is not a usable patch key",
+              "keys are lowercase letters, digits and _: rename the member, or give "
+              ".withKey(\"sample\")");
+    m.id = script::detail::keyId(m.key);
+    m.offset = f->offset;
+    if (m.name.empty() || m.name.size() > 63)
+        error(f->init->loc, "script.file.declaration", "a file's name is between 1 and 63 bytes",
+              want);
+    out_.plugin.files.push_back(std::move(m));
+    out_.plugin.fileFields.push_back(f);
 }
 
 void Sema::evaluateParam(FieldDecl* f) {
