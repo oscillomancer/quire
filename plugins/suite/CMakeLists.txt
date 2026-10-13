@@ -80,3 +80,28 @@ if(SUPPLE_BUILD_TESTS)
   add_test(NAME script-examples.tests COMMAND script-examples.tests)
   set_tests_properties(script-examples.tests PROPERTIES LABELS "script-compiler")
 endif()
+
+# What dsp.export's source exports are made of (host/dsp-commands), staged
+# beside the stock plugins as the player is: the template's framework and
+# root files, the suite without its compiler, and the files an export's own
+# part starts from (export/). Copied afresh at every build, so nothing
+# removed here lingers there.
+set(kit ${CMAKE_BINARY_DIR}/plugins/script-export)
+set(kit_template ${CMAKE_SOURCE_DIR}/plugins/template)
+add_custom_target(script-export-kit ALL
+  COMMAND ${CMAKE_COMMAND} -E rm -rf ${kit}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${kit}/template ${kit}/suite
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${kit_template}/framework ${kit}/template/framework
+  COMMAND ${CMAKE_COMMAND} -E copy ${kit_template}/CMakeLists.txt ${kit_template}/CMakePresets.json
+          ${kit_template}/.gitignore ${kit}/template
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/runtime ${kit}/suite/runtime
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/semantic/include
+          ${kit}/suite/semantic/include
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/semantic/src
+          ${kit}/suite/semantic/src
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/glue ${kit}/suite/glue
+  COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/suite.cmake
+          ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE ${kit}/suite
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/export ${kit}/files
+  COMMENT "Staging the script export kit"
+  VERBATIM)

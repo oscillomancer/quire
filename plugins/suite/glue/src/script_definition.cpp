@@ -8,17 +8,7 @@ namespace supple::suite {
 
 using script::detail::ParamModel;
 
-std::string stateTagFor(std::string_view id) {
-    uint32_t h = 2166136261u;
-    for (char c : id) h = (h ^ static_cast<unsigned char>(c)) * 16777619u;
-    static constexpr char kLetters[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    std::string tag;
-    for (int k = 0; k < 4; ++k) {
-        tag += kLetters[h % 52];
-        h = h / 52 + static_cast<uint32_t>(k) * 7919u;
-    }
-    return tag;
-}
+std::string stateTagFor(std::string_view id) { return script::detail::stateTag(id); }
 
 namespace {
 

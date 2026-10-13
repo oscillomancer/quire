@@ -78,6 +78,21 @@ inline std::uint32_t keyId(std::string_view key) {
     return h;
 }
 
+// The four letters a plugin's state is tagged with, made from its ID: as
+// permanent as the ID, and the same wherever the plugin is built (the
+// player, a source export).
+inline std::string stateTag(std::string_view id) {
+    std::uint32_t h = 2166136261u;
+    for (char c : id) h = (h ^ static_cast<unsigned char>(c)) * 16777619u;
+    static constexpr char kLetters[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    std::string tag;
+    for (int k = 0; k < 4; ++k) {
+        tag += kLetters[h % 52];
+        h = h / 52 + static_cast<std::uint32_t>(k) * 7919u;
+    }
+    return tag;
+}
+
 // Immutable once made; any number of instances share it, on any thread.
 class Code {
   public:

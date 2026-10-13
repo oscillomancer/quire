@@ -1,0 +1,42 @@
+# @NAME@
+
+@DESCRIPTION@
+
+A DSP script, `product/script/@FILE@`, as a plugin of its own: the script
+compiled as C++ and run by the same glue as the script player, on the
+Supple Audio plugin framework @FRAMEWORK_VERSION@. It is the plugin the
+player plays, with the same ID, parameters and state, so sessions and
+presets made with one load in the other.
+
+## Building
+
+```sh
+cmake --preset release
+cmake --build --preset release
+ctest --preset release
+```
+
+The built plugins are in `build/release/plugins/`. See
+[framework/docs/BUILDING.md](framework/docs/BUILDING.md) for platforms,
+sanitizers, validators and installing.
+
+## Layout
+
+- `product/script/@FILE@`: the script as it was written. It is ordinary
+  C++ against `suite/runtime/include/supple/script.h`; change it there.
+  The script compiler does not check it here, so what the player refuses
+  (allocating in `process()`, an integer divided by a variable, ...) is
+  yours to avoid.
+- `product/Catalog.cpp`: makes the plugin from the script and lists each
+  parameter's patch key, since C++ cannot see member names. List a `Param`
+  you add there.
+- `suite/`: the script runtime, the semantic-params layer and the glue.
+- `framework/`: the plugin framework, unchanged from the template; update
+  it with `framework/tools/update_framework.cmake`.
+
+## License
+
+@LICENSE_TEXT@ The framework in `framework/` and the suite in `suite/` are
+MIT licensed (their `LICENSE` files). Third-party notices are in
+`framework/NOTICES.txt` and `product/NOTICES.txt`, and ship inside every
+built plugin.

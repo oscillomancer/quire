@@ -1,0 +1,41 @@
+# @NAME@: the DSP script in product/script/ as a plugin of its own,
+# compiled as C++ and run by the suite's glue (suite/) as the script player
+# runs it. The plugin is what the script declares (product/Catalog.cpp): its
+# parameters, buses and identity come from the script, so a session or a
+# preset saved with the player's plugin loads in this one.
+#
+# PRODUCT_ID and PRODUCT_STATE_TAG are the plugin's own, permanent once
+# shipped. The state tag is the one the player gives this ID.
+
+set(PRODUCT_NAME        "@NAME@")
+set(PRODUCT_ID          "@ID@")
+set(PRODUCT_VERSION     "@VERSION@")
+set(PRODUCT_DESCRIPTION "@DESCRIPTION@")
+set(PRODUCT_VENDOR      "@VENDOR@")
+set(PRODUCT_URL         "@URL@")
+set(PRODUCT_COPYRIGHT   "@COPYRIGHT@")
+set(PRODUCT_CODE        "@CODE@")
+
+set(PRODUCT_RUNTIME     ON)
+set(PRODUCT_KIND        "effect")
+set(PRODUCT_CHANNELS    @CHANNELS@)
+set(PRODUCT_FEATURES    "audio-effect")
+
+# The suite's layer: the semantic-params extension and the script's status
+# in the host's log.
+set(PRODUCT_LAYER           ON)
+set(PRODUCT_LAYER_SOURCES   product/Layer.cpp)
+
+# AU codes: the manufacturer code is made from the vendor; Apple asks that
+# it be registered, so choose your own before shipping for macOS.
+set(PRODUCT_AU_MANUFACTURER "@MANUFACTURER@")
+set(PRODUCT_AU_SUBTYPE      "@TAG@")
+set(PRODUCT_STATE_TAG       "@TAG@")
+
+set(PRODUCT_DSP_SOURCES     product/Catalog.cpp)
+# The automatic editor, laid out from the script's parameters.
+set(PRODUCT_EDITOR_SOURCES  "")
+set(PRODUCT_TEST_SOURCES    "")
+
+set(PRODUCT_SMOKE_PLAIN_PARAM   "@SMOKE_PARAM@")
+set(PRODUCT_SMOKE_LATENCY_PARAM "")
