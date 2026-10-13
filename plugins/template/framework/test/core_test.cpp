@@ -1050,7 +1050,7 @@ TEST(smoothed_parameters_glide_sample_accurately_and_settle_exactly) {
     }
     // Reset snaps: what follows starts at the value, not on the way to it.
     auto reused = std::make_unique<BasicEngine<GlideProbe>>();
-    glide(*reused, {512}, 4096, 1000, 0.2, 0.8, 512);
+    glide(*reused, {512}, 4096, 1000, 0.2, 0.8, 1024);
     reused->reset();
     std::vector<double> l(512), r(512);
     double* io[] = {l.data(), r.data()};
@@ -1061,6 +1061,29 @@ TEST(smoothed_parameters_glide_sample_accurately_and_settle_exactly) {
         bool snapped = true;
         for (int i = 4096; i < 4096 + 512; ++i) snapped &= reused->processor().trace[k][static_cast<size_t>(i)] == to;
         CHECK_MSG(snapped, "%s glided on after reset()", p.name);
+    }
+    // So does a change flushed after reset(), before any audio: a host's
+    // render resets, flushes the values it wants, then processes.
+    struct Back {
+        size_t k = 0;
+        bool next(EngineEvent& ev) {
+            if (k == params::kSmoothedCount) return false;
+            const size_t i = params::kSmoothedIndices[k++];
+            ev = EngineEvent{};
+            ev.index = static_cast<int>(i);
+            ev.value = fromNormalized(params::at(i), 0.2);
+            return true;
+        }
+    } back;
+    reused->reset();
+    reused->flush(back);
+    reused->process<double>(io, io, 512);
+    for (size_t k = 0; k < params::kSmoothedCount; ++k) {
+        const ParamDef& p = params::at(params::kSmoothedIndices[k]);
+        const double to = toPlain(p, fromNormalized(p, 0.2));
+        bool snapped = true;
+        for (int i = 4096 + 512; i < 4096 + 1024; ++i) snapped &= reused->processor().trace[k][static_cast<size_t>(i)] == to;
+        CHECK_MSG(snapped, "%s glided to a value flushed after reset()", p.name);
     }
 }
 

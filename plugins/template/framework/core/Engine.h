@@ -355,6 +355,7 @@ class BasicEngine {
         resetPeaks();
         restartWanted_.store(false, std::memory_order_relaxed);
         active_ = true;
+        unplayed_ = true;
         return true;
     }
 
@@ -440,7 +441,8 @@ class BasicEngine {
 
     // Clears every trace of earlier audio, and adopts whatever the store holds
     // now -- a state loaded just before reset() included -- snapped, not
-    // glided to: what follows depends only on the current state.
+    // glided to, as are changes flushed before the next block: what follows
+    // depends only on the current state.
     void reset() SUPPLE_REALTIME {
         if (!active_) return;
         noteOutput_.clear();
@@ -452,6 +454,7 @@ class BasicEngine {
         bypass_.set(bypassOn() ? 1.0 : 0.0, true);
         reinitialize();
         deferNotes(0);
+        unplayed_ = true;
     }
 
     // Parameter events with no audio (CLAP params.flush). Valid active or not.
@@ -536,6 +539,7 @@ class BasicEngine {
             if (pending) end = std::min(end, static_cast<int>(e.time));
             if (metering) end = std::min(end, frame + countdown_);
             run(io, frame, end - frame, metering, transport);
+            unplayed_ = false;
             if (metering) {
                 countdown_ -= end - frame;
                 if (countdown_ <= 0) {
@@ -667,12 +671,17 @@ class BasicEngine {
                     if (flagged(i, pflag::kRestart) && values_.changed(table_->at(i).id))
                         restartWanted_.store(true, std::memory_order_release);
             }
+            // With no audio since activation or reset() there is nothing to
+            // glide from: a change then (a flush before the first block)
+            // snaps, so the next render depends only on the values it is
+            // given.
+            const bool snap = values_.initial() || unplayed_;
             if (table_->bypassIndex() >= 0 &&
                 values_.changed(table_->at(static_cast<size_t>(table_->bypassIndex())).id))
-                bypass_.set(bypassOn() ? 1.0 : 0.0);
+                bypass_.set(bypassOn() ? 1.0 : 0.0, snap);
             const auto& smoothed = table_->smoothed();
             for (size_t k = 0; k < smoothed.size(); ++k)
-                if (values_.changed(table_->at(smoothed[k]).id)) retarget(k, values_.initial());
+                if (values_.changed(table_->at(smoothed[k]).id)) retarget(k, snap);
             processor_.update(values_);
             reread();
         }
@@ -987,6 +996,7 @@ class BasicEngine {
     int channelsOut_ = 2;
     Layout layout_ = Layout::Stereo;
     bool active_ = false;
+    bool unplayed_ = false;  // no audio since activation or reset()
     std::vector<std::vector<double>> scratch_;
     std::vector<double*> pointers_;
     std::vector<std::vector<double>> sidechain_;  // [channel]

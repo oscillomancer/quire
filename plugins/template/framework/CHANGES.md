@@ -4,6 +4,16 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.16.2
+
+What a product must do: nothing.
+
+- **No glide before the first block.** A smoothed parameter, or the bypass,
+  changed after activation or `reset()` and before any audio (a host's
+  render: reset, flush the values it wants, process) now starts at its new
+  value rather than gliding to it, so that render depends only on those
+  values. Quire's reset check (`clap-reset-check`) failed without it.
+
 ## 1.16.1
 
 Two pins moved, the VST3 is optional, and a product's folder can be
