@@ -28,14 +28,10 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
    `fx_patch_get`, `fx_patch_merge` and `fx_param_set` work in its units.
    An instrument goes first on its track, and plays the track's notes:
    `item_add {track, bar, notation: "..."}` (`guides/notation.md`).
-   `fx_patch_list {fx}` lists its read-only factory patches as canonical
-   patch documents; `fx_patch_set {fx, name: "Warm"}` applies one as a
-   complete replacement, undoable like any patch edit. Give exactly one of
-   `name` or `patch` to `fx_patch_set`. In the sandbox, use
-   `preset_list {plugin: "<id>", source: "factory"}` and
-   `preset_load {instance, name: "Warm", source: "factory"}`; listing marks
-   them `read_only: true`. User presets remain the default source and may
-   share a name with a factory patch.
+   `fx_patch_list {fx}` lists its factory patches and `fx_patch_set {fx,
+   name: "Warm"}` applies one (undoable). In the sandbox: `preset_list
+   {plugin, source: "factory"}` and `preset_load {instance, name, source:
+   "factory"}`.
 4. **Measure it.** `dsp_test {script: "tilt_eq"}` plays a
    sine, a sweep, an impulse, pink noise and silence through a fresh
    instance and reports levels, the sine's `gain_db` and `thd_percent`, the
@@ -104,68 +100,30 @@ library and have the same seven commands.
 
 ## Test what changes over time
 
-A static patch cannot show whether moving a knob clicks or becomes unstable.
-Use `automation` to send discrete changes during every selected signal, in
-physical units and at sample offsets rounded from seconds:
+`dsp_test` can also move parameters, feed a sidechain and play your own
+notes. Each signal still gets a fresh instance.
+
+- `automation: [{param, at_s, value}]`: changes in the patch's units at
+  those times, during every signal (no ramps: give several points for a
+  gradual move). `automation.excess_step` is how much larger the biggest
+  sample-to-sample step is than without the automation; when `problems`
+  says it may click, make the parameter `.smoothed()` and read it with
+  `.at(i)`.
+- `sidechain: {signal, level_db, frequency_hz, start_s, length_s}`: a key
+  for a plugin with a sidechain input, playing over part of the render.
+  `sidechain.gain_change_db` is how far the output moved while the key
+  played, compared with a silent key: negative is ducking.
+- `notes: [{key, velocity, start_s, length_s}]`: an instrument's notes
+  (MIDI keys) in place of the fixed note and chord; `release_ms` counts
+  from the last note-off.
 
 ```json
-{"script":"tilt_eq","signals":["sine"],"automation":[
-  {"param":"output","at_s":0.253,"value":-12},
-  {"param":"output","at_s":0.753,"value":0}
-]}
+{"script": "compressor", "signals": ["sine"], "level_db": -30,
+ "sidechain": {"signal": "sine", "level_db": -6, "start_s": 0.25, "length_s": 0.5}}
 ```
 
-Use the plugin's patch keys and ranges; enum keys and booleans work too.
-There is no automatic ramp: supply intermediate points for gradual motion
-or a dense staircase to probe zipper noise (up to 1024 points). Each signal
-gets a fresh instance/initial patch. `automation.max_step` is the largest
-adjacent-sample change, `baseline_max_step` the same render without changes,
-`excess_step` their positive difference, all in full-scale amplitude. A step
-over 0.05 and four times baseline suggests checking `.smoothed()` and
-`.at(i)`. Intended changes can also increase it, and a small step does not
-prove inaudibility. Read `problems` for clipping, nonfinite output and loops
-from both passes, then save and inspect/listen to the primary audio.
-
-For a sidechain compressor, send a key while the main sine plays:
-
-```json
-{"script":"compressor","signals":["sine"],"level_db":-30,
- "sidechain":{"signal":"sine","level_db":-6,"frequency_hz":100,
-              "start_s":0.25,"length_s":0.5}}
-```
-
-Only a plugin with a key input accepts it. The key is connected and silent
-outside its span. All those key fields are optional: the example's values
-are defaults for `seconds: 1`; default start/length scale with `seconds`.
-`sidechain.gain_change_db` compares output in the middle half of the span
-against a fresh render with a connected silent key and the same automation:
-a negative value measures ducking. `rms_dbfs`/`reference_rms_dbfs` give the
-levels. Gain change is null if either output is below -120 dBFS (e.g. main
-silence); slow attack may need a longer key/longer `seconds` to settle.
-Repeat with `sidechain: {signal: "silence"}` as a control.
-
-For an instrument, use a note sequence to check velocity, overlapping
-notes, repeated keys and release:
-
-```json
-{"script":"synth","notes":[
-  {"key":60,"velocity":0.8,"start_s":0.013,"length_s":0.2},
-  {"key":67,"velocity":0.6,"start_s":0.303,"length_s":0.4}
-]}
-```
-
-Keys are 0..127, velocity (0,1] (default 0.8); spans must fit within
-`seconds` (the final release may be exactly at its end). Distinct note IDs
-let repeated keys overlap. With custom notes the default signals are
-`notes` and `silence`; don't select the A4 `note` signal or only silence.
-`release_ms` starts at the actual final note-off, and no A4 tuning check is
-reported for a custom sequence. Without `notes`, the usual A4 check remains.
-At the same sample, parameter changes precede note-offs, then note-ons.
-
-Automation and a key may be combined. THD/impulse response are omitted with
-automation or a non-silent key because they no longer describe static
-behavior; sine gain is measured across the changing render. Only primary
-outputs are saved; `cpu_percent` includes reference renders too.
+With automation or a sounding key, THD and the impulse response are left
+out: they describe a plugin that holds still.
 
 ## Follow the stock plugins
 
@@ -179,16 +137,12 @@ follow the same conventions as the stock plugins:
   sentence each, `.in()` groups when there are more than five or six.
 - **Defaults that do something sensible**, and a neutral setting reachable
   (0 dB, 0% wet, a flat tilt).
-- **Useful factory patches** in `factoryPatches(Patches& p)`: a neutral
-  reference, a subtle everyday setting, and a stronger useful contrast.
-  Name the sound or use ("Warm", "Slap", "Parallel crunch"); balance output
-  levels so louder does not win by accident. For a percent write 30, as in
-  the patch. Start with the tilt, echo and drive examples. Measure each
-  patch with `dsp_test {script, patch: <the listed patch>}` and listen on
-  suitable material. They also appear in other hosts' factory discovery
-  and the preset bar. Editing factory declarations refreshes the immutable
-  preset table through a plugin restart; ordinary DSP-only edits still swap
-  in place.
+- **Useful factory patches** (`factoryPatches`, as in the tilt, echo and
+  drive examples): a neutral one, an everyday setting and a stronger
+  contrast, named for the sound or the use ("Warm", "Slap", "Parallel
+  crunch"), with levels balanced so louder does not win. Check each with
+  `dsp_test {script, patch}`. Other hosts show them in their preset
+  browsers, and the plugin in its preset bar.
 - **`.smoothed(20)`** on anything that scales the audio directly (levels,
   mix, pan), read with `.at(i)`, so automation and edits never click.
 - **A stable id**: `Info.id` is how projects find the plugin. Pick it once
@@ -198,7 +152,7 @@ follow the same conventions as the stock plugins:
 ## Mistakes to avoid
 
 - A percent parameter reads as a fraction: `percent("Mix", 30)` is `0.3` in
-  code, `30` in the patch.
+  code, `30` in the patch and in `factoryPatches`.
 - `io.channels` may be 1 (mono) or 2: index per-channel state with `c` and
   loop `c < io.channels`; an `Array<Biquad, 2>` covers both.
 - Allocation belongs in `prepare()`: `DelayLine::prepare`, `Buffer::resize`.

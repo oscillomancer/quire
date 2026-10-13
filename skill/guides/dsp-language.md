@@ -83,9 +83,6 @@ patch says `"gain": -3`), exactly as with the stock plugins.
 | `toggle(name, def)` | on or off; read `.on()` |
 | `continuous(name, min, max, def, Unit::...)` | anything else: `Unit::Bpm`, `Unit::Samples`, or no unit (`Unit::None`, the default) |
 
-**Factory patches use patch values:** a percent is **30**, as the patch
-shows it, even though the audio code reads that parameter as **0.3**.
-
 Modifiers chain: `decibels("Output", -24, 12, 0).smoothed(20).help("...")`.
 
 | Modifier | Effect |
@@ -105,7 +102,8 @@ Reading: a `Param` reads as a `double` in its unit (`gain * 0.5`), with
 `.value()`, `.at(i)` (the glide at frame `i`), `.index()`, `.on()`,
 `.gain()` (dB as linear gain) and, in `update()`, `.changed()`.
 
-**Factory patches.** Add a declaration-only hook inside the plugin struct:
+**Factory patches** are declared in the plugin struct, in patch values (a
+percent as 30, though the audio code reads it as 0.3):
 
 ```cpp
 void factoryPatches(Patches& p) {
@@ -115,17 +113,10 @@ void factoryPatches(Patches& p) {
 }
 ```
 
-These are the tilt example's three patches. Each statement starts with
-`p.add("Name")`, followed by zero or more `.set(ParamMember, value)` calls.
-Names are unique, nonempty, at most 64 bytes; values are constants in patch
-units, bools, or choice keys (`.set(shape, "soft")`). The compiler checks
-ranges and rejects readonly meters, duplicate assignments, unknown members
-and choices. Omitted parameters take defaults. Use the Param member, not a
-quoted key; `withKey()` still controls its serialized key. No loops,
-branches, locals or other calls belong here, and other hooks cannot call
-`factoryPatches()`. It is metadata, never audio code. Patches stay in this
-one file and reach the player, plugin exports and native source exports;
-no sidecar or separate preset table is needed.
+Each patch is `p.add("Name")` and `.set(member, value)` calls with a
+constant, a bool or a choice's key (`.set(shape, "soft")`); a parameter left
+out takes its default. Nothing else belongs here (no loops or locals), and
+the compiler checks names, ranges and choices.
 
 **Keys and IDs.** A parameter's patch key is its member's name in
 snake_case (`lowCut` is `low_cut`), and its CLAP id is a hash of the key.
