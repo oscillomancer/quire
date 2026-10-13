@@ -545,7 +545,7 @@ void Sema::layout(StructDecl* s) {
             s->base == PluginKind::None) {
             error(f->loc, "script.param.location",
                   "parameters are members of the plugin struct itself",
-                  "move '" + f->name + "' into the struct that derives from Effect or Instrument");
+                  "move '" + f->name + "' into the struct that derives from Effect");
             continue;
         }
         if (ft->kind == TypeKind::Object && !ft->builtin->declarable && ft->builtin != b_.param()) {
@@ -1205,8 +1205,7 @@ void Sema::extractPlugin() {
         if (s->base != PluginKind::None) plugins.push_back(s);
     if (plugins.empty()) {
         error(Loc{1, 1}, "script.plugin.missing", "the script declares no plugin",
-              "declare one struct that derives from Effect (audio in and out) or Instrument (notes "
-              "in, audio out): "
+              "declare one struct that derives from Effect (audio in and out): "
               "struct MyPlugin : Effect { ... };");
         return;
     }
@@ -1223,9 +1222,12 @@ void Sema::extractPlugin() {
     }
     p.decl = s;
     p.kind = s->base;
-    if (p.kind == PluginKind::NoteEffect)
-        error(s->baseLoc, "script.plugin.kind", "note effects are not available to scripts yet",
-              "derive from Effect or Instrument");
+    // Scripts get no notes yet, so only an effect can do anything.
+    if (p.kind != PluginKind::Effect)
+        error(s->baseLoc, "script.plugin.kind",
+              std::string(p.kind == PluginKind::Instrument ? "instruments" : "note effects") +
+                  " are not available to scripts yet (scripts receive no notes)",
+              "derive from Effect: audio in, audio out");
     // Info.
     FieldDecl* infoField = nullptr;
     for (FieldDecl* f : s->fields)

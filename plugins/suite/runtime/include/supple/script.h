@@ -496,9 +496,9 @@ class Plugin {
 
 // Audio in, audio out.
 class Effect : public Plugin {};
-// Notes in, audio out.
+// Notes in, audio out; notes in, notes out. Not available to scripts yet:
+// they receive no notes, and the compiler says so.
 class Instrument : public Plugin {};
-// Notes in, notes out, no audio.
 class NoteEffect : public Plugin {};
 
 // --- DSP -------------------------------------------------------------------------
