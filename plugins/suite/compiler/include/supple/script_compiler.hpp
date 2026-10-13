@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Supple Audio
 //
 // The DSP script compiler, for C++ callers (the player, Quire's commands and
-// tests). supple/script_compiler.h is the same surface as a C ABI.
+// tests).
 //
 //   auto result = supple::scriptc::compile(source);
 //   if (!result.program) report(result.diagnostics);   // each with a hint

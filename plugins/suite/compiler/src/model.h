@@ -3,7 +3,7 @@
 //
 // What semantic analysis learns about a script's plugin: its identity, its
 // parameter table, its hooks and the layout of its struct. Code generation
-// and the runtime glue read it; the C ABI reports it.
+// reads it, and the Program it makes describes the plugin to the glue.
 #pragma once
 
 #include <cstdint>
