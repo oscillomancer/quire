@@ -93,9 +93,9 @@ if(SUPPLE_BUILD_PLUGINS)
   # tree (plugins/template) with plugins/<product> as its product folder, as
   # an isolated ExternalProject. Its dependencies are this repository's
   # third_party copies, at the template's pins; it makes the CLAP alone
-  # unless SUPPLE_PLUGIN_VST3 (with a complete VST3_SDK_ROOT). The plugin
-  # stays in its build folder, plugins/<name>/plugins/<artifact>.clap. Its
-  # own ctest suite becomes plugin.<name>.ctest.
+  # unless SUPPLE_PLUGIN_VST3 (with a complete VST3_SDK_ROOT). The CLAP, its
+  # license and notices are staged in plugins/clap beside the stock plugins.
+  # Its own ctest suite becomes plugin.<name>.ctest.
   function(supple_add_template_product name product artifact)
     set(plugin_build "${CMAKE_BINARY_DIR}/plugins/${name}")
     # As for the stock plugins: instrumented for tsan and rtsan, whose hosts
@@ -132,11 +132,19 @@ if(SUPPLE_BUILD_PLUGINS)
         -DFETCHCONTENT_SOURCE_DIR_NANOVG=${tp}/nanovg
         -DFETCHCONTENT_SOURCE_DIR_NANOSVG=${tp}/nanosvg
       BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --parallel 1)
+    set(staged "${CMAKE_BINARY_DIR}/plugins/clap")
+    ExternalProject_Add_Step(plugin-${name} stage
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${staged}"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${plugin_build}/plugins/${artifact}.clap"
+              "${plugin_build}/plugins/${artifact}-LICENSE.txt"
+              "${plugin_build}/plugins/${artifact}-NOTICES.txt" "${staged}"
+      DEPENDEES build
+      ALWAYS TRUE)
     if(SUPPLE_BUILD_TESTS)
       add_test(NAME plugin.${name}.ctest
         COMMAND ${CMAKE_CTEST_COMMAND} --test-dir "${plugin_build}" --output-on-failure)
     endif()
-    set(${name}_clap "${plugin_build}/plugins/${artifact}.clap" PARENT_SCOPE)
+    set(${name}_clap "${staged}/${artifact}.clap" PARENT_SCOPE)
   endfunction()
 
   supple_add_plugin(gate GATE)
