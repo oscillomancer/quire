@@ -1737,6 +1737,10 @@ std::shared_ptr<const Program> Codegen::run() {
     d.prepare = reinterpret_cast<Program::Hook>(hook(model.prepare));
     d.update = reinterpret_cast<Program::Hook>(hook(model.update));
     d.process = reinterpret_cast<Program::ProcessHook>(hook(model.process));
+    d.startVoice = reinterpret_cast<Program::VoiceHook>(hook(model.startVoice));
+    d.startVoiceRetrigger = reinterpret_cast<Program::StartHook>(hook(model.startVoiceRetrigger));
+    d.releaseVoice = reinterpret_cast<Program::VoiceHook>(hook(model.releaseVoice));
+    d.stopVoice = reinterpret_cast<Program::VoiceHook>(hook(model.stopVoice));
     program_ = nullptr;
     return program;
 }
@@ -1769,6 +1773,10 @@ std::size_t Program::size() const { return static_cast<std::size_t>(d_->size); }
 Program::Hook Program::prepare() const { return d_->prepare; }
 Program::Hook Program::update() const { return d_->update; }
 Program::ProcessHook Program::process() const { return d_->process; }
+Program::VoiceHook Program::startVoice() const { return d_->startVoice; }
+Program::StartHook Program::startVoiceRetrigger() const { return d_->startVoiceRetrigger; }
+Program::VoiceHook Program::releaseVoice() const { return d_->releaseVoice; }
+Program::VoiceHook Program::stopVoice() const { return d_->stopVoice; }
 
 void* Program::create() const {
     const std::size_t bytes = (static_cast<std::size_t>(d_->size) + 63) / 64 * 64;

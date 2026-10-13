@@ -139,9 +139,21 @@ TEST_CASE("the first scripts' mistakes are refused with a hint") {
     CHECK(firstError(withInfo(".id = \"com.example.t\", .version = \"1.2\"")) ==
           "script.plugin.info");
     CHECK(firstError(withInfo(".id = \"com.example.t\", .version = \"1.2.10\"")) == "");
-    // Scripts receive no notes yet: an instrument would compile and stay silent.
-    CHECK(firstError(head + "struct T : Instrument {\n" + info +
-                     "void process(Block& io) {}\n};\n") == "script.plugin.kind");
+    // Instruments: notes reach voices through the voice hooks, which only an
+    // instrument has; scripts send no notes, so no note effects.
+    auto instrument = [&](const std::string& body) {
+        return head + "struct T : Instrument {\n" + info + body + "\n};\n";
+    };
+    CHECK(firstError(instrument("void process(Block& io) {}")) == "script.plugin.voices");
+    CHECK(firstError(instrument("void startVoice(int v) {}\nvoid process(Block& io) {}")) ==
+          "script.plugin.voices");
+    CHECK(firstError(instrument("void startVoice(double v) {}\nvoid releaseVoice(int v) {}\n"
+                                "void process(Block& io) {}")) == "script.plugin.hook");
+    CHECK(firstError(plugin("void releaseVoice(int v) {}\nvoid process(Block& io) {}")) ==
+          "script.plugin.hook");
+    CHECK(firstError(plugin("void process(Block& io) { int k = voiceKey(0); }")) ==
+          "script.plugin.instrument");
+    CHECK(firstError(head + "struct T : NoteEffect {\n" + info + "};\n") == "script.plugin.kind");
 }
 
 TEST_CASE("continuous() takes a unit, for the units without a factory") {
@@ -158,4 +170,49 @@ struct T : Effect {
     REQUIRE(r.program->params().size() == 2);
     CHECK(r.program->params()[0].unit == scriptc::ParamModel::Unit::Bpm);
     CHECK(r.program->params()[1].unit == scriptc::ParamModel::Unit::None);
+}
+
+TEST_CASE("an instrument takes its notes through voice hooks") {
+    const std::string source = R"(#include <supple/script.h>
+
+struct Synth : Instrument {
+    static constexpr Info info = {.name = "Synth", .id = "com.example.synth", .voices = 4};
+    Param glide = milliseconds("Glide", 0, 500, 0);
+
+    struct Voice {
+        Oscillator osc;
+        Adsr env;
+    };
+    Array<Voice, 4> voice;
+
+    void update() {
+        setVoiceMode(glide > 0 ? VoiceMode::Legato : VoiceMode::Poly);
+        setGlide(glide);
+    }
+    void startVoice(int v, bool retrigger) {
+        if (retrigger) voice[v].env.gate(true);
+    }
+    void releaseVoice(int v) { voice[v].env.gate(false); }
+    void stopVoice(int v) { voice[v].env.kill(); }
+    void process(Block& io) {
+        for (int v = 0; v < voiceCount(); ++v) {
+            if (!voicePlaying(v)) continue;
+            for (int i = 0; i < io.frames; ++i) {
+                voice[v].osc.setFrequency(voiceHz(v, i));
+                const double tone = voice[v].osc.next();
+                const double x = tone * voice[v].env.next() * voiceVelocity(v);
+                for (int c = 0; c < io.channels; ++c) io[c][i] += x;
+            }
+            if (!voice[v].env.active()) voiceFinished(v);
+        }
+    }
+};
+)";
+    auto r = compileOk(source);
+    CHECK(r.program->kind() == scriptc::PluginKind::Instrument);
+    CHECK(r.program->info().voices == 4);
+    CHECK(r.program->startVoiceRetrigger() != nullptr);
+    CHECK(r.program->startVoice() == nullptr);
+    CHECK(r.program->releaseVoice() != nullptr);
+    CHECK(r.program->stopVoice() != nullptr);
 }

@@ -376,6 +376,8 @@ const Type* Sema::resolve(TypeSpec* spec, StructDecl* scope, bool allowVoid) {
             t = e->type;
         } else if (const BuiltinClass* c = b_.cls(first)) {
             t = c->type;
+        } else if (const Type* named = b_.enumNamed(first)) {
+            t = named;
         }
     } else if (path.size() >= 2) {
         // Outer::Inner, Oscillator::Shape.
@@ -1249,12 +1251,11 @@ void Sema::extractPlugin() {
     }
     p.decl = s;
     p.kind = s->base;
-    // Scripts get no notes yet, so only an effect can do anything.
-    if (p.kind != PluginKind::Effect)
+    // Notes out are not available yet: no note effects.
+    if (p.kind == PluginKind::NoteEffect)
         error(s->baseLoc, "script.plugin.kind",
-              std::string(p.kind == PluginKind::Instrument ? "instruments" : "note effects") +
-                  " are not available to scripts yet (scripts receive no notes)",
-              "derive from Effect: audio in, audio out");
+              "note effects are not available to scripts yet (scripts send no notes)",
+              "derive from Effect (audio in, audio out) or Instrument (notes in, audio out)");
     // Info.
     FieldDecl* infoField = nullptr;
     for (FieldDecl* f : s->fields)
@@ -1313,6 +1314,27 @@ void Sema::extractPlugin() {
                             f->params[0]->qt.type->builtin == b_.block() &&
                             f->params[0]->qt.isRef && !f->params[0]->qt.isConst && !f->isConst;
             if (expectSignature(ok, "void process(Block& io)")) p.process = f;
+        } else if (n == "startVoice" || n == "releaseVoice" || n == "stopVoice") {
+            if (p.kind != PluginKind::Instrument) {
+                error(f->loc, "script.plugin.hook",
+                      n + "() is an instrument's hook, and " + s->name + " gets no notes",
+                      "derive from Instrument to play notes, or give the function another name");
+                continue;
+            }
+            auto plain = [&](size_t i, const Type* t) {
+                return f->params.size() > i && f->params[i]->qt.type == t &&
+                       !f->params[i]->qt.isRef;
+            };
+            const bool takesVoice = isVoid && !f->isConst && plain(0, b_.intType());
+            if (n == "startVoice") {
+                const bool one = takesVoice && f->params.size() == 1;
+                const bool two = takesVoice && f->params.size() == 2 && plain(1, b_.boolType());
+                if (expectSignature(one || two, "void startVoice(int v)"))
+                    (two ? p.startVoiceRetrigger : p.startVoice) = f;
+            } else if (expectSignature(takesVoice && f->params.size() == 1,
+                                       "void " + n + "(int v)")) {
+                (n == "releaseVoice" ? p.releaseVoice : p.stopVoice) = f;
+            }
         } else if (n == "reset") {
             error(
                 f->loc, "script.plugin.reset",
@@ -1332,6 +1354,16 @@ void Sema::extractPlugin() {
                   "the runtime calls update() after parameters change, not " + n + "()",
                   "rename it: void update()");
         }
+    }
+    if (p.kind == PluginKind::Instrument) {
+        if (!p.startVoice && !p.startVoiceRetrigger)
+            error(s->loc, "script.plugin.voices", s->name + " needs  void startVoice(int v)",
+                  "the runtime calls it when voice v starts a note: start its envelope there, "
+                  "reading voiceKey(v) and voiceVelocity(v)");
+        if (!p.releaseVoice)
+            error(s->loc, "script.plugin.voices", s->name + " needs  void releaseVoice(int v)",
+                  "the runtime calls it when voice v's key is up: start its release there, and "
+                  "call voiceFinished(v) in process() once it has died away");
     }
     if (!p.process && p.kind != PluginKind::NoteEffect)
         error(s->loc, "script.plugin.process", s->name + " needs  void process(Block& io)",
@@ -1498,6 +1530,9 @@ void Sema::evaluateInfo(FieldDecl* f) {
             error(f->loc, "script.plugin.info", "'" + info.version + "' is not a version",
                   ".version = \"1.2.0\" (major, minor, patch)");
     }
+    if (info.voices < 0 || info.voices > 64)
+        error(f->loc, "script.plugin.info", ".voices is from 1 to 64 (0: the default, 8)",
+              ".voices = 8");
     if (info.latency < 0)
         error(f->loc, "script.plugin.info", ".latency cannot be negative",
               ".latency = 0, or the delay the plugin adds, in samples");
@@ -1664,6 +1699,10 @@ void Sema::contexts() {
     mark(p.prepare, kInit);
     mark(p.update, kAudio);
     mark(p.process, kAudio);
+    mark(p.startVoice, kAudio);
+    mark(p.startVoiceRetrigger, kAudio);
+    mark(p.releaseVoice, kAudio);
+    mark(p.stopVoice, kAudio);
     // Recursion: a cycle in the call graph.
     std::map<FunctionDecl*, int> state;  // 1: on the stack, 2: done
     std::function<bool(FunctionDecl*)> visit = [&](FunctionDecl* f) -> bool {

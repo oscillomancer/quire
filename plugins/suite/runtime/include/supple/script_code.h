@@ -120,6 +120,17 @@ class Code {
     virtual Hook prepare() const = 0;
     virtual Hook update() const = 0;
     virtual ProcessHook process() const = 0;
+
+    // An instrument's voice hooks (script.h's Instrument), with the voice's
+    // index (and for startVoice, whether to retrigger) as 64-bit integers.
+    // startVoice is the one-argument form, startVoiceRetrigger the
+    // two-argument one; a script has at most one of them.
+    using VoiceHook = void (*)(void* ctx, void* self, std::int64_t v);
+    using StartHook = void (*)(void* ctx, void* self, std::int64_t v, std::int64_t retrigger);
+    virtual VoiceHook startVoice() const { return nullptr; }
+    virtual StartHook startVoiceRetrigger() const { return nullptr; }
+    virtual VoiceHook releaseVoice() const { return nullptr; }
+    virtual VoiceHook stopVoice() const { return nullptr; }
 };
 
 }  // namespace supple::script::detail

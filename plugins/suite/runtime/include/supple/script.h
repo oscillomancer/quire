@@ -491,14 +491,55 @@ class Plugin {
   private:
     friend struct detail::Instance;
     friend struct detail::Layout;
+    friend class Instrument;
     detail::Instance* instance_ = nullptr;
 };
 
 // Audio in, audio out.
 class Effect : public Plugin {};
-// Notes in, audio out; notes in, notes out. Not available to scripts yet:
-// they receive no notes, and the compiler says so.
-class Instrument : public Plugin {};
+
+// How an instrument's voices take notes. Poly gives each note a voice of its
+// own. Mono plays the newest key held on voice 0, and returns to the last one
+// still held when it is released. Legato is Mono gliding from note to note
+// without starting the voice again.
+enum class VoiceMode { Poly, Mono, Legato };
+
+// Notes in, audio out. The runtime hands each note to one of the
+// instrument's voices (Info's .voices, 8 when it gives none), stealing the
+// oldest when every voice is busy, and holds released notes while the
+// sustain pedal is down. It calls the instrument's
+//
+//   void startVoice(int v)     voice v starts a note: voiceKey(v), voiceVelocity(v)
+//   void releaseVoice(int v)   its key is up: start the release
+//   void stopVoice(int v)      (optional) silence it at once: stolen or choked
+//
+// process() adds every voice that voicePlaying(v) into io, which arrives
+// silent, and calls voiceFinished(v) once a voice's release has died away,
+// which tells the host its note is over. startVoice may take a second
+// argument, startVoice(int v, bool retrigger): false in Legato mode, for a
+// note that glides from the one sounding, whose envelope keeps going.
+class Instrument : public Plugin {
+  public:
+    int voiceCount() const;
+    bool voicePlaying(int v) const;     // from startVoice until voiceFinished
+    int voiceKey(int v) const;          // the note's MIDI key, 0..127
+    int voiceChannel(int v) const;      // its MIDI channel, 0..15
+    double voiceVelocity(int v) const;  // 0..1
+    // At frame i of the block: the voice's pitch in semitones (its key,
+    // gliding, plus its channel's pitch bend), and its frequency in Hz.
+    double voicePitch(int v, int i) const;
+    double voiceHz(int v, int i) const;
+    void voiceFinished(int v);
+    // Usually in update(): how notes take voices, the glide from one note to
+    // the next (Mono and Legato), and the pitch bend's reach in semitones (2
+    // unless set).
+    void setVoiceMode(VoiceMode mode);
+    void setGlide(double ms);
+    void setBendRange(double semitones);
+};
+
+// Notes in, notes out. Not available to scripts yet, and the compiler says
+// so.
 class NoteEffect : public Plugin {};
 
 // --- DSP -------------------------------------------------------------------------

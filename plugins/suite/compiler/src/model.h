@@ -48,6 +48,11 @@ struct PluginModel {
     FunctionDecl* prepare = nullptr;
     FunctionDecl* update = nullptr;
     FunctionDecl* process = nullptr;
+    // An instrument's voice hooks; startVoice takes (int v) or (int v, bool retrigger).
+    FunctionDecl* startVoice = nullptr;
+    FunctionDecl* startVoiceRetrigger = nullptr;
+    FunctionDecl* releaseVoice = nullptr;
+    FunctionDecl* stopVoice = nullptr;
     int size = 0, align = 8;
     std::vector<ObjectSlot> objects;
     std::vector<InitialValue> initial;

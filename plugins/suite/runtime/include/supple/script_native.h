@@ -89,6 +89,34 @@ class NativeCode final : public Code {
             };
         return nullptr;
     }
+    VoiceHook startVoice() const override {
+        if constexpr (requires(T& t) { t.startVoice(0); })
+            return [](void*, void* self, std::int64_t v) {
+                static_cast<T*>(self)->startVoice(static_cast<int>(v));
+            };
+        return nullptr;
+    }
+    StartHook startVoiceRetrigger() const override {
+        if constexpr (requires(T& t) { t.startVoice(0, true); })
+            return [](void*, void* self, std::int64_t v, std::int64_t retrigger) {
+                static_cast<T*>(self)->startVoice(static_cast<int>(v), retrigger != 0);
+            };
+        return nullptr;
+    }
+    VoiceHook releaseVoice() const override {
+        if constexpr (requires(T& t) { t.releaseVoice(0); })
+            return [](void*, void* self, std::int64_t v) {
+                static_cast<T*>(self)->releaseVoice(static_cast<int>(v));
+            };
+        return nullptr;
+    }
+    VoiceHook stopVoice() const override {
+        if constexpr (requires(T& t) { t.stopVoice(0); })
+            return [](void*, void* self, std::int64_t v) {
+                static_cast<T*>(self)->stopVoice(static_cast<int>(v));
+            };
+        return nullptr;
+    }
 
   private:
     struct Collector final : ParamRegistrar {

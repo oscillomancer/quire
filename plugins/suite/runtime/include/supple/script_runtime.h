@@ -23,6 +23,25 @@ struct Status {
     std::atomic<std::uint32_t> budgetLine{0};
 };
 
+// An instrument's voices as the glue keeps them (the framework's voice
+// manager): what Instrument's methods read and do. Indexes are in range.
+class VoiceBank {
+  public:
+    virtual int count() const = 0;
+    virtual bool playing(int v) const = 0;
+    virtual int key(int v) const = 0;
+    virtual int channel(int v) const = 0;
+    virtual double velocity(int v) const = 0;
+    virtual double pitch(int v, int frame) const = 0;
+    virtual void finished(int v) = 0;
+    virtual void setMode(VoiceMode mode) = 0;
+    virtual void setGlide(double ms) = 0;
+    virtual void setBendRange(double semitones) = 0;
+
+  protected:
+    ~VoiceBank() = default;
+};
+
 // One running plugin instance as the runtime sees it. The plugin struct's
 // Plugin base points here; built-in objects reach it through current().
 struct Instance {
@@ -33,6 +52,7 @@ struct Instance {
     // Back-edges a hook may take before it is stopped (audio hooks only).
     std::int64_t budget = std::int64_t{1} << 31;
     Status status;
+    VoiceBank* voices = nullptr;  // an instrument's
 
     static void bind(Plugin& plugin, Instance* instance) { plugin.instance_ = instance; }
 };

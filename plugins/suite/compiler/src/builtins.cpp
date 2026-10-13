@@ -77,6 +77,7 @@ struct Registrar {
             if (it != scope->nestedTypes.end()) return it->second;
         }
         if (auto* c = b.cls(n)) return c->type;
+        if (auto* e = b.enumNamed(n)) return e;
         fail("unknown type " + n);
     }
 
@@ -274,14 +275,20 @@ const BuiltinEnum* Builtins::enumOf(const Type* type) const {
     return nullptr;
 }
 
+const Type* Builtins::enumNamed(const std::string& name) const {
+    auto it = enumByName_.find(name);
+    return it == enumByName_.end() ? nullptr : it->second;
+}
+
 std::vector<const BuiltinFunction*> Builtins::functions(const std::string& name) const {
     auto it = byName_.find(name);
     return it == byName_.end() ? std::vector<const BuiltinFunction*>{} : it->second;
 }
 
 bool Builtins::reserved(const std::string& name) const {
-    return byName_.count(name) || classByName_.count(name) || name == "pi" || name == "twoPi" ||
-           name == "Array" || name == "Buffer" || name == "Unit" || name == "Curve";
+    return byName_.count(name) || classByName_.count(name) || enumByName_.count(name) ||
+           name == "pi" || name == "twoPi" || name == "Array" || name == "Buffer" ||
+           name == "Unit" || name == "Curve";
 }
 
 int Builtins::pluginBaseSize() const { return static_cast<int>(sizeof(S::Plugin)); }
@@ -342,12 +349,60 @@ void Builtins::addClasses() {
     info->declarable = false;
     info_ = info;
 
+    // VoiceMode, at the top level.
+    {
+        auto mode = std::make_unique<BuiltinEnum>();
+        auto t = std::make_unique<Type>();
+        t->kind = TypeKind::Enum;
+        t->name = "VoiceMode";
+        t->size = 4;
+        t->align = 4;
+        mode->type = t.get();
+        types_.push_back(std::move(t));
+        mode->values = {{"Poly", 0}, {"Mono", 1}, {"Legato", 2}};
+        static_assert(static_cast<int>(S::VoiceMode::Legato) == 2);
+        enumByName_["VoiceMode"] = mode->type;
+        enums_.push_back(std::move(mode));
+    }
+
     auto* plugin = addClass("Plugin", sizeof(S::Plugin), alignof(S::Plugin));
     plugin->declarable = false;
     r.inlineMethod(plugin, "double sampleRate() const", Intrinsic::SampleRate);
     r.inlineMethod(plugin, "int maxBlockSize() const", Intrinsic::MaxBlockSize);
     r.inlineMethod(plugin, "int channels() const", Intrinsic::Channels);
     r.inlineMethod(plugin, "bool offline() const", Intrinsic::Offline);
+    // An instrument's (sema allows them in instruments only): the plugin
+    // struct is an Instrument, whose base is at its start.
+    r.method(
+        plugin, "int voiceCount() const", +[](const S::Instrument* p) { return p->voiceCount(); });
+    r.method(
+        plugin, "bool voicePlaying(int v) const",
+        +[](const S::Instrument* p, int v) -> int { return p->voicePlaying(v); });
+    r.method(
+        plugin, "int voiceKey(int v) const",
+        +[](const S::Instrument* p, int v) { return p->voiceKey(v); });
+    r.method(
+        plugin, "int voiceChannel(int v) const",
+        +[](const S::Instrument* p, int v) { return p->voiceChannel(v); });
+    r.method(
+        plugin, "double voiceVelocity(int v) const",
+        +[](const S::Instrument* p, int v) { return p->voiceVelocity(v); });
+    r.method(
+        plugin, "double voicePitch(int v, int i) const",
+        +[](const S::Instrument* p, int v, int i) { return p->voicePitch(v, i); });
+    r.method(
+        plugin, "double voiceHz(int v, int i) const",
+        +[](const S::Instrument* p, int v, int i) { return p->voiceHz(v, i); });
+    r.method(
+        plugin, "void voiceFinished(int v)", +[](S::Instrument* p, int v) { p->voiceFinished(v); });
+    r.method(
+        plugin, "void setVoiceMode(VoiceMode mode)",
+        +[](S::Instrument* p, int m) { p->setVoiceMode(static_cast<S::VoiceMode>(m)); });
+    r.method(
+        plugin, "void setGlide(double ms)", +[](S::Instrument* p, double ms) { p->setGlide(ms); });
+    r.method(
+        plugin, "void setBendRange(double semitones)",
+        +[](S::Instrument* p, double st) { p->setBendRange(st); });
     plugin_ = plugin;
 
     // DSP objects.

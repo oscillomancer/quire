@@ -25,6 +25,8 @@ struct ProgramData {
     std::vector<ParamSlot> paramSlots;
     Program::Hook prepare = nullptr, update = nullptr;
     Program::ProcessHook process = nullptr;
+    Program::VoiceHook startVoice = nullptr, releaseVoice = nullptr, stopVoice = nullptr;
+    Program::StartHook startVoiceRetrigger = nullptr;
     void* mir = nullptr;  // MIR_context_t: owns the code
     bool generator = false;
     bool interpreted = false;

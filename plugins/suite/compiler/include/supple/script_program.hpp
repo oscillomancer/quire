@@ -51,6 +51,10 @@ class Program final : public script::detail::Code {
     Hook prepare() const override;
     Hook update() const override;
     ProcessHook process() const override;
+    VoiceHook startVoice() const override;
+    StartHook startVoiceRetrigger() const override;
+    VoiceHook releaseVoice() const override;
+    VoiceHook stopVoice() const override;
 
   private:
     friend class Codegen;

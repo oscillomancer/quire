@@ -6,6 +6,7 @@
 // the thunks in thunks.cpp. The DSP itself is the plugin framework's
 // (framework/dsp); this file only gives it script-facing names and finds the
 // sample rate.
+#include <algorithm>
 #include <atomic>
 #include <climits>
 #include <cmath>
@@ -258,6 +259,62 @@ double Plugin::sampleRate() const { return instanceOf(instance_).sampleRate; }
 int Plugin::maxBlockSize() const { return instanceOf(instance_).maxBlockSize; }
 int Plugin::channels() const { return instanceOf(instance_).channels; }
 bool Plugin::offline() const { return instanceOf(instance_).offline; }
+
+// --- instruments -----------------------------------------------------------------
+
+namespace {
+// The bank that has voice v, or null (and the index reported when it is out
+// of range).
+detail::VoiceBank* bankFor(detail::Instance* in, int v) {
+    detail::VoiceBank* bank = in ? in->voices : nullptr;
+    if (!bank) return nullptr;
+    if (v < 0 || v >= bank->count()) {
+        detail::outOfRange(0);
+        return nullptr;
+    }
+    return bank;
+}
+}  // namespace
+
+int Instrument::voiceCount() const {
+    const detail::VoiceBank* bank = instance_ ? instance_->voices : nullptr;
+    return bank ? bank->count() : 0;
+}
+bool Instrument::voicePlaying(int v) const {
+    const detail::VoiceBank* bank = bankFor(instance_, v);
+    return bank && bank->playing(v);
+}
+int Instrument::voiceKey(int v) const {
+    const detail::VoiceBank* bank = bankFor(instance_, v);
+    return bank ? bank->key(v) : 0;
+}
+int Instrument::voiceChannel(int v) const {
+    const detail::VoiceBank* bank = bankFor(instance_, v);
+    return bank ? bank->channel(v) : 0;
+}
+double Instrument::voiceVelocity(int v) const {
+    const detail::VoiceBank* bank = bankFor(instance_, v);
+    return bank ? bank->velocity(v) : 0.0;
+}
+double Instrument::voicePitch(int v, int i) const {
+    const detail::VoiceBank* bank = bankFor(instance_, v);
+    return bank ? bank->pitch(v, i) : 0.0;
+}
+double Instrument::voiceHz(int v, int i) const { return mtof(voicePitch(v, i)); }
+void Instrument::voiceFinished(int v) {
+    if (detail::VoiceBank* bank = bankFor(instance_, v)) bank->finished(v);
+}
+void Instrument::setVoiceMode(VoiceMode mode) {
+    if (detail::VoiceBank* bank = instance_ ? instance_->voices : nullptr) bank->setMode(mode);
+}
+void Instrument::setGlide(double ms) {
+    if (detail::VoiceBank* bank = instance_ ? instance_->voices : nullptr)
+        bank->setGlide(std::isfinite(ms) ? std::max(0.0, ms) : 0.0);
+}
+void Instrument::setBendRange(double semitones) {
+    if (detail::VoiceBank* bank = instance_ ? instance_->voices : nullptr)
+        bank->setBendRange(std::isfinite(semitones) ? std::clamp(semitones, 0.0, 96.0) : 2.0);
+}
 
 // --- DSP -------------------------------------------------------------------------
 

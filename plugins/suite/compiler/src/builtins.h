@@ -127,6 +127,8 @@ class Builtins {
 
     const BuiltinClass* cls(const std::string& name) const;
     const BuiltinEnum* enumOf(const Type* type) const;
+    // A runtime enum declared at the top level (VoiceMode), or null.
+    const Type* enumNamed(const std::string& name) const;
     std::vector<const BuiltinFunction*> functions(const std::string& name) const;
     // Every name the runtime declares, which a script may not declare again.
     bool reserved(const std::string& name) const;
@@ -158,6 +160,7 @@ class Builtins {
     std::vector<std::unique_ptr<BuiltinEnum>> enums_;
     std::map<std::string, std::vector<const BuiltinFunction*>> byName_;
     std::map<std::string, const BuiltinClass*> classByName_;
+    std::map<std::string, const Type*> enumByName_;
 
     Type *void_, *bool_, *int_, *float_, *double_, *string_, *initList_, *null_;
     const BuiltinClass *param_ = nullptr, *block_ = nullptr, *channel_ = nullptr,

@@ -609,6 +609,7 @@ Expr* Sema::checkName(NameExpr* n) {
             if ((scopeStruct = findStruct(part, self_))) continue;
             if ((scopeEnum = findEnum(part, self_))) continue;
             if ((scopeClass = b_.cls(part))) continue;
+            if ((scopeBuiltinEnum = b_.enumNamed(part))) continue;
             if (part == "supple" || part == "script") continue;
         } else if (scopeStruct) {
             StructDecl* inner = nullptr;
@@ -1079,26 +1080,37 @@ Expr* Sema::checkCall(CallExpr* c) {
                 c->lvalue = f->resultType.isRef;
                 c->qt.isRef = false;
                 if (fn_) fn_->calls.push_back(f);
-                if (f->name == "prepare" || f->name == "process") {
+                if (f->name == "prepare" || f->name == "process" || f->name == "startVoice" ||
+                    f->name == "releaseVoice" || f->name == "stopVoice") {
                     if (self_ && self_->base != PluginKind::None && f->owner == self_)
                         error(c->loc, "script.call.hook",
                               f->name + "() is called by the runtime, not by the script",
-                              f->name == "process"
-                                  ? "move the shared work into a member function both can call"
-                                  : "the runtime calls prepare() itself; put the shared work in a "
-                                    "member function");
+                              f->name == "prepare"
+                                  ? "the runtime calls prepare() itself; put the shared work in a "
+                                    "member function"
+                                  : "move the shared work into a member function both can call");
                 }
                 return c;
             }
             case RefKind::BuiltinMethod: {
-                // A plugin base method: sampleRate() and friends.
+                // A plugin base method: sampleRate() and friends (intrinsics),
+                // and an instrument's voice methods.
                 for (const auto& bm : b_.pluginBase()->methods)
                     if (bm.name == calleeName) {
                         c->builtinMethod = &bm;
                         c->implicitThis = true;
-                        if (!c->args.empty())
-                            error(c->loc, "script.call.arguments",
-                                  calleeName + "() takes no arguments", calleeName + "()");
+                        if (bm.intrinsic == Intrinsic::None && self_ &&
+                            self_->base != PluginKind::Instrument)
+                            error(c->loc, "script.plugin.instrument",
+                                  calleeName + "() is an instrument's, and " + self_->name +
+                                      " has no voices",
+                                  "derive from Instrument to play notes: struct Synth : "
+                                  "Instrument { ... }");
+                        if (fn_ && fn_->isConst && !bm.isConst)
+                            error(c->loc, "script.call.const",
+                                  "calling " + calleeName + "() from a const member function",
+                                  "drop the const from the member function");
+                        c->args = callArguments(c, bm.params, {}, calleeName + "()");
                         c->qt = bm.result;
                         return c;
                     }
