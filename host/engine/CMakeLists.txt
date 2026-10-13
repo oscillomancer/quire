@@ -32,7 +32,8 @@ if(SUPPLE_BUILD_TESTS)
                              FIXTURE_VST3_PATH="${CMAKE_BINARY_DIR}/host/clap-host/test-vst3.vst3"
                              FAKE_JACK_PATH="$<TARGET_FILE:engine-fake-jack>"
                              BRIDGE_PATH="$<TARGET_FILE:${PRODUCT_SLUG}-bridge>"
-                             STOCK_CLAP_DIR="${CMAKE_BINARY_DIR}/plugins/clap")
+                             STOCK_CLAP_DIR="${CMAKE_BINARY_DIR}/plugins/clap"
+                             SUPPLE_SCRIPT_EXAMPLES="${PROJECT_SOURCE_DIR}/plugins/suite/examples")
   target_link_libraries(engine.tests PRIVATE ${CMAKE_DL_LIBS})
 endif()
 

@@ -1,10 +1,13 @@
 // DSP scripts over the bus (ADR-0032): a script written with dsp.write is a
-// plugin like a stock one -- listed, loaded, and set in physical units
-// through its patch -- and its mistakes come back with hints.
+// plugin like a stock one -- listed, loaded, set in physical units through
+// its patch, an instrument playing a track's notes -- and its mistakes come
+// back with hints.
 #include <doctest/doctest.h>
 #include <unistd.h>
 
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
 
 #include "supple/engine/app.h"
@@ -113,4 +116,44 @@ TEST_CASE("a DSP script written over the bus is a plugin an agent sets through i
     CHECK_FALSE(listed["scripts"].at(0).find("ok")->asBool());
     CHECK(call("dsp.get", json::parse(R"({"name": "agent_gain"})").value())["source"].asString() ==
           broken);
+}
+
+TEST_CASE("a scripted instrument plays a track's notes in the mix") {
+    if (!fs::exists(kStock / "Script Player.clap")) {
+        MESSAGE("skipped: no script player in " << kStock.string());
+        return;
+    }
+    Root root;
+    AppOptions o;
+    o.workdir = root.path;
+    o.chainDir = root.path / "chains";
+    o.pluginPath = {kStock / "Script Player.clap"};
+    auto app = EngineApp::create(o, {.console9 = false});
+    REQUIRE(app);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, **app);
+    auto call = [&](std::string name, json::Value args) {
+        auto r = bus.execute({std::move(name), std::move(args), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    std::ifstream in(std::string(SUPPLE_SCRIPT_EXAMPLES) + "/synth.cpp");
+    std::stringstream source;
+    source << in.rdbuf();
+    json::Value w = json::Value::object();
+    w["name"] = "synth";
+    w["source"] = source.str();
+    json::Value written = call("dsp.write", std::move(w));
+    REQUIRE(written["ok"].asBool());
+    CHECK(written["plugin"]["kind"].asString() == "instrument");
+    REQUIRE(written["listed"].asBool());
+
+    call("track.add", json::parse(R"({"name": "Keys"})").value());
+    call("fx.add", json::parse(R"({"track": "tr_1", "plugin": "com.example.synth"})").value());
+    call("item.add", json::parse(R"({"track": "tr_1", "bar": 1,
+        "notation": "voice keys; 1: C4:q E4:q G4:h"})")
+                         .value());
+    json::Value mix = call("render.mix", json::parse(R"({"name": "keys"})").value());
+    CHECK(mix["peak_dbfs"].asDouble() > -40.0);
 }
