@@ -251,11 +251,13 @@ struct Library {
 }  // namespace
 
 TEST(each_script_in_the_library_is_a_plugin) {
-    CHECK(factory()->get_plugin_count(factory()) == 2);
+    CHECK(factory()->get_plugin_count(factory()) == 3);
     Instance tilt("com.example.tilt");
     CHECK(tilt.plugin != nullptr && tilt.semantic != nullptr);
     CHECK(tilt.params->count(tilt.plugin) == 3);
     CHECK(std::string(tilt.plugin->desc->name) == "Tilt");
+    Instance pluck("com.example.pluck");
+    CHECK(pluck.plugin != nullptr && std::string(pluck.plugin->desc->features[0]) == "instrument");
 }
 
 TEST(the_schema_names_every_clap_parameter_by_key) {

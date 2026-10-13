@@ -161,7 +161,8 @@ if(SUPPLE_BUILD_PLUGINS)
 
   # The player runs DSP scripts (ADR-0032): its plugins are the scripts in
   # SUPPLE_SCRIPT_LIBRARY's folders, so the checks every stock plugin has run
-  # with the player's test scripts (Smoke, and Tilt, which keeps state).
+  # with the player's test scripts (Smoke; Tilt, which keeps state; Pluck,
+  # an instrument).
   supple_add_template_product(player suite/player "Script Player")
   if(SUPPLE_BUILD_TESTS)
     set(player_scripts "${CMAKE_CURRENT_SOURCE_DIR}/suite/player/test")
@@ -172,6 +173,8 @@ if(SUPPLE_BUILD_PLUGINS)
     add_test(NAME plugin.player.semantic.smoke
       COMMAND semantic-conformance "${player_clap}" com.suppleaudio.script-player)
     add_test(NAME plugin.player.semantic.tilt COMMAND semantic-conformance "${player_clap}" com.example.tilt)
+    add_test(NAME plugin.player.semantic.pluck COMMAND semantic-conformance "${player_clap}" com.example.pluck)
+    list(APPEND player_tests plugin.player.semantic.pluck)
     if(UNIX AND NOT APPLE)
       add_test(NAME plugin.player.unload COMMAND clap-unload-probe "${player_clap}")
       set_tests_properties(plugin.player.unload PROPERTIES LABELS "rt;plugin-unload" TIMEOUT 30)

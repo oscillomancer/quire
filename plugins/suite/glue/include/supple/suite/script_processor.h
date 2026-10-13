@@ -19,6 +19,12 @@
 //     the running one without the host noticing (swap()): prepared on the
 //     main thread, taken at the start of a block, crossfaded over 10 ms. The
 //     one it replaced goes back to the main thread to be freed (collect()).
+//   - An instrument's notes go to the framework's voice manager
+//     (dsp/Voices.h), which calls the script's voice hooks -- startVoice,
+//     releaseVoice, stopVoice -- and which Instrument's methods read and
+//     drive (detail::VoiceBank). Its output arrives silent. A replacement
+//     picks up the voices sounding: each starts again in the new code, and
+//     a released one is released again.
 #pragma once
 
 #include <algorithm>
@@ -27,9 +33,11 @@
 #include <memory>
 #include <vector>
 
+#include "core/Notes.h"
 #include "core/ParamValues.h"
 #include "core/ProcessorBase.h"
 #include "core/Ring.h"
+#include "dsp/Voices.h"
 #include "supple/script_runtime.h"
 #include "supple/suite/script_definition.h"
 
@@ -96,6 +104,9 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         const D::InfoModel& info = definition_->code()->info();
         latency_ = std::max(0, info.latency);
         tail_ = info.tail < 0 ? UINT32_MAX : static_cast<uint32_t>(info.tail);
+        instrument_ = definition_->code()->kind() == D::PluginKind::Instrument;
+        voiceCount_ = std::clamp(info.voices > 0 ? info.voices : kDefaultVoices, 1, kMaxVoices);
+        if (instrument_) instance_.voices = &bank_;
     }
     ~ScriptProcessor() {
         delete incoming_.exchange(nullptr, std::memory_order_acq_rel);
@@ -113,6 +124,10 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         if (Generation* waiting = incoming_.exchange(nullptr, std::memory_order_acq_rel))
             current_.reset(waiting);
         fading_.reset();
+        if (instrument_) {
+            voices_.prepare(setup.sampleRate);
+            voices_.setCount(voiceCount_, *this);
+        }
         load(*current_, v, true);
         current_->prepare(&instance_);
         stopped_ = false;
@@ -127,12 +142,22 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     void update(const ParamValues& v) {
         if (fading_) run(*fading_, v, false);
         run(*current_, v, false);
+        applyVoiceMode();
     }
 
     void reset() {
+        if (instrument_) voices_.reset(*this);
         current_->reset();
         if (fading_) retire(std::move(fading_));
         stopped_ = false;
+    }
+
+    // An instrument's notes and controllers (pitch bend, the sustain pedal).
+    void note(const NoteEvent& e) {
+        if (instrument_) voices_.note(e, *this);
+    }
+    void midi(const MidiMessage& m) {
+        if (instrument_) voices_.midi(m, *this);
     }
 
     void process(Block& block) {
@@ -141,6 +166,8 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
             silence(block);
             return;
         }
+        if (instrument_) silence(block);  // the voices add into it
+        endFrame_ = std::max(block.frames - 1, 0);
         if (fading_) {
             // The old generation plays on a copy of the input; the two meet
             // along a linear fade.
@@ -149,7 +176,9 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
                 std::copy(block.data[c], block.data[c] + block.frames, fadePointers_[c]);
             Block copy = block;
             copy.data = fadePointers_.data();
+            fadingNow_ = true;  // its voices end with it, not in the voice manager
             runProcess(*fading_, copy);
+            fadingNow_ = false;
             runProcess(*current_, block);
             for (int i = 0; i < block.frames; ++i) {
                 const double t = std::min(1.0, static_cast<double>(fadeDone_ + i) / fadeLength_);
@@ -165,6 +194,8 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         }
         if (stopped_) silence(block);
         report(*current_);
+        if (instrument_) voices_.advance(block.frames);
+        endFrame_ = 0;
     }
 
     int latencySamples() const { return latency_; }
@@ -190,6 +221,25 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         Generation* done = nullptr;
         while (retired_.pop(done)) delete done;
     }
+
+    // --- the voice manager's (dsp/Voices.h): the script's voice hooks -------------
+
+    void voiceStart(int v, bool retrigger) {
+        const D::Code& code = current_->program();
+        if (auto hook = code.startVoiceRetrigger())
+            callVoice([&] { hook(&instance_, current_->self(), v, retrigger ? 1 : 0); });
+        else if (auto start = code.startVoice(); start && retrigger)
+            callVoice([&] { start(&instance_, current_->self(), v); });
+    }
+    void voiceRelease(int v) {
+        if (auto hook = current_->program().releaseVoice())
+            callVoice([&] { hook(&instance_, current_->self(), v); });
+    }
+    void voiceStop(int v) {
+        if (auto hook = current_->program().stopVoice())
+            callVoice([&] { hook(&instance_, current_->self(), v); });
+    }
+    void voiceEnded(const NoteEvent& n) { noteEnded(n, endFrame_); }
 
   private:
     // Every value into a generation's Param members.
@@ -260,7 +310,57 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         current_.reset(next);
         fadeDone_ = 0;
         stopped_ = false;
+        // The voices sounding carry on in the new code: each starts again,
+        // and a released one is released again.
+        if (instrument_)
+            for (int v = 0; v < voiceCount_; ++v)
+                if (voices_[v].active) {
+                    voiceStart(v, true);
+                    if (!voices_[v].held) voiceRelease(v);
+                }
     }
+
+    // A voice hook: the script runs inside its instance, on a budget.
+    template <class Call>
+    void callVoice(Call&& call) {
+        if (stopped_) return;
+        {
+            D::CurrentScope scope(&instance_);
+            instance_.budget = kBudgetPerHook;
+            call();
+        }
+        checkBudget();
+    }
+
+    // A mode set in update() takes effect once it returns: the change
+    // releases voices, through the script's hooks.
+    void applyVoiceMode() {
+        if (pendingMode_ < 0) return;
+        const auto mode = static_cast<Voices::Mode>(pendingMode_);
+        pendingMode_ = -1;
+        voices_.setMode(mode, *this);
+    }
+
+    // Instrument's methods, through the instance (script_runtime.h).
+    class Bank final : public D::VoiceBank {
+      public:
+        explicit Bank(ScriptProcessor& p) : p_(p) {}
+        int count() const override { return p_.voiceCount_; }
+        bool playing(int v) const override { return p_.voices_[v].active; }
+        int key(int v) const override { return p_.voices_[v].note.key; }
+        int channel(int v) const override { return p_.voices_[v].note.channel; }
+        double velocity(int v) const override { return p_.voices_[v].velocity; }
+        double pitch(int v, int frame) const override { return p_.voices_.pitchAt(v, frame); }
+        void finished(int v) override {
+            if (!p_.fadingNow_) p_.voices_.finished(v, p_);
+        }
+        void setMode(S::VoiceMode mode) override { p_.pendingMode_ = static_cast<int>(mode); }
+        void setGlide(double ms) override { p_.voices_.setGlide(ms); }
+        void setBendRange(double semitones) override { p_.voices_.setBendRange(semitones); }
+
+      private:
+        ScriptProcessor& p_;
+    };
 
     void retire(std::unique_ptr<Generation> g) {
         // A full queue keeps it: freeing here would be the audio thread's to do.
@@ -292,6 +392,10 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
 
     // Loop iterations a hook may take: generous for real work, small enough
     // that a runaway loop is stopped within a block or so.
+    static constexpr int kMaxVoices = 64, kDefaultVoices = 8;
+    using Voices = dsp::Voices<kMaxVoices>;
+    static_assert(static_cast<int>(S::VoiceMode::Legato) == static_cast<int>(Voices::Mode::Legato));
+
     static constexpr std::int64_t kBudgetPerHook = std::int64_t{1} << 26;
     static constexpr std::int64_t kBudgetPerFrame = std::int64_t{1} << 16;
 
@@ -310,6 +414,14 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     uint32_t budgetSeen_ = 0;
     int latency_ = 0;
     uint32_t tail_ = 0;
+    // An instrument's.
+    bool instrument_ = false;
+    int voiceCount_ = kDefaultVoices;
+    Voices voices_;
+    Bank bank_{*this};
+    int pendingMode_ = -1;
+    int endFrame_ = 0;
+    bool fadingNow_ = false;
 };
 
 }  // namespace supple::suite

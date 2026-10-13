@@ -4,10 +4,14 @@
 // Scripts as the player runs them: through the framework's Engine, against
 // the compiler's own runner, stopped when they spin, reset to what prepare
 // left, and replaced while they play.
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "Catalog.h"
@@ -16,6 +20,12 @@
 #include "core/Catalog.h"
 #include "core/Engine.h"
 #include "runner.h"
+#include "supple/script_native.h"
+
+// The example synth compiled as C++, as a source export builds it.
+namespace supple::script::native_synth {
+#include "synth.cpp"
+}  // namespace supple::script::native_synth
 
 using namespace supple;
 using namespace supple::player;
@@ -61,6 +71,48 @@ void setPlain(Engine& engine, uint32_t id, double plain) {
     const ParamTable& t = engine.definition()->params();
     const int i = t.indexOf(id);
     engine.store().set(static_cast<size_t>(i), toHost(t.at(static_cast<size_t>(i)), plain));
+}
+
+// Notes for one block: those of `all` (frame, key, on) within it.
+struct BlockNotes {
+    const std::vector<std::tuple<int, int, bool>>* all = nullptr;
+    int start = 0, frames = 0;
+    size_t k = 0;
+    bool next(EngineEvent& e) {
+        for (; k < all->size(); ++k) {
+            const auto [frame, key, on] = (*all)[k];
+            if (frame < start || frame >= start + frames) continue;
+            e = EngineEvent{};
+            e.type = EngineEvent::Type::Note;
+            e.time = static_cast<uint32_t>(frame - start);
+            e.note.key = static_cast<int16_t>(key);
+            e.note.type = on ? NoteEvent::Type::On : NoteEvent::Type::Off;
+            e.note.velocity = 0.8;
+            ++k;
+            return true;
+        }
+        return false;
+    }
+};
+
+// An instrument playing `notes`, in blocks of 64: its left channel, and
+// the keys of the notes it reported over.
+std::vector<double> playNotes(const DefinitionPtr& d,
+                              const std::vector<std::tuple<int, int, bool>>& notes, int frames,
+                              std::vector<int>& ended) {
+    Engine engine(d);
+    engine.activate(48000.0, 64, 0, 2);
+    std::vector<double> left(static_cast<size_t>(frames)), right(static_cast<size_t>(frames));
+    for (int start = 0; start < frames; start += 64) {
+        const int n = std::min(64, frames - start);
+        double* out[] = {left.data() + start, right.data() + start};
+        BlockNotes events{&notes, start, n};
+        engine.process<double>(nullptr, out, n, events);
+        const NoteOutput& o = engine.noteOutput();
+        for (int i = 0; i < o.count(); ++i)
+            if (o[i].kind == NoteOutput::Kind::End) ended.push_back(o[i].note.key);
+    }
+    return left;
 }
 
 const char* const kSpinner = R"(#include <supple/script.h>
@@ -200,10 +252,53 @@ struct L : Effect {
 
 TEST(the_library_lists_a_plugin_per_script_that_compiles) {
     const std::vector<DefinitionPtr> plugins = catalog().list();
-    CHECK(plugins.size() == 2);
+    CHECK(plugins.size() == 3);
     CHECK(catalog().find("com.example.tilt") != nullptr);
+    const DefinitionPtr pluck = catalog().find("com.example.pluck");
+    CHECK(pluck != nullptr && pluck->info().instrument() && pluck->info().voices == 4);
     CHECK(catalog().find("com.suppleaudio.script-player") != nullptr);
     CHECK(catalog().list()[0] == plugins[0]);  // unchanged, the same plugin
+}
+
+TEST(an_instrument_plays_its_notes_the_same_compiled_either_way_and_ends_each) {
+    std::ifstream in(std::string(SUPPLE_SCRIPT_EXAMPLES) + "/synth.cpp");
+    std::stringstream text;
+    text << in.rdbuf();
+    const auto jit = compileText(text.str());
+    using Native = supple::script::native_synth::Synth;
+    const auto native =
+        makeScriptDefinition(std::make_shared<const supple::script::detail::NativeCode<Native>>(
+            std::vector<supple::script::detail::NativeCode<Native>::Key>{
+                {&Native::attack, "attack"},
+                {&Native::release, "release"},
+                {&Native::cutoff, "cutoff"},
+                {&Native::glide, "glide"},
+                {&Native::level, "level"}}));
+    CHECK(jit != nullptr && native != nullptr);
+    if (!jit || !native) return;
+    CHECK(jit->info().instrument() && jit->info().takesNotes() && jit->info().voices == 8);
+
+    // A chord, a note stolen from it (nine notes on eight voices), released.
+    std::vector<std::tuple<int, int, bool>> notes = {{10, 60, true},    {100, 64, true},
+                                                     {300, 67, true},   {2000, 60, false},
+                                                     {2500, 64, false}, {3000, 67, false}};
+    for (int k = 0; k < 6; ++k) {
+        notes.push_back({400 + k, 70 + k, true});
+        notes.push_back({3100 + k, 70 + k, false});
+    }
+    std::vector<int> jitEnded, nativeEnded;
+    const auto a = playNotes(jit, notes, 24000, jitEnded);
+    const auto b = playNotes(native, notes, 24000, nativeEnded);
+    CHECK(a == b);
+    CHECK(jitEnded == nativeEnded);
+    double peak = 0.0;
+    for (int i = 400; i < 2000; ++i) peak = std::max(peak, std::abs(a[static_cast<size_t>(i)]));
+    CHECK(peak > 0.01);
+    // Every note ended once (the first one stolen), and then silence.
+    std::vector<int> sorted = jitEnded;
+    std::sort(sorted.begin(), sorted.end());
+    CHECK(sorted == (std::vector<int>{60, 64, 67, 70, 71, 72, 73, 74, 75}));
+    for (int i = 23000; i < 24000; ++i) CHECK(a[static_cast<size_t>(i)] == 0.0);
 }
 
 SUPPLE_TEST_MAIN
