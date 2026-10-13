@@ -546,7 +546,8 @@ drive example). Write your own once the product is past its sketch.
   `onPointerDown/Move/Up` and edit through `ui().dragEdit(control, value)`
   (or `dragEdit(controlX, x, controlY, y)` for two at once) and
   `ui().endDragEdit()`, never `host().beginEdit` directly. `Ui` owns the
-  one-gesture-at-a-time rule. A press `onPointerDown` takes holds the
+  one-gesture-at-a-time rule: every parameter the drawing edits until
+  `endDragEdit()` is in one gesture. A press `onPointerDown` takes holds the
   pointer until its release: the moves and the release come to the hooks,
   and the wheel and keys wait. Override `onCancel()` to drop the drag:
   focus loss and teardown call it, and the release may never arrive.
@@ -566,8 +567,8 @@ An editor can be drawn without a window or a display: `gui::drawOffscreen
 `ui-tests` checks that the starter's draws so.
 
 `ui-tests` fuzzes the real editor with random input and fails on a nested
-or unclosed gesture, more than two parameters in one, or a note left
-sounding, and lints the layout: controls must stay inside the panel and
+or unclosed gesture, more than two parameters in a control's, or a note
+left sounding, and lints the layout: controls must stay inside the panel and
 must not overlap, except on different pages of one tab bar.
 
 ## Releasing

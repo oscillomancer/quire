@@ -4,6 +4,19 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.22.0
+
+What a product must do: nothing.
+
+- **A drawing's gesture holds every parameter it edits** (`gui/Ui.h`).
+  `ui().dragEdit` calls until `endDragEdit()` are one host gesture, which
+  each parameter joins with its first change, however many there are; a
+  burst of `ui().wheelEdit` is likewise one. Before, the gesture held one
+  parameter (or two, through the two-control form), and a drawing that
+  edited a third on every move ended and began gestures as it went: an undo
+  step per move in some hosts. A drawing that closed one handle's gesture
+  only by starting another's now closes it at `endDragEdit()`.
+
 ## 1.21.0
 
 What a product must do: nothing.

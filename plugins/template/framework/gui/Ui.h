@@ -11,9 +11,11 @@
 //
 //   - One host gesture is open at a time: one control's, touching at most
 //     two parameters together (an XY pad's two, an envelope corner's decay
-//     and sustain). Anything that starts a new edit closes the previous one
-//     first. A parameter's begin is sent with its first change, so a pad
-//     moved only sideways never touches the vertical parameter's automation.
+//     and sustain), or a product's own drawing's, touching every parameter
+//     it edits from a press to its release. Anything else that starts an
+//     edit closes the open gesture first. A parameter's begin is sent with
+//     its first change, so a pad moved only sideways never touches the
+//     vertical parameter's automation.
 //   - Dragging: vertical for knobs, along the track for sliders, absolute on
 //     an XY pad or an envelope's handles. Shift is fine adjustment, and
 //     pressing or releasing it mid-drag re-anchors rather than jumping. The
@@ -361,18 +363,21 @@ class Ui {
 
     // For a product's own interactive drawing -- a graph handle, a node --
     // that edits the parameter behind control i the way a drag would. Ui
-    // keeps the one-gesture rule: this closes any other gesture, and
-    // endDragEdit() closes this one. The second form edits slot k of a
-    // multi-parameter control; the third, two controls' parameters as one
-    // gesture (an EQ node's frequency and gain). For a parameter only the
-    // drawing edits, add a control for it with visible = false.
+    // keeps the one-gesture rule: the drawing's edits until endDragEdit()
+    // (at the release) are one gesture, which every parameter they change
+    // joins with its first change, however many; any other gesture is
+    // closed first. The second form edits slot k of a multi-parameter
+    // control; the third, two controls' parameters at once (an EQ node's
+    // frequency and gain). For a parameter only the drawing edits, add a
+    // control for it with visible = false.
     void dragEdit(int control, double host) { dragEdit(control, 0, host); }
-    void dragEdit(int control, int slot, double host);
+    void dragEdit(int control, int slot, double host) { drawingEdit(control, slot, host, false); }
     void dragEdit(int controlX, double hostX, int controlY, double hostY);
     void endDragEdit() { endGesture(); }
     // The same drawing's wheel (or keys): as the controls' own, one gesture
-    // per burst, closed after kGestureIdleSeconds without another.
-    void wheelEdit(int control, double host) { edit(control, 0, host, true); }
+    // per burst, holding all the burst changes, closed after
+    // kGestureIdleSeconds without another.
+    void wheelEdit(int control, double host) { drawingEdit(control, 0, host, true); }
 
     void setFocus(int control);
     void openMenu(int control);
@@ -435,14 +440,24 @@ class Ui {
         bool relative = false;  // an XY pad keeps its offset after changing speed
         int handle = -1;  // an envelope's handle; a keyboard's key
     };
-    // One control's (or two controls') parameters in one host gesture.
+    // One host gesture: a control's parameters (two at most), or all a
+    // product's drawing changes in it. Each entry is a (control, slot).
     struct Gesture {
-        int control[2] = {-1, -1};
-        int slot[2] = {0, 0};
-        bool open[2] = {false, false};
+        struct Entry {
+            int control = -1;
+            int slot = 0;
+            bool open = false;  // its begin was sent
+        };
+        std::vector<Entry> entries;
         bool timed = false;
+        bool drawing = false;  // dragEdit's or wheelEdit's: they add to it
         double idle = 0.0;
-        bool involves(int c) const { return control[0] == c || control[1] == c; }
+        bool active() const {
+            return std::any_of(entries.begin(), entries.end(), [](const Entry& e) { return e.control >= 0; });
+        }
+        bool involves(int c) const {
+            return std::any_of(entries.begin(), entries.end(), [c](const Entry& e) { return e.control == c; });
+        }
     };
 
     const ParamDef* def(int i, int slot = 0) const;
@@ -459,6 +474,7 @@ class Ui {
     void endGesture();
     void send(int entry, double host);
     void edit(int i, int slot, double host, bool timed);
+    void drawingEdit(int i, int slot, double host, bool timed);
     void oneShot(int i, double host) { oneShot(i, 0, host); }
     void oneShot(int i, int slot, double host);
     void resetAll(int i);

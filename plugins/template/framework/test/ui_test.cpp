@@ -1280,6 +1280,37 @@ TEST(a_two_slot_gesture_coalesces_duplicate_parameter_ids) {
     CHECK(host.begins == 2 && host.ends == 2 && host.clean());
 }
 
+TEST(a_drawing_edits_any_number_of_parameters_in_one_gesture) {
+    const auto ids = continuousParams(3);
+    if (ids.size() < 3) return;
+    const auto at = [&](int k, double t) {
+        const ParamDef& p = params::at(static_cast<size_t>(params::indexOf(ids[static_cast<size_t>(k)])));
+        return p.hostMin() + (p.hostMax() - p.hostMin()) * t;
+    };
+    MockHost host;
+    Ui ui(host, 800, 600);
+    for (const uint32_t id : ids) ui.knob(id, {0, 0, 1, 1}).visible = false;
+    // A press setting three parameters, then drags moving two: one gesture.
+    for (int k = 0; k < 3; ++k) ui.dragEdit(k, at(k, 0.2));
+    for (int move = 1; move <= 8; ++move) {
+        ui.dragEdit(0, at(0, 0.2 + 0.05 * move));
+        ui.dragEdit(1, at(1, 0.2 + 0.05 * move));
+    }
+    CHECK(host.begins == 3 && host.openCount == 3 && host.ends == 0);
+    ui.endDragEdit();
+    CHECK(host.ends == 3 && host.openCount == 0);
+    // The wheel turning two: one gesture per burst.
+    for (int notch = 1; notch <= 4; ++notch) {
+        ui.wheelEdit(1, at(1, 0.95 - 0.1 * notch));
+        ui.wheelEdit(2, at(2, 0.2 + 0.1 * notch));
+        ui.idle(0.05);
+    }
+    CHECK(host.begins == 5 && host.openCount == 2);
+    ui.idle(Ui::kGestureIdleSeconds);
+    CHECK(host.ends == 5 && host.openCount == 0);
+    CHECK(!host.nested && !host.strayEnd && !host.valueOutsideGesture);
+}
+
 TEST(an_xy_pad_moves_two_parameters_in_one_gesture) {
     const std::vector<uint32_t> ids = continuousParams(2);
     if (ids.size() < 2) {

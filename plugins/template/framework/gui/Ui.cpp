@@ -595,46 +595,40 @@ int Ui::envelopeHandleAt(int i, float x, float y) const {
 
 void Ui::beginGesture(int c0, int s0, int c1, int s1, bool timed) {
     Gesture& g = gesture_;
-    if (g.control[0] == c0 && g.slot[0] == s0 && g.control[1] == c1 && g.slot[1] == s1) {
-        g.timed = timed;
-        g.idle = 0.0;
-        return;
+    const bool same = !g.drawing && g.entries.size() == 2 && g.entries[0].control == c0 &&
+                      g.entries[0].slot == s0 && g.entries[1].control == c1 && g.entries[1].slot == s1;
+    if (!same) {
+        endGesture();
+        g.entries = {{c0, s0, false}, {c1, s1, false}};
     }
-    endGesture();
-    g.control[0] = c0;
-    g.slot[0] = s0;
-    g.control[1] = c1;
-    g.slot[1] = s1;
     g.timed = timed;
     g.idle = 0.0;
 }
 
 void Ui::endGesture() {
-    if (gesture_.control[0] < 0 && gesture_.control[1] < 0) return;
-    for (int k = 0; k < 2; ++k)
-        if (gesture_.open[k]) host_.endEdit(paramOf(gesture_.control[k], gesture_.slot[k]));
+    const bool active = gesture_.active();
+    for (const Gesture::Entry& e : gesture_.entries)
+        if (e.open) host_.endEdit(paramOf(e.control, e.slot));
     gesture_ = Gesture{};
+    if (!active) return;
     wheelAccumulator_ = 0.0;
     wheelControl_ = -1;
     dirty_ = true;
 }
 
 // One of the open gesture's parameters to `host`: its begin goes with its
-// first change.
+// first change, once for a parameter two entries share.
 void Ui::send(int entry, double host) {
-    const int i = gesture_.control[entry];
-    const int slot = gesture_.slot[entry];
-    const ParamDef* p = def(i, slot);
+    Gesture::Entry& e = gesture_.entries[static_cast<size_t>(entry)];
+    const ParamDef* p = def(e.control, e.slot);
     if (!p || p->isOutput()) return;
     const double v = sanitizeHost(*p, host);
-    if (v == currentValue(i, slot)) return;
-    const uint32_t id = paramOf(i, slot);
-    const int other = 1 - entry;
-    const bool alreadyOpen = gesture_.open[other] &&
-        paramOf(gesture_.control[other], gesture_.slot[other]) == id;
-    if (!gesture_.open[entry] && !alreadyOpen) {
+    if (v == currentValue(e.control, e.slot)) return;
+    const uint32_t id = paramOf(e.control, e.slot);
+    const auto begun = [&](const Gesture::Entry& o) { return o.open && paramOf(o.control, o.slot) == id; };
+    if (std::none_of(gesture_.entries.begin(), gesture_.entries.end(), begun)) {
+        e.open = true;
         host_.beginEdit(id);
-        gesture_.open[entry] = true;
     }
     host_.setValue(id, v);
     dirty_ = true;
@@ -665,18 +659,27 @@ void Ui::resetAll(int i) {
         if (const ParamDef* p = def(i, k)) oneShot(i, k, hostDefault(*p));
 }
 
-void Ui::dragEdit(int i, int slot, double host) {
+// The drawing's gesture, held (a press's) or timed (a wheel burst's), with
+// this parameter in it.
+void Ui::drawingEdit(int i, int slot, double host, bool timed) {
     const ParamDef* p = def(i, slot);
-    if (!p || drag_.control >= 0 || sanitizeHost(*p, host) == currentValue(i, slot)) return;
-    beginGesture(i, slot, -1, 0, false);
-    send(0, host);
+    if (!p || (!timed && drag_.control >= 0) || sanitizeHost(*p, host) == currentValue(i, slot)) return;
+    Gesture& g = gesture_;
+    if (!g.drawing || g.timed != timed) {
+        endGesture();
+        g.drawing = true;
+        g.timed = timed;
+    }
+    g.idle = 0.0;
+    size_t k = 0;
+    while (k < g.entries.size() && !(g.entries[k].control == i && g.entries[k].slot == slot)) ++k;
+    if (k == g.entries.size()) g.entries.push_back({i, slot, false});
+    send(static_cast<int>(k), host);
 }
 
 void Ui::dragEdit(int controlX, double hostX, int controlY, double hostY) {
-    if (drag_.control >= 0 || !def(controlX) || !def(controlY)) return;
-    beginGesture(controlX, 0, controlY, 0, false);
-    send(0, hostX);
-    send(1, hostY);
+    dragEdit(controlX, 0, hostX);
+    dragEdit(controlY, 0, hostY);
 }
 
 void Ui::step(int i, double normalDelta, int steps, int slot) {
@@ -2068,7 +2071,7 @@ void Ui::idle(double seconds) {
     }
     presetPoll_ += seconds;
     if (presetPoll_ >= 0.25) syncPresets(false);
-    if ((gesture_.control[0] >= 0 || gesture_.control[1] >= 0) && gesture_.timed) {
+    if (gesture_.active() && gesture_.timed) {
         gesture_.idle += seconds;
         if (gesture_.idle >= kGestureIdleSeconds) endGesture();
     }
@@ -2096,7 +2099,7 @@ bool Ui::takeDirty() {
 }
 
 bool Ui::animating() const {
-    return ((gesture_.control[0] >= 0 || gesture_.control[1] >= 0) && gesture_.timed) || text_.open ||
+    return (gesture_.active() && gesture_.timed) || text_.open ||
            (tooltipArmed_ && !tooltip_.open);
 }
 
