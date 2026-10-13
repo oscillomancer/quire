@@ -1061,7 +1061,9 @@ only available plug-ins; explicit scanning replaces the catalogue/report pair.
 too, since nothing may load in that thread; without the bridge the job fails
 with `host.scan.unsupervised`), and the model thread installs the new pair
 when the job is done. A background scan still running is returned instead of
-a second one.
+a second one. Modules in the stock folder are never served from the scan
+cache (2026-10-12): the script player's plugins are the scripts in its
+library (ADR-0032), which its file says nothing about.
 
 ### Initial engine-start failure (2026-10-08)
 

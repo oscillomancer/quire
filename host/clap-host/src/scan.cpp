@@ -401,7 +401,8 @@ Result<std::vector<PluginInfo>> scan(std::span<const fs::path> paths, const Scan
     const auto stock = stockPluginDir();
     std::vector<PluginInfo> result;
     for (const auto& module : modules(paths)) {
-        const bool trusted = !options.superviseAll && stock && module.parent_path() == *stock;
+        const bool stockModule = stock && module.parent_path() == *stock;
+        const bool trusted = !options.superviseAll && stockModule;
         if (options.forceInProcess || trusted) {
             auto local = scanModuleInProcess(module);
             if (!local)
@@ -418,8 +419,12 @@ Result<std::vector<PluginInfo>> scan(std::span<const fs::path> paths, const Scan
         }
         const fs::path canonical = key->find("path")->asString();
         const auto recordPath = cacheFile(directory, canonical);
+        // The stock folder's modules are never cached: the script player's
+        // plugins are the scripts in its library, which its file says
+        // nothing about (and the stock plugins are cheap to scan).
+        const bool cacheable = !directory.empty() && !stockModule;
         std::optional<json::Value> cached;
-        if (!directory.empty()) {
+        if (cacheable) {
             auto text = readTextFile(recordPath, options.maxOutputBytes + (1u << 20));
             if (text) {
                 auto record = json::parse(
@@ -445,7 +450,7 @@ Result<std::vector<PluginInfo>> scan(std::span<const fs::path> paths, const Scan
                                  : supervise(executable, module, options);
         }();
         if (cacheHit) ++gReport.cachedModules;
-        if (!cacheHit && !bridgeMissing && !directory.empty()) {
+        if (!cacheHit && !bridgeMissing && cacheable) {
             // Do not pin transient spawn/I/O failures, or a result for a module
             // that changed while its child was scanning.
             auto after = fingerprint(module);

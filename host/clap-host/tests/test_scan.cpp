@@ -126,6 +126,23 @@ TEST_CASE("supervised scan isolates entry crashes/hangs and caches results until
     }
 }
 
+TEST_CASE("the stock folder's modules are scanned afresh, never from the cache") {
+    // The script player lists the scripts in its library: its file does not
+    // change when they do.
+    const auto stock = stockPluginDir();
+    const fs::path player = stock ? *stock / "Script Player.clap" : fs::path();
+    if (!stock || !fs::exists(player)) {
+        MESSAGE("skipped: no script player in the stock plugin folder");
+        return;
+    }
+    ScanTest fixture;
+    fixture.options.superviseAll = true;  // as a background plugin.scan does
+    REQUIRE(scan(std::span<const fs::path>(&player, 1), fixture.options));
+    std::error_code ec;
+    CHECK((!fs::exists(fixture.options.cacheDirectory, ec) ||
+           fs::is_empty(fixture.options.cacheDirectory, ec)));
+}
+
 TEST_CASE("scan canonicalizes and deduplicates aliases in search path order") {
     ScanTest fixture;
     const auto good = fixture.copy(SCAN_GOOD_PATH, "good.clap");
