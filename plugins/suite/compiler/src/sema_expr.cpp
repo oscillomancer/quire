@@ -7,8 +7,10 @@
 // JIT computes what a C++ compiler would; where C++ leaves behaviour
 // undefined (float to int out of range, a variable divisor, a shift past the
 // width) the script is refused with the defined way to say it.
+#include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 
 #include "sema.h"
 
@@ -1837,11 +1839,13 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                         }
                     }
                     if (name == "continuous" && args.size() == 5) {
-                        error(call->args[4]->loc, "script.param.argument",
-                              "continuous()'s unit: use the factory for it (decibels, frequency, "
-                              "...)",
-                              "");
-                        return std::nullopt;
+                        if (args[4].builtinEnum != "Unit") {
+                            error(call->args[4]->loc, "script.param.argument",
+                                  "continuous(): the unit must be a Unit",
+                                  "Unit::Bpm, Unit::Samples, ... (or Unit::None)");
+                            return std::nullopt;
+                        }
+                        p.unit = static_cast<ParamModel::Unit>(args[4].intValue);
                     }
                 }
                 return c;
@@ -1927,7 +1931,7 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                     p.roles.push_back(r.stringValue);
                 }
             } else if (mod == "curved") {
-                if (args.empty() || args[0].kind != Constant::Kind::Enum) {
+                if (args.empty() || args[0].builtinEnum != "Curve") {
                     error(call->loc, "script.param.modifier",
                           ".curved() takes Curve::Linear, Curve::Log or Curve::Pow", "");
                     return std::nullopt;
@@ -1951,22 +1955,30 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
             return c;
         }
     }
-    // Curve::Log and the like, inside parameter declarations.
+    // Curve::Log, Unit::Bpm and the like, inside parameter declarations.
     if (e->kind == ExprKind::Name) {
         auto* n = static_cast<NameExpr*>(e);
-        if (n->path.size() == 2 && n->path[0] == "Curve") {
-            Constant c;
-            c.kind = Constant::Kind::Enum;
-            if (n->path[1] == "Linear")
-                c.intValue = 0;
-            else if (n->path[1] == "Log")
-                c.intValue = 1;
-            else if (n->path[1] == "Pow")
-                c.intValue = 2;
-            else {
-                error(n->loc, "script.param.curve", "Curve has Linear, Log and Pow", "");
+        static const std::map<std::string, std::vector<std::string>> builtinEnums = {
+            {"Curve", {"Linear", "Log", "Pow"}},
+            {"Unit",
+             {"None", "Decibels", "Hertz", "Milliseconds", "Percent", "Ratio", "Semitones", "Cents",
+              "Octaves", "Degrees", "Bpm", "Samples"}}};
+        const auto known = n->path.size() == 2 ? builtinEnums.find(n->path[0]) : builtinEnums.end();
+        if (known != builtinEnums.end()) {
+            const auto& names = known->second;
+            const auto at = std::find(names.begin(), names.end(), n->path[1]);
+            if (at == names.end()) {
+                std::string all;
+                for (const auto& v : names)
+                    all += (all.empty() ? "" : ", ") + known->first + "::" + v;
+                error(n->loc, known->first == "Curve" ? "script.param.curve" : "script.param.unit",
+                      known->first + " has no '" + n->path[1] + "'", "one of " + all);
                 return std::nullopt;
             }
+            Constant c;
+            c.kind = Constant::Kind::Enum;
+            c.intValue = at - names.begin();
+            c.builtinEnum = known->first;
             return c;
         }
     }

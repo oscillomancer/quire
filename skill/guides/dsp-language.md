@@ -78,7 +78,7 @@ patch says `"gain": -3`), exactly as with the stock plugins.
 | `integer(name, min, max, def)` | a whole number; read `.index()` |
 | `choice(name, {"Low Pass", "High Pass"}, def)` | an option; read `.index()` (0, 1, ...) |
 | `toggle(name, def)` | on or off; read `.on()` |
-| `continuous(name, min, max, def, Unit::...)` | anything else |
+| `continuous(name, min, max, def, Unit::...)` | anything else: `Unit::Bpm`, `Unit::Samples`, or no unit (`Unit::None`, the default) |
 
 Modifiers chain: `decibels("Output", -24, 12, 0).smoothed(20).help("...")`.
 

@@ -30,6 +30,7 @@ struct Constant {
     std::vector<std::string> designators;
     ParamModel spec;  // a ParamSpec under construction
     const Type* enumType = nullptr;
+    std::string builtinEnum;  // "Curve" or "Unit" for the runtime's enums (no enumType)
 
     bool numeric() const { return kind == Kind::Bool || kind == Kind::Int || kind == Kind::Double; }
     double asDouble() const {

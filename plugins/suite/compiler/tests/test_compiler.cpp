@@ -121,7 +121,27 @@ TEST_CASE("the first scripts' mistakes are refused with a hint") {
           "script.call.recursion");
     CHECK(firstError(plugin("int f(int n) { if (n > 0) return 1; } void process(Block& io) {}")) ==
           "script.return.missing_path");
+    CHECK(firstError(plugin("Param p = continuous(\"P\", 0, 1, 0, Unit::Furlongs);\n"
+                            "void process(Block& io) {}")) == "script.param.unit");
+    CHECK(firstError(plugin("Param p = decibels(\"P\", 0, 1, 0).curved(Unit::Hertz);\n"
+                            "void process(Block& io) {}")) == "script.param.modifier");
     // Scripts receive no notes yet: an instrument would compile and stay silent.
     CHECK(firstError(head + "struct T : Instrument {\n" + info +
                      "void process(Block& io) {}\n};\n") == "script.plugin.kind");
+}
+
+TEST_CASE("continuous() takes a unit, for the units without a factory") {
+    const std::string source = R"(#include <supple/script.h>
+
+struct T : Effect {
+    static constexpr Info info = {.name = "T", .id = "com.example.t"};
+    Param tempo = continuous("Tempo", 40, 240, 120, Unit::Bpm);
+    Param plain = continuous("Amount", 0, 1, 0.5);
+    void process(Block& io) {}
+};
+)";
+    auto r = compileOk(source);
+    REQUIRE(r.program->params().size() == 2);
+    CHECK(r.program->params()[0].unit == scriptc::ParamModel::Unit::Bpm);
+    CHECK(r.program->params()[1].unit == scriptc::ParamModel::Unit::None);
 }
