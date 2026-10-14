@@ -429,13 +429,6 @@ class SharedSignals {
 
   private:
 #if defined(_WIN32)
-    static bool autoReset(HANDLE event) {
-        if (!SetEvent(event)) return false;
-        const bool valid = WaitForSingleObject(event, 0) == WAIT_OBJECT_0 &&
-                           WaitForSingleObject(event, 0) == WAIT_TIMEOUT;
-        ResetEvent(event);
-        return valid;
-    }
     HANDLE request_ = nullptr, done_ = nullptr;
 #endif
 };
