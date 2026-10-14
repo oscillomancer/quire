@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <ostream>
 #include <string>
 #include <thread>
 
