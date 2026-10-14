@@ -131,7 +131,7 @@ TEST_CASE("files: atomic replacement preserves an existing reader") {
                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
         REQUIRE(reader.handle != INVALID_HANDLE_VALUE);
         const auto replaced = writeFileAtomic(path, std::string_view("new"));
-        INFO(replaced ? "ok" : replaced.error().message);
+        INFO((replaced ? "ok" : replaced.error().message));
         REQUIRE(replaced.ok());
         char old[3];
         DWORD count = 0;
