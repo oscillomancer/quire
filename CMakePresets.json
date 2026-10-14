@@ -27,8 +27,41 @@
     { "name": "rtsan", "inherits": "base", "displayName": "Clang RealtimeSanitizer",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "SUPPLE_SANITIZE": "realtime",
                           "SUPPLE_BUILD_GUI": "OFF" } },
-    {"name": "macos", "inherits": "base", "displayName": "macos portable Debug", "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin"}, "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "CMAKE_OSX_ARCHITECTURES": "arm64", "CMAKE_OSX_DEPLOYMENT_TARGET": "14.4", "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/macos.cmake", "SUPPLE_WERROR": "ON"}},
-    {"name": "windows", "inherits": "base", "displayName": "windows portable Debug", "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows"}, "cacheVariables": {"CMAKE_C_COMPILER": "clang-cl", "CMAKE_CXX_COMPILER": "clang-cl", "CMAKE_BUILD_TYPE": "Debug", "SUPPLE_WERROR": "ON", "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake", "VCPKG_TARGET_TRIPLET": "x64-windows"}}
+    {
+      "name": "macos",
+      "inherits": "base",
+      "displayName": "macos portable Debug",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "14.4",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/macos.cmake",
+        "SUPPLE_WERROR": "ON"
+      }
+    },
+    {
+      "name": "windows",
+      "inherits": "base",
+      "displayName": "windows portable Debug",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang-cl",
+        "CMAKE_CXX_COMPILER": "clang-cl",
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SUPPLE_WERROR": "ON",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
+      }
+    }
   ],
   "buildPresets": [
     { "name": "dev", "configurePreset": "dev", "jobs": 6 },
@@ -38,8 +71,16 @@
     { "name": "ubsan", "configurePreset": "ubsan", "jobs": 6 },
     { "name": "tsan", "configurePreset": "tsan", "jobs": 6 },
     { "name": "rtsan", "configurePreset": "rtsan", "jobs": 6 },
-    {"name": "macos", "configurePreset": "macos", "jobs": 6},
-    {"name": "windows", "configurePreset": "windows", "jobs": 6}
+    {
+      "name": "macos",
+      "configurePreset": "macos",
+      "jobs": 6
+    },
+    {
+      "name": "windows",
+      "configurePreset": "windows",
+      "jobs": 6
+    }
   ],
   "testPresets": [
     { "name": "base", "hidden": true, "output": { "outputOnFailure": true },
@@ -58,8 +99,16 @@
     { "name": "rtsan", "inherits": "base", "configurePreset": "rtsan",
       "environment": { "RTSAN_OPTIONS": "halt_on_error=1" },
       "filter": { "exclude": { "label": "slow" } } },
-    {"name": "macos", "inherits": "base", "configurePreset": "macos"},
-    {"name": "windows", "inherits": "base", "configurePreset": "windows"}
+    {
+      "name": "macos",
+      "inherits": "base",
+      "configurePreset": "macos"
+    },
+    {
+      "name": "windows",
+      "inherits": "base",
+      "configurePreset": "windows"
+    }
   ],
   "workflowPresets": [
     { "name": "dev", "steps": [
@@ -76,7 +125,39 @@
       { "type": "configure", "name": "tsan" }, { "type": "build", "name": "tsan" }, { "type": "test", "name": "tsan" } ] },
     { "name": "rtsan", "steps": [
       { "type": "configure", "name": "rtsan" }, { "type": "build", "name": "rtsan" }, { "type": "test", "name": "rtsan" } ] },
-    {"name": "macos", "steps": [{"type": "configure", "name": "macos"}, {"type": "build", "name": "macos"}, {"type": "test", "name": "macos"}]},
-    {"name": "windows", "steps": [{"type": "configure", "name": "windows"}, {"type": "build", "name": "windows"}, {"type": "test", "name": "windows"}]}
+    {
+      "name": "macos",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "macos"
+        },
+        {
+          "type": "build",
+          "name": "macos"
+        },
+        {
+          "type": "test",
+          "name": "macos"
+        }
+      ]
+    },
+    {
+      "name": "windows",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "windows"
+        },
+        {
+          "type": "build",
+          "name": "windows"
+        },
+        {
+          "type": "test",
+          "name": "windows"
+        }
+      ]
+    }
   ]
 }
