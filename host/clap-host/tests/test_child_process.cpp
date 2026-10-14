@@ -62,3 +62,16 @@ TEST_CASE("Windows child job terminates descendants retaining stdout") {
     std::filesystem::remove(file, ec);
 }
 #endif
+
+#if !defined(_WIN32)
+TEST_CASE("child control inheritance preserves stdout capture with closed stdio") {
+    const std::array<std::string, 1> args{"control-stdio"};
+    auto child = ChildProcess::spawn(CHILD_FIXTURE_PATH, args);
+    REQUIRE(child);
+    auto output =
+        (*child)->collect(std::chrono::steady_clock::now() + std::chrono::seconds(10), 32);
+    REQUIRE(output);
+    CHECK(output->exitCode == 0);
+    CHECK_FALSE(output->crashed);
+}
+#endif

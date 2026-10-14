@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -11,6 +12,10 @@
 #include <fcntl.h>
 #include <io.h>
 #include <windows.h>
+#else
+#include <fcntl.h>
+#include <supple/host/child_process.h>
+#include <unistd.h>
 #endif
 int main(int argc, char** argv) {
 #if defined(_WIN32)
@@ -18,6 +23,28 @@ int main(int argc, char** argv) {
 #endif
     if (argc < 2) return 3;
     const std::string mode = argv[1];
+#if !defined(_WIN32)
+    if (mode == "control-stdio") {
+        int fds[2];
+        if (::pipe(fds) != 0) return 10;
+        for (int fd : fds)
+            if (::fcntl(fd, F_SETFD, FD_CLOEXEC) != 0) return 11;
+        if (::dup2(fds[0], STDOUT_FILENO) != STDOUT_FILENO) return 12;
+        ::close(fds[0]);
+        ::close(STDIN_FILENO);
+        const std::array<std::string, 2> args{"-c", "cat <&3"};
+        supple::host::ChildProcess::LaunchOptions options;
+        options.control = STDOUT_FILENO;
+        auto child = supple::host::ChildProcess::spawn("/bin/sh", args, options);
+        if (!child) return 13;
+        if (::write(fds[1], "ipc", 3) != 3) return 14;
+        ::close(fds[1]);
+        ::close(STDOUT_FILENO);
+        auto output =
+            (*child)->collect(std::chrono::steady_clock::now() + std::chrono::seconds(5), 32);
+        return output && output->exitCode == 0 && output->text == "ipc" ? 0 : 15;
+    }
+#endif
 #if defined(_WIN32)
     if (mode == "tree" && argc == 3) {
         std::wstring exe(32768, L'\0');

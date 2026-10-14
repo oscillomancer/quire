@@ -26,6 +26,9 @@ supple_target_defaults(${PRODUCT_SLUG}-bridge)
 
 if(SUPPLE_BUILD_TESTS)
   add_executable(host-child-fixture tests/child_fixture.cpp)
+  if(UNIX)
+    target_link_libraries(host-child-fixture PRIVATE supple::clap-host)
+  endif()
   supple_target_defaults(host-child-fixture)
   # Hermetic CLAP fixtures for the host tests.
   add_library(clap-host-fixtures MODULE tests/fixture_plugins.cpp)

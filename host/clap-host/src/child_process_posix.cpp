@@ -59,10 +59,12 @@ Result<std::unique_ptr<ChildProcess>> ChildProcess::spawn(const std::filesystem:
 #else
     if (::pipe2(fds, O_CLOEXEC) != 0) return failure("child.spawn", "cannot create pipe");
 #endif
-    // Keep redirection endpoints above stdio, including when the parent closed it.
+    // Keep pipe endpoints above stdio and the reserved control fd, even when
+    // the parent closed stdio. Mapping control must not overwrite capture.
+    const int firstPipeFd = options.control < 0 ? 3 : 4;
     for (auto& fd : fds) {
-        if (fd > STDERR_FILENO) continue;
-        const int copy = ::fcntl(fd, F_DUPFD_CLOEXEC, 3);
+        if (fd >= firstPipeFd) continue;
+        const int copy = ::fcntl(fd, F_DUPFD_CLOEXEC, firstPipeFd);
         if (copy < 0) {
             const int rc = errno;
             ::close(fds[0]);
