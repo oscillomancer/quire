@@ -1182,7 +1182,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                     const auto& configured = engine.options().pluginPath;
                     auto paths = configured.empty() ? host::defaultSearchPath() : configured;
                     engine.startJob([&engine, &jobs, &dispatcher, id = running,
-                                     paths = std::move(paths)](std::stop_token) {
+                                     paths = std::move(paths)](supple::StopToken) {
                         host::ScanReport report;
                         host::ScanOptions options;
                         options.superviseAll = true;  // nothing loads in this thread

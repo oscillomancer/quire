@@ -120,3 +120,29 @@ Native file reads allow delete sharing. Concurrent replacement preserves
 the previous file for readers that permit delete sharing and permits
 successive writers to replace the same destination. External Windows readers
 that deny delete sharing cause a structured `file.write` error until closed.
+
+## Cooperative job cancellation (2026-10-14, ADR-0036)
+
+`base/stop.h` supplies `StopToken`, `JoiningThread` and `StopCallback<F>` for
+non-RT work. Where available, token/thread are aliases of std::stop_token and
+std::jthread, and the callback wraps std::stop_callback. Apple's system libc++
+uses an original fallback, avoiding a second C++ runtime. Host job and offline
+render signatures use StopToken; Linux/Windows types and ABI remain unchanged.
+
+JoiningThread accepts a callable, optionally receiving a token, is movable,
+and requests cancellation then joins in its destructor and before replacing
+an owned thread. join(), joinable(), request_stop() and get_stop_token() follow
+those standard operations. A default token cannot stop; stop_requested() is an
+acquire observation. A token remains stopped after its source is destroyed;
+otherwise stop_possible() becomes false when its source is gone.
+
+StopCallback registration either joins the next stop request or invokes
+synchronously if cancellation is already requested. Requests deliver at most
+once and are noexcept; a throwing callback terminates. Destroying a registration
+waits for an in-flight invocation and prevents any later invocation. Callbacks
+may remove themselves or another registration. Invocation happens outside the
+state mutex. The fallback snapshots shared slots under that mutex and guards
+each invocation with a recursive slot mutex, so self-removal retains the running
+callable. Callbacks and tokens may outlive the thread. These operations allocate,
+lock and join: never call them from audio. The standalone forced-fallback test
+must link only libraries that do not include stop.h, to avoid mixed type definitions.

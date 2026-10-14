@@ -562,12 +562,12 @@ TEST_CASE("finished job threads are reaped before another starts") {
     Harness h;
     std::atomic<int> completed{0};
     for (int i = 0; i < 120; ++i) {
-        h.host->session().startJob([&](std::stop_token) { completed.fetch_add(1); });
+        h.host->session().startJob([&](supple::StopToken) { completed.fetch_add(1); });
         while (completed.load() <= i) std::this_thread::yield();
         while (h.host->session().activeJobThreadCountForTests() != 0) std::this_thread::yield();
         CHECK(h.host->session().jobThreadCountForTests() <= 2);
     }
-    h.host->session().startJob([](std::stop_token) {});
+    h.host->session().startJob([](supple::StopToken) {});
     CHECK(h.host->session().jobThreadCountForTests() <= 2);
 }
 

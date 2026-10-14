@@ -458,7 +458,7 @@ TEST_CASE("the session tick adopts background work and drops finished job thread
     std::mutex mutex;
     std::condition_variable cv;
     bool running = false, finish = false;
-    s->startJob([&](std::stop_token) {
+    s->startJob([&](supple::StopToken) {
         {
             std::lock_guard lock(mutex);
             running = true;
@@ -489,7 +489,7 @@ TEST_CASE("reset joins jobs and discards late background render records") {
     TempDir dir("reset-jobs");
     auto session = openSession(dir);
     auto record = session->reserveRender("late");
-    session->startJob([&](std::stop_token stop) {
+    session->startJob([&](supple::StopToken stop) {
         while (!stop.stop_requested()) std::this_thread::yield();
         session->submitRender(std::move(record));
     });

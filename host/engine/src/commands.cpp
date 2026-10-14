@@ -2641,7 +2641,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 auto pin = app.versions().pin(s.version);
                 app.startJob([&app, &dispatcher, &jobs, target, id, renderId, pin = std::move(pin),
                               s = std::move(s), o, path, a, addFile,
-                              catalogue = std::move(catalogue), identity](std::stop_token stop) {
+                              catalogue = std::move(catalogue), identity](supple::StopToken stop) {
                     if (stop.stop_requested() || jobs.cancelled(id)) return;
                     OfflineSettings settings = o;
                     settings.cancelFlag = jobs.cancellationFlag(id);
@@ -3598,7 +3598,8 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.exposure = cmd::Exposure::McpTool;
         c.summary = "Start real-time playback on the audio device (jack) or without one (dummy).";
         c.description =
-            "backend: jack (default; PipeWire's JACK or a JACK server) or dummy (no device, "
+            "backend: jack (Linux default; PipeWire's JACK or a JACK server) or dummy (default "
+            "elsewhere, no device, "
             "paced like one). block: the device block in frames (default 256); the device's "
             "period may differ and is reported. anticipative (default true): render ahead of "
             "the playhead on worker threads (edits are heard up to 200 ms later); false renders "
@@ -3620,9 +3621,11 @@ void registerEngineCommands(cmd::Registry& registry) {
                      .field("anticipative", &EngineStartArgs::anticipative, schema::boolean())
                      .build();
         c.result = engineStatusSchema();
-        c.errors = {{"engine.running", "the engine is already running", "engine.stop first"},
-                    {"backend.unavailable", "JACK is not installed", "install pipewire-jack"},
-                    {"backend.open", "no JACK server answered", "is PipeWire running?"}};
+        c.errors = {
+            {"engine.running", "the engine is already running", "engine.stop first"},
+            {"backend.unavailable", "JACK is not installed", "install pipewire-jack"},
+            {"backend.open", "no JACK server answered", "is PipeWire running?"},
+            {"backend.unsupported", "backend is unavailable on this platform", "select dummy"}};
         c.examples = {
             {"Without a device", obj(R"({"backend": "dummy", "block": 128})"),
              obj(R"({"running": true, "backend": "dummy", "sample_rate": 48000.0, "block": 128,
@@ -3641,7 +3644,12 @@ void registerEngineCommands(cmd::Registry& registry) {
              "empty"}};
         c.run = [](const EngineStartArgs& a, Context& ctx) -> Result<EngineStatus> {
             EngineApp& app = A(ctx);
-            const bool dummy = a.backend.value_or(BackendArg::Jack) == BackendArg::Dummy;
+#if defined(__linux__)
+            constexpr auto defaultBackend = BackendArg::Jack;
+#else
+            constexpr auto defaultBackend = BackendArg::Dummy;
+#endif
+            const bool dummy = a.backend.value_or(defaultBackend) == BackendArg::Dummy;
             SUPPLE_TRY(app.startEngine(dummy ? "dummy" : "jack",
                                        static_cast<std::uint32_t>(a.block.value_or(256)),
                                        a.anticipative.value_or(true)));

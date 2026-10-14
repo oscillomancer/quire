@@ -2327,7 +2327,7 @@ TEST_CASE("project replacement joins jobs and drops stale render completions") {
     auto target = renderTarget(*app);
     const auto id = bus.jobs().create();
     std::atomic<bool> joined{false};
-    app->startJob([&](std::stop_token stop) {
+    app->startJob([&](supple::StopToken stop) {
         while (!stop.stop_requested()) std::this_thread::yield();
         joined.store(true);
     });

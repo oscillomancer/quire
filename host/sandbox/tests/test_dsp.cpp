@@ -495,6 +495,8 @@ TEST_CASE("dsp.export makes a plugin that plays its version of the script, and n
     CHECK_FALSE(fs::exists(root.path / "without-notices" / "Boost.clap"));
 }
 
+#endif
+
 TEST_CASE("dsp.test plays notes into an instrument and hears its pitch") {
     const fs::path player = kStock / "Script Player.clap";
     if (!fs::exists(player)) {
@@ -611,4 +613,18 @@ TEST_CASE("dsp.test gives a convolution reverb its room through a patch") {
     CHECK(missing.error().toString().find("there is no file there") != std::string::npos);
 }
 
+#if !defined(__linux__)
+TEST_CASE("native plugin-file export gives a source-export hint") {
+    Harness h;
+    h.write("native-export",
+            script("Native", "com.example.native-export",
+                   "Param gain = decibels(\"Gain\", -24, 24, 0); void process(Block& io) {}"));
+    auto args = json::Value::object();
+    args["script"] = "native-export";
+    auto result = h.bus->execute({"dsp.export", args, kTest});
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == "dsp.platform");
+    CHECK(result.error().path == "/args/format");
+    CHECK_FALSE(result.error().hint.empty());
+}
 #endif

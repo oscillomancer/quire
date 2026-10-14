@@ -113,7 +113,12 @@ TEST_CASE("every sandbox command example runs against its fixture" * doctest::de
         [&](std::string_view fixture) -> std::unique_ptr<cmd::Host> {
             return makeHost(root.path / std::to_string(n++), {}, fixture.starts_with("dsp_player"));
         },
-        [](std::string_view fixture) { return SUPPLE_EDITORS || fixture != "dsp_player_editor"; });
+        [](std::string_view fixture) {
+#if !defined(__linux__)
+            if (fixture == "dsp_player_export") return false;
+#endif
+            return SUPPLE_EDITORS || fixture != "dsp_player_editor";
+        });
     INFO((st ? std::string() : st.error().toString()));
     CHECK(st.ok());
     CHECK(n >= 16);

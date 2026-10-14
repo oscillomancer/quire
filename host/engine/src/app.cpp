@@ -739,7 +739,7 @@ Result<fs::path> EngineApp::renderPath(std::string_view reference) const {
     return resolve(fs::path(reference));
 }
 
-void EngineApp::startJob(std::function<void(std::stop_token)> work) {
+void EngineApp::startJob(std::function<void(supple::StopToken)> work) {
     for (auto it = jobs_.begin(); it != jobs_.end();) {
         if (it->finished->load(std::memory_order_acquire))
             it = jobs_.erase(it);
@@ -747,15 +747,16 @@ void EngineApp::startJob(std::function<void(std::stop_token)> work) {
             ++it;
     }
     auto finished = std::make_shared<std::atomic<bool>>(false);
-    jobs_.push_back({std::jthread([hook = options_.jobStartedHook, done = options_.jobFinishedHook,
-                                   work = std::move(work), finished, this](std::stop_token stop) {
-                         if (hook) hook();
-                         work(stop);
-                         if (done) done();
-                         finished->store(true, std::memory_order_release);
-                         mainWake_.notify();
-                     }),
-                     finished});
+    jobs_.push_back(
+        {supple::JoiningThread([hook = options_.jobStartedHook, done = options_.jobFinishedHook,
+                                work = std::move(work), finished, this](supple::StopToken stop) {
+             if (hook) hook();
+             work(stop);
+             if (done) done();
+             finished->store(true, std::memory_order_release);
+             mainWake_.notify();
+         }),
+         finished});
 }
 
 void EngineApp::stopJobs() {
@@ -867,9 +868,8 @@ Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, boo
                 static_cast<std::uint32_t>(std::clamp<std::size_t>(names->size(), 2, 32));
         ownedBackend_ = std::make_unique<JackBackend>(o);
 #else
-        return Error("engine.backend.unsupported",
-                     "the JACK backend is unavailable on this platform", "/backend",
-                     "select dummy until the native device backend is available");
+        return Error("backend.unsupported", "the JACK backend is unavailable on this platform",
+                     "/backend", "select dummy until the native device backend is available");
 #endif
     } else if (backend == "dummy") {
         ownedBackend_ = std::make_unique<DummyBackend>(
@@ -1970,7 +1970,7 @@ Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<Recor
         const auto branch = versions_->branch();
         auto* dispatcher = commands_;
         startJob([this, dispatcher, source, expected, take = std::move(take), input, generation,
-                  branch](std::stop_token stop) mutable {
+                  branch](supple::StopToken stop) mutable {
             Result<std::string> result =
                 Error("file.open", "cannot open recording for hashing", take.file.string(),
                       "restore a readable file and reimport it to retry hashing");
@@ -2018,7 +2018,7 @@ void EngineApp::finalizeRecordingHash(Id source, model::MediaSource expected, Re
                               : base / current->project->mediaDir / expected.path;
     auto* dispatcher = commands_;
     startJob([this, dispatcher, source, expected, take = std::move(take), hash = std::move(hash),
-              branch = std::move(branch), generation, path](std::stop_token stop) mutable {
+              branch = std::move(branch), generation, path](supple::StopToken stop) mutable {
         if (stop.stop_requested()) return;
         detail::RecordingInfo side{take.track,    take.startSample, take.sampleRate,
                                    take.segments, take.loop.start,  take.loop.end,

@@ -22,10 +22,10 @@
 #include <map>
 #include <memory>
 #include <optional>
-#include <stop_token>
 #include <string>
 #include <string_view>
 #include <vector>
+#include "supple/base/stop.h"
 
 #include "supple/audio/audio_file.h"
 #include "supple/base/result.h"
@@ -178,7 +178,7 @@ struct OfflineSettings {
     // Optional worker-side publication, at most once per 500 ms plus final.
     std::function<void(double)> progress;
     double progressBase = 0.0, progressScale = 1.0;
-    std::stop_token stopToken;
+    supple::StopToken stopToken;
 };
 
 struct OfflineResult {

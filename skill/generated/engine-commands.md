@@ -1126,7 +1126,7 @@ Result:
 
 Export a DSP script as a plugin for other DAWs: a CLAP file, or C++ source.
 
-format clap (the default): copies the script player that plays the script here and appends the script. The copy is a plugin of its own, under the script's id and name, that plays this version of the script in any CLAP host (it reads no library), written to <folder>/<plugin name>.clap (default: the script's folder, under export/) with the licenses to ship beside it (notices). It runs on this platform, as fast as the player it copies (a debug build's is slow). format source: a C++ project of the plugin template that builds the same plugin (same id, parameters and state) as CLAP and VST3, plus AU on macOS (only Linux has been validated here), with the script compiled as C++, written to the empty <folder> (default: the script's folder, under export/<script>-source); its README says how to build it, and license (MIT unless GPL-3.0-or-later) is the license of its own files. Export again after changing the script; an export does not follow the library.
+format clap (the default, Linux only): copies the script player that plays the script here and appends the script. The copy is a plugin of its own, under the script's id and name, that plays this version of the script in any CLAP host (it reads no library), written to <folder>/<plugin name>.clap (default: the script's folder, under export/) with the licenses to ship beside it (notices). It runs on this platform, as fast as the player it copies (a debug build's is slow). format source: a C++ project of the plugin template that builds the same plugin (same id, parameters and state) as CLAP and VST3, plus AU on macOS (only Linux has been validated here), with the script compiled as C++, written to the empty <folder> (default: the script's folder, under export/<script>-source); its README says how to build it, and license (MIT unless GPL-3.0-or-later) is the license of its own files. Export again after changing the script; an export does not follow the library.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -1181,6 +1181,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 
 ### Errors
 
+- `dsp.platform`: plugin-file export is unavailable on this platform Hint: use format source to export a C++ project
 - `dsp.compile`: the script does not compile Hint: dsp.check gives its diagnostics
 - `dsp.id_taken`: another script in the library has the script's id Hint: give each script its own Info.id
 - `dsp.not_listed`: the script compiles but no plugin has its id Hint: put the script player on the plugin path
@@ -1193,7 +1194,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 
 ### Examples
 
-**Export a script from the library as a plugin file** (`dsp_player`)
+**Export a script from the library as a plugin file** (`dsp_player_export`)
 
 ```json
 {
@@ -2058,7 +2059,7 @@ Result:
 
 Start real-time playback on the audio device (jack) or without one (dummy).
 
-backend: jack (default; PipeWire's JACK or a JACK server) or dummy (no device, paced like one). block: the device block in frames (default 256); the device's period may differ and is reported. anticipative (default true): render ahead of the playhead on worker threads (edits are heard up to 200 ms later); false renders everything in the audio callback. The engine runs at the device's rate (media is resampled; renders stay at the project's rate). Background and live thread capacities follows the app's Audio processing threads preference (Automatic by default); live helpers join each callback with no added latency. memory_lock reports the default-off host-process memory policy: requested, active, and a structured OS error on failure. cpu_idle_latency reports the default-off 20 microsecond PM QoS request, released on engine stop. A protection failure does not prevent audio startup.
+backend: jack (Linux default; PipeWire's JACK or a JACK server) or dummy (default elsewhere, no device, paced like one). block: the device block in frames (default 256); the device's period may differ and is reported. anticipative (default true): render ahead of the playhead on worker threads (edits are heard up to 200 ms later); false renders everything in the audio callback. The engine runs at the device's rate (media is resampled; renders stay at the project's rate). Background and live thread capacities follows the app's Audio processing threads preference (Automatic by default); live helpers join each callback with no added latency. memory_lock reports the default-off host-process memory policy: requested, active, and a structured OS error on failure. cpu_idle_latency reports the default-off 20 microsecond PM QoS request, released on engine stop. A protection failure does not prevent audio startup.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -2338,6 +2339,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 - `engine.running`: the engine is already running Hint: engine.stop first
 - `backend.unavailable`: JACK is not installed Hint: install pipewire-jack
 - `backend.open`: no JACK server answered Hint: is PipeWire running?
+- `backend.unsupported`: backend is unavailable on this platform Hint: select dummy
 
 ### Examples
 

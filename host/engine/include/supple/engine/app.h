@@ -26,6 +26,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "supple/base/stop.h"
 
 #include "supple/cmd/bus.h"
 #include "supple/engine/midi_control.h"
@@ -283,7 +284,7 @@ class EngineApp : public cmd::Host {
     std::vector<QueuedRender>& renderQueue() { return renderQueue_; }
     std::string nextQueueId() { return "q" + std::to_string(++queueCounter_); }
     Result<std::filesystem::path> renderPath(std::string_view reference) const;
-    void startJob(std::function<void(std::stop_token)> work);
+    void startJob(std::function<void(supple::StopToken)> work);
     void stopJobs() override;
     void dispatcherAttached(cmd::Dispatcher* dispatcher) override { commands_ = dispatcher; }
 
@@ -527,7 +528,7 @@ class EngineApp : public cmd::Host {
     mutable std::mutex rendersMutex_;
     std::uint64_t nextRender_ = 1;
     struct JobThread {
-        std::jthread thread;
+        supple::JoiningThread thread;
         std::shared_ptr<std::atomic<bool>> finished;
     };
     std::vector<JobThread> jobs_;

@@ -1166,7 +1166,7 @@ void Session::adoptBackgroundRenders() {
     }
 }
 
-void Session::startJob(std::function<void(std::stop_token)> work) {
+void Session::startJob(std::function<void(supple::StopToken)> work) {
     for (auto it = jobs_.begin(); it != jobs_.end();) {
         if (it->finished->load(std::memory_order_acquire)) {
             if (it->thread.joinable()) it->thread.join();
@@ -1176,11 +1176,12 @@ void Session::startJob(std::function<void(std::stop_token)> work) {
         }
     }
     auto finished = std::make_shared<std::atomic<bool>>(false);
-    jobs_.push_back(JobThread{std::jthread([w = std::move(work), finished](std::stop_token st) {
-                                  w(st);
-                                  finished->store(true, std::memory_order_release);
-                              }),
-                              std::move(finished)});
+    jobs_.push_back(
+        JobThread{supple::JoiningThread([w = std::move(work), finished](supple::StopToken st) {
+                      w(st);
+                      finished->store(true, std::memory_order_release);
+                  }),
+                  std::move(finished)});
 }
 
 void Session::stopJobs() {

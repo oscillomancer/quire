@@ -613,3 +613,9 @@ editor opening fails with host.editor.unsupported until editor embedding lands.
 macOS enables the sandbox/offline renderer; Windows waits for native audio-file
 I/O. The macOS engine and dummy backend are enabled separately from JACK, bridge
 and editor integration. Windows engine/sandbox wait for audio-file I/O.
+
+On non-Linux platforms `dsp.export {format: "clap"}` returns `dsp.platform`
+at `/format`, with a hint to select `source`. This is the existing Linux-only
+binary export limit made explicit for bundle players. Source generation and
+DSP measurement remain enabled. The binary-export example uses its own fixture
+and is skipped only where that format is unavailable.

@@ -1238,8 +1238,14 @@ dummy audio and offline rendering. The platform's RT output must equal its
 offline output, including the anticipative renderer. A native fixture test
 runs this contract through both executors, Console 9, latency compensation and
 multiple worker capacities. JACK/fake JACK and the hardware benchmark stay
-Linux-only; an explicit JACK request returns engine.backend.unsupported,
+Linux-only; an explicit JACK request returns backend.unsupported,
 path /backend and a hint to select dummy. Windows engine remains gated by
 audio-file I/O. Shared/dedicated bridge creation on non-Linux platforms returns
 host.bridge.unsupported, path /isolation with an in_process hint, through the
 same InstancePool load boundary; it never substitutes a local instance.
+
+`engine.start` defaults to JACK on Linux and dummy on other platforms. Its
+registry documents `backend.unsupported` and the default difference, so the CLI's
+play command also works with no backend flag on the native headless port.
+Background jobs and render cancellation use core-base StopToken/JoiningThread;
+Linux uses the standard types, while Apple uses the non-RT fallback in core-base.

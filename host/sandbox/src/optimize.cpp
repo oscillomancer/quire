@@ -514,9 +514,9 @@ void registerOptimizeCommands(cmd::Registry& registry) {
                                              &jobs,
                                              &s,
                                              a.instance});
-        s.startJob([w](std::stop_token stop) {
+        s.startJob([w](supple::StopToken stop) {
             Work& W = *w;
-            std::stop_callback onStop(stop, [&] { (void)W.jobs->cancel(W.job); });
+            supple::StopCallback onStop(stop, [&] { (void)W.jobs->cancel(W.job); });
             auto cancelled = [&] {
                 if (stop.stop_requested()) (void)W.jobs->cancel(W.job);
                 return W.jobs->cancelled(W.job);

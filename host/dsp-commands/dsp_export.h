@@ -312,7 +312,8 @@ void registerDspExport(cmd::Registry& registry) {
     c.exposure = cmd::Exposure::McpTool;
     c.summary = "Export a DSP script as a plugin for other DAWs: a CLAP file, or C++ source.";
     c.description =
-        "format clap (the default): copies the script player that plays the script here and "
+        "format clap (the default, Linux only): copies the script player that plays the script "
+        "here and "
         "appends the script. The copy is a plugin of its own, under the script's id and name, "
         "that plays this version of the script in any CLAP host (it reads no library), "
         "written to <folder>/<plugin name>.clap (default: the script's folder, under export/) "
@@ -354,7 +355,9 @@ void registerDspExport(cmd::Registry& registry) {
                    .field("notices", &ExportResult::notices,
                           schema::string().doc("clap: the licenses to ship with the plugin"))
                    .build();
-    c.errors = {{"dsp.compile", "the script does not compile", "dsp.check gives its diagnostics"},
+    c.errors = {{"dsp.platform", "plugin-file export is unavailable on this platform",
+                 "use format source to export a C++ project"},
+                {"dsp.compile", "the script does not compile", "dsp.check gives its diagnostics"},
                 {"dsp.id_taken", "another script in the library has the script's id",
                  "give each script its own Info.id"},
                 {"dsp.not_listed", "the script compiles but no plugin has its id",
@@ -382,7 +385,7 @@ void registerDspExport(cmd::Registry& registry) {
                        detail::j(R"({"path":"<any>","id":"com.example.gain","name":"Gain",
                                      "format":"clap","player":"<any>","bytes":"<any>",
                                      "notices":"<any>"})"),
-                       "dsp_player"},
+                       "dsp_player_export"},
                       {"Export it as a C++ project", std::move(source),
                        detail::j(R"({"path":"<any>","id":"com.example.gain","name":"Gain",
                                      "format":"source"})"),
@@ -431,6 +434,10 @@ void registerDspExport(cmd::Registry& registry) {
             return ExportResult{dest.string(), info.id, info.name, "source", {}, {}, {}};
         }
 
+#if !defined(__linux__)
+        return Error("dsp.platform", "plugin-file export is unavailable on this platform",
+                     "/format", "use format source to export a C++ project");
+#endif
         const std::string& id = program.info().id;
         auto info = s.findPlugin(id);
         if (!info) {

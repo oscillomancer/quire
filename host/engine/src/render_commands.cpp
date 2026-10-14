@@ -523,7 +523,7 @@ Result<json::Value> runTasks(EngineApp& app, const std::vector<RenderTask>& task
                              cmd::JobManager* jobs = nullptr, std::string_view job = {},
                              const std::vector<host::PluginInfo>* catalogue = nullptr,
                              const host::HostIdentity* identity = nullptr,
-                             std::stop_token stop = {}) {
+                             supple::StopToken stop = {}) {
     json::Value files = json::Value::array();
     for (std::size_t i = 0; i < tasks.size(); ++i) {
         if (jobs && jobs->cancelled(job))
@@ -1293,7 +1293,7 @@ void registerQueueCommands(cmd::Registry& registry) {
             auto& jobs = ctx.service<cmd::JobManager>();
             const std::string id = jobs.create();
             app.startJob([&app, &jobs, &dispatcher, origin, target, id, work = std::move(work),
-                          catalogue = std::move(catalogue), identity](std::stop_token stop) {
+                          catalogue = std::move(catalogue), identity](supple::StopToken stop) {
                 json::Value renders = json::Value::array();
                 std::vector<std::string> done;
                 for (const auto& w : work) {
@@ -1404,7 +1404,7 @@ void registerRenderCommands(cmd::Registry& registry) {
             auto& jobs = ctx.service<cmd::JobManager>();
             const std::string id = jobs.create();
             app.startJob([&app, &jobs, &dispatcher, origin, target, id, tasks = std::move(*tasks),
-                          a, catalogue = std::move(catalogue), identity](std::stop_token stop) {
+                          a, catalogue = std::move(catalogue), identity](supple::StopToken stop) {
                 if (stop.stop_requested() || jobs.cancelled(id)) return;
                 auto result = runTasks(app, tasks, a, &jobs, id, &catalogue, &identity, stop);
                 if (result) {

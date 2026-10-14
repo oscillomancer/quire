@@ -18,10 +18,10 @@
 #include <mutex>
 #include <optional>
 #include <span>
-#include <stop_token>
 #include <string>
 #include <thread>
 #include <vector>
+#include "supple/base/stop.h"
 
 #include "supple/base/result.h"
 #include "supple/host/clap_host.h"
@@ -196,7 +196,7 @@ class Session {
 
     // --- background jobs ----------------------------------------------------------
     // Runs `work` on its own thread; stopJobs() requests stop and joins all.
-    void startJob(std::function<void(std::stop_token)> work);
+    void startJob(std::function<void(supple::StopToken)> work);
     void stopJobs();
     // The model thread's periodic service: adopts finished background renders
     // and drops finished job threads.
@@ -244,7 +244,7 @@ class Session {
     std::mutex backgroundMutex_;
     std::vector<RenderRecord> backgroundRenders_;
     struct JobThread {
-        std::jthread thread;
+        supple::JoiningThread thread;
         std::shared_ptr<std::atomic<bool>> finished;
     };
     std::vector<JobThread> jobs_;
