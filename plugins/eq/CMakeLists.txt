@@ -95,19 +95,17 @@ if (EQ_BUILD_TOOLS)
         target_link_options(eq-test PRIVATE -fsanitize=realtime)
     endif()
     add_test(NAME core COMMAND eq-test)
-    if (UNIX AND NOT APPLE)
-        find_package(Threads REQUIRED)
-        add_executable(eq-semantic-rt test/semantic_rt.cpp)
-        target_link_libraries(eq-semantic-rt PRIVATE
-            supple::plugin-support Threads::Threads ${CMAKE_DL_LIBS})
-        eq_target_defaults(eq-semantic-rt)
-        if (EQ_RTSAN)
-            target_compile_options(eq-semantic-rt PRIVATE -fsanitize=realtime)
-            target_link_options(eq-semantic-rt PRIVATE -fsanitize=realtime)
-        endif()
-        add_test(NAME semantic-rt COMMAND eq-semantic-rt
-            ${EQ_ASSET_DIR}/${EQ_DISPLAY_NAME}.clap)
+    find_package(Threads REQUIRED)
+    add_executable(eq-semantic-rt test/semantic_rt.cpp)
+    target_link_libraries(eq-semantic-rt PRIVATE
+        supple::plugin-support Threads::Threads ${CMAKE_DL_LIBS})
+    eq_target_defaults(eq-semantic-rt)
+    if (EQ_RTSAN)
+        target_compile_options(eq-semantic-rt PRIVATE -fsanitize=realtime)
+        target_link_options(eq-semantic-rt PRIVATE -fsanitize=realtime)
     endif()
+    add_test(NAME semantic-rt COMMAND eq-semantic-rt
+        ${EQ_ASSET_DIR}/${EQ_DISPLAY_NAME}.clap)
 
     if (SUPPLE_SEMANTIC_CONFORMANCE)
         add_test(NAME semantic-conformance COMMAND ${SUPPLE_SEMANTIC_CONFORMANCE}

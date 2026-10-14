@@ -100,3 +100,6 @@ and notices into the shared stock directory. This avoids clap-wrapper's extra
 CLAP subfolder without changing it or the template, and keeps internal test
 modules outside the stock catalogue. Player staging uses the same flat output
 contract; macOS continues to copy its complete bundle.
+
+Product semantic concurrency tests use native module loaders and run on every
+platform. Tail/unload probes that use dlopen or /proc remain Linux-only.

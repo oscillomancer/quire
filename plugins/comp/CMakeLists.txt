@@ -101,19 +101,17 @@ if (COMP_BUILD_TOOLS)
         target_link_options(comp-test PRIVATE -fsanitize=realtime)
     endif()
     add_test(NAME core COMMAND comp-test)
-    if (UNIX AND NOT APPLE)
-        find_package(Threads REQUIRED)
-        add_executable(comp-semantic-rt test/semantic_rt.cpp)
-        target_link_libraries(comp-semantic-rt PRIVATE
-            supple::plugin-support Threads::Threads ${CMAKE_DL_LIBS})
-        comp_target_defaults(comp-semantic-rt)
-        if (COMP_RTSAN)
-            target_compile_options(comp-semantic-rt PRIVATE -fsanitize=realtime)
-            target_link_options(comp-semantic-rt PRIVATE -fsanitize=realtime)
-        endif()
-        add_test(NAME semantic-rt COMMAND comp-semantic-rt
-            ${COMP_ASSET_DIR}/${COMP_DISPLAY_NAME}.clap)
+    find_package(Threads REQUIRED)
+    add_executable(comp-semantic-rt test/semantic_rt.cpp)
+    target_link_libraries(comp-semantic-rt PRIVATE
+        supple::plugin-support Threads::Threads ${CMAKE_DL_LIBS})
+    comp_target_defaults(comp-semantic-rt)
+    if (COMP_RTSAN)
+        target_compile_options(comp-semantic-rt PRIVATE -fsanitize=realtime)
+        target_link_options(comp-semantic-rt PRIVATE -fsanitize=realtime)
     endif()
+    add_test(NAME semantic-rt COMMAND comp-semantic-rt
+        ${COMP_ASSET_DIR}/${COMP_DISPLAY_NAME}.clap)
 
     if (SUPPLE_SEMANTIC_CONFORMANCE)
         add_test(NAME semantic-conformance COMMAND ${SUPPLE_SEMANTIC_CONFORMANCE}

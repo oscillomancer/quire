@@ -101,19 +101,17 @@ if (TRANSIENT_BUILD_TOOLS)
         target_link_options(transient-test PRIVATE -fsanitize=realtime)
     endif()
     add_test(NAME core COMMAND transient-test)
-    if (UNIX AND NOT APPLE)
-        find_package(Threads REQUIRED)
-        add_executable(transient-semantic-rt test/semantic_rt.cpp)
-        target_link_libraries(transient-semantic-rt PRIVATE
-            supple::plugin-support Threads::Threads ${CMAKE_DL_LIBS})
-        transient_target_defaults(transient-semantic-rt)
-        if (TRANSIENT_RTSAN)
-            target_compile_options(transient-semantic-rt PRIVATE -fsanitize=realtime)
-            target_link_options(transient-semantic-rt PRIVATE -fsanitize=realtime)
-        endif()
-        add_test(NAME semantic-rt COMMAND transient-semantic-rt
-            ${TRANSIENT_ASSET_DIR}/${TRANSIENT_DISPLAY_NAME}.clap)
+    find_package(Threads REQUIRED)
+    add_executable(transient-semantic-rt test/semantic_rt.cpp)
+    target_link_libraries(transient-semantic-rt PRIVATE
+        supple::plugin-support Threads::Threads ${CMAKE_DL_LIBS})
+    transient_target_defaults(transient-semantic-rt)
+    if (TRANSIENT_RTSAN)
+        target_compile_options(transient-semantic-rt PRIVATE -fsanitize=realtime)
+        target_link_options(transient-semantic-rt PRIVATE -fsanitize=realtime)
     endif()
+    add_test(NAME semantic-rt COMMAND transient-semantic-rt
+        ${TRANSIENT_ASSET_DIR}/${TRANSIENT_DISPLAY_NAME}.clap)
 
     if (SUPPLE_SEMANTIC_CONFORMANCE)
         add_test(NAME semantic-conformance COMMAND ${SUPPLE_SEMANTIC_CONFORMANCE}

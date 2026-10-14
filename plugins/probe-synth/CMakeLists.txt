@@ -93,19 +93,17 @@ if (PROBESYNTH_BUILD_TOOLS)
         target_link_options(probesynth-test PRIVATE -fsanitize=realtime)
     endif()
     add_test(NAME core COMMAND probesynth-test)
-    if (UNIX AND NOT APPLE)
-        find_package(Threads REQUIRED)
-        add_executable(probesynth-semantic-rt test/semantic_rt.cpp)
-        target_link_libraries(probesynth-semantic-rt PRIVATE
-            supple::plugin-support Threads::Threads ${CMAKE_DL_LIBS})
-        probesynth_target_defaults(probesynth-semantic-rt)
-        if (PROBESYNTH_RTSAN)
-            target_compile_options(probesynth-semantic-rt PRIVATE -fsanitize=realtime)
-            target_link_options(probesynth-semantic-rt PRIVATE -fsanitize=realtime)
-        endif()
-        add_test(NAME semantic-rt COMMAND probesynth-semantic-rt
-            ${PROBESYNTH_ASSET_DIR}/ProbeSynth.clap)
+    find_package(Threads REQUIRED)
+    add_executable(probesynth-semantic-rt test/semantic_rt.cpp)
+    target_link_libraries(probesynth-semantic-rt PRIVATE
+        supple::plugin-support Threads::Threads ${CMAKE_DL_LIBS})
+    probesynth_target_defaults(probesynth-semantic-rt)
+    if (PROBESYNTH_RTSAN)
+        target_compile_options(probesynth-semantic-rt PRIVATE -fsanitize=realtime)
+        target_link_options(probesynth-semantic-rt PRIVATE -fsanitize=realtime)
     endif()
+    add_test(NAME semantic-rt COMMAND probesynth-semantic-rt
+        ${PROBESYNTH_ASSET_DIR}/ProbeSynth.clap)
 
     if (SUPPLE_SEMANTIC_CONFORMANCE)
         add_test(NAME semantic-conformance COMMAND ${SUPPLE_SEMANTIC_CONFORMANCE}
