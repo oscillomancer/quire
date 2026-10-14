@@ -9,7 +9,8 @@ Fails (exit 1) when:
   * a dependency is not mentioned in THIRD_PARTY.md;
   * a CMake FetchContent_Declare / ExternalProject_Add names a dependency that
     is not in the manifest;
-  * first-party source contains a GPL/AGPL/LGPL SPDX identifier.
+  * GPL dependencies are not declared DAW-only, or plugin code carries GPL;
+  * first-party source carries an incompatible SPDX identifier.
 
 Run: tools/license-check/check.py --root <repo>
 """
@@ -19,10 +20,37 @@ import pathlib
 import re
 import sys
 
-FIRST_PARTY_DIRS = ["cmake", "libs", "host", "plugins", "daw", "mcp", "tools", "tests"]
+FIRST_PARTY_DIRS = ["cmake", "libs", "host", "plugins", "daw", "mcp", "tools", "tests", "skill", "docs"]
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hh", ".m", ".mm", ".py", ".lua", ".cmake"}
-# Built by concatenation so this file does not match its own pattern.
-FORBIDDEN_SPDX = re.compile("SPDX-License-" + r"Identifier:[ \t]*[^\n]*\b(A?GPL|LGPL)", re.IGNORECASE)
+# Keep GPL approvals separate from the permissive dependency allow-list.
+GPL_LICENSES = {"GPL-3.0-only", "GPL-3.0-or-later"}
+MIT_LIBRARIES = {"core-base", "core-json", "core-schema", "core-params",
+                 "core-patch", "core-dsp", "core-analysis"}
+SPDX_RE = re.compile("SPDX-License-" + r"Identifier:[ \t]*([^\n]+)")
+
+
+def mit_component(rel):
+    parts = pathlib.PurePosixPath(rel).parts
+    return (parts[0] == "plugins" or
+            (len(parts) > 1 and parts[0] == "libs" and parts[1] in MIT_LIBRARIES) or
+            str(rel) == "cmake/product.h.in")
+
+
+def dependency_license_ok(dependency, allowed):
+    expression = dependency["license"]
+    # Reject GPL even in an OR alternative unless the whole component is
+    # explicitly restricted to the DAW. A plugin scope must never be GPL.
+    tokens = re.findall(r"[A-Za-z0-9][A-Za-z0-9.+:-]*", expression)
+    copyleft = any(re.match(r"(?:A?GPL|LGPL)(?:-|$)", t) for t in tokens)
+    scope = dependency.get("scope")
+    if copyleft and scope != "daw-only":
+        return False
+    permitted = set(allowed) - GPL_LICENSES
+    if scope == "daw-only":
+        permitted |= GPL_LICENSES
+    return license_ok(expression, permitted)
+
+
 FETCH_RE = re.compile(r"(?:FetchContent_Declare|ExternalProject_Add)\s*\(\s*([A-Za-z0-9_.+-]+)", re.IGNORECASE)
 # What may follow "ExternalProject_Add(plugin-" in plugins/CMakeLists.txt: a
 # variable name and a SOURCE_DIR that is a folder of plugins/ (no "..").
@@ -134,9 +162,9 @@ def main() -> int:
 
     for d in deps:
         tag = d["name"]
-        if not license_ok(d["license"], allowed):
+        if not dependency_license_ok(d, allowed):
             errors.append(f"{tag}: license '{d['license']}' is not on the allow-list "
-                          f"(needs the maintainer's approval and a manifest exception)")
+                          f"(GPL requires scope: daw-only; plugins cannot contain GPL)")
         if d.get("dir") and not (tp / d["dir"]).is_dir():
             errors.append(f"{tag}: manifest dir third_party/{d['dir']} does not exist")
         lf = d.get("license_file")
@@ -154,13 +182,21 @@ def main() -> int:
 
     for p in first_party_files(root):
         rel = p.relative_to(root)
-        if p.suffix in SOURCE_SUFFIXES or p.name == "CMakeLists.txt":
+        if p.suffix in SOURCE_SUFFIXES or p.name == "CMakeLists.txt" or p.name.endswith((".h.in", ".cpp.in")):
             try:
                 text = p.read_text(errors="replace")
             except OSError:
                 continue
-            if FORBIDDEN_SPDX.search(text) and pathlib.PurePosixPath(rel.as_posix()) not in SPDX_NAMES_ONLY:
-                errors.append(f"{rel}: carries a (L/A)GPL SPDX identifier")
+            if pathlib.PurePosixPath(rel.as_posix()) not in SPDX_NAMES_ONLY:
+                for match in SPDX_RE.finditer(text):
+                    identifier = match.group(1).split("*/", 1)[0].strip()
+                    if identifier == "@LICENSE@" and rel.parts[:3] == ("plugins", "suite", "export"):
+                        continue
+                    permitted = (set(allowed) - GPL_LICENSES if mit_component(rel)
+                                 else {"GPL-3.0-or-later"})
+                    if (mit_component(rel) and re.search(r"\b(?:A?GPL|LGPL)-", identifier)
+                            or not license_ok(identifier, permitted)):
+                        errors.append(f"{rel}: incompatible SPDX identifier '{identifier}'")
             if p.name == "CMakeLists.txt" or p.suffix == ".cmake":
                 for m in FETCH_RE.finditer(text):
                     dep = m.group(1).lower()

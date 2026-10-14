@@ -82,6 +82,37 @@ class BuildFiles(unittest.TestCase):
                 self.assertEqual(result, 1)
                 self.assertIn("fetches 'undeclared'", errors)
 
+    def test_gpl_daw_and_mit_plugin_boundaries(self):
+        for filename, identifier, expected in (
+            ("daw/example.cpp", "GPL-3.0-or-later", 0),
+            ("plugins/common/example.cpp", "GPL-3.0-or-later", 1),
+            ("plugins/common/example.cpp", "MIT OR GPL-3.0-or-later", 1),
+            ("libs/core-analysis/example.cpp", "GPL-3.0-or-later", 1),
+            ("libs/core-analysis/example.cpp", "MIT", 0),
+            ("plugins/suite/export/product/Catalog.cpp.in", "@LICENSE@", 0),
+            ("plugins/common/example.cpp", "@LICENSE@", 1),
+            ("daw/example.cpp", "AGPL-3.0-or-later", 1),
+        ):
+            with self.subTest(filename=filename, identifier=identifier):
+                result, errors = self.check_fixture(filename, "// SPDX-License-" + "Identifier: " + identifier + "\n")
+                self.assertEqual(result, expected, errors)
+
+
+class DependencyScopes(unittest.TestCase):
+    def test_gpl_requires_explicit_daw_only_scope(self):
+        for scope in (None, "plugins", "daw", "daw-only"):
+            for license_id in ("GPL-3.0-only", "GPL-3.0-or-later"):
+                with self.subTest(scope=scope, license_id=license_id):
+                    dependency = {"license": license_id, "scope": scope}
+                    self.assertEqual(gate.dependency_license_ok(dependency, {"MIT", license_id}), scope == "daw-only")
+
+    def test_or_alternative_cannot_hide_plugin_gpl(self):
+        self.assertFalse(gate.dependency_license_ok({"license": "MIT OR GPL-3.0-only", "scope": "plugins"}, {"MIT"}))
+
+    def test_other_copyleft_is_not_approved_by_daw_scope(self):
+        for license_id in ("AGPL-3.0-only", "LGPL-3.0-only", "GPL-2.0-only"):
+            self.assertFalse(gate.dependency_license_ok({"license": license_id, "scope": "daw-only"}, {"MIT"}))
+
 
 class Expressions(unittest.TestCase):
     allowed = {"MIT", "BSD-3-Clause", "Apache-2.0", "Apache-2.0 WITH LLVM-exception"}
@@ -117,7 +148,7 @@ class Expressions(unittest.TestCase):
         manifest = json.loads((Path(__file__).resolve().parents[2] / "third_party/manifest.json").read_text())
         for dependency in manifest["dependencies"]:
             with self.subTest(dependency=dependency["name"]):
-                self.assertTrue(gate.license_ok(dependency["license"], set(manifest["allowed_licenses"])))
+                self.assertTrue(gate.dependency_license_ok(dependency, set(manifest["allowed_licenses"])))
 
 
 if __name__ == "__main__":
