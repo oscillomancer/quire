@@ -94,7 +94,7 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y ninja-build libx11-dev libxcursor-dev libxrandr-dev libxext-dev \
+          sudo apt-get install -y ninja-build ccache libx11-dev libxcursor-dev libxrandr-dev libxext-dev \
             libgl1-mesa-dev libegl1-mesa-dev libcurl4-openssl-dev zlib1g-dev \
             libasound2-dev libwayland-dev libxkbcommon-dev xvfb xauth
           wget -q https://apt.llvm.org/llvm.sh -O "$RUNNER_TEMP/llvm.sh"
@@ -128,8 +128,25 @@ jobs:
           echo "VCPKG_BINARY_SOURCES=clear;files,$(cygpath -m "$GITHUB_WORKSPACE/.deps/vcpkg-binaries"),readwrite" >> "$GITHUB_ENV"
           clang-cl --version
 
+      # Shared core libraries are compiled in several isolated plugin builds.
+      - name: Restore Linux compiler cache
+        if: matrix.platform == 'linux'
+        id: compiler-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .compiler-cache
+          key: clang22-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: clang22-${{ runner.arch }}-
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }}
+        run: |
+          if [[ '${{ matrix.platform }}' == linux ]]; then
+            echo "CCACHE_DIR=$GITHUB_WORKSPACE/.compiler-cache" >> "$GITHUB_ENV"
+            echo "CCACHE_NOHASHDIR=true" >> "$GITHUB_ENV"
+            echo "CCACHE_MAXSIZE=500M" >> "$GITHUB_ENV"
+            cmake --preset dev -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          else
+            cmake --preset ${{ matrix.preset }}
+          fi
       # Preserve expensive dependencies even when the compiler/test stage fails.
       - name: Save dependencies
         if: steps.cache.outputs.cache-hit != 'true'
@@ -148,6 +165,12 @@ jobs:
       - name: Test portable targets
         if: matrix.platform != 'linux'
         run: ctest --preset ${{ matrix.preset }}
+      - name: Save Linux compiler cache
+        if: always() && matrix.platform == 'linux' && steps.compiler-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .compiler-cache
+          key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
       - name: Test logs
         if: always()
         uses: actions/upload-artifact@v4

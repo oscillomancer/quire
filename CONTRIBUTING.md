@@ -75,7 +75,7 @@ Use `ci/<branch>-<n>` with a new number each time. Annotate with
 `platforms=linux`, `platforms=macos` or `platforms=windows` to target only
 one platform; unannotated tags run all. Superseded builds cancel per branch
 and platform, including across different tag numbers. Delete remote CI tags
-once their runs finish. Dependencies are cached; avoid repeated full runs
+once their runs finish. Dependencies and Linux compiler output are cached; avoid repeated full runs
 on this private repository (macOS and Windows consume more Actions minutes).
 
 Linux (`ubuntu-24.04`, Clang 22) builds the existing `dev` preset with all
