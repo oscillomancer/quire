@@ -1316,7 +1316,9 @@ uses MMCSS Pro Audio, macOS device-derived Mach time constraints (ADR-0037),
 reported as high/priority 0. The native callback reports none because PortAudio
 does not expose its thread policy; the OS/host API owns it. These are distinct from core-base's generic High
 QoS/priority helper. macOS workgroup joining remains a future device-validated
-improvement. Offline and dummy threads stay normal; background Normal opts out.
+improvement. Offline and dummy threads stay normal; background Normal opts out. Native
+background elevation also requires leaving two usable CPUs free, as on Linux;
+an oversized explicit pool stays normal with a corrective warning.
 
 The fake API tests cover device selection, odd-period chunks, both executors'
 exact offline equivalence, PDC/Console 9, several worker counts, failures and

@@ -313,3 +313,26 @@ TEST_CASE("native helper setup is self-applied and rolls back all helpers on ref
         CHECK(working == (refuse ? 0 : 2));
     }
 }
+
+TEST_CASE("native background policy leaves two usable CPUs free") {
+    const unsigned cpus = allowedCpuCount();
+    // EngineOptions caps helpers at 64; above 66 CPUs every legal pool fits.
+    if (cpus > 66) return;
+    struct CapacityBackend : DummyBackend {
+        CapacityBackend() : DummyBackend({.mode = DummyBackend::Mode::Manual}) {}
+        std::atomic<unsigned> prepared{0};
+        bool nativeThreadPolicy() const override { return true; }
+        unsigned liveThreadCapacity() const override { return 0; }
+        Status prepareCurrentThread(bool) override {
+            ++prepared;
+            return okStatus();
+        }
+    } backend;
+    auto instances = pool();
+    MediaCache media;
+    Engine engine(instances, media, {.workers = static_cast<int>(cpus > 1 ? cpus - 2 : 0)});
+    REQUIRE(engine.start(backend, {}));
+    CHECK(backend.prepared == 0);
+    CHECK(engine.scheduling().renderer.kind == ThreadPolicy::Kind::Normal);
+    engine.stop();
+}

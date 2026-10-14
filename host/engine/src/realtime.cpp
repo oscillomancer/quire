@@ -255,14 +255,21 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
             static_cast<std::int64_t>(options_.renderAheadMs / 1000.0 * config_.sampleRate));
         aheadFrames_ = std::min<std::int64_t>(
             aheadFrames_, static_cast<std::int64_t>(ring_->mask - 1) * options_.renderBlock);
+        const auto backgroundHelpers = options_.workers < 0
+                                           ? detail::Workers::defaultHelpers()
+                                           : static_cast<unsigned>(std::min(options_.workers, 64));
         Backend* native =
             backend.nativeThreadPolicy() && options_.background != EngineOptions::Background::Normal
                 ? &backend
                 : nullptr;
-        workers_ = std::make_unique<detail::Workers>(
-            options_.workers < 0 ? detail::Workers::defaultHelpers()
-                                 : static_cast<unsigned>(std::min(options_.workers, 64)),
-            detail::Workers::Hooks{}, native);
+        if (native && backgroundHelpers + 3 > allowedCpuCount()) {
+            native = nullptr;
+            startWarnings_.push_back(
+                "background audio threads run at normal priority: the pool "
+                "must leave two usable CPUs free; lower Audio processing threads and restart");
+        }
+        workers_ =
+            std::make_unique<detail::Workers>(backgroundHelpers, detail::Workers::Hooks{}, native);
         if (auto policy = workers_->startupStatus(); !policy)
             startWarnings_.push_back(policy.error().toString());
         if (!workers_->startupStatus()) native = nullptr;
