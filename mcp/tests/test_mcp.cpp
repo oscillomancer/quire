@@ -279,8 +279,26 @@ TEST_CASE("the proxy reconnects after the app restarts") {
     REQUIRE(second.start(path));  // ... and starts again on the same socket
     auto again = request(**proxy, add);
     CHECK(reconnects == 1);
-    REQUIRE(again.find("result")->find("structuredContent"));
-    CHECK(again.find("result")->find("structuredContent")->find("count")->asInt() == 4);
+    auto* result = again.find("result");
+    REQUIRE(result);
+    auto* content = result->find("structuredContent");
+    REQUIRE(content);
+    if (auto* error = result->find("isError"); error && error->asBool()) {
+        // A stopped peer may accept the write locally and fail on the read
+        // (Winsock), or reject the write (Unix). An unanswered edit is never
+        // retried automatically. This fixture knows the old server stopped
+        // before the call, so an explicit retry is safe and runs once.
+        REQUIRE(content->find("code"));
+        CHECK(content->find("code")->asString() == "rpc.read");
+        again = request(**proxy, add);
+        result = again.find("result");
+        REQUIRE(result);
+        content = result->find("structuredContent");
+        REQUIRE(content);
+    }
+    REQUIRE(content->find("count"));
+    CHECK(content->find("count")->asInt() == 4);
+    CHECK(reconnects == 1);
     client.close();
     second.stop();
 }
