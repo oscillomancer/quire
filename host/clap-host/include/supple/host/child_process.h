@@ -10,8 +10,8 @@
 #include <string>
 #include "supple/base/result.h"
 namespace supple::host {
-// Non-RT owning child + process tree. stdin/stderr go to the null device;
-// stdout is captured. Only those stdio handles survive exec. Destruction
+// Non-RT owning child + process tree. By default stdin/stderr go to the null
+// device and stdout is captured; options select explicit IPC/stderr inheritance. Destruction
 // kills descendants and reaps the leader even after a collect error.
 class ChildProcess {
   public:
@@ -25,6 +25,7 @@ class ChildProcess {
         // Windows retains its native value. -1 supplies only the default stdio.
         std::intptr_t control = -1;
         bool captureOutput = true;
+        bool inheritStderr = false;
     };
     static Result<std::unique_ptr<ChildProcess>> spawn(const std::filesystem::path& executable,
                                                        std::span<const std::string> arguments);

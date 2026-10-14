@@ -2,6 +2,8 @@
 // Copyright (c) 2026 Supple Audio
 #include <doctest/doctest.h>
 #include <array>
+#include <fstream>
+#include <iterator>
 #include "supple/host/child_process.h"
 using namespace supple::host;
 TEST_CASE("child capture preserves arguments, exit code and bounded output") {
@@ -15,6 +17,34 @@ TEST_CASE("child capture preserves arguments, exit code and bounded output") {
     CHECK(output->text == "space value\nquote\"inside\ntrailing\\\n\n");
     CHECK(output->exitCode == 7);
     CHECK_FALSE(output->crashed);
+}
+TEST_CASE("child stderr is suppressed by default and inherited only when requested") {
+    const auto file = std::filesystem::temp_directory_path() /
+                      ("supple-child-stderr-" +
+                       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    struct Remove {
+        std::filesystem::path path;
+        ~Remove() {
+            std::error_code error;
+            std::filesystem::remove(path, error);
+        }
+    } remove{file};
+    for (const std::string inherit : {"0", "1"}) {
+        for (const std::string capture : {"0", "1"}) {
+            const std::array<std::string, 4> args{"stderr-parent", file.string(), inherit, capture};
+            auto child = ChildProcess::spawn(CHILD_FIXTURE_PATH, args);
+            REQUIRE(child);
+            auto output =
+                (*child)->collect(std::chrono::steady_clock::now() + std::chrono::seconds(10), 32);
+            REQUIRE(output);
+            CHECK(output->exitCode == 0);
+            CHECK(output->text.empty());
+            std::ifstream input(file, std::ios::binary);
+            REQUIRE(input);
+            const std::string diagnostic((std::istreambuf_iterator<char>(input)), {});
+            CHECK(diagnostic == (inherit == "1" ? "child stderr" : ""));
+        }
+    }
 }
 TEST_CASE("child timeout and output overflow are structured and clean up the child") {
     for (const std::string mode : {"hang", "flood"}) {
@@ -36,7 +66,6 @@ TEST_CASE("child timeout and output overflow are structured and clean up the chi
 
 #if defined(_WIN32)
 #include <windows.h>
-#include <fstream>
 TEST_CASE("Windows child job terminates descendants retaining stdout") {
     const auto file = std::filesystem::temp_directory_path() /
                       ("supple-child-descendant-" + std::to_string(GetCurrentProcessId()) + ".pid");

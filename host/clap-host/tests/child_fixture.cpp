@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
+#include <supple/host/child_process.h>
 #include <array>
 #include <chrono>
 #include <cstdio>
@@ -14,7 +15,6 @@
 #include <windows.h>
 #else
 #include <fcntl.h>
-#include <supple/host/child_process.h>
 #include <unistd.h>
 #endif
 int main(int argc, char** argv) {
@@ -23,6 +23,40 @@ int main(int argc, char** argv) {
 #endif
     if (argc < 2) return 3;
     const std::string mode = argv[1];
+    if (mode == "stderr") {
+        std::fputs("child stderr", stderr);
+        return std::fflush(stderr) == 0 ? 0 : 20;
+    }
+    // Isolate changes to the parent's stderr from the test runner and its threads.
+    if (mode == "stderr-parent" && argc == 5) {
+        FILE* file = std::fopen(argv[2], "wb");
+        if (!file) return 21;
+        struct Close {
+            FILE* file;
+            ~Close() { std::fclose(file); }
+        } close{file};
+#if defined(_WIN32)
+        const HANDLE handle = reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(file)));
+        if (!SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) ||
+            !SetStdHandle(STD_ERROR_HANDLE, handle))
+            return 22;
+#else
+        if (::dup2(::fileno(file), STDERR_FILENO) != STDERR_FILENO) return 22;
+#endif
+        const std::array<std::string, 1> args{"stderr"};
+        supple::host::ChildProcess::LaunchOptions options;
+        if (std::string(argv[3]) == "1") options.inheritStderr = true;
+        if (std::string(argv[4]) == "0") options.captureOutput = false;
+        auto child = supple::host::ChildProcess::spawn(argv[0], args, options);
+        if (!child) return 23;
+#if defined(_WIN32)
+        DWORD flags = 0;
+        if (!GetHandleInformation(handle, &flags) || (flags & HANDLE_FLAG_INHERIT)) return 25;
+#endif
+        auto output =
+            (*child)->collect(std::chrono::steady_clock::now() + std::chrono::seconds(5), 32);
+        return output && output->exitCode == 0 && output->text.empty() ? 0 : 24;
+    }
 #if !defined(_WIN32)
     if (mode == "control-stdio") {
         int fds[2];

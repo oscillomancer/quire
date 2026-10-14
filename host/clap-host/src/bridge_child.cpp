@@ -24,6 +24,7 @@ Result<std::unique_ptr<NativeChild>> NativeChild::launch(const std::filesystem::
     ChildProcess::LaunchOptions options;
     options.control = control;
     options.captureOutput = false;  // plugin logging cannot fill an undrained pipe
+    options.inheritStderr = true;   // retain plug-in diagnostics and assert/abort messages
 #if defined(_WIN32)
     const std::vector<std::string> args{"--control-handle", std::to_string(control)};
 #else

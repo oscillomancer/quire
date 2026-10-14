@@ -142,9 +142,13 @@ identical on each platform.
 ChildProcess additionally accepts LaunchOptions: `control = -1` by default
 (no extra inheritance), otherwise one native bridge resource (POSIX remapped
 to fd 3; Windows retained in the explicit handle list); `captureOutput = true`
-by default, false directs stdout to the null device. Existing scanner callers
-retain their API and behavior. `pid()` and `nativeProcess()` expose borrowed
-identity for bridge exit watches/handle transfer. The owner keeps the process
+by default, false directs stdout to the null device. `inheritStderr = false`
+by default retains the scanner's null stderr. The bridge sets it true to retain
+plug-in diagnostics: POSIX inherits fd 2; Windows duplicates a valid parent
+STD_ERROR_HANDLE as inheritable and adds only that copy to the explicit handle
+list, falling back to NUL when it cannot be duplicated. Parent handle flags
+are unchanged. Existing scanner callers retain their API and behavior.
+`pid()` and `nativeProcess()` expose borrowed identity for bridge exit watches/handle transfer. The owner keeps the process
 or unreaped POSIX leader until final tree cleanup; bridge users must depart
 before owner destruction. Launch and cleanup are setup/control APIs. The
 existing bounded bridge-wait exception sanctions the nonblocking killTree()

@@ -100,9 +100,13 @@ Result<std::unique_ptr<ChildProcess>> ChildProcess::spawn(const std::filesystem:
         if (rc == 0)
             rc = ::posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY,
                                                     0);
-        if (rc == 0)
+        if (rc == 0 && !options.inheritStderr)
             rc = ::posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY,
                                                     0);
+        // Explicit dup2 also preserves fd 2 under Apple's CLOEXEC_DEFAULT.
+        // A parent with closed stderr leaves it closed rather than failing spawn.
+        if (rc == 0 && options.inheritStderr && ::fcntl(STDERR_FILENO, F_GETFD) >= 0)
+            rc = ::posix_spawn_file_actions_adddup2(&actions, STDERR_FILENO, STDERR_FILENO);
 #if defined(__APPLE__)
         if (rc == 0 && (options.control < 0 || fds[0] != 3))
             rc = ::posix_spawn_file_actions_addclose(&actions, fds[0]);

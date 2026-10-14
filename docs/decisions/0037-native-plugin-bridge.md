@@ -82,3 +82,12 @@ The bridge retains its pidfd death watch and fast liveness poll (socket HUP
 fallback), observes exit with WNOWAIT, and keeps the leader unreaped until
 final tree cleanup to prevent PID reuse. Linux memfd, futex, protocol, spin
 and deadline behavior are unchanged. All platforms now have one spawn path.
+
+## Diagnostic inheritance note (2026-10-14)
+
+The bridge sets ChildProcess::LaunchOptions::inheritStderr to true, preserving
+Linux's pre-helper diagnostic stream and providing the same facility natively.
+POSIX explicitly inherits fd 2; Windows uses an inheritable duplicate of the
+parent's valid STD_ERROR_HANDLE in its strict handle list, or NUL if duplication
+is unavailable. The parent handle's inheritance flags are not changed. The
+scanner retains the default false/null stderr, and bridge stdout stays null.

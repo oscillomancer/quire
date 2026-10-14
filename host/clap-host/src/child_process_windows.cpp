@@ -71,6 +71,17 @@ Result<std::unique_ptr<ChildProcess>> ChildProcess::spawn(const std::filesystem:
                               OPEN_EXISTING, 0, nullptr);
     if (input.value == INVALID_HANDLE_VALUE || error.value == INVALID_HANDLE_VALUE)
         return failure("child.spawn", "cannot open null device");
+    Handle inheritedError;
+    HANDLE standardError = error.value;
+    if (options.inheritStderr) {
+        const HANDLE parentError = GetStdHandle(STD_ERROR_HANDLE);
+        DWORD flags = 0;
+        if (parentError && parentError != INVALID_HANDLE_VALUE &&
+            GetHandleInformation(parentError, &flags) &&
+            DuplicateHandle(GetCurrentProcess(), parentError, GetCurrentProcess(),
+                            &inheritedError.value, 0, TRUE, DUPLICATE_SAME_ACCESS))
+            standardError = inheritedError.value;
+    }
     child->impl_->job.value = CreateJobObjectW(nullptr, nullptr);
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
     limits.BasicLimitInformation.LimitFlags =
@@ -98,7 +109,7 @@ Result<std::unique_ptr<ChildProcess>> ChildProcess::spawn(const std::filesystem:
         }
     } control;
     std::vector<HANDLE> inherited{input.value, options.captureOutput ? writer.value : error.value};
-    if (options.captureOutput) inherited.push_back(error.value);
+    if (standardError != inherited.back()) inherited.push_back(standardError);
     if (options.control >= 0) {
         control.handle = reinterpret_cast<HANDLE>(options.control);
         if (!GetHandleInformation(control.handle, &control.flags) ||
@@ -115,7 +126,7 @@ Result<std::unique_ptr<ChildProcess>> ChildProcess::spawn(const std::filesystem:
     startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
     startup.StartupInfo.hStdInput = input.value;
     startup.StartupInfo.hStdOutput = options.captureOutput ? writer.value : error.value;
-    startup.StartupInfo.hStdError = error.value;
+    startup.StartupInfo.hStdError = standardError;
     startup.lpAttributeList = attributes;
     std::wstring command = quote(executable.wstring());
     for (const auto& arg : arguments)
