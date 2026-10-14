@@ -111,7 +111,8 @@ Result<std::shared_ptr<BridgeProcess>> BridgeProcess::spawn() {
     if (rc != 0) {
         ::close(sv[0]);
         return Error("host.bridge",
-                     "could not start the plugin bridge " + exeText + ": " + std::strerror(rc));
+                     "could not start the plugin bridge " + exeText + ": " + std::strerror(rc),
+                     exeText, "check the bridge executable and process resources");
     }
     self->pid_ = pid;
     self->sock_ = sv[0];
