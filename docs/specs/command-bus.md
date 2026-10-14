@@ -337,8 +337,9 @@ per MCP.
 A scripted MCP client (C++ test or Python tooling in `tests/integration/`)
 runs initialize → tools/list → a sequence of calls against the sandbox, and
 checks results; its transcript (requests/responses, pretty-printed) is
-committed as `docs/demos/mcp-orrery-session.md` and drift-tested
-(`mcp.demo`).
+committed as `docs/demos/mcp-orrery-session.md` and drift-tested on Linux
+(`mcp.demo`). Native runs retain every structured-result assertion and record
+an informational Linux-reference diff; DSP values are deterministic per platform.
 
 ## Implementation notes (2026-09-26, Task A)
 

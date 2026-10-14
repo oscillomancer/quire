@@ -146,7 +146,9 @@ stock plugin builds and their conformance/reset checks on macOS/Windows.
 The existing Linux bridge/protocol, `/proc`, subreaper and shell-script probes
 remain Linux-only. Native tests cover fixture loading, state/audio, crash/hang
 isolation, cache and process capture/deadlines. Windows external validator
-shell tests are omitted; native product host-smoke tests still run.
+shell tests are omitted; native product host-smoke tests still run. The macOS
+external validator entries skip when the optional validator is absent; the
+product, semantic and host checks still execute.
 
 Windows stock builds enable the CRT math constants with _USE_MATH_DEFINES in
 platform build glue. Product-owned semantic stress tests use a native loader;

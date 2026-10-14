@@ -10,16 +10,18 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
 `main`.
 
 The port branch has on-demand Linux/macOS/Windows CI and portable presets
-(ADR-0034). Linux dev passes all 137 tests including the 12 CLAP validators;
-macOS and Windows pass their portable tests. The macOS preset uses AppleClang
-and system libc++; shared float/double parsing uses vendored fast_float (MIT)
-on all platforms, including the suite's self-contained source exports.
-Native waits/wakes, thread setup, control-protocol and standalone MCP/proxy pass
-native CI on macOS arm64 (37 tests) and Windows (35 tests; ADR-0035).
-Native hosting/scanning and stock wrappers are enabled for platform validation
-(ADR-0036); audio bridge and GUI remain gated. macOS enables the engine/CLI,
-dummy backend, sandbox and offline renderer. Windows audio-file I/O and its
-dependent engine/sandbox remain gated. Native CI validation is in progress.
+(ADR-0034). Linux dev passes all 139 tests including the 12 CLAP validators.
+Native hosting/scanning and stock wrappers pass Windows CI (70 tests) and
+macOS arm64 CI (86 executed tests; 12 optional external validators skipped;
+ADR-0036). The macOS preset uses AppleClang and system libc++; shared
+float/double parsing uses vendored fast_float (MIT) on all platforms,
+including the suite's self-contained source exports. Native waits/wakes,
+thread setup, control-protocol and standalone MCP/proxy have native coverage
+on both platforms (ADR-0035).
+macOS also enables and tests the engine/CLI, dummy backend, sandbox and offline
+renderer, including RT/offline equivalence in both executors. Audio bridge,
+hardware backends and GUI remain gated. Windows audio-file I/O and its
+dependent engine/sandbox remain gated.
 Portable libraries, the session model, stock DSP cores
 and the script suite build independently of those services; see
 CONTRIBUTING.md for the complete gate list. External Windows readers that
@@ -189,8 +191,9 @@ capacity reports retain their original revision/settings.
 Engine and hosting:
 - The headless platform layer (ADR-0035) has natively tested macOS/Windows
   address waits, wake sources, control socket/MCP paths and user directory roots.
-  The macOS engine now builds independently of JACK; its native validation is
-  in progress. Windows engine file helpers remain behind the audio-file gate.
+  The macOS engine runs with dummy/offline audio independently of JACK, with
+  native RT/offline equivalence coverage. Windows engine file helpers remain
+  behind the audio-file gate.
   Native hosting/scanning are enabled (ADR-0036); audio bridge, hardware backends
   and GUI embedding remain separate ports.
   Windows event waits admit 64 unique handles. macOS QoS must be self-applied;
@@ -275,8 +278,11 @@ Plugins:
   can leave that gesture open in the host until it rescans.
 - Orrery's reference patch uses about 9 % of a core at 48 kHz / 256 frames;
   reaching 3 % needs a structure-of-arrays voice bank.
-- Stock plugins are tested as Linux CLAP builds; their VST3 and AUv2
-  builds are optional and not covered by CI.
+- Stock CLAP builds and product/conformance/reset checks run on Linux, macOS
+  and Windows. Existing macOS AUv2 targets compile in CI but are not host-tested
+  here. Stock VST3 builds remain opt-in; native VST3 hosting is tested with an
+  in-tree SDK fixture. External CLAP validators are optional and absent from
+  macOS CI (12 skipped tests).
 
 Smaller recorded items: `describeFlat` skips hidden parameters in full
 detail; core-params formats magnitudes beyond six decimals imprecisely;
