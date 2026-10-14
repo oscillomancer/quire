@@ -121,7 +121,10 @@ Result<std::shared_ptr<BridgeProcess>> BridgeProcess::spawn() {
     closeResource(sv[1]);
     if (!child) {
         closeResource(sv[0]);
-        return child.error();
+        Error error("host.bridge", "could not start plugin bridge: " + child.error().message,
+                    platform::pathText(exe), "check the bridge executable and process resources");
+        error.details.push_back(child.error());
+        return error;
     }
     self->child_ = std::move(*child);
     self->pid_ = self->child_->pid();
@@ -428,6 +431,14 @@ Result<std::vector<std::uint8_t>> BridgeProcess::call(Op op, std::uint32_t insta
 #endif
     if (!sendFrame(sock_, static_cast<std::uint32_t>(op), instance, w.bytes, fd, deadline) ||
         !recvFrameUntil(sock_, status, returnedId, reply, &replyFd, deadline)) {
+#if defined(_WIN32)
+        if (sock_->rejectedResource()) {
+            fail(kProtocolViolation);
+            killBridge();
+            return Error("bridge.malformed", "unexpected handle in bridge reply", "/handle",
+                         "use matching host and bridge builds");
+        }
+#endif
         // Gone, or not answering: either way the instance is lost.
         if (alive()) {
             fail(kHung);

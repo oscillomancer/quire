@@ -46,6 +46,8 @@ class NativeControl {
   public:
     explicit NativeControl(HANDLE pipe, bool acceptsResources = false);
     bool acceptsResources() const { return acceptsResources_; }
+    void rejectResource() { rejectedResource_ = true; }
+    bool rejectedResource() const { return rejectedResource_; }
     ~NativeControl();
     NativeControl(const NativeControl&) = delete;
     NativeControl& operator=(const NativeControl&) = delete;
@@ -57,6 +59,7 @@ class NativeControl {
     void arm();
     HANDLE pipe_;
     bool acceptsResources_;
+    bool rejectedResource_ = false;
     OVERLAPPED input_{};
     bool pending_ = false, ended_ = false;
     char buffer_[65536];

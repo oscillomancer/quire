@@ -172,7 +172,10 @@ bool recvFrameUntil(Control socket, std::uint32_t& head, std::uint32_t& instance
         // The bridge cannot duplicate into the parent. A reply containing a
         // numeric handle is a protocol violation, never authority to close a
         // parent handle chosen by untrusted plugin code.
-        if (!socket->acceptsResources()) return false;
+        if (!socket->acceptsResources()) {
+            socket->rejectResource();
+            return false;
+        }
         if (descriptorCount) *descriptorCount = 1;
         if (fd)
             *fd = resource;

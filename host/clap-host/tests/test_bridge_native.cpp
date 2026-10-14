@@ -226,7 +226,20 @@ TEST_CASE("a numeric handle in an untrusted bridge reply never closes a parent h
     std::vector<std::uint8_t> bytes;
     bridge::Resource received = bridge::noResource;
     CHECK_FALSE(bridge::recvFrame(&parent, status, id, bytes, &received, 1000));
+    CHECK(parent.rejectedResource());
     retained.notify();
     CHECK(retained.drain());
 }
 #endif
+
+TEST_CASE("native missing bridge executable preserves the structured host error") {
+    const auto missing =
+        std::filesystem::path(BRIDGE_PATH).parent_path() / "missing-bridge-test-executable";
+    setBridgeExecutable(missing);
+    auto remote =
+        Instance::create(nativePlugin(FIXTURE_CLAP_PATH, "com.suppleaudio.test.gain"), {}, true);
+    setBridgeExecutable(BRIDGE_PATH);
+    REQUIRE_FALSE(remote);
+    CHECK(remote.error().code == "host.bridge");
+    CHECK_FALSE(remote.error().hint.empty());
+}

@@ -544,7 +544,7 @@ none) and u64 request/done event handles after Activate's rate/min/max/size.
 Release/acquire on the shared words publishes all arena data. Event waits
 recheck before parking and after wake; stale signals never acknowledge a
 command. The parent rejects resource-bearing replies without closing a
-numeric handle supplied by untrusted child code. Native launch reuses the
+numeric handle supplied by untrusted child code, returning `bridge.malformed`. Native launch reuses the
 hosting child helper's explicit control inheritance and null stdout, so
 plugin logging cannot block the bridge on an undrained output pipe.
 
