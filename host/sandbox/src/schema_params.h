@@ -5,11 +5,11 @@
 // through its schema: CLAP value ↔ physical value, normalized mapping.
 #pragma once
 
-#include <charconv>
 #include <cmath>
 #include <string>
 #include <vector>
 
+#include "supple/base/chars.h"
 #include "supple/json/json.h"
 #include "supple/params/params.h"
 
@@ -39,7 +39,7 @@ inline Result<params::Curve> curveFromName(std::string_view name) {
     if (c.kind == params::CurveKind::Pow || c.kind == params::CurveKind::Bipolar) {
         const char* begin = name.data();
         const char* end = begin + name.size();
-        const auto [next, err] = std::from_chars(begin, end, c.k);
+        const auto [next, err] = ::supple::fromChars(begin, end, c.k);
         if (err != std::errc{} || next != end || !std::isfinite(c.k) || c.k <= 0.0)
             return Error("sandbox.param_curve", "curve exponent must be finite and positive",
                          "/curve", "use e.g. pow:3 or bipolar:2");
