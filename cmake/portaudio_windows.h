@@ -5,5 +5,10 @@
 // DAW uses WIN32_LEAN_AND_MEAN. Supply their requirements without editing them.
 #include <windows.h>
 
-#include <objbase.h>
 #include <winternl.h>
+
+// ASIO C++ needs COM's interface macro; the C frontend uses that identifier.
+// WASAPI C includes its own COM declarations after this prelude.
+#if defined(__cplusplus)
+#include <objbase.h>
+#endif
