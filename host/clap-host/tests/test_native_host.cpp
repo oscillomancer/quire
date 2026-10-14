@@ -8,6 +8,27 @@
 using namespace supple;
 using namespace supple::host;
 namespace fs = std::filesystem;
+namespace {
+struct WorkDir {
+    fs::path path;
+    explicit WorkDir(const char* name) {
+        // Atomic creation also isolates runs in separate PID namespaces that
+        // share a temp directory (parallel sanitizer presets in the sandbox).
+        for (std::size_t index = 0;; ++index) {
+            auto candidate =
+                fs::temp_directory_path() / (std::string(name) + "-" + std::to_string(index));
+            if (fs::create_directory(candidate)) {
+                path = std::move(candidate);
+                return;
+            }
+        }
+    }
+    ~WorkDir() {
+        std::error_code ec;
+        fs::remove_all(path, ec);
+    }
+};
+}  // namespace
 TEST_CASE("missing scan helper names the executable to install") {
     ScanOptions options;
     options.bridgeExecutable = fs::path(SCANNER_PATH) / "missing";
@@ -27,21 +48,11 @@ TEST_CASE("missing scan helper names the executable to install") {
 #endif
 }
 TEST_CASE("native supervised scanner isolates crashes and hangs and caches results") {
-    const auto work = fs::temp_directory_path() / "supple-native-scan";
-    std::error_code ec;
-    fs::remove_all(work, ec);
-    fs::create_directories(work);
-    struct Cleanup {
-        fs::path path;
-        ~Cleanup() {
-            std::error_code error;
-            fs::remove_all(path, error);
-        }
-    } cleanup{work};
+    WorkDir work("supple-native-scan");
     const std::vector<fs::path> modules{SCAN_GOOD_PATH, SCAN_CRASH_PATH, SCAN_HANG_PATH};
     ScanOptions options;
     options.bridgeExecutable = SCANNER_PATH;
-    options.cacheDirectory = work / "cache";
+    options.cacheDirectory = work.path / "cache";
     options.superviseAll = true;
     options.timeoutMs = 2000;
     ScanReport report;
@@ -59,9 +70,8 @@ TEST_CASE("native VST3 bundle scanning is supervised and cached") {
     ScanOptions options;
     options.bridgeExecutable = SCANNER_PATH;
     options.superviseAll = true;
-    options.cacheDirectory = fs::temp_directory_path() / "supple-native-vst3-scan";
-    std::error_code ec;
-    fs::remove_all(options.cacheDirectory, ec);
+    WorkDir work("supple-native-vst3-scan");
+    options.cacheDirectory = work.path;
     ScanReport report;
     auto result = scan(std::span<const fs::path>(&module, 1), options, &report);
     REQUIRE(result);
@@ -69,7 +79,6 @@ TEST_CASE("native VST3 bundle scanning is supervised and cached") {
     CHECK(report.failures.empty());
     REQUIRE(scan(std::span<const fs::path>(&module, 1), options, &report));
     CHECK(report.cachedModules == 1);
-    fs::remove_all(options.cacheDirectory, ec);
 }
 #if !defined(__linux__)
 TEST_CASE("native bridge requests fail with actionable structured errors") {
