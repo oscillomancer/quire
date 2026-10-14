@@ -100,6 +100,10 @@ and the Windows SDK, with vcpkg SDL3/zlib/curl and a binary cache. Windows
 commands are `cmake --workflow --preset macos` or `windows`; the latter
 requires `VCPKG_ROOT` and an initialized Windows SDK environment.
 
+If `build/macos` was configured with the earlier Homebrew LLVM toolchain,
+start with `cmake --fresh --preset macos` to discard its compiler/runtime
+cache, then build and test with the `macos` presets.
+
 ### Temporary port gates
 
 `cmake/Platforms.cmake` defines the boundaries. Later port steps remove
