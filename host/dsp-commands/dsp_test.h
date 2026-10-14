@@ -767,9 +767,9 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                 stimulus(sc.signal, settings.sampleRate,
                          static_cast<double>(span->second - span->first) / settings.sampleRate,
                          sc.levelDb, sc.frequencyHz);
-            for (std::size_t c = 0; c < key.channels.size(); ++c)
-                std::copy(active.channels[c].begin(), active.channels[c].end(),
-                          key.channels[c].begin() + span->first);
+            for (std::size_t ch = 0; ch < key.channels.size(); ++ch)
+                std::copy(active.channels[ch].begin(), active.channels[ch].end(),
+                          key.channels[ch].begin() + span->first);
         }
         std::set<std::string> logged;
         double rendered = 0.0, spent = 0.0;
