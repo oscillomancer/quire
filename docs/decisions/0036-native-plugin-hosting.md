@@ -90,3 +90,10 @@ classification. Host scan diagnostics retain their Linux messages and hints.
 Non-Linux engine.start defaults to dummy; explicit JACK requests return
 backend.unsupported. Plugin-file DSP exports remain Linux-only and return
 an actionable dsp.platform error elsewhere; source exports remain available.
+
+Windows isolated plugin builds use a configuration-specific library output
+path matching their declared asset folder, then stage only the named product
+and notices into the shared stock directory. This avoids clap-wrapper's extra
+CLAP subfolder without changing it or the template, and keeps internal test
+modules outside the stock catalogue. Player staging uses the same flat output
+contract; macOS continues to copy its complete bundle.

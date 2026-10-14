@@ -33,6 +33,16 @@ if(SUPPLE_BUILD_PLUGINS)
       message(FATAL_ERROR "Plugin ${dir} needs cmake/Identity.cmake or an explicit artifact name")
     endif()
     set(plugin_build "${CMAKE_BINARY_DIR}/plugins/${dir}")
+    set(plugin_assets "${CMAKE_BINARY_DIR}/plugins/clap")
+    set(plugin_output_args)
+    if(WIN32)
+      # clap-wrapper appends /CLAP to its generic output property. Initialize
+      # the configuration-specific property so product tests and notices keep
+      # their declared flat asset layout, then stage only this product.
+      set(plugin_assets "${plugin_build}/plugins")
+      string(TOUPPER "${CMAKE_BUILD_TYPE}" plugin_config)
+      list(APPEND plugin_output_args "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_${plugin_config}=${plugin_assets}")
+    endif()
     if(SUPPLE_SANITIZE STREQUAL "realtime")
       set(plugin_rtsan ON)
       set(plugin_core_sanitize realtime)
@@ -57,11 +67,12 @@ if(SUPPLE_BUILD_PLUGINS)
         -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}
         -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+        ${plugin_output_args}
         -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
         -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
         -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
         -DSUPPLE_ROOT=${CMAKE_SOURCE_DIR}
-        -D${prefix}_ASSET_DIR=${CMAKE_BINARY_DIR}/plugins/clap
+        -D${prefix}_ASSET_DIR=${plugin_assets}
         -D${prefix}_NOTICES_PREFIX=${artifact}-
         -DSUPPLE_SEMANTIC_CONFORMANCE=$<TARGET_FILE:semantic-conformance>
         -D${prefix}_BUILD_GUI=${SUPPLE_BUILD_GUI}
@@ -72,6 +83,14 @@ if(SUPPLE_BUILD_PLUGINS)
         -DSUPPLE_SANITIZE=${plugin_core_sanitize}
         -DFETCHCONTENT_FULLY_DISCONNECTED=ON
       BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --parallel 1)
+    if(WIN32)
+      ExternalProject_Add_Step(plugin-${dir} stage
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/plugins/clap"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${plugin_assets}/${artifact}.clap"
+                "${plugin_assets}/${artifact}-LICENSE.txt" "${plugin_assets}/${artifact}-NOTICES.txt"
+                "${CMAKE_BINARY_DIR}/plugins/clap"
+        DEPENDEES build ALWAYS TRUE)
+    endif()
     if(SUPPLE_BUILD_TESTS)
       add_test(NAME plugin.${dir}.ctest
         COMMAND ${CMAKE_CTEST_COMMAND} --test-dir "${plugin_build}" --output-on-failure)
@@ -106,6 +125,11 @@ if(SUPPLE_BUILD_PLUGINS)
   # Its own ctest suite becomes plugin.<name>.ctest.
   function(supple_add_template_product name product artifact)
     set(plugin_build "${CMAKE_BINARY_DIR}/plugins/${name}")
+    set(plugin_output_args)
+    if(WIN32)
+      string(TOUPPER "${CMAKE_BUILD_TYPE}" plugin_config)
+      list(APPEND plugin_output_args "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_${plugin_config}=${plugin_build}/plugins")
+    endif()
     # As for the stock plugins: instrumented for tsan and rtsan, whose hosts
     # are, and not for asan or ubsan.
     if(SUPPLE_SANITIZE STREQUAL "realtime" OR SUPPLE_SANITIZE STREQUAL "thread")
@@ -128,6 +152,7 @@ if(SUPPLE_BUILD_PLUGINS)
         -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}
         -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+        ${plugin_output_args}
         -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
         -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
         -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
