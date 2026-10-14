@@ -226,7 +226,9 @@ def run_mode(mode, sandbox, proxy_binary, orrery, root):
         # socket server, which removes its socket on a graceful exit.
         stop(process, timeout=5, graceful=False)
         stop(server)
-    if server is not None:
+    # Windows TerminateProcess cannot run the server's endpoint destructor;
+    # the harness removes this private directory after the demo finishes.
+    if server is not None and os.name != "nt":
         assert not socket.exists(), "socket server left its socket"
     return transcript, workdir
 

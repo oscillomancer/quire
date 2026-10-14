@@ -1455,7 +1455,7 @@ extern "C" CLAP_EXPORT int supple_fixture_patch_starts() {
 extern "C" CLAP_EXPORT const clap_plugin_entry_t clap_entry = {CLAP_VERSION_INIT, entryInit,
                                                                entryDeinit, entryFactory};
 
-extern "C" void supple_fixture_wait_patch_start(int previous) {
+extern "C" CLAP_EXPORT void supple_fixture_wait_patch_start(int previous) {
     while (gPatchStarts.load(std::memory_order_acquire) == previous) gPatchStarts.wait(previous);
 }
 
