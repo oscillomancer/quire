@@ -120,6 +120,9 @@ Native file reads allow delete sharing. Concurrent replacement preserves
 the previous file for readers that permit delete sharing and permits
 successive writers to replace the same destination. External Windows readers
 that deny delete sharing cause a structured `file.write` error until closed.
+File diagnostics convert native Windows paths to UTF-8 explicitly, so failed
+reads/publications for non-ANSI filenames return Result errors rather than
+throwing during path conversion (including recording sidecars).
 
 ## Cooperative job cancellation (2026-10-14, ADR-0036)
 

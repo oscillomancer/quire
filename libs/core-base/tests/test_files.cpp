@@ -149,3 +149,24 @@ TEST_CASE("files: atomic replacement preserves an existing reader") {
     }
     fs::remove_all(dir);
 }
+
+TEST_CASE("files: Unicode failure paths stay structured") {
+    const fs::path dir =
+        fs::temp_directory_path() / ("supple-unicode-errors-" + std::to_string(::getpid()));
+    fs::create_directories(dir);
+    struct Cleanup {
+        fs::path path;
+        ~Cleanup() { fs::remove_all(path); }
+    } cleanup{dir};
+    const auto name = std::u8string(u8"missing-音");
+    const fs::path missing = dir / fs::path(name);
+    auto read = readFile(missing);
+    REQUIRE_FALSE(read);
+    CHECK(read.error().code == "file.open");
+    CHECK(read.error().message.find(std::string(name.begin(), name.end())) != std::string::npos);
+    fs::create_directory(missing);
+    auto written = writeFileAtomic(missing, "cannot replace a directory");
+    REQUIRE_FALSE(written);
+    CHECK(written.error().code == "file.write");
+    CHECK(written.error().message.find(std::string(name.begin(), name.end())) != std::string::npos);
+}

@@ -22,6 +22,16 @@
 namespace supple {
 
 namespace fs = std::filesystem;
+namespace {
+std::string displayPath(const fs::path& path) {
+#ifdef _WIN32
+    const auto utf8 = path.u8string();
+    return {utf8.begin(), utf8.end()};
+#else
+    return path.string();
+#endif
+}
+}  // namespace
 
 Result<std::vector<std::uint8_t>> readFile(const fs::path& path, std::size_t maxBytes) {
 #ifdef _WIN32
@@ -30,16 +40,16 @@ Result<std::vector<std::uint8_t>> readFile(const fs::path& path, std::size_t max
                                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                       nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE)
-        return Error("file.open", "cannot open " + path.string(), {}, "check the path");
+        return Error("file.open", "cannot open " + displayPath(path), {}, "check the path");
     const auto close = [](void* handle) { ::CloseHandle(handle); };
     const std::unique_ptr<void, decltype(close)> owner(file, close);
     LARGE_INTEGER size{};
     if (!::GetFileSizeEx(file, &size) || size.QuadPart < 0) {
-        return Error("file.read", "cannot read " + path.string());
+        return Error("file.read", "cannot read " + displayPath(path));
     }
     if (static_cast<std::uint64_t>(size.QuadPart) > maxBytes) {
         return Error("file.too_large",
-                     path.string() + " is larger than " + std::to_string(maxBytes) + " bytes");
+                     displayPath(path) + " is larger than " + std::to_string(maxBytes) + " bytes");
     }
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size.QuadPart));
     std::size_t off = 0;
@@ -47,24 +57,24 @@ Result<std::vector<std::uint8_t>> readFile(const fs::path& path, std::size_t max
         DWORD read = 0;
         const DWORD count = static_cast<DWORD>(std::min<std::size_t>(bytes.size() - off, 1 << 20));
         if (!::ReadFile(file, bytes.data() + off, count, &read, nullptr) || read == 0) {
-            return Error("file.read", "short read from " + path.string());
+            return Error("file.read", "short read from " + displayPath(path));
         }
         off += read;
     }
 #else
     std::ifstream in(path, std::ios::binary);
-    if (!in) return Error("file.open", "cannot open " + path.string(), {}, "check the path");
+    if (!in) return Error("file.open", "cannot open " + displayPath(path), {}, "check the path");
     in.seekg(0, std::ios::end);
     const auto end = in.tellg();
-    if (end < 0) return Error("file.read", "cannot read " + path.string());
+    if (end < 0) return Error("file.read", "cannot read " + displayPath(path));
     if (static_cast<std::uint64_t>(end) > maxBytes)
         return Error("file.too_large",
-                     path.string() + " is larger than " + std::to_string(maxBytes) + " bytes");
+                     displayPath(path) + " is larger than " + std::to_string(maxBytes) + " bytes");
     in.seekg(0, std::ios::beg);
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(end));
     if (!bytes.empty())
         in.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-    if (!in) return Error("file.read", "short read from " + path.string());
+    if (!in) return Error("file.read", "short read from " + displayPath(path));
 #endif
     return bytes;
 }
@@ -89,8 +99,9 @@ Status writeFileAtomic(const fs::path& path, std::span<const std::uint8_t> bytes
     auto error = [&](const std::string& what, DWORD code) {
         fs::remove(tmp, ec);
         return Error(
-            "file.write", what + " " + path.string() + ": Windows error " + std::to_string(code),
-            {}, "check free disk space and permissions; close readers that deny delete sharing");
+            "file.write",
+            what + " " + displayPath(path) + ": Windows error " + std::to_string(code), {},
+            "check free disk space and permissions; close readers that deny delete sharing");
     };
     const auto destination = fs::absolute(path, ec).native();
     if (ec) {
@@ -112,10 +123,10 @@ Status writeFileAtomic(const fs::path& path, std::span<const std::uint8_t> bytes
         ::CreateFileW(tmp.c_str(), GENERIC_WRITE | DELETE, FILE_SHARE_READ | FILE_SHARE_DELETE,
                       nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE)
-        return Error(
-            "file.write",
-            "cannot create " + tmp.string() + ": Windows error " + std::to_string(::GetLastError()),
-            {}, "check that the directory exists and is writable");
+        return Error("file.write",
+                     "cannot create " + displayPath(tmp) + ": Windows error " +
+                         std::to_string(::GetLastError()),
+                     {}, "check that the directory exists and is writable");
     std::size_t off = 0;
     while (off < bytes.size()) {
         DWORD written = 0;
@@ -149,13 +160,14 @@ Status writeFileAtomic(const fs::path& path, std::span<const std::uint8_t> bytes
                          std::to_string(counter.fetch_add(1)) + ".tmp";
     const int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
     if (fd < 0)
-        return Error("file.write", "cannot create " + tmp.string() + ": " + std::strerror(errno),
-                     {}, "check that the directory exists and is writable");
+        return Error("file.write",
+                     "cannot create " + displayPath(tmp) + ": " + std::strerror(errno), {},
+                     "check that the directory exists and is writable");
     auto fail = [&](const std::string& what) {
         const std::string reason = std::strerror(errno);
         ::close(fd);
         fs::remove(tmp, ec);
-        return Error("file.write", what + " " + tmp.string() + ": " + reason, {},
+        return Error("file.write", what + " " + displayPath(tmp) + ": " + reason, {},
                      "check free disk space and permissions");
     };
     std::size_t off = 0;
@@ -169,12 +181,12 @@ Status writeFileAtomic(const fs::path& path, std::span<const std::uint8_t> bytes
     if (::fsync(fd) != 0) return fail("cannot sync");
     if (::close(fd) != 0) {
         fs::remove(tmp, ec);
-        return Error("file.write", "cannot close " + tmp.string());
+        return Error("file.write", "cannot close " + displayPath(tmp));
     }
     if (::rename(tmp.c_str(), path.c_str()) != 0) {
         const std::string reason = std::strerror(errno);
         fs::remove(tmp, ec);
-        return Error("file.write", "cannot move " + tmp.string() + " into place: " + reason);
+        return Error("file.write", "cannot move " + displayPath(tmp) + " into place: " + reason);
     }
     // And the directory entry: sync the directory (best effort).
     const int dfd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
