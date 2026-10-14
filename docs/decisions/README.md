@@ -51,3 +51,4 @@ current state.
 | [0030](0030-main-thread-scheduling.md) | Main-thread service notifications and deadlines | Accepted |
 | [0031](0031-bridge-parent-notifications.md) | Bridge-to-parent notifications and idle audio parking | Accepted |
 | [0032](0032-dsp-scripting.md) | DSP scripting: a checked C++ subset, a JIT player and exports | Accepted |
+| [0033](0033-daw-and-plugin-licensing.md) | DAW and plugin licensing | Accepted |

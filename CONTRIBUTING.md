@@ -44,7 +44,8 @@ responsible for every line, and you must have run what you claim works.
 
 ## Licensing of contributions
 
-Quire does not have a license yet, so outside contributions cannot be
-accepted until one is chosen. Contributions must never include code copied
-from GPL or AGPL projects, or from REAPER (see the hard rules in
-`AGENTS.md`).
+Contributions use the license of the component they change: GPL-3.0-or-later
+for the DAW, MIT for plugins and their shared libraries (ADR-0033).
+Contributions must be original and must never include code copied from GPL
+or AGPL projects, or from REAPER (see `AGENTS.md`). The vendored ASIO SDK
+is the sanctioned exception for Windows DAW integration.

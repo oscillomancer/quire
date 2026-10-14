@@ -95,7 +95,7 @@ coding agents alike, are in [AGENTS.md](AGENTS.md).
 
 ## License
 
-A license for Quire has not been chosen yet; until it is, no license is
-granted to use, copy or distribute it. The stock plugins under `plugins/` are
-MIT licensed (see each plugin's `LICENSE`). Third-party components keep their
-own licenses; see [THIRD_PARTY.md](THIRD_PARTY.md).
+Quire's DAW code is GPL-3.0-or-later; see [LICENSE](LICENSE). Stock plugins
+(`plugins/`) and their shared libraries remain MIT. The complete map and
+rationale are in [ADR-0033](docs/decisions/0033-daw-and-plugin-licensing.md).
+Third-party components keep their own licenses; see [THIRD_PARTY.md](THIRD_PARTY.md).

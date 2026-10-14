@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-10-13. This file describes the present: what works, what is
+Updated 2026-10-14. This file describes the present: what works, what is
 known not to, and what is planned. Keep it current with each change; the
 history is in git.
 
@@ -10,6 +10,9 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
 `main`.
 
 ## What works
+
+- **Licensing** (ADR-0033): DAW code is GPL-3.0-or-later; stock plugins
+  and their shared libraries are MIT.
 
 - **Session and history** (`specs/session-model.md`, ADR-0008): immutable
   versions with stable ids, per-branch undo, branches with object-level diff
@@ -253,7 +256,6 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
 
 ## Planned
 
-- Choose a project license before publishing the repository.
 - Profile the 64-frame worst case; a pipelined bridge mode.
 - Track groups, stretch markers, MIDI outputs, a background media cache.
 - Lua ergonomics (a script library path, hot reload).

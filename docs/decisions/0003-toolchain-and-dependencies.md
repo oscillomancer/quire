@@ -78,3 +78,9 @@ patch and notation authoring.
 - Catch2 (BSL-1.0): heavier than doctest for no gain here.
 - libebur128 (MIT): viable, but we must validate against EBU signals anyway,
   and owning it lets the analysis layer share K-weighting/oversampling code.
+
+## Amendment, 2026-10-14
+
+[ADR-0033](0033-daw-and-plugin-licensing.md) amends the license gate and
+dependency policy: GPL DAW code, MIT plugins and shared libraries, and
+a sanctioned Windows DAW-only ASIO SDK dependency.

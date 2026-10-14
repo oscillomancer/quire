@@ -8,7 +8,9 @@ anything is undeclared, not on the allow-list, missing its license file, or
 not described here. Policy: [ADR-0003](docs/decisions/0003-toolchain-and-dependencies.md).
 
 Allowed for bundled code: MIT, MIT-0, BSD-2/3-Clause, ISC, Zlib, Apache-2.0,
-BSL-1.0, CC0, Unlicense (OFL-1.1 for fonts). Forbidden: GPL, AGPL. LGPL/MPL need the maintainer's explicit approval. Dynamically linked OS libraries
+BSL-1.0, CC0, Unlicense (OFL-1.1 for fonts). The ASIO SDK is the sanctioned GPL-3.0-only exception, Windows DAW only,
+never plugins (ADR-0033). Other GPL dependencies need a DAW-only manifest
+declaration and maintainer approval; AGPL is forbidden. LGPL/MPL need the maintainer's explicit approval. Dynamically linked OS libraries
 (libc, ALSA, JACK/PipeWire client libs, X11/Wayland/GL) are acceptable.
 
 | Name | License | Version / commit | Purpose | Linkage |

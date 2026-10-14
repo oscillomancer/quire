@@ -22,13 +22,17 @@ same change, and say what you found.
 
 ## Hard rules
 
-1. **Licensing.** All first-party code is original. Never copy code from
+1. **Licensing.** First-party DAW code is GPL-3.0-or-later; `plugins/`
+   and the plugin-linked libraries remain MIT (ADR-0033). All first-party
+   code is original. Never copy code from
    Ardour or any other GPL/AGPL project, and do not read GPL source while
    implementing; notes about GPL software are prose in `docs/research/`,
    and someone else implements from them. Dependencies must be MIT,
    BSD-2/3, ISC, Zlib, Apache-2.0, BSL-1.0, CC0/public domain or Unlicense
    (fonts: OFL-1.1), vendored under `third_party/` with their license file,
    declared in `third_party/manifest.json` and listed in `THIRD_PARTY.md`.
+   The ASIO SDK is the sanctioned GPL-3.0-only exception, Windows DAW
+   only, never plugins; its source may be read for that integration.
    `tools/license-check` fails the build otherwise. LGPL and MPL code needs
    the maintainer's explicit approval first.
 2. **REAPER is proprietary.** Quire follows its workflow, studied only by
