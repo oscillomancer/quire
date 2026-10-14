@@ -51,6 +51,9 @@ std::vector<std::filesystem::path> libraryFolders() {
 }
 
 bool readScript(const std::filesystem::path& file, std::string& text) {
+    // Some standard libraries accept a directory stream and report an empty EOF.
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(file, ec)) return false;
     std::ifstream in(file, std::ios::binary);
     if (!in) return false;
     // Bound the read itself, not only the result: a mistakenly huge file

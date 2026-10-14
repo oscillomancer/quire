@@ -621,3 +621,7 @@ at `/format`, with a hint to select `source`. This is the existing Linux-only
 binary export limit made explicit for bundle players. Source generation and
 DSP measurement remain enabled. The binary-export example uses its own fixture
 and is skipped only where that format is unavailable.
+
+Script-player source reads require a regular file before opening the bounded
+(1 MiB) stream; directories are rejected even where ifstream reports an empty
+EOF.

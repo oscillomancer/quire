@@ -26,7 +26,8 @@ inline constexpr size_t kMaxScriptBytes = 1u << 20;
 std::vector<std::filesystem::path> libraryFolders();
 // <folder>/<name>/<name>.cpp for every <name>, sorted.
 std::vector<std::filesystem::path> libraryScripts(const std::filesystem::path& folder);
-// A script's whole text; false when it cannot be read or is too long.
+// A regular script file's whole text; false for other file types, I/O errors
+// or a file longer than kMaxScriptBytes.
 bool readScript(const std::filesystem::path& file, std::string& text);
 // A script compiled into a plugin (the interpreter instead of machine code
 // when SUPPLE_SCRIPT_INTERPRET is set); null with the reasons in `problems`.
