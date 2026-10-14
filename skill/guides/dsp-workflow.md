@@ -13,7 +13,9 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
    a spectral effect, a convolution reverb, a synth, a sampler, a meter
    with an editor of its own) rather than
    from nothing, and decide the parameters first: what a person would
-   turn, in which unit, over what range.
+   turn, in which unit, over what range. Give a new plugin a unique
+   `Info.id`; copying an example under a new file name does not change its
+   plugin ID. Keep the same library name and ID when updating that plugin.
 2. **Write it**: `dsp_write {name: "tilt_eq", source: "<the whole file>"}`.
    - `ok: false`: fix the `diagnostics` in order, each at its `line` and
      `column`. The `hint` is the fix; apply it rather than guessing. Fix the
@@ -22,12 +24,18 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
      `instrument`) and its parameters as the patch will show them (`key`,
      `unit`, range, default), and its `files` when it has any (a sample, an
      impulse response). `listed: true` means `plugin_list` shows it now.
-   - `dsp_check {source}` compiles without saving, for trying a fragment.
+   - `dsp_check {source}` compiles a whole script without saving.
+   - `ok: true, listed: false`: the compiler accepted it but the player did
+     not list its ID. Check `plugin_list` and the host's plugin path; the
+     script player must be installed there before it can be loaded.
 3. **Load it** on a track: `fx_add {track, plugin: "<its id>", patch:
    {params: {...}}}`. It answers `semantic: true`: `fx_describe`,
    `fx_patch_get`, `fx_patch_merge` and `fx_param_set` work in its units.
    An instrument goes first on its track, and plays the track's notes:
    `item_add {track, bar, notation: "..."}` (`guides/notation.md`).
+   In the sandbox, use `plugin_load {plugin: "<its id>"}`, then
+   `patch_merge {instance: "<returned instance>", patch: {params: {...}}}`
+   and `param_set {instance, values: {...}}`.
    `fx_patch_list {fx}` lists its factory patches and `fx_patch_set {fx,
    name: "Warm"}` applies one (undoable). In the sandbox: `preset_list
    {plugin, source: "factory"}` and `preset_load {instance, name, source:
@@ -88,7 +96,7 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
    `export/`, or `folder: "/home/<them>/.clap"` to install it) and the
    notices to ship beside it: ready now, for this platform. `format:
    "source"` writes a C++ project instead, which builds the same plugin
-   (same id, parameters and state) as CLAP, VST3 and AU anywhere; its
+   (same id, parameters and state) as CLAP and VST3, plus AU on macOS; its
    README says how, and `license` (`MIT` unless `GPL-3.0-or-later`) is
    theirs to choose. Either plays the script as it was when exported;
    export again after changing it. Projects here keep using the library's
@@ -96,7 +104,27 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
 
 `dsp_list` shows every script in the library (and whether it compiles);
 `dsp_get {name}` returns one's source. The DAW and the sandbox share the
-library and have the same seven commands.
+library by default in the GUI app and sandbox CLI
+(`<XDG_DATA_HOME or ~/.local/share>/<slug>/scripts`) and have the same
+seven commands. With `--workdir`, or in the headless engine, scripts live
+in `<workdir>/scripts`; `dsp_list.library` gives the actual location.
+
+## Export limits
+
+Player exports currently produce Linux CLAP files only. Ship the returned
+`notices` file beside the plugin. Source exports need a new or empty
+`folder` and at least one visible, automatable parameter for the template's
+host tests. They require the source export kit installed beside the stock
+plugins (`script-export-kit` in a development build).
+
+Exports contain the script and its declared factory patches, not the
+current instance's patch or the audio files its properties refer to. Save
+that patch separately, distribute any required samples or impulse responses,
+and set their paths on the destination machine. A source export uses native
+C++: checked indexing remains, but the JIT's loop budget does not. Keep
+loops bounded before exporting; a loop that the player stops can hang a
+native export. Build and test the exported project before distributing it;
+platforms beyond Linux have not been validated here.
 
 ## Test what changes over time
 

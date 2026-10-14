@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-10-08. This file describes the present: what works, what is
+Updated 2026-10-13. This file describes the present: what works, what is
 known not to, and what is planned. Keep it current with each change; the
 history is in git.
 
@@ -119,6 +119,43 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
   determinism check and an unload test (all but Nave also pass the headless
   REAPER check); JSON patches and the semantic-parameters extension.
 
+- **DSP scripting** (ADR-0032): plugins written in a checked subset of
+  C++, run by a JIT player plugin, exported as plugins or C++ projects. The
+  compiler and runtime exist (`plugins/suite`, tested against the same scripts
+  compiled as C++). So does the player (`plugins/suite/player`, built from
+  `plugins/template`, staged with the stock plugins): one plugin per script
+  in the script library, with the semantic-params extension, reloading a
+  script when its file changes. `dsp.write`, `dsp.check`, `dsp.get` and
+  `dsp.list` write and compile scripts (the app's library is
+  `<data>/<slug>/scripts`, shared with the sandbox), `dsp.test` measures
+  one with standard signals (and, when asked, parameter automation, a timed
+  sidechain key or a note sequence), and a script that compiles is loaded
+  and set like a stock plugin (`skill/guides/dsp-workflow.md`).
+  `fx.describe` and the sandbox's `plugin.describe` report a live
+  instance's loop-budget stops, out-of-range indices and failed reloads as
+  structured problems. Scripts declare read-only factory patches
+  (`factoryPatches(Patches&)`), listed and applied with `fx.patch.list` and
+  `fx.patch.set {name}` or the sandbox's `preset.list/load {source:
+  "factory"}`, and offered by exports' preset bar and hosts' preset
+  browsers. `dsp.export` makes a script a CLAP plugin for any host (a copy
+  of the player with the script appended, which offers that one plugin), or
+  a C++ project of the plugin template that builds the same plugin, bit for
+  bit, with the script compiled as C++ (every example's export is checked
+  against the player, for semantic conformance and factory patches, and
+  passes its own tests). Effects and instruments
+  (voices the runtime manages, CLAP note expressions and per-note
+  modulation; no note effects); samples and impulse responses
+  as files a patch names (loaded whole, no streaming from disk); spectral
+  effects (an STFT), oversampling and sidechains. A script may draw its
+  own editor (`editor()` for controls, `draw()` on an HTML-canvas-style
+  `Canvas`, `pointer()` to drag and click what it draws, editing
+  parameters as a user would, `Shared` members for what the audio code
+  shows it); one that does not gets the automatic editor. `dsp.preview`
+  draws a plugin's editor to a PNG without a window (EGL, Linux only; the
+  editor-picture extension), after clicks, drags and wheel turns it is
+  given, and says what they edited. Plugin-file exports are for Linux
+  only.
+
 Benchmarks are in `docs/benchmarks/`: B1, 30 Orrery tracks with EQ and
 compression at 48 kHz and 64 frames without xruns using anticipation
 (`b1.md`); the comparison with REAPER (`b2.md`); GUI cold start and frame
@@ -195,6 +232,11 @@ GUI:
   mixer strips but not onto track-panel rows.
 
 Plugins:
+- DSP source exports require a visible, automatable parameter for their host
+  tests and do not retain the JIT's loop-budget instrumentation. Exports
+  include declared factory patches, but do not package external audio files
+  or the patch of a currently loaded instance. Preview requires an editor
+  build and EGL on Linux.
 - Orrery's reference patch uses about 9 % of a core at 48 kHz / 256 frames;
   reaching 3 % needs a structure-of-arrays voice bank.
 - Stock plugins are tested as Linux CLAP builds; their VST3 and AUv2
@@ -210,41 +252,5 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
 - Profile the 64-frame worst case; a pipelined bridge mode.
 - Track groups, stretch markers, MIDI outputs, a background media cache.
 - Lua ergonomics (a script library path, hot reload).
-- DSP scripting (ADR-0032): plugins written in a checked subset of
-  C++, run by a JIT player plugin, exported as plugins or C++ projects. The
-  compiler and runtime exist (`plugins/suite`, tested against the same scripts
-  compiled as C++). So does the player (`plugins/suite/player`, built from
-  `plugins/template`, staged with the stock plugins): one plugin per script
-  in the script library, with the semantic-params extension, reloading a
-  script when its file changes. `dsp.write`, `dsp.check`, `dsp.get` and
-  `dsp.list` write and compile scripts (the app's library is
-  `<data>/<slug>/scripts`, shared with the sandbox), `dsp.test` measures
-  one with standard signals (and, when asked, parameter automation, a timed
-  sidechain key or a note sequence), and a script that compiles is loaded
-  and set like a stock plugin (`skill/guides/dsp-workflow.md`).
-  `fx.describe` and the sandbox's `plugin.describe` report a live
-  instance's loop-budget stops, out-of-range indices and failed reloads as
-  structured problems. Scripts declare read-only factory patches
-  (`factoryPatches(Patches&)`), listed and applied with `fx.patch.list` and
-  `fx.patch.set {name}` or the sandbox's `preset.list/load {source:
-  "factory"}`, and offered by exports' preset bar and hosts' preset
-  browsers. `dsp.export` makes a script a CLAP plugin for any host (a copy
-  of the player with the script appended, which offers that one plugin), or
-  a C++ project of the plugin template that builds the same plugin, bit for
-  bit, with the script compiled as C++ (every example's export is checked
-  against the player, for semantic conformance and factory patches, and
-  passes its own tests). Effects and instruments
-  (voices the runtime manages, CLAP note expressions and per-note
-  modulation; no note effects); samples and impulse responses
-  as files a patch names (loaded whole, no streaming from disk); spectral
-  effects (an STFT), oversampling and sidechains. A script may draw its
-  own editor (`editor()` for controls, `draw()` on an HTML-canvas-style
-  `Canvas`, `pointer()` to drag and click what it draws, editing
-  parameters as a user would, `Shared` members for what the audio code
-  shows it); one that does not gets the automatic editor. `dsp.preview`
-  draws a plugin's editor to a PNG without a window (EGL, Linux only; the
-  editor-picture extension), after clicks, drags and wheel turns it is
-  given, and says what they edited. Plugin-file exports are for Linux
-  only.
 - Orrery's structural performance pass.
 - Hardening and ports beyond Linux.

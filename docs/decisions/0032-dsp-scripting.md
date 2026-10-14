@@ -464,6 +464,21 @@ Where the work stands, and where it departs from the text above:
   a level in decibels when it has one (a neutral bell's frequency changes
   nothing).
 
+### Review clarifications (2026-10-13)
+
+The implementation notes above record successive stages; later dated notes
+supersede earlier statements that preview, properties or script editors are
+missing. Current contracts are in the specs and both DSP guides.
+
+Source export currently requires a visible, automatable parameter because
+the generated project's host tests use one. Native C++ exports retain
+checked indexing but have no JIT loop-budget instrumentation. Both export
+formats include the script's factory patch declarations; neither packages
+external samples/impulse responses or captures a loaded instance's patch.
+Player exports are Linux CLAP only; other platforms remain unvalidated.
+The GUI app and default sandbox CLI share the user library; an explicit
+workdir and the headless engine use their own `<workdir>/scripts`.
+
 ## Consequences
 
 Scripts reuse all of Quire's hosting and agent tooling with no special
