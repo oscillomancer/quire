@@ -462,7 +462,7 @@ Result<std::vector<std::uint8_t>> BridgeProcess::call(Op op, std::uint32_t insta
                  "fx.restart re-creates it");
 }
 
-Result<std::vector<std::uint8_t>> RemoteInstance::call(Op op, const Writer& w, int fd,
+Result<std::vector<std::uint8_t>> RemoteInstance::call(Op op, const Writer& w, Resource fd,
                                                        int timeoutMs) {
     switch (op) {
         case Op::Activate:

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <ostream>
 #include "../src/bridge_client.h"
 #include "../src/bridge_protocol.h"
 using namespace supple;

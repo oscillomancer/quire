@@ -19,13 +19,13 @@ namespace {
 #if !defined(__linux__)
 std::string uniqueName() {
     std::random_device random;
-    std::string name(product::kSlug);
-    name += "-bridge-";
-    constexpr char hex[] = "0123456789abcdef";
-    for (int i = 0; i < 4; ++i) {
-        const auto value = random();
-        for (int shift = 28; shift >= 0; shift -= 4) name += hex[(value >> shift) & 15];
-    }
+    // Darwin shm names have a 31-byte limit. Keep a product-derived prefix
+    // and 132 random bits in 22 filename-safe characters (at most 30 bytes
+    // including shm_open's leading slash).
+    std::string name(std::string_view(product::kSlug).substr(0, 6));
+    name += '-';
+    constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    for (int i = 0; i < 22; ++i) name += alphabet[random() & 63];
     return name;
 }
 #endif
