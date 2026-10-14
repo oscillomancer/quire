@@ -271,9 +271,11 @@ Result<DescribeResult> describePlugin(Session& s, const DescribeArgs& a) {
     DescribeResult r;
     r.plugin = in.info().id;
     r.name = in.info().name;
+    // A failed query is reported, not fatal: the description still helps.
     auto status = in.pluginStatus();
-    if (!status) return std::move(status).error();
-    if (!status->isNull()) {
+    if (!status)
+        r.problems = host::statusFailure(status.error());
+    else if (!status->isNull()) {
         r.statusAvailable = true;
         r.problems = *status->find("problems");
     }
@@ -601,7 +603,8 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
                               schema::boolean().doc("The instance supplied its current problems"))
                        .field("problems", &DescribeResult::problems,
                               schema::any().doc("Current plugin problems: code, message, scope, "
-                                                "line when known, hint, silent"))
+                                                "line when known, hint, silent; scope host when "
+                                                "unreadable"))
                        .build();
         c.examples = {
             {"Summarize the effect", obj(R"({"instance": "in_2"})"),

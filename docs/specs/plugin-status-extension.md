@@ -88,11 +88,15 @@ no request payload, one length-prefixed JSON string reply (`null` if
 unsupported). Existing operation numbers and shared-memory layout stay
 unchanged. The child calls the same API on its plugin's main thread; shared
 and dedicated instances therefore report their own problems. Existing
-version negotiation rejects a mismatched bridge. Bridge failure is an error,
-not an empty healthy report.
+version negotiation rejects a mismatched bridge. Bridge failure is an error
+from `pluginStatus()`, never an empty healthy report.
 
 Engine `fx.describe` and sandbox `plugin.describe` expose the document's
 `problems` in both summary and full modes and `status_available: true`.
 Without support, or without a live engine instance, `status_available` is
 false and `problems` is omitted. Unavailable status does not imply health.
+A failed query (a crashed bridge, an invalid document) does not fail the
+description: `status_available` is false and `problems` holds one entry with
+scope `host`, the error's code (`host.status`, `host.status_contract`, a
+bridge code) and its hint (`host::statusFailure`).
 Engine status always comes from the live instance, never a scratch probe.

@@ -451,4 +451,8 @@ class Instance {
     bool remoteEditor_ = false;  // the bridged plugin has an embeddable editor
 };
 
+// A failed pluginStatus() as a problems array of one host-scoped entry, for
+// reports that carry on without the plugin's document (a crashed bridge).
+json::Value statusFailure(const Error& error);
+
 }  // namespace supple::host

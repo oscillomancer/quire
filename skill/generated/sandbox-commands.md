@@ -1993,7 +1993,7 @@ Kind: `query`. Exposure: `mcp-tool`.
       "description": "The instance supplied its current problems"
     },
     "problems": {
-      "description": "Current plugin problems: code, message, scope, line when known, hint, silent"
+      "description": "Current plugin problems: code, message, scope, line when known, hint, silent; scope host when unreadable"
     }
   },
   "required": ["plugin", "name", "params", "description", "status_available"],

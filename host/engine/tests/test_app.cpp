@@ -389,6 +389,11 @@ TEST_CASE("an isolated plugin that crashes is reported and restarted over the bu
     CHECK(failure.find("error")->find("code")->asString() == "engine.bridge_failed");
     CHECK(failure.find("reason")->asString() == failure.find("error")->find("message")->asString());
     CHECK(status["running"].asBool());  // the engine plays on
+    // Its description still answers, with the unreadable status as a problem.
+    auto described = call("fx.describe", R"({"fx": "fx_2"})");
+    CHECK_FALSE(described["status_available"].asBool());
+    REQUIRE(described["problems"].size() == 1);
+    CHECK(described["problems"].at(0).find("scope")->asString() == "host");
     bool reported = false;
     for (const auto& [topic, payload] : app->takeEvents())
         if (topic == "fx.failed") {

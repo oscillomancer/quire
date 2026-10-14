@@ -1490,6 +1490,22 @@ Result<json::Value> Instance::pluginStatus() {
     return *doc;
 }
 
+json::Value statusFailure(const Error& error) {
+    json::Value p = json::Value::object();
+    p["code"] = error.code.empty() ? std::string("host.status") : error.code;
+    p["message"] = error.message.empty()
+                       ? std::string("The plugin's current problems could not be read.")
+                       : error.message;
+    p["scope"] = "host";
+    p["hint"] = error.hint.empty()
+                    ? std::string("Restart or replace the plugin, then inspect it again.")
+                    : error.hint;
+    p["silent"] = false;
+    json::Value list = json::Value::array();
+    list.push_back(std::move(p));
+    return list;
+}
+
 Result<json::Value> Instance::factoryPatches() {
     if (remote_) {
         auto text = remote_->text(bridge::Op::FactoryPatches);

@@ -204,7 +204,7 @@ q = nil
 ---@field description string
 ---@field docs? string
 ---@field status_available boolean The instance supplied its current problems
----@field problems? any Current plugin problems: code, message, scope, line when known, hint, silent
+---@field problems? any Current plugin problems: code, message, scope, line when known, hint, silent; scope host when unreadable
 
 ---@class Quire.plugin_list_args
 ---@field filter? string Text to match in the id or name.

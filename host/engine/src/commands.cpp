@@ -2434,7 +2434,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                        schema::boolean().doc("A live instance supplied its current problems"))
                 .field("problems", &FxDescription::problems,
                        schema::any().doc("Current plugin problems: code, message, scope, line when "
-                                         "known, hint, silent"))
+                                         "known, hint, silent; scope host when unreadable"))
                 .field("sidechain_channels", &FxDescription::sidechainChannels,
                        schema::integer().doc("The plug-in's key input: route.add {fx} feeds it"))
                 .field("latency_samples", &FxDescription::latencySamples,
@@ -2459,9 +2459,12 @@ void registerEngineCommands(cmd::Registry& registry) {
             // A scratch instance cannot know what went wrong in the one playing.
             host::Instance* live = app.instanceOf(*id);
             if (live) {
+                // A failed query (a crashed bridge) is reported, not fatal: the
+                // description is what an agent needs to decide what to do next.
                 auto status = live->pluginStatus();
-                if (!status) return std::move(status).error();
-                if (!status->isNull()) {
+                if (!status)
+                    r.problems = host::statusFailure(status.error());
+                else if (!status->isNull()) {
                     r.statusAvailable = true;
                     r.problems = *status->find("problems");
                 }

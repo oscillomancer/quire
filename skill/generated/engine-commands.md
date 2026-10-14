@@ -3640,7 +3640,7 @@ Kind: `query`. Exposure: `mcp-tool`.
       "description": "A live instance supplied its current problems"
     },
     "problems": {
-      "description": "Current plugin problems: code, message, scope, line when known, hint, silent"
+      "description": "Current plugin problems: code, message, scope, line when known, hint, silent; scope host when unreadable"
     },
     "sidechain_channels": {
       "type": "integer",

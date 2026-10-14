@@ -540,6 +540,9 @@ an array of `code`, `message`, `scope`, optional source `line`, `hint` and
 `silent` (audio silenced because of that problem). Queries never clear
 observations. Without a live instance or extension, status is unavailable
 and `problems` is omitted; a scratch instance cannot establish live health.
+A failed status query (a crashed bridge, an invalid document) still
+describes the plugin: status is unavailable and `problems` holds one entry
+with scope `host` and the error's code and hint.
 Descriptions and semantic schemas fall back to the live instance when a
 scratch query fails, so a saved script that no longer compiles can still
 be inspected; normal descriptions continue reflecting model edits.
