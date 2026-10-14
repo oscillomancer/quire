@@ -364,14 +364,11 @@ Result<std::vector<PluginInfo>> scan(std::span<const fs::path> paths, const Scan
         options.maxOutputBytes > (64u << 20))
         return Error("host.scan.options",
                      "scanner needs a positive timeout and output limit <= 64 MiB");
+    const std::string helper(platform::scanHelperName());
     auto executable =
         options.bridgeExecutable.empty() ? bridgeExecutable() : options.bridgeExecutable;
     if (!options.forceInProcess && executable.empty()) {
-#if defined(__linux__)
-        locateBridgeExecutable(std::string(product::kSlug) + "-bridge");
-#else
-        locateBridgeExecutable(std::string(product::kSlug) + "-scanner");
-#endif
+        locateBridgeExecutable(std::string(product::kSlug) + "-" + helper);
         executable = bridgeExecutable();
     }
     std::error_code executableError;
@@ -380,14 +377,13 @@ Result<std::vector<PluginInfo>> scan(std::span<const fs::path> paths, const Scan
         (executable.empty() || !fs::is_regular_file(executable, executableError) ||
          !platform::executable(executable));
     if (bridgeMissing && options.superviseAll)
-        return Error("host.scan.unsupervised", "a background scan needs the plugin bridge",
-                     "/bridge",
-                     "install the bridge beside the application, or scan in the "
-                     "foreground");
+        return Error(
+            "host.scan.unsupervised", "a background scan needs the plugin " + helper, "/bridge",
+            "install the " + helper + " beside the application, or scan in the foreground");
     if (bridgeMissing) {
-        gReport.warnings.emplace_back("host.scan.unsupervised",
-                                      "plugin bridge unavailable; scanning in process", "/bridge",
-                                      "install the bridge beside the application");
+        gReport.warnings.emplace_back(
+            "host.scan.unsupervised", "plugin " + helper + " unavailable; scanning in process",
+            "/bridge", "install the " + helper + " beside the application");
         std::fprintf(stderr, "%s\n", gReport.warnings.back().toString().c_str());
     }
     const auto directory =

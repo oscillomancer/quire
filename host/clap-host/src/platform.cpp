@@ -99,6 +99,13 @@ bool executable(const fs::path& path) {
     return ::access(path.c_str(), X_OK) == 0;
 #endif
 }
+std::string_view scanHelperName() {
+#if defined(__linux__)
+    return "bridge";
+#else
+    return "scanner";
+#endif
+}
 namespace {
 std::string environmentText(const char* name) {
 #if defined(_WIN32)

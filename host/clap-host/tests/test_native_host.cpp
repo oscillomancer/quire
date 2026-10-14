@@ -8,6 +8,24 @@
 using namespace supple;
 using namespace supple::host;
 namespace fs = std::filesystem;
+TEST_CASE("missing scan helper names the executable to install") {
+    ScanOptions options;
+    options.bridgeExecutable = fs::path(SCANNER_PATH) / "missing";
+    options.superviseAll = true;
+    auto result = scan({}, options);
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == "host.scan.unsupervised");
+    CHECK(result.error().path == "/bridge");
+#if defined(__linux__)
+    CHECK(result.error().message == "a background scan needs the plugin bridge");
+    CHECK(result.error().hint ==
+          "install the bridge beside the application, or scan in the foreground");
+#else
+    CHECK(result.error().message == "a background scan needs the plugin scanner");
+    CHECK(result.error().hint ==
+          "install the scanner beside the application, or scan in the foreground");
+#endif
+}
 TEST_CASE("native supervised scanner isolates crashes and hangs and caches results") {
     const auto work = fs::temp_directory_path() / "supple-native-scan";
     std::error_code ec;

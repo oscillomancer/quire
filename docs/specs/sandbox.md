@@ -599,7 +599,9 @@ The standalone `<slug>-scanner --scan <module>` speaks the existing canonical
 scan JSON schema and keeps plugin stdout off the reply stream. Linux retains
 the bridge's existing scan mode by default; other platforms locate the scanner
 in the same build-tree/sibling locations. ScanOptions::bridgeExecutable can
-explicitly select either executable. Missing scanner behavior and supervised
+explicitly select either executable. Missing-helper messages and hints name
+the bridge on Linux and the standalone scanner on other platforms; the
+compatibility error path remains `/bridge`. Missing scanner behavior and supervised
 background requirements are unchanged. ChildProcess::spawn(executable, args)
 uses native process creation with redirected stdout and null stdin/stderr.
 collect(steady_clock deadline, maxBytes) returns {text, exitCode, crashed};

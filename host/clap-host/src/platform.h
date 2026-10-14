@@ -16,4 +16,5 @@ void* symbol(void* library, const char* name);
 void closeLibrary(void* library);
 std::vector<std::filesystem::path> pluginPaths(bool vst3);
 bool executable(const std::filesystem::path& path);
+std::string_view scanHelperName();
 }  // namespace supple::host::platform
