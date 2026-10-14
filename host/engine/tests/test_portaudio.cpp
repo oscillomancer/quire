@@ -183,7 +183,14 @@ TEST_CASE("PortAudio failed selection and stream startup release resources") {
     auto nativeApi = Driver::api;
     nativeApi.native = true;
     PortAudioBackend native({}, nativeApi);
-    CHECK_FALSE(native.prepareLiveThread(std::thread::native_handle_type{}));
+    std::atomic<unsigned> releaseHelper{0};
+    std::thread idle([&] { releaseHelper.wait(0); });
+    auto refused = native.prepareLiveThread(idle.native_handle());
+    releaseHelper.store(1);
+    releaseHelper.notify_one();
+    idle.join();
+    REQUIRE_FALSE(refused);
+    CHECK(refused.error().code == "engine.live_threads");
     CHECK(native.callbackPolicy().kind == ThreadPolicy::Kind::None);
     PortAudioBackend missing({.hostApi = "unknown"}, Driver::api);
     auto bad = missing.start({}, [](auto, auto, auto) {});
