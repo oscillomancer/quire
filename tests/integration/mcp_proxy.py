@@ -85,7 +85,11 @@ def main():
                 except subprocess.TimeoutExpired:
                     server.kill()
                     server.wait(timeout=5)
-            assert not socket.exists(), "server left its socket after shutdown"
+            # POSIX terminate delivers the installed SIGTERM handler. Windows
+            # TerminateProcess cannot run destructors; this private directory
+            # is reclaimed by the harness. Native endpoint tests cover close.
+            if os.name != "nt":
+                assert not socket.exists(), "server left its socket after shutdown"
     print(f"MCP proxy socket integration passed in {time.monotonic() - started:.2f}s")
 
 
