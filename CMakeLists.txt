@@ -58,8 +58,10 @@ if(Python3_FOUND)
              COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/license-check/check.py --root ${CMAKE_SOURCE_DIR})
     add_test(NAME license-check.tests
              COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_SOURCE_DIR}/tools/license-check)
+    if(UNIX)
     add_test(NAME eval-harness.tests
              COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_SOURCE_DIR}/tools/eval-harness)
     set_tests_properties(eval-harness.tests PROPERTIES LABELS "eval")
+    endif()
   endif()
 endif()

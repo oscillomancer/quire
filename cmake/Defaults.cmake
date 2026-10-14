@@ -26,6 +26,17 @@ if(SUPPLE_SANITIZE)
   endforeach()
 endif()
 
+# clang-cl accepts warning switches directly, but ignores some GNU driver
+# flags (notably -ffp-contract). Forward every such option explicitly.
+function(supple_compile_options target scope)
+  set(flags ${ARGN})
+  if(MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    list(TRANSFORM flags REPLACE "^(-.*)$" "/clang:\\1")
+    list(TRANSFORM flags REPLACE ":(-W[^>]+)>$" ":/clang:\\1>")
+  endif()
+  target_compile_options(${target} ${scope} ${flags})
+endfunction()
+
 function(supple_target_defaults target)
   target_compile_features(${target} PUBLIC cxx_std_20)
   set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
@@ -41,16 +52,11 @@ function(supple_target_defaults target)
                                            $<$<COMPILE_LANGUAGE:CXX>:-Wnon-virtual-dtor>
                                            $<$<COMPILE_LANGUAGE:CXX>:-Wold-style-cast>
                                            $<$<COMPILE_LANGUAGE:CXX>:-Woverloaded-virtual>)
-  if(MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    # All these flags apply to C and C++ in clang-cl too.
-    list(TRANSFORM flags REPLACE "^(-.*)$" "/clang:\\1")
-    list(TRANSFORM flags REPLACE ":(-W[^>]+)>$" ":/clang:\\1>")
-  endif()
-  target_compile_options(${target} PRIVATE ${flags})
+  supple_compile_options(${target} PRIVATE ${flags})
   # Parameter tables use designated initializers with default member values
   # on purpose (docs/specs/core-params.md); Clang's -Wextra would flag every
   # omitted field.
-  target_compile_options(${target} PRIVATE
+  supple_compile_options(${target} PRIVATE
     $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-missing-designated-field-initializers>
     $<$<CXX_COMPILER_ID:GNU>:-Wno-missing-field-initializers>)
   if(SUPPLE_WERROR)

@@ -81,8 +81,9 @@ on this private repository (macOS and Windows consume more Actions minutes).
 Linux (`ubuntu-24.04`, Clang 22) builds the existing `dev` preset with all
 its tests, under Xvfb and software OpenGL. SDL3 is built into the runner's
 workspace because Ubuntu 24.04 predates it. macOS (`macos-15`, arm64) uses
-AppleClang and Homebrew Ninja/SDL3, with deployment target 14.4; curl and
-zlib come from the SDK. Windows (`windows-2022`, x64) uses clang-cl, Ninja
+Homebrew LLVM/libc++ and Ninja/SDL3, with deployment target 14.4; curl and
+zlib come from the SDK. The first CI run demonstrated that Xcode 16.4
+lacks floating-point `std::from_chars`, required by units and JSON parsing. Windows (`windows-2022`, x64) uses clang-cl, Ninja
 and the Windows SDK, with vcpkg SDL3/zlib/curl and a binary cache. Windows
 10 1803 is the minimum. No packaging or installers run here. Local platform
 commands are `cmake --workflow --preset macos` or `windows`; the latter
@@ -104,6 +105,7 @@ run on macOS. These gates are explicit, with no no-op RT implementations:
 | Same gate: CLAP/VST3 host, scan fixtures, bridge and sandbox | macOS, Windows | Linux loader, process isolation and IPC; hosting/bridge port steps |
 | Same gate: engine, JACK/fake JACK, control socket/model loop, MCP | macOS, Windows | Linux wake/process services and JACK; headless/backend port steps; session model still built |
 | Same gate: DAW GUI/agent, stock plugin wrappers, conformance/reset/export integration tests | macOS, Windows | Depend on the host/engine and X11; SDK-free DSP engines and suite tests still built |
+| POSIX evaluation harness tests | Windows | Unix executable fixtures, symlinks and process groups |
 | `SUPPLE_POSIX_AUDIO_FILES`: audio-file library/tests | Windows | POSIX exclusive files, RF64 output and recording recovery; file-I/O port step |
 
 Research GUI spikes and host fuzzers reject configuration on non-Linux

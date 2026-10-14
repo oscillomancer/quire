@@ -8,7 +8,7 @@ if(SUPPLE_BUILD_TESTS)
     "${reference}/Console9Buss/Console9Buss.cpp"
     "${reference}/Console9Buss/Console9BussProc.cpp")
   target_include_directories(console9-reference PRIVATE tests/reference)
-  target_compile_options(console9-reference PRIVATE -w -ffp-contract=off ${_supple_sanitize_flags})
+  supple_compile_options(console9-reference PRIVATE -w -ffp-contract=off ${_supple_sanitize_flags})
   # Factories otherwise have the same symbol; leave upstream files untouched.
   set_source_files_properties("${reference}/Console9Channel/Console9Channel.cpp"
     PROPERTIES COMPILE_DEFINITIONS "createEffectInstance=createConsole9ChannelReference")

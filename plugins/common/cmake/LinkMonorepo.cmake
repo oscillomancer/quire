@@ -10,6 +10,7 @@ function(supple_plugin_add_monorepo_libraries)
         message(FATAL_ERROR "SUPPLE_ROOT must point at the monorepo checkout")
     endif()
     include("${SUPPLE_ROOT}/cmake/Product.cmake")
+    include("${SUPPLE_ROOT}/cmake/Platforms.cmake")
     include("${SUPPLE_ROOT}/cmake/Defaults.cmake")
     configure_file("${SUPPLE_ROOT}/cmake/product.h.in"
                    "${CMAKE_BINARY_DIR}/generated/supple/product.h" @ONLY)

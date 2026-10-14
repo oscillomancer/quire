@@ -98,13 +98,17 @@ jobs:
           .github/scripts/sdl3.sh
           echo "CMAKE_PREFIX_PATH=$GITHUB_WORKSPACE/.deps/install" >> "$GITHUB_ENV"
 
-      # SDK curl/zlib; AppleClang first, arm64 with minimum macOS 14.4.
+      # Xcode 16.4 libc++ lacks floating from_chars (first port run).
+      # Homebrew LLVM/libc++ supplies it; SDK curl/zlib, arm64, macOS 14.4.
       - name: macOS tools and libraries
         if: matrix.platform == 'macos'
         run: |
           export HOMEBREW_NO_AUTO_UPDATE=1
           export HOMEBREW_CACHE="$GITHUB_WORKSPACE/.deps/homebrew"
-          brew install ninja sdl3
+          brew install ninja sdl3 llvm
+          llvm=$(brew --prefix llvm)
+          echo "$llvm/bin" >> "$GITHUB_PATH"
+          echo "MAC_LLVM=$llvm" >> "$GITHUB_ENV"
           test "$(uname -m)" = arm64
           xcrun clang --version
 
@@ -120,9 +124,17 @@ jobs:
           clang-cl --version
 
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }}
+        run: |
+          if [[ '${{ matrix.platform }}' == macos ]]; then
+            cmake --preset macos -DCMAKE_C_COMPILER="$MAC_LLVM/bin/clang" \
+              -DCMAKE_CXX_COMPILER="$MAC_LLVM/bin/clang++" \
+              -DCMAKE_CXX_FLAGS="-nostdinc++ -isystem $MAC_LLVM/include/c++/v1" \
+              -DCMAKE_EXE_LINKER_FLAGS="-L$MAC_LLVM/lib/c++ -Wl,-rpath,$MAC_LLVM/lib/c++"
+          else
+            cmake --preset ${{ matrix.preset }}
+          fi
       - name: Build
-        run: cmake --build --preset ${{ matrix.preset }}
+        run: cmake --build --preset ${{ matrix.preset }} -- -k 0
       - name: Test Linux (software OpenGL under Xvfb)
         if: matrix.platform == 'linux'
         env:
