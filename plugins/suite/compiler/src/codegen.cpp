@@ -17,6 +17,7 @@
 #include <functional>
 #include <map>
 #include <new>
+#include <set>
 
 #include "program.h"
 #include "sema.h"
@@ -308,6 +309,11 @@ class Codegen {
     std::map<std::string, void*> imports_;
     std::vector<std::unique_ptr<std::vector<std::string>>> names_;
     std::map<const Type*, const unsigned char*> prototypes_;
+    // Each function's frame and the script functions it calls, for the
+    // stack a chain of calls needs (stackDepth()).
+    std::map<const FunctionDecl*, int> frames_;
+    std::map<const FunctionDecl*, std::set<const FunctionDecl*>> callees_;
+    int stackDepth(const FunctionDecl* f, std::map<const FunctionDecl*, int>& known) const;
 
     // Per function.
     FunctionDecl* fn_ = nullptr;
@@ -1229,6 +1235,7 @@ MIR_op_t Codegen::call(CallExpr* c) {
     // A script function or member function.
     if (c->function) {
         FunctionDecl* f = c->function;
+        callees_[fn_].insert(f);
         std::vector<MIR_op_t> ops{MIR_new_ref_op(ctx_, functionProtos_[f]),
                                   MIR_new_ref_op(ctx_, forwards_[f])};
         MIR_reg_t result = 0;
@@ -1699,6 +1706,9 @@ void Codegen::function(FunctionDecl* f) {
             l.reg = r;
         }
     }
+    // A call spends the budget as a loop's turn does: a tree of calls with no
+    // loop in it can still do exponential work.
+    budgetCheck(f->loc.line);
     statement(f->body);
     // Falling off the end (void), or the abort exit: return zero.
     place(exit_);
@@ -1711,6 +1721,18 @@ void Codegen::function(FunctionDecl* f) {
                      MIR_new_insn(ctx_, MIR_ALLOCA, reg(frameReg_),
                                   imm(std::max(16, (frameSize_ + 15) / 16 * 16))));
     MIR_finish_func(ctx_);
+    frames_[f] = frameSize_;
+}
+
+// The frames of the deepest chain of calls from f (recursion is refused,
+// so the calls form no cycle).
+int Codegen::stackDepth(const FunctionDecl* f, std::map<const FunctionDecl*, int>& known) const {
+    if (auto it = known.find(f); it != known.end()) return it->second;
+    int deepest = 0;
+    if (auto it = callees_.find(f); it != callees_.end())
+        for (const FunctionDecl* g : it->second) deepest = std::max(deepest, stackDepth(g, known));
+    const auto frame = frames_.find(f);
+    return known[f] = deepest + (frame == frames_.end() ? 0 : frame->second);
 }
 
 std::shared_ptr<const Program> Codegen::run() {
@@ -1767,6 +1789,17 @@ std::shared_ptr<const Program> Codegen::run() {
         functionProtos_[f] = proto(abi);
     }
     for (FunctionDecl* f : an_.functions) function(f);
+    std::map<const FunctionDecl*, int> depths;
+    for (FunctionDecl* f : an_.functions)
+        if (stackDepth(f, depths) > kMaxStackBytes) {
+            diags_.error(f->loc, "script.stack",
+                         f->name + "() and the functions it calls need more than " +
+                             std::to_string(kMaxStackBytes >> 10) +
+                             " KiB of local storage together",
+                         "move large arrays or structs to plugin members, or call fewer "
+                         "functions with large locals from one another");
+            break;
+        }
     MIR_finish_module(ctx_);
     if (diags_.hasErrors()) {
         tMirJump = nullptr;

@@ -602,6 +602,48 @@ TEST_CASE("the local storage limit covers a function's complete frame") {
     CHECK(firstError(plugin("Array<double, 8000> a; auto b = a;")) == "script.local.size");
 }
 
+TEST_CASE("the frames along a chain of calls are limited together") {
+    // Each function holds 60 KiB; a chain of n of them needs n times that.
+    auto chain = [](int n) {
+        std::string text =
+            "#include <supple/script.h>\n"
+            "struct T : Effect {\n"
+            "static constexpr Info info = {.name = \"T\", .id = \"com.example.t\"};\n"
+            "double f0() { Array<double, 7500> a; a[0] = 1.0; return a[0]; }\n";
+        for (int i = 1; i < n; ++i)
+            text += "double f" + std::to_string(i) + "() { Array<double, 7500> a; a[0] = f" +
+                    std::to_string(i - 1) + "(); return a[0]; }\n";
+        return text + "void process(Block& io) { io[0][0] = f" + std::to_string(n - 1) +
+               "(); }\n};\n";
+    };
+    CHECK(firstError(chain(4)).empty());
+    CHECK(firstError(chain(5)) == "script.stack");
+}
+
+TEST_CASE("calls spend the loop budget, so a tree of calls without loops stops") {
+    // f16 calls f15 twice, ... down to f0: 65536 calls of f0 in all.
+    std::string source =
+        "#include <supple/script.h>\n"
+        "struct T : Effect {\n"
+        "static constexpr Info info = {.name = \"T\", .id = \"com.example.t\"};\n"
+        "double count = 0;\n"
+        "void f0() { count += 1; }\n";
+    for (int i = 1; i <= 16; ++i)
+        source += "void f" + std::to_string(i) + "() { f" + std::to_string(i - 1) + "(); f" +
+                  std::to_string(i - 1) + "(); }\n";
+    source += "void process(Block& io) { f16(); io[0][0] = count; }\n};\n";
+    auto result = compileOk(source);
+    JitRunner run(result.program);
+    Audio audio(2, 1);
+    script::detail::CurrentScope current(&run.instance);
+    run.instance.budget = 10000;
+    run.blocks(audio, 1, [&](script::Block& block) {
+        callRealtime(result.program->process(), &run.instance, run.self(), &block);
+    });
+    CHECK(run.instance.status.budgetExceeded.load() == 1);
+    CHECK(audio.data[0][0] == 0.0);
+}
+
 TEST_CASE("loop budgets stop all back edges and unwind script calls") {
     for (const std::string loop :
          {"while (true) { continue; }", "for (;;) { continue; }", "do { continue; } while (true);",

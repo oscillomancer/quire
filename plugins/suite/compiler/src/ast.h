@@ -18,8 +18,10 @@
 
 namespace supple::scriptc {
 
-// Includes compiler-generated temporaries, not just declared locals.
+// One function's frame: declared locals and the compiler's temporaries.
 inline constexpr int kMaxFrameBytes = 64 << 10;
+// The frames along any chain of calls, which an audio thread's stack holds.
+inline constexpr int kMaxStackBytes = 256 << 10;
 
 // --- positions and diagnostics -------------------------------------------------
 
