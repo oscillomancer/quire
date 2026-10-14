@@ -1255,7 +1255,9 @@ The audio-file library, engine/CLI and sandbox build on Windows as well as
 Linux/macOS. Recording creation is exclusive: an existing take or link is
 never replaced. Recovery opens the final path without following links; Windows
 rejects reparse points and directories on the opened handle. Windows opens use
-CreateFileW and permit read/write/delete sharing, so inspection and recovery can
+CreateFileW and permit read/write/delete sharing. Audio-file error messages
+convert native paths explicitly to UTF-8, avoiding Windows ANSI conversion
+exceptions for Unicode take names. Inspection and recovery can
 coexist with a flushed writer. Recording and recovery positions are 64-bit on
 all platforms (Windows long is only 32-bit). Recording's existing RIFF limit
 and complete-frame recovery rule are unchanged; no file operations run on audio

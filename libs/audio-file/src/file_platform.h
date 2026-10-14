@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <string>
 #if defined(_WIN32)
 #include <fcntl.h>
 #include <io.h>
@@ -17,6 +18,10 @@
 #endif
 
 namespace supple::audio::detail::files {
+inline std::string text(const std::filesystem::path& path) {
+    const auto utf8 = path.u8string();
+    return {utf8.begin(), utf8.end()};
+}
 inline std::FILE* open(const std::filesystem::path& path, bool write, bool create = false) {
 #if defined(_WIN32)
     const HANDLE handle =

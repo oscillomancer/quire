@@ -43,7 +43,9 @@ Status WavStreamWriter::open(const std::filesystem::path& path, double sampleRat
         sampleRate > 768000)
         return Error("audio.stream", "bad channel count or rate");
     file_ = detail::files::open(path, true, true);  // never an existing file (another take's)
-    if (!file_) return Error("file.write", "cannot create " + path.string() + " (does it exist?)");
+    if (!file_)
+        return Error("file.write",
+                     "cannot create " + detail::files::text(path) + " (does it exist?)");
     channels_ = channels;
     frames_ = 0;
     std::uint8_t h[kHeaderBytes] = {};
@@ -112,7 +114,9 @@ Status WavStreamWriter::close() {
 
 Result<WavStreamInfo> inspectWavStream(const std::filesystem::path& path) {
     std::FILE* f = detail::files::open(path, false);
-    if (!f) return Error("file.open", "cannot read " + path.string() + " (or it is a link)");
+    if (!f)
+        return Error("file.open",
+                     "cannot read " + detail::files::text(path) + " (or it is a link)");
     std::uint8_t h[kHeaderBytes];
     bool read = std::fread(h, 1, sizeof h, f) == sizeof h;
     std::int64_t end = -1;
@@ -123,11 +127,13 @@ Result<WavStreamInfo> inspectWavStream(const std::filesystem::path& path) {
     if (!read || std::memcmp(h, "RIFF", 4) != 0 || std::memcmp(h + 8, "WAVEfmt ", 8) != 0 ||
         get32(h + 16) != 16 || get16(h + 20) != 3 || get16(h + 34) != 32 ||
         std::memcmp(h + 36, "data", 4) != 0)
-        return Error("audio.not_stream", path.string() + " is not a recording's WAV file");
+        return Error("audio.not_stream",
+                     detail::files::text(path) + " is not a recording's WAV file");
     WavStreamInfo info;
     info.channels = get16(h + 22);
     info.sampleRate = get32(h + 24);
-    if (info.channels == 0) return Error("audio.not_stream", path.string() + " has no channels");
+    if (info.channels == 0)
+        return Error("audio.not_stream", detail::files::text(path) + " has no channels");
     const std::uint64_t frameBytes = std::uint64_t(info.channels) * 4;
     info.headerFrames = get32(h + 40) / frameBytes;
     const std::uint64_t data = std::min<std::uint64_t>(size - kHeaderBytes, kMaxData);
@@ -140,7 +146,9 @@ Result<std::uint64_t> repairWavStream(const std::filesystem::path& path) {
     if (!info) return std::move(info).error();
     if (info->fileFrames == info->headerFrames) return info->headerFrames;
     std::FILE* f = detail::files::open(path, true);
-    if (!f) return Error("file.write", "cannot open " + path.string() + " (or it is a link)");
+    if (!f)
+        return Error("file.write",
+                     "cannot open " + detail::files::text(path) + " (or it is a link)");
     const auto data = static_cast<std::uint32_t>(info->fileFrames * info->channels * 4);
     std::uint8_t b[4];
     bool ok = true;
@@ -149,7 +157,8 @@ Result<std::uint64_t> repairWavStream(const std::filesystem::path& path) {
     put32(b, data);
     ok = ok && detail::files::seek(f, 40, SEEK_SET) == 0 && std::fwrite(b, 1, 4, f) == 4;
     ok = std::fclose(f) == 0 && ok;
-    if (!ok) return Error("file.write", "cannot rewrite the header of " + path.string());
+    if (!ok)
+        return Error("file.write", "cannot rewrite the header of " + detail::files::text(path));
     return info->fileFrames;
 }
 

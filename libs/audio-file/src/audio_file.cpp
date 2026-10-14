@@ -137,13 +137,15 @@ Result<AudioData> readAudio(std::span<const std::uint8_t> bytes) {
 
 Result<AudioData> readAudio(const fs::path& path) {
     std::ifstream in(path, std::ios::binary);
-    if (!in) return Error("audio.open", "cannot open " + path.string(), {}, "check the path");
+    if (!in)
+        return Error("audio.open", "cannot open " + detail::files::text(path), {},
+                     "check the path");
     std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)),
                                     std::istreambuf_iterator<char>());
     auto r = readAudio(bytes);
     if (!r) {
         Error e = std::move(r).error();
-        e.message = path.filename().string() + ": " + e.message;
+        e.message = detail::files::text(path.filename()) + ": " + e.message;
         return e;
     }
     return r;
