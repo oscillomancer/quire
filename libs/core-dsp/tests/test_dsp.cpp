@@ -132,3 +132,32 @@ TEST_CASE("polyphase upsampler ignores short output spans without advancing hist
     reference.process(0.5f, expected);
     CHECK(actual == expected);
 }
+
+#if defined(__aarch64__)
+namespace {
+std::uint64_t fpcr() {
+    std::uint64_t value;
+    asm volatile("mrs %0, fpcr" : "=r"(value));
+    return value;
+}
+void setFpcr(std::uint64_t value) { asm volatile("msr fpcr, %0" : : "r"(value)); }
+}  // namespace
+TEST_CASE("arm64 denormal guard sets FZ and restores the entire FPCR across nesting") {
+    const auto saved = fpcr();
+    constexpr std::uint64_t fz = std::uint64_t{1} << 24;
+    const auto original = saved & ~fz;
+    setFpcr(original);
+    {
+        DenormalGuard outer;
+        CHECK(fpcr() == (original | fz));
+        {
+            DenormalGuard inner;
+            setFpcr(original);  // a plug-in leaks its mode: inner restores outer
+        }
+        CHECK(fpcr() == (original | fz));
+    }
+    const auto restored = fpcr();
+    setFpcr(saved);
+    CHECK(restored == original);
+}
+#endif

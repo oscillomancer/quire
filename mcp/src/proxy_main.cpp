@@ -5,7 +5,18 @@
 #include <cstdio>
 #include <iostream>
 
+#if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+#define fileno _fileno
+#endif
+
 int main(int argc, char** argv) {
+#if defined(_WIN32)
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
+
     using namespace supple;
     std::filesystem::path path;
     std::string instance = "default";

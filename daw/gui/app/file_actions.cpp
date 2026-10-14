@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "file_actions.h"
+#include <supple/base/paths.h>
 
 #include <SDL3/SDL.h>
 
@@ -103,8 +104,8 @@ class TemplateList : public ui::List {
 }  // namespace
 
 std::filesystem::path mediaHome() {
-    const char* home = std::getenv("HOME");
-    if (!home || !*home) return {};
+    const auto home = paths::home();
+    if (home.empty()) return {};
     return std::filesystem::path(home) / "Documents" / (std::string(product::kSlug) + "-media");
 }
 

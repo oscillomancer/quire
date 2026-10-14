@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "control_map.h"
+#include <supple/base/paths.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -24,10 +25,7 @@ bool sameControl(const model::MidiControl& a, const model::MidiControl& b) {
 }  // namespace
 
 std::filesystem::path ControlMap::defaultFile(std::string_view slug) {
-    if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
-        return std::filesystem::path(xdg) / slug / "controls.json";
-    if (const char* home = std::getenv("HOME"); home && *home)
-        return std::filesystem::path(home) / ".config" / slug / "controls.json";
+    if (const auto root = paths::config(); !root.empty()) return root / slug / "controls.json";
     return {};
 }
 

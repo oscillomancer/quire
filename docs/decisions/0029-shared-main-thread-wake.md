@@ -3,6 +3,9 @@
 **Status:** Accepted, 2026-10-08. Spec: `docs/specs/core-base.md`.
 Builds on ADR-0024's private futex wake exception and ADR-0013's bridge.
 
+**Platform amendment, 2026-10-14:** [ADR-0035](0035-headless-platform-layer.md)
+adds macOS/Windows mechanisms while retaining these Linux semantics.
+
 ## Context
 
 The bridge has an audio-safe, coalesced futex-to-eventfd relay. The engine

@@ -1,15 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
-#include <fcntl.h>
-#include <poll.h>
+#include <supple/base/paths.h>
 #include <supple/product.h>
 #include <supple/rpc/model_loop.h>
 #include <supple/rpc/protocol.h>
-#include <sys/file.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
-#include <sys/un.h>
-#include <unistd.h>
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
@@ -23,6 +17,8 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+#include "endpoint_platform.h"
+#include "socket_platform.h"
 
 namespace supple::rpc {
 namespace {
@@ -84,8 +80,7 @@ Error errorFromJson(const json::Value& value) {
     return error;
 }
 std::filesystem::path socketPath(std::string_view instance) {
-    const char* runtime = std::getenv("XDG_RUNTIME_DIR");
-    std::filesystem::path root = runtime && *runtime ? runtime : "/tmp";
+    const auto root = paths::runtime();
     return root / std::string(product::kSlug) / (std::string(instance) + ".sock");
 }
 
@@ -96,7 +91,7 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
         json::Value filter = json::Value::object();
     };
     struct Peer {
-        std::atomic<int> fd = -1;
+        std::atomic<net::Socket> fd = net::invalid;
         std::thread thread;
         std::mutex outputMutex;
         std::deque<std::string> output;
@@ -116,9 +111,8 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
     cmd::Dispatcher& dispatcher;
     Post post;
     std::filesystem::path socket;
-    int listener = -1;
-    dev_t socketDevice = 0;
-    ino_t socketInode = 0;
+    net::Socket listener = net::invalid;
+    net::Identity socketIdentity;
     std::thread acceptThread;
     std::mutex peersMutex;
     std::vector<std::shared_ptr<Peer>> peers;
@@ -342,13 +336,13 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
                 if (!peer->sending.empty() || !peer->output.empty()) events |= POLLOUT;
                 if (peer->closeAfterWrite && peer->sending.empty() && peer->output.empty()) break;
             }
-            pollfd pfd{peer->fd, events, 0};
-            int ready = ::poll(&pfd, 1, 25);
+            net::PollFd pfd{peer->fd, events, 0};
+            int ready = net::poll(&pfd, 1, 25);
             if (ready < 0 && errno == EINTR) continue;
             if (ready < 0 || (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))) break;
             if (pfd.revents & POLLIN) {
                 char bytes[8192];
-                auto count = ::recv(peer->fd, bytes, sizeof(bytes), 0);
+                auto count = net::recv(peer->fd, bytes, sizeof(bytes));
                 if (count <= 0) {
                     if (count < 0 && (errno == EAGAIN || errno == EINTR)) continue;
                     break;
@@ -375,8 +369,8 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
                 {
                     std::lock_guard lock(peer->outputMutex);
                     if (peer->sending.empty()) continue;
-                    auto n = ::send(peer->fd, peer->sending.data() + peer->sent,
-                                    peer->sending.size() - peer->sent, MSG_NOSIGNAL);
+                    auto n = net::send(peer->fd, peer->sending.data() + peer->sent,
+                                       peer->sending.size() - peer->sent);
                     if (n > 0) {
                         peer->sent += static_cast<std::size_t>(n);
                         peer->outputBytes -= static_cast<std::size_t>(n);
@@ -389,24 +383,24 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
                 if (peer->sending.empty()) dropNotice(peer);
             }
         }
-        int closingFd = peer->fd.exchange(-1);
-        if (closingFd >= 0) ::close(closingFd);
+        auto closingFd = peer->fd.exchange(net::invalid);
+        if (closingFd != net::invalid) net::close(closingFd);
     }
     void acceptLoop() {
         while (running) {
-            pollfd pfd{listener, POLLIN, 0};
-            int ready = ::poll(&pfd, 1, 50);
+            net::PollFd pfd{listener, POLLIN, 0};
+            int ready = net::poll(&pfd, 1, 50);
             if (ready < 0 && errno == EINTR) continue;
             if (ready <= 0) continue;
             if (!(pfd.revents & POLLIN)) continue;
-            int fd = ::accept4(listener, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
-            if (fd < 0) continue;
+            auto fd = net::accept(listener);
+            if (fd == net::invalid) continue;
             std::vector<std::shared_ptr<Peer>> retired;
             {
                 std::lock_guard lock(peersMutex);
                 auto it = peers.begin();
                 while (it != peers.end()) {
-                    if ((*it)->fd.load() < 0) {
+                    if ((*it)->fd.load() == net::invalid) {
                         retired.push_back(*it);
                         it = peers.erase(it);
                     } else
@@ -420,7 +414,7 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
             {
                 std::lock_guard lock(peersMutex);
                 if (peers.size() >= 64) {
-                    ::close(fd);
+                    net::close(fd);
                     continue;
                 }
                 peers.push_back(peer);
@@ -436,105 +430,78 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
         std::filesystem::create_directories(path.parent_path(), ec);
         if (ec) return Error("rpc.path", ec.message(), path.string());
         if (path.parent_path().filename() == product::kSlug &&
-            ::chmod(path.parent_path().c_str(), 0700) != 0)
+            net::privatePermissions(path.parent_path(), true) != 0)
             return Error("rpc.path", std::strerror(errno), path.parent_path().string());
         // Serialize stale-path inspection and bind across competing processes.
-        auto lockPath = path.string() + ".lock";
-        int lockFd = ::open(lockPath.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600);
-        if (lockFd < 0) return Error("rpc.path", std::strerror(errno), lockPath);
-        if (::flock(lockFd, LOCK_EX) != 0) {
-            auto message = std::strerror(errno);
-            ::close(lockFd);
-            return Error("rpc.path", message, lockPath);
-        }
-        auto unlock = [&] {
-            ::flock(lockFd, LOCK_UN);
-            ::close(lockFd);
-        };
-        struct stat existing{};
-        if (::lstat(path.c_str(), &existing) == 0) {
-            int probe = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+        auto lockPath = path;
+        lockPath += ".lock";
+        net::EndpointLock lock(lockPath);
+        if (!lock.valid()) return Error("rpc.path", std::strerror(errno), lockPath.string());
+        net::Identity existing{};
+        if (net::identity(path, existing)) {
+            auto probe = net::open();
             sockaddr_un addr{};
             addr.sun_family = AF_UNIX;
-            auto name = path.string();
+            auto name = net::pathName(path);
             if (name.size() >= sizeof(addr.sun_path)) {
-                if (probe >= 0) ::close(probe);
-                unlock();
+                if (probe != net::invalid) net::close(probe);
                 return Error("rpc.path", "socket path is too long", name);
             }
             std::memcpy(addr.sun_path, name.c_str(), name.size() + 1);
-            int connected = probe >= 0
-                                ? ::connect(probe, reinterpret_cast<sockaddr*>(&addr), sizeof(addr))
-                                : -1;
+            int connected = probe != net::invalid ? net::connect(probe, addr) : -1;
             int connectError = errno;
-            if (probe >= 0) ::close(probe);
-            if (connected == 0 || !S_ISSOCK(existing.st_mode) ||
+            if (probe != net::invalid) net::close(probe);
+            if (connected == 0 || !existing.socket ||
                 (connectError != ECONNREFUSED && connectError != ENOENT)) {
-                unlock();
                 return Error("rpc.address_in_use", "socket address is in use", name,
                              "choose another instance or socket path");
             }
-            if (::unlink(path.c_str()) != 0 && errno != ENOENT) {
+            if (net::remove(path) != 0 && errno != ENOENT) {
                 auto message = std::strerror(errno);
-                unlock();
                 return Error("rpc.path", message, name);
             }
         }
-        listener = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-        if (listener < 0) {
-            unlock();
+        listener = net::open();
+        if (listener == net::invalid) {
             return Error("rpc.socket", std::strerror(errno));
         }
         sockaddr_un address{};
         address.sun_family = AF_UNIX;
-        auto pathString = path.string();
+        auto pathString = net::pathName(path);
         if (pathString.size() >= sizeof(address.sun_path)) {
-            ::close(listener);
-            listener = -1;
-            unlock();
+            net::close(listener);
+            listener = net::invalid;
             return Error("rpc.path", "socket path is too long", pathString);
         }
         std::memcpy(address.sun_path, pathString.c_str(), pathString.size() + 1);
-        if (::bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+        if (net::bind(listener, address) != 0) {
             int bindError = errno;
             auto message = std::strerror(errno);
-            ::close(listener);
-            listener = -1;
-            unlock();
+            net::close(listener);
+            listener = net::invalid;
             return Error(bindError == EADDRINUSE ? "rpc.address_in_use" : "rpc.socket", message,
                          pathString);
         }
-        struct stat owned{};
-        if (::lstat(path.c_str(), &owned) == 0) {
-            socketDevice = owned.st_dev;
-            socketInode = owned.st_ino;
-        }
-        if (::listen(listener, 16) != 0) {
+        net::identity(path, socketIdentity);
+        if (net::listen(listener) != 0) {
             auto message = std::strerror(errno);
-            ::close(listener);
-            listener = -1;
-            struct stat current{};
-            if (::lstat(path.c_str(), &current) == 0 && current.st_dev == socketDevice &&
-                current.st_ino == socketInode)
-                ::unlink(path.c_str());
-            unlock();
+            net::close(listener);
+            listener = net::invalid;
+            net::Identity current{};
+            if (net::identity(path, current) && current == socketIdentity) net::remove(path);
             return Error("rpc.socket", message, pathString);
         }
-        if (::chmod(path.c_str(), 0600) != 0) {
+        if (net::privatePermissions(path, false) != 0) {
             auto message = std::strerror(errno);
-            ::close(listener);
-            listener = -1;
-            struct stat current{};
-            if (::lstat(path.c_str(), &current) == 0 && current.st_dev == socketDevice &&
-                current.st_ino == socketInode)
-                ::unlink(path.c_str());
-            unlock();
+            net::close(listener);
+            listener = net::invalid;
+            net::Identity current{};
+            if (net::identity(path, current) && current == socketIdentity) net::remove(path);
             return Error("rpc.path", message, pathString);
         }
         socket = path;
         running = true;
         acceptThread = std::thread([self = shared_from_this()] { self->acceptLoop(); });
-        unlock();
         return {};
     }
     void stop() {
@@ -542,8 +509,8 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
         // The accept and peer loops poll with short timeouts. Join before
         // closing descriptors so neither loop observes a reused fd.
         if (acceptThread.joinable()) acceptThread.join();
-        ::close(listener);
-        listener = -1;
+        net::close(listener);
+        listener = net::invalid;
         std::vector<std::shared_ptr<Peer>> copy;
         {
             std::lock_guard lock(peersMutex);
@@ -552,10 +519,8 @@ struct Server::Impl : std::enable_shared_from_this<Impl> {
         }
         for (auto& peer : copy)
             if (peer->thread.joinable()) peer->thread.join();
-        struct stat current{};
-        if (::lstat(socket.c_str(), &current) == 0 && current.st_dev == socketDevice &&
-            current.st_ino == socketInode)
-            ::unlink(socket.c_str());
+        net::Identity current{};
+        if (net::identity(socket, current) && current == socketIdentity) net::remove(socket);
     }
     void publish(std::string_view topic, const json::Value& payload) {
         auto sequence = ++topicSequence[std::string(topic)];
@@ -622,17 +587,17 @@ Status Client::connect(const std::filesystem::path& path, std::string client, st
 }
 Status Client::open() {
     drop();
-    fd_ = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-    if (fd_ < 0) return Error("rpc.socket", std::strerror(errno));
+    fd_ = static_cast<std::intptr_t>(net::open());
+    if (fd_ == -1) return Error("rpc.socket", std::strerror(errno));
     sockaddr_un address{};
     address.sun_family = AF_UNIX;
-    auto pathString = path_.string();
+    auto pathString = net::pathName(path_);
     if (pathString.size() >= sizeof(address.sun_path)) {
         drop();
         return Error("rpc.path", "socket path is too long", pathString);
     }
     std::memcpy(address.sun_path, pathString.c_str(), pathString.size() + 1);
-    if (::connect(fd_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+    if (net::connect(static_cast<net::Socket>(fd_), address) != 0) {
         auto message = std::strerror(errno);
         drop();
         return Error("rpc.connect", message, pathString);
@@ -643,7 +608,7 @@ Status Client::open() {
     return result.error();
 }
 void Client::drop() {
-    if (fd_ >= 0) ::close(fd_);
+    if (fd_ != -1) net::close(static_cast<net::Socket>(fd_));
     fd_ = -1;
     input_.clear();
     nextId_ = 1;
@@ -658,7 +623,7 @@ void Client::setTimeout(std::chrono::milliseconds timeout) {
                           std::chrono::milliseconds(std::chrono::hours(24)));
 }
 Result<json::Value> Client::call(std::string_view method, const json::Value& params) {
-    if (fd_ < 0) {
+    if (fd_ == -1) {
         if (!hello_)
             return Error("rpc.connect", "client is not connected", "", "call connect() first");
         if (auto reopened = open(); !reopened) {
@@ -688,7 +653,8 @@ Result<json::Value> Client::exchange(std::string_view method, const json::Value&
     auto output = line(request);
     std::size_t sent = 0;
     while (sent < output.size()) {
-        auto n = ::send(fd_, output.data() + sent, output.size() - sent, MSG_NOSIGNAL);
+        auto n =
+            net::send(static_cast<net::Socket>(fd_), output.data() + sent, output.size() - sent);
         if (n < 0 && errno == EINTR) continue;
         if (n <= 0) return fail(Error("rpc.write", std::strerror(errno)));
         sent += static_cast<std::size_t>(n);
@@ -727,15 +693,15 @@ Result<json::Value> Client::exchange(std::string_view method, const json::Value&
         if (remaining <= clock::duration::zero())
             return fail(Error("rpc.timeout", "timed out waiting for response", "",
                               "the call may still have run; check before repeating it"));
-        pollfd pfd{fd_, POLLIN, 0};
-        const int ready = ::poll(&pfd, 1, detail::waitMilliseconds(remaining));
+        net::PollFd pfd{static_cast<net::Socket>(fd_), POLLIN, 0};
+        const int ready = net::poll(&pfd, 1, detail::waitMilliseconds(remaining));
         if (ready < 0 && errno == EINTR)
             return fail(Error("rpc.interrupted", "a signal interrupted the wait for the response",
                               "", "the call may still have run; check before repeating it"));
         if (ready < 0) return fail(Error("rpc.read", std::strerror(errno)));
         if (ready == 0) continue;  // the deadline check above decides
         char bytes[8192];
-        auto n = ::recv(fd_, bytes, sizeof(bytes), 0);
+        auto n = net::recv(static_cast<net::Socket>(fd_), bytes, sizeof(bytes));
         if (n < 0 && errno == EINTR) continue;
         if (n <= 0) return fail(Error("rpc.read", "socket closed while waiting for response"));
         input_.append(bytes, static_cast<std::size_t>(n));

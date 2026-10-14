@@ -1,24 +1,33 @@
 # core-base: main-thread wake relay
 
-**Decision:** ADR-0029. Public header:
+**Decisions:** ADR-0029, ADR-0035. Public header:
 `supple/base/main_thread_wake.h`, namespace `supple`.
 
-`MainThreadWake` turns real-time-safe notifications into a pollable Linux
-eventfd. It owns one parked relay thread. It is noncopyable; construction
+`MainThreadWake` turns real-time-safe notifications into a native waitable:
+Linux eventfd, macOS nonblocking pipe, Windows manual-reset event HANDLE. It owns one parked relay thread. It is noncopyable;
+construction
 and destruction run off audio. Every producer must stop or join before the
 relay is destroyed. Destruction wakes and joins the relay, then closes its
 descriptor.
 
-- `fd()` returns the owned, nonblocking, close-on-exec eventfd, or -1 if
-  eventfd creation failed. The caller checks this before subscribing
+- `waitable()` returns a borrowed `Waitable`; check `valid()` before subscribing
+  producers. It outlives all watchers. `waitFor(span<WaitItem>, timeoutMs)`
+  snapshots readiness; negative timeout waits indefinitely. Readiness flags
+  `kWaitRead/Write/Error/Hangup/Invalid` match POSIX poll bits. Windows accepts
+  manual-reset event handles (read readiness), at most 64 unique handles;
+  socket-event registration/reset is the owner's responsibility. Its descriptors
+  are rejected with `kWaitInvalid`. Invalid default sources are ignored.
+- `fd()` is POSIX compatibility and returns the owned, nonblocking, close-on-exec descriptor
+  (eventfd or pipe), or -1 if
+  creation failed or the source is a Windows handle. The caller checks this before subscribing
   producers or waiting. Callers borrow it for polling; they neither close it
   nor read it directly in normal service.
 - `notify()` is `SUPPLE_RT`, callable by concurrent producers. Publish work
   before calling it. Notifications coalesce until main drains: the first
   producer sets a pending bit, advances a private futex sequence and calls
   the sanctioned `rt::wake`. Later producers still publish through the
-  pending bit, but do not wake the relay again. Only the non-RT relay writes
-  the eventfd; producers never write descriptors, allocate, lock or wait.
+  pending bit, but do not wake the relay again. Only the non-RT relay signals
+  the native event; producers never write descriptors, allocate, lock or wait.
 - `drain()` is non-RT, called by one main thread **before** consuming the
   associated queues or flags. It returns false when no event was read. On
   success it acquires coalesced publications, clears the pending bit and
@@ -33,8 +42,54 @@ There is no periodic relay timeout.
 
 The bridge uses this shared relay through optional
 `host::Instance::setMainThreadWake(MainThreadWake&)` subscriptions (sandbox
-spec §1). The app's in-process instances are not subscribed yet. EngineApp
-service scheduling and bridge-to-parent notifications are separate work.
+spec §1). EngineApp also subscribes its local instances (ADR-0030); the relay
+outlives producers and their worker joins.
+
+## Native events and address waits
+
+`WakeEvent` owns the cold-path event underlying the relay. `notify()` may
+coalesce; `drain()` removes all current readiness, including a pipe burst. Drain **before** consuming published work,
+so a notification racing reset cannot strand work. It is never called by audio
+producers; those use `MainThreadWake`. POSIX notify is signal-safe.
+`rt::wait/waitUntil/wake` operate on one process-local lock-free 32-bit atomic
+with one waiter. Publish with release before waking; predicates are acquired and
+rechecked after spurious returns. Expired deadlines still observe publication
+before reporting false. These primitives cannot serve cross-process Windows IPC.
+
+## Thread setup
+
+`ThreadPolicy` retains `None/Normal/Fifo/RoundRobin` and adds `High` (`"high"`).
+FIFO/RR and their existing rlimit checks are Linux-only. Windows High uses
+THREAD_PRIORITY_HIGHEST; macOS High uses user-interactive QoS and can only be
+applied by the owning thread. Neither implies `realtime()`. Normal resets native
+priority. Errors retain actionable `thread.policy`/`thread.rttime` diagnostics.
+Names retain the 15-byte limit. `availableCpus()` respects affinity with a
+hardware-count fallback; `allowedCpuCount()` returns zero if Linux affinity
+cannot be read, preserving conservative live-helper admission. `realtimePriorityLimit`
+clamps to Linux RLIMIT_RTPRIO and leaves other platforms unchanged.
+
+## Directory roots
+
+Header `supple/base/paths.h`, namespace `supple::paths`, functions returning
+filesystem paths without a product slug or directory creation:
+
+| Root | Linux | macOS | Windows |
+|---|---|---|---|
+| home | HOME | HOME | USERPROFILE |
+| config | XDG_CONFIG_HOME, else HOME/.config | HOME/Library/Application Support | APPDATA |
+| data | XDG_DATA_HOME, else HOME/.local/share | HOME/Library/Application Support | APPDATA |
+| cache | XDG_CACHE_HOME, else HOME/.cache | HOME/Library/Caches | LOCALAPPDATA |
+| runtime | XDG_RUNTIME_DIR, else /tmp | native temporary directory | LOCALAPPDATA/Temp, else native temporary directory |
+
+`data/cache(allowTemporary = false)` retain strict roots for GUI callers.
+With true, CLI fallback uses a temporary root; Linux keeps the former /tmp
+fallback and distinguishes unset HOME from empty HOME (relative .cache and
+.local/share). Empty config/data/cache means the user directory cannot be resolved. Empty
+runtime means the native temporary directory could not be resolved. Environment
+is read off audio before worker startup; callers append the generated slug and
+choose any existing component-specific fallback. Windows uses wide environment
+APIs to preserve non-ASCII user paths. Linux retains existing relative/empty
+XDG behavior; the supervised scanner's stricter absolute-path policy is separate.
 
 ## Floating-point parsing
 
@@ -52,14 +107,14 @@ format argument or long-double overload is provided.
 
 ## Platform builds
 
-The wake relay, futex wait/wake, stack prefault and thread scheduling
-implementations are Linux-only during the initial port (ADR-0034).
-`SUPPLE_PLATFORM_SERVICES` gates their sources and platform tests; portable
-inline primitives and their tests remain enabled. Consumers requiring the
-relay are gated together, with no dummy RT implementation. File read/write
+Core-base sources and platform-neutral tests build on Linux, macOS and Windows
+(ADR-0035). Tests that inspect Linux memory residency or scheduling limits stay
+Linux-only. Hosting/engine/GUI remain separately gated until their port steps
+land. File read/write
 helpers build on all platforms; Windows atomic writes use native wide paths,
 exclusive temporary creation, flushed binary writes and POSIX-style rename through the open native handle.
 Native file reads allow delete sharing. Concurrent replacement preserves
 the previous file for readers that permit delete sharing and permits
 successive writers to replace the same destination. External Windows readers
 that deny delete sharing cause a structured `file.write` error until closed.
+

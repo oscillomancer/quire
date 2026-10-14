@@ -1,10 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
-#include <fcntl.h>
-#include <poll.h>
 #include <signal.h>
 #include <supple/rpc/model_loop.h>
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <fcntl.h>
 #include <unistd.h>
+#endif
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
@@ -12,13 +21,21 @@
 #include <deque>
 #include <exception>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 namespace supple::rpc {
 namespace {
 // Signal state: atomics so a handler racing the model thread is well defined
 // (both are lock-free; the handler only stores and writes to the pipe).
+#if defined(_WIN32)
+std::atomic<void*> signalHandle{nullptr};
+std::atomic<std::uint32_t> signalReaders{0};
+static_assert(std::atomic<void*>::is_always_lock_free);
+static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
+#else
 std::atomic<int> signalFd{-1};
+#endif
 std::atomic<bool> stopping{false};
 using Clock = std::chrono::steady_clock;
 // `from + by`, saturating at the clock's end instead of overflowing.
@@ -27,11 +44,19 @@ Clock::time_point later(Clock::time_point from, Clock::duration by) {
 }
 void onSignal(int) {
     stopping.store(true, std::memory_order_relaxed);
+#if defined(_WIN32)
+    // The CRT invokes SIGINT on another thread. Claim before reading the handle:
+    // either teardown observes this claim or this reader sees the cleared handle.
+    signalReaders.fetch_add(1, std::memory_order_seq_cst);
+    if (const auto handle = signalHandle.load(std::memory_order_seq_cst)) SetEvent(handle);
+    signalReaders.fetch_sub(1, std::memory_order_seq_cst);
+#else
     const int fd = signalFd.load(std::memory_order_relaxed);
     if (fd >= 0) {
         char byte = 1;
         (void)::write(fd, &byte, 1);
     }
+#endif
 }
 }  // namespace
 
@@ -41,15 +66,38 @@ int detail::waitMilliseconds(Clock::duration remaining) {
     return ms.count() >= INT_MAX ? INT_MAX : static_cast<int>(ms.count());
 }
 
+Waitable detail::Wake::waitable() const {
+#if defined(__linux__)
+    return readFd;
+#else
+    return event.waitable();
+#endif
+}
 detail::Wake::~Wake() {
+#if defined(__linux__)
     if (readFd >= 0) ::close(readFd);
     if (writeFd >= 0) ::close(writeFd);
+#endif
 }
-
+void detail::Wake::drain() {
+#if defined(__linux__)
+    char bytes[256];
+    while (::read(readFd, bytes, sizeof(bytes)) > 0) {
+    }
+#else
+    while (event.drain()) {
+    }
+#endif
+}
 void detail::Wake::notify() const {
+#if defined(__linux__)
     if (writeFd < 0) return;
     char byte = 1;
-    (void)::write(writeFd, &byte, 1);
+    while (::write(writeFd, &byte, 1) < 0 && errno == EINTR) {
+    }
+#else
+    event.notify();
+#endif
     if (waker) waker();
 }
 
@@ -86,7 +134,12 @@ struct ModelLoop::Impl {
     std::deque<std::function<void()>> tasks;
     std::vector<std::shared_ptr<detail::TimerState>> timers;
     std::vector<std::shared_ptr<detail::FdState>> watches;
+#if defined(_WIN32)
+    using SignalHandler = void (*)(int);
+    SignalHandler oldInt = SIG_DFL, oldTerm = SIG_DFL;
+#else
     struct sigaction oldInt{}, oldTerm{};
+#endif
 
     // Milliseconds until the nearest timer, or -1 when there is none. Called
     // with the lock held.
@@ -146,7 +199,7 @@ struct ModelLoop::Impl {
 
     bool pollOnce(bool block) {
         std::vector<std::shared_ptr<detail::FdState>> readyWatches;
-        std::vector<pollfd> fds{{wake->readFd, POLLIN, 0}};
+        std::vector<WaitItem> fds{{wake->waitable(), kWaitRead, 0}};
         int timeout = 0;
         {
             std::lock_guard lock(mutex);
@@ -154,48 +207,64 @@ struct ModelLoop::Impl {
                 return w->cancelled.load(std::memory_order_acquire);
             });
             readyWatches = watches;
-            for (const auto& w : readyWatches) fds.push_back({w->fd, w->events, 0});
+            for (const auto& w : readyWatches) fds.push_back({w->source, w->events, 0});
             if (block && tasks.empty()) timeout = nextTimeoutMs();
         }
-        const int result = ::poll(fds.data(), fds.size(), timeout);
+        const int result = waitFor(fds, timeout);
         if (result < 0) return errno == EINTR;
-        drainWake();
+        wake->drain();
         drainTasks();
         for (std::size_t i = 0; i < readyWatches.size(); ++i) {
             const auto& w = readyWatches[i];
-            if (fds[i + 1].revents && !w->cancelled.load(std::memory_order_acquire))
-                w->fn(fds[i + 1].revents);
+            if (fds[i + 1].ready && !w->cancelled.load(std::memory_order_acquire))
+                w->fn(fds[i + 1].ready);
         }
         runDueTimers();
         drainTasks();
         return true;
     }
-
-    void drainWake() const {
-        char bytes[256];
-        while (::read(wake->readFd, bytes, sizeof(bytes)) > 0) {
-        }
-    }
 };
 
 ModelLoop::ModelLoop() : impl_(new Impl) {
+    stopping.store(false, std::memory_order_relaxed);
+#if defined(__linux__)
     int fds[2];
     if (::pipe2(fds, O_NONBLOCK | O_CLOEXEC) != 0) std::terminate();
     impl_->wake->readFd = fds[0];
     impl_->wake->writeFd = fds[1];
+    signalFd.store(fds[1], std::memory_order_relaxed);
+#else
+    if (!impl_->wake->waitable().valid()) std::terminate();
+#if defined(_WIN32)
+    signalHandle.store(impl_->wake->waitable().nativeHandle(), std::memory_order_relaxed);
+#else
+    signalFd.store(impl_->wake->event.writeFd(), std::memory_order_relaxed);
+#endif
+#endif
+#if defined(_WIN32)
+    impl_->oldInt = ::signal(SIGINT, onSignal);
+    impl_->oldTerm = ::signal(SIGTERM, onSignal);
+#else
     struct sigaction action{};
     action.sa_handler = onSignal;
     sigemptyset(&action.sa_mask);
     stopping.store(false, std::memory_order_relaxed);
-    signalFd.store(impl_->wake->writeFd, std::memory_order_relaxed);
     ::sigaction(SIGINT, &action, &impl_->oldInt);
     ::sigaction(SIGTERM, &action, &impl_->oldTerm);
+#endif
 }
 
 ModelLoop::~ModelLoop() {
+#if defined(_WIN32)
+    signalHandle.store(nullptr, std::memory_order_seq_cst);
+    while (signalReaders.load(std::memory_order_seq_cst) != 0) std::this_thread::yield();
+    ::signal(SIGINT, impl_->oldInt);
+    ::signal(SIGTERM, impl_->oldTerm);
+#else
     signalFd.store(-1, std::memory_order_relaxed);
     ::sigaction(SIGINT, &impl_->oldInt, nullptr);
     ::sigaction(SIGTERM, &impl_->oldTerm, nullptr);
+#endif
     // Timers keep their handles (they see the wake go away and stop signalling);
     // the pipe closes with the last reference to it.
     {
@@ -235,9 +304,9 @@ Timer ModelLoop::at(Clock::time_point deadline, std::function<void()> fn) {
     impl_->wake->notify();
     return Timer(std::move(state));
 }
-FdWatch ModelLoop::watch(int fd, short events, std::function<void(short)> fn) {
+FdWatch ModelLoop::watch(Waitable source, short events, std::function<void(short)> fn) {
     auto state = std::make_shared<detail::FdState>();
-    state->fd = fd;
+    state->source = source;
     state->events = events;
     state->fn = std::move(fn);
     state->wake = impl_->wake;
@@ -258,7 +327,7 @@ void ModelLoop::post(std::function<void()> task) {
 }
 
 void ModelLoop::setWaker(std::function<void()> waker) { impl_->wake->waker = std::move(waker); }
-int ModelLoop::wakeFd() const { return impl_->wake->readFd; }
+Waitable ModelLoop::waitable() const { return impl_->wake->waitable(); }
 
 int ModelLoop::pump() {
     impl_->pollOnce(false);

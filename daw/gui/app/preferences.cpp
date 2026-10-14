@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "preferences.h"
+#include <supple/base/paths.h>
 
 #include <cstdlib>
 
@@ -58,10 +59,7 @@ ui::Node& row(ui::Node& form, const std::string& id, const std::string& label) {
 }  // namespace
 
 std::filesystem::path Preferences::defaultFile(std::string_view slug) {
-    if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
-        return std::filesystem::path(xdg) / slug / "preferences.json";
-    if (const char* home = std::getenv("HOME"); home && *home)
-        return std::filesystem::path(home) / ".config" / slug / "preferences.json";
+    if (const auto root = paths::config(); !root.empty()) return root / slug / "preferences.json";
     return {};
 }
 

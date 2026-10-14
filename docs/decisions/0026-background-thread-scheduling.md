@@ -5,6 +5,9 @@
 ("no priority changes") and [ADR-0013](0013-plugin-isolation.md) (the bridge
 audio thread's scheduling; protocol version 10).
 
+**Platform amendment, 2026-10-14:** [ADR-0035](0035-headless-platform-layer.md)
+adds macOS/Windows mechanisms while retaining these Linux semantics.
+
 ## Context
 
 The renderer renders up to 200 ms ahead of the device callback. It works

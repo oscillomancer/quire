@@ -13,8 +13,17 @@
 //       Serve MCP over stdio against a live in-process sandbox session.
 //   <slug>-sandbox serve [--workdir DIR] [--plugin-path P]... [--instance NAME] [--socket PATH]
 //       Serve the command bus on a Unix socket from the model thread.
+#if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+#define fileno _fileno
+#include <process.h>
+#define getpid _getpid
+#else
 #include <unistd.h>
+#endif
 
+#include <supple/base/paths.h>
 #include <supple/mcp/server.h>
 #include <supple/rpc/model_loop.h>
 #include <chrono>
@@ -53,9 +62,7 @@ int usage() {
 }
 
 fs::path defaultWorkdir() {
-    const char* cache = std::getenv("XDG_CACHE_HOME");
-    const char* home = std::getenv("HOME");
-    fs::path base = cache && *cache ? fs::path(cache) : fs::path(home ? home : "/tmp") / ".cache";
+    const fs::path base = paths::cache(true);
     const auto now = std::chrono::duration_cast<std::chrono::seconds>(
                          std::chrono::system_clock::now().time_since_epoch())
                          .count();
@@ -66,10 +73,7 @@ fs::path defaultWorkdir() {
 // The user's DSP script library, the one the app uses:
 // <XDG_DATA_HOME or ~/.local/share>/<slug>/scripts.
 fs::path userScriptDir() {
-    const char* data = std::getenv("XDG_DATA_HOME");
-    const char* home = std::getenv("HOME");
-    const fs::path base =
-        data && *data ? fs::path(data) : fs::path(home ? home : "/tmp") / ".local" / "share";
+    const fs::path base = paths::data(true);
     return base / std::string(product::kSlug) / "scripts";
 }
 
@@ -107,6 +111,11 @@ void print(const json::Value& v) {
 }  // namespace
 
 int main(int argc, char** argv) {
+#if defined(_WIN32)
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
+
     std::vector<std::string> args(argv + 1, argv + argc);
     if (args.empty()) return usage();
     // Offline evaluation tooling, outside the frozen command/MCP registry.

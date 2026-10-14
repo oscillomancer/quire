@@ -4,8 +4,10 @@
 // exercise opt-in settings without changing the test process's memory locks.
 #pragma once
 
+#if defined(__linux__)
 #include <sys/resource.h>
 #include <sys/types.h>
+#endif
 #include <cstddef>
 
 #include <cstdint>
@@ -15,6 +17,18 @@
 
 namespace supple::engine {
 
+// Portable injection types; on Linux aliases preserve the existing test API.
+#if defined(__linux__)
+using MemoryLimit = rlimit;
+using ProtectionWriteSize = ssize_t;
+inline constexpr auto kUnlimitedMemory = RLIM_INFINITY;
+#else
+struct MemoryLimit {
+    std::uint64_t rlim_cur = 0, rlim_max = 0;
+};
+using ProtectionWriteSize = std::ptrdiff_t;
+inline constexpr auto kUnlimitedMemory = UINT64_MAX;
+#endif
 // Permit shallow idle without deep-state exit delays. Fixed policy; no sysfs reads.
 inline constexpr std::int32_t kCpuIdleLatencyUs = 20;
 
@@ -34,9 +48,9 @@ struct RuntimeProtectionOps {
     RuntimeProtectionOps();
     std::function<int(int)> lockMemory;
     std::function<int()> unlockMemory;
-    std::function<int(rlimit*)> memoryLimit;
+    std::function<int(MemoryLimit*)> memoryLimit;
     std::function<int(const char*, int)> openLatency;
-    std::function<ssize_t(int, const void*, std::size_t)> writeLatency;
+    std::function<ProtectionWriteSize(int, const void*, std::size_t)> writeLatency;
     std::function<int(int)> closeLatency;
 };
 

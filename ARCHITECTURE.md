@@ -109,6 +109,14 @@ host, daw or plugins; plugins use only header-light libs.
   in-memory cache when a plan is compiled; a background, disk-backed cache is
   planned.
 
+The headless platform layer (ADR-0035) preserves these Linux mechanisms and
+adds macOS address waits and pipes, and Windows address waits and event handles.
+`Waitable` carries borrowed native readiness sources through ModelLoop and MCP;
+new embedding code uses typed sources instead of assuming integer descriptors.
+On arm64 the per-node guard sets FPCR FZ and restores the complete register.
+Platform directory roots come from `supple::paths`. Native port verification,
+device backends, hosting/bridge and GUI embedding remain separate gates.
+
 `core-base` provides `supple::MainThreadWake`, a coalesced notification relay
 (ADR-0029). Producers publish atomics and wake a private futex; its parked
 non-RT thread writes a pollable eventfd. The bridge uses it for plug-in main

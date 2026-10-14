@@ -2,10 +2,13 @@
 // Copyright (c) 2026 Supple Audio
 #include "media_files.h"
 
+#include "file_platform.h"
+#if defined(__linux__)
 #include <fcntl.h>
 #include <linux/fs.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
+#endif
 
 #include <atomic>
 #include <cerrno>
@@ -35,8 +38,10 @@ bool sameBytes(const fs::path& a, const fs::path& b) {
 // copy into a temporary name, published with link() so nothing is replaced.
 Status copyNew(const fs::path& from, const fs::path& to) {
     static std::atomic<unsigned> serial{0};
-    const fs::path temp = to.string() + "." + std::to_string(::getpid()) + "." +
-                          std::to_string(serial.fetch_add(1)) + ".copy-tmp";
+    fs::path temp = to;
+    temp += "." + std::to_string(files::processId()) + "." + std::to_string(serial.fetch_add(1)) +
+            ".copy-tmp";
+#if defined(__linux__)
     const int in = ::open(from.c_str(), O_RDONLY | O_CLOEXEC);
     if (in < 0) return copyError(from, to, std::strerror(errno));
     const int out = ::open(temp.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
@@ -50,11 +55,15 @@ Status copyNew(const fs::path& from, const fs::path& to) {
     ::close(out);
     std::error_code ec;
     if (!cloned) fs::copy_file(from, temp, fs::copy_options::overwrite_existing, ec);
+#else
+    std::error_code ec;
+    fs::copy_file(from, temp, fs::copy_options::none, ec);
+#endif
     if (ec) {
         fs::remove(temp, ec);
         return copyError(from, to, ec.message());
     }
-    const int linked = ::link(temp.c_str(), to.c_str());
+    const int linked = files::publishNew(temp, to);
     const int error = errno;
     fs::remove(temp, ec);
     if (linked != 0) return copyError(from, to, std::strerror(error));

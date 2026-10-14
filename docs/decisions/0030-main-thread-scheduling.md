@@ -4,6 +4,9 @@
 `command-bus.md`, `session-model.md` §5.3, `sandbox.md`.
 Builds on ADR-0028's renderer waits and ADR-0029's shared relay.
 
+**Platform amendment, 2026-10-14:** [ADR-0035](0035-headless-platform-layer.md)
+adds macOS/Windows mechanisms while retaining these Linux semantics.
+
 ## Context
 
 The app's 100 ms service timer combines queued work with time-based work.

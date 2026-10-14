@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Supple Audio
 #include <doctest/doctest.h>
-#include <poll.h>
+#if defined(__linux__)
 #include <unistd.h>
+#endif
 
 #include <array>
 #include <cerrno>
@@ -15,6 +16,7 @@ using namespace supple;
 
 namespace supple {
 struct MainThreadWakeTestAccess {
+    static bool consumeEvent(MainThreadWake& wake) { return wake.event_.drain(); }
     struct Shutdown {
         std::atomic<int> stage{0};
         std::atomic<bool> resume{false};
@@ -58,36 +60,40 @@ namespace {
 void notify(MainThreadWake& wake) SUPPLE_RT { wake.notify(); }
 
 void ready(MainThreadWake& wake) {
-    pollfd fd{wake.fd(), POLLIN, 0};
+    WaitItem fd{wake.waitable(), kWaitRead, 0};
     int result;
     do {
-        result = ::poll(&fd, 1, -1);
+        result = waitFor(std::span(&fd, 1), -1);
     } while (result < 0 && errno == EINTR);
     REQUIRE(result == 1);
-    REQUIRE(fd.revents == POLLIN);
+    REQUIRE(fd.ready == kWaitRead);
 }
 }  // namespace
 
 TEST_CASE("main-thread wake notifications coalesce until main drains") {
     MainThreadWake wake;
-    REQUIRE(wake.fd() >= 0);
+    REQUIRE(wake.waitable().valid());
     CHECK_FALSE(wake.drain());
     for (int i = 0; i < 1000; ++i) notify(wake);
     ready(wake);
+#if defined(__linux__)
     std::uint64_t count = 0;
     REQUIRE(::read(wake.fd(), &count, sizeof(count)) == sizeof(count));
     CHECK(count == 1);
+#else
+    REQUIRE(MainThreadWakeTestAccess::consumeEvent(wake));
+#endif
     // Keep the pending bit set: no further relay write is possible, even if
     // this producer runs after the relay's first write completed.
     notify(wake);
-    pollfd fd{wake.fd(), POLLIN, 0};
-    CHECK(::poll(&fd, 1, 0) == 0);
+    WaitItem fd{wake.waitable(), kWaitRead, 0};
+    CHECK(waitFor(std::span(&fd, 1), 0) == 0);
 }
 
 TEST_CASE("main-thread wake shutdown between the quit check and sequence capture cannot park") {
     MainThreadWakeTestAccess::Shutdown shutdown;
     auto wake = MainThreadWakeTestAccess::create(shutdown);
-    REQUIRE(wake->fd() >= 0);
+    REQUIRE(wake->waitable().valid());
     notify(*wake);
     while (shutdown.stage.load() < 1) shutdown.stage.wait(0);
     // The relay is paused immediately before capture (after the quit check
@@ -105,7 +111,7 @@ TEST_CASE("main-thread wake shutdown between the quit check and sequence capture
 TEST_CASE(
     "main-thread wake drain acquires coalesced publications and rearms requests during servicing") {
     MainThreadWake wake;
-    REQUIRE(wake.fd() >= 0);
+    REQUIRE(wake.waitable().valid());
     std::array<std::atomic<int>, 2> values{};
     for (int pass = 1; pass <= 100; ++pass) {
         values[0].store(pass, std::memory_order_relaxed);

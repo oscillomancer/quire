@@ -795,3 +795,11 @@ on the resulting session (through the bus) — the same commands the agent
 uses, so a UI test can also be an agent workflow test. TSan for the
 worker/UI handoffs. Plugin GUI embedding keeps the template's host probe
 tests (`*-linux-host-probe`).
+
+## Platform directory roots (2026-10-14, ADR-0035)
+
+Configuration, data and peak-cache defaults share core-base's paths helper.
+Linux retains its XDG/HOME locations. macOS uses Library/Application Support and
+Library/Caches; Windows APPDATA and LOCALAPPDATA. User Documents/media defaults
+use paths::home(). Product slugs and explicit file overrides remain caller-owned.
+This change does not port GUI windowing or plugin-editor embedding.

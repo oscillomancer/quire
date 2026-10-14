@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
+#include <supple/base/paths.h>
 // <slug>: the DAW with a window (docs/specs/gui.md). The UI thread is the
 // model thread: it pumps the command bus's loop (socket requests, the service
 // tick) between SDL events, and draws only when something changed.
@@ -212,10 +213,7 @@ Result<ui::Theme> loadTheme(const std::string& spec, gui::Appearance& look) {
 
 // The user's data folder: <XDG_DATA_HOME or ~/.local/share>/<slug>.
 fs::path dataFolder() {
-    if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg && *xdg)
-        return fs::path(xdg) / std::string(product::kSlug);
-    if (const char* home = std::getenv("HOME"); home && *home)
-        return fs::path(home) / ".local" / "share" / std::string(product::kSlug);
+    if (const auto root = paths::data(); !root.empty()) return root / std::string(product::kSlug);
     return fs::temp_directory_path() / std::string(product::kSlug);
 }
 

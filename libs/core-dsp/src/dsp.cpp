@@ -7,7 +7,7 @@
 #include <limits>
 #include <numbers>
 
-#if defined(__SSE2__)
+#if defined(__SSE2__) || defined(_M_X64)
 #include <xmmintrin.h>
 #endif
 #include <pocketfft_hdronly.h>
@@ -225,14 +225,20 @@ void OnePole::prepare(double sampleRate, double timeSeconds) {
     coefficient_ = timeSeconds <= 0 ? 1 : -std::expm1(-1.0 / (sampleRate * timeSeconds));
 }
 DenormalGuard::DenormalGuard() SUPPLE_RT {
-#if defined(__SSE2__)
+#if defined(__SSE2__) || defined(_M_X64)
     previous_ = _mm_getcsr();
-    _mm_setcsr(previous_ | 0x8040u);
+    _mm_setcsr(static_cast<unsigned>(previous_) | 0x8040u);
+#elif defined(__aarch64__)
+    asm volatile("mrs %0, fpcr" : "=r"(previous_));
+    const std::uint64_t flush = previous_ | (std::uint64_t{1} << 24);
+    asm volatile("msr fpcr, %0" : : "r"(flush));
 #endif
 }
 DenormalGuard::~DenormalGuard() SUPPLE_RT {
-#if defined(__SSE2__)
-    _mm_setcsr(previous_);
+#if defined(__SSE2__) || defined(_M_X64)
+    _mm_setcsr(static_cast<unsigned>(previous_));
+#elif defined(__aarch64__)
+    asm volatile("msr fpcr, %0" : : "r"(previous_));
 #endif
 }
 }  // namespace supple::dsp

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "supple/agent/config.h"
+#include <supple/base/paths.h>
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -71,10 +72,7 @@ Status writePrivate(const std::filesystem::path& file, std::string_view text) {
 }  // namespace
 
 std::filesystem::path Config::defaultFile(std::string_view slug) {
-    if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
-        return std::filesystem::path(xdg) / slug / "agent.json";
-    if (const char* home = std::getenv("HOME"); home && *home)
-        return std::filesystem::path(home) / ".config" / slug / "agent.json";
+    if (const auto root = paths::config(); !root.empty()) return root / slug / "agent.json";
     return {};
 }
 

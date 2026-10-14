@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "plugin_browser.h"
+#include <supple/base/paths.h>
 
 #include <algorithm>
 #include <cctype>
@@ -37,10 +38,7 @@ const char* kFavMark = "*";  // ASCII: Inter has no visible U+2605
 // --- Favourites -----------------------------------------------------------------
 
 std::filesystem::path Favourites::defaultFile(std::string_view slug) {
-    if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
-        return std::filesystem::path(xdg) / slug / "favourites.json";
-    if (const char* home = std::getenv("HOME"); home && *home)
-        return std::filesystem::path(home) / ".config" / slug / "favourites.json";
+    if (const auto root = paths::config(); !root.empty()) return root / slug / "favourites.json";
     return {};
 }
 

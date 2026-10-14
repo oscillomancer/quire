@@ -5,6 +5,7 @@
 #include <array>
 #include <complex>
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <vector>
 
@@ -106,7 +107,7 @@ class DenormalGuard {
     ~DenormalGuard() SUPPLE_RT;
 
   private:
-    [[maybe_unused]] unsigned previous_ = 0;  // SSE2 state; ARM64 support is a later port step.
+    [[maybe_unused]] std::uint64_t previous_ = 0;
 };
 
 }  // namespace supple::dsp

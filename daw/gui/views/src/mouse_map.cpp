@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "supple/views/mouse_map.h"
+#include <supple/base/paths.h>
 
 #include <algorithm>
 #include <array>
@@ -219,10 +220,7 @@ Status MouseMap::save(const std::filesystem::path& file) const {
 }
 
 std::filesystem::path MouseMap::defaultFile(std::string_view slug) {
-    if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
-        return std::filesystem::path(xdg) / slug / "mouse.json";
-    if (const char* home = std::getenv("HOME"); home && *home)
-        return std::filesystem::path(home) / ".config" / slug / "mouse.json";
+    if (const auto root = paths::config(); !root.empty()) return root / slug / "mouse.json";
     return {};
 }
 

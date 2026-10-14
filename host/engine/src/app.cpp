@@ -79,7 +79,7 @@ Result<std::unique_ptr<EngineApp>> EngineApp::create(AppOptions options, model::
             "pass a writable workdir and ensure its parent directory exists and has space");
     auto app = std::unique_ptr<EngineApp>(new EngineApp(std::move(options)));
     dsp_commands::nameScriptLibrary(app->scriptDir());
-    if (app->serviceFd() < 0)
+    if (!app->serviceWaitable().valid())
         return Error("engine.service_wake", "cannot create the main-thread service descriptor", {},
                      "close unused files/descriptors and retry creating the engine app");
     EngineApp* self = app.get();

@@ -3,9 +3,6 @@
 #include "supple/engine/realtime.h"
 #include "supple/engine/bench_probe.h"
 
-#include <sched.h>
-#include <sys/resource.h>
-
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -297,14 +294,8 @@ void Engine::scheduleBackground() {
                            ? options_.backgroundPriority
                            : kBackgroundPriority;
         if (callback.realtime()) priority = std::min(priority, callback.priority - 1);
-        rlimit limit{};
-        if (::getrlimit(RLIMIT_RTPRIO, &limit) == 0 && limit.rlim_cur != RLIM_INFINITY)
-            priority =
-                static_cast<int>(std::min<rlim_t>(static_cast<rlim_t>(priority), limit.rlim_cur));
-        cpu_set_t allowed;
-        CPU_ZERO(&allowed);
-        const int cpus =
-            ::sched_getaffinity(0, sizeof(allowed), &allowed) == 0 ? CPU_COUNT(&allowed) : 0;
+        priority = realtimePriorityLimit(priority);
+        const int cpus = static_cast<int>(allowedCpuCount());
         const int threads = static_cast<int>(workers_->helpers()) + 1;
         if (priority < 1)
             refused =
@@ -317,9 +308,13 @@ void Engine::scheduleBackground() {
                       " allowed CPUs to the rest of the system; lower Audio processing threads "
                       "and restart the engine";
         else
+#if defined(__linux__)
             want = {Kind::Fifo, priority};
+#else
+            want = {Kind::High, 0};
+#endif
     }
-    if (want.realtime()) {
+    if (want != normal) {
         Status applied = workers_->setPolicy(want);
         if (applied) applied = setThreadPolicy(renderer_.native_handle(), want);
         if (!applied) {  // all or nothing: a slower straggler would delay every job

@@ -1,10 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
-#include <poll.h>
 #include <supple/mcp/server.h>
 #include <supple/product.h>
 #include <supple/rpc/model_loop.h>
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <io.h>
+#include <windows.h>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+#else
 #include <unistd.h>
+#endif
 #include <algorithm>
 #include <cerrno>
 #include <string>
@@ -300,39 +313,101 @@ struct StreamByter : Byter {
 // Buffered: a multi-megabyte request costs a few reads, not a poll and a read
 // per byte.
 struct FdByter : Byter {
-    explicit FdByter(int fd) : fd_(fd) {}
+    explicit FdByter(int fd) : fd_(fd) {
+#if defined(_WIN32)
+        reader_ = std::thread([this] { readLoop(); });
+#endif
+    }
+#if defined(_WIN32)
+    ~FdByter() override {
+        {
+            std::lock_guard lock(mutex_);
+            quit_ = true;
+        }
+        consumed_.notify_one();
+        // Cancellation can race the reader's entry into synchronous ReadFile.
+        // Retry only during shutdown until it exits; no idle polling.
+        while (WaitForSingleObject(reader_.native_handle(), 10) == WAIT_TIMEOUT)
+            CancelSynchronousIo(reader_.native_handle());
+        reader_.join();
+    }
+#endif
     bool buffered() const override { return pos_ < end_; }
     int wait(int timeoutMs, const std::vector<Tick::Watch>& watches) override {
         const bool buffered = pos_ < end_;
         if (buffered && watches.empty()) return 1;
-        std::vector<pollfd> fds{{fd_, POLLIN, 0}};
-        for (const auto& watch : watches) fds.push_back({watch.fd, watch.events, 0});
-        const int ready = ::poll(fds.data(), fds.size(), buffered ? 0 : timeoutMs);
+#if defined(_WIN32)
+        std::vector<WaitItem> fds{{inputReady_.waitable(), kWaitRead, 0}};
+#else
+        std::vector<WaitItem> fds{{fd_, kWaitRead, 0}};
+#endif
+        for (const auto& watch : watches) fds.push_back({watch.source, watch.events, 0});
+        const int ready = waitFor(fds, buffered ? 0 : timeoutMs);
         if (ready < 0) return errno == EINTR ? 0 : -1;
         bool serviced = false;
         for (std::size_t i = 0; i < watches.size(); ++i) {
-            if (!fds[i + 1].revents) continue;
+            if (!fds[i + 1].ready) continue;
             // The owner validates snapshots if a preceding callback removed a
             // later fd; callbacks only publish work, service runs below.
-            watches[i].ready(fds[i + 1].revents);
+            watches[i].ready(fds[i + 1].ready);
             serviced = true;
         }
         if (serviced) return 0;
         if (buffered) return 1;
         if (ready == 0) return 0;
-        return (fds[0].revents & (POLLIN | POLLHUP | POLLERR)) ? 1 : -1;
+        return (fds[0].ready & (kWaitRead | kWaitHangup | kWaitError)) ? 1 : -1;
     }
     int get() override {
         if (pos_ == end_) {
+#if defined(_WIN32)
+            {
+                std::lock_guard lock(mutex_);
+                if (!inboxSize_) return -1;
+                inputReady_.drain();
+                std::copy_n(inbox_, inboxSize_, buffer_);
+                pos_ = 0;
+                end_ = inboxSize_;
+                inboxSize_ = 0;
+            }
+            consumed_.notify_one();
+#else
             ssize_t n;
             do n = ::read(fd_, buffer_, sizeof(buffer_));
             while (n < 0 && errno == EINTR);
             if (n <= 0) return -1;
             pos_ = 0;
             end_ = static_cast<std::size_t>(n);
+#endif
         }
         return static_cast<unsigned char>(buffer_[pos_++]);
     }
+#if defined(_WIN32)
+    void readLoop() {
+        const auto handle = reinterpret_cast<HANDLE>(_get_osfhandle(fd_));
+        for (;;) {
+            {
+                std::unique_lock lock(mutex_);
+                consumed_.wait(lock, [this] { return quit_ || inboxSize_ == 0; });
+                if (quit_) return;
+            }
+            DWORD count = 0;
+            const bool ok = ReadFile(handle, inbox_, sizeof(inbox_), &count, nullptr) != 0;
+            {
+                std::lock_guard lock(mutex_);
+                inboxSize_ = ok ? count : 0;
+                inputReady_.notify();
+            }
+            if (!ok || !count) return;
+        }
+    }
+    WakeEvent inputReady_;
+    std::mutex mutex_;
+    std::condition_variable consumed_;
+    bool quit_ = false;
+    char inbox_[65536];
+    std::size_t inboxSize_ = 0;
+    std::thread reader_;
+#endif
     int fd_;
     char buffer_[65536];
     std::size_t pos_ = 0, end_ = 0;

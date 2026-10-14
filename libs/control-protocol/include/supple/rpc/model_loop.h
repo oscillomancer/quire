@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Supple Audio
 #pragma once
 
+#include <supple/base/waitable.h>
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -15,7 +16,13 @@ namespace detail {
 // The pipe is closed with the last holder (the loop, or a timer cancelling
 // from another thread while the loop goes away), never under a notify.
 struct Wake {
+#if defined(__linux__)
     int readFd = -1, writeFd = -1;
+#else
+    WakeEvent event;
+#endif
+    Waitable waitable() const;
+    void drain();
     Wake() = default;
     Wake(const Wake&) = delete;
     Wake& operator=(const Wake&) = delete;
@@ -33,7 +40,7 @@ struct TimerState {
     std::weak_ptr<Wake> wake;
 };
 struct FdState {
-    int fd = -1;
+    Waitable source;
     short events = 0;
     std::function<void(short)> fn;
     std::atomic<bool> cancelled{false};
@@ -110,7 +117,7 @@ class ModelLoop {
     // run on the next pass, never inline. May be registered from any thread.
     Timer at(std::chrono::steady_clock::time_point deadline, std::function<void()> fn);
     // `events` and callback readiness flags use poll(2)'s POLLIN/POLLOUT/etc.
-    FdWatch watch(int fd, short events, std::function<void(short)> fn);
+    FdWatch watch(Waitable source, short events, std::function<void(short)> fn);
     void post(std::function<void()> task);
     void run();  // blocks until SIGINT or SIGTERM
 
@@ -122,7 +129,8 @@ class ModelLoop {
     void setWaker(std::function<void()> waker);
     // Borrowed read descriptor for embedding: watch for POLLIN, then pump().
     // Only pump/run drains it. Stop watching before destroying the loop.
-    int wakeFd() const;
+    Waitable waitable() const;
+    int wakeFd() const { return waitable().fd(); }
     // Runs the due timers and the posted tasks once, without blocking.
     // Returns the milliseconds until the nearest timer (detail::waitMilliseconds:
     // rounded up, at most INT_MAX), or -1 when there is none.

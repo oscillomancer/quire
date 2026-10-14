@@ -57,7 +57,7 @@ struct ScopedSanctionedSyscall {
     ScopedSanctionedSyscall& operator=(const ScopedSanctionedSyscall&) = delete;
 };
 
-// Linux private futex notification. Publish the word with release before wake;
+// Process-local address notification. Publish with release before wake;
 // wait acquires that publication. One waiter per word, lifetime through join.
 void wake(std::atomic<std::uint32_t>& word) SUPPLE_RT;
 // Idle helpers only: blocks until the word differs, including spurious wakes.

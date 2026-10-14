@@ -374,7 +374,8 @@ class EngineApp : public cmd::Host {
     // asking), restarts the engine after a device change, and autosaves the
     // project when its head changed and an autosave interval has passed.
     void tick();
-    int serviceFd() const { return mainWake_.fd(); }
+    Waitable serviceWaitable() const { return mainWake_.waitable(); }
+    int serviceFd() const { return serviceWaitable().fd(); }
     // All persistent local instances, including probes and retired plans.
     struct ServiceFd {
         int fd;

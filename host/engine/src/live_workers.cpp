@@ -2,7 +2,6 @@
 // Copyright (c) 2026 Supple Audio
 #include "live_workers.h"
 
-#include <sched.h>
 #include <algorithm>
 #include <string>
 
@@ -42,11 +41,8 @@ void LiveWorkers::shutDown() {
 }
 
 unsigned LiveWorkers::maxHelpers() {
-    cpu_set_t allowed;
-    CPU_ZERO(&allowed);
-    if (::sched_getaffinity(0, sizeof(allowed), &allowed) != 0) return 0;
-    const int count = CPU_COUNT(&allowed);
-    return count > 1 ? static_cast<unsigned>(count - 1) : 0;
+    const unsigned cpus = allowedCpuCount();
+    return cpus > 1 ? cpus - 1 : 0;
 }
 
 Status LiveWorkers::configure(Backend& backend) {

@@ -416,8 +416,10 @@ Plug-in lifecycle calls (`start/stop_processing`, `reset`, parameter flush
 outside `process()`), transport computation, copies, the metronome and
 offline post-processing (normalization, limiter, dither, encoding) keep the
 thread's environment in every executor. A value that underflows inside a node
-becomes zero; normal-range results are unchanged. The guard is SSE2-only;
-other architectures keep their default environment.
+becomes zero; normal-range results are unchanged. The guard uses SSE2 FTZ/DAZ on x86 and FPCR FZ on arm64 (ADR-0035);
+other architectures keep their default environment. The full control register is
+restored, including when a plug-in changes it. Cross-platform render bit identity
+is not required; per-platform executor equivalence remains required.
 
 Audio sample buffers (node and stage buffers, delays, the render-ahead and
 frontier rings) are zero-filled on the main thread when a plan or ring is
@@ -1208,3 +1210,23 @@ User-only acceptance: enable/disable and engine-stop/restart/exit cleanup
 with the real device, plus repeated sparse/dense 64/128-frame sessions,
 actual granted period, callback tails/xruns and power/thermal/fan behavior.
 No latency benefit is claimed without those measurements.
+
+### Headless platform mechanisms (2026-10-14, ADR-0035)
+
+`EngineApp::serviceWaitable()` borrows its relay's typed source; `serviceFd()`
+remains POSIX compatibility (-1 on Windows). Headless loops/MCP wait on the typed
+source. Dummy/offline scheduling stays normal. Linux FIFO/affinity/rlimit behavior
+is unchanged. Windows High is a verified thread priority, macOS High a self-applied
+QoS class; neither promises real-time callback scheduling. Backend helper setup
+remains mandatory for real-time live multiprocessing. Process memory locking with
+future/on-fault semantics and the CPU latency-device preference report unsupported
+on macOS/Windows when requested; defaults remain off. RuntimeProtectionOps exposes
+portable MemoryLimit/ProtectionWriteSize types, aliased to rlimit/ssize_t on Linux.
+Chain/template/work-directory paths use core-base's platform roots.
+
+Media cache identities use Linux/macOS stat fields or Windows volume/file ID,
+size and last-write time; content hashes take precedence on every platform.
+Preset/media publication never replaces an existing destination unless explicitly
+requested. Linux retains reflink and hard-link publication; macOS copies to a
+private temporary file before linking; Windows uses a non-replacing same-directory
+MoveFileEx. Cache identity strings are internal and are not serialized.

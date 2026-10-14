@@ -2,8 +2,6 @@
 // Copyright (c) 2026 Supple Audio
 #include "workers.h"
 
-#include <sched.h>
-
 #include <algorithm>
 #include <bit>
 #include <string>
@@ -130,11 +128,7 @@ unsigned Workers::defaultHelpers() {
     // The CPUs the calling thread may run on (taskset, cpusets), not every
     // online core: a larger pool would only contend and fail the real-time
     // CPU cap (ADR-0026).
-    cpu_set_t allowed;
-    CPU_ZERO(&allowed);
-    const unsigned cpus = ::sched_getaffinity(0, sizeof(allowed), &allowed) == 0
-                              ? static_cast<unsigned>(CPU_COUNT(&allowed))
-                              : std::max(1u, std::thread::hardware_concurrency());
+    const unsigned cpus = availableCpus();
     return cpus > 3 ? cpus - 3 : 0;  // cpus - 2 workers, the caller being one
 }
 

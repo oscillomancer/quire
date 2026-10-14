@@ -2,7 +2,8 @@
 // Copyright (c) 2026 Supple Audio
 // FX chain presets: ordered, canonical documents independent of session ids.
 // File actions never create history; a load validates first and commits once.
-#include <unistd.h>
+#include <supple/base/paths.h>
+#include "file_platform.h"
 
 #include <algorithm>
 #include <array>
@@ -88,12 +89,9 @@ Status validName(const std::string& name) {
 
 Result<fs::path> chainDir(const EngineApp& app) {
     if (!app.options().chainDir.empty()) return app.options().chainDir;
-    if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
-        return fs::path(xdg) / product::kSlug / "chains";
-    if (const char* home = std::getenv("HOME"); home && *home)
-        return fs::path(home) / ".config" / product::kSlug / "chains";
+    if (const auto root = paths::config(); !root.empty()) return root / product::kSlug / "chains";
     return Error("chain.directory", "no configuration directory", {},
-                 "set XDG_CONFIG_HOME or AppOptions::chainDir");
+                 "set AppOptions::chainDir to an explicit writable directory");
 }
 
 Result<fs::path> namedPath(const EngineApp& app, const std::string& name) {
@@ -145,10 +143,11 @@ Status writePreset(const fs::path& path, std::string_view text, bool replace) {
     // Publishing with link is atomic and refuses an existing destination,
     // including when another process saves the same name concurrently.
     static std::atomic<unsigned> serial{0};
-    const fs::path temp = path.string() + "." + std::to_string(::getpid()) + "." +
-                          std::to_string(serial.fetch_add(1)) + ".preset-tmp";
+    fs::path temp = path;
+    temp += "." + std::to_string(detail::files::processId()) + "." +
+            std::to_string(serial.fetch_add(1)) + ".preset-tmp";
     SUPPLE_TRY(writeFileAtomic(temp, text));
-    const int result = ::link(temp.c_str(), path.c_str());
+    const int result = detail::files::publishNew(temp, path);
     const int error = errno;
     std::error_code ignored;
     fs::remove(temp, ignored);
@@ -307,12 +306,10 @@ constexpr std::string_view kTemplateSchema = "supple.track-template/1.0";
 
 Result<fs::path> templateDir(const EngineApp& app) {
     if (!app.options().templateDir.empty()) return app.options().templateDir;
-    if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
-        return fs::path(xdg) / product::kSlug / "track-templates";
-    if (const char* home = std::getenv("HOME"); home && *home)
-        return fs::path(home) / ".config" / product::kSlug / "track-templates";
+    if (const auto root = paths::config(); !root.empty())
+        return root / product::kSlug / "track-templates";
     return Error("template.directory", "no configuration directory", {},
-                 "set XDG_CONFIG_HOME or AppOptions::templateDir");
+                 "set AppOptions::templateDir to an explicit writable directory");
 }
 
 Result<fs::path> templatePath(const EngineApp& app, const std::string& name) {
@@ -561,12 +558,10 @@ Status removeNamed(const fs::path& path, const char* code, const std::string& wh
 
 Result<fs::path> projectTemplateDir(const EngineApp& app) {
     if (!app.options().projectTemplateDir.empty()) return app.options().projectTemplateDir;
-    if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
-        return fs::path(xdg) / product::kSlug / "templates";
-    if (const char* home = std::getenv("HOME"); home && *home)
-        return fs::path(home) / ".config" / product::kSlug / "templates";
+    if (const auto root = paths::config(); !root.empty())
+        return root / product::kSlug / "templates";
     return Error("template.directory", "no configuration directory", {},
-                 "set XDG_CONFIG_HOME or AppOptions::projectTemplateDir");
+                 "set AppOptions::projectTemplateDir to an explicit writable directory");
 }
 
 // A template is a folder, <dir>/<name>/project.json with media/; an older one
@@ -602,7 +597,8 @@ Status publishProjectTemplate(EngineApp& app, const TemplateLocation& at, bool r
                      "a project template named " + at.folder.filename().string() + " exists",
                      "/name", "choose another name or set replace: true");
     static std::atomic<unsigned> serial{0};
-    const std::string tag = std::to_string(::getpid()) + "-" + std::to_string(serial.fetch_add(1));
+    const std::string tag =
+        std::to_string(detail::files::processId()) + "-" + std::to_string(serial.fetch_add(1));
     const fs::path staging = at.folder.parent_path() / ".staging";
     const fs::path fresh = staging / ("new-" + tag), old = staging / ("old-" + tag);
     std::error_code ec;

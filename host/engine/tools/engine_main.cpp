@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
-#include <poll.h>
 // <slug>-engine: the headless DAW (spec: docs/specs/engine.md §6).
 //
 //   <slug>-engine exec '<json>' [--project FILE] [--save] [--workdir DIR] [--plugin-path P]...
@@ -17,6 +16,13 @@
 //   <slug>-engine play FILE [--bar N] [--seconds S] [--block N] [--backend jack|dummy]
 //       Play a project through the audio device (to its end, or for S
 //       seconds; Ctrl-C stops), then print engine.status.
+#if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+#define fileno _fileno
+#endif
+
+#include <supple/base/paths.h>
 #include <supple/mcp/server.h>
 #include <supple/rpc/model_loop.h>
 #include <atomic>
@@ -78,10 +84,7 @@ void print(const json::Value& v) {
 }
 
 fs::path defaultWorkdir() {
-    const char* cache = std::getenv("XDG_CACHE_HOME");
-    const char* home = std::getenv("HOME");
-    const fs::path base =
-        cache && *cache ? fs::path(cache) : fs::path(home ? home : "/tmp") / ".cache";
+    const fs::path base = paths::cache(true);
     return base / std::string(product::kSlug) / "engine";
 }
 
@@ -170,6 +173,11 @@ int play(cmd::Registry& registry, const std::vector<std::string>& args) {
 }  // namespace
 
 int main(int argc, char** argv) {
+#if defined(_WIN32)
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
+
     std::vector<std::string> args(argv + 1, argv + argc);
     if (args.empty()) return usage();
     // The plugin bridge (isolated fx).
@@ -245,7 +253,8 @@ int main(int argc, char** argv) {
                             service();
                         }));
             };
-            auto wake = loop.watch((*app)->serviceFd(), POLLIN, [&](short) { service(); });
+            auto wake =
+                loop.watch((*app)->serviceWaitable(), supple::kWaitRead, [&](short) { service(); });
             rpc::Server server(registry, dispatcher, [&](auto task) {
                 loop.post([&, task = std::move(task)] {
                     pluginWatches.clear();  // commands may replace instances
@@ -279,7 +288,8 @@ int main(int argc, char** argv) {
         };
         tick.deadline = [&] { return (*app)->nextServiceDeadline(); };
         tick.watches = [&] {
-            std::vector<mcp::Tick::Watch> watches{{(*app)->serviceFd(), POLLIN, [](short) {}}};
+            std::vector<mcp::Tick::Watch> watches{
+                {(*app)->serviceWaitable(), supple::kWaitRead, [](short) {}}};
             for (const auto& watch : (*app)->serviceFds())
                 watches.push_back({watch.fd, watch.events, [&, watch](short ready) {
                                        (*app)->serviceFdReady(watch, ready);

@@ -16,6 +16,9 @@ not entered must not extend the cycle merely to observe that it has ended.
 renderer polling with block deadlines and event-driven wakes, extending the
 nonblocking callback futex-wake exception to buffer-space notifications.
 
+**Platform amendment, 2026-10-14:** [ADR-0035](0035-headless-platform-layer.md)
+adds macOS/Windows mechanisms while retaining these Linux semantics.
+
 ## Context
 
 Four independent live Ferric instances exhaust one callback core at 64 and

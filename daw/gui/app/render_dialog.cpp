@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "render_dialog.h"
+#include <supple/base/paths.h>
 
 #include <algorithm>
 #include <charconv>
@@ -311,7 +312,7 @@ void RenderDialog::setSource(Source source) {
 void RenderDialog::showFolder() {
     if (!folder_) return;
     std::string text = app_.rendersDir().string();
-    if (const char* home = std::getenv("HOME"); home && *home) {
+    if (const auto home = paths::home(); !home.empty()) {
         const std::string prefix = std::string(home) + "/";
         if (text.starts_with(prefix)) text = "~/" + text.substr(prefix.size());
     }

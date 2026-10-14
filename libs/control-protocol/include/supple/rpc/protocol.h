@@ -76,7 +76,7 @@ class Client {
     Status open();
     void drop();
     Result<json::Value> exchange(std::string_view method, const json::Value& params);
-    int fd_ = -1;
+    std::intptr_t fd_ = -1;
     std::uint64_t nextId_ = 1;
     std::string input_;
     std::filesystem::path path_;

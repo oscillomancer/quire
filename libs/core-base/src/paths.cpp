@@ -1,0 +1,100 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
+#include "supple/base/paths.h"
+#include <cstdlib>
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
+namespace supple::paths {
+namespace {
+std::filesystem::path env(const char* key) {
+#if defined(_WIN32)
+    // Use the wide environment API so non-ASCII user names retain their path.
+    const std::wstring name(key, key + std::char_traits<char>::length(key));
+    const DWORD size = GetEnvironmentVariableW(name.c_str(), nullptr, 0);
+    if (!size) return {};
+    std::wstring value(size, L'\0');
+    const DWORD length = GetEnvironmentVariableW(name.c_str(), value.data(), size);
+    if (!length || length >= size) return {};
+    value.resize(length);
+    return std::filesystem::path(value);
+#else
+    const char* value = std::getenv(key);
+    return value && *value ? std::filesystem::path(value) : std::filesystem::path{};
+#endif
+}
+#if !defined(_WIN32)
+std::filesystem::path belowHome(const std::filesystem::path& suffix) {
+    auto root = home();
+    return root.empty() ? root : root / suffix;
+}
+#endif
+}  // namespace
+std::filesystem::path home() {
+#if defined(_WIN32)
+    return env("USERPROFILE");
+#else
+    return env("HOME");
+#endif
+}
+std::filesystem::path config() {
+#if defined(_WIN32)
+    return env("APPDATA");
+#elif defined(__APPLE__)
+    return belowHome("Library/Application Support");
+#else
+    auto root = env("XDG_CONFIG_HOME");
+    return root.empty() ? belowHome(".config") : root;
+#endif
+}
+std::filesystem::path data(bool allowTemporary) {
+#if defined(_WIN32)
+    auto root = env("APPDATA");
+#elif defined(__APPLE__)
+    auto root = belowHome("Library/Application Support");
+#else
+    auto root = env("XDG_DATA_HOME");
+    if (root.empty() && allowTemporary) {
+        const char* user = std::getenv("HOME");
+        return std::filesystem::path(user ? user : "/tmp") / ".local/share";
+    }
+    if (root.empty()) root = belowHome(".local/share");
+#endif
+    return root.empty() && allowTemporary ? runtime() / ".local/share" : root;
+}
+std::filesystem::path cache(bool allowTemporary) {
+#if defined(_WIN32)
+    auto root = env("LOCALAPPDATA");
+#elif defined(__APPLE__)
+    auto root = belowHome("Library/Caches");
+#else
+    auto root = env("XDG_CACHE_HOME");
+    if (root.empty() && allowTemporary) {
+        const char* user = std::getenv("HOME");
+        return std::filesystem::path(user ? user : "/tmp") / ".cache";
+    }
+    if (root.empty()) root = belowHome(".cache");
+#endif
+    return root.empty() && allowTemporary ? runtime() / ".cache" : root;
+}
+std::filesystem::path runtime() {
+#if defined(_WIN32)
+    auto root = env("LOCALAPPDATA");
+    if (!root.empty()) return root / "Temp";
+#elif defined(__linux__)
+    auto root = env("XDG_RUNTIME_DIR");
+    if (!root.empty()) return root;
+    return "/tmp";  // Preserve the Linux control socket contract.
+#endif
+    std::error_code error;
+    auto temporary = std::filesystem::temp_directory_path(error);
+    return error ? std::filesystem::path{} : temporary;
+}
+}  // namespace supple::paths

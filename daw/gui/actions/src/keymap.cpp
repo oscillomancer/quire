@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Supple Audio
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_keycode.h>
+#include <supple/base/paths.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -149,10 +150,7 @@ Keymap Keymap::defaults() {
 }
 
 std::filesystem::path Keymap::defaultFile(std::string_view slug) {
-    if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
-        return std::filesystem::path(xdg) / slug / "keymap.json";
-    if (const char* home = std::getenv("HOME"); home && *home)
-        return std::filesystem::path(home) / ".config" / slug / "keymap.json";
+    if (const auto root = paths::config(); !root.empty()) return root / slug / "keymap.json";
     return {};
 }
 

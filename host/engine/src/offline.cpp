@@ -5,7 +5,7 @@
 #include "plan.h"
 #include "stretch.h"
 
-#include <sys/stat.h>
+#include "file_platform.h"
 
 #include <algorithm>
 #include <cmath>
@@ -314,13 +314,11 @@ constexpr std::size_t kMaxVariantFrames = std::size_t{1} << 28;
 
 Result<std::string> mediaIdentity(const std::filesystem::path& path, std::string_view hash) {
     if (!hash.empty()) return "hash:" + std::string(hash);
-    struct stat info{};
-    if (::stat(path.c_str(), &info) != 0)
+    const auto identity = detail::files::identity(path);
+    if (!identity)
         return Error("engine.media_missing", "cannot inspect media " + path.string(), {},
                      "restore the source file or import an existing audio_file");
-    return "file:" + std::to_string(info.st_dev) + ":" + std::to_string(info.st_ino) + ":" +
-           std::to_string(info.st_size) + ":" + std::to_string(info.st_mtim.tv_sec) + ":" +
-           std::to_string(info.st_mtim.tv_nsec);
+    return *identity;
 }
 }  // namespace
 

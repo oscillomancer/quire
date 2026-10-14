@@ -183,6 +183,15 @@ capacity reports retain their original revision/settings.
 ## Known limits
 
 Engine and hosting:
+- The headless platform layer (ADR-0035) has macOS/Windows address waits,
+  native wake sources, control socket/MCP paths and user directory roots;
+  native macOS/Windows builds and execution are not yet verified. Hosting,
+  scanning, bridge, hardware backends and GUI embedding remain separate ports.
+  Windows event waits admit 64 unique handles. macOS QoS must be self-applied;
+  attempts to elevate engine threads from another thread report a normal-policy
+  fallback. Linux process memory-lock and CPU latency preferences report
+  unsupported on other platforms. Windows MCP is intended for piped/file input;
+  cancelling an interactive console read can await a keypress during shutdown.
 - Without anticipation, a single Orrery chain can miss deadlines at 64
   frames although average load is low (per-block bursts at chord changes);
   the harness now exposes callback tails for further profiling.
@@ -191,8 +200,10 @@ Engine and hosting:
   A serial plug-in chain cannot benefit, and a stalled helper that has claimed
   a job stalls its cycle. Wake/scheduling overhead remains on light graphs;
   there is no adaptive cost threshold.
-- The FTZ/DAZ policy exists on x86-64 (SSE2) only; plug-in lifecycle calls
-  run in the thread's own floating-point environment.
+- The shared DSP guard implements x86 FTZ/DAZ and arm64 FPCR FZ; arm64 native
+  execution still requires port CI. Plug-in lifecycle calls run in the thread's
+  own floating-point environment. Orrery's separate MXCSR guard remains a
+  plugin-template port responsibility.
 - Real-time background threads need `RLIMIT_RTPRIO` ≥ 1, an unlimited
   `RLIMIT_RTTIME` and a pool that leaves two allowed CPUs free; without them
   the renderer and pool run at normal priority (with a warning) and compete

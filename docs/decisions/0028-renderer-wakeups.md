@@ -3,6 +3,9 @@
 **Status:** Accepted, 2026-10-08. Amends ADR-0012 §5 and ADR-0024 §4.
 Spec: `docs/specs/engine.md` §2.1.
 
+**Platform amendment, 2026-10-14:** [ADR-0035](0035-headless-platform-layer.md)
+adds macOS/Windows mechanisms while retaining these Linux semantics.
+
 ## Context
 
 The renderer polls every millisecond while stopped and every quarter render

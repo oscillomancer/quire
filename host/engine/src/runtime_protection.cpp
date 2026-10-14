@@ -3,8 +3,10 @@
 #include "runtime_protection.h"
 
 #include <fcntl.h>
+#if defined(__linux__)
 #include <sys/mman.h>
 #include <unistd.h>
+#endif
 #include <utility>
 
 #include <cerrno>
@@ -12,6 +14,7 @@
 
 namespace supple::engine {
 
+#if defined(__linux__)
 RuntimeProtectionOps::RuntimeProtectionOps()
     : lockMemory([](int flags) { return ::mlockall(flags); }),
       unlockMemory([] { return ::munlockall(); }),
@@ -20,6 +23,27 @@ RuntimeProtectionOps::RuntimeProtectionOps()
       writeLatency(
           [](int fd, const void* bytes, std::size_t size) { return ::write(fd, bytes, size); }),
       closeLatency([](int fd) { return ::close(fd); }) {}
+#else
+RuntimeProtectionOps::RuntimeProtectionOps()
+    : lockMemory([](int) {
+          errno = ENOTSUP;
+          return -1;
+      }),
+      unlockMemory([] { return 0; }),
+      memoryLimit([](MemoryLimit*) {
+          errno = ENOTSUP;
+          return -1;
+      }),
+      openLatency([](const char*, int) {
+          errno = ENOTSUP;
+          return -1;
+      }),
+      writeLatency([](int, const void*, std::size_t) -> ProtectionWriteSize {
+          errno = ENOTSUP;
+          return -1;
+      }),
+      closeLatency([](int) { return 0; }) {}
+#endif
 
 namespace detail {
 namespace {
@@ -51,7 +75,12 @@ Status RuntimeProtection::setMemoryLock(bool requested, bool running) {
 
 Status RuntimeProtection::applyMemory() {
     if (memory_.active) return {};
-    if (ops_->lockMemory(MCL_CURRENT | MCL_FUTURE | MCL_ONFAULT) == 0) {
+#if defined(__linux__)
+    constexpr int flags = MCL_CURRENT | MCL_FUTURE | MCL_ONFAULT;
+#else
+    constexpr int flags = 0;
+#endif
+    if (ops_->lockMemory(flags) == 0) {
         memory_.active = true;
         memory_.error.reset();
         return {};
@@ -59,9 +88,9 @@ Status RuntimeProtection::applyMemory() {
     const int value = errno;
     std::string hint = "disable memory locking, or retry after resolving the OS error";
     if (value == ENOMEM || value == EPERM) {
-        rlimit limit{};
+        MemoryLimit limit{};
         const std::string allowance = ops_->memoryLimit(&limit) != 0 ? "unavailable"
-                                      : limit.rlim_cur == RLIM_INFINITY
+                                      : limit.rlim_cur == kUnlimitedMemory
                                           ? "unlimited"
                                           : std::to_string(limit.rlim_cur) + " bytes";
         hint =
@@ -71,6 +100,10 @@ Status RuntimeProtection::applyMemory() {
     } else if (value == EINVAL) {
         hint = "disable memory locking; the kernel does not support the requested flags";
     }
+    if (value == ENOTSUP)
+        hint =
+            "process-wide memory locking with future/on-fault semantics is Linux-only; disable the "
+            "option";
     return failure(memory_, value, "engine.memory_lock", "mlockall", "/lock_memory",
                    std::move(hint));
 }
@@ -101,18 +134,22 @@ Status RuntimeProtection::applyLatency() {
     if (latencyFd_ >= 0) return {};
     int fd;
     do {
+#if defined(__linux__)
         fd = ops_->openLatency("/dev/cpu_dma_latency", O_WRONLY | O_CLOEXEC);
+#else
+        fd = ops_->openLatency("/dev/cpu_dma_latency", 0);
+#endif
     } while (fd < 0 && errno == EINTR);
     int value = 0;
     const char* operation = "open /dev/cpu_dma_latency";
     if (fd < 0) {
         value = errno;
     } else {
-        ssize_t written;
+        ProtectionWriteSize written;
         do {
             written = ops_->writeLatency(fd, &kCpuIdleLatencyUs, sizeof(kCpuIdleLatencyUs));
         } while (written < 0 && errno == EINTR);
-        if (written == static_cast<ssize_t>(sizeof(kCpuIdleLatencyUs))) {
+        if (written == static_cast<ProtectionWriteSize>(sizeof(kCpuIdleLatencyUs))) {
             latencyFd_ = fd;
             latency_.active = true;
             latency_.error.reset();
@@ -131,6 +168,8 @@ Status RuntimeProtection::applyLatency() {
             "(commonly audio); ask an administrator or disable the option";
     else if (value == ENOENT || value == ENODEV)
         hint = "the CPU latency device is unavailable; disable the option on this system";
+    if (value == ENOTSUP)
+        hint = "the process CPU idle-latency request is Linux-only; disable the option";
     return failure(latency_, value, "engine.cpu_idle_latency", operation, "/prevent_deep_idle",
                    std::move(hint));
 }

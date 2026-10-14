@@ -487,3 +487,29 @@ and checks deadlines/readiness at frame boundaries, every 4 KiB of buffered inpu
 and whenever input buffering empties. Partial frames cannot block asynchronous
 service; continuous buffered requests cannot starve it. The istream overload
 retains blocking stream behavior. No MCP or control wire schema changes.
+
+### Portable control and service sources (2026-10-14, ADR-0035)
+
+`ModelLoop::watch(Waitable, events, callback)` retains descriptor calls through
+Waitable's implicit POSIX descriptor constructor. `waitable()` borrows the loop's
+native wake source; `wakeFd()` remains POSIX compatibility (-1 on Windows).
+Cancellation, timer deadlines and ready-snapshot ordering are unchanged. Windows
+accepts manual-reset event handles, up to 64 unique handles including the loop's
+own wake source. MCP Tick::Watch carries `source: Waitable` instead of `fd: int`.
+The Windows fd reader uses a joined, bounded input thread to allow service during
+partial stdio frames. Stream overloads retain their existing blocking behavior.
+
+Control transport remains AF_UNIX and protocol 1, with Winsock on Windows. macOS
+paths must fit 104 bytes including the terminator; other native sun_path limits
+are enforced at runtime. Windows paths use UTF-8 and endpoint cleanup checks the
+volume/file identity. LockFileEx serializes competing starts. Default directories
+come from paths::runtime() plus the generated slug; Linux XDG_RUNTIME_DIR and
+/tmp behavior is unchanged. POSIX mode checks remain; Windows inherits its user
+profile directory ACL. Explicit socket directories must be private to the user.
+
+Windows MCP is intended for pipes or file descriptors backed by files. Interactive
+console input is a known limit: CancelSynchronousIo is not guaranteed to interrupt
+a console read during reader teardown, so shutdown can await a keypress. Pipe-based
+MCP clients are the tested transport contract. Windows signal teardown clears the
+borrowed wake handle and joins lock-free handler claims before the event can close;
+Linux retains its existing signal/descriptor lifecycle.

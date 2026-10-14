@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Supple Audio
 #pragma once
 
+#include <supple/base/waitable.h>
 #include <supple/rpc/protocol.h>
 #include <chrono>
 #include <functional>
@@ -14,12 +15,12 @@
 
 namespace supple::mcp {
 // Service on the serving thread, between requests or bytes of partial frames.
-// The fd reader polls async sources/deadlines; legacy callers use an interval.
+// The native reader waits for async sources/deadlines; legacy callers use an interval.
 struct Tick {
     std::function<void()> fn;
     std::chrono::milliseconds interval{100};
     struct Watch {
-        int fd;
+        Waitable source;
         short events;
         std::function<void(short)> ready;
     };

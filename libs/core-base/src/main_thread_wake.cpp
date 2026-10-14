@@ -2,11 +2,6 @@
 // Copyright (c) 2026 Supple Audio
 #include "supple/base/main_thread_wake.h"
 
-#include <sys/eventfd.h>
-#include <unistd.h>
-
-#include <cerrno>
-
 #include "supple/base/thread.h"
 
 namespace supple {
@@ -17,8 +12,8 @@ static_assert(std::atomic<MainThreadWake*>::is_always_lock_free);
 MainThreadWake::MainThreadWake() : MainThreadWake(nullptr, nullptr) {}
 
 MainThreadWake::MainThreadWake(RelayHook hook, void* context)
-    : relayHook_(hook), relayContext_(context), fd_(::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK)) {
-    if (fd_ >= 0) relay_ = std::thread([this] { relay(); });
+    : relayHook_(hook), relayContext_(context) {
+    if (waitable().valid()) relay_ = std::thread([this] { relay(); });
 }
 
 MainThreadWake::~MainThreadWake() {
@@ -27,7 +22,6 @@ MainThreadWake::~MainThreadWake() {
     rt::wake(sequence_);
     observe(RelayStep::Shutdown);
     if (relay_.joinable()) relay_.join();
-    if (fd_ >= 0) ::close(fd_);
 }
 
 void MainThreadWake::notify() SUPPLE_RT {
@@ -54,19 +48,12 @@ void MainThreadWake::relay() {
         // as an ordinary notification, then park forever on that same word.
         if (quit_.load(std::memory_order_acquire)) return;
         observe(RelayStep::BeforeWrite);
-        const std::uint64_t one = 1;
-        while (::write(fd_, &one, sizeof(one)) < 0 && errno == EINTR) {
-        }
+        event_.notify();
     }
 }
 
 bool MainThreadWake::drain() {
-    std::uint64_t count;
-    ssize_t read;
-    do {
-        read = ::read(fd_, &count, sizeof(count));
-    } while (read < 0 && errno == EINTR);
-    if (read != sizeof(count)) return false;
+    if (!event_.drain()) return false;
     // Clear before consuming work. A producer that coalesced before this is
     // acquired here; one arriving afterwards signals a fresh loop pass.
     pending_.exchange(false, std::memory_order_acq_rel);

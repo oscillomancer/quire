@@ -568,3 +568,11 @@ reason: {code, message, path, hint, details?}, cached}`; `scan.warnings` carries
 structured errors and `scan.cached_modules` counts reused module results.
 The report belongs to this catalogue and survives unrelated host scans;
 `rescan: true` replaces both the catalogue and its report.
+
+## Headless platform roots (2026-10-14, ADR-0035)
+
+The CLI work directory uses paths::cache() and the script library paths::data(),
+with the generated product slug appended. Linux retains XDG/HOME fallbacks.
+macOS uses Library/Caches and Library/Application Support; Windows LOCALAPPDATA
+and APPDATA. Socket and MCP service use the portable control layer; plugin hosting,
+scanning, editor embedding and the bridge remain separate port steps.

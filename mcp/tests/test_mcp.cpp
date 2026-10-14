@@ -1,10 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include <doctest/doctest.h>
-#include <poll.h>
 #include <supple/mcp/server.h>
 #include <supple/product.h>
+#if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+#include <process.h>
+#define getpid _getpid
+#define fileno _fileno
+#else
 #include <unistd.h>
+#endif
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -14,6 +21,27 @@
 #include <thread>
 using namespace supple;
 namespace {
+int makePipe(int* fds) {
+#if defined(_WIN32)
+    return _pipe(fds, 65536, _O_BINARY | _O_NOINHERIT);
+#else
+    return ::pipe(fds);
+#endif
+}
+std::ptrdiff_t writePipe(int fd, const void* data, std::size_t size) {
+#if defined(_WIN32)
+    return _write(fd, data, static_cast<unsigned>(size));
+#else
+    return ::write(fd, data, size);
+#endif
+}
+int closePipe(int fd) {
+#if defined(_WIN32)
+    return _close(fd);
+#else
+    return ::close(fd);
+#endif
+}
 struct Count {
     int count = 0;
 };
@@ -279,29 +307,32 @@ TEST_CASE("the stdio loop runs the service tick while it waits for a request") {
     cmd::Dispatcher dispatcher(commands, host);
     mcp::Server server(commands, dispatcher);
     int fds[2];
-    REQUIRE(::pipe(fds) == 0);
+    REQUIRE(makePipe(fds) == 0);
     std::atomic<int> ticks{0};
     std::ostringstream output;
     Status served;
     std::thread runner([&] {
         served = server.serve(fds[0], output,
-                              mcp::Tick{[&] { ++ticks; }, std::chrono::milliseconds(10)});
+                              mcp::Tick{[&] {
+                                            ++ticks;
+                                            ticks.notify_one();
+                                        },
+                                        std::chrono::milliseconds(10)});
     });
-    for (int i = 0; i < 400 && ticks.load() < 3; ++i)
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    for (int value = ticks.load(); value < 3; value = ticks.load()) ticks.wait(value);
     CHECK(ticks.load() >= 3);  // it waited, ticking, instead of blocking
     const std::string initialize =
         R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","clientInfo":{"name":"tick-test"}}})"
         "\n";
-    CHECK(::write(fds[1], initialize.data(), initialize.size()) ==
-          static_cast<ssize_t>(initialize.size()));
-    ::close(fds[1]);  // end of input: the loop answers what it read, then ends
+    CHECK(writePipe(fds[1], initialize.data(), initialize.size()) ==
+          static_cast<std::ptrdiff_t>(initialize.size()));
+    closePipe(fds[1]);  // end of input: the loop answers what it read, then ends
     runner.join();
     CHECK(served);
     const std::string text = output.str();
     CHECK(text.find("\"protocolVersion\"") != std::string::npos);
     CHECK(text.find("\"id\":1") != std::string::npos);
-    ::close(fds[0]);
+    closePipe(fds[0]);
 }
 
 TEST_CASE("R16 malformed envelopes without ids return Invalid Request") {
@@ -326,19 +357,20 @@ TEST_CASE("stdio service fds run while an incomplete request waits without a per
     Host host;
     cmd::Dispatcher bus(r, host);
     mcp::Server server(r, bus);
-    int input[2], wake[2];
-    REQUIRE(::pipe(input) == 0);
-    REQUIRE(::pipe(wake) == 0);
+    int input[2];
+    WakeEvent wake;
+    REQUIRE(makePipe(input) == 0);
+    REQUIRE(wake.waitable().valid());
     const std::string prefix = R"({"jsonrpc":"2.0","id":1,"method":"initialize")";
-    REQUIRE(::write(input[1], prefix.data(), prefix.size()) == static_cast<ssize_t>(prefix.size()));
-    char byte = 1;
-    REQUIRE(::write(wake[1], &byte, 1) == 1);
+    REQUIRE(writePipe(input[1], prefix.data(), prefix.size()) ==
+            static_cast<std::ptrdiff_t>(prefix.size()));
+    wake.notify();
     bool ready = false;
     int calls = 0;
     mcp::Tick service;
     service.watches = [&] {
-        return std::vector<mcp::Tick::Watch>{{wake[0], POLLIN, [&](short) {
-                                                  REQUIRE(::read(wake[0], &byte, 1) == 1);
+        return std::vector<mcp::Tick::Watch>{{wake.waitable(), kWaitRead, [&](short) {
+                                                  REQUIRE(wake.drain());
                                                   ready = true;
                                               }}};
     };
@@ -346,16 +378,14 @@ TEST_CASE("stdio service fds run while an incomplete request waits without a per
     service.fn = [&] {
         CHECK(ready);
         ++calls;
-        REQUIRE(::write(input[1], "}\n", 2) == 2);
-        ::close(input[1]);
+        REQUIRE(writePipe(input[1], "}\n", 2) == 2);
+        closePipe(input[1]);
     };
     std::ostringstream output;
     REQUIRE(server.serve(input[0], output, service));
     CHECK(calls == 1);
     CHECK(output.str().find("protocolVersion") != std::string::npos);
-    ::close(input[0]);
-    ::close(wake[0]);
-    ::close(wake[1]);
+    closePipe(input[0]);
 }
 
 TEST_CASE("stdio recomputes one-shot deadlines after service") {
@@ -364,7 +394,7 @@ TEST_CASE("stdio recomputes one-shot deadlines after service") {
     cmd::Dispatcher bus(r, host);
     mcp::Server server(r, bus);
     int input[2];
-    REQUIRE(::pipe(input) == 0);
+    REQUIRE(makePipe(input) == 0);
     int calls = 0;
     mcp::Tick service;
     service.deadline = [&] {
@@ -373,12 +403,12 @@ TEST_CASE("stdio recomputes one-shot deadlines after service") {
     };
     service.fn = [&] {
         ++calls;
-        ::close(input[1]);
+        closePipe(input[1]);
     };
     std::ostringstream output;
     REQUIRE(server.serve(input[0], output, service));
     CHECK(calls == 1);
-    ::close(input[0]);
+    closePipe(input[0]);
 }
 
 TEST_CASE("stdio service is fair during a long request already buffered by the reader") {
@@ -392,15 +422,14 @@ TEST_CASE("stdio service is fair during a long request already buffered by the r
         std::string(6000, ' ') + R"({"jsonrpc":"2.0","id":1,"method":"initialize"})" + '\n';
     REQUIRE(::fwrite(frame.data(), 1, frame.size(), input) == frame.size());
     ::rewind(input);
-    int wake[2];
-    REQUIRE(::pipe(wake) == 0);
-    char byte = 1;
+    WakeEvent wake;
+    REQUIRE(wake.waitable().valid());
     int inspections = 0, calls = 0;
     mcp::Tick service;
     service.watches = [&] {
-        if (++inspections == 2) REQUIRE(::write(wake[1], &byte, 1) == 1);
+        if (++inspections == 2) wake.notify();
         return std::vector<mcp::Tick::Watch>{
-            {wake[0], POLLIN, [&](short) { REQUIRE(::read(wake[0], &byte, 1) == 1); }}};
+            {wake.waitable(), kWaitRead, [&](short) { REQUIRE(wake.drain()); }}};
     };
     service.fn = [&] {
         ++calls;
@@ -411,6 +440,4 @@ TEST_CASE("stdio service is fair during a long request already buffered by the r
     CHECK(calls == 1);
     CHECK(output.str().find("protocolVersion") != std::string::npos);
     ::fclose(input);
-    ::close(wake[0]);
-    ::close(wake[1]);
 }

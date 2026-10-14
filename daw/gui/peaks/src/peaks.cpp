@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "supple/peaks/peaks.h"
+#include <supple/base/paths.h>
 
 #include <algorithm>
 #include <cctype>
@@ -241,10 +242,7 @@ Result<Pyramid> Pyramid::deserialize(std::span<const std::uint8_t> in) {
 }
 
 std::filesystem::path defaultCacheDir(std::string_view slug) {
-    if (const char* xdg = std::getenv("XDG_CACHE_HOME"); xdg && *xdg)
-        return std::filesystem::path(xdg) / slug / "peaks";
-    if (const char* home = std::getenv("HOME"); home && *home)
-        return std::filesystem::path(home) / ".cache" / slug / "peaks";
+    if (const auto root = paths::cache(); !root.empty()) return root / slug / "peaks";
     return std::filesystem::temp_directory_path() / slug / "peaks";
 }
 

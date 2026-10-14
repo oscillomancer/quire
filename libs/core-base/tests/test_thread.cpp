@@ -2,8 +2,12 @@
 // Copyright (c) 2026 Supple Audio
 #include <doctest/doctest.h>
 
+#if !defined(_WIN32)
 #include <pthread.h>
+#endif
+#if defined(__linux__)
 #include <sys/resource.h>
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -15,11 +19,14 @@
 using supple::ThreadPolicy;
 
 namespace {
+#if !defined(_WIN32)
 std::string nameOf(pthread_t thread) {
     char name[16] = {};
     REQUIRE(::pthread_getname_np(thread, name, sizeof(name)) == 0);
     return name;
 }
+#endif
+#if defined(__linux__)
 // Lowers one soft limit for the scope (process-local; the hard limit is kept,
 // so the soft value can be restored).
 struct LimitScope {
@@ -33,6 +40,7 @@ struct LimitScope {
     }
     ~LimitScope() { ::setrlimit(resource, &saved); }
 };
+#endif
 // A live thread that only waits for the end of the scope: changing its
 // scheduling is harmless (an exited thread could not be scheduled).
 struct ParkedThread {
@@ -45,12 +53,17 @@ struct ParkedThread {
     }
 };
 bool realtimeAllowed() {
+#if defined(__linux__)
     rlimit rtprio{}, rttime{};
     return ::getrlimit(RLIMIT_RTPRIO, &rtprio) == 0 && rtprio.rlim_cur >= 1 &&
            ::getrlimit(RLIMIT_RTTIME, &rttime) == 0 && rttime.rlim_cur == RLIM_INFINITY;
+#else
+    return false;
+#endif
 }
 }  // namespace
 
+#if !defined(_WIN32)
 TEST_CASE("nameThread names the calling thread and cuts at 15 bytes") {
     std::string shortName, longName;
     std::thread([&] {
@@ -63,11 +76,13 @@ TEST_CASE("nameThread names the calling thread and cuts at 15 bytes") {
     CHECK(longName == "audio-a-very-lo");
 }
 
+#endif
 TEST_CASE("thread policies are read, set, verified and named") {
     CHECK(supple::policyName(ThreadPolicy::Kind::None) == "none");
     CHECK(supple::policyName(ThreadPolicy::Kind::Normal) == "normal");
     CHECK(supple::policyName(ThreadPolicy::Kind::Fifo) == "fifo");
     CHECK(supple::policyName(ThreadPolicy::Kind::RoundRobin) == "rr");
+    CHECK(supple::policyName(ThreadPolicy::Kind::High) == "high");
     ParkedThread idle;
     const auto handle = idle.thread.native_handle();
     ThreadPolicy before, fifo, rr, after;
@@ -79,6 +94,10 @@ TEST_CASE("thread policies are read, set, verified and named") {
         setRr = supple::setThreadPolicy(handle, {ThreadPolicy::Kind::RoundRobin, 1});
         rr = supple::threadPolicy(handle);
     }
+#if defined(_WIN32)
+    REQUIRE(supple::setThreadPolicy(handle, {ThreadPolicy::Kind::High, 0}));
+    CHECK(supple::threadPolicy(handle) == ThreadPolicy{ThreadPolicy::Kind::High, 0});
+#endif
     REQUIRE(supple::setThreadPolicy(handle, {ThreadPolicy::Kind::Normal, 7}));
     after = supple::threadPolicy(handle);
     CHECK(before == ThreadPolicy{ThreadPolicy::Kind::Normal, 0});
@@ -93,6 +112,7 @@ TEST_CASE("thread policies are read, set, verified and named") {
     CHECK(rr == ThreadPolicy{ThreadPolicy::Kind::RoundRobin, 1});
 }
 
+#if defined(__linux__)
 TEST_CASE("real-time policies are refused without permission or with a CPU time limit") {
     ParkedThread idle;
     const auto handle = idle.thread.native_handle();
@@ -122,3 +142,20 @@ TEST_CASE("real-time policies are refused without permission or with a CPU time 
     CHECK_FALSE(limited.error().hint.empty());
     CHECK(limitedPolicy == ThreadPolicy{ThreadPolicy::Kind::Normal, 0});
 }
+
+#endif
+
+#if defined(__APPLE__)
+TEST_CASE("macOS QoS is applied and verified by the owning thread") {
+    supple::Status high, normal;
+    ThreadPolicy observed;
+    std::thread([&] {
+        high = supple::setThreadPolicy(pthread_self(), {ThreadPolicy::Kind::High, 0});
+        observed = supple::threadPolicy(pthread_self());
+        normal = supple::setThreadPolicy(pthread_self(), {ThreadPolicy::Kind::Normal, 0});
+    }).join();
+    CHECK_MESSAGE(high, (high ? "" : high.error().toString()));
+    CHECK(observed == ThreadPolicy{ThreadPolicy::Kind::High, 0});
+    CHECK_MESSAGE(normal, (normal ? "" : normal.error().toString()));
+}
+#endif

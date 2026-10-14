@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Supple Audio
 // Coalesced main-thread notification. Audio producers only publish atomics
-// and wake a private futex; a parked relay makes the request pollable.
+// and wake an address waiter; a parked relay signals the native event.
 #pragma once
 
 #include <atomic>
@@ -9,19 +9,22 @@
 #include <thread>
 
 #include "supple/base/rt.h"
+#include "supple/base/waitable.h"
 
 namespace supple {
 
 // Construct and destroy off audio. The relay must outlive every producer;
-// stop/join producers before destruction. One main thread drains the fd.
+// stop/join producers before destruction. One main thread drains the event.
 class MainThreadWake {
   public:
     MainThreadWake();
     ~MainThreadWake();
     MainThreadWake(const MainThreadWake&) = delete;
     MainThreadWake& operator=(const MainThreadWake&) = delete;
-    // Pollable notification fd; -1 if eventfd creation failed. Consume via drain().
-    int fd() const { return fd_; }
+    // Borrowed native source; invalid if creation failed. Consume via drain().
+    Waitable waitable() const { return event_.waitable(); }
+    // POSIX compatibility for existing embedding/bridge callers; -1 on Windows.
+    int fd() const { return waitable().fd(); }
     void notify() SUPPLE_RT;
     // Main thread, before servicing requests: acquire producers' publications
     // and allow the next request to notify. False if no relay event was ready.
@@ -38,7 +41,7 @@ class MainThreadWake {
     void observe(RelayStep step) {
         if (relayHook_) relayHook_(relayContext_, *this, step);
     }
-    int fd_ = -1;
+    WakeEvent event_;
     std::atomic<bool> pending_{false}, quit_{false};
     std::atomic<std::uint32_t> sequence_{0};
     std::thread relay_;

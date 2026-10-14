@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "appearance.h"
+#include <supple/base/paths.h>
 
 #include <cstdlib>
 
@@ -11,10 +12,7 @@
 namespace supple::gui {
 
 std::filesystem::path Appearance::defaultFile(std::string_view slug) {
-    if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
-        return std::filesystem::path(xdg) / slug / "appearance.json";
-    if (const char* home = std::getenv("HOME"); home && *home)
-        return std::filesystem::path(home) / ".config" / slug / "appearance.json";
+    if (const auto root = paths::config(); !root.empty()) return root / slug / "appearance.json";
     return {};
 }
 

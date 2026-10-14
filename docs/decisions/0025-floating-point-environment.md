@@ -2,6 +2,9 @@
 
 **Status:** Accepted, 2026-10-08. Implementation follows in separate commits.
 
+**Platform amendment, 2026-10-14:** [ADR-0035](0035-headless-platform-layer.md)
+adds macOS/Windows mechanisms while retaining these Linux semantics.
+
 ## Context
 
 Subnormal floats (below about 1.18e-38, −758 dBFS; doubles below about
