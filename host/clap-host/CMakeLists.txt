@@ -2,6 +2,8 @@ supple_add_library(clap-host
   SOURCES src/clap_host.cpp src/vst3_host.cpp src/bridge_client.cpp src/bridge_protocol.cpp src/scan.cpp
   DEPS supple::core-base supple::core-json supple::clap supple::semantic-params-abi supple::vst3-host
   PRIVATE_DEPS ${CMAKE_DL_LIBS})
+# The script player's mark, which the scan cache leaves out (header only).
+target_include_directories(clap-host PRIVATE ${PROJECT_SOURCE_DIR}/plugins/suite/compiler/include)
 
 # The plugin bridge: hosts dedicated or shared isolated plugin instances (ADR-0013).
 add_executable(${PRODUCT_SLUG}-bridge bridge/bridge_main.cpp)
@@ -19,6 +21,7 @@ if(SUPPLE_BUILD_TESTS)
 
   supple_add_tests(clap-host SOURCES tests/test_clap_host.cpp tests/test_scan.cpp tests/test_main_thread_wake.cpp LABELS rt)
   add_dependencies(clap-host.tests clap-host-fixtures ${PRODUCT_SLUG}-bridge)
+  target_include_directories(clap-host.tests PRIVATE ${PROJECT_SOURCE_DIR}/plugins/suite/compiler/include)
   target_compile_definitions(clap-host.tests PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>"
                              BRIDGE_PATH="$<TARGET_FILE:${PRODUCT_SLUG}-bridge>")
 

@@ -4,6 +4,7 @@
 #include "supple/base/files.h"
 #include "supple/json/json.h"
 #include "supple/product.h"
+#include "supple/script_export.hpp"
 
 #include <fcntl.h>
 #include <poll.h>
@@ -19,6 +20,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <set>
 
 extern char** environ;
@@ -27,6 +29,24 @@ namespace supple::host {
 namespace fs = std::filesystem;
 namespace {
 constexpr std::string_view kSchema = "supple.plugin-scan/1.0";
+// The cache record's own version: 2 leaves the script player out.
+constexpr std::int64_t kCacheVersion = 2;
+
+// Whether the module is a script player (or a player export), whose plugins
+// are the scripts in its library: what it offers changes while its file
+// stays the same, so no record of it can be trusted.
+bool scriptPlayer(const fs::path& module) {
+    std::ifstream in(module, std::ios::binary);
+    const std::string_view mark = scriptc::kPlayerMark;
+    std::string window;
+    char chunk[1 << 16];
+    while (in.read(chunk, sizeof chunk) || in.gcount() > 0) {
+        window.append(chunk, static_cast<std::size_t>(in.gcount()));
+        if (window.find(mark) != std::string::npos) return true;
+        window.erase(0, window.size() - std::min(window.size(), mark.size() - 1));
+    }
+    return false;
+}
 thread_local ScanReport gReport;
 
 Error invalidOutput() {
@@ -419,9 +439,9 @@ Result<std::vector<PluginInfo>> scan(std::span<const fs::path> paths, const Scan
         }
         const fs::path canonical = key->find("path")->asString();
         const auto recordPath = cacheFile(directory, canonical);
-        // The stock folder's modules are never cached: the script player's
-        // plugins are the scripts in its library, which its file says
-        // nothing about (and the stock plugins are cheap to scan).
+        // The stock folder's modules are never cached (they are cheap to
+        // scan), nor is a script player anywhere (see scriptPlayer(), checked
+        // when a record would be written).
         const bool cacheable = !directory.empty() && !stockModule;
         std::optional<json::Value> cached;
         if (cacheable) {
@@ -430,7 +450,8 @@ Result<std::vector<PluginInfo>> scan(std::span<const fs::path> paths, const Scan
                 auto record = json::parse(
                     *text, {.maxDepth = 32, .maxBytes = options.maxOutputBytes + (1u << 20)});
                 if (record && record->find("schema") && record->find("schema")->isString() &&
-                    record->find("schema")->asString() == kSchema && record->find("key") &&
+                    record->find("schema")->asString() == kSchema && record->find("version") &&
+                    *record->find("version") == json::Value(kCacheVersion) && record->find("key") &&
                     *record->find("key") == *key && record->find("reply"))
                     cached = *record->find("reply");
             }
@@ -460,9 +481,10 @@ Result<std::vector<PluginInfo>> scan(std::span<const fs::path> paths, const Scan
                                     outcome.error().code == "host.scan.output_limit" ||
                                     outcome.error().code == "host.load" ||
                                     outcome.error().code == "host.scan.load";
-            if (persistent && after && *after == *key) {
+            if (persistent && after && *after == *key && !scriptPlayer(module)) {
                 auto record = json::Value::object();
                 record["schema"] = kSchema;
+                record["version"] = kCacheVersion;
                 record["key"] = *key;
                 record["reply"] = scanReply(outcome);
                 if (outcome)

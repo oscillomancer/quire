@@ -1096,7 +1096,10 @@ with `host.scan.unsupervised`), and the model thread installs the new pair
 when the job is done. A background scan still running is returned instead of
 a second one. Modules in the stock folder are never served from the scan
 cache (2026-10-12): the script player's plugins are the scripts in its
-library (ADR-0032), which its file says nothing about.
+library (ADR-0032), which its file says nothing about. Nor is a script
+player or player export anywhere else (2026-10-14): a module whose file
+holds the player's mark (`SUPPLE_SCRIPT_PLAYER_MARK`) gets no cache record,
+and records written before then (without `version: 2`) are ignored.
 
 ### Initial engine-start failure (2026-10-08)
 

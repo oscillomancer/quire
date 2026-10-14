@@ -11,6 +11,7 @@
 #include "../src/scan.h"
 #include "supple/base/files.h"
 #include "supple/json/json.h"
+#include "supple/script_export.hpp"
 
 using namespace supple;
 using namespace supple::host;
@@ -141,6 +142,19 @@ TEST_CASE("the stock folder's modules are scanned afresh, never from the cache")
     std::error_code ec;
     CHECK((!fs::exists(fixture.options.cacheDirectory, ec) ||
            fs::is_empty(fixture.options.cacheDirectory, ec)));
+}
+
+TEST_CASE("a script player anywhere is scanned afresh, never from the cache") {
+    // Its plugins are its library's scripts, which its file does not show.
+    ScanTest fixture;
+    const fs::path plain = fixture.copy(SCAN_GOOD_PATH, "plain.clap");
+    const fs::path player = fixture.copy(SCAN_GOOD_PATH, "player.clap");
+    std::ofstream(player, std::ios::app | std::ios::binary) << SUPPLE_SCRIPT_PLAYER_MARK;
+    const std::vector<fs::path> paths{plain, player};
+    ScanReport report;
+    REQUIRE(scan(paths, fixture.options, &report));
+    REQUIRE(scan(paths, fixture.options, &report));
+    CHECK(report.cachedModules == 1);  // the plain copy only
 }
 
 TEST_CASE("scan canonicalizes and deduplicates aliases in search path order") {
