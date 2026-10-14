@@ -75,6 +75,25 @@ class Lexer {
 
     std::vector<Token> run() {
         std::vector<Token> out;
+        // C++ removes escaped newlines before recognizing comments and
+        // tokens. Refuse them even in comments, where otherwise the two
+        // compilers could execute different source text.
+        for (size_t i = 0; i + 1 < src_.size(); ++i)
+            if (src_[i] == '\\' &&
+                (src_[i + 1] == '\n' ||
+                 (src_[i + 1] == '\r' && i + 2 < src_.size() && src_[i + 2] == '\n'))) {
+                Loc loc{1, 1};
+                for (size_t j = 0; j < i; ++j) {
+                    if (src_[j] == '\n')
+                        ++loc.line, loc.column = 1;
+                    else
+                        ++loc.column;
+                }
+                diags_.error(loc, "script.lex.continuation",
+                             "escaped newlines are not in the subset",
+                             "remove the backslash at the end of the line");
+                break;
+            }
         bool lineStart = true;
         while (true) {
             skipSpace(lineStart);
@@ -215,6 +234,16 @@ class Lexer {
             }
         }
         t.text = std::string(src_.substr(start, pos_ - start));
+        const bool hexSpelling = t.text.starts_with("0x") || t.text.starts_with("0X");
+        auto digit = [&](char c) {
+            return isDigit(c) ||
+                   (hexSpelling && ((c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')));
+        };
+        for (size_t i = 0; i < t.text.size(); ++i)
+            if (t.text[i] == '\'' && (i == 0 || i + 1 == t.text.size() || !digit(t.text[i - 1]) ||
+                                      !digit(t.text[i + 1])))
+                diags_.error(t.loc, "script.lex.number", "a digit separator must be between digits",
+                             "write separators between digits, as in 1'000 or 0xA'B");
         std::string digits;
         for (char c : t.text)
             if (c != '\'') digits += c;
@@ -260,12 +289,16 @@ class Lexer {
             // float, as C++ rounds the literal's value (from the decimal,
             // directly): strtof, not (float)strtod, to avoid double rounding.
             errno = 0;
+            char* end = nullptr;
             if (t.floatSuffix) {
-                const float f = std::strtof(body.c_str(), nullptr);
+                const float f = std::strtof(body.c_str(), &end);
                 t.floatValue = static_cast<double>(f);
             } else {
-                t.floatValue = std::strtod(body.c_str(), nullptr);
+                t.floatValue = std::strtod(body.c_str(), &end);
             }
+            if (end != body.c_str() + body.size())
+                diags_.error(t.loc, "script.lex.number", "'" + t.text + "' is not a number",
+                             "write a decimal number such as 1.5, 2e-3 or 0.25f");
             if (std::isinf(t.floatValue))
                 diags_.error(t.loc, "script.lex.range",
                              "'" + t.text + "' is too large to represent",
@@ -280,7 +313,7 @@ class Lexer {
                (digits[end - 1] == 'u' || digits[end - 1] == 'U' || digits[end - 1] == 'l' ||
                 digits[end - 1] == 'L' || digits[end - 1] == 'z' || digits[end - 1] == 'Z'))
             --end;
-        if (end != digits.size() && !hex) {
+        if (end != digits.size()) {
             diags_.error(
                 t.loc, "script.lex.int_suffix",
                 "'" + t.text +
@@ -375,6 +408,10 @@ class Lexer {
                         value += '\r';
                         break;
                     case '0':
+                        if (peek(1) >= '0' && peek(1) <= '7')
+                            diags_.error(here(), "script.lex.escape",
+                                         "octal string escapes are not in the subset",
+                                         "use \\n or \\t, or write the character itself (UTF-8)");
                         value += '\0';
                         break;
                     case '\\':

@@ -441,3 +441,27 @@ TEST_CASE("invalid constant division reports an error without executing it") {
         CHECK(firstError(source) == "script.ub.division");
     }
 }
+
+TEST_CASE("literals must have the same spelling and type as C++") {
+    auto script = [](const std::string& expression) {
+        return "#include <supple/script.h>\n"
+               "struct T : Effect {\n"
+               "static constexpr Info info = {.name = \"T\", .id = \"com.example.t\"};\n"
+               "void process(Block& io) { double x = " +
+               expression + "; }\n};\n";
+    };
+    for (const char* literal : {"1e", "1e+", "1.2.3", "1'e3", "1.0'f", "0x'1"}) {
+        INFO(literal);
+        CHECK(firstError(script(literal)) == "script.lex.number");
+    }
+    for (const char* literal : {"0x1u", "0x1L", "0x1ULL"}) {
+        INFO(literal);
+        CHECK(firstError(script(literal)) == "script.lex.int_suffix");
+    }
+    for (const char* literal : {"1'000", "1.25e+2", "1.0e1'0", "0xA'B", "0b10'01"}) {
+        INFO(literal);
+        CHECK(firstError(script(literal)).empty());
+    }
+    CHECK(firstError(script("1; // comment \\\n io[0][0] = 2")) == "script.lex.continuation");
+    CHECK(firstError(script("1; const char* text = \"\\012\"")) == "script.lex.escape");
+}
