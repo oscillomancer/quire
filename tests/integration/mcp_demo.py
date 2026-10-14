@@ -13,7 +13,7 @@ import difflib
 import json
 import os
 import re
-import select
+from pipe_ready import wait_pipe
 import subprocess
 import tempfile
 import time
@@ -98,7 +98,7 @@ class Client:
         os.write(self.process.stdin.fileno(),
                  (json.dumps(request, separators=(",", ":")) + "\n").encode())
         while b"\n" not in self.pending:
-            readable, _, _ = select.select([self.process.stdout], [], [], 120)
+            readable = wait_pipe(self.process.stdout, 120)
             assert readable, f"MCP timed out on {method}"
             data = os.read(self.process.stdout.fileno(), 8192)
             assert data, f"MCP closed on {method}: {self.process.stderr.read().decode()}"

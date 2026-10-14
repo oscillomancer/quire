@@ -4,7 +4,7 @@
 import argparse
 import json
 import os
-import select
+from pipe_ready import wait_pipe
 import subprocess
 import tempfile
 from pathlib import Path
@@ -27,7 +27,7 @@ def main():
 
         def receive():
             while b"\n" not in pending:
-                readable, _, _ = select.select([process.stdout], [], [], 20)
+                readable = wait_pipe(process.stdout, 20)
                 if not readable:
                     raise AssertionError("MCP server timed out")
                 chunk = os.read(process.stdout.fileno(), 8192)

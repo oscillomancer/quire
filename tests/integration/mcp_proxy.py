@@ -3,7 +3,7 @@
 """Exercise a real sandbox socket server through the stdio MCP proxy."""
 import json
 import os
-import select
+from pipe_ready import wait_pipe
 import subprocess
 import sys
 import tempfile
@@ -43,7 +43,7 @@ def main():
                 message = {"jsonrpc": "2.0", "id": identifier, "method": method, "params": params}
                 os.write(proxy.stdin.fileno(), (json.dumps(message) + "\n").encode())
                 while b"\n" not in pending:
-                    readable, _, _ = select.select([proxy.stdout], [], [], 30)
+                    readable = wait_pipe(proxy.stdout, 30)
                     assert readable, f"proxy timed out on {method}"
                     data = os.read(proxy.stdout.fileno(), 8192)
                     assert data, f"proxy exited on {method}: {proxy.stderr.read().decode()}"
