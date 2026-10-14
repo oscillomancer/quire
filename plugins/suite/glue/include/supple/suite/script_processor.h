@@ -17,7 +17,8 @@
 //     replacement; its status says where (Instance::status).
 //   - A new compile of the same script, with the same parameters, replaces
 //     the running one without the host noticing (swap()): prepared on the
-//     main thread, taken at the start of a block, crossfaded over 10 ms. The
+//     main thread (refused if its prepare() reports another latency), taken
+//     at the start of a block, crossfaded over 10 ms. The
 //     one it replaced goes back to the main thread to be freed (collect()).
 //     What the old code observes while it fades out (an index out of range,
 //     its budget spent) is set aside, not the new code's; old code its
@@ -47,8 +48,10 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -128,6 +131,15 @@ class Generation {
     void reset() {
         if (reset_) program_->copy(self_, reset_);
     }
+    // What a replacement's prepare() asked of the voices (setVoiceMode,
+    // setGlide, setBendRange), for the swap to apply; NaN or -1 when nothing.
+    struct VoiceSettings {
+        int mode = -1;
+        double glideMs = std::numeric_limits<double>::quiet_NaN();
+        double bendRange = std::numeric_limits<double>::quiet_NaN();
+    };
+    VoiceSettings preparedVoices;
+
     // The runtime record its code runs with, in the struct and its copy.
     void bindInstance(D::Instance* instance) {
         D::Instance::bind(*static_cast<S::Plugin*>(self_), instance);
@@ -145,6 +157,9 @@ class Generation {
 
 class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
   public:
+    // Script::offline() reports it.
+    static constexpr bool kOfflineMode = true;
+
     explicit ScriptProcessor(const DefinitionPtr& definition)
         : definition_(std::static_pointer_cast<const ScriptDefinition>(definition)),
           table_(&definition_->params()),
@@ -181,6 +196,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         instance_.maxBlockSize = setup.maxBlockSize;
         instance_.channels = setup.channels;
         instance_.offline = setup.offline;
+        offlineNow_.store(setup.offline, std::memory_order_relaxed);
         // A replacement offered before this prepare is prepared again for it.
         if (Generation* waiting = incoming_.exchange(nullptr, std::memory_order_acq_rel))
             current_.reset(waiting);
@@ -291,6 +307,10 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     }
 
     void process(Block& block) {
+        if (block.offline != instance_.offline) {
+            instance_.offline = block.offline;
+            offlineNow_.store(block.offline, std::memory_order_relaxed);
+        }
         // Keep an offered replacement on the main-thread side until the
         // current fade can be retired. Otherwise adopt() would overwrite
         // the generation retire() retained when its queue was full.
@@ -368,26 +388,33 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
 
     // Offers a new build of the script, with the same parameters, to
     // replace the running one at the start of a block. Main thread, after
-    // the first prepare.
-    void swap(std::shared_ptr<const D::Code> code, const ParamValues& values) {
+    // the first prepare. False, offering nothing, when its prepare() reports
+    // another latency than the host was told: that needs a restart.
+    bool swap(std::shared_ptr<const D::Code> code, const ParamValues& values) {
         auto next =
             std::make_unique<Generation>(code, *table_, definition_->properties(), &instance_);
         load(*next, values, true);
         // Prepared here while the audio thread runs the current code, so
-        // against a record of its own -- the same rate and sizes, no voices
-        // -- that its hooks' budget and setLatency() write; the real one
-        // from the swap on.
+        // against a record of its own -- the same rate and sizes, and voices
+        // that only count -- that its hooks' budget and setLatency() write;
+        // the real one from the swap on. What it asks of the voices waits
+        // for the swap.
         D::Instance own;
         own.sampleRate = instance_.sampleRate;
         own.maxBlockSize = instance_.maxBlockSize;
         own.channels = instance_.channels;
-        own.offline = instance_.offline;
+        own.offline = offlineNow_.load(std::memory_order_relaxed);
+        PreparingBank preparing(voiceCount_, next->preparedVoices);
+        if (instrument_) own.voices = &preparing;
         next->bindInstance(&own);
         next->prepare(&own);
         next->bindInstance(&instance_);
+        const int latency = own.latency >= 0 ? own.latency : std::max(0, code->info().latency);
+        if (latency != latencySamples()) return false;
         editorCode_ = code;
         editorChannel_ = next->channel();
         delete incoming_.exchange(next.release(), std::memory_order_acq_rel);
+        return true;
     }
 
     // Frees what the audio thread let go of.
@@ -508,6 +535,12 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         fading_ = std::move(current_);
         fadingStopped_ = stopped;
         current_.reset(next);
+        if (instrument_) {
+            const Generation::VoiceSettings& v = current_->preparedVoices;
+            if (v.mode >= 0) pendingMode_ = v.mode;
+            if (!std::isnan(v.glideMs)) voices_.setGlide(v.glideMs);
+            if (!std::isnan(v.bendRange)) voices_.setBendRange(v.bendRange);
+        }
         // The files are the new code's now; the old lets go of them.
         bindFiles(*current_);
         if (fading_)
@@ -591,6 +624,33 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         ScriptProcessor& p_;
     };
 
+    // A replacement's voices while its prepare() runs on the main thread:
+    // as many as the running code has, none sounding; what it sets is kept
+    // for the swap.
+    class PreparingBank final : public D::VoiceBank {
+      public:
+        PreparingBank(int count, Generation::VoiceSettings& settings)
+            : count_(count), settings_(settings) {}
+        int count() const override { return count_; }
+        bool playing(int) const override { return false; }
+        int key(int) const override { return 0; }
+        int channel(int) const override { return 0; }
+        double velocity(int) const override { return 0.0; }
+        double pitch(int, int) const override { return 0.0; }
+        double expression(int, int which) const override {
+            return which == 0 ? 1.0 : which == 1 ? 0.5 : 0.0;  // as a new note's
+        }
+        double modulated(int, int, double value) const override { return value; }
+        void finished(int) override {}
+        void setMode(S::VoiceMode mode) override { settings_.mode = static_cast<int>(mode); }
+        void setGlide(double ms) override { settings_.glideMs = ms; }
+        void setBendRange(double semitones) override { settings_.bendRange = semitones; }
+
+      private:
+        int count_;
+        Generation::VoiceSettings& settings_;
+    };
+
     void retire(std::unique_ptr<Generation> g) {
         // A full queue keeps it: freeing here would be the audio thread's to do.
         Generation* raw = g.release();
@@ -665,6 +725,8 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     std::vector<int> polySlot_;
     std::vector<std::array<double, kMaxVoices>> polyAmount_;
     bool fadingNow_ = false;
+    // block.offline as the audio thread last saw it, for swap()'s prepare.
+    std::atomic<bool> offlineNow_{false};
 };
 
 }  // namespace supple::suite

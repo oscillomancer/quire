@@ -362,6 +362,90 @@ struct L : Effect {
     processor.collect();
 }
 
+TEST(an_edit_to_what_describes_the_plugin_redefines_it) {
+    const std::string base = R"(#include <supple/script.h>
+struct L : Effect {
+    static constexpr Info info = {.name = "L", .id = "com.example.level"};
+    Param level = decibels("Level", -12, 12, 0);
+    void process(Block& io) {}
+};
+)";
+    const auto d = compileText(base);
+    auto edited = [&](const char* from, const char* to) {
+        std::string text = base;
+        text.replace(text.find(from), std::string(from).size(), to);
+        return compileText(text);
+    };
+    CHECK(sameShape(*edited("void process(Block& io) {}", "void process(Block& io) { }"), *d));
+    CHECK(!sameShape(*edited("12, 0)", "12, 0).withKey(\"gain\")"), *d));
+    CHECK(!sameShape(*edited("12, 0)", "12, 0).help(\"How loud.\")"), *d));
+    CHECK(!sameShape(*edited("\"com.example.level\"", "\"com.example.level\", .latency = 4"), *d));
+    CHECK(!sameShape(*edited("\"com.example.level\"", "\"com.example.level\", .tail = 100"), *d));
+}
+
+TEST(a_replacement_reporting_another_latency_is_not_swapped) {
+    const std::string source = R"(#include <supple/script.h>
+struct L : Effect {
+    static constexpr Info info = {.name = "L", .id = "com.example.level"};
+    void prepare() { setLatency(4); }
+    void process(Block& io) {}
+};
+)";
+    std::string later = source;
+    later.replace(later.find("setLatency(4)"), 13, "setLatency(8)");
+    const auto d = compileText(source), same = compileText(source), next = compileText(later);
+    ScriptProcessor processor(d);
+    ParamValues values(d->params());
+    processor.prepare({.sampleRate = 48000.0, .maxBlockSize = 16, .channels = 1}, values);
+    CHECK(processor.latencySamples() == 4);
+    CHECK(!processor.swap(next->code(), values));
+    CHECK(processor.swap(same->code(), values));
+    processor.collect();
+}
+
+TEST(a_replacement_prepares_with_the_running_voice_count_and_offline_mode) {
+    const std::string source = R"(#include <supple/script.h>
+struct I : Instrument {
+    static constexpr Info info = {.name = "I", .id = "com.example.count", .voices = 4};
+    double counted = 0;
+    void prepare() { counted = voiceCount() + (offline() ? 10 : 0); }
+    void startVoice(int v) {}
+    void releaseVoice(int v) { voiceFinished(v); }
+    void process(Block& io) {
+        for (int i = 0; i < io.frames; ++i) io[0][i] = counted;
+    }
+};
+)";
+    std::string next = source;
+    next.replace(next.find("io[0][i] = counted"), 18, "io[0][i] = counted + 0.0");
+    const auto d = compileText(source), replacement = compileText(next);
+    Engine engine(d);
+    engine.setOffline(true);
+    engine.activate(48000.0, 64, 0, 2);
+    CHECK(render(engine, 64).back() == 14.0);
+    ParamValues values(d->params());
+    CHECK(engine.processor().swap(replacement->code(), values));
+    render(engine, 1024);  // past the fade
+    CHECK(render(engine, 64).back() == 14.0);
+    engine.processor().collect();
+}
+
+TEST(offline_reports_the_host_render_mode_as_it_changes) {
+    const auto d = compileText(R"(#include <supple/script.h>
+struct L : Effect {
+    static constexpr Info info = {.name = "L", .id = "com.example.offline"};
+    void process(Block& io) {
+        for (int i = 0; i < io.frames; ++i) io[0][i] = offline() ? 1.0 : 0.0;
+    }
+};
+)");
+    Engine engine(d);
+    engine.activate(48000.0, 64, 2, 2);
+    CHECK(render(engine, 64).back() == 0.0);
+    engine.setOffline(true);
+    CHECK(render(engine, 64).back() == 1.0);
+}
+
 TEST(replacements_wait_for_retirement_room_without_destroying_audio_state) {
     const auto d = compileText(R"(#include <supple/script.h>
 struct L : Effect {

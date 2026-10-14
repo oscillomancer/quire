@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string_view>
 
 namespace supple::suite {
 
@@ -176,6 +177,10 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
     return definition;
 }
 
+namespace {
+std::string_view text(const char* s) { return s ? std::string_view(s) : std::string_view(); }
+}  // namespace
+
 bool sameShape(const Definition& a, const Definition& b) {
     // The framework's preset table is immutable; patch edits need redefinition.
     if (a.info().presets != b.info().presets || a.presets().size() != b.presets().size())
@@ -184,26 +189,48 @@ bool sameShape(const Definition& a, const Definition& b) {
         if (a.presets()[i].name != b.presets()[i].name ||
             a.presets()[i].values != b.presets()[i].values)
             return false;
+    // A swap keeps the running Definition, so whatever it says of the plugin
+    // -- names, help, keys -- must be what the new code would say too.
     const PluginInfo &x = a.info(), &y = b.info();
-    if (x.id != y.id || x.name != y.name || x.kind != y.kind || x.layouts != y.layouts ||
-        x.sidechain != y.sidechain || x.auxOutputs != y.auxOutputs || x.voices != y.voices ||
-        a.params().count() != b.params().count() ||
+    if (x.id != y.id || x.name != y.name || x.vendor != y.vendor || x.url != y.url ||
+        x.version != y.version || x.description != y.description || x.features != y.features ||
+        x.stateTag != y.stateTag || x.kind != y.kind || x.layouts != y.layouts ||
+        x.sidechain != y.sidechain || x.auxOutputs != y.auxOutputs || x.noteInput != y.noteInput ||
+        x.noteOutput != y.noteOutput || x.noteExpressions != y.noteExpressions ||
+        x.presets != y.presets || x.tuning != y.tuning || x.voices != y.voices ||
+        x.overlappingNotes != y.overlappingNotes || a.params().count() != b.params().count() ||
         a.properties().count() != b.properties().count())
         return false;
     for (size_t k = 0; k < a.properties().count(); ++k) {
         const PropertyDef &p = a.properties().at(k), &q = b.properties().at(k);
-        if (p.id != q.id || p.kind != q.kind || std::string(p.name) != q.name) return false;
+        if (p.id != q.id || p.kind != q.kind || text(p.name) != text(q.name) ||
+            text(p.def) != text(q.def) || p.limit != q.limit || p.flags != q.flags ||
+            text(p.extensions) != text(q.extensions) || text(p.description) != text(q.description))
+            return false;
     }
     for (size_t k = 0; k < a.params().count(); ++k) {
         const ParamDef &p = a.params().at(k), &q = b.params().at(k);
         if (p.id != q.id || p.kind != q.kind || p.unit != q.unit || p.taper != q.taper ||
             p.min != q.min || p.max != q.max || p.def != q.def || p.curve != q.curve ||
-            p.flags != q.flags || p.smoothing != q.smoothing || std::string(p.name) != q.name ||
-            std::string(p.group) != q.group || p.labelCount != q.labelCount)
+            p.precision != q.precision || p.flags != q.flags || p.smoothing != q.smoothing ||
+            text(p.name) != text(q.name) || text(p.group) != text(q.group) ||
+            text(p.label) != text(q.label) || text(p.suffix) != text(q.suffix) ||
+            text(p.description) != text(q.description) || p.formatter != q.formatter ||
+            p.parser != q.parser || p.labelCount != q.labelCount)
             return false;
         for (int c = 0; c < p.labelCount; ++c)
-            if (std::string(p.labels[c]) != q.labels[c]) return false;
+            if (text(p.labels[c]) != text(q.labels[c])) return false;
     }
+    const auto* m = dynamic_cast<const SemanticDefinition*>(&a);
+    const auto* n = dynamic_cast<const SemanticDefinition*>(&b);
+    if ((m == nullptr) != (n == nullptr) || (m && m->meaning() != n->meaning())) return false;
+    // The latency and tail the host was told stay until it restarts us.
+    const auto* s = dynamic_cast<const ScriptDefinition*>(&a);
+    const auto* t = dynamic_cast<const ScriptDefinition*>(&b);
+    if (s && t &&
+        (s->code()->info().latency != t->code()->info().latency ||
+         s->code()->info().tail != t->code()->info().tail))
+        return false;
     return true;
 }
 

@@ -91,11 +91,14 @@ class PlayerLayer final : public suite::ScriptLayer {
             ParamValues values(definition().params());
             for (size_t i = 0; i < definition().params().count(); ++i)
                 values.setIndex(i, toPlain(definition().params().at(i), s.host[i]));
-            processor().swap(next->code(), values);
-            source_ = source;
-            statusRestarted();
-            instance().rebuildEditor();
-            return;
+            // Refused when the new code reports another latency: the host
+            // learns it by the restart a redefinition asks for.
+            if (processor().swap(next->code(), values)) {
+                source_ = source;
+                statusRestarted();
+                instance().rebuildEditor();
+                return;
+            }
         }
         if (!instance().redefine(next)) {
             reloadFailed(

@@ -55,8 +55,9 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
     std::shared_ptr<const script::detail::Code> code, std::filesystem::path file = {},
     std::string source = {}, std::string* problems = nullptr);
 
-// Whether two plugins have the same parameters, files, factory patches,
-// kinds, ranges and buses: DSP-only edits swap in place without a restart.
+// Whether two plugins are the same to a host and to an agent: identity,
+// parameters, files, factory patches, meaning, buses, declared latency and
+// tail. DSP-only edits swap in place without a restart.
 bool sameShape(const Definition& a, const Definition& b);
 
 // Four ASCII characters made from an ID, for the state tag.

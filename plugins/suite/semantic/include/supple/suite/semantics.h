@@ -37,10 +37,12 @@ struct ParamMeaning {
     std::string key;                      // [a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*
     std::vector<std::string> tags;        // "role:level", "stage:filter", "macro"
     std::vector<std::string> choiceKeys;  // a choice's options, lower snake case
+    bool operator==(const ParamMeaning&) const = default;
 };
 
 struct PropertyMeaning {
     std::string key;
+    bool operator==(const PropertyMeaning&) const = default;
 };
 
 struct Meaning {
@@ -48,6 +50,7 @@ struct Meaning {
     std::string docs;                         // what the plugin is and how its patch is organised
     std::vector<ParamMeaning> params;         // by parameter table index
     std::vector<PropertyMeaning> properties;  // by property index
+    bool operator==(const Meaning&) const = default;
 };
 
 // A Definition that says what it means.
