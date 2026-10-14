@@ -119,6 +119,13 @@ struct TestResult {
     std::vector<std::string> log;
 };
 
+// Plugin validation paths are relative to its patch, not the command arguments.
+inline Error patchError(Error error) {
+    error.path = "/patch" + error.path;
+    for (auto& detail : error.details) detail = patchError(std::move(detail));
+    return error;
+}
+
 inline double toDb(double amplitude) {
     return amplitude > 1e-10 ? 20.0 * std::log10(amplitude) : -200.0;
 }
@@ -714,7 +721,8 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
             if (!instance.info().semantic)
                 return Error("dsp.not_semantic", info->name + " takes no patch", "/patch",
                              "set it by plugin.load and param.set instead");
-            SUPPLE_TRY(instance.setPatch(json::writeCompact(*a.patch), CLAP_SUPPLE_SET_MERGE));
+            auto applied = instance.setPatch(json::writeCompact(*a.patch), CLAP_SUPPLE_SET_MERGE);
+            if (!applied) return patchError(std::move(applied).error());
         }
 
         TestResult out;
@@ -777,8 +785,11 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
             [&](const sandbox::RenderRequest& request) -> Result<sandbox::RenderResult> {
             auto fresh = host::Instance::create(*info, Traits::identity(s));
             if (!fresh) return std::move(fresh).error();
-            if (a.patch)
-                SUPPLE_TRY((*fresh)->setPatch(json::writeCompact(*a.patch), CLAP_SUPPLE_SET_MERGE));
+            if (a.patch) {
+                auto applied =
+                    (*fresh)->setPatch(json::writeCompact(*a.patch), CLAP_SUPPLE_SET_MERGE);
+                if (!applied) return patchError(std::move(applied).error());
+            }
             host::Instance* chain[] = {fresh->get()};
             const auto start = std::chrono::steady_clock::now();
             auto result = sandbox::render(chain, settings, request);

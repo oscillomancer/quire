@@ -281,7 +281,8 @@ void registerDspPreview(cmd::Registry& registry) {
             if (!instance.info().semantic)
                 return Error("dsp.not_semantic", info->name + " takes no patch", "/patch",
                              "set it by plugin.load and param.set instead");
-            SUPPLE_TRY(instance.setPatch(json::writeCompact(*a.patch), CLAP_SUPPLE_SET_MERGE));
+            auto applied = instance.setPatch(json::writeCompact(*a.patch), CLAP_SUPPLE_SET_MERGE);
+            if (!applied) return patchError(std::move(applied).error());
         }
 
         PreviewResult out;

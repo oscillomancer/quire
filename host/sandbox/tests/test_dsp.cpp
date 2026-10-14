@@ -77,6 +77,23 @@ struct Harness {
 
 }  // namespace
 
+TEST_CASE("DSP render commands locate invalid patch values inside the patch argument") {
+    Harness h;
+    h.write("gain",
+            script("Gain", "com.example.patch-errors",
+                   "Param gain = decibels(\"Gain\", -24, 24, 0); void process(Block& io) {}"));
+    for (const std::string command : {"dsp.test", "dsp.preview"}) {
+        if (command == "dsp.preview" && !SUPPLE_EDITORS) continue;
+        auto args = json::parse(R"({"script":"gain","patch":{"params":{"gain":1000}}})").value();
+        auto result = h.bus->execute({command, args, kTest});
+        REQUIRE_FALSE(result);
+        CHECK(result.error().path == "/args/patch/params/gain");
+        CHECK_FALSE(result.error().code.empty());
+        CHECK_FALSE(result.error().message.empty());
+        CHECK_FALSE(result.error().hint.empty());
+    }
+}
+
 TEST_CASE("dsp.test automation uses physical values and detects abrupt steps") {
     Harness h;
     // The command's value reaches the renderer at sample 12012, not the next block.
