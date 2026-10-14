@@ -235,8 +235,9 @@ TEST_CASE("compare reports the scored loss the optimizer minimizes") {
         for (float& sample : channel) sample *= 0.5f;
     const fs::path quiet = h.root.path / "quiet.wav";
     REQUIRE(audio::writeWav(quiet, *quietAudio, {}).ok());
-    json::Value matched = h.call("compare", R"({"reference": "rd_1", "test": ")" + quiet.generic_string() +
-                                                R"(", "test_note_off_s": 1.0})");
+    json::Value matched =
+        h.call("compare", R"({"reference": "rd_1", "test": ")" + quiet.generic_string() +
+                              R"(", "test_note_off_s": 1.0})");
     INFO(json::writeCompact(matched));
     CHECK(matched["loss"]["total"].asDouble() < 1e-6);
     CHECK(matched["loss"].find("note_off_assumed") == nullptr);
@@ -251,8 +252,9 @@ TEST_CASE("compare reports the scored loss the optimizer minimizes") {
     CHECK(std::fabs(assumed["loss"]["total"].asDouble() - matched["loss"]["total"].asDouble()) <
           1e-9);
     // A wrong note-off is visible in the result, and changes the loss.
-    json::Value shifted = h.call("compare", R"({"reference": "rd_1", "test": ")" + quiet.generic_string() +
-                                                R"(", "test_note_off_s": 0.5})");
+    json::Value shifted =
+        h.call("compare", R"({"reference": "rd_1", "test": ")" + quiet.generic_string() +
+                              R"(", "test_note_off_s": 0.5})");
     CHECK(shifted["loss"]["note_off_s"]["test"].asDouble() == doctest::Approx(0.5));
 }
 
@@ -471,10 +473,10 @@ TEST_CASE("reference read and analysis run on the job worker after optimize.star
     const fs::path file = h.root.path / "reference.wav";
     REQUIRE(audio::writeWav(file, audio, {}).ok());
     const auto start = std::chrono::steady_clock::now();
-    auto started =
-        h.call("optimize.start", R"({"instance":"in_1",
+    auto started = h.call("optimize.start", R"({"instance":"in_1",
         "params":["filter1.cutoff"],"target":{"reference":")" +
-                                     file.generic_string() + R"("},"evaluations":10,"max_seconds":10})");
+                                                file.generic_string() +
+                                                R"("},"evaluations":10,"max_seconds":10})");
     const double ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     INFO(ms);
