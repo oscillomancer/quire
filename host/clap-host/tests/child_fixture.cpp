@@ -8,9 +8,14 @@
 #include <thread>
 #include <vector>
 #if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
 #include <windows.h>
 #endif
 int main(int argc, char** argv) {
+#if defined(_WIN32)
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
     if (argc < 2) return 3;
     const std::string mode = argv[1];
 #if defined(_WIN32)
