@@ -5,6 +5,7 @@
 
 #ifdef _WIN32
 #include <process.h>
+#include <windows.h>
 #define getpid _getpid
 #else
 #include <unistd.h>
@@ -121,11 +122,28 @@ TEST_CASE("files: atomic replacement preserves an existing reader") {
     const fs::path path = dir / "data";
     REQUIRE(writeFileAtomic(path, std::string_view("old")).ok());
     {
+#ifdef _WIN32
+        struct Reader {
+            HANDLE handle;
+            ~Reader() { ::CloseHandle(handle); }
+        } reader{::CreateFileW(path.c_str(), GENERIC_READ,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                               OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
+        REQUIRE(reader.handle != INVALID_HANDLE_VALUE);
+        const auto replaced = writeFileAtomic(path, std::string_view("new"));
+        INFO(replaced ? "ok" : replaced.error().message);
+        REQUIRE(replaced.ok());
+        char old[3];
+        DWORD count = 0;
+        REQUIRE(::ReadFile(reader.handle, old, sizeof(old), &count, nullptr));
+        const std::string previous(old, count);
+#else
         std::ifstream reader(path, std::ios::binary);
         REQUIRE(reader.good());
         REQUIRE(writeFileAtomic(path, std::string_view("new")).ok());
         const std::string previous((std::istreambuf_iterator<char>(reader)),
                                    std::istreambuf_iterator<char>());
+#endif
         CHECK(previous == "old");
         CHECK(readTextFile(path).value() == "new");
     }

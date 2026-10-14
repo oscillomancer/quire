@@ -23,6 +23,36 @@ namespace supple {
 namespace fs = std::filesystem;
 
 Result<std::vector<std::uint8_t>> readFile(const fs::path& path, std::size_t maxBytes) {
+#ifdef _WIN32
+    // Readers must permit delete sharing for atomic replacement on Windows.
+    const HANDLE file = ::CreateFileW(path.c_str(), GENERIC_READ,
+                                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return Error("file.open", "cannot open " + path.string(), {}, "check the path");
+    LARGE_INTEGER size{};
+    if (!::GetFileSizeEx(file, &size) || size.QuadPart < 0) {
+        ::CloseHandle(file);
+        return Error("file.read", "cannot read " + path.string());
+    }
+    if (static_cast<std::uint64_t>(size.QuadPart) > maxBytes) {
+        ::CloseHandle(file);
+        return Error("file.too_large",
+                     path.string() + " is larger than " + std::to_string(maxBytes) + " bytes");
+    }
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size.QuadPart));
+    std::size_t off = 0;
+    while (off < bytes.size()) {
+        DWORD read = 0;
+        const DWORD count = static_cast<DWORD>(std::min<std::size_t>(bytes.size() - off, 1 << 20));
+        if (!::ReadFile(file, bytes.data() + off, count, &read, nullptr) || read == 0) {
+            ::CloseHandle(file);
+            return Error("file.read", "short read from " + path.string());
+        }
+        off += read;
+    }
+    ::CloseHandle(file);
+#else
     std::ifstream in(path, std::ios::binary);
     if (!in) return Error("file.open", "cannot open " + path.string(), {}, "check the path");
     in.seekg(0, std::ios::end);
@@ -36,6 +66,7 @@ Result<std::vector<std::uint8_t>> readFile(const fs::path& path, std::size_t max
     if (!bytes.empty())
         in.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     if (!in) return Error("file.read", "short read from " + path.string());
+#endif
     return bytes;
 }
 
@@ -58,9 +89,9 @@ Status writeFileAtomic(const fs::path& path, std::span<const std::uint8_t> bytes
            std::to_string(counter.fetch_add(1)) + ".tmp";
     auto error = [&](const std::string& what, DWORD code) {
         fs::remove(tmp, ec);
-        return Error("file.write",
-                     what + " " + path.string() + ": Windows error " + std::to_string(code), {},
-                     "check free disk space and directory permissions");
+        return Error(
+            "file.write", what + " " + path.string() + ": Windows error " + std::to_string(code),
+            {}, "check free disk space and permissions; close readers that deny delete sharing");
     };
     const HANDLE file =
         ::CreateFileW(tmp.c_str(), GENERIC_WRITE | DELETE, FILE_SHARE_READ | FILE_SHARE_DELETE,

@@ -14,7 +14,8 @@ The port branch has on-demand Linux/macOS/Windows CI and portable presets
 control/MCP, GUI and plugin wrappers remain gated, and Windows audio-file
 I/O remains gated. Portable libraries, the session model, stock DSP cores
 and the script suite build independently of those services; see
-CONTRIBUTING.md for the complete gate list.
+CONTRIBUTING.md for the complete gate list. External Windows readers that
+deny delete sharing prevent atomic file replacement until closed.
 
 ## What works
 
