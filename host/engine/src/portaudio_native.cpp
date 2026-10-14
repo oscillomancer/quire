@@ -13,6 +13,8 @@
 #elif defined(_WIN32)
 #include <windows.h>
 
+#include <asiosys.h>
+
 #include <asio.h>
 #include <avrt.h>
 #endif

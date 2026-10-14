@@ -35,7 +35,7 @@ else()
   target_include_directories(tp-portaudio PRIVATE ${_pa}/src/os/win ${_asio}/common ${_asio}/host ${_asio}/host/pc)
   target_compile_definitions(tp-portaudio PRIVATE PA_USE_WASAPI=1 PA_USE_ASIO=1
     PA_USE_DS=0 PA_USE_WMME=0 PA_USE_WDMKS=0)
-  target_compile_options(tp-portaudio PRIVATE /w)
+  target_compile_options(tp-portaudio PRIVATE /w "/FI${CMAKE_CURRENT_LIST_DIR}/portaudio_windows.h")
   target_link_libraries(tp-portaudio PRIVATE winmm ole32 uuid avrt)
 endif()
 set_target_properties(tp-portaudio PROPERTIES POSITION_INDEPENDENT_CODE ON)
