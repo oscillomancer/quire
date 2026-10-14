@@ -5,6 +5,7 @@
 // that keeps values by name, and an instance redefined when its file changes.
 #include <algorithm>
 #include <chrono>
+#include <clocale>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -19,6 +20,7 @@
 #include "ProductInfo.h"
 #include "plugin/Entry.h"
 #include "plugin/TestHooks.h"
+#include "core/StateFormat.h"
 #if SUPPLE_WITH_GUI
 #include "gui/EditorHost.h"
 #endif
@@ -258,6 +260,71 @@ TEST(state_keeps_each_stage_value_by_name_when_the_stages_move) {
     Instance b(kDuo);
     CHECK(b.state->load(b.plugin, &saved.in));
     CHECK(b.value("High") == -6.0 && b.value("Low") == 3.0);
+}
+
+TEST(a_malformed_stage_value_refuses_the_whole_state) {
+    Folder folder;
+    folder.write("duo.stages", "Low\nHigh\n");
+    Instance a(kDuo);
+    a.set("Low", 3.0);
+    a.set("High", -6.0);
+    MemoryStream saved;
+    CHECK(a.state->save(a.plugin, &saved.out));
+    const uint8_t* chunk = nullptr;
+    size_t size = 0;
+    const uint32_t tag = supple::state::fourcc("STGN");
+    CHECK(supple::state::findChunk(saved.bytes.data(), saved.bytes.size(), tag, chunk, size));
+    if (!chunk) return;
+    for (const char* value : {"", "garbage", "1x", "nan", "inf", "1e999"}) {
+        MemoryStream bad;
+        bad.bytes = saved.bytes;
+        bad.bytes.resize(static_cast<size_t>(chunk - saved.bytes.data()) - 8);
+        const std::string text = std::string("Low\t12\nHigh\t") + value + "\n";
+        supple::state::appendChunk(bad.bytes, tag, {text.begin(), text.end()});
+        CHECK(!a.state->load(a.plugin, &bad.in));
+        CHECK(a.value("Low") == 3.0 && a.value("High") == -6.0);
+    }
+}
+
+TEST(stage_state_round_trips_across_numeric_locales) {
+    Folder folder;
+    folder.write("duo.stages", "Low\nHigh\n");
+    Instance a(kDuo);
+    a.set("Low", 1.2345678901234567);
+    const std::string original = std::setlocale(LC_NUMERIC, nullptr);
+    std::setlocale(LC_NUMERIC, "C");
+    MemoryStream saved;
+    CHECK(a.state->save(a.plugin, &saved.out));
+    bool comma = false;
+    for (const char* locale : {"de_DE.UTF-8", "fr_FR.UTF-8", "German_Germany.1252"}) {
+        if (!std::setlocale(LC_NUMERIC, locale)) continue;
+        comma = true;
+        MemoryStream other;
+        CHECK(a.state->save(a.plugin, &other.out));
+        CHECK(other.bytes == saved.bytes);
+        saved.read = 0;
+        CHECK(a.state->load(a.plugin, &saved.in));
+        CHECK(a.value("Low") == 1.2345678901234567);
+    }
+    std::setlocale(LC_NUMERIC, original.c_str());
+    if (!comma) std::printf("    (no comma numeric locale installed: cross-locale check skipped)\n");
+    saved.read = 0;
+    CHECK(a.state->load(a.plugin, &saved.in));
+    MemoryStream again;
+    CHECK(a.state->save(a.plugin, &again.out));
+    CHECK(again.bytes == saved.bytes);
+}
+
+TEST(a_tab_in_a_stage_name_round_trips) {
+    Folder folder;
+    folder.write("duo.stages", "Low\tBand\nHigh\n");
+    Instance a(kDuo);
+    a.set("Low\tBand", 1.5);
+    MemoryStream saved;
+    CHECK(a.state->save(a.plugin, &saved.out));
+    a.set("Low\tBand", -3.0);
+    CHECK(a.state->load(a.plugin, &saved.in));
+    CHECK(a.value("Low\tBand") == 1.5);
 }
 
 TEST(a_changed_file_redefines_an_active_instance_at_its_restart) {

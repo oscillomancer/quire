@@ -20,6 +20,9 @@ Gui::~Gui() {
 }
 
 void Gui::rebuild(EditorHost& host) {
+    // A native/fallback update can finish the previous swap without tick()
+    // collecting its old editor. Retire the one the window shows now.
+    if (retired_ && !window_.replacing()) retired_.reset();
     std::unique_ptr<EditorBase> next = make_(host);
     editor_->focusLost();
     window_.replaceEditor(*next);

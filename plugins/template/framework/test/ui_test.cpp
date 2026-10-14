@@ -30,6 +30,7 @@
 #include "core/PropertyTable.h"
 #include "gui/EditorBase.h"
 #include "gui/Fonts.h"
+#include "gui/Gui.h"
 #include "gui/Images.h"
 #include "gui/Layout.h"
 #include "gui/NativeFiles.h"
@@ -1723,6 +1724,44 @@ struct ProductEditor {
     }
 };
 }  // namespace
+
+TEST(rebuilding_after_a_window_draw_keeps_the_displayed_editor_alive) {
+    MockHost host;
+    const Theme theme{};
+    bool alive[4]{};
+    int made = 0;
+    struct TrackedEditor final : EditorBase {
+        bool& alive;
+        TrackedEditor(EditorHost& h, const Theme& t, bool& a) : EditorBase(h, t, 160.0f, 120.0f), alive(a) {
+            alive = true;
+        }
+        ~TrackedEditor() override { alive = false; }
+        void paint(NVGcontext*) override {}
+    };
+    Gui gui(host, "supple-rebuild-test", true, [&](EditorHost& h) {
+        return std::make_unique<TrackedEditor>(h, theme, alive[made++]);
+    });
+    if (!gui.create() || !gui.setParent(0) || !gui.show()) {
+        std::printf("    (no window available: rebuild check skipped)\n");
+        return;
+    }
+    gui.rebuild(host);
+    // A native/fallback update may adopt the replacement without Gui::tick
+    // having collected the retired editor yet.
+    for (int n = 0; n < 100 && gui.window().replacing(); ++n) {
+        gui.window().tick();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(!gui.window().replacing());
+    if (gui.window().replacing()) return;
+    gui.rebuild(host);
+    CHECK(alive[1]);  // still attached until the next draw
+    CHECK(alive[2]);  // waiting to replace it
+    // Another rebuild before drawing replaces only the waiting editor.
+    gui.rebuild(host);
+    CHECK(alive[1] && !alive[2] && alive[3]);
+    gui.tick();
+}
 
 TEST(the_editor_draws_without_a_window_at_any_scale) {
     MockHost host;

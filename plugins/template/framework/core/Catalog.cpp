@@ -27,4 +27,9 @@ Catalog& catalog() {
     return *instance;
 }
 
+std::mutex& catalogMutex() {
+    static std::mutex instance;
+    return instance;
+}
+
 }  // namespace supple

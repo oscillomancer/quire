@@ -31,7 +31,7 @@ struct ProviderInfo {
 };
 
 // Every provider handed out, kept for the life of the module (hosts keep
-// the pointers), and the catalog's as last listed.
+// the pointers), and the catalog's as last listed (under catalogMutex()).
 struct Providers {
     std::vector<std::unique_ptr<ProviderInfo>> all;
     std::vector<const ProviderInfo*> current;
@@ -129,12 +129,14 @@ bool CLAP_ABI providerMetadata(const clap_preset_discovery_provider_t* p, uint32
 const void* CLAP_ABI providerExtension(const clap_preset_discovery_provider_t*, const char*) { return nullptr; }
 
 uint32_t CLAP_ABI factoryCount(const clap_preset_discovery_factory_t*) {
+    const std::lock_guard lock(catalogMutex());
     providers().refresh();
     return static_cast<uint32_t>(providers().current.size());
 }
 
 const clap_preset_discovery_provider_descriptor_t* CLAP_ABI factoryDescriptor(const clap_preset_discovery_factory_t*,
                                                                                uint32_t index) {
+    const std::lock_guard lock(catalogMutex());
     if (providers().current.empty()) providers().refresh();
     return index < providers().current.size() ? &providers().current[index]->clap : nullptr;
 }
@@ -143,10 +145,13 @@ const clap_preset_discovery_provider_t* CLAP_ABI factoryCreate(const clap_preset
                                                                 const clap_preset_discovery_indexer_t* indexer,
                                                                 const char* id) {
     if (!indexer || !id) return nullptr;
-    if (providers().current.empty()) providers().refresh();
     const ProviderInfo* info = nullptr;
-    for (const ProviderInfo* candidate : providers().current)
-        if (candidate->id == id) info = candidate;
+    {
+        const std::lock_guard lock(catalogMutex());
+        if (providers().current.empty()) providers().refresh();
+        for (const ProviderInfo* candidate : providers().current)
+            if (candidate->id == id) info = candidate;
+    }
     if (!info) return nullptr;
     auto* s = new Provider();
     s->indexer = indexer;

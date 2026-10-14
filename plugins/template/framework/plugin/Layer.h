@@ -27,7 +27,9 @@
 //     parameters, buses, name -- keeping its ID. The framework asks the host
 //     to restart and swaps at the deactivation (CLAP_PARAM_RESCAN_ALL),
 //     carrying the state over through saveChunk/loadChunk and by parameter
-//     ID, then calls redefined().
+//     ID, then calls redefined(). A state the new definition refuses (its
+//     loadChunk returns false) is logged, and the plugin starts from its
+//     defaults.
 //   - The editor: createEditor() may make every editor the instance opens,
 //     in place of product::createEditor (a family's editors, made from what
 //     only the layer knows); null leaves it to the product.

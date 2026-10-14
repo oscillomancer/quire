@@ -15,8 +15,8 @@
 //     from its stages: a fader each, then the output. The built-in plugin
 //     keeps the product's (the automatic editor).
 #include <algorithm>
-#include <cstdio>
-#include <cstdlib>
+#include <charconv>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <memory>
@@ -133,8 +133,11 @@ class StagesLayer final : public supple::plugin::Layer {
         for (size_t k = 0; k < d.stages().size(); ++k) {
             const int i = d.params().indexOf(kStage0 + static_cast<uint32_t>(k));
             char value[32];
-            std::snprintf(value, sizeof(value), "%.17g", s.host[static_cast<size_t>(i)]);
-            text += d.stages()[k] + "\t" + value + "\n";
+            const auto written = std::to_chars(value, value + sizeof(value), s.host[static_cast<size_t>(i)],
+                                                std::chars_format::general, 17);
+            text += d.stages()[k] + "\t";
+            text.append(value, written.ptr);
+            text += '\n';
         }
         return {text.begin(), text.end()};
     }
@@ -150,14 +153,18 @@ class StagesLayer final : public supple::plugin::Layer {
             if (end == std::string::npos) end = text.size();
             const std::string line = text.substr(start, end - start);
             start = end + 1;
-            const size_t tab = line.find('\t');
+            const size_t tab = line.rfind('\t');  // a stage name may itself contain a tab
             if (tab == std::string::npos) return false;  // not ours: refuse the state
             const std::string name = line.substr(0, tab);
+            double value = 0.0;
+            const char* endValue = line.data() + line.size();
+            const auto parsed = std::from_chars(line.data() + tab + 1, endValue, value);
+            if (parsed.ec != std::errc{} || parsed.ptr != endValue || !std::isfinite(value)) return false;
             for (size_t k = 0; k < d.stages().size(); ++k) {
                 if (d.stages()[k] != name) continue;
                 const int i = d.params().indexOf(kStage0 + static_cast<uint32_t>(k));
                 const supple::ParamDef& p = d.params().at(static_cast<size_t>(i));
-                s.host[static_cast<size_t>(i)] = supple::sanitizeHost(p, std::strtod(line.c_str() + tab + 1, nullptr));
+                s.host[static_cast<size_t>(i)] = supple::sanitizeHost(p, value);
             }
         }
         return true;

@@ -15,8 +15,12 @@
 // once (its meters show what played since the last drain), takes the
 // pointer input given, in order, as from a window, is drawn once at its
 // design size times `scale`, and is let go: it loses focus, which ends
-// every gesture the input opened. It must not be in a window. The caller
-// waits: call it from the main thread, as the editor would run.
+// every gesture the input opened. It must not be in a window. Call it from
+// the main thread, which waits while the editor runs on the other: nothing
+// else runs beside the editor, but what its edits call reaches the host from
+// that thread (CLAP's request_flush and request_restart may come from any;
+// mark_dirty and the note-name change may not). So it is for a plugin's own
+// tools, such as an extension its host knows, not for a host's editor.
 #pragma once
 
 #include <span>

@@ -510,6 +510,20 @@ TEST(the_descriptor_is_the_product_identity) {
     CHECK(factory()->create_plugin(factory(), &host.clap, "com.example.not-this") == nullptr);
 }
 
+// CLAP lets a host call the factory from any thread at once (tsan checks).
+TEST(the_factory_lists_from_several_threads_at_once) {
+    std::vector<std::thread> scans;
+    for (int t = 0; t < 4; ++t)
+        scans.emplace_back([] {
+            for (int k = 0; k < 50; ++k) {
+                const uint32_t n = factory()->get_plugin_count(factory());
+                for (uint32_t i = 0; i < n; ++i) (void)factory()->get_plugin_descriptor(factory(), i);
+            }
+        });
+    for (std::thread& t : scans) t.join();
+    CHECK(factory()->get_plugin_count(factory()) == 1);
+}
+
 TEST(the_host_parameter_list_is_the_table) {
     Instance i;
     CHECK(i.params->count(i.plugin) == params::kCount);
@@ -906,6 +920,8 @@ TEST(a_deactivated_sidechain_is_unconnected_whatever_its_buffers_hold) {
     if (!activation) return;
     const uint32_t key = product::info::kAudioInput ? 1 : 0;
     CHECK(!activation->set_active(i.plugin, false, 0, false, 32));  // only the sidechain
+    for (uint32_t bits : {0u, 32u, 64u}) CHECK(activation->set_active(i.plugin, true, key, true, bits));
+    for (uint32_t bits : {1u, 16u, 128u}) CHECK(!activation->set_active(i.plugin, true, key, false, bits));
     // The main output of a fresh instance, its key loud but maybe deactivated,
     // or not connected at all.
     auto render = [&](bool active, bool connected) {

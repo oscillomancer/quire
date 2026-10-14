@@ -10,10 +10,13 @@
 //
 // Hosts list the catalog through the CLAP plugin factory (and the VST3
 // wrapper through it), and make each instance from the Definition its ID
-// finds. An ID is permanent once shipped, as a product's is.
+// finds. An ID is permanent once shipped, as a product's is. CLAP lets a
+// host call the factory from any thread, so the module calls the catalog
+// with catalogMutex() held: one call at a time, from whichever thread.
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <string_view>
 #include <vector>
 
@@ -24,16 +27,20 @@ namespace supple {
 class Catalog {
   public:
     virtual ~Catalog() = default;
-    // Main thread: the plugins offered now, in a stable order.
+    // The plugins offered now, in a stable order. Any thread but the audio
+    // thread, one call at a time.
     virtual std::vector<DefinitionPtr> list() = 0;
-    // Main thread: the plugin with this ID as it is now, or null. By default
-    // the one list() has.
+    // The plugin with this ID as it is now, or null. By default the one
+    // list() has. As list().
     virtual DefinitionPtr find(std::string_view id);
 };
 
 // The module's catalog, made on first use and kept for the life of the
 // process.
 Catalog& catalog();
+// Held around every use of the catalog and of what the factories made of
+// it (their lists of descriptors).
+std::mutex& catalogMutex();
 
 }  // namespace supple
 
