@@ -303,6 +303,15 @@ restore the files. Every successful CLAP export returns its `notices` path.
 `/patch` (the command boundary adds `/args`), for example
 `/args/patch/params/gain`, preserving the plugin's code and corrective hint.
 
+The player offers one plugin per ID, so a library holds one script per ID:
+`dsp.write` refuses, without saving, a script whose `Info.id` another script
+in the library has (`dsp.id_taken` at `/source`), and `dsp.test`,
+`dsp.preview` and `dsp.export` by `script` refuse a name that shares its ID
+with another (`dsp.id_taken` at `/script`). A source export's host tests
+move a parameter they find by name through CMake, so `dsp.no_parameter`
+also covers a script whose automatable parameters' names all hold `"`,
+`\`, `$`, `;` or `@`.
+
 ### `dsp.test`: changes during a render
 
 All previous arguments/defaults remain. These optional inputs apply to each

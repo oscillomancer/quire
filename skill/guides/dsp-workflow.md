@@ -15,7 +15,9 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
    from nothing, and decide the parameters first: what a person would
    turn, in which unit, over what range. Give a new plugin a unique
    `Info.id`; copying an example under a new file name does not change its
-   plugin ID. Keep the same library name and ID when updating that plugin.
+   plugin ID, and `dsp_write` refuses a second script with an ID already in
+   the library (`dsp.id_taken`). Keep the same library name and ID when
+   updating that plugin.
 2. **Write it**: `dsp_write {name: "tilt_eq", source: "<the whole file>"}`.
    - `ok: false`: fix the `diagnostics` in order, each at its `line` and
      `column`. The `hint` is the fix; apply it rather than guessing. Fix the
@@ -114,7 +116,8 @@ in `<workdir>/scripts`; `dsp_list.library` gives the actual location.
 Player exports currently produce Linux CLAP files only. Ship the returned
 `notices` file beside the plugin. Source exports need a new or empty
 `folder` and at least one visible, automatable parameter for the template's
-host tests. They require the source export kit installed beside the stock
+host tests, whose name holds none of `"`, `\`, `$`, `;` or `@` (the tests
+find it by name through CMake). They require the source export kit installed beside the stock
 plugins (`script-export-kit` in a development build).
 
 Exports contain the script and its declared factory patches, not the

@@ -201,6 +201,41 @@ Result<std::string> readScript(const Host& a, const std::string& name, const std
     return readTextFile(file, kMaxScriptBytes);
 }
 
+// The library's other scripts whose plugin has `id`, by name. The player
+// offers one plugin per ID (the first it finds), so a name among them may
+// not be the code that plays.
+template <class Host>
+std::vector<std::string> scriptsWithId(const Host& a, const std::string& id,
+                                       const std::string& except) {
+    std::vector<std::string> out;
+    std::error_code ec;
+    for (fs::directory_iterator it(a.scriptDir(), ec), end; !ec && it != end; it.increment(ec)) {
+        const std::string name = it->path().filename().string();
+        const fs::path file = it->path() / (name + ".cpp");
+        if (name == except || !fs::is_regular_file(file, ec)) continue;
+        auto text = readTextFile(file, kMaxScriptBytes);
+        if (!text) continue;
+        const scriptc::Result r = scriptc::compile(*text);
+        if (r.program && r.program->info().id == id) out.push_back(name);
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+// An error when another script in the library has the plugin ID `id`.
+template <class Host>
+Status uniqueId(const Host& a, const std::string& id, const std::string& name,
+                const std::string& path) {
+    const std::vector<std::string> others = scriptsWithId(a, id, name);
+    if (others.empty()) return {};
+    std::string list;
+    for (const auto& n : others) list += (list.empty() ? "" : ", ") + n;
+    return Error("dsp.id_taken",
+                 "the script " + list + " already has the id " + id +
+                     ", and the player plays one plugin per id",
+                 path, "give Info.id a value no other script in the library has");
+}
+
 inline schema::Schema<Diagnostic> diagnosticSchema() {
     return schema::object<Diagnostic>("dsp_diagnostic")
         .field("severity", &Diagnostic::severity, schema::string().doc("error or warning"))
@@ -307,7 +342,9 @@ void registerDspCommands(cmd::Registry& registry) {
                                                     "the plugin path)"))
                        .build();
         c.errors = {{"dsp.name", "not a script name", "use lower-case letters, digits, _ or -"},
-                    {"dsp.size", "the script is longer than 1 MiB", "split it up"}};
+                    {"dsp.size", "the script is longer than 1 MiB", "split it up"},
+                    {"dsp.id_taken", "another script in the library has its id; not saved",
+                     "give Info.id a value no other script has"}};
         c.examples = {{"Save a gain script", gainArgs(),
                        j(R"({"name":"gain","path":"<any>","ok":true,"diagnostics":[],
                              "plugin":"<any>","listed":"<any>"})"),
@@ -321,8 +358,10 @@ void registerDspCommands(cmd::Registry& registry) {
                     "the script is " + std::to_string(a.source.size()) + " bytes, more than 1 MiB",
                     "/source", "split it up");
             const fs::path file = scriptPath(owner, a.name);
-            SUPPLE_TRY(writeFileAtomic(file, a.source));
             Compiled compiled = compile(a.source);
+            if (compiled.plugin)
+                SUPPLE_TRY(uniqueId(owner, compiled.plugin->id, a.name, "/source"));
+            SUPPLE_TRY(writeFileAtomic(file, a.source));
             WriteResult out{a.name,
                             file.string(),
                             compiled.ok,

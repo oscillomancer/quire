@@ -169,11 +169,19 @@ inline std::string substitute(std::string text, const std::map<std::string, std:
 // The parameter the project's host tests move, an eighth of its range up
 // from its default, expecting an effect's output to differ from its input:
 // a level in decibels when there is one (a neutral bell stays neutral
-// whatever its frequency), else the first a host can automate.
+// whatever its frequency), else the first a host can automate. The tests
+// find it by name, which travels through CMake into a C string, so only a
+// name with none of " \ $ ; @ or control characters will do. "" for none.
+inline bool plainName(std::string_view name) {
+    return std::none_of(name.begin(), name.end(), [](char c) {
+        return static_cast<unsigned char>(c) < 0x20 || c == '"' || c == '\\' || c == '$' ||
+               c == ';' || c == '@';
+    });
+}
 inline std::string smokeParam(const scriptc::Program& program) {
     std::string first;
     for (const scriptc::ParamModel& p : program.params()) {
-        if (!p.automatable || p.output || p.hidden) continue;
+        if (!p.automatable || p.output || p.hidden || !plainName(p.name)) continue;
         if (p.unit == scriptc::ParamModel::Unit::Decibels && p.def < p.max) return p.name;
         if (first.empty()) first = p.name;
     }
@@ -345,6 +353,8 @@ void registerDspExport(cmd::Registry& registry) {
                           schema::string().doc("clap: the licenses to ship with the plugin"))
                    .build();
     c.errors = {{"dsp.compile", "the script does not compile", "dsp.check gives its diagnostics"},
+                {"dsp.id_taken", "another script in the library has the script's id",
+                 "give each script its own Info.id"},
                 {"dsp.not_listed", "the script compiles but no plugin has its id",
                  "put the script player on the plugin path"},
                 {"dsp.player", "the plugin with the script's id is not the script player",
@@ -356,7 +366,8 @@ void registerDspExport(cmd::Registry& registry) {
                 {"dsp.plugin_name", "source: the plugin's name cannot name a project",
                  "rename it in Info.name"},
                 {"dsp.no_parameter",
-                 "source: the project's tests need a parameter a host can automate", "declare one"},
+                 "source: the project's tests need a parameter a host can automate, plainly named",
+                 "declare one"},
                 {"dsp.kit", "source: no export kit beside the stock plugins",
                  "build the script-export-kit target"}};
     {
@@ -387,6 +398,7 @@ void registerDspExport(cmd::Registry& registry) {
             return Error("dsp.compile", "the script does not compile", "/script",
                          "dsp.check {name: \"" + a.script + "\"} gives its diagnostics");
         const scriptc::Program& program = *built.program;
+        SUPPLE_TRY(detail::uniqueId(s, program.info().id, a.script, "/script"));
 
         if (a.format == Format::Source) {
             const scriptc::InfoModel& info = program.info();
@@ -395,16 +407,14 @@ void registerDspExport(cmd::Registry& registry) {
                              "/script",
                              "rename it in Info.name: letters, digits, spaces and - _ . ( ) are "
                              "safe");
-            const bool automatable = std::any_of(program.params().begin(), program.params().end(),
-                                                 [](const scriptc::ParamModel& p) {
-                                                     return p.automatable && !p.output && !p.hidden;
-                                                 });
-            if (!automatable)
+            if (smokeParam(program).empty())
                 return Error("dsp.no_parameter",
                              info.name +
-                                 " has no parameter a host can automate, which the "
-                                 "project's own tests set",
-                             "/script", "declare one, such as Param mix = percent(\"Mix\", 100);");
+                                 " has no parameter a host can automate with a plain name, "
+                                 "which the project's own tests set",
+                             "/script",
+                             "declare one, such as Param mix = percent(\"Mix\", 100); its name "
+                             "may not hold quotes, backslashes, $, ; or @");
             auto kit = exportKit();
             if (!kit) return std::move(kit).error();
             const fs::path dest =

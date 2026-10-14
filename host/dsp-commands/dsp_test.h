@@ -642,6 +642,8 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                    .field("log", &TestResult::log, schema::arrayOf(schema::string()))
                    .build();
     c.errors = {{"dsp.args", "neither or both of plugin and script", "give exactly one"},
+                {"dsp.id_taken", "another script in the library has the script's id",
+                 "give each script its own Info.id"},
                 {"dsp.not_listed", "the script compiles but no plugin has its id",
                  "put the script player on the plugin path"},
                 {"dsp.not_effect", "the plugin takes no audio and no notes",
@@ -698,6 +700,7 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                 return Error("dsp.compile", "the script does not compile", "/script",
                              "dsp.check {name: \"" + *a.script + "\"} gives its diagnostics");
             id = compiled.plugin->id;
+            SUPPLE_TRY(detail::uniqueId(s, id, *a.script, "/script"));
         }
         auto info = s.findPlugin(id);
         if (!info && a.script) {

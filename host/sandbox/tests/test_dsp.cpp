@@ -94,6 +94,47 @@ TEST_CASE("DSP render commands locate invalid patch values inside the patch argu
     }
 }
 
+TEST_CASE("two scripts with one id are refused: the player would play only one") {
+    Harness h;
+    const std::string body = "    void process(Block& io) {}";
+    h.write("first", script("First", "com.example.twin", body));
+    auto args = json::Value::object();
+    args["name"] = "second";
+    args["source"] = script("Second", "com.example.twin", body);
+    auto refused = h.bus->execute({"dsp.write", args, kTest});
+    REQUIRE_FALSE(refused);
+    CHECK(refused.error().code == "dsp.id_taken");
+    CHECK(refused.error().path == "/args/source");
+    // One saved some other way is refused by name too.
+    auto list = h.bus->execute({"dsp.list", json::Value::object(), kTest});
+    REQUIRE(list);
+    const fs::path library((*list)["library"].asString());
+    CHECK_FALSE(fs::exists(library / "second"));
+    fs::create_directories(library / "second");
+    std::ofstream(library / "second" / "second.cpp") << args["source"].asString();
+    auto tested = h.test(R"({"script":"second","signals":["sine"],"seconds":0.1})");
+    REQUIRE_FALSE(tested);
+    CHECK(tested.error().code == "dsp.id_taken");
+    CHECK(tested.error().path == "/args/script");
+}
+
+TEST_CASE("a source export's tests move a parameter whose name survives CMake and C") {
+    Harness h;
+    auto exportSource = [&](const std::string& params) {
+        h.write("named",
+                script("Named", "com.example.named", params + "    void process(Block& io) {}"));
+        auto args = json::Value::object();
+        args["script"] = "named";
+        args["format"] = "source";
+        args["folder"] = (h.root.path / "named-source").string();
+        return h.bus->execute({"dsp.export", args, kTest});
+    };
+    auto refused = exportSource("    Param gain = decibels(\"Out \\\"dB\\\"\", -24, 24, 0);\n");
+    REQUIRE_FALSE(refused);
+    CHECK(refused.error().code == "dsp.no_parameter");
+    CHECK(refused.error().path == "/args/script");
+}
+
 TEST_CASE("dsp.test automation uses physical values and detects abrupt steps") {
     Harness h;
     // The command's value reaches the renderer at sample 12012, not the next block.

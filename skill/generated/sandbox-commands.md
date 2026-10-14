@@ -438,12 +438,13 @@ Kind: `action`. Exposure: `mcp-tool`.
 ### Errors
 
 - `dsp.compile`: the script does not compile Hint: dsp.check gives its diagnostics
+- `dsp.id_taken`: another script in the library has the script's id Hint: give each script its own Info.id
 - `dsp.not_listed`: the script compiles but no plugin has its id Hint: put the script player on the plugin path
 - `dsp.player`: the plugin with the script's id is not the script player Hint: give the script an id no other plugin has
 - `dsp.notices`: the player's license or notices cannot be read Hint: restore the license and notices beside the player before exporting
 - `dsp.path`: the folder is relative, or (source) not empty Hint: give an absolute folder; for source, a new one
 - `dsp.plugin_name`: source: the plugin's name cannot name a project Hint: rename it in Info.name
-- `dsp.no_parameter`: source: the project's tests need a parameter a host can automate Hint: declare one
+- `dsp.no_parameter`: source: the project's tests need a parameter a host can automate, plainly named Hint: declare one
 - `dsp.kit`: source: no export kit beside the stock plugins Hint: build the script-export-kit target
 
 ### Examples
@@ -707,6 +708,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 ### Errors
 
 - `dsp.args`: neither or both of plugin and script Hint: give exactly one
+- `dsp.id_taken`: another script in the library has the script's id Hint: give each script its own Info.id
 - `dsp.not_listed`: the script compiles but no plugin has its id Hint: put the script player on the plugin path
 - `dsp.signal`: a signal the plugin cannot play Hint: an effect plays audio signals, an instrument notes
 - `dsp.pointer`: a drag without its end, or too many steps Hint: give a drag to_x and to_y; at most 64 steps
@@ -939,6 +941,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 ### Errors
 
 - `dsp.args`: neither or both of plugin and script Hint: give exactly one
+- `dsp.id_taken`: another script in the library has the script's id Hint: give each script its own Info.id
 - `dsp.not_listed`: the script compiles but no plugin has its id Hint: put the script player on the plugin path
 - `dsp.not_effect`: the plugin takes no audio and no notes Hint: test an effect or an instrument
 - `dsp.signal`: a signal the plugin cannot play Hint: an effect plays audio signals, an instrument notes
@@ -1239,6 +1242,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 
 - `dsp.name`: not a script name Hint: use lower-case letters, digits, _ or -
 - `dsp.size`: the script is longer than 1 MiB Hint: split it up
+- `dsp.id_taken`: another script in the library has its id; not saved Hint: give Info.id a value no other script has
 
 ### Examples
 
