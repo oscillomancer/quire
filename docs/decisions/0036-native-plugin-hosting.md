@@ -9,8 +9,8 @@ files contract. Device audio, bridge and GUI remain separate gates.
 
 **DSP link correction, 2026-10-14:** Windows engine linking exposed a duplicate
 Oversampler::reset symbol between core-dsp and the script runtime's template DSP.
-The runtime imports template DSP under a private namespace (without editing the
-template), preserving both layouts and avoiding ELF symbol interposition too.
+The runtime gives its private template oversampler a distinct type name (without
+editing the template), preserving both layouts and avoiding ELF interposition too.
 A combined-library regression exercises both reset paths; script APIs and numeric
 behavior are unchanged.
 

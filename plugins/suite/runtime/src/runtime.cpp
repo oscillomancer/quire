@@ -26,26 +26,25 @@
 #include <pthread.h>
 #endif
 
-// These are the template's DSP types, whose layouts differ from core-dsp.
-// Keep their symbols private to the script runtime when both libraries link
-// into the DAW. The template files themselves remain byte-identical.
-#define dsp script_runtime_dsp
 #include "dsp/Dynamics.h"
 #include "dsp/Envelope.h"
 #include "dsp/Filters.h"
 #include "dsp/Interpolation.h"
 #include "dsp/Math.h"
 #include "dsp/Oscillators.h"
+// core-dsp has a different Oversampler layout. Give this private template
+// type its own symbol name while preserving the template's source and the
+// file-resource types shared with the player glue.
+#define Oversampler ScriptRuntimeOversampler
 #include "dsp/Oversampler.h"
+#undef Oversampler
 #include "dsp/Stft.h"
-#undef dsp
 #include "supple/script.h"
 #include "supple/script_code.h"
 #include "supple/script_files.h"
 #include "supple/script_runtime.h"
 
 namespace supple::script {
-namespace dsp = ::supple::script_runtime_dsp;
 
 Patches& Patches::add(const char* name) {
     builder_->add(name);
@@ -540,7 +539,7 @@ void DelayLine::clear() { line(line_).clear(); }
 // prepare(). Unprepared, it passes samples through.
 namespace {
 struct OversamplerState {
-    dsp::Oversampler over;
+    dsp::ScriptRuntimeOversampler over;
     bool prepared = false;
     double one = 0.0;      // the sample, unprepared
     double* hi = nullptr;  // up()'s factor() samples, until down()
@@ -563,7 +562,7 @@ Oversampler& Oversampler::operator=(const Oversampler& other) {
 Oversampler::~Oversampler() { delete &over(state_); }
 void Oversampler::prepare(int factor) {
     OversamplerState& o = over(state_);
-    o.over.prepare(1, 1, std::clamp(factor, 2, 16), dsp::Oversampler::Phase::Minimum);
+    o.over.prepare(1, 1, std::clamp(factor, 2, 16), dsp::ScriptRuntimeOversampler::Phase::Minimum);
     o.prepared = true;
     o.hi = nullptr;
 }
