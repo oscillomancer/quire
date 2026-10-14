@@ -388,6 +388,8 @@ TEST_CASE("dsp.test measures a script through the player and names what goes wro
     CHECK(problems.find("NaN or infinity") != std::string::npos);
 }
 
+#if defined(__linux__)
+// Binary script exports append to the Linux player; native bundle export is a later port.
 TEST_CASE("dsp.export makes a plugin that plays its version of the script, and no other") {
     const fs::path player = kStock / "Script Player.clap";
     if (!fs::exists(player)) {
@@ -608,3 +610,5 @@ TEST_CASE("dsp.test gives a convolution reverb its room through a patch") {
     REQUIRE_FALSE(missing);
     CHECK(missing.error().toString().find("there is no file there") != std::string::npos);
 }
+
+#endif

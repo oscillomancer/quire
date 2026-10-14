@@ -1230,3 +1230,16 @@ Preset/media publication never replaces an existing destination unless explicitl
 requested. Linux retains reflink and hard-link publication; macOS copies to a
 private temporary file before linking; Windows uses a non-replacing same-directory
 MoveFileEx. Cache identity strings are internal and are not serialized.
+
+### Native hosting boundary (2026-10-14, ADR-0036)
+
+macOS enables the engine library and CLI with in-process CLAP/VST3 hosting,
+dummy audio and offline rendering. The platform's RT output must equal its
+offline output, including the anticipative renderer. A native fixture test
+runs this contract through both executors, Console 9, latency compensation and
+multiple worker capacities. JACK/fake JACK and the hardware benchmark stay
+Linux-only; an explicit JACK request returns engine.backend.unsupported,
+path /backend and a hint to select dummy. Windows engine remains gated by
+audio-file I/O. Shared/dedicated bridge creation on non-Linux platforms returns
+host.bridge.unsupported, path /isolation with an in_process hint, through the
+same InstancePool load boundary; it never substitutes a local instance.

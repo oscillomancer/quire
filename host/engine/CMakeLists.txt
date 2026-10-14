@@ -6,7 +6,6 @@ find_package(ZLIB REQUIRED)
 supple_add_library(engine
   SOURCES src/offline.cpp src/plan.cpp src/workers.cpp src/live_workers.cpp src/realtime.cpp src/recording.cpp
           src/stretch.cpp src/meters.cpp src/runtime_protection.cpp src/media_files.cpp
-          src/jack_backend.cpp
           src/app.cpp src/plugin_outputs.cpp src/commands.cpp src/extra_commands.cpp src/midi_commands.cpp src/analysis_commands.cpp
           src/render_commands.cpp src/chain_commands.cpp src/take_commands.cpp src/learn.cpp src/dsp_commands.cpp
           src/midi_control.cpp
@@ -15,7 +14,11 @@ supple_add_library(engine
        supple::core-dsp supple::signalsmith-stretch supple::console9
   PRIVATE_DEPS supple::product-info supple::script-compiler supple::sandbox-render ZLIB::ZLIB ${CMAKE_DL_LIBS})
 
-if(SUPPLE_BUILD_TESTS)
+if(SUPPLE_PLATFORM_LINUX)
+  target_sources(engine PRIVATE src/jack_backend.cpp)
+endif()
+
+if(SUPPLE_BUILD_TESTS AND SUPPLE_PLATFORM_LINUX)
   # A stand-in libjack: the JACK backend is tested without a server or device.
   add_library(engine-fake-jack MODULE tests/fake_jack.cpp)
   set_target_properties(engine-fake-jack PROPERTIES PREFIX "" OUTPUT_NAME "fake-libjack")
@@ -40,6 +43,13 @@ if(SUPPLE_BUILD_TESTS)
   target_link_libraries(engine.tests PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
+if(SUPPLE_BUILD_TESTS AND NOT SUPPLE_PLATFORM_LINUX)
+  supple_add_tests(engine SOURCES tests/test_native_engine.cpp LABELS rt)
+  add_dependencies(engine.tests clap-host-fixtures)
+  target_compile_definitions(engine.tests PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>")
+endif()
+
+if(SUPPLE_PLATFORM_LINUX)
 # Capacity benchmark (engine.md §7 B1), with a command-built shared session.
 add_executable(engine-bench bench/engine_bench.cpp bench/session.cpp)
 target_link_libraries(engine-bench PRIVATE supple::engine supple::product-info)
@@ -66,6 +76,8 @@ if(SUPPLE_BUILD_TESTS)
     -s ${PROJECT_SOURCE_DIR}/tools/bench -p "test_*.py")
   set_tests_properties(engine.bench-tooling PROPERTIES ENVIRONMENT
     "SUPPLE_BENCH_LUA_CHECK=$<TARGET_FILE:engine-bench-lua-check>")
+endif()
+
 endif()
 
 # The headless DAW CLI: <slug>-engine (named from cmake/Product.cmake).

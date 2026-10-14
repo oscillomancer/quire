@@ -856,6 +856,7 @@ Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, boo
     config.inputs = 2;         // at least the device's first stereo pair, for recording
     config.midiInputs = true;  // its MIDI inputs, for MIDI tracks (ADR-0016)
     if (backend == "jack") {
+#if defined(__linux__)
         JackOptions o;
         o.clientName = std::string(product::kSlug);
         o.library = options_.jackLibrary;
@@ -865,6 +866,11 @@ Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, boo
             config.inputs =
                 static_cast<std::uint32_t>(std::clamp<std::size_t>(names->size(), 2, 32));
         ownedBackend_ = std::make_unique<JackBackend>(o);
+#else
+        return Error("engine.backend.unsupported",
+                     "the JACK backend is unavailable on this platform", "/backend",
+                     "select dummy until the native device backend is available");
+#endif
     } else if (backend == "dummy") {
         ownedBackend_ = std::make_unique<DummyBackend>(
             DummyBackend::Options{.mode = DummyBackend::Mode::Thread, .paced = true});
