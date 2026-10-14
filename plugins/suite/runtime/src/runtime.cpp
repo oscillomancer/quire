@@ -96,8 +96,10 @@ namespace {
 // loaded module gets on a thread's first touch -- an allocation on the
 // audio thread's first block. A thread holds a slot only while it is inside
 // a hook (CurrentScope), so the table stays small; it is scanned up to the
-// highest slot ever taken.
-constexpr int kSlots = 128;
+// highest slot ever taken. There is room for far more threads inside hooks
+// at once than any host's pool has; past it, built-ins would fall back to
+// the default instance (48 kHz, no status).
+constexpr int kSlots = 1024;
 struct Slot {
     std::atomic<std::uintptr_t> thread{0};
     Instance* instance = nullptr;  // only its thread reads or writes it
