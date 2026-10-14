@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Supple Audio
 # Build and test on demand, never on ordinary branch pushes.
 # Once on the default branch: gh workflow run build.yml --ref <branch> -f platforms=macos
 # Before integration: git tag -a ci/<branch>-<n> -m 'platforms=macos'

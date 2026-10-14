@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Supple Audio
 # SDL3 is a declared system dependency. Build it in the disposable Linux
 # runner's workspace because Ubuntu 24.04 predates its development package.
 set -euo pipefail

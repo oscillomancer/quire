@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Supple Audio
 # Xcode 16.4 libc++ lacks floating-point from_chars. Use the matched Homebrew
 # LLVM headers and runtime for macOS 14.4 instead (ADR-0034's fallback).
 # SUPPLE_MAC_LLVM_ROOT supports a user-installed LLVM in another prefix.
