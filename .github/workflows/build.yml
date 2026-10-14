@@ -49,6 +49,8 @@ jobs:
           if [[ $GITHUB_REF == refs/tags/ci/* ]]; then
             branch=${GITHUB_REF_NAME#ci/}
             branch=${branch%-*}
+            # checkout can replace annotated refs with the event's commit SHA.
+            git fetch --force origin "$GITHUB_REF:$GITHUB_REF"
             choice=$(git for-each-ref --format='%(contents:subject)' "$GITHUB_REF")
             if [[ $choice == platforms=* ]]; then platforms=${choice#platforms=}; fi
           fi
@@ -79,10 +81,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Cache dependencies
-        uses: actions/cache@v4
+        id: cache
+        uses: actions/cache/restore@v4
         with:
           path: .deps
-          key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/build.yml', '.github/scripts/*', 'vcpkg.json') }}
+          key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/scripts/*', 'vcpkg.json') }}
 
       # System packages below belong to disposable runners, never the workstation.
       - name: Linux tools and libraries
@@ -128,11 +131,18 @@ jobs:
           if [[ '${{ matrix.platform }}' == macos ]]; then
             cmake --preset macos -DCMAKE_C_COMPILER="$MAC_LLVM/bin/clang" \
               -DCMAKE_CXX_COMPILER="$MAC_LLVM/bin/clang++" \
-              -DCMAKE_CXX_FLAGS="-nostdinc++ -isystem $MAC_LLVM/include/c++/v1" \
-              -DCMAKE_EXE_LINKER_FLAGS="-L$MAC_LLVM/lib/c++ -Wl,-rpath,$MAC_LLVM/lib/c++"
+              -DCMAKE_CXX_FLAGS="-nostdinc++ -isystem $MAC_LLVM/include/c++/v1 -D_LIBCPP_DISABLE_AVAILABILITY" \
+              -DCMAKE_EXE_LINKER_FLAGS="-L$MAC_LLVM/lib/c++ -L$MAC_LLVM/lib/unwind -lunwind -Wl,-rpath,$MAC_LLVM/lib/c++ -Wl,-rpath,$MAC_LLVM/lib/unwind"
           else
             cmake --preset ${{ matrix.preset }}
           fi
+      # Preserve expensive dependencies even when the compiler/test stage fails.
+      - name: Save dependencies
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .deps
+          key: ${{ steps.cache.outputs.cache-primary-key }}
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} -- -k 0
       - name: Test Linux (software OpenGL under Xvfb)

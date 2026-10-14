@@ -106,7 +106,7 @@ class DenormalGuard {
     ~DenormalGuard() SUPPLE_RT;
 
   private:
-    unsigned previous_ = 0;
+    [[maybe_unused]] unsigned previous_ = 0;  // SSE2 state; ARM64 support is a later port step.
 };
 
 }  // namespace supple::dsp

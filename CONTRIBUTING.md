@@ -83,7 +83,9 @@ its tests, under Xvfb and software OpenGL. SDL3 is built into the runner's
 workspace because Ubuntu 24.04 predates it. macOS (`macos-15`, arm64) uses
 Homebrew LLVM/libc++ and Ninja/SDL3, with deployment target 14.4; curl and
 zlib come from the SDK. The first CI run demonstrated that Xcode 16.4
-lacks floating-point `std::from_chars`, required by units and JSON parsing. Windows (`windows-2022`, x64) uses clang-cl, Ninja
+lacks floating-point `std::from_chars`, required by units and JSON parsing.
+The bundled libc++ uses `_LIBCPP_DISABLE_AVAILABILITY` together with its
+matching headers, libraries and runtime search paths, as Homebrew specifies. Windows (`windows-2022`, x64) uses clang-cl, Ninja
 and the Windows SDK, with vcpkg SDL3/zlib/curl and a binary cache. Windows
 10 1803 is the minimum. No packaging or installers run here. Local platform
 commands are `cmake --workflow --preset macos` or `windows`; the latter
