@@ -415,9 +415,11 @@ class SharedSignals {
 #endif
     }
     void wake(std::atomic<std::uint32_t>& word, bool completion = false) SUPPLE_RT {
+        // All native wakes are one nonblocking syscall, including shutdown
+        // invoked from main through this RT-annotated entry point.
+        const rt::ScopedSanctionedSyscall sanctioned;
 #if defined(_WIN32)
         (void)word;
-        const rt::ScopedSanctionedSyscall sanctioned;
         SetEvent(completion ? done_ : request_);
 #else
         (void)completion;
