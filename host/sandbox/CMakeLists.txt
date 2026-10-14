@@ -63,13 +63,18 @@ if(SUPPLE_BUILD_TESTS)
     COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_proxy.py
             $<TARGET_FILE:${PRODUCT_SLUG}-sandbox> $<TARGET_FILE:${PRODUCT_SLUG}-mcp>
             $<TARGET_FILE:orrery-headless>)
-  # The full real-synth session runs in the dev and GCC debug presets only.
+  # Keep the Linux documentation golden; native DSP numbers may differ.
+  # Both deployments still run every structured-result assertion.
   if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT SUPPLE_SANITIZE)
+    set(_mcp_demo_args)
+    if(NOT SUPPLE_PLATFORM_LINUX)
+      list(APPEND _mcp_demo_args --portable)
+    endif()
     add_test(NAME mcp.demo
       COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_demo.py
               $<TARGET_FILE:${PRODUCT_SLUG}-sandbox> $<TARGET_FILE:${PRODUCT_SLUG}-mcp>
               $<TARGET_FILE:orrery-headless>
-              ${PROJECT_SOURCE_DIR}/docs/demos/mcp-orrery-session.md)
+              ${PROJECT_SOURCE_DIR}/docs/demos/mcp-orrery-session.md ${_mcp_demo_args})
     set_tests_properties(mcp.demo PROPERTIES LABELS "sandbox;slow")
   endif()
   add_dependencies(${PRODUCT_SLUG}-sandbox orrery-headless)

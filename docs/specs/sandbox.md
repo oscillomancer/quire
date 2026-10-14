@@ -625,3 +625,9 @@ and is skipped only where that format is unavailable.
 Script-player source reads require a regular file before opening the bounded
 (1 MiB) stream; directories are rejected even where ifstream reports an empty
 EOF.
+
+The real-synth MCP demo runs its raw structured-result assertions through stdio
+and proxy on native systems. Its exact numeric documentation transcript remains
+a Linux drift check: DSP is deterministic per platform, not bit-identical
+between platforms (ADR-0034). Portable mode retains an informational Linux
+reference diff in the CTest log for review.

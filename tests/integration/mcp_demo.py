@@ -2,12 +2,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Run the real Orrery sound-design loop over both MCP deployments.
 
-The committed transcript is also a drift test. Only temporary paths, render
-IDs, wall-clock timings, and long arrays are normalized in its display.
-Assertions always inspect the unmodified structured MCP results.
+The committed Linux transcript is also a drift test. Only temporary paths,
+render IDs, wall-clock timings, and long arrays are normalized in its display.
+--portable runs both deployments and all raw structured-result assertions; the
+Linux reference diff is informational because DSP values are platform-dependent.
 """
 
 import argparse
+import difflib
 import json
 import os
 import re
@@ -236,6 +238,8 @@ def main():
     parser.add_argument("orrery", type=Path)
     parser.add_argument("transcript", type=Path)
     parser.add_argument("--write", action="store_true", help="regenerate the committed transcript")
+    parser.add_argument("--portable", action="store_true",
+                        help="check raw MCP contracts; print the Linux transcript diff for review")
     args = parser.parse_args()
     for path in (args.sandbox, args.proxy, args.orrery):
         assert path.is_file(), path
@@ -257,7 +261,16 @@ def main():
         args.transcript.write_text(content, encoding="utf-8")
     else:
         expected = args.transcript.read_text(encoding="utf-8")
-        assert content == expected, "MCP transcript drift; regenerate with --write and review diff"
+        if content != expected:
+            difference = "".join(difflib.unified_diff(
+                expected.splitlines(keepends=True), content.splitlines(keepends=True),
+                fromfile="Linux reference", tofile="current platform"))
+            if args.portable:
+                print("Informational Linux-reference diff (raw contracts passed):")
+                print(difference, end="")
+            else:
+                raise AssertionError("MCP transcript drift; regenerate with --write and review diff\n"
+                                     + difference)
     print(f"Orrery MCP demo passed in {time.monotonic() - started:.2f}s")
 
 

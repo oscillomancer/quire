@@ -118,3 +118,11 @@ available; full type/variable debug info can be restored with
 -DCMAKE_CXX_FLAGS_DEBUG=-g on a larger machine. Stock isolated builds keep their
 existing flags. The fallback implementation's private namespace is stop_detail
 to avoid collisions with component detail namespaces when both are imported.
+
+Native conformance found that a directory can look like an empty successful
+ifstream read on macOS. The product-owned script catalog requires a regular
+file before its bounded read; the shared template is unchanged. The MCP
+real-synth session keeps all raw protocol/render/optimization assertions on
+native systems, while its exact Linux numeric transcript remains a Linux drift
+check. Native logs retain the reference diff for review (per-platform render
+determinism, ADR-0034).
