@@ -6,15 +6,16 @@ set(SUPPLE_PLATFORM_LINUX OFF)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   set(SUPPLE_PLATFORM_LINUX ON)
 endif()
-# Futex/eventfd, process isolation, JACK, X11 and the services depending on them.
-set(SUPPLE_PLATFORM_SERVICES ${SUPPLE_PLATFORM_LINUX})
+# Hosting/scanning, process isolation, JACK, X11 and their dependent services.
+# Core-base waits/wakes, control-protocol and MCP are portable and ungated.
+set(SUPPLE_HOST_SERVICES ${SUPPLE_PLATFORM_LINUX})
 # Recording recovery and RF64 output still use POSIX file descriptors.
 set(SUPPLE_POSIX_AUDIO_FILES OFF)
 if(UNIX)
   set(SUPPLE_POSIX_AUDIO_FILES ON)
 endif()
-if(NOT SUPPLE_PLATFORM_SERVICES)
-  message(STATUS "Port gates: scheduling/wake relay, hosting/bridge, engine/JACK, control/MCP, GUI/agent, plugin wrappers (see CONTRIBUTING.md)")
+if(NOT SUPPLE_HOST_SERVICES)
+  message(STATUS "Port gates: hosting/scan/bridge, engine/JACK, GUI/agent, plugin wrappers (see CONTRIBUTING.md)")
   set(SUPPLE_BUILD_GUI OFF CACHE BOOL "Build GUI components" FORCE)
   set(SUPPLE_BUILD_PLUGINS OFF CACHE BOOL "Build the stock plugins (template-derived)" FORCE)
   if(SUPPLE_BUILD_SPIKES OR SUPPLE_BUILD_FUZZERS)

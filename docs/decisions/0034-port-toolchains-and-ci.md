@@ -2,6 +2,10 @@
 
 **Status:** Accepted, 2026-10-14. Amends ADR-0003.
 
+**Gate amendment, 2026-10-14:** [ADR-0035](0035-headless-platform-layer.md)
+removes the native core-base and control/MCP gates. Remaining hosting-dependent
+services use `SUPPLE_HOST_SERVICES`; the Windows audio-file gate is unchanged.
+
 ## Context
 
 The macOS and Windows port needs branch CI before changes can reach the

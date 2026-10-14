@@ -1,4 +1,4 @@
-if(SUPPLE_PLATFORM_SERVICES)
+if(SUPPLE_HOST_SERVICES)
   add_subdirectory(clap-host)
   add_subdirectory(sandbox)
   add_subdirectory(engine)

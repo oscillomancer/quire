@@ -14,8 +14,9 @@ The port branch has on-demand Linux/macOS/Windows CI and portable presets
 macOS and Windows pass their portable tests. The macOS preset uses AppleClang
 and system libc++; shared float/double parsing uses vendored fast_float (MIT)
 on all platforms, including the suite's self-contained source exports.
-Non-Linux host, engine,
-control/MCP, GUI and plugin wrappers remain gated, and Windows audio-file
+Native waits/wakes, thread setup, control-protocol and standalone MCP/proxy are
+now enabled on macOS/Windows for native CI validation (ADR-0035).
+Non-Linux host, engine, GUI and plugin wrappers remain gated, and Windows audio-file
 I/O remains gated. Portable libraries, the session model, stock DSP cores
 and the script suite build independently of those services; see
 CONTRIBUTING.md for the complete gate list. External Windows readers that

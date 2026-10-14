@@ -112,16 +112,20 @@ cache, then build and test with the `macos` presets.
 `cmake/Platforms.cmake` defines the boundaries. Later port steps remove
 them as implementations and tests become available. Linux coverage is
 unchanged. macOS and Windows currently build/test JSON/schema/params/patch,
-command bus, Lua, DSP/Console 9/analysis, MIDI/notation/timeline/optimizer,
+core-base native waits/wakes/thread setup, command bus, control-protocol/MCP,
+Lua, DSP/Console 9/analysis, MIDI/notation/timeline/optimizer,
 session model, plugin support, all stock SDK-free DSP engines, and the
 script compiler/runtime and suite semantic layer. Audio-file tests also
-run on macOS. These gates are explicit, with no no-op RT implementations:
+run on macOS. Native core-base sources/tests, JSON-RPC control transport/model
+loop and standalone MCP/proxy no longer share the hosting gate (ADR-0035).
+Linux-specific descriptor/permission/signal probes and memory-residency/rlimit
+tests remain guarded with portable boundary coverage alongside them.
+These gates are explicit, with no no-op RT implementations:
 
 | Gate | Off on | Reason / follow-up |
 |---|---|---|
-| `SUPPLE_PLATFORM_SERVICES`: scheduling, stack prefault and wake relay implementations/tests | macOS, Windows | Linux futex/eventfd and scheduling APIs; portable inline RT primitives still tested |
-| Same gate: CLAP/VST3 host, scan fixtures, bridge and sandbox | macOS, Windows | Linux loader, process isolation and IPC; hosting/bridge port steps |
-| Same gate: engine, JACK/fake JACK, control socket/model loop, MCP | macOS, Windows | Linux wake/process services and JACK; headless/backend port steps; session model still built |
+| `SUPPLE_HOST_SERVICES`: CLAP/VST3 host, scan fixtures, bridge and sandbox | macOS, Windows | Linux loader, process isolation and IPC; hosting/bridge port steps |
+| Same gate: engine, JACK/fake JACK | macOS, Windows | Depends on hosting and device backends; session model still built |
 | Same gate: DAW GUI/agent, stock plugin wrappers, conformance/reset/export integration tests | macOS, Windows | Depend on the host/engine and X11; SDK-free DSP engines and suite tests still built |
 | POSIX evaluation harness tests | Windows | Unix executable fixtures, symlinks and process groups |
 | `SUPPLE_POSIX_AUDIO_FILES`: audio-file library/tests | Windows | POSIX exclusive files, RF64 output and recording recovery; file-I/O port step |

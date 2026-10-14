@@ -10,7 +10,7 @@ add_subdirectory(comp/engine)
 add_subdirectory(drive/engine)
 add_subdirectory(transient/engine)
 add_subdirectory(reverb/engine)
-if(SUPPLE_PLATFORM_SERVICES)
+if(SUPPLE_HOST_SERVICES)
   add_subdirectory(orrery/clap)
 endif()
 

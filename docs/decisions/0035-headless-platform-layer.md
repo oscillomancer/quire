@@ -86,3 +86,11 @@ API references: [Apple address waits](https://developer.apple.com/documentation/
 [Windows address waits](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-waitonaddress),
 [Apple QoS](https://developer.apple.com/library/archive/documentation/Performance/Conceptual/EnergyGuide-iOS/PrioritizeWorkWithQoS.html),
 [Windows AF_UNIX](https://devblogs.microsoft.com/commandline/af_unix-comes-to-windows/).
+
+## Build integration (2026-10-14)
+
+Native core-base implementations/tests, control-protocol and standalone MCP/proxy
+build independently of the hosting port. The former broad platform-services gate
+is narrowed and renamed `SUPPLE_HOST_SERVICES`: hosting/scanning, bridge, sandbox,
+engine/device backends, GUI/agent and plugin wrappers remain Linux-only. The
+Windows POSIX audio-file gate is unchanged. Linux target/test coverage is retained.

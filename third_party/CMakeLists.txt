@@ -71,7 +71,7 @@ endif()
 target_link_libraries(tp-lua PUBLIC ${CMAKE_DL_LIBS})
 add_library(supple::lua ALIAS tp-lua)
 
-if(SUPPLE_PLATFORM_SERVICES)
+if(SUPPLE_HOST_SERVICES)
 set(_vst3 ${CMAKE_CURRENT_SOURCE_DIR}/vst3sdk-v3.8.0_build_66)
 add_library(tp-vst3-host STATIC
   ${_vst3}/pluginterfaces/base/coreiids.cpp
