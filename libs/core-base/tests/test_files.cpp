@@ -3,7 +3,12 @@
 #include <doctest/doctest.h>
 #include <supple/base/files.h>
 
+#ifdef _WIN32
+#include <process.h>
+#define getpid _getpid
+#else
 #include <unistd.h>
+#endif
 #include <atomic>
 #include <filesystem>
 #include <string>
@@ -91,5 +96,20 @@ TEST_CASE("files: atomic write, read back, errors") {
     CHECK(
         writeFileAtomic(dir / "sub" / "a.txt" / "not-a-dir", std::string_view("x")).error().code ==
         "file.write");
+    fs::remove_all(dir);
+}
+
+TEST_CASE("files: native Unicode paths and binary bytes survive replacement") {
+    const fs::path dir =
+        fs::temp_directory_path() / ("supple-native-" + std::to_string(::getpid()));
+    const fs::path path = dir / fs::path(std::u8string(u8"音声.wav"));
+    const std::vector<std::uint8_t> first{0, 10, 13, 26, 255};
+    const std::vector<std::uint8_t> second{26, 13, 10, 0};
+    REQUIRE(writeFileAtomic(path, first).ok());
+    REQUIRE(readFile(path).ok());
+    CHECK(*readFile(path) == first);
+    REQUIRE(writeFileAtomic(path, second).ok());
+    REQUIRE(readFile(path).ok());
+    CHECK(*readFile(path) == second);
     fs::remove_all(dir);
 }

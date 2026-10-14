@@ -67,6 +67,7 @@ endif()
 target_link_libraries(tp-lua PUBLIC ${CMAKE_DL_LIBS})
 add_library(supple::lua ALIAS tp-lua)
 
+if(SUPPLE_PLATFORM_SERVICES)
 set(_vst3 ${CMAKE_CURRENT_SOURCE_DIR}/vst3sdk-v3.8.0_build_66)
 add_library(tp-vst3-host STATIC
   ${_vst3}/pluginterfaces/base/coreiids.cpp
@@ -90,6 +91,7 @@ if(_supple_sanitize_flags)
 endif()
 target_link_libraries(tp-vst3-host PUBLIC ${CMAKE_DL_LIBS})
 add_library(supple::vst3-host ALIAS tp-vst3-host)
+endif()
 
 # MIR 1.0.0 (MIT): the JIT and interpreter behind DSP scripts (ADR-0032).
 # Only the core, the interpreter (included by mir.c) and the generator are
@@ -99,7 +101,11 @@ set(_mir ${CMAKE_CURRENT_SOURCE_DIR}/mir-1.0.0)
 add_library(tp-mir STATIC ${_mir}/mir.c ${_mir}/mir-gen.c)
 target_include_directories(tp-mir SYSTEM PUBLIC ${_mir})
 set_target_properties(tp-mir PROPERTIES C_STANDARD 11 C_EXTENSIONS ON POSITION_INDEPENDENT_CODE ON)
-target_compile_options(tp-mir PRIVATE -w -fsigned-char)
+if(MSVC)
+  target_compile_options(tp-mir PRIVATE /clang:-w /clang:-fsigned-char /clang:-std=gnu11)
+else()
+  target_compile_options(tp-mir PRIVATE -w -fsigned-char)
+endif()
 if(_supple_sanitize_flags)
   target_compile_options(tp-mir PRIVATE ${_supple_sanitize_flags})
   # MIR's string hash reads unaligned 64-bit words (mir-hash.h), which

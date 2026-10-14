@@ -8,6 +8,7 @@
 // sample rate.
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <cctype>
 #include <climits>
 #include <cmath>
@@ -111,7 +112,7 @@ std::uintptr_t thisThread() {
 #ifdef _WIN32
     return static_cast<std::uintptr_t>(GetCurrentThreadId()) + 1;
 #else
-    return static_cast<std::uintptr_t>(pthread_self()) | 1;  // never 0, the free mark
+    return std::bit_cast<std::uintptr_t>(pthread_self()) | 1;  // never 0, the free mark
 #endif
 }
 

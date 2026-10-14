@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Supple Audio
 #include <doctest/doctest.h>
+#ifdef __linux__
 #include <sys/mman.h>
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -20,6 +22,7 @@ using supple::Rng;
 using supple::RtHandoff;
 using supple::SpscRing;
 
+#ifdef __linux__
 TEST_CASE("futex deadline wait checks publication before waiting and handles expired deadlines") {
     std::atomic<std::uint32_t> event{0};
     const std::chrono::steady_clock::time_point expired{};
@@ -36,6 +39,8 @@ TEST_CASE("futex deadline wait checks publication before waiting and handles exp
     producer.join();
     CHECK(supple::rt::waitUntil(event, 1, expired));
 }
+
+#endif
 
 TEST_CASE("SpscRing: full ring drops the newest item, peek/consume retries") {
     SpscRing<int, 4> ring;
@@ -219,7 +224,7 @@ TEST_CASE("RT primitives are real-time safe" * doctest::description("rt")) {
 #if defined(__SANITIZE_ADDRESS__)
 #define SUPPLE_TEST_FAKE_STACKS 1
 #endif
-#ifndef SUPPLE_TEST_FAKE_STACKS
+#if defined(__linux__) && !defined(SUPPLE_TEST_FAKE_STACKS)
 TEST_CASE("prefaultStack commits the stack below its caller") {
     constexpr std::size_t kFailed = SIZE_MAX;
     std::size_t pages = 0, before = kFailed, after = kFailed;

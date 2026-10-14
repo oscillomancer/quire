@@ -8,6 +8,13 @@
 
 namespace {
 constexpr const char* kFlag = "SUPPLE_TEST_ENVIRONMENT_FLAG";
+int setFlag(const char* value) {
+#ifdef _WIN32
+    return ::_putenv_s(kFlag, value ? value : "");
+#else
+    return value ? ::setenv(kFlag, value, 1) : ::unsetenv(kFlag);
+#endif
+}
 struct RestoreFlag {
     std::optional<std::string> previous;
     RestoreFlag() {
@@ -15,22 +22,22 @@ struct RestoreFlag {
     }
     ~RestoreFlag() {
         if (previous)
-            setenv(kFlag, previous->c_str(), 1);
+            setFlag(previous->c_str());
         else
-            unsetenv(kFlag);
+            setFlag(nullptr);
     }
 };
 }  // namespace
 
 TEST_CASE("environment flags require exactly 1") {
     RestoreFlag restore;
-    REQUIRE(unsetenv(kFlag) == 0);
+    REQUIRE(setFlag(nullptr) == 0);
     CHECK_FALSE(supple::environmentFlagEnabled(kFlag));
     for (const char* value : {"", "0", "01", "10", "true", "1 ", " 1", "1\n"}) {
         CAPTURE(value);
-        REQUIRE(setenv(kFlag, value, 1) == 0);
+        REQUIRE(setFlag(value) == 0);
         CHECK_FALSE(supple::environmentFlagEnabled(kFlag));
     }
-    REQUIRE(setenv(kFlag, "1", 1) == 0);
+    REQUIRE(setFlag("1") == 0);
     CHECK(supple::environmentFlagEnabled(kFlag));
 }

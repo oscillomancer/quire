@@ -35,20 +35,26 @@ function(supple_target_defaults target)
   endif()
   # Determinism (Principle 5): no FMA contraction, so Clang and GCC compute
   # identical DSP and analysis results. Never add -ffast-math.
-  target_compile_options(${target} PRIVATE -ffp-contract=off)
-  target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wshadow
+  set(flags -ffp-contract=off)
+  list(APPEND flags -Wall -Wextra -Wpedantic -Wshadow
                                            -Wcast-align -Wnull-dereference -Wdouble-promotion
                                            $<$<COMPILE_LANGUAGE:CXX>:-Wnon-virtual-dtor>
                                            $<$<COMPILE_LANGUAGE:CXX>:-Wold-style-cast>
                                            $<$<COMPILE_LANGUAGE:CXX>:-Woverloaded-virtual>)
+  if(MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    # All these flags apply to C and C++ in clang-cl too.
+    list(TRANSFORM flags REPLACE "^(-.*)$" "/clang:\\1")
+    list(TRANSFORM flags REPLACE ":(-W[^>]+)>$" ":/clang:\\1>")
+  endif()
+  target_compile_options(${target} PRIVATE ${flags})
   # Parameter tables use designated initializers with default member values
   # on purpose (docs/specs/core-params.md); Clang's -Wextra would flag every
   # omitted field.
   target_compile_options(${target} PRIVATE
-    $<$<CXX_COMPILER_ID:Clang>:-Wno-missing-designated-field-initializers>
+    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-missing-designated-field-initializers>
     $<$<CXX_COMPILER_ID:GNU>:-Wno-missing-field-initializers>)
   if(SUPPLE_WERROR)
-    target_compile_options(${target} PRIVATE -Werror)
+    target_compile_options(${target} PRIVATE $<IF:$<BOOL:${MSVC}>,/WX,-Werror>)
   endif()
   if(_supple_sanitize_flags)
     target_compile_options(${target} PRIVATE ${_supple_sanitize_flags})

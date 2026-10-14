@@ -10,7 +10,12 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#include <process.h>
+#define getpid _getpid
+#else
 #include <unistd.h>
+#endif
 
 #include "supple/base/files.h"
 #include "supple/base/sha256.h"

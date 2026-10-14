@@ -2,6 +2,9 @@
 
 **Status:** Accepted, 2026-09-26.
 
+2026-10-14: [ADR-0033](0033-port-toolchains-and-ci.md) amends the platform
+toolchains, CI triggers and cross-platform determinism requirement.
+
 ## Context
 
 C++20, CMake + Ninja, Clang and GCC, sanitizers including RealtimeSanitizer

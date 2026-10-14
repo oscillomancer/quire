@@ -2,8 +2,14 @@
 // Copyright (c) 2026 Supple Audio
 #include "supple/base/files.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <fcntl.h>
 #include <unistd.h>
+#endif
+
+#include <algorithm>
 
 #include <array>
 #include <atomic>
@@ -45,6 +51,44 @@ Status writeFileAtomic(const fs::path& path, std::span<const std::uint8_t> bytes
     // A unique temporary name per writer (pid + counter), created exclusively,
     // so concurrent writers of the same target never share a temp file.
     static std::atomic<std::uint64_t> counter{0};
+#ifdef _WIN32
+    fs::path tmp = path;
+    tmp += "." + std::to_string(::GetCurrentProcessId()) + "." +
+           std::to_string(counter.fetch_add(1)) + ".tmp";
+    auto error = [&](const std::string& what, DWORD code) {
+        fs::remove(tmp, ec);
+        return Error("file.write",
+                     what + " " + path.string() + ": Windows error " + std::to_string(code), {},
+                     "check free disk space and directory permissions");
+    };
+    const HANDLE file = ::CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                                      FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return Error(
+            "file.write",
+            "cannot create " + tmp.string() + ": Windows error " + std::to_string(::GetLastError()),
+            {}, "check that the directory exists and is writable");
+    std::size_t off = 0;
+    while (off < bytes.size()) {
+        DWORD written = 0;
+        const DWORD count = static_cast<DWORD>(std::min<std::size_t>(bytes.size() - off, 1 << 20));
+        if (!::WriteFile(file, bytes.data() + off, count, &written, nullptr) || written == 0) {
+            const DWORD code = ::GetLastError();
+            ::CloseHandle(file);
+            return error("cannot write", code);
+        }
+        off += written;
+    }
+    if (!::FlushFileBuffers(file)) {
+        const DWORD code = ::GetLastError();
+        ::CloseHandle(file);
+        return error("cannot sync", code);
+    }
+    if (!::CloseHandle(file)) return error("cannot close", ::GetLastError());
+    if (!::MoveFileExW(tmp.c_str(), path.c_str(),
+                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        return error("cannot move temporary file into place", ::GetLastError());
+#else
     const fs::path tmp = path.string() + "." + std::to_string(::getpid()) + "." +
                          std::to_string(counter.fetch_add(1)) + ".tmp";
     const int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
@@ -82,6 +126,7 @@ Status writeFileAtomic(const fs::path& path, std::span<const std::uint8_t> bytes
         (void)::fsync(dfd);
         ::close(dfd);
     }
+#endif
     return okStatus();
 }
 
