@@ -67,6 +67,12 @@ struct BridgeTestAccess {
     static bool pendingDirty(const std::shared_ptr<BridgeProcess>& process, std::size_t member) {
         return process->members_.at(member)->pendingNotes_.stateDirty;
     }
+    static std::shared_ptr<BridgeProcess> adopt(int socket,
+                                                std::unique_ptr<bridge::NativeChild> child) {
+        auto process = adopt(socket, child->pid());
+        process->child_ = std::move(child);
+        return process;
+    }
     static std::shared_ptr<BridgeProcess> adopt(int socket, pid_t pid) {
         std::shared_ptr<BridgeProcess> process(new BridgeProcess);
         process->sock_ = socket;
@@ -1324,15 +1330,20 @@ TEST_CASE("state restore is a queued-edit barrier and inactive saves flush edits
 TEST_CASE("bridge requests fail when a scripted child stops reading") {
     int sockets[2];
     REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
-    const auto pid = ::fork();
-    REQUIRE(pid >= 0);
-    if (pid == 0) {
-        ::close(sockets[0]);
-        for (;;) ::pause();
-    }
-    ScriptedChild child{pid};
+    char pattern[] = "/tmp/supple-scripted-child-XXXXXX";
+    const char* root = ::mkdtemp(pattern);
+    REQUIRE(root);
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() { std::filesystem::remove_all(path); }
+    } cleanup{root};
+    const auto executable = cleanup.path / "peer";
+    std::ofstream(executable) << "#!/bin/sh\nexec sleep 60\n";
+    std::filesystem::permissions(executable, std::filesystem::perms::owner_all);
+    auto child = bridge::NativeChild::launch(executable, sockets[1]);
     ::close(sockets[1]);
-    auto process = BridgeTestAccess::adopt(sockets[0], pid);
+    REQUIRE(child);
+    auto process = BridgeTestAccess::adopt(sockets[0], std::move(*child));
     bridge::Writer request;
     request.bytes.resize(1 << 20);
     const auto reply = process->call(bridge::Op::LoadState, 1, request, -1, 20);
