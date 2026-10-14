@@ -4664,7 +4664,8 @@ TEST_CASE("background elevation refusals keep every background thread normal and
         REQUIRE(engine.start(backend, {.blockSize = 128}));
         CHECK(engine.scheduling().renderer == kNormal);
         CHECK(engine.scheduling().background == kNormal);
-        CHECK(warnsNormal(engine, "allowed CPUs"));
+        // A zero RT priority limit is refused before the CPU cap (ADR-0026).
+        CHECK(warnsNormal(engine, softLimit(RLIMIT_RTPRIO) < 1 ? "RLIMIT_RTPRIO" : "allowed CPUs"));
         engine.stop();
     }
     SUBCASE("no real-time priority within RLIMIT_RTPRIO") {
