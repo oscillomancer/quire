@@ -79,6 +79,12 @@ once their runs finish. Dependencies and Linux compiler output are cached;
 avoid repeated full runs on this private repository (macOS and Windows
 consume more Actions minutes).
 
+GitHub isolates caches by ref: a fresh CI tag cannot restore a cache saved
+under another tag. Caches help same-ref reruns and, after integration,
+manual runs on the same branch. Linux ccache also reuses shared compilation
+within each run's isolated plugin builds. See GitHub's
+[cache access restrictions](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache).
+
 Linux (`ubuntu-24.04`, Clang 22) builds the existing `dev` preset with all
 its tests, under Xvfb and software OpenGL. SDL3 and the pinned CLAP validator
 are built and cached in the runner's workspace; Ubuntu 24.04 predates SDL3.
