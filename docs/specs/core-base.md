@@ -12,7 +12,10 @@ descriptor.
 
 - `waitable()` returns a borrowed `Waitable`; check `valid()` before subscribing
   producers. It outlives all watchers. `waitFor(span<WaitItem>, timeoutMs)`
-  snapshots readiness; negative timeout waits indefinitely. Readiness flags
+  snapshots readiness and returns the number of ready entries, including
+  duplicate sources. Native registrations are deduplicated on macOS/Windows
+  and readiness is delivered to every interested watch. Negative timeout waits
+  indefinitely. Readiness flags
   `kWaitRead/Write/Error/Hangup/Invalid` match POSIX poll bits. Windows accepts
   manual-reset event handles (read readiness), at most 64 unique handles;
   socket-event registration/reset is the owner's responsibility. Its descriptors

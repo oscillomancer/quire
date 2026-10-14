@@ -36,7 +36,8 @@ struct WaitItem {
     short events = kWaitRead;
     short ready = 0;
 };
-// poll semantics: count ready, 0 deadline, -1 error (errno); -1 timeout is infinite.
+// Returns the number of ready entries (including duplicate sources), 0 at the
+// deadline, -1 on error (errno). A -1 timeout waits indefinitely.
 // Windows accepts at most 64 event handles, reports invalid sources as ready.
 int waitFor(std::span<WaitItem> items, int timeoutMs);
 

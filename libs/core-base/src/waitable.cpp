@@ -70,6 +70,33 @@ int waitFor(std::span<WaitItem> items, int timeoutMs) {
             ++ready;
         }
     return ready;
+#elif defined(__APPLE__)
+    // Darwin poll reports duplicate registrations through only one entry.
+    // Register each descriptor once, then fan its readiness out to the watches.
+    std::vector<pollfd> fds;
+    fds.reserve(items.size());
+    for (auto& item : items) {
+        item.ready = 0;
+        const int fd = item.source.fd();
+        const auto found = std::find_if(fds.begin(), fds.end(),
+                                        [fd](const auto& entry) { return entry.fd == fd; });
+        if (found == fds.end())
+            fds.push_back({fd, item.events, 0});
+        else
+            found->events |= item.events;
+    }
+    const int result = ::poll(fds.data(), fds.size(), timeoutMs);
+    if (result < 0) return result;
+    int ready = 0;
+    for (auto& item : items) {
+        const int fd = item.source.fd();
+        const auto found = std::find_if(fds.begin(), fds.end(),
+                                        [fd](const auto& entry) { return entry.fd == fd; });
+        item.ready =
+            static_cast<short>(found->revents & (item.events | POLLERR | POLLHUP | POLLNVAL));
+        if (item.ready) ++ready;
+    }
+    return ready;
 #else
     std::vector<pollfd> fds;
     fds.reserve(items.size());
