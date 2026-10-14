@@ -534,3 +534,15 @@ struct T : Effect {
 };
 )") == "script.type.reference");
 }
+
+TEST_CASE("array size does not make its subscript a constant expression") {
+    CHECK(firstError(R"(#include <supple/script.h>
+struct T : Effect {
+    static constexpr Info info = {.name = "T", .id = "com.example.t"};
+    void process(Block& io) {
+        Array<Array<int, 2>, 2> a;
+        constexpr int width = a[0].size();
+    }
+};
+)") == "script.constant.required");
+}

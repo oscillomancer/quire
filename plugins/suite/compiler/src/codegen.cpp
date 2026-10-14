@@ -1330,8 +1330,8 @@ MIR_op_t Codegen::call(CallExpr* c) {
         const std::string& m = static_cast<MemberExpr*>(c->callee)->member;
         const Type* ot = c->object->type();
         if (m == "size") {
-            if (ot->kind == TypeKind::Array) return imm(ot->count);
             MIR_reg_t object = aggregate(c->object);
+            if (ot->kind == TypeKind::Array) return imm(ot->count);
             MIR_reg_t r = temp(VK::I);
             const int sizeOff =
                 ot->element->kind == TypeKind::Double  ? D::Layout::bufferSize<double>()

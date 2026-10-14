@@ -1019,7 +1019,14 @@ Expr* Sema::checkCall(CallExpr* c) {
                               "write size()");
                     c->qt = QualType{b_.intType(), false, false};
                     if (ot->kind == TypeKind::Array) {
-                        c->constant = true;
+                        // size() is static constexpr, but C++ still evaluates
+                        // its object expression. In particular, subscripting
+                        // calls non-constexpr operator[] and may change an index.
+                        Expr* object = m->object;
+                        while (object->kind == ExprKind::Member)
+                            object = static_cast<MemberExpr*>(object)->object;
+                        c->constant =
+                            object->kind == ExprKind::Name || object->kind == ExprKind::This;
                         c->constInt = ot->count;
                         c->constValue = ot->count;
                     }

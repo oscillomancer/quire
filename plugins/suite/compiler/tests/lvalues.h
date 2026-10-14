@@ -35,5 +35,10 @@ struct Lvalues : Effect {
         a[++i] += i;
         io[0][8] = a[1];
         io[0][9] = defaultValue();
+        Array<Array<int, 2>, 2> nested;
+        int row = 0;
+        int width = nested[row++].size() + 1;
+        io[0][10] = row;
+        io[0][11] = width;
     }
 };
