@@ -96,8 +96,8 @@ struct Tour : Effect {
         y += idiv(k, 7) * 1e-5 + imod(k, 5) * 1e-6 + wrap(k, 13) * 1e-7;
         flip = !flip;
         y = flip ? y : -y * 0.5;
-        y += average(taps) * 1e-3;
-        return on ? y : x;
+        y += average(taps) * 1e-3;  // which keeps rising: the output is bounded below
+        return on ? clamp(y, -1.0, 1.0) : x;
     }
 
     void process(Block& io) {
