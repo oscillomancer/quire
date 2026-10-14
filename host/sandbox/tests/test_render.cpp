@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -177,10 +178,12 @@ TEST_CASE("renderer mixes a mono key at exact samples and zero pads it" *
                 wrong += channel[i] != (i >= 1003 && i < 2013 ? 0.75f : 0.25f);
         CHECK(wrong == 0);
     }
+    // No key: the port is deactivated, and the fixture keys from its input.
     request.sidechain = nullptr;
     auto dry = render(chain, settings, request);
     REQUIRE(dry);
-    CHECK(dry->audio.channels == input.channels);
+    for (const auto& channel : dry->audio.channels)
+        CHECK(std::all_of(channel.begin(), channel.end(), [](float x) { return x == 0.5f; }));
     request.sidechain = &key;
     key.sampleRate = 44100;
     CHECK(render(chain, settings, request).error().path == "/sidechain");

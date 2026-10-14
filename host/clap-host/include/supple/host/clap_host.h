@@ -247,10 +247,18 @@ class Instance {
     // order; their channels are ProcessBlock::auxOutputs (ADR-0021).
     const std::vector<AudioPortInfo>& auxOutputPorts() const { return auxOutPorts_; }
     std::uint32_t auxOutputChannels() const;
-    // Whether a key is connected. VST3 plug-ins see it as their auxiliary bus
-    // being active (some then key from it); set before activate().
+    // Whether a key is connected; set before activate(). CLAP plug-ins see an
+    // unconnected key port deactivated (audio-ports-activation) and VST3s an
+    // inactive auxiliary bus, so they can key from their own input; either
+    // way it hears silence.
     Status setSidechainActive(bool on);
     bool sidechainActive() const { return keyActive_; }
+    // Whether a change to it needs a fresh activation: a VST3, a CLAP plug-in
+    // with port activation, or an isolated one (whose extensions the host
+    // cannot see).
+    bool followsKeyActivation() const {
+        return vst3_ != nullptr || remote_ != nullptr || extPortsActivation_ != nullptr;
+    }
 
     // --- standard parameters (main thread) ---
     std::vector<ParamInfo> params() const;
@@ -427,6 +435,7 @@ class Instance {
     const clap_plugin_timer_support_t* extTimer_ = nullptr;
     const clap_plugin_supple_semantic_params_t* extSemantic_ = nullptr;
     const clap_plugin_supple_editor_picture_t* extPicture_ = nullptr;
+    const clap_plugin_audio_ports_activation_t* extPortsActivation_ = nullptr;
     const clap_plugin_supple_plugin_status_t* extStatus_ = nullptr;
     const clap_plugin_gui_t* extGui_ = nullptr;
     const clap_plugin_posix_fd_support_t* extFd_ = nullptr;

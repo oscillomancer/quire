@@ -49,7 +49,9 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
   every executor, and owned audio threads prefault their stacks (ADR-0025).
 - **Strips and routing** (ADR-0019 to ADR-0022): typed channel, buss and
   master strips with Console 9 summing (switchable, level-matched); routes
-  with taps, channel maps, mono and polarity; sidechain keys; up to 128
+  with taps, channel maps, mono and polarity; sidechain keys (an unrouted
+  key deactivates a plug-in's key port or bus, so it can key from its own
+  input); up to 128
   channels per strip with plugin pins and multi-output instruments; strip
   polarity and mono; the routing matrix.
 - **Recording**: armed inputs to crash-readable WAV, input monitoring (needs

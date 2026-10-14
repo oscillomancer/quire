@@ -102,3 +102,14 @@ plain compressors.
   input (e.g. after a class change) stays in the project and the plan
   ignores it with a warning.
 
+
+## Implementation notes (2026-10-13)
+
+- **Unrouted CLAP keys.** A CLAP plug-in that offers
+  `audio-ports-activation` sees its key port deactivated while no route
+  feeds it, the same switch as a VST3's auxiliary bus, so it can key from
+  its own input instead of treating the silent buffers as a key. The port
+  still gets silent buffers (`constant_mask` set), and a block's key is
+  ignored while it is inactive. Such instances, and isolated ones (whose
+  extensions the host cannot see), restart on a key change as VST3s do
+  (`Instance::followsKeyActivation`); other CLAP plug-ins keep running.

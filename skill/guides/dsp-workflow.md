@@ -112,7 +112,9 @@ notes. Each signal still gets a fresh instance.
 - `sidechain: {signal, level_db, frequency_hz, start_s, length_s}`: a key
   for a plugin with a sidechain input, playing over part of the render.
   `sidechain.gain_change_db` is how far the output moved while the key
-  played, compared with a silent key: negative is ducking.
+  played, compared with a silent key: negative is ducking. Without
+  `sidechain`, nothing is routed to the key (`io.sidechainConnected` is
+  false).
 - `notes: [{key, velocity, start_s, length_s}]`: an instrument's notes
   (MIDI keys) in place of the fixed note and chord; `release_ms` counts
   from the last note-off.

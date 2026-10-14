@@ -690,6 +690,11 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
     self->extState_ = static_cast<const clap_plugin_state_t*>(ext(CLAP_EXT_STATE));
     self->extLatency_ = static_cast<const clap_plugin_latency_t*>(ext(CLAP_EXT_LATENCY));
     self->extTail_ = static_cast<const clap_plugin_tail_t*>(ext(CLAP_EXT_TAIL));
+    self->extPortsActivation_ = static_cast<const clap_plugin_audio_ports_activation_t*>(
+        ext(CLAP_EXT_AUDIO_PORTS_ACTIVATION));
+    if (!self->extPortsActivation_)
+        self->extPortsActivation_ = static_cast<const clap_plugin_audio_ports_activation_t*>(
+            ext(CLAP_EXT_AUDIO_PORTS_ACTIVATION_COMPAT));
     self->extTimer_ = static_cast<const clap_plugin_timer_support_t*>(ext(CLAP_EXT_TIMER_SUPPORT));
     self->extGui_ = static_cast<const clap_plugin_gui_t*>(ext(CLAP_EXT_GUI));
     self->extFd_ =
@@ -900,6 +905,11 @@ Status Instance::activate(double sampleRate, std::uint32_t minFrames, std::uint3
             at += c;
         }
     }
+    // An unrouted key port is deactivated, so the plug-in can tell it from a
+    // silent key (and key from its own input); its buffers stay silent.
+    if (extPortsActivation_ && hostState_->keyIn >= 0)
+        (void)extPortsActivation_->set_active(
+            plugin_, true, static_cast<std::uint32_t>(hostState_->keyIn), keyActive_, 32);
     if (!plugin_->activate(plugin_, sampleRate, minFrames, maxFrames))
         return Error(
             "host.activate",
@@ -1262,7 +1272,7 @@ bool Instance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT {
             if (static_cast<int>(i) == h.mainIn) {
                 src = b.inputs;
                 have = b.inputChannels;
-            } else if (static_cast<int>(i) == h.keyIn) {
+            } else if (static_cast<int>(i) == h.keyIn && keyActive_) {
                 src = b.sidechain;
                 have = b.sidechainChannels;
             }

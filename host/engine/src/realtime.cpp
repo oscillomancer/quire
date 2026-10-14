@@ -417,13 +417,14 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
     std::unique_ptr<detail::Plan> plan = std::move(*first);
     {
         // A key connected or disconnected is part of a VST3's activation (its
-        // auxiliary bus), which a processing instance cannot change: it gets a
-        // fresh one (ADR-0018). CLAP plug-ins hear the key or silence as is.
+        // auxiliary bus) and of a CLAP plug-in's with port activation, which a
+        // processing instance cannot change: it gets a fresh one (ADR-0018).
+        // Other CLAP plug-ins hear the key or silence as is.
         bool keyChanged = false;
         for (const detail::Node& n : plan->nodes)
             detail::forEachStage(n, [&](const detail::Stage& st) {
                 if (st.instance && st.instance->processing() && st.instance->sidechainChannels() &&
-                    st.instance->info().format == "vst3" &&
+                    st.instance->followsKeyActivation() &&
                     st.instance->sidechainActive() != st.keyed) {
                     plugins_.restart(st.fx);
                     keyChanged = true;

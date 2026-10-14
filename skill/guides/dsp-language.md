@@ -146,7 +146,10 @@ There is no `reset()` to write: the runtime returns every member to what
 `io[c][i]` (read the input, write the output, in place), `io.transport`
 (`playing`, `tempo`, `beats`, `barStart`, time signature),
 `io.sidechain(c)[i]` (the key input with Info's `.sidechain`; silent until
-`io.sidechainConnected`), `io.output(bus, c)[i]`.
+`io.sidechainConnected`, which is false while nothing is routed to the key
+in Quire and in hosts that deactivate an unused port; a host that always
+feeds the port reports it connected, so a plugin there may want a choice
+parameter for its key), `io.output(bus, c)[i]`.
 From any member function: `sampleRate()`, `maxBlockSize()`, `channels()`,
 `offline()`. In `prepare()`, `setLatency(samples)` reports a delay the
 plugin adds that depends on the sample rate (an `Oversampler`'s, a

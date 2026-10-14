@@ -2390,6 +2390,54 @@ TEST_CASE("a keyed plug-in plays in real time as offline, rendered ahead or live
             }
 }
 
+TEST_CASE("a key routed while playing reaches a plug-in that follows port activation (ADR-0018)" *
+          doctest::description("rt")) {
+    // The key mix offers CLAP port activation: a processing instance cannot
+    // be told its key is routed now, so it gets a fresh one that is.
+    model::Session s = synthSession();
+    Id source, keyedFx;
+    {
+        model::EditTxn t(s, 2);
+        for (const auto& e : s.tracks)
+            if (e.id != kMaster) source = e.id;
+        model::Track tr;
+        tr.name = "Keyed";
+        tr.parent = kMaster;
+        const Id keyed = t.create(tr);
+        t.modify<model::Track>(kMaster, [&](model::Track& m) { m.children.push_back(keyed); });
+        model::FxInstance fx;
+        fx.plugin.id = "com.suppleaudio.test.keymix";
+        keyedFx = t.create(fx);
+        t.modify<model::Track>(keyed, [&](model::Track& x) { x.chain.push_back(keyedFx); });
+        s = t.commit().value();
+    }
+    auto pool = makePool();
+    MediaCache media;
+    DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+    Engine engine(pool, media, kInCallback);
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
+    REQUIRE(engine.load(s).ok());
+    engine.play();
+    backend.run(8);
+    REQUIRE(pool.find(keyedFx));
+    CHECK(pool.find(keyedFx)->processing());
+    CHECK_FALSE(pool.find(keyedFx)->sidechainActive());
+    {
+        model::EditTxn t(s, 3);
+        model::Route key;
+        key.from.track = source;
+        key.to.fx = keyedFx;
+        t.create(key);
+        s = t.commit().value();
+    }
+    REQUIRE(engine.load(s).ok());
+    backend.run(8);
+    REQUIRE(pool.find(keyedFx));
+    CHECK(pool.find(keyedFx)->sidechainActive());
+    engine.stop();
+    CHECK(engine.processErrors() == 0);
+}
+
 TEST_CASE("auxiliary channels play in real time as offline, rendered ahead or live (ADR-0020)" *
           doctest::description("rt")) {
     // synthSession's track feeds channels 3/4 of a 4-channel buss whose key

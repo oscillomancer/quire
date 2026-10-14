@@ -115,7 +115,9 @@ TEST_CASE("dsp.test automation uses physical values and detects abrupt steps") {
     CHECK(abrupt["signals"].at(0) == abrupt["signals"].at(1));  // a fresh initial value per pass
 }
 
-TEST_CASE("dsp.test compressor ducks under a timed key and measures a silent reference") {
+TEST_CASE(
+    "dsp.test compressor ducks under a timed key, measures a silent reference, and keys from its "
+    "input without one") {
     Harness h;
     std::ifstream in(std::string(SUPPLE_SCRIPT_EXAMPLES) + "/compressor.cpp");
     std::stringstream source;
@@ -133,6 +135,11 @@ TEST_CASE("dsp.test compressor ducks under a timed key and measures a silent ref
     const auto& silentMain = *silent["signals"].at(1).find("sidechain");
     CHECK(silentSine.find("gain_change_db")->asDouble() == 0.0);
     CHECK(silentMain.find("gain_change_db")->isNull());
+    // With no key routed, the key port is deactivated and the compressor
+    // listens to its own input: a loud sine is turned down.
+    auto own = h.measured(R"({"script":"compressor","signals":["sine"],"level_db":-6,
+        "patch":{"params":{"attack":1}}})");
+    CHECK(own["signals"].at(0).find("gain_db")->asDouble() < -5.0);
 }
 
 TEST_CASE("dsp.test custom notes keep exact timing, velocity and their own final release") {

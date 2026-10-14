@@ -1069,7 +1069,8 @@ clap_process_status CLAP_ABI edgeProcess(const clap_plugin_t* pl, const clap_pro
 // Inputs: main (stereo), key (stereo), an extra mono port; outputs: main and
 // an auxiliary pair. out = main + key, exactly, so a key's alignment shows in
 // the output. A host that does not give every declared port a buffer gets
-// CLAP_PROCESS_ERROR.
+// CLAP_PROCESS_ERROR. A key port the host deactivated (audio-ports-activation)
+// is unrouted: it keys from its main input instead, out = 2 * main.
 
 const clap_plugin_descriptor_t* keyMixDescriptor() {
     static const char* features[] = {CLAP_PLUGIN_FEATURE_AUDIO_EFFECT, nullptr};
@@ -1088,7 +1089,9 @@ const clap_plugin_descriptor_t* keyMixDescriptor() {
 struct KeyMix {
     clap_plugin_t plugin{};
     const clap_host_t* host = nullptr;
+    bool keyActive = true;
 };
+KeyMix* K(const clap_plugin_t* p) { return static_cast<KeyMix*>(p->plugin_data); }
 uint32_t CLAP_ABI keyMixPortCount(const clap_plugin_t*, bool input) { return input ? 3 : 2; }
 bool CLAP_ABI keyMixPortGet(const clap_plugin_t*, uint32_t index, bool isInput,
                             clap_audio_port_info_t* info) {
@@ -1104,19 +1107,27 @@ bool CLAP_ABI keyMixPortGet(const clap_plugin_t*, uint32_t index, bool isInput,
     return true;
 }
 const clap_plugin_audio_ports_t kKeyMixPorts = {keyMixPortCount, keyMixPortGet};
+bool CLAP_ABI keyMixSetActive(const clap_plugin_t* p, bool isInput, uint32_t index, bool active,
+                              uint32_t) {
+    if (isInput && index == 1) K(p)->keyActive = active;
+    return true;
+}
+const clap_plugin_audio_ports_activation_t kKeyMixActivation = {
+    [](const clap_plugin_t*) { return false; }, keyMixSetActive};
 const void* CLAP_ABI keyMixExt(const clap_plugin_t*, const char* id) {
+    if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS_ACTIVATION)) return &kKeyMixActivation;
     return !std::strcmp(id, CLAP_EXT_AUDIO_PORTS) ? &kKeyMixPorts : nullptr;
 }
 bool CLAP_ABI keyMixActivate(const clap_plugin_t*, double, uint32_t, uint32_t) { return true; }
-clap_process_status CLAP_ABI keyMixProcess(const clap_plugin_t*, const clap_process_t* p) {
+clap_process_status CLAP_ABI keyMixProcess(const clap_plugin_t* plugin, const clap_process_t* p) {
     if (p->audio_inputs_count != 3 || p->audio_outputs_count != 2 ||
         p->audio_inputs[0].channel_count != 2 || p->audio_inputs[1].channel_count != 2 ||
         p->audio_inputs[2].channel_count != 1 || p->audio_outputs[1].channel_count != 2)
         return CLAP_PROCESS_ERROR;
+    const clap_audio_buffer_t& key = p->audio_inputs[K(plugin)->keyActive ? 1 : 0];
     for (uint32_t c = 0; c < 2; ++c)
         for (uint32_t i = 0; i < p->frames_count; ++i) {
-            p->audio_outputs[0].data32[c][i] =
-                p->audio_inputs[0].data32[c][i] + p->audio_inputs[1].data32[c][i];
+            p->audio_outputs[0].data32[c][i] = p->audio_inputs[0].data32[c][i] + key.data32[c][i];
             p->audio_outputs[1].data32[c][i] = 0.0f;
         }
     return CLAP_PROCESS_CONTINUE;

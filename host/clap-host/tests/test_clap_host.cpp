@@ -1303,10 +1303,16 @@ TEST_CASE("a sidechain key reaches CLAP and VST3 plug-ins, in process and isolat
         CAPTURE(isolated);
         auto made = Instance::create(*keyMix, {}, isolated);
         REQUIRE(made);
-        const auto r = check(**made, true);
+        auto r = check(**made, true);
         CHECK(r[0] == doctest::Approx(0.75));
         CHECK(r[1] == doctest::Approx(-0.25));
         CHECK(r[2] == doctest::Approx(0.25));
+        // Unrouted, the key port is deactivated (audio-ports-activation) and
+        // hears nothing whatever the block holds: the fixture keys from its
+        // main input instead.
+        r = check(**made, false);
+        CHECK(r[0] == doctest::Approx(0.5));
+        CHECK(r[2] == doctest::Approx(0.5));
     }
     auto vst3 = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
     REQUIRE(vst3);
