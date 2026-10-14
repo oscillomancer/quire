@@ -80,19 +80,3 @@ TEST_CASE("native VST3 bundle scanning is supervised and cached") {
     REQUIRE(scan(std::span<const fs::path>(&module, 1), options, &report));
     CHECK(report.cachedModules == 1);
 }
-#if !defined(__linux__)
-TEST_CASE("native bridge requests fail with actionable structured errors") {
-    PluginInfo info;
-    info.path = FIXTURE_CLAP_PATH;
-    info.id = "com.suppleaudio.test.gain";
-    auto instance = Instance::create(info, {}, true);
-    REQUIRE_FALSE(instance);
-    CHECK(instance.error().code == "host.bridge.unsupported");
-    CHECK(instance.error().path == "/isolation");
-    CHECK_FALSE(instance.error().hint.empty());
-    auto shared = createBridgeProcess();
-    REQUIRE_FALSE(shared);
-    CHECK(shared.error().code == "host.bridge.unsupported");
-}
-
-#endif

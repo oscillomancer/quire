@@ -118,11 +118,12 @@ Platform directory roots come from `supple::paths`. Native device audio uses Por
 control-side monitor wakes the owner for device recovery. Device callbacks keep
 the same chunked, allocation-free engine contract as JACK. Owned helpers apply
 MMCSS Pro Audio or device-derived Mach time constraints on themselves before
-work, through a startup barrier. Audio bridge and GUI embedding remain separate
-gates; real-device validation remains opt-in.
+work, through a startup barrier. GUI embedding remains a separate gate;
+real-device validation remains opt-in.
 Native in-process hosting and supervised scanning are separate from that bridge
 (ADR-0036). clap-host owns a reusable ChildProcess tree/capture helper and
-a standalone scanner; non-Linux isolation requests return structured errors.
+a standalone scanner. The bridge uses that helper on every platform for
+explicit control-resource inheritance and process-group/Job cleanup (ADR-0037).
 The native headless engine/dummy backend and sandbox build independently of
 Linux JACK and its hardware benchmark. Audio files use POSIX streams or wide-path
 Windows handles with delete sharing, exclusive recording creation and atomic

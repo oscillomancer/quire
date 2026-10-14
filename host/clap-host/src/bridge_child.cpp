@@ -1,22 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "bridge_child.h"
-#include <chrono>
-#include <cstring>
 #include <string>
 #include <vector>
 #include "platform.h"
 #if defined(__APPLE__)
 #include <fcntl.h>
-#include <mach-o/dyld.h>
-#include <signal.h>
-#include <spawn.h>
 #include <sys/event.h>
+#endif
+#if !defined(_WIN32)
 #include <sys/wait.h>
+#include <unistd.h>
+#endif
+#if defined(__linux__)
+#include <poll.h>
+#include <sys/syscall.h>
 #endif
 namespace supple::host::bridge {
 std::filesystem::path ownExecutable() { return platform::executablePath(); }
-#if !defined(__linux__)
 Result<std::unique_ptr<NativeChild>> NativeChild::launch(const std::filesystem::path& exe,
                                                          Resource control) {
     std::unique_ptr<NativeChild> child(new NativeChild);
@@ -34,6 +35,9 @@ Result<std::unique_ptr<NativeChild>> NativeChild::launch(const std::filesystem::
     child->pid_ = child->owner_->pid();
 #if defined(_WIN32)
     child->process_ = reinterpret_cast<HANDLE>(child->owner_->nativeProcess());
+#elif defined(__linux__)
+    // Socket HUP remains the death-watch fallback on kernels without pidfds.
+    child->death_ = static_cast<int>(::syscall(SYS_pidfd_open, child->pid_, 0));
 #else
     child->death_ = kqueue();
     if (child->death_ >= 0 && fcntl(child->death_, F_SETFD, FD_CLOEXEC) == 0) {
@@ -66,6 +70,12 @@ bool NativeChild::alive() const {
 #if defined(_WIN32)
     return process_ && WaitForSingleObject(process_, 0) == WAIT_TIMEOUT;
 #else
+#if defined(__linux__)
+    if (death_ >= 0) {
+        pollfd descriptor{death_, POLLIN, 0};
+        return ::poll(&descriptor, 1, 0) == 0;
+    }
+#endif
     siginfo_t status{};
     return pid_ > 0 &&
            waitid(P_PID, static_cast<id_t>(pid_), &status, WEXITED | WNOHANG | WNOWAIT) == 0 &&
@@ -101,6 +111,5 @@ void NativeChild::revoke(Resource resource) const {
                         0, FALSE, DUPLICATE_SAME_ACCESS | DUPLICATE_CLOSE_SOURCE))
         CloseHandle(local);
 }
-#endif
 #endif
 }  // namespace supple::host::bridge

@@ -71,3 +71,14 @@ adapters borrow their lifetime handles from ChildProcess. macOS retains an
 exited leader until the final bridge owner dies, trading a temporary zombie
 for safe PID identity during concurrent audio-side failure checks. Native
 cross-process GUI embedding and pipelined live bridging remain future work.
+
+## Launch integration note (2026-10-14)
+
+After ADR-0036's helper landed on the port branch, Linux launch and teardown
+also moved onto ChildProcess. This amends the separate posix_spawn/waitpid
+ownership in the first decision bullet: the helper now owns the private
+process group and final reaping, and timeout termination kills that group.
+The bridge retains its pidfd death watch and fast liveness poll (socket HUP
+fallback), observes exit with WNOWAIT, and keeps the leader unreaped until
+final tree cleanup to prevent PID reuse. Linux memfd, futex, protocol, spin
+and deadline behavior are unchanged. All platforms now have one spawn path.

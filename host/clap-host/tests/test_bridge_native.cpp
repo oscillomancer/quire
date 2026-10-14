@@ -5,6 +5,9 @@
 #include <supple/base/rt.h>
 #include <supple/base/waitable.h>
 #include <supple/host/clap_host.h>
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -45,6 +48,15 @@ void awaitWake(MainThreadWake& wake) {
     REQUIRE(wake.drain());
 }
 }  // namespace
+#if !defined(_WIN32)
+TEST_CASE("native bridge launch uses the helper private process group") {
+    setBridgeExecutable(BRIDGE_PATH);
+    auto process = BridgeProcess::spawn();
+    REQUIRE_MESSAGE(process, (process ? "" : process.error().toString()));
+    CHECK(::getpgid((*process)->pid()) == (*process)->pid());
+    CHECK(::getpgid((*process)->pid()) != ::getpgrp());
+}
+#endif
 TEST_CASE("native bridge shared memory and wakes preserve exact CLAP and VST3 audio and state") {
     setBridgeExecutable(BRIDGE_PATH);
     for (const std::filesystem::path& module :

@@ -69,11 +69,8 @@ class BridgeProcess {
     std::mutex subscribersMutex_;
     std::map<MainThreadWake*, std::size_t> subscribers_;
     std::atomic<int> pid_{-1};
-    int pidfd_ = -1;
     bridge::Control sock_ = bridge::noControl;
-#if !defined(__linux__)
     std::unique_ptr<bridge::NativeChild> child_;
-#endif
     std::mutex requests_;  // control calls from instances on the main thread
     std::atomic<bool> failed_{false};
     std::atomic<int> failSignal_{0};

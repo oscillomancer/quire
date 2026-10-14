@@ -87,12 +87,14 @@ Result<std::unique_ptr<ChildProcess>> ChildProcess::spawn(const std::filesystem:
     posix_spawnattr_t attrs;
     rc = ::posix_spawnattr_init(&attrs);
     if (rc == 0) {
-        rc = options.captureOutput
-                 ? ::posix_spawn_file_actions_adddup2(&actions, fds[1], STDOUT_FILENO)
-                 : ::posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null",
-                                                      O_WRONLY, 0);
-        if (rc == 0 && options.control >= 0)
+        // Preserve control first: it may occupy stdout if parent stdio was closed.
+        if (options.control >= 0)
             rc = ::posix_spawn_file_actions_adddup2(&actions, static_cast<int>(options.control), 3);
+        if (rc == 0)
+            rc = options.captureOutput
+                     ? ::posix_spawn_file_actions_adddup2(&actions, fds[1], STDOUT_FILENO)
+                     : ::posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null",
+                                                          O_WRONLY, 0);
         if (rc == 0)
             rc = ::posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY,
                                                     0);

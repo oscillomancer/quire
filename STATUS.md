@@ -30,6 +30,9 @@ deny delete sharing prevent atomic file replacement until closed.
 
 The bridge port implements native macOS shared memory/address wakes and Windows
 mapping/event handle transfer, notifications and process isolation (ADR-0037).
+All platforms launch and clean up through the shared ChildProcess helper, with
+explicit IPC inheritance and process-group/Job ownership. Linux retains its
+memfd/futex transport and pidfd death watch.
 Bridge targets and portable fixture tests are enabled and pass native CI on
 macOS and Windows. Linux bridge and engine
 tests pass under RTSan and TSan, retaining the existing deadlines and

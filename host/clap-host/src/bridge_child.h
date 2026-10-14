@@ -7,7 +7,6 @@
 #include <filesystem>
 #include "bridge_platform.h"
 namespace supple::host::bridge {
-#if !defined(__linux__)
 class NativeChild {
   public:
     static Result<std::unique_ptr<NativeChild>> launch(const std::filesystem::path& exe,
@@ -32,6 +31,5 @@ class NativeChild {
     int death_ = -1;
 #endif
 };
-#endif
 std::filesystem::path ownExecutable();
 }  // namespace supple::host::bridge

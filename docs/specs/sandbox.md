@@ -146,7 +146,11 @@ by default, false directs stdout to the null device. Existing scanner callers
 retain their API and behavior. `pid()` and `nativeProcess()` expose borrowed
 identity for bridge exit watches/handle transfer. The owner keeps the process
 or unreaped POSIX leader until final tree cleanup; bridge users must depart
-before owner destruction. These are setup/control APIs, never DSP callbacks.
+before owner destruction. Launch and cleanup are setup/control APIs. The
+existing bounded bridge-wait exception sanctions the nonblocking killTree()
+on timeout; it never reaps there. Linux retains its pidfd death watch (socket
+HUP fallback), while main-thread exit observation uses WNOWAIT until final
+helper cleanup. The memfd/futex audio path remains unchanged.
 
 The eventfd/futex/pidfd descriptions below name Linux mechanisms; the native
 objects above implement the same publication and lifetime contracts.
@@ -629,13 +633,16 @@ uses native process creation with redirected stdout and null stdin/stderr.
 collect(steady_clock deadline, maxBytes) returns {text, exitCode, crashed};
 errors are child.spawn/io/wait/timeout/output_limit with path and hint. Scan
 rebases those error codes to host.scan.*. Destruction kills descendants and
-reaps the child; killTree() explicitly cancels it. This API is non-RT.
+reaps the child; killTree() explicitly cancels it. Spawn, capture and destruction
+are non-RT; the bridge sanctions only the nonblocking timeout kill as described
+above.
 
-On macOS and Windows, isolated Instance::create and createBridgeProcess fail
-with host.bridge.unsupported, path /isolation and an in_process hint. Native
-editor opening fails with host.editor.unsupported until editor embedding lands.
+Isolated Instance::create and createBridgeProcess use the native bridge on
+Linux, macOS and Windows; shared and dedicated crash scopes remain identical.
+Native editor opening fails with host.editor.unsupported until editor embedding
+lands.
 macOS enables the sandbox/offline renderer; Windows waits for native audio-file
-I/O. The macOS engine and dummy backend are enabled separately from JACK, bridge
+I/O. The macOS engine and dummy backend are enabled separately from JACK
 and editor integration. Windows engine/sandbox wait for audio-file I/O.
 
 On non-Linux platforms `dsp.export {format: "clap"}` returns `dsp.platform`

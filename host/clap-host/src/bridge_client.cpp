@@ -7,16 +7,6 @@
 #include "bridge_notifications.h"
 #include "platform.h"
 
-#if !defined(_WIN32)
-#include <poll.h>
-#include <signal.h>
-#include <spawn.h>
-#include <sys/wait.h>
-#endif
-#if defined(__linux__)
-#include <sys/socket.h>
-#endif
-
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -26,10 +16,6 @@
 #include <utility>
 
 #include "supple/base/rt.h"
-
-#if defined(__linux__)
-extern char** environ;
-#endif
 
 namespace supple::host {
 
@@ -96,28 +82,6 @@ Result<std::shared_ptr<BridgeProcess>> BridgeProcess::spawn() {
     Resource sv[2];
     if (!controlPair(sv)) return Error("host.bridge", "socketpair failed");
     std::shared_ptr<BridgeProcess> self(new BridgeProcess());
-#if defined(__linux__)
-    posix_spawn_file_actions_t fa;
-    posix_spawn_file_actions_init(&fa);
-    posix_spawn_file_actions_adddup2(&fa, sv[1], kControlFd);  // dup2 clears CLOEXEC
-    const std::string exeText = exe.string();
-    const std::string fdText = std::to_string(kControlFd);
-    char* argv[] = {const_cast<char*>(exeText.c_str()), const_cast<char*>("--control-fd"),
-                    const_cast<char*>(fdText.c_str()), nullptr};
-    pid_t pid = 0;
-    const int rc = ::posix_spawn(&pid, exeText.c_str(), &fa, nullptr, argv, environ);
-    posix_spawn_file_actions_destroy(&fa);
-    ::close(sv[1]);
-    if (rc != 0) {
-        ::close(sv[0]);
-        return Error("host.bridge",
-                     "could not start the plugin bridge " + exeText + ": " + std::strerror(rc),
-                     exeText, "check the bridge executable and process resources");
-    }
-    self->pid_ = pid;
-    self->sock_ = sv[0];
-    self->pidfd_ = static_cast<int>(::syscall(SYS_pidfd_open, pid, 0));
-#else
     auto child = NativeChild::launch(exe, sv[1]);
     closeResource(sv[1]);
     if (!child) {
@@ -133,7 +97,6 @@ Result<std::shared_ptr<BridgeProcess>> BridgeProcess::spawn() {
     self->sock_ = new NativeControl(reinterpret_cast<HANDLE>(sv[0]));
 #else
     self->sock_ = sv[0];
-#endif
 #endif
     if (auto status = self->initializeNotifications(); !status) return status.error();
     return self;
@@ -192,11 +155,7 @@ void BridgeProcess::watch() {
     bool watchingDeath = true, failureAnnounced = false;
     for (;;) {
         Waitable death;
-#if defined(__linux__)
-        death = pidfd_;
-#else
         if (child_) death = child_->waitable();
-#endif
         WaitItem descriptors[] = {
             {notification_.waitable(), kWaitRead, 0},
             {watcherWake_.waitable(), kWaitRead, 0},
@@ -316,24 +275,17 @@ BridgeProcess::~BridgeProcess() {
     watcherWake_.notify();
     if (watcher_.joinable()) watcher_.join();
     closeControl(sock_);
-#if defined(__linux__)
-    if (pid_ > 0) {
-        // The bridge exits after its final Destroy or when the socket closes.
-        int status = 0;
-        for (int i = 0; i < 200 && ::waitpid(pid_, &status, WNOHANG) == 0; ++i) ::usleep(10000);
-        if (::waitpid(pid_, &status, WNOHANG) == 0) {
-            killBridge();
-            ::waitpid(pid_, &status, 0);
+    if (child_) {
+        if (child_->waitable().valid()) {
+            WaitItem exited{child_->waitable()};
+            (void)waitFor(std::span(&exited, 1), 2000);
+        } else {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+            while (child_->alive() && std::chrono::steady_clock::now() < deadline)
+                (void)waitFor({}, 10);
         }
     }
-    if (pidfd_ >= 0) ::close(pidfd_);
-#else
-    if (child_) {
-        WaitItem exited{child_->waitable()};
-        (void)waitFor(std::span(&exited, 1), 2000);
-    }
     child_.reset();
-#endif
 }
 
 void RemoteInstance::unmap() {
@@ -344,44 +296,23 @@ void RemoteInstance::unmap() {
 }
 
 void BridgeProcess::killBridge() {
-    // Through the pidfd: never a recycled pid.
-#if defined(__linux__)
-    if (pidfd_ >= 0)
-        ::syscall(SYS_pidfd_send_signal, pidfd_, SIGKILL, nullptr, 0);
-    else if (pid_ > 0)
-        ::kill(pid_, SIGKILL);
-#else
+    // The helper retains the leader's identity until final tree cleanup.
     if (child_) child_->kill();
-#endif
 }
 
-// Main thread: collects the exit status of a bridge that has died.
+// Main thread: observes exit without reaping the helper-owned leader.
 void BridgeProcess::reap() {
     if (pid_ <= 0) return;
-    int why = 0;
-#if defined(__linux__)
-    int st = 0;
-    if (::waitpid(pid_, &st, WNOHANG) != pid_) return;
-    pid_ = -1;
-    why = WIFSIGNALED(st) ? WTERMSIG(st) : 0;
-#else
     if (!child_ || child_->alive()) return;
-    why = child_->exitStatus();
+    const int why = child_->exitStatus();
     pid_ = -1;
-#endif
     fail(why);
     if (failSignal_.load() == -1) failSignal_.store(why);
 }
 
 bool BridgeProcess::alive() const {
     if (pid_ <= 0) return false;
-#if defined(__linux__)
-    if (pidfd_ < 0) return ::kill(pid_, 0) == 0;
-    pollfd p{pidfd_, POLLIN, 0};
-    return ::poll(&p, 1, 0) == 0;  // readable once the process has exited
-#else
     return child_ && child_->alive();
-#endif
 }
 
 void BridgeProcess::fail(int why) SUPPLE_RT {
