@@ -1,4 +1,4 @@
-# ADR-0037: Native device audio through PortAudio
+# ADR-0038: Native device audio through PortAudio
 
 **Status:** Accepted, 2026-10-14. Amends ADR-0004 and ADR-0035's device/helper
 scheduling boundary. Linux JACK behavior is unchanged.

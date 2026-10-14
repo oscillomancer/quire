@@ -114,7 +114,7 @@ adds macOS address waits and pipes, and Windows address waits and event handles.
 `Waitable` carries borrowed native readiness sources through ModelLoop and MCP;
 new embedding code uses typed sources instead of assuming integer descriptors.
 On arm64 the per-node guard sets FPCR FZ and restores the complete register.
-Platform directory roots come from `supple::paths`. Native device audio uses PortAudio CoreAudio/WASAPI/ASIO (ADR-0037); its
+Platform directory roots come from `supple::paths`. Native device audio uses PortAudio CoreAudio/WASAPI/ASIO (ADR-0038); its
 control-side monitor wakes the owner for device recovery. Device callbacks keep
 the same chunked, allocation-free engine contract as JACK. Owned helpers apply
 MMCSS Pro Audio or device-derived Mach time constraints on themselves before

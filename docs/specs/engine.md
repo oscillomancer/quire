@@ -1270,7 +1270,7 @@ and write-through. External Windows readers denying delete sharing can prevent
 publication; failure removes only our own temporary file and returns audio.write
 with a corrective hint. Small renders retain core-base writeFileAtomic.
 
-### Native device backend (2026-10-14, ADR-0037)
+### Native device backend (2026-10-14, ADR-0038)
 
 `PortAudioBackend` implements Backend on macOS/Windows. `start()` accepts the
 existing BackendConfig rate/block/channels; PortAudioOptions selects exact host
@@ -1316,7 +1316,7 @@ accepting normal-priority helpers; injected normal drivers retain normal setup.
 Each helper class's non-RT startup barrier verifies all results before enabling
 it, rolling back the class on refusal. Live setup failure disables that pool;
 background/renderer failures warn and report the actual fallback class. Windows
-uses MMCSS Pro Audio, macOS device-derived Mach time constraints (ADR-0037),
+uses MMCSS Pro Audio, macOS device-derived Mach time constraints (ADR-0038),
 reported as high/priority 0. The native callback reports none because PortAudio
 does not expose its thread policy; the OS/host API owns it. These are distinct from core-base's generic High
 QoS/priority helper. macOS workgroup joining remains a future device-validated

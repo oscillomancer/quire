@@ -120,8 +120,10 @@ unchanged. macOS and Windows currently build/test JSON/schema/params/patch,
 core-base native waits/wakes/thread setup, command bus, control-protocol/MCP,
 Lua, DSP/Console 9/analysis, MIDI/notation/timeline/optimizer,
 session model, plugin support, all stock SDK-free DSP engines, and the
-script compiler/runtime and suite semantic layer. Audio-file tests run on all three platforms. Native core-base sources/tests, JSON-RPC control transport/model
-loop and standalone MCP/proxy no longer share the hosting gate (ADR-0035).
+script compiler/runtime and suite semantic layer. Audio-file I/O, engine/CLI,
+dummy/offline rendering, sandbox and their portable tests run on all three
+platforms. Native core-base sources/tests, JSON-RPC control transport/model loop
+and standalone MCP/proxy no longer share the hosting gate (ADR-0035).
 Linux-specific descriptor/permission/signal probes and memory-residency/rlimit
 tests remain guarded with portable boundary coverage alongside them.
 These gates are explicit, with no no-op RT implementations:
@@ -129,7 +131,7 @@ These gates are explicit, with no no-op RT implementations:
 | Gate | Off on | Reason / follow-up |
 |---|---|---|
 | `SUPPLE_HOST_SERVICES`: audio bridge | macOS, Windows | Shared memory, cross-process wake and native IPC; bridge port step |
-| JACK/fake JACK and hardware capacity benchmark | macOS, Windows | Linux graph/hardware tooling; native device audio uses PortAudio (ADR-0037) |
+| JACK/fake JACK and hardware capacity benchmark | macOS, Windows | Linux graph/hardware tooling; native device audio uses PortAudio (ADR-0038) |
 | Same gate: DAW GUI/agent and source-export integration tests | macOS, Windows | GUI depends on engine/X11; stock wrappers and conformance/reset tests now enabled separately |
 | POSIX evaluation harness tests | Windows | Unix executable fixtures, symlinks and process groups |
 

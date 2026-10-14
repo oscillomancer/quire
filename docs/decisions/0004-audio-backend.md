@@ -2,7 +2,7 @@
 
 **Status:** Accepted, 2026-09-26. Evidence: `docs/research/linux-audio.md`.
 
-**Native device amendment, 2026-10-14:** [ADR-0037](0037-native-device-audio.md)
+**Native device amendment, 2026-10-14:** [ADR-0038](0038-native-device-audio.md)
 adds PortAudio on macOS/Windows and device-derived, self-applied helper policies;
 Linux mechanisms and callback publication/lifetime rules remain unchanged.
 

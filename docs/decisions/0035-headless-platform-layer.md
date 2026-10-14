@@ -12,7 +12,7 @@ retaining the Linux audio bridge and the remaining engine/device/GUI gates.
 RF64 publication lift the POSIX audio-file gate; see engine.md's Native audio
 files contract. Device audio, bridge and GUI remain separate gates.
 
-**Native device amendment, 2026-10-14:** [ADR-0037](0037-native-device-audio.md)
+**Native device amendment, 2026-10-14:** [ADR-0038](0038-native-device-audio.md)
 adds PortAudio on macOS/Windows and device-derived, self-applied helper policies;
 Linux mechanisms and callback publication/lifetime rules remain unchanged.
 

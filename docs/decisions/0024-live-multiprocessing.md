@@ -19,7 +19,7 @@ nonblocking callback futex-wake exception to buffer-space notifications.
 **Platform amendment, 2026-10-14:** [ADR-0035](0035-headless-platform-layer.md)
 adds macOS/Windows mechanisms while retaining these Linux semantics.
 
-**Native device amendment, 2026-10-14:** [ADR-0037](0037-native-device-audio.md)
+**Native device amendment, 2026-10-14:** [ADR-0038](0038-native-device-audio.md)
 adds PortAudio on macOS/Windows and device-derived, self-applied helper policies;
 Linux mechanisms and callback publication/lifetime rules remain unchanged.
 
