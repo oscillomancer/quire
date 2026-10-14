@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 #include <clap/clap.h>
-#include "supple/plugin/test_module.h"
 #include <array>
 #include <atomic>
 #include <cstring>
@@ -8,6 +7,7 @@
 #include <thread>
 #include "supple/base/rt.h"
 #include "supple/clap/semantic_params.h"
+#include "supple/plugin/test_module.h"
 static const void* CLAP_ABI extension(const clap_host_t*, const char*) { return nullptr; }
 static void CLAP_ABI callback(const clap_host_t*) {}
 static int64_t CLAP_ABI write(const clap_ostream_t* o, const void* d, uint64_t n) {
@@ -27,7 +27,8 @@ int main(int argc, char** argv) {
     if (argc != 2) return 1;
     void* lib = supple::plugin::test::open(argv[1]);
     if (!lib) return 2;
-    auto* entry = static_cast<const clap_plugin_entry_t*>(supple::plugin::test::symbol(lib, "clap_entry"));
+    auto* entry =
+        static_cast<const clap_plugin_entry_t*>(supple::plugin::test::symbol(lib, "clap_entry"));
     if (!entry || !entry->init(argv[1])) return 3;
     auto* f = static_cast<const clap_plugin_factory_t*>(entry->get_factory(CLAP_PLUGIN_FACTORY_ID));
     clap_host_t host{CLAP_VERSION_INIT, nullptr,  "Test",   "Supple Audio", "", "1",

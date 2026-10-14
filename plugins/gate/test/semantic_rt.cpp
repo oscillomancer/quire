@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 #include <clap/clap.h>
-#include "supple/plugin/test_module.h"
 #include <atomic>
 #include <cmath>
 #include <cstdio>
@@ -10,6 +9,7 @@
 #include "gate/params.h"
 #include "supple/clap/semantic_params.h"
 #include "supple/json/json.h"
+#include "supple/plugin/test_module.h"
 
 namespace {
 const void* CLAP_ABI extension(const clap_host_t*, const char*) { return nullptr; }
@@ -27,7 +27,8 @@ int main(int argc, char** argv) {
         std::puts(supple::plugin::test::error());
         return 1;
     }
-    const auto* entry = static_cast<const clap_plugin_entry_t*>(supple::plugin::test::symbol(lib, "clap_entry"));
+    const auto* entry =
+        static_cast<const clap_plugin_entry_t*>(supple::plugin::test::symbol(lib, "clap_entry"));
     if (!entry || !entry->init(argv[1])) return 1;
     const auto* factory =
         static_cast<const clap_plugin_factory_t*>(entry->get_factory(CLAP_PLUGIN_FACTORY_ID));
