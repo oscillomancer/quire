@@ -5,7 +5,8 @@
 #include <cstdint>
 #include "supple/base/result.h"
 namespace supple::engine::detail {
-// Driver calls belong to the control thread, except the supplied callbacks.
+// Setup/teardown belong to the owner; stream info/state may also be read by
+// the monitor. Native driver rate queries belong exclusively to the monitor.
 struct PortAudioApi {
     decltype(&Pa_Initialize) initialize;
     decltype(&Pa_Terminate) terminate;
@@ -23,7 +24,7 @@ struct PortAudioApi {
     decltype(&Pa_CloseStream) close;
     decltype(&Pa_GetStreamInfo) info;
     decltype(&Pa_IsStreamActive) active;
-    // Optional native rate observation, only called off the callback.
+    // Optional native rate observation, only called by the monitor thread.
     double (*deviceRate)(PaStream*, PaDeviceIndex) = nullptr;
     bool native = false;
     bool threaded = true;

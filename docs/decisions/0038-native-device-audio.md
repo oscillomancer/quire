@@ -3,6 +3,11 @@
 **Status:** Accepted, 2026-10-14. Amends ADR-0004 and ADR-0035's device/helper
 scheduling boundary. Linux JACK behavior is unchanged.
 
+**Monitor clarification, 2026-10-14:** Native driver rate queries, including the
+initial baseline, run exclusively on the monitor. It publishes rate/loss flags
+through atomics; owner-side status reads them and cheap PortAudio stream
+info/activity. Owner status never queries the ASIO/CoreAudio driver rate.
+
 ## Decision
 
 - Vendor the latest eligible stable PortAudio release, v19.7.0 (2021-04-06,

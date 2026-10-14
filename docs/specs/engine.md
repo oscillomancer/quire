@@ -1304,7 +1304,11 @@ engine in chunks no larger than blockSize; period reports the complete device
 callback size. Status exposes device input/output latency in frames, affected
 callback xrun counts, and restart_needed/reason for loss or changed rate.
 Period changes need no restart. A native device monitor observes state every
-250 ms and wakes the app only for a restart transition. Normal stop supplies a
+250 ms and wakes the app only for a restart transition. The monitor alone queries
+native driver rates, including the initial observed baseline, and publishes
+rate/loss flags through atomics. Owner-side status reads those flags and cheap
+PortAudio stream info/activity; it never calls the native driver rate query.
+Normal stop supplies a
 final zero-frame callback on the device thread; a lost/stalled device closes and
 joins before owner-thread lifecycle fallback, as with JACK. All native threads
 and device-library initialization references are released on stop/destruction.

@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 #include <array>
 #include <cstdlib>
+#include <mutex>
 #include "../../../tests/file_platform.h"
 #include "portaudio_api.h"
 #include "supple/engine/app.h"
@@ -26,6 +27,10 @@ struct Driver {
     int active = 1, initialized = 0, closed = 0;
     std::thread audio;
     std::atomic<unsigned> audioRequest{0};
+    std::atomic<double> hardwareRate{48000};
+    std::atomic<unsigned> rateQueries{0};
+    std::mutex rateQueryMutex;
+    std::vector<std::thread::id> rateQueryThreads;
     std::array<std::array<float, 4096>, 2> in{}, out{};
     std::array<float*, 2> inputs{in[0].data(), in[1].data()}, outputs{out[0].data(), out[1].data()};
     Driver() { current = this; }
@@ -179,6 +184,35 @@ TEST_CASE("PortAudio selection, planar chunks, latency and callback status witho
     CHECK(finals == 1);
     CHECK(driver.initialized == 0);
     CHECK(driver.closed == 1);
+}
+TEST_CASE("native rate queries stay on the monitor and publish rate changes to status") {
+    Driver driver;
+    auto api = Driver::api;
+    api.native = true;
+    api.deviceRate = [](PaStream*, PaDeviceIndex) {
+        const double rate = Driver::current->hardwareRate.load(std::memory_order_acquire);
+        {
+            std::lock_guard lock(Driver::current->rateQueryMutex);
+            Driver::current->rateQueryThreads.push_back(std::this_thread::get_id());
+        }
+        Driver::current->rateQueries.fetch_add(1, std::memory_order_release);
+        Driver::current->rateQueries.notify_one();
+        return rate;
+    };
+    PortAudioBackend backend({}, api);
+    const auto owner = std::this_thread::get_id();
+    REQUIRE(backend.start({}, [](auto, auto, auto) {}));
+    driver.rateQueries.wait(0, std::memory_order_acquire);
+    for (unsigned i = 0; i < 8; ++i) CHECK_FALSE(backend.status().restartNeeded);
+    driver.hardwareRate.store(44100, std::memory_order_release);
+    while (!backend.status().restartNeeded) std::this_thread::yield();
+    CHECK(backend.status().restartReason == "sample rate changed");
+    backend.stop();
+    REQUIRE_FALSE(driver.rateQueryThreads.empty());
+    const auto monitor = driver.rateQueryThreads.front();
+    CHECK(monitor != owner);
+    for (const auto thread : driver.rateQueryThreads) CHECK(thread == monitor);
+    CHECK(driver.initialized == 0);
 }
 TEST_CASE("PortAudio failed selection and stream startup release resources") {
     Driver driver;

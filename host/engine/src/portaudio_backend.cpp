@@ -42,7 +42,6 @@ struct PortAudioBackend::Impl {
     std::atomic<std::uint32_t> final{0}, period{0};
     std::atomic<std::uint64_t> xruns{0};
     std::uint32_t inputLatency = 0, outputLatency = 0;
-    double startedDeviceRate = 0;
     PaDeviceIndex outputDevice = paNoDevice;
     std::thread monitor;
     std::atomic<std::uint32_t> monitorStop{0};
@@ -221,8 +220,6 @@ Status PortAudioBackend::start(const BackendConfig& config, Callback callback) {
     self.config.sampleRate = info->sampleRate;
     self.inputLatency = latency(info->inputLatency, info->sampleRate);
     self.outputLatency = latency(info->outputLatency, info->sampleRate);
-    self.startedDeviceRate =
-        api.deviceRate ? api.deviceRate(self.stream, self.outputDevice) : info->sampleRate;
     error = api.finished(self.stream, Impl::finished);
     if (error != paNoError) return fail(failure(api, error, "/backend"));
     error = api.start(self.stream);
@@ -231,13 +228,22 @@ Status PortAudioBackend::start(const BackendConfig& config, Callback callback) {
         try {
             self.monitor = std::thread([this] {
                 auto& state = *impl_;
+                double startedDeviceRate = 0;
                 while (!state.monitorStop.load(std::memory_order_acquire)) {
                     const auto observed = status();
-                    if (observed.restartNeeded) {
-                        if (observed.restartReason == "sample rate changed")
-                            state.rateChanged.store(true);
+                    bool deviceRateChanged = false;
+                    if (!observed.restartNeeded && state.api->deviceRate) {
+                        const double rate = state.api->deviceRate(state.stream, state.outputDevice);
+                        if (rate > 0) {
+                            if (startedDeviceRate <= 0) startedDeviceRate = rate;
+                            deviceRateChanged = rate != startedDeviceRate;
+                        }
+                    }
+                    if (observed.restartNeeded || deviceRateChanged) {
+                        if (deviceRateChanged || observed.restartReason == "sample rate changed")
+                            state.rateChanged.store(true, std::memory_order_release);
                         else
-                            state.gone.store(true);
+                            state.gone.store(true, std::memory_order_release);
                         state.notify();
                         break;
                     }
@@ -283,16 +289,11 @@ void PortAudioBackend::stop() {
 BackendStatus PortAudioBackend::status() const {
     const auto& self = *impl_;
     bool gone = self.gone.load(std::memory_order_acquire);
-    bool rateChanged = self.rateChanged.load();
+    bool rateChanged = self.rateChanged.load(std::memory_order_acquire);
     if (self.stream) {
         gone = gone || self.api->active(self.stream) != 1;
         const auto* info = self.api->info(self.stream);
         rateChanged = rateChanged || (info && info->sampleRate != self.config.sampleRate);
-        if (self.api->deviceRate) {
-            const double rate = self.api->deviceRate(self.stream, self.outputDevice);
-            rateChanged = rateChanged || (rate > 0 && self.startedDeviceRate > 0 &&
-                                          rate != self.startedDeviceRate);
-        }
     }
     return {self.period.load(),  self.xruns.load(),
             self.outputLatency,  self.inputLatency,
