@@ -180,6 +180,11 @@ TEST_CASE("PortAudio selection, planar chunks, latency and callback status witho
 }
 TEST_CASE("PortAudio failed selection and stream startup release resources") {
     Driver driver;
+    auto nativeApi = Driver::api;
+    nativeApi.native = true;
+    PortAudioBackend native({}, nativeApi);
+    CHECK_FALSE(native.prepareLiveThread(std::thread::native_handle_type{}));
+    CHECK(native.callbackPolicy().kind == ThreadPolicy::Kind::None);
     PortAudioBackend missing({.hostApi = "unknown"}, Driver::api);
     auto bad = missing.start({}, [](auto, auto, auto) {});
     REQUIRE_FALSE(bad);

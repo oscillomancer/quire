@@ -311,6 +311,9 @@ void PortAudioBackend::releaseCurrentThread() {
     if (nativeThreadPolicy()) detail::releaseDeviceThread();
 }
 Status PortAudioBackend::prepareLiveThread(std::thread::native_handle_type thread) {
+    if (nativeThreadPolicy())
+        return Error("engine.live_threads", "native device helpers must apply their own policy", {},
+                     "use prepareCurrentThread on each helper before publishing live work");
     return setThreadPolicy(thread, {ThreadPolicy::Kind::Normal, 0});
 }
 ThreadPolicy PortAudioBackend::callbackPolicy() {

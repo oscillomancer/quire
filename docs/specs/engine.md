@@ -1311,6 +1311,8 @@ and device-library initialization references are released on stop/destruction.
 
 Backend's optional nativeThreadPolicy/prepareCurrentThread/releaseCurrentThread
 hooks apply native policy on each owned thread before work and undo it at exit.
+Native prepareLiveThread refuses cross-thread setup rather than silently
+accepting normal-priority helpers; injected normal drivers retain normal setup.
 Each helper class's non-RT startup barrier verifies all results before enabling
 it, rolling back the class on refusal. Live setup failure disables that pool;
 background/renderer failures warn and report the actual fallback class. Windows
