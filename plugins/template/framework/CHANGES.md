@@ -4,6 +4,24 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.23.0
+
+What a product must do: nothing.
+
+- **A host can deactivate the sidechain** (CLAP `audio-ports-activation`,
+  offered with `PRODUCT_SIDECHAIN ON`). A host with nothing routed to the
+  key says so before activating, and `block.sidechainConnected` is then
+  false though the host still passes (silent) buffers, so a product can
+  key from its own input. Before, any buffer was a connection: a host that
+  always passes the key port's buffers left a product listening to
+  silence. VST3 hosts reach it through the wrapper's bus activation; a
+  sidechain bus they leave inactive is now unconnected too. Only the
+  sidechain can be deactivated, and only while the plugin is inactive.
+- **The defaults are unmodified with a layer's chunk** (`core/PresetLibrary.h`).
+  A fresh instance of a product whose layer saves a chunk showed its preset
+  bar as "Default *": the library's own defaults and factory presets lacked
+  the chunk every save carries. `StateAccess::appendChunks` adds it.
+
 ## 1.22.0
 
 What a product must do: nothing.

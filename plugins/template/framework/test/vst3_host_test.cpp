@@ -336,6 +336,10 @@ Result renderVst3(Vst3Module& m, const info::LayoutInfo& layout, bool dense = fa
     if (!v.processor) return Result(false);
     if (info::kAudioOutput && v.arrange(arrangement(layout)) != kResultTrue) return Result(false);
     Vst::ProcessSetup setup{Vst::kRealtime, Vst::kSample32, kBlock, 48000.0};
+    // Every bus is fed, so every bus is active, as a host that routes a
+    // sidechain makes it; an inactive one is unconnected (audio-ports-activation).
+    for (const Vst::BusDirection dir : {Vst::kInput, Vst::kOutput})
+        for (int32 b = 0; b < v.buses(Vst::kAudio, dir); ++b) v.component->activateBus(Vst::kAudio, dir, b, true);
     if (v.processor->setupProcessing(setup) != kResultOk || v.component->setActive(true) != kResultOk)
         return Result(false);
     v.processor->setProcessing(true);

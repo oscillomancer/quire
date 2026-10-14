@@ -103,7 +103,9 @@ effect is switched on there (checked by `cmake/Capabilities.cmake`):
   VST3 hosts with their speaker arrangements. A note effect leaves it unset.
 - `PRODUCT_SIDECHAIN ON`: a sidechain input as wide as the main bus.
   `block.sidechain[c][i]`, silence when unconnected
-  (`block.sidechainConnected`). The duck example.
+  (`block.sidechainConnected`): the host passed no buffers, or
+  deactivated the port (CLAP `audio-ports-activation`, a VST3 bus left
+  inactive). The duck example.
 - `PRODUCT_AUX_OUTPUTS "Name" ...`: extra outputs, named, each as wide as the
   main bus. Write `block.aux(bus)[c][i]` (zero on entry); bypass silences
   them. The duck example.

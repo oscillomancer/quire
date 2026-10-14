@@ -894,6 +894,44 @@ TEST(every_declared_layout_activates_and_processes) {
     }
 }
 
+TEST(a_deactivated_sidechain_is_unconnected_whatever_its_buffers_hold) {
+    Instance i;
+    auto* activation = static_cast<const clap_plugin_audio_ports_activation_t*>(
+        i.plugin->get_extension(i.plugin, CLAP_EXT_AUDIO_PORTS_ACTIVATION));
+    if (!product::info::kSidechain) {
+        CHECK(activation == nullptr);
+        return;
+    }
+    CHECK(activation && !activation->can_activate_while_processing(i.plugin));
+    if (!activation) return;
+    const uint32_t key = product::info::kAudioInput ? 1 : 0;
+    CHECK(!activation->set_active(i.plugin, false, 0, false, 32));  // only the sidechain
+    // The main output of a fresh instance, its key loud but maybe deactivated,
+    // or not connected at all.
+    auto render = [&](bool active, bool connected) {
+        Instance k;
+        CHECK(activation->set_active(k.plugin, true, key, active, 32));
+        k.activate(48000.0, 256);
+        CHECK(!activation->set_active(k.plugin, true, key, true, 32));  // not while active
+        Audio audio(k.channels());
+        audio.connect(connected, true);
+        std::vector<float> out;
+        for (int block = 0; block < 16; ++block) {
+            for (int c = 0; c < audio.channels; ++c)
+                for (uint32_t n = 0; n < 256; ++n) {
+                    const float t = static_cast<float>(block * 256 + static_cast<int>(n));
+                    audio.data[static_cast<size_t>(c)][n] = 0.2f * std::sin(0.03f * t);
+                    audio.sidechain[static_cast<size_t>(c)][n] = 0.9f * std::sin(0.011f * t);
+                }
+            audio.run(k.plugin, noEvents(), nullptr);
+            if (audio.mainOut())
+                out.insert(out.end(), audio.data[0].begin(), audio.data[0].end());
+        }
+        return out;
+    };
+    CHECK(render(false, true) == render(true, false));
+}
+
 TEST(a_host_negotiates_layouts_port_by_port) {
     if (!product::info::kAudioOutput) return;
     Instance i;

@@ -130,8 +130,11 @@ all of them. Hosts negotiate one arrangement at a time (VST3's
 `setBusArrangements` sets them together; clap-wrapper turns it into one
 `configurable-audio-ports` request), and a sidechain is almost always fed
 at the main width; a product that wants a mono key sums the channels it is
-given. Layouts are told apart by channel count, which is also their CLAP
-configuration ID, so no two may share one.
+given. A host with nothing routed to the sidechain may deactivate it (CLAP
+`audio-ports-activation`, a VST3 bus left inactive) while the plugin is
+inactive; the DSP then sees it unconnected, whatever buffers the host
+still passes. Layouts are told apart by channel count, which is also their
+CLAP configuration ID, so no two may share one.
 
 A surround layout's channels are in CLAP's speaker order, ascending, which is
 the bit order of a VST3 speaker arrangement and of a WAVE channel mask, so

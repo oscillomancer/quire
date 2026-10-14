@@ -37,6 +37,13 @@ class StateAccess {
     virtual std::vector<uint8_t> saveState(state::Context context) = 0;
     // Applies a whole blob, or nothing (false).
     virtual bool loadState(const uint8_t* data, size_t size, state::Context context) = 0;
+    // The chunks saveState() puts after the framework's state (a layer's),
+    // for a snapshot the library makes itself -- the defaults, a factory
+    // preset -- so that it compares with saveState() byte for byte.
+    virtual void appendChunks(std::vector<uint8_t>& bytes, const state::Snapshot& snapshot,
+                              state::Context context) {
+        (void)bytes, (void)snapshot, (void)context;
+    }
 };
 
 class PresetLibrary {
@@ -141,6 +148,7 @@ class PresetLibrary {
     std::filesystem::path fileFor(std::string_view name) const;
     std::vector<uint8_t> factoryBlob(size_t index) const;
     std::vector<uint8_t> defaultsBlob() const;
+    std::vector<uint8_t> blob(const state::Snapshot& snapshot) const;
 
     StateAccess& state_;
     DefinitionPtr definition_;

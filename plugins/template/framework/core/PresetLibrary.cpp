@@ -148,10 +148,16 @@ void PresetLibrary::loaded(int index, std::string name) {
     stickyModified_ = false;
 }
 
+std::vector<uint8_t> PresetLibrary::blob(const state::Snapshot& snapshot) const {
+    std::vector<uint8_t> bytes = state::save(magic_, snapshot, state::Context::Preset);
+    state_.appendChunks(bytes, snapshot, state::Context::Preset);
+    return bytes;
+}
+
 std::vector<uint8_t> PresetLibrary::defaultsBlob() const {
     state::Snapshot s(*definition_);
     s.defaultProperties();
-    return state::save(magic_, s, state::Context::Preset);
+    return blob(s);
 }
 
 std::vector<uint8_t> PresetLibrary::factoryBlob(size_t index) const {
@@ -170,7 +176,7 @@ std::vector<uint8_t> PresetLibrary::factoryBlob(size_t index) const {
         const int i = properties.indexOf(id);
         if (i >= 0) s.property[static_cast<size_t>(i)] = text;
     }
-    return state::save(magic_, s, state::Context::Preset);
+    return blob(s);
 }
 
 bool PresetLibrary::load(int index) {

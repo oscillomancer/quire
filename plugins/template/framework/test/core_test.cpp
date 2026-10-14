@@ -1710,6 +1710,28 @@ struct TempFolder {
 
 }  // namespace
 
+TEST(the_defaults_are_unmodified_when_the_state_carries_a_layers_chunk) {
+    // A layer's chunk follows the framework's state in every save; the
+    // library's own defaults must carry it too to compare equal.
+    struct Chunked : MemoryState {
+        std::vector<uint8_t> saveState(state::Context context) override {
+            std::vector<uint8_t> bytes = MemoryState::saveState(context);
+            appendChunks(bytes, state::Snapshot{}, context);
+            return bytes;
+        }
+        void appendChunks(std::vector<uint8_t>& bytes, const state::Snapshot&, state::Context) override {
+            state::appendChunk(bytes, state::fourcc("LAYR"), {1, 2, 3});
+        }
+    };
+    TempFolder folder;
+    Chunked st;
+    PresetLibrary lib(st, folder.path);
+    CHECK(lib.currentName() == "Default" && !lib.modified());
+    const size_t i = settable();
+    st.host[i] = otherValue(i);
+    CHECK(lib.modified());
+}
+
 TEST(user_presets_save_load_rename_and_delete) {
     TempFolder folder;
     MemoryState st;

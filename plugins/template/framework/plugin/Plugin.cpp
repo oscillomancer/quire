@@ -223,14 +223,15 @@ class ClapEvents {
 enum class Site : uint8_t {
     Init, Destroy, Activate, Deactivate, StartProcessing, StopProcessing, Reset, Process, OnMainThread,
     ParamsCount, ParamsInfo, ParamsValue, ParamsToText, ParamsFromText, ParamsFlush,
-    StateSave, StateLoad, PortsConfig, Latency, PresetLoad,
+    StateSave, StateLoad, PortsConfig, PortsActivation, Latency, PresetLoad,
     GuiCreate, GuiDestroy, GuiSize, GuiParent, GuiShow, GuiHide, Timer,
     Render, TrackInfo, ContextMenu, NoteNames, Tuning, kCount
 };
 constexpr const char* kSiteNames[] = {
     "init", "destroy", "activate", "deactivate", "start_processing", "stop_processing", "reset", "process",
     "on_main_thread", "params.count", "params.get_info", "params.get_value", "params.value_to_text",
-    "params.text_to_value", "params.flush", "state.save", "state.load", "audio-ports-config", "latency.get",
+    "params.text_to_value", "params.flush", "state.save", "state.load", "audio-ports-config",
+    "audio-ports-activation", "latency.get",
     "preset-load", "gui.create", "gui.destroy", "gui size", "gui.set_parent", "gui.show", "gui.hide",
     "timer-support.on_timer", "render", "track-info.changed", "context-menu", "note-name", "tuning.changed"};
 static_assert(std::size(kSiteNames) == static_cast<size_t>(Site::kCount));
@@ -344,6 +345,9 @@ struct Plugin final : StateAccess, Instance
     std::unique_ptr<EditBridge> edits;
     int channels;  // the main bus width: the selected layout's
     bool active = false;
+    // The host's say on the sidechain (audio-ports-activation), changed only
+    // while inactive: an inactive one is unconnected, whatever buffers it has.
+    bool sidechainActive = true;
     int reportedLatency = -1;         // main thread: what the host was last told
     bool restartOutstanding = false;  // main thread
     double editorScale = 1.0;         // main thread: survives editor close and state
@@ -573,8 +577,7 @@ struct Plugin final : StateAccess, Instance
         s.editorScale = currentEditorScale();
         if (presets && context == state::Context::Project) presets->describe(s);
         std::vector<uint8_t> bytes = state::save(magic, s, context);
-        if (layer && layer->chunkTag() != 0)
-            state::appendChunk(bytes, layer->chunkTag(), layer->saveChunk(s, context));
+        appendChunks(bytes, s, context);
         return bytes;
     }
 
@@ -679,6 +682,10 @@ struct Plugin final : StateAccess, Instance
 
     // --- StateAccess: the preset library's loads are the plugin's own -------------
     std::vector<uint8_t> saveState(state::Context context) override { return save(context); }
+    void appendChunks(std::vector<uint8_t>& bytes, const state::Snapshot& s, state::Context context) override {
+        if (layer && layer->chunkTag() != 0)
+            state::appendChunk(bytes, layer->chunkTag(), layer->saveChunk(s, context));
+    }
     bool loadState(const uint8_t* data, size_t size, state::Context context) override {
         if (!load(data, size, context)) return false;
         markDirty();
@@ -911,6 +918,7 @@ struct Plugin final : StateAccess, Instance
         const bool ports = before.kind != after.kind || before.sidechain != after.sidechain ||
                            before.auxOutputs != after.auxOutputs || before.layouts != after.layouts ||
                            channels != channelsBefore;
+        if (ports) sidechainActive = true;  // the host sets it again after the rescan
         if (ports && hostAudioPorts && hostAudioPorts->rescan) {
             const uint32_t flags = CLAP_AUDIO_PORTS_RESCAN_NAMES | CLAP_AUDIO_PORTS_RESCAN_FLAGS |
                                    CLAP_AUDIO_PORTS_RESCAN_CHANNEL_COUNT | CLAP_AUDIO_PORTS_RESCAN_PORT_TYPE |
@@ -1232,6 +1240,7 @@ bool CLAP_ABI configsSelect(const clap_plugin_t* p, clap_id id) {
     for (const BusLayout& l : s->info().layouts) {
         if (static_cast<clap_id>(l.channels) == id) {
             s->channels = l.channels;
+            s->sidechainActive = true;  // a selection resets the ports' activation
             return true;
         }
     }
@@ -1286,10 +1295,30 @@ bool CLAP_ABI configurableApply(const clap_plugin_t* p, const clap_audio_port_co
     int channels = 0;
     if (s->active || !layoutRequested(s->info(), requests, count, channels)) return false;
     s->channels = channels;
+    s->sidechainActive = true;
     return true;
 }
 
 const clap_plugin_configurable_audio_ports_t kConfigurablePorts = {configurableCanApply, configurableApply};
+
+// A host may deactivate the sidechain (one with nothing routed to it) while
+// the plugin is inactive; the DSP then sees it unconnected, though the host
+// still passes silent buffers. Other ports stay active.
+bool CLAP_ABI portsCanActivateWhileProcessing(const clap_plugin_t*) { return false; }
+
+bool CLAP_ABI portsSetActive(const clap_plugin_t* p, bool isInput, uint32_t index, bool isActive, uint32_t) {
+    Plugin* s = self(p);
+    s->expect(Thread::Main, Site::PortsActivation);
+    const PluginInfo& info = s->info();
+    if (s->active || !portExists(info, isInput, index)) return false;
+    if (isInput && info.sidechain && index == sidechainPort(info)) {
+        s->sidechainActive = isActive;
+        return true;
+    }
+    return isActive;
+}
+
+const clap_plugin_audio_ports_activation_t kPortsActivation = {portsCanActivateWhileProcessing, portsSetActive};
 
 // Surround and ambisonic layouts say which channel is which.
 bool CLAP_ABI surroundMaskSupported(const clap_plugin_t* p, uint64_t mask) {
@@ -1895,9 +1924,9 @@ bool processAs(Plugin* s, const clap_process_t* process, Source& events, const T
         if (in.channel_count < width || !channelsOf<T>(in)) return false;
         io.in = channelsOf<T>(in);
     }
-    // A bus the host left unconnected, or narrower than it was told, is
-    // silence in and nowhere out.
-    if (info.sidechain) {
+    // A bus the host left unconnected or deactivated, or narrower than it
+    // was told, is silence in and nowhere out.
+    if (info.sidechain && s->sidechainActive) {
         if (sidechainPort(info) < process->audio_inputs_count) {
             const clap_audio_buffer_t& sc = process->audio_inputs[sidechainPort(info)];
             if (sc.channel_count >= width) io.sidechain = channelsOf<T>(sc);
@@ -1982,6 +2011,9 @@ const void* CLAP_ABI pluginExtension(const clap_plugin_t* p, const char* id) {
     if (s.layer)
         if (const void* own = s.layer->extension(id)) return own;
     if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &kAudioPorts;
+    if (info.sidechain && (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS_ACTIVATION) ||
+                           !std::strcmp(id, CLAP_EXT_AUDIO_PORTS_ACTIVATION_COMPAT)))
+        return &kPortsActivation;
     if (info.audioOutput()) {
         if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG)) return &kAudioPortsConfig;
         if (!std::strcmp(id, CLAP_EXT_CONFIGURABLE_AUDIO_PORTS) ||
