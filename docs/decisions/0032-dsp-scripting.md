@@ -427,7 +427,10 @@ Where the work stands, and where it departs from the text above:
   instance (bridge protocol 12 forwards it): loop-budget stops,
   out-of-range indices, editor-code problems, and saves that failed to
   reload while the previous version plays on. Audio observations clear
-  when new code is adopted, on reset and on activation.
+  when new code is adopted, on reset and on activation. A failed query (a
+  crashed bridge) is a host-scoped problem, not a failed description.
+  Replacement code always crossfades: what the old code observes while it
+  fades out is discarded, and code its budget stopped fades from silence.
 - 2026-10-13: factory patches. A script declares them in `void
   factoryPatches(Patches& p)` (`p.add("Warm").set(tilt, -3)`), in patch
   values (a percent as 30), which the compiler checks against each Param.
@@ -438,7 +441,14 @@ Where the work stands, and where it departs from the text above:
   semantic-params `/1`, forwarded by bridge protocol 13. The engine lists
   and applies them with `fx.patch.list` and `fx.patch.set {name}`, the
   sandbox with `preset.list/load {source: "factory"}`. A change to a
-  script's patches redefines the plugin.
+  script's patches redefines the plugin. Framework 1.23.0 gives the preset
+  library's defaults the layer's chunk, so a fresh instance is not
+  "Default *". Source exports' patches are checked against the player's.
+- 2026-10-13: `io.sidechainConnected` is false while nothing is routed to
+  the key: framework 1.23.0 offers CLAP `audio-ports-activation`, and the
+  host deactivates an unrouted key port (ADR-0018's note), so the
+  compressor example keys from its own input. A host that always feeds
+  the port still reports it connected.
 - 2026-10-13: `dsp.test` drives what changes over time: parameter
   automation (sample-accurate, in physical units), a timed sidechain key
   (the sandbox renderer's `RenderRequest::sidechain`) and an instrument's
