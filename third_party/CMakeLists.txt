@@ -10,6 +10,10 @@ add_library(tp-doctest INTERFACE)
 target_include_directories(tp-doctest SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/doctest/include)
 add_library(supple::doctest ALIAS tp-doctest)
 
+add_library(tp-fast-float INTERFACE)
+target_include_directories(tp-fast-float SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/fast_float/include)
+add_library(supple::fast-float ALIAS tp-fast-float)
+
 add_library(tp-doctest-main STATIC ${CMAKE_CURRENT_SOURCE_DIR}/doctest_main.cpp)
 target_link_libraries(tp-doctest-main PUBLIC tp-doctest)
 target_compile_features(tp-doctest-main PUBLIC cxx_std_20)

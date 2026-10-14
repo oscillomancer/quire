@@ -48,6 +48,20 @@
       "linkage": "tests"
     },
     {
+      "name": "fast_float",
+      "dir": "fast_float",
+      "license": "MIT",
+      "license_file": "fast_float/LICENSE-MIT",
+      "version": "8.3.0 (2026-09-15)",
+      "source": "https://github.com/fastfloat/fast_float/archive/refs/tags/v8.3.0.tar.gz",
+      "commit": "b0ab987b3dfdde13fa1915f65ef2a5c068d9208c",
+      "sha256": "90485994d0fed61d0693e8dba32c464b0e8adf7f2e7c2efbf5bff0df5ef5b13f",
+      "purpose": "Locale-independent float/double parsing through core-base; usable by all MIT libraries and plugins",
+      "linkage": "headers",
+      "scope": "plugins-and-daw",
+      "notes": "MIT option selected from the upstream MIT/Apache-2.0/BSL-1.0 alternatives; only unmodified include/ and LICENSE-MIT are vendored. Latest stable release at least two weeks old as of 2026-10-14."
+    },
+    {
       "name": "dr_libs",
       "dir": "dr_libs",
       "license": "Unlicense OR MIT-0",
