@@ -8,11 +8,20 @@ supple_add_library(engine
           src/stretch.cpp src/meters.cpp src/runtime_protection.cpp src/media_files.cpp
           src/app.cpp src/plugin_outputs.cpp src/commands.cpp src/extra_commands.cpp src/midi_commands.cpp src/analysis_commands.cpp
           src/render_commands.cpp src/chain_commands.cpp src/take_commands.cpp src/learn.cpp src/dsp_commands.cpp
-          src/midi_control.cpp
+          src/midi_control.cpp src/portaudio_backend.cpp src/portaudio_native.cpp
   DEPS supple::model supple::clap-host supple::audio-file supple::timeline supple::semantic-params-abi
        supple::command-bus supple::lua-bus supple::notation supple::core-params supple::core-analysis
        supple::core-dsp supple::signalsmith-stretch supple::console9
   PRIVATE_DEPS supple::product-info supple::script-compiler supple::sandbox-render ZLIB::ZLIB ${CMAKE_DL_LIBS})
+
+target_include_directories(engine SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/third_party/portaudio-19.7.0/include)
+if(APPLE OR WIN32)
+  target_link_libraries(engine PRIVATE supple::portaudio)
+  if(WIN32)
+    target_link_libraries(engine PRIVATE avrt)
+    target_include_directories(engine SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/third_party/asiosdk-2.3.4/common)
+  endif()
+endif()
 
 if(SUPPLE_PLATFORM_LINUX)
   target_sources(engine PRIVATE src/jack_backend.cpp)
@@ -111,6 +120,18 @@ if(SUPPLE_BUILD_TESTS)
               $<TARGET_FILE:${PRODUCT_SLUG}-engine> $<TARGET_FILE:orrery-headless>)
     set_tests_properties(engine.mcp-arrangement PROPERTIES LABELS "engine;slow")
   endif()
+endif()
+
+if(SUPPLE_BUILD_TESTS)
+  add_executable(engine-portaudio.tests tests/test_portaudio.cpp)
+  target_link_libraries(engine-portaudio.tests PRIVATE supple::engine supple::doctest-main)
+  target_include_directories(engine-portaudio.tests PRIVATE src)
+  target_include_directories(engine-portaudio.tests SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/third_party/portaudio-19.7.0/include)
+  target_compile_definitions(engine-portaudio.tests PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>")
+  add_dependencies(engine-portaudio.tests clap-host-fixtures)
+  supple_target_defaults(engine-portaudio.tests)
+  add_test(NAME engine-portaudio.tests COMMAND engine-portaudio.tests)
+  set_tests_properties(engine-portaudio.tests PROPERTIES LABELS "engine;rt")
 endif()
 
 if(SUPPLE_BUILD_TESTS)

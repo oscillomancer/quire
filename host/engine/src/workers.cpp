@@ -95,15 +95,32 @@ void TaskGraph::build(const std::vector<std::vector<std::uint32_t>>& deps) {
 
 Workers::Workers(unsigned helpers) : Workers(helpers, Hooks{}) {}
 
-Workers::Workers(unsigned helpers, Hooks hooks)
-    : slots_(std::make_unique<Slot[]>(helpers)), hooks_(hooks) {
+Workers::Workers(unsigned helpers, Hooks hooks, Backend* backend)
+    : startup_(helpers, backend, false),
+      nativeBackend_(backend),
+      slots_(std::make_unique<Slot[]>(helpers)),
+      hooks_(hooks) {
     threads_.reserve(helpers);
-    for (unsigned i = 0; i < helpers; ++i)
-        threads_.emplace_back([this, i] {
-            nameThread("audio-bg-" + std::to_string(i + 1));
-            rt::prefaultStack();  // ADR-0025
-            loop(i);
-        });
+    try {
+        for (unsigned i = 0; i < helpers; ++i)
+            threads_.emplace_back([this, i] {
+                nameThread("audio-bg-" + std::to_string(i + 1));
+                rt::prefaultStack();  // ADR-0025
+                const bool elevated = startup_.enter(i);
+                ThreadStartup::Cleanup cleanup{elevated ? nativeBackend_ : nullptr};
+                loop(i);
+            });
+    } catch (...) {
+        startup_.cancel();
+        quit_.store(true);
+        for (unsigned i = 0; i < threads_.size(); ++i) {
+            slots_[i].sequence.fetch_add(1);
+            slots_[i].sequence.notify_one();
+        }
+        for (auto& thread : threads_) thread.join();
+        throw;
+    }
+    startupStatus_ = startup_.finish();
 }
 
 Workers::~Workers() {
@@ -121,7 +138,9 @@ Status Workers::setPolicy(ThreadPolicy policy) {
 }
 
 ThreadPolicy Workers::policy() {
-    return threads_.empty() ? ThreadPolicy{} : threadPolicy(threads_.front().native_handle());
+    return threads_.empty()                   ? ThreadPolicy{}
+           : nativeBackend_ && startupStatus_ ? ThreadPolicy{ThreadPolicy::Kind::High, 0}
+                                              : threadPolicy(threads_.front().native_handle());
 }
 
 unsigned Workers::defaultHelpers() {

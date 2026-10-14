@@ -849,12 +849,13 @@ Status EngineApp::startEngine(Backend& backend, const BackendConfig& config,
     return {};
 }
 
-Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, bool anticipative) {
+Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, bool anticipative,
+                              const EngineDeviceOptions& device) {
     if (engine_)
         return Error("engine.running", "the engine is already running", {},
                      "engine.stop first to change the backend or block size");
     BackendConfig config;
-    config.sampleRate = view().project->sampleRate;
+    config.sampleRate = device.rate > 0 ? device.rate : view().project->sampleRate;
     config.blockSize = block;
     config.inputs = 2;         // at least the device's first stereo pair, for recording
     config.midiInputs = true;  // its MIDI inputs, for MIDI tracks (ADR-0016)
@@ -871,14 +872,19 @@ Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, boo
         ownedBackend_ = std::make_unique<JackBackend>(o);
 #else
         return Error("backend.unsupported", "the JACK backend is unavailable on this platform",
-                     "/backend", "select dummy until the native device backend is available");
+                     "/backend", "select portaudio for a native device, or dummy without a device");
 #endif
+    } else if (backend == "portaudio") {
+        config.inputs = device.inputs;
+        config.outputs = device.outputs;
+        config.midiInputs = false;
+        ownedBackend_ = std::make_unique<PortAudioBackend>(device.native);
     } else if (backend == "dummy") {
         ownedBackend_ = std::make_unique<DummyBackend>(
             DummyBackend::Options{.mode = DummyBackend::Mode::Thread, .paced = true});
     } else {
         return Error("engine.backend", "unknown backend " + std::string(backend), {},
-                     "jack or dummy");
+                     "select jack, portaudio or dummy");
     }
     auto st = startEngine(*ownedBackend_, config, EngineOptions{.anticipative = anticipative});
     if (!st) {
@@ -887,6 +893,7 @@ Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, boo
     }
     // The app owns this backend: a restart recreates it (the instance may be
     // dead with the device).
+    engineDevice_ = device;
     engineKind_ = std::string(backend);
     engineBlock_ = block;
     engineAnticipative_ = anticipative;
@@ -1099,7 +1106,7 @@ void EngineApp::retryRestart() {
     if (now < restartRetryAt_) return;
     Status st = okStatus();
     if (!engineKind_.empty())
-        st = startEngine(engineKind_, engineBlock_, engineAnticipative_);
+        st = startEngine(engineKind_, engineBlock_, engineAnticipative_, engineDevice_);
     else if (restartBackend_)
         st = startEngine(*restartBackend_, restartConfig_, restartOptions_);
     else

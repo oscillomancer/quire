@@ -14,6 +14,9 @@
 #include <supple/base/files.h>
 #include "../../../tests/file_platform.h"
 #include "../src/file_platform.h"
+#if defined(_WIN32)
+#include <winioctl.h>
+#endif
 
 using namespace supple::audio;
 namespace fs = std::filesystem;
@@ -602,4 +605,42 @@ TEST_CASE("streaming render files sync and publish atomically over native paths"
     CHECK_FALSE(fs::exists(temp));
     CHECK(supple::readTextFile(path).value() == "replacement");
     fs::remove(path);
+}
+
+TEST_CASE("recording recovery uses 64-bit positions past Windows long range") {
+    const auto path =
+        fs::temp_directory_path() /
+        ("supple-large-recording-" + std::to_string(supple::test::processId()) + ".wav");
+    WavStreamWriter writer;
+    REQUIRE(writer.open(path, 48000, 2));
+    REQUIRE(writer.flush());
+    writer.abandon();
+    struct Cleanup {
+        fs::path path;
+        ~Cleanup() { fs::remove(path); }
+    } cleanup{path};
+    auto* stream = supple::audio::detail::files::open(path, true);
+    REQUIRE(stream);
+#if defined(_WIN32)
+    // Do not commit GiB of storage on the runner for a positioning test.
+    DWORD bytes = 0;
+    const auto handle = reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(stream)));
+    if (!DeviceIoControl(handle, FSCTL_SET_SPARSE, nullptr, 0, nullptr, 0, &bytes, nullptr)) {
+        std::fclose(stream);
+        MESSAGE("filesystem cannot create a sparse test file");
+        return;
+    }
+#endif
+    constexpr std::int64_t end = (std::int64_t{1} << 31) + 44 + 8;
+    REQUIRE(supple::audio::detail::files::seek(stream, end - 1, SEEK_SET) == 0);
+    REQUIRE(std::fputc(0, stream) != EOF);
+    CHECK(supple::audio::detail::files::tell(stream) == end);
+    REQUIRE(std::fclose(stream) == 0);
+    auto info = inspectWavStream(path);
+    REQUIRE(info);
+    CHECK(info->fileFrames == static_cast<std::uint64_t>(end - 44) / 8);
+    auto repaired = repairWavStream(path);
+    REQUIRE(repaired);
+    CHECK(*repaired == info->fileFrames);
+    CHECK(inspectWavStream(path)->headerFrames == *repaired);
 }

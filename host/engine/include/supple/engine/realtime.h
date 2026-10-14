@@ -178,6 +178,11 @@ class Backend {
     // True when callbacks run on a thread of the backend's own (a device);
     // false for a backend driven by its caller.
     virtual bool ownsThread() const = 0;
+    // Native device helpers apply scheduling on their own thread before work.
+    // Setup/cleanup are non-RT; the backend outlives all owned thread joins.
+    virtual bool nativeThreadPolicy() const { return false; }
+    virtual Status prepareCurrentThread(bool) { return okStatus(); }
+    virtual void releaseCurrentThread() {}
     // Main thread after start(), before live jobs: configure an idle helper.
     // Normal/dummy backends keep normal scheduling. RT backends MUST override
     // this and refuse unsafe scheduling/capacity (engine then runs serially).

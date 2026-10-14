@@ -164,9 +164,15 @@ struct TextResult {
 
 // --- engine / transport -------------------------------------------------------------------
 
-enum class BackendArg { Jack, Dummy };
+enum class BackendArg { Jack, Dummy, PortAudio };
+struct EngineDevicesArgs {
+    std::optional<BackendArg> backend;
+};
 struct EngineStartArgs {
     std::optional<BackendArg> backend;
+    std::optional<std::string> hostApi, inputDevice, outputDevice;
+    std::optional<double> rate;
+    std::optional<std::int64_t> inputs, outputs;
     std::optional<std::int64_t> block;
     std::optional<bool> anticipative;
 };
@@ -3592,14 +3598,65 @@ void registerEngineCommands(cmd::Registry& registry) {
     }
     // ---------------------------------------------------------------- engine.*
     {
+        Command<EngineDevicesArgs, json::Value> c;
+        c.name = "engine.devices";
+        c.kind = Kind::Query;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "List native audio device names, host APIs, rates and channel capacities.";
+        c.description =
+            "Enumerates PortAudio devices on macOS/Windows without opening a stream. "
+            "backend defaults to portaudio; dummy returns an empty list without initializing "
+            "hardware. Use exact host_api and name values with engine.start. Linux uses JACK "
+            "ports and returns backend.unsupported; engine.inputs lists running JACK inputs.";
+        c.tags = {"engine"};
+        c.args = schema::object<EngineDevicesArgs>("engine_devices_args")
+                     .field("backend", &EngineDevicesArgs::backend,
+                            schema::enumeration<BackendArg>({{BackendArg::Jack, "jack"},
+                                                             {BackendArg::Dummy, "dummy"},
+                                                             {BackendArg::PortAudio, "portaudio"}}))
+                     .build();
+        c.result = schema::any();
+        c.errors = {{"backend.unsupported", "native device enumeration is unavailable",
+                     "use engine.inputs with JACK"}};
+        c.examples = {
+            {"Without hardware", obj(R"({"backend":"dummy"})"), obj(R"({"devices":[]})"), "empty"}};
+        c.run = [](const EngineDevicesArgs& args, Context&) -> Result<json::Value> {
+            if (args.backend == BackendArg::Dummy) return obj(R"({"devices":[]})");
+            if (args.backend == BackendArg::Jack)
+                return Error("backend.unsupported", "JACK exposes graph ports", "/backend",
+                             "use engine.inputs while JACK is running");
+            auto devices = PortAudioBackend::devices();
+            if (!devices) return std::move(devices).error();
+            auto result = json::Value::object();
+            result["devices"] = json::Value::array();
+            for (const auto& device : *devices) {
+                auto entry = json::Value::object();
+                entry["host_api"] = device.hostApi;
+                entry["name"] = device.name;
+                entry["inputs"] = std::int64_t{device.inputs};
+                entry["outputs"] = std::int64_t{device.outputs};
+                entry["default_rate"] = device.defaultRate;
+                entry["default_input"] = device.defaultInput;
+                entry["default_output"] = device.defaultOutput;
+                result["devices"].push_back(std::move(entry));
+            }
+            return result;
+        };
+        addChecked(registry, std::move(c));
+    }
+    {
         Command<EngineStartArgs, EngineStatus> c;
         c.name = "engine.start";
         c.kind = Kind::Action;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary = "Start real-time playback on the audio device (jack) or without one (dummy).";
+        c.summary = "Start playback through JACK, native PortAudio, or a device-free dummy.";
         c.description =
-            "backend: jack (Linux default; PipeWire's JACK or a JACK server) or dummy (default "
-            "elsewhere, no device, "
+            "backend: jack (Linux default), portaudio (macOS/Windows native device), or dummy "
+            "(default "
+            "elsewhere, no device). For portaudio, host_api, input_device and output_device "
+            "select exact names from engine.devices. inputs defaults to 0 (playback only); "
+            "outputs defaults to 2. rate defaults to the project rate. Native MIDI is not yet "
+            "available. Dummy is "
             "paced like one). block: the device block in frames (default 256); the device's "
             "period may differ and is reported. anticipative (default true): render ahead of "
             "the playhead on worker threads (edits are heard up to 200 ms later); false renders "
@@ -3615,14 +3672,24 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.tags = {"engine"};
         c.args = schema::object<EngineStartArgs>("engine_start_args")
                      .field("backend", &EngineStartArgs::backend,
-                            schema::enumeration<BackendArg>(
-                                {{BackendArg::Jack, "jack"}, {BackendArg::Dummy, "dummy"}}))
+                            schema::enumeration<BackendArg>({{BackendArg::Jack, "jack"},
+                                                             {BackendArg::Dummy, "dummy"},
+                                                             {BackendArg::PortAudio, "portaudio"}}))
+                     .field("host_api", &EngineStartArgs::hostApi, schema::string())
+                     .field("input_device", &EngineStartArgs::inputDevice, schema::string())
+                     .field("output_device", &EngineStartArgs::outputDevice, schema::string())
+                     .field("rate", &EngineStartArgs::rate, schema::number().range(1, 768000))
+                     .field("inputs", &EngineStartArgs::inputs, schema::integer().range(0, 64))
+                     .field("outputs", &EngineStartArgs::outputs, schema::integer().range(2, 64))
                      .field("block", &EngineStartArgs::block, schema::integer().range(16, 4096))
                      .field("anticipative", &EngineStartArgs::anticipative, schema::boolean())
                      .build();
         c.result = engineStatusSchema();
         c.errors = {
             {"engine.running", "the engine is already running", "engine.stop first"},
+            {"backend.device", "device or host API was not found",
+             "choose names from engine.devices"},
+            {"backend.config", "device format is invalid", "check rate and channel capacities"},
             {"backend.unavailable", "JACK is not installed", "install pipewire-jack"},
             {"backend.open", "no JACK server answered", "is PipeWire running?"},
             {"backend.unsupported", "backend is unavailable on this platform", "select dummy"}};
@@ -3649,10 +3716,19 @@ void registerEngineCommands(cmd::Registry& registry) {
 #else
             constexpr auto defaultBackend = BackendArg::Dummy;
 #endif
-            const bool dummy = a.backend.value_or(defaultBackend) == BackendArg::Dummy;
-            SUPPLE_TRY(app.startEngine(dummy ? "dummy" : "jack",
+            const auto backend = a.backend.value_or(defaultBackend);
+            EngineDeviceOptions device;
+            device.native.hostApi = a.hostApi.value_or("");
+            device.native.inputDevice = a.inputDevice.value_or("");
+            device.native.outputDevice = a.outputDevice.value_or("");
+            device.rate = a.rate.value_or(0);
+            device.inputs = static_cast<std::uint32_t>(a.inputs.value_or(0));
+            device.outputs = static_cast<std::uint32_t>(a.outputs.value_or(2));
+            SUPPLE_TRY(app.startEngine(backend == BackendArg::Dummy  ? "dummy"
+                                       : backend == BackendArg::Jack ? "jack"
+                                                                     : "portaudio",
                                        static_cast<std::uint32_t>(a.block.value_or(256)),
-                                       a.anticipative.value_or(true)));
+                                       a.anticipative.value_or(true), device));
             return app.engineStatus();
         };
         addChecked(registry, std::move(c));

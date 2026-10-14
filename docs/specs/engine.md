@@ -1267,3 +1267,56 @@ POSIX syncs the containing directory; Windows uses MoveFileExW with replacement
 and write-through. External Windows readers denying delete sharing can prevent
 publication; failure removes only our own temporary file and returns audio.write
 with a corrective hint. Small renders retain core-base writeFileAtomic.
+
+### Native device backend (2026-10-14, ADR-0037)
+
+`PortAudioBackend` implements Backend on macOS/Windows. `start()` accepts the
+existing BackendConfig rate/block/channels; PortAudioOptions selects exact host
+API and input/output names (empty: defaults). `driverDevices()` uses its injected
+API for tests; static `devices()` uses the native API. Library initialization
+and teardown stay off RT. Failed opens release every acquired stream/reference.
+The Linux build compiles the driver-independent wrapper for fake-driver tests,
+but never builds or initializes the PortAudio library.
+
+`engine.start` accepts backend `jack|portaudio|dummy` and optional `host_api`,
+`input_device`, `output_device`, `rate` (1..768000), `inputs` (0..64) and `outputs`
+(2..64). Native stream inputs default to zero, outputs to two; native MIDI is
+unavailable. JACK keeps its capture/MIDI behavior. Native default backend stays
+dummy; Linux's existing default stays JACK. The CLI play command forwards these
+fields through --host-api, --input-device, --output-device, --rate, --inputs and
+--outputs. Device recovery retains them alongside block/anticipative settings.
+
+`engine.devices {backend: portaudio}` (the default) returns `devices` containing
+`host_api`, `name`, `inputs`, `outputs`, `default_rate`, `default_input` and
+`default_output`. It enumerates without opening a stream. `{backend: dummy}`
+returns an empty list without library initialization. Linux portaudio requests
+return backend.unsupported, path /backend and a JACK/dummy hint; JACK device
+queries direct the caller to engine.inputs. Selection errors use backend.device
+and the relevant host_api/input_device/output_device path. Format/channel errors
+use backend.config or backend.open, with a corrective hint. Duplicate matching
+names are rejected. No numeric device index is persisted across restarts.
+
+Callbacks use non-interleaved float32 and paClipOff/paDitherOff. They call the
+engine in chunks no larger than blockSize; period reports the complete device
+callback size. Status exposes device input/output latency in frames, affected
+callback xrun counts, and restart_needed/reason for loss or changed rate.
+Period changes need no restart. A native device monitor observes state every
+250 ms and wakes the app only for a restart transition. Normal stop supplies a
+final zero-frame callback on the device thread; a lost/stalled device closes and
+joins before owner-thread lifecycle fallback, as with JACK. All native threads
+and device-library initialization references are released on stop/destruction.
+
+Backend's optional nativeThreadPolicy/prepareCurrentThread/releaseCurrentThread
+hooks apply native policy on each owned thread before work and undo it at exit.
+Each helper class's non-RT startup barrier verifies all results before enabling
+it, rolling back the class on refusal. Live setup failure disables that pool;
+background/renderer failures warn and report the actual fallback class. Windows
+uses MMCSS Pro Audio, macOS device-derived Mach time constraints (ADR-0037),
+reported as high/priority 0. These are distinct from core-base's generic High
+QoS/priority helper. macOS workgroup joining remains a future device-validated
+improvement. Offline and dummy threads stay normal; background Normal opts out.
+
+The fake API tests cover device selection, odd-period chunks, both executors'
+exact offline equivalence, PDC/Console 9, several worker counts, failures and
+final callback ownership. Real native device tests are skipped unless
+SUPPLE_AUDIO_DEVICE_TEST equals `1`; default CI never opens a stream.

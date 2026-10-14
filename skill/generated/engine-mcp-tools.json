@@ -1720,6 +1720,28 @@
     }
   },
   {
+    "name": "engine_devices",
+    "title": "List native audio device names, host APIs, rates and channel capacities.",
+    "description": "List native audio device names, host APIs, rates and channel capacities. Enumerates PortAudio devices on macOS/Windows without opening a stream. backend defaults to portaudio; dummy returns an empty list without initializing hardware. Use exact host_api and name values with engine.start. Linux uses JACK ports and returns backend.unsupported; engine.inputs lists running JACK inputs. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "engine_devices_args",
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": ["jack", "dummy", "portaudio"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {},
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "engine_inputs",
     "title": "The device inputs a track can record: audio channels and MIDI devices.",
     "description": "The device inputs a track can record: audio channels and MIDI devices. audio: one entry per input channel (channel, the 1-based number track.set record_input takes, and the device port it is connected to). midi: the MIDI devices (names track.set record_midi matches). While the engine is stopped: running false and empty lists (engine.start opens the device). See describe for errors and examples.",
@@ -1738,15 +1760,39 @@
   },
   {
     "name": "engine_start",
-    "title": "Start real-time playback on the audio device (jack) or without one (dummy).",
-    "description": "Start real-time playback on the audio device (jack) or without one (dummy). backend: jack (Linux default; PipeWire's JACK or a JACK server) or dummy (default elsewhere, no device, paced like one). block: the device block in frames (default 256); the device's period may differ and is reported. anticipative (default true): render ahead of the playhead on worker threads (edits are heard up to 200 ms later); false renders everything in the audio callback. The engine runs at the device's rate (media is resampled; renders stay at the project's rate). Background and live thread capacities follows the app's Audio processing threads preference (Automatic by default); live helpers join each callback with no added latency. memory_lock reports the default-off host-process memory policy: requested, active, and a structured OS error on failure. cpu_idle_latency reports the default-off 20 microsecond PM QoS request, released on engine stop. A protection failure does not prevent audio startup. See describe for errors and examples.",
+    "title": "Start playback through JACK, native PortAudio, or a device-free dummy.",
+    "description": "Start playback through JACK, native PortAudio, or a device-free dummy. backend: jack (Linux default), portaudio (macOS/Windows native device), or dummy (default elsewhere, no device). For portaudio, host_api, input_device and output_device select exact names from engine.devices. inputs defaults to 0 (playback only); outputs defaults to 2. rate defaults to the project rate. Native MIDI is not yet available. Dummy is paced like one). block: the device block in frames (default 256); the device's period may differ and is reported. anticipative (default true): render ahead of the playhead on worker threads (edits are heard up to 200 ms later); false renders everything in the audio callback. The engine runs at the device's rate (media is resampled; renders stay at the project's rate). Background and live thread capacities follows the app's Audio processing threads preference (Automatic by default); live helpers join each callback with no added latency. memory_lock reports the default-off host-process memory policy: requested, active, and a structured OS error on failure. cpu_idle_latency reports the default-off 20 microsecond PM QoS request, released on engine stop. A protection failure does not prevent audio startup. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "engine_start_args",
       "properties": {
         "backend": {
           "type": "string",
-          "enum": ["jack", "dummy"]
+          "enum": ["jack", "dummy", "portaudio"]
+        },
+        "host_api": {
+          "type": "string"
+        },
+        "input_device": {
+          "type": "string"
+        },
+        "output_device": {
+          "type": "string"
+        },
+        "rate": {
+          "type": "number",
+          "minimum": 1.0,
+          "maximum": 768000.0
+        },
+        "inputs": {
+          "type": "integer",
+          "minimum": 0.0,
+          "maximum": 64.0
+        },
+        "outputs": {
+          "type": "integer",
+          "minimum": 2.0,
+          "maximum": 64.0
         },
         "block": {
           "type": "integer",

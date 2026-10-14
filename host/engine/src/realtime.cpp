@@ -225,7 +225,9 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
         std::min({requested, detail::LiveWorkers::maxHelpers(), backend.liveThreadCapacity()});
     if (helpers > 0) {
         try {
-            liveWorkers_ = std::make_unique<detail::LiveWorkers>(helpers);
+            liveWorkers_ = std::make_unique<detail::LiveWorkers>(
+                helpers, detail::LiveWorkers::Hooks{},
+                backend.nativeThreadPolicy() ? &backend : nullptr);
         } catch (const std::system_error& error) {
             startWarnings_.push_back(
                 "live helper creation failed: " + std::string(error.what()) +
@@ -253,9 +255,19 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
             static_cast<std::int64_t>(options_.renderAheadMs / 1000.0 * config_.sampleRate));
         aheadFrames_ = std::min<std::int64_t>(
             aheadFrames_, static_cast<std::int64_t>(ring_->mask - 1) * options_.renderBlock);
+        Backend* native =
+            backend.nativeThreadPolicy() && options_.background != EngineOptions::Background::Normal
+                ? &backend
+                : nullptr;
         workers_ = std::make_unique<detail::Workers>(
             options_.workers < 0 ? detail::Workers::defaultHelpers()
-                                 : static_cast<unsigned>(std::min(options_.workers, 64)));
+                                 : static_cast<unsigned>(std::min(options_.workers, 64)),
+            detail::Workers::Hooks{}, native);
+        if (auto policy = workers_->startupStatus(); !policy)
+            startWarnings_.push_back(policy.error().toString());
+        if (!workers_->startupStatus()) native = nullptr;
+        std::shared_ptr<detail::ThreadStartup> rendererStartup;
+        if (native) rendererStartup = std::make_shared<detail::ThreadStartup>(1, native, false);
         // The renderer's starting epoch is taken here, not on its thread: a
         // seek or pause issued before the thread runs must still be seen.
         const TransportSnapshot t = transportSnapshot();
@@ -268,11 +280,17 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
         epochDone_.store(first, std::memory_order_release);
         rendererQuit_ = false;
         rendererWakeAt_.store(INT64_MAX);
-        renderer_ = std::thread([this, first] {
+        renderer_ = std::thread([this, first, rendererStartup, native] {
             nameThread("audio-render");
             rt::prefaultStack();  // ADR-0025
+            const bool elevated = rendererStartup && rendererStartup->enter(0);
+            detail::ThreadStartup::Cleanup cleanup{elevated ? native : nullptr};
             rendererLoop(first);
         });
+        auto rendererPolicy = rendererStartup ? rendererStartup->finish() : okStatus();
+        scheduling_.renderer = {
+            native && rendererPolicy ? ThreadPolicy::Kind::High : ThreadPolicy::Kind::Normal, 0};
+        if (!rendererPolicy) startWarnings_.push_back(rendererPolicy.error().toString());
         // No plan exists before start() returns, so no bridged instance has
         // started processing with an older policy.
         scheduleBackground();
@@ -283,6 +301,11 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
 
 void Engine::scheduleBackground() {
     using Kind = ThreadPolicy::Kind;
+    if (backend_->nativeThreadPolicy()) {
+        scheduling_.background = workers_->policy();
+        host::setBridgeAudioPolicy(scheduling_.renderer);
+        return;
+    }
     using Background = EngineOptions::Background;
     const ThreadPolicy callback = scheduling_.callback;
     const ThreadPolicy normal{Kind::Normal, 0};

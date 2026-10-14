@@ -53,3 +53,4 @@ current state.
 | [0032](0032-dsp-scripting.md) | DSP scripting: a checked C++ subset, a JIT player and exports | Accepted |
 | [0033](0033-daw-and-plugin-licensing.md) | DAW and plugin licensing | Accepted |
 | [0036](0036-native-plugin-hosting.md) | Native plugin hosting and supervised scanning | Accepted |
+| [0037](0037-native-device-audio.md) | Native device audio through PortAudio | Accepted |

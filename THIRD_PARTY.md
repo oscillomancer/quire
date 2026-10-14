@@ -83,3 +83,11 @@ logo non-compliance does not affect GPL rights but may violate trademarks.
 The license recommends those guidelines. No logo artwork is bundled here.
 The two license files, README, proprietary agreement and usage guidelines
 are preserved alongside the subset. CMake integration is still pending.
+
+PortAudio v19.7.0 (2021-04-06), commit
+147dd722548358763a8b649b3e4b41dfffbcfbb6, is vendored unmodified under
+`third_party/portaudio-19.7.0`; MIT license in LICENSE.txt. It is built only for
+DAW device audio on macOS (CoreAudio) and Windows (WASAPI + ASIO). Windows's
+ASIO-enabled static build also contains the separately licensed ASIO SDK
+GPL-3.0-only subset; neither dependency enters plugin binaries. PortAudio's
+non-binding requests are preserved in its license. Linux retains JACK.

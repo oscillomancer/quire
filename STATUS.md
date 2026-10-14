@@ -19,9 +19,9 @@ including the suite's self-contained source exports. Native waits/wakes,
 thread setup, control-protocol and standalone MCP/proxy have native coverage
 on both platforms (ADR-0035).
 macOS also enables and tests the engine/CLI, dummy backend, sandbox and offline
-renderer, including RT/offline equivalence in both executors. Audio bridge,
-hardware backends and GUI remain gated. Windows audio-file I/O and the dependent engine/sandbox are enabled for native
-CI verification; device audio remains gated.
+renderer, including RT/offline equivalence in both executors. Audio bridge and GUI remain gated. Native hardware backends now have
+PortAudio implementations and fake-driver tests; native CI verification is pending. Windows audio-file I/O and the dependent engine/sandbox are enabled for native
+CI verification.
 Portable libraries, the session model, stock DSP cores
 and the script suite build independently of those services; see
 CONTRIBUTING.md for the complete gate list. External Windows readers that
@@ -194,11 +194,11 @@ Engine and hosting:
   The macOS engine runs with dummy/offline audio independently of JACK, with
   native RT/offline equivalence coverage. Windows engine file helpers and audio-file I/O are enabled; native CI
   verification is pending.
-  Native hosting/scanning are enabled (ADR-0036); audio bridge, hardware backends
-  and GUI embedding remain separate ports.
-  Windows event waits admit 64 unique handles. macOS QoS must be self-applied;
-  attempts to elevate engine threads from another thread report a normal-policy
-  fallback. Linux process memory-lock and CPU latency preferences report
+  Native hosting/scanning are enabled (ADR-0036); audio bridge and GUI embedding remain separate ports; hardware backends
+  await native CI and opt-in device validation.
+  Windows event waits admit 64 unique handles. Generic macOS High QoS must be self-applied. Native device helpers instead
+  use a startup barrier with Mach time constraints (macOS) or MMCSS Pro Audio
+  (Windows); workgroup joining and actual hardware trials remain pending. Linux process memory-lock and CPU latency preferences report
   unsupported on other platforms. Windows MCP is intended for piped/file input;
   cancelling an interactive console read can await a keypress during shutdown.
 - Without anticipation, a single Orrery chain can miss deadlines at 64
@@ -225,8 +225,10 @@ Engine and hosting:
 - There is no pipelined bridge mode, so a bridged plugin on a live
   (monitored) track is passed through with a warning; set its isolation to
   in-process to hear it while monitoring.
-- Audio backends: JACK and a dummy backend. No direct PipeWire or ALSA
-  backend; no MIDI outputs.
+- Audio backends: Linux JACK, dummy, and native PortAudio (CoreAudio on macOS;
+  WASAPI/ASIO on Windows), with selection, latency/xruns and restart notifications.
+  Fake-device output equals offline in both executors; native build verification
+  is pending. No direct PipeWire/ALSA backend, native MIDI inputs or MIDI outputs.
 - MIDI learn has no OSC, no "arm envelope" option, and no learn directly on
   track faders (the "(MIDI CC)" actions cover the selected tracks). The last
   touched parameter misses edits in plug-in editors that report no gestures

@@ -34,7 +34,7 @@ decisions behind it are in `docs/decisions/` (ADRs) and the contracts in
         │ anticipative render-ahead for non-live tracks; PDC; automation      │
         │ plugins: CLAP, VST3 (in process / shared bridge / dedicated process) │
         └───────────────┬────────────────────────────────────────────────────┘
-                        │ AudioBackend: JACK (pipewire-jack) · dummy · offline
+                        │ AudioBackend: JACK · PortAudio (native) · dummy · offline
                         ▼
                      hardware
 ```
@@ -114,8 +114,12 @@ adds macOS address waits and pipes, and Windows address waits and event handles.
 `Waitable` carries borrowed native readiness sources through ModelLoop and MCP;
 new embedding code uses typed sources instead of assuming integer descriptors.
 On arm64 the per-node guard sets FPCR FZ and restores the complete register.
-Platform directory roots come from `supple::paths`. Native port verification,
-device backends, audio bridge and GUI embedding remain separate gates.
+Platform directory roots come from `supple::paths`. Native device audio uses PortAudio CoreAudio/WASAPI/ASIO (ADR-0037); its
+control-side monitor wakes the owner for device recovery. Device callbacks keep
+the same chunked, allocation-free engine contract as JACK. Owned helpers apply
+MMCSS Pro Audio or device-derived Mach time constraints on themselves before
+work, through a startup barrier. Audio bridge and GUI embedding remain separate
+gates; real-device validation remains opt-in.
 Native in-process hosting and supervised scanning are separate from that bridge
 (ADR-0036). clap-host owns a reusable ChildProcess tree/capture helper and
 a standalone scanner; non-Linux isolation requests return structured errors.

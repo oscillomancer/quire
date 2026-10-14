@@ -5,6 +5,7 @@
 #pragma once
 
 #include "supple/base/result.h"
+#include "thread_startup.h"
 #include "workers.h"
 
 namespace supple::engine {
@@ -22,7 +23,8 @@ class LiveWorkers {
         void* context = nullptr;
     };
     explicit LiveWorkers(unsigned helpers);
-    LiveWorkers(unsigned helpers, Hooks hooks);
+    LiveWorkers(unsigned helpers, Hooks hooks, Backend* backend = nullptr);
+    Status startupStatus() const { return startupStatus_; }
     ~LiveWorkers();
     LiveWorkers(const LiveWorkers&) = delete;
     LiveWorkers& operator=(const LiveWorkers&) = delete;
@@ -46,6 +48,9 @@ class LiveWorkers {
         std::atomic<std::uint32_t> sequence{0};
     };
     std::unique_ptr<Slot[]> slots_;
+    ThreadStartup startup_;
+    Status startupStatus_;
+    Backend* nativeBackend_ = nullptr;
     std::vector<std::thread> threads_;
     Hooks hooks_;
     std::atomic<unsigned> active_{0};

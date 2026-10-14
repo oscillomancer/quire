@@ -17,6 +17,7 @@
 #include "supple/base/result.h"
 #include "supple/base/rt.h"
 #include "supple/base/thread.h"
+#include "thread_startup.h"
 
 namespace supple::engine::detail {
 
@@ -69,7 +70,8 @@ class Workers {
         void* context = nullptr;
     };
     explicit Workers(unsigned helpers);
-    Workers(unsigned helpers, Hooks hooks);
+    Workers(unsigned helpers, Hooks hooks, Backend* backend = nullptr);
+    Status startupStatus() const { return startupStatus_; }
     ~Workers();
     Workers(const Workers&) = delete;
     Workers& operator=(const Workers&) = delete;
@@ -103,6 +105,9 @@ class Workers {
         std::atomic<std::uint32_t> sequence{0};
     };
 
+    ThreadStartup startup_;
+    Status startupStatus_;
+    Backend* nativeBackend_ = nullptr;
     std::vector<std::thread> threads_;
     std::unique_ptr<Slot[]> slots_;
     // Enrollment is complete BEFORE any helper can read the job. run() cannot

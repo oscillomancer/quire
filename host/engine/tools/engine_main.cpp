@@ -13,7 +13,7 @@
 //       Serve MCP over stdio against the in-process engine session.
 //   <slug>-engine serve [--project FILE] [--instance NAME] [--socket PATH]
 //       Serve the command bus on a Unix socket from the model thread.
-//   <slug>-engine play FILE [--bar N] [--seconds S] [--block N] [--backend jack|dummy]
+//   <slug>-engine play FILE [--bar N] [--seconds S] [--block N] [--backend jack|portaudio|dummy]
 //       Play a project through the audio device (to its end, or for S
 //       seconds; Ctrl-C stops), then print engine.status.
 #if defined(_WIN32)
@@ -53,15 +53,17 @@ int inputDescriptor() {
 
 int usage() {
     const auto slug = std::string(product::kSlug);
-    std::fprintf(stderr,
-                 "usage: %s-engine exec '<json>' [--project FILE] [--save] [--workdir DIR] "
-                 "[--plugin-path P]...\n"
-                 "       %s-engine registry [--markdown | --mcp-tools | --lua]\n"
-                 "       %s-engine --mcp [--project FILE] [--workdir DIR] [--plugin-path P]...\n"
-                 "       %s-engine serve [--project FILE] [--instance NAME] [--socket PATH]\n"
-                 "       %s-engine play FILE [--bar N] [--seconds S] [--block N] "
-                 "[--backend jack|dummy] [--plugin-path P]...\n",
-                 slug.c_str(), slug.c_str(), slug.c_str(), slug.c_str(), slug.c_str());
+    std::fprintf(
+        stderr,
+        "usage: %s-engine exec '<json>' [--project FILE] [--save] [--workdir DIR] "
+        "[--plugin-path P]...\n"
+        "       %s-engine registry [--markdown | --mcp-tools | --lua]\n"
+        "       %s-engine --mcp [--project FILE] [--workdir DIR] [--plugin-path P]...\n"
+        "       %s-engine serve [--project FILE] [--instance NAME] [--socket PATH]\n"
+        "       %s-engine play FILE [--bar N] [--seconds S] [--block N] "
+        "[--backend jack|portaudio|dummy] [--host-api NAME] [--output-device NAME] "
+        "[--input-device NAME] [--rate HZ] [--inputs N] [--outputs N] [--plugin-path P]...\n",
+        slug.c_str(), slug.c_str(), slug.c_str(), slug.c_str(), slug.c_str());
     return 2;
 }
 
@@ -121,6 +123,18 @@ int play(cmd::Registry& registry, const std::vector<std::string>& args) {
             start["block"] = std::int64_t{std::atoll(args[++i].c_str())};
         else if (args[i] == "--backend")
             start["backend"] = args[++i];
+        else if (args[i] == "--host-api")
+            start["host_api"] = args[++i];
+        else if (args[i] == "--input-device")
+            start["input_device"] = args[++i];
+        else if (args[i] == "--output-device")
+            start["output_device"] = args[++i];
+        else if (args[i] == "--rate")
+            start["rate"] = std::atof(args[++i].c_str());
+        else if (args[i] == "--inputs")
+            start["inputs"] = std::int64_t{std::atoll(args[++i].c_str())};
+        else if (args[i] == "--outputs")
+            start["outputs"] = std::int64_t{std::atoll(args[++i].c_str())};
         else if (args[i] == "--plugin-path")
             options.pluginPath.emplace_back(args[++i]);
         else

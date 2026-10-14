@@ -31,6 +31,8 @@ target_include_directories(product-info INTERFACE ${CMAKE_BINARY_DIR}/generated)
 add_library(supple::product-info ALIAS product-info)
 
 add_subdirectory(third_party)
+# Native device library is DAW-only, never part of isolated plugin builds.
+include(cmake/PortAudio.cmake)
 add_subdirectory(libs)
 add_subdirectory(plugins)
 add_subdirectory(host)

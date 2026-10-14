@@ -2015,6 +2015,51 @@ Result:
 
 ```
 
+## `engine.devices@1`
+
+List native audio device names, host APIs, rates and channel capacities.
+
+Enumerates PortAudio devices on macOS/Windows without opening a stream. backend defaults to portaudio; dummy returns an empty list without initializing hardware. Use exact host_api and name values with engine.start. Linux uses JACK ports and returns backend.unsupported; engine.inputs lists running JACK inputs.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `backend` | string |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Errors
+
+- `backend.unsupported`: native device enumeration is unavailable Hint: use engine.inputs with JACK
+
+### Examples
+
+**Without hardware** (`empty`)
+
+```json
+{
+  "backend": "dummy"
+}
+
+```
+
+Result:
+
+```json
+{
+  "devices": []
+}
+
+```
+
 ## `engine.inputs@1`
 
 The device inputs a track can record: audio channels and MIDI devices.
@@ -2057,9 +2102,9 @@ Result:
 
 ## `engine.start@1`
 
-Start real-time playback on the audio device (jack) or without one (dummy).
+Start playback through JACK, native PortAudio, or a device-free dummy.
 
-backend: jack (Linux default; PipeWire's JACK or a JACK server) or dummy (default elsewhere, no device, paced like one). block: the device block in frames (default 256); the device's period may differ and is reported. anticipative (default true): render ahead of the playhead on worker threads (edits are heard up to 200 ms later); false renders everything in the audio callback. The engine runs at the device's rate (media is resampled; renders stay at the project's rate). Background and live thread capacities follows the app's Audio processing threads preference (Automatic by default); live helpers join each callback with no added latency. memory_lock reports the default-off host-process memory policy: requested, active, and a structured OS error on failure. cpu_idle_latency reports the default-off 20 microsecond PM QoS request, released on engine stop. A protection failure does not prevent audio startup.
+backend: jack (Linux default), portaudio (macOS/Windows native device), or dummy (default elsewhere, no device). For portaudio, host_api, input_device and output_device select exact names from engine.devices. inputs defaults to 0 (playback only); outputs defaults to 2. rate defaults to the project rate. Native MIDI is not yet available. Dummy is paced like one). block: the device block in frames (default 256); the device's period may differ and is reported. anticipative (default true): render ahead of the playhead on worker threads (edits are heard up to 200 ms later); false renders everything in the audio callback. The engine runs at the device's rate (media is resampled; renders stay at the project's rate). Background and live thread capacities follows the app's Audio processing threads preference (Automatic by default); live helpers join each callback with no added latency. memory_lock reports the default-off host-process memory policy: requested, active, and a structured OS error on failure. cpu_idle_latency reports the default-off 20 microsecond PM QoS request, released on engine stop. A protection failure does not prevent audio startup.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -2068,6 +2113,12 @@ Kind: `action`. Exposure: `mcp-tool`.
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
 | `backend` | string |  |  |  |  |
+| `host_api` | string |  |  |  |  |
+| `input_device` | string |  |  |  |  |
+| `output_device` | string |  |  |  |  |
+| `rate` | number |  | 1.0..768000.0 |  |  |
+| `inputs` | integer |  | 0.0..64.0 |  |  |
+| `outputs` | integer |  | 2.0..64.0 |  |  |
 | `block` | integer |  | 16.0..4096.0 |  |  |
 | `anticipative` | boolean |  |  |  |  |
 
@@ -2337,6 +2388,8 @@ Kind: `action`. Exposure: `mcp-tool`.
 ### Errors
 
 - `engine.running`: the engine is already running Hint: engine.stop first
+- `backend.device`: device or host API was not found Hint: choose names from engine.devices
+- `backend.config`: device format is invalid Hint: check rate and channel capacities
 - `backend.unavailable`: JACK is not installed Hint: install pipewire-jack
 - `backend.open`: no JACK server answered Hint: is PipeWire running?
 - `backend.unsupported`: backend is unavailable on this platform Hint: select dummy

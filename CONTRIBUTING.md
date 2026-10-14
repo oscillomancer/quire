@@ -129,7 +129,7 @@ These gates are explicit, with no no-op RT implementations:
 | Gate | Off on | Reason / follow-up |
 |---|---|---|
 | `SUPPLE_HOST_SERVICES`: audio bridge | macOS, Windows | Shared memory, cross-process wake and native IPC; bridge port step |
-| JACK/fake JACK and hardware capacity benchmark | macOS, Windows | Native device backend is a later port; requests return backend.unsupported |
+| JACK/fake JACK and hardware capacity benchmark | macOS, Windows | Linux graph/hardware tooling; native device audio uses PortAudio (ADR-0037) |
 | Same gate: DAW GUI/agent and source-export integration tests | macOS, Windows | GUI depends on engine/X11; stock wrappers and conformance/reset tests now enabled separately |
 | POSIX evaluation harness tests | Windows | Unix executable fixtures, symlinks and process groups |
 
@@ -156,3 +156,9 @@ core-base non-RT job layer, retaining standard types elsewhere. The VST3 loader
 uses Objective-C++20 with ARC. The stock projects' existing AUv2 builds use the
 vendored Apache-2.0 AudioUnitSDK at clap-wrapper's pin; no downloads or template
 source changes are required.
+
+Native audio builds PortAudio only in the root DAW project (CoreAudio on macOS;
+WASAPI + ASIO on Windows). Isolated stock-plugin projects never build or link it.
+Fake-driver engine-portaudio.tests runs on all platforms and under Linux RTSan /
+TSan. Real native-device tests require SUPPLE_AUDIO_DEVICE_TEST=1 exactly; leave
+it unset in CI. Native devices have no MIDI input implementation yet.

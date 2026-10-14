@@ -203,8 +203,17 @@ q = nil
 ---@field plugin? table
 ---@field listed boolean plugin.list shows it (the script player is on the plugin path)
 
+---@class Quire.engine_devices_args
+---@field backend? "jack"|"dummy"|"portaudio"
+
 ---@class Quire.engine_start_args
----@field backend? "jack"|"dummy"
+---@field backend? "jack"|"dummy"|"portaudio"
+---@field host_api? string
+---@field input_device? string
+---@field output_device? string
+---@field rate? number
+---@field inputs? integer
+---@field outputs? integer
 ---@field block? integer
 ---@field anticipative? boolean
 
@@ -1193,8 +1202,9 @@ q = nil
 ---@field write fun(args: Quire.dsp_write_args): Quire.dsp_write_result Save a DSP script to the library and compile it, with diagnostics.
 
 ---@class Quire.engine
+---@field devices fun(args?: Quire.engine_devices_args): table List native audio device names, host APIs, rates and channel capacities.
 ---@field inputs fun(): table The device inputs a track can record: audio channels and MIDI devices.
----@field start fun(args?: Quire.engine_start_args): Quire.engine_start_result Start real-time playback on the audio device (jack) or without one (dummy).
+---@field start fun(args?: Quire.engine_start_args): Quire.engine_start_result Start playback through JACK, native PortAudio, or a device-free dummy.
 ---@field status fun(): Quire.engine_status_result Real-time engine state: backend, rate, block, device period, latency, xruns.
 ---@field stop fun(): table Stop real-time playback and release the audio device.
 

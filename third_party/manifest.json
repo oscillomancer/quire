@@ -230,6 +230,22 @@
       "platforms": [
         "macos"
       ]
+    },
+    {
+      "name": "PortAudio",
+      "dir": "portaudio-19.7.0",
+      "license": "MIT",
+      "license_file": "portaudio-19.7.0/LICENSE.txt",
+      "version": "v19.7.0 (2021-04-06)",
+      "source": "https://github.com/PortAudio/portaudio",
+      "commit": "147dd722548358763a8b649b3e4b41dfffbcfbb6",
+      "purpose": "Native DAW device audio: CoreAudio on macOS; WASAPI and ASIO on Windows",
+      "linkage": "static",
+      "scope": "daw-only",
+      "platforms": [
+        "macos",
+        "windows"
+      ]
     }
   ],
   "system_libraries": [

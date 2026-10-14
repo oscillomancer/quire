@@ -31,6 +31,7 @@
 #include "supple/cmd/bus.h"
 #include "supple/engine/midi_control.h"
 #include "supple/engine/offline.h"
+#include "supple/engine/portaudio.h"
 #include "supple/engine/realtime.h"
 #include "supple/engine/runtime_protection.h"
 #include "supple/lua/runtime.h"
@@ -155,6 +156,12 @@ struct MeterReading {
     model::Id track;
     float peak[2] = {0.0f, 0.0f};
     float rms[2] = {0.0f, 0.0f};
+};
+
+struct EngineDeviceOptions {
+    PortAudioOptions native;
+    double rate = 0;  // zero: project rate
+    std::uint32_t inputs = 0, outputs = 2;
 };
 
 class EngineApp : public cmd::Host {
@@ -293,7 +300,8 @@ class EngineApp : public cmd::Host {
     Status startEngine(Backend& backend, const BackendConfig& config, const EngineOptions& options);
     // On a backend the app owns: "jack" (the audio device, at the graph's
     // rate) or "dummy" (no device, paced like one, at the project's rate).
-    Status startEngine(std::string_view backend, std::uint32_t block, bool anticipative = true);
+    Status startEngine(std::string_view backend, std::uint32_t block, bool anticipative = true,
+                       const EngineDeviceOptions& device = {});
     // App-wide execution limit per background/live pool, including its caller.
     // 0: Automatic; 1..64: maximum threads. Applies on the next engine start
     // when EngineOptions::workers is -1; explicit helper counts take precedence.
@@ -605,6 +613,7 @@ class EngineApp : public cmd::Host {
     std::uint64_t fixedClock_ = 0;
 
     // The engine's start recipe, kept to restart it after a device change.
+    EngineDeviceOptions engineDevice_;
     std::string engineKind_;  // "jack"/"dummy" when the app owns the backend
     std::uint32_t engineBlock_ = 0;
     bool engineAnticipative_ = true;

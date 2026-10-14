@@ -12,20 +12,27 @@
 namespace supple::engine::detail {
 
 LiveWorkers::LiveWorkers(unsigned helpers) : LiveWorkers(helpers, Hooks{}) {}
-LiveWorkers::LiveWorkers(unsigned helpers, Hooks hooks)
-    : slots_(std::make_unique<Slot[]>(helpers)), hooks_(hooks) {
+LiveWorkers::LiveWorkers(unsigned helpers, Hooks hooks, Backend* backend)
+    : slots_(std::make_unique<Slot[]>(helpers)),
+      startup_(helpers, backend, true),
+      nativeBackend_(backend),
+      hooks_(hooks) {
     threads_.reserve(helpers);
     try {
         for (unsigned i = 0; i < helpers; ++i)
             threads_.emplace_back([this, i] {
                 nameThread("audio-live-" + std::to_string(i + 1));
                 rt::prefaultStack();  // ADR-0025
+                const bool elevated = startup_.enter(i);
+                ThreadStartup::Cleanup cleanup{elevated ? nativeBackend_ : nullptr};
                 loop(i);
             });
     } catch (...) {
+        startup_.cancel();
         shutDown();  // even a partially constructed pool must reap its threads
         throw;
     }
+    startupStatus_ = startup_.finish();
 }
 
 LiveWorkers::~LiveWorkers() { shutDown(); }
@@ -46,12 +53,16 @@ unsigned LiveWorkers::maxHelpers() {
 }
 
 Status LiveWorkers::configure(Backend& backend) {
+    SUPPLE_TRY(startupStatus_);
+    if (nativeBackend_) return okStatus();
     for (auto& thread : threads_) SUPPLE_TRY(backend.prepareLiveThread(thread.native_handle()));
     return okStatus();
 }
 
 ThreadPolicy LiveWorkers::policy() {
-    return threads_.empty() ? ThreadPolicy{} : threadPolicy(threads_.front().native_handle());
+    return threads_.empty()                   ? ThreadPolicy{}
+           : nativeBackend_ && startupStatus_ ? ThreadPolicy{ThreadPolicy::Kind::High, 0}
+                                              : threadPolicy(threads_.front().native_handle());
 }
 
 void LiveWorkers::help(TaskGraph& g, Fn fn, void* context) SUPPLE_RT {
