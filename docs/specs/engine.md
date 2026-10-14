@@ -393,6 +393,11 @@ preset's engine tests (with the dummy backend).
 
 ### 2.4 Floating-point environment and first touch (ADR-0025)
 
+During the initial platform port (ADR-0034), the engine remains gated on
+macOS and Windows. `DenormalGuard` currently saves/restores SSE2 MXCSR;
+its state is unused on ARM64 until the floating-point environment port step.
+Portable DSP tests do not establish ARM64 RT/offline environment equivalence.
+
 `detail::processNode` scopes `dsp::DenormalGuard` around each node: its
 input sums, delays, Console 9 stages, faders, oversampling, meters and every
 in-process plug-in `process()` run with FTZ and DAZ added to the executing

@@ -27,7 +27,7 @@
     { "name": "rtsan", "inherits": "base", "displayName": "Clang RealtimeSanitizer",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "SUPPLE_SANITIZE": "realtime",
                           "SUPPLE_BUILD_GUI": "OFF" } },
-    {"name": "macos", "inherits": "base", "displayName": "macos portable Debug", "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin"}, "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "CMAKE_OSX_ARCHITECTURES": "arm64", "CMAKE_OSX_DEPLOYMENT_TARGET": "14.4", "SUPPLE_WERROR": "ON"}},
+    {"name": "macos", "inherits": "base", "displayName": "macos portable Debug", "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin"}, "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug", "CMAKE_OSX_ARCHITECTURES": "arm64", "CMAKE_OSX_DEPLOYMENT_TARGET": "14.4", "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/macos.cmake", "SUPPLE_WERROR": "ON"}},
     {"name": "windows", "inherits": "base", "displayName": "windows portable Debug", "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows"}, "cacheVariables": {"CMAKE_C_COMPILER": "clang-cl", "CMAKE_CXX_COMPILER": "clang-cl", "CMAKE_BUILD_TYPE": "Debug", "SUPPLE_WERROR": "ON", "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake", "VCPKG_TARGET_TRIPLET": "x64-windows"}}
   ],
   "buildPresets": [

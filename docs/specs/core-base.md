@@ -39,7 +39,7 @@ service scheduling and bridge-to-parent notifications are separate work.
 ## Platform builds
 
 The wake relay, futex wait/wake, stack prefault and thread scheduling
-implementations are Linux-only during the initial port (ADR-0033).
+implementations are Linux-only during the initial port (ADR-0034).
 `SUPPLE_PLATFORM_SERVICES` gates their sources and platform tests; portable
 inline primitives and their tests remain enabled. Consumers requiring the
 relay are gated together, with no dummy RT implementation. File read/write

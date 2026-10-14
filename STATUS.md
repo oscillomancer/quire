@@ -10,7 +10,7 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
 `main`.
 
 The port branch has on-demand Linux/macOS/Windows CI and portable presets
-(ADR-0033); platform validation is in progress. Non-Linux host, engine,
+(ADR-0034); platform validation is in progress. Non-Linux host, engine,
 control/MCP, GUI and plugin wrappers remain gated, and Windows audio-file
 I/O remains gated. Portable libraries, the session model, stock DSP cores
 and the script suite build independently of those services; see

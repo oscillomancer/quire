@@ -113,4 +113,4 @@ run on macOS. These gates are explicit, with no no-op RT implementations:
 Research GUI spikes and host fuzzers reject configuration on non-Linux
 platforms rather than silently building incomplete targets. Renders must
 be deterministic on each platform; cross-platform bit identity is not
-required (ADR-0033).
+required (ADR-0034).

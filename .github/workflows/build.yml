@@ -127,15 +127,7 @@ jobs:
           clang-cl --version
 
       - name: Configure
-        run: |
-          if [[ '${{ matrix.platform }}' == macos ]]; then
-            cmake --preset macos -DCMAKE_C_COMPILER="$MAC_LLVM/bin/clang" \
-              -DCMAKE_CXX_COMPILER="$MAC_LLVM/bin/clang++" \
-              -DCMAKE_CXX_FLAGS="-nostdinc++ -isystem $MAC_LLVM/include/c++/v1 -D_LIBCPP_DISABLE_AVAILABILITY" \
-              -DCMAKE_EXE_LINKER_FLAGS="-L$MAC_LLVM/lib/c++ -L$MAC_LLVM/lib/unwind -lunwind -Wl,-rpath,$MAC_LLVM/lib/c++ -Wl,-rpath,$MAC_LLVM/lib/unwind"
-          else
-            cmake --preset ${{ matrix.preset }}
-          fi
+        run: cmake --preset ${{ matrix.preset }}
       # Preserve expensive dependencies even when the compiler/test stage fails.
       - name: Save dependencies
         if: steps.cache.outputs.cache-hit != 'true'

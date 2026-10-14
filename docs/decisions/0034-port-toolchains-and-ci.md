@@ -1,4 +1,4 @@
-# ADR-0033: Port toolchains and on-demand CI
+# ADR-0034: Port toolchains and on-demand CI
 
 **Status:** Accepted, 2026-10-14. Amends ADR-0003.
 
