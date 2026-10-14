@@ -70,9 +70,10 @@ int waitFor(std::span<WaitItem> items, int timeoutMs) {
             ++ready;
         }
     return ready;
-#elif defined(__APPLE__)
-    // Darwin poll reports duplicate registrations through only one entry.
-    // Register each descriptor once, then fan its readiness out to the watches.
+#else
+    // Darwin coalesces duplicate registrations; Linux can observe a wake
+    // between duplicates while scanning them. Poll each descriptor once so
+    // every watcher receives the same readiness snapshot.
     std::vector<pollfd> fds;
     fds.reserve(items.size());
     for (auto& item : items) {
@@ -97,17 +98,6 @@ int waitFor(std::span<WaitItem> items, int timeoutMs) {
         if (item.ready) ++ready;
     }
     return ready;
-#else
-    std::vector<pollfd> fds;
-    fds.reserve(items.size());
-    for (auto& item : items) {
-        item.ready = 0;
-        fds.push_back({item.source.fd(), item.events, 0});
-    }
-    const int result = ::poll(fds.data(), fds.size(), timeoutMs);
-    if (result >= 0)
-        for (std::size_t i = 0; i < items.size(); ++i) items[i].ready = fds[i].revents;
-    return result;
 #endif
 }
 WakeEvent::WakeEvent() {

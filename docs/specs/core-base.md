@@ -13,7 +13,7 @@ descriptor.
 - `waitable()` returns a borrowed `Waitable`; check `valid()` before subscribing
   producers. It outlives all watchers. `waitFor(span<WaitItem>, timeoutMs)`
   snapshots readiness and returns the number of ready entries, including
-  duplicate sources. Native registrations are deduplicated on macOS/Windows
+  duplicate sources. Native registrations are deduplicated on all platforms
   and readiness is delivered to every interested watch. Negative timeout waits
   indefinitely. Readiness flags
   `kWaitRead/Write/Error/Hangup/Invalid` match POSIX poll bits. Windows accepts
