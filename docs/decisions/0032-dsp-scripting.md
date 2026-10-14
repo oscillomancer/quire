@@ -123,6 +123,8 @@ x86-64 and AArch64 code (Linux, macOS including Apple Silicon, Windows
 x86-64) and has an interpreter for the same IR, which is the fallback for
 hosts that forbid executable memory. Diagnostics are JSON (`code`, `message`,
 `line`, `column`, `hint`), the same shape as the bus's errors.
+(2026-10-14: the interpreter turned out not to serve as that fallback; see
+"Final review" below.)
 
 Back-edges in audio code count against a per-call budget; a script that
 exceeds it is stopped, its output silenced and its status set, instead of
@@ -478,6 +480,32 @@ external samples/impulse responses or captures a loaded instance's patch.
 Player exports are Linux CLAP only; other platforms remain unvalidated.
 The GUI app and default sandbox CLI share the user library; an explicit
 workdir and the headless engine use their own `<workdir>/scripts`.
+
+### Final review (2026-10-14)
+
+- MIR's interpreter is a test and diagnostic backend (the differential
+  tests, `SUPPLE_SCRIPT_INTERPRET`), not the fallback §2 describes: it
+  allocates on its first call and still generates small machine-code
+  shims for calls into C, so it is neither real-time safe nor usable where
+  executable memory is forbidden. There is no fallback for such hosts.
+- The budget counts calls as well as back edges, so a tree of calls with
+  no loop in it stops too. Frames are limited to 64 KiB per function and
+  256 KiB along any chain of calls, and nesting to a few hundred levels, so
+  neither a script nor the compiler can exhaust a stack.
+- The checker refuses what a C++ compiler would (a `noexcept` condition, a
+  free function or constant used above its declaration, constant int
+  overflow), so a source export builds whatever the player accepted.
+- A reload swaps code in place only when the plugin is the same to a host
+  and to an agent: everything the Definition says, its meaning, and its
+  declared and prepared latency and tail; otherwise it redefines. A
+  replacement's `prepare()` sees the running voice count and render mode,
+  and `offline()` follows the host's render mode.
+- A library holds one script per plugin ID: the player offers the first it
+  finds, so the commands refuse a second (`dsp.id_taken`). A script player
+  anywhere is left out of the scan cache.
+- Framework 1.23.1 serialises the plugin factories (CLAP hosts may scan
+  from several threads), so the player's catalog is called one call at a
+  time from whichever thread the host scans on.
 
 ## Consequences
 

@@ -232,11 +232,16 @@ GUI:
   mixer strips but not onto track-panel rows.
 
 Plugins:
-- DSP source exports require a visible, automatable parameter for their host
-  tests and do not retain the JIT's loop-budget instrumentation. Exports
-  include declared factory patches, but do not package external audio files
-  or the patch of a currently loaded instance. Preview requires an editor
-  build and EGL on Linux.
+- DSP source exports require a visible, automatable parameter with a plain
+  name for their host tests and do not retain the JIT's loop budget (a loop
+  that never ends hangs a native export). Exports include declared factory
+  patches, but do not package external audio files or the patch of a
+  currently loaded instance. Preview requires an editor build and EGL on
+  Linux.
+- Scripts need a JIT: there is no fallback for hosts that forbid executable
+  memory (MIR's interpreter is a test backend, not real-time safe).
+- A script save that redefines the plugin while an editor drag is under way
+  can leave that gesture open in the host until it rescans.
 - Orrery's reference patch uses about 9 % of a core at 48 kHz / 256 frames;
   reaching 3 % needs a structure-of-arrays voice bank.
 - Stock plugins are tested as Linux CLAP builds; their VST3 and AUv2

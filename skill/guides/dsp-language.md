@@ -153,9 +153,17 @@ in Quire and in hosts that deactivate an unused port; a host that always
 feeds the port reports it connected, so a plugin there may want a choice
 parameter for its key), `io.output(bus, c)[i]`.
 From any member function: `sampleRate()`, `maxBlockSize()`, `channels()`,
-`offline()`. In `prepare()`, `setLatency(samples)` reports a delay the
-plugin adds that depends on the sample rate (an `Oversampler`'s, a
-lookahead), where Info's `.latency` is fixed.
+`offline()` (the host renders a bounce; it may change between blocks, and
+a script that sounds different offline no longer renders the same as it
+plays). In `prepare()`, `setLatency(samples)` reports a delay the plugin
+adds that depends on the sample rate (an `Oversampler`'s, a lookahead),
+where Info's `.latency` is fixed.
+
+Saving a script while it plays swaps the new code in with a 10 ms crossfade
+when the plugin is otherwise the same. When a save changes what the plugin
+says of itself (its name, parameters, keys, help, patches, buses, latency or
+tail), the plugin is redefined instead: the host restarts it, which may be
+heard.
 
 ## Instruments
 
@@ -418,7 +426,9 @@ mouse.
 - `enum class Mode { A, B };`, named `Mode::A`.
 - `struct`s with members, default member values and member functions
   (`const` ones too). Free functions. `constexpr` globals and
-  `static constexpr` members for constants.
+  `static constexpr` members for constants. As in C++, a free function or
+  a global constant is used only below its declaration (a member function
+  may call any member).
 - `Array<T, N>`: fixed size, any element type, `= {1.0, 0.5}`, `.size()`,
   `.fill(v)`, range-based `for`. `Buffer<T>`: numbers, sized by
   `resize(n)` in `prepare()`, a member only.
@@ -426,8 +436,11 @@ mouse.
   References bind to the selected variable or member; a `const` reference
   to a converted number holds a temporary value. Assignments evaluate the
   right-hand value before selecting the target, as in C++20.
-  A function's local storage, including temporaries, is limited to 64 KiB;
-  keep larger arrays and structs as plugin members.
+  A function's local storage, including temporaries, is limited to 64 KiB,
+  and the functions along any chain of calls to 256 KiB together; keep
+  larger arrays and structs as plugin members.
+- Expressions, blocks and types nest at most a few hundred deep (a chain
+  such as `a + b + c` counts a level per link).
 - `if`/`else`, `switch`, `for`, range-based `for`, `while`, `do`, `break`,
   `continue`, `return`, `? :`.
 - Conversions: `static_cast<float>(x)` between numbers; float to int only
@@ -441,7 +454,9 @@ other than the plugin's, constructors and destructors, `class` (write
 `struct`), operator overloading, exceptions, `goto`, recursion, static locals,
 unions, `typedef`/`using`, macros and the preprocessor, `sizeof`, namespaces,
 `if` with an initializer, `if constexpr`, the comma operator (except in a
-`for`'s step), character literals, `constexpr` functions.
+`for`'s step), character literals, `constexpr` functions, `noexcept` with a
+condition (plain `noexcept` is fine), and declaring a function apart from
+its definition.
 
 ## Defined behaviour
 
@@ -453,13 +468,20 @@ A script cannot do what C++ leaves undefined. The compiler refuses:
 - a float stored in an int without one of the conversions above;
 - two operands of one expression that both change the same thing
   (`r.next() - r.next()` on one `Random`);
-- a variable or member without a starting value.
+- a variable or member without a starting value;
+- constant int arithmetic that overflows (`2147483647 + 1`); values computed
+  at run time wrap.
 
 At run time: an index outside an `Array`, `Buffer` or channel reads 0 and a
 write to it goes nowhere, and the host's log names the line. Each hook has a
-budget of loop iterations (65,536 per frame in `process`); a script that
-spends it is stopped and silent until it is reset or reloaded, and the log names the
-line.
+budget of loop iterations and calls (65,536 per frame in `process`); a
+script that spends it is stopped and silent until it is reset or reloaded,
+and the log names the line.
+
+These guards are the player's. A source export (`dsp_export` with
+`format: "source"`) is ordinary C++: an invalid index still reads 0 and is
+reported without a line, but there is no budget, so a loop that never ends
+hangs the plugin. Test a script in the player before exporting its source.
 
 Inspect a loaded instance with `fx_describe` (DAW) or `plugin_describe`
 (sandbox): its `problems` report loop budgets, invalid indices and failed
