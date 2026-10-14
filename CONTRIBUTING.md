@@ -76,8 +76,7 @@ Use `ci/<branch>-<n>` with a new number each time. Annotate with
 one platform; unannotated tags run all. Superseded builds cancel per branch
 and platform, including across different tag numbers. Delete remote CI tags
 once their runs finish. Dependencies and Linux compiler output are cached;
-avoid repeated full runs on this private repository (macOS and Windows
-consume more Actions minutes).
+run only the platforms needed for the change.
 
 GitHub isolates caches by ref: a fresh CI tag cannot restore a cache saved
 under another tag. Caches help same-ref reruns and, after integration,
@@ -89,7 +88,9 @@ Linux (`ubuntu-24.04`, Clang 22) builds the existing `dev` preset with all
 its tests, under Xvfb and software OpenGL. SDL3 and the pinned CLAP validator
 are built and cached in the runner's workspace; Ubuntu 24.04 predates SDL3.
 macOS (`macos-15`, arm64) uses
-AppleClang and the system libc++, with deployment target 14.4; Homebrew
+AppleClang and the system libc++, with deployment target 14.4. Its build preset
+uses two jobs to keep the engine command translation units within the hosted
+runner memory budget. Homebrew
 supplies Ninja/SDL3, while curl and zlib come from the SDK. Float/double
 parsing uses the vendored MIT fast_float library through core-base on every
 platform; integer parsing remains `std::from_chars`. This avoids the Apple

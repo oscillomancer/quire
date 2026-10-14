@@ -74,7 +74,10 @@ decimal timestamp digits without narrowing. Core-base StopToken/JoiningThread
 alias the standard types where supported and provide an original non-RT fallback
 for Apple, with synchronous callback lifetime and join behavior documented in
 core-base.md. Standard and forced-fallback tests run independently on Linux too.
-The GUI still needs its own conversion when its gate is lifted.
+The product-owned Analyzer analysis worker uses the same helper. The GUI still
+needs its own conversion when its gate is lifted. The macOS build preset limits
+compilation to two jobs: six concurrent engine command translation units
+stopped making progress on the hosted runner after the engine gate was lifted.
 
 The VST3 macOS loader compiles with ARC and C++20. Existing stock projects
 also request AUv2 on macOS; clap-wrapper's pinned AudioUnitSDK-1.1.0 (Apache-2.0,

@@ -75,7 +75,7 @@
     {
       "name": "macos",
       "configurePreset": "macos",
-      "jobs": 6
+      "jobs": 2
     },
     {
       "name": "windows",

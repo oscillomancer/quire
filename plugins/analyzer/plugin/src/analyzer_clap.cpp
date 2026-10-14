@@ -17,6 +17,7 @@
 #include <thread>
 #include <vector>
 #include "analyzer/processor.h"
+#include "supple/base/stop.h"
 #include "supple/clap/plugin_support.h"
 
 #include <clap/clap.h>
@@ -74,7 +75,7 @@ struct Plug
         kStateMagic};
     Values audioValues = defaults();
     uint64_t seen = 0;
-    std::jthread worker;
+    supple::JoiningThread worker;
     uint64_t meterSamples = 0;
     supple::analyzer::Frame mainFrame{}, audioFrame{};
     uint64_t shownGeneration = 0;
@@ -520,7 +521,7 @@ bool CLAP_ABI plugActivate(const clap_plugin_t* p, double sr, uint32_t, uint32_t
     self->sizeScratch(self->channels);
     self->pushParams();
     self->active = true;
-    self->worker = std::jthread([self](std::stop_token stop) {
+    self->worker = supple::JoiningThread([self](supple::StopToken stop) {
         while (!stop.stop_requested()) {
             self->processor.drain();
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
