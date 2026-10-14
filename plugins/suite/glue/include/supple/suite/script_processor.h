@@ -198,6 +198,14 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         fadeBuffer_.assign(channels, std::vector<double>(frames, 0.0));
         fadePointers_.resize(channels);
         for (size_t c = 0; c < channels; ++c) fadePointers_[c] = fadeBuffer_[c].data();
+        const size_t auxiliaries = definition_->info().auxOutputs.size();
+        fadeAuxBuffer_.assign(auxiliaries * channels, std::vector<double>(frames, 0.0));
+        fadeAuxPointers_.resize(fadeAuxBuffer_.size());
+        for (size_t c = 0; c < fadeAuxPointers_.size(); ++c)
+            fadeAuxPointers_[c] = fadeAuxBuffer_[c].data();
+        fadeAuxBuses_.resize(auxiliaries);
+        for (size_t b = 0; b < auxiliaries; ++b)
+            fadeAuxBuses_[b] = fadeAuxPointers_.data() + b * channels;
         fadeLength_ = std::max(1, static_cast<int>(setup.sampleRate * 0.01));
     }
 
@@ -304,14 +312,17 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
                 std::copy(block.data[c], block.data[c] + block.frames, fadePointers_[c]);
             Block copy = block;
             copy.data = fadePointers_.data();
+            // Extra outputs are silent on entry for each generation, and
+            // need the same fade as the main output. Sharing the host's
+            // buffers would let old code's writes enter the new code.
+            copy.auxData = fadeAuxBuses_.data();
+            for (auto& channel : fadeAuxBuffer_) std::fill_n(channel.data(), block.frames, 0.0);
             if (!fadingStopped_) {
                 fadingNow_ = true;  // its voices end with it, not in the voice manager
                 runFading([&] { runProcess(*fading_, copy); });
                 fadingNow_ = false;
             }
-            if (fadingStopped_)  // stopped code is silent
-                for (size_t c = 0; c < channels; ++c)
-                    std::fill(fadePointers_[c], fadePointers_[c] + block.frames, 0.0);
+            if (fadingStopped_) silence(copy);
             runProcess(*current_, block);
             for (int i = 0; i < block.frames; ++i) {
                 const double t = std::min(1.0, static_cast<double>(fadeDone_ + i) / fadeLength_);
@@ -319,6 +330,9 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
                      ++c)
                     block.data[c][i] =
                         fadePointers_[static_cast<size_t>(c)][i] * (1.0 - t) + block.data[c][i] * t;
+                for (int b = 0; b < block.auxOutputs; ++b)
+                    for (int c = 0; c < block.channels; ++c)
+                        block.aux(b)[c][i] = copy.aux(b)[c][i] * (1.0 - t) + block.aux(b)[c][i] * t;
             }
             fadeDone_ += block.frames;
             if (fadeDone_ >= fadeLength_) retire(std::move(fading_));
@@ -628,6 +642,9 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     Ring<Generation*, 3> retired_;
     std::vector<std::vector<double>> fadeBuffer_;
     std::vector<double*> fadePointers_;
+    std::vector<std::vector<double>> fadeAuxBuffer_;
+    std::vector<double*> fadeAuxPointers_;
+    std::vector<double* const*> fadeAuxBuses_;
     int fadeLength_ = 480, fadeDone_ = 0;
     double spare_ = 0.0;
     bool stopped_ = false;

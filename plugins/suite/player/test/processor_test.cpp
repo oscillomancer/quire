@@ -283,6 +283,51 @@ struct L : Effect {
     engine.processor().collect();
 }
 
+TEST(replacement_crossfades_each_output_bus_independently) {
+    const std::string source = R"(#include <supple/script.h>
+struct L : Effect {
+    static constexpr Info info = {.name = "L", .id = "com.example.level",
+                                  .outputs = {"First", "Second"}};
+    void process(Block& io) {
+        for (int i = 0; i < io.frames; ++i) {
+            io[0][i] = 1.0;
+            io.output(0, 0)[i] += 1.0;
+            io.output(1, 0)[i] += 2.0;
+        }
+    }
+};
+)";
+    std::string louder = source;
+    for (size_t at = 0; (at = louder.find("1.0", at)) != std::string::npos; at += 3)
+        louder.replace(at, 3, "3.0");
+    louder.replace(louder.find("+= 2.0"), 6, "+= 6.0");
+    const auto d = compileText(source), next = compileText(louder);
+    ScriptProcessor processor(d);
+    ParamValues values(d->params());
+    processor.prepare({.sampleRate = 1000.0, .maxBlockSize = 16, .channels = 1}, values);
+    processor.swap(next->code(), values);
+    double main[16]{}, first[16]{}, second[16]{};
+    double* mainBus[] = {main};
+    double* firstBus[] = {first};
+    double* secondBus[] = {second};
+    double* const* auxiliary[] = {firstBus, secondBus};
+    supple::Block block;
+    block.data = mainBus;
+    block.channels = 1;
+    block.frames = 16;
+    block.auxOutputs = 2;
+    block.auxData = auxiliary;
+    const auto process = [](ScriptProcessor& p, supple::Block& b) SUPPLE_REALTIME { p.process(b); };
+    process(processor, block);
+    for (int i = 0; i < 16; ++i) {
+        const double t = std::min(1.0, i / 10.0);
+        CHECK_NEAR(main[i], 1.0 + 2.0 * t, 1e-12);
+        CHECK_NEAR(first[i], main[i], 1e-12);
+        CHECK_NEAR(second[i], 2.0 * main[i], 1e-12);
+    }
+    processor.collect();
+}
+
 TEST(replacements_wait_for_retirement_room_without_destroying_audio_state) {
     const auto d = compileText(R"(#include <supple/script.h>
 struct L : Effect {
