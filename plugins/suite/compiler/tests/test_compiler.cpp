@@ -524,3 +524,13 @@ TEST_CASE("invalid metadata always has an actionable hint") {
     CHECK(firstError(plugin("AudioFile s = audioFile(\"S\").withKey(\"a.b\");")) ==
           "script.file.key");
 }
+
+TEST_CASE("a mutable reference cannot default to a temporary") {
+    CHECK(firstError(R"(#include <supple/script.h>
+struct T : Effect {
+    static constexpr Info info = {.name = "T", .id = "com.example.t"};
+    double read(int& value = 1) { return value; }
+    void process(Block& io) {}
+};
+)") == "script.type.reference");
+}

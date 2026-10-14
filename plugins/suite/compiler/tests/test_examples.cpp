@@ -550,10 +550,10 @@ TEST_CASE("lvalues preserve C++ sequencing and reference storage") {
     REQUIRE(in.good());
     std::stringstream source;
     source << in.rdbuf();
-    Audio expected(2, 9);
+    Audio expected(2, 10);
     NativeRunner<script::ex_lvalues::Lvalues> native;
     native.process(expected);
-    CHECK(expected.data[0] == std::vector<double>{1, 1, 2, 1, 4, 3, 9, 9, 4});
+    CHECK(expected.data[0] == std::vector<double>{1, 1, 2, 1, 4, 3, 9, 9, 4, 0.5});
     for (bool interpret : {false, true}) {
         INFO(interpret);
         scriptc::Options options;
@@ -561,7 +561,7 @@ TEST_CASE("lvalues preserve C++ sequencing and reference storage") {
         auto result = scriptc::compile(source.str(), options);
         REQUIRE_MESSAGE(result.program, scriptc::toText(result.diagnostics));
         JitRunner run(result.program);
-        Audio actual(2, 9);
+        Audio actual(2, 10);
         run.process(actual);
         CHECK(actual == expected);
     }

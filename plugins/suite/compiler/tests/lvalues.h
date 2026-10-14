@@ -5,6 +5,8 @@
 struct Lvalues : Effect {
     static constexpr Info info = {.name = "Lvalues", .id = "com.example.lvalues"};
 
+    double defaultValue(const double& value = 0.5) { return value; }
+
     void process(Block& io) {
         Array<int, 4> a;
         int i = 1;
@@ -32,5 +34,6 @@ struct Lvalues : Effect {
         i = 0;
         a[++i] += i;
         io[0][8] = a[1];
+        io[0][9] = defaultValue();
     }
 };

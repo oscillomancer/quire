@@ -1235,32 +1235,30 @@ MIR_op_t Codegen::call(CallExpr* c) {
             }
             ops.push_back(reg(self));
         }
-        for (size_t i = 0; i < c->args.size(); ++i) {
+        for (size_t i = 0; i < f->params.size(); ++i) {
             VarDecl* p = f->params[i];
+            Expr* argument = i < c->args.size() ? c->args[i] : p->init;
             if (p->qt.isRef) {
-                if (c->args[i]->lvalue && c->args[i]->type() == p->qt.type) {
-                    ops.push_back(reg(addressOf(placeOf(c->args[i]))));
+                if (argument->lvalue && argument->type() == p->qt.type) {
+                    ops.push_back(reg(addressOf(placeOf(argument))));
                 } else {
                     // A const reference to a temporary number.
                     int off = 0;
                     MIR_reg_t slot = frameSlot(p->qt.type->size, p->qt.type->align, off);
-                    store(p->qt.type, Place{false, slot, 0}, value(c->args[i]));
+                    store(p->qt.type, Place{false, slot, 0}, value(argument));
                     ops.push_back(reg(slot));
                 }
             } else {
-                MIR_op_t v = value(c->args[i]);
+                MIR_op_t v = value(argument);
                 // Fix the value now: a later argument must not change it.
                 ops.push_back(reg(toReg(v, kindOf(p->qt.type))));
-                if (c->args[i]->lvalue && v.mode == MIR_OP_REG) {
+                if (argument->lvalue && v.mode == MIR_OP_REG) {
                     MIR_reg_t copy = temp(kindOf(p->qt.type));
                     move(kindOf(p->qt.type), reg(copy), v);
                     ops.back() = reg(copy);
                 }
             }
         }
-        // Default arguments.
-        for (size_t i = c->args.size(); i < f->params.size(); ++i)
-            ops.push_back(constant(f->params[i]->init));
         emit(MIR_new_insn_arr(ctx_, MIR_CALL, ops.size(), ops.data()));
         abortCheck();
         return result ? reg(result) : imm(0);

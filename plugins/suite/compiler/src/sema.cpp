@@ -818,8 +818,8 @@ void Sema::signature(FunctionDecl* f) {
                           t->name + "& " + p->name);
         }
         if (p->init) {
-            p->init = convert(check(p->init), QualType{t, false, false}, p->init->loc,
-                              "the default of '" + p->name + "'");
+            p->init =
+                convert(check(p->init), p->qt, p->init->loc, "the default of '" + p->name + "'");
             if (!p->init->constant)
                 error(p->init->loc, "script.constant.required",
                       "a default argument must be a constant",
