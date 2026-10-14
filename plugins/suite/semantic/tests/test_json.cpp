@@ -19,6 +19,7 @@ std::string errorCode(std::string_view text) {
     Value v;
     Error e;
     CHECK_FALSE(parse(text, v, e));
+    CHECK_FALSE(e.hint.empty());
     return e.code;
 }
 }  // namespace
@@ -58,6 +59,7 @@ TEST_CASE("the mistakes people and models make get their own errors") {
     CHECK(errorCode("{\"a\" 1}") == "json.parse.expected_colon");
     CHECK(errorCode("[01]") == "json.parse.invalid_number");
     CHECK(errorCode("\"\xff\"") == "json.parse.invalid_utf8");
+    CHECK(errorCode("\"unfinished\\") == "json.parse.unexpected_end");
     CHECK(errorCode("{} {}") == "json.parse.trailing_content");
     Value v;
     Error e;

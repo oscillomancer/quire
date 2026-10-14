@@ -314,3 +314,25 @@ TEST_CASE("a patch gotten and set again changes nothing, merged or replaced") {
         CHECK(codec.patch(s, env, false).find("params")->find("filter.cutoff")->asDouble() == hz);
     }
 }
+
+TEST_CASE("a plugin without properties rejects property edits transactionally") {
+    const auto base = fixture();
+    ParamTable::Builder parameters;
+    for (size_t i = 0; i < base->params().count(); ++i) parameters.add(base->params().at(i));
+    const Definition d(base->info(), parameters.build());
+    const PatchCodec codec(d);
+    state::Snapshot snapshot(d);
+    const auto before = snapshot.host;
+    Envelope envelope;
+    envelope.name = "Before";
+    std::vector<json::Error> errors;
+    const auto doc =
+        parsed(R"({"name":"After","params":{"gain":-6},"properties":{"sample":"missing.wav"}})");
+    CHECK_FALSE(codec.apply(doc, true, snapshot, envelope, errors));
+    CHECK(snapshot.host == before);
+    CHECK(envelope.name == std::optional<std::string>("Before"));
+    REQUIRE(errors.size() == 1);
+    CHECK(errors[0].code == "patch.unknown_member");
+    CHECK(errors[0].path == "/properties");
+    CHECK_FALSE(errors[0].hint.empty());
+}

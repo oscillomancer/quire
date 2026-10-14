@@ -395,7 +395,8 @@ class Parser {
             if (c == '\\') {
                 ++i_;
                 if (i_ >= s_.size())
-                    return fail("json.parse.unexpected_end", "the text ends in an escape", "");
+                    return fail("json.parse.unexpected_end", "the text ends in an escape",
+                                "complete the escape (for example, \\n) and close the string");
                 const char e = s_[i_++];
                 switch (e) {
                     case '"':

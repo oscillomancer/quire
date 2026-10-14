@@ -748,6 +748,11 @@ bool PatchCodec::apply(const json::Value& document, bool merge, state::Snapshot&
         static const std::array<const char*, 7> kMembers = {"schema", "name",   "author",    "tags",
                                                             "notes",  "params", "properties"};
         for (const json::Member& m : doc.asObject()) {
+            if (m.first == "properties" && definition_.properties().count() == 0) {
+                errors.push_back(error("patch.unknown_member", "this plugin has no properties",
+                                       "/properties", "remove the properties member"));
+                continue;
+            }
             if (std::find_if(kMembers.begin(), kMembers.end(),
                              [&](const char* k) { return m.first == k; }) != kMembers.end())
                 continue;
