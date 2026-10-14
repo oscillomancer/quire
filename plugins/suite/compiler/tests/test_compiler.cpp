@@ -465,3 +465,34 @@ TEST_CASE("literals must have the same spelling and type as C++") {
     CHECK(firstError(script("1; // comment \\\n io[0][0] = 2")) == "script.lex.continuation");
     CHECK(firstError(script("1; const char* text = \"\\012\"")) == "script.lex.escape");
 }
+
+TEST_CASE("sidechain views return zero outside their bounds") {
+    const std::string source = R"(#include <supple/script.h>
+struct T : Effect {
+    static constexpr Info info = {.name = "T", .id = "com.example.t", .sidechain = true};
+    void process(Block& io) {
+        auto key = io.sidechain(0);
+        io[-1][0] = 42;
+        io[0][0] = key[-1];
+        io[0][1] = key[io.frames];
+        io[0][2] = key[0];
+        io[-1][0] = 42;
+        io[0][3] = io.sidechain(-1)[0];
+    }
+};
+)";
+    for (bool interpret : {false, true}) {
+        scriptc::Options options;
+        options.interpret = interpret;
+        auto result = compileOk(source, options);
+        for (bool connected : {false, true}) {
+            JitRunner run(result.program);
+            Audio key(2, 4);
+            key.data[0][0] = 0.5;
+            run.key = connected ? &key : nullptr;
+            Audio audio(2, 4);
+            run.process(audio);
+            CHECK(audio.data[0] == std::vector<double>{0, 0, connected ? 0.5 : 0.0, 0});
+        }
+    }
+}

@@ -685,6 +685,14 @@ Codegen::Place Codegen::channelElement(Expr* e, bool clearSpare) {
     MIR_reg_t data = 0, frames = 0, spare = 0;
     channelOf(x->object, data, frames, spare);
     MIR_reg_t index = toReg(value(x->index), VK::I);
+    if (x->object->type()->builtin == b_.inputChannel()) {
+        // InputChannel has no writable spare. Materialized views set that
+        // pointer to null, and direct views may share a Block's dirty spare.
+        // Both must read zero when no input sample exists.
+        int offset = 0;
+        spare = frameSlot(8, 8, offset);
+        clearSpare = true;
+    }
     return checkedElement(data, index, -1, frames, 8, spare, b_.doubleType(), x->loc.line,
                           clearSpare);
 }
