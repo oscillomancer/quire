@@ -348,6 +348,8 @@ void registerDspExport(cmd::Registry& registry) {
                  "put the script player on the plugin path"},
                 {"dsp.player", "the plugin with the script's id is not the script player",
                  "give the script an id no other plugin has"},
+                {"dsp.notices", "the player's license or notices cannot be read",
+                 "restore the license and notices beside the player before exporting"},
                 {"dsp.path", "the folder is relative, or (source) not empty",
                  "give an absolute folder; for source, a new one"},
                 {"dsp.plugin_name", "source: the plugin's name cannot name a project",
@@ -440,6 +442,13 @@ void registerDspExport(cmd::Registry& registry) {
                 id + " belongs to " + info->path.string() + ", which is not the script player",
                 "/script", "give the script an id no other plugin has");
 
+        auto notices = playerNotices(info->path, player.size() != module->size());
+        if (!notices)
+            return Error("dsp.notices", "cannot read the licenses for " + info->path.string(),
+                         "/script",
+                         "restore the player's -LICENSE.txt and -NOTICES.txt files beside it; "
+                         "an existing export needs its -NOTICES.txt file");
+
         json::Value payload = json::Value::object();
         payload["schema"] = std::string(scriptc::kExportSchema);
         payload["name"] = a.script;
@@ -462,11 +471,9 @@ void registerDspExport(cmd::Registry& registry) {
                          info->path.string(),
                          static_cast<std::int64_t>(bytes.size()),
                          {}};
-        if (auto notices = playerNotices(info->path, player.size() != module->size())) {
-            const fs::path notes = folder / (file.stem().string() + "-NOTICES.txt");
-            SUPPLE_TRY(writeFileAtomic(notes, *notices));
-            out.notices = notes.string();
-        }
+        const fs::path notes = folder / (file.stem().string() + "-NOTICES.txt");
+        SUPPLE_TRY(writeFileAtomic(notes, *notices));
+        out.notices = notes.string();
         return out;
     };
     registry.add(std::move(c));

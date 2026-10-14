@@ -435,6 +435,19 @@ TEST_CASE("dsp.export makes a plugin that plays its version of the script, and n
           fs::file_size(first["notices"].asString()));
     Host again = open("again", root.path / "again");
     CHECK(gainDb(again) == doctest::Approx(12.0).epsilon(0.002));
+
+    // An installed copy missing its notices must not yield an export that
+    // cannot be redistributed with the required licenses.
+    REQUIRE(fs::remove(first["notices"].asString()));
+    json::Value missing = json::Value::object();
+    missing["script"] = "boost";
+    missing["folder"] = (root.path / "without-notices").string();
+    auto refused = anywhere.bus->execute({"dsp.export", missing, kTest});
+    REQUIRE_FALSE(refused);
+    CHECK(refused.error().code == "dsp.notices");
+    CHECK(refused.error().path == "/args/script");
+    CHECK_FALSE(refused.error().hint.empty());
+    CHECK_FALSE(fs::exists(root.path / "without-notices" / "Boost.clap"));
 }
 
 TEST_CASE("dsp.test plays notes into an instrument and hears its pitch") {

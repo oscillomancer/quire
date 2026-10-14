@@ -1184,6 +1184,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 - `dsp.compile`: the script does not compile Hint: dsp.check gives its diagnostics
 - `dsp.not_listed`: the script compiles but no plugin has its id Hint: put the script player on the plugin path
 - `dsp.player`: the plugin with the script's id is not the script player Hint: give the script an id no other plugin has
+- `dsp.notices`: the player's license or notices cannot be read Hint: restore the license and notices beside the player before exporting
 - `dsp.path`: the folder is relative, or (source) not empty Hint: give an absolute folder; for source, a new one
 - `dsp.plugin_name`: source: the plugin's name cannot name a project Hint: rename it in Info.name
 - `dsp.no_parameter`: source: the project's tests need a parameter a host can automate Hint: declare one
