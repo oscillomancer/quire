@@ -89,8 +89,8 @@ its tests, under Xvfb and software OpenGL. SDL3 and the pinned CLAP validator
 are built and cached in the runner's workspace; Ubuntu 24.04 predates SDL3.
 macOS (`macos-15`, arm64) uses
 AppleClang and the system libc++, with deployment target 14.4. Its build preset
-uses two jobs to keep the engine command translation units within the hosted
-runner memory budget. Homebrew
+uses two jobs, also enforced explicitly by the workflow, to keep the engine
+command translation units within the hosted runner memory budget. Homebrew
 supplies Ninja/SDL3, while curl and zlib come from the SDK. Float/double
 parsing uses the vendored MIT fast_float library through core-base on every
 platform; integer parsing remains `std::from_chars`. This avoids the Apple

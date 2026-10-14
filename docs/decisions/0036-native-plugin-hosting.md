@@ -103,3 +103,8 @@ contract; macOS continues to copy its complete bundle.
 
 Product semantic concurrency tests use native module loaders and run on every
 platform. Tail/unload probes that use dlopen or /proc remain Linux-only.
+
+The macOS workflow also supplies an explicit two-job CLI limit and matching
+CMAKE_BUILD_PARALLEL_LEVEL. A native run still left six compiler drivers active
+with only preset jobs=2 while the workflow environment specified six; relying
+on the preset alone did not bound the hosted build's compiler concurrency.
