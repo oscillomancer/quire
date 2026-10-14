@@ -102,6 +102,8 @@ int wrap(int i, int n);
 
 namespace detail {
 struct Layout;
+// Native bounds checks have no source line; the JIT supplies its own.
+void outOfRange(int line);
 // Reports a Shared or SharedArray member to the plugin under construction
 // (a source export's glue listens; nothing else does).
 void declareShared(void* member, int bytes);
@@ -117,6 +119,7 @@ struct Array {
 
     T& operator[](int i) {
         if (static_cast<unsigned>(i) < static_cast<unsigned>(N)) return items_[i];
+        detail::outOfRange(0);
         if constexpr (std::is_arithmetic_v<T>) spare_ = T();
         return spare_;
     }
@@ -154,6 +157,7 @@ class Buffer {
     int size() const { return size_; }
     T& operator[](int i) {
         if (static_cast<unsigned>(i) < static_cast<unsigned>(size_)) return items_[i];
+        detail::outOfRange(0);
         spare_ = T();
         return spare_;
     }
@@ -536,7 +540,9 @@ struct Info {
 class InputChannel {
   public:
     double operator[](int i) const {
-        return static_cast<unsigned>(i) < static_cast<unsigned>(frames_) ? data_[i] : 0.0;
+        if (static_cast<unsigned>(i) < static_cast<unsigned>(frames_)) return data_[i];
+        detail::outOfRange(0);
+        return 0.0;
     }
     int size() const { return frames_; }
 
@@ -548,6 +554,7 @@ class Channel {
   public:
     double& operator[](int i) const {
         if (static_cast<unsigned>(i) < static_cast<unsigned>(frames_)) return data_[i];
+        detail::outOfRange(0);
         *spare_ = 0.0;
         return *spare_;
     }
@@ -580,12 +587,14 @@ class Block {
     Channel operator[](int c) const {
         if (static_cast<unsigned>(c) < static_cast<unsigned>(channels))
             return Channel{data_[c], frames, spare_};
+        detail::outOfRange(0);
         return Channel{spare_, 0, spare_};
     }
     // The sidechain (Info::sidechain): the key input, silent when unconnected.
     InputChannel sidechain(int c) const {
         if (static_cast<unsigned>(c) < static_cast<unsigned>(sidechainChannels_))
             return InputChannel{sidechain_[c], frames};
+        detail::outOfRange(0);
         return InputChannel{nullptr, 0};
     }
     // An extra output (Info::outputs), silent on entry.
@@ -593,6 +602,7 @@ class Block {
         if (static_cast<unsigned>(bus) < static_cast<unsigned>(outputs_) &&
             static_cast<unsigned>(c) < static_cast<unsigned>(channels))
             return Channel{aux_[bus][c], frames, spare_};
+        detail::outOfRange(0);
         return Channel{spare_, 0, spare_};
     }
 

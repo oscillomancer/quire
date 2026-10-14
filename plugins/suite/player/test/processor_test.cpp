@@ -163,6 +163,30 @@ struct Spin : Effect {
 
 }  // namespace
 
+TEST(native_container_bounds_report_runtime_status_without_a_source_line) {
+    script::detail::Instance instance;
+    script::Array<double, 1> array;
+    script::Buffer<double> buffer;
+    buffer.resize(1);
+    double data[1] = {1.0}, spare = 0.0;
+    script::Channel channel{data, 1, &spare};
+    script::InputChannel input{data, 1};
+    script::Block block;
+    block.spare_ = &spare;
+    const auto read = [&]() SUPPLE_REALTIME {
+        script::detail::CurrentScope scope(&instance);
+        const double result = array[-1] + buffer[1] + channel[1] + input[-1];
+        (void)block[-1];
+        (void)block.sidechain(-1);
+        (void)block.output(-1, 0);
+        return result;
+    };
+    CHECK(read() == 0.0);
+    CHECK(instance.status.outOfRange.load() == 7);
+    CHECK(instance.status.outOfRangeLine.load() == 0);
+    CHECK(!instance.status.silent.load());
+}
+
 TEST(a_script_becomes_a_definition_with_its_keys_units_and_ids) {
     const auto d = compileText(libraryScript("tilt"));
     CHECK(d->info().id == "com.example.tilt" && d->info().name == "Tilt" &&
