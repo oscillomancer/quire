@@ -90,7 +90,11 @@ are built and cached in the runner's workspace; Ubuntu 24.04 predates SDL3.
 macOS (`macos-15`, arm64) uses
 AppleClang and the system libc++, with deployment target 14.4. Its build preset
 uses two jobs, also enforced explicitly by the workflow, to keep the engine
-command translation units within the hosted runner memory budget. Homebrew
+command translation units within the hosted runner memory budget. The root
+project uses `-gline-tables-only` in this preset: assertions and unoptimized code
+remain enabled, with file/line stack traces. For full variable/type debugging
+on a larger machine, configure with `-DCMAKE_CXX_FLAGS_DEBUG=-g`. Isolated stock
+projects retain their own Debug flags. Homebrew
 supplies Ninja/SDL3, while curl and zlib come from the SDK. Float/double
 parsing uses the vendored MIT fast_float library through core-base on every
 platform; integer parsing remains `std::from_chars`. This avoids the Apple

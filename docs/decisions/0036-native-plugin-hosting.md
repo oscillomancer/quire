@@ -105,6 +105,16 @@ Product semantic concurrency tests use native module loaders and run on every
 platform. Tail/unload probes that use dlopen or /proc remain Linux-only.
 
 The macOS workflow also supplies an explicit two-job CLI limit and matching
-CMAKE_BUILD_PARALLEL_LEVEL. A native run still left six compiler drivers active
-with only preset jobs=2 while the workflow environment specified six; relying
-on the preset alone did not bound the hosted build's compiler concurrency.
+CMAKE_BUILD_PARALLEL_LEVEL. A cancelled native run listed twelve clang processes
+with only preset jobs=2 while the workflow environment specified six. The
+explicit CLI bound avoids relying on preset/environment precedence.
+
+A completed two-job native build took 59 minutes, leaving no margin for tests;
+the large engine command translation units dominated that build. The macOS
+preset uses -gline-tables-only to reduce debug emission cost and compiler memory
+for the root project while
+retaining Debug assertions and unoptimized code. File/line stack traces remain
+available; full type/variable debug info can be restored with
+-DCMAKE_CXX_FLAGS_DEBUG=-g on a larger machine. Stock isolated builds keep their
+existing flags. The fallback implementation's private namespace is stop_detail
+to avoid collisions with component detail namespaces when both are imported.

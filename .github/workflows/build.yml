@@ -156,8 +156,8 @@ jobs:
           path: .deps
           key: ${{ steps.cache.outputs.cache-primary-key }}
       - name: Build
-        # Keep the environment and explicit CLI limit aligned: CMake versions
-        # can prefer CMAKE_BUILD_PARALLEL_LEVEL over a build preset's jobs.
+        # Align the environment and explicit CLI limit for predictable
+        # compiler concurrency on every runner.
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: ${{ matrix.platform == 'macos' && '2' || '6' }}
         run: cmake --build --preset ${{ matrix.preset }} --parallel "$CMAKE_BUILD_PARALLEL_LEVEL" -- -k 0
