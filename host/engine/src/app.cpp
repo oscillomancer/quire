@@ -1960,17 +1960,17 @@ Result<std::vector<RecordedInfo>> EngineApp::commitTakes(const std::vector<Recor
         }
     }
     SUPPLE_TRY(commitTransaction(*txnId));
-    for (auto& [source, take] : pendingHashes) {
+    for (auto& [source, pendingTake] : pendingHashes) {
         // Open only; all reads happen on the worker. The handle survives a
         // first save moving the scratch file before the job gets to run.
-        auto input = std::make_shared<std::ifstream>(take.file, std::ios::binary);
+        auto input = std::make_shared<std::ifstream>(pendingTake.file, std::ios::binary);
         const model::MediaSource expected = *head().media.find(source);
-        take.sampleRate = expected.sampleRate;
+        pendingTake.sampleRate = expected.sampleRate;
         const auto generation = projectGeneration();
         const auto branch = versions_->branch();
         auto* dispatcher = commands_;
-        startJob([this, dispatcher, source, expected, take = std::move(take), input, generation,
-                  branch](supple::StopToken stop) mutable {
+        startJob([this, dispatcher, source, expected, take = std::move(pendingTake), input,
+                  generation, branch](supple::StopToken stop) mutable {
             Result<std::string> result =
                 Error("file.open", "cannot open recording for hashing", take.file.string(),
                       "restore a readable file and reimport it to retry hashing");

@@ -25,6 +25,18 @@
 namespace json = supple::suite::json;
 
 namespace {
+void setLibraryEnvironment(const std::string& value) {
+#if defined(_WIN32)
+    _putenv_s("SUPPLE_SCRIPT_LIBRARY", value.c_str());
+#else
+    setenv("SUPPLE_SCRIPT_LIBRARY", value.c_str(), 1);
+#endif
+}
+#if defined(_WIN32)
+constexpr char kLibrarySeparator = ';';
+#else
+constexpr char kLibrarySeparator = ':';
+#endif
 
 struct Host {
     clap_host_t clap{};
@@ -227,7 +239,7 @@ struct Library {
         // The script from whichever folder of the library has it.
         std::string_view rest = previous;
         while (!rest.empty()) {
-            const size_t end = std::min(rest.find(':'), rest.size());
+            const size_t end = std::min(rest.find(kLibrarySeparator), rest.size());
             const auto file = std::filesystem::path(rest.substr(0, end)) / script /
                               (std::string(script) + ".cpp");
             if (std::filesystem::exists(file)) {
@@ -236,10 +248,10 @@ struct Library {
             }
             rest.remove_prefix(std::min(end + 1, rest.size()));
         }
-        setenv("SUPPLE_SCRIPT_LIBRARY", root.string().c_str(), 1);
+        setLibraryEnvironment(root.string());
     }
     ~Library() {
-        setenv("SUPPLE_SCRIPT_LIBRARY", previous.c_str(), 1);
+        setLibraryEnvironment(previous);
         std::error_code ec;
         std::filesystem::remove_all(root, ec);
     }
