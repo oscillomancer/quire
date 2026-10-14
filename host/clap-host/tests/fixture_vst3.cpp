@@ -51,6 +51,7 @@ std::atomic<int> gNoteOffs{0}, gWildcardOffs{0};
 std::atomic<int> gAttachedUnsized{0};
 std::array<std::atomic<int>, 64> gNoteIdOffs{};
 
+#if defined(__linux__)
 class TestHandler final
     : public U::Implements<U::Directly<Linux::ITimerHandler, Linux::IEventHandler>> {
   public:
@@ -117,6 +118,8 @@ class TestView final : public CPluginView {
     TestHandler first_, second_;
 };
 
+#endif
+
 class Fixture final : public SingleComponentEffect {
   public:
     // MultiOut (ADR-0021): an instrument with a main output (0.125) and an
@@ -154,7 +157,12 @@ class Fixture final : public SingleComponentEffect {
         return result;
     }
     IPlugView* PLUGIN_API createView(FIDString name) override {
+#if defined(__linux__)
         return controller_ && std::strcmp(name, ViewType::kEditor) == 0 ? new TestView : nullptr;
+#else
+        (void)name;
+        return nullptr;
+#endif
     }
     tresult PLUGIN_API getControllerClassId(TUID id) override {
         if (kind_ != Separate && kind_ != Stateless) return kResultFalse;

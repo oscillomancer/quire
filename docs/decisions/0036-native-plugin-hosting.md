@@ -50,10 +50,12 @@ hang isolation even when the audio bridge is unavailable.
 ## Consequences
 
 Hosting, scanner, stock wrappers and host conformance/reset checks can build
-independently of the engine and audio bridge. macOS can also build the sandbox
-and offline renderer. The engine remains gated pending separation of Linux
-JACK scheduling/affinity from device-independent services. Windows sandbox
-and engine retain the audio-file gate. Linux-only `/proc`, signals, subreaper,
+independently of the engine and audio bridge. macOS also builds the engine library/CLI, dummy backend, sandbox and offline
+renderer. JACK/fake JACK and the hardware benchmark remain Linux-only; an
+explicit JACK request elsewhere returns engine.backend.unsupported with a
+/backend path and dummy hint. Windows sandbox and engine retain the audio-file
+gate. Native engine tests exercise the existing RT/offline equivalence contract
+in the callback and anticipative executors. Linux-only `/proc`, signals, subreaper,
 Unix-script and bridge protocol probes remain on Linux, with native fixture
 coverage of loading, state, audio, supervised crash/hang/cache and child cleanup.
 Native CI results and any template boundary failures are recorded in STATUS.

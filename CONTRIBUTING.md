@@ -125,8 +125,8 @@ These gates are explicit, with no no-op RT implementations:
 | Gate | Off on | Reason / follow-up |
 |---|---|---|
 | `SUPPLE_HOST_SERVICES`: audio bridge | macOS, Windows | Shared memory, cross-process wake and native IPC; bridge port step |
-| Sandbox and offline renderer | Windows | Depends on the gated audio-file library; enabled on macOS |
-| Same gate: engine, JACK/fake JACK | macOS, Windows | Linux JACK scheduling/affinity remains coupled to engine; Windows also needs audio-file I/O |
+| Engine library/CLI and sandbox | Windows | Depend on the gated audio-file library; enabled on macOS with dummy/offline audio |
+| JACK/fake JACK and hardware capacity benchmark | macOS, Windows | Native device backend is a later port; requests return engine.backend.unsupported |
 | Same gate: DAW GUI/agent and source-export integration tests | macOS, Windows | GUI depends on engine/X11; stock wrappers and conformance/reset tests now enabled separately |
 | POSIX evaluation harness tests | Windows | Unix executable fixtures, symlinks and process groups |
 | `SUPPLE_POSIX_AUDIO_FILES`: audio-file library/tests | Windows | POSIX exclusive files, RF64 output and recording recovery; file-I/O port step |
@@ -142,3 +142,7 @@ The existing Linux bridge/protocol, `/proc`, subreaper and shell-script probes
 remain Linux-only. Native tests cover fixture loading, state/audio, crash/hang
 isolation, cache and process capture/deadlines. Windows external validator
 shell tests are omitted; native product host-smoke tests still run.
+
+Windows stock builds enable the CRT math constants with _USE_MATH_DEFINES in
+platform build glue. Product-owned semantic stress tests use a native loader;
+template host/probe/shared-stack sources are unchanged.

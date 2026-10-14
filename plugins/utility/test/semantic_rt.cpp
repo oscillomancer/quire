@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <clap/clap.h>
-#include <dlfcn.h>
+#include "supple/plugin/test_module.h"
 #include <array>
 #include <atomic>
 #include <cstring>
@@ -25,9 +25,9 @@ static void process(const clap_plugin_t* p, const clap_process_t* c) SUPPLE_RT;
 static void process(const clap_plugin_t* p, const clap_process_t* c) { p->process(p, c); }
 int main(int argc, char** argv) {
     if (argc != 2) return 1;
-    void* lib = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
+    void* lib = supple::plugin::test::open(argv[1]);
     if (!lib) return 2;
-    auto* entry = static_cast<const clap_plugin_entry_t*>(dlsym(lib, "clap_entry"));
+    auto* entry = static_cast<const clap_plugin_entry_t*>(supple::plugin::test::symbol(lib, "clap_entry"));
     if (!entry || !entry->init(argv[1])) return 3;
     auto* f = static_cast<const clap_plugin_factory_t*>(entry->get_factory(CLAP_PLUGIN_FACTORY_ID));
     clap_host_t host{CLAP_VERSION_INIT, nullptr,  "Test",   "Supple Audio", "", "1",
@@ -88,6 +88,6 @@ int main(int argc, char** argv) {
     p->deactivate(p);
     p->destroy(p);
     entry->deinit();
-    dlclose(lib);
+    supple::plugin::test::close(lib);
     return ok ? 0 : 11;
 }

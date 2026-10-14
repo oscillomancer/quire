@@ -21,7 +21,7 @@
 #include <clap/clap.h>
 #if defined(_WIN32)
 #include <io.h>
-#define write _write
+
 #else
 #include <unistd.h>
 #endif
@@ -43,6 +43,13 @@
 #include "supple/patch/patch.h"
 
 namespace {
+void fixtureWrite(int fd, const void* bytes, unsigned count) {
+#if defined(_WIN32)
+    (void)::_write(fd, bytes, count);
+#else
+    (void)::write(fd, bytes, count);
+#endif
+}
 
 using namespace supple;
 
@@ -910,7 +917,7 @@ void CLAP_ABI edgeTimer(const clap_plugin_t* pl, clap_id id) {
     }
     if (edge.config[0] == 43) {
         const char done = 't';
-        (void)::write(edge.config[1], &done, 1);  // main-thread timer receipt
+        (void)fixtureWrite(edge.config[1], &done, 1);  // main-thread timer receipt
     }
     timer->unregister_timer(edge.host, id);
     if (edge.timerCalls == 1) {
@@ -966,7 +973,7 @@ void CLAP_ABI edgeMain(const clap_plugin_t* pl) {
     }
     if (E(pl)->config[0] == 42) {
         const char done = 'm';
-        (void)::write(E(pl)->config[1], &done, 1);  // main-thread callback receipt
+        (void)fixtureWrite(E(pl)->config[1], &done, 1);  // main-thread callback receipt
     }
 }
 uint32_t CLAP_ABI edgeLatency(const clap_plugin_t* pl) { return E(pl)->config[0] == 5 ? 64 : 0; }

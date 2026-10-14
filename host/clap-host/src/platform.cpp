@@ -99,6 +99,23 @@ bool executable(const fs::path& path) {
     return ::access(path.c_str(), X_OK) == 0;
 #endif
 }
+namespace {
+std::string environmentText(const char* name) {
+#if defined(_WIN32)
+    const auto wideName = pathFromText(name).wstring();
+    const DWORD size = GetEnvironmentVariableW(wideName.c_str(), nullptr, 0);
+    if (!size) return {};
+    std::wstring value(size, L'\0');
+    const DWORD length = GetEnvironmentVariableW(wideName.c_str(), value.data(), size);
+    if (!length || length >= size) return {};
+    value.resize(length);
+    return pathText(fs::path(value));
+#else
+    const char* value = std::getenv(name);
+    return value ? value : "";
+#endif
+}
+}  // namespace
 std::vector<fs::path> pluginPaths(bool vst3) {
     std::vector<fs::path> result;
     auto add = [&](const fs::path& path) {
@@ -110,8 +127,8 @@ std::vector<fs::path> pluginPaths(bool vst3) {
 #else
     constexpr char separator = ':';
 #endif
-    if (const char* env = std::getenv(vst3 ? "VST3_PATH" : "CLAP_PATH")) {
-        const std::string text(env);
+    const auto text = environmentText(vst3 ? "VST3_PATH" : "CLAP_PATH");
+    if (!text.empty()) {
         for (std::size_t start = 0; start <= text.size();) {
             const auto end = text.find(separator, start);
             if (end > start) add(pathFromText(text.substr(start, end - start)));
@@ -121,10 +138,10 @@ std::vector<fs::path> pluginPaths(bool vst3) {
     }
 
 #if defined(_WIN32)
-    const char* common = std::getenv("COMMONPROGRAMFILES");
-    if (common) add(pathFromText(common) / (vst3 ? "VST3" : "CLAP"));
-    const char* local = std::getenv("LOCALAPPDATA");
-    if (local) add(pathFromText(local) / "Programs/Common" / (vst3 ? "VST3" : "CLAP"));
+    const auto common = environmentText("COMMONPROGRAMFILES");
+    if (!common.empty()) add(pathFromText(common) / (vst3 ? "VST3" : "CLAP"));
+    const auto local = environmentText("LOCALAPPDATA");
+    if (!local.empty()) add(pathFromText(local) / "Programs/Common" / (vst3 ? "VST3" : "CLAP"));
 #elif defined(__APPLE__)
     const auto home = paths::home();
     const auto directory = fs::path("Library/Audio/Plug-Ins") / (vst3 ? "VST3" : "CLAP");

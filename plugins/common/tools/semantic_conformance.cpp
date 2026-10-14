@@ -49,7 +49,7 @@ int main(int argc, char** argv) {
     for (const auto& p : *list)
         if (p.id == id) info = &p;
     if (!info) {
-        std::fprintf(stderr, "plugin %s not found in %s\n", id.c_str(), path.c_str());
+        std::fprintf(stderr, "plugin %s not found in %s\n", id.c_str(), path.string().c_str());
         return 2;
     }
     check(info->semantic, "implements " + std::string(CLAP_EXT_SUPPLE_SEMANTIC_PARAMS));

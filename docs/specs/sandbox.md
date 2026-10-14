@@ -611,4 +611,5 @@ On macOS and Windows, isolated Instance::create and createBridgeProcess fail
 with host.bridge.unsupported, path /isolation and an in_process hint. Native
 editor opening fails with host.editor.unsupported until editor embedding lands.
 macOS enables the sandbox/offline renderer; Windows waits for native audio-file
-I/O. Engine device and bridge integration remain separately gated.
+I/O. The macOS engine and dummy backend are enabled separately from JACK, bridge
+and editor integration. Windows engine/sandbox wait for audio-file I/O.

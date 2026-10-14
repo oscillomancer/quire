@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <clap/clap.h>
-#include <dlfcn.h>
+#include "supple/plugin/test_module.h"
 #include <atomic>
 #include <cmath>
 #include <cstdio>
@@ -22,12 +22,12 @@ bool CLAP_ABI accept(const clap_output_events_t*, const clap_event_header_t*) { 
 }  // namespace
 int main(int argc, char** argv) {
     if (argc != 2) return 2;
-    void* lib = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
+    void* lib = supple::plugin::test::open(argv[1]);
     if (!lib) {
-        std::puts(dlerror());
+        std::puts(supple::plugin::test::error());
         return 1;
     }
-    const auto* entry = static_cast<const clap_plugin_entry_t*>(dlsym(lib, "clap_entry"));
+    const auto* entry = static_cast<const clap_plugin_entry_t*>(supple::plugin::test::symbol(lib, "clap_entry"));
     if (!entry || !entry->init(argv[1])) return 1;
     const auto* factory =
         static_cast<const clap_plugin_factory_t*>(entry->get_factory(CLAP_PLUGIN_FACTORY_ID));
@@ -98,7 +98,7 @@ int main(int argc, char** argv) {
     if (state->load(p, &input)) bad = true;
     p->destroy(p);
     entry->deinit();
-    dlclose(lib);
+    supple::plugin::test::close(lib);
     std::printf("semantic patches during %u bounded audio blocks: %s\n", blocks.load(),
                 bad ? "FAIL" : "ok");
     return bad ? 1 : 0;

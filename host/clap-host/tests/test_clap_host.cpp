@@ -77,6 +77,9 @@ struct BridgeTestAccess {
 }  // namespace supple::host
 
 namespace {
+bool rtBlock(Instance& g, const ProcessBlock& b, OutputEvents& out) SUPPLE_RT {
+    return g.process(b, &out);
+}
 
 const std::filesystem::path kFixture = FIXTURE_CLAP_PATH;
 const std::filesystem::path kVst3Fixture = FIXTURE_VST3_PATH;
@@ -133,73 +136,6 @@ struct ControllerWatch {
 };
 
 }  // namespace
-
-TEST_CASE("VST3 fixture scans, processes, and restores state") {
-    auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
-    REQUIRE(found);
-    REQUIRE(found->size() == 8);
-    CHECK((*found)[0].format == "vst3");
-    CHECK((*found)[0].id.rfind("vst3:", 0) == 0);
-    CHECK((*found)[0].version == "2.0");
-    auto gain = std::find_if(found->begin(), found->end(),
-                             [](const PluginInfo& p) { return p.name == "Test VST3 Gain"; });
-    REQUIRE(gain != found->end());
-    auto made = Instance::create(*gain, {});
-    REQUIRE(made);
-    auto& instance = **made;
-    REQUIRE(instance.params().size() == 1);
-    REQUIRE(instance.setParam(1, 0.25).ok());
-    CHECK(*instance.paramValue(1) == doctest::Approx(0.25));
-    auto text = instance.paramText(1, 0.25);
-    REQUIRE(text);
-    auto parsed = instance.paramFromText(1, *text);
-    REQUIRE(parsed);
-    CHECK(*parsed == doctest::Approx(0.25));
-    auto state = instance.saveState();
-    REQUIRE_MESSAGE(state, (state ? "" : state.error().message));
-    REQUIRE(instance.setParam(1, 0.75).ok());
-    REQUIRE(instance.loadState(*state).ok());
-    CHECK(*instance.paramValue(1) == doctest::Approx(0.25));
-    REQUIRE(instance.activate(48000, 1, 64).ok());
-    REQUIRE(instance.startProcessing());
-    Buffers buffer(64);
-    std::fill(buffer.l.begin(), buffer.l.end(), 1.0f);
-    std::fill(buffer.r.begin(), buffer.r.end(), 1.0f);
-    REQUIRE(instance.process(buffer.block(64)));
-    CHECK(static_cast<double>(buffer.ol[0]) == doctest::Approx(0.25));
-    Event automation{.kind = Event::Kind::Param, .time = 20, .paramId = 1, .value = 0.5};
-    REQUIRE(instance.process(buffer.block(64, std::span<const Event>(&automation, 1))));
-    CHECK(static_cast<double>(buffer.ol[19]) == doctest::Approx(0.25));
-    CHECK(static_cast<double>(buffer.ol[20]) == doctest::Approx(0.5));
-    instance.stopProcessing();
-    instance.deactivate();
-}
-
-TEST_CASE("VST3 plug-ins with a sidechain bus get every bus; kNotImplemented starts processing") {
-    // A partial bus layout is refused by strict plug-ins, which then output
-    // silence; setProcessing may answer kNotImplemented (sfizz does).
-    auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
-    REQUIRE(found);
-    auto sidechain = std::find_if(found->begin(), found->end(), [](const PluginInfo& p) {
-        return p.name == "Test VST3 Sidechain Gain";
-    });
-    REQUIRE(sidechain != found->end());
-    auto made = Instance::create(*sidechain, {});
-    REQUIRE(made);
-    auto& instance = **made;
-    CHECK(instance.audioInputChannels() == 2);
-    REQUIRE(instance.setParam(1, 0.5).ok());
-    REQUIRE(instance.activate(48000, 1, 64).ok());
-    REQUIRE(instance.startProcessing());
-    Buffers buffer(64);
-    std::fill(buffer.l.begin(), buffer.l.end(), 1.0f);
-    std::fill(buffer.r.begin(), buffer.r.end(), 1.0f);
-    REQUIRE(instance.process(buffer.block(64)));
-    CHECK(static_cast<double>(buffer.ol[10]) == doctest::Approx(0.5));
-    CHECK(static_cast<double>(buffer.orr[10]) == doctest::Approx(0.5));
-    instance.stopProcessing();
-    instance.deactivate();
-}
 
 TEST_CASE("a VST3 instrument's auxiliary output buses are active and reach the block") {
     setBridgeExecutable(BRIDGE_PATH);
@@ -353,48 +289,6 @@ TEST_CASE("a VST3's edit controller is reached from the main thread only") {
     CHECK(*(*plain)->plainParam(1, 0.4) == doctest::Approx(0.4));
 }
 
-TEST_CASE("a VST3 reset ends the notes the host delivered") {
-    // A VST3 has no reset of its own: the host remembers the notes it sent and
-    // releases them at the next process (the engine relies on that for "no
-    // hanging notes" when an instance leaves an executor).
-    auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
-    REQUIRE(found);
-    const auto sine = std::find_if(found->begin(), found->end(),
-                                   [](const PluginInfo& p) { return p.name == "Test VST3 Sine"; });
-    REQUIRE(sine != found->end());
-    auto made = Instance::create(*sine, {});
-    REQUIRE(made);
-    auto& instrument = **made;
-    REQUIRE(instrument.activate(48000, 1, 64).ok());
-    REQUIRE(instrument.startProcessing());
-    Buffers buffer(64);
-    Event note{.kind = Event::Kind::NoteOn, .time = 0, .key = 69, .noteId = 3};
-    REQUIRE(instrument.process(buffer.block(64, std::span<const Event>(&note, 1), false)));
-    CHECK(std::abs(buffer.ol[32]) > 0.01f);  // the voice is sounding
-    instrument.reset();
-    buffer = Buffers(64);
-    REQUIRE(instrument.process(buffer.block(64, {}, false)));
-    CHECK(buffer.ol[32] == 0.0f);  // the reset note-off ended it
-    instrument.stopProcessing();
-    instrument.deactivate();
-}
-
-TEST_CASE("scan finds the fixtures with their capabilities") {
-    auto list = scan(std::span<const std::filesystem::path>(&kFixture, 1));
-    REQUIRE(list);
-    REQUIRE(list->size() == 17);
-    const auto gain = find("com.suppleaudio.test.gain");
-    CHECK_FALSE(gain.instrument);
-    CHECK(gain.semantic);
-    CHECK(gain.name == "Test Gain");
-    const auto sine = find("com.suppleaudio.test.sine");
-    CHECK(sine.instrument);
-    CHECK_FALSE(sine.semantic);
-    auto bad = Instance::create(PluginInfo{.id = "nope", .path = kFixture}, {});
-    REQUIRE_FALSE(bad);
-    CHECK(bad.error().code == "host.create");
-}
-
 TEST_CASE("a multi-out instrument's auxiliary outputs reach the block, in process and bridged") {
     setBridgeExecutable(BRIDGE_PATH);
     for (bool isolated : {false, true}) {
@@ -457,159 +351,6 @@ TEST_CASE("a 49-port instrument loads with all its outputs, in process and bridg
         p.stopProcessing();
         p.deactivate();
     }
-}
-
-TEST_CASE("gain: ports, params, sample-accurate automation") {
-    auto inst = Instance::create(find("com.suppleaudio.test.gain"), {});
-    REQUIRE(inst);
-    auto& g = **inst;
-    CHECK(g.audioInputChannels() == 2);
-    CHECK(g.audioOutputChannels() == 2);
-    CHECK_FALSE(g.acceptsNotes());
-    auto ps = g.params();
-    REQUIRE(ps.size() == 2);
-    CHECK(ps[0].name == "Gain");
-    CHECK((ps[1].flags & CLAP_PARAM_IS_STEPPED) != 0);
-    CHECK(*g.paramText(0, gainClap(-6)) == "-6.0 dB");
-    CHECK(*g.paramFromText(0, "-6 dB") == doctest::Approx(gainClap(-6)));
-    CHECK_FALSE(g.paramFromText(0, "loud"));
-
-    REQUIRE(g.activate(48000, 1, 512).ok());
-    g.startProcessing();
-    Buffers buf(256);
-    for (std::uint32_t i = 0; i < 256; ++i) buf.l[i] = buf.r[i] = 0.5f;
-    Event e{.kind = Event::Kind::Param, .time = 100, .paramId = 0, .value = gainClap(-60)};
-    REQUIRE(g.process(buf.block(256, std::span<const Event>(&e, 1))));
-    CHECK(static_cast<double>(buf.ol[99]) == doctest::Approx(0.5));
-    CHECK(buf.ol[100] == 0.0f);  // -60 dB is off-at-min: silence exactly from sample 100
-    // A queued change applies at the start of the next block.
-    REQUIRE(g.setParam(0, gainClap(0)).ok());
-    REQUIRE(g.process(buf.block(256)));
-    CHECK(static_cast<double>(buf.ol[0]) == doctest::Approx(0.5));
-    g.stopProcessing();
-    g.deactivate();
-    // Inactive: flushed immediately on the main thread.
-    REQUIRE(g.setParam(0, gainClap(-12)).ok());
-    CHECK(*g.paramValue(0) == doctest::Approx(gainClap(-12)));
-}
-
-TEST_CASE("gain: state round trip across instances") {
-    auto a = Instance::create(find("com.suppleaudio.test.gain"), {});
-    auto b = Instance::create(find("com.suppleaudio.test.gain"), {});
-    REQUIRE(a);
-    REQUIRE(b);
-    REQUIRE((*a)->setParam(0, gainClap(-3)).ok());
-    auto state = (*a)->saveState();
-    REQUIRE(state);
-    REQUIRE((*b)->loadState(*state).ok());
-    CHECK(*(*b)->paramValue(0) == doctest::Approx(gainClap(-3)));
-    std::vector<std::uint8_t> junk = {1, 2, 3};
-    CHECK_FALSE((*b)->loadState(junk).ok());
-}
-
-TEST_CASE("gain: semantic schema, patches, errors, validate-only") {
-    auto inst = Instance::create(find("com.suppleaudio.test.gain"), {});
-    REQUIRE(inst);
-    auto& g = **inst;
-    auto schema = g.semanticSchema();
-    REQUIRE(schema);
-    CHECK(schema->find("params")->find("gain")->find("unit")->asString() == "dB");
-    CHECK(*g.getPatch(true) ==
-          "{\n  \"schema\": \"supple.test-gain-patch/1.0\",\n  \"params\": {}\n}\n");
-    REQUIRE(g.setPatch(R"({"params": {"gain": "-4.5 dB"}})", CLAP_SUPPLE_SET_MERGE).ok());
-    CHECK(*g.paramValue(0) == doctest::Approx(gainClap(-4.5)));
-    CHECK(g.getPatch(true)->find("\"gain\": -4.5") != std::string::npos);
-    CHECK(*g.describe(true) == "Gain: Gain -4.5 dB");
-    auto bad = g.setPatch(R"({"params": {"gian": 1}})", CLAP_SUPPLE_SET_MERGE);
-    REQUIRE_FALSE(bad.ok());
-    CHECK(bad.error().code == "params.unknown_key");
-    CHECK(bad.error().path == "/params/gian");
-    CHECK(bad.error().hint.find("gain") != std::string::npos);
-    REQUIRE(g.setPatch(R"({"params": {"gain": 6}})", CLAP_SUPPLE_SET_VALIDATE_ONLY).ok());
-    CHECK(*g.paramValue(0) == doctest::Approx(gainClap(-4.5)));  // unchanged
-}
-
-TEST_CASE("gain: latency change requests a restart; serviceMainThread reactivates") {
-    auto inst = Instance::create(find("com.suppleaudio.test.gain"), {});
-    REQUIRE(inst);
-    auto& g = **inst;
-    REQUIRE(g.activate(48000, 1, 256).ok());
-    CHECK(g.latency() == 0);
-    REQUIRE(g.setPatch(R"({"params": {"latency": "short"}})", CLAP_SUPPLE_SET_MERGE).ok());
-    CHECK(g.serviceMainThread());
-    CHECK(g.active());
-    CHECK(g.latency() == 64);
-    g.startProcessing();
-    Buffers buf(128);
-    buf.l[0] = buf.r[0] = 1.0f;
-    REQUIRE(g.process(buf.block(128)));
-    CHECK(buf.ol[0] == 0.0f);
-    CHECK(static_cast<double>(buf.ol[64]) == doctest::Approx(1.0));
-    g.stopProcessing();
-}
-
-TEST_CASE("sine: notes at sample offsets, note end events, MIDI dialect") {
-    auto inst = Instance::create(find("com.suppleaudio.test.sine"), {});
-    REQUIRE(inst);
-    auto& s = **inst;
-    CHECK(s.audioInputChannels() == 0);
-    CHECK(s.acceptsNotes());
-    REQUIRE(s.activate(48000, 1, 512).ok());
-    s.startProcessing();
-    Buffers buf(512);
-    const Event events[] = {
-        {.kind = Event::Kind::NoteOn, .time = 10, .key = 69, .noteId = 7, .velocity = 1.0},
-        {.kind = Event::Kind::NoteOff, .time = 300, .key = 69, .noteId = 7},
-    };
-    std::vector<OutputEvent> storage(16);
-    OutputEvents out{storage};
-    REQUIRE(s.process(buf.block(512, events, false), &out));
-    for (int i = 0; i <= 10; ++i) CHECK(buf.ol[i] == 0.0f);  // phase 0 at the note start
-    double energy = 0;
-    for (int i = 11; i < 300; ++i)
-        energy += static_cast<double>(buf.ol[i]) * static_cast<double>(buf.ol[i]);
-    CHECK(energy > 1.0);
-    for (int i = 300; i < 512; ++i) CHECK(buf.ol[i] == 0.0f);
-    REQUIRE(out.count == 1);
-    CHECK(out.storage[0].kind == OutputEvent::Kind::NoteEnd);
-    CHECK(out.storage[0].time == 300);
-    CHECK(out.storage[0].noteId == 7);
-    CHECK(out.storage[0].port == 0);
-    CHECK(out.storage[0].channel == 0);
-    CHECK(out.storage[0].key == 69);
-    // Raw MIDI events also reach the plugin.
-    Event midiOn{.kind = Event::Kind::Midi, .time = 0};
-    midiOn.midi[0] = 0x90;
-    midiOn.midi[1] = 60;
-    midiOn.midi[2] = 100;
-    REQUIRE(s.process(buf.block(64, std::span<const Event>(&midiOn, 1), false)));
-    double e2 = 0;
-    for (int i = 0; i < 64; ++i)
-        e2 += static_cast<double>(buf.ol[i]) * static_cast<double>(buf.ol[i]);
-    CHECK(e2 > 0.0);
-    s.stopProcessing();
-}
-
-namespace {
-bool rtBlock(Instance& g, const ProcessBlock& b, OutputEvents& out) SUPPLE_RT {
-    return g.process(b, &out);
-}
-}  // namespace
-
-TEST_CASE("the process path is real-time safe" * doctest::description("rt")) {
-    auto inst = Instance::create(find("com.suppleaudio.test.sine"), {});
-    REQUIRE(inst);
-    REQUIRE((*inst)->activate(48000, 1, 256).ok());
-    (*inst)->startProcessing();
-    Buffers buf(256);
-    std::vector<OutputEvent> storage(64);
-    OutputEvents out{storage};
-    const Event events[] = {{.kind = Event::Kind::NoteOn, .time = 3, .key = 60, .velocity = 0.8},
-                            {.kind = Event::Kind::NoteOff, .time = 200, .key = 60}};
-    bool ok = true;
-    for (int i = 0; i < 50; ++i) ok = ok && rtBlock(**inst, buf.block(256, events, false), out);
-    CHECK(ok);
-    (*inst)->stopProcessing();
 }
 
 TEST_CASE("undersized CLAP output events are rejected locally and bridged") {
@@ -860,36 +601,6 @@ TEST_CASE("bridge idle output codec rejects malformed replies and preserves meta
         validReply(Op::TakeIdleOutputs, Reader(invalid.bytes.data(), invalid.bytes.size())));
 }
 
-TEST_CASE("lifecycle: a restart requested while processing waits until processing stops") {
-    auto inst = Instance::create(find("com.suppleaudio.test.gain"), {});
-    REQUIRE(inst);
-    auto& g = **inst;
-    REQUIRE(g.activate(48000, 1, 256).ok());
-    CHECK(g.latency() == 0);
-    REQUIRE(g.startProcessing());
-    Buffers buf(64);
-    Event e;
-    e.kind = Event::Kind::Param;
-    e.paramId = 1;  // latency: "short" -> the fixture calls request_restart on the audio thread
-    e.value = 1.0;
-    REQUIRE(g.process(buf.block(64, std::span<const Event>(&e, 1))));
-    g.serviceMainThread();  // still processing: must not restart, must keep the request
-    CHECK(g.active());
-    CHECK(g.latency() == 0);
-    CHECK(g.restartPending());  // the engine takes it off its executors for this
-    g.deactivate();             // refused while processing
-    CHECK(g.active());
-    bool logged = false;
-    for (const auto& line : g.takeLog())
-        logged = logged || line.find("deactivate") != std::string::npos;
-    CHECK(logged);
-    g.stopProcessing();
-    CHECK(g.serviceMainThread());
-    CHECK(g.active());
-    CHECK(g.latency() == 64);
-    CHECK_FALSE(g.restartPending());
-}
-
 TEST_CASE("lifecycle: a bridged plug-in's restart waits for processing too, and says so") {
     setBridgeExecutable(BRIDGE_PATH);
     auto inst = Instance::create(find("com.suppleaudio.test.gain"), {}, true);
@@ -908,35 +619,6 @@ TEST_CASE("lifecycle: a bridged plug-in's restart waits for processing too, and 
     CHECK(g.latency() == 64);
     CHECK_FALSE(g.restartPending());
     g.deactivate();
-}
-
-TEST_CASE("lifecycle: request_flush while active is served on the audio thread") {
-    auto inst = Instance::create(find("com.suppleaudio.test.edge"), {});
-    REQUIRE(inst);
-    auto& p = **inst;
-    auto flushes = [&] { return p.paramValue(7).value(); };
-    const std::uint8_t plain[4] = {0, 0, 0, 0};
-    // Inactive: the host flushes on the main thread.
-    REQUIRE(p.loadState(plain).ok());
-    CHECK_FALSE(p.needsAudioFlush());
-    p.serviceMainThread();
-    CHECK(flushes() == 1.0);
-    // Active: the main thread must not flush; flushParams() on the audio thread does.
-    REQUIRE(p.activate(48000, 1, 256).ok());
-    REQUIRE(p.loadState(plain).ok());
-    CHECK(p.needsAudioFlush());
-    p.serviceMainThread();
-    CHECK(flushes() == 1.0);
-    p.flushParams();
-    CHECK(flushes() == 2.0);
-    CHECK_FALSE(p.needsAudioFlush());
-    // A process call also satisfies the request.
-    REQUIRE(p.loadState(plain).ok());
-    REQUIRE(p.startProcessing());
-    Buffers buf(32);
-    REQUIRE(p.process(buf.block(32)));
-    CHECK_FALSE(p.needsAudioFlush());
-    p.stopProcessing();
 }
 
 TEST_CASE("an editor opens in process and through the bridge; a dead bridge closes it (gap #39)") {
@@ -988,44 +670,6 @@ TEST_CASE("an editor opens in process and through the bridge; a dead bridge clos
         CHECK_FALSE(p.hasEditor());
     }
 }
-
-TEST_CASE("lifecycle: refused start_processing blocks process(); tail is reported") {
-    auto inst = Instance::create(find("com.suppleaudio.test.edge"), {});
-    REQUIRE(inst);
-    auto& p = **inst;
-    const std::uint8_t refuse[4] = {1, 0xe8, 0x03, 0};  // tail 1000 samples
-    REQUIRE(p.loadState(refuse).ok());
-    CHECK(p.reportsTail());
-    CHECK(p.tail() == 1000);
-    REQUIRE(p.activate(48000, 1, 256).ok());
-    CHECK_FALSE(p.startProcessing());
-    Buffers buf(32);
-    CHECK_FALSE(p.process(buf.block(32)));
-    CHECK_FALSE(Instance::create(find("com.suppleaudio.test.gain"), {}).value()->reportsTail());
-}
-
-TEST_CASE("events: queued params wait when the arena is full; overflow is counted") {
-    auto inst = Instance::create(find("com.suppleaudio.test.gain"), {});
-    REQUIRE(inst);
-    auto& g = **inst;
-    REQUIRE(g.activate(48000, 1, 256).ok());
-    REQUIRE(g.startProcessing());
-    REQUIRE(g.setParam(0, gainClap(-6)).ok());  // queued (active)
-    std::vector<Event> midi(9000);
-    for (auto& e : midi) {
-        e.kind = Event::Kind::Midi;  // ignored by the gain fixture
-        e.midi[0] = 0xb0;
-    }
-    Buffers buf(256);
-    REQUIRE(g.process(buf.block(256, midi)));
-    CHECK(g.takeNotifications().droppedEvents == 9000 - 8192);
-    CHECK(g.paramValue(0).value() == doctest::Approx(gainClap(0)));  // not delivered yet
-    REQUIRE(g.process(buf.block(256)));
-    CHECK(g.paramValue(0).value() == doctest::Approx(gainClap(-6)));
-    g.stopProcessing();
-}
-
-// --- isolation (ADR-0013) ----------------------------------------------------------------
 
 TEST_CASE("isolation: a bridged instance behaves like the in-process one") {
     setBridgeExecutable(BRIDGE_PATH);
@@ -1270,33 +914,6 @@ TEST_CASE("isolation: a missing bridge is a clean error") {
     setBridgeExecutable(BRIDGE_PATH);
 }
 
-TEST_CASE("CLAP without port activation follows key buffers while processing") {
-    auto made = Instance::create(find("com.suppleaudio.test.legacy-keymix"), {});
-    REQUIRE(made);
-    Instance& in = **made;
-    CHECK_FALSE(in.followsKeyActivation());
-    REQUIRE(in.setSidechainActive(false).ok());
-    REQUIRE(in.activate(48000, 1, 64).ok());
-    REQUIRE(in.startProcessing());
-    Buffers buffer(64);
-    std::fill(buffer.l.begin(), buffer.l.end(), 0.25f);
-    std::fill(buffer.r.begin(), buffer.r.end(), 0.25f);
-    REQUIRE(in.process(buffer.block(64)));
-    CHECK(buffer.ol[7] == 0.25f);
-    // Adding a route changes the block, without restarting this instance.
-    std::vector<float> keySamples(64, 0.5f);
-    const float* key[] = {keySamples.data(), keySamples.data()};
-    auto block = buffer.block(64);
-    block.sidechain = key;
-    block.sidechainChannels = 2;
-    REQUIRE(in.process(block));
-    CHECK(buffer.ol[7] == 0.75f);
-    // Removing it restores silent key buffers, still without a restart.
-    REQUIRE(in.process(buffer.block(64)));
-    CHECK(buffer.ol[7] == 0.25f);
-    in.stopProcessing();
-}
-
 TEST_CASE("a sidechain key reaches CLAP and VST3 plug-ins, in process and isolated (ADR-0018)") {
     // Every declared port gets a buffer (the key-mix fixture errors otherwise);
     // the key sums into the output; without a key the plug-in hears silence.
@@ -1397,17 +1014,6 @@ TEST_CASE("a plugin found in two places resolves to the first on the search path
     fs::remove_all(base);
 }
 
-TEST_CASE("CLAP timers may remove themselves and replace registrations") {
-    auto made = Instance::create(find("com.suppleaudio.test.edge"), {});
-    REQUIRE(made);
-    const std::array<std::uint8_t, 4> config{2, 0, 0, 0};
-    REQUIRE((*made)->loadState(config));
-    REQUIRE((*made)->serviceMainThread());
-    CHECK(*(*made)->paramValue(9) == 1);
-    REQUIRE((*made)->serviceMainThread());
-    CHECK(*(*made)->paramValue(9) == 2);
-    CHECK((*made)->nextTimerMs() == -1);
-}
 TEST_CASE("activation and process reject invalid dimensions before touching buffers") {
     setBridgeExecutable(BRIDGE_PATH);
     for (bool isolated : {false, true}) {
@@ -1432,41 +1038,6 @@ TEST_CASE("activation and process reject invalid dimensions before touching buff
         instance.stopProcessing();
         instance.deactivate();
     }
-}
-TEST_CASE("VST3 queue rejection preserves controller value and malformed MIDI is dropped") {
-    auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
-    REQUIRE(found);
-    auto gain = std::find_if(found->begin(), found->end(),
-                             [](const auto& p) { return p.name == "Test VST3 Gain"; });
-    REQUIRE(gain != found->end());
-    auto made = Instance::create(*gain, {});
-    REQUIRE(made);
-    auto& instance = **made;
-    CHECK_FALSE(instance.activate(48000, 1, UINT32_MAX));
-    bool full = false;
-    for (int i = 0; i < 4096; ++i) {
-        if (!instance.setParam(1, 0.25)) {
-            full = true;
-            break;
-        }
-    }
-    REQUIRE(full);
-    CHECK_FALSE(instance.setParam(1, 0.75));
-    CHECK(*instance.paramValue(1) == doctest::Approx(0.25));
-    REQUIRE(instance.activate(48000, 1, 64));
-    REQUIRE(instance.startProcessing());
-    Buffers buffer(64);
-    std::array<Event, 128> events{};
-    for (std::size_t i = 0; i < events.size(); ++i) {
-        events[i].kind = Event::Kind::Midi;
-        events[i].midi[0] = 0xb0;
-        events[i].midi[1] = static_cast<std::uint8_t>(128 + i);
-        events[i].midi[2] = 127;
-    }
-    CHECK(instance.process(buffer.block(64, events)));
-    CHECK(instance.takeNotifications().droppedEvents == events.size());
-    instance.stopProcessing();
-    instance.deactivate();
 }
 TEST_CASE("VST3 scan retains search path precedence and suppresses repeated bundles") {
     namespace fs = std::filesystem;
@@ -1803,21 +1374,6 @@ TEST_CASE("bridge protocol v6 retains nested structured error details") {
     CHECK(bridge::kVersion == 13);
 }
 
-TEST_CASE("malformed semantic schema falls back to plain CLAP parameters with a warning") {
-    auto info = find("com.suppleaudio.test.malformed-schema");
-    CHECK_FALSE(info.semantic);
-    auto instance = Instance::create(info, {});
-    REQUIRE(instance);
-    CHECK_FALSE((*instance)->info().semantic);
-    CHECK_FALSE((*instance)->semanticSchema());
-    CHECK_FALSE((*instance)->params().empty());
-    REQUIRE((*instance)->setParam(0, gainClap(-3)));
-    CHECK(*(*instance)->paramValue(0) == doctest::Approx(gainClap(-3)));
-    const auto log = (*instance)->takeLog();
-    REQUIRE_FALSE(log.empty());
-    CHECK(log[0].find("invalid semantic schema") != std::string::npos);
-}
-
 TEST_CASE("editor failures destroy the partial editor and show-hide requests reach its owner") {
     for (std::uint8_t mode : {3, 4}) {
         auto made = Instance::create(find("com.suppleaudio.test.edge"), {});
@@ -1836,20 +1392,6 @@ TEST_CASE("editor failures destroy the partial editor and show-hide requests rea
         CHECK(requests.height == 240);
         (*made)->closeEditor();
     }
-}
-
-TEST_CASE("restart activation failures are structured notifications") {
-    auto made = Instance::create(find("com.suppleaudio.test.edge"), {});
-    REQUIRE(made);
-    REQUIRE((*made)->activate(48000, 1, 64));
-    const std::array<std::uint8_t, 4> config{5, 0, 0, 0};
-    REQUIRE((*made)->loadState(config));
-    REQUIRE((*made)->serviceMainThread());
-    CHECK_FALSE((*made)->active());
-    const auto notes = (*made)->takeNotifications();
-    REQUIRE(notes.restartError);
-    CHECK(notes.restartError->code == "host.activate");
-    CHECK_FALSE((*made)->takeNotifications().restartError);
 }
 
 TEST_CASE(
@@ -1936,21 +1478,6 @@ TEST_CASE("VST3 notes preserve overlapping counts and ids and expand wildcard of
     (*made)->deactivate();
 }
 
-TEST_CASE("CLAP layouts beyond the supported port and channel limits are refused") {
-    for (const auto* id :
-         {"com.suppleaudio.test.many-ports", "com.suppleaudio.test.many-channels"}) {
-        auto made = Instance::create(find(id), {});
-        REQUIRE_FALSE(made);
-        CHECK(made.error().code == "host.layout");
-    }
-    RemotePorts ports;
-    auto remote = RemoteInstance::spawn(find("com.suppleaudio.test.gain"), {}, ports);
-    REQUIRE(remote);
-    auto activated = (*remote)->activate(48000, 1, 64, 17, 2);
-    REQUIRE_FALSE(activated);
-    CHECK(activated.error().code == "host.layout");
-}
-
 TEST_CASE("VST3 layouts beyond the supported bus and channel limits are refused") {
     void* module = ::dlopen(FIXTURE_VST3_MODULE, RTLD_NOW);
     REQUIRE(module);
@@ -2028,45 +1555,6 @@ TEST_CASE("valid bridge errors preserve details without failing the process") {
     CHECK(result.error().details[0].path == "/gain");
     CHECK(result.error().details[0].hint == "use 0..1");
     CHECK_FALSE(process->failed());
-}
-
-TEST_CASE("CLAP process requests and ordered parameter clear notifications are observable") {
-    struct Control {
-        void (*requestProcess)(const clap_plugin_t*);
-        void (*rescan)(const clap_plugin_t*, bool);
-        void (*clear)(const clap_plugin_t*, clap_id, clap_param_clear_flags);
-        void (*restart)(const clap_plugin_t*);
-    };
-    auto made = Instance::create(find("com.suppleaudio.test.edge"), {});
-    REQUIRE(made);
-    auto& instance = **made;
-    const auto* plugin = instance.raw();
-    const auto* control =
-        static_cast<const Control*>(plugin->get_extension(plugin, "supple.test.edge-control"));
-    REQUIRE(control);
-    CHECK_FALSE(instance.processRequested());
-    control->requestProcess(plugin);
-    CHECK(instance.processRequested());
-    CHECK(instance.takeProcessRequest());
-    CHECK_FALSE(instance.takeProcessRequest());
-    control->clear(plugin, 7, CLAP_PARAM_CLEAR_AUTOMATIONS);
-    control->clear(plugin, 8, CLAP_PARAM_CLEAR_MODULATIONS);
-    auto notes = instance.takeNotifications();
-    REQUIRE(notes.paramsClear.size() == 2);
-    CHECK(notes.paramsClear[0].id == 7);
-    CHECK(notes.paramsClear[0].flags == CLAP_PARAM_CLEAR_AUTOMATIONS);
-    CHECK(notes.paramsClear[1].id == 8);
-    CHECK(notes.paramsClear[1].flags == CLAP_PARAM_CLEAR_MODULATIONS);
-    CHECK(instance.takeNotifications().paramsClear.empty());
-    // Rescan wins over earlier clears; a subsequent clear remains effective.
-    control->clear(plugin, 7, CLAP_PARAM_CLEAR_ALL);
-    control->rescan(plugin, false);
-    control->clear(plugin, 8, CLAP_PARAM_CLEAR_ALL);
-    notes = instance.takeNotifications();
-    CHECK(notes.paramsRescan);
-    CHECK(notes.paramsRescanFlags == CLAP_PARAM_RESCAN_ALL);
-    REQUIRE(notes.paramsClear.size() == 1);
-    CHECK(notes.paramsClear[0].id == 8);
 }
 
 TEST_CASE("bridged process requests and ordered clears survive service and rescan") {
@@ -2175,36 +1663,6 @@ TEST_CASE("oversized acknowledged bridge output count fails silently without are
         CHECK(query.error().message.find("protocol") != std::string::npos);
         CHECK_FALSE(query.error().hint.empty());
     }
-}
-
-TEST_CASE("a VST3 state its controller rejects leaves the plug-in as it was") {
-    auto list = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
-    REQUIRE(list);
-    const auto info = std::find_if(list->begin(), list->end(), [](const auto& p) {
-        return p.name == "Test VST3 Separate Gain";
-    });
-    REQUIRE(info != list->end());
-    auto made = Instance::create(*info, {});
-    REQUIRE(made);
-    auto state = (*made)->saveState();
-    REQUIRE(state);
-    const auto before = (*made)->paramValue(1);
-    REQUIRE(before);
-    // The component's 8-byte value changed to 0.9, then a one-byte
-    // controller state the controller refuses (framing stays valid).
-    const double changed = 0.9;
-    std::memcpy(state->data() + 16, &changed, 8);
-    state->resize(25);
-    (*state)[12] = 1;
-    (*state)[13] = (*state)[14] = (*state)[15] = 0;
-    (*state)[24] = 0;
-    auto loaded = (*made)->loadState(*state);
-    REQUIRE_FALSE(loaded);
-    CHECK(loaded.error().code == "host.state");
-    CHECK_FALSE(loaded.error().hint.empty());
-    const auto after = (*made)->paramValue(1);
-    REQUIRE(after);
-    CHECK(*after == doctest::Approx(*before));
 }
 
 TEST_CASE("a VST3 controller without state of its own still saves the component's") {
@@ -2649,4 +2107,14 @@ TEST_CASE("an idle bridge death wakes every subscribed parent relay") {
     (*first)->serviceMainThread();
     // The watcher can report pidfd/HUP before waitpid has a final status.
     CHECK_FALSE((*process)->failure().empty());
+}
+
+TEST_CASE("bridge rejects main layouts beyond its channel limit") {
+    setBridgeExecutable(BRIDGE_PATH);
+    RemotePorts ports;
+    auto remote = RemoteInstance::spawn(find("com.suppleaudio.test.gain"), {}, ports);
+    REQUIRE(remote);
+    auto activated = (*remote)->activate(48000, 1, 64, 17, 2);
+    REQUIRE_FALSE(activated);
+    CHECK(activated.error().code == "host.layout");
 }

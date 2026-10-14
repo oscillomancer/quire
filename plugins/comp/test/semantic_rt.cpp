@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Supple Audio
 // Exercise the actual CLAP binary while the main thread replaces patches.
 #include <clap/clap.h>
-#include <dlfcn.h>
+#include "supple/plugin/test_module.h"
 #include <supple/clap/semantic_params.h>
 #include <supple/json/json.h>
 
@@ -50,12 +50,12 @@ struct Input {
 
 int main(int argc, char** argv) {
     if (argc != 2) return 2;
-    void* lib = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
+    void* lib = supple::plugin::test::open(argv[1]);
     if (!lib) {
-        std::fprintf(stderr, "%s\n", dlerror());
+        std::fprintf(stderr, "%s\n", supple::plugin::test::error());
         return 1;
     }
-    auto* entry = static_cast<const clap_plugin_entry_t*>(dlsym(lib, "clap_entry"));
+    auto* entry = static_cast<const clap_plugin_entry_t*>(supple::plugin::test::symbol(lib, "clap_entry"));
     if (!entry || !entry->init(argv[1])) return 1;
     const auto* factory =
         static_cast<const clap_plugin_factory_t*>(entry->get_factory(CLAP_PLUGIN_FACTORY_ID));
@@ -170,7 +170,7 @@ int main(int argc, char** argv) {
     plugin->deactivate(plugin);
     plugin->destroy(plugin);
     entry->deinit();
-    dlclose(lib);
+    supple::plugin::test::close(lib);
     if (bad || blocks < 8) return 1;
     std::printf("set_patch during %u processing blocks: ok\n", blocks.load());
     return 0;

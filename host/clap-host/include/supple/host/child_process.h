@@ -2,6 +2,8 @@
 // Copyright (c) 2026 Supple Audio
 #pragma once
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <span>

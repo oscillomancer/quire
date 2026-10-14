@@ -335,9 +335,9 @@ int main(int argc, char** argv) {
         testPlugin(info);
     }
     if (tested == 0) {
-        std::fprintf(stderr, "no plugin found in %s\n", path.c_str());
+        std::fprintf(stderr, "no plugin found in %s\n", path.string().c_str());
         return 2;
     }
-    std::printf("%s: %d failure(s)\n", path.filename().c_str(), failures);
+    std::printf("%s: %d failure(s)\n", path.filename().string().c_str(), failures);
     return failures ? 1 : 0;
 }

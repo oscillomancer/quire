@@ -88,6 +88,7 @@ add_library(tp-vst3-host STATIC
   ${_vst3}/public.sdk/source/vst/utility/stringconvert.cpp)
 if(APPLE)
   enable_language(OBJCXX)
+  set_target_properties(tp-vst3-host PROPERTIES OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
   target_sources(tp-vst3-host PRIVATE ${_vst3}/public.sdk/source/vst/hosting/module_mac.mm)
   target_link_libraries(tp-vst3-host PUBLIC "-framework Cocoa" "-framework CoreFoundation")
 elseif(WIN32)

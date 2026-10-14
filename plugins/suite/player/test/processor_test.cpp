@@ -16,7 +16,11 @@
 #include <tuple>
 #include <vector>
 
+#if defined(_WIN32)
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 #include "Catalog.h"
 #include "Check.h"
@@ -43,6 +47,13 @@ using namespace supple::player;
 using namespace supple::suite;
 
 namespace {
+int processId() {
+#if defined(_WIN32)
+    return _getpid();
+#else
+    return static_cast<int>(::getpid());
+#endif
+}
 
 using Engine = BasicEngine<ScriptProcessor>;
 
@@ -76,7 +87,7 @@ std::string writeWav(const char* name, int frames, double (*make)(int)) {
     for (int n = 0; n < frames; ++n)
         a.channel[0][static_cast<size_t>(n)] = static_cast<float>(make(n));
     const std::string path = (std::filesystem::temp_directory_path() /
-                              ("supple-processor-" + std::to_string(::getpid()) + "-" + name))
+                              ("supple-processor-" + std::to_string(processId()) + "-" + name))
                                  .string();
     CHECK(dsp::saveWavFile(path, a));
     return path;
@@ -540,7 +551,7 @@ struct W : Effect {
 
 TEST(script_reads_are_bounded_and_reject_io_errors) {
     const auto path = std::filesystem::temp_directory_path() /
-                      ("supple-script-read-" + std::to_string(::getpid()) + ".cpp");
+                      ("supple-script-read-" + std::to_string(processId()) + ".cpp");
     std::string text;
     CHECK(!readScript(std::filesystem::temp_directory_path(), text));
     {

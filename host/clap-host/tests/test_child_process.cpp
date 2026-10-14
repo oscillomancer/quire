@@ -33,3 +33,31 @@ TEST_CASE("child timeout and output overflow are structured and clean up the chi
     REQUIRE_FALSE(missing);
     CHECK(missing.error().code == "child.spawn");
 }
+
+#if defined(_WIN32)
+#include <windows.h>
+#include <fstream>
+TEST_CASE("Windows child job terminates descendants retaining stdout") {
+    const auto file = std::filesystem::temp_directory_path() / "supple-child-descendant.pid";
+    const std::array<std::string, 2> args{"tree", file.string()};
+    auto child = ChildProcess::spawn(CHILD_FIXTURE_PATH, args);
+    REQUIRE(child);
+    auto output = (*child)->collect(std::chrono::steady_clock::now() + std::chrono::seconds(5), 64);
+    REQUIRE_FALSE(output);
+    CHECK(output.error().code == "child.timeout");
+    DWORD pid = 0;
+    std::ifstream input(file);
+    REQUIRE(static_cast<bool>(input >> pid));
+    input.close();
+    HANDLE descendant = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    REQUIRE(descendant);
+    struct Close {
+        HANDLE value;
+        ~Close() { CloseHandle(value); }
+    } close{descendant};
+    child->reset();
+    CHECK(WaitForSingleObject(descendant, 5000) == WAIT_OBJECT_0);
+    std::error_code ec;
+    std::filesystem::remove(file, ec);
+}
+#endif

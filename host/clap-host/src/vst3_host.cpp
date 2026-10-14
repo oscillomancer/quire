@@ -145,8 +145,15 @@ class Handler : public Steinberg::U::Implements<Steinberg::U::Directly<vst::ICom
 // The editor's frame and, on Linux, its run loop: file descriptors and timers
 // the plug-in registers are serviced from the host's main thread (the UI loop
 // polls the descriptors and calls onFd; timers run from serviceMainThread).
-class PlugFrame : public Steinberg::U::Implements<
-                      Steinberg::U::Directly<Steinberg::IPlugFrame, Steinberg::Linux::IRunLoop>> {
+#if defined(__linux__)
+using PlugFrameInterfaces =
+    Steinberg::U::Directly<Steinberg::IPlugFrame, Steinberg::Linux::IRunLoop>;
+#define SUPPLE_RUNLOOP_OVERRIDE override
+#else
+using PlugFrameInterfaces = Steinberg::U::Directly<Steinberg::IPlugFrame>;
+#define SUPPLE_RUNLOOP_OVERRIDE
+#endif
+class PlugFrame : public Steinberg::U::Implements<PlugFrameInterfaces> {
   public:
     struct Timer {
         Steinberg::Linux::ITimerHandler* handler;
@@ -171,21 +178,23 @@ class PlugFrame : public Steinberg::U::Implements<
         // size now (the common host behaviour).
         return view->onSize(r);
     }
-    Steinberg::tresult PLUGIN_API registerEventHandler(
-        Steinberg::Linux::IEventHandler* h, Steinberg::Linux::FileDescriptor fd) override {
+    Steinberg::tresult PLUGIN_API registerEventHandler(Steinberg::Linux::IEventHandler* h,
+                                                       Steinberg::Linux::FileDescriptor fd)
+        SUPPLE_RUNLOOP_OVERRIDE {
         if (!h) return kInvalidArgument;
         handlers.emplace_back(h, fd);
         if (auto* wake = mainWake.load(std::memory_order_acquire)) wake->notify();
         return kResultOk;
     }
-    Steinberg::tresult PLUGIN_API
-    unregisterEventHandler(Steinberg::Linux::IEventHandler* h) override {
+    Steinberg::tresult PLUGIN_API unregisterEventHandler(Steinberg::Linux::IEventHandler* h)
+        SUPPLE_RUNLOOP_OVERRIDE {
         std::erase_if(handlers, [&](const auto& x) { return x.first == h; });
         if (auto* wake = mainWake.load(std::memory_order_acquire)) wake->notify();
         return kResultOk;
     }
     Steinberg::tresult PLUGIN_API registerTimer(Steinberg::Linux::ITimerHandler* h,
-                                                Steinberg::Linux::TimerInterval ms) override {
+                                                Steinberg::Linux::TimerInterval ms)
+        SUPPLE_RUNLOOP_OVERRIDE {
         if (!h) return kInvalidArgument;
         const auto period = static_cast<std::uint32_t>(std::max<Steinberg::uint64>(ms, 1));
         timers.push_back(
@@ -193,12 +202,15 @@ class PlugFrame : public Steinberg::U::Implements<
         if (auto* wake = mainWake.load(std::memory_order_acquire)) wake->notify();
         return kResultOk;
     }
-    Steinberg::tresult PLUGIN_API unregisterTimer(Steinberg::Linux::ITimerHandler* h) override {
+    Steinberg::tresult PLUGIN_API unregisterTimer(Steinberg::Linux::ITimerHandler* h)
+        SUPPLE_RUNLOOP_OVERRIDE {
         std::erase_if(timers, [&](const Timer& t) { return t.handler == h; });
         if (auto* wake = mainWake.load(std::memory_order_acquire)) wake->notify();
         return kResultOk;
     }
 };
+
+#undef SUPPLE_RUNLOOP_OVERRIDE
 
 // A module stays loaded for the life of the process once opened (scan or
 // instance), and is never unloaded, not even at exit: modules can bind to

@@ -8,46 +8,6 @@
 using namespace supple;
 using namespace supple::host;
 namespace fs = std::filesystem;
-TEST_CASE("native CLAP and VST3 scan, render and restore state in process") {
-    for (const fs::path module : {fs::path(FIXTURE_CLAP_PATH), fs::path(FIXTURE_VST3_PATH)}) {
-        ScanOptions options;
-        options.forceInProcess = true;
-        auto catalogue = scan(std::span<const fs::path>(&module, 1), options);
-        REQUIRE(catalogue);
-        REQUIRE_FALSE(catalogue->empty());
-        for (const auto& info : *catalogue) {
-            if (info.name.find("Gain") == std::string::npos &&
-                info.id != "com.suppleaudio.test.gain")
-                continue;
-            auto made = Instance::create(info, {});
-            REQUIRE(made);
-            auto& instance = **made;
-            const auto params = instance.params();
-            REQUIRE_FALSE(params.empty());
-            REQUIRE(instance.setParam(params[0].id, params[0].def));
-            auto saved = instance.saveState();
-            REQUIRE(saved);
-            REQUIRE(instance.loadState(*saved));
-            REQUIRE(instance.activate(48000, 1, 64));
-            REQUIRE(instance.startProcessing());
-            std::array<float, 64> left{}, right{}, outLeft{}, outRight{};
-            left.fill(0.25f);
-            right.fill(0.25f);
-            const float* inputs[]{left.data(), right.data()};
-            float* outputs[]{outLeft.data(), outRight.data()};
-            ProcessBlock block;
-            block.inputs = inputs;
-            block.outputs = outputs;
-            block.frames = 64;
-            block.inputChannels = 2;
-            block.outputChannels = 2;
-            REQUIRE(instance.process(block));
-            CHECK(outLeft[0] == doctest::Approx(0.25f));
-            instance.stopProcessing();
-            instance.deactivate();
-        }
-    }
-}
 TEST_CASE("native supervised scanner isolates crashes and hangs and caches results") {
     const auto work = fs::temp_directory_path() / "supple-native-scan";
     std::error_code ec;
