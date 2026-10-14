@@ -128,6 +128,8 @@ non-RT work. Where available, token/thread are aliases of std::stop_token and
 std::jthread, and the callback wraps std::stop_callback. Apple's system libc++
 uses an original fallback, avoiding a second C++ runtime. Host job and offline
 render signatures use StopToken; Linux/Windows types and ABI remain unchanged.
+Fallback implementation types use `supple::stop_detail`, so importing the vendor
+and a component namespace does not introduce an ambiguous `detail` namespace.
 
 JoiningThread accepts a callable, optionally receiving a token, is movable,
 and requests cancellation then joins in its destructor and before replacing

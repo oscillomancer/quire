@@ -31,7 +31,7 @@ class StopCallback {
 #include <type_traits>
 #include <vector>
 namespace supple {
-namespace detail {
+namespace stop_detail {
 struct StopSlot {
     // Recursive so a callback may destroy its own registration.
     std::recursive_mutex mutex;
@@ -57,7 +57,7 @@ struct StopState {
         return true;
     }
 };
-}  // namespace detail
+}  // namespace stop_detail
 class StopToken {
   public:
     StopToken() = default;
@@ -73,15 +73,15 @@ class StopToken {
     friend class JoiningThread;
     template <typename F>
     friend class StopCallback;
-    explicit StopToken(std::shared_ptr<detail::StopState> state) : state_(std::move(state)) {}
-    std::shared_ptr<detail::StopState> state_;
+    explicit StopToken(std::shared_ptr<stop_detail::StopState> state) : state_(std::move(state)) {}
+    std::shared_ptr<stop_detail::StopState> state_;
 };
 template <typename F>
 class StopCallback {
   public:
     StopCallback(StopToken token, F callback) : state_(std::move(token.state_)) {
         if (!state_) return;
-        slot_ = std::make_shared<detail::StopSlot>();
+        slot_ = std::make_shared<stop_detail::StopSlot>();
         auto function = std::make_shared<F>(std::move(callback));
         slot_->callback = [function] { std::invoke(std::move(*function)); };
         bool immediate;
@@ -107,8 +107,8 @@ class StopCallback {
     StopCallback& operator=(const StopCallback&) = delete;
 
   private:
-    std::shared_ptr<detail::StopState> state_;
-    std::shared_ptr<detail::StopSlot> slot_;
+    std::shared_ptr<stop_detail::StopState> state_;
+    std::shared_ptr<stop_detail::StopSlot> slot_;
 };
 class JoiningThread {
   public:
@@ -116,7 +116,7 @@ class JoiningThread {
     template <typename F>
         requires(!std::is_same_v<std::remove_cvref_t<F>, JoiningThread>)
     explicit JoiningThread(F&& work)
-        : state_(std::make_shared<detail::StopState>()),
+        : state_(std::make_shared<stop_detail::StopState>()),
           thread_([token = StopToken(state_), task = std::forward<F>(work)]() mutable {
               if constexpr (std::is_invocable_v<std::decay_t<F>, StopToken>)
                   std::invoke(std::move(task), token);
@@ -148,7 +148,7 @@ class JoiningThread {
         }
         if (state_) state_->sourceAlive.store(false, std::memory_order_release);
     }
-    std::shared_ptr<detail::StopState> state_;
+    std::shared_ptr<stop_detail::StopState> state_;
     std::thread thread_;
 };
 }  // namespace supple

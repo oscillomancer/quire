@@ -6,6 +6,14 @@
 #include <future>
 #include <memory>
 #include "supple/base/stop.h"
+
+// Consumers may import both the vendor and a component with its own detail.
+namespace stop_consumer::detail {
+inline constexpr bool visible = true;
+}
+using namespace supple;
+using namespace stop_consumer;
+static_assert(detail::visible);
 TEST_CASE("joining jobs publish cancellation, invoke once, unregister and join") {
     std::atomic<bool> done{false};
     std::atomic<int> calls{0};
