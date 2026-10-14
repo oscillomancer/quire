@@ -278,13 +278,13 @@ void Processor::prepare(double fs, std::uint32_t, int channels) {
     impl_->linear.publish(impl_->target, impl_->fs);
     reset();
 }
-void Processor::reset() {
+void Processor::reset() SUPPLE_RT {
     for (auto& b : impl_->bands) b.clear();
     impl_->linear.reset();
     impl_->sample = 0;
     impl_->snap = true;
 }
-void Processor::setParam(std::size_t i, double v) {
+void Processor::setParam(std::size_t i, double v) SUPPLE_RT {
     if (i >= kParamCount) return;
     v = params::clampPhysical(impl_->specs[i], v);
     if (impl_->target[i] != v && i <= kAutoGain) impl_->autoDirty = true;
@@ -303,10 +303,11 @@ void Processor::setParam(std::size_t i, double v) {
 void Processor::setLinearValues(const Values& v) { impl_->linear.publish(v, impl_->fs); }
 void Processor::collect() { impl_->linear.collect(); }
 int Processor::latency() const { return impl_->target[kPhase] == 2 ? impl_->linear.latency() : 0; }
-void Processor::process(const float* const* in, float* const* out, std::uint32_t frames) {
+void Processor::process(const float* const* in, float* const* out, std::uint32_t frames) SUPPLE_RT {
     impl_->process(in, out, frames);
 }
-void Processor::process(const double* const* in, double* const* out, std::uint32_t frames) {
+void Processor::process(const double* const* in, double* const* out,
+                        std::uint32_t frames) SUPPLE_RT {
     impl_->process(in, out, frames);
 }
 }  // namespace supple::eq

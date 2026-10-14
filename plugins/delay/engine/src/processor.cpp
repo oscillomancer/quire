@@ -14,7 +14,7 @@ double cubic(double a, double b, double c, double d, double t) {
 }
 bool logarithmic(size_t i) { return i == kHighpass || i == kLowpass || i == kModRate; }
 }  // namespace
-void Processor::Ramp::set(double v, uint32_t n) {
+void Processor::Ramp::set(double v, uint32_t n) SUPPLE_RT {
     target = v;
     if (n == 0) {
         value = v;
@@ -25,32 +25,32 @@ void Processor::Ramp::set(double v, uint32_t n) {
         step = (v - value) / n;
     }
 }
-double Processor::Ramp::next() {
+double Processor::Ramp::next() SUPPLE_RT {
     if (left) {
         value += step;
         if (!--left) value = target;
     }
     return value;
 }
-void Processor::Filter::tune(double hz, double fs) {
+void Processor::Filter::tune(double hz, double fs) SUPPLE_RT {
     g = std::tan(pi * std::min(hz, .45 * fs) / fs);
     a1 = 1 / (1 + g * (g + std::sqrt(2.)));
     a2 = g * a1;
     a3 = g * a2;
 }
-double Processor::Filter::tick(double x, bool high) {
+double Processor::Filter::tick(double x, bool high) SUPPLE_RT {
     const double v3 = x - s2, v1 = a1 * s1 + a2 * v3, v2 = s2 + a2 * s1 + a3 * v3;
     s1 = flush(2 * v1 - s1);
     s2 = flush(2 * v2 - s2);
     return high ? x - std::sqrt(2.) * v1 - v2 : v2;
 }
-double Processor::Line::random() {
+double Processor::Line::random() SUPPLE_RT {
     seed ^= seed << 13;
     seed ^= seed >> 17;
     seed ^= seed << 5;
     return double(seed) / 4294967295. * 2 - 1;
 }
-double Processor::Line::read(double delay) const {
+double Processor::Line::read(double delay) const SUPPLE_RT {
     const double pos = double(write) - delay;
     const auto base = static_cast<int64_t>(std::floor(pos));
     const auto size = static_cast<int64_t>(buffer.size());
@@ -60,7 +60,7 @@ double Processor::Line::read(double delay) const {
     };
     return cubic(get(base - 1), get(base), get(base + 1), get(base + 2), pos - std::floor(pos));
 }
-double Processor::Line::frozenRead() const {
+double Processor::Line::frozenRead() const SUPPLE_RT {
     const double pos = double(frozenPos) - frozenFraction;
     const auto base = static_cast<int64_t>(std::floor(pos)),
                size = static_cast<int64_t>(frozenLength);
@@ -70,8 +70,12 @@ double Processor::Line::frozenRead() const {
     };
     return cubic(get(base - 1), get(base), get(base + 1), get(base + 2), pos - std::floor(pos));
 }
-double Processor::encode(size_t i, double v) const { return logarithmic(i) ? std::log(v) : v; }
-double Processor::decode(size_t i, double v) const { return logarithmic(i) ? std::exp(v) : v; }
+double Processor::encode(size_t i, double v) const SUPPLE_RT {
+    return logarithmic(i) ? std::log(v) : v;
+}
+double Processor::decode(size_t i, double v) const SUPPLE_RT {
+    return logarithmic(i) ? std::exp(v) : v;
+}
 bool Processor::prepare(double rate, uint32_t maxFrames, int channels) {
     if (!std::isfinite(rate) || rate < 1000 || rate > 768000 || !maxFrames ||
         (channels != 1 && channels != 2))
@@ -85,7 +89,7 @@ bool Processor::prepare(double rate, uint32_t maxFrames, int channels) {
     reset();
     return true;
 }
-void Processor::reset() {
+void Processor::reset() SUPPLE_RT {
     started_ = false;
     sample_ = 0;
     phase_ = 0;
@@ -110,14 +114,14 @@ void Processor::reset() {
     }
     telemetry_ = {times, tempo_, -120, -120, 0};
 }
-void Processor::setTempo(double bpm) {
+void Processor::setTempo(double bpm) SUPPLE_RT {
     tempo_ = std::isfinite(bpm) && bpm > 0 ? bpm : 120;
     if (!started_) {
         const auto t = lineTimes(values_, tempo_);
         for (size_t i = 0; i < 2; ++i) lines_[i].glide1 = lines_[i].glide2 = t[i] * fs_ / 1000;
     }
 }
-void Processor::setParam(size_t i, double v) {
+void Processor::setParam(size_t i, double v) SUPPLE_RT {
     if (i >= kNumParams || !std::isfinite(v)) return;
     const auto& p = table()[i];
     v = std::clamp(v, p.min, p.max);
@@ -139,17 +143,17 @@ void Processor::setParam(size_t i, double v) {
         for (size_t c = 0; c < 2; ++c) lines_[c].glide1 = lines_[c].glide2 = t[c] * fs_ / 1000;
     }
 }
-void Processor::setParams(std::span<const double> v) {
+void Processor::setParams(std::span<const double> v) SUPPLE_RT {
     for (size_t i = 0; i < std::min(v.size(), values_.size()); ++i) setParam(i, v[i]);
 }
-void Processor::process(const float* const* in, float* const* out, uint32_t n) {
+void Processor::process(const float* const* in, float* const* out, uint32_t n) SUPPLE_RT {
     render(in, out, n);
 }
-void Processor::process(const double* const* in, double* const* out, uint32_t n) {
+void Processor::process(const double* const* in, double* const* out, uint32_t n) SUPPLE_RT {
     render(in, out, n);
 }
 template <class T>
-void Processor::render(const T* const* in, T* const* out, uint32_t frames) {
+void Processor::render(const T* const* in, T* const* out, uint32_t frames) SUPPLE_RT {
     if (lines_[0].buffer.empty()) return;
     dsp::DenormalGuard guard;
     if (!started_) {

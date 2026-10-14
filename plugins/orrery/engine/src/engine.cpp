@@ -1894,7 +1894,7 @@ void Engine::setPatch(const Patch& patch) {
     impl_->handoff.publish(compileProgram(patch));
 }
 
-void Engine::setValues(std::span<const double> values) {
+void Engine::setValues(std::span<const double> values) SUPPLE_RT {
     Impl& m = *impl_;
     const std::size_t n = std::min(values.size(), m.flushValues.size());
     if (n == 0) return;
@@ -1909,7 +1909,7 @@ void Engine::setValues(std::span<const double> values) {
 
 void Engine::collect() { impl_->handoff.collect(); }
 
-void Engine::reset() {
+void Engine::reset() SUPPLE_RT {
     Impl& m = *impl_;
     for (Voice& v : m.voices) v.state = Voice::State::Free;
     m.heldCount = 0;
@@ -1941,18 +1941,18 @@ void Engine::reset() {
     m.prog = nullptr;
 }
 
-int Engine::activeVoices() const {
+int Engine::activeVoices() const SUPPLE_RT {
     int n = 0;
     for (const Voice& v : impl_->voices) n += v.state != Voice::State::Free;
     return n;
 }
 
-bool Engine::silent() const {
+bool Engine::silent() const SUPPLE_RT {
     return activeVoices() == 0 && impl_->quiet > static_cast<std::uint64_t>(impl_->sr * 0.1);
 }
 
 void Engine::process(std::span<const Event> events, const Transport& transport, float* left,
-                     float* right, std::uint32_t frames) {
+                     float* right, std::uint32_t frames) SUPPLE_RT {
     Impl& m = *impl_;
     assert(frames <= m.maxBlock);
 #ifdef ORRERY_HAS_MXCSR

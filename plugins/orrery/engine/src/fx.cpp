@@ -12,7 +12,7 @@ namespace supple::orrery {
 using dsp::kPi;
 using dsp::kTwoPi;
 
-double DelayLine::read(double delay) const {
+double DelayLine::read(double delay) const SUPPLE_RT {
     const double d = std::clamp(delay, 1.0, static_cast<double>(capacity()));
     const double rp = static_cast<double>(pos_) - d + static_cast<double>(buf_.size());
     const auto i0 = static_cast<std::size_t>(rp) % buf_.size();
@@ -22,7 +22,7 @@ double DelayLine::read(double delay) const {
     return a + (b - a) * frac;
 }
 
-void Biquad::lowShelf(double fs, double hz, double db) {
+void Biquad::lowShelf(double fs, double hz, double db) SUPPLE_RT {
     const double A = std::pow(10.0, db / 40.0), w = kTwoPi * hz / fs;
     const double c = std::cos(w), s = std::sin(w), alpha = s / 2.0 * std::sqrt(2.0);
     const double sq = 2.0 * std::sqrt(A) * alpha;
@@ -32,7 +32,7 @@ void Biquad::lowShelf(double fs, double hz, double db) {
         ((A + 1) + (A - 1) * c - sq) / a0);
 }
 
-void Biquad::highShelf(double fs, double hz, double db) {
+void Biquad::highShelf(double fs, double hz, double db) SUPPLE_RT {
     const double A = std::pow(10.0, db / 40.0), w = kTwoPi * hz / fs;
     const double c = std::cos(w), s = std::sin(w), alpha = s / 2.0 * std::sqrt(2.0);
     const double sq = 2.0 * std::sqrt(A) * alpha;
@@ -42,7 +42,7 @@ void Biquad::highShelf(double fs, double hz, double db) {
         ((A + 1) - (A - 1) * c - sq) / a0);
 }
 
-void Biquad::peak(double fs, double hz, double db, double q) {
+void Biquad::peak(double fs, double hz, double db, double q) SUPPLE_RT {
     const double A = std::pow(10.0, db / 40.0), w = kTwoPi * hz / fs;
     const double alpha = std::sin(w) / (2.0 * q), c = std::cos(w);
     const double a0 = 1 + alpha / A;
@@ -63,7 +63,7 @@ void FxRack::prepare(double sampleRate) {
     reset();
 }
 
-void FxRack::reset() {
+void FxRack::reset() SUPPLE_RT {
     for (auto& l : chorus_.line) l.reset();
     chorus_.phase = 0.0;
     phaser_.ap = {};
@@ -82,7 +82,7 @@ void FxRack::reset() {
     }
 }
 
-void FxRack::set(FxKind kind, std::span<const double> v, double tempo) {
+void FxRack::set(FxKind kind, std::span<const double> v, double tempo) SUPPLE_RT {
     auto at = [&](auto f) { return v[static_cast<std::size_t>(f)]; };
     switch (kind) {
         case FxKind::Chorus:
@@ -143,7 +143,7 @@ void FxRack::set(FxKind kind, std::span<const double> v, double tempo) {
     }
 }
 
-void FxRack::process(FxKind kind, float* l, float* r, std::uint32_t n) {
+void FxRack::process(FxKind kind, float* l, float* r, std::uint32_t n) SUPPLE_RT {
     switch (kind) {
         case FxKind::Chorus: {
             auto& c = chorus_;

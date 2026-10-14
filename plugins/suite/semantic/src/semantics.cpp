@@ -220,7 +220,7 @@ std::string trim(std::string_view s) {
     return std::string(s);
 }
 
-size_t distance(std::string_view a, std::string_view b) {
+size_t editDistance(std::string_view a, std::string_view b) {
     std::vector<size_t> row(b.size() + 1);
     for (size_t j = 0; j <= b.size(); ++j) row[j] = j;
     for (size_t i = 1; i <= a.size(); ++i) {
@@ -240,7 +240,7 @@ std::string closest(std::string_view word, const std::vector<std::string>& candi
     std::string best;
     size_t bestDistance = std::string::npos;
     for (const std::string& c : candidates) {
-        const size_t d = distance(lower(word), lower(c));
+        const size_t d = editDistance(lower(word), lower(c));
         if (d < bestDistance) bestDistance = d, best = c;
     }
     return best;

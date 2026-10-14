@@ -218,7 +218,7 @@ std::string describe(std::span<const double> v, bool changedOnly) {
     }
     return out.empty() ? "Default tempo-synced stereo echoes." : out;
 }
-std::array<double, 2> lineTimes(const Values& v, double tempo) {
+std::array<double, 2> lineTimes(const Values& v, double tempo) SUPPLE_RT {
     constexpr double beats[]{0,   32,     16, 8,   4,      2,   3,    4. / 3, 1,
                              1.5, 2. / 3, .5, .75, 1. / 3, .25, .375, 1. / 6, .125};
     tempo = std::isfinite(tempo) && tempo > 0 ? tempo : 120;
@@ -226,7 +226,7 @@ std::array<double, 2> lineTimes(const Values& v, double tempo) {
     const double base = sync ? 60000 / tempo * beats[sync] : v[kTime];
     return {std::clamp(base, 1., 5000.), std::clamp(base * (1 + v[kOffset] / 100), 1., 5000.)};
 }
-uint32_t tailSamples(const Values& v, double fs, double tempo) {
+uint32_t tailSamples(const Values& v, double fs, double tempo) SUPPLE_RT {
     constexpr auto infinite = uint32_t(std::numeric_limits<int32_t>::max());
     if (v[kFreeze] != 0 || v[kFeedback] >= 100) return infinite;
     const auto times = lineTimes(v, tempo);
@@ -235,7 +235,7 @@ uint32_t tailSamples(const Values& v, double fs, double tempo) {
     return static_cast<uint32_t>(std::min(
         double(infinite), std::ceil(fs * (std::max(times[0], times[1]) * repeats + 50) / 1000)));
 }
-double safetyLimit(double x) {
+double safetyLimit(double x) SUPPLE_RT {
     const double a = std::abs(x);
     return a <= .5 ? x : std::copysign(.5 + .5 * std::tanh(2 * (a - .5)), x);
 }

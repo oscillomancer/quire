@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <string>
 #include <vector>
 
@@ -554,9 +555,9 @@ TEST_CASE("band-limited triangle is closer to the ideal than the naive one") {
     for (int n = 0; n < 4800; ++n) {
         double ideal = 0.0;
         for (int k = 1; k * hz < fs / 2; k += 2)
-            ideal +=
-                (k % 4 == 1 ? 1.0 : -1.0) * std::sin(2.0 * M_PI * k * (phase - 0.25)) / (k * k);
-        ideal *= -8.0 / (M_PI * M_PI);
+            ideal += (k % 4 == 1 ? 1.0 : -1.0) *
+                     std::sin(2.0 * std::numbers::pi * k * (phase - 0.25)) / (k * k);
+        ideal *= -8.0 / (std::numbers::pi * std::numbers::pi);
         const double naive = phase < 0.5 ? 4.0 * phase - 1.0 : 3.0 - 4.0 * phase;
         const double bl = wave::triangle(phase, dt);
         errBlamp += (bl - ideal) * (bl - ideal);

@@ -265,7 +265,7 @@ const patch::FlatPatchType& patchType() {
 uint32_t lookaheadSamples(double c, double fs) {
     return static_cast<uint32_t>(std::llround(fs * (c >= 2 ? .005 : c >= 1 ? .001 : 0)));
 }
-double expansionDb(double level, double threshold, double ratio, double range) {
+double expansionDb(double level, double threshold, double ratio, double range) SUPPLE_RT {
     return std::clamp((ratio - 1) * (level - threshold), range, 0.0);
 }
 std::string describe(std::span<const double> v, bool changedOnly) {

@@ -39,7 +39,7 @@ void Processor::prepare(double fs, uint32_t maxFrames, int channels) {
     delay_.resize(static_cast<size_t>(std::ceil(sr_ * .005)) + 1);
     reset();
 }
-void Processor::reset() {
+void Processor::reset() SUPPLE_RT {
     started_ = false;
     write_ = grid_ = 0;
     for (auto& s : delay_) s = {};
@@ -54,14 +54,14 @@ void Processor::reset() {
     open_ = false;
     configure(true);
 }
-void Processor::setParam(size_t i, double v) {
+void Processor::setParam(size_t i, double v) SUPPLE_RT {
     if (i >= kGr || (i == kLookahead && started_)) return;
     values_[i] = params::clampPhysical(table()[i], v);
     configure(!started_);
     if (!started_)
         for (auto& c : channel_) c.gate = c.expand = values_[kRange];
 }
-void Processor::setParams(std::span<const double> v) {
+void Processor::setParams(std::span<const double> v) SUPPLE_RT {
     for (size_t i = 0; i < kGr && i < v.size(); ++i) {
         if (i == kLookahead && started_) continue;
         values_[i] = params::clampPhysical(table()[i], v[i]);
@@ -86,7 +86,7 @@ void Processor::configure(bool snap) {
         grid_ = 0;
     }
 }
-Telemetry Processor::telemetry() const { return {level_, gr_, open_}; }
+Telemetry Processor::telemetry() const SUPPLE_RT { return {level_, gr_, open_}; }
 template <class T>
 void Processor::run(const T* const* in, T* const* out, uint32_t frames, const T* const* key) {
     dsp::DenormalGuard denorm;
@@ -180,17 +180,17 @@ void Processor::run(const T* const* in, T* const* out, uint32_t frames, const T*
     }
 }
 void Processor::process(const float* const* in, float* const* out, uint32_t n,
-                        const float* const* key) {
+                        const float* const* key) SUPPLE_RT {
     run(in, out, n, key);
 }
 void Processor::process(const double* const* in, double* const* out, uint32_t n,
-                        const double* const* key) {
+                        const double* const* key) SUPPLE_RT {
     run(in, out, n, key);
 }
-void Processor::process(float* const* io, int n, bool) {
+void Processor::process(float* const* io, int n, bool) SUPPLE_RT {
     if (n > 0) run(io, io, static_cast<uint32_t>(n), static_cast<const float* const*>(nullptr));
 }
-void Processor::process(double* const* io, int n, bool) {
+void Processor::process(double* const* io, int n, bool) SUPPLE_RT {
     if (n > 0) run(io, io, static_cast<uint32_t>(n), static_cast<const double* const*>(nullptr));
 }
 }  // namespace supple::gate

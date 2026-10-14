@@ -39,19 +39,19 @@ void Processor::prepare(double sampleRate, uint32_t maxFrames, int channels) {
     dcAlpha_ = std::exp(-2 * std::numbers::pi * 5 / sr_);
     reset();
 }
-void Processor::reset() {
+void Processor::reset() SUPPLE_RT {
     started_ = false;
     for (auto& f : side_) f = {};
     for (int c = 0; c < 2; ++c) dcX_[c] = dcY_[c] = 0;
     inputPeak_ = outputPeak_ = ll_ = rr_ = lr_ = 0;
     configure(true);
 }
-void Processor::setParam(size_t index, double physical) {
+void Processor::setParam(size_t index, double physical) SUPPLE_RT {
     if (index >= kNumParams || (kParams[index].flags & params::kReadonly)) return;
     values_[index] = params::clampPhysical(kParams[index], physical);
     configure(!started_);
 }
-void Processor::setParams(const Values& v) {
+void Processor::setParams(const Values& v) SUPPLE_RT {
     for (size_t i = 0; i < kNumParams; ++i)
         if (!(kParams[i].flags & params::kReadonly))
             values_[i] = params::clampPhysical(kParams[i], v[i]);
@@ -151,23 +151,23 @@ void Processor::run(const T* const* in, T* const* out, uint32_t frames, bool tel
         }
     }
 }
-Processor::Telemetry Processor::takeTelemetry() {
+Processor::Telemetry Processor::takeTelemetry() SUPPLE_RT {
     Telemetry t{20 * std::log10(std::max(1e-6, inputPeak_)),
                 20 * std::log10(std::max(1e-6, outputPeak_)),
                 ll_ > 0 && rr_ > 0 ? std::clamp(lr_ / std::sqrt(ll_ * rr_), -1.0, 1.0) : 0};
     inputPeak_ = outputPeak_ = ll_ = rr_ = lr_ = 0;
     return t;
 }
-void Processor::process(const float* const* in, float* const* out, uint32_t n) {
+void Processor::process(const float* const* in, float* const* out, uint32_t n) SUPPLE_RT {
     run(in, out, n, false);
 }
-void Processor::process(const double* const* in, double* const* out, uint32_t n) {
+void Processor::process(const double* const* in, double* const* out, uint32_t n) SUPPLE_RT {
     run(in, out, n, false);
 }
-void Processor::process(float* const* io, int n, bool telemetry) {
+void Processor::process(float* const* io, int n, bool telemetry) SUPPLE_RT {
     run(io, io, static_cast<uint32_t>(n), telemetry);
 }
-void Processor::process(double* const* io, int n, bool telemetry) {
+void Processor::process(double* const* io, int n, bool telemetry) SUPPLE_RT {
     run(io, io, static_cast<uint32_t>(n), telemetry);
 }
 }  // namespace supple::utility

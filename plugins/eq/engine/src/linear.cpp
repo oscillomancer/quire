@@ -6,7 +6,7 @@
 #include <numbers>
 #include "design.h"
 namespace supple::eq {
-void fft(std::span<Complex> x, bool inverse) {
+void fft(std::span<Complex> x, bool inverse) SUPPLE_RT {
     const auto n = x.size();
     for (std::size_t i = 1, j = 0; i < n; ++i) {
         std::size_t bit = n >> 1;
@@ -143,7 +143,7 @@ double linearMagnitudeDb(const Values& values, double hz, double fs) {
     }
     return 20 * std::log10(std::max(1e-300, std::abs(h)));
 }
-void Linear::reset() {
+void Linear::reset() SUPPLE_RT {
     std::fill(history_.begin(), history_.end(), Complex{});
     for (auto& a : input_) a.fill({});
     for (auto& a : output_) a.fill(0);
@@ -155,7 +155,7 @@ void Linear::reset() {
         std::copy(current_.begin(), current_.end(), target_.begin());
     }
 }
-void Linear::compute(std::size_t position, std::array<std::array<double, kFft>, 2>& out) {
+void Linear::compute(std::size_t position, std::array<std::array<double, kFft>, 2>& out) SUPPLE_RT {
     for (std::size_t c = 0; c < 2; ++c) {
         scratch_.fill({});
         for (std::size_t in = 0; in < 2; ++in)
@@ -169,7 +169,7 @@ void Linear::compute(std::size_t position, std::array<std::array<double, kFft>, 
         for (std::size_t k = 0; k < kFft; ++k) out[c][k] = scratch_[k].real();
     }
 }
-void Linear::sample(double& l, double& r) {
+void Linear::sample(double& l, double& r) SUPPLE_RT {
     input_[0][fill_] = l;
     input_[1][fill_] = r;
     l = output_[0][fill_] + previous_[0][fill_ + kBlock];

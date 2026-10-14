@@ -1806,6 +1806,19 @@ std::shared_ptr<const Program> Codegen::run() {
         return nullptr;
     }
     if (options_.listing) {
+#ifdef _WIN32
+        // ISO C tmpfile is binary on Windows; this optional listing is made
+        // during compilation, never on the audio thread.
+        FILE* f = std::tmpfile();
+        if (f) {
+            MIR_output_module(ctx_, f, module_);
+            std::rewind(f);
+            char block[4096];
+            while (const size_t count = std::fread(block, 1, sizeof(block), f))
+                d.listing.append(block, count);
+            std::fclose(f);
+        }
+#else
         char* text = nullptr;
         size_t size = 0;
         FILE* f = open_memstream(&text, &size);
@@ -1815,6 +1828,7 @@ std::shared_ptr<const Program> Codegen::run() {
             d.listing.assign(text, size);
             std::free(text);
         }
+#endif
     }
     MIR_load_module(ctx_, module_);
     tImports = &imports_;

@@ -64,6 +64,15 @@ struct Gain : Effect {
 
 }  // namespace
 
+TEST_CASE("optional MIR listings contain a complete module with binary newlines") {
+    const auto compiled = compileOk(kGain, {.listing = true});
+    const auto listing = compiled.program->listing();
+    CHECK(listing.find("module") != std::string_view::npos);
+    CHECK(listing.find("endmod") != std::string_view::npos);
+    CHECK(listing.find('\r') == std::string_view::npos);
+    CHECK(compileOk(kGain).program->listing().empty());
+}
+
 TEST_CASE("factory patches are constant checked declarations with physical values") {
     const auto source = [](const std::string& declarations, const std::string& extra = "") {
         std::string s = kGain;

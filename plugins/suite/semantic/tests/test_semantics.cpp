@@ -7,7 +7,12 @@
 #include <memory>
 #include <string>
 
+#ifdef _WIN32
+#include <process.h>
+#define getpid _getpid
+#else
 #include <unistd.h>
+#endif
 
 #include "supple/suite/semantics.h"
 
@@ -86,7 +91,8 @@ TEST_CASE("the schema lists every CLAP parameter the way core-params describes i
     CHECK(gain.find("type")->asString() == "float");
     CHECK(gain.find("unit")->asString() == "dB");
     CHECK(gain.find("curve")->asString() == "linear");
-    CHECK(gain.find("default")->asDouble() == 0.0);
+    // A normalized host position maps back with platform-dependent rounding.
+    CHECK(gain.find("default")->asDouble() == doctest::Approx(0.0).epsilon(1e-12));
     CHECK(params.find("filter.cutoff")->find("curve")->asString() == "log");
     CHECK(params.find("filter.mode")->find("type")->asString() == "enum");
     CHECK(params.find("steps")->find("min")->isInt());

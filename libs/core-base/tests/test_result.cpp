@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 #include <supple/base/closest.h>
 #include <supple/base/units.h>
+#include <ostream>
 
 #include <supple/base/result.h>
 #include <supple/product.h>

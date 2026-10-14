@@ -19,7 +19,7 @@ spec.loader.exec_module(gate)
 class BuildFiles(unittest.TestCase):
     def check_fixture(self, filename, contents):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             source = root / filename
             source.parent.mkdir(parents=True, exist_ok=True)
             source.write_text(contents)

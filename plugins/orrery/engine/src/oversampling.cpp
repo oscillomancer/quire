@@ -79,12 +79,12 @@ void Halfband::setCoefs(const std::vector<double>& coefs) {
     reset();
 }
 
-void Halfband::reset() {
+void Halfband::reset() SUPPLE_RT {
     for (auto& s : s_) s.x1 = s.y1 = 0.0;
     oddPrev_ = 0.0;
 }
 
-double Halfband::process(double even, double odd) {
+double Halfband::process(double even, double odd) SUPPLE_RT {
     // At the low rate each z⁻² section is y = a·(x − y[n−1]) + x[n−1].
     double y0 = even;
     for (int i = 0; i < n0_; ++i) {
@@ -124,12 +124,12 @@ void Decimator::setFactor(int factor) {
     reset();
 }
 
-void Decimator::reset() {
+void Decimator::reset() SUPPLE_RT {
     first_.reset();
     second_.reset();
 }
 
-void Decimator::process(const float* in, float* out, std::uint32_t n) {
+void Decimator::process(const float* in, float* out, std::uint32_t n) SUPPLE_RT {
     switch (factor_) {
         case 1:
             std::copy_n(in, n, out);
