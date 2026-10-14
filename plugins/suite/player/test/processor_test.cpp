@@ -283,6 +283,32 @@ struct L : Effect {
     engine.processor().collect();
 }
 
+TEST(replacements_wait_for_retirement_room_without_destroying_audio_state) {
+    const auto d = compileText(R"(#include <supple/script.h>
+struct L : Effect {
+    static constexpr Info info = {.name = "L", .id = "com.example.level"};
+    Shared<double> level;
+    void process(Block& io) { level.set(1.0); }
+};
+)");
+    Engine engine(d);
+    engine.activate(48000.0, 64, 2, 2);
+    std::vector<std::weak_ptr<SharedChannel>> channels;
+    channels.push_back(engine.processor().editorChannel());
+    for (int k = 0; k < 12; ++k) {
+        engine.processor().swap(d->code(), ParamValues(d->params()));
+        render(engine, 64);
+        // The queue holds eight retired generations. Once it is full,
+        // another fade must wait; only collect() may destroy audio state.
+        if (k < 9) channels.push_back(engine.processor().editorChannel());
+        for (const auto& channel : channels) CHECK(!channel.expired());
+    }
+    engine.processor().collect();
+    render(engine, 512);
+    engine.processor().collect();
+    for (const auto& channel : channels) CHECK(channel.expired());
+}
+
 TEST(code_that_indexed_out_of_range_still_crossfades_and_its_faults_stay_its_own) {
     // The old code reads past its block every time; the replacement does not.
     const std::string level = R"(#include <supple/script.h>

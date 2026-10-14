@@ -283,7 +283,12 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     }
 
     void process(Block& block) {
-        if (Generation* next = incoming_.exchange(nullptr, std::memory_order_acq_rel)) adopt(next);
+        // Keep an offered replacement on the main-thread side until the
+        // current fade can be retired. Otherwise adopt() would overwrite
+        // the generation retire() retained when its queue was full.
+        if (!fading_ || retired_.writable())
+            if (Generation* next = incoming_.exchange(nullptr, std::memory_order_acq_rel))
+                adopt(next);
         if (stopped_) {
             silence(block);
             return;
