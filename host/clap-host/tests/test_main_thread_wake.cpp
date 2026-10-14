@@ -84,12 +84,14 @@ TEST_CASE("bridge snapshot caches preserve bounded outputs and ordered rescan cl
 TEST_CASE("bridge audio quit cannot lose a wake before or during indefinite parking") {
     using namespace supple::host::bridge;
     Header header;
+    SharedSignals signals;
+    REQUIRE(signals.create());
     std::atomic<bool> quit{false};
     const auto last = header.request.load();
-    requestAudioQuit(quit, header.request);
+    requestAudioQuit(quit, header.request, signals);
     CHECK(quit.load(std::memory_order_acquire));
     CHECK(header.request.load(std::memory_order_acquire) != last);
-    const int waited = futexWait(header.request, last, -1), waitError = errno;
+    const int waited = signals.wait(header.request, last, -1), waitError = errno;
     CHECK(waited == -1);
     CHECK(waitError == EAGAIN);  // no blocking syscall when stop won before parking
     for (int cycle = 0; cycle < 50; ++cycle) {
@@ -99,10 +101,10 @@ TEST_CASE("bridge audio quit cannot lose a wake before or during indefinite park
         std::thread audio([&] {
             armed.store(true, std::memory_order_release);
             armed.notify_one();
-            while (!quit.load(std::memory_order_acquire)) futexWait(header.request, seen, -1);
+            while (!quit.load(std::memory_order_acquire)) signals.wait(header.request, seen, -1);
         });
         while (!armed.load(std::memory_order_acquire)) armed.wait(false);
-        requestAudioQuit(quit, header.request);
+        requestAudioQuit(quit, header.request, signals);
         audio.join();  // no timer, audio command, or elapsed-time assertion helps departure
         CHECK(quit.load());
     }

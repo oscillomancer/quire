@@ -130,7 +130,6 @@ These gates are explicit, with no no-op RT implementations:
 
 | Gate | Off on | Reason / follow-up |
 |---|---|---|
-| `SUPPLE_HOST_SERVICES`: audio bridge | macOS, Windows | Shared memory, cross-process wake and native IPC; bridge port step |
 | JACK/fake JACK and hardware capacity benchmark | macOS, Windows | Linux graph/hardware tooling; native device audio uses PortAudio (ADR-0038) |
 | Same gate: DAW GUI/agent and source-export integration tests | macOS, Windows | GUI depends on engine/X11; stock wrappers and conformance/reset tests now enabled separately |
 | POSIX evaluation harness tests | Windows | Unix executable fixtures, symlinks and process groups |
@@ -142,8 +141,9 @@ required (ADR-0034).
 
 ADR-0036 enables native CLAP/VST3 hosting, the standalone supervised scanner,
 stock plugin builds and their conformance/reset checks on macOS/Windows.
-The existing Linux bridge/protocol, `/proc`, subreaper and shell-script probes
-remain Linux-only. Native tests cover fixture loading, state/audio, crash/hang
+ADR-0037 enables the native bridge executable and shared/dedicated isolation
+tests. Linux `/proc`, raw descriptor/subreaper and shell-script probes remain
+Linux-only. Native tests cover fixture loading, state/audio, crash/hang
 isolation, cache and process capture/deadlines. Windows external validator
 shell tests are omitted; native product host-smoke tests still run. The macOS
 external validator entries skip when the optional validator is absent; the

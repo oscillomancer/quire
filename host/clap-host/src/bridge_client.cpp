@@ -5,15 +5,17 @@
 // calls are commands in shared memory with a futex wake-up and a deadline.
 #include "bridge_client.h"
 #include "bridge_notifications.h"
+#include "platform.h"
 
-#include <fcntl.h>
+#if !defined(_WIN32)
 #include <poll.h>
 #include <signal.h>
 #include <spawn.h>
-#include <sys/eventfd.h>
-#include <sys/mman.h>
-#include <sys/socket.h>
 #include <sys/wait.h>
+#endif
+#if defined(__linux__)
+#include <sys/socket.h>
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -25,7 +27,9 @@
 
 #include "supple/base/rt.h"
 
+#if defined(__linux__)
 extern char** environ;
+#endif
 
 namespace supple::host {
 
@@ -62,8 +66,8 @@ void setBridgeExecutable(std::filesystem::path path) {
 
 bool locateBridgeExecutable(std::string_view name) {
     std::error_code ec;
-    const std::filesystem::path self = std::filesystem::read_symlink("/proc/self/exe", ec);
-    if (ec) return false;
+    const std::filesystem::path self = ownExecutable();
+    if (self.empty()) return false;
     const std::filesystem::path dir = self.parent_path();
     // Installed: beside it. Build tree: host/engine/tools -> host/clap-host,
     // daw/gui -> host/clap-host.
@@ -89,9 +93,10 @@ Result<std::shared_ptr<BridgeProcess>> BridgeProcess::spawn() {
     if (exe.empty())
         return Error("host.bridge", "no plugin bridge is configured", {},
                      "setBridgeExecutable() at startup, or use in-process isolation");
-    int sv[2];
-    if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sv) != 0)
-        return Error("host.bridge", "socketpair failed");
+    Resource sv[2];
+    if (!controlPair(sv)) return Error("host.bridge", "socketpair failed");
+    std::shared_ptr<BridgeProcess> self(new BridgeProcess());
+#if defined(__linux__)
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
     posix_spawn_file_actions_adddup2(&fa, sv[1], kControlFd);  // dup2 clears CLOEXEC
@@ -108,38 +113,44 @@ Result<std::shared_ptr<BridgeProcess>> BridgeProcess::spawn() {
         return Error("host.bridge",
                      "could not start the plugin bridge " + exeText + ": " + std::strerror(rc));
     }
-    std::shared_ptr<BridgeProcess> self(new BridgeProcess());
     self->pid_ = pid;
     self->sock_ = sv[0];
     self->pidfd_ = static_cast<int>(::syscall(SYS_pidfd_open, pid, 0));
+#else
+    auto child = NativeChild::launch(exe, sv[1]);
+    closeResource(sv[1]);
+    if (!child) {
+        closeResource(sv[0]);
+        return child.error();
+    }
+    self->child_ = std::move(*child);
+    self->pid_ = self->child_->pid();
+#if defined(_WIN32)
+    self->sock_ = new NativeControl(reinterpret_cast<HANDLE>(sv[0]));
+#else
+    self->sock_ = sv[0];
+#endif
+#endif
     if (auto status = self->initializeNotifications(); !status) return status.error();
     return self;
 }
 
 Status BridgeProcess::initializeNotifications() {
-    if (notificationFd_ >= 0) return okStatus();
-    if (watcherWake_.fd() < 0)
-        return Error("host.bridge", "could not create bridge failure wake", "/notification",
-                     "free file descriptors or use in-process isolation");
-    notificationFd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-    if (notificationFd_ < 0)
-        return Error("host.bridge", "could not create bridge notification eventfd", "/notification",
-                     "free file descriptors or use in-process isolation");
+    if (notificationsReady_) return okStatus();
+    if (!watcherWake_.waitable().valid() || !notification_.waitable().valid())
+        return Error("host.bridge", "could not create bridge notification wake", "/notification",
+                     "free event resources or use in-process isolation");
     Writer w;
     w.u32(kVersion);
-    auto subscribed = call(Op::SubscribeNotifications, 0, w, notificationFd_);
-    if (!subscribed) {
-        ::close(notificationFd_);
-        notificationFd_ = -1;
-        return subscribed.error();
-    }
+    auto subscribed = call(Op::SubscribeNotifications, 0, w, notificationTarget(notification_));
+    if (!subscribed) return subscribed.error();
+    notificationsReady_ = true;
     try {
         watcher_ = std::thread([this] { watch(); });
     } catch (const std::system_error& error) {
         fail(-1);
         killBridge();
-        ::close(notificationFd_);
-        notificationFd_ = -1;
+        notificationsReady_ = false;
         return Error("host.bridge",
                      "could not start bridge notification watcher: " + std::string(error.what()),
                      "/notification", "free thread resources or use in-process isolation");
@@ -176,11 +187,22 @@ void BridgeProcess::watch() {
     nameThread("bridge-parent");
     bool watchingDeath = true, failureAnnounced = false;
     for (;;) {
-        pollfd descriptors[] = {{notificationFd_, POLLIN, 0},
-                                {watcherWake_.fd(), POLLIN, 0},
-                                {watchingDeath ? pidfd_ : -1, POLLIN, 0},
-                                {watchingDeath ? sock_ : -1, 0, 0}};
-        const int ready = ::poll(descriptors, 4, -1);
+        Waitable death;
+#if defined(__linux__)
+        death = pidfd_;
+#else
+        if (child_) death = child_->waitable();
+#endif
+        WaitItem descriptors[] = {
+            {notification_.waitable(), kWaitRead, 0},
+            {watcherWake_.waitable(), kWaitRead, 0},
+            {watchingDeath ? death : Waitable{}, kWaitRead, 0},
+#if defined(_WIN32)
+            {Waitable{}, 0, 0}};  // process HANDLE reports death; no pipe reads here
+#else
+            {watchingDeath ? Waitable(sock_) : Waitable{}, 0, 0}};
+#endif
+        const int ready = waitFor(descriptors, -1);
         if (ready < 0 && errno == EINTR) continue;
         if (ready < 0) {
             fail(-1);
@@ -189,23 +211,18 @@ void BridgeProcess::watch() {
             return;
         }
         bool changed = false;
-        if (descriptors[1].revents) {
+        if (descriptors[1].ready) {
             (void)watcherWake_.drain();
             changed = failed() && !failureAnnounced;
         }
         if (watcherQuit_.load(std::memory_order_acquire)) return;
-        if (descriptors[0].revents & POLLIN) {
-            std::uint64_t count;
-            ssize_t read;
-            do {
-                read = ::read(notificationFd_, &count, sizeof(count));
-            } while (read < 0 && errno == EINTR);
-            if (read == sizeof(count)) {
+        if (descriptors[0].ready & kWaitRead) {
+            if (notification_.drain()) {
                 ackPending_.store(true, std::memory_order_release);
                 changed = true;
             }
         }
-        if (descriptors[2].revents || descriptors[3].revents) {
+        if (descriptors[2].ready || descriptors[3].ready) {
             fail(-1);
             watchingDeath = false;  // pidfd and HUP stay level-ready
             changed = true;
@@ -246,7 +263,7 @@ Result<std::unique_ptr<RemoteInstance>> RemoteInstance::spawn(
     self->process_ = std::move(process);
     if (auto status = self->process_->initializeNotifications(); !status) return status.error();
     Writer w;
-    w.str(info.path.string());
+    w.str(platform::pathText(info.path));
     w.str(info.id);
     w.str(info.format);
     w.str(identity.name);
@@ -294,8 +311,8 @@ BridgeProcess::~BridgeProcess() {
     watcherQuit_.store(true, std::memory_order_release);
     watcherWake_.notify();
     if (watcher_.joinable()) watcher_.join();
-    if (notificationFd_ >= 0) ::close(notificationFd_);
-    if (sock_ >= 0) ::close(sock_);
+    closeControl(sock_);
+#if defined(__linux__)
     if (pid_ > 0) {
         // The bridge exits after its final Destroy or when the socket closes.
         int status = 0;
@@ -306,38 +323,61 @@ BridgeProcess::~BridgeProcess() {
         }
     }
     if (pidfd_ >= 0) ::close(pidfd_);
+#else
+    if (child_) {
+        WaitItem exited{child_->waitable()};
+        (void)waitFor(std::span(&exited, 1), 2000);
+    }
+    child_.reset();
+#endif
 }
 
 void RemoteInstance::unmap() {
-    if (map_) ::munmap(map_, layout_.size);
+    unmapMemory(map_, layout_.size);
+    signals_.clear();
     map_ = nullptr;
     hdr_ = nullptr;
 }
 
 void BridgeProcess::killBridge() {
     // Through the pidfd: never a recycled pid.
+#if defined(__linux__)
     if (pidfd_ >= 0)
         ::syscall(SYS_pidfd_send_signal, pidfd_, SIGKILL, nullptr, 0);
     else if (pid_ > 0)
         ::kill(pid_, SIGKILL);
+#else
+    if (child_) child_->kill();
+#endif
 }
 
 // Main thread: collects the exit status of a bridge that has died.
 void BridgeProcess::reap() {
     if (pid_ <= 0) return;
+    int why = 0;
+#if defined(__linux__)
     int st = 0;
     if (::waitpid(pid_, &st, WNOHANG) != pid_) return;
     pid_ = -1;
-    const int why = WIFSIGNALED(st) ? WTERMSIG(st) : 0;
+    why = WIFSIGNALED(st) ? WTERMSIG(st) : 0;
+#else
+    if (!child_ || child_->alive()) return;
+    why = child_->exitStatus();
+    pid_ = -1;
+#endif
     fail(why);
     if (failSignal_.load() == -1) failSignal_.store(why);
 }
 
 bool BridgeProcess::alive() const {
     if (pid_ <= 0) return false;
+#if defined(__linux__)
     if (pidfd_ < 0) return ::kill(pid_, 0) == 0;
     pollfd p{pidfd_, POLLIN, 0};
     return ::poll(&p, 1, 0) == 0;  // readable once the process has exited
+#else
+    return child_ && child_->alive();
+#endif
 }
 
 void BridgeProcess::fail(int why) SUPPLE_RT {
@@ -352,7 +392,13 @@ std::string BridgeProcess::failure() const {
     const int s = failSignal_.load();
     if (s == kProtocolViolation) return "the plugin bridge violated the output-event protocol";
     if (s == kHung) return "the plugin stopped responding and its bridge was killed";
+#if defined(_WIN32)
+    if (s != 0 && s != -1)
+        return "the plugin bridge exited (Windows status " +
+               std::to_string(static_cast<std::uint32_t>(s)) + ")";
+#else
     if (s > 0) return std::string("the plugin bridge died (") + ::strsignal(s) + ")";
+#endif
     return "the plugin bridge exited";
 }
 
@@ -361,7 +407,7 @@ std::string RemoteInstance::failure() const { return process_->failure(); }
 // --- control plane --------------------------------------------------------------------
 
 Result<std::vector<std::uint8_t>> BridgeProcess::call(Op op, std::uint32_t instance,
-                                                      const Writer& w, int fd, int timeoutMs) {
+                                                      const Writer& w, Resource fd, int timeoutMs) {
     std::lock_guard lock(requests_);
     if (failed()) {
         reap();
@@ -371,7 +417,15 @@ Result<std::vector<std::uint8_t>> BridgeProcess::call(Op op, std::uint32_t insta
     std::uint32_t status = 0;
     std::vector<std::uint8_t> reply;
     std::uint32_t returnedId = 0;
-    int replyFd = -1;
+    Resource replyFd = noResource;
+#if defined(_WIN32)
+    if (fd != noResource) {
+        fd = child_ ? child_->duplicate(fd) : noResource;
+        if (fd == noResource)
+            return Error("bridge.transfer", "could not transfer bridge resource", "/handle",
+                         "check process/handle resources");
+    }
+#endif
     if (!sendFrame(sock_, static_cast<std::uint32_t>(op), instance, w.bytes, fd, deadline) ||
         !recvFrameUntil(sock_, status, returnedId, reply, &replyFd, deadline)) {
         // Gone, or not answering: either way the instance is lost.
@@ -382,13 +436,13 @@ Result<std::vector<std::uint8_t>> BridgeProcess::call(Op op, std::uint32_t insta
             fail(-1);
             for (int i = 0; i < 100 && pid_ > 0; ++i) {
                 reap();
-                if (pid_ > 0) ::usleep(1000);
+                if (pid_ > 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
         }
         return Error("host.bridge_failed", failure(), {}, "fx.restart re-creates it");
     }
     if (replyFd >= 0) {
-        ::close(replyFd);
+        closeResource(replyFd);
         killBridge();
         fail(kProtocolViolation);
         return Error("bridge.malformed", "unexpected descriptor in bridge reply", "/fd",
@@ -433,21 +487,21 @@ Status RemoteInstance::activate(double rate, std::uint32_t minFrames, std::uint3
     if (in > kMaxChannels || out > kMaxChannels || key > kMaxChannels)
         return Error("host.layout", "bridge layout exceeds 16 channels");
     unmap();
+    if (failed()) return Error("host.bridge_failed", failure(), {}, "fx.restart re-creates it");
     layout_ = Layout(maxFrames, in, out, key, std::min(auxOut, kMaxAuxChannels));
     if (layout_.size > std::numeric_limits<std::uint32_t>::max())
         return Error("host.activate", "shared memory size exceeds the bridge protocol limit", {},
                      "use a smaller maximum block size");
-    const int fd = ::memfd_create("supple-bridge", MFD_CLOEXEC);
-    if (fd < 0) return Error("host.bridge", "memfd_create failed");
-    if (::ftruncate(fd, static_cast<off_t>(layout_.size)) != 0) {
-        ::close(fd);
-        return Error("host.bridge", "could not size the shared memory");
-    }
-    map_ = ::mmap(nullptr, layout_.size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (map_ == MAP_FAILED) {
-        map_ = nullptr;
-        ::close(fd);
-        return Error("host.bridge", "could not map the shared memory");
+    const Resource fd = createMemory(layout_.size);
+    if (fd == noResource)
+        return Error("host.bridge", "could not create shared memory", "/memory",
+                     "free memory resources or use in-process isolation");
+    map_ = mapMemory(fd, layout_.size);
+    if (!map_ || !signals_.create()) {
+        closeResource(fd);
+        unmap();
+        return Error("host.bridge", "could not map shared memory or create audio signals",
+                     "/memory", "free memory/event resources or use in-process isolation");
     }
     hdr_ = new (map_) Header{};
     hdr_->magic = kMagic;
@@ -464,9 +518,31 @@ Status RemoteInstance::activate(double rate, std::uint32_t minFrames, std::uint3
     w.u32(minFrames);
     w.u32(maxFrames);
     w.u32(static_cast<std::uint32_t>(layout_.size));
+#if defined(_WIN32)
+    const auto requestEvent = process_->child_->duplicate(signals_.resource(false));
+    const auto doneEvent = process_->child_->duplicate(signals_.resource(true));
+    if (requestEvent == noResource || doneEvent == noResource) {
+        process_->child_->revoke(requestEvent);
+        process_->child_->revoke(doneEvent);
+        closeResource(fd);
+        unmap();
+        return Error("host.bridge", "could not transfer audio signals", "/events",
+                     "check process/handle resources");
+    }
+    w.u64(static_cast<std::uint64_t>(requestEvent));
+    w.u64(static_cast<std::uint64_t>(doneEvent));
+#endif
     auto reply = call(Op::Activate, w, fd);
-    ::close(fd);  // the mapping (and the bridge's copy) keep it
+    closeResource(fd);  // the mapping (and the bridge's copy) keep it
     if (!reply) {
+#if defined(_WIN32)
+        // The only early failure after event duplication precedes frame send.
+        // Once sent, the child owns those handles; transport failure kills it.
+        if (reply.error().code == "bridge.transfer") {
+            process_->child_->revoke(requestEvent);
+            process_->child_->revoke(doneEvent);
+        }
+#endif
         unmap();
         return std::move(reply).error();
     }
@@ -776,7 +852,7 @@ bool RemoteInstance::command(Cmd cmd) SUPPLE_RT {
     hdr_->cmd = static_cast<std::uint32_t>(cmd);
     const std::uint32_t req = ++seq_;
     hdr_->request.store(req, std::memory_order_release);
-    futexWake(hdr_->request);
+    signals_.wake(hdr_->request);
     for (int spin = 0; spin < 4000; ++spin)
         if (hdr_->done.load(std::memory_order_acquire) == req) return true;
     // Lifecycle commands may page in a plugin's code; a block must not stall
@@ -787,7 +863,7 @@ bool RemoteInstance::command(Cmd cmd) SUPPLE_RT {
     for (;;) {
         const std::uint32_t seen = hdr_->done.load(std::memory_order_acquire);
         if (seen == req) return true;
-        futexWait(hdr_->done, seen, 10);
+        signals_.wait(hdr_->done, seen, 10, true);
         if (hdr_->done.load(std::memory_order_acquire) == req) return true;
         if (!process_->alive()) {
             process_->fail(-1);  // the signal is read when the main thread reaps it

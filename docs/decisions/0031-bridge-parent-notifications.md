@@ -4,6 +4,9 @@
 core-base relay and coordinates with ADR-0030's main-thread scheduling.
 Contracts: sandbox spec §1 and engine spec §5.
 
+**Amendment, 2026-10-14:** [ADR-0037](0037-native-plugin-bridge.md) enables
+native macOS/Windows bridge transport, shared wakes and child ownership.
+
 ## Context
 
 A bridge services its own callbacks, timers and descriptors on events, but

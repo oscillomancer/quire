@@ -17,6 +17,9 @@ adds protocol v11 parent notification/rearm and event-driven idle audio shutdown
 adds native in-process loaders and a standalone supervised scanner, while
 retaining the Linux audio bridge and the remaining engine/device/GUI gates.
 
+**Amendment, 2026-10-14:** [ADR-0037](0037-native-plugin-bridge.md) enables
+native macOS/Windows bridge transport, shared wakes and child ownership.
+
 ## Context
 
 Phase 4 acceptance: a crashing test plugin in an isolation mode does not take

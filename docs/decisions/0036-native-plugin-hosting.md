@@ -14,6 +14,9 @@ editing the template), preserving both layouts and avoiding ELF interposition to
 A combined-library regression exercises both reset paths; script APIs and numeric
 behavior are unchanged.
 
+**Amendment, 2026-10-14:** [ADR-0037](0037-native-plugin-bridge.md) enables
+native macOS/Windows bridge transport, shared wakes and child ownership.
+
 ## Context
 
 In-process hosting and discovery must work before the Linux audio bridge,

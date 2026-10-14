@@ -2,9 +2,12 @@
 // Copyright (c) 2026 Supple Audio
 #include "bridge_protocol.h"
 
+#if !defined(_WIN32)
+#include <fcntl.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
 
 #include <cerrno>
 #include <limits>
@@ -13,6 +16,7 @@ namespace supple::host::bridge {
 
 namespace {
 
+#if !defined(_WIN32)
 bool ready(int socket, short events, Deadline deadline) {
     for (;;) {
         int timeout = -1;
@@ -48,7 +52,13 @@ bool writeAll(int s, const void* data, std::size_t n, int fd, Deadline deadline)
             c->cmsg_len = CMSG_LEN(sizeof(int));
             std::memcpy(CMSG_DATA(c), &fd, sizeof(int));
         }
-        const ssize_t w = ::sendmsg(s, &msg, MSG_NOSIGNAL | MSG_DONTWAIT);
+        const ssize_t w = ::sendmsg(s, &msg,
+#if defined(__linux__)
+                                    MSG_NOSIGNAL | MSG_DONTWAIT
+#else
+                                    MSG_DONTWAIT
+#endif
+        );
         if (w < 0) {
             if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) continue;
             return false;
@@ -74,7 +84,13 @@ bool readAll(int s, void* data, std::size_t n, int* fd, Deadline deadline, int* 
             msg.msg_control = control;
             msg.msg_controllen = sizeof control;
         }
-        const ssize_t r = ::recvmsg(s, &msg, MSG_CMSG_CLOEXEC | MSG_DONTWAIT);
+        const ssize_t r = ::recvmsg(s, &msg,
+#if defined(__linux__)
+                                    MSG_CMSG_CLOEXEC | MSG_DONTWAIT
+#else
+                                    MSG_DONTWAIT
+#endif
+        );
         if (r < 0) {
             if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) continue;
             return false;
@@ -88,6 +104,12 @@ bool readAll(int s, void* data, std::size_t n, int* fd, Deadline deadline, int* 
                     if (descriptorCount) ++*descriptorCount;
                     int received = -1;
                     std::memcpy(&received, CMSG_DATA(c) + i * sizeof(int), sizeof(int));
+#if defined(__APPLE__)
+                    if (::fcntl(received, F_SETFD, FD_CLOEXEC) != 0) {
+                        ::close(received);
+                        return false;
+                    }
+#endif
                     if (*fd < 0)
                         *fd = received;
                     else
@@ -102,43 +124,75 @@ bool readAll(int s, void* data, std::size_t n, int* fd, Deadline deadline, int* 
     return true;
 }
 
+#endif
 }  // namespace
 
-bool sendFrame(int socket, std::uint32_t head, std::uint32_t instance,
-               const std::vector<std::uint8_t>& payload, int fd, Deadline deadline) {
+bool sendFrame(Control socket, std::uint32_t head, std::uint32_t instance,
+               const std::vector<std::uint8_t>& payload, Resource fd, Deadline deadline) {
     if (payload.size() > kMaxMessage) return false;
     std::uint32_t prefix[3] = {static_cast<std::uint32_t>(payload.size()), head, instance};
+#if defined(_WIN32)
+    const auto attachment = static_cast<std::uint64_t>(fd);
+    return socket && socket->write(prefix, sizeof(prefix), deadline) &&
+           socket->write(&attachment, sizeof(attachment), deadline) &&
+           (payload.empty() || socket->write(payload.data(), payload.size(), deadline));
+#else
     return writeAll(socket, prefix, sizeof prefix, fd, deadline) &&
            (payload.empty() || writeAll(socket, payload.data(), payload.size(), -1, deadline));
+#endif
 }
 
-bool recvFrame(int socket, std::uint32_t& head, std::uint32_t& instance,
-               std::vector<std::uint8_t>& payload, int* fd, int timeoutMs, int* descriptorCount) {
+bool recvFrame(Control socket, std::uint32_t& head, std::uint32_t& instance,
+               std::vector<std::uint8_t>& payload, Resource* fd, int timeoutMs,
+               int* descriptorCount) {
     return recvFrameUntil(socket, head, instance, payload, fd, deadlineAfter(timeoutMs),
                           descriptorCount);
 }
 
-bool recvFrameUntil(int socket, std::uint32_t& head, std::uint32_t& instance,
-                    std::vector<std::uint8_t>& payload, int* fd, Deadline deadline,
+bool recvFrameUntil(Control socket, std::uint32_t& head, std::uint32_t& instance,
+                    std::vector<std::uint8_t>& payload, Resource* fd, Deadline deadline,
                     int* descriptorCount) {
     if (fd) *fd = -1;
     if (descriptorCount) *descriptorCount = 0;
     auto fail = [&] {
         if (fd && *fd >= 0) {
-            ::close(*fd);
+            closeResource(*fd);
             *fd = -1;
         }
         return false;
     };
     std::uint32_t prefix[3] = {0, 0, 0};
+#if defined(_WIN32)
+    std::uint64_t attachment = static_cast<std::uint64_t>(noResource);
+    if (!socket || !socket->read(prefix, sizeof(prefix), deadline) ||
+        !socket->read(&attachment, sizeof(attachment), deadline))
+        return fail();
+    const auto resource = static_cast<Resource>(attachment);
+    if (resource != noResource) {
+        // The bridge cannot duplicate into the parent. A reply containing a
+        // numeric handle is a protocol violation, never authority to close a
+        // parent handle chosen by untrusted plugin code.
+        if (!socket->acceptsResources()) return false;
+        if (descriptorCount) *descriptorCount = 1;
+        if (fd)
+            *fd = resource;
+        else
+            closeResource(resource);
+    }
+#else
     if (!readAll(socket, prefix, sizeof prefix, fd, deadline, descriptorCount)) return fail();
+#endif
     if (prefix[0] > kMaxMessage) return fail();
     head = prefix[1];
     instance = prefix[2];
     payload.resize(prefix[0]);
+#if defined(_WIN32)
+    if (prefix[0] && !socket->read(payload.data(), payload.size(), deadline)) return fail();
+#else
     if (prefix[0] &&
         !readAll(socket, payload.data(), payload.size(), fd, deadline, descriptorCount))
         return fail();
+#endif
     return true;
 }
 
@@ -180,6 +234,9 @@ bool validRequest(Op op, Reader r) {
             break;
         case Op::Activate:
             r.skip(20);
+#if defined(_WIN32)
+            r.skip(16);  // duplicated request and done events
+#endif
             break;
         case Op::ParamValue:
             r.skip(4);

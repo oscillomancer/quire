@@ -129,6 +129,25 @@ all local subscriptions in its service deadline/FD snapshot (ADR-0030).
 
 ### Bridge notifications (protocol v13; notification design ADR-0031)
 
+ADR-0037 extends the subscription to native WakeEvent signal targets:
+Linux eventfd (unchanged), a nonblocking write-only pipe on macOS, and a
+manual-reset event duplicated into the child on Windows. POSIX negotiates
+version 13; Windows negotiates native version 14. Invalid resource types,
+counts, versions and duplicate subscriptions remain structured errors.
+The Windows control channel transfers recipient-owned handle values; the
+parent rejects handle-bearing replies without acting on the claimed value.
+Notification publication, acknowledge/rearm and retained snapshots remain
+identical on each platform.
+
+ChildProcess additionally accepts LaunchOptions: `control = -1` by default
+(no extra inheritance), otherwise one native bridge resource (POSIX remapped
+to fd 3; Windows retained in the explicit handle list); `captureOutput = true`
+by default, false directs stdout to the null device. Existing scanner callers
+retain their API and behavior. `pid()` and `nativeProcess()` expose borrowed
+identity for bridge exit watches/handle transfer. The owner keeps the process
+or unreaped POSIX leader until final tree cleanup; bridge users must depart
+before owner destruction. These are setup/control APIs, never DSP callbacks.
+
 Before Create, the parent sends process-level `SubscribeNotifications` with
 instance id 0, exactly one dedicated nonblocking eventfd via SCM_RIGHTS, and
 `u32 version = 13`; the reply is `u32 version = 13`. The descriptor is checked

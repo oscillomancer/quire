@@ -5,13 +5,12 @@
 // --control-fd N). Main-thread requests arrive on the socket; audio-thread
 // commands arrive in per-instance shared memory sent with Activate and run on
 // that instance's audio thread. Exits when the host closes the control socket.
+#if !defined(_WIN32)
 #include <fcntl.h>
-#include <poll.h>
 #include <pthread.h>
 #include <signal.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -29,6 +28,7 @@
 #include "../src/bridge_notifications.h"
 #include "../src/bridge_protocol.h"
 #include "../src/main_thread_wake.h"
+#include "../src/platform.h"
 #include "../src/scan.h"
 #include "supple/base/rt.h"
 #include "supple/base/thread.h"
@@ -85,6 +85,7 @@ struct BridgeInstance {
     void* map = nullptr;
     std::size_t mapSize = 0;
     Header* hdr = nullptr;
+    SharedSignals signals;
     Layout layout{0, 0, 0};
     std::thread audio;
     std::atomic<bool> quit{false};
@@ -124,7 +125,7 @@ struct BridgeInstance {
         while (!quit.load()) {
             const std::uint32_t req = hdr->request.load(std::memory_order_acquire);
             if (req == last) {
-                futexWait(hdr->request, last, -1);
+                signals.wait(hdr->request, last, -1);
                 continue;
             }
             if (quit.load(std::memory_order_acquire)) break;
@@ -170,13 +171,18 @@ struct BridgeInstance {
                     // refusal leaves the thread as it was.
                     const auto kind = hdr->audioPolicy;  // an unknown kind is ignored
                     const ThreadPolicy want{
-                        kind <= static_cast<std::uint32_t>(ThreadPolicy::Kind::RoundRobin)
+                        kind <= static_cast<std::uint32_t>(ThreadPolicy::Kind::High)
                             ? static_cast<ThreadPolicy::Kind>(kind)
                             : ThreadPolicy::Kind::None,
                         static_cast<int>(std::min(hdr->audioPriority, 99u))};
                     if (want.kind != ThreadPolicy::Kind::None && want != policy) {
-                        (void)setThreadPolicy(::pthread_self(), want);
-                        policy = threadPolicy(::pthread_self());
+#if defined(_WIN32)
+                        const auto thread = GetCurrentThread();
+#else
+                        const auto thread = ::pthread_self();
+#endif
+                        (void)setThreadPolicy(thread, want);
+                        policy = threadPolicy(thread);
                     }
                     std::lock_guard lock(lifecycle);
                     result = instance->startProcessing() ? 1 : 0;
@@ -204,44 +210,45 @@ struct BridgeInstance {
             hdr->result = result;
             hdr->processing = instance->processing() ? 1 : 0;
             hdr->done.store(req, std::memory_order_release);
-            futexWake(hdr->done);
+            signals.wake(hdr->done, true);
             if (wake && (command != Cmd::Process || hadFlush)) wake->notify();
         }
     }
 
     void stopAudio() {
         if (!audio.joinable()) return;
-        requestAudioQuit(quit, hdr->request);
+        requestAudioQuit(quit, hdr->request, signals);
         audio.join();
         quit = false;
     }
 
     void unmap() {
-        if (map) ::munmap(map, mapSize);
+        unmapMemory(map, mapSize);
+        signals.clear();
         map = nullptr;
         hdr = nullptr;
     }
 };
 
 struct Bridge {
-    int sock = kControlFd;
+#if defined(_WIN32)
+    std::unique_ptr<NativeControl> control;
+    Control sock = noControl;
+#else
+    Control sock = kControlFd;
+#endif
     MainThreadWake wake;  // outlives every instance and its callback threads
-    int outward = -1;
+    Resource outward = noResource;
     NotificationLatch notifications;
     ~Bridge() {
-        if (outward >= 0) ::close(outward);
+        if (outward != noResource) closeResource(outward);
     }
     void collect(BridgeInstance& slot) {
         if (slot.collect()) notifications.publish();
     }
     bool announce() {
         if (outward < 0 || !notifications.announce()) return true;
-        const std::uint64_t one = 1;
-        ssize_t written;
-        do {
-            written = ::write(outward, &one, sizeof(one));
-        } while (written < 0 && errno == EINTR);
-        return written == sizeof(one);
+        return signalNotification(outward);
     }
     std::map<std::uint32_t, std::unique_ptr<BridgeInstance>> instances;
     std::uint32_t nextId = 1;
@@ -272,40 +279,33 @@ struct Bridge {
     }
 
     // Returns false to exit.
-    bool handle(Op op, std::uint32_t instanceId, Reader& r, int fd, int descriptorCount = -1) {
+    bool handle(Op op, std::uint32_t instanceId, Reader& r, Resource fd, int descriptorCount = -1) {
         replyId = instanceId;
         if (!validRequest(op, r)) {
-            if (fd >= 0) ::close(fd);
+            if (fd >= 0) closeResource(fd);
             return fail(Error("bridge.malformed", "malformed request to the plugin bridge",
                               "/payload",
                               "send the exact payload defined for this bridge operation"));
         }
         if (descriptorCount < 0) descriptorCount = fd >= 0 ? 1 : 0;
         if (descriptorCount > 1) {
-            if (fd >= 0) ::close(fd);
+            if (fd >= 0) closeResource(fd);
             return fail(Error("bridge.fd", "exactly one descriptor is allowed", "/fd",
                               "send only the descriptor required by the operation"));
         }
         if (op == Op::SubscribeNotifications) {
             const auto version = r.u32();
             if (instanceId || outward >= 0 || version != kVersion || fd < 0) {
-                if (fd >= 0) ::close(fd);
-                return fail(Error(
-                    "bridge.subscription", "invalid notification subscription", "/version",
-                    "subscribe once with instance 0, matching protocol version and an eventfd"));
+                if (fd >= 0) closeResource(fd);
+                return fail(Error("bridge.subscription", "invalid notification subscription",
+                                  "/version",
+                                  "subscribe once with instance 0, matching protocol version and a "
+                                  "native wake source"));
             }
-            char target[64];
-            const std::string path = "/proc/self/fd/" + std::to_string(fd);
-            const auto length = ::readlink(path.c_str(), target, sizeof(target));
-            const int flags = ::fcntl(fd, F_GETFL);
-            if (length < 0 ||
-                std::string_view(target, static_cast<std::size_t>(length)) !=
-                    "anon_inode:[eventfd]" ||
-                flags < 0 || !(flags & O_NONBLOCK) || (flags & O_ACCMODE) != O_RDWR) {
-                ::close(fd);
-                return fail(Error("bridge.fd",
-                                  "notification descriptor is not a nonblocking eventfd", "/fd",
-                                  "create a dedicated eventfd with EFD_NONBLOCK and EFD_CLOEXEC"));
+            if (!validNotification(fd)) {
+                closeResource(fd);
+                return fail(Error("bridge.fd", "invalid native notification resource", "/fd",
+                                  "send the signal target of a dedicated nonblocking WakeEvent"));
             }
             outward = fd;
             notifications.acknowledge();
@@ -314,7 +314,7 @@ struct Bridge {
             return reply(w);
         }
         if (fd >= 0 && op != Op::Activate) {
-            ::close(fd);
+            closeResource(fd);
             return fail(Error("bridge.fd", "unexpected descriptor for this operation", "/fd",
                               "send descriptors only with Activate or SubscribeNotifications"));
         }
@@ -327,7 +327,7 @@ struct Bridge {
             return reply(Writer{});
         }
         if (outward < 0) {
-            if (fd >= 0) ::close(fd);
+            if (fd >= 0) closeResource(fd);
             return fail(
                 Error("bridge.subscription", "notification subscription is required", "/version",
                       "subscribe with the matching bridge protocol before creating instances"));
@@ -336,7 +336,7 @@ struct Bridge {
             if (instanceId != 0)
                 return fail(Error("bridge.instance", "Create requires instance id 0"));
             PluginInfo info;
-            info.path = r.str();
+            info.path = platform::pathFromText(r.str());
             info.id = r.str();
             info.format = r.str();
             HostIdentity identity;
@@ -372,7 +372,7 @@ struct Bridge {
         }
         auto it = instances.find(instanceId);
         if (it == instances.end()) {
-            if (fd >= 0) ::close(fd);
+            if (fd >= 0) closeResource(fd);
             return fail(Error("bridge.no_instance", "unknown instance id"));
         }
         BridgeInstance& slot = *it->second;
@@ -394,18 +394,32 @@ struct Bridge {
                 const double rate = r.f64();
                 const std::uint32_t minFrames = r.u32(), maxFrames = r.u32(), size = r.u32();
                 if (fd < 0) return fail(Error("bridge.activate", "no shared memory"));
-                struct stat backing{};
-                if (!r.ok() || size < sizeof(Header) || ::fstat(fd, &backing) != 0 ||
-                    backing.st_size < static_cast<off_t>(size)) {
-                    ::close(fd);
+#if defined(_WIN32)
+                const auto requestEvent = static_cast<Resource>(r.u64());
+                const auto doneEvent = static_cast<Resource>(r.u64());
+#endif
+                if (!r.ok() || size < sizeof(Header)) {
+                    closeResource(fd);
+#if defined(_WIN32)
+                    closeResource(requestEvent);
+                    closeResource(doneEvent);
+#endif
                     return fail(Error("bridge.activate", "invalid shared memory size or request"));
                 }
                 stopAudio();
                 unmap();
-                map = ::mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-                ::close(fd);
-                if (map == MAP_FAILED) {
-                    map = nullptr;
+#if defined(_WIN32)
+                if (!slot.signals.adopt(requestEvent, doneEvent)) {
+                    closeResource(fd);
+                    return fail(Error("bridge.activate", "invalid shared audio signal handles",
+                                      "/events",
+                                      "send a distinct request/done auto-reset event pair"));
+                }
+#endif
+                map = mapMemory(fd, size);
+                closeResource(fd);
+                if (!map) {
+                    unmap();
                     return fail(Error("bridge.activate", "could not map the shared memory"));
                 }
                 mapSize = size;
@@ -620,6 +634,7 @@ struct Bridge {
 }  // namespace
 
 int main(int argc, char** argv) {
+#if !defined(_WIN32)
     ::signal(SIGPIPE, SIG_IGN);
     if (argc == 3 && std::string_view(argv[1]) == "--scan") {
         // Keep plugin printf/cout (including background threads and unload
@@ -652,14 +667,27 @@ int main(int argc, char** argv) {
         ::close(output);
         return result ? 0 : 1;
     }
+#endif
     Bridge b;
     for (int i = 1; i + 1 < argc; ++i)
-        if (std::string(argv[i]) == "--control-fd") b.sock = std::atoi(argv[i + 1]);
-    if (b.wake.fd() < 0) {
+#if defined(_WIN32)
+        if (std::string_view(argv[i]) == "--control-handle") {
+            const auto handle = reinterpret_cast<HANDLE>(
+                static_cast<std::uintptr_t>(std::strtoull(argv[i + 1], nullptr, 10)));
+            b.control = std::make_unique<NativeControl>(handle, true);
+            b.sock = b.control.get();
+        }
+#else
+        if (std::string_view(argv[i]) == "--control-fd") b.sock = std::atoi(argv[i + 1]);
+#endif
+#if defined(_WIN32)
+    if (!b.sock) return 1;
+#endif
+    if (!b.wake.waitable().valid()) {
         std::perror("bridge main-thread eventfd");
         return 1;
     }
-    std::vector<pollfd> polled;
+    std::vector<WaitItem> polled;
     std::vector<std::uint32_t> owners;  // the instance of each editor descriptor
     for (;;) {
         // Clear the coalesced wake before consuming work: a request made
@@ -675,41 +703,43 @@ int main(int argc, char** argv) {
         if (!b.announce()) break;
         // Timers and descriptors may be registered without an open editor.
         // Host death arrives as control-socket HUP; no periodic probe is needed.
-        polled = {{b.sock, POLLIN, 0}, {b.wake.fd(), POLLIN, 0}};
+        polled = {{controlWaitable(b.sock), kWaitRead, 0}, {b.wake.waitable(), kWaitRead, 0}};
         owners.assign(2, 0);
         int timeout = -1;
         for (auto& [id, slot] : b.instances) {
             for (const auto& [fd, flags] : slot->instance->watchedFds()) {
                 short events = 0;
-                if (flags & CLAP_POSIX_FD_READ) events |= POLLIN;
-                if (flags & CLAP_POSIX_FD_WRITE) events |= POLLOUT;
-                polled.push_back(pollfd{fd, events, 0});
+                if (flags & CLAP_POSIX_FD_READ) events |= kWaitRead;
+                if (flags & CLAP_POSIX_FD_WRITE) events |= kWaitWrite;
+                polled.push_back(WaitItem{fd, events, 0});
                 owners.push_back(id);
             }
             timeout = nearestTimeout(timeout, slot->instance->nextTimerMs());
         }
-        const int ready = ::poll(polled.data(), polled.size(), timeout);
+        const int ready = waitFor(polled, timeout);
         if (ready < 0) {
             if (errno == EINTR) continue;  // rebuild deadlines and service work
             break;
         }
         for (std::size_t i = 2; ready > 0 && i < polled.size(); ++i) {
-            if (!polled[i].revents) continue;
+            if (!polled[i].ready) continue;
             const auto it = b.instances.find(owners[i]);
             if (it == b.instances.end()) continue;
             std::uint32_t flags = 0;
-            if (polled[i].revents & POLLIN) flags |= CLAP_POSIX_FD_READ;
-            if (polled[i].revents & POLLOUT) flags |= CLAP_POSIX_FD_WRITE;
-            if (polled[i].revents & (POLLERR | POLLHUP | POLLNVAL)) flags |= CLAP_POSIX_FD_ERROR;
+            if (polled[i].ready & kWaitRead) flags |= CLAP_POSIX_FD_READ;
+            if (polled[i].ready & kWaitWrite) flags |= CLAP_POSIX_FD_WRITE;
+            if (polled[i].ready & (kWaitError | kWaitHangup | kWaitInvalid))
+                flags |= CLAP_POSIX_FD_ERROR;
             std::lock_guard lock(it->second->lifecycle);
-            it->second->instance->onFd(polled[i].fd, flags);
+            it->second->instance->onFd(polled[i].source.fd(), flags);
         }
-        if (polled[0].revents & POLLNVAL) break;
-        if (!(polled[0].revents & (POLLIN | POLLHUP | POLLERR))) continue;
+        if (polled[0].ready & kWaitInvalid) break;
+        if (!(polled[0].ready & (kWaitRead | kWaitHangup | kWaitError))) continue;
         std::uint32_t op = 0;
         std::uint32_t id = 0;
         std::vector<std::uint8_t> payload;
-        int fd = -1, descriptorCount = 0;
+        Resource fd = noResource;
+        int descriptorCount = 0;
         if (!recvFrame(b.sock, op, id, payload, &fd, -1, &descriptorCount))
             break;  // the host is gone
         Reader r(payload.data(), payload.size());

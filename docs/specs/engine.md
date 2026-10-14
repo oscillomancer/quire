@@ -529,6 +529,25 @@ not suppress a key connected later; a missing block key supplies silence.
 
 ## 5. Plugin isolation (`host/clap-host/bridge`)
 
+The bridge is native on Linux, macOS and Windows (ADR-0037). Linux retains
+memfd, SCM_RIGHTS, shared futexes and pidfd behavior. macOS uses unlinked
+shm_open descriptors transferred over socketpair, shared address waits/wakes,
+a pipe notification and kqueue child exit. Windows uses pagefile mappings
+and request/done auto-reset events duplicated into the child, a manual-reset
+outward notification, overlapped duplex control pipe and owned process/Job
+handles. The existing background/offline bounded-wait exception and failure
+semantics apply on each platform; the engine/device and GUI gates are separate.
+
+POSIX protocol 13 and Header layout are unchanged. Windows native protocol 14
+adds a u64 recipient-owned resource after each frame prefix (all-ones means
+none) and u64 request/done event handles after Activate's rate/min/max/size.
+Release/acquire on the shared words publishes all arena data. Event waits
+recheck before parking and after wake; stale signals never acknowledge a
+command. The parent rejects resource-bearing replies without closing a
+numeric handle supplied by untrusted child code. Native launch reuses the
+hosting child helper's explicit control inheritance and null stdout, so
+plugin logging cannot block the bridge on an undrained output pipe.
+
 Protocol 12 appends a main-thread `PluginStatus` query to the existing
 control plane, with no shared-memory change. It forwards the generic
 [plugin-status extension](plugin-status-extension.md) for shared and

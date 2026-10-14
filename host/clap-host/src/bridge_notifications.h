@@ -11,10 +11,11 @@ namespace supple::host::bridge {
 
 // Shutdown changes the futex word as well as waking it: a stop racing the
 // wait syscall must make its expected-value check fail, not lose the wake.
-inline void requestAudioQuit(std::atomic<bool>& quit, std::atomic<std::uint32_t>& request) {
+inline void requestAudioQuit(std::atomic<bool>& quit, std::atomic<std::uint32_t>& request,
+                             SharedSignals& signals) {
     quit.store(true, std::memory_order_release);
     request.fetch_add(1, std::memory_order_release);
-    futexWake(request);
+    signals.wake(request);
 }
 
 struct NotificationLatch {

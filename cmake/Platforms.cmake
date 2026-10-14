@@ -6,12 +6,12 @@ set(SUPPLE_PLATFORM_LINUX OFF)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   set(SUPPLE_PLATFORM_LINUX ON)
 endif()
-# Process isolation, JACK, X11 and their dependent services.
+# JACK, X11 and their dependent services. Hosting, scanning and the bridge are portable.
 set(SUPPLE_PLUGIN_HOST ON)
 # Core-base waits/wakes, control-protocol and MCP are portable and ungated.
 set(SUPPLE_HOST_SERVICES ${SUPPLE_PLATFORM_LINUX})
 if(NOT SUPPLE_HOST_SERVICES)
-  message(STATUS "Port gates: bridge, JACK, GUI/agent (see CONTRIBUTING.md)")
+  message(STATUS "Port gates: JACK, GUI/agent (see CONTRIBUTING.md)")
   set(SUPPLE_BUILD_GUI OFF CACHE BOOL "Build GUI components" FORCE)
   if(SUPPLE_BUILD_SPIKES OR SUPPLE_BUILD_FUZZERS)
     message(FATAL_ERROR "Research spikes and host fuzzers require Linux platform services")

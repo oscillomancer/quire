@@ -236,6 +236,16 @@ the device callback, so a bridged plugin on a live (monitored) node is
 passed through with a warning; a pipelined mode for live nodes is future
 work.
 
+Linux keeps its memfd/socketpair/shared futex/pidfd path. macOS transfers an
+unlinked shm_open descriptor, uses shared address waits and pipe notifications,
+and observes child exit with kqueue. Windows duplicates unnamed mappings,
+auto-reset request/done events and a manual-reset notification into an owned
+Job child; overlapped pipe control preserves absolute deadlines. The native
+launch adapter reuses the scanner's ChildProcess inheritance/lifetime helper.
+All platforms publish through the shared atomic words before signalling and
+recheck before parking; Windows process-local address waits are not used for
+bridge audio. These mechanisms retain the background-only wait exception.
+
 **Runtime latency changes.** CLAP only lets an active plugin change latency
 via `request_restart`. The engine then prepares a new plan on a worker thread
 (the plugin reactivated with its new latency, all delay-compensation lines

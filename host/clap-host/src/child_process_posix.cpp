@@ -39,6 +39,13 @@ ChildProcess::~ChildProcess() {
 }
 Result<std::unique_ptr<ChildProcess>> ChildProcess::spawn(const std::filesystem::path& executable,
                                                           std::span<const std::string> arguments) {
+    return spawn(executable, arguments, LaunchOptions{});
+}
+int ChildProcess::pid() const { return impl_->pid; }
+std::intptr_t ChildProcess::nativeProcess() const { return 0; }
+Result<std::unique_ptr<ChildProcess>> ChildProcess::spawn(const std::filesystem::path& executable,
+                                                          std::span<const std::string> arguments,
+                                                          LaunchOptions options) {
     std::unique_ptr<ChildProcess> child(new ChildProcess);
     int fds[2];
 #if defined(__APPLE__)
@@ -80,7 +87,12 @@ Result<std::unique_ptr<ChildProcess>> ChildProcess::spawn(const std::filesystem:
     posix_spawnattr_t attrs;
     rc = ::posix_spawnattr_init(&attrs);
     if (rc == 0) {
-        rc = ::posix_spawn_file_actions_adddup2(&actions, fds[1], STDOUT_FILENO);
+        rc = options.captureOutput
+                 ? ::posix_spawn_file_actions_adddup2(&actions, fds[1], STDOUT_FILENO)
+                 : ::posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null",
+                                                      O_WRONLY, 0);
+        if (rc == 0 && options.control >= 0)
+            rc = ::posix_spawn_file_actions_adddup2(&actions, static_cast<int>(options.control), 3);
         if (rc == 0)
             rc = ::posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY,
                                                     0);
@@ -88,11 +100,14 @@ Result<std::unique_ptr<ChildProcess>> ChildProcess::spawn(const std::filesystem:
             rc = ::posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY,
                                                     0);
 #if defined(__APPLE__)
-        if (rc == 0) rc = ::posix_spawn_file_actions_addclose(&actions, fds[0]);
-        if (rc == 0) rc = ::posix_spawn_file_actions_addclose(&actions, fds[1]);
+        if (rc == 0 && (options.control < 0 || fds[0] != 3))
+            rc = ::posix_spawn_file_actions_addclose(&actions, fds[0]);
+        if (rc == 0 && (options.control < 0 || fds[1] != 3))
+            rc = ::posix_spawn_file_actions_addclose(&actions, fds[1]);
         constexpr short flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT;
 #else
-        if (rc == 0) rc = ::posix_spawn_file_actions_addclosefrom_np(&actions, 3);
+        if (rc == 0)
+            rc = ::posix_spawn_file_actions_addclosefrom_np(&actions, options.control < 0 ? 3 : 4);
         constexpr short flags = POSIX_SPAWN_SETPGROUP;
 #endif
         if (rc == 0) rc = ::posix_spawnattr_setpgroup(&attrs, 0);

@@ -3,10 +3,7 @@
 // Internal: the host side of a bridged plugin instance (ADR-0013).
 #pragma once
 
-#if !defined(__linux__)
-#include "bridge_unavailable.h"
-#else
-#include <sys/types.h>
+#include "bridge_child.h"
 
 #include <atomic>
 #include <map>
@@ -34,18 +31,19 @@ class RemoteInstance;
 
 class BridgeProcess {
   public:
-    static Result<std::shared_ptr<BridgeProcess> > spawn();
+    static Result<std::shared_ptr<BridgeProcess>> spawn();
     ~BridgeProcess();
-    Result<std::vector<std::uint8_t> > call(bridge::Op op, std::uint32_t instance,
-                                            const bridge::Writer& w, int fd = -1,
-                                            int timeoutMs = 10000);
+    Result<std::vector<std::uint8_t>> call(bridge::Op op, std::uint32_t instance,
+                                           const bridge::Writer& w,
+                                           bridge::Resource fd = bridge::noResource,
+                                           int timeoutMs = 10000);
     bool failed() const { return failed_.load(); }
     std::string failure() const;
     void fail(int why) SUPPLE_RT;
     void reap();  // main thread
     bool alive() const;
     void killBridge();
-    pid_t pid() const { return pid_.load(); }
+    int pid() const { return pid_.load(); }
 
   private:
     friend struct BridgeTestAccess;
@@ -60,7 +58,8 @@ class BridgeProcess {
     void unsubscribe(RemoteInstance& instance);
     bool refresh();  // main only: ACK before snapshotting every registered member
     MainThreadWake watcherWake_;
-    int notificationFd_ = -1;
+    WakeEvent notification_;
+    bool notificationsReady_ = false;
     std::thread watcher_;
     std::atomic<bool> watcherQuit_{false}, ackPending_{false};
     std::atomic<std::uint64_t> delivery_{0};
@@ -69,8 +68,12 @@ class BridgeProcess {
     std::vector<RemoteInstance*> members_;  // main only, includes retired instances
     std::mutex subscribersMutex_;
     std::map<MainThreadWake*, std::size_t> subscribers_;
-    std::atomic<pid_t> pid_{-1};
-    int pidfd_ = -1, sock_ = -1;
+    std::atomic<int> pid_{-1};
+    int pidfd_ = -1;
+    bridge::Control sock_ = bridge::noControl;
+#if !defined(__linux__)
+    std::unique_ptr<bridge::NativeChild> child_;
+#endif
     std::mutex requests_;  // control calls from instances on the main thread
     std::atomic<bool> failed_{false};
     std::atomic<int> failSignal_{0};
@@ -78,7 +81,7 @@ class BridgeProcess {
 
 class RemoteInstance {
   public:
-    static Result<std::unique_ptr<RemoteInstance> > spawn(
+    static Result<std::unique_ptr<RemoteInstance>> spawn(
         const PluginInfo& info, const HostIdentity& identity, RemotePorts& ports,
         std::shared_ptr<BridgeProcess> process = {});
     ~RemoteInstance();
@@ -106,7 +109,7 @@ class RemoteInstance {
     // SemanticSchema/Describe/GetPatch: a string reply; `flag` = changedOnly.
     Result<std::string> text(bridge::Op op, std::optional<bool> flag = {});
     Status setPatch(std::string_view json, std::uint32_t mode);
-    Result<std::vector<std::uint8_t> > saveState();
+    Result<std::vector<std::uint8_t>> saveState();
     Status loadState(std::span<const std::uint8_t> bytes);
     // Drain retained snapshots; pull on demand only without a wake subscription.
     bool service(Instance::Notifications& notes, std::vector<std::string>& log);
@@ -135,7 +138,7 @@ class RemoteInstance {
     bool failed() const { return process_->failed(); }
     std::string failure() const;
     void setDeadlineMs(int ms) { deadlineMs_ = ms; }
-    pid_t bridgePid() const { return process_->pid(); }
+    int bridgePid() const { return process_->pid(); }
 
   private:
     friend struct BridgeTestAccess;
@@ -151,8 +154,9 @@ class RemoteInstance {
     Instance::EditorRequests pendingEditor_;
     std::vector<std::string> pendingLog_;
     bool pendingWork_ = false, editorOpen_ = false;
-    Result<std::vector<std::uint8_t> > call(bridge::Op op, const bridge::Writer& w, int fd = -1,
-                                            int timeoutMs = 10000);
+    Result<std::vector<std::uint8_t>> call(bridge::Op op, const bridge::Writer& w,
+                                           bridge::Resource fd = bridge::noResource,
+                                           int timeoutMs = 10000);
     bool command(bridge::Cmd cmd) SUPPLE_RT;
     void unmap();
 
@@ -160,6 +164,7 @@ class RemoteInstance {
     std::uint32_t instanceId_ = 0;
     void* map_ = nullptr;
     bridge::Header* hdr_ = nullptr;
+    bridge::SharedSignals signals_;
     bridge::Layout layout_{0, 0, 0};
     std::uint32_t seq_ = 0;
     int deadlineMs_ = 2000;  // for process(); lifecycle commands get longer
@@ -171,5 +176,3 @@ class RemoteInstance {
 std::filesystem::path bridgeExecutable();
 
 }  // namespace supple::host
-
-#endif

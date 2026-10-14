@@ -50,6 +50,15 @@ ChildProcess::~ChildProcess() {
 }
 Result<std::unique_ptr<ChildProcess>> ChildProcess::spawn(const std::filesystem::path& executable,
                                                           std::span<const std::string> arguments) {
+    return spawn(executable, arguments, LaunchOptions{});
+}
+int ChildProcess::pid() const { return static_cast<int>(GetProcessId(impl_->process.value)); }
+std::intptr_t ChildProcess::nativeProcess() const {
+    return reinterpret_cast<std::intptr_t>(impl_->process.value);
+}
+Result<std::unique_ptr<ChildProcess>> ChildProcess::spawn(const std::filesystem::path& executable,
+                                                          std::span<const std::string> arguments,
+                                                          LaunchOptions options) {
     std::unique_ptr<ChildProcess> child(new ChildProcess);
     SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
     Handle writer, input, error;
@@ -80,15 +89,32 @@ Result<std::unique_ptr<ChildProcess>> ChildProcess::spawn(const std::filesystem:
         LPPROC_THREAD_ATTRIBUTE_LIST value;
         ~AttributeCleanup() { DeleteProcThreadAttributeList(value); }
     } cleanup{attributes};
-    HANDLE inherited[] = {input.value, writer.value, error.value};
-    if (!UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited,
-                                   sizeof(inherited), nullptr, nullptr))
+    struct InheritControl {
+        HANDLE handle = nullptr;
+        DWORD flags = 0;
+        ~InheritControl() {
+            if (handle)
+                SetHandleInformation(handle, HANDLE_FLAG_INHERIT, flags & HANDLE_FLAG_INHERIT);
+        }
+    } control;
+    std::vector<HANDLE> inherited{input.value, options.captureOutput ? writer.value : error.value};
+    if (options.captureOutput) inherited.push_back(error.value);
+    if (options.control >= 0) {
+        control.handle = reinterpret_cast<HANDLE>(options.control);
+        if (!GetHandleInformation(control.handle, &control.flags) ||
+            !SetHandleInformation(control.handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
+            return failure("child.spawn", "cannot prepare bridge control inheritance");
+        inherited.push_back(control.handle);
+    }
+    if (!UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                   inherited.data(), inherited.size() * sizeof(HANDLE), nullptr,
+                                   nullptr))
         return failure("child.spawn", "cannot restrict inherited handles");
     STARTUPINFOEXW startup{};
     startup.StartupInfo.cb = sizeof(startup);
     startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
     startup.StartupInfo.hStdInput = input.value;
-    startup.StartupInfo.hStdOutput = writer.value;
+    startup.StartupInfo.hStdOutput = options.captureOutput ? writer.value : error.value;
     startup.StartupInfo.hStdError = error.value;
     startup.lpAttributeList = attributes;
     std::wstring command = quote(executable.wstring());

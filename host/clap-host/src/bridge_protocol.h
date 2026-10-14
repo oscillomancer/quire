@@ -11,12 +11,16 @@
 // sequence word in the Header.
 #pragma once
 
+#include "bridge_platform.h"
+#include "supple/base/rt.h"
 #if defined(__linux__)
 #include <linux/futex.h>
 #include <sys/syscall.h>
 #include <time.h>
-#include <unistd.h>
+#elif defined(__APPLE__)
+#include <os/os_sync_wait_on_address.h>
 #endif
+#include <cerrno>
 
 #include <atomic>
 #include <chrono>
@@ -41,7 +45,11 @@ inline constexpr std::uint32_t kMagic = 0x31474253;  // "SBG1"
 // 11: a versioned outward notification subscription and process-level rearm.
 // 12: a main-thread plugin-status query (no data-plane change).
 // 13: read-only factory patches through semantic-params.
-inline constexpr std::uint32_t kVersion = 13;
+#if defined(_WIN32)
+inline constexpr std::uint32_t kVersion = 14;  // native handles in control frames and Activate
+#else
+inline constexpr std::uint32_t kVersion = 13;  // POSIX wire and shared-memory ABI unchanged
+#endif
 inline constexpr int kControlFd = 3;  // the bridge's end of the socketpair
 inline constexpr std::uint32_t kMaxChannels = 16;
 // Auxiliary output channels carried (ADR-0021); a plug-in's further ones go
@@ -244,14 +252,14 @@ bool validReply(Op op, Reader r);
 
 // Writes one whole frame ([u32 size][u32 head][u32 instance][payload]) with an optional
 // file descriptor; reads one (size-checked). False when the peer is gone.
-bool sendFrame(int socket, std::uint32_t head, std::uint32_t instance,
-               const std::vector<std::uint8_t>& payload, int fd = -1,
+bool sendFrame(Control socket, std::uint32_t head, std::uint32_t instance,
+               const std::vector<std::uint8_t>& payload, Resource fd = noResource,
                Deadline deadline = Deadline::max());
-bool recvFrame(int socket, std::uint32_t& head, std::uint32_t& instance,
-               std::vector<std::uint8_t>& payload, int* fd = nullptr, int timeoutMs = -1,
+bool recvFrame(Control socket, std::uint32_t& head, std::uint32_t& instance,
+               std::vector<std::uint8_t>& payload, Resource* fd = nullptr, int timeoutMs = -1,
                int* descriptorCount = nullptr);
-bool recvFrameUntil(int socket, std::uint32_t& head, std::uint32_t& instance,
-                    std::vector<std::uint8_t>& payload, int* fd, Deadline deadline,
+bool recvFrameUntil(Control socket, std::uint32_t& head, std::uint32_t& instance,
+                    std::vector<std::uint8_t>& payload, Resource* fd, Deadline deadline,
                     int* descriptorCount = nullptr);
 
 // --- data plane ---------------------------------------------------------------------
@@ -310,17 +318,124 @@ struct Layout {
     }
 };
 
-#if defined(__linux__)
+#if !defined(_WIN32)
 inline long futexWait(std::atomic<std::uint32_t>& word, std::uint32_t expected, int timeoutMs) {
+#if defined(__linux__)
     timespec ts{timeoutMs / 1000, static_cast<long>(timeoutMs % 1000) * 1000000L};
     return ::syscall(SYS_futex, reinterpret_cast<std::uint32_t*>(&word), FUTEX_WAIT, expected,
                      timeoutMs < 0 ? nullptr : &ts, nullptr, 0);
+#elif defined(__APPLE__)
+    if (timeoutMs < 0)
+        return os_sync_wait_on_address(&word, expected, sizeof(expected),
+                                       OS_SYNC_WAIT_ON_ADDRESS_SHARED);
+    return os_sync_wait_on_address_with_timeout(
+        &word, expected, sizeof(expected), OS_SYNC_WAIT_ON_ADDRESS_SHARED,
+        OS_CLOCK_MACH_ABSOLUTE_TIME, static_cast<std::uint64_t>(timeoutMs) * 1'000'000);
+#endif
 }
 inline void futexWake(std::atomic<std::uint32_t>& word) {
+#if defined(__linux__)
     ::syscall(SYS_futex, reinterpret_cast<std::uint32_t*>(&word), FUTEX_WAKE, 1, nullptr, nullptr,
               0);
-}
-
+#elif defined(__APPLE__)
+    os_sync_wake_by_address_any(&word, sizeof(std::uint32_t), OS_SYNC_WAKE_BY_ADDRESS_SHARED);
 #endif
+}
+#endif
+// Private per-instance auto-reset events on Windows; zero-resource wrapper on POSIX.
+// One waiter per direction. Release/acquire on the words, never event state,
+// publishes commands and outputs. Stale event signals only cause a recheck.
+class SharedSignals {
+  public:
+    SharedSignals() = default;
+    SharedSignals(const SharedSignals&) = delete;
+    SharedSignals& operator=(const SharedSignals&) = delete;
+    ~SharedSignals() { clear(); }
+    bool create() {
+#if defined(_WIN32)
+        clear();
+        request_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        done_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (!request_ || !done_) {
+            clear();
+            return false;
+        }
+#endif
+        return true;
+    }
+    void clear() {
+#if defined(_WIN32)
+        if (request_) CloseHandle(request_);
+        if (done_ && done_ != request_) CloseHandle(done_);
+        request_ = done_ = nullptr;
+#endif
+    }
+#if defined(_WIN32)
+    bool adopt(Resource request, Resource done) {
+        clear();
+        request_ = reinterpret_cast<HANDLE>(request);
+        done_ = reinterpret_cast<HANDLE>(done);
+        // Validate event handles before any audio thread can use them.
+        if (!request_ || !done_ || request_ == INVALID_HANDLE_VALUE ||
+            done_ == INVALID_HANDLE_VALUE || request_ == done_ || !SetEvent(request_) ||
+            !SetEvent(done_)) {
+            clear();
+            return false;
+        }
+        ResetEvent(request_);
+        ResetEvent(done_);
+        return true;
+    }
+    Resource resource(bool completion) const {
+        return reinterpret_cast<Resource>(completion ? done_ : request_);
+    }
+#endif
+    long wait(std::atomic<std::uint32_t>& word, std::uint32_t seen, int timeoutMs,
+              bool completion = false) {
+#if defined(_WIN32)
+        if (word.load(std::memory_order_acquire) != seen) {
+            errno = EAGAIN;
+            return -1;
+        }
+        const auto result =
+            WaitForSingleObject(completion ? done_ : request_,
+                                timeoutMs < 0 ? INFINITE : static_cast<DWORD>(timeoutMs));
+        if (result == WAIT_OBJECT_0) return 0;
+        errno = result == WAIT_TIMEOUT ? ETIMEDOUT : EIO;
+        return -1;
+#else
+        (void)completion;
+#if defined(__APPLE__)
+        if (word.load(std::memory_order_acquire) != seen) {
+            errno = EAGAIN;
+            return -1;
+        }
+#endif
+        return futexWait(word, seen, timeoutMs);
+#endif
+    }
+    void wake(std::atomic<std::uint32_t>& word, bool completion = false) SUPPLE_RT {
+#if defined(_WIN32)
+        (void)word;
+        const rt::ScopedSanctionedSyscall sanctioned;
+        SetEvent(completion ? done_ : request_);
+#else
+        (void)completion;
+        futexWake(word);
+#endif
+    }
+
+  private:
+#if defined(_WIN32)
+    static bool autoReset(HANDLE event) {
+        if (!SetEvent(event)) return false;
+        const bool valid = WaitForSingleObject(event, 0) == WAIT_OBJECT_0 &&
+                           WaitForSingleObject(event, 0) == WAIT_TIMEOUT;
+        ResetEvent(event);
+        return valid;
+    }
+    HANDLE request_ = nullptr, done_ = nullptr;
+#endif
+};
 
 }  // namespace supple::host::bridge
