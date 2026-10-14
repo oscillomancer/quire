@@ -44,4 +44,6 @@ implementations are Linux-only during the initial port (ADR-0034).
 inline primitives and their tests remain enabled. Consumers requiring the
 relay are gated together, with no dummy RT implementation. File read/write
 helpers build on all platforms; Windows atomic writes use native wide paths,
-exclusive temporary creation, flushed binary writes and replace-on-move.
+exclusive temporary creation, flushed binary writes and POSIX-style rename through the open native handle.
+Concurrent replacement preserves the previous file for its existing readers
+and permits successive writers to replace the same destination.

@@ -1,0 +1,5 @@
+# Canonical generated documents and their source examples use LF even when
+# Git's Windows default is autocrlf. Vendored sources keep their own bytes.
+/libs/command-bus/tests/golden/** text eol=lf
+/skill/generated/** text eol=lf
+/plugins/suite/examples/** text eol=lf

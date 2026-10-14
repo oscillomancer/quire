@@ -11,6 +11,7 @@
 #endif
 #include <atomic>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <thread>
 
@@ -111,5 +112,22 @@ TEST_CASE("files: native Unicode paths and binary bytes survive replacement") {
     REQUIRE(writeFileAtomic(path, second).ok());
     REQUIRE(readFile(path).ok());
     CHECK(*readFile(path) == second);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("files: atomic replacement preserves an existing reader") {
+    const fs::path dir =
+        fs::temp_directory_path() / ("supple-reader-" + std::to_string(::getpid()));
+    const fs::path path = dir / "data";
+    REQUIRE(writeFileAtomic(path, std::string_view("old")).ok());
+    {
+        std::ifstream reader(path, std::ios::binary);
+        REQUIRE(reader.good());
+        REQUIRE(writeFileAtomic(path, std::string_view("new")).ok());
+        const std::string previous((std::istreambuf_iterator<char>(reader)),
+                                   std::istreambuf_iterator<char>());
+        CHECK(previous == "old");
+        CHECK(readTextFile(path).value() == "new");
+    }
     fs::remove_all(dir);
 }

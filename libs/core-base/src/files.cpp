@@ -14,6 +14,7 @@
 #include <array>
 #include <atomic>
 #include <cerrno>
+#include <cstddef>
 #include <cstring>
 #include <fstream>
 
@@ -61,8 +62,9 @@ Status writeFileAtomic(const fs::path& path, std::span<const std::uint8_t> bytes
                      what + " " + path.string() + ": Windows error " + std::to_string(code), {},
                      "check free disk space and directory permissions");
     };
-    const HANDLE file = ::CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
-                                      FILE_ATTRIBUTE_NORMAL, nullptr);
+    const HANDLE file =
+        ::CreateFileW(tmp.c_str(), GENERIC_WRITE | DELETE, FILE_SHARE_READ | FILE_SHARE_DELETE,
+                      nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE)
         return Error(
             "file.write",
@@ -84,10 +86,35 @@ Status writeFileAtomic(const fs::path& path, std::span<const std::uint8_t> bytes
         ::CloseHandle(file);
         return error("cannot sync", code);
     }
+    const auto destination = fs::absolute(path, ec).native();
+    if (ec) {
+        ::CloseHandle(file);
+        fs::remove(tmp, ec);
+        return Error("file.write", "cannot resolve the destination path", {}, "check the path");
+    }
+    // Rename the open file with POSIX replacement semantics (Windows 10+).
+    // Concurrent writers may still hold the file they just published; they
+    // must not prevent the next writer from atomically replacing that name.
+    FILE_RENAME_INFO rename{};
+    constexpr DWORD kReplaceIfExists = 0x1, kPosixSemantics = 0x2;
+    rename.Flags = kReplaceIfExists | kPosixSemantics;
+    rename.FileNameLength = static_cast<DWORD>(destination.size() * sizeof(wchar_t));
+    std::vector<std::uint8_t> renameBytes(sizeof(rename) + rename.FileNameLength + sizeof(wchar_t));
+    std::memcpy(renameBytes.data(), &rename, sizeof(rename));
+    std::memcpy(renameBytes.data() + offsetof(FILE_RENAME_INFO, FileName), destination.data(),
+                rename.FileNameLength);
+    if (!::SetFileInformationByHandle(file, FileRenameInfoEx, renameBytes.data(),
+                                      static_cast<DWORD>(renameBytes.size()))) {
+        const DWORD code = ::GetLastError();
+        ::CloseHandle(file);
+        return error("cannot rename temporary file into place", code);
+    }
+    if (!::FlushFileBuffers(file)) {
+        const DWORD code = ::GetLastError();
+        ::CloseHandle(file);
+        return error("cannot sync renamed file", code);
+    }
     if (!::CloseHandle(file)) return error("cannot close", ::GetLastError());
-    if (!::MoveFileExW(tmp.c_str(), path.c_str(),
-                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-        return error("cannot move temporary file into place", ::GetLastError());
 #else
     const fs::path tmp = path.string() + "." + std::to_string(::getpid()) + "." +
                          std::to_string(counter.fetch_add(1)) + ".tmp";

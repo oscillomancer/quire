@@ -1,3 +1,5 @@
+cmake_minimum_required(VERSION 3.25)
+
 # The skill's guide to the example scripts, made from them:
 #
 #   cmake -DEXAMPLES=plugins/suite/examples -DOUT=skill/generated/dsp-examples.md

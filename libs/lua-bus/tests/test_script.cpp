@@ -99,8 +99,9 @@ TEST_CASE("print and q.log go to the script's log") {
     REQUIRE(out->log.size() == 3);
     CHECK(out->log[0] == "hello\t42");
     CHECK(out->log[1] == "bye");
-    CHECK(out->log[2].rfind("table: 0x", 0) == 0);  // luaL_tolstring names the table
-    CHECK(scene.script.log().size() == 3);          // the log outlives the run
+    CHECK(out->log[2].rfind("table: ", 0) == 0);  // Lua uses the platform's %p spelling
+    CHECK(out->log[2].size() > std::string("table: ").size());
+    CHECK(scene.script.log().size() == 3);  // the log outlives the run
 }
 
 TEST_CASE("the instruction budget stops a runaway script") {
