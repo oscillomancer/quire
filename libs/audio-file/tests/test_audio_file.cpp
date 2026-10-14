@@ -12,7 +12,8 @@
 #include <supple/audio/audio_file.h>
 #include <supple/audio/wav_stream.h>
 #include <supple/base/files.h>
-#include <unistd.h>
+#include "../../../tests/file_platform.h"
+#include "../src/file_platform.h"
 
 using namespace supple::audio;
 namespace fs = std::filesystem;
@@ -67,8 +68,8 @@ TEST_CASE("RF64 header carries 64-bit sizes without allocating a payload") {
 }
 
 TEST_CASE("inspect reads little-endian RF64 and BW64 sizes from sparse files") {
-    const auto path =
-        fs::temp_directory_path() / ("supple-inspect-rf64-" + std::to_string(::getpid()) + ".wav");
+    const auto path = fs::temp_directory_path() /
+                      ("supple-inspect-rf64-" + std::to_string(supple::test::processId()) + ".wav");
     constexpr std::uint64_t frames = (std::uint64_t{1} << 30) + 3;
     auto header = wavHeader(frames, 1, 48000, SampleFormat::Float32);
     REQUIRE(header);
@@ -92,8 +93,9 @@ TEST_CASE("inspect reads little-endian RF64 and BW64 sizes from sparse files") {
 }
 
 TEST_CASE("inspect rejects short fmt chunks and overflowing chunk skips") {
-    const auto path = fs::temp_directory_path() /
-                      ("supple-inspect-invalid-" + std::to_string(::getpid()) + ".wav");
+    const auto path =
+        fs::temp_directory_path() /
+        ("supple-inspect-invalid-" + std::to_string(supple::test::processId()) + ".wav");
     auto header = wavHeader(0, 1, 48000, SampleFormat::Float32);
     REQUIRE(header);
     (*header)[16] = 0;  // fmt declares no payload, despite bytes that resemble one
@@ -110,7 +112,8 @@ TEST_CASE("inspect rejects short fmt chunks and overflowing chunk skips") {
 
 TEST_CASE("streamed WAV validates rates and rejects overflowing append sizes") {
     const auto path =
-        fs::temp_directory_path() / ("supple-stream-bounds-" + std::to_string(::getpid()) + ".wav");
+        fs::temp_directory_path() /
+        ("supple-stream-bounds-" + std::to_string(supple::test::processId()) + ".wav");
     fs::remove(path);
     WavStreamWriter writer;
     for (double rate : {0.25, std::numeric_limits<double>::infinity(), 1e20}) {
@@ -126,8 +129,9 @@ TEST_CASE("streamed WAV validates rates and rejects overflowing append sizes") {
 }
 
 TEST_CASE("inspect rejects malformed FLAC STREAMINFO") {
-    const auto path = fs::temp_directory_path() /
-                      ("supple-inspect-flac-invalid-" + std::to_string(::getpid()) + ".flac");
+    const auto path =
+        fs::temp_directory_path() /
+        ("supple-inspect-flac-invalid-" + std::to_string(supple::test::processId()) + ".flac");
     auto encoded = encodeFlac(tone(32, 48000, 1));
     REQUIRE(encoded);
     REQUIRE(supple::writeFileAtomic(path, *encoded));
@@ -272,7 +276,7 @@ TEST_CASE("resampling preserves channel layout and duration") {
 
 TEST_CASE("a streamed WAV is readable after every header update and after close") {
     const auto path = std::filesystem::temp_directory_path() /
-                      ("supple-wav-stream-" + std::to_string(::getpid()) + ".wav");
+                      ("supple-wav-stream-" + std::to_string(supple::test::processId()) + ".wav");
     supple::audio::WavStreamWriter w;
     REQUIRE(w.open(path, 48000, 2).ok());
     std::vector<float> block(2 * 1000);
@@ -299,7 +303,7 @@ TEST_CASE("a streamed WAV is readable after every header update and after close"
 
 TEST_CASE("repairing a streamed WAV recovers the frames written after the last header update") {
     const auto path = std::filesystem::temp_directory_path() /
-                      ("supple-wav-repair-" + std::to_string(::getpid()) + ".wav");
+                      ("supple-wav-repair-" + std::to_string(supple::test::processId()) + ".wav");
     {
         supple::audio::WavStreamWriter w;
         REQUIRE(w.open(path, 44100, 1).ok());
@@ -312,10 +316,10 @@ TEST_CASE("repairing a streamed WAV recovers the frames written after the last h
         // A crash now: the header says 1000 frames, the file holds 1500 (and
         // half a frame the OS got before the end).
         const float half = 0.25f;
-        std::FILE* f = std::fopen(path.c_str(), "ab");
+        std::ofstream f(path, std::ios::binary | std::ios::app);
         REQUIRE(f);
-        std::fwrite(&half, 1, 2, f);
-        std::fclose(f);
+        f.write(reinterpret_cast<const char*>(&half), 2);
+        f.close();
         auto info = supple::audio::inspectWavStream(path);
         REQUIRE(info);
         CHECK(info->headerFrames == 1000);
@@ -366,8 +370,8 @@ TEST_CASE("inspect reads metadata without decoding, and agrees with readAudio") 
     // decoder's own frame count.
     CHECK(mp3->frames == static_cast<std::int64_t>(mp3Ref->frames()));
 
-    const auto dir =
-        std::filesystem::temp_directory_path() / ("supple-inspect-" + std::to_string(::getpid()));
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-inspect-" + std::to_string(supple::test::processId()));
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
 
@@ -484,8 +488,8 @@ TEST_CASE("FLAC encoding decodes to exactly what the same WAV holds (16 and 24 b
 }
 
 TEST_CASE("R6 inspect rejects inconsistent PCM and float block alignment") {
-    const auto path =
-        fs::temp_directory_path() / ("supple-align-" + std::to_string(::getpid()) + ".wav");
+    const auto path = fs::temp_directory_path() /
+                      ("supple-align-" + std::to_string(supple::test::processId()) + ".wav");
     const std::uint8_t formats[][2] = {{1, 8}, {1, 16}, {1, 24}, {1, 32}, {3, 32}, {3, 64}};
     for (const auto& format : formats) {
         for (unsigned channels : {1u, 2u}) {
@@ -545,5 +549,57 @@ TEST_CASE("R6 inspect rejects inconsistent PCM and float block alignment") {
     (*other)[32] = 1;  // Other format tags retain their existing handling.
     REQUIRE(supple::writeFileAtomic(path, *other));
     REQUIRE(inspect(path));
+    fs::remove(path);
+}
+
+TEST_CASE("recording creation is exclusive and native paths survive recovery") {
+    const auto dir = fs::temp_directory_path() /
+                     ("supple-native-wav-" + std::to_string(supple::test::processId()));
+    fs::create_directories(dir);
+    struct Cleanup {
+        fs::path path;
+        ~Cleanup() { fs::remove_all(path); }
+    } cleanup{dir};
+    const auto path = dir / fs::path(std::u8string(u8"take-音.wav"));
+    WavStreamWriter writer;
+    REQUIRE(writer.open(path, 48000, 2));
+    const float frames[] = {0.25f, -0.5f, 0.75f, -1.0f};
+    REQUIRE(writer.append(frames, 2));
+    REQUIRE(writer.flush());
+    WavStreamWriter second;
+    CHECK_FALSE(second.open(path, 48000, 2));
+    writer.abandon();
+    REQUIRE(repairWavStream(path));
+    auto restored = readAudio(path);
+    REQUIRE(restored);
+    CHECK(restored->channels == std::vector<std::vector<float>>{{0.25f, 0.75f}, {-0.5f, -1.0f}});
+    const auto alias = dir / "link.wav";
+    std::error_code ec;
+    fs::create_symlink(path, alias, ec);
+    if (!ec) {
+        CHECK_FALSE(inspectWavStream(alias));
+        CHECK_FALSE(repairWavStream(alias));
+        CHECK_FALSE(second.open(alias, 48000, 2));
+    } else {
+        MESSAGE("symlink probe unavailable: ", ec.message());
+    }
+}
+
+TEST_CASE("streaming render files sync and publish atomically over native paths") {
+    const auto path =
+        fs::temp_directory_path() /
+        fs::path(std::u8string(u8"supple-render-音-") +
+                 fs::path(std::to_string(supple::test::processId())).u8string() + u8".wav");
+    REQUIRE(supple::writeFileAtomic(path, "old"));
+    fs::path temp;
+    auto* file = supple::audio::detail::files::temporary(path, temp);
+    REQUIRE(file);
+    CHECK(std::fwrite("replacement", 1, 11, file) == 11);
+    REQUIRE(supple::audio::detail::files::sync(file));
+    CHECK(supple::readTextFile(path).value() == "old");
+    REQUIRE(std::fclose(file) == 0);
+    REQUIRE(supple::audio::detail::files::publish(temp, path));
+    CHECK_FALSE(fs::exists(temp));
+    CHECK(supple::readTextFile(path).value() == "replacement");
     fs::remove(path);
 }

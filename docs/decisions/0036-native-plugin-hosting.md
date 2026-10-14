@@ -3,6 +3,10 @@
 **Status:** Accepted, 2026-10-14. Amends ADR-0013, ADR-0017 and the temporary
 hosting gates in ADR-0034/0035. The audio bridge protocol is unchanged.
 
+**Audio-file amendment, 2026-10-14:** native Windows recording/recovery and
+RF64 publication lift the POSIX audio-file gate; see engine.md's Native audio
+files contract. Device audio, bridge and GUI remain separate gates.
+
 ## Context
 
 In-process hosting and discovery must work before the Linux audio bridge,

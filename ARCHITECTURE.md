@@ -119,8 +119,10 @@ device backends, audio bridge and GUI embedding remain separate gates.
 Native in-process hosting and supervised scanning are separate from that bridge
 (ADR-0036). clap-host owns a reusable ChildProcess tree/capture helper and
 a standalone scanner; non-Linux isolation requests return structured errors.
-The macOS headless engine/dummy backend and sandbox build independently of
-Linux JACK and its hardware benchmark; Windows retains the audio-file gate.
+The native headless engine/dummy backend and sandbox build independently of
+Linux JACK and its hardware benchmark. Audio files use POSIX streams or wide-path
+Windows handles with delete sharing, exclusive recording creation and atomic
+render publication; recording writes remain on the I/O thread.
 
 `core-base` provides `supple::MainThreadWake`, a coalesced notification relay
 (ADR-0029). Producers publish atomics and wake a private futex; its parked

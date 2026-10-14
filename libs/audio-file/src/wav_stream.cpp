@@ -2,8 +2,7 @@
 // Copyright (c) 2026 Supple Audio
 #include "supple/audio/wav_stream.h"
 
-#include <fcntl.h>
-#include <unistd.h>
+#include "file_platform.h"
 
 #include <algorithm>
 #include <cmath>
@@ -29,15 +28,6 @@ std::uint32_t get32(const std::uint8_t* p) {
     return v;
 }
 
-// Recovery touches only the file itself, never what a link points to.
-std::FILE* openNoFollow(const std::filesystem::path& path, int flags, const char* mode) {
-    const int fd = ::open(path.c_str(), flags | O_NOFOLLOW | O_CLOEXEC);
-    if (fd < 0) return nullptr;
-    std::FILE* f = ::fdopen(fd, mode);
-    if (!f) ::close(fd);
-    return f;
-}
-
 constexpr long kHeaderBytes = 44;
 // The RIFF container caps sizes at 32 bits; longer recordings need RF64.
 constexpr std::uint64_t kMaxData = 0xFFFFFFFFull - (kHeaderBytes - 8);
@@ -52,7 +42,7 @@ Status WavStreamWriter::open(const std::filesystem::path& path, double sampleRat
     if (channels == 0 || channels > 64 || !std::isfinite(sampleRate) || sampleRate < 1 ||
         sampleRate > 768000)
         return Error("audio.stream", "bad channel count or rate");
-    file_ = std::fopen(path.c_str(), "wbx");  // never an existing file (another take's)
+    file_ = detail::files::open(path, true, true);  // never an existing file (another take's)
     if (!file_) return Error("file.write", "cannot create " + path.string() + " (does it exist?)");
     channels_ = channels;
     frames_ = 0;
@@ -88,15 +78,15 @@ Status WavStreamWriter::updateHeader() {
     if (!file_) return okStatus();
     const auto data = static_cast<std::uint32_t>(frames_ * channels_ * 4);
     std::uint8_t b[4];
-    const long end = std::ftell(file_);
+    const auto end = detail::files::tell(file_);
     if (end < 0) return Error("file.write", "position");
     put32(b, data + kHeaderBytes - 8);
-    if (std::fseek(file_, 4, SEEK_SET) != 0 || std::fwrite(b, 1, 4, file_) != 4)
+    if (detail::files::seek(file_, 4, SEEK_SET) != 0 || std::fwrite(b, 1, 4, file_) != 4)
         return Error("file.write", "header");
     put32(b, data);
-    if (std::fseek(file_, 40, SEEK_SET) != 0 || std::fwrite(b, 1, 4, file_) != 4)
+    if (detail::files::seek(file_, 40, SEEK_SET) != 0 || std::fwrite(b, 1, 4, file_) != 4)
         return Error("file.write", "header");
-    if (std::fseek(file_, end, SEEK_SET) != 0) return Error("file.write", "seek");
+    if (detail::files::seek(file_, end, SEEK_SET) != 0) return Error("file.write", "seek");
     return flush();
 }
 
@@ -121,12 +111,12 @@ Status WavStreamWriter::close() {
 }
 
 Result<WavStreamInfo> inspectWavStream(const std::filesystem::path& path) {
-    std::FILE* f = openNoFollow(path, O_RDONLY, "rb");
+    std::FILE* f = detail::files::open(path, false);
     if (!f) return Error("file.open", "cannot read " + path.string() + " (or it is a link)");
     std::uint8_t h[kHeaderBytes];
     bool read = std::fread(h, 1, sizeof h, f) == sizeof h;
-    long end = -1;
-    if (read && std::fseek(f, 0, SEEK_END) == 0) end = std::ftell(f);
+    std::int64_t end = -1;
+    if (read && detail::files::seek(f, 0, SEEK_END) == 0) end = detail::files::tell(f);
     std::fclose(f);
     read = read && end >= kHeaderBytes;
     const auto size = static_cast<std::uint64_t>(end);
@@ -149,15 +139,15 @@ Result<std::uint64_t> repairWavStream(const std::filesystem::path& path) {
     auto info = inspectWavStream(path);
     if (!info) return std::move(info).error();
     if (info->fileFrames == info->headerFrames) return info->headerFrames;
-    std::FILE* f = openNoFollow(path, O_RDWR, "r+b");
+    std::FILE* f = detail::files::open(path, true);
     if (!f) return Error("file.write", "cannot open " + path.string() + " (or it is a link)");
     const auto data = static_cast<std::uint32_t>(info->fileFrames * info->channels * 4);
     std::uint8_t b[4];
     bool ok = true;
     put32(b, data + kHeaderBytes - 8);
-    ok = ok && std::fseek(f, 4, SEEK_SET) == 0 && std::fwrite(b, 1, 4, f) == 4;
+    ok = ok && detail::files::seek(f, 4, SEEK_SET) == 0 && std::fwrite(b, 1, 4, f) == 4;
     put32(b, data);
-    ok = ok && std::fseek(f, 40, SEEK_SET) == 0 && std::fwrite(b, 1, 4, f) == 4;
+    ok = ok && detail::files::seek(f, 40, SEEK_SET) == 0 && std::fwrite(b, 1, 4, f) == 4;
     ok = std::fclose(f) == 0 && ok;
     if (!ok) return Error("file.write", "cannot rewrite the header of " + path.string());
     return info->fileFrames;

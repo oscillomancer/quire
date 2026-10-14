@@ -4,7 +4,7 @@
 // measures is what the script does, and what goes wrong is said in words.
 // And dsp.export: a copy of the player that plays one script anywhere.
 #include <doctest/doctest.h>
-#include <unistd.h>
+#include "../../../tests/file_platform.h"
 
 #include <cmath>
 #include <cstdint>
@@ -28,8 +28,8 @@ const fs::path kStock = STOCK_CLAP_DIR;
 const cmd::Origin kTest{cmd::Origin::Type::Test, "unit", ""};
 
 struct Root {
-    fs::path path =
-        fs::temp_directory_path() / ("supple-sandbox-dsp-" + std::to_string(::getpid()));
+    fs::path path = fs::temp_directory_path() /
+                    ("supple-sandbox-dsp-" + std::to_string(supple::test::processId()));
     Root() { fs::remove_all(path); }
     ~Root() { fs::remove_all(path); }
 };

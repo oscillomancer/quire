@@ -120,8 +120,7 @@ unchanged. macOS and Windows currently build/test JSON/schema/params/patch,
 core-base native waits/wakes/thread setup, command bus, control-protocol/MCP,
 Lua, DSP/Console 9/analysis, MIDI/notation/timeline/optimizer,
 session model, plugin support, all stock SDK-free DSP engines, and the
-script compiler/runtime and suite semantic layer. Audio-file tests also
-run on macOS. Native core-base sources/tests, JSON-RPC control transport/model
+script compiler/runtime and suite semantic layer. Audio-file tests run on all three platforms. Native core-base sources/tests, JSON-RPC control transport/model
 loop and standalone MCP/proxy no longer share the hosting gate (ADR-0035).
 Linux-specific descriptor/permission/signal probes and memory-residency/rlimit
 tests remain guarded with portable boundary coverage alongside them.
@@ -130,11 +129,9 @@ These gates are explicit, with no no-op RT implementations:
 | Gate | Off on | Reason / follow-up |
 |---|---|---|
 | `SUPPLE_HOST_SERVICES`: audio bridge | macOS, Windows | Shared memory, cross-process wake and native IPC; bridge port step |
-| Engine library/CLI and sandbox | Windows | Depend on the gated audio-file library; enabled on macOS with dummy/offline audio |
 | JACK/fake JACK and hardware capacity benchmark | macOS, Windows | Native device backend is a later port; requests return backend.unsupported |
 | Same gate: DAW GUI/agent and source-export integration tests | macOS, Windows | GUI depends on engine/X11; stock wrappers and conformance/reset tests now enabled separately |
 | POSIX evaluation harness tests | Windows | Unix executable fixtures, symlinks and process groups |
-| `SUPPLE_POSIX_AUDIO_FILES`: audio-file library/tests | Windows | POSIX exclusive files, RF64 output and recording recovery; file-I/O port step |
 
 Research GUI spikes and host fuzzers reject configuration on non-Linux
 platforms rather than silently building incomplete targets. Renders must

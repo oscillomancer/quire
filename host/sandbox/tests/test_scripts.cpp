@@ -3,7 +3,7 @@
 // script.run through the sandbox's registry (see test_scripts.cpp in the
 // engine for why this is its own binary).
 #include <doctest/doctest.h>
-#include <unistd.h>
+#include "../../../tests/file_platform.h"
 
 #include <filesystem>
 
@@ -17,8 +17,8 @@ namespace {
 const fs::path kFixture = FIXTURE_CLAP_PATH;
 
 struct Root {
-    fs::path path =
-        fs::temp_directory_path() / ("supple-sandbox-scripts-" + std::to_string(::getpid()));
+    fs::path path = fs::temp_directory_path() /
+                    ("supple-sandbox-scripts-" + std::to_string(supple::test::processId()));
     Root() { fs::remove_all(path); }
     ~Root() { fs::remove_all(path); }
 };

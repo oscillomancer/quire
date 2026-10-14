@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Supple Audio
 #include <doctest/doctest.h>
 #include <supple/product.h>
-#include <unistd.h>
+#include "../../../tests/file_platform.h"
 
 #include <cmath>
 #include <filesystem>
@@ -21,8 +21,8 @@ namespace {
 const fs::path kFixture = FIXTURE_CLAP_PATH;
 
 struct Root {
-    fs::path path =
-        fs::temp_directory_path() / ("supple-sandbox-cmd-" + std::to_string(::getpid()));
+    fs::path path = fs::temp_directory_path() /
+                    ("supple-sandbox-cmd-" + std::to_string(supple::test::processId()));
     Root() { fs::remove_all(path); }
     ~Root() { fs::remove_all(path); }
 };
@@ -55,7 +55,7 @@ TEST_CASE("audio filenames beginning with rd_ are not render identifiers") {
         {"render", j(R"({"notation":"1: A4:w", "seconds": 1, "tail_s": 0})"), kTest});
     REQUIRE(rendered);
     struct File {
-        fs::path path = "rd_reference-" + std::to_string(::getpid()) + ".wav";
+        fs::path path = "rd_reference-" + std::to_string(supple::test::processId()) + ".wav";
         bool created = false;
         ~File() {
             if (created) fs::remove(path);
@@ -238,8 +238,8 @@ TEST_CASE("registry exports are deterministic and name every sandbox tool") {
 
 TEST_CASE("sandbox invocation hook restores state and discards failed invocation events") {
     namespace fs = std::filesystem;
-    const auto root =
-        fs::temp_directory_path() / ("supple-savepoint-hook-" + std::to_string(getpid()));
+    const auto root = fs::temp_directory_path() /
+                      ("supple-savepoint-hook-" + std::to_string(supple::test::processId()));
     struct Cleanup {
         fs::path root;
         ~Cleanup() { fs::remove_all(root); }
@@ -355,18 +355,23 @@ TEST_CASE("sandbox bus refuses failed invocation snapshots and aborts caught res
 
 TEST_CASE("sandbox plugin list exposes cached failures even for an empty catalogue") {
     Root root;
+#if defined(_WIN32)
+    static constexpr const char* cacheVariable = "LOCALAPPDATA";
+#else
+    static constexpr const char* cacheVariable = "XDG_CACHE_HOME";
+#endif
     struct Environment {
         std::optional<std::string> previous;
         ~Environment() {
             if (previous)
-                ::setenv("XDG_CACHE_HOME", previous->c_str(), 1);
+                supple::test::environment(cacheVariable, previous->c_str());
             else
-                ::unsetenv("XDG_CACHE_HOME");
+                supple::test::environment(cacheVariable, nullptr);
         }
     } env;
-    if (const char* previous = std::getenv("XDG_CACHE_HOME")) env.previous = previous;
+    if (const char* previous = std::getenv(cacheVariable)) env.previous = previous;
     const auto cache = root.path / "cache";
-    REQUIRE(::setenv("XDG_CACHE_HOME", cache.c_str(), 1) == 0);
+    REQUIRE(supple::test::environment(cacheVariable, cache.string().c_str()) == 0);
     fs::create_directories(root.path);
     struct Bridge {
         fs::path previous =

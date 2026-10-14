@@ -2,9 +2,9 @@
 // Copyright (c) 2026 Supple Audio
 // The optimizer end to end with Orrery (docs/specs/optimizer.md §6): recover a
 // hidden patch from its render, and hit a descriptor profile.
-#include <dlfcn.h>
 #include <doctest/doctest.h>
-#include <unistd.h>
+#include "../../../plugins/common/include/supple/plugin/test_module.h"
+#include "../../../tests/file_platform.h"
 
 #include <atomic>
 #include <chrono>
@@ -30,9 +30,9 @@ const fs::path kFixture = FIXTURE_CLAP_PATH;
 std::atomic<unsigned> gRootNumber{0};
 
 struct Root {
-    fs::path path =
-        fs::temp_directory_path() / ("supple-sandbox-opt-" + std::to_string(::getpid()) + "-" +
-                                     std::to_string(gRootNumber.fetch_add(1)));
+    fs::path path = fs::temp_directory_path() /
+                    ("supple-sandbox-opt-" + std::to_string(supple::test::processId()) + "-" +
+                     std::to_string(gRootNumber.fetch_add(1)));
     Root() { fs::remove_all(path); }
     ~Root() { fs::remove_all(path); }
 };
@@ -538,9 +538,10 @@ TEST_CASE("profile weights scale candidate loss") {
 }
 
 TEST_CASE("worker-owned CLAP clone keeps main-thread lifecycle") {
-    void* library = dlopen(kFixture.c_str(), RTLD_NOW);
+    void* library = supple::plugin::test::open(FIXTURE_CLAP_PATH);
     REQUIRE(library);
-    auto failures = reinterpret_cast<int (*)()>(dlsym(library, "supple_fixture_thread_failures"));
+    auto failures = reinterpret_cast<int (*)()>(
+        supple::plugin::test::symbol(library, "supple_fixture_thread_failures"));
     REQUIRE(failures);
     const int before = failures();
     {
@@ -555,7 +556,7 @@ TEST_CASE("worker-owned CLAP clone keeps main-thread lifecycle") {
         REQUIRE(done["status"].asString() == "done");
     }
     CHECK(failures() == before);
-    dlclose(library);
+    supple::plugin::test::close(library);
 }
 
 TEST_CASE("finished job threads are reaped before another starts") {
@@ -572,12 +573,13 @@ TEST_CASE("finished job threads are reaped before another starts") {
 }
 
 TEST_CASE("job.cancel stops a generation after the current candidate") {
-    void* library = dlopen(kFixture.c_str(), RTLD_NOW);
+    void* library = supple::plugin::test::open(FIXTURE_CLAP_PATH);
     REQUIRE(library);
-    auto starts = reinterpret_cast<int (*)()>(dlsym(library, "supple_fixture_patch_starts"));
+    auto starts = reinterpret_cast<int (*)()>(
+        supple::plugin::test::symbol(library, "supple_fixture_patch_starts"));
     REQUIRE(starts);
-    auto waitStarted =
-        reinterpret_cast<void (*)(int)>(dlsym(library, "supple_fixture_wait_patch_start"));
+    auto waitStarted = reinterpret_cast<void (*)(int)>(
+        supple::plugin::test::symbol(library, "supple_fixture_wait_patch_start"));
     REQUIRE(waitStarted);
     const int before = starts();
     Harness h;
@@ -592,7 +594,7 @@ TEST_CASE("job.cancel stops a generation after the current candidate") {
     h.host->session().stopJobs();
     CHECK(h.host->session().activeJobThreadCountForTests() == 0);
     CHECK_FALSE(fs::exists(h.root.path / "renders" / (started["render"].asString() + ".wav")));
-    dlclose(library);
+    supple::plugin::test::close(library);
 }
 
 TEST_CASE("a flat params merge renders the same whether or not the session rendered before") {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include <doctest/doctest.h>
-#include <unistd.h>
+#include "../../../tests/file_platform.h"
 
 #include <chrono>
 #include <cmath>
@@ -26,8 +26,8 @@ constexpr const char* kSine = "com.suppleaudio.test.sine";
 struct TempDir {
     fs::path path;
     explicit TempDir(const char* tag) {
-        path = fs::temp_directory_path() /
-               (std::string("supple-sandbox-") + tag + "-" + std::to_string(::getpid()));
+        path = fs::temp_directory_path() / (std::string("supple-sandbox-") + tag + "-" +
+                                            std::to_string(supple::test::processId()));
         fs::remove_all(path);
     }
     ~TempDir() { fs::remove_all(path); }

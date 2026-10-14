@@ -4,14 +4,13 @@
 
 #include "supple/base/files.h"
 
-#include <fcntl.h>
-#include <unistd.h>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstring>
 #include <fstream>
 #include <system_error>
+#include "file_platform.h"
 
 #include "supple/base/rng.h"
 
@@ -284,17 +283,13 @@ Status writeWav(const fs::path& path, const AudioData& data, const WavOptions& o
                       static_cast<std::uint32_t>(std::lround(data.sampleRate)), options.format);
         if (!header) return std::move(header).error();
         std::error_code ec;
-        fs::create_directories(path.parent_path(), ec);
+        fs::create_directories(path.has_parent_path() ? path.parent_path() : fs::path("."), ec);
         if (ec) return Error("audio.write", "cannot create render directory");
-        std::string temporary = path.string() + ".tmp-XXXXXX";
-        const int fd = ::mkstemp(temporary.data());
-        if (fd < 0) return Error("audio.write", "cannot create temporary WAV file");
-        std::FILE* file = ::fdopen(fd, "wb");
-        if (!file) {
-            ::close(fd);
-            ::unlink(temporary.c_str());
-            return Error("audio.write", "cannot open temporary WAV file");
-        }
+        fs::path temporary;
+        std::FILE* file = detail::files::temporary(path, temporary);
+        if (!file)
+            return Error("audio.write", "cannot create temporary WAV file", {},
+                         "check that the directory is writable and has free space");
         bool good = std::fwrite(header->data(), 1, header->size(), file) == header->size();
         Rng rng(options.ditherSeed);
         std::vector<std::uint8_t> block(4096 * channels * bytesPer);
@@ -322,19 +317,14 @@ Status writeWav(const fs::path& path, const AudioData& data, const WavOptions& o
                 }
             good = std::fwrite(block.data(), 1, w, file) == w;
         }
-        good = std::fflush(file) == 0 && good;
-        good = ::fsync(fd) == 0 && good;
+        good = detail::files::sync(file) && good;
         good = std::fclose(file) == 0 && good;
-        if (good) good = ::rename(temporary.c_str(), path.c_str()) == 0;
+        if (good) good = detail::files::publish(temporary, path);
         if (!good) {
-            ::unlink(temporary.c_str());
-            return Error("audio.write", "could not write RF64 WAV");
+            fs::remove(temporary, ec);
+            return Error("audio.write", "could not write or publish RF64 WAV", {},
+                         "check free disk space, permissions and readers denying delete sharing");
         }
-        const int parent = ::open(path.parent_path().c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-        if (parent < 0) return Error("audio.write", "cannot sync render directory");
-        const bool synced = ::fsync(parent) == 0;
-        ::close(parent);
-        if (!synced) return Error("audio.write", "cannot sync render directory");
         return okStatus();
     }
     auto bytes = encodeWav(data, options);

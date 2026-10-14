@@ -10,6 +10,10 @@ services use `SUPPLE_HOST_SERVICES`; the Windows audio-file gate is unchanged.
 adds native in-process loaders and a standalone supervised scanner, while
 retaining the Linux audio bridge and the remaining engine/device/GUI gates.
 
+**Audio-file amendment, 2026-10-14:** native Windows recording/recovery and
+RF64 publication lift the POSIX audio-file gate; see engine.md's Native audio
+files contract. Device audio, bridge and GUI remain separate gates.
+
 ## Context
 
 The macOS and Windows port needs branch CI before changes can reach the

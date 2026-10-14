@@ -20,8 +20,8 @@ thread setup, control-protocol and standalone MCP/proxy have native coverage
 on both platforms (ADR-0035).
 macOS also enables and tests the engine/CLI, dummy backend, sandbox and offline
 renderer, including RT/offline equivalence in both executors. Audio bridge,
-hardware backends and GUI remain gated. Windows audio-file I/O and its
-dependent engine/sandbox remain gated.
+hardware backends and GUI remain gated. Windows audio-file I/O and the dependent engine/sandbox are enabled for native
+CI verification; device audio remains gated.
 Portable libraries, the session model, stock DSP cores
 and the script suite build independently of those services; see
 CONTRIBUTING.md for the complete gate list. External Windows readers that
@@ -192,8 +192,8 @@ Engine and hosting:
 - The headless platform layer (ADR-0035) has natively tested macOS/Windows
   address waits, wake sources, control socket/MCP paths and user directory roots.
   The macOS engine runs with dummy/offline audio independently of JACK, with
-  native RT/offline equivalence coverage. Windows engine file helpers remain
-  behind the audio-file gate.
+  native RT/offline equivalence coverage. Windows engine file helpers and audio-file I/O are enabled; native CI
+  verification is pending.
   Native hosting/scanning are enabled (ADR-0036); audio bridge, hardware backends
   and GUI embedding remain separate ports.
   Windows event waits admit 64 unique handles. macOS QoS must be self-applied;

@@ -1239,8 +1239,7 @@ offline output, including the anticipative renderer. A native fixture test
 runs this contract through both executors, Console 9, latency compensation and
 multiple worker capacities. JACK/fake JACK and the hardware benchmark stay
 Linux-only; an explicit JACK request returns backend.unsupported,
-path /backend and a hint to select dummy. Windows engine remains gated by
-audio-file I/O. Shared/dedicated bridge creation on non-Linux platforms returns
+path /backend and a hint to select dummy. Windows also enables the engine/sandbox through native audio-file I/O. Shared/dedicated bridge creation on non-Linux platforms returns
 host.bridge.unsupported, path /isolation with an in_process hint, through the
 same InstancePool load boundary; it never substitutes a local instance.
 
@@ -1249,3 +1248,22 @@ registry documents `backend.unsupported` and the default difference, so the CLI'
 play command also works with no backend flag on the native headless port.
 Background jobs and render cancellation use core-base StopToken/JoiningThread;
 Linux uses the standard types, while Apple uses the non-RT fallback in core-base.
+
+### Native audio files (2026-10-14)
+
+The audio-file library, engine/CLI and sandbox build on Windows as well as
+Linux/macOS. Recording creation is exclusive: an existing take or link is
+never replaced. Recovery opens the final path without following links; Windows
+rejects reparse points and directories on the opened handle. Windows opens use
+CreateFileW and permit read/write/delete sharing, so inspection and recovery can
+coexist with a flushed writer. Recording and recovery positions are 64-bit on
+all platforms (Windows long is only 32-bit). Recording's existing RIFF limit
+and complete-frame recovery rule are unchanged; no file operations run on audio
+threads.
+
+RF64 rendering streams into an exclusively created sibling temporary file,
+flushes its contents to disk, closes it, and atomically replaces the destination.
+POSIX syncs the containing directory; Windows uses MoveFileExW with replacement
+and write-through. External Windows readers denying delete sharing can prevent
+publication; failure removes only our own temporary file and returns audio.write
+with a corrective hint. Small renders retain core-base writeFileAtomic.
