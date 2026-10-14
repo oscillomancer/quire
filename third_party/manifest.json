@@ -187,6 +187,21 @@
       "commit": "9fad9770f2ae8542ab1a548a68c1ad1ac690abe0",
       "purpose": "VST3 hosting ABI, module loader, parameter and event helpers",
       "linkage": "static"
+    },
+    {
+      "name": "asiosdk",
+      "dir": "asiosdk-2.3.4",
+      "license": "GPL-3.0-only AND BSD-3-Clause",
+      "license_file": "asiosdk-2.3.4/LICENSE.txt",
+      "version": "2.3.4 (2025-10-15)",
+      "source": "https://download.steinberg.net/sdk_downloads/ASIO-SDK_2.3.4_2025-10-15.zip",
+      "sha256": "d5ebf0c20dd2c5f43771fd0c1418f4b361bf52434ee670097cfa6b3a335e2eca",
+      "purpose": "Windows DAW ASIO backend; never plugins (ADR-0033)",
+      "linkage": "static",
+      "scope": "daw-only",
+      "platforms": [
+        "windows"
+      ]
     }
   ],
   "system_libraries": [

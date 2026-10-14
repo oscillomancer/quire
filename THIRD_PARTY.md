@@ -15,6 +15,7 @@ declaration and maintainer approval; AGPL is forbidden. LGPL/MPL need the mainta
 
 | Name | License | Version / commit | Purpose | Linkage |
 |---|---|---|---|---|
+| asiosdk | GPL-3.0-only AND BSD-3-Clause (selected GPL option) | 2.3.4 / 2025-10-15; archive SHA-256 `d5ebf0c20dd2c5f43771fd0c1418f4b361bf52434ee670097cfa6b3a335e2eca` | ASIO backend; common and Windows host sources only | static, Windows DAW only, never plugins |
 | clap | MIT | 1.2.10 / `195b42a` | CLAP plugin ABI headers for hosting and for the stock plugins | headers |
 | doctest | MIT | 2.5.3 / `2d0a935` | Unit-test framework; tests only, never shipped | tests |
 | airwindows-console9 | MIT, © 2018 Chris Johnson | `d22a25b7f7c0c8c05e9f3ae480e7f1da9769f49d` | Airwindows Console 9 Channel/Buss reference for the DSP null test; mono AU kernels retained as reference text | test-only, never linked into a shipped binary |
@@ -59,3 +60,24 @@ Development tool (not linked, bundled, or used at runtime):
 license, Cargo packages and binary live in the user's tool cache outside this
 repository; `tools/validator/build.sh` pins and builds it for optional CLAP
 conformance checks.
+
+## ASIO SDK notices
+
+The identical root and common LICENSE.txt files offer the proprietary
+Steinberg ASIO license or GPL version 3, without an "or later" grant.
+They apply only to files referencing them; embedded licenses govern other
+files. Quire selects GPL-3.0-only. Host helpers carry BSD-3-Clause notices:
+source distributions retain copyright, conditions and disclaimer; binary
+distributions reproduce them in documentation or accompanying materials,
+and endorsement requires permission. Preserve those notices when shipping.
+The proprietary option requires a signed agreement before publication and
+written permission to redistribute the SDK; Quire does not select it.
+
+The unmodified SDK README says branding is optional under GPLv3. If used,
+ASIO trademarks and logos must follow the included usage guidelines: logos
+unaltered, only in product-related contexts; no ASIO-derived product/company
+names, branding of incompatible products or offensive associations. It says
+logo non-compliance does not affect GPL rights but may violate trademarks.
+The license recommends those guidelines. No logo artwork is bundled here.
+The two license files, README, proprietary agreement and usage guidelines
+are preserved alongside the subset. CMake integration is still pending.
