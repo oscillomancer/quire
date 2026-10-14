@@ -5,7 +5,10 @@
 // --control-fd N). Main-thread requests arrive on the socket; audio-thread
 // commands arrive in per-instance shared memory sent with Activate and run on
 // that instance's audio thread. Exits when the host closes the control socket.
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+#else
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
@@ -641,7 +644,45 @@ struct Bridge {
 
 }  // namespace
 
+#if defined(_WIN32)
+int bridgeMain(int argc, char** argv) {
+    if (argc == 3 && std::string_view(argv[1]) == "--scan") {
+        // Preserve binary protocol bytes while plugin printf/cout goes to NUL.
+        const int saved = _dup(_fileno(stdout));
+        if (saved < 0) return 1;
+        if (!SetHandleInformation(reinterpret_cast<HANDLE>(_get_osfhandle(saved)),
+                                  HANDLE_FLAG_INHERIT, 0) ||
+            _setmode(saved, _O_BINARY) < 0) {
+            _close(saved);
+            return 1;
+        }
+        FILE* output = _fdopen(saved, "wb");
+        if (!output) {
+            _close(saved);
+            return 1;
+        }
+        FILE* ignored = nullptr;
+        if (freopen_s(&ignored, "NUL", "w", stdout) != 0) {
+            std::fclose(output);
+            return 1;
+        }
+        SetStdHandle(STD_OUTPUT_HANDLE, reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(stdout))));
+        std::error_code ec;
+        const auto path =
+            std::filesystem::absolute(platform::pathFromText(argv[2]), ec).lexically_normal();
+        const Result<std::vector<PluginInfo>> result =
+            ec ? Result<std::vector<PluginInfo>>(Error("host.scan.load",
+                                                       "cannot resolve plugin path", "/path",
+                                                       "check the module path"))
+               : scanModuleInProcess(path);
+        const auto text = json::writeCanonical(scanReply(result));
+        const bool written = std::fwrite(text.data(), 1, text.size(), output) == text.size();
+        const bool closed = std::fclose(output) == 0;
+        return written && closed && result ? 0 : 1;
+    }
+#else
 int main(int argc, char** argv) {
+#endif
 #if !defined(_WIN32)
     ::signal(SIGPIPE, SIG_IGN);
     if (argc == 3 && std::string_view(argv[1]) == "--scan") {
@@ -763,3 +804,17 @@ int main(int argc, char** argv) {
     }
     return 0;
 }
+
+#if defined(_WIN32)
+int wmain(int argc, wchar_t** argv) {
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
+    std::vector<std::string> text;
+    text.reserve(static_cast<std::size_t>(argc));
+    for (int i = 0; i < argc; ++i)
+        text.push_back(platform::pathText(std::filesystem::path(argv[i])));
+    std::vector<char*> utf8;
+    for (auto& arg : text) utf8.push_back(arg.data());
+    utf8.push_back(nullptr);
+    return bridgeMain(argc, utf8.data());
+}
+#endif

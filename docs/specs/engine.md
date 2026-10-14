@@ -546,7 +546,9 @@ recheck before parking and after wake; stale signals never acknowledge a
 command. The parent rejects resource-bearing replies without closing a
 numeric handle supplied by untrusted child code, returning `bridge.malformed`. Native launch reuses the
 hosting child helper's explicit control inheritance and null stdout, so
-plugin logging cannot block the bridge on an undrained output pipe.
+plugin logging cannot block the bridge on an undrained output pipe. The bridge
+also retains native `--scan` compatibility; Windows takes Unicode arguments
+and writes canonical scan replies through a private binary stdout copy.
 
 Protocol 12 appends a main-thread `PluginStatus` query to the existing
 control plane, with no shared-memory change. It forwards the generic
