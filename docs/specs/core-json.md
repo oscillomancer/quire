@@ -82,7 +82,9 @@ class Value {
     std::size_t size() const;                     // array/object size, else 0
 
     // Deep equality. Numbers compare by numeric value across Int/Double
-    // (1 == 1.0). Object equality ignores member order.
+    // (1 == 1.0), without rounding an integer to floating point. Mixed
+    // comparisons require a finite integral double in the int64 range.
+    // Object equality ignores member order.
     friend bool operator==(const Value&, const Value&);
 };
 

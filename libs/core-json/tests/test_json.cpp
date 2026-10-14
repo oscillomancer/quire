@@ -155,6 +155,13 @@ TEST_CASE("merge patch property for document values") {
 TEST_CASE("numeric equality preserves large integer precision") {
     CHECK(Value(1) == Value(1.0));
     CHECK_FALSE(Value(9007199254740993LL) == Value(9007199254740992.0));
+    CHECK_FALSE(Value(9007199254740992.0) == Value(9007199254740993LL));
+    CHECK(Value(std::numeric_limits<std::int64_t>::min()) == Value(-0x1p63));
+    CHECK(Value(-0x1p63) == Value(std::numeric_limits<std::int64_t>::min()));
+    CHECK_FALSE(Value(std::numeric_limits<std::int64_t>::max()) == Value(0x1p63));
+    CHECK_FALSE(Value(0) == Value(0.5));
+    CHECK_FALSE(Value(0) == Value(std::numeric_limits<double>::quiet_NaN()));
+    CHECK_FALSE(Value(0) == Value(std::numeric_limits<double>::infinity()));
 }
 TEST_CASE("strict identity and saturated integers") {
     Value ordered = Value::object();

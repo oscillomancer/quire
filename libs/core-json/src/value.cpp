@@ -236,10 +236,14 @@ void Object::sortKeys() {
 bool operator==(const Value& a, const Value& b) {
     if (a.isNumber() && b.isNumber()) {
         if (a.isInt() && b.isInt()) return a.asInt() == b.asInt();
-        return (a.isInt() ? static_cast<long double>(a.asInt())
-                          : static_cast<long double>(a.asDouble())) ==
-               (b.isInt() ? static_cast<long double>(b.asInt())
-                          : static_cast<long double>(b.asDouble()));
+        if (!a.isInt() && !b.isInt()) return a.asDouble() == b.asDouble();
+        const auto integer = a.isInt() ? a.asInt() : b.asInt();
+        const double number = a.isInt() ? b.asDouble() : a.asDouble();
+        // long double has only 53 significant bits on ARM64 and Windows.
+        // Check range/integrality before converting the double, so comparison
+        // neither rounds the integer nor invokes an out-of-range conversion.
+        return number >= -0x1p63 && number < 0x1p63 && std::trunc(number) == number &&
+               integer == static_cast<std::int64_t>(number);
     }
     if (a.type() != b.type()) return false;
     switch (a.type()) {
