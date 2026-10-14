@@ -283,6 +283,37 @@ struct L : Effect {
     engine.processor().collect();
 }
 
+TEST(code_that_indexed_out_of_range_still_crossfades_and_its_faults_stay_its_own) {
+    // The old code reads past its block every time; the replacement does not.
+    const std::string level = R"(#include <supple/script.h>
+struct L : Effect {
+    static constexpr Info info = {.name = "L", .id = "com.example.level"};
+    void process(Block& io) {
+        for (int c = 0; c < io.channels; ++c)
+            for (int i = 0; i < io.frames; ++i) io[c][i] *= 1.0 + io[c][io.frames];
+    }
+};
+)";
+    std::string louder = level;
+    louder.replace(louder.find("1.0 + io[c][io.frames]"), 22, "2.0");
+    const auto d = compileText(level);
+    const auto next = compileText(louder);
+    Engine engine(d);
+    engine.activate(48000.0, 64, 2, 2);
+    const std::vector<double> before = render(engine, 512);
+    const auto& status = engine.processor().instance().status;
+    CHECK(status.outOfRange.load() >= 1);
+    engine.processor().swap(next->code(), ParamValues(d->params()));
+    const std::vector<double> fading = render(engine, 64);
+    CHECK(std::fabs(fading[32]) > std::fabs(before[32]) &&
+          std::fabs(fading[32]) < 2.0 * std::fabs(before[32]));
+    CHECK(status.outOfRange.load() == 0);
+    render(engine, 512);
+    CHECK(status.outOfRange.load() == 0);
+    CHECK(!status.silent.load());
+    engine.processor().collect();
+}
+
 TEST(a_new_compile_is_prepared_beside_the_one_playing) {
     // swap() runs the new code's prepare() on this thread while another
     // plays the old: they must share nothing a hook writes (TSan says if

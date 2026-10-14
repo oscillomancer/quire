@@ -69,8 +69,12 @@ The suite's `ScriptLayer` exposes:
   refused replacements also report a corrective hint.
 
 Audio observations clear when replacement code is adopted, on reset or on
-activation. A faulty generation is not crossfaded into replacement code,
-so its faults cannot stop the new generation. Valid code still crossfades.
+activation. Replacement code always crossfades from the old generation.
+What the old generation observes while it fades out (an index out of range,
+its budget spent) is discarded, so its faults are never reported for, and
+cannot stop, the new generation. An old generation its budget stopped is
+silent, so the new code fades in from silence; one that spends its budget
+during the fade goes silent for the rest of it.
 Editor observations clear when replacement code rebuilds the editor.
 Reload errors clear after an accepted replacement or restoration of the
 last accepted source. A reload waiting for a host restart keeps old audio

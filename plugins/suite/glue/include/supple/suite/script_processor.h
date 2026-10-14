@@ -19,6 +19,9 @@
 //     the running one without the host noticing (swap()): prepared on the
 //     main thread, taken at the start of a block, crossfaded over 10 ms. The
 //     one it replaced goes back to the main thread to be freed (collect()).
+//     What the old code observes while it fades out (an index out of range,
+//     its budget spent) is set aside, not the new code's; old code its
+//     budget stopped is silent, so the new code fades in from silence.
 //   - Files (AudioFile, Convolver members) are file properties: the
 //     framework loads each off the audio thread with loadFile() -- the
 //     audio, and an impulse response's convolution too -- and hands it to
@@ -199,8 +202,9 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     }
 
     void update(const ParamValues& v) {
-        if (fading_ && !fadingFaulty_) run(*fading_, v, false);
+        if (fading_ && !fadingStopped_) runFading([&] { run(*fading_, v, false); });
         run(*current_, v, false);
+        checkBudget();
         applyVoiceMode();
     }
 
@@ -286,20 +290,23 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         }
         if (instrument_) silence(block);  // the voices add into it
         endFrame_ = std::max(block.frames - 1, 0);
-        if (fading_ && fadingFaulty_) {
-            runProcess(*current_, block);
-            retire(std::move(fading_));
-        } else if (fading_) {
+        if (fading_) {
             // The old generation plays on a copy of the input; the two meet
             // along a linear fade.
-            for (size_t c = 0; c < fadePointers_.size() && static_cast<int>(c) < block.channels;
-                 ++c)
+            const size_t channels =
+                std::min(fadePointers_.size(), static_cast<size_t>(std::max(block.channels, 0)));
+            for (size_t c = 0; c < channels; ++c)
                 std::copy(block.data[c], block.data[c] + block.frames, fadePointers_[c]);
             Block copy = block;
             copy.data = fadePointers_.data();
-            fadingNow_ = true;  // its voices end with it, not in the voice manager
-            runProcess(*fading_, copy);
-            fadingNow_ = false;
+            if (!fadingStopped_) {
+                fadingNow_ = true;  // its voices end with it, not in the voice manager
+                runFading([&] { runProcess(*fading_, copy); });
+                fadingNow_ = false;
+            }
+            if (fadingStopped_)  // stopped code is silent
+                for (size_t c = 0; c < channels; ++c)
+                    std::fill(fadePointers_[c], fadePointers_[c] + block.frames, 0.0);
             runProcess(*current_, block);
             for (int i = 0; i < block.frames; ++i) {
                 const double t = std::min(1.0, static_cast<double>(fadeDone_ + i) / fadeLength_);
@@ -313,6 +320,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         } else {
             runProcess(*current_, block);
         }
+        checkBudget();
         if (stopped_) silence(block);
         report(*current_);
         if (instrument_) voices_.advance(block.frames);
@@ -408,7 +416,6 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         D::CurrentScope scope(&instance_);
         instance_.budget = kBudgetPerHook;
         if (auto hook = g.program().update()) hook(&instance_, g.self());
-        checkBudget();
         for (size_t i = 0; i < g.paramCount(); ++i)
             if (S::Param* p = g.param(i)) D::ParamBinding::setValue(*p, p->value(), false);
     }
@@ -443,13 +450,30 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         }
         for (uint16_t i : table_->smoothed())
             if (S::Param* p = g.param(i)) D::ParamBinding::setGlide(*p, nullptr, 0);
-        checkBudget();
+    }
+
+    // A hook of the generation fading out. What it observes is not the new
+    // code's, so the status goes back to what it was; budget it spends
+    // stops it for the rest of the fade, not the plugin.
+    template <class Hook>
+    void runFading(Hook&& hook) {
+        D::Status& s = instance_.status;
+        constexpr auto relaxed = std::memory_order_relaxed;
+        const uint32_t range = s.outOfRange.load(relaxed),
+                       rangeLine = s.outOfRangeLine.load(relaxed),
+                       budget = s.budgetExceeded.load(relaxed),
+                       budgetLine = s.budgetLine.load(relaxed);
+        hook();
+        if (s.budgetExceeded.load(relaxed) != budget) fadingStopped_ = true;
+        s.outOfRange.store(range, relaxed);
+        s.outOfRangeLine.store(rangeLine, relaxed);
+        s.budgetExceeded.store(budget, relaxed);
+        s.budgetLine.store(budgetLine, relaxed);
     }
 
     void adopt(Generation* next) {
-        // Faulty old code must not fault again during the replacement's fade.
-        const bool faulty = instance_.status.budgetExceeded.load(std::memory_order_relaxed) ||
-                            instance_.status.outOfRange.load(std::memory_order_relaxed);
+        // Old code its budget stopped stays silent through the fade.
+        const bool stopped = stopped_;
         instance_.status.clear();
         budgetSeen_ = 0;
         // Its values are the running one's; it starts from them, snapped.
@@ -463,7 +487,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         }
         if (fading_) retire(std::move(fading_));
         fading_ = std::move(current_);
-        fadingFaulty_ = faulty;
+        fadingStopped_ = stopped;
         current_.reset(next);
         // The files are the new code's now; the old lets go of them.
         bindFiles(*current_);
@@ -602,7 +626,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     int fadeLength_ = 480, fadeDone_ = 0;
     double spare_ = 0.0;
     bool stopped_ = false;
-    bool fadingFaulty_ = false;
+    bool fadingStopped_ = false;  // the old code ran out of budget: it fades from silence
     uint32_t budgetSeen_ = 0;
     int latency_ = 0;
     uint32_t tail_ = 0;
