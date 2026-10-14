@@ -26,6 +26,10 @@
 #include <pthread.h>
 #endif
 
+// These are the template's DSP types, whose layouts differ from core-dsp.
+// Keep their symbols private to the script runtime when both libraries link
+// into the DAW. The template files themselves remain byte-identical.
+#define dsp script_runtime_dsp
 #include "dsp/Dynamics.h"
 #include "dsp/Envelope.h"
 #include "dsp/Filters.h"
@@ -34,12 +38,14 @@
 #include "dsp/Oscillators.h"
 #include "dsp/Oversampler.h"
 #include "dsp/Stft.h"
+#undef dsp
 #include "supple/script.h"
 #include "supple/script_code.h"
 #include "supple/script_files.h"
 #include "supple/script_runtime.h"
 
 namespace supple::script {
+namespace dsp = ::supple::script_runtime_dsp;
 
 Patches& Patches::add(const char* name) {
     builder_->add(name);
