@@ -37,8 +37,8 @@ std::string firstError(const std::string& source) {
 }
 
 // Only the generated hook is an audio entry point; compilation and test
-// buffers are prepared outside it. The interpreter's RT policy is a
-// separate open review issue: it lazily allocates on its first call.
+// buffers are prepared outside it. The interpreter is a test and diagnostic
+// backend, not real-time safe: it allocates on its first call.
 void callRealtime(scriptc::Program::ProcessHook hook, void* instance, void* self, void* block)
 #if defined(__clang__) && __has_cpp_attribute(clang::nonblocking)
     [[clang::nonblocking]]
@@ -135,6 +135,35 @@ TEST_CASE("a gain script compiles and applies its gain") {
         CHECK(audio.data[0][0] == expected);
         CHECK(audio.data[1][99] == expected);
     }
+}
+
+TEST_CASE("deep nesting is refused before the compiler's walks could exhaust its stack") {
+    auto nested = [](const std::string& open, const std::string& middle, const std::string& close,
+                     int levels) {
+        std::string text;
+        for (int i = 0; i < levels; ++i) text += open;
+        text += middle;
+        for (int i = 0; i < levels; ++i) text += close;
+        return text;
+    };
+    auto plugin = [](const std::string& body) {
+        return "#include <supple/script.h>\nstruct T : Effect {\n"
+               "static constexpr Info info = {.name = \"T\", .id = \"com.example.t\"};\n" +
+               body + "\n};\n";
+    };
+    auto chain = [](const std::string& link, int links) {
+        std::string text = "1";
+        for (int i = 0; i < links; ++i) text += link;
+        return text;
+    };
+    const std::string process = " void process(Block& io) {}";
+    CHECK(firstError(plugin("double x = " + nested("(", "1", ")", 100) + ";" + process)) == "");
+    CHECK(firstError(plugin("double x = " + nested("(", "1", ")", 30000) + ";" + process)) ==
+          "script.nesting");
+    CHECK(firstError(plugin("double x = " + chain(" + 1", 30000) + ";" + process)) ==
+          "script.nesting");
+    CHECK(firstError(plugin("void process(Block& io) " + nested("{", "", "}", 30000))) ==
+          "script.nesting");
 }
 
 TEST_CASE("the first scripts' mistakes are refused with a hint") {

@@ -131,8 +131,31 @@ class Parser {
         }
     }
     void error(Loc loc, std::string code, std::string message, std::string hint) {
+        if (abandoned_) return;
         diags_.error(loc, std::move(code), std::move(message), std::move(hint));
     }
+
+    // How deep expressions, statements, initializers and types may nest:
+    // the checker and code generator walk them recursively, so source within
+    // the size limit could otherwise exhaust the stack. A chain (a + b + c,
+    // a.f().g(), a, b) nests one level per link. Past the limit the parse
+    // stops with one error.
+    static constexpr int kMaxNesting = 256;
+    void deeper(int levels = 1) {
+        depth_ += levels;
+        if (depth_ <= kMaxNesting || abandoned_) return;
+        error(cur().loc, "script.nesting", "expressions, blocks or types nest too deeply here",
+              "split the expression into named locals, or move inner blocks into functions");
+        abandoned_ = true;
+        pos_ = toks_.size() - 1;  // the end: every loop stops there
+    }
+    struct Nest {
+        explicit Nest(Parser& parser) : p(parser) { p.deeper(); }
+        ~Nest() { --p.depth_; }
+        Nest(const Nest&) = delete;
+        Nest& operator=(const Nest&) = delete;
+        Parser& p;
+    };
     // Skips to the end of the current statement or declaration after an error.
     void recover() {
         int depth = 0;
@@ -298,6 +321,7 @@ class Parser {
     }
 
     TypeSpec* typeSpec(bool allowStorage = true) {
+        const Nest nest(*this);
         TypeSpec* s = unit_.spec();
         s->loc = cur().loc;
         // Leading specifiers.
@@ -829,6 +853,7 @@ class Parser {
     }
 
     Stmt* statement() {
+        const Nest nest(*this);
         const Token& t = cur();
         const Loc loc = t.loc;
         if (atPunct("{")) return compound();
@@ -1037,17 +1062,22 @@ class Parser {
 
     Expr* expression() {
         Expr* e = assignment();
+        int links = 0;
         while (atPunct(",")) {
+            deeper();
+            ++links;
             auto* b = unit_.expr<BinaryExpr>(advance().loc);
             b->op = ",";
             b->left = e;
             b->right = assignment();
             e = b;
         }
+        depth_ -= links;
         return e;
     }
 
     Expr* assignment() {
+        const Nest nest(*this);
         Expr* left = conditional();
         static const char* ops[] = {
             "=", "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "|=", "^="};
@@ -1092,6 +1122,7 @@ class Parser {
 
     Expr* binary(int minPrec) {
         Expr* left = unary();
+        int links = 0;
         while (true) {
             const Token& t = cur();
             if (t.kind != Tok::Punct) break;
@@ -1106,6 +1137,8 @@ class Parser {
             if (op == "<=>")
                 error(loc, "script.unsupported.spaceship",
                       "the three-way comparison is not in the subset", "compare with <, == and >");
+            deeper();
+            ++links;
             Expr* right = binary(p + 1);
             auto* b = unit_.expr<BinaryExpr>(loc);
             b->op = op;
@@ -1113,10 +1146,12 @@ class Parser {
             b->right = right;
             left = b;
         }
+        depth_ -= links;
         return left;
     }
 
     Expr* unary() {
+        const Nest nest(*this);
         const Token& t = cur();
         if (t.kind == Tok::Punct) {
             if (t.text == "-" || t.text == "+" || t.text == "!" || t.text == "~" ||
@@ -1388,8 +1423,14 @@ class Parser {
     }
 
     Expr* postfix(Expr* e) {
+        int links = 0;
         while (true) {
             const Token& t = cur();
+            if (!(t.punct("(") || t.punct("[") || t.punct(".") || t.punct("->") || t.punct("++") ||
+                  t.punct("--") || (t.punct("{") && e->kind == ExprKind::Name)))
+                break;
+            deeper();
+            ++links;
             if (t.punct("(")) {
                 auto* c = unit_.expr<CallExpr>(advance().loc);
                 c->callee = e;
@@ -1435,14 +1476,14 @@ class Parser {
                 c->target->path = static_cast<NameExpr*>(e)->path;
                 c->operand = initList();
                 e = c;
-            } else {
-                break;
             }
         }
+        depth_ -= links;
         return e;
     }
 
     InitListExpr* initList() {
+        const Nest nest(*this);
         auto* l = unit_.expr<InitListExpr>(cur().loc);
         expect("{");
         while (!atPunct("}") && !at(Tok::End)) {
@@ -1472,6 +1513,8 @@ class Parser {
     Diagnostics& diags_;
     size_t pos_ = 0;
     int inTemplate_ = 0;
+    int depth_ = 0;
+    bool abandoned_ = false;
     std::set<std::string> types_;
 };
 
