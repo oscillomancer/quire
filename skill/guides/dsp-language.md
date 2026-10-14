@@ -258,10 +258,9 @@ Convolver room = impulseResponse("Room").help("A recording of a space's echo.");
 
 Its path is a property of the plugin, saved with it and set in a patch,
 `{"properties": {"sample": "/home/me/kick.wav"}}` (the key is the member's
-name in snake_case, or `.withKey("...")`). The runtime loads it off the
-audio thread. File keys use lowercase letters, digits and underscores,
-without dots. The runtime loads the file
-as WAV, AIFF or FLAC, resampled to the session's rate, and hands
+name in snake_case, or `.withKey("...")`). File keys use lowercase letters,
+digits and underscores, without dots. The runtime loads WAV, AIFF or FLAC
+off the audio thread, resamples to the session's rate, and hands
 it over at the start of a block; until then, and with no file, `loaded()`
 is false. Not in `prepare()`: files arrive after it.
 
@@ -284,7 +283,7 @@ or both, and `pointer()` to make its drawing respond to the mouse:
 |---|---|---|
 | `void editor(Editor& e)` | Once, as the editor opens (and after a reload) | Its size and its controls |
 | `void draw(Canvas& g)` | At each repaint | What lies under the controls: panels, graphs, meters, text |
-| `void pointer(const Pointer& p)` | As the pointer acts where no control is (needs `draw()`) | Handles to drag, shapes to click: `p.edit()`s parameters |
+| `void pointer(const Pointer& p)` | As the pointer acts where no control is (needs `draw()`) | Handles to drag, shapes to click: edits parameters with `Param::edit()` |
 
 ```cpp
 #include <supple/script.h>

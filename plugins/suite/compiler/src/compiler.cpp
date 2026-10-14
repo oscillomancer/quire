@@ -15,9 +15,9 @@ Result compile(std::string_view source, const Options& options) {
     Diagnostics diags;
     Unit unit;
     if (source.size() > (4u << 20)) {
-        diags.error(
-            Loc{1, 1}, "script.too_large", "the script is larger than 4 MiB",
-            "keep a script under 1 MiB: compute tables in prepare() rather than writing them out");
+        diags.error(Loc{1, 1}, "script.too_large", "the script is larger than 4 MiB",
+                    "keep a script at most 4 MiB: compute tables in prepare() rather than writing "
+                    "them out");
     } else {
         std::vector<Token> tokens = lex(source, diags);
         parse(tokens, unit, diags);
