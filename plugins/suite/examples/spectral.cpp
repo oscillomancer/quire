@@ -49,10 +49,12 @@ struct Spectral : Effect {
     }
 
     void process(Block& io) {
-        for (int c = 0; c < io.channels && c < 2; ++c) {
-            Stft& s = stft[c];
-            DelayLine& d = dry[c];
-            for (int i = 0; i < io.frames; ++i) {
+        // Consume the shared random stream in sample/channel order, so
+        // whispering is the same at every host block size.
+        for (int i = 0; i < io.frames; ++i) {
+            for (int c = 0; c < io.channels && c < 2; ++c) {
+                Stft& s = stft[c];
+                DelayLine& d = dry[c];
                 const double x = io[c][i];
                 if (s.push(x)) change(s);
                 const double wet = s.pull();

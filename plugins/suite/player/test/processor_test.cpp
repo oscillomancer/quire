@@ -222,6 +222,16 @@ TEST(the_engine_plays_a_script_as_its_own_runner_does_bit_for_bit) {
               first < played.size() ? audio.data[0][first] : 0.0);
 }
 
+TEST(spectral_whisper_is_identical_across_host_block_sizes) {
+    const auto d = compileText(exampleScript("spectral.cpp"));
+    Engine small(d), large(d);
+    small.activate(48000.0, 1024, 2, 2);
+    large.activate(48000.0, 1024, 2, 2);
+    setPlain(small, d->params().at(0).id, 2.0);
+    setPlain(large, d->params().at(0).id, 2.0);
+    CHECK(render(small, 4096, 64) == render(large, 4096, 1024));
+}
+
 TEST(a_reset_returns_the_script_to_what_prepare_left) {
     const auto d = compileText(libraryScript("tilt"));
     Engine engine(d);
