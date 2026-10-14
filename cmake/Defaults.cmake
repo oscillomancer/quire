@@ -5,6 +5,11 @@ set(SUPPLE_SANITIZE "" CACHE STRING
     "Sanitizer set for first-party targets: '', address, undefined, thread, realtime (comma-separated)")
 option(SUPPLE_WERROR "Treat warnings as errors on first-party targets" OFF)
 
+if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+  include(CheckCXXCompilerFlag)
+  check_cxx_compiler_flag(-Wno-perf-constraint-implies-noexcept SUPPLE_APPLE_RT_NOEXCEPT_WARNING)
+endif()
+
 set(_supple_sanitize_flags "")
 if(SUPPLE_SANITIZE)
   string(REPLACE "," ";" _san_list "${SUPPLE_SANITIZE}")
@@ -61,6 +66,12 @@ function(supple_target_defaults target)
     $<$<CXX_COMPILER_ID:GNU>:-Wno-missing-field-initializers>)
   if(SUPPLE_WERROR)
     target_compile_options(${target} PRIVATE $<IF:$<BOOL:${MSVC}>,/WX,-Werror>)
+  endif()
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang" AND SUPPLE_APPLE_RT_NOEXCEPT_WARNING)
+    # AppleClang diagnoses existing nonblocking signatures without explicit
+    # noexcept. Keep their types and RT annotations; suppress only this
+    # signature advisory, not function-effect checks or other warnings.
+    target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-perf-constraint-implies-noexcept>)
   endif()
   if(_supple_sanitize_flags)
     target_compile_options(${target} PRIVATE ${_supple_sanitize_flags})
