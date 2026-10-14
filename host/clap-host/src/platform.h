@@ -3,6 +3,7 @@
 #pragma once
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 #include "supple/base/result.h"
 namespace supple::host::platform {

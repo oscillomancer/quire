@@ -9,5 +9,6 @@ namespace supple::host {
 Result<std::vector<PluginInfo>> scanModuleInProcess(const std::filesystem::path& module);
 json::Value scanReply(const Result<std::vector<PluginInfo>>& result);
 Result<std::vector<PluginInfo>> parseScanReply(const json::Value& reply,
-                                               const std::filesystem::path& module);
+                                               const std::filesystem::path& module,
+                                               std::optional<bool> vst3Format = {});
 }  // namespace supple::host

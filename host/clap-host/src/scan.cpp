@@ -238,9 +238,9 @@ json::Value scanReply(const Result<std::vector<PluginInfo>>& result) {
     return reply;
 }
 
-Result<std::vector<PluginInfo>> parseScanReply(const json::Value& reply, const fs::path& module) {
-    std::error_code ec;
-    const bool vst3 = module.extension() == ".vst3";
+Result<std::vector<PluginInfo>> parseScanReply(const json::Value& reply, const fs::path& module,
+                                               std::optional<bool> vst3Format) {
+    const bool vst3 = vst3Format.value_or(module.extension() == ".vst3");
     const auto* schema = reply.find("schema");
     if (!schema || !schema->isString() || schema->asString() != kSchema) return invalidOutput();
     const auto* error = reply.find("error");
@@ -379,7 +379,7 @@ Result<std::vector<PluginInfo>> scan(std::span<const fs::path> paths, const Scan
         bool cacheHit = false;
         auto outcome = [&]() -> Result<std::vector<PluginInfo>> {
             if (cached) {
-                auto parsed = parseScanReply(*cached, canonical);
+                auto parsed = parseScanReply(*cached, canonical, module.extension() == ".vst3");
                 if (parsed || (cached->find("error") && scanReply(parsed) == *cached)) {
                     cacheHit = true;
                     if (parsed)
