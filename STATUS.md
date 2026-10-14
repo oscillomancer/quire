@@ -230,7 +230,8 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
   of the player with the script appended, which offers that one plugin), or
   a C++ project of the plugin template that builds the same plugin, bit for
   bit, with the script compiled as C++ (every example's export is checked
-  against the player and for semantic conformance). Effects and instruments
+  against the player, for semantic conformance and factory patches, and
+  passes its own tests). Effects and instruments
   (voices the runtime manages, CLAP note expressions and per-note
   modulation; no note effects); samples and impulse responses
   as files a patch names (loaded whole, no streaming from disk); spectral

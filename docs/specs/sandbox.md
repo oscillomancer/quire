@@ -438,7 +438,10 @@ whose instrument render rejects a sampler silent with no sample loaded).
 The test checks signal names/counts, WAV frame counts and byte equality.
 Sampler/reverb receive generated audio files with audible patches; the
 compressor receives a timed key, and instruments receive custom notes.
-Factory-patch export verification is reserved for the subsequent patch work.
+Factory patches must match: the player, a player export and the built
+project list the same names in the same order, and each applies the same
+full patch; tilt's must be Flat, Warm, Air, with Warm at tilt -3 dB,
+pivot 800 Hz, output 0 dB.
 
 ## Implementation notes — `host/clap-host` (2026-09-26)
 

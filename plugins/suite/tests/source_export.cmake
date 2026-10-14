@@ -1,4 +1,5 @@
-# Source-export conformance and player/native audio equivalence (ADR-0032).
+# Source-export conformance, factory patches and player/native audio
+# equivalence (ADR-0032).
 # EXAMPLES runs every example, then SCRIPT/PATCH (the library tilt regression),
 # sequentially, each in a fresh project/build. Without EXAMPLES, run one case.
 # Required: SANDBOX PLAYER KIT SCRIPT PATCH WORK THIRD_PARTY CC CXX BUILD_TYPE
@@ -95,7 +96,67 @@ run("${CASE}'s own tests" ${CMAKE_CTEST_COMMAND} --test-dir "${WORK}/build" --ou
 set(built "${WORK}/build/plugins/${plugin_name}.clap")
 run("${CASE}'s semantic conformance" ${CMAKE_COMMAND} -E env "HOME=${home}"
     "SUPPLE_SCRIPT_LIBRARY=${WORK}/workdir/scripts" "${CONFORMANCE}" "${built}" "${id}")
-# Factory-patch checks go here after the coordinator merges that export behavior.
+
+# Factory patches: the same names, in the same order, applying the same
+# values from the library's player, a player export and the built project.
+run("exporting ${CASE} for the player" ${sandbox} exec
+    "{\"command\":\"dsp.export\",\"args\":{\"script\":\"${name}\",\"folder\":\"${WORK}/player-export\"}}"
+    --workdir "${WORK}/workdir" --plugin-path "${PLAYER}")
+string(JSON player_export GET "${output}" path)
+# The patches `plugin` lists from `path`, each as preset.load applies it.
+function(factory_patches plugin path out)
+    run("listing ${CASE}'s factory patches from ${path}" ${sandbox} exec
+        "{\"command\":\"preset.list\",\"args\":{\"plugin\":\"${plugin}\",\"source\":\"factory\"}}"
+        --workdir "${WORK}/workdir" --plugin-path "${path}")
+    string(JSON count LENGTH "${output}" presets)
+    set(steps "{\"command\":\"plugin.load\",\"args\":{\"plugin\":\"${plugin}\"},\"as\":\"p\"}")
+    set(names "")
+    if (count GREATER 0)
+        math(EXPR last "${count} - 1")
+        foreach(i RANGE ${last})
+            string(JSON patch_name GET "${output}" presets ${i} name)
+            list(APPEND names "${patch_name}")
+            string(APPEND steps ",{\"command\":\"preset.load\",\"args\":{\"instance\":\"\${p.instance}\",\"name\":\"${patch_name}\",\"source\":\"factory\"}}"
+                ",{\"command\":\"patch.get\",\"args\":{\"instance\":\"\${p.instance}\",\"detail\":\"full\"}}")
+        endforeach()
+    endif()
+    run("applying ${CASE}'s factory patches from ${path}" ${sandbox} exec
+        "{\"command\":\"batch\",\"args\":{\"steps\":[${steps}]}}"
+        --workdir "${WORK}/workdir" --plugin-path "${path}")
+    set(patches "${names}")
+    if (count GREATER 0)
+        foreach(i RANGE 1 ${count})
+            math(EXPR step "2 * ${i}")
+            string(JSON patch GET "${output}" results ${step} patch)
+            string(APPEND patches "\n${patch}")
+            string(JSON patch_name GET "${patch}" name)
+            if (patch_name STREQUAL "Warm")
+                string(JSON warm GET "${patch}" params)
+                set(${out}_warm "${warm}" PARENT_SCOPE)
+            endif()
+        endforeach()
+    endif()
+    set(${out} "${patches}" PARENT_SCOPE)
+endfunction()
+factory_patches("${id}" "${PLAYER}" library_patches)
+factory_patches("${id}" "${player_export}" player_export_patches)
+factory_patches("${id}" "${built}" source_export_patches)
+foreach(mode player_export source_export)
+    if (NOT ${mode}_patches STREQUAL library_patches)
+        message(FATAL_ERROR "${CASE}: the ${mode}'s factory patches differ from the player's:\n"
+            "${${mode}_patches}\nvs\n${library_patches}")
+    endif()
+endforeach()
+if (name STREQUAL "tilt")
+    string(FIND "${library_patches}" "Flat;Warm;Air\n" at)
+    if (NOT at EQUAL 0 OR NOT DEFINED library_patches_warm)
+        message(FATAL_ERROR "${CASE}: expected factory patches Flat, Warm, Air:\n${library_patches}")
+    endif()
+    string(JSON warm_ok EQUAL "${library_patches_warm}" "{\"tilt\":-3.0,\"pivot\":800.0,\"output\":0.0}")
+    if (NOT warm_ok)
+        message(FATAL_ERROR "${CASE}: Warm applies ${library_patches_warm}, not tilt -3, pivot 800, output 0")
+    endif()
+endif()
 
 set(patch "{\"params\":${PATCH}}")
 if (CASE STREQUAL "sampler" OR CASE STREQUAL "reverb")
