@@ -3,6 +3,7 @@
 #pragma once
 
 #include <supple/notation/notation.h>
+#include "supple/base/chars.h"
 
 #include <algorithm>
 #include <array>
@@ -82,7 +83,7 @@ inline std::optional<std::int64_t> integer(std::string_view text) {
 inline std::optional<double> number(std::string_view text) {
     if (!text.empty() && text.front() == '+') text.remove_prefix(1);
     double value = 0;
-    auto [p, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    auto [p, error] = ::supple::fromChars(text.data(), text.data() + text.size(), value);
     if (error != std::errc{} || p != text.data() + text.size() || !std::isfinite(value))
         return std::nullopt;
     return value;

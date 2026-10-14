@@ -5,6 +5,7 @@
 #include <charconv>
 #include <cmath>
 #include <limits>
+#include "supple/base/chars.h"
 namespace supple::json {
 namespace {
 void appendUtf8(std::string& s, unsigned cp) {
@@ -209,7 +210,7 @@ class Parser {
                 return Value(static_cast<long long>(n));
         }
         double d = 0;
-        auto [p, ec] = std::from_chars(literal.data(), literal.data() + literal.size(), d);
+        auto [p, ec] = ::supple::fromChars(literal.data(), literal.data() + literal.size(), d);
         if (ec != std::errc{} || p != literal.data() + literal.size() || !std::isfinite(d))
             return fail("number_out_of_range", "number is out of range",
                         "use a smaller finite number");

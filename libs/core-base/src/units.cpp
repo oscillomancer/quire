@@ -6,6 +6,7 @@
 #include <cmath>
 #include <iomanip>
 #include <sstream>
+#include "supple/base/chars.h"
 namespace supple::units {
 namespace {
 struct Alias {
@@ -57,7 +58,7 @@ Result<double> parseQuantity(std::string_view text, Unit fieldUnit) {
                      "use a number and " + std::string(unitName(fieldUnit)));
     if (text.front() == '+') text.remove_prefix(1);
     double value = 0;
-    auto [p, ec] = std::from_chars(text.data(), text.data() + text.size(), value);
+    auto [p, ec] = ::supple::fromChars(text.data(), text.data() + text.size(), value);
     if (ec != std::errc{} || p == text.data() || !std::isfinite(value))
         return Error("schema.unit", "invalid quantity number", {},
                      "use a finite number and " + std::string(unitName(fieldUnit)));

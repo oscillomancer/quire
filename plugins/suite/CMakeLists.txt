@@ -46,7 +46,7 @@ set_target_properties(suite-framework-core PROPERTIES POSITION_INDEPENDENT_CODE 
 # is built with the plugin that uses it.)
 add_library(suite-semantic STATIC semantic/src/json.cpp semantic/src/semantics.cpp)
 target_include_directories(suite-semantic PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/semantic/include)
-target_link_libraries(suite-semantic PUBLIC suite-framework-core)
+target_link_libraries(suite-semantic PUBLIC suite-framework-core PRIVATE supple::core-base)
 set_target_properties(suite-semantic PROPERTIES POSITION_INDEPENDENT_CODE ON)
 supple_target_defaults(suite-semantic)
 add_library(supple::suite-semantic ALIAS suite-semantic)
@@ -106,6 +106,13 @@ add_custom_target(script-export-kit ALL
           ${kit}/suite/semantic/include
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/semantic/src
           ${kit}/suite/semantic/src
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${kit}/suite/base/include/supple/base ${kit}/suite/base/src
+  COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/libs/core-base/include/supple/base/chars.h
+          ${kit}/suite/base/include/supple/base
+  COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/libs/core-base/src/chars.cpp ${kit}/suite/base/src
+  COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE ${kit}/suite/base
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/third_party/fast_float
+          ${kit}/suite/third_party/fast_float
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/glue ${kit}/suite/glue
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/tools ${kit}/suite/tools
   COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/suite.cmake

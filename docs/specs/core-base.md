@@ -36,6 +36,20 @@ The bridge uses this shared relay through optional
 spec §1). The app's in-process instances are not subscribed yet. EngineApp
 service scheduling and bridge-to-parent notifications are separate work.
 
+## Floating-point parsing
+
+`supple/base/chars.h` declares `supple::fromChars(first, last, value)` for
+`float&` and `double&`. Both return `std::from_chars_result` and implement
+the default general-format grammar: no leading whitespace or plus sign,
+optional minus sign, decimal/scientific notation, and infinity/NaN. The
+pointer stops after the matched prefix; an unmatched exponent is not consumed.
+Invalid input returns `invalid_argument` with the pointer at `first`;
+overflow or underflow returns `result_out_of_range` after the numeric prefix.
+Both errors leave the destination unchanged. Parsing is locale-independent
+and rounds to nearest, ties to even, using vendored fast_float under MIT on
+every platform. Integer parsing remains `std::from_chars`. No additional
+format argument or long-double overload is provided.
+
 ## Platform builds
 
 The wake relay, futex wait/wake, stack prefault and thread scheduling

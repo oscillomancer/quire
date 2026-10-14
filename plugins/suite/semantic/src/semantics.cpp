@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Supple Audio
 #include "supple/suite/semantics.h"
+#include "supple/base/chars.h"
 
 #include <algorithm>
 #include <array>
@@ -255,7 +256,7 @@ std::string curveText(const ParamDef& p) {
     while (s.size() > 1 && s.back() == '0') s.pop_back();
     if (s.back() == '.') s.pop_back();
     double back = 0.0;
-    const auto r = std::from_chars(s.data(), s.data() + s.size(), back);
+    const auto r = ::supple::fromChars(s.data(), s.data() + s.size(), back);
     if (r.ec != std::errc() || back != p.curve) {
         char shortest[32];
         const auto t = std::to_chars(shortest, shortest + sizeof(shortest), p.curve);
@@ -574,7 +575,7 @@ bool PatchCodec::readValue(size_t index, const json::Value& v, const std::string
         const char* first = text.data();
         const char* last = text.data() + text.size();
         if (first != last && *first == '+') ++first;
-        const auto r = std::from_chars(first, last, physical);
+        const auto r = ::supple::fromChars(first, last, physical);
         if (r.ec != std::errc() || !std::isfinite(physical))
             return typeError(unit.name
                                  ? "a number of " + std::string(unit.name) + ", e.g. " +

@@ -4,6 +4,15 @@
 # added to the product's targets. The player adds the script compiler; a
 # source export adds its script.
 
+# Exports carry the same MIT core-base parser and fast_float headers. The
+# player uses those files directly from the monorepo, without a second parser.
+set(suite_chars ${SUPPLE_SUITE}/base)
+set(suite_fast_float ${SUPPLE_SUITE}/third_party/fast_float)
+if (NOT EXISTS "${suite_chars}/include/supple/base/chars.h")
+    set(suite_chars ${SUPPLE_SUITE}/../../libs/core-base)
+    set(suite_fast_float ${SUPPLE_SUITE}/../../third_party/fast_float)
+endif()
+
 add_library(suite-runtime STATIC ${SUPPLE_SUITE}/runtime/src/runtime.cpp)
 target_include_directories(suite-runtime PUBLIC ${SUPPLE_SUITE}/runtime/include)
 target_include_directories(suite-runtime SYSTEM PRIVATE ${SUPPLE_FRAMEWORK})
@@ -14,10 +23,13 @@ endif()
 supple_defaults(suite-runtime)
 
 target_sources(product-core PRIVATE
+    ${suite_chars}/src/chars.cpp
     ${SUPPLE_SUITE}/semantic/src/json.cpp
     ${SUPPLE_SUITE}/semantic/src/semantics.cpp
     ${SUPPLE_SUITE}/glue/src/script_definition.cpp)
 target_include_directories(product-core PUBLIC ${SUPPLE_SUITE}/semantic/include ${SUPPLE_SUITE}/glue/include)
+target_include_directories(product-core PRIVATE ${suite_chars}/include)
+target_include_directories(product-core SYSTEM PRIVATE ${suite_fast_float}/include)
 target_link_libraries(product-core PUBLIC suite-runtime)
 if (TARGET product-impl)
     target_sources(product-impl PRIVATE

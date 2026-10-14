@@ -294,6 +294,11 @@ within −120 dBFS for the stock test synth).
 | `dsp.preview` | action | `plugin` (id) or `script` (name); `patch?` (merge); `signal?` (an effect's `sine`, the default, `sweep`, `impulse`, `noise`, `silence`; an instrument's `notes`, the default, `note`, `silence`); `level_db` (-12); `frequency_hz` (1000); `seconds` (1; 0 plays nothing); `scale` (1, 0.5 to 3); `pointer?` (up to 64 steps before the picture, in its pixels at scale 1: `{action, x, y}` with `action` `move`, `press`, `release`, `click`, `double_click`, `drag` (with `to_x`, `to_y`) or `wheel` (`steps`, 1; up positive), and `shift`, `ctrl`, `alt`) | `path` (a PNG of the editor, drawn without a window after the signal played through a fresh instance and the pointer acted, in the renders folder), `width` and `height` in pixels, `plugin`, `edits` (a merge patch: what the pointer changed), `problems` (the editor code's loop budget or out-of-range index, with the line), `log`. Needs the plugin's `com.suppleaudio.editor-picture/1` (`docs/specs/editor-picture-extension.md`), which the script player has |
 | `dsp.test` | action | `plugin` (id) or `script` (name); `patch?` (merge); `signals?` (an effect's `sine`, `sweep`, `impulse`, `noise`, `silence`, all by default; an instrument's `notes`, `note`, `silence`, all by default); `level_db` (each audio signal's peak, -12); `frequency_hz` (1000); `seconds` (1); `save`; `automation?`, `sidechain?`, `notes?` (below) | per signal: `peak_dbfs`, `rms_dbfs`, `dc`, `clipped`, `denormals`, sine `gain_db` and `thd_percent`, impulse `response_db` at octave centres, note `pitch_hz`, an instrument's `release_ms`, `path` when saved, optional `automation` and `sidechain` measurements (below); `latency`, `cpu_percent` (measured), `problems` (prose), `log` |
 
+Source exports carry the MIT core-base floating-point parser and the pinned
+fast_float headers/license used by the suite's semantic layer. They build
+offline without linking the rest of the monorepo. Player and export notices
+include fast_float's selected MIT license.
+
 A CLAP `dsp.export` requires the source player's license and notices (or an
 existing export's combined notices) to be readable before it writes the
 plugin. Missing files fail with `dsp.notices` at `/script`, with a hint to

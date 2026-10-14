@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Supple Audio
 #include "supple/suite/json.h"
+#include "supple/base/chars.h"
 
 #include <algorithm>
 #include <charconv>
@@ -494,7 +495,7 @@ class Parser {
             if (r.ec == std::errc() && r.ptr == last) return out = Value(v), true;
         }
         double d = 0.0;
-        const auto r = std::from_chars(first, last, d);
+        const auto r = ::supple::fromChars(first, last, d);
         if (r.ec != std::errc() || r.ptr != last || !std::isfinite(d))
             return fail("json.parse.number_out_of_range", "a number too large for a double",
                         "use a smaller number");

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Supple Audio
 #include "supple/params/params.h"
+#include "supple/base/chars.h"
 
 #include <clap/ext/params.h>
 
@@ -541,7 +542,7 @@ std::string curveName(const Curve& c, Type type) {
         while (s.size() > 1 && s.back() == '0') s.pop_back();
         if (!s.empty() && s.back() == '.') s.pop_back();
         double parsed = 0;
-        const auto old = std::from_chars(s.data(), s.data() + s.size(), parsed);
+        const auto old = ::supple::fromChars(s.data(), s.data() + s.size(), parsed);
         if (old.ec == std::errc{} && old.ptr == s.data() + s.size() && parsed == c.k) return s;
         // General format without a precision emits the shortest round-trip text.
         std::array<char, 64> text{};
@@ -688,7 +689,7 @@ Result<std::unique_ptr<DescribedParam>> fromDescription(std::string_view key,
         if (colon != std::string::npos) {
             const char* begin = curve.data() + colon + 1;
             const char* end = curve.data() + curve.size();
-            const auto parsed = std::from_chars(begin, end, k);
+            const auto parsed = ::supple::fromChars(begin, end, k);
             if (parsed.ec != std::errc{} || parsed.ptr != end || !std::isfinite(k) || k <= 0)
                 return Error("params.description", "curve exponent must be positive and finite",
                              json::pointerJoin(json::pointerJoin("", out->key), "curve"),
