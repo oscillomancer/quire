@@ -429,3 +429,15 @@ TEST_CASE("every whole script in the guides compiles") {
     }
     CHECK(scripts >= 3);
 }
+
+TEST_CASE("invalid constant division reports an error without executing it") {
+    for (const char* op : {"/", "%"}) {
+        const std::string source =
+            "#include <supple/script.h>\n"
+            "struct T : Effect {\n"
+            "static constexpr Info info = {.name = \"T\", .id = \"com.example.t\"};\n"
+            "void process(Block& io) { int x = (-2147483647 - 1) " +
+            std::string(op) + " -1; }\n};\n";
+        CHECK(firstError(source) == "script.ub.division");
+    }
+}

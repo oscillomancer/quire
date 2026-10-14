@@ -1397,11 +1397,14 @@ std::int64_t intOp(const std::string& op, std::int64_t a, std::int64_t b) {
         r = x - y;
     else if (op == "*")
         r = x * y;
-    else if (op == "/")
-        return b ? static_cast<std::int32_t>(a) / static_cast<std::int32_t>(b) : 0;
-    else if (op == "%")
-        return b ? static_cast<std::int32_t>(a) % static_cast<std::int32_t>(b) : 0;
-    else if (op == "&")
+    else if (op == "/" || op == "%") {
+        // Invalid divisors already have a diagnostic, but folding still
+        // visits the expression. Do not execute undefined arithmetic in
+        // the compiler while reporting an invalid script.
+        if (b <= 0) return 0;
+        return op == "/" ? static_cast<std::int32_t>(a) / static_cast<std::int32_t>(b)
+                         : static_cast<std::int32_t>(a) % static_cast<std::int32_t>(b);
+    } else if (op == "&")
         r = x & y;
     else if (op == "|")
         r = x | y;
