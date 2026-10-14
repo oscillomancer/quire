@@ -454,6 +454,26 @@ struct W : Effect {
     CHECK(engine.processor().instance().status.budgetExceeded.load() == 0);
 }
 
+TEST(script_reads_are_bounded_and_reject_io_errors) {
+    const auto path = std::filesystem::temp_directory_path() /
+                      ("supple-script-read-" + std::to_string(::getpid()) + ".cpp");
+    std::string text;
+    CHECK(!readScript(std::filesystem::temp_directory_path(), text));
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << std::string(kMaxScriptBytes, 'x');
+    }
+    CHECK(readScript(path, text));
+    CHECK(text.size() == kMaxScriptBytes);
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::app);
+        out << std::string(kMaxScriptBytes, 'y');
+    }
+    CHECK(!readScript(path, text));
+    CHECK(text.size() <= kMaxScriptBytes + 1);
+    std::filesystem::remove(path);
+}
+
 TEST(the_library_lists_a_plugin_per_script_that_compiles) {
     const std::vector<DefinitionPtr> plugins = catalog().list();
     CHECK(plugins.size() == 3);

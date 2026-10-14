@@ -15,7 +15,6 @@
 #include <map>
 #include <memory>
 #include <set>
-#include <sstream>
 #include <system_error>
 
 #ifdef _WIN32
@@ -54,10 +53,12 @@ std::vector<std::filesystem::path> libraryFolders() {
 bool readScript(const std::filesystem::path& file, std::string& text) {
     std::ifstream in(file, std::ios::binary);
     if (!in) return false;
-    std::ostringstream all;
-    all << in.rdbuf();
-    text = all.str();
-    return text.size() <= kMaxScriptBytes;
+    // Bound the read itself, not only the result: a mistakenly huge file
+    // must not exhaust memory while the catalog or reload tick reads it.
+    text.resize(kMaxScriptBytes + 1);
+    in.read(text.data(), static_cast<std::streamsize>(text.size()));
+    text.resize(static_cast<size_t>(in.gcount()));
+    return in.eof() && !in.bad() && text.size() <= kMaxScriptBytes;
 }
 
 std::vector<std::filesystem::path> libraryScripts(const std::filesystem::path& folder) {
