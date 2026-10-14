@@ -2466,10 +2466,20 @@ void Sema::sequencingIn(Expr* e) {
         case ExprKind::Unary:
             sequencingIn(static_cast<UnaryExpr*>(e)->operand);
             return;
-        case ExprKind::Assign:
-            sequencingIn(static_cast<AssignExpr*>(e)->target);
-            sequencingIn(static_cast<AssignExpr*>(e)->value);
+        case ExprKind::Assign: {
+            auto* a = static_cast<AssignExpr*>(e);
+            sequencingIn(a->target);
+            sequencingIn(a->value);
+            // C++17 evaluates the value first, but compilers differ (GCC
+            // reads `i` after `++i` in a[++i] += i), so a source export
+            // could compute something else than the player.
+            if (conflict(effectsOf(a->target), effectsOf(a->value)))
+                error(a->loc, "script.ub.order",
+                      "one side of this assignment changes something the other side uses, which "
+                      "C++ compilers order differently",
+                      "split it into separate statements: change the index or variable first");
             return;
+        }
         case ExprKind::Conditional:
             sequencingIn(static_cast<ConditionalExpr*>(e)->cond);
             sequencingIn(static_cast<ConditionalExpr*>(e)->then);

@@ -553,7 +553,7 @@ TEST_CASE("lvalues preserve C++ sequencing and reference storage") {
     Audio expected(2, 12);
     NativeRunner<script::ex_lvalues::Lvalues> native;
     native.process(expected);
-    CHECK(expected.data[0] == std::vector<double>{1, 1, 2, 1, 4, 3, 9, 9, 4, 0.5, 1, 3});
+    CHECK(expected.data[0] == std::vector<double>{7, 1, 2, 1, 4, 3, 9, 9, 7, 0.5, 1, 3});
     for (bool interpret : {false, true}) {
         INFO(interpret);
         scriptc::Options options;

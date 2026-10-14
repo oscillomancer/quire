@@ -467,7 +467,9 @@ A script cannot do what C++ leaves undefined. The compiler refuses:
 - shifts by anything but a constant 0 to 31;
 - a float stored in an int without one of the conversions above;
 - two operands of one expression that both change the same thing
-  (`r.next() - r.next()` on one `Random`);
+  (`r.next() - r.next()` on one `Random`), or where one changes what the
+  other uses, the two sides of an assignment included (`a[++i] = i`:
+  compilers disagree on it);
 - a variable or member without a starting value;
 - constant int arithmetic that overflows (`2147483647 + 1`); values computed
   at run time wrap.

@@ -200,6 +200,13 @@ TEST_CASE("the first scripts' mistakes are refused with a hint") {
     CHECK(firstError(
               plugin("Random r; void process(Block& io) { double y = r.next() - r.next(); }")) ==
           "script.ub.order");
+    for (const char* assignment : {"a[++i] = i;", "a[++i] += i;", "a[i] = i++;"})
+        CHECK(firstError(
+                  plugin(std::string("void process(Block& io) { Array<int, 4> a; int i = 0; ") +
+                         assignment + " }")) == "script.ub.order");
+    CHECK(firstError(plugin("void process(Block& io) { Array<int, 4> a; int i = 0; a[i++] = 1; "
+                            "a[i] = a[i] + 1; }"))
+              .empty());
     CHECK(firstError(plugin(
               "Random r; Random s; void process(Block& io) { double y = r.next() - s.next(); }")) ==
           "");

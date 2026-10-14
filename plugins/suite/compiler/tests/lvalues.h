@@ -10,7 +10,7 @@ struct Lvalues : Effect {
     void process(Block& io) {
         Array<int, 4> a;
         int i = 1;
-        a[++i] = i;
+        a[++i] = 7;
         io[0][0] = a[2];
         i = 0;
         (a[++i] = 1) = 2;
@@ -32,7 +32,7 @@ struct Lvalues : Effect {
         n = 10;
         io[0][7] = d;
         i = 0;
-        a[++i] += i;
+        a[++i] += 3;
         io[0][8] = a[1];
         io[0][9] = defaultValue();
         Array<Array<int, 2>, 2> nested;
