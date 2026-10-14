@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstring>
 #include <fstream>
+#include <memory>
 
 namespace supple {
 
@@ -30,13 +31,13 @@ Result<std::vector<std::uint8_t>> readFile(const fs::path& path, std::size_t max
                                       nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE)
         return Error("file.open", "cannot open " + path.string(), {}, "check the path");
+    const auto close = [](void* handle) { ::CloseHandle(handle); };
+    const std::unique_ptr<void, decltype(close)> owner(file, close);
     LARGE_INTEGER size{};
     if (!::GetFileSizeEx(file, &size) || size.QuadPart < 0) {
-        ::CloseHandle(file);
         return Error("file.read", "cannot read " + path.string());
     }
     if (static_cast<std::uint64_t>(size.QuadPart) > maxBytes) {
-        ::CloseHandle(file);
         return Error("file.too_large",
                      path.string() + " is larger than " + std::to_string(maxBytes) + " bytes");
     }
@@ -46,12 +47,10 @@ Result<std::vector<std::uint8_t>> readFile(const fs::path& path, std::size_t max
         DWORD read = 0;
         const DWORD count = static_cast<DWORD>(std::min<std::size_t>(bytes.size() - off, 1 << 20));
         if (!::ReadFile(file, bytes.data() + off, count, &read, nullptr) || read == 0) {
-            ::CloseHandle(file);
             return Error("file.read", "short read from " + path.string());
         }
         off += read;
     }
-    ::CloseHandle(file);
 #else
     std::ifstream in(path, std::ios::binary);
     if (!in) return Error("file.open", "cannot open " + path.string(), {}, "check the path");
@@ -93,6 +92,22 @@ Status writeFileAtomic(const fs::path& path, std::span<const std::uint8_t> bytes
             "file.write", what + " " + path.string() + ": Windows error " + std::to_string(code),
             {}, "check free disk space and permissions; close readers that deny delete sharing");
     };
+    const auto destination = fs::absolute(path, ec).native();
+    if (ec) {
+        fs::remove(tmp, ec);
+        return Error("file.write", "cannot resolve the destination path", {}, "check the path");
+    }
+    // Rename the open file with POSIX replacement semantics (Windows 10+).
+    // Concurrent writers may still hold the file they just published; they
+    // must not prevent the next writer from atomically replacing that name.
+    FILE_RENAME_INFO rename{};
+    constexpr DWORD kReplaceIfExists = 0x1, kPosixSemantics = 0x2;
+    rename.Flags = kReplaceIfExists | kPosixSemantics;
+    rename.FileNameLength = static_cast<DWORD>(destination.size() * sizeof(wchar_t));
+    std::vector<std::uint8_t> renameBytes(sizeof(rename) + rename.FileNameLength + sizeof(wchar_t));
+    std::memcpy(renameBytes.data(), &rename, sizeof(rename));
+    std::memcpy(renameBytes.data() + offsetof(FILE_RENAME_INFO, FileName), destination.data(),
+                rename.FileNameLength);
     const HANDLE file =
         ::CreateFileW(tmp.c_str(), GENERIC_WRITE | DELETE, FILE_SHARE_READ | FILE_SHARE_DELETE,
                       nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -117,23 +132,6 @@ Status writeFileAtomic(const fs::path& path, std::span<const std::uint8_t> bytes
         ::CloseHandle(file);
         return error("cannot sync", code);
     }
-    const auto destination = fs::absolute(path, ec).native();
-    if (ec) {
-        ::CloseHandle(file);
-        fs::remove(tmp, ec);
-        return Error("file.write", "cannot resolve the destination path", {}, "check the path");
-    }
-    // Rename the open file with POSIX replacement semantics (Windows 10+).
-    // Concurrent writers may still hold the file they just published; they
-    // must not prevent the next writer from atomically replacing that name.
-    FILE_RENAME_INFO rename{};
-    constexpr DWORD kReplaceIfExists = 0x1, kPosixSemantics = 0x2;
-    rename.Flags = kReplaceIfExists | kPosixSemantics;
-    rename.FileNameLength = static_cast<DWORD>(destination.size() * sizeof(wchar_t));
-    std::vector<std::uint8_t> renameBytes(sizeof(rename) + rename.FileNameLength + sizeof(wchar_t));
-    std::memcpy(renameBytes.data(), &rename, sizeof(rename));
-    std::memcpy(renameBytes.data() + offsetof(FILE_RENAME_INFO, FileName), destination.data(),
-                rename.FileNameLength);
     if (!::SetFileInformationByHandle(file, FileRenameInfoEx, renameBytes.data(),
                                       static_cast<DWORD>(renameBytes.size()))) {
         const DWORD code = ::GetLastError();
