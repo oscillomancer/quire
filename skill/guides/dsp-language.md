@@ -84,6 +84,8 @@ patch says `"gain": -3`), exactly as with the stock plugins.
 | `continuous(name, min, max, def, Unit::...)` | anything else: `Unit::Bpm`, `Unit::Samples`, or no unit (`Unit::None`, the default) |
 
 Modifiers chain: `decibels("Output", -24, 12, 0).smoothed(20).help("...")`.
+Ranges and smoothing times must be finite, power-curve exponents finite and
+positive, and integer parameter ranges must fit in `int`.
 
 | Modifier | Effect |
 |---|---|
@@ -257,7 +259,9 @@ Convolver room = impulseResponse("Room").help("A recording of a space's echo.");
 Its path is a property of the plugin, saved with it and set in a patch,
 `{"properties": {"sample": "/home/me/kick.wav"}}` (the key is the member's
 name in snake_case, or `.withKey("...")`). The runtime loads it off the
-audio thread (WAV, AIFF or FLAC, resampled to the session's rate) and hands
+audio thread. File keys use lowercase letters, digits and underscores,
+without dots. The runtime loads the file
+as WAV, AIFF or FLAC, resampled to the session's rate, and hands
 it over at the start of a block; until then, and with no file, `loaded()`
 is false. Not in `prepare()`: files arrive after it.
 

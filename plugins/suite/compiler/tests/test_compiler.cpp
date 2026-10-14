@@ -496,3 +496,31 @@ struct T : Effect {
         }
     }
 }
+
+TEST_CASE("invalid metadata always has an actionable hint") {
+    auto plugin = [](const std::string& declaration) {
+        return "#include <supple/script.h>\n"
+               "struct T : Effect {\n"
+               "static constexpr Info info = {.name = \"T\", .id = \"com.example.t\"};\n" +
+               declaration + "\nvoid process(Block& io) {}\n};\n";
+    };
+    for (const std::string factory :
+         {"decibels(\"\", -12, 12, 0)", "decibels(\"P\", 1, 0, 0)", "decibels(\"P\", -12, 12, 20)",
+          "frequency(\"P\", 0, 1000, 500)",
+          "continuous(\"P\", 0, 1, 0).curved(Curve::Pow, 1.0 / 0.0)",
+          "continuous(\"P\", 0, 1, 0).smoothed(0.0 / 0.0)", "integer(\"P\", 0, 1e20, 0)",
+          "choice(\"P\", {\"A\", \"A\"}, 0)", "choice(\"P\", {\"A\", \"B\"}, 0).offAtMin()",
+          "decibels(\"P\", -12, 12, 0).meter().smoothed(20)",
+          "decibels(\"P\", -12, 12, 0).meter().modulated()"}) {
+        INFO(factory);
+        CHECK(firstError(plugin("Param p = " + factory + ";")) == "script.param.range");
+    }
+    for (const std::string modifier : {"meter(1)", "help(\"a\", \"b\")", "withId(1, 2)",
+                                       "smoothed()", "curved(Curve::Pow, 2, 3)"}) {
+        INFO(modifier);
+        CHECK(firstError(plugin("Param p = decibels(\"P\", -12, 12, 0)." + modifier + ";")) ==
+              "script.param.modifier");
+    }
+    CHECK(firstError(plugin("AudioFile s = audioFile(\"S\").withKey(\"a.b\");")) ==
+          "script.file.key");
+}

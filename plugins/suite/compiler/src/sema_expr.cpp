@@ -2141,6 +2141,19 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                 return std::nullopt;
             };
             const std::string& mod = m->member;
+            const bool flag = mod == "modulated" || mod == "polyModulated" || mod == "offAtMin" ||
+                              mod == "meter" || mod == "notAutomatable";
+            const bool single = mod == "in" || mod == "help" || mod == "withKey" ||
+                                mod == "withId" || mod == "smoothed" || mod == "role";
+            if ((flag && !args.empty()) || (single && args.size() != 1) ||
+                (mod == "curved" && (args.empty() || args.size() > 2))) {
+                error(call->loc, "script.param.modifier",
+                      "." + mod + "() has the wrong number of arguments",
+                      flag              ? "write ." + mod + "() without arguments"
+                      : mod == "curved" ? ".curved(Curve::Log), or .curved(Curve::Pow, 3)"
+                                        : "give ." + mod + "() exactly one argument");
+                return std::nullopt;
+            }
             if (mod == "in") {
                 auto t = text(0);
                 if (!t) return std::nullopt;

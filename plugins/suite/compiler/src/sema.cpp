@@ -1859,7 +1859,7 @@ void Sema::evaluateFile(FieldDecl* f) {
     }
     m.member = f->name;
     if (m.key.empty()) m.key = snakeCase(f->name);
-    if (!validKey(m.key))
+    if (!validKey(m.key) || m.key.find('.') != std::string::npos)
         error(f->loc, "script.file.key", "'" + m.key + "' is not a usable patch key",
               "keys are lowercase letters, digits and _: rename the member, or give "
               ".withKey(\"sample\")");
@@ -1892,44 +1892,66 @@ void Sema::evaluateParam(FieldDecl* f) {
               ".withKey(\"low_cut\")");
     if (p.id == 0) p.id = script::detail::keyId(p.key);
     p.offset = f->offset;
-    auto bad = [&](const std::string& what, const std::string& hint = {}) {
+    auto bad = [&](const std::string& what, const std::string& hint) {
         error(f->init->loc, "script.param.range", p.name + ": " + what, hint);
     };
-    if (p.name.empty()) bad("a parameter needs a name");
-    if (p.name.size() > 63) bad("the name is longer than 63 bytes");
+    if (p.name.empty())
+        bad("a parameter needs a name", "give the factory a nonempty name in quotes");
+    if (p.name.size() > 63)
+        bad("the name is longer than 63 bytes", "shorten the name to at most 63 UTF-8 bytes");
     if (!std::isfinite(p.min) || !std::isfinite(p.max) || !std::isfinite(p.def))
-        bad("its range must be finite");
-    if (!(p.max > p.min)) bad("the maximum must be above the minimum");
+        bad("its range must be finite", "use finite minimum, maximum and default values");
+    if (!(p.max > p.min))
+        bad("the maximum must be above the minimum",
+            "increase the maximum or decrease the minimum");
     if (p.def < p.min || p.def > p.max)
         bad("the default " + std::to_string(p.def) + " is outside " + std::to_string(p.min) + ".." +
-            std::to_string(p.max));
+                std::to_string(p.max),
+            "choose a default between the minimum and maximum");
     if (p.curve == ParamModel::Curve::Log && p.min <= 0)
-        bad("a logarithmic range must start above 0");
-    if (p.curve == ParamModel::Curve::Pow && !(p.curveK > 0))
-        bad("a power curve's exponent must be above 0");
+        bad("a logarithmic range must start above 0",
+            "use a positive minimum or .curved(Curve::Linear)");
+    if (p.curve == ParamModel::Curve::Pow && (!std::isfinite(p.curveK) || !(p.curveK > 0)))
+        bad("a power curve's exponent must be finite and above 0",
+            "use .curved(Curve::Pow, 3), or another finite positive exponent");
     if (p.curve == ParamModel::Curve::Log && p.max / p.min > 1e15)
-        bad("a logarithmic range spans at most 15 decades");
+        bad("a logarithmic range spans at most 15 decades",
+            "reduce maximum/minimum to at most 1e15");
     if (p.kind == ParamModel::Kind::Choice) {
-        if (p.choices.size() < 2) bad("a choice needs at least two options");
+        if (p.choices.size() < 2)
+            bad("a choice needs at least two options", "list two or more distinct option names");
         std::set<std::string> seen;
         for (const auto& c : p.choices) {
-            if (c.empty() || c.size() > 31) bad("each option is 1 to 31 bytes");
-            if (!seen.insert(c).second) bad("the option '" + c + "' appears twice");
+            if (c.empty() || c.size() > 31)
+                bad("each option is 1 to 31 bytes",
+                    "use nonempty option names of at most 31 UTF-8 bytes");
+            if (!seen.insert(c).second)
+                bad("the option '" + c + "' appears twice", "give every option a distinct name");
         }
     }
     if (p.kind != ParamModel::Kind::Continuous && p.def != std::floor(p.def))
-        bad("its default must be a whole number");
+        bad("its default must be a whole number", "use an integer literal for the default");
     if (p.kind == ParamModel::Kind::Integer &&
         (p.min != std::floor(p.min) || p.max != std::floor(p.max)))
-        bad("an integer parameter's range is whole numbers");
-    if (p.smoothingMs < 0) bad("a smoothing time cannot be negative");
+        bad("an integer parameter's range is whole numbers",
+            "use integer literals for its minimum and maximum");
+    if (p.kind == ParamModel::Kind::Integer && (p.min < -2147483648.0 || p.max > 2147483647.0))
+        bad("an integer parameter's range must fit in int",
+            "keep the range between -2147483648 and 2147483647");
+    if (!std::isfinite(p.smoothingMs) || p.smoothingMs < 0)
+        bad("a smoothing time must be finite and nonnegative",
+            "use .smoothed(20), or another finite nonnegative time in ms");
     if (p.smoothingMs > 0 && p.kind != ParamModel::Kind::Continuous)
         bad("only continuous parameters glide", "remove .smoothed()");
-    if (p.smoothingMs > 0 && p.output) bad("a meter does not glide");
+    if (p.smoothingMs > 0 && p.output)
+        bad("a meter does not glide", "remove .smoothed() from the meter");
     if (p.offAtMinimum &&
         !(p.kind == ParamModel::Kind::Continuous || p.kind == ParamModel::Kind::Integer))
-        bad(".offAtMin() is for continuous and integer parameters");
-    if (p.output && p.modulatable) bad("a meter cannot be modulated");
+        bad(".offAtMin() is for continuous and integer parameters",
+            "remove .offAtMin() from a choice or toggle");
+    if (p.output && p.modulatable)
+        bad("a meter cannot be modulated",
+            "remove .modulated() or .polyModulated() from the meter");
     for (const auto& r : p.roles)
         if (!roleVocabulary().count(r)) {
             std::string all;
