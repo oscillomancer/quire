@@ -581,7 +581,7 @@ Modes per instance (session-model §1.7): `in_process`, `shared_bridge` (one
 bridge process for all instances in that mode), `dedicated` (one process per
 instance).
 
-- The bridge executable (`<slug>-bridge`) hosts plugins with the same
+- On Linux, the bridge executable (`<slug>-bridge`) hosts plugins with the same
   `clap-host` library. Control plane: a Unix socket speaking a small binary
   protocol for main-thread calls (activate, params, state, semantic
   extension, GUI create/set_parent with the host's X11 XID, timers).

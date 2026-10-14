@@ -3,12 +3,12 @@
 // Internal: the plugin bridge protocol (ADR-0013), shared by the host side
 // (bridge_client.cpp) and the bridge executable (bridge/bridge_main.cpp).
 //
-// Control plane: a Unix socketpair; messages are [u32 size][u32 op][u32 instance][payload]
-// and replies [u32 size][u32 status][u32 instance][payload], little endian, written and
-// read whole. File descriptors (the shared memory) ride SCM_RIGHTS.
-// Data plane: one memfd per active instance with a Header, the event arenas
-// and the audio buffers; each side wakes the other with a futex on a 32-bit
-// sequence word in the Header.
+// POSIX control: socketpair, [u32 size][u32 op/status][u32 instance][payload]
+// with SCM_RIGHTS resources. Windows control: overlapped pipe; an additional
+// u64 recipient-owned handle follows the prefix. See ADR-0037 for versioning.
+// The pointer-free Header/event/audio layout is common to all platforms.
+// Linux uses memfd/shared futexes; macOS uses unlinked shm/shared address wakes;
+// Windows uses a pagefile mapping and duplicated request/done auto-reset events.
 #pragma once
 
 #include "bridge_platform.h"

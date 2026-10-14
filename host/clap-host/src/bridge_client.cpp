@@ -430,8 +430,8 @@ Result<std::vector<std::uint8_t>> BridgeProcess::call(Op op, std::uint32_t insta
         !recvFrameUntil(sock_, status, returnedId, reply, &replyFd, deadline)) {
         // Gone, or not answering: either way the instance is lost.
         if (alive()) {
-            killBridge();
             fail(kHung);
+            killBridge();
         } else {
             fail(-1);
             for (int i = 0; i < 100 && pid_ > 0; ++i) {
@@ -852,7 +852,11 @@ bool RemoteInstance::command(Cmd cmd) SUPPLE_RT {
     hdr_->cmd = static_cast<std::uint32_t>(cmd);
     const std::uint32_t req = ++seq_;
     hdr_->request.store(req, std::memory_order_release);
+#if defined(__linux__)
+    futexWake(hdr_->request);
+#else
     signals_.wake(hdr_->request);
+#endif
     for (int spin = 0; spin < 4000; ++spin)
         if (hdr_->done.load(std::memory_order_acquire) == req) return true;
     // Lifecycle commands may page in a plugin's code; a block must not stall
@@ -863,15 +867,19 @@ bool RemoteInstance::command(Cmd cmd) SUPPLE_RT {
     for (;;) {
         const std::uint32_t seen = hdr_->done.load(std::memory_order_acquire);
         if (seen == req) return true;
+#if defined(__linux__)
+        futexWait(hdr_->done, seen, 10);
+#else
         signals_.wait(hdr_->done, seen, 10, true);
+#endif
         if (hdr_->done.load(std::memory_order_acquire) == req) return true;
         if (!process_->alive()) {
             process_->fail(-1);  // the signal is read when the main thread reaps it
             return false;
         }
         if (std::chrono::steady_clock::now() > deadline) {
-            process_->killBridge();
             process_->fail(-2);
+            process_->killBridge();
             return false;
         }
     }

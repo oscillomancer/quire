@@ -25,7 +25,8 @@ InstancePool makePool() {
 }
 // A track playing a sine instrument: notes on beats 0, 1, 2, 3 (quarter notes).
 model::Session synthSession(double volumeDb = 0.0, const char* extraFx = nullptr,
-                            unsigned tracks = 1) {
+                            unsigned tracks = 1,
+                            model::Isolation isolation = model::Isolation::InProcess) {
     model::EditTxn t(model::Session::create({.console9 = false}), 1);
     for (unsigned channel = 0; channel < tracks; ++channel) {
         model::Track tr;
@@ -43,6 +44,7 @@ model::Session synthSession(double volumeDb = 0.0, const char* extraFx = nullptr
                     json::parse(
                         R"({"schema": "supple.test-gain-patch/1.0", "params": {"latency": "short"}})")
                         .value();
+            if (std::string_view(plugin) == "com.suppleaudio.test.gain") fx.isolation = isolation;
             const Id f = t.create(fx);
             t.modify<model::Track>(track, [&](model::Track& x) { x.chain.push_back(f); });
         }
@@ -141,4 +143,27 @@ TEST_CASE("native in-process engine output equals offline in both executors" *
             CHECK(maxDiff(cap.channels[0], L, offline.audio.channels[0], 96000) == 0.0);
             CHECK(maxDiff(cap.channels[1], L, offline.audio.channels[1], 96000) == 0.0);
         }
+}
+
+TEST_CASE("native isolated engine output equals offline through shared and dedicated bridges") {
+    host::setBridgeExecutable(BRIDGE_PATH);
+    for (const auto isolation : {model::Isolation::SharedBridge, model::Isolation::Dedicated}) {
+        const auto session = synthSession(-18, "com.suppleaudio.test.gain", 2, isolation);
+        auto offlinePool = makePool();
+        auto rendered = renderOffline(session, offlinePool, {.startSeconds = 0, .endSeconds = 0.1});
+        REQUIRE_MESSAGE(rendered, (rendered ? "" : rendered.error().toString()));
+        auto pool = makePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 8192});
+        Engine engine(pool, media, {.workers = 1});
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}));
+        REQUIRE(engine.load(session));
+        engine.play();
+        runAhead(engine, backend, 8192 / 128, 128);
+        engine.stop();
+        CHECK(engine.processErrors() == 0);
+        CHECK(engine.outputLatency() == 64);
+        CHECK(maxDiff(backend.capture().channels[0], 64, rendered->audio.channels[0], 4800) == 0);
+        CHECK(maxDiff(backend.capture().channels[1], 64, rendered->audio.channels[1], 4800) == 0);
+    }
 }

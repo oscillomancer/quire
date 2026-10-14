@@ -127,7 +127,7 @@ publication (or overflow) notifies after updating its queue/counter. The engine
 app subscribes persistent instances and probes to its one relay and includes
 all local subscriptions in its service deadline/FD snapshot (ADR-0030).
 
-### Bridge notifications (protocol v13; notification design ADR-0031)
+### Bridge notifications (POSIX v13, Windows v14; notification design ADR-0031)
 
 ADR-0037 extends the subscription to native WakeEvent signal targets:
 Linux eventfd (unchanged), a nonblocking write-only pipe on macOS, and a
@@ -148,7 +148,10 @@ identity for bridge exit watches/handle transfer. The owner keeps the process
 or unreaped POSIX leader until final tree cleanup; bridge users must depart
 before owner destruction. These are setup/control APIs, never DSP callbacks.
 
-Before Create, the parent sends process-level `SubscribeNotifications` with
+The eventfd/futex/pidfd descriptions below name Linux mechanisms; the native
+objects above implement the same publication and lifetime contracts.
+
+Before Create, the Linux parent sends process-level `SubscribeNotifications` with
 instance id 0, exactly one dedicated nonblocking eventfd via SCM_RIGHTS, and
 `u32 version = 13`; the reply is `u32 version = 13`. The descriptor is checked
 for eventfd type, read/write access and O_NONBLOCK; received copies are CLOEXEC.

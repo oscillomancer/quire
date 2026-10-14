@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
-// Bridge-owned launch adapter until the hosting child-process helper lands.
+// Bridge exit/handle-transfer adapter backed by the shared child-process helper.
 #pragma once
 #include <supple/base/result.h>
 #include <supple/host/child_process.h>

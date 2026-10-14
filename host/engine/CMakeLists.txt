@@ -54,8 +54,8 @@ endif()
 
 if(SUPPLE_BUILD_TESTS AND NOT SUPPLE_PLATFORM_LINUX)
   supple_add_tests(engine SOURCES tests/test_native_engine.cpp LABELS rt)
-  add_dependencies(engine.tests clap-host-fixtures ${PRODUCT_SLUG}-scanner)
-  target_compile_definitions(engine.tests PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>")
+  add_dependencies(engine.tests clap-host-fixtures ${PRODUCT_SLUG}-scanner ${PRODUCT_SLUG}-bridge)
+  target_compile_definitions(engine.tests PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>" BRIDGE_PATH="$<TARGET_FILE:${PRODUCT_SLUG}-bridge>")
 endif()
 
 if(SUPPLE_PLATFORM_LINUX)

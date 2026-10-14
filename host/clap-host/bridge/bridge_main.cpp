@@ -125,7 +125,11 @@ struct BridgeInstance {
         while (!quit.load()) {
             const std::uint32_t req = hdr->request.load(std::memory_order_acquire);
             if (req == last) {
+#if defined(__linux__)
+                futexWait(hdr->request, last, -1);
+#else
                 signals.wait(hdr->request, last, -1);
+#endif
                 continue;
             }
             if (quit.load(std::memory_order_acquire)) break;
@@ -210,7 +214,11 @@ struct BridgeInstance {
             hdr->result = result;
             hdr->processing = instance->processing() ? 1 : 0;
             hdr->done.store(req, std::memory_order_release);
+#if defined(__linux__)
+            futexWake(hdr->done);
+#else
             signals.wake(hdr->done, true);
+#endif
             if (wake && (command != Cmd::Process || hadFlush)) wake->notify();
         }
     }

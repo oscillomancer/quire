@@ -13,7 +13,6 @@
 #include <spawn.h>
 #include <sys/event.h>
 #include <sys/wait.h>
-extern char** environ;
 #endif
 namespace supple::host::bridge {
 std::filesystem::path ownExecutable() { return platform::executablePath(); }
