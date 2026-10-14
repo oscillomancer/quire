@@ -12,6 +12,10 @@ the notation, reads analysis reports, and iterates. It is also the plugin
 team's test harness and the seed of the engine (the engine reuses
 `clap-host` unchanged).
 
+The sandbox CLI searches explicit `--plugin-path` locations first, then
+the bundled stock plugin folder (including the script player), then the
+standard CLAP/VST3 locations. Both `exec` and MCP use this order.
+
 ## 1. `host/clap-host`
 
 ```cpp

@@ -71,6 +71,13 @@ fs::path userScriptDir() {
     return base / std::string(product::kSlug) / "scripts";
 }
 
+// Explicit locations retain priority; the bundled player and stock plugins
+// precede older installed copies, as in the engine CLI.
+void addDefaultPlugins(sandbox::SessionOptions& options) {
+    if (auto stock = host::stockPluginDir()) options.pluginPath.push_back(*stock);
+    for (const auto& path : host::defaultSearchPath()) options.pluginPath.push_back(path);
+}
+
 json::Value errorJson(const Error& e) {
     json::Value v = json::Value::object();
     v["code"] = e.code;
@@ -177,8 +184,7 @@ int main(int argc, char** argv) {
             options.workdir = defaultWorkdir();
             options.scriptDir = userScriptDir();  // the app's; under --workdir, <workdir>/scripts
         }
-        if (!options.pluginPath.empty())
-            for (auto& path : host::defaultSearchPath()) options.pluginPath.push_back(path);
+        addDefaultPlugins(options);
         auto session = sandbox::Session::open(options);
         if (!session) {
             std::fprintf(stderr, "%s\n", session.error().toString().c_str());
@@ -267,10 +273,7 @@ int main(int argc, char** argv) {
             options.workdir = defaultWorkdir();
             options.scriptDir = userScriptDir();  // the app's; under --workdir, <workdir>/scripts
         }
-        if (!options.pluginPath.empty()) {
-            // Explicit paths come first; the standard locations still apply.
-            for (auto& p : host::defaultSearchPath()) options.pluginPath.push_back(p);
-        }
+        addDefaultPlugins(options);
         auto parsed = json::parse(args[1]);
         if (!parsed || !parsed->isObject()) {
             print(errorJson(parsed ? Error("cli.invocation", "the invocation must be an object", {},
