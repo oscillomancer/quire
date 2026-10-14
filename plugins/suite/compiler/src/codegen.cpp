@@ -326,6 +326,15 @@ class Codegen {
 MIR_reg_t Codegen::frameSlot(int size, int align, int& offset) {
     align = std::max(8, align);
     frameSize_ = (frameSize_ + align - 1) / align * align;
+    if (std::max(size, 1) > kMaxFrameBytes - frameSize_) {
+        diags_.error(fn_->loc, "script.local.size",
+                     fn_->name + "() needs more than 64 KiB of local storage and temporaries",
+                     "move large arrays or structs to plugin members, or reuse scratch storage");
+        // The program will be discarded before linking. Keep generating
+        // within the limit so invalid input cannot overflow frameSize_.
+        offset = 0;
+        return frameReg_;
+    }
     offset = frameSize_;
     frameSize_ += std::max(size, 1);
     MIR_reg_t r = ptemp();

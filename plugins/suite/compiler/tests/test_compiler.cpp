@@ -546,3 +546,17 @@ struct T : Effect {
 };
 )") == "script.constant.required");
 }
+
+TEST_CASE("the local storage limit covers a function's complete frame") {
+    auto plugin = [](const std::string& body) {
+        return "#include <supple/script.h>\n"
+               "struct T : Effect {\n"
+               "static constexpr Info info = {.name = \"T\", .id = \"com.example.t\"};\n"
+               "void process(Block& io) { " +
+               body + " }\n};\n";
+    };
+    CHECK(firstError(plugin("Array<double, 8000> a;")).empty());
+    CHECK(firstError(plugin("Array<double, 8000> a; Array<double, 8000> b;")) ==
+          "script.local.size");
+    CHECK(firstError(plugin("Array<double, 8000> a; auto b = a;")) == "script.local.size");
+}

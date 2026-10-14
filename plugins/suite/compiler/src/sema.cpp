@@ -82,7 +82,6 @@ const std::set<std::string>& roleVocabulary() {
 }
 
 constexpr int kMaxStructBytes = 64 << 20;  // a plugin's whole state; Buffers hold the big data
-constexpr int kMaxFrameBytes = 64 << 10;   // one function's local arrays and structs
 
 }  // namespace
 

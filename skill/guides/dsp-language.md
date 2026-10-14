@@ -427,6 +427,8 @@ mouse.
   References bind to the selected variable or member; a `const` reference
   to a converted number holds a temporary value. Assignments evaluate the
   right-hand value before selecting the target, as in C++20.
+  A function's local storage, including temporaries, is limited to 64 KiB;
+  keep larger arrays and structs as plugin members.
 - `if`/`else`, `switch`, `for`, range-based `for`, `while`, `do`, `break`,
   `continue`, `return`, `? :`.
 - Conversions: `static_cast<float>(x)` between numbers; float to int only

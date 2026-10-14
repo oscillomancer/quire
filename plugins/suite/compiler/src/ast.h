@@ -18,6 +18,9 @@
 
 namespace supple::scriptc {
 
+// Includes compiler-generated temporaries, not just declared locals.
+inline constexpr int kMaxFrameBytes = 64 << 10;
+
 // --- positions and diagnostics -------------------------------------------------
 
 struct Loc {
