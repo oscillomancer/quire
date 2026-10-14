@@ -2554,16 +2554,16 @@ TEST_CASE("plugin.scan in the background returns at once and installs the catalo
     const std::string job = started["job"].asString();
     CHECK(started["plugins"].size() == before);  // the current list, at once
     auto again = run(bus, "plugin.scan", R"({"wait": false})");
-    std::string status;
-    for (int i = 0; i < 2000 && status != "done" && status != "failed"; ++i) {
-        bus.flushJobEvents();  // the worker posts the catalogue to this thread
-        status = run(bus, "job.status", R"({"job": ")" + job + R"("})")["status"].asString();
-        if (status == "running") std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    // A cached scan may finish before the second request starts. In that case
+    // the second request legitimately creates a new job; settle both jobs.
+    for (const auto& id : {job, again["job"].asString()}) {
+        std::string status;
+        for (int i = 0; i < 2000 && status != "done" && status != "failed"; ++i) {
+            bus.flushJobEvents();  // the worker posts the catalogue to this thread
+            status = run(bus, "job.status", R"({"job": ")" + id + R"("})")["status"].asString();
+            if (status == "running") std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        REQUIRE(status == "done");
     }
-    REQUIRE(status == "done");
-    // A request while the scan ran joined it instead of starting another.
-    CHECK((again["job"].asString() == job ||
-           run(bus, "job.status", R"({"job": ")" + again["job"].asString() + R"("})")["status"] ==
-               "done"));
     CHECK(run(bus, "plugin.list", "{}")["plugins"].size() == before);
 }

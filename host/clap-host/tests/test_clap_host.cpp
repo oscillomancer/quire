@@ -77,6 +77,15 @@ struct BridgeTestAccess {
 }  // namespace supple::host
 
 namespace {
+// Scripted peers bypass the production launcher and retain their own PID owner.
+struct ScriptedChild {
+    pid_t pid;
+    ~ScriptedChild() {
+        ::kill(pid, SIGKILL);
+        while (::waitpid(pid, nullptr, 0) < 0 && errno == EINTR) {
+        }
+    }
+};
 bool rtBlock(Instance& g, const ProcessBlock& b, OutputEvents& out) SUPPLE_RT {
     return g.process(b, &out);
 }
@@ -1321,6 +1330,7 @@ TEST_CASE("bridge requests fail when a scripted child stops reading") {
         ::close(sockets[0]);
         for (;;) ::pause();
     }
+    ScriptedChild child{pid};
     ::close(sockets[1]);
     auto process = BridgeTestAccess::adopt(sockets[0], pid);
     bridge::Writer request;
@@ -1830,6 +1840,7 @@ TEST_CASE("bridge services audio callbacks and closed-editor timers without a Se
         char* argv[] = {executable.data(), nullptr};
         pid_t pid;
         REQUIRE(::posix_spawn(&pid, executable.c_str(), &actions, nullptr, argv, environ) == 0);
+        ScriptedChild child{pid};
         auto process = BridgeTestAccess::adopt(sockets[0], pid);
         close.socket = -1;
         ::close(close.child);
