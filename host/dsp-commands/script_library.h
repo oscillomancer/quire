@@ -20,8 +20,13 @@ inline void nameScriptLibrary(const std::filesystem::path& dir) {
         return std::string(v ? v : "");
     }();
     std::string value = dir.string();
+#if defined(_WIN32)
+    if (!inherited.empty()) value += ";" + inherited;
+    _putenv_s("SUPPLE_SCRIPT_LIBRARY", value.c_str());
+#else
     if (!inherited.empty()) value += ":" + inherited;
     ::setenv("SUPPLE_SCRIPT_LIBRARY", value.c_str(), 1);
+#endif
 }
 
 }  // namespace supple::dsp_commands

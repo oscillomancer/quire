@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Supple Audio
 #include <doctest/doctest.h>
 #include <supple/product.h>
+#include <array>
 #include "../../../tests/file_platform.h"
 
 #include <cmath>

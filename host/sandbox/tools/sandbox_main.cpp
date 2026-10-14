@@ -16,7 +16,6 @@
 #if defined(_WIN32)
 #include <fcntl.h>
 #include <io.h>
-#define fileno _fileno
 #include <process.h>
 #define getpid _getpid
 #else
@@ -43,6 +42,13 @@ using namespace supple;
 namespace fs = std::filesystem;
 
 namespace {
+int inputDescriptor() {
+#if defined(_WIN32)
+    return _fileno(stdin);
+#else
+    return ::fileno(stdin);
+#endif
+}
 
 int usage() {
     std::fprintf(
@@ -234,7 +240,7 @@ int main(int argc, char** argv) {
         }
         mcp::Server server(registry, dispatcher);
         // The tick drains the host's events: MCP has no event channel.
-        auto status = server.serve(::fileno(stdin), std::cout,
+        auto status = server.serve(inputDescriptor(), std::cout,
                                    mcp::Tick{[&] {
                                                  host.tick();
                                                  host.takeEvents();

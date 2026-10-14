@@ -19,7 +19,6 @@
 #if defined(_WIN32)
 #include <fcntl.h>
 #include <io.h>
-#define fileno _fileno
 #endif
 
 #include <supple/base/paths.h>
@@ -44,6 +43,13 @@ using namespace supple;
 namespace fs = std::filesystem;
 
 namespace {
+int inputDescriptor() {
+#if defined(_WIN32)
+    return _fileno(stdin);
+#else
+    return ::fileno(stdin);
+#endif
+}
 
 int usage() {
     const auto slug = std::string(product::kSlug);
@@ -153,8 +159,8 @@ int play(cmd::Registry& registry, const std::vector<std::string>& args) {
     const double from = (*app)->engine()->transport().seconds;
     const double length = seconds.value_or(s.timeMap->secondsAt(endBeat) - from + 1.0);
     std::signal(SIGINT, [](int) { g_interrupted = true; });
-    std::fprintf(stderr, "playing %s for %.1f s (Ctrl-C stops)\n", project.filename().c_str(),
-                 length);
+    std::fprintf(stderr, "playing %s for %.1f s (Ctrl-C stops)\n",
+                 project.filename().string().c_str(), length);
     const auto end = std::chrono::steady_clock::now() + std::chrono::duration<double>(length);
     while (!g_interrupted && std::chrono::steady_clock::now() < end) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -297,7 +303,7 @@ int main(int argc, char** argv) {
             return watches;
         };
         tick.fn();
-        auto status = server.serve(::fileno(stdin), std::cout, tick);
+        auto status = server.serve(inputDescriptor(), std::cout, tick);
         if (!status) {
             std::fprintf(stderr, "%s\n", status.error().toString().c_str());
             return 1;

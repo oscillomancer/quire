@@ -5,7 +5,9 @@
 #include "runtime_protection.h"
 #include "supple/model/numeric.h"
 
+#if !defined(_WIN32)
 #include <poll.h>
+#endif
 #include <algorithm>
 #include <cctype>
 #include <charconv>
@@ -998,6 +1000,7 @@ std::vector<host::Instance*> EngineApp::serviceInstances() const {
 }
 std::vector<EngineApp::ServiceFd> EngineApp::serviceFds() const {
     std::vector<ServiceFd> out;
+#if !defined(_WIN32)
     for (auto* instance : serviceInstances()) {
         if (instance->isolated()) continue;  // bridge owns its subscriptions
         for (const auto& [fd, flags] : instance->watchedFds()) {
@@ -1008,9 +1011,14 @@ std::vector<EngineApp::ServiceFd> EngineApp::serviceFds() const {
             out.push_back({fd, events, instance});
         }
     }
+#endif
     return out;
 }
 void EngineApp::serviceFdReady(const ServiceFd& watch, short ready) {
+#if defined(_WIN32)
+    (void)watch;
+    (void)ready;
+#else
     // A preceding ready callback/command may replace an instance or unregister
     // an fd. Never dereference a stale owner from a poll snapshot.
     for (const auto& current : serviceFds()) {
@@ -1022,6 +1030,7 @@ void EngineApp::serviceFdReady(const ServiceFd& watch, short ready) {
         current.owner->onFd(current.fd, flags);
         return;
     }
+#endif
 }
 std::optional<std::uint64_t> EngineApp::nextServiceDelayMs() const {
     std::optional<std::uint64_t> delay;

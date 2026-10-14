@@ -108,7 +108,11 @@ Result<std::string> token(std::string_view name, const PatternData& d) {
     if (key == "date" && arg == "YYYY-MM-DD") {
         const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
         std::tm t{};
+#if defined(_WIN32)
+        gmtime_s(&t, &now);
+#else
         gmtime_r(&now, &t);
+#endif
         char buf[16];
         std::strftime(buf, sizeof buf, "%Y-%m-%d", &t);
         return std::string(buf);
@@ -116,7 +120,11 @@ Result<std::string> token(std::string_view name, const PatternData& d) {
     if (key == "time" && arg == "HH-mm-ss") {
         const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
         std::tm t{};
+#if defined(_WIN32)
+        gmtime_s(&t, &now);
+#else
         gmtime_r(&now, &t);
+#endif
         char buf[16];
         std::strftime(buf, sizeof buf, "%H-%M-%S", &t);
         return std::string(buf);
