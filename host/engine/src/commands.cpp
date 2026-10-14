@@ -168,6 +168,9 @@ enum class BackendArg { Jack, Dummy, PortAudio };
 struct EngineDevicesArgs {
     std::optional<BackendArg> backend;
 };
+struct EngineDevicesResult {
+    std::vector<AudioDevice> devices;
+};
 struct EngineStartArgs {
     std::optional<BackendArg> backend;
     std::optional<std::string> hostApi, inputDevice, outputDevice;
@@ -3599,7 +3602,7 @@ void registerEngineCommands(cmd::Registry& registry) {
     }
     // ---------------------------------------------------------------- engine.*
     {
-        Command<EngineDevicesArgs, json::Value> c;
+        Command<EngineDevicesArgs, EngineDevicesResult> c;
         c.name = "engine.devices";
         c.kind = Kind::Query;
         c.exposure = cmd::Exposure::McpTool;
@@ -3616,32 +3619,31 @@ void registerEngineCommands(cmd::Registry& registry) {
                                                              {BackendArg::Dummy, "dummy"},
                                                              {BackendArg::PortAudio, "portaudio"}}))
                      .build();
-        c.result = schema::any();
+        const auto device =
+            schema::object<AudioDevice>("audio_device")
+                .field("host_api", &AudioDevice::hostApi, schema::string())
+                .field("name", &AudioDevice::name, schema::string())
+                .field("inputs", &AudioDevice::inputs, schema::integerOf<std::uint32_t>())
+                .field("outputs", &AudioDevice::outputs, schema::integerOf<std::uint32_t>())
+                .field("default_rate", &AudioDevice::defaultRate, schema::number())
+                .field("default_input", &AudioDevice::defaultInput, schema::boolean())
+                .field("default_output", &AudioDevice::defaultOutput, schema::boolean())
+                .build();
+        c.result = schema::object<EngineDevicesResult>("engine_devices_result")
+                       .field("devices", &EngineDevicesResult::devices, schema::arrayOf(device))
+                       .build();
         c.errors = {{"backend.unsupported", "native device enumeration is unavailable",
                      "use engine.inputs with JACK"}};
         c.examples = {
             {"Without hardware", obj(R"({"backend":"dummy"})"), obj(R"({"devices":[]})"), "empty"}};
-        c.run = [](const EngineDevicesArgs& args, Context&) -> Result<json::Value> {
-            if (args.backend == BackendArg::Dummy) return obj(R"({"devices":[]})");
+        c.run = [](const EngineDevicesArgs& args, Context&) -> Result<EngineDevicesResult> {
+            if (args.backend == BackendArg::Dummy) return EngineDevicesResult{};
             if (args.backend == BackendArg::Jack)
                 return Error("backend.unsupported", "JACK exposes graph ports", "/backend",
                              "use engine.inputs while JACK is running");
             auto devices = PortAudioBackend::devices();
             if (!devices) return std::move(devices).error();
-            auto result = json::Value::object();
-            result["devices"] = json::Value::array();
-            for (const auto& device : *devices) {
-                auto entry = json::Value::object();
-                entry["host_api"] = device.hostApi;
-                entry["name"] = device.name;
-                entry["inputs"] = std::int64_t{device.inputs};
-                entry["outputs"] = std::int64_t{device.outputs};
-                entry["default_rate"] = device.defaultRate;
-                entry["default_input"] = device.defaultInput;
-                entry["default_output"] = device.defaultOutput;
-                result["devices"].push_back(std::move(entry));
-            }
-            return result;
+            return EngineDevicesResult{std::move(*devices)};
         };
         addChecked(registry, std::move(c));
     }

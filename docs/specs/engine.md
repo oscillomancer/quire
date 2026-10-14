@@ -1291,7 +1291,10 @@ fields through --host-api, --input-device, --output-device, --rate, --inputs and
 
 `engine.devices {backend: portaudio}` (the default) returns `devices` containing
 `host_api`, `name`, `inputs`, `outputs`, `default_rate`, `default_input` and
-`default_output`. It enumerates without opening a stream. `{backend: dummy}`
+`default_output`. It enumerates without opening a stream.
+The result schema declares these required fields: host API/name strings,
+integer input/output capacities, a numeric default rate, and boolean default
+input/output indicators. `{backend: dummy}`
 returns an empty list without library initialization. Linux portaudio requests
 return backend.unsupported, path /backend and a JACK/dummy hint; JACK device
 queries direct the caller to engine.inputs. Selection errors use backend.device

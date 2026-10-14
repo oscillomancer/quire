@@ -2032,7 +2032,54 @@ Kind: `query`. Exposure: `mcp-tool`.
 ### Result
 
 ```json
-{}
+{
+  "type": "object",
+  "title": "engine_devices_result",
+  "properties": {
+    "devices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "audio_device",
+        "properties": {
+          "host_api": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "inputs": {
+            "type": "integer"
+          },
+          "outputs": {
+            "type": "integer"
+          },
+          "default_rate": {
+            "type": "number"
+          },
+          "default_input": {
+            "type": "boolean"
+          },
+          "default_output": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "host_api",
+          "name",
+          "inputs",
+          "outputs",
+          "default_rate",
+          "default_input",
+          "default_output"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["devices"],
+  "additionalProperties": false
+}
 
 ```
 
