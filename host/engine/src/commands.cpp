@@ -214,7 +214,8 @@ schema::Schema<ThreadClass> threadClassSchema() {
                schema::enumeration<ThreadPolicy::Kind>({{ThreadPolicy::Kind::None, "none"},
                                                         {ThreadPolicy::Kind::Normal, "normal"},
                                                         {ThreadPolicy::Kind::Fifo, "fifo"},
-                                                        {ThreadPolicy::Kind::RoundRobin, "rr"}}))
+                                                        {ThreadPolicy::Kind::RoundRobin, "rr"},
+                                                        {ThreadPolicy::Kind::High, "high"}}))
         .field("priority", &ThreadClass::priority, schema::integer().range(0, 99))
         .build();
 }
@@ -3808,7 +3809,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             "reports the owned 20 microsecond request with the same status/error fields; it "
             "affects system idle while held and leaves CPU frequency policy unchanged. "
             "live_helpers is the enabled live helper capacity. scheduling: each thread class's "
-            "policy (none, normal, fifo, rr) and priority as applied at start: the device "
+            "policy (none, normal, fifo, rr, high) and priority as applied at start: the device "
             "callback, live helpers, renderer and background helpers (real-time below a "
             "real-time callback when permitted). warnings includes scheduling fallbacks and "
             "plan warnings with corrective actions. failed_errors adds structured code, "

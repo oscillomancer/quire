@@ -3,7 +3,9 @@
 #include <doctest/doctest.h>
 #include <array>
 #include <cstdlib>
+#include "../../../tests/file_platform.h"
 #include "portaudio_api.h"
+#include "supple/engine/app.h"
 #include "supple/engine/offline.h"
 #include "supple/engine/portaudio.h"
 #include "thread_startup.h"
@@ -347,4 +349,35 @@ TEST_CASE("native background policy leaves two usable CPUs free") {
     CHECK(backend.prepared == 0);
     CHECK(engine.scheduling().renderer.kind == ThreadPolicy::Kind::Normal);
     engine.stop();
+}
+
+TEST_CASE("engine status serializes verified native helper policies") {
+    if (allowedCpuCount() < 2) return;
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-native-status-" + std::to_string(supple::test::processId()));
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() { std::filesystem::remove_all(path); }
+    } cleanup{dir};
+    struct PolicyBackend : DummyBackend {
+        PolicyBackend() : DummyBackend({.mode = DummyBackend::Mode::Manual}) {}
+        bool nativeThreadPolicy() const override { return true; }
+        Status prepareCurrentThread(bool) override { return okStatus(); }
+    } backend;
+    AppOptions options;
+    options.workdir = dir;
+    options.pluginPath = {FIXTURE_CLAP_PATH};
+    auto opened = EngineApp::create(options);
+    REQUIRE(opened);
+    auto& app = **opened;
+    REQUIRE(app.startEngine(backend, {}, {.workers = 1}));
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher dispatcher(registry, app);
+    app.attachCommands(dispatcher);
+    auto result = dispatcher.execute(
+        {"engine.status", json::Value::object(), {cmd::Origin::Type::Test, "native-status", ""}});
+    REQUIRE(result);
+    CHECK((*result)["scheduling"]["live"]["policy"] == "high");
+    app.stopEngine();
 }

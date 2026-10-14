@@ -284,7 +284,7 @@ classes from it, all process-local:
   at start (None for a class without threads, and for all while stopped).
   `engine.start` and `engine.status` report it as `scheduling`: `callback`,
   `live`, `renderer` and `background` objects, each with `policy` (`none`,
-  `normal`, `fifo`, `rr`) and `priority` (0..99).
+  `normal`, `fifo`, `rr`, `high`) and `priority` (0..99).
 
 **Thread names.** Every audio thread the host creates names itself when it
 starts (`nameThread`, core-base `supple/base/thread.h`; Linux keeps 15 bytes),

@@ -2181,7 +2181,7 @@ Kind: `action`. Exposure: `mcp-tool`.
           "properties": {
             "policy": {
               "type": "string",
-              "enum": ["none", "normal", "fifo", "rr"]
+              "enum": ["none", "normal", "fifo", "rr", "high"]
             },
             "priority": {
               "type": "integer",
@@ -2198,7 +2198,7 @@ Kind: `action`. Exposure: `mcp-tool`.
           "properties": {
             "policy": {
               "type": "string",
-              "enum": ["none", "normal", "fifo", "rr"]
+              "enum": ["none", "normal", "fifo", "rr", "high"]
             },
             "priority": {
               "type": "integer",
@@ -2215,7 +2215,7 @@ Kind: `action`. Exposure: `mcp-tool`.
           "properties": {
             "policy": {
               "type": "string",
-              "enum": ["none", "normal", "fifo", "rr"]
+              "enum": ["none", "normal", "fifo", "rr", "high"]
             },
             "priority": {
               "type": "integer",
@@ -2232,7 +2232,7 @@ Kind: `action`. Exposure: `mcp-tool`.
           "properties": {
             "policy": {
               "type": "string",
-              "enum": ["none", "normal", "fifo", "rr"]
+              "enum": ["none", "normal", "fifo", "rr", "high"]
             },
             "priority": {
               "type": "integer",
@@ -2461,7 +2461,7 @@ Result:
 
 Real-time engine state: backend, rate, block, device period, latency, xruns.
 
-plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. meter_drops: meter entries a full ring dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, never audio. dropped/voice_dropped count lost plug-in output/voice records. memory_lock reports requested/active and an optional OS error with errno and a corrective hint, including while stopped. Bridges are excluded. cpu_idle_latency reports the owned 20 microsecond request with the same status/error fields; it affects system idle while held and leaves CPU frequency policy unchanged. live_helpers is the enabled live helper capacity. scheduling: each thread class's policy (none, normal, fifo, rr) and priority as applied at start: the device callback, live helpers, renderer and background helpers (real-time below a real-time callback when permitted). warnings includes scheduling fallbacks and plan warnings with corrective actions. failed_errors adds structured code, message, path and hint to each failure. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them).
+plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. meter_drops: meter entries a full ring dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, never audio. dropped/voice_dropped count lost plug-in output/voice records. memory_lock reports requested/active and an optional OS error with errno and a corrective hint, including while stopped. Bridges are excluded. cpu_idle_latency reports the owned 20 microsecond request with the same status/error fields; it affects system idle while held and leaves CPU frequency policy unchanged. live_helpers is the enabled live helper capacity. scheduling: each thread class's policy (none, normal, fifo, rr, high) and priority as applied at start: the device callback, live helpers, renderer and background helpers (real-time below a real-time callback when permitted). warnings includes scheduling fallbacks and plan warnings with corrective actions. failed_errors adds structured code, message, path and hint to each failure. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them).
 
 Kind: `query`. Exposure: `mcp-tool`.
 
@@ -2529,7 +2529,7 @@ Kind: `query`. Exposure: `mcp-tool`.
           "properties": {
             "policy": {
               "type": "string",
-              "enum": ["none", "normal", "fifo", "rr"]
+              "enum": ["none", "normal", "fifo", "rr", "high"]
             },
             "priority": {
               "type": "integer",
@@ -2546,7 +2546,7 @@ Kind: `query`. Exposure: `mcp-tool`.
           "properties": {
             "policy": {
               "type": "string",
-              "enum": ["none", "normal", "fifo", "rr"]
+              "enum": ["none", "normal", "fifo", "rr", "high"]
             },
             "priority": {
               "type": "integer",
@@ -2563,7 +2563,7 @@ Kind: `query`. Exposure: `mcp-tool`.
           "properties": {
             "policy": {
               "type": "string",
-              "enum": ["none", "normal", "fifo", "rr"]
+              "enum": ["none", "normal", "fifo", "rr", "high"]
             },
             "priority": {
               "type": "integer",
@@ -2580,7 +2580,7 @@ Kind: `query`. Exposure: `mcp-tool`.
           "properties": {
             "policy": {
               "type": "string",
-              "enum": ["none", "normal", "fifo", "rr"]
+              "enum": ["none", "normal", "fifo", "rr", "high"]
             },
             "priority": {
               "type": "integer",
