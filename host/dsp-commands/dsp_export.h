@@ -166,6 +166,20 @@ inline std::string substitute(std::string text, const std::map<std::string, std:
     return text;
 }
 
+// The parameter the project's host tests move, an eighth of its range up
+// from its default, expecting an effect's output to differ from its input:
+// a level in decibels when there is one (a neutral bell stays neutral
+// whatever its frequency), else the first a host can automate.
+inline std::string smokeParam(const scriptc::Program& program) {
+    std::string first;
+    for (const scriptc::ParamModel& p : program.params()) {
+        if (!p.automatable || p.output || p.hidden) continue;
+        if (p.unit == scriptc::ParamModel::Unit::Decibels && p.def < p.max) return p.name;
+        if (first.empty()) first = p.name;
+    }
+    return first;
+}
+
 // Writes the source project for `program` (compiled from `source`, the
 // library's script `name`) into the empty folder `dest`.
 inline Status writeSource(const fs::path& kit, const fs::path& dest, const std::string& name,
@@ -173,11 +187,17 @@ inline Status writeSource(const fs::path& kit, const fs::path& dest, const std::
                           License license) {
     const scriptc::InfoModel& info = program.info();
     const std::string vendor = vendorOf(info);
-    std::string smoke;
-    for (const scriptc::ParamModel& p : program.params())
-        if (smoke.empty() && p.automatable && !p.output && !p.hidden) smoke = p.name;
+    const std::string smoke = smokeParam(program);
+    // The kind and bus layouts the player's glue gives the script
+    // (script_definition.cpp): an instrument is stereo unless it says.
+    const auto kind = program.kind();
+    const bool instrument = kind == scriptc::PluginKind::Instrument;
+    const bool noteEffect = kind == scriptc::PluginKind::NoteEffect;
+    std::vector<int> widths = info.channels;
+    if (widths.empty() && !noteEffect)
+        widths = instrument ? std::vector<int>{2} : std::vector<int>{2, 1};
     std::string channels;
-    for (int w : info.channels.empty() ? std::vector<int>{2, 1} : info.channels)
+    for (int w : noteEffect ? std::vector<int>{} : widths)
         channels += (channels.empty() ? "" : " ") + std::to_string(w);
     std::string keys;
     for (const scriptc::ParamModel& p : program.params())
@@ -211,6 +231,9 @@ inline Status writeSource(const fs::path& kit, const fs::path& dest, const std::
         {"HOLDER", holder},
         {"COPYRIGHT", "Copyright (c) " + year + " " + holder},
         {"CODE", code},
+        {"KIND", instrument   ? "instrument"
+                 : noteEffect ? "note-effect"
+                              : "effect"},
         {"CHANNELS", channels},
         {"MANUFACTURER", manufacturerCode(vendor)},
         {"TAG", script::detail::stateTag(info.id)},

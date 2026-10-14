@@ -18,9 +18,9 @@ set(PRODUCT_CODE        "@CODE@")
 
 set(PRODUCT_RUNTIME     ON)
 set(PRODUCT_PRESETS     ON)
-set(PRODUCT_KIND        "effect")
+set(PRODUCT_KIND        "@KIND@")
 set(PRODUCT_CHANNELS    @CHANNELS@)
-set(PRODUCT_FEATURES    "audio-effect")
+set(PRODUCT_FEATURES    "")
 
 # The suite's layer: the semantic-params extension and the script's status
 # in the host's log.
