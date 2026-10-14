@@ -87,7 +87,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .deps
-          key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/scripts/*', 'vcpkg.json') }}
+          key: deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/scripts/*', 'tools/validator/build.sh', 'vcpkg.json') }}
 
       # System packages below belong to disposable runners, never the workstation.
       - name: Linux tools and libraries
@@ -102,6 +102,10 @@ jobs:
           echo /usr/lib/llvm-22/bin >> "$GITHUB_PATH"
           .github/scripts/sdl3.sh
           echo "CMAKE_PREFIX_PATH=$GITHUB_WORKSPACE/.deps/install" >> "$GITHUB_ENV"
+          # Match local dev coverage, including the optional external validator.
+          export XDG_CACHE_HOME="$GITHUB_WORKSPACE/.deps/cache"
+          validator=$(tools/validator/build.sh)
+          echo "CLAP_VALIDATOR_BIN=$validator" >> "$GITHUB_ENV"
 
       # Xcode 16.4 libc++ lacks floating from_chars (first port run).
       # Homebrew LLVM/libc++ supplies it; SDK curl/zlib, arm64, macOS 14.4.

@@ -75,17 +75,20 @@ Use `ci/<branch>-<n>` with a new number each time. Annotate with
 `platforms=linux`, `platforms=macos` or `platforms=windows` to target only
 one platform; unannotated tags run all. Superseded builds cancel per branch
 and platform, including across different tag numbers. Delete remote CI tags
-once their runs finish. Dependencies and Linux compiler output are cached; avoid repeated full runs
-on this private repository (macOS and Windows consume more Actions minutes).
+once their runs finish. Dependencies and Linux compiler output are cached;
+avoid repeated full runs on this private repository (macOS and Windows
+consume more Actions minutes).
 
 Linux (`ubuntu-24.04`, Clang 22) builds the existing `dev` preset with all
-its tests, under Xvfb and software OpenGL. SDL3 is built into the runner's
-workspace because Ubuntu 24.04 predates it. macOS (`macos-15`, arm64) uses
+its tests, under Xvfb and software OpenGL. SDL3 and the pinned CLAP validator
+are built and cached in the runner's workspace; Ubuntu 24.04 predates SDL3.
+macOS (`macos-15`, arm64) uses
 Homebrew LLVM/libc++ and Ninja/SDL3, with deployment target 14.4; curl and
 zlib come from the SDK. The first CI run demonstrated that Xcode 16.4
 lacks floating-point `std::from_chars`, required by units and JSON parsing.
 The bundled libc++ uses `_LIBCPP_DISABLE_AVAILABILITY` together with its
-matching headers, libraries and runtime search paths, as Homebrew specifies. Windows (`windows-2022`, x64) uses clang-cl, Ninja
+matching headers, libraries and runtime search paths, as Homebrew specifies.
+Windows (`windows-2022`, x64) uses clang-cl, Ninja
 and the Windows SDK, with vcpkg SDL3/zlib/curl and a binary cache. Windows
 10 1803 is the minimum. No packaging or installers run here. Local platform
 commands are `cmake --workflow --preset macos` or `windows`; the latter
