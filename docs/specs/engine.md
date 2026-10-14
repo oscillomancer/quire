@@ -1281,7 +1281,8 @@ but never builds or initializes the PortAudio library.
 `engine.start` accepts backend `jack|portaudio|dummy` and optional `host_api`,
 `input_device`, `output_device`, `rate` (1..768000), `inputs` (0..64) and `outputs`
 (2..64). Native stream inputs default to zero, outputs to two; native MIDI is
-unavailable. JACK keeps its capture/MIDI behavior. Native default backend stays
+unavailable (a C++ BackendConfig MIDI request returns backend.config at
+/midi_inputs before initializing the device library). JACK keeps its capture/MIDI behavior. Native default backend stays
 dummy; Linux's existing default stays JACK. The CLI play command forwards these
 fields through --host-api, --input-device, --output-device, --rate, --inputs and
 --outputs. Device recovery retains them alongside block/anticipative settings.
@@ -1312,7 +1313,8 @@ Each helper class's non-RT startup barrier verifies all results before enabling
 it, rolling back the class on refusal. Live setup failure disables that pool;
 background/renderer failures warn and report the actual fallback class. Windows
 uses MMCSS Pro Audio, macOS device-derived Mach time constraints (ADR-0037),
-reported as high/priority 0. These are distinct from core-base's generic High
+reported as high/priority 0. The native callback reports none because PortAudio
+does not expose its thread policy; the OS/host API owns it. These are distinct from core-base's generic High
 QoS/priority helper. macOS workgroup joining remains a future device-validated
 improvement. Offline and dummy threads stay normal; background Normal opts out.
 
@@ -1320,3 +1322,9 @@ The fake API tests cover device selection, odd-period chunks, both executors'
 exact offline equivalence, PDC/Console 9, several worker counts, failures and
 final callback ownership. Real native device tests are skipped unless
 SUPPLE_AUDIO_DEVICE_TEST equals `1`; default CI never opens a stream.
+
+Native CoreAudio may perform host-side rate conversion when its nominal hardware
+rate differs from the requested stream rate. Engine config reports the stream
+rate; the monitor separately observes nominal hardware changes and requests a
+restart. Hardware output conversion is outside the engine's exact-output
+contract, which is verified at the float callback boundary.

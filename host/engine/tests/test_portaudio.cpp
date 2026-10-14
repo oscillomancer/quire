@@ -187,6 +187,10 @@ TEST_CASE("PortAudio failed selection and stream startup release resources") {
     CHECK_FALSE(bad.error().hint.empty());
     CHECK(driver.initialized == 0);
     PortAudioBackend backend({}, Driver::api);
+    auto midi = backend.start({.midiInputs = true}, [](auto, auto, auto) {});
+    REQUIRE_FALSE(midi);
+    CHECK(midi.error().path == "/midi_inputs");
+    CHECK(driver.initialized == 0);
     driver.startError = paDeviceUnavailable;
     CHECK_FALSE(backend.start({}, [](auto, auto, auto) {}));
     CHECK(driver.closed == 1);

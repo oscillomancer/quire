@@ -113,6 +113,9 @@ Status PortAudioBackend::start(const BackendConfig& config, Callback callback) {
         return Error("engine.running", "the device stream is already running", "/backend",
                      "stop the engine before starting another stream");
     if (!self.api) return unsupported();
+    if (config.midiInputs)
+        return Error("backend.config", "native MIDI inputs are not implemented", "/midi_inputs",
+                     "disable MIDI inputs for PortAudio; Linux JACK supports device MIDI");
     if (!std::isfinite(config.sampleRate) || config.sampleRate < 1 || config.sampleRate > 768000 ||
         !config.blockSize || config.blockSize > 65536 || config.inputs > 64 || config.outputs < 2 ||
         config.outputs > 64 || !callback || !std::isfinite(self.options.stopTimeoutSeconds) ||
@@ -311,7 +314,9 @@ Status PortAudioBackend::prepareLiveThread(std::thread::native_handle_type threa
     return setThreadPolicy(thread, {ThreadPolicy::Kind::Normal, 0});
 }
 ThreadPolicy PortAudioBackend::callbackPolicy() {
-    return {nativeThreadPolicy() ? ThreadPolicy::Kind::High : ThreadPolicy::Kind::Normal, 0};
+    // PortAudio does not expose its callback thread handle/policy. Do not
+    // claim a priority we cannot verify; native helper setup is independent.
+    return nativeThreadPolicy() ? ThreadPolicy{} : ThreadPolicy{ThreadPolicy::Kind::Normal, 0};
 }
 Result<std::vector<AudioDevice>> PortAudioBackend::driverDevices() const {
     const auto* api = impl_->api;
