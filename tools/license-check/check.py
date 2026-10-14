@@ -31,7 +31,8 @@ SPDX_RE = re.compile("SPDX-License-" + r"Identifier:[ \t]*([^\n]+)")
 
 
 def mit_component(rel):
-    parts = pathlib.PurePosixPath(rel).parts
+    rel = pathlib.PurePosixPath(rel)
+    parts = rel.parts
     return (parts[0] == "plugins" or
             (len(parts) > 1 and parts[0] == "libs" and parts[1] in MIT_LIBRARIES) or
             str(rel) == "cmake/product.h.in")

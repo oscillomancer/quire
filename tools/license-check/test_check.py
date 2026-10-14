@@ -5,7 +5,7 @@ import contextlib
 import importlib.util
 import io
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import sys
 import tempfile
 import unittest
@@ -97,6 +97,17 @@ class BuildFiles(unittest.TestCase):
             with self.subTest(filename=filename, identifier=identifier):
                 result, errors = self.check_fixture(filename, "// SPDX-License-" + "Identifier: " + identifier + "\n")
                 self.assertEqual(result, expected, errors)
+
+
+class ComponentPaths(unittest.TestCase):
+    def test_native_windows_paths_keep_the_same_license_boundary(self):
+        for path, expected in (("cmake/product.h.in", True),
+                               ("libs/core-base/src/files.cpp", True),
+                               ("plugins/suite/compiler/src/codegen.cpp", True),
+                               ("libs/command-bus/src/bus.cpp", False),
+                               ("host/engine/src/app.cpp", False)):
+            with self.subTest(path=path):
+                self.assertEqual(gate.mit_component(PureWindowsPath(path)), expected)
 
 
 class DependencyScopes(unittest.TestCase):

@@ -239,7 +239,7 @@ bool operator==(const Value& a, const Value& b) {
         if (!a.isInt() && !b.isInt()) return a.asDouble() == b.asDouble();
         const auto integer = a.isInt() ? a.asInt() : b.asInt();
         const double number = a.isInt() ? b.asDouble() : a.asDouble();
-        // long double has only 53 significant bits on ARM64 and Windows.
+        // long double has only 53 significant bits on Apple ARM64 and Windows.
         // Check range/integrality before converting the double, so comparison
         // neither rounds the integer nor invokes an out-of-range conversion.
         return number >= -0x1p63 && number < 0x1p63 && std::trunc(number) == number &&
