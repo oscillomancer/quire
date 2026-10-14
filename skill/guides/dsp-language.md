@@ -420,6 +420,9 @@ mouse.
   `.fill(v)`, range-based `for`. `Buffer<T>`: numbers, sized by
   `resize(n)` in `prepare()`, a member only.
 - Locals have a value when declared: `double y = 0.0;`, `auto& v = voices[i];`.
+  References bind to the selected variable or member; a `const` reference
+  to a converted number holds a temporary value. Assignments evaluate the
+  right-hand value before selecting the target, as in C++20.
 - `if`/`else`, `switch`, `for`, range-based `for`, `while`, `do`, `break`,
   `continue`, `return`, `? :`.
 - Conversions: `static_cast<float>(x)` between numbers; float to int only

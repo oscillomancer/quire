@@ -269,6 +269,8 @@ class Codegen {
 
     // --- generation (below) ---
     Place placeOf(Expr* e);
+    Place assign(AssignExpr* e);
+    Place increment(UnaryExpr* e, MIR_op_t& result);
     MIR_reg_t aggregate(Expr* e);
     MIR_op_t value(Expr* e);
     MIR_op_t convertValue(MIR_op_t v, const Type* from, const Type* to);
@@ -477,14 +479,13 @@ Codegen::Place Codegen::placeOf(Expr* e) {
         }
         case ExprKind::Assign: {
             auto* a = static_cast<AssignExpr*>(e);
-            value(a);
-            return placeOf(a->target);
+            return assign(a);
         }
         case ExprKind::Unary: {
             auto* u = static_cast<UnaryExpr*>(e);
             if (!u->postfix) {
-                value(u);
-                return placeOf(u->operand);
+                MIR_op_t ignored{};
+                return increment(u, ignored);
             }
             break;
         }
@@ -688,6 +689,73 @@ Codegen::Place Codegen::channelElement(Expr* e, bool clearSpare) {
                           clearSpare);
 }
 
+// An assignment and a prefix increment are themselves lvalues. Keep the
+// place computed during their side effect; evaluating the target again
+// would repeat subscripts, calls and increments.
+Codegen::Place Codegen::assign(AssignExpr* a) {
+    const Type* tt = a->target->type();
+    if (a->op == "=") {
+        if (tt->isScalar() || tt->kind == TypeKind::String) {
+            // C++17: the value is computed before the target.
+            MIR_op_t v = value(a->value);
+            if (v.mode == MIR_OP_REG) {
+                MIR_reg_t saved = temp(kindOf(tt));
+                move(kindOf(tt), reg(saved), v);
+                v = reg(saved);
+            }
+            Place p = placeOf(a->target);
+            store(tt, p, v);
+            return p;
+        }
+        MIR_reg_t src = 0;
+        if (a->value->kind == ExprKind::InitList) {
+            int off = 0;
+            src = frameSlot(tt->size, tt->align, off);
+            initialize(src, tt, a->value, a->loc.line);
+        } else {
+            src = aggregate(a->value);
+        }
+        Place p = placeOf(a->target);
+        MIR_reg_t dst = addressOf(p);
+        copyBytes(dst, src, tt->size);
+        return p;
+    }
+    const std::string op = a->op.substr(0, a->op.size() - 1);
+    MIR_op_t v = value(a->value);
+    if (v.mode == MIR_OP_REG) {
+        MIR_reg_t saved = temp(kindOf(a->value->type()));
+        move(kindOf(a->value->type()), reg(saved), v);
+        v = reg(saved);
+    }
+    Place p = placeOf(a->target);
+    MIR_op_t cur = convertValue(load(tt, p), tt, (op == "<<" || op == ">>") ? tt : a->operandType);
+    MIR_op_t result = arithmetic(op, (op == "<<" || op == ">>") ? tt : a->operandType, cur, v);
+    MIR_op_t back = convertValue(result, (op == "<<" || op == ">>") ? tt : a->operandType, tt);
+    store(tt, p, back);
+    return p;
+}
+
+Codegen::Place Codegen::increment(UnaryExpr* u, MIR_op_t& result) {
+    const Type* ot = u->operand->type();
+    Place p = placeOf(u->operand);
+    MIR_op_t old = load(ot, p);
+    const VK k = kindOf(ot);
+    MIR_reg_t oldCopy = toReg(old, k);
+    if (p.inReg) {
+        // The register itself changes; keep the old value apart.
+        MIR_reg_t saved = temp(k);
+        move(k, reg(saved), reg(oldCopy));
+        oldCopy = saved;
+    }
+    const MIR_op_t one = k == VK::D   ? MIR_new_double_op(ctx_, 1.0)
+                         : k == VK::F ? MIR_new_float_op(ctx_, 1.0f)
+                                      : imm(1);
+    MIR_op_t next = arithmetic(u->op == "++" ? "+" : "-", ot, reg(oldCopy), one);
+    store(ot, p, next);
+    result = u->postfix ? reg(oldCopy) : next;
+    return p;
+}
+
 // --- values ----------------------------------------------------------------------------------
 
 MIR_op_t Codegen::convertValue(MIR_op_t v, const Type* from, const Type* to) {
@@ -843,23 +911,9 @@ MIR_op_t Codegen::value(Expr* e) {
         case ExprKind::Unary: {
             auto* u = static_cast<UnaryExpr*>(e);
             if (u->op == "++" || u->op == "--") {
-                const Type* ot = u->operand->type();
-                Place p = placeOf(u->operand);
-                MIR_op_t old = load(ot, p);
-                const VK k = kindOf(ot);
-                MIR_reg_t oldCopy = toReg(old, k);
-                if (p.inReg) {
-                    // The register itself changes; keep the old value apart.
-                    MIR_reg_t saved = temp(k);
-                    move(k, reg(saved), reg(oldCopy));
-                    oldCopy = saved;
-                }
-                const MIR_op_t one = k == VK::D   ? MIR_new_double_op(ctx_, 1.0)
-                                     : k == VK::F ? MIR_new_float_op(ctx_, 1.0f)
-                                                  : imm(1);
-                MIR_op_t next = arithmetic(u->op == "++" ? "+" : "-", ot, reg(oldCopy), one);
-                store(ot, p, next);
-                return u->postfix ? reg(oldCopy) : next;
+                MIR_op_t result{};
+                increment(u, result);
+                return result;
             }
             MIR_op_t v = value(u->operand);
             const VK k = kindOf(t);
@@ -907,42 +961,8 @@ MIR_op_t Codegen::value(Expr* e) {
             return arithmetic(op, bin->operandType, a, c);
         }
         case ExprKind::Assign: {
-            auto* a = static_cast<AssignExpr*>(e);
-            const Type* tt = a->target->type();
-            if (a->op == "=") {
-                if (tt->isScalar() || tt->kind == TypeKind::String) {
-                    // C++17: the value is computed before the target.
-                    MIR_op_t v = value(a->value);
-                    if (v.mode == MIR_OP_REG) v = reg(toReg(v, kindOf(tt)));
-                    Place p = placeOf(a->target);
-                    store(tt, p, v);
-                    return v;
-                }
-                MIR_reg_t src = 0;
-                if (a->value->kind == ExprKind::InitList) {
-                    int off = 0;
-                    src = frameSlot(tt->size, tt->align, off);
-                    initialize(src, tt, a->value, a->loc.line);
-                } else {
-                    src = aggregate(a->value);
-                }
-                MIR_reg_t dst = addressOf(placeOf(a->target));
-                copyBytes(dst, src, tt->size);
-                return imm(0);
-            }
-            const std::string op = a->op.substr(0, a->op.size() - 1);
-            MIR_op_t v = value(a->value);
-            if (v.mode == MIR_OP_REG) v = reg(toReg(v, kindOf(a->value->type())));
-            Place p = placeOf(a->target);
-            MIR_op_t cur =
-                convertValue(load(tt, p), tt, (op == "<<" || op == ">>") ? tt : a->operandType);
-            if (cur.mode == MIR_OP_REG && p.inReg) cur = reg(toReg(cur, kindOf(a->operandType)));
-            MIR_op_t result =
-                arithmetic(op, (op == "<<" || op == ">>") ? tt : a->operandType, cur, v);
-            MIR_op_t back =
-                convertValue(result, (op == "<<" || op == ">>") ? tt : a->operandType, tt);
-            store(tt, p, back);
-            return back;
+            Place p = assign(static_cast<AssignExpr*>(e));
+            return t->isScalar() || t->kind == TypeKind::String ? load(t, p) : imm(0);
         }
         case ExprKind::Conditional: {
             auto* c = static_cast<ConditionalExpr*>(e);
@@ -1416,7 +1436,14 @@ void Codegen::statement(Stmt* s) {
                 if (v->qt.isRef) {
                     l.reference = true;
                     l.reg = ptemp();
-                    emit(MIR_MOV, reg(l.reg), reg(addressOf(placeOf(v->init))));
+                    if (v->init->lvalue && v->init->type() == t) {
+                        emit(MIR_MOV, reg(l.reg), reg(addressOf(placeOf(v->init))));
+                    } else {
+                        int off = 0;
+                        MIR_reg_t slot = frameSlot(t->size, t->align, off);
+                        initialize(slot, t, v->init, v->loc.line);
+                        emit(MIR_MOV, reg(l.reg), reg(slot));
+                    }
                     continue;
                 }
                 if ((t->isScalar() || t->kind == TypeKind::String) && !v->addressTaken) {

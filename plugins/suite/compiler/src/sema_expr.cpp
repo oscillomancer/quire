@@ -415,6 +415,14 @@ void Sema::markAddressTaken(Expr* e) {
     if (e->kind == ExprKind::Name) {
         auto* n = static_cast<NameExpr*>(e);
         if (n->var) n->var->addressTaken = true;
+    } else if (e->kind == ExprKind::Conditional) {
+        auto* c = static_cast<ConditionalExpr*>(e);
+        markAddressTaken(c->then);
+        markAddressTaken(c->otherwise);
+    } else if (e->kind == ExprKind::Assign) {
+        markAddressTaken(static_cast<AssignExpr*>(e)->target);
+    } else if (e->kind == ExprKind::Unary) {
+        markAddressTaken(static_cast<UnaryExpr*>(e)->operand);
     }
 }
 
@@ -1630,6 +1638,9 @@ Expr* Sema::checkConditional(ConditionalExpr* c) {
     if (a == b) {
         c->qt = QualType{a, c->then->qt.isConst || c->otherwise->qt.isConst, false};
         c->lvalue = c->then->lvalue && c->otherwise->lvalue;
+        // Lowering an lvalue selection chooses an address, including when
+        // its arms are otherwise register-only scalar locals.
+        if (c->lvalue) markAddressTaken(c);
         if (!a->isScalar() && !c->lvalue && a->kind != TypeKind::Object &&
             a->kind != TypeKind::String)
             error(c->loc, "script.type.conditional",

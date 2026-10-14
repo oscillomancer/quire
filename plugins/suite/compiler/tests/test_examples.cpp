@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 
@@ -20,6 +21,9 @@
 // The examples, as a source export includes a script: inside the runtime's
 // namespace, after <supple/script.h>.
 namespace supple::script {
+namespace ex_lvalues {
+#include "lvalues.h"
+}
 namespace ex_gain {
 #include "gain.cpp"
 }
@@ -539,4 +543,26 @@ TEST_CASE("a script compiled as C++ describes the plugin the compiler describes"
     // Without its keys, a Param's key is its name's: "Pivot" -> pivot.
     const script::detail::NativeCode<Tilt> keyless;
     CHECK(keyless.params()[1].key == "pivot");
+}
+
+TEST_CASE("lvalues preserve C++ sequencing and reference storage") {
+    std::ifstream in(std::filesystem::path(__FILE__).parent_path() / "lvalues.h");
+    REQUIRE(in.good());
+    std::stringstream source;
+    source << in.rdbuf();
+    Audio expected(2, 9);
+    NativeRunner<script::ex_lvalues::Lvalues> native;
+    native.process(expected);
+    CHECK(expected.data[0] == std::vector<double>{1, 1, 2, 1, 4, 3, 9, 9, 4});
+    for (bool interpret : {false, true}) {
+        INFO(interpret);
+        scriptc::Options options;
+        options.interpret = interpret;
+        auto result = scriptc::compile(source.str(), options);
+        REQUIRE_MESSAGE(result.program, scriptc::toText(result.diagnostics));
+        JitRunner run(result.program);
+        Audio actual(2, 9);
+        run.process(actual);
+        CHECK(actual == expected);
+    }
 }
