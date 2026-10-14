@@ -8,7 +8,7 @@ namespace supple::host {
 namespace {
 std::filesystem::path executable;
 std::mutex executableMutex;
-std::atomic<std::uint32_t> audioPolicy{0};
+std::atomic<std::uint32_t> audioPolicy{static_cast<std::uint32_t>(ThreadPolicy::Kind::Normal) << 8};
 Error unavailable() {
     return Error("host.bridge.unsupported", "plugin isolation is unavailable on this platform",
                  "/isolation", "select in_process isolation until the native bridge is available");

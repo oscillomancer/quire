@@ -216,6 +216,20 @@
       "platforms": [
         "windows"
       ]
+    },
+    {
+      "name": "AudioUnitSDK",
+      "dir": "AudioUnitSDK-1.1.0",
+      "license": "Apache-2.0",
+      "license_file": "AudioUnitSDK-1.1.0/LICENSE.txt",
+      "version": "AudioUnitSDK-1.1.0",
+      "source": "https://github.com/apple/AudioUnitSDK",
+      "commit": "53a9a2008aae7fb1b0a9f093dd523b9b12f6c0d9",
+      "purpose": "Existing stock-plugin AUv2 wrappers on macOS (clap-wrapper pin)",
+      "linkage": "static",
+      "platforms": [
+        "macos"
+      ]
     }
   ],
   "system_libraries": [

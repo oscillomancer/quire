@@ -26,7 +26,7 @@ bool CLAP_ABI init(const char*) {
     }
     if constexpr (SCAN_MODE == 1) {
 #if defined(_WIN32)
-        TerminateProcess(GetCurrentProcess(), 0xC0000005);
+        RaiseException(EXCEPTION_ACCESS_VIOLATION, EXCEPTION_NONCONTINUABLE, 0, nullptr);
 #else
         ::raise(SIGKILL);
 #endif

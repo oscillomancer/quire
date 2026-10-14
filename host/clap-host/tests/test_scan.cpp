@@ -94,6 +94,8 @@ TEST_CASE("supervised scan isolates entry crashes/hangs and caches results until
     CHECK(report.failures[0].reason.code == "host.scan.crashed");
     CHECK(report.failures[0].reason.message.find("signal 9") != std::string::npos);
     CHECK(report.failures[1].reason.code == "host.scan.timeout");
+    CHECK(report.failures[1].reason.hint == "repair/reinstall the module to retry its scan");
+    CHECK(report.failures[1].reason.message == "plugin scanner timed out after 2000 ms");
     CHECK_FALSE(report.failures[0].cached);
     CHECK_FALSE(report.failures[1].cached);
     CHECK(report.cachedModules == 0);

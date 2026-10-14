@@ -38,7 +38,11 @@ if (SUPPLE_BUILD_TESTS AND COMMAND supple_test)
     # Scripts the tests play (SUPPLE_SCRIPT_LIBRARY): host-smoke and the
     # VST3 checks the one with the player's own ID, the rest every one.
     set(player_smoke ${SUPPLE_PRODUCT}/test/smoke)
-    set(player_library "${player_smoke}:${SUPPLE_PRODUCT}/test/library")
+    if(WIN32)
+        set(player_library "${player_smoke}\\;${SUPPLE_PRODUCT}/test/library")
+    else()
+        set(player_library "${player_smoke}:${SUPPLE_PRODUCT}/test/library")
+    endif()
     if (TARGET processor-tests)
         target_include_directories(processor-tests PRIVATE ${SUPPLE_SUITE}/compiler/tests ${SUPPLE_SUITE}/examples)
         target_compile_definitions(processor-tests PRIVATE SUPPLE_SCRIPT_EXAMPLES="${SUPPLE_SUITE}/examples")

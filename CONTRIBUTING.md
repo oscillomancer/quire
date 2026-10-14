@@ -126,7 +126,7 @@ These gates are explicit, with no no-op RT implementations:
 |---|---|---|
 | `SUPPLE_HOST_SERVICES`: audio bridge | macOS, Windows | Shared memory, cross-process wake and native IPC; bridge port step |
 | Engine library/CLI and sandbox | Windows | Depend on the gated audio-file library; enabled on macOS with dummy/offline audio |
-| JACK/fake JACK and hardware capacity benchmark | macOS, Windows | Native device backend is a later port; requests return engine.backend.unsupported |
+| JACK/fake JACK and hardware capacity benchmark | macOS, Windows | Native device backend is a later port; requests return backend.unsupported |
 | Same gate: DAW GUI/agent and source-export integration tests | macOS, Windows | GUI depends on engine/X11; stock wrappers and conformance/reset tests now enabled separately |
 | POSIX evaluation harness tests | Windows | Unix executable fixtures, symlinks and process groups |
 | `SUPPLE_POSIX_AUDIO_FILES`: audio-file library/tests | Windows | POSIX exclusive files, RF64 output and recording recovery; file-I/O port step |
@@ -146,3 +146,9 @@ shell tests are omitted; native product host-smoke tests still run.
 Windows stock builds enable the CRT math constants with _USE_MATH_DEFINES in
 platform build glue. Product-owned semantic stress tests use a native loader;
 template host/probe/shared-stack sources are unchanged.
+
+Apple libc++'s missing jthread/stop-token facilities are supplied through the
+core-base non-RT job layer, retaining standard types elsewhere. The VST3 loader
+uses Objective-C++20 with ARC. The stock projects' existing AUv2 builds use the
+vendored Apache-2.0 AudioUnitSDK at clap-wrapper's pin; no downloads or template
+source changes are required.

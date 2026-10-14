@@ -17,6 +17,11 @@ int scan(const std::filesystem::path& module) {
 #if defined(_WIN32)
     const int saved = _dup(_fileno(stdout));
     if (saved < 0) return 1;
+    if (!SetHandleInformation(reinterpret_cast<HANDLE>(_get_osfhandle(saved)), HANDLE_FLAG_INHERIT,
+                              0)) {
+        _close(saved);
+        return 1;
+    }
     _setmode(saved, _O_BINARY);
     FILE* output = _fdopen(saved, "wb");
     FILE* ignored = nullptr;
@@ -47,6 +52,7 @@ int scan(const std::filesystem::path& module) {
 }  // namespace
 #if defined(_WIN32)
 int wmain(int argc, wchar_t** argv) {
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
     if (argc != 3 || std::wstring_view(argv[1]) != L"--scan") return 2;
     return scan(std::filesystem::path(argv[2]));
 }

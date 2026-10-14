@@ -67,6 +67,7 @@ if(SUPPLE_BUILD_PLUGINS)
         -D${prefix}_BUILD_GUI=${SUPPLE_BUILD_GUI}
         -D${prefix}_VST3=${SUPPLE_PLUGIN_VST3}
         -DVST3_SDK_ROOT=${VST3_SDK_ROOT}
+        -DAUDIOUNIT_SDK_ROOT=${CMAKE_SOURCE_DIR}/third_party/AudioUnitSDK-1.1.0
         -D${prefix}_RTSAN=${plugin_rtsan}
         -DSUPPLE_SANITIZE=${plugin_core_sanitize}
         -DFETCHCONTENT_FULLY_DISCONNECTED=ON
@@ -135,6 +136,7 @@ if(SUPPLE_BUILD_PLUGINS)
         -DSUPPLE_BUILD_TESTS=${SUPPLE_BUILD_TESTS}
         -DSUPPLE_BUILD_VST3=${SUPPLE_PLUGIN_VST3}
         -DVST3_SDK_ROOT=${VST3_SDK_ROOT}
+        -DAUDIOUNIT_SDK_ROOT=${CMAKE_SOURCE_DIR}/third_party/AudioUnitSDK-1.1.0
         -DSUPPLE_SANITIZE=${plugin_sanitize}
         -DFETCHCONTENT_FULLY_DISCONNECTED=ON
         -DFETCHCONTENT_SOURCE_DIR_CLAP=${tp}/clap
@@ -185,7 +187,11 @@ if(SUPPLE_BUILD_PLUGINS)
   supple_add_template_product(player suite/player "Script Player")
   if(SUPPLE_BUILD_TESTS)
     set(player_scripts "${CMAKE_CURRENT_SOURCE_DIR}/suite/player/test")
-    set(player_env "SUPPLE_SCRIPT_LIBRARY=${player_scripts}/smoke:${player_scripts}/library")
+    if(WIN32)
+      set(player_env "SUPPLE_SCRIPT_LIBRARY=${player_scripts}/smoke\\;${player_scripts}/library")
+    else()
+      set(player_env "SUPPLE_SCRIPT_LIBRARY=${player_scripts}/smoke:${player_scripts}/library")
+    endif()
     set(player_tests plugin.player.reset plugin.player.semantic.smoke plugin.player.semantic.tilt)
     add_test(NAME plugin.player.reset COMMAND clap-reset-check "${player_clap}")
     set_tests_properties(plugin.player.reset PROPERTIES LABELS "rt;plugin-reset" TIMEOUT 180)

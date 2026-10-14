@@ -81,6 +81,21 @@ json::Value pluginsJson(const std::vector<PluginInfo>& plugins) {
     return list;
 }
 
+bool bundleDirectory(const fs::path& path) {
+    if (path.extension() == ".vst3") return true;
+#if defined(__APPLE__)
+    if (path.extension() == ".clap") return true;
+#endif
+    return false;
+}
+bool moduleFile(const fs::path& path) {
+    if (path.extension() == ".clap") return true;
+#if defined(_WIN32)
+    if (path.extension() == ".vst3") return true;
+#endif
+    return false;
+}
+
 std::vector<fs::path> modules(std::span<const fs::path> roots) {
     std::vector<fs::path> result;
     std::set<fs::path> seen;
@@ -88,8 +103,7 @@ std::vector<fs::path> modules(std::span<const fs::path> roots) {
         std::error_code ec;
         std::vector<fs::path> found;
         if (fs::is_regular_file(root, ec) ||
-            ((root.extension() == ".vst3" || root.extension() == ".clap") &&
-             fs::is_directory(root, ec))) {
+            (bundleDirectory(root) && fs::is_directory(root, ec))) {
             found.push_back(root);
         } else if (fs::is_directory(root, ec)) {
             for (fs::recursive_directory_iterator
@@ -97,11 +111,10 @@ std::vector<fs::path> modules(std::span<const fs::path> roots) {
                  end;
                  it != end; it.increment(ec)) {
                 if (ec) break;
-                if ((it->path().extension() == ".vst3" || it->path().extension() == ".clap") &&
-                    it->is_directory(ec)) {
+                if (bundleDirectory(it->path()) && it->is_directory(ec)) {
                     found.push_back(it->path());
                     it.disable_recursion_pending();
-                } else if (it->path().extension() == ".clap" && it->is_regular_file(ec)) {
+                } else if (moduleFile(it->path()) && it->is_regular_file(ec)) {
                     found.push_back(it->path());
                 }
             }
@@ -121,6 +134,21 @@ std::vector<fs::path> modules(std::span<const fs::path> roots) {
         }
     }
     return result;
+}
+
+// Apple libc++ uses a 128-bit file-clock representation. Keep every digit,
+// including negative/minimum values, without narrowing or nonstandard overloads.
+std::string timestampText(auto value) {
+    const bool negative = value < 0;
+    std::string text;
+    do {
+        const int digit = static_cast<int>(value % 10);
+        text += static_cast<char>('0' + (digit < 0 ? -digit : digit));
+        value /= 10;
+    } while (value != 0);
+    if (negative) text += '-';
+    std::reverse(text.begin(), text.end());
+    return text;
 }
 
 // A bundle's directory mtime alone misses replacement/touch of an existing
@@ -168,7 +196,7 @@ Result<json::Value> fingerprint(const fs::path& module) {
         stat["path"] = platform::pathText(file.lexically_relative(module));
         // Strings preserve the filesystem's complete integer range in JSON.
         stat["size"] = std::to_string(size);
-        stat["mtime"] = std::to_string(time.time_since_epoch().count());
+        stat["mtime"] = timestampText(time.time_since_epoch().count());
         stats.push_back(std::move(stat));
     }
     if (ec)
@@ -180,7 +208,15 @@ Result<json::Value> fingerprint(const fs::path& module) {
 }
 
 fs::path cacheDirectory() {
-    const auto root = paths::cache();
+    auto root = paths::cache();
+    if (!root.is_absolute()) {
+#if defined(__linux__)
+        const auto home = paths::home();
+        root = home.is_absolute() ? home / ".cache" : fs::path{};
+#else
+        root.clear();
+#endif
+    }
     if (root.empty()) return {};
     return root / product::kSlug / "plugin-scan";
 }
@@ -205,14 +241,32 @@ Result<std::vector<PluginInfo>> supervise(const fs::path& executable, const fs::
         std::chrono::steady_clock::now() + std::chrono::milliseconds(options.timeoutMs),
         options.maxOutputBytes);
     if (!output) {
-        auto error = output.error();
-        error.code.replace(0, 5, "host.scan");
-        return error;
+        const auto& error = output.error();
+        if (error.code == "child.timeout")
+            return Error(
+                "host.scan.timeout",
+                "plugin scanner timed out after " + std::to_string(options.timeoutMs) + " ms",
+                "/path", "repair/reinstall the module to retry its scan");
+        if (error.code == "child.output_limit")
+            return Error("host.scan.output_limit",
+                         "plugin scanner output exceeds " + std::to_string(options.maxOutputBytes) +
+                             " bytes",
+                         "/path", "update the plugin/bridge");
+        if (error.code == "child.wait")
+            return Error("host.scan.wait", "cannot observe scanner exit", "/path", error.hint);
+        return Error("host.scan.io", "cannot read scanner output", "/path", error.hint);
     }
-    if (output->crashed)
-        return Error("host.scan.crashed",
-                     "plugin scanner crashed with signal " + std::to_string(output->exitCode),
-                     "/path", "repair/reinstall the module to retry its scan");
+    if (output->crashed) {
+#if defined(_WIN32)
+        constexpr const char* cause = "exit code ";
+#else
+        constexpr const char* cause = "signal ";
+#endif
+        return Error(
+            "host.scan.crashed",
+            "plugin scanner crashed with " + std::string(cause) + std::to_string(output->exitCode),
+            "/path", "repair/reinstall the module to retry its scan");
+    }
     auto parsed = json::parse(output->text, {.maxDepth = 32, .maxBytes = options.maxOutputBytes});
     if (!parsed) return invalidOutput();
     auto result = parseScanReply(*parsed, module);

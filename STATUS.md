@@ -19,7 +19,8 @@ native CI on macOS arm64 (37 tests) and Windows (35 tests; ADR-0035).
 Native hosting/scanning and stock wrappers are enabled for platform validation
 (ADR-0036); audio bridge and GUI remain gated. macOS enables the engine/CLI,
 dummy backend, sandbox and offline renderer. Windows audio-file I/O and its
-dependent engine/sandbox remain gated. Native CI validation is in progress. Portable libraries, the session model, stock DSP cores
+dependent engine/sandbox remain gated. Native CI validation is in progress.
+Portable libraries, the session model, stock DSP cores
 and the script suite build independently of those services; see
 CONTRIBUTING.md for the complete gate list. External Windows readers that
 deny delete sharing prevent atomic file replacement until closed.
@@ -189,7 +190,8 @@ Engine and hosting:
 - The headless platform layer (ADR-0035) has natively tested macOS/Windows
   address waits, wake sources, control socket/MCP paths and user directory roots.
   The macOS engine now builds independently of JACK; its native validation is
-  in progress. Windows engine file helpers remain behind the audio-file gate. Native hosting/scanning are enabled (ADR-0036); audio bridge, hardware backends
+  in progress. Windows engine file helpers remain behind the audio-file gate.
+  Native hosting/scanning are enabled (ADR-0036); audio bridge, hardware backends
   and GUI embedding remain separate ports.
   Windows event waits admit 64 unique handles. macOS QoS must be self-applied;
   attempts to elevate engine threads from another thread report a normal-policy

@@ -64,7 +64,8 @@ Result<std::unique_ptr<ChildProcess>> ChildProcess::spawn(const std::filesystem:
         return failure("child.spawn", "cannot open null device");
     child->impl_->job.value = CreateJobObjectW(nullptr, nullptr);
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
-    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    limits.BasicLimitInformation.LimitFlags =
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;
     if (!child->impl_->job.value ||
         !SetInformationJobObject(child->impl_->job.value, JobObjectExtendedLimitInformation,
                                  &limits, sizeof(limits)))

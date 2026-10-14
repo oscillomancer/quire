@@ -38,7 +38,8 @@ TEST_CASE("child timeout and output overflow are structured and clean up the chi
 #include <windows.h>
 #include <fstream>
 TEST_CASE("Windows child job terminates descendants retaining stdout") {
-    const auto file = std::filesystem::temp_directory_path() / "supple-child-descendant.pid";
+    const auto file = std::filesystem::temp_directory_path() /
+                      ("supple-child-descendant-" + std::to_string(GetCurrentProcessId()) + ".pid");
     const std::array<std::string, 2> args{"tree", file.string()};
     auto child = ChildProcess::spawn(CHILD_FIXTURE_PATH, args);
     REQUIRE(child);

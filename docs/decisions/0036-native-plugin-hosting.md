@@ -52,7 +52,7 @@ hang isolation even when the audio bridge is unavailable.
 Hosting, scanner, stock wrappers and host conformance/reset checks can build
 independently of the engine and audio bridge. macOS also builds the engine library/CLI, dummy backend, sandbox and offline
 renderer. JACK/fake JACK and the hardware benchmark remain Linux-only; an
-explicit JACK request elsewhere returns engine.backend.unsupported with a
+explicit JACK request elsewhere returns backend.unsupported with a
 /backend path and dummy hint. Windows sandbox and engine retain the audio-file
 gate. Native engine tests exercise the existing RT/offline equivalence contract
 in the callback and anticipative executors. Linux-only `/proc`, signals, subreaper,
@@ -65,3 +65,28 @@ Native CI results and any template boundary failures are recorded in STATUS.
 Porting the audio bridge as part of discovery would couple separate stages.
 Running scanner probes in the host would break background-scan thread and
 crash-isolation contracts. Fake remote processing would hide unsupported modes.
+
+## Native build integration (2026-10-14)
+
+Native CI exposed two Apple libc++ gaps: filesystem clock ticks use 128 bits,
+and jthread/stop-token facilities are absent. Scanner fingerprints preserve all
+decimal timestamp digits without narrowing. Core-base StopToken/JoiningThread
+alias the standard types where supported and provide an original non-RT fallback
+for Apple, with synchronous callback lifetime and join behavior documented in
+core-base.md. Standard and forced-fallback tests run independently on Linux too.
+The GUI still needs its own conversion when its gate is lifted.
+
+The VST3 macOS loader compiles with ARC and C++20. Existing stock projects
+also request AUv2 on macOS; clap-wrapper's pinned AudioUnitSDK-1.1.0 (Apache-2.0,
+commit 53a9a2008aae7fb1b0a9f093dd523b9b12f6c0d9) is vendored and passed through
+AUDIOUNIT_SDK_ROOT. Template/shared-stack sources remain untouched. Windows test
+library paths use semicolons; product semantic tests use native loaders.
+Windows discovery includes legacy single-file VST3 modules. CLAP directory
+bundles are recognized only on macOS, preserving Linux recursive search behavior.
+
+Windows scanner protocol handles are explicitly non-inheritable; scan children
+suppress fault/critical-error dialogs, and real-exception fixtures exercise crash
+classification. Host scan diagnostics retain their Linux messages and hints.
+Non-Linux engine.start defaults to dummy; explicit JACK requests return
+backend.unsupported. Plugin-file DSP exports remain Linux-only and return
+an actionable dsp.platform error elsewhere; source exports remain available.
