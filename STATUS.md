@@ -14,8 +14,8 @@ The port branch has on-demand Linux/macOS/Windows CI and portable presets
 macOS and Windows pass their portable tests. The macOS preset uses AppleClang
 and system libc++; shared float/double parsing uses vendored fast_float (MIT)
 on all platforms, including the suite's self-contained source exports.
-Native waits/wakes, thread setup, control-protocol and standalone MCP/proxy are
-now enabled on macOS/Windows for native CI validation (ADR-0035).
+Native waits/wakes, thread setup, control-protocol and standalone MCP/proxy pass
+native CI on macOS arm64 (37 tests) and Windows (35 tests; ADR-0035).
 Non-Linux host, engine, GUI and plugin wrappers remain gated, and Windows audio-file
 I/O remains gated. Portable libraries, the session model, stock DSP cores
 and the script suite build independently of those services; see
@@ -184,10 +184,11 @@ capacity reports retain their original revision/settings.
 ## Known limits
 
 Engine and hosting:
-- The headless platform layer (ADR-0035) has macOS/Windows address waits,
-  native wake sources, control socket/MCP paths and user directory roots;
-  native macOS/Windows builds and execution are not yet verified. Hosting,
-  scanning, bridge, hardware backends and GUI embedding remain separate ports.
+- The headless platform layer (ADR-0035) has natively tested macOS/Windows
+  address waits, wake sources, control socket/MCP paths and user directory roots.
+  Engine file helpers and runtime-protection fallbacks remain unverified outside
+  Linux while the engine is gated. Hosting, scanning, bridge, hardware backends
+  and GUI embedding remain separate ports.
   Windows event waits admit 64 unique handles. macOS QoS must be self-applied;
   attempts to elevate engine threads from another thread report a normal-policy
   fallback. Linux process memory-lock and CPU latency preferences report
@@ -201,9 +202,9 @@ Engine and hosting:
   A serial plug-in chain cannot benefit, and a stalled helper that has claimed
   a job stalls its cycle. Wake/scheduling overhead remains on light graphs;
   there is no adaptive cost threshold.
-- The shared DSP guard implements x86 FTZ/DAZ and arm64 FPCR FZ; arm64 native
-  execution still requires port CI. Plug-in lifecycle calls run in the thread's
-  own floating-point environment. Orrery's separate MXCSR guard remains a
+- The shared DSP guard implements x86 FTZ/DAZ and arm64 FPCR FZ; macOS arm64 CI
+  verifies FPCR restoration and subnormal handling. Plug-in lifecycle calls run
+  in the thread's own floating-point environment. Orrery's separate MXCSR guard remains a
   plugin-template port responsibility.
 - Real-time background threads need `RLIMIT_RTPRIO` ≥ 1, an unlimited
   `RLIMIT_RTTIME` and a pool that leaves two allowed CPUs free; without them
