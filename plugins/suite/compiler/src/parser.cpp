@@ -800,12 +800,12 @@ class Parser {
                 f->isConst = true;
             else if (acceptKeyword("noexcept")) {
                 if (atPunct("(")) {
-                    int depth = 0;
-                    do {
-                        if (atPunct("(")) ++depth;
-                        if (atPunct(")")) --depth;
-                        advance();
-                    } while (depth > 0 && !at(Tok::End));
+                    // C++ would evaluate the condition; the subset has
+                    // nothing to say with it.
+                    error(cur().loc, "script.unsupported.noexcept",
+                          "noexcept with a condition is not in the subset",
+                          "write noexcept alone, or nothing");
+                    skipParens();
                 }
             } else if (at(Tok::Ident) && (cur().text == "override" || cur().text == "final")) {
                 error(cur().loc, "script.unsupported.virtual",

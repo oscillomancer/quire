@@ -602,6 +602,32 @@ TEST_CASE("the local storage limit covers a function's complete frame") {
     CHECK(firstError(plugin("Array<double, 8000> a; auto b = a;")) == "script.local.size");
 }
 
+TEST_CASE("what a C++ compiler would refuse is refused, so a source export builds") {
+    const std::string head =
+        "#include <supple/script.h>\n"
+        "constexpr int kOne = 1;\n";
+    const std::string plugin =
+        "struct T : Effect {\n"
+        "static constexpr Info info = {.name = \"T\", .id = \"com.example.t\"};\n";
+    CHECK(firstError(head + plugin + "void process(Block& io) noexcept {}\n};\n").empty());
+    CHECK(firstError(head + plugin + "void process(Block& io) noexcept(unknownName) {}\n};\n") ==
+          "script.unsupported.noexcept");
+    CHECK(firstError(head + "double later();\n").size() > 0);  // separate declarations: refused
+    CHECK(firstError(head +
+                     "double earlier() { return later(); }\n"
+                     "double later() { return 1.0; }\n" +
+                     plugin + "void process(Block& io) { io[0][0] = earlier(); }\n};\n") ==
+          "script.name.order");
+    CHECK(firstError(head + plugin +
+                     "void process(Block& io) { io[0][0] = kTwo; }\n};\n"
+                     "constexpr double kTwo = 2.0;\n") == "script.name.order");
+    CHECK(firstError(head + "constexpr int bad = 2147483647 + kOne;\n" + plugin +
+                     "void process(Block& io) {}\n};\n") == "script.constant.overflow");
+    CHECK(firstError(head + "constexpr int fine = 2147483646 + kOne;\n" + plugin +
+                     "void process(Block& io) {}\n};\n")
+              .empty());
+}
+
 TEST_CASE("the frames along a chain of calls are limited together") {
     // Each function holds 60 KiB; a chain of n of them needs n times that.
     auto chain = [](int n) {

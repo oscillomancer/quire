@@ -135,6 +135,8 @@ class Sema {
     bool requireModifiable(Expr* e, Loc loc, const std::string& what);
     VarDecl* lookupLocal(const std::string& name) const;
     void markAddressTaken(Expr* e);
+    // C++ finds a free function or a constant only below its declaration.
+    void declaredBefore(Loc declared, Loc use, const std::string& name);
     std::vector<Expr*> callArguments(CallExpr* c, const std::vector<QualType>& params,
                                      const std::vector<Expr*>& defaults, const std::string& what);
 

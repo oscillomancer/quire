@@ -9,6 +9,7 @@
 // width) the script is refused with the defined way to say it.
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <map>
 
@@ -411,6 +412,14 @@ Expr* Sema::condition(Expr* e) {
     return convert(e, QualType{b_.boolType(), false, false}, e->loc, "the condition");
 }
 
+void Sema::declaredBefore(Loc declared, Loc use, const std::string& name) {
+    if (use.line == 0 || declared.line < use.line ||
+        (declared.line == use.line && declared.column < use.column))
+        return;
+    error(use, "script.name.order", "'" + name + "' is used above its declaration",
+          "move " + name + " above the code that uses it, as C++ needs");
+}
+
 void Sema::markAddressTaken(Expr* e) {
     if (e->kind == ExprKind::Name) {
         auto* n = static_cast<NameExpr*>(e);
@@ -563,12 +572,14 @@ Expr* Sema::checkName(NameExpr* n) {
         }
         if (auto g = globals_.find(first); g != globals_.end()) {
             VarDecl* v = g->second;
+            declaredBefore(v->loc, n->loc, first);
             n->ref = RefKind::Global;
             n->var = v;
             constantOf(n, v->qt, v->init ? evaluate(v->init, nullptr) : std::nullopt);
             return n;
         }
         if (auto f = functions_.find(first); f != functions_.end()) {
+            declaredBefore(f->second->loc, n->loc, first);
             n->ref = RefKind::Function;
             n->function = f->second;
             return n;
@@ -1389,6 +1400,10 @@ Expr* Sema::checkUnary(UnaryExpr* u) {
         if (operandType->kind == TypeKind::Int) {
             const auto v = static_cast<std::uint32_t>(u->operand->constInt);
             const std::uint32_t r = u->op == "-" ? 0u - v : u->op == "~" ? ~v : v;
+            if (u->op == "-" && u->operand->constInt == INT32_MIN)
+                error(u->loc, "script.constant.overflow",
+                      "negating the smallest int overflows, which C++ refuses",
+                      "compute it in double");
             u->constInt = static_cast<std::int32_t>(r);
             u->constValue = static_cast<double>(u->constInt);
         } else if (operandType->kind == TypeKind::Float) {
@@ -1403,16 +1418,22 @@ Expr* Sema::checkUnary(UnaryExpr* u) {
 
 namespace {
 // C++'s int arithmetic on two's complement (exports build with -fwrapv).
-std::int64_t intOp(const std::string& op, std::int64_t a, std::int64_t b) {
+// `overflow` says the exact result does not fit: C++ refuses that in a
+// constant expression, -fwrapv or not.
+std::int64_t intOp(const std::string& op, std::int64_t a, std::int64_t b, bool& overflow) {
     const auto x = static_cast<std::uint32_t>(a), y = static_cast<std::uint32_t>(b);
     std::uint32_t r = 0;
-    if (op == "+")
+    const auto exact = [&](std::int64_t v) { overflow = v < INT32_MIN || v > INT32_MAX; };
+    if (op == "+") {
         r = x + y;
-    else if (op == "-")
+        exact(a + b);
+    } else if (op == "-") {
         r = x - y;
-    else if (op == "*")
+        exact(a - b);
+    } else if (op == "*") {
         r = x * y;
-    else if (op == "/" || op == "%") {
+        exact(a * b);
+    } else if (op == "/" || op == "%") {
         // Invalid divisors already have a diagnostic, but folding still
         // visits the expression. Do not execute undefined arithmetic in
         // the compiler while reporting an invalid script.
@@ -1538,7 +1559,12 @@ Expr* Sema::checkBinary(BinaryExpr* bin) {
                                 : op == "==" ? a == b
                                              : a != b;
             } else {
-                bin->constInt = intOp(op, a, b);
+                bool overflow = false;
+                bin->constInt = intOp(op, a, b, overflow);
+                if (overflow)
+                    error(bin->loc, "script.constant.overflow",
+                          "this constant arithmetic overflows int, which C++ refuses",
+                          "compute it in double, or split it so each step fits in int");
             }
             bin->constValue = static_cast<double>(bin->constInt);
         } else if (common->kind == TypeKind::Float) {
