@@ -301,6 +301,10 @@ release build then goes through what a host would do with it:
   (`.github/scripts/get-mesa-windows.sh`); a DLL beside the executable is
   loaded before System32's.
 
+A run-time product (`PRODUCT_RUNTIME`, such as the `stages` example) has
+no fixed editor to preview and builds no `gui-preview`, nor an AU (a
+component's codes are fixed in its bundle); those steps say so and pass.
+
 Each job uploads the plugins, the release packages, the probe's window
 captures and the previews as an artifact. A failing step repeats its compiler diagnostics and log tail
 as error annotations. GitHub's macOS runners are 1x virtual machines with a

@@ -15,13 +15,14 @@
 //     from its stages: a fader each, then the output. The built-in plugin
 //     keeps the product's (the automatic editor).
 #include <algorithm>
-#include <charconv>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <iomanip>
+#include <locale>
 #include <memory>
+#include <sstream>
 #include <string>
-#include <system_error>
 #include <vector>
 
 #include "Catalog.h"
@@ -132,12 +133,12 @@ class StagesLayer final : public supple::plugin::Layer {
         std::string text;
         for (size_t k = 0; k < d.stages().size(); ++k) {
             const int i = d.params().indexOf(kStage0 + static_cast<uint32_t>(k));
-            char value[32];
-            const auto written = std::to_chars(value, value + sizeof(value), s.host[static_cast<size_t>(i)],
-                                                std::chars_format::general, 17);
-            text += d.stages()[k] + "\t";
-            text.append(value, written.ptr);
-            text += '\n';
+            // The C locale's digits whatever the user's, and every bit of the
+            // value (std::to_chars for doubles needs macOS 13.3).
+            std::ostringstream value;
+            value.imbue(std::locale::classic());
+            value << std::setprecision(17) << s.host[static_cast<size_t>(i)];
+            text += d.stages()[k] + "\t" + value.str() + "\n";
         }
         return {text.begin(), text.end()};
     }
@@ -156,10 +157,12 @@ class StagesLayer final : public supple::plugin::Layer {
             const size_t tab = line.rfind('\t');  // a stage name may itself contain a tab
             if (tab == std::string::npos) return false;  // not ours: refuse the state
             const std::string name = line.substr(0, tab);
+            // All of the rest is the number, read in the C locale.
             double value = 0.0;
-            const char* endValue = line.data() + line.size();
-            const auto parsed = std::from_chars(line.data() + tab + 1, endValue, value);
-            if (parsed.ec != std::errc{} || parsed.ptr != endValue || !std::isfinite(value)) return false;
+            std::istringstream number(line.substr(tab + 1));
+            number.imbue(std::locale::classic());
+            number >> std::noskipws >> value;
+            if (number.fail() || !number.eof() || !std::isfinite(value)) return false;
             for (size_t k = 0; k < d.stages().size(); ++k) {
                 if (d.stages()[k] != name) continue;
                 const int i = d.params().indexOf(kStage0 + static_cast<uint32_t>(k));

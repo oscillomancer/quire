@@ -140,6 +140,7 @@ jobs:
           name="$CI_PRODUCT_name"
           for b in "$name.clap" "$name.vst3" "$name.component"; do
             bin="build/release/plugins/$b/Contents/MacOS/$name"
+            [ -e "build/release/plugins/$b" ] || continue  # a run-time product has no AU
             echo "== $b"
             lipo -info "$bin"
             otool -l "$bin" | grep -A4 LC_BUILD_VERSION | grep -E "minos|sdk" || true
@@ -148,13 +149,18 @@ jobs:
           # Only the AU is signed as a bundle (macOS refuses to register an
           # AU otherwise); the CLAP and VST3 carry the linker's ad-hoc
           # signature on their binaries, as Ferric's do.
-          .github/scripts/step.sh codesign-au codesign --verify --deep --strict --verbose=2 \
-            "build/release/plugins/$name.component"
-          plutil -p "build/release/plugins/$name.component/Contents/Info.plist"
+          if [ -e "build/release/plugins/$name.component" ]; then
+            .github/scripts/step.sh codesign-au codesign --verify --deep --strict --verbose=2 \
+              "build/release/plugins/$name.component"
+            plutil -p "build/release/plugins/$name.component/Contents/Info.plist"
+          fi
 
       - name: auval
         if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.preset == 'release' }}
         run: |
+          if [ ! -e "build/release/plugins/$CI_PRODUCT_name.component" ]; then
+            echo "No AU: a run-time product's plugins are found when it runs."; exit 0
+          fi
           auval -a | grep -i -- "$CI_PRODUCT_au_manufacturer" || true
           .github/scripts/step.sh auval auval -strict -v "$CI_PRODUCT_au_type" "$CI_PRODUCT_au_subtype" "$CI_PRODUCT_au_manufacturer"
 
@@ -167,8 +173,10 @@ jobs:
           name="$CI_PRODUCT_name"
           .github/scripts/step.sh pluginval-vst3 "$PLUGINVAL" --strictness-level 8 --validate-in-process --timeout-ms 300000 \
             --validate "$HOME/Library/Audio/Plug-Ins/VST3/$name.vst3"
-          .github/scripts/step.sh pluginval-au "$PLUGINVAL" --strictness-level 8 --validate-in-process --timeout-ms 300000 \
-            --validate "$HOME/Library/Audio/Plug-Ins/Components/$name.component"
+          if [ -e "build/release/plugins/$name.component" ]; then
+            .github/scripts/step.sh pluginval-au "$PLUGINVAL" --strictness-level 8 --validate-in-process --timeout-ms 300000 \
+              --validate "$HOME/Library/Audio/Plug-Ins/Components/$name.component"
+          fi
 
       # A real Cocoa window hosting the editor through the CLAP. GitHub's
       # macOS runners are virtual machines: the window server is real, the
@@ -181,6 +189,9 @@ jobs:
       - name: gui-preview (OpenGL, every named scenario, and 2x)
         if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.preset == 'release' }}
         run: |
+          if [ ! -e build/release/gui-preview ] && [ ! -e build/release/gui-preview.exe ]; then
+            echo "No gui-preview: a run-time product has no fixed editor to preview."; exit 0
+          fi
           mkdir -p preview
           .github/scripts/step.sh previews ./build/release/gui-preview --all preview
           .github/scripts/step.sh preview-2x ./build/release/gui-preview preview/default-2x.png --scale 2
@@ -281,6 +292,9 @@ jobs:
       - name: gui-preview (every named scenario, and 2x)
         if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.preset == 'release' }}
         run: |
+          if [ ! -e build/release/gui-preview ] && [ ! -e build/release/gui-preview.exe ]; then
+            echo "No gui-preview: a run-time product has no fixed editor to preview."; exit 0
+          fi
           mkdir -p preview
           .github/scripts/step.sh previews xvfb-run -a -s "-screen 0 1920x1080x24" ./build/release/gui-preview --all preview
           .github/scripts/step.sh preview-2x xvfb-run -a -s "-screen 0 1920x1080x24" ./build/release/gui-preview preview/default-2x.png --scale 2
@@ -403,6 +417,9 @@ jobs:
       - name: gui-preview (every named scenario, and 2x)
         if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.preset == 'release' }}
         run: |
+          if [ ! -e build/release/gui-preview ] && [ ! -e build/release/gui-preview.exe ]; then
+            echo "No gui-preview: a run-time product has no fixed editor to preview."; exit 0
+          fi
           mkdir -p preview
           .github/scripts/step.sh previews ./build/release/gui-preview --all preview
           .github/scripts/step.sh preview-2x ./build/release/gui-preview preview/default-2x.png --scale 2

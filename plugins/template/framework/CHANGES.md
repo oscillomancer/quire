@@ -4,6 +4,17 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.23.2
+
+What a product must do: nothing.
+
+- **The Stages example builds on macOS before 13.3** (`examples/stages/Layer.cpp`).
+  Its state used `std::to_chars` and `std::from_chars` for doubles, which
+  Apple's libc++ offers only from macOS 13.3 (the deployment target is 11).
+  It now writes and reads them with streams in the C locale, as exactly.
+- **CI skips `gui-preview` and the AU checks for a run-time product**
+  (`.github/workflows/build.yml`), which builds neither.
+
 ## 1.23.1
 
 What a product must do: a run-time product's `Catalog` is now called from
