@@ -6,6 +6,10 @@
 removes the native core-base and control/MCP gates. Remaining hosting-dependent
 services use `SUPPLE_HOST_SERVICES`; the Windows audio-file gate is unchanged.
 
+**Hosting amendment, 2026-10-14:** [ADR-0036](0036-native-plugin-hosting.md)
+adds native in-process loaders and a standalone supervised scanner, while
+retaining the Linux audio bridge and the remaining engine/device/GUI gates.
+
 ## Context
 
 The macOS and Windows port needs branch CI before changes can reach the

@@ -1,16 +1,38 @@
 supple_add_library(clap-host
-  SOURCES src/clap_host.cpp src/vst3_host.cpp src/bridge_client.cpp src/bridge_protocol.cpp src/scan.cpp
+  SOURCES src/clap_host.cpp src/vst3_host.cpp src/platform.cpp src/scan.cpp
   DEPS supple::core-base supple::core-json supple::clap supple::semantic-params-abi supple::vst3-host
   PRIVATE_DEPS ${CMAKE_DL_LIBS})
+if(SUPPLE_PLATFORM_LINUX)
+  target_sources(clap-host PRIVATE src/bridge_client.cpp src/bridge_protocol.cpp)
+else()
+  target_sources(clap-host PRIVATE src/bridge_unavailable.cpp)
+endif()
+if(WIN32)
+  target_sources(clap-host PRIVATE src/child_process_windows.cpp)
+else()
+  target_sources(clap-host PRIVATE src/child_process_posix.cpp)
+endif()
+if(APPLE)
+  target_link_libraries(clap-host PRIVATE "-framework CoreFoundation")
+endif()
+add_executable(${PRODUCT_SLUG}-scanner tools/scanner_main.cpp)
+target_include_directories(${PRODUCT_SLUG}-scanner PRIVATE src)
+target_link_libraries(${PRODUCT_SLUG}-scanner PRIVATE supple::clap-host)
+supple_target_defaults(${PRODUCT_SLUG}-scanner)
+
 # The script player's mark, which the scan cache leaves out (header only).
 target_include_directories(clap-host PRIVATE ${PROJECT_SOURCE_DIR}/plugins/suite/compiler/include)
 
 # The plugin bridge: hosts dedicated or shared isolated plugin instances (ADR-0013).
+if(SUPPLE_PLATFORM_LINUX)
 add_executable(${PRODUCT_SLUG}-bridge bridge/bridge_main.cpp)
 target_link_libraries(${PRODUCT_SLUG}-bridge PRIVATE supple::clap-host supple::core-dsp)
 supple_target_defaults(${PRODUCT_SLUG}-bridge)
+endif()
 
 if(SUPPLE_BUILD_TESTS)
+  add_executable(host-child-fixture tests/child_fixture.cpp)
+  supple_target_defaults(host-child-fixture)
   # Hermetic CLAP fixtures for the host tests.
   add_library(clap-host-fixtures MODULE tests/fixture_plugins.cpp)
   target_link_libraries(clap-host-fixtures PRIVATE supple::core-params supple::core-patch
@@ -19,11 +41,24 @@ if(SUPPLE_BUILD_TESTS)
   supple_target_defaults(clap-host-fixtures)
   target_compile_options(clap-host-fixtures PRIVATE -Wno-old-style-cast)
 
-  supple_add_tests(clap-host SOURCES tests/test_clap_host.cpp tests/test_scan.cpp tests/test_main_thread_wake.cpp LABELS rt)
+  if(SUPPLE_PLATFORM_LINUX)
+    set(_host_tests tests/test_clap_host.cpp tests/test_scan.cpp tests/test_main_thread_wake.cpp tests/test_native_host.cpp)
+  else()
+    set(_host_tests tests/test_native_host.cpp)
+  endif()
+  supple_add_tests(clap-host SOURCES ${_host_tests} tests/test_child_process.cpp LABELS rt)
+  add_dependencies(clap-host.tests ${PRODUCT_SLUG}-scanner host-child-fixture)
+  target_compile_definitions(clap-host.tests PRIVATE CHILD_FIXTURE_PATH="$<TARGET_FILE:host-child-fixture>")
+  target_compile_definitions(clap-host.tests PRIVATE SCANNER_PATH="$<TARGET_FILE:${PRODUCT_SLUG}-scanner>")
+  if(SUPPLE_PLATFORM_LINUX)
   add_dependencies(clap-host.tests clap-host-fixtures ${PRODUCT_SLUG}-bridge)
   target_include_directories(clap-host.tests PRIVATE ${PROJECT_SOURCE_DIR}/plugins/suite/compiler/include)
   target_compile_definitions(clap-host.tests PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>"
                              BRIDGE_PATH="$<TARGET_FILE:${PRODUCT_SLUG}-bridge>")
+  else()
+    add_dependencies(clap-host.tests clap-host-fixtures)
+    target_compile_definitions(clap-host.tests PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>")
+  endif()
 
   foreach(_mode good crash hang)
     add_library(clap-scan-${_mode} MODULE tests/fixture_scan.cpp)
@@ -56,9 +91,28 @@ if(SUPPLE_BUILD_TESTS)
     ${_vst3_fixture_sdk}/vstcomponentbase.cpp
     ${_vst3_fixture_sdk}/vstparameters.cpp)
   target_link_libraries(clap-host-vst3-fixtures PRIVATE supple::vst3-host)
-  set_target_properties(clap-host-vst3-fixtures PROPERTIES PREFIX "" SUFFIX ".so"
+  if(APPLE)
+    set(_vst3_arch MacOS)
+    set(_vst3_suffix "")
+  elseif(WIN32)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
+      set(_vst3_arch arm64-win)
+    else()
+      set(_vst3_arch x86_64-win)
+    endif()
+    set(_vst3_suffix ".vst3")
+  else()
+    set(_vst3_arch x86_64-linux)
+    set(_vst3_suffix ".so")
+  endif()
+  set_target_properties(clap-host-vst3-fixtures PROPERTIES PREFIX "" SUFFIX "${_vst3_suffix}"
     OUTPUT_NAME "test-vst3"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-vst3.vst3/Contents/x86_64-linux")
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-vst3.vst3/Contents/${_vst3_arch}"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-vst3.vst3/Contents/${_vst3_arch}"
+    WINDOWS_EXPORT_ALL_SYMBOLS ON)
+  if(APPLE)
+    configure_file(tests/fixture_Info.plist "${CMAKE_CURRENT_BINARY_DIR}/test-vst3.vst3/Contents/Info.plist" COPYONLY)
+  endif()
   file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-vst3.vst3/Contents/Resources")
   configure_file(tests/fixture_moduleinfo.json
     "${CMAKE_CURRENT_BINARY_DIR}/test-vst3.vst3/Contents/Resources/moduleinfo.json" COPYONLY)

@@ -10,10 +10,7 @@
 #include <map>
 #include <vector>
 
-#if defined(__SSE__) || defined(__x86_64__)
-#include <xmmintrin.h>
-#define ORRERY_HAS_MXCSR 1
-#endif
+#include "supple/dsp/dsp.h"
 
 #include "dsp.h"
 #include "filters.h"
@@ -1955,10 +1952,7 @@ void Engine::process(std::span<const Event> events, const Transport& transport, 
                      float* right, std::uint32_t frames) SUPPLE_RT {
     Impl& m = *impl_;
     assert(frames <= m.maxBlock);
-#ifdef ORRERY_HAS_MXCSR
-    const unsigned csr = _mm_getcsr();
-    _mm_setcsr(csr | 0x8040);  // flush-to-zero, denormals-are-zero
-#endif
+    supple::dsp::DenormalGuard denormals;
     Program* previous = m.prog;
     Program* next = m.handoff.acquire();
     if (next != previous) {
@@ -1986,9 +1980,6 @@ void Engine::process(std::span<const Event> events, const Transport& transport, 
     if (!m.prog) {
         std::fill_n(left, frames, 0.0f);
         std::fill_n(right, frames, 0.0f);
-#ifdef ORRERY_HAS_MXCSR
-        _mm_setcsr(csr);
-#endif
         return;
     }
     m.tempo = std::isfinite(transport.tempo) ? std::clamp(transport.tempo, 20.0, 999.0) : 120.0;
@@ -2066,9 +2057,6 @@ void Engine::process(std::span<const Event> events, const Transport& transport, 
         m.frames[0] = m.frames[k];
     }
     m.now += frames;
-#ifdef ORRERY_HAS_MXCSR
-    _mm_setcsr(csr);
-#endif
 }
 
 }  // namespace supple::orrery

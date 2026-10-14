@@ -432,3 +432,11 @@ extern "C" int fixtureNoteOffs(int id) {
 }
 
 extern "C" void fixtureLayoutMode(int mode) { gLayoutMode = mode; }
+
+#if defined(__APPLE__)
+extern "C" bool bundleEntry(void*) { return true; }
+extern "C" bool bundleExit() { return true; }
+#elif defined(_WIN32)
+extern "C" __declspec(dllexport) bool InitDll() { return true; }
+extern "C" __declspec(dllexport) bool ExitDll() { return true; }
+#endif

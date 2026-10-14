@@ -124,9 +124,10 @@ These gates are explicit, with no no-op RT implementations:
 
 | Gate | Off on | Reason / follow-up |
 |---|---|---|
-| `SUPPLE_HOST_SERVICES`: CLAP/VST3 host, scan fixtures, bridge and sandbox | macOS, Windows | Linux loader, process isolation and IPC; hosting/bridge port steps |
-| Same gate: engine, JACK/fake JACK | macOS, Windows | Depends on hosting and device backends; session model still built |
-| Same gate: DAW GUI/agent, stock plugin wrappers, conformance/reset/export integration tests | macOS, Windows | Depend on the host/engine and X11; SDK-free DSP engines and suite tests still built |
+| `SUPPLE_HOST_SERVICES`: audio bridge | macOS, Windows | Shared memory, cross-process wake and native IPC; bridge port step |
+| Sandbox and offline renderer | Windows | Depends on the gated audio-file library; enabled on macOS |
+| Same gate: engine, JACK/fake JACK | macOS, Windows | Linux JACK scheduling/affinity remains coupled to engine; Windows also needs audio-file I/O |
+| Same gate: DAW GUI/agent and source-export integration tests | macOS, Windows | GUI depends on engine/X11; stock wrappers and conformance/reset tests now enabled separately |
 | POSIX evaluation harness tests | Windows | Unix executable fixtures, symlinks and process groups |
 | `SUPPLE_POSIX_AUDIO_FILES`: audio-file library/tests | Windows | POSIX exclusive files, RF64 output and recording recovery; file-I/O port step |
 
@@ -134,3 +135,10 @@ Research GUI spikes and host fuzzers reject configuration on non-Linux
 platforms rather than silently building incomplete targets. Renders must
 be deterministic on each platform; cross-platform bit identity is not
 required (ADR-0034).
+
+ADR-0036 enables native CLAP/VST3 hosting, the standalone supervised scanner,
+stock plugin builds and their conformance/reset checks on macOS/Windows.
+The existing Linux bridge/protocol, `/proc`, subreaper and shell-script probes
+remain Linux-only. Native tests cover fixture loading, state/audio, crash/hang
+isolation, cache and process capture/deadlines. Windows external validator
+shell tests are omitted; native product host-smoke tests still run.

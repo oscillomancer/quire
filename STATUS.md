@@ -16,8 +16,9 @@ and system libc++; shared float/double parsing uses vendored fast_float (MIT)
 on all platforms, including the suite's self-contained source exports.
 Native waits/wakes, thread setup, control-protocol and standalone MCP/proxy pass
 native CI on macOS arm64 (37 tests) and Windows (35 tests; ADR-0035).
-Non-Linux host, engine, GUI and plugin wrappers remain gated, and Windows audio-file
-I/O remains gated. Portable libraries, the session model, stock DSP cores
+Native hosting/scanning and stock wrappers are enabled for platform validation
+(ADR-0036); the engine, audio bridge and GUI remain gated, as does Windows
+audio-file I/O and its dependent sandbox. macOS enables the sandbox/offline renderer. Portable libraries, the session model, stock DSP cores
 and the script suite build independently of those services; see
 CONTRIBUTING.md for the complete gate list. External Windows readers that
 deny delete sharing prevent atomic file replacement until closed.
@@ -187,7 +188,7 @@ Engine and hosting:
 - The headless platform layer (ADR-0035) has natively tested macOS/Windows
   address waits, wake sources, control socket/MCP paths and user directory roots.
   Engine file helpers and runtime-protection fallbacks remain unverified outside
-  Linux while the engine is gated. Hosting, scanning, bridge, hardware backends
+  Linux while the engine is gated. Native hosting/scanning are enabled (ADR-0036); audio bridge, hardware backends
   and GUI embedding remain separate ports.
   Windows event waits admit 64 unique handles. macOS QoS must be self-applied;
   attempts to elevate engine threads from another thread report a normal-policy
@@ -204,8 +205,7 @@ Engine and hosting:
   there is no adaptive cost threshold.
 - The shared DSP guard implements x86 FTZ/DAZ and arm64 FPCR FZ; macOS arm64 CI
   verifies FPCR restoration and subnormal handling. Plug-in lifecycle calls run
-  in the thread's own floating-point environment. Orrery's separate MXCSR guard remains a
-  plugin-template port responsibility.
+  in the thread's own floating-point environment. Orrery now uses this same shared guard on all architectures.
 - Real-time background threads need `RLIMIT_RTPRIO` ≥ 1, an unlimited
   `RLIMIT_RTTIME` and a pool that leaves two allowed CPUs free; without them
   the renderer and pool run at normal priority (with a warning) and compete

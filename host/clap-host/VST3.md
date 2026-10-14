@@ -57,3 +57,10 @@ are reported accurately; bridged main/key buses have a further 16-channel cap.
 Notes are tracked with counts and note ids in a bounded arena. Wildcard note
 ends and chokes expand to explicit offs; reset releases every tracked count.
 Run-loop snapshots dispatch only handlers that remain registered.
+
+Native module loaders (ADR-0036) are copied without modification from public.sdk
+commit `a3911a4615dabbfdfd9d181ee26b05c70c289a95`, the submodule pinned by
+SDK commit `9fad977`. macOS builds module_mac.mm with Cocoa/CoreFoundation;
+Windows builds module_win32.cpp with shell32/ole32/uuid. The in-tree fixture
+uses native bundle binary paths and entry points. See sandbox.md for search
+paths, scanning and the temporary non-Linux bridge/editor errors.

@@ -3,7 +3,15 @@
 // Entry-init failures for supervised scanning. Never loaded into the test host.
 #include <clap/clap.h>
 #include <signal.h>
+#include <chrono>
+#include <thread>
+#if defined(_WIN32)
+#include <process.h>
+#include <windows.h>
+#define getpid _getpid
+#else
 #include <unistd.h>
+#endif
 
 #include <cstdio>
 #include <cstdlib>
@@ -16,9 +24,15 @@ bool CLAP_ABI init(const char*) {
             std::fclose(file);
         }
     }
-    if constexpr (SCAN_MODE == 1) ::raise(SIGKILL);
+    if constexpr (SCAN_MODE == 1) {
+#if defined(_WIN32)
+        TerminateProcess(GetCurrentProcess(), 0xC0000005);
+#else
+        ::raise(SIGKILL);
+#endif
+    }
     if constexpr (SCAN_MODE == 2)
-        for (;;) ::pause();
+        for (;;) std::this_thread::sleep_for(std::chrono::seconds(60));
     // A noisy but otherwise healthy plugin must not corrupt scan JSON.
     std::puts("plugin initialization log on stdout");
     return true;

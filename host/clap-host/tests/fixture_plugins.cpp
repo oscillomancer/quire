@@ -19,7 +19,12 @@
 //     (in · 2^-100) · 2^100, exact for |in| >= 2^-26 and zero below it when
 //     process() runs with FTZ/DAZ (ADR-0025).
 #include <clap/clap.h>
+#if defined(_WIN32)
+#include <io.h>
+#define write _write
+#else
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <array>

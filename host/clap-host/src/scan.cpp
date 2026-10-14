@@ -8,12 +8,9 @@
 #include "supple/product.h"
 #include "supple/script_export.hpp"
 
-#include <fcntl.h>
-#include <poll.h>
-#include <signal.h>
-#include <spawn.h>
-#include <sys/wait.h>
-#include <unistd.h>
+#include "platform.h"
+#include "supple/base/paths.h"
+#include "supple/host/child_process.h"
 
 #include <algorithm>
 #include <array>
@@ -24,8 +21,6 @@
 #include <cstring>
 #include <fstream>
 #include <set>
-
-extern char** environ;
 
 namespace supple::host {
 namespace fs = std::filesystem;
@@ -38,6 +33,15 @@ constexpr std::int64_t kCacheVersion = 2;
 // are the scripts in its library: what it offers changes while its file
 // stays the same, so no record of it can be trusted.
 bool scriptPlayer(const fs::path& module) {
+    std::error_code ec;
+    if (fs::is_directory(module, ec)) {
+        for (fs::directory_iterator it(module / "Contents/MacOS", ec), end; it != end;
+             it.increment(ec)) {
+            if (ec) break;
+            if (it->is_regular_file(ec) && scriptPlayer(it->path())) return true;
+        }
+        return false;
+    }
     std::ifstream in(module, std::ios::binary);
     const std::string_view mark = scriptc::kPlayerMark;
     std::string window;
@@ -66,7 +70,7 @@ json::Value pluginsJson(const std::vector<PluginInfo>& plugins) {
         item["version"] = p.version;
         item["description"] = p.description;
         item["format"] = p.format;
-        item["path"] = p.path.string();
+        item["path"] = platform::pathText(p.path);
         item["instrument"] = p.instrument;
         item["semantic"] = p.semantic;
         auto features = json::Value::array();
@@ -84,7 +88,8 @@ std::vector<fs::path> modules(std::span<const fs::path> roots) {
         std::error_code ec;
         std::vector<fs::path> found;
         if (fs::is_regular_file(root, ec) ||
-            (root.extension() == ".vst3" && fs::is_directory(root, ec))) {
+            ((root.extension() == ".vst3" || root.extension() == ".clap") &&
+             fs::is_directory(root, ec))) {
             found.push_back(root);
         } else if (fs::is_directory(root, ec)) {
             for (fs::recursive_directory_iterator
@@ -92,7 +97,8 @@ std::vector<fs::path> modules(std::span<const fs::path> roots) {
                  end;
                  it != end; it.increment(ec)) {
                 if (ec) break;
-                if (it->path().extension() == ".vst3" && it->is_directory(ec)) {
+                if ((it->path().extension() == ".vst3" || it->path().extension() == ".clap") &&
+                    it->is_directory(ec)) {
                     found.push_back(it->path());
                     it.disable_recursion_pending();
                 } else if (it->path().extension() == ".clap" && it->is_regular_file(ec)) {
@@ -122,7 +128,9 @@ std::vector<fs::path> modules(std::span<const fs::path> roots) {
 Result<json::Value> fingerprint(const fs::path& module) {
     std::error_code ec;
     const auto canonical = fs::canonical(module, ec);
-    if (ec) return Error("host.scan.stat", "cannot resolve module " + module.string(), "/path");
+    if (ec)
+        return Error("host.scan.stat", "cannot resolve module " + platform::pathText(module),
+                     "/path");
     std::vector<fs::path> files;
     if (fs::is_regular_file(module, ec)) {
         files.push_back(module);
@@ -147,7 +155,7 @@ Result<json::Value> fingerprint(const fs::path& module) {
         }
     }
     auto key = json::Value::object();
-    key["path"] = canonical.string();
+    key["path"] = platform::pathText(canonical);
     auto stats = json::Value::array();
     std::sort(files.begin(), files.end());
     for (const auto& file : files) {
@@ -157,7 +165,7 @@ Result<json::Value> fingerprint(const fs::path& module) {
         const auto time = fs::last_write_time(file, ec);
         if (ec) break;
         auto stat = json::Value::object();
-        stat["path"] = file.lexically_relative(module).string();
+        stat["path"] = platform::pathText(file.lexically_relative(module));
         // Strings preserve the filesystem's complete integer range in JSON.
         stat["size"] = std::to_string(size);
         stat["mtime"] = std::to_string(time.time_since_epoch().count());
@@ -165,18 +173,14 @@ Result<json::Value> fingerprint(const fs::path& module) {
     }
     if (ec)
         return Error("host.scan.stat",
-                     "cannot stat module " + module.string() + ": " + ec.message(), "/path",
-                     "check file permissions");
+                     "cannot stat module " + platform::pathText(module) + ": " + ec.message(),
+                     "/path", "check file permissions");
     key["files"] = std::move(stats);
     return key;
 }
 
 fs::path cacheDirectory() {
-    fs::path root;
-    if (const char* env = std::getenv("XDG_CACHE_HOME"); env && fs::path(env).is_absolute())
-        root = env;
-    else if (const char* home = std::getenv("HOME"); home && fs::path(home).is_absolute())
-        root = fs::path(home) / ".cache";
+    const auto root = paths::cache();
     if (root.empty()) return {};
     return root / product::kSlug / "plugin-scan";
 }
@@ -185,127 +189,37 @@ fs::path cacheFile(const fs::path& directory, const fs::path& module) {
     // A filename hash only: the full canonical path is checked in the record,
     // so even a hash collision can only cause a cache miss.
     std::uint64_t hash = 14695981039346656037ull;
-    for (const unsigned char c : module.string()) {
+    for (const unsigned char c : platform::pathText(module)) {
         hash ^= c;
         hash *= 1099511628211ull;
     }
     return directory / (std::to_string(hash) + ".json");
 }
 
-struct Child {
-    pid_t pid = 0;
-    int fd = -1;
-    ~Child() {
-        if (fd >= 0) ::close(fd);
-        if (pid > 0) {
-            // The leader is not reaped until here: its PID cannot be reused.
-            // Also close descendants holding stdout open after the leader exits.
-            ::kill(-pid, SIGKILL);
-            int status = 0;
-            while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {
-            }
-        }
-    }
-};
-
 Result<std::vector<PluginInfo>> supervise(const fs::path& executable, const fs::path& module,
                                           const ScanOptions& options) {
-    int pipeFds[2];
-    if (::pipe2(pipeFds, O_CLOEXEC) != 0)
-        return Error("host.scan.spawn",
-                     "cannot create scanner pipe: " + std::string(std::strerror(errno)));
-    Child child;
-    child.fd = pipeFds[0];
-    const int flags = ::fcntl(child.fd, F_GETFL);
-    if (flags < 0 || ::fcntl(child.fd, F_SETFL, flags | O_NONBLOCK) < 0) {
-        ::close(pipeFds[1]);
-        return Error("host.scan.spawn", "cannot make scanner pipe nonblocking");
+    const std::array<std::string, 2> args{"--scan", platform::pathText(module)};
+    auto child = ChildProcess::spawn(executable, args);
+    if (!child) return Error("host.scan.spawn", child.error().message, "/path", child.error().hint);
+    auto output = (*child)->collect(
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(options.timeoutMs),
+        options.maxOutputBytes);
+    if (!output) {
+        auto error = output.error();
+        error.code.replace(0, 5, "host.scan");
+        return error;
     }
-    posix_spawn_file_actions_t actions;
-    int rc = ::posix_spawn_file_actions_init(&actions);
-    if (rc != 0) {
-        ::close(pipeFds[1]);
-        return Error("host.scan.spawn", "cannot initialize scanner file actions");
-    }
-    posix_spawnattr_t attrs;
-    rc = ::posix_spawnattr_init(&attrs);
-    if (rc == 0) {
-        rc = ::posix_spawn_file_actions_addclose(&actions, pipeFds[0]);
-        if (rc == 0) rc = ::posix_spawn_file_actions_adddup2(&actions, pipeFds[1], STDOUT_FILENO);
-        if (rc == 0 && pipeFds[1] != STDOUT_FILENO)
-            rc = ::posix_spawn_file_actions_addclose(&actions, pipeFds[1]);
-        if (rc == 0)
-            rc = ::posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY,
-                                                    0);
-        if (rc == 0)
-            rc = ::posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY,
-                                                    0);
-        if (rc == 0) rc = ::posix_spawn_file_actions_addclosefrom_np(&actions, 3);
-        if (rc == 0) rc = ::posix_spawnattr_setpgroup(&attrs, 0);
-        if (rc == 0) rc = ::posix_spawnattr_setflags(&attrs, POSIX_SPAWN_SETPGROUP);
-        const auto exeText = executable.string();
-        const auto moduleText = module.string();
-        char* args[] = {const_cast<char*>(exeText.c_str()), const_cast<char*>("--scan"),
-                        const_cast<char*>(moduleText.c_str()), nullptr};
-        if (rc == 0)
-            rc = ::posix_spawn(&child.pid, exeText.c_str(), &actions, &attrs, args, environ);
-        ::posix_spawnattr_destroy(&attrs);
-    }
-    ::posix_spawn_file_actions_destroy(&actions);
-    ::close(pipeFds[1]);
-    if (rc != 0) {
-        child.pid = 0;
-        return Error("host.scan.spawn", "cannot start scanner: " + std::string(std::strerror(rc)),
-                     "/path", "check the bridge executable and its permissions");
-    }
-    const auto deadline =
-        std::chrono::steady_clock::now() + std::chrono::milliseconds(options.timeoutMs);
-    std::string output;
-    std::array<char, 8192> bytes;
-    bool eof = false;
-    siginfo_t exit{};
-    for (;;) {
-        if (std::chrono::steady_clock::now() >= deadline)
-            return Error(
-                "host.scan.timeout",
-                "plugin scanner timed out after " + std::to_string(options.timeoutMs) + " ms",
-                "/path", "repair/reinstall the module to retry its scan");
-        if (!eof) {
-            const auto n = ::read(child.fd, bytes.data(), bytes.size());
-            if (n > 0) {
-                if (static_cast<std::size_t>(n) > options.maxOutputBytes - output.size())
-                    return Error("host.scan.output_limit",
-                                 "plugin scanner output exceeds " +
-                                     std::to_string(options.maxOutputBytes) + " bytes",
-                                 "/path", "update the plugin/bridge");
-                output.append(bytes.data(), static_cast<std::size_t>(n));
-                continue;
-            }
-            if (n == 0)
-                eof = true;
-            else if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)
-                return Error("host.scan.io", "cannot read scanner output");
-        }
-        if (::waitid(P_PID, static_cast<id_t>(child.pid), &exit, WEXITED | WNOHANG | WNOWAIT) < 0 &&
-            errno != EINTR)
-            return Error("host.scan.wait", "cannot observe scanner exit");
-        if (exit.si_pid != 0) {
-            if (exit.si_code == CLD_KILLED || exit.si_code == CLD_DUMPED)
-                return Error("host.scan.crashed",
-                             "plugin scanner crashed with signal " + std::to_string(exit.si_status),
-                             "/path", "repair/reinstall the module to retry its scan");
-            if (eof) break;
-        }
-        pollfd polled{eof ? -1 : child.fd, POLLIN, 0};
-        if (::poll(&polled, 1, 10) < 0 && errno != EINTR)
-            return Error("host.scan.io", "cannot poll scanner output");
-    }
-    auto parsed = json::parse(output, {.maxDepth = 32, .maxBytes = options.maxOutputBytes});
+    if (output->crashed)
+        return Error("host.scan.crashed",
+                     "plugin scanner crashed with signal " + std::to_string(output->exitCode),
+                     "/path", "repair/reinstall the module to retry its scan");
+    auto parsed = json::parse(output->text, {.maxDepth = 32, .maxBytes = options.maxOutputBytes});
     if (!parsed) return invalidOutput();
     auto result = parseScanReply(*parsed, module);
-    if (result && exit.si_status != 0) return invalidOutput();
+    if (result && output->exitCode != 0) return invalidOutput();
     return result;
 }
+
 }  // namespace
 
 json::Value scanReply(const Result<std::vector<PluginInfo>>& result) {
@@ -326,7 +240,7 @@ json::Value scanReply(const Result<std::vector<PluginInfo>>& result) {
 
 Result<std::vector<PluginInfo>> parseScanReply(const json::Value& reply, const fs::path& module) {
     std::error_code ec;
-    const bool vst3 = fs::is_directory(module, ec);
+    const bool vst3 = module.extension() == ".vst3";
     const auto* schema = reply.find("schema");
     if (!schema || !schema->isString() || schema->asString() != kSchema) return invalidOutput();
     const auto* error = reply.find("error");
@@ -354,7 +268,7 @@ Result<std::vector<PluginInfo>> parseScanReply(const json::Value& reply, const f
         const auto* semantic = item.find("semantic");
         const auto* features = item.find("features");
         if (!instrument || !instrument->isBool() || !semantic || !semantic->isBool() || !features ||
-            !features->isArray() || item.find("path")->asString() != module.string() ||
+            !features->isArray() || item.find("path")->asString() != platform::pathText(module) ||
             item.find("id")->asString().empty())
             return invalidOutput();
         PluginInfo info;
@@ -399,14 +313,18 @@ Result<std::vector<PluginInfo>> scan(std::span<const fs::path> paths, const Scan
     auto executable =
         options.bridgeExecutable.empty() ? bridgeExecutable() : options.bridgeExecutable;
     if (!options.forceInProcess && executable.empty()) {
+#if defined(__linux__)
         locateBridgeExecutable(std::string(product::kSlug) + "-bridge");
+#else
+        locateBridgeExecutable(std::string(product::kSlug) + "-scanner");
+#endif
         executable = bridgeExecutable();
     }
     std::error_code executableError;
     const bool bridgeMissing =
         !options.forceInProcess &&
         (executable.empty() || !fs::is_regular_file(executable, executableError) ||
-         ::access(executable.c_str(), X_OK) != 0);
+         !platform::executable(executable));
     if (bridgeMissing && options.superviseAll)
         return Error("host.scan.unsupervised", "a background scan needs the plugin bridge",
                      "/bridge",
@@ -439,7 +357,7 @@ Result<std::vector<PluginInfo>> scan(std::span<const fs::path> paths, const Scan
             gReport.failures.push_back({module, key.error(), false});
             continue;
         }
-        const fs::path canonical = key->find("path")->asString();
+        const fs::path canonical = platform::pathFromText(key->find("path")->asString());
         const auto recordPath = cacheFile(directory, canonical);
         // The stock folder's modules are never cached (they are cheap to
         // scan), nor is a script player anywhere (see scriptPlayer(), checked
@@ -491,7 +409,7 @@ Result<std::vector<PluginInfo>> scan(std::span<const fs::path> paths, const Scan
                 record["reply"] = scanReply(outcome);
                 if (outcome)
                     for (auto& info : record["reply"]["plugins"].asArray())
-                        info["path"] = canonical.string();
+                        info["path"] = platform::pathText(canonical);
                 auto written = writeFileAtomic(recordPath, json::writeCanonical(record));
                 if (!written) gReport.warnings.push_back(written.error());
             }

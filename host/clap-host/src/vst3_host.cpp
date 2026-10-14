@@ -3,6 +3,7 @@
 #include "vst3_host.h"
 #include "main_thread_wake.h"
 #include "pending_edits.h"
+#include "platform.h"
 
 #include <algorithm>
 #include <array>
@@ -209,7 +210,7 @@ std::shared_ptr<VST3::Hosting::Module> moduleFor(const fs::path& path) {
     static auto& mutex = *new std::mutex;
     static auto& cache = *new std::map<std::string, std::shared_ptr<VST3::Hosting::Module>>;
     std::lock_guard lock(mutex);
-    const auto key = path.lexically_normal().string();
+    const auto key = platform::pathText(path.lexically_normal());
     if (auto found = cache.find(key); found != cache.end()) return found->second;
     std::string error;
     auto module = VST3::Hosting::Module::create(key, error);
@@ -1207,25 +1208,5 @@ Result<std::vector<PluginInfo>> scanVst3Module(const fs::path& path) {
     return result;
 }
 
-std::vector<fs::path> defaultVst3SearchPath() {
-    std::vector<fs::path> paths;
-    auto add = [&](const fs::path& p) {
-        std::error_code ec;
-        if (fs::exists(p, ec)) paths.push_back(p);
-    };
-    if (const char* env = std::getenv("VST3_PATH")) {
-        std::string text(env);
-        std::size_t start = 0;
-        while (start <= text.size()) {
-            const auto end = text.find(':', start);
-            if (end > start) add(text.substr(start, end - start));
-            if (end == std::string::npos) break;
-            start = end + 1;
-        }
-    }
-    if (const char* home = std::getenv("HOME")) add(fs::path(home) / ".vst3");
-    add("/usr/lib/vst3");
-    add("/usr/local/lib/vst3");
-    return paths;
-}
+std::vector<fs::path> defaultVst3SearchPath() { return platform::pluginPaths(true); }
 }  // namespace supple::host

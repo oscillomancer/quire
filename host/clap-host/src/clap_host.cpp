@@ -8,7 +8,7 @@
 #include "scan.h"
 #include "vst3_host.h"
 
-#include <dlfcn.h>
+#include "platform.h"
 
 #include <algorithm>
 #include <chrono>
@@ -43,32 +43,32 @@ class Library {
         if (ec)
             return Error("host.load", "cannot resolve " + path.string() + ": " + ec.message(), {},
                          "check the plugin path and its symlinks");
-        const std::string key = canonical.string();
+        const std::string key = platform::pathText(canonical);
         if (auto existing = cache[key].lock()) return existing;
 
-        void* handle = ::dlopen(key.c_str(), RTLD_NOW | RTLD_LOCAL);
-        if (!handle)
-            return Error("host.load", "cannot load " + key + ": " + std::string(::dlerror()), {},
-                         "check that the file is a CLAP plugin built for this platform");
-        auto* entry = static_cast<const clap_plugin_entry_t*>(::dlsym(handle, "clap_entry"));
+        auto opened = platform::openLibrary(canonical);
+        if (!opened) return opened.error();
+        void* handle = *opened;
+        auto* entry =
+            static_cast<const clap_plugin_entry_t*>(platform::symbol(handle, "clap_entry"));
         if (!entry) {
-            ::dlclose(handle);
+            platform::closeLibrary(handle);
             return Error("host.load", key + " has no clap_entry symbol", {},
                          "this is not a CLAP plugin");
         }
         if (!clap_version_is_compatible(entry->clap_version)) {
-            ::dlclose(handle);
+            platform::closeLibrary(handle);
             return Error("host.load", key + " uses an incompatible CLAP version");
         }
         if (!entry->init(key.c_str())) {
-            ::dlclose(handle);
+            platform::closeLibrary(handle);
             return Error("host.load", key + ": clap_entry.init failed");
         }
         auto* factory =
             static_cast<const clap_plugin_factory_t*>(entry->get_factory(CLAP_PLUGIN_FACTORY_ID));
         if (!factory) {
             entry->deinit();
-            ::dlclose(handle);
+            platform::closeLibrary(handle);
             return Error("host.load", key + " provides no plugin factory");
         }
         auto lib = std::shared_ptr<Library>(new Library(handle, entry, factory, key));
@@ -78,7 +78,7 @@ class Library {
 
     ~Library() {
         entry_->deinit();
-        ::dlclose(handle_);
+        platform::closeLibrary(handle_);
     }
 
     const clap_plugin_factory_t* factory() const { return factory_; }
@@ -541,33 +541,17 @@ const void* CLAP_ABI HostCallbacks::getExtension(const clap_host_t*, const char*
 
 std::optional<fs::path> stockPluginDir() {
     std::error_code ec;
-    const fs::path exe = fs::read_symlink("/proc/self/exe", ec);
-    if (ec) return std::nullopt;
+    const fs::path exe = platform::executablePath();
+    if (exe.empty()) return std::nullopt;
     const fs::path dir = exe.parent_path().parent_path().parent_path() / "plugins" / "clap";
     if (!fs::is_directory(dir, ec)) return std::nullopt;
     return fs::weakly_canonical(dir, ec);
 }
 
 std::vector<fs::path> defaultSearchPath() {
-    std::vector<fs::path> out;
-    auto add = [&](const fs::path& p) {
-        std::error_code ec;
-        if (!p.empty() && fs::exists(p, ec)) out.push_back(p);
-    };
-    if (const char* env = std::getenv("CLAP_PATH")) {
-        std::string s(env);
-        std::size_t start = 0;
-        while (start <= s.size()) {
-            const std::size_t end = s.find(':', start);
-            add(s.substr(start, end == std::string::npos ? std::string::npos : end - start));
-            if (end == std::string::npos) break;
-            start = end + 1;
-        }
-    }
-    if (const char* home = std::getenv("HOME")) add(fs::path(home) / ".clap");
-    add("/usr/lib/clap");
-    add("/usr/local/lib/clap");
-    for (const auto& p : defaultVst3SearchPath()) add(p);
+    auto out = platform::pluginPaths(false);
+    const auto vst3 = defaultVst3SearchPath();
+    out.insert(out.end(), vst3.begin(), vst3.end());
     return out;
 }
 
@@ -583,7 +567,7 @@ bool shadowed(std::span<const PluginInfo> catalogue, std::size_t index) {
 
 Result<std::vector<PluginInfo>> scanModuleInProcess(const fs::path& file) {
     std::error_code ec;
-    if (fs::is_directory(file, ec)) return scanVst3Module(file);
+    if (file.extension() == ".vst3") return scanVst3Module(file);
     std::vector<PluginInfo> out;
     {
         auto lib = Library::open(file);
@@ -1711,6 +1695,13 @@ bool Instance::hasEditor() const {
 }
 
 Result<Instance::EditorSize> Instance::openEditor(unsigned long x11Parent, double scale) {
+#if !defined(__linux__)
+    (void)x11Parent;
+    (void)scale;
+    return Error("host.editor.unsupported", "native plugin editor embedding is unavailable",
+                 "/editor", "use plugin parameters until native editor embedding is available");
+#else
+
     if (vst3_) {
         auto size = vst3_->openEditor(x11Parent, scale);
         if (size) editorOpen_ = true;
@@ -1750,6 +1741,7 @@ Result<Instance::EditorSize> Instance::openEditor(unsigned long x11Parent, doubl
     }
     editorOpen_ = true;
     return size;
+#endif
 }
 
 Result<Instance::EditorSize> Instance::resizeEditor(std::uint32_t width, std::uint32_t height) {

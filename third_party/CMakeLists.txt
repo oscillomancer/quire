@@ -71,7 +71,7 @@ endif()
 target_link_libraries(tp-lua PUBLIC ${CMAKE_DL_LIBS})
 add_library(supple::lua ALIAS tp-lua)
 
-if(SUPPLE_HOST_SERVICES)
+if(SUPPLE_PLUGIN_HOST)
 set(_vst3 ${CMAKE_CURRENT_SOURCE_DIR}/vst3sdk-v3.8.0_build_66)
 add_library(tp-vst3-host STATIC
   ${_vst3}/pluginterfaces/base/coreiids.cpp
@@ -81,12 +81,21 @@ add_library(tp-vst3-host STATIC
   ${_vst3}/public.sdk/source/common/commonstringconvert.cpp
   ${_vst3}/public.sdk/source/vst/vstinitiids.cpp
   ${_vst3}/public.sdk/source/vst/hosting/module.cpp
-  ${_vst3}/public.sdk/source/vst/hosting/module_linux.cpp
   ${_vst3}/public.sdk/source/vst/hosting/eventlist.cpp
   ${_vst3}/public.sdk/source/vst/hosting/hostclasses.cpp
   ${_vst3}/public.sdk/source/vst/hosting/pluginterfacesupport.cpp
   ${_vst3}/public.sdk/source/vst/hosting/parameterchanges.cpp
   ${_vst3}/public.sdk/source/vst/utility/stringconvert.cpp)
+if(APPLE)
+  enable_language(OBJCXX)
+  target_sources(tp-vst3-host PRIVATE ${_vst3}/public.sdk/source/vst/hosting/module_mac.mm)
+  target_link_libraries(tp-vst3-host PUBLIC "-framework Cocoa" "-framework CoreFoundation")
+elseif(WIN32)
+  target_sources(tp-vst3-host PRIVATE ${_vst3}/public.sdk/source/vst/hosting/module_win32.cpp)
+  target_link_libraries(tp-vst3-host PUBLIC shell32 ole32 uuid)
+else()
+  target_sources(tp-vst3-host PRIVATE ${_vst3}/public.sdk/source/vst/hosting/module_linux.cpp)
+endif()
 target_include_directories(tp-vst3-host SYSTEM PUBLIC ${_vst3})
 target_compile_features(tp-vst3-host PUBLIC cxx_std_20)
 set_target_properties(tp-vst3-host PROPERTIES POSITION_INDEPENDENT_CODE ON)

@@ -11,10 +11,12 @@
 // sequence word in the Header.
 #pragma once
 
+#if defined(__linux__)
 #include <linux/futex.h>
 #include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
+#endif
 
 #include <atomic>
 #include <chrono>
@@ -308,6 +310,7 @@ struct Layout {
     }
 };
 
+#if defined(__linux__)
 inline long futexWait(std::atomic<std::uint32_t>& word, std::uint32_t expected, int timeoutMs) {
     timespec ts{timeoutMs / 1000, static_cast<long>(timeoutMs % 1000) * 1000000L};
     return ::syscall(SYS_futex, reinterpret_cast<std::uint32_t*>(&word), FUTEX_WAIT, expected,
@@ -317,5 +320,7 @@ inline void futexWake(std::atomic<std::uint32_t>& word) {
     ::syscall(SYS_futex, reinterpret_cast<std::uint32_t*>(&word), FUTEX_WAKE, 1, nullptr, nullptr,
               0);
 }
+
+#endif
 
 }  // namespace supple::host::bridge

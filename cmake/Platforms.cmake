@@ -6,7 +6,8 @@ set(SUPPLE_PLATFORM_LINUX OFF)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   set(SUPPLE_PLATFORM_LINUX ON)
 endif()
-# Hosting/scanning, process isolation, JACK, X11 and their dependent services.
+# Process isolation, JACK, X11 and their dependent services.
+set(SUPPLE_PLUGIN_HOST ON)
 # Core-base waits/wakes, control-protocol and MCP are portable and ungated.
 set(SUPPLE_HOST_SERVICES ${SUPPLE_PLATFORM_LINUX})
 # Recording recovery and RF64 output still use POSIX file descriptors.
@@ -15,9 +16,8 @@ if(UNIX)
   set(SUPPLE_POSIX_AUDIO_FILES ON)
 endif()
 if(NOT SUPPLE_HOST_SERVICES)
-  message(STATUS "Port gates: hosting/scan/bridge, engine/JACK, GUI/agent, plugin wrappers (see CONTRIBUTING.md)")
+  message(STATUS "Port gates: bridge, engine/JACK, GUI/agent (see CONTRIBUTING.md)")
   set(SUPPLE_BUILD_GUI OFF CACHE BOOL "Build GUI components" FORCE)
-  set(SUPPLE_BUILD_PLUGINS OFF CACHE BOOL "Build the stock plugins (template-derived)" FORCE)
   if(SUPPLE_BUILD_SPIKES OR SUPPLE_BUILD_FUZZERS)
     message(FATAL_ERROR "Research spikes and host fuzzers require Linux platform services")
   endif()

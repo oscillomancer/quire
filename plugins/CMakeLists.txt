@@ -10,7 +10,7 @@ add_subdirectory(comp/engine)
 add_subdirectory(drive/engine)
 add_subdirectory(transient/engine)
 add_subdirectory(reverb/engine)
-if(SUPPLE_HOST_SERVICES)
+if(SUPPLE_PLUGIN_HOST)
   add_subdirectory(orrery/clap)
 endif()
 
@@ -57,6 +57,9 @@ if(SUPPLE_BUILD_PLUGINS)
         -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}
         -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+        -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
+        -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
+        -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
         -DSUPPLE_ROOT=${CMAKE_SOURCE_DIR}
         -D${prefix}_ASSET_DIR=${CMAKE_BINARY_DIR}/plugins/clap
         -D${prefix}_NOTICES_PREFIX=${artifact}-
@@ -83,7 +86,7 @@ if(SUPPLE_BUILD_PLUGINS)
         "${CMAKE_BINARY_DIR}/plugins/clap/${artifact}.clap")
       set_tests_properties(plugin.${dir}.reset PROPERTIES
         LABELS "rt;plugin-reset" TIMEOUT 180)
-      if(NOT SUPPLE_SANITIZE)
+      if(NOT SUPPLE_SANITIZE AND UNIX)
         add_test(NAME plugin.${dir}.validator
           COMMAND "${CMAKE_SOURCE_DIR}/tools/validator/run.sh"
                   "${CMAKE_BINARY_DIR}/plugins/clap/${artifact}.clap")
@@ -124,6 +127,9 @@ if(SUPPLE_BUILD_PLUGINS)
         -DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}
         -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+        -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
+        -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
+        -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
         -DSUPPLE_PRODUCT_DIR=${CMAKE_CURRENT_SOURCE_DIR}/${product}
         -DSUPPLE_BUILD_GUI=${SUPPLE_BUILD_GUI}
         -DSUPPLE_BUILD_TESTS=${SUPPLE_BUILD_TESTS}
@@ -139,11 +145,18 @@ if(SUPPLE_BUILD_PLUGINS)
         -DFETCHCONTENT_SOURCE_DIR_NANOSVG=${tp}/nanosvg
       BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --parallel 1)
     set(staged "${CMAKE_BINARY_DIR}/plugins/clap")
+    if(APPLE)
+      set(_stage_notices "${plugin_build}/plugins/${artifact}.clap/Contents/Resources")
+      set(_stage_clap ${CMAKE_COMMAND} -E copy_directory "${plugin_build}/plugins/${artifact}.clap" "${staged}/${artifact}.clap")
+    else()
+      set(_stage_notices "${plugin_build}/plugins")
+      set(_stage_clap ${CMAKE_COMMAND} -E copy_if_different "${plugin_build}/plugins/${artifact}.clap" "${staged}/${artifact}.clap")
+    endif()
     ExternalProject_Add_Step(plugin-${name} stage
       COMMAND ${CMAKE_COMMAND} -E make_directory "${staged}"
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${plugin_build}/plugins/${artifact}.clap"
-              "${plugin_build}/plugins/${artifact}-LICENSE.txt"
-              "${plugin_build}/plugins/${artifact}-NOTICES.txt" "${staged}"
+      COMMAND ${_stage_clap}
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_stage_notices}/$<IF:$<BOOL:${APPLE}>,LICENSE.txt,${artifact}-LICENSE.txt>" "${staged}/${artifact}-LICENSE.txt"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_stage_notices}/$<IF:$<BOOL:${APPLE}>,NOTICES.txt,${artifact}-NOTICES.txt>" "${staged}/${artifact}-NOTICES.txt"
       DEPENDEES build
       ALWAYS TRUE)
     if(SUPPLE_BUILD_TESTS)
@@ -186,7 +199,7 @@ if(SUPPLE_BUILD_PLUGINS)
       set_tests_properties(plugin.player.unload PROPERTIES LABELS "rt;plugin-unload" TIMEOUT 30)
       list(APPEND player_tests plugin.player.unload)
     endif()
-    if(NOT SUPPLE_SANITIZE)
+    if(NOT SUPPLE_SANITIZE AND UNIX)
       # The player has factory presets, on which 0.4.1's preset-discovery
       # tests deadlock (the template's validate.cmake skips them too).
       add_test(NAME plugin.player.validator
@@ -213,6 +226,7 @@ if(SUPPLE_BUILD_PLUGINS)
       ENVIRONMENT "SUPPLE_SCRIPT_LIBRARY=${example_library}")
     # Fresh source exports of every example plus the non-default library
     # tilt regression: each its own tests, semantic conformance and player audio parity.
+    if(SUPPLE_HOST_SERVICES)
     add_test(NAME plugin.export.source
       COMMAND ${CMAKE_COMMAND} -DSANDBOX=$<TARGET_FILE:${PRODUCT_SLUG}-sandbox>
               -DPLAYER=${player_clap} -DKIT=${CMAKE_BINARY_DIR}/plugins/script-export
@@ -226,5 +240,6 @@ if(SUPPLE_BUILD_PLUGINS)
               -P ${CMAKE_CURRENT_SOURCE_DIR}/suite/tests/source_export.cmake)
     # Nested builds use three jobs too; do not overlap them with other tests.
     set_tests_properties(plugin.export.source PROPERTIES LABELS slow TIMEOUT 1800 RUN_SERIAL TRUE)
+    endif()
   endif()
 endif()

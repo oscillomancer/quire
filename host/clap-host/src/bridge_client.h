@@ -3,6 +3,9 @@
 // Internal: the host side of a bridged plugin instance (ADR-0013).
 #pragma once
 
+#if !defined(__linux__)
+#include "bridge_unavailable.h"
+#else
 #include <sys/types.h>
 
 #include <atomic>
@@ -31,11 +34,11 @@ class RemoteInstance;
 
 class BridgeProcess {
   public:
-    static Result<std::shared_ptr<BridgeProcess>> spawn();
+    static Result<std::shared_ptr<BridgeProcess> > spawn();
     ~BridgeProcess();
-    Result<std::vector<std::uint8_t>> call(bridge::Op op, std::uint32_t instance,
-                                           const bridge::Writer& w, int fd = -1,
-                                           int timeoutMs = 10000);
+    Result<std::vector<std::uint8_t> > call(bridge::Op op, std::uint32_t instance,
+                                            const bridge::Writer& w, int fd = -1,
+                                            int timeoutMs = 10000);
     bool failed() const { return failed_.load(); }
     std::string failure() const;
     void fail(int why) SUPPLE_RT;
@@ -75,7 +78,7 @@ class BridgeProcess {
 
 class RemoteInstance {
   public:
-    static Result<std::unique_ptr<RemoteInstance>> spawn(
+    static Result<std::unique_ptr<RemoteInstance> > spawn(
         const PluginInfo& info, const HostIdentity& identity, RemotePorts& ports,
         std::shared_ptr<BridgeProcess> process = {});
     ~RemoteInstance();
@@ -103,7 +106,7 @@ class RemoteInstance {
     // SemanticSchema/Describe/GetPatch: a string reply; `flag` = changedOnly.
     Result<std::string> text(bridge::Op op, std::optional<bool> flag = {});
     Status setPatch(std::string_view json, std::uint32_t mode);
-    Result<std::vector<std::uint8_t>> saveState();
+    Result<std::vector<std::uint8_t> > saveState();
     Status loadState(std::span<const std::uint8_t> bytes);
     // Drain retained snapshots; pull on demand only without a wake subscription.
     bool service(Instance::Notifications& notes, std::vector<std::string>& log);
@@ -148,8 +151,8 @@ class RemoteInstance {
     Instance::EditorRequests pendingEditor_;
     std::vector<std::string> pendingLog_;
     bool pendingWork_ = false, editorOpen_ = false;
-    Result<std::vector<std::uint8_t>> call(bridge::Op op, const bridge::Writer& w, int fd = -1,
-                                           int timeoutMs = 10000);
+    Result<std::vector<std::uint8_t> > call(bridge::Op op, const bridge::Writer& w, int fd = -1,
+                                            int timeoutMs = 10000);
     bool command(bridge::Cmd cmd) SUPPLE_RT;
     void unmap();
 
@@ -168,3 +171,5 @@ class RemoteInstance {
 std::filesystem::path bridgeExecutable();
 
 }  // namespace supple::host
+
+#endif

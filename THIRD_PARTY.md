@@ -24,7 +24,7 @@ declaration and maintainer approval; AGPL is forbidden. LGPL/MPL need the mainta
 | pocketfft | BSD-3-Clause | cpp branch / `c90e55b` | FFT for offline analysis and analyzer displays | headers |
 | signalsmith-stretch | MIT | 1.4.0 / `a670068` (tarball sha256 `077235…f284`) | Pitch-preserving offline time-stretch of media takes (`take.playrate`/`preserve_pitch`/`pitch`) | headers |
 | signalsmith-linear | MIT | 0.6.4 / `de55e6a` (tarball sha256 `2cb10d…a56`) | STFT/FFT layer Signalsmith Stretch is built on (its pinned dependency) | headers |
-| vst3sdk | MIT | v3.8.0_build_66 / `9fad977` | VST3 hosting ABI, module loader, event and parameter helpers | static |
+| vst3sdk | MIT | v3.8.0_build_66 / `9fad977` | VST3 hosting ABI, Linux/macOS/Windows module loaders, event and parameter helpers | static |
 | lua | MIT | 5.4.9 (lua.org tarball, sha256 `2335b6c5…`; upstream `src/` unmodified) | The embedded scripting language behind `libs/lua-bus` and the `script.run` command (ADR-0006); built as a static library with only the core and sandbox libraries compiled | static |
 | mir | MIT | 1.0.0 / `477d820` (tarball sha256 `fdc934…4055`; upstream files unmodified) | JIT compiler and interpreter behind DSP scripts (ADR-0032); only the core, generator and interpreter sources are vendored | static |
 | clap-wrapper | MIT (bundles fmt: MIT; PreSonus gain-reduction header: public domain) | 0.16.0 / `1cca996` (template pin) | Builds template-derived plugins (CLAP; VST3/AUv2 when enabled) | static, plugins only |

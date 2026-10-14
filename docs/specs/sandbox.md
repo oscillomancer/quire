@@ -576,3 +576,39 @@ with the generated product slug appended. Linux retains XDG/HOME fallbacks.
 macOS uses Library/Caches and Library/Application Support; Windows LOCALAPPDATA
 and APPDATA. Socket and MCP service use the portable control layer; plugin hosting,
 scanning, editor embedding and the bridge remain separate port steps.
+
+## Native hosting and scanner (2026-10-14, ADR-0036)
+
+CLAP loads native Windows DLLs and macOS bundles (Contents/Info.plist names
+Contents/MacOS's executable). Entry init receives the canonical bundle path,
+UTF-8 on all platforms. VST3 uses the pinned SDK's native bundle loader:
+Contents/MacOS, Contents/x86_64-win or Contents/arm64-win, and the existing
+Linux layout. CLAP retains scoped library ownership; VST3 modules remain
+loaded for the process lifetime. Discovery stops recursion at either format's
+bundle directory. Cache fingerprints cover binary and metadata changes within
+bundles; script players, including bundled players, remain uncached.
+
+CLAP_PATH and VST3_PATH precede standard locations, with `;` separators on
+Windows and `:` on POSIX. Standard locations are ~/.clap and ~/.vst3 plus
+/usr/{,local/}lib/{clap,vst3} on Linux; ~/Library/Audio/Plug-Ins/{CLAP,VST3}
+and /Library/Audio/Plug-Ins/{CLAP,VST3} on macOS; %COMMONPROGRAMFILES%/{CLAP,VST3}
+and %LOCALAPPDATA%/Programs/Common/{CLAP,VST3} on Windows. Empty environment
+entries are ignored. Scan cache roots use paths::cache() plus the product slug.
+
+The standalone `<slug>-scanner --scan <module>` speaks the existing canonical
+scan JSON schema and keeps plugin stdout off the reply stream. Linux retains
+the bridge's existing scan mode by default; other platforms locate the scanner
+in the same build-tree/sibling locations. ScanOptions::bridgeExecutable can
+explicitly select either executable. Missing scanner behavior and supervised
+background requirements are unchanged. ChildProcess::spawn(executable, args)
+uses native process creation with redirected stdout and null stdin/stderr.
+collect(steady_clock deadline, maxBytes) returns {text, exitCode, crashed};
+errors are child.spawn/io/wait/timeout/output_limit with path and hint. Scan
+rebases those error codes to host.scan.*. Destruction kills descendants and
+reaps the child; killTree() explicitly cancels it. This API is non-RT.
+
+On macOS and Windows, isolated Instance::create and createBridgeProcess fail
+with host.bridge.unsupported, path /isolation and an in_process hint. Native
+editor opening fails with host.editor.unsupported until editor embedding lands.
+macOS enables the sandbox/offline renderer; Windows waits for native audio-file
+I/O. Engine device and bridge integration remain separately gated.

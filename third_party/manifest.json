@@ -199,7 +199,7 @@
       "version": "v3.8.0_build_66",
       "source": "https://github.com/steinbergmedia/vst3sdk",
       "commit": "9fad9770f2ae8542ab1a548a68c1ad1ac690abe0",
-      "purpose": "VST3 hosting ABI, module loader, parameter and event helpers",
+      "purpose": "VST3 hosting ABI, Linux/macOS/Windows module loaders, parameter and event helpers",
       "linkage": "static"
     },
     {

@@ -4,6 +4,10 @@
 first (including the custom semantic extension), VST3 second". Builds on
 ADR-0013 (the `host::Instance` API with more than one backing).
 
+**Hosting amendment, 2026-10-14:** [ADR-0036](0036-native-plugin-hosting.md)
+adds native in-process loaders and a standalone supervised scanner, while
+retaining the Linux audio bridge and the remaining engine/device/GUI gates.
+
 ## Context
 
 Everything in the engine, the sandbox and the optimizer talks to plugins

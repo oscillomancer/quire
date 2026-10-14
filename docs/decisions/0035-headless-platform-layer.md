@@ -4,6 +4,10 @@
 ADR-0025, ADR-0026, ADR-0028, ADR-0029 and ADR-0030; their Linux behavior
 and publication/lifetime rules are retained.
 
+**Hosting amendment, 2026-10-14:** [ADR-0036](0036-native-plugin-hosting.md)
+adds native in-process loaders and a standalone supervised scanner, while
+retaining the Linux audio bridge and the remaining engine/device/GUI gates.
+
 ## Decision
 
 The first port target is the headless engine, dummy/offline backends,

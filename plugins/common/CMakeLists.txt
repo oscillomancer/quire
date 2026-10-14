@@ -18,7 +18,7 @@ if(SUPPLE_BUILD_TESTS)
     supple_target_defaults(clap-unload-probe)
   endif()
 
-  if(SUPPLE_HOST_SERVICES)
+  if(SUPPLE_PLUGIN_HOST)
   # Checks any plugin's semantic extension through the real host (spec §7).
   add_executable(semantic-conformance tools/semantic_conformance.cpp)
   target_link_libraries(semantic-conformance PRIVATE supple::clap-host supple::core-json)

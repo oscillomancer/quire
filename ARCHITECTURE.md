@@ -115,7 +115,10 @@ adds macOS address waits and pipes, and Windows address waits and event handles.
 new embedding code uses typed sources instead of assuming integer descriptors.
 On arm64 the per-node guard sets FPCR FZ and restores the complete register.
 Platform directory roots come from `supple::paths`. Native port verification,
-device backends, hosting/bridge and GUI embedding remain separate gates.
+device backends, audio bridge and GUI embedding remain separate gates.
+Native in-process hosting and supervised scanning are separate from that bridge
+(ADR-0036). clap-host owns a reusable ChildProcess tree/capture helper and
+a standalone scanner; non-Linux isolation requests return structured errors.
 
 `core-base` provides `supple::MainThreadWake`, a coalesced notification relay
 (ADR-0029). Producers publish atomics and wake a private futex; its parked

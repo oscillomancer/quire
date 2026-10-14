@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
+#pragma once
+#include <filesystem>
+#include <string>
+#include <vector>
+#include "supple/base/result.h"
+namespace supple::host::platform {
+// All paths crossing plugin ABIs are UTF-8.
+std::filesystem::path pathFromText(std::string_view text);
+std::string pathText(const std::filesystem::path& path);
+std::filesystem::path executablePath();
+Result<void*> openLibrary(const std::filesystem::path& path);
+void* symbol(void* library, const char* name);
+void closeLibrary(void* library);
+std::vector<std::filesystem::path> pluginPaths(bool vst3);
+bool executable(const std::filesystem::path& path);
+}  // namespace supple::host::platform
