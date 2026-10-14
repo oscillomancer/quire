@@ -69,7 +69,9 @@ jobs:
     needs: plan
     name: ${{ matrix.platform }} (${{ matrix.preset }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    # Fresh AppleClang builds can exceed an hour at the two-job memory limit.
+    # Leave room for tests without increasing compiler concurrency.
+    timeout-minutes: ${{ matrix.platform == 'macos' && 90 || 60 }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
