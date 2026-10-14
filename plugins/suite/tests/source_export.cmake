@@ -85,13 +85,13 @@ run("configuring ${CASE}" ${CMAKE_COMMAND} -S "${WORK}/project" -B "${WORK}/buil
     -DFETCHCONTENT_SOURCE_DIR_NANOVG=${tp}/nanovg
     -DFETCHCONTENT_SOURCE_DIR_NANOSVG=${tp}/nanosvg)
 run("building ${CASE}" ${CMAKE_COMMAND} --build "${WORK}/build" --parallel 3)
-# Keep the original full template-suite regression. Its generic smoke probe
-# assumes the first automatable parameter changes neutral DSP, which is not
-# true of every example (e.g. bell's Frequency with Gain at 0 dB).
-# Every example instead gets the real semantic/audio checks below.
-if (CASE STREQUAL "library-tilt")
-    run("${CASE}'s own tests" ${CMAKE_CTEST_COMMAND} --test-dir "${WORK}/build" --output-on-failure -j 3)
+# The project's own tests. A sampler with no sample loaded is silent, which
+# host-smoke's instrument render rejects; its audio is checked below instead.
+set(skip "")
+if (CASE STREQUAL "sampler")
+    set(skip -E "^host-smoke-")
 endif()
+run("${CASE}'s own tests" ${CMAKE_CTEST_COMMAND} --test-dir "${WORK}/build" --output-on-failure -j 3 ${skip})
 set(built "${WORK}/build/plugins/${plugin_name}.clap")
 run("${CASE}'s semantic conformance" ${CMAKE_COMMAND} -E env "HOME=${home}"
     "SUPPLE_SCRIPT_LIBRARY=${WORK}/workdir/scripts" "${CONFORMANCE}" "${built}" "${id}")

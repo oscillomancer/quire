@@ -206,7 +206,7 @@ if(SUPPLE_BUILD_PLUGINS)
     set_tests_properties(plugin.player.examples.reset PROPERTIES LABELS "rt;plugin-reset" TIMEOUT 300
       ENVIRONMENT "SUPPLE_SCRIPT_LIBRARY=${example_library}")
     # Fresh source exports of every example plus the non-default library
-    # tilt regression: own tests, semantic conformance and player audio parity.
+    # tilt regression: each its own tests, semantic conformance and player audio parity.
     add_test(NAME plugin.export.source
       COMMAND ${CMAKE_COMMAND} -DSANDBOX=$<TARGET_FILE:${PRODUCT_SLUG}-sandbox>
               -DPLAYER=${player_clap} -DKIT=${CMAKE_BINARY_DIR}/plugins/script-export

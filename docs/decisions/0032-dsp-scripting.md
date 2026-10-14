@@ -449,7 +449,10 @@ Where the work stands, and where it departs from the text above:
   example, runs the semantic conformance tool on each, and compares its
   signals, lengths and bytes with the player's (the sampler and reverb
   with generated files, the compressor with a key, instruments with a
-  note sequence); the library's tilt also runs its export's own tests.
+  note sequence), and each export passes its own tests. A source export
+  takes its kind and bus layouts from the script, and its host tests move
+  a level in decibels when it has one (a neutral bell's frequency changes
+  nothing).
 
 ## Consequences
 

@@ -432,8 +432,9 @@ paths, locations and hints.
 The slow `plugin.export.source` test builds fresh source exports for every
 script in `plugins/suite/examples`, plus the library tilt regression with
 its non-default patch. Each export passes the semantic conformance tool,
-then renders the same explicit signal list as the player. The library tilt
-also retains the full exported template test suite.
+then renders the same explicit signal list as the player. Each export
+also passes its own template test suite (the sampler without host-smoke,
+whose instrument render rejects a sampler silent with no sample loaded).
 The test checks signal names/counts, WAV frame counts and byte equality.
 Sampler/reverb receive generated audio files with audible patches; the
 compressor receives a timed key, and instruments receive custom notes.
