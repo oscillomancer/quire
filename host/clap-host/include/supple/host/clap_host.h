@@ -250,7 +250,8 @@ class Instance {
     // Whether a key is connected; set before activate(). CLAP plug-ins see an
     // unconnected key port deactivated (audio-ports-activation) and VST3s an
     // inactive auxiliary bus, so they can key from their own input; either
-    // way it hears silence.
+    // way it hears silence. CLAP plug-ins without that extension follow the
+    // ProcessBlock key buffers, including routing changes while processing.
     Status setSidechainActive(bool on);
     bool sidechainActive() const { return keyActive_; }
     // Whether a change to it needs a fresh activation: a VST3, a CLAP plug-in

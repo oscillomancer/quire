@@ -516,6 +516,10 @@ first use, and no plug-in code runs early to warm it.
   misses) and emitted as `engine.xrun` events with context (block size,
   load, which node was slowest).
 
+CLAP plugins without audio-ports-activation follow each block's key buffers
+without restarting when a route changes. Their activation-time key flag does
+not suppress a key connected later; a missing block key supplies silence.
+
 ## 5. Plugin isolation (`host/clap-host/bridge`)
 
 Protocol 12 appends a main-thread `PluginStatus` query to the existing

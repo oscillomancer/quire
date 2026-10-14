@@ -380,7 +380,7 @@ TEST_CASE("a VST3 reset ends the notes the host delivered") {
 TEST_CASE("scan finds the fixtures with their capabilities") {
     auto list = scan(std::span<const std::filesystem::path>(&kFixture, 1));
     REQUIRE(list);
-    REQUIRE(list->size() == 16);
+    REQUIRE(list->size() == 17);
     const auto gain = find("com.suppleaudio.test.gain");
     CHECK_FALSE(gain.instrument);
     CHECK(gain.semantic);
@@ -1266,6 +1266,33 @@ TEST_CASE("isolation: a missing bridge is a clean error") {
     REQUIRE_FALSE(inst);
     CHECK(inst.error().code.rfind("host.bridge", 0) == 0);
     setBridgeExecutable(BRIDGE_PATH);
+}
+
+TEST_CASE("CLAP without port activation follows key buffers while processing") {
+    auto made = Instance::create(find("com.suppleaudio.test.legacy-keymix"), {});
+    REQUIRE(made);
+    Instance& in = **made;
+    CHECK_FALSE(in.followsKeyActivation());
+    REQUIRE(in.setSidechainActive(false).ok());
+    REQUIRE(in.activate(48000, 1, 64).ok());
+    REQUIRE(in.startProcessing());
+    Buffers buffer(64);
+    std::fill(buffer.l.begin(), buffer.l.end(), 0.25f);
+    std::fill(buffer.r.begin(), buffer.r.end(), 0.25f);
+    REQUIRE(in.process(buffer.block(64)));
+    CHECK(buffer.ol[7] == 0.25f);
+    // Adding a route changes the block, without restarting this instance.
+    std::vector<float> keySamples(64, 0.5f);
+    const float* key[] = {keySamples.data(), keySamples.data()};
+    auto block = buffer.block(64);
+    block.sidechain = key;
+    block.sidechainChannels = 2;
+    REQUIRE(in.process(block));
+    CHECK(buffer.ol[7] == 0.75f);
+    // Removing it restores silent key buffers, still without a restart.
+    REQUIRE(in.process(buffer.block(64)));
+    CHECK(buffer.ol[7] == 0.25f);
+    in.stopProcessing();
 }
 
 TEST_CASE("a sidechain key reaches CLAP and VST3 plug-ins, in process and isolated (ADR-0018)") {

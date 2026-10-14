@@ -1272,7 +1272,9 @@ bool Instance::process(const ProcessBlock& b, OutputEvents* out) SUPPLE_RT {
             if (static_cast<int>(i) == h.mainIn) {
                 src = b.inputs;
                 have = b.inputChannels;
-            } else if (static_cast<int>(i) == h.keyIn && keyActive_) {
+            } else if (static_cast<int>(i) == h.keyIn && (!extPortsActivation_ || keyActive_)) {
+                // Without port activation, routing may change while this
+                // instance keeps processing; the block supplies its current key.
                 src = b.sidechain;
                 have = b.sidechainChannels;
             }

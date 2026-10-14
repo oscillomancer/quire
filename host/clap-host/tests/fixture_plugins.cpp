@@ -1086,6 +1086,13 @@ const clap_plugin_descriptor_t* keyMixDescriptor() {
                                                features};
     return &d;
 }
+const clap_plugin_descriptor_t* legacyKeyMixDescriptor() {
+    static clap_plugin_descriptor_t d = *keyMixDescriptor();
+    d.id = "com.suppleaudio.test.legacy-keymix";
+    d.name = "Legacy Key Mix";
+    return &d;
+}
+
 struct KeyMix {
     clap_plugin_t plugin{};
     const clap_host_t* host = nullptr;
@@ -1114,8 +1121,9 @@ bool CLAP_ABI keyMixSetActive(const clap_plugin_t* p, bool isInput, uint32_t ind
 }
 const clap_plugin_audio_ports_activation_t kKeyMixActivation = {
     [](const clap_plugin_t*) { return false; }, keyMixSetActive};
-const void* CLAP_ABI keyMixExt(const clap_plugin_t*, const char* id) {
-    if (!std::strcmp(id, CLAP_EXT_AUDIO_PORTS_ACTIVATION)) return &kKeyMixActivation;
+const void* CLAP_ABI keyMixExt(const clap_plugin_t* p, const char* id) {
+    if (p->desc != legacyKeyMixDescriptor() && !std::strcmp(id, CLAP_EXT_AUDIO_PORTS_ACTIVATION))
+        return &kKeyMixActivation;
     return !std::strcmp(id, CLAP_EXT_AUDIO_PORTS) ? &kKeyMixPorts : nullptr;
 }
 bool CLAP_ABI keyMixActivate(const clap_plugin_t*, double, uint32_t, uint32_t) { return true; }
@@ -1322,7 +1330,7 @@ const clap_plugin_t* make(const clap_host_t* host, const clap_plugin_descriptor_
     return &self->plugin;
 }
 
-uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 16; }
+uint32_t CLAP_ABI factoryCount(const clap_plugin_factory_t*) { return 17; }
 const clap_plugin_descriptor_t* CLAP_ABI factoryDesc(const clap_plugin_factory_t*, uint32_t i) {
     return i == 0    ? gainDescriptor()
            : i == 1  ? sineDescriptor()
@@ -1339,6 +1347,7 @@ const clap_plugin_descriptor_t* CLAP_ABI factoryDesc(const clap_plugin_factory_t
            : i == 12 ? multiOutDescriptor()
            : i == 14 ? contractDescriptor(false)
            : i == 15 ? contractDescriptor(true)
+           : i == 16 ? legacyKeyMixDescriptor()
            : i == 13 ? multiOut48Descriptor()
                      : nullptr;
 }
@@ -1404,8 +1413,9 @@ const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const 
     }
     if (!std::strcmp(id, crashDescriptor()->id))
         return make<Crash>(host, crashDescriptor(), crashActivate, crashProcess, crashExt);
-    if (!std::strcmp(id, keyMixDescriptor()->id))
-        return make<KeyMix>(host, keyMixDescriptor(), keyMixActivate, keyMixProcess, keyMixExt);
+    for (const auto* desc : {keyMixDescriptor(), legacyKeyMixDescriptor()})
+        if (!std::strcmp(id, desc->id))
+            return make<KeyMix>(host, desc, keyMixActivate, keyMixProcess, keyMixExt);
     for (const auto* desc : {multiOutDescriptor(), multiOut48Descriptor()})
         if (!std::strcmp(id, desc->id))
             return make<MultiOut>(host, desc, multiOutActivate, multiOutProcess, multiOutExt);
