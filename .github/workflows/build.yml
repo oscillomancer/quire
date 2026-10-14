@@ -107,17 +107,14 @@ jobs:
           validator=$(tools/validator/build.sh)
           echo "CLAP_VALIDATOR_BIN=$validator" >> "$GITHUB_ENV"
 
-      # Xcode 16.4 libc++ lacks floating from_chars (first port run).
-      # Homebrew LLVM/libc++ supplies it; SDK curl/zlib, arm64, macOS 14.4.
+      # AppleClang/system libc++; shared MIT fast_float supplies float parsing.
+      # SDK curl/zlib, arm64, macOS 14.4. No bundled C++ runtime is required.
       - name: macOS tools and libraries
         if: matrix.platform == 'macos'
         run: |
           export HOMEBREW_NO_AUTO_UPDATE=1
           export HOMEBREW_CACHE="$GITHUB_WORKSPACE/.deps/homebrew"
-          brew install ninja sdl3 llvm
-          llvm=$(brew --prefix llvm)
-          echo "$llvm/bin" >> "$GITHUB_PATH"
-          echo "MAC_LLVM=$llvm" >> "$GITHUB_ENV"
+          brew install ninja sdl3
           test "$(uname -m)" = arm64
           xcrun clang --version
 

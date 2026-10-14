@@ -11,7 +11,10 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
 
 The port branch has on-demand Linux/macOS/Windows CI and portable presets
 (ADR-0034). Linux dev passes all 137 tests including the 12 CLAP validators;
-macOS and Windows pass their portable tests. Non-Linux host, engine,
+macOS and Windows pass their portable tests. The macOS preset uses AppleClang
+and system libc++; shared float/double parsing uses vendored fast_float (MIT)
+on all platforms, including the suite's self-contained source exports.
+Non-Linux host, engine,
 control/MCP, GUI and plugin wrappers remain gated, and Windows audio-file
 I/O remains gated. Portable libraries, the session model, stock DSP cores
 and the script suite build independently of those services; see

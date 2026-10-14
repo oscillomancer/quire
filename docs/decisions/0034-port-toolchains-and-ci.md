@@ -12,8 +12,13 @@ The repository is private, so hosted runner cost makes targeted runs useful.
 
 - Preserve existing Linux presets and their target/test coverage. Hosted
   Linux uses Clang 22 on Ubuntu 24.04 and the full dev preset.
-- macOS is Apple Silicon, minimum 14.4, AppleClang first. Use Homebrew LLVM
-  only if a demonstrated libc++ gap requires it.
+- macOS is Apple Silicon, minimum 14.4, AppleClang and the system libc++.
+  The review on 2026-10-14 replaces the initial Homebrew LLVM fallback:
+  shipping a second libc++/libunwind beside system-runtime plugins creates
+  packaging and hosting liabilities. Vendored fast_float (MIT option) supplies
+  float/double parsing through one core-base helper on every platform;
+  integer parsing remains in the standard library. Fix further compiler gaps
+  portably or report the tradeoff instead of substituting a bundled runtime.
 - Windows is x64, minimum Windows 10 1803, clang-cl with the Windows SDK
   and Ninja. Forward GNU-style determinism and warning flags to Clang.
 - Determinism is required within each platform, including RT/offline

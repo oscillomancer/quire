@@ -40,7 +40,8 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_OSX_ARCHITECTURES": "arm64",
         "CMAKE_OSX_DEPLOYMENT_TARGET": "14.4",
-        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/macos.cmake",
+        "CMAKE_C_COMPILER": "/usr/bin/clang",
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
         "SUPPLE_WERROR": "ON"
       }
     },
