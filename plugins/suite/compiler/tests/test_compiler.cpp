@@ -28,11 +28,23 @@ scriptc::Result compileOk(const std::string& source, const scriptc::Options& opt
 // how to fix it.
 std::string firstError(const std::string& source) {
     auto r = scriptc::compile(source);
+    std::string first;
     for (const auto& m : r.diagnostics) {
         CHECK_MESSAGE(!m.hint.empty(), m.code << ": " << m.message);
-        if (m.error) return m.code;
+        if (m.error && first.empty()) first = m.code;
     }
-    return "";
+    return first;
+}
+
+// Only the generated hook is an audio entry point; compilation and test
+// buffers are prepared outside it. The interpreter's RT policy is a
+// separate open review issue: it lazily allocates on its first call.
+void callRealtime(scriptc::Program::ProcessHook hook, void* instance, void* self, void* block)
+#if defined(__clang__) && __has_cpp_attribute(clang::nonblocking)
+    [[clang::nonblocking]]
+#endif
+{
+    hook(instance, self, block);
 }
 
 const char* kGain = R"(#include <supple/script.h>
@@ -559,4 +571,64 @@ TEST_CASE("the local storage limit covers a function's complete frame") {
     CHECK(firstError(plugin("Array<double, 8000> a; Array<double, 8000> b;")) ==
           "script.local.size");
     CHECK(firstError(plugin("Array<double, 8000> a; auto b = a;")) == "script.local.size");
+}
+
+TEST_CASE("loop budgets stop all back edges and unwind script calls") {
+    for (const std::string loop :
+         {"while (true) { continue; }", "for (;;) { continue; }", "do { continue; } while (true);",
+          "Array<int, 8> a; for (int x : a) { continue; }"}) {
+        const std::string source =
+            "#include <supple/script.h>\n"
+            "struct T : Effect {\n"
+            "static constexpr Info info = {.name = \"T\", .id = \"com.example.t\"};\n"
+            "double work() { " +
+            loop +
+            " return 1.0; }\n"
+            "void process(Block& io) { io[0][0] = work(); io[0][1] = 2.0; }\n};\n";
+        for (bool interpret : {false, true}) {
+            INFO(loop << ", interpret=" << interpret);
+            scriptc::Options options;
+            options.interpret = interpret;
+            auto result = compileOk(source, options);
+            JitRunner run(result.program);
+            Audio audio(2, 2);
+            script::detail::CurrentScope current(&run.instance);
+            run.instance.budget = 3;
+            run.blocks(audio, 2, [&](script::Block& block) {
+                if (interpret)
+                    result.program->process()(&run.instance, run.self(), &block);
+                else
+                    callRealtime(result.program->process(), &run.instance, run.self(), &block);
+            });
+            CHECK(run.instance.status.budgetExceeded.load() == 1);
+            CHECK(run.instance.status.budgetLine.load() == 4);
+            CHECK(run.instance.budget < 0);
+            CHECK(audio.data[0] == std::vector<double>{0, 0});
+        }
+    }
+}
+
+TEST_CASE("NaN comparisons and bounded sidechain reads run in a JIT audio hook") {
+    auto result = compileOk(R"(#include <supple/script.h>
+struct T : Effect {
+    static constexpr Info info = {.name = "T", .id = "com.example.t"};
+    void process(Block& io) {
+        double x = sqrt(-1.0);
+        io[0][0] = x != 0.0;
+        io[0][1] = x < 0.0;
+        io[0][2] = x == x;
+        io[0][3] = bool(x);
+        auto key = io.sidechain(0);
+        io[0][4] = key[-1];
+    }
+};
+)");
+    JitRunner run(result.program);
+    Audio audio(2, 5);
+    script::detail::CurrentScope current(&run.instance);
+    run.instance.budget = 100;
+    run.blocks(audio, 5, [&](script::Block& block) {
+        callRealtime(result.program->process(), &run.instance, run.self(), &block);
+    });
+    CHECK(audio.data[0] == std::vector<double>{1, 0, 0, 1, 0});
 }
