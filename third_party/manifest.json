@@ -239,7 +239,7 @@
       "version": "v19.7.0 (2021-04-06)",
       "source": "https://github.com/PortAudio/portaudio",
       "commit": "147dd722548358763a8b649b3e4b41dfffbcfbb6",
-      "purpose": "Native DAW device audio: CoreAudio on macOS; WASAPI and ASIO on Windows",
+      "purpose": "Unmodified native source/header subset: CoreAudio macOS; WASAPI/ASIO Windows; DAW-only",
       "linkage": "static",
       "scope": "daw-only",
       "platforms": [

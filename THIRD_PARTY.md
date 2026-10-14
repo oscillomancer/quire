@@ -85,7 +85,7 @@ The two license files, README, proprietary agreement and usage guidelines
 are preserved alongside the subset. CMake integration is still pending.
 
 PortAudio v19.7.0 (2021-04-06), commit
-147dd722548358763a8b649b3e4b41dfffbcfbb6, is vendored unmodified under
+147dd722548358763a8b649b3e4b41dfffbcfbb6, has its unmodified native source/header subset vendored under
 `third_party/portaudio-19.7.0`; MIT license in LICENSE.txt. It is built only for
 DAW device audio on macOS (CoreAudio) and Windows (WASAPI + ASIO). Windows's
 ASIO-enabled static build also contains the separately licensed ASIO SDK
