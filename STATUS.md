@@ -30,8 +30,9 @@ deny delete sharing prevent atomic file replacement until closed.
 
 The bridge port implements native macOS shared memory/address wakes and Windows
 mapping/event handle transfer, notifications and process isolation (ADR-0037).
-Bridge targets and portable fixture tests are enabled; native validation is in
-progress. Linux bridge and engine behavior retain the existing deadlines and
+Bridge targets and portable fixture tests are enabled and pass native CI on
+macOS and Windows. Linux bridge and engine
+tests pass under RTSan and TSan, retaining the existing deadlines and
 background-only processing contract.
 
 ## What works
