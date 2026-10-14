@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 #include <nanovg.h>

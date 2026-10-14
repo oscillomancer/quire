@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Preferences (Edit > Preferences…): app-wide settings, never project state.
 // The monitoring mode, audio thread limit, opt-in process controls, render
 // folder and import copying are saved to <config>/<slug>/preferences.json

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Wrapped text and a vertical scroll container (transcripts, long lists of
 // heterogeneous rows, forms).
 #pragma once

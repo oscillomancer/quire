@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """Compare --dump-guide captures: reference + all guide JSON examples, 8 s each.
 
 Usage: python3 plugins/orrery/engine/bench/compare_renders.py BASE.raw NEW.raw

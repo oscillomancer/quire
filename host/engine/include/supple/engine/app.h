@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The DAW application core without a GUI: the session history, plugins,
 // rendering and (optionally) the real-time engine behind the command bus
 // (session-model §6–7, engine.md §6). Model thread only.

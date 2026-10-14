@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Contextual mouse modifiers (gap log #37): what a press does in each context
 // of the arrange view for each modifier combination. The defaults are the
 // built-in gestures; <config>/<slug>/mouse.json (supple.mouse/1.0) overrides

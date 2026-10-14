@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Ruler edits driven through the same pointer, keymap and text paths as the app.
 #include <SDL3/SDL_keycode.h>
 #include <doctest/doctest.h>

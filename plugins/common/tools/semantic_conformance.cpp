@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // semantic-conformance <plugin.clap> <plugin-id>
 //
 // Checks a plugin's com.suppleaudio.semantic-params/1 implementation against

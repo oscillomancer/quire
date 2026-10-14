@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include <supple/script.h>
 
 // Not a useful plugin: a tour of the language, whose output the tests compare

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // dsp.test, the DSP script harness (ADR-0032), shared by the engine and the
 // sandbox: standard signals through a fresh instance of an effect, or notes
 // into an instrument (a script's, through the script player, or any other),

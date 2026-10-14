@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include <supple/script.h>
 
 // One band of an equaliser, shaped by hand in an editor of its own: press on

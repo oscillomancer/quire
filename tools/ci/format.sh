@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # clang-format over first-party C/C++ sources.
 # Usage: tools/ci/format.sh [--check]
 set -euo pipefail

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Per-strip peak/RMS telemetry for the GUI meters (engine.md §2.3, ADR-0014).
 //
 // The anticipative renderer processes audio up to `render_ahead` *before* it is

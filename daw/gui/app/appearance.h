@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The look the user picked (gui.md §7): dark or light, and the warm (orange,
 // the default) or ink (blue) palette. Kept in <config>/<slug>/appearance.json
 // (supple.appearance/1.0); View > switch actions change and save it.

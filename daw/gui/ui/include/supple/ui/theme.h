@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Theme tokens (docs/specs/gui.md §2, §7): widgets read named tokens, never
 // literals. Loaded from `supple.theme/1.0` JSON; unknown names fall back to a
 // loud magenta so a missing token is visible, not silently wrong.

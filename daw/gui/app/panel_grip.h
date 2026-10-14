@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The top edge of a resizable dock (the mixer, the MIDI editor): drag to set
 // the panel's height, double-click to restore its default. It lights up under
 // the pointer and while dragged.

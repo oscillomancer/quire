@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Screensets (gap log #38) end to end: the app saves a named layout into the
 project's UI file and recalls it in a later run. Offscreen, no audio device."""
 import json

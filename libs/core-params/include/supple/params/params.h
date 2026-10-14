@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Semantic parameter definitions (spec: docs/specs/core-params.md, ADR-0010).
 //
 // A plugin declares one constexpr table of ParamSpec. Everything else — CLAP

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // CLAP and VST3 hosting (docs/specs/sandbox.md §1, ADR-0017). Shared by the
 // sandbox and engine.
 //

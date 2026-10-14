@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The arrange view (gui.md §4.3): the ruler (bars|beats, time,
 // tempo/meter, markers/regions, the loop range) above the lanes, with the
 // track control panel column to the left sharing the row geometry and the

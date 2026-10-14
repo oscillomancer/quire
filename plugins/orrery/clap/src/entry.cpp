@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // orrery-headless.clap: Orrery without an editor (tests, the sandbox, the
 // engine). The template-derived plugin in plugins/orrery adds the editor.
 #include <clap/clap.h>

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Render identifiers use rd_<digits>; other strings name audio files.
 #pragma once
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // <slug>-bridge: hosts isolated fx instances (ADR-0013).
 // Started by the host with its end of the control socket on fd 3 (or
 // --control-fd N). Main-thread requests arrive on the socket; audio-thread

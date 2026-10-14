@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Descriptors against synthetic signals with known answers (core-analysis §10).
 #include <doctest/doctest.h>
 #include <supple/base/environment.h>

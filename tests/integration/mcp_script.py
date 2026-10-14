@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Run a Lua script over MCP: `exec` with script.run, its edits visible to a
 later query, and a structured error when the script misbehaves."""
 import argparse

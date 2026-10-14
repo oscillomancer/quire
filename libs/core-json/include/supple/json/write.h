@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #pragma once
 #include <supple/base/result.h>
 #include <supple/json/value.h>

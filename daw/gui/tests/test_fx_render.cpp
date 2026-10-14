@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The FX chain window, the plugin browser and the parameter panel, and the
 // render dialog: driven by keys and clicks through the bus (gui.md §10).
 #include <SDL3/SDL.h>

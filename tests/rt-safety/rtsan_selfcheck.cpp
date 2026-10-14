@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Proves the rtsan preset really enforces real-time safety: this program
 // allocates inside a SUPPLE_RT function and must be killed by
 // RealtimeSanitizer. Registered as WILL_FAIL in the rtsan preset only.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 #include <poll.h>
 #include <supple/mcp/server.h>
 #include <supple/product.h>

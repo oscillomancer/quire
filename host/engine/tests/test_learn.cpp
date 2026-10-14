@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // MIDI learn (ADR-0027): reading controller messages, and plug-in parameters
 // moved by them through EngineApp::pollControl.
 #include <doctest/doctest.h>

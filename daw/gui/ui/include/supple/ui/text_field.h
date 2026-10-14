@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Single-line text editing: caret and selection on UTF-8 boundaries, word
 // motion, clipboard, IME composition shown inline, horizontal scrolling.
 #pragma once

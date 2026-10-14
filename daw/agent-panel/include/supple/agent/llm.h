@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Chat completion with tools over HTTP streaming (docs/specs/gui.md §5):
 // the Anthropic Messages API or any OpenAI-compatible endpoint (including a
 // local llama-server). Requests run on the caller's (worker) thread.

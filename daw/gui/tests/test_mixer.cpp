@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The mixer's own gestures (gui.md §4.4): the fx button, a resizable chain
 // section, plug-in reorder and copy by drag, strip reorder by drag; the
 // reorder-index helper the TCP shares.

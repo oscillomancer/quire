@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Object IDs (ADR-0008, session-model §1.1): `<kind>_<n>`, n from a per-kind
 // counter that never goes backwards within a lineage. `tr_0` is the master.
 #pragma once

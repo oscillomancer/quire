@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Internal: the engine's worker pool (ADR-0012/0023, engine.md §2.2). It runs a
 // task graph — one render block of a plan, one task per node — on its
 // threads and the submitting thread together: a task starts once the tasks

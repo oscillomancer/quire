@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The FX chain window (docs/specs/gui.md §4.5): a popup panel for one track's
 // chain — per-effect name, bypass and offline (distinct, fx.set), wet/dry,
 // latency, editor, reorder and remove — plus the input chain, the plugin

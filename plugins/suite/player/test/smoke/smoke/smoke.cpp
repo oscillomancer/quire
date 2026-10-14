@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include <supple/script.h>
 
 // What host-smoke plays: the player's own ID, a level and a meter.

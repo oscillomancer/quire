@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Polyphase IIR half-band decimators (voice bus → base rate).
 //
 // H(z) = ½·[A0(z²) + z⁻¹·A1(z²)], each Ai a cascade of first-order all-pass

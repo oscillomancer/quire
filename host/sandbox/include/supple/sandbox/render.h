@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Offline rendering through a chain of CLAP instances (spec: docs/specs/
 // sandbox.md §3). Deterministic: the same instances in the same state, the
 // same request and the same settings produce bit-identical audio.

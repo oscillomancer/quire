@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // A strip control used on a selected track acts on the whole track selection
 // (gui.md §4.2), in the TCP and the mixer alike: the same mute, solo, arm,
 // monitoring or input on each (arm, monitoring and input on channels only), and

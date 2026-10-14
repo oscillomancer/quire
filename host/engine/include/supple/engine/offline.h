@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Offline rendering of a session version (spec: docs/specs/engine.md §1, §3).
 //
 // The session is compiled into a plan: tracks in topological order (sources

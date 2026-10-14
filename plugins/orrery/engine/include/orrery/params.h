@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Orrery's parameter table (spec: docs/specs/synth.md §4, §8).
 //
 // Every non-structure field of every slot — existing in the patch or not — is

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Generated from cmake/Product.cmake. Do not edit; do not hard-code these
 // values anywhere else.
 #pragma once

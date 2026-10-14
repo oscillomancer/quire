@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Test-only syntax check using the same vendored Lua parser as the app.
 #include <lauxlib.h>
 #include <lua.h>

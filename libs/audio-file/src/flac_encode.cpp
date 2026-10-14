@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // FLAC encoding (the format as the Xiph FLAC format specification, RFC 9639,
 // describes it): an original encoder. Fixed-blocksize frames of
 // FlacOptions::blockSize samples; per frame the cheapest of independent,

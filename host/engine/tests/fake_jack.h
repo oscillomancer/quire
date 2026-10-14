@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The test controls of the stand-in libjack (fake_jack.cpp). The backend
 // dlopens the same file, so both share one copy of its state.
 #pragma once

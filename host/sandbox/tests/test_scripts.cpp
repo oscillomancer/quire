@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // script.run through the sandbox's registry (see test_scripts.cpp in the
 // engine for why this is its own binary).
 #include <doctest/doctest.h>

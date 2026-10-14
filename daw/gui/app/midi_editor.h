@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The MIDI editor (docs/specs/gui.md §4.7), docked under the arrange view: a
 // piano roll (draw, select, move, resize, velocity, quantize, transpose) and
 // a velocity lane over midi.notes / midi.edit, and the notation panel — the

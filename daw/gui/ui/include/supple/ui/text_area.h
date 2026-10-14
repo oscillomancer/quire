@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Multi-line plain-text editing in the monospace face: caret and selection on
 // UTF-8 boundaries across lines, line numbers, scrolling, local undo, IME
 // composition inline, clipboard, and marks (located diagnostics: a gutter dot,

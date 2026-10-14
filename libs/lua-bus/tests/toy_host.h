@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // A test host for lua-bus: a handful of commands covering every schema kind,
 // one-level transactions that really roll back, and an event queue.
 #pragma once

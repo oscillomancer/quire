@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The optimizer end to end with Orrery (docs/specs/optimizer.md §6): recover a
 // hidden patch from its render, and hit a descriptor profile.
 #include <dlfcn.h>

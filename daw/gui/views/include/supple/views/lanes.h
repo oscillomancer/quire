@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The track lanes: the arrange view's item area (gui.md §4.3). Items are
 // drawn with the bulk GL layers (§3): bodies, fades and MIDI notes as
 // instanced rectangles, audio as min/max bands sampled from peak pyramids,

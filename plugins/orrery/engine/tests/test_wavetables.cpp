@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Wavetables (synth.md §4.2): generated, band-limited, alias-free, and the
 // recipes do what their names say.
 #include <doctest/doctest.h>

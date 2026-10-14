@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Identity mockups (P5.16): the real GUI, rendered offscreen in each theme.
 
 Builds a demo session over the engine's MCP server (tempo ramp, markers and a

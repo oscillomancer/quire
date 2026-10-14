@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Takes as material of their own (session-model §7): delete one, take one out
 // of its item, spread an item's takes onto tracks or one after another, and
 // render an item through its FX as a new audio take (MIDI through the track's

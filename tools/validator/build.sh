@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Build the pinned development-only CLAP validator in a user-space cache.
 # Prints the binary path. Once built, this works without network access.
 set -euo pipefail

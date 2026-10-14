@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # Puts Mesa's software OpenGL (llvmpipe, from pal1000/mesa-dist-win) beside
 # the given executables. GitHub's Windows runners have no GPU driver, so
 # their opengl32.dll is Windows' GDI renderer, which stops at OpenGL 1.1 and

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Scoring over authoritative compiler/analysis output."""
 
 from relay import invocations

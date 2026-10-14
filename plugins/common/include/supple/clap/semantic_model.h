@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // The semantic-params extension and CLAP state for plugins whose patch has
 // structure (slots, routes, types) rather than a flat parameter table.
 //

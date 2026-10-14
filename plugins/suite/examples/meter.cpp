@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include <supple/script.h>
 
 // A gain with an editor of its own: a scope of the output and a level meter

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // B1 capacity: command-built stock chains, a monitored input and master limiter.
 #include <sys/resource.h>
 #include "measurements.h"

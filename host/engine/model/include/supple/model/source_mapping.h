@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Source beats mapped to item beats; visible loop passes are bounded for drawing.
 #pragma once
 #include <algorithm>

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Small whole-file helpers (main/I-O threads only).
 #pragma once
 

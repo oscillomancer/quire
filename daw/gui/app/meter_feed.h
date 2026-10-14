@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Meter readings to meter widgets: once per frame the feed polls its source
 // (EngineApp::meters() in the app — the audio heard since the last poll) and
 // hands each strip's reading to every Meter registered for that track (the

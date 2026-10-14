@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // FX chain presets: ordered, canonical documents independent of session ids.
 // File actions never create history; a load validates first and commits once.
 #include <unistd.h>

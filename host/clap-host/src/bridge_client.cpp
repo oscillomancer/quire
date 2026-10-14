@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The bridged backing of host::Instance (ADR-0013): the plugin lives in a
 // bridge process; main-thread calls are control-plane requests, audio-thread
 // calls are commands in shared memory with a futex wake-up and a deadline.

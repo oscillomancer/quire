@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Internal: the compiled render plan shared by the offline renderer and the
 // real-time engine (engine.md §1–2). Not a public interface.
 #pragma once

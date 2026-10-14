@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The meter bank and its rings (engine.md §2.3, P5.3c): the numbers the GUI
 // meters read. The ring itself is the shared SpscRing; the bank adds the slot
 // table, the heard-position rule and the drop counters. The threaded case runs

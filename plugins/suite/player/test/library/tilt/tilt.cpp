@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include <supple/script.h>
 
 // A tilt equaliser: one control raises the highs and lowers the lows around

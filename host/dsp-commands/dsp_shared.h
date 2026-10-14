@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // DSP scripts (ADR-0032), shared by the engine and the sandbox: the commands
 // that write, check, read and list the scripts the script player turns into
 // plugins. A script is <library>/<name>/<name>.cpp (Host::scriptDir()); once

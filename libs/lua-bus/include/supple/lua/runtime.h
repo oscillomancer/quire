@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The scripts of one application and the bus events that reach them
 // (ADR-0006). Model thread only.
 //

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 #include "plan.h"
 #include "live_workers.h"
 #include "supple/model/fade_shape.h"

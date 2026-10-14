@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Waveform peak pyramids (docs/specs/gui.md §3.1): min/max/RMS per channel
 // at 64…16384 samples per bucket, built off the UI thread, cached on disk
 // under the user cache directory keyed by the media's content hash (never in

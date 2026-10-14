@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Orrery CPU benchmark (synth.md §9): the reference patch — 8 notes × 3-voice
 // unison, 2 va + sub, ladder 24 dB, tape drive, 2 envelopes, 1 LFO, chorus +
 // reverb, normal quality — at 48 kHz / 256 frames, as a percentage of one

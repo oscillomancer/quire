@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // JSON ⇄ Lua conversion for the scripting bindings (ADR-0006).
 //
 // Objects become tables with string keys and arrays become sequences, which

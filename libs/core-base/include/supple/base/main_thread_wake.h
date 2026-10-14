@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Coalesced main-thread notification. Audio producers only publish atomics
 // and wake a private futex; a parked relay makes the request pollable.
 #pragma once

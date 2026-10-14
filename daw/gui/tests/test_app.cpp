@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The app's actions, actions list and menus, driven by keys and clicks like a
 // user would, asserting on the session through the bus (gui.md §10).
 #include <SDL3/SDL.h>

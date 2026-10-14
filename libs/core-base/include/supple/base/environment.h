@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Environment flags (main/test threads only; never on the audio path).
 #pragma once
 

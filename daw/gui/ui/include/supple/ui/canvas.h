@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Drawing for chrome (widgets, text, outlines) over NanoVG, in design units
 // and window coordinates. Bulk data (waveforms, notes) uses the GL layers of
 // P5.3, never this (ADR-0005 §3).

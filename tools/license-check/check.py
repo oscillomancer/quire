@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """License gate for the monorepo.
 
 Fails (exit 1) when:

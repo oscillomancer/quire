@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Parameter specs rebuilt from a semantic schema's "params" entries
 // (core-params describeParamJson), for hosts that talk to a plugin only
 // through its schema: CLAP value ↔ physical value, normalized mapping.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The shell: the arrange view in the window with a transport bar above and a
 // status line below. It also owns the wiring between the views and the app:
 // selection (UiState), commands (the bus, Origin::Ui) and the meter feed.

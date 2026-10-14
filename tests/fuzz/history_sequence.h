@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Shared byte-stream history property: libFuzzer mutates the bytes, while
 // engine.tests feeds fixed seeded streams through exactly the same commands.
 #pragma once

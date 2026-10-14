@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 #include "supple/engine/app.h"
 #include "media_files.h"
 #include "runtime_protection.h"

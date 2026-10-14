@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Output gestures through the shell, Root pointer capture and the real bus.
 #include <SDL3/SDL_keycode.h>
 #include <doctest/doctest.h>

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The agent session against a scripted fake LLM server (Anthropic and
 // OpenAI streaming formats), with a real engine and bus.
 #include <doctest/doctest.h>

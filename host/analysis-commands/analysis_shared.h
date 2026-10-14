@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Shared command-facing analysis types and conversion for sandbox and engine.
 #pragma once
 

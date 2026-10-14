@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Copies of audio files into a project's or a template's own media folder
 // (imports, Save as into another folder, project templates), so a project
 // never depends on a file somewhere else. Main/I-O threads only.

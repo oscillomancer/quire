@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // A generated session for benchmarks and demos (gui.md §9): N channel strips,
 // each with an audio item (one of eight generated WAVs) and an 8-bar MIDI
 // item, built through the command bus like an agent would.

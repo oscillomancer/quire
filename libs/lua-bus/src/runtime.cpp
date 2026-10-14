@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 #include "supple/lua/runtime.h"
 
 #include <supple/schema/schema.h>

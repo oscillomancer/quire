@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Editing gestures in the arrange view (docs/specs/gui.md §4.3, P5.6;
 // reaper-ux.md 8-13): select (click, Shift add, Ctrl toggle, marquee on empty
 // space or a right-drag anywhere: it takes the items and the automation points

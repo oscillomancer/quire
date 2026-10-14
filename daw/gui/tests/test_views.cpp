@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The arrange view (gui.md §4.3) over a real session built through the
 // command bus (the same commands an agent uses), drawn offscreen: golden
 // images for the ruler and the item states, and scripted tests for zoom,

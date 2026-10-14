@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Offline evaluation utilities; Python standard library only."""
 
 import hashlib

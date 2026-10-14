@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Oscillators (synth.md §4.2). Per-sample, phase in cycles, `dt` = cycles per
 // internal sample, `pm` = phase offset in cycles (FM input). RT-safe.
 #pragma once

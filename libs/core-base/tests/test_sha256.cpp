@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // SHA-256 against the FIPS 180-4 / NIST vectors, plus the incremental and
 // file paths the media model uses (P5.3c/D-?): a digest must not depend on how
 // the bytes were fed.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The immutable session (session-model §1–4): every object in ID-keyed maps,
 // edited only through EditTxn, validated by invariants, diffable.
 #pragma once

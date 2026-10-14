@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The MIDI learn dialog (gui.md §4.5, §6; ADR-0027): "Move the MIDI
 // controller you wish to assign". It shows the control it heard last, its
 // CC mode and options; OK binds it, Remove unbinds what was bound. Opened

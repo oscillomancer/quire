@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // A track's right-click menu, shared by the TCP and the mixer: Rename, Color…
 // (the swatch menu), Timebase… (channels), Channels… (ADR-0020: the main pair
 // and auxiliary channels 3-8) and Delete. Each pick is one command (one undo step).

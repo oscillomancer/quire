@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Structural edits as semantic merge patches, for editors: each function
 // returns an RFC 7396 merge patch over the current patch (EditorBridge::merge)
 // that keeps the patch valid — removing a slot also removes the routes that

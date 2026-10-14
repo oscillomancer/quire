@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Entry-init failures for supervised scanning. Never loaded into the test host.
 #include <clap/clap.h>
 #include <signal.h>

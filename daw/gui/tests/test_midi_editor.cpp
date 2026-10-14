@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The MIDI editor driven like a user: pointer and keys through the root, the
 // notation panel typed into, the session read back through commands.
 #include <doctest/doctest.h>

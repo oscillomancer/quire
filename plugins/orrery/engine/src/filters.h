@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Per-voice filters and drive (synth.md §4.3–4.4). Mono objects (a voice
 // holds one per channel). Coefficients are updated per control tick; the
 // per-sample loop takes already-ramped values. RT-safe.

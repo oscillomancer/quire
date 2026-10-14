@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The sandbox's DSP script commands (ADR-0032): dsp.write, dsp.check, dsp.get,
 // dsp.list, dsp.test and dsp.export over the session (host/dsp-commands).
 #include "dsp_commands.h"

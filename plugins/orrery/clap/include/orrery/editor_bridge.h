@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // What an editor sees of an Orrery instance, and the hook through which the
 // template-derived plugin adds its editor (clap.gui, clap.timer-support) to
 // the shared CLAP core.

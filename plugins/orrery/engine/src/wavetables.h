@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Orrery's wavetables (synth.md §4.2 `wavetable`): original tables generated
 // from harmonic recipes — no third-party data — stored as mip-mapped,
 // band-limited single-cycle frames.

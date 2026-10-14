@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 /*
  * CLAP extension: com.suppleaudio.editor-picture/1
  * Spec: docs/specs/editor-picture-extension.md.

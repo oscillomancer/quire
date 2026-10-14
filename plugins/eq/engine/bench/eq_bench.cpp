@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Offline CPU/accuracy measurements, never registered as a CTest timing test.
 // Build with -O2: cmake --preset release -DCMAKE_CXX_FLAGS_RELEASE='-O2 -DNDEBUG'
 // cmake --build --preset release --target eq-bench -j6

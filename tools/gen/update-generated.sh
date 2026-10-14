@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Regenerates the committed generator output under skill/generated/ from the
 # dev build (checked by the sandbox.registry-drift test).
 set -euo pipefail

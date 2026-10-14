@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Scrolling: a scroll bar, and a virtualized list (only visible rows are
 // painted; any number of rows) with selection and keyboard navigation.
 #pragma once

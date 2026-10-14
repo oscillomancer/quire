@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Render every Orrery recipe in skill/guides/sound-design.md to a WAV for a
 human listening check, through the sandbox's MCP server (the same path an
 agent uses). Usage:

@@ -374,7 +374,7 @@ TEST(a_changed_script_replaces_the_playing_one_in_place) {
     const auto& problem = failed.find("problems")->asArray().at(0);
     CHECK(problem.find("code")->asString() == "script.reload.failed");
     CHECK(problem.find("scope")->asString() == "reload");
-    CHECK(problem.find("line")->asInt() == 14);
+    CHECK(problem.find("line")->asInt() == 16);
     CHECK(!problem.find("silent")->asBool());
     CHECK(!problem.find("hint")->asString().empty());
     library.edit("smoke", "0.5 * undefinedThing", "0.75 * dbToGain", 6);
@@ -401,7 +401,7 @@ TEST(runtime_problems_have_lines_and_reload_clears_them) {
         CHECK(p.find("code")->asString() ==
               (budget ? "script.runtime.budget" : "script.runtime.index"));
         CHECK(p.find("scope")->asString() == "audio");
-        CHECK(p.find("line")->asInt() == 14);
+        CHECK(p.find("line")->asInt() == 16);
         CHECK(p.find("silent")->asBool() == budget);
         CHECK(!p.find("hint")->asString().empty());
         CHECK(a.status() == a.status());  // reading does not consume problems

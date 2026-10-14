@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Phase 4 acceptance: an LLM over MCP builds a small arrangement headlessly
 and renders it.
 

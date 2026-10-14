@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // The skill's sound-design guide (skill/guides/sound-design.md): every JSON
 // example is a valid patch, and every recipe renders finite, audible sound.
 #include <doctest/doctest.h>

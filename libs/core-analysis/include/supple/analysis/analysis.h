@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Offline analysis reports (spec: docs/specs/core-analysis.md §2–§8):
 // loudness, spectral, harmonic, envelope and stereo descriptors of a signal,
 // their JSON report, prose summary, comparison, target profiles and masking.

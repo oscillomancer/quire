@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // dsp.preview, a plugin's editor as a picture (ADR-0032 §8), shared by the
 // engine and the sandbox: a fresh instance, set by a patch, plays a test
 // signal (or notes) while its editor is watched, so meters and the

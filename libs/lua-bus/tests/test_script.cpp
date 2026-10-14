@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The scripting sandbox, the generated bindings and the JSON ⇄ Lua round trip
 // (ADR-0006). Model thread; no audio.
 #include <doctest/doctest.h>

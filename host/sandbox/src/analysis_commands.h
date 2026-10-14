@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Sandbox analysis commands: analyze, compare, masking, profile.evaluate.
 #pragma once
 

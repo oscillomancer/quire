@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Patch and preset documents (spec: docs/specs/core-patch.md, ADR-0009).
 //
 // A patch is a plugin's complete, human-readable state: the primary interface

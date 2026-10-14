@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Orrery through the real CLAP host: discovery, the semantic extension,
 // rendering notes, parameter automation and state.
 #include <doctest/doctest.h>

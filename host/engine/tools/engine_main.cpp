@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 #include <poll.h>
 // <slug>-engine: the headless DAW (spec: docs/specs/engine.md §6).
 //

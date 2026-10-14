@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // SHA-256 (FIPS 180-4: state, 64-round compression, Merkle–Damgård padding).
 //
 // An original implementation, incremental so a large file is hashed as it is

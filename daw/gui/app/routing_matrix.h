@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The routing matrix (docs/specs/gui.md §4.6): strips (in hierarchy) ×
 // strips and plug-in keys, from route.matrix. A strip with auxiliary channels
 // (a multi-out instrument's outputs, ADR-0021) has a row per channel pair

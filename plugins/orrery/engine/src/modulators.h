@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Control-rate modulators: envelopes, LFOs, step sequencers, smooth random.
 // Each advances by a number of base-rate samples per control tick and
 // reports its value at the end of the tick. RT-safe, allocation-free,

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Local CI: every preset, the license gate and the format check.
 # Usage: tools/ci/run-all.sh [preset ...]   (default: all)
 set -uo pipefail

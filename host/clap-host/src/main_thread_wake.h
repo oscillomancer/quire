@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Internal plug-in timer helpers; the shared notification relay is in core-base.
 #pragma once
 

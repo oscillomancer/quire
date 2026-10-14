@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Console 9 arithmetic: Copyright (c) 2018 Chris Johnson, MIT.
 // License and original reference: third_party/airwindows-console9/LICENSE.
 #include "supple/console9/console9.h"

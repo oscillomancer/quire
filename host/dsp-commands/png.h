@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // A picture as a PNG file (8-bit RGBA, one zlib stream, filter 0), for
 // dsp.preview: what an agent reads to see a plugin's editor. The system
 // zlib does the compressing.

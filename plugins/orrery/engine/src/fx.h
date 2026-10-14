@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Global post-FX (synth.md §4.10): chorus, phaser, delay, reverb, EQ.
 // Stereo, base rate. set() takes the block's effective physical values in
 // field order (ChorusF, PhaserF, ...) once per control tick; process() runs

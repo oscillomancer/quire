@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Pure helper and process-isolation tests; no REAPER or audio device required."""
 from array import array
 from contextlib import redirect_stdout

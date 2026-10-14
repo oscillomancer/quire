@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Process cleanup shared by the integration drivers: every child they start is
 ended and reaped on every path, including failures during startup."""
 import subprocess

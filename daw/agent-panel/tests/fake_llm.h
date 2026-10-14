@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // A scripted streaming LLM server for tests (Anthropic and OpenAI formats).
 #pragma once
 

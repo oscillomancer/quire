@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The arrange view's editing gestures (P5.6), driven like a user: pointer
 // events through the root; the model read back; one history entry each.
 #include <doctest/doctest.h>

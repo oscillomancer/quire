@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Basic widgets. Each reads theme tokens only and exposes its value for
 // tests (valueText).
 #pragma once

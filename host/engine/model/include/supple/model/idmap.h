@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // IdMap<T>: an immutable, ID-ordered collection of shared immutable objects
 // (session-model §2). Copying a map is a pointer copy; an edit copies the
 // entry vector once per transaction (Builder) and shares every untouched

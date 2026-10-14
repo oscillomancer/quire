@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Design-unit geometry for the toolkit (docs/specs/gui.md §2). One design
 // unit is one pixel at scale 1; the window's pixel ratio maps the rest.
 #pragma once

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The live pool (ADR-0024): exact-once dependencies and claim/close lifetime.
 #include <doctest/doctest.h>
 

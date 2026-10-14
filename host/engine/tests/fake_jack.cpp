@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // A stand-in libjack for the JACK backend tests: no server, no device. The
 // process callback runs on a thread of its own, free-running at a period the
 // test sets; the test drives server events (period and rate changes, xruns,

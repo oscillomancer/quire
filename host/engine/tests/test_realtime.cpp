@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 #include <clap/plugin.h>
 #include <doctest/doctest.h>
 #include "supple/engine/bench_probe.h"

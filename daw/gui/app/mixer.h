@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The mixer (docs/specs/gui.md §4.4), docked under the arrange view: strips
 // in track order grouped by type — channels, busses, masters — each with its
 // type colour, its name (a double-click renames it), "fx" (the chain) and "+"

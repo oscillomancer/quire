@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Session object types (session-model §1). Plain value structs: immutable once
 // shared through an IdMap; edited only by copying in an EditTxn. Their JSON
 // form (schemas.h) is the project file's and the command bus's.

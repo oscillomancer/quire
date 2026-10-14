@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include "supple/dsp/oversampler.h"
 #include <algorithm>
 #include <cmath>

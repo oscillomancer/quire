@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The real-time engine (spec: docs/specs/engine.md §1.6, §2.3): plays a
 // session through an audio backend. The main thread compiles a session
 // version into a plan and hands it to the audio thread (RtHandoff); the audio

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Deterministic pseudo-random numbers: xoshiro256** seeded with splitmix64
 // (Blackman & Vigna, public-domain algorithms; implemented here from the
 // published description). Identical seeds give identical streams on every

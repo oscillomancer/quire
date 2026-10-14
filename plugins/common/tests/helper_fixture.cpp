@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // A stock-plugin-shaped fixture built only from plugin_support: shows the
 // intended wiring and feeds the semantic conformance test.
 #include <clap/clap.h>

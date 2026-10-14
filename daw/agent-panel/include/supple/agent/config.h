@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Agent endpoints, stored per user in $XDG_CONFIG_HOME/<slug>/agent.json
 // (supple.agent/1.0), readable by the owner only (0600): API keys live here,
 // never in a project.

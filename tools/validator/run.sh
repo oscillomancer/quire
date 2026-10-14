@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Run the pinned validator headlessly and retain its complete JSON and text summary.
 set -euo pipefail
 

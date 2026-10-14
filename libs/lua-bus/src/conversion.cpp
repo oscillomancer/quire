@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 #include "conversion.h"
 
 // Lua is built as C++ (third_party/CMakeLists.txt): no extern "C".

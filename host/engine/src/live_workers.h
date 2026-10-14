@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Callback-only fork-join executor (ADR-0024). The background Workers pool
 // parks within jobs and must never be called from the device callback.
 #pragma once

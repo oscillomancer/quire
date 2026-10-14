@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Names and scheduling for the threads the host owns (engine.md §2.2,
 // ADR-0026). Linux. Setup only: never call from an audio path.
 #pragma once

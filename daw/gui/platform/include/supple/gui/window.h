@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // A DAW window: SDL3 (X11 driver, or the offscreen driver for tests and
 // benchmarks), one OpenGL 3.3 core context, NanoVG GL3 for chrome (ADR-0005).
 #pragma once

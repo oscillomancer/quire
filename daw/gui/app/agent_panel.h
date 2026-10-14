@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The agent panel (docs/specs/gui.md §5): a chat with an LLM that edits the
 // session on its own branch; the human reads the diff, A/Bs it and accepts
 // or rejects. Docked at the right of the main window.

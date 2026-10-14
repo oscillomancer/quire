@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Versions, undo/redo, branches and merge by replay (ADR-0008,
 // session-model §6). Every committed transaction is a Version holding the
 // resulting immutable Session plus what produced it (the resolved command

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The render dialog (docs/specs/gui.md §4.8): a front end to render.mix,
 // render.stems, render.regions and render.dry-run. Every control maps to a
 // schema field; the file-name pattern gets a live dry-run preview, re-run on

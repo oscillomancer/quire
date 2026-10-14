@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The retained node tree (docs/specs/gui.md §2): semantic roles, stack
 // layout, input, damage. Custom-drawn views (arrange, piano roll) are one
 // node each with their own internal hit testing and virtualization.

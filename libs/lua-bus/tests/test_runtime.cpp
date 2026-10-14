@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The runtime: named scripts that keep their state, bus events reaching their
 // subscriptions, and `script.run` over the command bus.
 #include <doctest/doctest.h>

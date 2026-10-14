@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Per-project UI state (docs/specs/gui.md §1.2): zoom, scroll, selection,
 // panels and window size live in <project stem>.ui.json beside the project
 // (canonical JSON, never in the project or its diff). Views register a

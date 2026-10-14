@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The search window for a parameter the caller left unconstrained: the current
 // value ± a musically sized step, clamped to the parameter's own range.
 //

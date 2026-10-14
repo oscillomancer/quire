@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Structural edit helpers (orrery/edits.h): every edit they offer must pass
 // the codec, and cascades (routes, oscillator targets) must keep patches valid.
 #include <doctest/doctest.h>

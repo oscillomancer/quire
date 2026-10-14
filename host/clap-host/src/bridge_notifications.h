@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Retained bridge publications, independent of the descriptor that announces them.
 #pragma once
 

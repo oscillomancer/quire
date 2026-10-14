@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Original test stand-in, derived only from the Console9 source's uses.
 // Not an SDK, plug-in ABI, or host implementation. Never used outside tests.
 #pragma once

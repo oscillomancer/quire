@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Actions bound to a MIDI controller (gui.md §6, ADR-0027): the user's
 // MIDI learn for the actions list, kept beside the keymap in
 // `<config>/<slug>/controls.json` (supple.controls/1.0). A control drives

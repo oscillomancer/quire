@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 """On-demand, isolated REAPER CLAP acceptance. Python standard library only."""
 import argparse
 from array import array

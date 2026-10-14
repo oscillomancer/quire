@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Test fixtures: two small, deterministic CLAP plugins built in-tree so the
 // host tests are hermetic.
 //

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // UTF-8 validity (RFC 3629: no overlong forms, no surrogates, at most
 // U+10FFFF), shared by the parser, the writer and callers that check text
 // before it becomes a JSON string.

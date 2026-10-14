@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // MIDI learn (ADR-0027): what a controller's message is and what it says.
 // Shared by the engine (learned plug-in parameters) and the window app
 // (actions bound to a controller, the learn dialog). Pure functions and

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Reference-search benchmark for `optimize.start` (see README.md).
 
 For every synth-reference task: load Orrery, set the task's starting patch,

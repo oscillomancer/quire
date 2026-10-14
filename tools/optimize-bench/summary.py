@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Comparison table over optimize-bench reports (see README.md).
 
 Reads one or more `<label>.json` reports written by bench.py and prints (or

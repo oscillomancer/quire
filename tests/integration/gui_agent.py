@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """An agent drives the running GUI over its control socket (gui.md §1): the
 GUI serves the command bus from its UI thread, so strips an agent adds through
 the MCP proxy are in the session the window shows. The GUI runs offscreen and

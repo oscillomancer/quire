@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Run the real Orrery sound-design loop over both MCP deployments.
 
 The committed transcript is also a drift test. Only temporary paths, render

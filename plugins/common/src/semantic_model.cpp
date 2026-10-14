@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include "supple/clap/semantic_model.h"
 
 #include <vector>

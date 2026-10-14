@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The worker pool (ADR-0012): every task runs once, after its dependencies,
 // whatever the thread count.
 #include <doctest/doctest.h>

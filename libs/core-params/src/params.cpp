@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include "supple/params/params.h"
 
 #include <clap/ext/params.h>

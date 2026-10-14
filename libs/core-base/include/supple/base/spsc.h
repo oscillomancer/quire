@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Bounded single-producer / single-consumer ring for real-time channels.
 //
 // Contract (the same as the plugin template's Telemetry.h Ring, so plugin

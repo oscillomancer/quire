@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // MD5 (RFC 1321's algorithm: four rounds of sixteen steps, sine-derived
 // constants, Merkle–Damgård padding with a little-endian length).
 //

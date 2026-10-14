@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The actions list (gui.md §6, "?"): fuzzy search over every action, shows
 // bound keys and MIDI controls, runs (asking for prompted arguments), binds
 // keys (Ctrl+B) and learns a MIDI control (Ctrl+L); with the chrome, puts an

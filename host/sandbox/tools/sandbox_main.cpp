@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // <slug>-sandbox: the headless plugin sandbox (spec: docs/specs/sandbox.md §5).
 //
 //   <slug>-sandbox exec '<json>' [--workdir DIR] [--plugin-path P]...

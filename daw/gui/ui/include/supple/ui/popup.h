@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Popups on the overlay tree (menus, the actions list, pickers): placed next
 // to an anchor and kept inside the window; a click outside or Escape closes
 // the topmost one; focus moves into the popup and returns on close.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The command log and history dock (docs/specs/gui.md §4.10): the current
 // branch's versions (undo, redo, jump to a version), the branches (switch,
 // create, merge into main, delete), and the command log — every command with

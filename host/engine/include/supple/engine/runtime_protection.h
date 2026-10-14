@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Model-thread-only Linux process controls. Injectable operations let tests
 // exercise opt-in settings without changing the test process's memory locks.
 #pragma once

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Minimal PNG writer for snapshots and golden images: RGBA8, one zlib stream
 // (system zlib), filter 0.
 #pragma once

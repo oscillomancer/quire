@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Scripted and isolated Hermes runners."""
 
 import json

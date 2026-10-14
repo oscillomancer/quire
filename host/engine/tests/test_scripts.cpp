@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // script.run through the engine's registry. Its own binary because
 // ThreadSanitizer cannot follow Lua's longjmp-based error handling ("can't
 // find longjmp buf"), so the label tsan-skip keeps it out of that preset while

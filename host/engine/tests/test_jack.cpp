@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The JACK backend against a stand-in libjack (fake_jack.cpp): no server and
 // no device. The real server is exercised only on request:
 //   SUPPLE_AUDIO_DEVICE_TEST=1 engine.tests -tc='*real JACK*'

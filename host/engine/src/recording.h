@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Internal: recording (ADR-0014 §1–2). The audio callback copies each armed
 // track's input channels into an SPSC frame ring; a writer thread drains the
 // rings into WAV files, rewriting their headers every few seconds so a crash

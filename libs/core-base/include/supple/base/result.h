@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Structured errors and Result<T>, used by every library API.
 //
 // Errors are designed to be read by an LLM or a script as well as a person:

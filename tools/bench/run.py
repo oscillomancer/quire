@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """B1/B2 capacity searches. Default devices are dry; real JACK needs exact-1 opt-in."""
 import argparse
 import base64

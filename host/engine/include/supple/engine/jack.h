@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The JACK backend (ADR-0004). libjack is loaded at run time through a
 // symbol table of our own, so the engine starts on systems without JACK and
 // reports a clean error there. On PipeWire, libjack is pipewire-jack.

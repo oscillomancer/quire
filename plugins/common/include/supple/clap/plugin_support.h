@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Plugin-side support for Quire's stock plugins (ADR-0010, ADR-0011):
 // everything a template-derived plugin needs to expose a core-params table
 // through CLAP params, a flat core-patch document through CLAP state, and the

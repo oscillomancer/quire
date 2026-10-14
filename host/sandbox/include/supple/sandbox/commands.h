@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The sandbox's commands on the command bus (spec: docs/specs/sandbox.md §4)
 // and the bus Host that runs them against a Session.
 #pragma once

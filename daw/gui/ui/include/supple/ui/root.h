@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // One window's UI (docs/specs/gui.md §2): the content tree, an overlay tree
 // (popups, drag ghosts, playhead-like layers painted every frame), focus,
 // hover, pointer capture and damage. Content repaints only damaged regions

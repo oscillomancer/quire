@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Capacity/report and REAPER generator regressions; no audio device required."""
 import base64
 import importlib.util

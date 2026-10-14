@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Internal: pitch-preserving time-stretch of a whole media file (main
 // thread). Used by the media cache for takes with `preserve_pitch` and the
 // stretch pitch mode (engine.md §4); not a public interface.

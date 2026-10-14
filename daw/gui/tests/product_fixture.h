@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // One fixture identity, derived from the generated product configuration.
 #pragma once
 #include <string>

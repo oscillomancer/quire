@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 #include "command_validation.h"
 #include "supple/model/numeric.h"
 // The engine's command catalogue (session-model §7) — the core set. Every

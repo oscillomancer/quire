@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The transport bar (gui.md §4.1): play/stop, record, loop and punch buttons
 // (the same actions the keymap runs), the position in bars|beats and time, the
 // session tempo and meter (click to edit them), and the engine's readouts.

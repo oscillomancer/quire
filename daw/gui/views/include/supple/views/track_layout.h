@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Row geometry shared by the arrange view's two columns (gui.md §4.3): one
 // ordered row list per session version, one height per row and the same
 // vertical scroll in the track control panel and the lanes. UI state per

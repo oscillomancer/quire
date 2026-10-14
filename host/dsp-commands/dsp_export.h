@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // dsp.export (ADR-0032 §5), shared by the engine and the sandbox: a script
 // as a plugin for other hosts.
 //

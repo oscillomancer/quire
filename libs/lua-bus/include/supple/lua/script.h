@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // A Lua script running against the command bus (ADR-0006). Model thread only:
 // a script never touches the audio thread, and every call it makes goes
 // through the same registry, validation and transactions as the GUI or an

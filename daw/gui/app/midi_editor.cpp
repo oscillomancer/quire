@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 #include "midi_editor.h"
 #include "midi_event_list.h"
 #include "panel_grip.h"

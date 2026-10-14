@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Wait-free hand-off of immutable objects from a control thread to the audio
 // thread, with reclamation back on the control thread.
 //

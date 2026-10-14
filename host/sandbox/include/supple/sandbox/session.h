@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The sandbox session (spec: docs/specs/sandbox.md §2–4): loaded plugin
 // instances, the processing chain, renders kept for comparison, settings, and
 // transactional snapshots. Main thread only. The sandbox commands are thin

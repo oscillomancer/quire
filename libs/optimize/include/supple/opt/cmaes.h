@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Derivative-free minimization: (μ/μ_w, λ)-CMA-ES (spec: docs/specs/optimizer.md
 // §1), implemented from the equations of N. Hansen, "The CMA Evolution
 // Strategy: A Tutorial" (arXiv:1604.00772), default strategy parameters.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Bulk GL layers (docs/specs/gui.md §3, ADR-0005 §3): data-dense content
 // (waveforms, notes, clip bodies) bypasses NanoVG. A node that sets
 // `drawsGl` gets paintGl() after its NanoVG paint, with NanoVG flushed and

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The app's actions: every command, the built-ins the default keymap names,
 // the user's keymap, and key routing (gui.md §6). UI state the actions read
 // (selection, playhead) comes from UiState.

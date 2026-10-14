@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 #include "command_validation.h"
 #include "midi_ticks.h"
 // Note-level MIDI editing (the piano roll's commands, and an agent's when

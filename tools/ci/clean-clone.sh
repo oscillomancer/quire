@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Phase 0 acceptance gate: a fresh clone builds and tests with one command,
 # offline. Clones HEAD (committed state only) into a temporary directory,
 # runs the dev workflow there, and removes it afterwards.

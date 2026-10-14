@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The mouse modifiers dialog (gap log #37): per context of the arrange view,
 // what each modifier combination does. Edits apply at once and are saved to
 // <config>/<slug>/mouse.json.

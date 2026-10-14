@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Orrery's real-time synth engine (spec: docs/specs/synth.md §2, §5.4).
 //
 // Threads: prepare()/setPatch()/collect() on the main thread (not concurrently

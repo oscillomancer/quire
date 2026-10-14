@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Audio file I/O (spec: docs/specs/core-analysis.md §9). Main/I-O threads only.
 //
 // Reading: WAV (PCM 8/16/24/32, float 32/64, RF64/BW64), FLAC and MP3, detected

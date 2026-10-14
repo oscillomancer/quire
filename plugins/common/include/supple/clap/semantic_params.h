@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 /*
  * CLAP extension: com.suppleaudio.semantic-params/1
  * Spec: docs/specs/semantic-params-extension.md (frozen).

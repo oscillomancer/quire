@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Temporary XWayland/SDL/CLAP integration measurement.
 #include <GL/gl.h>
 #include <SDL3/SDL.h>

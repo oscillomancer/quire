@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Mixer controls shared by the track control panel and the mixer (gui.md
 // §4.2, §4.4): a dB fader, a pan control, a stereo meter with peak hold, and
 // a toggle (mute, solo, arm, monitor). Drags report a gesture: Begin, Move…,

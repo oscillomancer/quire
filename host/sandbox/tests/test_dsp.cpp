@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The DSP script harness (dsp.test) through the real script player: what it
 // measures is what the script does, and what goes wrong is said in words.
 // And dsp.export: a copy of the player that plays one script anywhere.

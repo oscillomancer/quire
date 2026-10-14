@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Small DSP helpers shared by Orrery's modules. Header-only, RT-safe.
 #pragma once
 

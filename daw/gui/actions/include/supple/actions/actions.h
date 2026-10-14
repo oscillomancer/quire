@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Actions, keymaps and macros (docs/specs/gui.md §6). An action is a command
 // with bound arguments (strings starting with "$" resolve from the context:
 // the selection, the playhead), a macro (actions run as one batch, one undo

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The File actions (new, open, save, save as, project templates, import
 // audio) with the system's file dialogs (SDL3: the desktop portal or a native
 // dialog, asynchronous — the UI thread never waits on them) and a confirmation

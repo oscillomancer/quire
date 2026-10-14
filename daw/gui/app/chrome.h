@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Menus and the toolbar, built from actions (gui.md §6) and customizable in
 // $XDG_CONFIG_HOME/<slug>/menus.json (supple.menus/1.0):
 //   {"schema": "supple.menus/1.0",

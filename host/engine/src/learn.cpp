@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // MIDI learn (ADR-0027): plug-in parameters driven by a controller. The
 // bindings live on the effect (fx `learn`); fx.learn.set / remove / list edit
 // and read them; EngineApp::pollControl moves the parameters.

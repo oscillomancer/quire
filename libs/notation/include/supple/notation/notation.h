@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Text notation for MIDI items. Compilation and decompilation are non-real-time.
 #pragma once
 

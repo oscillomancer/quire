@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The plugin browser (docs/specs/gui.md §4.5, §1.2): a searchable list over the
 // scan cache with stock plugins and favourites first; Enter adds the selected
 // plugin to the chain. Favourites are user config, never project state.

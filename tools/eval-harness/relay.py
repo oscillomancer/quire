@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """MCP relay: expose sandbox tools and capture authoritative state, never prose."""
 
 import argparse

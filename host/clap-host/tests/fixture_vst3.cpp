@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Original MIT test module for the VST3 host. Its processor classes exercise the
 // effect, note, latency, sidechain, layout and state paths without any external
 // installed plug-in. The sidechain gain behaves like strict real plug-ins: it refuses

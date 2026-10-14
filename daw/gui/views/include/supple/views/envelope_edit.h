@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Edits of an envelope's selected points (docs/specs/gui.md §4.3): the
 // selection is the points themselves (position and value), so it survives the
 // envelope being rewritten and drops points another edit removed. Each

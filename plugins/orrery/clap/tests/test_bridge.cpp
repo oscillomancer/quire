@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // The editor bridge (orrery/editor_bridge.h) against a minimal in-process host:
 // gestures reach the host as CLAP events and the engine as values, both while
 // processing and through params.flush; structural merges; the extension hook.

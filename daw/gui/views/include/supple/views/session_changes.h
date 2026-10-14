@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Adjacent versions supply their transaction change list. Branch jumps and
 // callers without history compare shared object identities instead.
 #pragma once

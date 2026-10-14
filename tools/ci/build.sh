@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # One-command build from a clean clone: configure, build and test a preset.
 # Usage: tools/ci/build.sh [preset]   (default: dev)
 set -euo pipefail

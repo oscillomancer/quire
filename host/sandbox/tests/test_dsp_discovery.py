@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The sandbox CLI discovers its bundled player without --plugin-path."""
 import json
 import os

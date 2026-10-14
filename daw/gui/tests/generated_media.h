@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The generated session's audio for GUI tests: written once per test process
 // and hard-linked into each test's media folder, where generateSession finds
 // it (writing eight 30 s WAVs took half of every fixture's setup).

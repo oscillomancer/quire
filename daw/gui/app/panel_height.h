@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // How tall a resizable dock (the mixer, the MIDI editor) may be: what its
 // parent column has left once the siblings with a height of their own (the
 // other docks) and a strip of the shell (transport, a little arrange) are kept.

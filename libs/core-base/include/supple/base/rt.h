@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Real-time annotations.
 //
 // SUPPLE_RT marks a function as real-time: RealtimeSanitizer (the `rtsan`

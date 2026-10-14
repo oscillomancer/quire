@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // A float32 WAV file written incrementally (recording, engine.md §4): the
 // header's sizes are rewritten on updateHeader() and close(), so a crash
 // leaves a readable file up to the last update. Not real-time: a writer

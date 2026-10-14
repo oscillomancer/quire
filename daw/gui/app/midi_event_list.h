@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Event-list mode of the MIDI editor (gui.md §4.7). Rows are virtualized;
 // cell edits and multi-row deletion each use one midi.edit command. Notes
 // share the roll's selection; CC selection belongs to this panel.

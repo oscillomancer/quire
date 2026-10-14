@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Plugin editors embedded in X11 windows. Needs a display: runs only with
 // SUPPLE_GUI_DISPLAY_TEST=1 (a window appears for about a second).
 #include <SDL3/SDL.h>

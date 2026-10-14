@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Tempo and meter maps and time conversion (spec: docs/specs/session-model.md
 // §1.3). Pure and immutable; safe to share across threads once built.
 //

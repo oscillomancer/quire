@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include "Editor.h"
 #include <algorithm>
 #include <cmath>

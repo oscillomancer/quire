@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The DSP script library (ADR-0032), shared by the engine and the sandbox: a
 // script is <library>/<name>/<name>.cpp, and the script player lists a
 // plugin for each one in the folders SUPPLE_SCRIPT_LIBRARY names.

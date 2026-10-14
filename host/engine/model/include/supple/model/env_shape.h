@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // How an envelope segment moves from its point to the next: t in 0..1 maps to
 // the fraction of the value change. Engine playback and the GUI's automation
 // lanes share it, so what is drawn is what plays.

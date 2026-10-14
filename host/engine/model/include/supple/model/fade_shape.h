@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Shared item fade gain: display and playback use the same shape and bend.
 #pragma once
 

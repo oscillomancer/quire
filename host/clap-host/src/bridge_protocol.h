@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Internal: the plugin bridge protocol (ADR-0013), shared by the host side
 // (bridge_client.cpp) and the bridge executable (bridge/bridge_main.cpp).
 //

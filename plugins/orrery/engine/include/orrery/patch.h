@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Orrery patches (spec: docs/specs/synth.md §3, §5–§7).
 //
 // A patch is *structure* (which slots exist and their types, audio routing,

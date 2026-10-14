@@ -23,6 +23,8 @@ language, `guides/dsp-workflow.md` the commands).
 ## gain
 
 ```cpp
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include <supple/script.h>
 
 // The smallest useful effect: a level in dB, glided so that moving it does
@@ -42,6 +44,8 @@ struct Gain : Effect {
 ## tilt
 
 ```cpp
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include <supple/script.h>
 
 // A tilt equaliser: one control raises the highs and lowers the lows around
@@ -82,6 +86,8 @@ struct Tilt : Effect {
 ## compressor
 
 ```cpp
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include <supple/script.h>
 
 // A compressor that can listen to another track. With a signal on its
@@ -126,6 +132,8 @@ struct Compressor : Effect {
 ## echo
 
 ```cpp
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include <supple/script.h>
 
 // A feedback delay: what comes back is fed in again, quieter each time.
@@ -168,6 +176,8 @@ struct Echo : Effect {
 ## drive
 
 ```cpp
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include <supple/script.h>
 
 // Saturation with three shapes and a tone control after it. The shaper runs
@@ -255,6 +265,8 @@ struct Drive : Effect {
 ## spectral
 
 ```cpp
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include <supple/script.h>
 
 // Three effects in the frequency domain: a gate that keeps only the parts of
@@ -326,6 +338,8 @@ struct Spectral : Effect {
 ## reverb
 
 ```cpp
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include <supple/script.h>
 
 // A convolution reverb: the input played through a recording of a space's
@@ -370,6 +384,8 @@ struct Reverb : Effect {
 ## synth
 
 ```cpp
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include <supple/script.h>
 
 // A polyphonic synth: a saw per voice through a low-pass filter and an
@@ -433,6 +449,8 @@ struct Synth : Instrument {
 ## sampler
 
 ```cpp
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include <supple/script.h>
 
 // A sampler: every key plays the sample, faster up the keyboard and slower
@@ -485,6 +503,8 @@ struct Sampler : Instrument {
 ## meter
 
 ```cpp
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include <supple/script.h>
 
 // A gain with an editor of its own: a scope of the output and a level meter
@@ -565,6 +585,8 @@ struct Meter : Effect {
 ## bell
 
 ```cpp
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include <supple/script.h>
 
 // One band of an equaliser, shaped by hand in an editor of its own: press on

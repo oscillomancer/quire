@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 #include "supple/ui/widgets.h"
 
 #include <SDL3/SDL_keycode.h>

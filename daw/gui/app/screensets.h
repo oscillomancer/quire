@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Named screensets (gap log #38): the window's layout — which panels show and
 // the arrange view's zoom, scroll, row heights (global and per track) and
 // follow mode — saved under a name and recalled in one step. They live in the

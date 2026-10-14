@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // optimize.start (docs/specs/optimizer.md §2–§4): tunes continuous parameters
 // of a semantic plugin instance with CMA-ES against a reference render and/or
 // an analysis profile. Runs as a job on a worker thread that owns a clone of

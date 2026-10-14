@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Container metadata without decoding (audio_file.h inspect): a host that only
 // needs a file's rate, channel count and frame count must not pay for a full
 // decode (item.add, the media model). WAV/RF64 walk their chunks, FLAC reads

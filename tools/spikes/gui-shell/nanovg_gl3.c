@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Small renderer translation unit for the licensed vendored NanoVG source.
 #define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>

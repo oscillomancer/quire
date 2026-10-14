@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Internal: the host side of a bridged plugin instance (ADR-0013).
 #pragma once
 

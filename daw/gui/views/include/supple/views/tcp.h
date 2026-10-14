@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The track control panel (gui.md §4.2): one row per visible strip, sharing
 // the arrange view's row geometry and vertical scroll. Each row carries the
 // strip's identity (name, type badge, parentage), its state (mute, solo, arm,

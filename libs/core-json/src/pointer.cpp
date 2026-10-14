@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 #include <supple/json/pointer.h>
 #include <charconv>
 namespace supple::json {

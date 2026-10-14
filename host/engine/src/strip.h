@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Implicit console stages. All state is owned by the source strip's executor.
 #pragma once
 #include <algorithm>

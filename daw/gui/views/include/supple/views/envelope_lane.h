@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // Automation lanes (gui.md §4.3, P5.14): how an envelope's values map to a
 // lane's height and read as text. A track's volume sits on the fader's taper
 // (so the lane and the fader agree), pan is centred, mute is off/on. Plugin

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The engine's DSP script commands (ADR-0032): dsp.write, dsp.check, dsp.get,
 // dsp.list, dsp.test and dsp.export over EngineApp's script library
 // (host/dsp-commands).

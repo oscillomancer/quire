@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // clap-reset-check <plugin.clap> [plugin-id]
 //
 // CLAP's contract: reset() clears all processing state (filters, oscillators,

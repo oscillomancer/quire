@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
 // Orrery as a CLAP instrument: params, state, note/audio ports and the
 // com.suppleaudio.semantic-params/1 extension over the structured patch.
 // The template-derived plugin (plugins/orrery, with the editor) and the

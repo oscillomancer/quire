@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // The semantic parameter panel (docs/specs/gui.md §4.5): a tab in the FX
 // window, generated from the plugin's semantic schema through `fx.describe`
 // (the same names, units, ranges and groups an agent reads). Edits go through

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // DSP scripts over the bus (ADR-0032): a script written with dsp.write is a
 // plugin like a stock one -- listed, loaded, set in physical units through
 // its patch, an instrument playing a track's notes -- and its mistakes come

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 #include "command_validation.h"
 #include "supple/model/numeric.h"
 // Additional session edits and queries from session-model §7.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
 // An agent session (docs/specs/gui.md §5): the model works through the same
 // MCP tool surface as external agents, on its own branch; the human reviews
 // the branch's diff, A/Bs it against the base and accepts or rejects it.
