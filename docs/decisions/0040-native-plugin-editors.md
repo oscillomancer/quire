@@ -47,7 +47,8 @@ Contracts: gui.md §4.5 and sandbox.md §1.
 
 Hermetic tests cover native CLAP/VST3 APIs, pointer width, partial-open cleanup,
 resize negotiation, repeated open/close and malformed/old editor payloads.
-Stock capability checks require a GUI build. Real native windows are opt-in
+Stock capability checks require a GUI build with staged stock modules;
+fixture-only host builds skip that one check. Real native windows are opt-in
 only (`SUPPLE_GUI_DISPLAY_TEST=1`); CI does not opt in. A headless build or
 passing fixture test does not establish visual rendering, focus or IME behavior.
 
