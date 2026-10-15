@@ -253,8 +253,11 @@ via `request_restart`. The engine then prepares a new plan on a worker thread
 recomputed) while the old plan keeps playing, and swaps at a block boundary
 with a short crossfade (default 10 ms) on affected paths. Offline renders are
 unaffected (plans are fixed per render). Full contract: `specs/engine.md`.
-Plugin GUIs are X11 windows embedded into the DAW's X11 windows (ADR-0005),
-including from bridge processes (X11 child windows work across processes).
+Plugin GUIs embed as native X11 children, NSViews or HWNDs (ADR-0040).
+Windows/X11 bridge editors use the same parent across processes; Cocoa bridges
+own floating NSWindows because NSView pointers are process-local. Native bridge
+main loops service UI input alongside IPC/timers; SDL pumps local editors. The
+separate native DAW GUI port supplies its shell and shared service watcher.
 
 ### Stock plugins (ADR-0011)
 

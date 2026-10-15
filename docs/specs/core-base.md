@@ -151,3 +151,11 @@ each invocation with a recursive slot mutex, so self-removal retains the running
 callable. Callbacks and tokens may outlive the thread. These operations allocate,
 lock and join: never call them from audio. The standalone forced-fallback test
 must link only libraries that do not include stop.h, to avoid mixed type definitions.
+
+## Borrowed native UI parent (ADR-0040)
+
+`NativeWindow` carries a Kind (None, X11, Cocoa, Win32, Floating) and a
+uintptr_t handle. X11 is a server XID, Cocoa an NSView pointer, Win32 an HWND.
+It conveys no ownership. Floating requests a bridge-owned parent without
+transferring a process-local pointer. `nativeWindowKind()` identifies the
+platform's embedded API; consumers validate kind, lifetime and thread affinity.

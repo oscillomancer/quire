@@ -644,9 +644,12 @@ Result<Instance::EditorSize> editorSize(Result<std::vector<std::uint8_t>> reply)
 }
 }  // namespace
 
-Result<Instance::EditorSize> RemoteInstance::openEditor(unsigned long x11Parent, double scale) {
+Result<Instance::EditorSize> RemoteInstance::openEditor(NativeWindow parent, double scale) {
     Writer w;
-    w.u64(x11Parent);
+    // NSView pointers are process-local: only the bridge may create its parent.
+    if (nativeWindowKind() == NativeWindow::Kind::Cocoa) parent = {NativeWindow::Kind::Floating, 0};
+    w.u8(static_cast<std::uint8_t>(parent.kind));
+    w.u64(parent.handle);
     w.f64(scale);
     auto result = editorSize(call(Op::EditorOpen, w));
     editorOpen_ = result.ok();

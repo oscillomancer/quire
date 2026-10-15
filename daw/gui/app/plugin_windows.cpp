@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstring>
 #include <system_error>
 #include <tuple>
@@ -17,11 +18,29 @@
 #include "supple/model/session.h"
 
 namespace supple::gui {
+namespace {
+double editorUnits(const Window& window) {
+    // NSView sizes are points; CLAP/VST3 HWND and X11 sizes are device pixels.
+    return window.nativeParent().kind == NativeWindow::Kind::Cocoa
+               ? 1.0
+               : static_cast<double>(window.pixelRatio());
+}
+int designSize(std::uint32_t size, const Window& window) {
+    return std::max(1, static_cast<int>(std::lround(size / editorUnits(window))));
+}
+std::uint32_t pluginSize(float size, const Window& window) {
+    return static_cast<std::uint32_t>(
+        std::max(1L, std::lround(static_cast<double>(size) * editorUnits(window))));
+}
+bool floats(const host::Instance& instance) {
+    return nativeWindowKind() == NativeWindow::Kind::Cocoa && instance.isolated();
+}
+}  // namespace
 
 void applyEditorRequests(Window& window, const host::Instance::EditorRequests& requests) {
     if (requests.closed) return;
     if (requests.resize)
-        window.setSize(static_cast<int>(requests.width), static_cast<int>(requests.height));
+        window.setSize(designSize(requests.width, window), designSize(requests.height, window));
     if (requests.show) window.show();
     // Both requests can be coalesced by the host; hide wins in that case.
     if (requests.hide) window.hide();
@@ -197,17 +216,18 @@ void PluginWindows::remember(const Editor& editor) {
 }
 
 void PluginWindows::place(Editor& editor) {
-    if (!editor.fx) return;
+    if (!editor.fx || !editor.window) return;
     const auto it = placements_.find(*editor.fx);
     if (it == placements_.end()) return;
     const Placement& p = it->second;
     if (editor.resizable && p.width > 0 && p.height > 0) {
-        auto accepted = editor.instance->resizeEditor(static_cast<std::uint32_t>(p.width),
-                                                      static_cast<std::uint32_t>(p.height));
+        auto accepted =
+            editor.instance->resizeEditor(pluginSize(static_cast<float>(p.width), *editor.window),
+                                          pluginSize(static_cast<float>(p.height), *editor.window));
         restoreContext();
         if (accepted && accepted->width > 0 && accepted->height > 0)
-            editor.window->setSize(static_cast<int>(accepted->width),
-                                   static_cast<int>(accepted->height));
+            editor.window->setSize(designSize(accepted->width, *editor.window),
+                                   designSize(accepted->height, *editor.window));
     }
     const int w = static_cast<int>(editor.window->width());
     const int h = static_cast<int>(editor.window->height());
@@ -258,7 +278,14 @@ Status PluginWindows::attach(Editor editor, const std::string& title) {
         if (auto error = watcher_->error()) watcherError_ = std::move(error);
     if (!editor.instance->hasEditor())
         return Error("gui.editor", title + " has no editor this host can embed", "",
-                     "the plugin offers no X11 editor (or its bridge process failed: restart it)");
+                     "use a plugin with a native editor, or restart its failed bridge");
+    if (floats(*editor.instance)) {
+        auto size = editor.instance->openEditor({NativeWindow::Kind::Floating, 0}, 1);
+        if (!size) return std::move(size).error();
+        editor.resizable = size->resizable;
+        editors_.push_back(std::move(editor));
+        return {};
+    }
     WindowOptions options;
     options.title = title;
     options.width = 640;
@@ -272,8 +299,10 @@ Status PluginWindows::attach(Editor editor, const std::string& title) {
     options.parent = owner_;
     auto window = Window::open(platform_, options);
     if (!window) return std::move(window).error();
-    const unsigned long parent = (*window)->x11Window();
-    if (!parent) return Error("gui.editor", "plugin editors need the X11 video driver");
+    const auto parent = (*window)->nativeParent();
+    if (!parent.valid())
+        return Error("gui.editor.parent", "no native editor parent is available", "/editor/parent",
+                     "run the GUI in an interactive native desktop session");
     auto size = editor.instance->openEditor(parent, static_cast<double>((*window)->pixelRatio()));
     restoreContext();
     if (!size) return std::move(size).error();
@@ -282,7 +311,7 @@ Status PluginWindows::attach(Editor editor, const std::string& title) {
         return *watcherError_;
     }
     if (size->width > 0 && size->height > 0)
-        (*window)->setSize(static_cast<int>(size->width), static_cast<int>(size->height));
+        (*window)->setSize(designSize(size->width, **window), designSize(size->height, **window));
     (*window)->setResizable(size->resizable);
     editor.window = std::move(*window);
     editor.resizable = size->resizable;
@@ -293,12 +322,23 @@ Status PluginWindows::attach(Editor editor, const std::string& title) {
 }
 
 Status PluginWindows::open(model::Id fx) {
-    for (const Editor& e : editors_)
+    for (std::size_t index = 0; index < editors_.size(); ++index) {
+        Editor& e = editors_[index];
         if (e.fx == fx) {
-            e.window->show();
-            SDL_RaiseWindow(e.window->sdl());
+            if (app_.instanceOf(fx) != e.instance) {
+                drop(index);
+                return open(fx);
+            }
+            if (e.window) {
+                e.window->show();
+                SDL_RaiseWindow(e.window->sdl());
+                return {};
+            }
+            auto shown = e.instance->openEditor({NativeWindow::Kind::Floating, 0}, 1);
+            if (!shown) return std::move(shown).error();
             return {};
         }
+    }
     const model::Session& s = app_.head();
     const model::FxInstance* info = s.fx.find(fx);
     if (!info) return Error("gui.editor", "no effect " + fx.str());
@@ -325,8 +365,12 @@ Status PluginWindows::open(host::Instance& instance, const std::string& title) {
 bool PluginWindows::reattach(Editor& editor) {
     host::Instance* instance = app_.instanceOf(*editor.fx);
     if (!instance || !instance->hasEditor()) return false;
-    auto size = instance->openEditor(editor.window->x11Window(),
-                                     static_cast<double>(editor.window->pixelRatio()));
+    // An isolation-mode change can change Cocoa ownership: rebuild that entry.
+    if (floats(*instance) != !editor.window) return false;
+    auto size =
+        instance->openEditor(editor.window ? editor.window->nativeParent()
+                                           : NativeWindow{NativeWindow::Kind::Floating, 0},
+                             editor.window ? static_cast<double>(editor.window->pixelRatio()) : 1);
     restoreContext();
     if (!size) return false;
     if (watcherError_ && !instance->watchedFds().empty()) {
@@ -337,19 +381,22 @@ bool PluginWindows::reattach(Editor& editor) {
     editor.serial = nextSerial_;  // a new registration: old readiness is not its own
     nextSerial_ += 2;
     // A resizable editor keeps the window's size; the window keeps its place.
-    if (size->resizable && editor.resizable) {
+    if (editor.window && size->resizable && editor.resizable) {
         if (auto kept =
-                instance->resizeEditor(static_cast<std::uint32_t>(editor.window->width()),
-                                       static_cast<std::uint32_t>(editor.window->height()))) {
+                instance->resizeEditor(pluginSize(editor.window->width(), *editor.window),
+                                       pluginSize(editor.window->height(), *editor.window))) {
             size->width = kept->width;
             size->height = kept->height;
         }
         restoreContext();
     }
     editor.resizable = size->resizable;
-    if (size->width > 0 && size->height > 0)
-        editor.window->setSize(static_cast<int>(size->width), static_cast<int>(size->height));
-    editor.window->setResizable(size->resizable);
+    if (editor.window) {
+        if (size->width > 0 && size->height > 0)
+            editor.window->setSize(designSize(size->width, *editor.window),
+                                   designSize(size->height, *editor.window));
+        editor.window->setResizable(size->resizable);
+    }
     return true;
 }
 
@@ -388,7 +435,7 @@ bool PluginWindows::handle(const SDL_Event& e) {
     if (!target) return false;
     for (std::size_t i = 0; i < editors_.size(); ++i) {
         Editor& ed = editors_[i];
-        if (ed.window->sdl() != target) continue;
+        if (!ed.window || ed.window->sdl() != target) continue;
         if (e.type < SDL_EVENT_WINDOW_FIRST || e.type > SDL_EVENT_WINDOW_LAST) return true;
         if (ed.fx && app_.instanceOf(*ed.fx) != ed.instance) {
             if (e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) drop(i);  // else service() reopens
@@ -398,12 +445,12 @@ bool PluginWindows::handle(const SDL_Event& e) {
             drop(i);
         } else if (e.type == SDL_EVENT_WINDOW_RESIZED && ed.resizable &&
                    ed.instance->editorOpen()) {
-            auto accepted = ed.instance->resizeEditor(static_cast<std::uint32_t>(e.window.data1),
-                                                      static_cast<std::uint32_t>(e.window.data2));
-            if (accepted && (accepted->width != static_cast<std::uint32_t>(e.window.data1) ||
-                             accepted->height != static_cast<std::uint32_t>(e.window.data2)))
-                ed.window->setSize(static_cast<int>(accepted->width),
-                                   static_cast<int>(accepted->height));
+            const auto width = pluginSize(ed.window->width(), *ed.window);
+            const auto height = pluginSize(ed.window->height(), *ed.window);
+            auto accepted = ed.instance->resizeEditor(width, height);
+            if (accepted && (accepted->width != width || accepted->height != height))
+                ed.window->setSize(designSize(accepted->width, *ed.window),
+                                   designSize(accepted->height, *ed.window));
             restoreContext();
         }
         return true;
@@ -461,7 +508,15 @@ int PluginWindows::service() {
     // An effect that is gone, or whose new instance cannot, loses its window.
     for (std::size_t i = editors_.size(); i-- > 0;) {
         Editor& e = editors_[i];
-        if (e.fx && app_.instanceOf(*e.fx) != e.instance && !reattach(e)) {
+        auto* current = e.fx ? app_.instanceOf(*e.fx) : e.instance;
+        if (e.fx && current && current != e.instance && floats(*current) != !e.window) {
+            const auto fx = *e.fx;
+            drop(i);
+            auto reopened = open(fx);
+            if (!reopened && onError) onError(reopened.error());
+            continue;
+        }
+        if (e.fx && current != e.instance && !reattach(e)) {
             remember(e);
             editors_.erase(editors_.begin() + static_cast<std::ptrdiff_t>(i));
             restoreContext();
@@ -473,7 +528,7 @@ int PluginWindows::service() {
             editors_.erase(editors_.begin() + static_cast<std::ptrdiff_t>(i));
             continue;
         }
-        applyEditorRequests(*e.window, requests);
+        if (e.window) applyEditorRequests(*e.window, requests);
     }
     // App-wide local instances (including closed editors, retired instances,
     // and probes) share this worker with caller-owned editors. The app owns

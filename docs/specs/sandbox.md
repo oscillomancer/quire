@@ -127,12 +127,49 @@ publication (or overflow) notifies after updating its queue/counter. The engine
 app subscribes persistent instances and probes to its one relay and includes
 all local subscriptions in its service deadline/FD snapshot (ADR-0030).
 
-### Bridge notifications (POSIX v13, Windows v14; notification design ADR-0031)
+### Native editors (ADR-0040)
+
+`Instance::openEditor(NativeWindow, double scale)` accepts a borrowed X11 XID,
+NSView pointer or HWND, tagged with its native kind. The X11 unsigned-long
+overload remains for existing callers. `hasEditor()` probes the platform's
+embedded CLAP API (x11/cocoa/win32), or VST3 platform type
+(X11EmbedWindowID/NSView/HWND). Unsupported plugins return
+`host.editor.unsupported`, path `/editor`, with a parameter-panel hint. Invalid
+parents or scales return `host.editor.parent`, path `/editor/parent`, with a
+hint to supply a live native parent and positive finite scale.
+
+Open/resize sizes are pixels on Linux/Windows and points on macOS. Cocoa views
+handle their own backing scale; Linux/Windows receive CLAP set_scale or VST3
+content-scale support when offered. Timers run on the main thread independent
+of editor visibility. CLAP POSIX FD support is advertised on Linux/macOS and
+serviced by their descriptor loops; Windows does not advertise it.
+
+EditorOpen retains its operation number but now carries `u8 kind, u64 handle,
+f64 scale` (17 bytes). Kinds: none=0, x11=1, cocoa=2, win32=3, floating=4.
+POSIX v15 and Windows v16 reject earlier peers at notification subscription.
+Windows HWND values retain all pointer bits. Cocoa proxies send floating/zero
+instead of an NSView pointer: the child creates an NSWindow hosting the native
+embedded plugin view, and owns its resize/show/hide/close lifecycle. The open
+reply and other editor operation payloads are unchanged; there is no audio ABI
+change. Reopening a Cocoa floating editor raises the existing window.
+
+Windows bridge main waits for IPC and native messages together; Cocoa uses
+AppKit with CFFileDescriptor run-loop sources. There is no editor polling timer.
+Bridge death/quit destroys its native windows. Cocoa bridge placement and focus
+are not persisted by the DAW. Cross-process transient ownership on macOS is
+unavailable; floating-level windows can appear above other applications.
+Windows child input is native, with plugin-dependent keyboard/IME behavior.
+Moving between DPI scales currently requires close/reopen to update set_scale.
+Real window tests require SUPPLE_GUI_DISPLAY_TEST=1 and a desktop session;
+normal native CI runs hermetic editor fixtures only. The DAW shell itself
+requires the separate port-gui integration.
+
+### Bridge notifications (POSIX v15, Windows v16; notification design ADR-0031)
 
 ADR-0037 extends the subscription to native WakeEvent signal targets:
 Linux eventfd (unchanged), a nonblocking write-only pipe on macOS, and a
 manual-reset event duplicated into the child on Windows. POSIX negotiates
-version 13; Windows negotiates native version 14. Invalid resource types,
+version 15; Windows negotiates native version 16. Invalid resource types,
 counts, versions and duplicate subscriptions remain structured errors.
 The Windows control channel transfers recipient-owned handle values; the
 parent rejects handle-bearing replies without acting on the claimed value.
@@ -161,7 +198,7 @@ objects above implement the same publication and lifetime contracts.
 
 Before Create, the Linux parent sends process-level `SubscribeNotifications` with
 instance id 0, exactly one dedicated nonblocking eventfd via SCM_RIGHTS, and
-`u32 version = 13`; the reply is `u32 version = 13`. The descriptor is checked
+`u32 version = 15`; the reply is `u32 version = 15`. The descriptor is checked
 for eventfd type, read/write access and O_NONBLOCK; received copies are CLOEXEC.
 Missing, wrong-type, extra or duplicate descriptors, duplicate subscriptions,
 wrong versions/instance ids and trailing payloads are rejected with structured
@@ -644,13 +681,12 @@ above.
 
 Isolated Instance::create and createBridgeProcess use the native bridge on
 Linux, macOS and Windows; shared and dedicated crash scopes remain identical.
-Native editor opening fails with host.editor.unsupported until editor embedding
-lands.
+Native editors use the typed parent and platform contract below (ADR-0040).
 The engine, sandbox and offline renderer run on macOS and Windows through
 native audio-file I/O (ADR-0038). Sandbox rendering accepts isolated host
 instances and retains exact local/bridged output equivalence on each platform.
 The sandbox session's plugin.load command continues to load in process. Native
-device backends and editor embedding remain separate from bridge isolation.
+device backends remain separate from bridge isolation.
 
 On non-Linux platforms `dsp.export {format: "clap"}` returns `dsp.platform`
 at `/format`, with a hint to select `source`. This is the existing Linux-only

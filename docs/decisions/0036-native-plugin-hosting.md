@@ -17,6 +17,10 @@ behavior are unchanged.
 **Amendment, 2026-10-14:** [ADR-0037](0037-native-plugin-bridge.md) enables
 native macOS/Windows bridge transport, shared wakes and child ownership.
 
+**Editor amendment, 2026-10-14:** [ADR-0040](0040-native-plugin-editors.md)
+adds native local editors, Windows bridged embedding and Cocoa bridge-owned
+floating windows.
+
 ## Context
 
 In-process hosting and discovery must work before the Linux audio bridge,

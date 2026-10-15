@@ -4,6 +4,10 @@
 ADR-0035's wakes and ADR-0036's native hosting and child-process ownership.
 Contracts: engine spec §5 and sandbox spec §1.
 
+**Editor amendment, 2026-10-14:** [ADR-0040](0040-native-plugin-editors.md)
+adds native local editors, Windows bridged embedding and Cocoa bridge-owned
+floating windows.
+
 ## Decision
 
 - Preserve the Linux memfd/mmap, SCM_RIGHTS socketpair, shared futex words,

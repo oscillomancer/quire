@@ -266,6 +266,7 @@ bool validRequest(Op op, Reader r) {
             r.skipString();
             break;
         case Op::EditorOpen:
+            if (r.u8() > static_cast<std::uint8_t>(NativeWindow::Kind::Floating)) return false;
             r.skip(16);
             break;
         case Op::EditorResize:

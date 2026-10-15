@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
-// Plugin editors in their own windows (docs/specs/gui.md §4.5): an X11
-// window per open editor, the plugin's GUI embedded in it (CLAP gui), its
+// Plugin editors in native windows (docs/specs/gui.md §4.5): X11/NSView/HWND
+// embedding, or a bridge-owned floating window on macOS. Their
 // timers and file descriptors serviced from the UI thread (= the plugin's main
 // thread), its resize requests applied. On instance replacement, the editor
 // reopens in the same window; removing the effect closes its window.

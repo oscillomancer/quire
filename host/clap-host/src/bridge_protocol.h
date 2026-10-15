@@ -46,9 +46,10 @@ inline constexpr std::uint32_t kMagic = 0x31474253;  // "SBG1"
 // 12: a main-thread plugin-status query (no data-plane change).
 // 13: read-only factory patches through semantic-params.
 #if defined(_WIN32)
-inline constexpr std::uint32_t kVersion = 14;  // native handles in control frames and Activate
+inline constexpr std::uint32_t kVersion =
+    16;  // typed editor parents; native handles in control frames
 #else
-inline constexpr std::uint32_t kVersion = 13;  // POSIX wire and shared-memory ABI unchanged
+inline constexpr std::uint32_t kVersion = 15;  // typed editor parents
 #endif
 inline constexpr int kControlFd = 3;  // the bridge's end of the socketpair
 inline constexpr std::uint32_t kMaxChannels = 16;
@@ -86,13 +87,13 @@ enum class Op : std::uint32_t {
     // so the numbers of the ops above do not change.
     NormalizedParam,  // id, plain → normalized
     PlainParam,       // id, normalized → plain
-    // The plug-in's editor, embedded by the bridge into the host's X11 window
-    // (window ids are the X server's, not a process's).
-    EditorOpen,              // u64 parent window, f64 scale → u32 width, u32 height, u8 resizable
-    EditorResize,            // u32 width, u32 height → the accepted size (as EditorOpen)
-    EditorClose,             // → ok
-    EditorRequests,          // → u8 resize, u8 closed, u32 width, u32 height, u8 show, u8 hide
-    TakeIdleOutputs,         // → u64 dropped, u32 count, [OutputEvent]
+    // Native editor: X11/Win32 embedded; Cocoa floats in a bridge-owned window.
+    EditorOpen,       // u8 parent kind, u64 parent handle, f64 scale → u32 width, u32 height, u8
+                      // resizable
+    EditorResize,     // u32 width, u32 height → the accepted size (as EditorOpen)
+    EditorClose,      // → ok
+    EditorRequests,   // → u8 resize, u8 closed, u32 width, u32 height, u8 show, u8 hide
+    TakeIdleOutputs,  // → u64 dropped, u32 count, [OutputEvent]
     SubscribeNotifications,  // process id 0: u32 version (+ eventfd) → u32 version
     AckNotifications,        // process id 0: no payload → ok
     PluginStatus,            // no payload → JSON text (null if unsupported)

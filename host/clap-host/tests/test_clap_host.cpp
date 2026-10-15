@@ -1392,7 +1392,7 @@ TEST_CASE("bridge protocol v6 retains nested structured error details") {
     CHECK(decoded.details[0].hint == "correct it");
     REQUIRE(decoded.details[0].details.size() == 1);
     CHECK(decoded.details[0].details[0].code == "leaf");
-    CHECK(bridge::kVersion == 13);
+    CHECK(bridge::kVersion == 15);
 }
 
 TEST_CASE("editor failures destroy the partial editor and show-hide requests reach its owner") {

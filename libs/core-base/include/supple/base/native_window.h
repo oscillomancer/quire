@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Supple Audio
+#pragma once
+#include <cstdint>
+namespace supple {
+// Borrowed UI-thread parent. Cocoa means NSView*, Win32 means HWND. Never
+// dereference another process's pointer. Floating asks the bridge to own a window.
+struct NativeWindow {
+    enum class Kind : std::uint8_t { None, X11, Cocoa, Win32, Floating };
+    Kind kind = Kind::None;
+    std::uintptr_t handle = 0;
+    bool valid() const { return kind == Kind::Floating || (kind != Kind::None && handle != 0); }
+};
+inline constexpr NativeWindow::Kind nativeWindowKind() {
+#if defined(__APPLE__)
+    return NativeWindow::Kind::Cocoa;
+#elif defined(_WIN32)
+    return NativeWindow::Kind::Win32;
+#else
+    return NativeWindow::Kind::X11;
+#endif
+}
+}  // namespace supple

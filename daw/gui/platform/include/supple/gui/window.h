@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "supple/base/native_window.h"
 #include "supple/base/result.h"
 
 struct NVGcontext;
@@ -76,7 +77,9 @@ class Window {
     float width() const;
     float height() const;
     float pixelRatio() const;
-    // The X11 window id plugin editors are parented to (0 offscreen).
+    // Borrowed native editor parent; unavailable for offscreen windows.
+    NativeWindow nativeParent() const;
+    // Compatibility accessor for existing X11 callers.
     unsigned long x11Window() const;
 
     void makeCurrent() const;

@@ -118,6 +118,29 @@ class TestView final : public CPluginView {
     TestHandler first_, second_;
 };
 
+#else
+class TestView final : public CPluginView {
+  public:
+    TestView() { rect = {0, 0, 300, 200}; }
+    tresult PLUGIN_API isPlatformTypeSupported(FIDString type) override {
+#if defined(__APPLE__)
+        return std::strcmp(type, kPlatformTypeNSView) == 0 ? kResultOk : kResultFalse;
+#else
+        return std::strcmp(type, kPlatformTypeHWND) == 0 ? kResultOk : kResultFalse;
+#endif
+    }
+    tresult PLUGIN_API canResize() override { return kResultTrue; }
+    tresult PLUGIN_API attached(void* parent, FIDString type) override {
+        if (!parent || isPlatformTypeSupported(type) != kResultOk) return kResultFalse;
+        auto result = CPluginView::attached(parent, type);
+        if (plugFrame) {
+            ViewRect size(0, 0, 320, 240);
+            plugFrame->resizeView(this, &size);
+        }
+        return result;
+    }
+};
+
 #endif
 
 class Fixture final : public SingleComponentEffect {
@@ -157,12 +180,7 @@ class Fixture final : public SingleComponentEffect {
         return result;
     }
     IPlugView* PLUGIN_API createView(FIDString name) override {
-#if defined(__linux__)
         return controller_ && std::strcmp(name, ViewType::kEditor) == 0 ? new TestView : nullptr;
-#else
-        (void)name;
-        return nullptr;
-#endif
     }
     tresult PLUGIN_API getControllerClassId(TUID id) override {
         if (kind_ != Separate && kind_ != Stateless) return kResultFalse;

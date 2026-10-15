@@ -3,6 +3,10 @@
 **Status:** Accepted, 2026-09-26. Evidence: `docs/research/gui-stack.md`,
 `docs/research/gui-spike.md` (spike code in `tools/spikes/gui-shell/`).
 
+**Editor amendment, 2026-10-14:** [ADR-0040](0040-native-plugin-editors.md)
+adds native local editors, Windows bridged embedding and Cocoa bridge-owned
+floating windows.
+
 ## Context
 
 Third-party plugin GUIs on Linux expect an X11 parent window

@@ -47,7 +47,7 @@ class Vst3Instance {
     void clearRestart();
     // Editor (main thread): see Instance's editor API.
     bool hasEditor();
-    Result<Instance::EditorSize> openEditor(unsigned long x11Parent, double scale);
+    Result<Instance::EditorSize> openEditor(NativeWindow parent, double scale);
     Result<Instance::EditorSize> resizeEditor(std::uint32_t width, std::uint32_t height);
     void closeEditor();
     bool editorOpen() const;

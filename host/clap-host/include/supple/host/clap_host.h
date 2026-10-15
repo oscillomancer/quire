@@ -23,6 +23,7 @@
 #include <thread>
 #include <vector>
 
+#include "supple/base/native_window.h"
 #include "supple/base/result.h"
 #include "supple/base/rt.h"
 #include "supple/base/spsc.h"
@@ -388,16 +389,18 @@ class Instance {
     // observable through failed(). VST3 has no CLAP flush outputs.
     IdleOutputs takeIdleOutputs();
 
-    // --- editor (main thread): the plugin's GUI embedded in an X11 window
-    // (CLAP gui extension, VST3 IPlugView). An isolated instance's editor is
-    // embedded by its bridge process into the same window (X11 window ids are
-    // the server's); its requests are polled through the bridge (gap log #39).
+    // --- editor (main/UI thread). X11/Win32 dimensions are pixels, Cocoa
+    // dimensions are points. Bridged Cocoa editors float in the child process.
     struct EditorSize {
         std::uint32_t width = 0, height = 0;
         bool resizable = false;
     };
     bool hasEditor() const;
-    Result<EditorSize> openEditor(unsigned long x11Parent, double scale);
+    Result<EditorSize> openEditor(NativeWindow parent, double scale);
+    // Compatibility for existing X11 callers; native callers use the typed API.
+    Result<EditorSize> openEditor(unsigned long x11Parent, double scale) {
+        return openEditor({NativeWindow::Kind::X11, x11Parent}, scale);
+    }
     // Host-driven resize; returns the size the plugin accepted.
     Result<EditorSize> resizeEditor(std::uint32_t width, std::uint32_t height);
     void closeEditor();

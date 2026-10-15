@@ -418,6 +418,26 @@ drop outside the strips cancels; each is one undo step.
 
 ### 4.5 FX chain and plugins
 
+Native editor parents are tagged X11 XIDs, Cocoa NSViews or Win32 HWNDs
+(ADR-0040). Local CLAP and VST3 views embed into an SDL editor container.
+Windows bridged views use the same HWND across processes. macOS bridged views
+float in a bridge-owned NSWindow; no empty SDL editor window is created.
+The bridge applies resize/show/hide and user-close itself and reports closure
+through its existing notifications. Cocoa bridge placement and focus are not
+persisted or included in the DAW's MIDI-learn focus predicate. Floating-level
+windows can remain above unrelated applications; cross-process transient
+ownership is unavailable. Windows keyboard accelerators/IME depend on the
+plugin's native child; the DAW does not forward shortcut messages.
+
+Window sizes/placements remain design units. Pixel editor sizes on
+Linux/Windows convert using pixelRatio; Cocoa editor sizes are already points.
+The GUI worker's inputScale maps SDL event coordinates to design units. Opening
+uses the current scale; live scale-change renegotiation requires close/reopen.
+Native run loops deliver local editor input; timers remain GUI deadlines.
+Linux/macOS FD readiness uses the shared watcher; Windows advertises no CLAP
+POSIX FD support. Display tests remain opt-in, never enabled by normal CI.
+
+
 Chain list with add (searchable browser over the plugin scan cache;
 favourites and stock plugins first; the browser also opens on its own from a
 strip's "+", titled with the track and with its own Close), reorder by
@@ -429,8 +449,8 @@ and Shift+click selects the rows from the last one clicked; on a row of a
 multi-selection, bypass, offline and Remove act on every selected effect in
 one undo step (the editor button and a double click open only that row's
 editor), wet/dry, per-FX latency and CPU, preset
-menu, and the plugin's own GUI (embedded X11 child of an SDL window,
-ADR-0005 §2, `clap.timer-support`, resize negotiated from observed
+menu, and the plugin's own GUI (native view/child of an SDL window, or a
+bridge-owned Cocoa window; ADR-0040, `clap.timer-support`, resize negotiated from observed
 geometry). For plugins without a GUI — and always as a second tab — a
 **semantic parameter panel** generated from the plugin's semantic schema
 (units, ranges, enums, groups): the same description an agent reads, so the

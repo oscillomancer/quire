@@ -831,10 +831,22 @@ bool CLAP_ABI edgeStateLoad(const clap_plugin_t* pl, const clap_istream_t* is) {
 }
 const clap_plugin_state_t kEdgeState = {edgeStateSave, edgeStateLoad};
 bool CLAP_ABI edgeGuiApi(const clap_plugin_t*, const char* api, bool floating) {
+#if defined(__APPLE__)
+    return !floating && !std::strcmp(api, CLAP_WINDOW_API_COCOA);
+#elif defined(_WIN32)
+    return !floating && !std::strcmp(api, CLAP_WINDOW_API_WIN32);
+#else
     return !floating && !std::strcmp(api, CLAP_WINDOW_API_X11);
+#endif
 }
 bool CLAP_ABI edgeGuiPreferred(const clap_plugin_t*, const char** api, bool* floating) {
+#if defined(__APPLE__)
+    *api = CLAP_WINDOW_API_COCOA;
+#elif defined(_WIN32)
+    *api = CLAP_WINDOW_API_WIN32;
+#else
     *api = CLAP_WINDOW_API_X11;
+#endif
     *floating = false;
     return true;
 }
@@ -870,8 +882,10 @@ bool CLAP_ABI edgeGuiSetSize(const clap_plugin_t* pl, uint32_t w, uint32_t h) {
     return true;
 }
 bool CLAP_ABI edgeGuiParent(const clap_plugin_t* pl, const clap_window_t* window) {
-    if (!E(pl)->guiCreated || std::strcmp(window->api, CLAP_WINDOW_API_X11) != 0) return false;
-    E(pl)->guiParent = window->x11;
+    if (!E(pl)->guiCreated || !edgeGuiApi(pl, window->api, false)) return false;
+    E(pl)->guiParent = !std::strcmp(window->api, CLAP_WINDOW_API_X11)
+                           ? window->x11
+                           : reinterpret_cast<std::uintptr_t>(window->ptr);
     return true;
 }
 bool CLAP_ABI edgeGuiTransient(const clap_plugin_t*, const clap_window_t*) { return false; }

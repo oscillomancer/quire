@@ -55,3 +55,4 @@ current state.
 | [0036](0036-native-plugin-hosting.md) | Native plugin hosting and supervised scanning | Accepted |
 | [0037](0037-native-plugin-bridge.md) | Native out-of-process plugin bridge | Accepted |
 | [0038](0038-native-device-audio.md) | Native device audio through PortAudio | Accepted |
+| [0040](0040-native-plugin-editors.md) | Native plugin editors | Accepted |

@@ -23,7 +23,7 @@ Both native platforms enable and test audio-file I/O, recording recovery,
 engine/CLI, dummy/offline rendering and sandbox. PortAudio builds CoreAudio on
 macOS and WASAPI/ASIO on Windows; fake-device tests verify RT/offline equivalence
 in both executors. Actual hardware trials remain opt-in and unmeasured.
-GUI embedding remains gated on this branch.
+The DAW GUI shell remains gated on this branch.
 Portable libraries, the session model, stock DSP cores
 and the script suite build independently of those services; see
 CONTRIBUTING.md for the complete gate list. External Windows readers that
@@ -42,6 +42,15 @@ exact isolated/local output through the existing host/render APIs;
 plugin.load continues to load in process. Linux bridge, engine and sandbox
 tests pass under RTSan and TSan, retaining the existing deadlines and
 background-only processing contract.
+
+Native host editor paths now select CLAP cocoa/win32 or VST3 NSView/HWND,
+with typed full-width parent handles (ADR-0040). Windows bridge editors embed;
+macOS bridge editors own floating NSWindows and service AppKit with IPC.
+Hermetic editor tests cover partial-open cleanup, resizing and repeated teardown.
+Native visual/focus/IME validation remains opt-in; DAW-side native shell tests
+await port-gui integration. Cocoa bridge placement/focus are not persisted,
+its windows use global floating level, and changing display scale requires
+closing/reopening an editor. Windows child keyboard behavior is plugin-dependent.
 
 ## What works
 
@@ -210,8 +219,8 @@ Engine and hosting:
   Both native engines run with dummy/offline audio and native RT/offline
   equivalence coverage. Windows file helpers and audio-file I/O pass native CI.
   Native hosting/scanning (ADR-0036) and PortAudio device builds (ADR-0038) are
-  verified; native bridge targets are enabled (ADR-0037), while GUI embedding
-  remains a separate port. Hardware behavior still needs opt-in device trials.
+  verified; native bridge targets are enabled (ADR-0037), with native host
+  editor paths supplied by ADR-0040. DAW shell integration remains on port-gui. Hardware behavior still needs opt-in device trials.
   Windows event waits admit 64 unique handles. Generic macOS High QoS must be
   self-applied. Native device helpers instead use a startup barrier with Mach
   time constraints (macOS) or MMCSS Pro Audio (Windows); workgroup joining and

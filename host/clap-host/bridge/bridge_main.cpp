@@ -30,6 +30,7 @@
 
 #include "../src/bridge_notifications.h"
 #include "../src/bridge_protocol.h"
+#include "../src/editor_platform.h"
 #include "../src/main_thread_wake.h"
 #include "../src/platform.h"
 #include "../src/scan.h"
@@ -48,6 +49,10 @@ namespace {
 struct BridgeInstance {
     std::unique_ptr<Instance> instance;
     MainThreadWake* wake = nullptr;
+#if defined(__APPLE__)
+    std::unique_ptr<FloatingEditorWindow> floating;
+    Instance::EditorSize floatingSize;
+#endif
     Instance::Notifications notes;
     Instance::IdleOutputs idle;
     Instance::EditorRequests editor;
@@ -62,6 +67,33 @@ struct BridgeInstance {
         auto n = instance->takeNotifications();
         auto outputs = instance->takeIdleOutputs();
         auto gui = instance->takeEditorRequests();
+#if defined(__APPLE__)
+        if (floating) {
+            if (floating->closed() || gui.closed) {
+                instance->closeEditor();
+                floating.reset();
+                gui = {};
+                gui.closed = true;
+            } else {
+                unsigned width = 0, height = 0;
+                if (floating->takeResize(width, height)) {
+                    if (auto size = instance->resizeEditor(width, height)) {
+                        floatingSize = *size;
+                        floating->resize(size->width, size->height, size->resizable);
+                    }
+                }
+                if (gui.resize) {
+                    floatingSize.width = gui.width;
+                    floatingSize.height = gui.height;
+                    floating->resize(gui.width, gui.height, floatingSize.resizable);
+                }
+                if (gui.show) floating->show();
+                if (gui.hide) floating->hide();
+                // Geometry belongs to the child window, not a DAW placeholder.
+                gui.resize = gui.show = gui.hide = false;
+            }
+        }
+#endif
         auto lines = instance->takeLog();
         const bool process = instance->takeProcessRequest();
         const auto newLatency = instance->latency(), newTail = instance->tail();
@@ -604,17 +636,53 @@ struct Bridge {
                 return reply(w);
             }
             case Op::EditorOpen: {
-                const auto parent = static_cast<unsigned long>(r.u64());
+                const auto kind = static_cast<NativeWindow::Kind>(r.u8());
+                const auto handle = r.u64();
                 const double scale = r.f64();
-                if (!r.ok()) return fail(Error("bridge.editor", "malformed EditorOpen request"));
-                return replyOr(instance->openEditor(parent, scale), writeSize);
+                if (!r.ok())
+                    return fail(Error("bridge.editor", "malformed EditorOpen request", "/editor",
+                                      "use a matching host and bridge build"));
+                NativeWindow parent{kind, static_cast<std::uintptr_t>(handle)};
+#if defined(__APPLE__)
+                if (kind != NativeWindow::Kind::Floating || handle != 0)
+                    return fail(Error("host.editor.parent",
+                                      "a bridged Cocoa editor requires its own window",
+                                      "/editor/parent", "request a floating bridge editor"));
+                if (slot.floating) {
+                    slot.floating->show();
+                    return replyOr(Result<Instance::EditorSize>(slot.floatingSize), writeSize);
+                }
+                auto window = FloatingEditorWindow::create(instance->info().name);
+                if (!window) return fail(window.error());
+                parent = (*window)->parent();
+#endif
+                auto size = instance->openEditor(parent, scale);
+#if defined(__APPLE__)
+                if (size) {
+                    (*window)->resize(size->width, size->height, size->resizable);
+                    (*window)->show();
+                    slot.floatingSize = *size;
+                    slot.floating = std::move(*window);
+                }
+#endif
+                return replyOr(std::move(size), writeSize);
             }
             case Op::EditorResize: {
                 const std::uint32_t width = r.u32(), height = r.u32();
-                return replyOr(instance->resizeEditor(width, height), writeSize);
+                auto size = instance->resizeEditor(width, height);
+#if defined(__APPLE__)
+                if (size && slot.floating) {
+                    slot.floatingSize = *size;
+                    slot.floating->resize(size->width, size->height, size->resizable);
+                }
+#endif
+                return replyOr(std::move(size), writeSize);
             }
             case Op::EditorClose:
                 instance->closeEditor();
+#if defined(__APPLE__)
+                slot.floating.reset();
+#endif
                 return reply(Writer{});
             case Op::EditorRequests: {
                 collect(slot);
@@ -682,6 +750,10 @@ int bridgeMain(int argc, char** argv) {
     }
 #else
 int main(int argc, char** argv) {
+    if (auto initialized = initializeEditorPlatform(); !initialized) {
+        std::fprintf(stderr, "%s\n", initialized.error().message.c_str());
+        return 1;
+    }
 #endif
 #if !defined(_WIN32)
     ::signal(SIGPIPE, SIG_IGN);
@@ -739,60 +811,66 @@ int main(int argc, char** argv) {
     std::vector<WaitItem> polled;
     std::vector<std::uint32_t> owners;  // the instance of each editor descriptor
     for (;;) {
-        // Clear the coalesced wake before consuming work: a request made
-        // during servicing must schedule another pass. Servicing before every
-        // poll also prevents a busy control socket from starving callbacks.
-        (void)b.wake.drain();
-        for (auto& [id, slot] : b.instances) {
-            (void)id;
-            std::lock_guard lock(slot->lifecycle);
-            (void)slot->instance->serviceMainThread();
-            b.collect(*slot);
-        }
-        if (!b.announce()) break;
-        // Timers and descriptors may be registered without an open editor.
-        // Host death arrives as control-socket HUP; no periodic probe is needed.
-        polled = {{controlWaitable(b.sock), kWaitRead, 0}, {b.wake.waitable(), kWaitRead, 0}};
-        owners.assign(2, 0);
-        int timeout = -1;
-        for (auto& [id, slot] : b.instances) {
-            for (const auto& [fd, flags] : slot->instance->watchedFds()) {
-                short events = 0;
-                if (flags & CLAP_POSIX_FD_READ) events |= kWaitRead;
-                if (flags & CLAP_POSIX_FD_WRITE) events |= kWaitWrite;
-                polled.push_back(WaitItem{fd, events, 0});
-                owners.push_back(id);
+#if defined(__APPLE__)
+        @autoreleasepool {
+#endif
+            // Clear the coalesced wake before consuming work: a request made
+            // during servicing must schedule another pass. Servicing before every
+            // poll also prevents a busy control socket from starving callbacks.
+            (void)b.wake.drain();
+            for (auto& [id, slot] : b.instances) {
+                (void)id;
+                std::lock_guard lock(slot->lifecycle);
+                (void)slot->instance->serviceMainThread();
+                b.collect(*slot);
             }
-            timeout = nearestTimeout(timeout, slot->instance->nextTimerMs());
+            if (!b.announce()) break;
+            // Timers and descriptors may be registered without an open editor.
+            // Host death arrives as control-socket HUP; no periodic probe is needed.
+            polled = {{controlWaitable(b.sock), kWaitRead, 0}, {b.wake.waitable(), kWaitRead, 0}};
+            owners.assign(2, 0);
+            int timeout = -1;
+            for (auto& [id, slot] : b.instances) {
+                for (const auto& [fd, flags] : slot->instance->watchedFds()) {
+                    short events = 0;
+                    if (flags & CLAP_POSIX_FD_READ) events |= kWaitRead;
+                    if (flags & CLAP_POSIX_FD_WRITE) events |= kWaitWrite;
+                    polled.push_back(WaitItem{fd, events, 0});
+                    owners.push_back(id);
+                }
+                timeout = nearestTimeout(timeout, slot->instance->nextTimerMs());
+            }
+            const int ready = waitEditorEvents(polled, timeout);
+            if (ready < 0) {
+                if (errno == EINTR) continue;  // rebuild deadlines and service work
+                break;
+            }
+            for (std::size_t i = 2; ready > 0 && i < polled.size(); ++i) {
+                if (!polled[i].ready) continue;
+                const auto it = b.instances.find(owners[i]);
+                if (it == b.instances.end()) continue;
+                std::uint32_t flags = 0;
+                if (polled[i].ready & kWaitRead) flags |= CLAP_POSIX_FD_READ;
+                if (polled[i].ready & kWaitWrite) flags |= CLAP_POSIX_FD_WRITE;
+                if (polled[i].ready & (kWaitError | kWaitHangup | kWaitInvalid))
+                    flags |= CLAP_POSIX_FD_ERROR;
+                std::lock_guard lock(it->second->lifecycle);
+                it->second->instance->onFd(polled[i].source.fd(), flags);
+            }
+            if (polled[0].ready & kWaitInvalid) break;
+            if (!(polled[0].ready & (kWaitRead | kWaitHangup | kWaitError))) continue;
+            std::uint32_t op = 0;
+            std::uint32_t id = 0;
+            std::vector<std::uint8_t> payload;
+            Resource fd = noResource;
+            int descriptorCount = 0;
+            if (!recvFrame(b.sock, op, id, payload, &fd, -1, &descriptorCount))
+                break;  // the host is gone
+            Reader r(payload.data(), payload.size());
+            if (!b.handle(static_cast<Op>(op), id, r, fd, descriptorCount)) break;
+#if defined(__APPLE__)
         }
-        const int ready = waitFor(polled, timeout);
-        if (ready < 0) {
-            if (errno == EINTR) continue;  // rebuild deadlines and service work
-            break;
-        }
-        for (std::size_t i = 2; ready > 0 && i < polled.size(); ++i) {
-            if (!polled[i].ready) continue;
-            const auto it = b.instances.find(owners[i]);
-            if (it == b.instances.end()) continue;
-            std::uint32_t flags = 0;
-            if (polled[i].ready & kWaitRead) flags |= CLAP_POSIX_FD_READ;
-            if (polled[i].ready & kWaitWrite) flags |= CLAP_POSIX_FD_WRITE;
-            if (polled[i].ready & (kWaitError | kWaitHangup | kWaitInvalid))
-                flags |= CLAP_POSIX_FD_ERROR;
-            std::lock_guard lock(it->second->lifecycle);
-            it->second->instance->onFd(polled[i].source.fd(), flags);
-        }
-        if (polled[0].ready & kWaitInvalid) break;
-        if (!(polled[0].ready & (kWaitRead | kWaitHangup | kWaitError))) continue;
-        std::uint32_t op = 0;
-        std::uint32_t id = 0;
-        std::vector<std::uint8_t> payload;
-        Resource fd = noResource;
-        int descriptorCount = 0;
-        if (!recvFrame(b.sock, op, id, payload, &fd, -1, &descriptorCount))
-            break;  // the host is gone
-        Reader r(payload.data(), payload.size());
-        if (!b.handle(static_cast<Op>(op), id, r, fd, descriptorCount)) break;
+#endif
     }
     for (auto& [id, slot] : b.instances) {
         (void)id;

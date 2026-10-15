@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "vst3_host.h"
+#include "editor_platform.h"
 #include "main_thread_wake.h"
 #include "pending_edits.h"
 #include "platform.h"
@@ -1086,28 +1087,33 @@ bool Vst3Instance::hasEditor() {
         if (s.controller)
             if (IPtr<Steinberg::IPlugView> v =
                     Steinberg::owned(s.controller->createView(vst::ViewType::kEditor)))
-                s.hasEditor = v->isPlatformTypeSupported(
-                                  Steinberg::kPlatformTypeX11EmbedWindowID) == kResultTrue;
+                s.hasEditor = v->isPlatformTypeSupported(editorVst3Api()) == kResultTrue;
     }
     return *s.hasEditor;
 }
 
-Result<Instance::EditorSize> Vst3Instance::openEditor(unsigned long x11Parent, double scale) {
+Result<Instance::EditorSize> Vst3Instance::openEditor(NativeWindow parent, double scale) {
     auto& s = *state_;
     if (s.view) closeEditor();
-    if (!hasEditor()) return Error("host.editor", "this plug-in has no X11 editor");
+    if (!hasEditor())
+        return Error("host.editor.unsupported", "this plug-in has no native editor", "/editor",
+                     "use the parameter panel or a plugin with a native editor");
     s.view = Steinberg::owned(s.controller->createView(vst::ViewType::kEditor));
     if (!s.view) return Error("host.editor", "the plug-in could not create its editor");
+    s.frame->resize = false;
     s.view->setFrame(s.frame);
+#if defined(__APPLE__)
+    (void)scale;  // NSView uses points; the view observes its backing scale.
+#else
     if (FUnknownPtr<Steinberg::IPlugViewContentScaleSupport> scaling(s.view); scaling)
         scaling->setContentScaleFactor(static_cast<float>(scale));
+#endif
     // The view's size is asked before it is attached, as VST3 hosts do: some
     // views (clap-wrapper's) size a resizable editor in attached() from the
     // last size reported, and would otherwise open at their minimum.
     Steinberg::ViewRect r;
     (void)s.view->getSize(&r);
-    if (s.view->attached(reinterpret_cast<void*>(x11Parent),
-                         Steinberg::kPlatformTypeX11EmbedWindowID) != kResultOk) {
+    if (s.view->attached(reinterpret_cast<void*>(parent.handle), editorVst3Api()) != kResultOk) {
         s.view->setFrame(nullptr);
         s.view = nullptr;
         return Error("host.editor", "the plug-in refused the parent window");
@@ -1118,7 +1124,6 @@ Result<Instance::EditorSize> Vst3Instance::openEditor(unsigned long x11Parent, d
         size.height = static_cast<std::uint32_t>(std::max(0, r.getHeight()));
     }
     size.resizable = s.view->canResize() == kResultTrue;
-    s.frame->resize = false;
     return size;
 }
 

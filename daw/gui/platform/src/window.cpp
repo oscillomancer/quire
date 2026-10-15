@@ -3,6 +3,10 @@
 #include "supple/gui/window.h"
 
 #include <SDL3/SDL.h>
+#if defined(__APPLE__)
+#include <objc/message.h>
+#include <objc/runtime.h>
+#endif
 #define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
 #include <GL/glext.h>
@@ -138,6 +142,25 @@ float Window::pixelRatio() const {
     SDL_GetWindowSize(window_, &w, &h);
     SDL_GetWindowSizeInPixels(window_, &pw, &ph);
     return w > 0 ? static_cast<float>(pw) / static_cast<float>(w) : 1.0f;
+}
+
+NativeWindow Window::nativeParent() const {
+    const auto props = SDL_GetWindowProperties(window_);
+#if defined(__APPLE__)
+    void* window = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
+    if (!window) return {};
+    // SDL exposes NSWindow*. The embedded plugin API requires its NSView*.
+    using ContentView = void* (*)(void*, SEL);
+    void* view =
+        reinterpret_cast<ContentView>(objc_msgSend)(window, sel_registerName("contentView"));
+    return {NativeWindow::Kind::Cocoa, reinterpret_cast<std::uintptr_t>(view)};
+#elif defined(_WIN32)
+    void* window = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+    return {NativeWindow::Kind::Win32, reinterpret_cast<std::uintptr_t>(window)};
+#else
+    return {NativeWindow::Kind::X11, static_cast<std::uintptr_t>(SDL_GetNumberProperty(
+                                         props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0))};
+#endif
 }
 
 unsigned long Window::x11Window() const {

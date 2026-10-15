@@ -3,6 +3,7 @@
 #include "supple/host/clap_host.h"
 
 #include "bridge_client.h"
+#include "editor_platform.h"
 #include "main_thread_wake.h"
 #include "pending_edits.h"
 #include "scan.h"
@@ -455,8 +456,8 @@ const clap_host_timer_support_t kHostTimer = {HostCallbacks::registerTimer,
 const clap_host_gui_t kHostGui = {HostCallbacks::guiResizeHintsChanged,
                                   HostCallbacks::guiRequestResize, HostCallbacks::guiRequestShow,
                                   HostCallbacks::guiRequestHide, HostCallbacks::guiClosed};
-const clap_host_posix_fd_support_t kHostFd = {HostCallbacks::registerFd, HostCallbacks::modifyFd,
-                                              HostCallbacks::unregisterFd};
+[[maybe_unused]] const clap_host_posix_fd_support_t kHostFd = {
+    HostCallbacks::registerFd, HostCallbacks::modifyFd, HostCallbacks::unregisterFd};
 const clap_host_supple_semantic_params_t kHostSemantic = {
     sizeof(clap_host_supple_semantic_params_t), HostCallbacks::semanticChanged};
 
@@ -530,7 +531,9 @@ const void* CLAP_ABI HostCallbacks::getExtension(const clap_host_t*, const char*
     if (!std::strcmp(id, CLAP_EXT_NOTE_PORTS)) return &kHostNotePorts;
     if (!std::strcmp(id, CLAP_EXT_TIMER_SUPPORT)) return &kHostTimer;
     if (!std::strcmp(id, CLAP_EXT_GUI)) return &kHostGui;
+#if !defined(_WIN32)
     if (!std::strcmp(id, CLAP_EXT_POSIX_FD_SUPPORT)) return &kHostFd;
+#endif
     if (!std::strcmp(id, CLAP_EXT_SUPPLE_SEMANTIC_PARAMS)) return &kHostSemantic;
     return nullptr;
 }
@@ -1691,44 +1694,54 @@ bool Instance::hasEditor() const {
     if (vst3_) return vst3_->hasEditor();
     if (remote_) return remoteEditor_ && !remote_->failed();
     return plugin_ && !remote_ && extGui_ &&
-           extGui_->is_api_supported(plugin_, CLAP_WINDOW_API_X11, false);
+           extGui_->is_api_supported(plugin_, editorClapApi(), false);
 }
 
-Result<Instance::EditorSize> Instance::openEditor(unsigned long x11Parent, double scale) {
-#if !defined(__linux__)
-    (void)x11Parent;
-    (void)scale;
-    return Error("host.editor.unsupported", "native plugin editor embedding is unavailable",
-                 "/editor", "use plugin parameters until native editor embedding is available");
-#else
-
+Result<Instance::EditorSize> Instance::openEditor(NativeWindow parent, double scale) {
+    const bool floating = remote_ && nativeWindowKind() == NativeWindow::Kind::Cocoa &&
+                          parent.kind == NativeWindow::Kind::Floating && parent.handle == 0;
+    if ((!floating && (parent.kind != nativeWindowKind() || !parent.valid())) ||
+        !std::isfinite(scale) || scale <= 0)
+        return Error("host.editor.parent", "invalid editor parent or scale", "/editor/parent",
+                     "pass this platform's live native parent and a positive finite scale");
     if (vst3_) {
-        auto size = vst3_->openEditor(x11Parent, scale);
-        if (size) editorOpen_ = true;
+        auto size = vst3_->openEditor(parent, scale);
+        editorOpen_ = size.ok();
         return size;
     }
-    if (!hasEditor()) return Error("host.editor", "this plugin has no embeddable X11 editor");
+    if (!hasEditor())
+        return Error("host.editor.unsupported",
+                     "this plugin has no editor for the native window API", "/editor",
+                     "use the parameter panel or a plugin with a native editor");
     if (remote_) {
-        if (editorOpen_) closeEditor();
-        auto size = remote_->openEditor(x11Parent, scale);
-        if (size) editorOpen_ = true;
+        if (editorOpen_ && nativeWindowKind() != NativeWindow::Kind::Cocoa) closeEditor();
+        auto size = remote_->openEditor(parent, scale);
+        editorOpen_ = size.ok();
         return size;
     }
     if (editorOpen_) closeEditor();
-    if (!extGui_->create(plugin_, CLAP_WINDOW_API_X11, false))
-        return Error("host.editor", "the plugin could not create its editor");
-    (void)extGui_->set_scale(plugin_, scale);  // X11 plugins may handle scale themselves
+    if (!extGui_->create(plugin_, editorClapApi(), false))
+        return Error("host.editor", "the plugin could not create its editor", "/editor",
+                     "close and reopen the editor, or use the parameter panel");
+#if !defined(__APPLE__)
+    (void)extGui_->set_scale(plugin_, scale);
+#endif
     clap_window_t window{};
-    window.api = CLAP_WINDOW_API_X11;
-    window.x11 = x11Parent;
+    window.api = editorClapApi();
+    if (parent.kind == NativeWindow::Kind::X11)
+        window.x11 = static_cast<unsigned long>(parent.handle);
+    else
+        window.ptr = reinterpret_cast<void*>(parent.handle);
     if (!extGui_->set_parent(plugin_, &window)) {
         extGui_->destroy(plugin_);
-        return Error("host.editor", "the plugin refused the parent window");
+        return Error("host.editor", "the plugin refused the parent window", "/editor",
+                     "close and reopen the editor, or use the parameter panel");
     }
     EditorSize size;
     if (!extGui_->get_size(plugin_, &size.width, &size.height)) {
         extGui_->destroy(plugin_);
-        return Error("host.editor", "the plugin could not report its editor size");
+        return Error("host.editor", "the plugin could not report its editor size", "/editor",
+                     "close and reopen the editor, or use the parameter panel");
     }
     size.resizable = extGui_->can_resize(plugin_);
     // Cleared before show: a resize the plug-in asks for while showing stands.
@@ -1737,11 +1750,11 @@ Result<Instance::EditorSize> Instance::openEditor(unsigned long x11Parent, doubl
     if (!extGui_->show(plugin_)) {
         extGui_->destroy(plugin_);
         hostState_->guiResize = false;
-        return Error("host.editor", "the plugin could not show its editor");
+        return Error("host.editor", "the plugin could not show its editor", "/editor",
+                     "close and reopen the editor, or use the parameter panel");
     }
     editorOpen_ = true;
     return size;
-#endif
 }
 
 Result<Instance::EditorSize> Instance::resizeEditor(std::uint32_t width, std::uint32_t height) {

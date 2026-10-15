@@ -84,7 +84,7 @@ TEST_CASE("editor FD watching reports startup failure and stops without a displa
     CHECK(polls == 1);  // a permanent failure terminates instead of spinning
 }
 
-TEST_CASE("the stock plugins offer embeddable X11 editors (no display needed)") {
+TEST_CASE("the stock plugins offer embeddable native editors (no display needed)") {
     const std::filesystem::path dir = SUPPLE_CLAP_DIR;
     auto plugins = host::scan(std::span<const std::filesystem::path>(&dir, 1));
     REQUIRE(plugins);
@@ -247,6 +247,21 @@ TEST_CASE("VST3 editors embed too (installed plugins; opt-in, needs a display)")
     }
     MESSAGE(opened << " VST3 editors");
     std::filesystem::remove_all(options.workdir);
+}
+
+TEST_CASE("an offscreen editor container has no native parent") {
+    auto platform = gui::Platform::start(gui::Platform::Driver::Offscreen);
+    REQUIRE(platform);
+    gui::WindowOptions options{"editor-parent", 64, 48, true};
+    auto window = gui::Window::open(**platform, options);
+    REQUIRE(window);
+#if defined(__linux__)
+    CHECK_FALSE((*window)->nativeParent().valid());
+#else
+    // The native GUI's offscreen mode uses hidden desktop windows.
+    CHECK((*window)->nativeParent().valid());
+    CHECK((*window)->nativeParent().kind == nativeWindowKind());
+#endif
 }
 
 TEST_CASE("editor show and hide requests preserve the offscreen parent window") {
