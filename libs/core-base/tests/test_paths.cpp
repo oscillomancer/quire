@@ -5,6 +5,10 @@
 #include <cstdlib>
 #include <optional>
 #include <string>
+#if defined(__linux__)
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 namespace {
 struct Environment {
@@ -66,7 +70,12 @@ TEST_CASE("platform paths select native user directories without creating them")
     CHECK(config() == "/tmp/test-user/.config");
     CHECK(data() == "/tmp/test-user/.local/share");
     CHECK(cache() == "/tmp/test-user/.cache");
-    CHECK(runtime() == "/tmp");
+    // Without XDG_RUNTIME_DIR: the login's private /run/user/<uid>, else /tmp.
+    const std::string login = "/run/user/" + std::to_string(::getuid());
+    struct stat info{};
+    const bool loginDir = ::stat(login.c_str(), &info) == 0 && S_ISDIR(info.st_mode) &&
+                          info.st_uid == ::getuid() && (info.st_mode & 077) == 0;
+    CHECK(runtime() == (loginDir ? login : std::string("/tmp")));
     user.set("");
     CHECK(cache().empty());
     CHECK(data().empty());

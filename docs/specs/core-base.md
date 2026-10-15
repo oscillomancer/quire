@@ -82,7 +82,7 @@ filesystem paths without a product slug or directory creation:
 | config | XDG_CONFIG_HOME, else HOME/.config | HOME/Library/Application Support | APPDATA |
 | data | XDG_DATA_HOME, else HOME/.local/share | HOME/Library/Application Support | APPDATA |
 | cache | XDG_CACHE_HOME, else HOME/.cache | HOME/Library/Caches | LOCALAPPDATA |
-| runtime | XDG_RUNTIME_DIR, else /tmp | native temporary directory | LOCALAPPDATA/Temp, else native temporary directory |
+| runtime | XDG_RUNTIME_DIR, else /run/user/UID when it is a private directory of the user, else /tmp | native temporary directory | LOCALAPPDATA/Temp, else native temporary directory |
 
 `data/cache(allowTemporary = false)` retain strict roots for GUI callers.
 With true, CLI fallback uses a temporary root; Linux keeps the former /tmp

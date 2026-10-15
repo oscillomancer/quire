@@ -10,6 +10,10 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#elif defined(__linux__)
+#include <sys/stat.h>
+#include <unistd.h>
+#include <string>
 #endif
 
 namespace supple::paths {
@@ -91,6 +95,14 @@ std::filesystem::path runtime() {
 #elif defined(__linux__)
     auto root = env("XDG_RUNTIME_DIR");
     if (!root.empty()) return root;
+    // Some launchers (Codex's MCP client among them) drop XDG_RUNTIME_DIR; the
+    // login's /run/user/<uid> is where it would have pointed.
+    const auto uid = ::getuid();
+    const std::string user = "/run/user/" + std::to_string(uid);
+    struct stat info{};
+    if (::stat(user.c_str(), &info) == 0 && S_ISDIR(info.st_mode) && info.st_uid == uid &&
+        (info.st_mode & 077) == 0)
+        return user;
     return "/tmp";  // Preserve the Linux control socket contract.
 #endif
     std::error_code error;
