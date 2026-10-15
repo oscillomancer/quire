@@ -432,7 +432,10 @@ ownership is unavailable. Windows keyboard accelerators/IME depend on the
 plugin's native child; the DAW does not forward shortcut messages.
 
 Window sizes/placements remain design units. Pixel editor sizes on
-Linux/Windows convert using pixelRatio; Cocoa editor sizes are already points.
+Linux/Windows use pixelRatio when converting observed geometry/placements;
+container sizing goes directly from editor pixels to SDL window coordinates
+using pixel density, avoiding integer design-unit rounding at fractional DPI.
+Cocoa editor sizes are already points.
 The GUI worker's inputScale maps SDL event coordinates to design units. Opening
 uses the current scale; live scale-change renegotiation requires close/reopen.
 Native run loops deliver local editor input; timers remain GUI deadlines.

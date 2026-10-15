@@ -25,8 +25,14 @@ double editorUnits(const Window& window) {
                ? 1.0
                : static_cast<double>(window.pixelRatio());
 }
-int designSize(std::uint32_t size, const Window& window) {
-    return std::max(1, static_cast<int>(std::lround(size / editorUnits(window))));
+void setEditorSize(Window& window, std::uint32_t width, std::uint32_t height) {
+    const double pixelRatio = static_cast<double>(window.pixelRatio());
+    const float nativeDensity = SDL_GetWindowPixelDensity(window.sdl());
+    const double inputScale =
+        nativeDensity > 0 ? pixelRatio / static_cast<double>(nativeDensity) : 1;
+    const auto [w, h] =
+        editorWindowSize(width, height, window.nativeParent().kind, pixelRatio, inputScale);
+    SDL_SetWindowSize(window.sdl(), w, h);
 }
 std::uint32_t pluginSize(float size, const Window& window) {
     return static_cast<std::uint32_t>(
@@ -37,10 +43,21 @@ bool floats(const host::Instance& instance) {
 }
 }  // namespace
 
+std::pair<int, int> editorWindowSize(std::uint32_t width, std::uint32_t height,
+                                     NativeWindow::Kind kind, double pixelRatio,
+                                     double inputScale) {
+    if (kind == NativeWindow::Kind::Cocoa)
+        return {static_cast<int>(width), static_cast<int>(height)};
+    // Convert once, without an integer design-unit intermediate. For example,
+    // 512 pixels at 150% remains 512 SDL pixels, rather than 341 design -> 511.
+    const double factor = pixelRatio > 0 && inputScale > 0 ? inputScale / pixelRatio : 1;
+    return {std::max(1, static_cast<int>(std::lround(width * factor))),
+            std::max(1, static_cast<int>(std::lround(height * factor)))};
+}
+
 void applyEditorRequests(Window& window, const host::Instance::EditorRequests& requests) {
     if (requests.closed) return;
-    if (requests.resize)
-        window.setSize(designSize(requests.width, window), designSize(requests.height, window));
+    if (requests.resize) setEditorSize(window, requests.width, requests.height);
     if (requests.show) window.show();
     // Both requests can be coalesced by the host; hide wins in that case.
     if (requests.hide) window.hide();
@@ -226,8 +243,7 @@ void PluginWindows::place(Editor& editor) {
                                           pluginSize(static_cast<float>(p.height), *editor.window));
         restoreContext();
         if (accepted && accepted->width > 0 && accepted->height > 0)
-            editor.window->setSize(designSize(accepted->width, *editor.window),
-                                   designSize(accepted->height, *editor.window));
+            setEditorSize(*editor.window, accepted->width, accepted->height);
     }
     const int w = static_cast<int>(editor.window->width());
     const int h = static_cast<int>(editor.window->height());
@@ -310,8 +326,7 @@ Status PluginWindows::attach(Editor editor, const std::string& title) {
         editor.instance->closeEditor();
         return *watcherError_;
     }
-    if (size->width > 0 && size->height > 0)
-        (*window)->setSize(designSize(size->width, **window), designSize(size->height, **window));
+    if (size->width > 0 && size->height > 0) setEditorSize(**window, size->width, size->height);
     (*window)->setResizable(size->resizable);
     editor.window = std::move(*window);
     editor.resizable = size->resizable;
@@ -393,8 +408,7 @@ bool PluginWindows::reattach(Editor& editor) {
     editor.resizable = size->resizable;
     if (editor.window) {
         if (size->width > 0 && size->height > 0)
-            editor.window->setSize(designSize(size->width, *editor.window),
-                                   designSize(size->height, *editor.window));
+            setEditorSize(*editor.window, size->width, size->height);
         editor.window->setResizable(size->resizable);
     }
     return true;
@@ -449,8 +463,7 @@ bool PluginWindows::handle(const SDL_Event& e) {
             const auto height = pluginSize(ed.window->height(), *ed.window);
             auto accepted = ed.instance->resizeEditor(width, height);
             if (accepted && (accepted->width != width || accepted->height != height))
-                ed.window->setSize(designSize(accepted->width, *ed.window),
-                                   designSize(accepted->height, *ed.window));
+                setEditorSize(*ed.window, accepted->width, accepted->height);
             restoreContext();
         }
         return true;

@@ -14,7 +14,10 @@ Contracts: gui.md §4.5 and sandbox.md §1.
   X11EmbedWindowID/NSView/HWND. Cocoa uses points and native backing scale;
   set_scale/content-scale requests apply only to Windows/Linux. GUI containers
   convert pixel editor sizes to design units using Window::pixelRatio; Cocoa
-  editor sizes already use points. Resize requests raised during attached()
+  editor sizes already use points. Pixel container sizing converts directly
+  to SDL window coordinates without integer design-unit rounding, preserving
+  fixed editor dimensions at fractional Windows scale factors.
+  Resize requests raised during attached()
   must survive the open call. Editors release their view before their parent.
 - Windows bridge editors use the parent's HWND across processes. The bridge
   initializes Per Monitor v2 DPI awareness before loading modules, matching

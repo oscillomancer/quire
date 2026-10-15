@@ -28,6 +28,11 @@ union SDL_Event;
 
 namespace supple::gui {
 
+// Editor sizes to SDL window coordinates. Pixel editors must not round through
+// integer design units; Cocoa supplies points, already SDL window coordinates.
+std::pair<int, int> editorWindowSize(std::uint32_t width, std::uint32_t height,
+                                     NativeWindow::Kind kind, double pixelRatio, double inputScale);
+
 // Applies coalesced host requests without destroying a hidden editor. Closed
 // editors are removed by the owner; close takes precedence over other flags.
 void applyEditorRequests(Window& window, const host::Instance::EditorRequests& requests);

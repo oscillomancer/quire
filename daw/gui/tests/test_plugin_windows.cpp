@@ -249,6 +249,24 @@ TEST_CASE("VST3 editors embed too (installed plugins; opt-in, needs a display)")
     std::filesystem::remove_all(options.workdir);
 }
 
+TEST_CASE("editor sizing preserves native pixels at fractional Windows DPI") {
+    for (double scale : {1.25, 1.5, 1.75, 2.0}) {
+        for (std::uint32_t pixels : {511u, 512u, 513u}) {
+            const auto [w, h] =
+                gui::editorWindowSize(pixels, pixels, NativeWindow::Kind::Win32, scale, scale);
+            CAPTURE(scale);
+            CAPTURE(pixels);
+            CHECK(w == static_cast<int>(pixels));
+            CHECK(h == static_cast<int>(pixels));
+        }
+    }
+    // Cocoa sizes are points, despite its two backing pixels per point.
+    CHECK(gui::editorWindowSize(513, 257, NativeWindow::Kind::Cocoa, 2, 1) ==
+          std::pair<int, int>{513, 257});
+    CHECK(gui::editorWindowSize(512, 256, NativeWindow::Kind::X11, 2, 1) ==
+          std::pair<int, int>{256, 128});
+}
+
 TEST_CASE("an offscreen editor container has no native parent") {
     auto platform = gui::Platform::start(gui::Platform::Driver::Offscreen);
     REQUIRE(platform);
