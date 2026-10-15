@@ -1,11 +1,15 @@
 # Quire
 
-Quire is a digital audio workstation for Linux in which a language model can
-work as a full operator, beside the person at the keyboard. Every edit,
-human or agent, is a typed command on one bus, recorded in a version history
-that can branch and merge. It comes with a suite of stock plugins whose
-parameters and patches are described in physical units, so an agent can
-program them as reliably as a person can.
+Quire is a digital audio workstation in which a language model can work as a
+full operator, beside the person at the keyboard. Every edit, human or agent,
+is a typed command on one bus, recorded in a version history that can branch
+and merge. It comes with a suite of stock plugins whose parameters and patches
+are described in physical units, so an agent can program them as reliably as a
+person can.
+
+![Quire with a twelve-track session: the arrange view, the MIDI editor, the
+mixer with plugins and sends, and the history sidebar showing an agent's
+edits on a branch](docs/images/gui.png)
 
 The workflow follows REAPER: arrange view, track panel, mixer, FX chains,
 routing matrix, MIDI editor, render dialog, actions list. The architecture
