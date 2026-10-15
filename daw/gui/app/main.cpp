@@ -9,12 +9,11 @@
 //          [--bench] [--no-socket] [--instance NAME] [--socket PATH]
 //          [--workdir DIR] [--plugin-path P]... [--generate N] [--script]
 //          [--idle SECONDS] [--view START_SECONDS,PIXELS_PER_SECOND]
-//          [--audio jack|dummy|none] [--theme dark|light|FILE] [--palette warm|ink]
+//          [--audio jack|portaudio|dummy|none] [--theme dark|light|FILE] [--palette warm|ink]
 //          [--action ID]...
 #include <SDL3/SDL.h>
-#include <poll.h>
-#include <time.h>
-#include <unistd.h>
+#include "supple/base/waitable.h"
+#include "supple/gui/process.h"
 
 #include <algorithm>
 #include <chrono>
@@ -114,7 +113,8 @@ int usage() {
                  "       [--bench] [--no-socket] [--instance NAME] [--socket PATH]\n"
                  "       [--workdir DIR] [--plugin-path P]... [--generate N] [--script]\n"
                  "       [--idle SECONDS] [--view START_SECONDS,PIXELS_PER_SECOND]\n"
-                 "       [--audio jack|dummy|none] [--theme dark|light|FILE] [--palette warm|ink]\n"
+                 "       [--audio jack|portaudio|dummy|none] [--theme dark|light|FILE] [--palette "
+                 "warm|ink]\n"
                  "       [--action ID]...\n",
                  std::string(product::kSlug).c_str());
     return 2;
@@ -134,8 +134,8 @@ bool parse(int argc, char** argv, Options& o) {
             o.script = true;
         else if (a == "--audio") {
             const char* v = value();
-            if (!v ||
-                (std::string(v) != "jack" && std::string(v) != "dummy" && std::string(v) != "none"))
+            if (!v || (std::string(v) != "jack" && std::string(v) != "portaudio" &&
+                       std::string(v) != "dummy" && std::string(v) != "none"))
                 return false;
             o.audio = v;
         } else if (a == "--action") {
@@ -225,47 +225,7 @@ fs::path scratchFolder(const Options& o) {
     char stamp[32] = {};
     const std::time_t now = std::time(nullptr);
     std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", std::localtime(&now));
-    return base / "unsaved" / (std::string(stamp) + "-" + std::to_string(::getpid()));
-}
-
-// Milliseconds since the kernel started this process (exec and dynamic
-// loading included), for the cold-start gate (ADR-0005 §5: < 300 ms).
-double millisecondsSinceProcessStart() {
-    std::ifstream stat("/proc/self/stat");
-    std::string line;
-    std::getline(stat, line);
-    const auto close = line.rfind(')');
-    if (close == std::string::npos) return -1;
-    std::istringstream fields(line.substr(close + 2));
-    std::string field;
-    for (int i = 3; i <= 22 && fields >> field; ++i)
-        if (i == 22) {
-            timespec boot{};
-            clock_gettime(CLOCK_BOOTTIME, &boot);
-            const double nowS =
-                static_cast<double>(boot.tv_sec) + 1e-9 * static_cast<double>(boot.tv_nsec);
-            const double startS = std::stod(field) / static_cast<double>(sysconf(_SC_CLK_TCK));
-            return 1000.0 * (nowS - startS);
-        }
-    return -1;
-}
-
-double processCpuMs() {
-    timespec t{};
-    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t);
-    return 1000.0 * static_cast<double>(t.tv_sec) + 1e-6 * static_cast<double>(t.tv_nsec);
-}
-
-double wallMs() {
-    timespec t{};
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return 1000.0 * static_cast<double>(t.tv_sec) + 1e-6 * static_cast<double>(t.tv_nsec);
-}
-
-double threadCpuMs() {
-    timespec t{};
-    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t);
-    return 1000.0 * static_cast<double>(t.tv_sec) + 1e-6 * static_cast<double>(t.tv_nsec);
+    return base / "unsaved" / (std::string(stamp) + "-" + std::to_string(gui::processId()));
 }
 
 double percentile(std::vector<double> v, double p) {
@@ -281,7 +241,7 @@ int main(int argc, char** argv) {
     if (!parse(argc, argv, o)) return usage();
 
     auto platform = gui::Platform::start(o.offscreen ? gui::Platform::Driver::Offscreen
-                                                     : gui::Platform::Driver::X11);
+                                                     : gui::Platform::Driver::Native);
     if (!platform) {
         std::fprintf(stderr, "%s\n", platform.error().toString().c_str());
         return 1;
@@ -446,7 +406,7 @@ int main(int argc, char** argv) {
         applyLook();
     });
     gui::PluginWindows pluginWindows(**platform, **app, [p = platform->get()] { p->wake(); });
-    pluginWindows.setModelWakeFd(loop.wakeFd());
+    pluginWindows.setModelWake(loop.waitable());
     pluginWindows.onError = [&](const Error& error) {
         if (shell.onError) shell.onError(error.message);
     };
@@ -778,8 +738,14 @@ int main(int argc, char** argv) {
     appActions.addUi("ui.region.add", "Region: add over loop range",
                      [&] { shell.arrange()->addRegion(); });
     // The audio engine: the device for interactive use, nothing offscreen.
-    const std::string audioMode =
-        !o.audio.empty() ? o.audio : (o.offscreen || o.frames > 0 ? "none" : "jack");
+    const std::string audioMode = !o.audio.empty() ? o.audio
+                                                   : (o.offscreen || o.frames > 0 ? "none" :
+#if defined(__linux__)
+                                                                                  "jack"
+#else
+                                                                                  "dummy"
+#endif
+                                                     );
     if (audioMode != "none") {
         json::Value args = json::Value::object();
         args["backend"] = audioMode;
@@ -975,15 +941,15 @@ int main(int argc, char** argv) {
                 return json::Value();
             });
     };
-    const double warmUntil = wallMs() + 60000;
+    const double warmUntil = gui::wallMs() + 60000;
     int step = 0;
     // The main-thread budget (docs/benchmarks/gui.md): each synchronous task
     // (the bus pump, the panels' sync pass, one input event) should finish in
     // 2 ms; frames are measured on their own.
     auto timed = [&](auto&& work) {
-        const double t0 = wallMs();
+        const double t0 = gui::wallMs();
         work();
-        if (const double ms = wallMs() - t0; ms > 2.0) {
+        if (const double ms = gui::wallMs() - t0; ms > 2.0) {
             ++longTasks;
             longestTaskMs = std::max(longestTaskMs, ms);
         }
@@ -999,8 +965,8 @@ int main(int argc, char** argv) {
             // A deadline may beat the FD worker to a newly readable relay.
             // Remember that notification before tick drains it, so a stopped
             // status/error change cannot disappear into an animation pass.
-            pollfd relay{(*app)->serviceFd(), POLLIN, 0};
-            if (::poll(&relay, 1, 0) > 0 && relay.revents) event = true;
+            WaitItem relay{(*app)->serviceWaitable(), kWaitRead};
+            if (waitFor(std::span(&relay, 1), 0) > 0 && relay.ready) event = true;
             preserveUi([&] {
                 next = loop.pump();
                 (*app)->tick();
@@ -1094,13 +1060,13 @@ int main(int argc, char** argv) {
         }
         if (o.frames > 0) root.requestAnimationFrame();  // benchmark runs draw every pass
         if (root.wantsFrame()) {
-            const double cpu0 = threadCpuMs();
+            const double cpu0 = gui::threadCpuMs();
             root.frame();
-            const double cpu = threadCpuMs() - cpu0;
-            if (drawn == 0 && coldStartMs < 0) coldStartMs = millisecondsSinceProcessStart();
+            const double cpu = gui::threadCpuMs() - cpu0;
+            if (drawn == 0 && coldStartMs < 0) coldStartMs = gui::millisecondsSinceProcessStart();
             if (!warm) {
                 warm = shell.arrange()->lanes().stats().pending == 0;
-                if (!warm && wallMs() > warmUntil) {
+                if (!warm && gui::wallMs() > warmUntil) {
                     std::fprintf(stderr, "peaks did not become ready within 60 s\n");
                     return 1;
                 }
@@ -1128,7 +1094,7 @@ int main(int argc, char** argv) {
                     fileActions.confirmDiscard("Quit?", [&] { quit = true; });
             } else if (e.type == SDL_EVENT_DROP_FILE && e.drop.data) {
                 dropped.emplace_back(e.drop.data);
-                dropAt = {e.drop.x, e.drop.y};
+                dropAt = {e.drop.x / (*window)->inputScale(), e.drop.y / (*window)->inputScale()};
             } else if (e.type == SDL_EVENT_DROP_COMPLETE) {
                 if (auto r = shell.arrange()->gestures().drop(dropped, dropAt); !r)
                     std::fprintf(stderr, "drop: %s\n", r.error().toString().c_str());
@@ -1141,12 +1107,12 @@ int main(int argc, char** argv) {
     }
     double idleCpuPercent = -1;
     if (o.idleSeconds > 0) {  // no input, no model changes: the loop should sleep
-        const double c0 = processCpuMs(), w0 = wallMs();
-        while (!quit && !loop.stopRequested() && wallMs() - w0 < o.idleSeconds * 1000) {
+        const double c0 = gui::processCpuMs(), w0 = gui::wallMs();
+        while (!quit && !loop.stopRequested() && gui::wallMs() - w0 < o.idleSeconds * 1000) {
             const int next = service();
             if (root.wantsFrame()) root.frame();
             SDL_Event e;
-            const double left = o.idleSeconds * 1000 - (wallMs() - w0);
+            const double left = o.idleSeconds * 1000 - (gui::wallMs() - w0);
             const int deadline = waitUntil(next);
             const int wait =
                 deadline < 0 ? static_cast<int>(left) : std::min(deadline, static_cast<int>(left));
@@ -1154,7 +1120,7 @@ int main(int argc, char** argv) {
                 while (SDL_PollEvent(&e)) {
                 }
         }
-        idleCpuPercent = 100.0 * (processCpuMs() - c0) / (wallMs() - w0);
+        idleCpuPercent = 100.0 * (gui::processCpuMs() - c0) / (gui::wallMs() - w0);
     }
     pluginWindows.suspendFdWatches();
     if (server) server->stop();
@@ -1182,7 +1148,7 @@ int main(int argc, char** argv) {
             "\"ui_tasks_over_2ms\": %d, \"longest_ui_task_ms\": %.2f, \"idle_cpu_percent\": %.2f, "
             "\"tracks\": %d, \"last_frame\": {\"rows\": %zu, \"items\": %zu, \"columns\": %zu, "
             "\"notes\": %zu}, \"peaks\": {\"built\": %d, \"loaded\": %d}, \"gl\": \"%s\"}\n",
-            o.offscreen ? "offscreen" : "x11", coldStartMs, drawn, percentile(frameCpu, 0.5),
+            SDL_GetCurrentVideoDriver(), coldStartMs, drawn, percentile(frameCpu, 0.5),
             percentile(frameCpu, 0.95),
             frameCpu.empty() ? 0.0 : *std::max_element(frameCpu.begin(), frameCpu.end()), longTasks,
             longestTaskMs, idleCpuPercent, o.generate, ls.rows, ls.items, ls.columns, ls.notes,

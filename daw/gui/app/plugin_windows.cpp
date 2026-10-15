@@ -357,9 +357,9 @@ bool PluginWindows::dispatchFds() {
         for (const auto& w : serviceWatches_)
             if (w.serial == r.owner && w.source.fd == r.fd) {
                 short flags = 0;
-                if (r.flags & CLAP_POSIX_FD_READ) flags |= POLLIN;
-                if (r.flags & CLAP_POSIX_FD_WRITE) flags |= POLLOUT;
-                if (r.flags & CLAP_POSIX_FD_ERROR) flags |= POLLERR;
+                if (r.flags & CLAP_POSIX_FD_READ) flags |= kWaitRead;
+                if (r.flags & CLAP_POSIX_FD_WRITE) flags |= kWaitWrite;
+                if (r.flags & CLAP_POSIX_FD_ERROR) flags |= kWaitError;
                 app_.serviceFdReady(w.source, flags);
                 appReady = true;
             }
@@ -417,8 +417,9 @@ int PluginWindows::service() {
     // and probes) share this worker with caller-owned editors. The app owns
     // their timers. Remote instances wake only through setMainThreadWake.
     std::vector<FdWatch> fds;
-    if (app_.serviceFd() >= 0) fds.push_back({app_.serviceFd(), CLAP_POSIX_FD_READ, 0});
-    if (modelWakeFd_ >= 0) fds.push_back({modelWakeFd_, CLAP_POSIX_FD_READ, 2});
+    if (app_.serviceWaitable().valid())
+        fds.push_back({app_.serviceWaitable(), CLAP_POSIX_FD_READ, 0});
+    if (modelWake_.valid()) fds.push_back({modelWake_, CLAP_POSIX_FD_READ, 2});
     std::vector<ServiceWatch> services;
     for (const auto& source : app_.serviceFds()) {
         auto old = std::find_if(serviceWatches_.begin(), serviceWatches_.end(), [&](const auto& w) {
@@ -429,8 +430,8 @@ int PluginWindows::service() {
         if (old == serviceWatches_.end()) nextServiceSerial_ += 2;
         services.push_back({source, serial});
         std::uint32_t flags = 0;
-        if (source.events & POLLIN) flags |= CLAP_POSIX_FD_READ;
-        if (source.events & POLLOUT) flags |= CLAP_POSIX_FD_WRITE;
+        if (source.events & kWaitRead) flags |= CLAP_POSIX_FD_READ;
+        if (source.events & kWaitWrite) flags |= CLAP_POSIX_FD_WRITE;
         fds.push_back({source.fd, flags, serial});
     }
     serviceWatches_ = std::move(services);

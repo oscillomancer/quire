@@ -22,6 +22,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "supple/base/stop.h"
 
 #include "supple/audio/audio_file.h"
 #include "supple/base/result.h"
@@ -101,7 +102,7 @@ class PeakService {
     Stats stats() const;
 
   private:
-    void run(std::stop_token stop);
+    void run(supple::StopToken stop);
     std::string key(const std::string& hash, const std::filesystem::path& media) const;
     std::filesystem::path cacheDir_;
     Post post_;
@@ -122,7 +123,7 @@ class PeakService {
     // Notifications posted to the owner check this first: the service may be
     // gone by the time the owner's loop runs them.
     std::shared_ptr<int> alive_ = std::make_shared<int>(0);
-    std::jthread worker_;  // last: joined before the rest is destroyed
+    supple::JoiningThread worker_;  // last: joined before the rest is destroyed
 };
 
 }  // namespace supple::peaks

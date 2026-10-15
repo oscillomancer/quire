@@ -5,8 +5,8 @@
 // reorder-index helper the TCP shares.
 #include <SDL3/SDL_keycode.h>
 #include <doctest/doctest.h>
-#include <unistd.h>
 #include "product_fixture.h"
+#include "test_support.h"
 
 #include <algorithm>
 #include <array>
@@ -56,17 +56,26 @@ struct Fixture {
 
     Fixture(std::shared_ptr<engine::RuntimeProtectionOps> operations = {}) {
         dir = std::filesystem::temp_directory_path() /
-              ("supple-mixer-test-" + std::to_string(::getpid()));
+              ("supple-mixer-test-" + std::to_string(testProcessId()));
         std::filesystem::remove_all(dir);
         std::filesystem::create_directories(dir / "config");
-        ::setenv("XDG_CONFIG_HOME", (dir / "config").c_str(), 1);
+        testConfigHome(dir / "config");
         auto p = gui::Platform::start(gui::Platform::Driver::Offscreen);
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(p, (p ? "" : p.error().message));
+#endif
         if (!p) return;
         platform = std::move(*p);
         auto w = gui::Window::open(*platform, {"mixer-test", 1400, 900, true});
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(w, (w ? "" : w.error().message));
+#endif
         if (!w) return;
         window = std::move(*w);
         auto f = gui::loadFonts(window->vg(), SUPPLE_GUI_FONTS_DIR);
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(f, (f ? "" : f.error().message));
+#endif
         if (!f) return;
         fonts = *f;
         engine::AppOptions options;

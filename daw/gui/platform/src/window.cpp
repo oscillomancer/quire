@@ -7,30 +7,46 @@
 #include <dlfcn.h>
 #include <objc/runtime.h>
 #endif
-#define GL_GLEXT_PROTOTYPES
-#include <GL/gl.h>
-#include <GL/glext.h>
 #include <nanovg.h>
+#include "supple/gui/gl_api.h"
 #define NANOVG_GL3 1
 #include <nanovg_gl.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <tuple>
+#include "supple/base/files.h"
 
 namespace supple::gui {
 namespace {
+constexpr const char* desktopDriver() {
+#if defined(__APPLE__)
+    return "cocoa";
+#elif defined(_WIN32)
+    return "windows";
+#else
+    return "x11";
+#endif
+}
+constexpr const char* offscreenDriver() {
+#if defined(__linux__)
+    return "offscreen";
+#else
+    return desktopDriver();  // hidden native windows: no EGL dependency
+#endif
+}
 Error sdlError(std::string code, std::string what) {
     return Error(std::move(code), what + ": " + SDL_GetError(), {},
-                 "the GUI needs an X11 display (XWayland) and OpenGL 3.3; "
-                 "tests and benchmarks use the offscreen driver");
+                 "the GUI needs a desktop session and OpenGL 3.3 core (4.1 on macOS)");
 }
 }  // namespace
 
 Result<std::unique_ptr<Platform>> Platform::start(Driver driver) {
     // Plugin editors are X11 children of our windows, so DAW windows are X11
     // windows even on Wayland desktops (ADR-0005 §1).
-    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, driver == Driver::X11 ? "x11" : "offscreen");
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER,
+                driver == Driver::Offscreen ? offscreenDriver() : desktopDriver());
     if (!SDL_Init(SDL_INIT_VIDEO)) return sdlError("gui.platform", "SDL_Init");
     std::unique_ptr<Platform> p(new Platform(driver));
     p->wakeEvent_ = SDL_RegisterEvents(1);
@@ -61,8 +77,14 @@ Result<std::unique_ptr<Window>> Window::open(const Platform& platform,
             (void)SDL_SetWindowParent(w->window_, options.parent->window_);
         return w;
     }
+#if defined(__APPLE__)
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
+#else
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+#endif
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
@@ -73,12 +95,16 @@ Result<std::unique_ptr<Window>> Window::open(const Platform& platform,
     if (options.hidden) flags |= SDL_WINDOW_HIDDEN;
     w->window_ = SDL_CreateWindow(options.title.c_str(), options.width, options.height, flags);
     if (!w->window_) return sdlError("gui.window", "SDL_CreateWindow");
+    w->setSize(options.width, options.height);
     if (options.parent && options.parent->window_)
         (void)SDL_SetWindowParent(w->window_, options.parent->window_);
     w->context_ = SDL_GL_CreateContext(w->window_);
     if (!w->context_) return sdlError("gui.window", "SDL_GL_CreateContext");
     SDL_GL_MakeCurrent(w->window_, static_cast<SDL_GLContext>(w->context_));
     SDL_GL_SetSwapInterval(1);  // event-driven: frames only when something changed
+#if defined(_WIN32)
+    if (!suppleLoadGl()) return sdlError("gui.gl", "loading OpenGL entry points");
+#endif
     w->vg_ = nvgCreateGL3(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
     if (!w->vg_) return Error("gui.window", "NanoVG could not create its GL3 renderer");
     return w;
@@ -95,7 +121,10 @@ Window::~Window() {
 
 std::uint32_t Window::id() const { return SDL_GetWindowID(window_); }
 
-void Window::setSize(int width, int height) { SDL_SetWindowSize(window_, width, height); }
+void Window::setSize(int width, int height) {
+    SDL_SetWindowSize(window_, static_cast<int>(static_cast<float>(width) * inputScale()),
+                      static_cast<int>(static_cast<float>(height) * inputScale()));
+}
 
 void Window::setPosition(int x, int y) { SDL_SetWindowPosition(window_, x, y); }
 
@@ -128,20 +157,30 @@ void Window::setTitle(const std::string& title) { SDL_SetWindowTitle(window_, ti
 float Window::width() const {
     int w = 0, h = 0;
     SDL_GetWindowSize(window_, &w, &h);
-    return static_cast<float>(w);
+    return static_cast<float>(w) / inputScale();
 }
 
 float Window::height() const {
     int w = 0, h = 0;
     SDL_GetWindowSize(window_, &w, &h);
-    return static_cast<float>(h);
+    return static_cast<float>(h) / inputScale();
+}
+
+float Window::inputScale() const {
+#if defined(_WIN32)
+    const float density = SDL_GetWindowPixelDensity(window_);
+    const float scale = SDL_GetWindowDisplayScale(window_);
+    return density > 0 && scale > 0 ? scale / density : 1.0f;
+#else
+    return 1.0f;
+#endif
 }
 
 float Window::pixelRatio() const {
     int w = 0, h = 0, pw = 0, ph = 0;
     SDL_GetWindowSize(window_, &w, &h);
     SDL_GetWindowSizeInPixels(window_, &pw, &ph);
-    return w > 0 ? static_cast<float>(pw) / static_cast<float>(w) : 1.0f;
+    return w > 0 ? static_cast<float>(pw) / static_cast<float>(w) * inputScale() : 1.0f;
 }
 
 NativeWindow Window::nativeParent() const {
@@ -232,7 +271,12 @@ Result<Fonts> loadFonts(NVGcontext* vg, const std::filesystem::path& dir) {
     Fonts f;
     auto load = [&](const char* name, const char* file) -> Result<int> {
         const auto path = dir / file;
-        const int id = nvgCreateFont(vg, name, path.c_str());
+        auto bytes = readFile(path, 32 * 1024 * 1024);
+        if (!bytes) return std::move(bytes).error();
+        auto* data = static_cast<unsigned char*>(std::malloc(bytes->size()));
+        if (!data) return Error("gui.font", "cannot allocate font data");
+        std::memcpy(data, bytes->data(), bytes->size());
+        const int id = nvgCreateFontMem(vg, name, data, static_cast<int>(bytes->size()), 1);
         if (id < 0)
             return Error("gui.font", "cannot load font " + path.string(), {},
                          "the bundled fonts live in assets/fonts/");

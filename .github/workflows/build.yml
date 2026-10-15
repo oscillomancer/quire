@@ -169,6 +169,9 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: '1'
           TMPDIR: /tmp
         run: xvfb-run -a -s '-screen 0 1920x1080x24' ctest --preset dev
+      - name: Windows software OpenGL for GUI tests
+        if: matrix.platform == 'windows'
+        run: bash .github/scripts/gui-mesa-windows.sh
       - name: Test portable targets
         if: matrix.platform != 'linux'
         run: ctest --preset ${{ matrix.preset }}
@@ -184,4 +187,11 @@ jobs:
         with:
           name: test-logs-${{ matrix.platform }}
           path: build/${{ matrix.preset }}/Testing/Temporary/
+          if-no-files-found: ignore
+      - name: GUI smoke images
+        if: always() && matrix.platform != 'linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-smoke-${{ matrix.platform }}
+          path: build/${{ matrix.preset }}/daw/gui/*.png
           if-no-files-found: ignore

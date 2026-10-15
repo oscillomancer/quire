@@ -3,8 +3,8 @@
 // The MIDI editor driven like a user: pointer and keys through the root, the
 // notation panel typed into, the session read back through commands.
 #include <doctest/doctest.h>
-#include <unistd.h>
 #include "product_fixture.h"
+#include "test_support.h"
 
 #include <SDL3/SDL_keycode.h>
 
@@ -53,17 +53,26 @@ struct Fixture {
     // `plugins`: the plug-in path (empty: the default).
     explicit Fixture(std::vector<std::filesystem::path> plugins = {}) {
         dir = std::filesystem::temp_directory_path() /
-              ("supple-midi-test-" + std::to_string(::getpid()));
+              ("supple-midi-test-" + std::to_string(testProcessId()));
         std::filesystem::remove_all(dir);
         std::filesystem::create_directories(dir / "config");
-        ::setenv("XDG_CONFIG_HOME", (dir / "config").c_str(), 1);
+        testConfigHome(dir / "config");
         auto p = gui::Platform::start(gui::Platform::Driver::Offscreen);
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(p, (p ? "" : p.error().message));
+#endif
         if (!p) return;
         platform = std::move(*p);
         auto w = gui::Window::open(*platform, {"midi-test", 1100, 560, true});
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(w, (w ? "" : w.error().message));
+#endif
         if (!w) return;
         window = std::move(*w);
         auto f = gui::loadFonts(window->vg(), SUPPLE_GUI_FONTS_DIR);
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(f, (f ? "" : f.error().message));
+#endif
         if (!f) return;
         fonts = *f;
         engine::AppOptions options;

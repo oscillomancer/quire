@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "supple/agent/llm.h"
+#include "supple/base/stop.h"
 
 #include <curl/curl.h>
 
@@ -70,7 +71,7 @@ using OnBytes = std::function<Status(std::string_view)>;
 
 struct Stream {
     const OnBytes& onBytes;
-    std::stop_token stop;
+    supple::StopToken stop;
     CURL* curl = nullptr;
     std::string head;  // the first bytes, kept for error messages
     std::size_t total = 0;
@@ -107,7 +108,7 @@ int onProgress(void* user, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
 }
 
 Status post(const std::string& url, const std::vector<std::string>& headers,
-            const std::string& body, const OnBytes& onBytes, std::stop_token stop) {
+            const std::string& body, const OnBytes& onBytes, supple::StopToken stop) {
     initCurl();
     CURL* curl = curl_easy_init();
     if (!curl) return Error("agent.http", "could not start an HTTP client");
@@ -239,7 +240,8 @@ json::Value anthropicBody(const Endpoint& e, const Request& r) {
 namespace {
 
 Result<Turn> anthropic(const Endpoint& e, const Request& r,
-                       const std::function<void(std::string_view)>& onText, std::stop_token stop) {
+                       const std::function<void(std::string_view)>& onText,
+                       supple::StopToken stop) {
     Turn turn;
     turn.message.role = Message::Role::Assistant;
     struct ToolBlock {
@@ -452,7 +454,7 @@ json::Value openaiBody(const Endpoint& e, const Request& r) {
 namespace {
 
 Result<Turn> openai(const Endpoint& e, const Request& r,
-                    const std::function<void(std::string_view)>& onText, std::stop_token stop) {
+                    const std::function<void(std::string_view)>& onText, supple::StopToken stop) {
     Turn turn;
     turn.message.role = Message::Role::Assistant;
     std::map<int, std::string> args;  // per tool call index
@@ -567,7 +569,7 @@ Result<Turn> openai(const Endpoint& e, const Request& r,
 }  // namespace
 
 Result<Turn> complete(const Endpoint& endpoint, const Request& request,
-                      const std::function<void(std::string_view)>& onText, std::stop_token stop) {
+                      const std::function<void(std::string_view)>& onText, supple::StopToken stop) {
     if (endpoint.baseUrl.empty() || endpoint.model.empty())
         return Error("agent.endpoint", "the endpoint needs a base URL and a model", "",
                      "set them in the agent panel's settings");

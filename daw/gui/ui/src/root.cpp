@@ -5,10 +5,8 @@
 #include "supple/ui/gl.h"
 
 #include <SDL3/SDL.h>
-#define GL_GLEXT_PROTOTYPES
-#include <GL/gl.h>
-#include <GL/glext.h>
 #include <nanovg.h>
+#include "supple/gui/gl_api.h"
 #define NANOVG_GL3 1
 #include <nanovg_gl.h>
 extern "C" {  // compiled as C in nanovg_gl3.c; the header has no guards of its own
@@ -30,9 +28,14 @@ namespace {
 unsigned modsFrom(SDL_Keymod m) {
     unsigned out = 0;
     if (m & SDL_KMOD_SHIFT) out |= kShift;
+#if defined(__APPLE__)
+    if (m & SDL_KMOD_GUI) out |= kCtrl;
+    if (m & SDL_KMOD_CTRL) out |= kSuper;
+#else
     if (m & SDL_KMOD_CTRL) out |= kCtrl;
-    if (m & SDL_KMOD_ALT) out |= kAlt;
     if (m & SDL_KMOD_GUI) out |= kSuper;
+#endif
+    if (m & SDL_KMOD_ALT) out |= kAlt;
     return out;
 }
 
@@ -411,9 +414,10 @@ void Root::composition(std::string_view utf8, int cursor) {
 }
 
 void Root::setTextInputArea(const Rect& caret) {
-    const SDL_Rect r{static_cast<int>(caret.x), static_cast<int>(caret.y),
-                     std::max(1, static_cast<int>(caret.w)),
-                     std::max(1, static_cast<int>(caret.h))};
+    const float scale = window_.inputScale();
+    const SDL_Rect r{static_cast<int>(caret.x * scale), static_cast<int>(caret.y * scale),
+                     std::max(1, static_cast<int>(caret.w * scale)),
+                     std::max(1, static_cast<int>(caret.h * scale))};
     SDL_SetTextInputArea(window_.sdl(), &r, 0);
 }
 
@@ -433,7 +437,7 @@ void Root::handle(const SDL_Event& e) {
     switch (e.type) {
         case SDL_EVENT_MOUSE_MOTION:
             pointer({PointerEvent::Type::Move,
-                     {e.motion.x, e.motion.y},
+                     {e.motion.x / window_.inputScale(), e.motion.y / window_.inputScale()},
                      0,
                      1,
                      modsFrom(SDL_GetModState())});
@@ -442,13 +446,15 @@ void Root::handle(const SDL_Event& e) {
         case SDL_EVENT_MOUSE_BUTTON_UP:
             pointer({e.type == SDL_EVENT_MOUSE_BUTTON_DOWN ? PointerEvent::Type::Down
                                                            : PointerEvent::Type::Up,
-                     {e.button.x, e.button.y},
+                     {e.button.x / window_.inputScale(), e.button.y / window_.inputScale()},
                      buttonFrom(e.button.button),
                      e.button.clicks,
                      modsFrom(SDL_GetModState())});
             break;
         case SDL_EVENT_MOUSE_WHEEL: {
-            PointerEvent p{PointerEvent::Type::Wheel, {e.wheel.mouse_x, e.wheel.mouse_y}};
+            PointerEvent p{
+                PointerEvent::Type::Wheel,
+                {e.wheel.mouse_x / window_.inputScale(), e.wheel.mouse_y / window_.inputScale()}};
             p.mods = modsFrom(SDL_GetModState());
             p.wheelX = e.wheel.x;
             p.wheelY = e.wheel.y;

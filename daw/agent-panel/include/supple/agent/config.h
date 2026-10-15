@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 // Agent endpoints, stored per user in $XDG_CONFIG_HOME/<slug>/agent.json
-// (supple.agent/1.0), readable by the owner only (0600): API keys live here,
+// (supple.agent/1.0), owner-only (POSIX 0600 / protected Windows DACL): API keys live here,
 // never in a project.
 #pragma once
 
@@ -23,7 +23,7 @@ struct Config {
 
     static std::filesystem::path defaultFile(std::string_view slug);
     static Result<Config> load(const std::filesystem::path& file);  // empty when absent
-    // Atomic and owner-only throughout: a 0600 temporary file in the same
+    // Atomic and owner-only throughout: a private temporary file in the same
     // directory, fsynced, then renamed over `file`; a failure (code
     // "agent.config") leaves the previous file as it was.
     Status save(const std::filesystem::path& file) const;

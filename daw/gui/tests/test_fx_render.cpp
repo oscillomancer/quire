@@ -8,11 +8,11 @@
 #include "generated_media.h"
 #include "product_fixture.h"
 
-#include <unistd.h>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <thread>
+#include "test_support.h"
 
 #include "app_actions.h"
 #include "fx_window.h"
@@ -56,18 +56,27 @@ struct Fixture {
                   .parent_path()
                   .parent_path()
                   .parent_path() /
-              "build" / ("supple-fx-render-" + std::to_string(::getpid()));
+              "build" / ("supple-fx-render-" + std::to_string(testProcessId()));
         std::filesystem::remove_all(dir);
         configDir = dir / "config";
         std::filesystem::create_directories(configDir);
-        ::setenv("XDG_CONFIG_HOME", configDir.c_str(), 1);
+        testConfigHome(configDir);
         auto p = gui::Platform::start(gui::Platform::Driver::Offscreen);
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(p, (p ? "" : p.error().message));
+#endif
         if (!p) return;
         platform = std::move(*p);
         auto w = gui::Window::open(*platform, {"fx-render-test", 1100, 740, true});
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(w, (w ? "" : w.error().message));
+#endif
         if (!w) return;
         window = std::move(*w);
         auto f = gui::loadFonts(window->vg(), SUPPLE_GUI_FONTS_DIR);
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(f, (f ? "" : f.error().message));
+#endif
         if (!f) return;
         fonts = *f;
         engine::AppOptions options;
@@ -197,6 +206,21 @@ struct Fixture {
     }
     void golden(const char* name) {
         const gui::Image image = root->readBack();
+#if !defined(__linux__)
+        REQUIRE(image.width > 0);
+        REQUIRE(image.height > 0);
+        REQUIRE(image.rgba.size() == static_cast<std::size_t>(image.width * image.height * 4));
+        bool varied = false;
+        for (std::size_t i = 4; i < image.rgba.size(); i += 4)
+            if (image.rgba[i] != image.rgba[0] || image.rgba[i + 1] != image.rgba[1] ||
+                image.rgba[i + 2] != image.rgba[2]) {
+                varied = true;
+                break;
+            }
+        CHECK(varied);
+        return;
+#endif
+
         const auto path = std::filesystem::path(SUPPLE_GUI_GOLDEN_DIR) / name;
         if (std::getenv("SUPPLE_UPDATE_GOLDEN") || !std::filesystem::exists(path)) {
             REQUIRE(gui::writePng(path, image));
@@ -204,7 +228,7 @@ struct Fixture {
             return;
         }
         int w = 0, h = 0, n = 0;
-        unsigned char* data = stbi_load(path.c_str(), &w, &h, &n, 4);
+        unsigned char* data = stbi_load(path.string().c_str(), &w, &h, &n, 4);
         REQUIRE(data);
         REQUIRE(w == image.width);
         REQUIRE(h == image.height);

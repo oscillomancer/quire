@@ -58,7 +58,11 @@ bool startsWith(const std::vector<Chord>& keys, const std::vector<Chord>& prefix
 
 std::string describe(const Chord& c) {
     std::string out;
+#if defined(__APPLE__)
+    if (c.mods & kCtrl) out += "Cmd+";
+#else
     if (c.mods & kCtrl) out += "Ctrl+";
+#endif
     if (c.mods & kAlt) out += "Alt+";
     if (c.mods & kShift) out += "Shift+";
     if (c.mods & kSuper) out += "Super+";
@@ -79,8 +83,8 @@ std::optional<Chord> parseChord(std::string_view text) {
             }
             return false;
         };
-        if (!(take("Ctrl+", kCtrl) || take("Alt+", kAlt) || take("Shift+", kShift) ||
-              take("Super+", kSuper)))
+        if (!(take("Ctrl+", kCtrl) || take("Cmd+", kCtrl) || take("Alt+", kAlt) ||
+              take("Shift+", kShift) || take("Super+", kSuper)))
             break;
     }
     const SDL_Keycode key = SDL_GetKeyFromName(rest.c_str());
@@ -145,6 +149,9 @@ Keymap Keymap::defaults() {
     }
     add({"["}, "arrange", "ui.marker.prev");
     add({"]"}, "arrange", "ui.marker.next");
+#if defined(__APPLE__)
+    add({"Cmd+Q"}, "global", "ui.quit");
+#endif
     k.defaults_ = k.bindings_;
     return k;
 }

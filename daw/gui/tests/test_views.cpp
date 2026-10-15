@@ -8,7 +8,6 @@
 #include <doctest/doctest.h>
 #include <stb_image.h>
 
-#include <unistd.h>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -17,6 +16,7 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+#include "test_support.h"
 
 #include "../app/generate.h"
 #include "generated_media.h"
@@ -44,12 +44,21 @@ struct Gl {
     bool ok = false;
     Gl() {
         auto p = gui::Platform::start(gui::Platform::Driver::Offscreen);
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(p, (p ? "" : p.error().message));
+#endif
         if (!p) return;
         platform = std::move(*p);
         auto w = gui::Window::open(*platform, {"arrange-test", 1000, 560, true});
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(w, (w ? "" : w.error().message));
+#endif
         if (!w) return;
         window = std::move(*w);
         auto f = gui::loadFonts(window->vg(), SUPPLE_GUI_FONTS_DIR);
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(f, (f ? "" : f.error().message));
+#endif
         if (!f) return;
         fonts = *f;
         ok = true;
@@ -73,7 +82,7 @@ struct Session {
 
     bool build(int trackCount) {
         dir = std::filesystem::temp_directory_path() /
-              ("supple-arrange-test-" + std::to_string(::getpid()) + "-" +
+              ("supple-arrange-test-" + std::to_string(testProcessId()) + "-" +
                std::to_string(trackCount));
         std::error_code ec;
         std::filesystem::remove_all(dir, ec);
@@ -155,6 +164,21 @@ views::ArrangeView* mount(ui::Root& root) {
 // from a different session state.
 void golden(ui::Root& root, const char* name) {
     const gui::Image image = root.readBack();
+#if !defined(__linux__)
+    REQUIRE(image.width > 0);
+    REQUIRE(image.height > 0);
+    REQUIRE(image.rgba.size() == static_cast<std::size_t>(image.width * image.height * 4));
+    bool varied = false;
+    for (std::size_t i = 4; i < image.rgba.size(); i += 4)
+        if (image.rgba[i] != image.rgba[0] || image.rgba[i + 1] != image.rgba[1] ||
+            image.rgba[i + 2] != image.rgba[2]) {
+            varied = true;
+            break;
+        }
+    CHECK(varied);
+    return;
+#endif
+
     const auto path = std::filesystem::path(SUPPLE_GUI_GOLDEN_DIR) / name;
     if (std::getenv("SUPPLE_UPDATE_GOLDEN") || !std::filesystem::exists(path)) {
         REQUIRE(gui::writePng(path, image));
@@ -162,7 +186,7 @@ void golden(ui::Root& root, const char* name) {
         return;
     }
     int w = 0, h = 0, n = 0;
-    unsigned char* data = stbi_load(path.c_str(), &w, &h, &n, 4);
+    unsigned char* data = stbi_load(path.string().c_str(), &w, &h, &n, 4);
     REQUIRE(data);
     REQUIRE(w == image.width);
     REQUIRE(h == image.height);
@@ -1285,7 +1309,7 @@ TEST_CASE("the mouse map: built-in defaults, per-combination overrides, the file
     REQUIRE(back);
     CHECK(*back == m);
     const auto dir = std::filesystem::temp_directory_path() /
-                     ("supple-mouse-test-" + std::to_string(::getpid()));
+                     ("supple-mouse-test-" + std::to_string(testProcessId()));
     REQUIRE(m.save(dir / "mouse.json"));
     auto loaded = views::MouseMap::load(dir / "mouse.json");
     REQUIRE(loaded);
@@ -1438,7 +1462,7 @@ TEST_CASE("unrelated FX edits in 200 tracks and 2000 items have bounded invalida
     Gl& g = gl();
     REQUIRE(g.ok);
     const auto dir = std::filesystem::temp_directory_path() /
-                     ("supple-invalidation-" + std::to_string(::getpid()));
+                     ("supple-invalidation-" + std::to_string(testProcessId()));
     peaks::PeakService peaks(dir, [](std::function<void()>) {});
     auto initial = model::Session::create();
     model::EditTxn build(initial, 1);
@@ -1721,7 +1745,7 @@ TEST_CASE(
     auto committed = build.commit();
     REQUIRE(committed);
     peaks::PeakService peaks(std::filesystem::temp_directory_path() /
-                                 ("supple-thumbnail-cache-" + std::to_string(::getpid())),
+                                 ("supple-thumbnail-cache-" + std::to_string(testProcessId())),
                              [](std::function<void()>) {});
     auto draw = [&](const model::Session& session, double start, double zoom, std::size_t notes) {
         ui::Root root(*g.window, g.fonts, ui::Theme::dark());

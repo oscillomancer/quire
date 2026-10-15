@@ -7,10 +7,10 @@
 
 #include <cstddef>
 #include <functional>
-#include <stop_token>
 #include <string>
 #include <string_view>
 #include <vector>
+#include "supple/base/stop.h"
 
 #include "supple/base/result.h"
 #include "supple/json/value.h"
@@ -73,7 +73,7 @@ struct Request {
 // call never runs.
 Result<Turn> complete(const Endpoint& endpoint, const Request& request,
                       const std::function<void(std::string_view)>& onText,
-                      std::stop_token stop = {});
+                      supple::StopToken stop = {});
 
 // The bytes one response may stream, and one event may span.
 inline constexpr std::size_t kMaxResponseBytes = std::size_t(64) << 20;

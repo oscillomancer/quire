@@ -2,9 +2,7 @@
 // Copyright (c) 2026 Supple Audio
 #include "supple/ui/gl.h"
 
-#define GL_GLEXT_PROTOTYPES
-#include <GL/gl.h>
-#include <GL/glext.h>
+#include "supple/gui/gl_api.h"
 
 #include <algorithm>
 #include <cmath>

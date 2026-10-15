@@ -22,7 +22,7 @@ namespace supple::gui {
 // Video subsystem lifetime. One per process, before any Window.
 class Platform {
   public:
-    enum class Driver { X11, Offscreen };
+    enum class Driver { Native, X11 = Native, Offscreen };
     static Result<std::unique_ptr<Platform>> start(Driver driver);
     ~Platform();
     Platform(const Platform&) = delete;
@@ -77,7 +77,8 @@ class Window {
     float width() const;
     float height() const;
     float pixelRatio() const;
-    // Borrowed native editor parent; unavailable for offscreen windows.
+    float inputScale() const;  // SDL window coordinates per design unit
+    // Borrowed native editor parent; unavailable for Linux offscreen windows.
     NativeWindow nativeParent() const;
     // Compatibility accessor for existing X11 callers.
     unsigned long x11Window() const;

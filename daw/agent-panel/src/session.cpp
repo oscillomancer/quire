@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "supple/agent/session.h"
+#include "supple/base/stop.h"
 
 #include <algorithm>
 #include <chrono>
@@ -227,8 +228,9 @@ bool Session::send(std::string prompt) {
         history_.push_back(std::move(m));
     }
     busy_ = true;
-    worker_ = std::jthread([this, alive = std::weak_ptr<int>(alive_), generation = ++generation_](
-                               std::stop_token stop) { work(stop, alive, generation); });
+    worker_ = supple::JoiningThread(
+        [this, alive = std::weak_ptr<int>(alive_),
+         generation = ++generation_](supple::StopToken stop) { work(stop, alive, generation); });
     return true;
 }
 
@@ -362,7 +364,7 @@ ToolResult Session::call(const ToolCall& c, std::optional<Error>& stopTurn) {
     return r;
 }
 
-void Session::work(std::stop_token stop, std::weak_ptr<int> alive, std::uint64_t generation) {
+void Session::work(supple::StopToken stop, std::weak_ptr<int> alive, std::uint64_t generation) {
     // Events of this turn: dropped once it is cancelled (or the session is gone).
     auto onModel = [this, alive, generation](std::function<void()> f) {
         post_([this, alive, generation, f = std::move(f)] {

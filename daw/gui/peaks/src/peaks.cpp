@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Supple Audio
 #include "supple/peaks/peaks.h"
 #include <supple/base/paths.h>
+#include "supple/base/stop.h"
 
 #include <algorithm>
 #include <cctype>
@@ -249,7 +250,7 @@ std::filesystem::path defaultCacheDir(std::string_view slug) {
 PeakService::PeakService(std::filesystem::path cacheDir, Post post)
     : cacheDir_(std::move(cacheDir)),
       post_(std::move(post)),
-      worker_([this](std::stop_token stop) { run(stop); }) {}
+      worker_([this](supple::StopToken stop) { run(stop); }) {}
 
 PeakService::~PeakService() {
     worker_.request_stop();
@@ -302,7 +303,7 @@ PeakService::Stats PeakService::stats() const {
     return stats_;
 }
 
-void PeakService::run(std::stop_token stop) {
+void PeakService::run(supple::StopToken stop) {
     for (;;) {
         Job job;
         {

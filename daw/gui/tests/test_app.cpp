@@ -6,13 +6,13 @@
 #include <doctest/doctest.h>
 #include "product_fixture.h"
 
-#include <unistd.h>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
 #include <mutex>
 #include <thread>
+#include "test_support.h"
 
 #include "actions_list.h"
 #include "agent_panel.h"
@@ -58,17 +58,26 @@ struct App {
 
     App() {
         dir = std::filesystem::temp_directory_path() /
-              ("supple-app-test-" + std::to_string(::getpid()));
+              ("supple-app-test-" + std::to_string(testProcessId()));
         std::filesystem::remove_all(dir);
         std::filesystem::create_directories(dir / "config");
-        ::setenv("XDG_CONFIG_HOME", (dir / "config").c_str(), 1);
+        testConfigHome(dir / "config");
         auto p = gui::Platform::start(gui::Platform::Driver::Offscreen);
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(p, (p ? "" : p.error().message));
+#endif
         if (!p) return;
         platform = std::move(*p);
         auto w = gui::Window::open(*platform, {"app-test", 1000, 640, true});
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(w, (w ? "" : w.error().message));
+#endif
         if (!w) return;
         window = std::move(*w);
         auto f = gui::loadFonts(window->vg(), SUPPLE_GUI_FONTS_DIR);
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(f, (f ? "" : f.error().message));
+#endif
         if (!f) return;
         fonts = *f;
         engine::AppOptions options;
@@ -497,7 +506,7 @@ TEST_CASE("hidden docks release their own focus and preserve focus elsewhere") {
 
 TEST_CASE("the appearance: warm and dark by default, saved and read back, palettes differ") {
     const auto dir = std::filesystem::temp_directory_path() /
-                     ("supple-appearance-" + std::to_string(::getpid()));
+                     ("supple-appearance-" + std::to_string(testProcessId()));
     const auto file = dir / "appearance.json";
     gui::Appearance look = gui::Appearance::load(file);  // missing: the defaults
     CHECK(look.dark);
@@ -523,8 +532,8 @@ TEST_CASE("the appearance: warm and dark by default, saved and read back, palett
 }
 
 TEST_CASE("UI state is saved beside the project and restored when it is opened") {
-    const auto dir =
-        std::filesystem::temp_directory_path() / ("supple-ui-state-" + std::to_string(::getpid()));
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-ui-state-" + std::to_string(testProcessId()));
     std::filesystem::create_directories(dir);
     const auto project = dir / "song.json";
     double zoom = 40;
@@ -570,8 +579,8 @@ TEST_CASE("UI state is saved beside the project and restored when it is opened")
 }
 
 TEST_CASE("UI state written in the background never overtakes a later flush") {
-    const auto dir =
-        std::filesystem::temp_directory_path() / ("supple-ui-async-" + std::to_string(::getpid()));
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-ui-async-" + std::to_string(testProcessId()));
     std::filesystem::create_directories(dir);
     const auto project = dir / "song.json";
     double zoom = 40;
@@ -1497,7 +1506,7 @@ TEST_CASE("UI sidecar compares once after input and wakes main after writing") {
     using Clock = std::chrono::steady_clock;
     const auto now = Clock::time_point(std::chrono::seconds(10));
     const auto dir = std::filesystem::temp_directory_path() /
-                     ("supple-ui-deadline-" + std::to_string(::getpid()));
+                     ("supple-ui-deadline-" + std::to_string(testProcessId()));
     std::filesystem::create_directories(dir);
     const auto project = dir / "song.json";
     std::mutex mutex;

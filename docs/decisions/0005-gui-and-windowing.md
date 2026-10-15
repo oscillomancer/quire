@@ -7,6 +7,10 @@
 adds native local editors, Windows bridged embedding and Cocoa bridge-owned
 floating windows.
 
+**Native windowing amendment, 2026-10-14:** [ADR-0039](0039-native-gui.md)
+extends the shell to Cocoa/Windows, with platform scaling, primary shortcuts,
+native waitables and platform-specific rendering tests; Linux behavior stays.
+
 ## Context
 
 Third-party plugin GUIs on Linux expect an X11 parent window

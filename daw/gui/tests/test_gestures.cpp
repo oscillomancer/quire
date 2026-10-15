@@ -3,7 +3,7 @@
 // The arrange view's editing gestures (P5.6), driven like a user: pointer
 // events through the root; the model read back; one history entry each.
 #include <doctest/doctest.h>
-#include <unistd.h>
+#include "test_support.h"
 
 #include <filesystem>
 #include <mutex>
@@ -46,16 +46,25 @@ struct Fixture {
 
     Fixture() {
         dir = std::filesystem::temp_directory_path() /
-              ("supple-gesture-test-" + std::to_string(::getpid()));
+              ("supple-gesture-test-" + std::to_string(testProcessId()));
         std::filesystem::remove_all(dir);
         std::filesystem::create_directories(dir);
         auto p = gui::Platform::start(gui::Platform::Driver::Offscreen);
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(p, (p ? "" : p.error().message));
+#endif
         if (!p) return;
         platform = std::move(*p);
         auto w = gui::Window::open(*platform, {"gesture-test", 1100, 600, true});
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(w, (w ? "" : w.error().message));
+#endif
         if (!w) return;
         window = std::move(*w);
         auto f = gui::loadFonts(window->vg(), SUPPLE_GUI_FONTS_DIR);
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(f, (f ? "" : f.error().message));
+#endif
         if (!f) return;
         fonts = *f;
         engine::AppOptions options;

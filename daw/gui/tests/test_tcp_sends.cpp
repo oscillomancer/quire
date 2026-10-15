@@ -3,7 +3,7 @@
 // Output gestures through the shell, Root pointer capture and the real bus.
 #include <SDL3/SDL_keycode.h>
 #include <doctest/doctest.h>
-#include <unistd.h>
+#include "test_support.h"
 
 #include <filesystem>
 
@@ -37,7 +37,7 @@ struct SendsFixture {
 
     explicit SendsFixture(bool busses = false) {
         dir = std::filesystem::path(SUPPLE_SKILL_DIR).parent_path() / "build" / "p5-sends" /
-              ("fixture-" + std::to_string(::getpid()));
+              ("fixture-" + std::to_string(testProcessId()));
         std::filesystem::create_directories(dir);
         auto p = gui::Platform::start(gui::Platform::Driver::Offscreen);
         REQUIRE(p);

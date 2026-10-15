@@ -21,6 +21,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include "supple/base/stop.h"
 
 #include "supple/base/result.h"
 #include "supple/json/value.h"
@@ -54,7 +55,7 @@ class UiPersistence {
   private:
     json::Value collect() const;
     void drain();  // waits until the writer is idle
-    void writerLoop(std::stop_token stop);
+    void writerLoop(supple::StopToken stop);
     void apply(const json::Value& doc);
     struct Section {
         std::string name;
@@ -76,7 +77,7 @@ class UiPersistence {
     std::optional<std::pair<std::filesystem::path, std::string>> pending_;
     bool writing_ = false;
     std::atomic<bool> writeFailed_{false};
-    std::jthread writer_;  // last: joined first
+    supple::JoiningThread writer_;  // last: joined first
 };
 
 }  // namespace supple::gui

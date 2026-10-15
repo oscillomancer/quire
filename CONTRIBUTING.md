@@ -132,7 +132,7 @@ These gates are explicit, with no no-op RT implementations:
 | Gate | Off on | Reason / follow-up |
 |---|---|---|
 | JACK/fake JACK and hardware capacity benchmark | macOS, Windows | Linux graph/hardware tooling; native device audio uses PortAudio (ADR-0038) |
-| `SUPPLE_HOST_SERVICES`: DAW GUI/agent and source-export integration tests | macOS, Windows | Shell/windowing integration is on port-gui; native host editors and bridge UI support are enabled (ADR-0040) |
+| GUI socket/screenset Python integration scripts, source-export integration tests | macOS, Windows | POSIX fixtures; native app smoke/UI logic and editor integration tests run separately (ADR-0039/0040) |
 | POSIX evaluation harness tests | Windows | Unix executable fixtures, symlinks and process groups |
 
 Research GUI spikes and host fuzzers reject configuration on non-Linux
@@ -165,3 +165,11 @@ WASAPI + ASIO on Windows). Isolated stock-plugin projects never build or link it
 Fake-driver engine-portaudio.tests runs on all platforms and under Linux RTSan /
 TSan. Real native-device tests require SUPPLE_AUDIO_DEVICE_TEST=1 exactly; leave
 it unset in CI. Native devices have no MIDI input implementation yet.
+
+GUI tests use Linux EGL offscreen windows or hidden native Cocoa/Windows
+windows. Native runners need a desktop session and OpenGL 3.3 (macOS 4.1).
+The Windows workflow deploys a pinned CI-only Mesa/llvmpipe driver beside GUI
+executables; it changes no system configuration and is not shipped. Linux
+reference PNGs are never updated on native systems. SUPPLE_GUI_DISPLAY_TEST
+still requires exactly `1`; ordinary tests do not open plug-in editors or
+real audio devices. Native platform smoke images are uploaded with test logs.

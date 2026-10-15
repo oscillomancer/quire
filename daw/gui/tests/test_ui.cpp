@@ -32,12 +32,21 @@ struct Fixture {
     bool ok = false;
     Fixture() {
         auto p = gui::Platform::start(gui::Platform::Driver::Offscreen);
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(p, (p ? "" : p.error().message));
+#endif
         if (!p) return;
         platform = std::move(*p);
         auto w = gui::Window::open(*platform, {"ui-test", 320, 200, true});
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(w, (w ? "" : w.error().message));
+#endif
         if (!w) return;
         window = std::move(*w);
         auto f = gui::loadFonts(window->vg(), SUPPLE_GUI_FONTS_DIR);
+#if !defined(__linux__)
+        REQUIRE_MESSAGE(f, (f ? "" : f.error().message));
+#endif
         if (!f) return;
         fonts = *f;
         ok = true;
@@ -73,7 +82,7 @@ struct Box : Node {
     }
 };
 
-double pixelDistance(const gui::Image& a, const gui::Image& b) {
+[[maybe_unused]] double pixelDistance(const gui::Image& a, const gui::Image& b) {
     REQUIRE(a.width == b.width);
     REQUIRE(a.height == b.height);
     double worst = 0;
@@ -342,6 +351,21 @@ TEST_CASE("golden image: a small panel in the dark theme") {
     root.setContent(std::move(content));
     root.frame(false);
     const gui::Image image = root.readBack();
+#if !defined(__linux__)
+    REQUIRE(image.width > 0);
+    REQUIRE(image.height > 0);
+    REQUIRE(image.rgba.size() == static_cast<std::size_t>(image.width * image.height * 4));
+    bool varied = false;
+    for (std::size_t i = 4; i < image.rgba.size(); i += 4)
+        if (image.rgba[i] != image.rgba[0] || image.rgba[i + 1] != image.rgba[1] ||
+            image.rgba[i + 2] != image.rgba[2]) {
+            varied = true;
+            break;
+        }
+    CHECK(varied);
+    return;
+#endif
+
     const std::filesystem::path golden =
         std::filesystem::path(SUPPLE_GUI_GOLDEN_DIR) / "panel-dark.png";
     if (std::getenv("SUPPLE_UPDATE_GOLDEN") || !std::filesystem::exists(golden)) {
@@ -350,7 +374,7 @@ TEST_CASE("golden image: a small panel in the dark theme") {
         return;
     }
     int w = 0, h = 0, n = 0;
-    unsigned char* data = stbi_load(golden.c_str(), &w, &h, &n, 4);
+    unsigned char* data = stbi_load(golden.string().c_str(), &w, &h, &n, 4);
     REQUIRE(data);
     gui::Image expected{
         w, h, std::vector<std::uint8_t>(data, data + static_cast<std::size_t>(w * h * 4))};
@@ -951,4 +975,31 @@ TEST_CASE("audit3: theme rejects non-finite sizes and escapes error paths") {
     CHECK(parseColor("#aBcD12") == Color::hex(0xabcd12));
     CHECK_FALSE(parseColor("#1234567"));
     CHECK_FALSE(parseColor("#12345"));
+}
+
+TEST_CASE("SDL primary-modifier keys map to the portable shortcut bits") {
+    REQUIRE_GL();
+    Root root(*fixture().window, fixture().fonts, Theme::dark());
+    unsigned mods = 0;
+    root.onUnhandledKey = [&](const KeyEvent& key) {
+        mods = key.mods;
+        return true;
+    };
+    SDL_Event event{};
+    event.type = SDL_EVENT_KEY_DOWN;
+    event.key.key = SDLK_S;
+    event.key.mod = SDL_KMOD_GUI;
+    root.handle(event);
+#if defined(__APPLE__)
+    CHECK(mods == kCtrl);
+#else
+    CHECK(mods == kSuper);
+#endif
+    event.key.mod = SDL_KMOD_CTRL;
+    root.handle(event);
+#if defined(__APPLE__)
+    CHECK(mods == kSuper);
+#else
+    CHECK(mods == kCtrl);
+#endif
 }

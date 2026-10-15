@@ -76,7 +76,8 @@ class PluginWindows {
     // rebuilds the set afterwards, even when no editor is open.
     bool dispatchFds();
     void suspendFdWatches();
-    void setModelWakeFd(int fd) { modelWakeFd_ = fd; }
+    void setModelWake(Waitable source) { modelWake_ = source; }
+    void setModelWakeFd(int fd) { setModelWake(Waitable(fd)); }
     std::optional<Error> fdError() { return watcher_ ? watcher_->error() : watcherError_; }
 
   private:
@@ -111,7 +112,7 @@ class PluginWindows {
         std::uint64_t serial;
     };
     std::vector<ServiceWatch> serviceWatches_;
-    int modelWakeFd_ = -1;
+    Waitable modelWake_;
     std::map<model::Id, Placement> placements_;
     std::unique_ptr<FdWatcher> watcher_;
     std::optional<Error> watcherError_;

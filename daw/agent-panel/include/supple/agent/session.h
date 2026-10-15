@@ -32,6 +32,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "supple/base/stop.h"
 
 #include "supple/agent/llm.h"
 #include "supple/cmd/bus.h"
@@ -93,7 +94,7 @@ class Session {
     const std::string& system() const { return system_; }
 
   private:
-    void work(std::stop_token stop, std::weak_ptr<int> alive, std::uint64_t generation);
+    void work(supple::StopToken stop, std::weak_ptr<int> alive, std::uint64_t generation);
     // Model thread. `stopTurn` is set when the turn must end (agent.branch_changed).
     ToolResult call(const ToolCall& call, std::optional<Error>& stopTurn);
     Result<json::Value> exec(const std::string& command, json::Value args);  // model thread
@@ -119,7 +120,7 @@ class Session {
     std::vector<Message> history_;
     std::atomic<bool> busy_{false};
     std::shared_ptr<int> alive_ = std::make_shared<int>(0);
-    std::jthread worker_;
+    supple::JoiningThread worker_;
     int nextId_ = 1;
 };
 

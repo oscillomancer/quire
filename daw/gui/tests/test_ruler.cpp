@@ -3,7 +3,7 @@
 // Ruler edits driven through the same pointer, keymap and text paths as the app.
 #include <SDL3/SDL_keycode.h>
 #include <doctest/doctest.h>
-#include <unistd.h>
+#include "test_support.h"
 
 #include <filesystem>
 
@@ -37,7 +37,7 @@ struct RulerFixture {
 
     RulerFixture() {
         dir = std::filesystem::temp_directory_path() /
-              ("supple-ruler-test-" + std::to_string(::getpid()));
+              ("supple-ruler-test-" + std::to_string(testProcessId()));
         std::filesystem::create_directories(dir);
         auto p = gui::Platform::start(gui::Platform::Driver::Offscreen);
         REQUIRE(p);

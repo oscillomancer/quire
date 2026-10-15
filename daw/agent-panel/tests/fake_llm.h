@@ -5,11 +5,6 @@
 
 #include <doctest/doctest.h>
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
 #include <atomic>
 #include <chrono>
 #include <deque>
@@ -23,6 +18,8 @@
 #include "supple/json/parse.h"
 #include "supple/json/write.h"
 
+#include "test_socket.h"
+
 namespace supple::agent::testing {
 
 // Serves one scripted response per request (HTTP/1.1, Connection: close).
@@ -35,15 +32,18 @@ class FakeServer {
         std::function<void()> beforeSend = {};
     };
     FakeServer() {
+        startTestSockets();
         fd_ = ::socket(AF_INET, SOCK_STREAM, 0);
+        REQUIRE(fd_ != kInvalidSocket);
         int one = 1;
-        ::setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+        ::setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&one),
+                     sizeof one);
         sockaddr_in addr{};
         addr.sin_family = AF_INET;
         addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         addr.sin_port = 0;
         REQUIRE(::bind(fd_, reinterpret_cast<sockaddr*>(&addr), sizeof addr) == 0);
-        socklen_t len = sizeof addr;
+        TestSocketLength len = sizeof addr;
         ::getsockname(fd_, reinterpret_cast<sockaddr*>(&addr), &len);
         port_ = ntohs(addr.sin_port);
         REQUIRE(::listen(fd_, 4) == 0);
@@ -51,8 +51,8 @@ class FakeServer {
     }
     ~FakeServer() {
         stop_ = true;
-        ::shutdown(fd_, SHUT_RDWR);
-        ::close(fd_);
+        shutdownTestSocket(fd_);
+        closeTestSocket(fd_);
         thread_.join();
     }
     std::string url(const char* path = "") const {
@@ -70,8 +70,9 @@ class FakeServer {
   private:
     void serve() {
         while (!stop_) {
-            const int c = ::accept(fd_, nullptr, nullptr);
-            if (c < 0) return;
+            const TestSocket c = ::accept(fd_, nullptr, nullptr);
+            if (c == kInvalidSocket) return;
+            suppressTestSigpipe(c);
             std::string in;
             char buf[8192];
             std::size_t need = std::string::npos;
@@ -102,20 +103,21 @@ class FakeServer {
             std::string head = "HTTP/1.1 " + std::to_string(r.status) +
                                (r.status == 200 ? " OK" : " Error") +
                                "\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
-            ::send(c, head.data(), head.size(), MSG_NOSIGNAL);
+            (void)sendTestBytes(c, head);
             if (r.beforeSend) r.beforeSend();
             if (r.status != 200) {
                 const std::string err = R"({"error": {"message": "invalid key"}})";
-                ::send(c, err.data(), err.size(), MSG_NOSIGNAL);
+                (void)sendTestBytes(c, err);
             }
             for (const std::string& chunk : r.chunks) {
                 if (r.delayMs) std::this_thread::sleep_for(std::chrono::milliseconds(r.delayMs));
-                if (::send(c, chunk.data(), chunk.size(), MSG_NOSIGNAL) < 0) break;
+                if (!sendTestBytes(c, chunk)) break;
             }
-            ::close(c);
+            closeTestSocket(c);
         }
     }
-    int fd_ = -1, port_ = 0;
+    TestSocket fd_ = kInvalidSocket;
+    int port_ = 0;
     std::atomic<bool> stop_{false};
     std::thread thread_;
     std::mutex m_;

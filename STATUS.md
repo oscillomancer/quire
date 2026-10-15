@@ -22,8 +22,9 @@ protocol and standalone MCP/proxy have native coverage on both platforms
 Both native platforms enable and test audio-file I/O, recording recovery,
 engine/CLI, dummy/offline rendering and sandbox. PortAudio builds CoreAudio on
 macOS and WASAPI/ASIO on Windows; fake-device tests verify RT/offline equivalence
-in both executors. Actual hardware trials remain opt-in and unmeasured.
-The DAW GUI shell remains gated on this branch.
+in both executors. Actual hardware trials remain opt-in and unmeasured. The
+GUI/agent gate is lifted (ADR-0039), with native editor embedding (ADR-0040);
+combined native DAW CI validation is pending.
 Portable libraries, the session model, stock DSP cores
 and the script suite build independently of those services; see
 CONTRIBUTING.md for the complete gate list. External Windows readers that
@@ -220,7 +221,7 @@ Engine and hosting:
   equivalence coverage. Windows file helpers and audio-file I/O pass native CI.
   Native hosting/scanning (ADR-0036) and PortAudio device builds (ADR-0038) are
   verified; native bridge targets are enabled (ADR-0037), with native host
-  editor paths supplied by ADR-0040. DAW shell integration remains on port-gui. Hardware behavior still needs opt-in device trials.
+  editor paths supplied by ADR-0040. Hardware behavior still needs opt-in device trials.
   Windows event waits admit 64 unique handles. Generic macOS High QoS must be
   self-applied. Native device helpers instead use a startup barrier with Mach
   time constraints (macOS) or MMCSS Pro Audio (Windows); workgroup joining and
@@ -292,6 +293,12 @@ Session and editing:
   squashed steps keep large invocation arguments.
 
 GUI:
+- Native shell/toolkit/agent builds are enabled (ADR-0039), pending native CI
+  verification. Cocoa/Windows hidden-window tests replace Linux EGL offscreen;
+  Linux golden references are unchanged. Native editor embedding is separate.
+  Windows config keys use a protected current-user ACL; filesystems without
+  ACL support fail the save. macOS cold-start process timing is unavailable.
+  GUI socket/screenset Python integration scripts remain Linux-only.
 - No autoscroll during drags; no resize cursor; plugins can be dropped onto
   mixer strips but not onto track-panel rows.
 

@@ -34,6 +34,9 @@ TEST_CASE("the PNG writer produces files a decoder reads back exactly") {
 
 TEST_CASE("an offscreen window draws with GL and NanoVG and reads back its pixels") {
     auto platform = gui::Platform::start(gui::Platform::Driver::Offscreen);
+#if !defined(__linux__)
+    REQUIRE_MESSAGE(platform, (platform ? "" : platform.error().message));
+#endif
     if (!platform) {
         MESSAGE("skipped: no offscreen GL here: " << platform.error().message);
         return;
@@ -46,7 +49,9 @@ TEST_CASE("an offscreen window draws with GL and NanoVG and reads back its pixel
     gui::Window& w = **window;
     CHECK((SDL_GetWindowFlags(w.sdl()) & SDL_WINDOW_RESIZABLE) == 0);
     CHECK((SDL_GetWindowFlags(w.sdl()) & SDL_WINDOW_UTILITY) != 0);
+#if defined(__linux__)
     CHECK(w.x11Window() == 0);  // offscreen: nothing to parent plugin editors to
+#endif
     auto fonts = gui::loadFonts(w.vg(), SUPPLE_GUI_FONTS_DIR);
     REQUIRE_MESSAGE(fonts, (fonts ? "" : fonts.error().message));
     w.beginFrame(0x102030);
@@ -57,6 +62,9 @@ TEST_CASE("an offscreen window draws with GL and NanoVG and reads back its pixel
     w.endFrame();
     const gui::Image image = w.readPixels();
     w.present();
+    REQUIRE(gui::writePng(SUPPLE_GUI_SMOKE_PNG, image));
+    CHECK(image.width == static_cast<int>(w.width() * w.pixelRatio()));
+    CHECK(image.height == static_cast<int>(w.height() * w.pixelRatio()));
     REQUIRE(image.width >= 64);
     auto at = [&](int x, int y) {
         const auto i = (static_cast<std::size_t>(y) * static_cast<std::size_t>(image.width) +

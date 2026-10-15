@@ -2,8 +2,8 @@
 
 This spec describes the GUI as built and is updated with it. Decisions it
 builds on:
-ADR-0005 (SDL3 X11 windows, GL3 + NanoVG, own retained toolkit, performance
-gates), ADR-0007 (command bus), ADR-0008 (versions, branches, undo),
+ADR-0005 (SDL3 windows, GL3 + NanoVG, own retained toolkit, performance
+gates), ADR-0039 (native windowing, scaling, keys and agent config), ADR-0007 (command bus), ADR-0008 (versions, branches, undo),
 ADR-0019 (typed strips), ADR-0030 (main-thread notifications/deadlines),
 `ARCHITECTURE.md` §3 (threads, event delivery) and §10, and the workflow research in `docs/research/reaper-ux.md` (the top-40
 list in §16 is the priority order for workflow coverage).
@@ -46,9 +46,9 @@ CLAP main-thread callbacks and hosts plugin GUIs. Consequences:
   nearest deadline: app service (`engine.md` §6), local CLAP timers (also
   without editors), ModelLoop timers, pending notation compilation (300 ms),
   dirty render previews (40 ms by default), and armed UI sidecar checks.
-  One parked `FdWatcher` watches the app relay, local plug-in descriptors and
-  ModelLoop's wake pipe; readiness posts an SDL wake, dispatches on main, and
-  stays out of poll until consumed/rearmed. Posted worker results also wake SDL.
+  One parked `FdWatcher` borrows native waitables and watches the app relay, local plug-in descriptors and
+  ModelLoop's wake source; readiness posts an SDL wake, dispatches on main, and
+  stays out of the wait set until consumed/rearmed. Posted worker results also wake SDL.
   Signal shutdown wakes through ModelLoop's pipe even without any deadline.
   The 100 ms service and 10 ms control polls are removed: MIDI batches use the
   relay. Remote instances use only `setMainThreadWake` forwarding; the GUI
@@ -88,7 +88,7 @@ placements, docking and
 screensets live in a separate per-project UI file (`<name>.ui.json`,
 canonical JSON, never in the project's diff) plus per-user settings
 (keymaps, toolbars, theme) under the user config directory
-(`$XDG_CONFIG_HOME/<slug>/`). Selection is exposed read-only to agents
+(`<paths::config()>/<slug>/`). Selection is exposed read-only to agents
 (`gui.selection` query) because "the selected items" is useful context;
 agents never depend on it for correctness.
 
@@ -144,7 +144,7 @@ only what the DAW needs, designed for virtualized, data-heavy views.
   when destroyed. Animated
   nodes (meters, playhead) are separate *layers* with their own small dirty
   rects so a running transport does not repaint the arrange view.
-- **Rendering.** Per window one GL 3.3 core context.
+- **Rendering.** Per window one GL 3.3 core context (macOS: 4.1 forward compatible).
   - **Chrome** (widgets, text, icons, outlines) through NanoVG GL3.
   - **Bulk layers** in plain GL with persistent buffers: waveforms (§3.1),
     MIDI notes as instanced rectangles, envelopes as line strips, meters
@@ -630,6 +630,13 @@ Delete.
 
 ## 6. Actions, keys, toolbars, menus
 
+On macOS every Ctrl shortcut and pointer gesture below uses Command; labels
+show Cmd, and Option is Alt. The portable `kCtrl` bit means this primary
+modifier, while physical Control uses `kSuper` on macOS. Keymap documents
+accept Ctrl and Cmd as primary aliases; Super retains the secondary bit.
+Cmd-Q and application-menu Quit use the normal clean shutdown path. Linux and
+Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
+
 - **Actions** = a command plus bound arguments (and optional argument
   prompts), named and searchable (`reaper-ux.md` addendum: ~4,400 REAPER
   actions collapse to ~2,000 shapes; parameterized commands cover them with
@@ -827,4 +834,20 @@ Configuration, data and peak-cache defaults share core-base's paths helper.
 Linux retains its XDG/HOME locations. macOS uses Library/Application Support and
 Library/Caches; Windows APPDATA and LOCALAPPDATA. User Documents/media defaults
 use paths::home(). Product slugs and explicit file overrides remain caller-owned.
-This change does not port GUI windowing or plugin-editor embedding.
+Windowing and agent-panel portability are specified in ADR-0039; native
+plugin-editor embedding remains a separate port.
+
+SDL drivers are forced to X11/Cocoa/Windows respectively. Layout uses design
+units; SDL pixel density and Windows per-monitor display scale determine the
+framebuffer ratio. Pointer, file-drop and IME-caret coordinates use that same
+mapping. PNG snapshots contain framebuffer pixels (design size times ratio).
+Native `--offscreen` uses hidden desktop windows; Linux retains the EGL
+offscreen driver. Golden comparisons and reference updates are Linux-only;
+native renders require GL and check content/size, with smoke images in CI.
+
+Agent API keys stay out of projects. Config publication is atomic and private
+throughout: POSIX 0600; Windows a protected current-user-only DACL, established
+before writing any secret. Unsupported ACL filesystems return `agent.config`.
+A Windows reader denying delete sharing can block replacement; the previous
+file remains intact and the temporary file is removed. HTTP and config tests
+run natively, with loopback sockets and no real endpoint or key.

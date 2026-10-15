@@ -6,7 +6,7 @@
 #pragma once
 
 #include <doctest/doctest.h>
-#include <unistd.h>
+#include "test_support.h"
 
 #include <filesystem>
 #include <string>
@@ -19,8 +19,8 @@ namespace supple::gui::test {
 inline void linkGeneratedMedia(const std::filesystem::path& mediaDir) {
     namespace fs = std::filesystem;
     struct Shared {
-        fs::path dir =
-            fs::temp_directory_path() / ("supple-generated-media-" + std::to_string(::getpid()));
+        fs::path dir = fs::temp_directory_path() /
+                       ("supple-generated-media-" + std::to_string(testProcessId()));
         Shared() {
             fs::remove_all(dir);
             REQUIRE(writeGeneratedMedia(dir));

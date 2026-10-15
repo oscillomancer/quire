@@ -138,8 +138,8 @@ local plug-in descriptors and the nearest monotonic service deadline (ADR-0030).
 Audio callbacks notify for published work/state transitions and one-shot output
 consumption targets, not unchanged blocks. Job/post notifications run outside
 locks; service flushes events before Lua delivery. The GUI shares one parked
-FD watcher for the app relay, local plug-in descriptors and ModelLoop wake
-pipe (including signals). SDL waits until those sources, input, or the nearest
+native-waitable watcher (service_watcher; ADR-0039) for the app relay, local plug-in descriptors and ModelLoop wake
+source (including signals). SDL waits until those sources, input, or the nearest
 app/panel deadline. Playback frames and transport counters stop with transport;
 meters animate only while moving, and arm one activity wake at rest. Input and
 commands arm a coalesced UI sidecar check; writer completion posts to main.
@@ -330,3 +330,11 @@ Definition of done: code, tests, docs, `STATUS.md`, no license issues, and
 review by someone other than the author. Nothing is "done" that was not run.
 
 `STATUS.md` lists what works today, the known limits and what is planned.
+
+The DAW windowing/agent panel uses SDL3 X11/Cocoa/Windows and OpenGL core
+(3.3, macOS 4.1), with native hidden-window render tests and Linux-only golden
+references (ADR-0039). SDL density/display scale maps design units to pixels.
+The UI's primary modifier maps to Command on macOS. Agent config publication
+uses POSIX 0600 or a protected current-user Windows DACL before writing keys.
+Editor embedding remains separately owned; unsupported host editor operations
+retain structured errors until that port lands.

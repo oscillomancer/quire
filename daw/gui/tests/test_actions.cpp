@@ -4,8 +4,8 @@
 
 #include <SDL3/SDL_keycode.h>
 
-#include <unistd.h>
 #include <filesystem>
+#include "test_support.h"
 
 #include "supple/actions/actions.h"
 #include "supple/base/files.h"
@@ -24,7 +24,7 @@ struct Engine {
     std::unique_ptr<cmd::Dispatcher> dispatcher;
     Engine() {
         dir = std::filesystem::temp_directory_path() /
-              ("supple-actions-test-" + std::to_string(::getpid()));
+              ("supple-actions-test-" + std::to_string(testProcessId()));
         std::filesystem::remove_all(dir);
         std::filesystem::create_directories(dir);
         engine::AppOptions options;
@@ -160,7 +160,12 @@ TEST_CASE("chords print and parse; keymaps resolve sections and sequences") {
     REQUIRE(z);
     CHECK(z->key == SDLK_Z);
     CHECK(z->mods == (1u | 2u));
+#if defined(__APPLE__)
+    CHECK(describe(*z) == "Cmd+Shift+Z");
+#else
     CHECK(describe(*z) == "Ctrl+Shift+Z");
+#endif
+    CHECK(parseChord(describe(*z)) == z);
     CHECK(parseChord("Shift+/")->key == SDLK_SLASH);
     CHECK_FALSE(parseChord("Ctrl+NoSuchKey"));
 
@@ -204,7 +209,7 @@ TEST_CASE("chords print and parse; keymaps resolve sections and sequences") {
 
 TEST_CASE("keymaps save only the user's changes and load them over the defaults") {
     const auto file = std::filesystem::temp_directory_path() /
-                      ("supple-keymap-test-" + std::to_string(::getpid())) / "keymap.json";
+                      ("supple-keymap-test-" + std::to_string(testProcessId())) / "keymap.json";
     Keymap k = Keymap::defaults();
     k.unbind({{*parseChord("L")}, "global", "transport.loop.toggle"});
     k.bind({{*parseChord("P")}, "global", "transport.loop.toggle"});

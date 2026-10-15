@@ -1,0 +1,127 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
+// GL includes and the Windows extension loader, shared by every GUI renderer.
+#pragma once
+#if defined(__APPLE__)
+#define GL_SILENCE_DEPRECATION
+#include <OpenGL/gl3.h>
+#else
+#if !defined(_WIN32)
+#define GL_GLEXT_PROTOTYPES
+#endif
+#include <SDL3/SDL_opengl.h>
+#include <SDL3/SDL_opengl_glext.h>
+#endif
+#if defined(_WIN32)
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern PFNGLACTIVETEXTUREPROC supple_glActiveTexture;
+#define glActiveTexture supple_glActiveTexture
+extern PFNGLATTACHSHADERPROC supple_glAttachShader;
+#define glAttachShader supple_glAttachShader
+extern PFNGLBINDATTRIBLOCATIONPROC supple_glBindAttribLocation;
+#define glBindAttribLocation supple_glBindAttribLocation
+extern PFNGLBINDBUFFERPROC supple_glBindBuffer;
+#define glBindBuffer supple_glBindBuffer
+extern PFNGLBINDBUFFERRANGEPROC supple_glBindBufferRange;
+#define glBindBufferRange supple_glBindBufferRange
+extern PFNGLBINDFRAMEBUFFERPROC supple_glBindFramebuffer;
+#define glBindFramebuffer supple_glBindFramebuffer
+extern PFNGLBINDRENDERBUFFERPROC supple_glBindRenderbuffer;
+#define glBindRenderbuffer supple_glBindRenderbuffer
+extern PFNGLBINDVERTEXARRAYPROC supple_glBindVertexArray;
+#define glBindVertexArray supple_glBindVertexArray
+extern PFNGLBLENDFUNCSEPARATEPROC supple_glBlendFuncSeparate;
+#define glBlendFuncSeparate supple_glBlendFuncSeparate
+extern PFNGLBLITFRAMEBUFFERPROC supple_glBlitFramebuffer;
+#define glBlitFramebuffer supple_glBlitFramebuffer
+extern PFNGLBUFFERDATAPROC supple_glBufferData;
+#define glBufferData supple_glBufferData
+extern PFNGLBUFFERSUBDATAPROC supple_glBufferSubData;
+#define glBufferSubData supple_glBufferSubData
+extern PFNGLCHECKFRAMEBUFFERSTATUSPROC supple_glCheckFramebufferStatus;
+#define glCheckFramebufferStatus supple_glCheckFramebufferStatus
+extern PFNGLCOMPILESHADERPROC supple_glCompileShader;
+#define glCompileShader supple_glCompileShader
+extern PFNGLCREATEPROGRAMPROC supple_glCreateProgram;
+#define glCreateProgram supple_glCreateProgram
+extern PFNGLCREATESHADERPROC supple_glCreateShader;
+#define glCreateShader supple_glCreateShader
+extern PFNGLDELETEBUFFERSPROC supple_glDeleteBuffers;
+#define glDeleteBuffers supple_glDeleteBuffers
+extern PFNGLDELETEFRAMEBUFFERSPROC supple_glDeleteFramebuffers;
+#define glDeleteFramebuffers supple_glDeleteFramebuffers
+extern PFNGLDELETEPROGRAMPROC supple_glDeleteProgram;
+#define glDeleteProgram supple_glDeleteProgram
+extern PFNGLDELETERENDERBUFFERSPROC supple_glDeleteRenderbuffers;
+#define glDeleteRenderbuffers supple_glDeleteRenderbuffers
+extern PFNGLDELETESHADERPROC supple_glDeleteShader;
+#define glDeleteShader supple_glDeleteShader
+extern PFNGLDELETEVERTEXARRAYSPROC supple_glDeleteVertexArrays;
+#define glDeleteVertexArrays supple_glDeleteVertexArrays
+extern PFNGLDISABLEVERTEXATTRIBARRAYPROC supple_glDisableVertexAttribArray;
+#define glDisableVertexAttribArray supple_glDisableVertexAttribArray
+extern PFNGLDRAWARRAYSINSTANCEDPROC supple_glDrawArraysInstanced;
+#define glDrawArraysInstanced supple_glDrawArraysInstanced
+extern PFNGLENABLEVERTEXATTRIBARRAYPROC supple_glEnableVertexAttribArray;
+#define glEnableVertexAttribArray supple_glEnableVertexAttribArray
+extern PFNGLFRAMEBUFFERRENDERBUFFERPROC supple_glFramebufferRenderbuffer;
+#define glFramebufferRenderbuffer supple_glFramebufferRenderbuffer
+extern PFNGLFRAMEBUFFERTEXTURE2DPROC supple_glFramebufferTexture2D;
+#define glFramebufferTexture2D supple_glFramebufferTexture2D
+extern PFNGLGENBUFFERSPROC supple_glGenBuffers;
+#define glGenBuffers supple_glGenBuffers
+extern PFNGLGENFRAMEBUFFERSPROC supple_glGenFramebuffers;
+#define glGenFramebuffers supple_glGenFramebuffers
+extern PFNGLGENRENDERBUFFERSPROC supple_glGenRenderbuffers;
+#define glGenRenderbuffers supple_glGenRenderbuffers
+extern PFNGLGENVERTEXARRAYSPROC supple_glGenVertexArrays;
+#define glGenVertexArrays supple_glGenVertexArrays
+extern PFNGLGENERATEMIPMAPPROC supple_glGenerateMipmap;
+#define glGenerateMipmap supple_glGenerateMipmap
+extern PFNGLGETPROGRAMINFOLOGPROC supple_glGetProgramInfoLog;
+#define glGetProgramInfoLog supple_glGetProgramInfoLog
+extern PFNGLGETPROGRAMIVPROC supple_glGetProgramiv;
+#define glGetProgramiv supple_glGetProgramiv
+extern PFNGLGETSHADERINFOLOGPROC supple_glGetShaderInfoLog;
+#define glGetShaderInfoLog supple_glGetShaderInfoLog
+extern PFNGLGETSHADERIVPROC supple_glGetShaderiv;
+#define glGetShaderiv supple_glGetShaderiv
+extern PFNGLGETUNIFORMBLOCKINDEXPROC supple_glGetUniformBlockIndex;
+#define glGetUniformBlockIndex supple_glGetUniformBlockIndex
+extern PFNGLGETUNIFORMLOCATIONPROC supple_glGetUniformLocation;
+#define glGetUniformLocation supple_glGetUniformLocation
+extern PFNGLLINKPROGRAMPROC supple_glLinkProgram;
+#define glLinkProgram supple_glLinkProgram
+extern PFNGLMULTIDRAWARRAYSPROC supple_glMultiDrawArrays;
+#define glMultiDrawArrays supple_glMultiDrawArrays
+extern PFNGLRENDERBUFFERSTORAGEPROC supple_glRenderbufferStorage;
+#define glRenderbufferStorage supple_glRenderbufferStorage
+extern PFNGLSHADERSOURCEPROC supple_glShaderSource;
+#define glShaderSource supple_glShaderSource
+extern PFNGLSTENCILOPSEPARATEPROC supple_glStencilOpSeparate;
+#define glStencilOpSeparate supple_glStencilOpSeparate
+extern PFNGLUNIFORM1FPROC supple_glUniform1f;
+#define glUniform1f supple_glUniform1f
+extern PFNGLUNIFORM1IPROC supple_glUniform1i;
+#define glUniform1i supple_glUniform1i
+extern PFNGLUNIFORM2FVPROC supple_glUniform2fv;
+#define glUniform2fv supple_glUniform2fv
+extern PFNGLUNIFORM4FPROC supple_glUniform4f;
+#define glUniform4f supple_glUniform4f
+extern PFNGLUNIFORM4FVPROC supple_glUniform4fv;
+#define glUniform4fv supple_glUniform4fv
+extern PFNGLUNIFORMBLOCKBINDINGPROC supple_glUniformBlockBinding;
+#define glUniformBlockBinding supple_glUniformBlockBinding
+extern PFNGLUSEPROGRAMPROC supple_glUseProgram;
+#define glUseProgram supple_glUseProgram
+extern PFNGLVERTEXATTRIBDIVISORPROC supple_glVertexAttribDivisor;
+#define glVertexAttribDivisor supple_glVertexAttribDivisor
+extern PFNGLVERTEXATTRIBPOINTERPROC supple_glVertexAttribPointer;
+#define glVertexAttribPointer supple_glVertexAttribPointer
+int suppleLoadGl(void);
+#ifdef __cplusplus
+}
+#endif
+#endif

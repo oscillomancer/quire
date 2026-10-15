@@ -4,11 +4,13 @@
 // OpenAI streaming formats), with a real engine and bus.
 #include <doctest/doctest.h>
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
+#if !defined(_WIN32)
 #include <sys/stat.h>
-#include <unistd.h>
+#else
+#include <aclapi.h>
+#include <windows.h>
+#endif
+#include "test_support.h"
 
 #include <chrono>
 #include <deque>
@@ -41,7 +43,7 @@ struct Rig {
     std::vector<std::function<void()>> posted;
     Rig() {
         dir = std::filesystem::temp_directory_path() /
-              ("supple-agent-test-" + std::to_string(::getpid()));
+              ("supple-agent-test-" + std::to_string(testProcessId()));
         std::filesystem::remove_all(dir);
         std::filesystem::create_directories(dir);
         engine::AppOptions options;
@@ -517,14 +519,31 @@ TEST_CASE("OpenAI-compatible streams must be typed and end with [DONE]") {
 
 TEST_CASE("the endpoint config is replaced atomically and stays owner-only") {
     const auto dir = std::filesystem::temp_directory_path() /
-                     ("supple-agent-config-" + std::to_string(::getpid()));
+                     ("supple-agent-config-" + std::to_string(testProcessId()));
     std::filesystem::remove_all(dir);
     const auto file = dir / "slug" / "agent.json";
+#if !defined(_WIN32)
     auto mode = [](const std::filesystem::path& p) {
         struct stat st{};
         REQUIRE(::stat(p.c_str(), &st) == 0);
         return st.st_mode & 0777;
     };
+#else
+    auto mode = [](const std::filesystem::path& p) {
+        PSECURITY_DESCRIPTOR descriptor = nullptr;
+        PACL acl = nullptr;
+        REQUIRE(GetNamedSecurityInfoW(p.c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr,
+                                      nullptr, &acl, nullptr, &descriptor) == ERROR_SUCCESS);
+        SECURITY_DESCRIPTOR_CONTROL control{};
+        DWORD revision = 0;
+        REQUIRE(GetSecurityDescriptorControl(descriptor, &control, &revision));
+        CHECK((control & SE_DACL_PROTECTED) != 0);
+        REQUIRE(acl != nullptr);
+        CHECK(acl->AceCount == 1);
+        LocalFree(descriptor);
+        return 0600;
+    };
+#endif
     auto onlyTheFile = [&] {
         std::vector<std::string> names;
         for (const auto& f : std::filesystem::directory_iterator(file.parent_path()))
@@ -538,7 +557,9 @@ TEST_CASE("the endpoint config is replaced atomically and stays owner-only") {
     CHECK(onlyTheFile());
 
     // An existing file readable by others is replaced by an owner-only one.
+#if !defined(_WIN32)
     ::chmod(file.c_str(), 0644);
+#endif
     c.endpoints[0].apiKey = "sk-2";
     REQUIRE(c.save(file));
     CHECK(mode(file) == 0600);
@@ -548,6 +569,7 @@ TEST_CASE("the endpoint config is replaced atomically and stays owner-only") {
     CHECK(loaded->endpoints.at(0).apiKey == "sk-2");
 
     // A failed write leaves the previous file as it was, and no temporary file.
+#if !defined(_WIN32)
     if (::geteuid() != 0) {
         ::chmod(file.parent_path().c_str(), 0500);
         c.endpoints[0].apiKey = "sk-3";
@@ -558,6 +580,18 @@ TEST_CASE("the endpoint config is replaced atomically and stays owner-only") {
         CHECK(Config::load(file)->endpoints.at(0).apiKey == "sk-2");
         CHECK(onlyTheFile());
     }
+#else
+    HANDLE held = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    REQUIRE(held != INVALID_HANDLE_VALUE);
+    c.endpoints[0].apiKey = "sk-3";
+    const auto denied = c.save(file);
+    CloseHandle(held);
+    REQUIRE_FALSE(denied);
+    CHECK(denied.error().code == "agent.config");
+    CHECK(Config::load(file)->endpoints.at(0).apiKey == "sk-2");
+    CHECK(onlyTheFile());
+#endif
     const auto blocked = dir / "slug" / "blocked";  // a non-empty directory: rename fails
     std::filesystem::create_directories(blocked / "inside");
     REQUIRE_FALSE(c.save(blocked));

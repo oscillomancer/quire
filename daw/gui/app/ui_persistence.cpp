@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "ui_persistence.h"
+#include "supple/base/stop.h"
 
 #include <cstdio>
 
@@ -12,7 +13,7 @@ namespace supple::gui {
 
 UiPersistence::UiPersistence(std::function<void()> completed)
     : completed_(std::move(completed)),
-      writer_([this](std::stop_token stop) { writerLoop(stop); }) {}
+      writer_([this](supple::StopToken stop) { writerLoop(stop); }) {}
 
 UiPersistence::~UiPersistence() {
     drain();
@@ -20,7 +21,7 @@ UiPersistence::~UiPersistence() {
     wake_.notify_all();
 }
 
-void UiPersistence::writerLoop(std::stop_token stop) {
+void UiPersistence::writerLoop(supple::StopToken stop) {
     std::unique_lock lock(mutex_);
     for (;;) {
         wake_.wait(lock, stop, [&] { return pending_.has_value(); });
@@ -120,7 +121,7 @@ void UiPersistence::tick(const std::filesystem::path& project, std::uint64_t gen
                 } else {
                     protectedFile_ = true;
                     std::fprintf(stderr, "ui: %s has invalid or unsupported UI state; ignored\n",
-                                 file.c_str());
+                                 file.string().c_str());
                 }
             } else {
                 protectedFile_ = true;  // unreadable state must not be overwritten

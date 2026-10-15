@@ -2,7 +2,6 @@
 // Copyright (c) 2026 Supple Audio
 #include <doctest/doctest.h>
 
-#include <unistd.h>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -14,6 +13,7 @@
 #include <numbers>
 #include <thread>
 #include <vector>
+#include "test_support.h"
 
 #include "supple/audio/audio_file.h"
 #include "supple/base/files.h"
@@ -38,7 +38,7 @@ audio::AudioData tone(std::size_t frames, double rate = 48000.0) {
 
 std::filesystem::path scratch(const char* name) {
     auto dir = std::filesystem::temp_directory_path() /
-               ("supple-peaks-test-" + std::to_string(::getpid())) / name;
+               ("supple-peaks-test-" + std::to_string(testProcessId())) / name;
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
     return dir;
