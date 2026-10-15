@@ -48,6 +48,15 @@ void awaitWake(MainThreadWake& wake) {
     REQUIRE(wake.drain());
 }
 }  // namespace
+TEST_CASE("bridge lookup resolves the platform executable suffix") {
+    for (const std::filesystem::path& executable :
+         {std::filesystem::path(BRIDGE_PATH), std::filesystem::path(SCANNER_PATH)}) {
+        setBridgeExecutable({});
+        REQUIRE(locateBridgeExecutable(executable.stem().string()));
+        CHECK(std::filesystem::equivalent(bridgeExecutable(), executable));
+    }
+    setBridgeExecutable(BRIDGE_PATH);
+}
 #if !defined(_WIN32)
 TEST_CASE("native bridge launch uses the helper private process group") {
     setBridgeExecutable(BRIDGE_PATH);

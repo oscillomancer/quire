@@ -55,11 +55,15 @@ bool locateBridgeExecutable(std::string_view name) {
     const std::filesystem::path self = ownExecutable();
     if (self.empty()) return false;
     const std::filesystem::path dir = self.parent_path();
+    auto file = platform::pathFromText(name);
+#if defined(_WIN32)
+    file += ".exe";
+#endif
     // Installed: beside it. Build tree: host/engine/tools -> host/clap-host,
     // daw/gui -> host/clap-host.
     for (const std::filesystem::path& candidate :
-         {dir / name, dir.parent_path() / "clap-host" / name,
-          dir.parent_path().parent_path() / "host" / "clap-host" / name})
+         {dir / file, dir.parent_path() / "clap-host" / file,
+          dir.parent_path().parent_path() / "host" / "clap-host" / file})
         if (std::filesystem::exists(candidate, ec)) {
             setBridgeExecutable(candidate);
             return true;

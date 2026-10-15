@@ -375,10 +375,10 @@ TEST_CASE("sandbox plugin list exposes cached failures even for an empty catalog
     REQUIRE(supple::test::environment(cacheVariable, cache.string().c_str()) == 0);
     fs::create_directories(root.path);
     struct Bridge {
-        fs::path previous =
-            fs::path(FIXTURE_CLAP_PATH).parent_path() / (std::string(product::kSlug) + "-bridge");
+        fs::path previous = BRIDGE_PATH;
         ~Bridge() { host::setBridgeExecutable(previous); }
     } bridge;
+    host::setBridgeExecutable(BRIDGE_PATH);
     const auto bad = root.path / "bad.clap";
     REQUIRE(writeFileAtomic(bad, "invalid plugin"));
     SessionOptions options;
