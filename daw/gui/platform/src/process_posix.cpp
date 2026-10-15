@@ -7,8 +7,10 @@
 #include <sstream>
 #include "supple/gui/process.h"
 #if defined(__APPLE__)
+#include <libproc.h>
 #include <mach/mach.h>
 #include <sys/resource.h>
+#include <sys/time.h>
 #endif
 namespace supple::gui {
 std::tm localTime(std::time_t time) {
@@ -38,6 +40,17 @@ double millisecondsSinceProcessStart() {
             const double startS = std::stod(field) / static_cast<double>(sysconf(_SC_CLK_TCK));
             return 1000.0 * (nowS - startS);
         }
+#elif defined(__APPLE__)
+    proc_bsdinfo info{};
+    timeval now{};
+    constexpr int size = static_cast<int>(sizeof(info));
+    if (proc_pidinfo(::getpid(), PROC_PIDTBSDINFO, 0, &info, size) != size ||
+        gettimeofday(&now, nullptr) != 0)
+        return -1;
+    const double elapsed =
+        1000.0 * (static_cast<double>(now.tv_sec) - static_cast<double>(info.pbi_start_tvsec)) +
+        0.001 * (static_cast<double>(now.tv_usec) - static_cast<double>(info.pbi_start_tvusec));
+    return elapsed >= 0 ? elapsed : -1;
 #endif
     return -1;
 }

@@ -108,3 +108,8 @@ is now combined with the GUI shell. Its NativeWindow accessor and native sizing
 are preserved alongside the extracted shared Waitable watcher. GUI editor
 integration tests build natively; real plugin display tests retain their exact
 SUPPLE_GUI_DISPLAY_TEST=1 opt-in. Linux pipe/poll fixtures stay Linux-only.
+
+**2026-10-15 fixture/timing amendment:** GUI socket/screenset integration tests
+now run natively, using portable pipes and native window-close cleanup. macOS
+cold-start timing uses the kernel process start timestamp via proc_pidinfo;
+`-1` remains the failure sentinel. Linux rendering and golden references stay.

@@ -820,8 +820,9 @@ exposes the selection to agents.
   task durations over 2 ms (each bus pump with its sidecar and editor
   service, each panels' sync pass, each input event; frames are counted on
   their own), idle CPU over 10 s and cold start to first
-  interactive frame. macOS reports cold-start process timing as unavailable
-  (`-1`); frame, CPU and idle measurements remain supported. Results in
+  interactive frame. macOS reads the kernel process start timestamp through
+  `proc_pidinfo`; unavailable timing still reports `-1`. Frame, CPU and idle
+  measurements remain supported. Results in
   `docs/benchmarks/gui.md`; the gates of
   ADR-0005 §5 are acceptance criteria.
 - Telemetry for long main-thread tasks in debug builds (a watchdog that
@@ -868,3 +869,11 @@ before writing any secret. Unsupported ACL filesystems return `agent.config`.
 A Windows reader denying delete sharing can block replacement; the previous
 file remains intact and the temporary file is removed. HTTP and config tests
 run natively, with loopback sockets and no real endpoint or key.
+
+**Native fixture coverage (2026-10-15):** socket-agent and screenset Python
+integration tests run on Linux, macOS and Windows. The socket test uses the
+existing portable AF_UNIX endpoint and bounded stdio pipe readiness. It saves
+its private project before native window-close on Windows (TerminateProcess
+cannot run shutdown/snapshot cleanup); POSIX retains SIGTERM. Final snapshots
+must match the window's design aspect ratio at its framebuffer density. All
+fixtures use dummy/no audio and private work/config directories.

@@ -18,6 +18,32 @@ from pathlib import Path
 from processes import stop
 
 
+def close_gui(process):
+    """Use the native close event on Windows, where terminate skips cleanup."""
+    if os.name != "nt":
+        process.terminate()
+        return
+    import ctypes
+    from ctypes import wintypes
+    user = ctypes.WinDLL("user32", use_last_error=True)
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    user.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
+    user.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    posted = []
+
+    @callback_type
+    def close(window, _):
+        owner = wintypes.DWORD()
+        user.GetWindowThreadProcessId(window, ctypes.byref(owner))
+        if owner.value == process.pid:
+            posted.append(bool(user.PostMessageW(window, 0x0010, 0, 0)))  # WM_CLOSE
+        return True
+
+    user.EnumWindows(close, 0)
+    assert any(posted), "the GUI has no native window to close"
+
+
 def png_size_and_pixels(path):
     data = Path(path).read_bytes()
     assert data[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"
@@ -36,11 +62,12 @@ def png_size_and_pixels(path):
 
 def main():
     gui_binary, proxy_binary, snapshot = sys.argv[1:4]
-    with tempfile.TemporaryDirectory(prefix="supple-gui-agent-") as temporary:
+    # AF_UNIX is also the Windows transport; keep its endpoint below 108 bytes.
+    with tempfile.TemporaryDirectory(prefix="sg-") as temporary:
         socket = Path(temporary) / "control.sock"
         gui = subprocess.Popen(
             [gui_binary, "--offscreen", "--socket", str(socket), "--workdir", temporary,
-             "--snapshot", snapshot],
+             "--snapshot", snapshot, "--audio", "dummy"],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         proxy = None
         try:
@@ -84,16 +111,21 @@ def main():
             assert not described.get("isError"), described
             text = json.dumps(described)
             assert "Drums" in text and "Kick" in text, text[:400]
+            # A native window-close must not open the unsaved-changes prompt.
+            saved = call(21, "tools/call", {"name": "project_save", "arguments": {
+                "path": str(Path(temporary) / "song.json")}})
+            assert not saved.get("isError"), saved
             proxy.stdin.close()
             assert proxy.wait(timeout=10) == 0, proxy.stderr.read().decode()
+            close_gui(gui)
+            assert gui.wait(timeout=20) == 0, gui.stderr.read().decode()
         finally:
-            # Both children are ended and reaped on every path: SIGTERM lets the
-            # GUI write its snapshot; a GUI that does not exit is killed.
+            # Reap both children on every path, including native close failures.
             stop(proxy, timeout=5, graceful=False)
             code = stop(gui, timeout=20)
         assert code == 0, f"GUI exited {code}: {gui.stderr.read().decode()}"
     width, height, raw = png_size_and_pixels(snapshot)
-    assert (width, height) == (1280, 800), (width, height)
+    assert width >= 1280 and height >= 800 and width * 800 == height * 1280, (width, height)
     assert len(raw) == height * (width * 4 + 1)
     print(f"ok: agent added strips over the GUI's socket; final frame {width}x{height}")
 

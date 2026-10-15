@@ -152,7 +152,6 @@ if(SUPPLE_BUILD_TESTS)
                    --action ui.no-such-action)
   set_tests_properties(gui.app-unknown-action PROPERTIES LABELS "gui;tsan-skip" WILL_FAIL TRUE
                        ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
-  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   # Named screensets saved into the UI file and recalled in a later run.
   add_test(NAME gui.screensets
            COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/gui_screensets.py
@@ -166,5 +165,4 @@ if(SUPPLE_BUILD_TESTS)
                    ${CMAKE_CURRENT_BINARY_DIR}/agent-final.png)
   set_tests_properties(gui.agent-over-socket PROPERTIES LABELS "gui;tsan-skip"
                        ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
-  endif()  # Linux integration scripts use POSIX process/socket helpers
 endif()

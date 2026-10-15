@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 def run_app(app, project, *actions):
-    argv = [app, str(project), "--offscreen", "--no-socket", "--frames", "3", "--audio", "none"]
+    argv = [app, str(project), "--offscreen", "--no-socket", "--frames", "3", "--audio", "none", "--workdir", str(project.parent)]
     for a in actions:
         argv += ["--action", a]
     subprocess.run(argv, check=True, timeout=120)
@@ -27,7 +27,7 @@ def main():
         # Save the mixer open and zoomed in as "mixing", then the default as slot 1.
         ui_file.write_text(json.dumps({"arrange": {"pixels_per_second": 120.0}}))
         run_app(app, project, "ui.mixer", 'ui.screenset.save {"name": "mixing"}')
-        ui = json.loads(ui_file.read_text())
+        ui = json.loads(ui_file.read_text(encoding="utf-8"))
         mixing = ui["screensets"]["mixing"]
         assert mixing["panels"]["mixer"] is True, mixing
         assert mixing["arrange"]["pixels_per_second"] == 120.0, mixing
@@ -36,19 +36,19 @@ def main():
         ui["arrange"]["pixels_per_second"] = 20.0
         ui_file.write_text(json.dumps(ui))
         run_app(app, project, 'ui.screenset.load {"name": "mixing"}')
-        ui = json.loads(ui_file.read_text())
+        ui = json.loads(ui_file.read_text(encoding="utf-8"))
         assert ui["panels"]["mixer"] is True, ui["panels"]
         assert ui["arrange"]["pixels_per_second"] == 120.0, ui["arrange"]
         # Slots are names; an unknown name fails the run.
         run_app(app, project, "ui.screenset.save:2")
-        assert "2" in json.loads(ui_file.read_text())["screensets"]
+        assert "2" in json.loads(ui_file.read_text(encoding="utf-8"))["screensets"]
         failed = subprocess.run(
             [app, str(project), "--offscreen", "--no-socket", "--frames", "2", "--audio", "none",
              "--action", 'ui.screenset.load {"name": "nope"}'], timeout=120,
             stderr=subprocess.PIPE, text=True)
         assert failed.returncode != 0 and "screenset.unknown" in failed.stderr, failed.stderr
         run_app(app, project, 'ui.screenset.delete {"name": "mixing"}')
-        assert "mixing" not in json.loads(ui_file.read_text())["screensets"]
+        assert "mixing" not in json.loads(ui_file.read_text(encoding="utf-8"))["screensets"]
     print("screensets: ok")
 
 

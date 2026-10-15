@@ -7,12 +7,20 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <thread>
 
 #include "supple/gui/png.h"
+#include "supple/gui/process.h"
 #include "supple/gui/window.h"
 
 using namespace supple;
+
+TEST_CASE("process startup timing is available on the native platform") {
+    const double elapsed = gui::millisecondsSinceProcessStart();
+    CHECK(std::isfinite(elapsed));
+    CHECK(elapsed >= 0);  // API availability, not a wall-clock performance threshold
+}
 
 TEST_CASE("the PNG writer produces files a decoder reads back exactly") {
     gui::Image image;
