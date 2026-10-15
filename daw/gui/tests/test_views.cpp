@@ -22,6 +22,7 @@
 #include "generated_media.h"
 #include "meter_feed.h"
 #include "supple/engine/app.h"
+#include "supple/gui/gl_api.h"
 #include "supple/gui/png.h"
 #include "supple/model/session.h"
 #include "supple/model/source_mapping.h"
@@ -1580,6 +1581,23 @@ TEST_CASE("unrelated FX edits in 200 tracks and 2000 items have bounded invalida
         root.damageAll();
         root.frame(false);
         const auto complete = root.readBack();
+        if (incremental.rgba != complete.rgba) {
+            std::size_t changed = 0;
+            int largest = 0;
+            REQUIRE(incremental.rgba.size() == complete.rgba.size());
+            for (std::size_t i = 0; i < incremental.rgba.size(); ++i) {
+                const int delta = std::abs(int(incremental.rgba[i]) - int(complete.rgba[i]));
+                changed += delta != 0;
+                largest = std::max(largest, delta);
+            }
+            MESSAGE("repaint version " << txn.version() << ": " << changed
+                                       << " channels differ, largest delta " << largest);
+            MESSAGE("renderer " << g.window->renderer() << ", dither "
+                                << (glIsEnabled(GL_DITHER) != GL_FALSE));
+            const auto suffix = std::to_string(txn.version()) + ".png";
+            REQUIRE(gui::writePng("incremental-" + suffix, incremental));
+            REQUIRE(gui::writePng("complete-" + suffix, complete));
+        }
         CHECK((incremental.rgba == complete.rgba));
         current = *next;
     };
