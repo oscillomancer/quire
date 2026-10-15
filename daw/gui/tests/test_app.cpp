@@ -28,6 +28,7 @@
 #include "shell.h"
 #include "supple/audio/audio_file.h"
 #include "supple/base/files.h"
+#include "supple/base/paths.h"
 #include "supple/engine/app.h"
 #include "supple/gui/png.h"
 #include "supple/peaks/peaks.h"
@@ -193,7 +194,7 @@ TEST_CASE("app actions: keys, the actions list, prompts, key binding and menus")
     a.key("F5");
     CHECK(a.actions->keysFor("track.add:master") == "F5");
     a.key("Escape");
-    CHECK(std::filesystem::exists(a.dir / "config" / gui::test::slug() / "keymap.json"));
+    CHECK(std::filesystem::exists(paths::config() / gui::test::slug() / "keymap.json"));
     const std::size_t masters = a.tracks("master");
     a.key("F5");
     CHECK(a.tracks("master") == masters + 1);
@@ -630,7 +631,7 @@ TEST_CASE("file actions: project templates save, start a new project and delete"
     if (!a.ok) return;
     gui::FileActions files(*a.root, *a.actions, *a.dispatcher, *a.app, a.ui, a.window->sdl(),
                            [](std::function<void()> f) { f(); });
-    const auto dir = a.dir / "config" / std::string(product::kSlug) / "templates";
+    const auto dir = paths::config() / std::string(product::kSlug) / "templates";
     a.key("Ctrl+T");
     const std::size_t tracks = a.tracks();
     // File > Save template…: a name, then Save. A taken name asks once more.
