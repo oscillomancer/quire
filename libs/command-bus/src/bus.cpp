@@ -878,7 +878,11 @@ json::Value mcpToolList(const Registry& registry) {
                 field.value["description"] = std::move(updated);
             }
         tool["inputSchema"] = std::move(input);
-        tool["outputSchema"] = info->resultSchema;
+        // MCP output schemas must describe an object; results declared as any
+        // JSON value (an empty schema) advertise none.
+        if (const auto* type = info->resultSchema.find("type");
+            type && type->isString() && type->asString() == "object")
+            tool["outputSchema"] = info->resultSchema;
         tool["annotations"] = json::Value::object();
         tool["annotations"]["readOnlyHint"] = info->kind == Kind::Query;
         tool["annotations"]["destructiveHint"] = info->kind == Kind::Action;

@@ -260,6 +260,9 @@ transaction-safe inside a batch), `rpc.*` (§3), `mcp.*` (§4).
 
 - **Transport:** Unix domain stream socket at
   `$XDG_RUNTIME_DIR/<slug>/<instance>.sock` (directory 0700, socket 0600).
+  Without `XDG_RUNTIME_DIR` (some MCP clients start servers with a reduced
+  environment) the root is `/run/user/<uid>` when that is a private
+  directory of the user, else `/tmp` (`paths::runtime()`).
   Accepted connection descriptors are nonblocking and close-on-exec.
   Framing: one JSON value per line (UTF-8, `\n`-terminated, compact JSON; no
   embedded newlines), max 16 MiB per message.
@@ -318,7 +321,9 @@ For every `McpTool` command: `name`, `title` (summary), `description`
 (summary + description + a one-line pointer to errors/examples via
 `describe`), `inputSchema` (args JSON Schema, with `x-unit` hints folded into
 field descriptions like "(Hz; accepts \"1.2 kHz\")" because clients ignore
-unknown keywords), `outputSchema` (result JSON Schema), `annotations`
+unknown keywords), `outputSchema` (result JSON Schema, only when it is an
+object schema: MCP requires `type: "object"`, and clients such as the Python
+SDK refuse the whole tool list otherwise), `annotations`
 (`readOnlyHint` for Query, `destructiveHint: false` for Edit — undoable —
 and `idempotentHint` where true).
 
@@ -327,7 +332,8 @@ and `idempotentHint` where true).
 `tools/call` → dispatcher `execute` with `Origin{Mcp, client name from
 initialize, agent}`. Every valid `initialize` replaces the client and agent
 identity; an absent `_meta.agent` clears the agent. The proxy forwards that
-identity in its RPC handshake. Success: `structuredContent` = result JSON and
+identity in its RPC handshake. Success: `structuredContent` = result JSON
+when the result is an object (MCP structured content is an object) and
 `content: [{"type":"text","text": <compact JSON of the result>}]`. Failure:
 `isError: true`, `content: [{"type":"text","text": <error rendered as
 "code at path: message\nHint: hint" plus details>}]`, `structuredContent` =

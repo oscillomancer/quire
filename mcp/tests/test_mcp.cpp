@@ -93,6 +93,21 @@ cmd::Registry registry() {
         return Count{ctx.service<int>() += args.value};
     };
     r.add(std::move(command));
+    // A result declared as any JSON value, here an array.
+    cmd::Command<Args, json::Value> history;
+    history.name = "counter.history";
+    history.kind = cmd::Kind::Query;
+    history.exposure = cmd::Exposure::McpTool;
+    history.summary = "List the counter's values.";
+    history.args = schema::object<Args>("history_args").build();
+    history.result = schema::any();
+    history.examples = {{"Values", json::Value::object(), json::parse("[0]").value(), "empty"}};
+    history.run = [](const Args&, cmd::Context& ctx) -> Result<json::Value> {
+        json::Value values = json::Value::array();
+        values.push_back(ctx.service<int>());
+        return values;
+    };
+    r.add(std::move(history));
     return r;
 }
 json::Value parse(std::string_view input) { return json::parse(input).value(); }
@@ -100,6 +115,32 @@ json::Value request(mcp::Server& server, std::string_view input) {
     auto output = server.handle(parse(input));
     REQUIRE(output);
     return *output;
+}
+// MCP clients refuse a tool list whose output schemas are not object schemas
+// (the Python SDK fails the whole list), and structured content is an object.
+void checkMcpShapes(mcp::Server& server, int id) {
+    auto listed = request(
+        server, R"({"jsonrpc":"2.0","id":)" + std::to_string(id) + R"(,"method":"tools/list"})");
+    bool sawHistory = false;
+    for (const auto& tool : listed.find("result")->find("tools")->asArray()) {
+        if (auto* output = tool.find("outputSchema")) {
+            auto* type = output->find("type");
+            CHECK((type && type->isString() && type->asString() == "object"));
+        }
+        if (tool.find("name")->asString() == "counter_history") {
+            sawHistory = true;
+            CHECK(tool.find("outputSchema") == nullptr);
+        }
+    }
+    CHECK(sawHistory);
+    auto history = request(
+        server,
+        R"({"jsonrpc":"2.0","id":)" + std::to_string(id + 1) +
+            R"(,"method":"tools/call","params":{"name":"counter_history","arguments":{}}})");
+    CHECK(history.find("result")->find("structuredContent") == nullptr);
+    CHECK(
+        history.find("result")->find("content")->asArray()[0].find("text")->asString().starts_with(
+            "["));
 }
 struct ModelQueue {
     std::mutex mutex;
@@ -154,6 +195,7 @@ TEST_CASE("in-process MCP negotiates, lists and executes with structured errors"
     for (const auto& tool : listed.find("result")->find("tools")->asArray())
         if (tool.find("name")->asString() == "counter_add") found = true;
     CHECK(found);
+    checkMcpShapes(server, 20);
     auto success = request(
         server,
         R"({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"counter_add","arguments":{"value":3}}})");
@@ -215,6 +257,7 @@ TEST_CASE("proxy MCP forwards calls over the Unix control socket") {
     for (const auto& tool : listed.find("result")->find("tools")->asArray())
         if (tool.find("name")->asString() == "counter_add") found = true;
     CHECK(found);
+    checkMcpShapes(**proxy, 20);
     auto success = request(
         **proxy,
         R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"counter_add","arguments":{"value":5}}})");

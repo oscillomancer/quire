@@ -68,7 +68,6 @@
       "required": ["masker_track", "maskee_track"],
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -97,7 +96,6 @@
       "required": ["render"],
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -139,7 +137,6 @@
       "required": ["track"],
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -212,7 +209,6 @@
       "required": ["env"],
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
@@ -244,7 +240,6 @@
       "required": ["item"],
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
@@ -267,7 +262,6 @@
       },
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -371,7 +365,6 @@
       "required": ["item"],
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
@@ -684,7 +677,6 @@
       "required": ["a", "b"],
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -1798,7 +1790,6 @@
       "properties": {},
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -4363,7 +4354,6 @@
       },
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -4661,7 +4651,6 @@
       "required": ["item", "ops"],
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": false,
@@ -4718,7 +4707,6 @@
       "required": ["item"],
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -5972,7 +5960,6 @@
       },
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -6117,7 +6104,6 @@
       "required": ["command", "args"],
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -6134,7 +6120,6 @@
       "properties": {},
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,
@@ -6159,7 +6144,6 @@
       },
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -6181,7 +6165,6 @@
       },
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -6297,7 +6280,6 @@
       },
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -6413,7 +6395,6 @@
       },
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
@@ -6671,7 +6652,6 @@
       "properties": {},
       "additionalProperties": false
     },
-    "outputSchema": {},
     "annotations": {
       "readOnlyHint": true,
       "destructiveHint": false,

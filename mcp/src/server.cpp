@@ -66,7 +66,9 @@ json::Value tool(std::string name, std::string title, std::string description, j
     value["title"] = std::move(title);
     value["description"] = std::move(description);
     value["inputSchema"] = std::move(input);
-    value["outputSchema"] = std::move(output);
+    // MCP output schemas must describe an object; results declared as any
+    // JSON value (an empty schema) advertise none.
+    if (stringField(output, "type") == "object") value["outputSchema"] = std::move(output);
     return value;
 }
 json::Value toolFromInfo(const json::Value& info) {
@@ -275,7 +277,8 @@ std::optional<json::Value> Server::handle(const json::Value& request) {
         json::Value text = json::Value::object();
         text["type"] = "text";
         if (result) {
-            output["structuredContent"] = *result;
+            // MCP structured content is an object; other results go as text only.
+            if (result->isObject()) output["structuredContent"] = *result;
             text["text"] = json::writeCompact(*result);
         } else {
             output["isError"] = true;
