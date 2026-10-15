@@ -17,12 +17,10 @@
 #include <sstream>
 #include <string>
 
+#include "../../dsp-commands/dsp_export_platform.h"
 #include "supple/audio/audio_file.h"
 #include "supple/base/files.h"
 #include "supple/sandbox/commands.h"
-#if defined(__APPLE__) || defined(_WIN32)
-#include "../../dsp-commands/dsp_export_platform.h"
-#endif
 
 using namespace supple;
 using namespace supple::sandbox;
@@ -471,7 +469,7 @@ TEST_CASE("dsp.export makes a plugin that plays its version of the script, and n
     json::Value first = exportTo(library, output);
     CHECK(first["path"].asString() == utf8(plugin));
     CHECK(first["id"].asString() == "com.example.boost");
-#if defined(_WIN32)
+#if !defined(__linux__)
     CHECK(fs::equivalent(dsp_commands::binary_export::path(first["player"].asString()), player));
 #else
     CHECK(first["player"].asString() == player.string());
@@ -532,7 +530,7 @@ TEST_CASE("dsp.export makes a plugin that plays its version of the script, and n
     // An export exported again starts from the player, with the new script.
     write(anywhere, "boost", boost(12));
     json::Value second = exportTo(anywhere, root.path / "again");
-#if defined(_WIN32)
+#if !defined(__linux__)
     CHECK(fs::equivalent(dsp_commands::binary_export::path(second["player"].asString()), plugin));
 #else
     CHECK(second["player"].asString() == first["path"].asString());
@@ -719,7 +717,7 @@ TEST_CASE("plugin-file export defaults to the script's export folder") {
     auto result = h.bus->execute({"dsp.export", args, kTest});
     REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
     CHECK((*result)["format"].asString() == "clap");
-#if defined(_WIN32)
+#if !defined(__linux__)
     CHECK(fs::equivalent(dsp_commands::binary_export::path((*result)["path"].asString()),
                          h.host->session().scriptDir() / "native-export/export/Native.clap"));
 #else
