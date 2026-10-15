@@ -105,10 +105,8 @@ TEST_CASE(
         };
         NSWindow* ownerWindow = nsWindow(**owner);
         NSWindow* otherWindow = nsWindow(**other);
-        [ownerWindow makeKeyAndOrderFront:nil];
-        [NSApp activate];
+        (*owner)->show();
         [NSApp updateWindows];
-        const auto activePid = NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier;
         ScanOptions options;
         options.forceInProcess = true;
         const std::filesystem::path path = FIXTURE_CLAP_PATH;
@@ -125,6 +123,7 @@ TEST_CASE(
         REQUIRE(instance);
         const NativeWindow parent{NativeWindow::Kind::Floating,
                                   static_cast<std::uintptr_t>(ownerWindow.windowNumber)};
+        const auto activePid = NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier;
         REQUIRE((*instance)->openEditor(parent, 1));
         auto windows = [] {
             return CFBridgingRelease(
@@ -138,9 +137,10 @@ TEST_CASE(
         };
         NSArray* list = windows();
         NSDictionary* editor = editorInfo(list);
-        REQUIRE_MESSAGE(editor, "run in an interactive macOS desktop with window-list access");
+        REQUIRE_MESSAGE(editor != nil,
+                        "run in an interactive macOS desktop with window-list access");
         NSNumber* editorNumber = editor[(__bridge NSString*)kCGWindowNumber];
-        auto position = [](NSArray* entries, NSNumber* number) {
+        auto position = [](NSArray* entries, NSNumber* number) -> NSUInteger {
             for (NSUInteger i = 0; i < entries.count; ++i)
                 if ([entries[i][(__bridge NSString*)kCGWindowNumber] isEqual:number]) return i;
             return NSNotFound;
@@ -155,7 +155,7 @@ TEST_CASE(
         [NSApp updateWindows];
         REQUIRE((*instance)->openEditor(parent, 1));
         list = windows();
-        REQUIRE(editorInfo(list));
+        REQUIRE(editorInfo(list) != nil);
         REQUIRE(position(list, @(otherWindow.windowNumber)) != NSNotFound);
         REQUIRE(position(list, @(ownerWindow.windowNumber)) != NSNotFound);
         CHECK([editorInfo(list)[(__bridge NSString*)kCGWindowNumber] isEqual:editorNumber]);
