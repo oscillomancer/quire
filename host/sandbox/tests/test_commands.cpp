@@ -116,14 +116,35 @@ TEST_CASE("every sandbox command example runs against its fixture" * doctest::de
         },
         [](std::string_view fixture) {
 #if !defined(__linux__)
-            if (fixture == "dsp_player_export") return false;
+            if (fixture == "dsp_player_export" || fixture == "dsp_player_editor") return false;
 #endif
             return SUPPLE_EDITORS || fixture != "dsp_player_editor";
         });
     INFO((st ? std::string() : st.error().toString()));
     CHECK(st.ok());
+#if defined(__linux__)
     CHECK(n >= 16);
+#else
+    CHECK(n >= 13);  // two editor pictures and the binary export require Linux
+#endif
 }
+
+#if !defined(__linux__) && SUPPLE_EDITORS
+TEST_CASE("native DSP previews report the unavailable headless drawing capability") {
+    Root root;
+    cmd::Registry registry;
+    registerCommands(registry);
+    auto host = makeHost(root.path / "preview", {}, true);
+    cmd::Dispatcher dispatcher(registry, *host);
+    host->setupFixture(dispatcher, "dsp_player_editor");
+    auto result = dispatcher.execute({"dsp.preview", j(R"({"script":"gain","seconds":0})"), kTest});
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == "dsp.no_picture");
+    CHECK(result.error().path == "/args/script");
+    CHECK_FALSE(result.error().message.empty());
+    CHECK(result.error().hint.find("Linux") != std::string::npos);
+}
+#endif
 
 TEST_CASE("an LLM-style session: load, program, render, batch with references") {
     Root root;

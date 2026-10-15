@@ -129,7 +129,8 @@ void registerDspPreview(cmd::Registry& registry) {
         "drag (from x, y to to_x, to_y) and wheel (steps notches, up positive), with shift, ctrl "
         "or alt held; edits is a merge patch of what they changed, as a user's edits would. "
         "problems says what went wrong in the editor's code (a loop stopped by its budget, an "
-        "index out of range), with the line.";
+        "index out of range), with the line. The script player's headless editor pictures "
+        "currently require Linux with EGL; on macOS and Windows it returns dsp.no_picture.";
     c.tags = {"dsp", "editor"};
     const auto place = [] {
         return schema::number()
@@ -325,9 +326,15 @@ void registerDspPreview(cmd::Registry& registry) {
         auto picture = instance.drawEditor(a.scale, input);
         (void)instance.watchEditor(false);
         if (!picture)
-            return Error(
-                "dsp.no_picture", picture.error().message, a.plugin ? "/plugin" : "/script",
-                "drawing without a window needs EGL (Mesa's libEGL), with or without a GPU");
+            return Error("dsp.no_picture", picture.error().message,
+                         a.plugin ? "/plugin" : "/script",
+#if defined(__linux__)
+                         "drawing without a window needs EGL (Mesa's libEGL), with or without a GPU"
+#else
+                         "use Linux with EGL for editor pictures; native editor windows remain "
+                         "available"
+#endif
+            );
         if (!steps.empty())
             if (auto edits = json::createMergePatch(before, patchNow()))
                 out.edits = std::move(*edits);

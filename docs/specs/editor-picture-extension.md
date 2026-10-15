@@ -104,6 +104,11 @@ reports what the input edited as a merge patch from the semantic patch
 before `draw` to the one after. Isolated (bridged) instances are not
 pictured.
 
+The script player's headless drawing backend currently requires Linux with
+EGL. On macOS and Windows, `dsp.preview` returns the structured `dsp.no_picture`
+error at `/args/plugin` or `/args/script`, with a hint to use Linux with EGL.
+Native editor windows are independent of this headless picture capability.
+
 ## 4. Versioning
 
 `struct_size` is the size of the struct the plugin was built with; a host

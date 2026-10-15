@@ -299,6 +299,8 @@ GUI:
   Windows config keys use a protected current-user ACL; filesystems without
   ACL support fail the save. macOS cold-start process timing is unavailable.
   GUI socket/screenset Python integration scripts remain Linux-only.
+  Script-player headless editor pictures (`dsp.preview`) still require
+  Linux/EGL; native builds return `dsp.no_picture` with a capability hint.
 - No autoscroll during drags; no resize cursor; plugins can be dropped onto
   mixer strips but not onto track-panel rows.
 

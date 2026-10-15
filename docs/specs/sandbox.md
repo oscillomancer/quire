@@ -373,6 +373,10 @@ existing export's combined notices) to be readable before it writes the
 plugin. Missing files fail with `dsp.notices` at `/script`, with a hint to
 restore the files. Every successful CLAP export returns its `notices` path.
 
+The script player's headless pictures through `dsp.preview` currently require
+Linux/EGL; macOS and Windows return `dsp.no_picture` with a platform capability
+hint. This does not limit native editor windows.
+
 `dsp.test` and `dsp.preview` locate patch validation errors beneath
 `/patch` (the command boundary adds `/args`), for example
 `/args/patch/params/gain`, preserving the plugin's code and corrective hint.
