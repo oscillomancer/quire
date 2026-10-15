@@ -864,6 +864,9 @@ offscreen driver. Offscreen and finite-frame runs close without an interactive
 discard prompt, completing normal cleanup and any requested final snapshot.
 Golden comparisons and reference updates are Linux-only;
 native renders require GL and check content/size, with smoke images in CI.
+macOS bulk rectangles align their edges to whole framebuffer pixels: Apple's
+software rasterizer can otherwise cover half-pixel edges differently under
+partial scissor clipping. Incremental/full repaint checks remain byte-exact.
 
 Agent API keys stay out of projects. Config publication is atomic and private
 throughout: POSIX 0600; Windows a protected current-user-only DACL, established

@@ -273,6 +273,19 @@ RectRenderer::~RectRenderer() {
 
 void RectRenderer::flush(const GlFrame& frame) {
     if (!instances_.empty()) {
+#if defined(__APPLE__)
+        // Apple's software rasterizer can cover a half-pixel triangle edge
+        // differently after scissor clipping. Whole-pixel edges keep partial
+        // and complete repaints identical (notably MIDI note thumbnails).
+        for (auto& instance : instances_) {
+            const float right = std::round((instance.x + instance.w) * frame.ratio) / frame.ratio;
+            const float bottom = std::round((instance.y + instance.h) * frame.ratio) / frame.ratio;
+            instance.x = std::round(instance.x * frame.ratio) / frame.ratio;
+            instance.y = std::round(instance.y * frame.ratio) / frame.ratio;
+            instance.w = right - instance.x;
+            instance.h = bottom - instance.y;
+        }
+#endif
         upload(vbo_, capacity_, instances_.data(), instances_.size() * sizeof(Instance));
         blendState();
         glUseProgram(program_.id());
