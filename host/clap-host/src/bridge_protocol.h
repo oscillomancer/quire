@@ -45,11 +45,12 @@ inline constexpr std::uint32_t kMagic = 0x31474253;  // "SBG1"
 // 11: a versioned outward notification subscription and process-level rearm.
 // 12: a main-thread plugin-status query (no data-plane change).
 // 13: read-only factory patches through semantic-params.
+// 17/18: Floating carries a Cocoa owner window number (ADR-0041).
+// 18/19: EditorScale renegotiates a live display-scale change (ADR-0040).
 #if defined(_WIN32)
-inline constexpr std::uint32_t kVersion =
-    18;  // Floating carries a Cocoa owner window number; native control handles
+inline constexpr std::uint32_t kVersion = 19;  // Windows runs one ahead: native control handles
 #else
-inline constexpr std::uint32_t kVersion = 17;  // Floating carries a Cocoa owner window number
+inline constexpr std::uint32_t kVersion = 18;
 #endif
 inline constexpr int kControlFd = 3;  // the bridge's end of the socketpair
 inline constexpr std::uint32_t kMaxChannels = 16;
@@ -98,6 +99,7 @@ enum class Op : std::uint32_t {
     AckNotifications,        // process id 0: no payload → ok
     PluginStatus,            // no payload → JSON text (null if unsupported)
     FactoryPatches,          // no payload → canonical patch array JSON text
+    EditorScale,             // f64 scale → the size for the window (as EditorOpen)
 };
 
 enum class Reply : std::uint32_t { Ok = 0, Error = 1 };

@@ -21,6 +21,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <utility>
 
 #include "supple/clap/semantic_params.h"
 #include "supple/json/json.h"
@@ -1707,6 +1708,7 @@ Result<Instance::EditorSize> Instance::openEditor(NativeWindow parent, double sc
     if (vst3_) {
         auto size = vst3_->openEditor(parent, scale);
         editorOpen_ = size.ok();
+        if (editorOpen_) editorScale_ = scale;
         return size;
     }
     if (!hasEditor())
@@ -1717,6 +1719,7 @@ Result<Instance::EditorSize> Instance::openEditor(NativeWindow parent, double sc
         if (editorOpen_ && nativeWindowKind() != NativeWindow::Kind::Cocoa) closeEditor();
         auto size = remote_->openEditor(parent, scale);
         editorOpen_ = size.ok();
+        if (editorOpen_) editorScale_ = scale;
         return size;
     }
     if (editorOpen_) closeEditor();
@@ -1726,6 +1729,7 @@ Result<Instance::EditorSize> Instance::openEditor(NativeWindow parent, double sc
 #if !defined(__APPLE__)
     (void)extGui_->set_scale(plugin_, scale);
 #endif
+    editorScale_ = scale;
     clap_window_t window{};
     window.api = editorClapApi();
     if (parent.kind == NativeWindow::Kind::X11)
@@ -1767,6 +1771,34 @@ Result<Instance::EditorSize> Instance::resizeEditor(std::uint32_t width, std::ui
         (void)extGui_->set_size(plugin_, size.width, size.height);
     }
     (void)extGui_->get_size(plugin_, &size.width, &size.height);
+    return size;
+}
+
+Result<Instance::EditorSize> Instance::setEditorScale(double scale) {
+    if (!validEditorScale(scale))
+        return Error("host.editor.scale", "invalid editor scale", "/editor/scale",
+                     "pass a positive finite scale factor");
+    if (!editorOpen_) return Error("host.editor", "no editor is open");
+    const double from = std::exchange(editorScale_, scale);
+    if (vst3_) return vst3_->setEditorScale(scale, from);
+    if (remote_) return remote_->setEditorScale(scale);
+    EditorSize before;
+    if (!extGui_->get_size(plugin_, &before.width, &before.height))
+        return Error("host.editor", "the plugin could not report its editor size", "/editor",
+                     "close and reopen the editor, or use the parameter panel");
+    before.resizable = extGui_->can_resize(plugin_);
+    EditorSize size = before;
+    if (!editorTakesScale(nativeWindowKind())) return size;
+    (void)extGui_->set_scale(plugin_, scale);
+    (void)extGui_->get_size(plugin_, &size.width, &size.height);
+    // A plug-in that rescaled itself has answered; otherwise a resizable editor
+    // keeps the logical size it had.
+    if (before.resizable && size.width == before.width && size.height == before.height) {
+        rescaleEditorSize(size.width, size.height, from, scale);
+        (void)extGui_->adjust_size(plugin_, &size.width, &size.height);
+        (void)extGui_->set_size(plugin_, size.width, size.height);
+        (void)extGui_->get_size(plugin_, &size.width, &size.height);
+    }
     return size;
 }
 

@@ -15,6 +15,7 @@
 #include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <mutex>
 #include <thread>
 
@@ -277,6 +278,18 @@ TEST_CASE("editor sizing preserves native pixels at fractional Windows DPI") {
           std::pair<int, int>{513, 257});
     CHECK(gui::editorWindowSize(512, 256, NativeWindow::Kind::X11, 2, 1) ==
           std::pair<int, int>{256, 128});
+}
+
+TEST_CASE("an editor is told about display-scale changes, not about noise") {
+    CHECK_FALSE(gui::editorScaleChanged(1.5, 1.5));
+    CHECK_FALSE(gui::editorScaleChanged(1.5, 1.5 + 1e-9));
+    CHECK(gui::editorScaleChanged(1.0, 1.25));  // 100% to 125%
+    CHECK(gui::editorScaleChanged(2.0, 1.0));   // to a standard-density monitor
+    CHECK(gui::editorScaleChanged(1.0, 1.001 * 1.01));
+    // An unusable reading is never a change to report.
+    CHECK_FALSE(gui::editorScaleChanged(1.0, 0.0));
+    CHECK_FALSE(gui::editorScaleChanged(0.0, 1.0));
+    CHECK_FALSE(gui::editorScaleChanged(1.0, std::numeric_limits<double>::quiet_NaN()));
 }
 
 TEST_CASE("an offscreen editor container exposes its available native parent") {

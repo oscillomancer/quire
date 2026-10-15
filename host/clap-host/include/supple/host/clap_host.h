@@ -39,6 +39,13 @@ class MainThreadWake;
 
 namespace supple::host {
 
+// Whether a plug-in is told the display scale (CLAP set_scale, VST3 content
+// scale) for an editor parent of this kind. Cocoa editors use points and observe
+// the backing scale themselves, so no factor is ever sent to them.
+inline constexpr bool editorTakesScale(NativeWindow::Kind kind) {
+    return kind == NativeWindow::Kind::X11 || kind == NativeWindow::Kind::Win32;
+}
+
 struct PluginInfo {
     std::string id, name, vendor, version, description;
     // CLAP by default; VST3 class ids use vst3:<32 hex digits>.
@@ -403,6 +410,12 @@ class Instance {
     }
     // Host-driven resize; returns the size the plugin accepted.
     Result<EditorSize> resizeEditor(std::uint32_t width, std::uint32_t height);
+    // The display scale of the open editor's window changed (X11/Win32 only;
+    // Cocoa editors use points and are never told). The plug-in gets the new
+    // factor (CLAP set_scale, VST3 content scale). A resizable editor keeps its
+    // logical size unless the plug-in resized itself. Returns the size to give
+    // the window, in pixels at the new scale.
+    Result<EditorSize> setEditorScale(double scale);
     void closeEditor();
     bool editorOpen() const { return editorOpen_; }
     // What the plugin asked for since the last call; the window owner applies show/hide.
@@ -446,6 +459,7 @@ class Instance {
     const clap_plugin_gui_t* extGui_ = nullptr;
     const clap_plugin_posix_fd_support_t* extFd_ = nullptr;
     bool editorOpen_ = false;
+    double editorScale_ = 1;  // the factor the open editor last received
     std::uint32_t inChannels_ = 0, outChannels_ = 0, keyChannels_ = 0;
     std::vector<AudioPortInfo> auxOutPorts_;
     bool acceptsNotes_ = false, keyActive_ = false;

@@ -1144,6 +1144,36 @@ Result<Instance::EditorSize> Vst3Instance::resizeEditor(std::uint32_t width, std
     return size;
 }
 
+Result<Instance::EditorSize> Vst3Instance::setEditorScale(double scale, double from) {
+    auto& s = *state_;
+    if (!s.view) return Error("host.editor", "no editor is open");
+    const auto read = [&](Steinberg::ViewRect& r, Instance::EditorSize& size) {
+        if (s.view->getSize(&r) != kResultOk) return;
+        size.width = static_cast<std::uint32_t>(std::max(0, r.getWidth()));
+        size.height = static_cast<std::uint32_t>(std::max(0, r.getHeight()));
+    };
+    Steinberg::ViewRect r;
+    Instance::EditorSize before;
+    before.resizable = s.view->canResize() == kResultTrue;
+    read(r, before);
+    Instance::EditorSize size = before;
+    if (!editorTakesScale(nativeWindowKind())) return size;
+    if (FUnknownPtr<Steinberg::IPlugViewContentScaleSupport> scaling(s.view); scaling)
+        scaling->setContentScaleFactor(static_cast<float>(scale));
+    read(r, size);
+    // A view that rescaled itself has answered; otherwise a resizable editor
+    // keeps the logical size it had.
+    if (before.resizable && size.width == before.width && size.height == before.height) {
+        rescaleEditorSize(size.width, size.height, from, scale);
+        r = Steinberg::ViewRect(0, 0, static_cast<Steinberg::int32>(size.width),
+                                static_cast<Steinberg::int32>(size.height));
+        (void)s.view->checkSizeConstraint(&r);
+        (void)s.view->onSize(&r);
+        read(r, size);
+    }
+    return size;
+}
+
 void Vst3Instance::closeEditor() {
     auto& s = *state_;
     if (!s.view) return;

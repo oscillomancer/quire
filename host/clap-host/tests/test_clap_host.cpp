@@ -1392,7 +1392,7 @@ TEST_CASE("bridge protocol v6 retains nested structured error details") {
     CHECK(decoded.details[0].hint == "correct it");
     REQUIRE(decoded.details[0].details.size() == 1);
     CHECK(decoded.details[0].details[0].code == "leaf");
-    CHECK(bridge::kVersion == 17);
+    CHECK(bridge::kVersion == 18);
 }
 
 TEST_CASE("editor failures destroy the partial editor and show-hide requests reach its owner") {
@@ -1454,6 +1454,37 @@ TEST_CASE(
     while (timers() == timerBefore) (*made)->serviceMainThread();
     CHECK(timers() == timerBefore + 1);
     CHECK(removed() == removedBefore);
+    (*made)->closeEditor();
+}
+
+TEST_CASE("a VST3 view is given the content scale at open and again when it changes") {
+    void* module = ::dlopen(FIXTURE_VST3_MODULE, RTLD_NOW);
+    REQUIRE(module);
+    struct Close {
+        void* module;
+        ~Close() { ::dlclose(module); }
+    } close{module};
+    auto scale = reinterpret_cast<float (*)()>(::dlsym(module, "fixtureContentScale"));
+    auto calls = reinterpret_cast<int (*)()>(::dlsym(module, "fixtureContentScaleCalls"));
+    REQUIRE(scale);
+    REQUIRE(calls);
+    auto list = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(list);
+    const auto info = std::find_if(list->begin(), list->end(), [](const auto& p) {
+        return p.name == "Test VST3 Separate Gain";
+    });
+    REQUIRE(info != list->end());
+    auto made = Instance::create(*info, {});
+    REQUIRE(made);
+    const int before = calls();
+    REQUIRE((*made)->openEditor(1234, 1.5));
+    CHECK(calls() == before + 1);
+    CHECK(scale() == 1.5f);
+    REQUIRE((*made)->setEditorScale(2));
+    CHECK(calls() == before + 2);
+    CHECK(scale() == 2.0f);
+    CHECK_FALSE((*made)->setEditorScale(-1));
+    CHECK(calls() == before + 2);  // refused before the view
     (*made)->closeEditor();
 }
 

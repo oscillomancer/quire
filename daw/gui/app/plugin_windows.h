@@ -33,6 +33,10 @@ namespace supple::gui {
 std::pair<int, int> editorWindowSize(std::uint32_t width, std::uint32_t height,
                                      NativeWindow::Kind kind, double pixelRatio, double inputScale);
 
+// Whether an editor window's display scale is no longer the one its plug-in was
+// last given (`given`), so the plug-in must be told. Ignores float noise.
+bool editorScaleChanged(double given, double current);
+
 // Applies coalesced host requests without destroying a hidden editor. Closed
 // editors are removed by the owner; close takes precedence over other flags.
 void applyEditorRequests(Window& window, const host::Instance::EditorRequests& requests);
@@ -89,6 +93,7 @@ class PluginWindows {
         std::uint64_t serial = 0;  // this registration of the instance's descriptors
         std::unique_ptr<Window> window;
         bool resizable = false;
+        double scale = 1;  // the display scale its plug-in was last given
     };
     struct Placement {
         int x = 0, y = 0;
@@ -99,6 +104,9 @@ class PluginWindows {
     void place(Editor& editor);  // before the window is shown
     NativeWindow floatingParent() const;
     Status attach(Editor editor, const std::string& title);
+    // The window's display scale changed (monitor move, system scale): tell the
+    // plug-in and give the window the size it answers with. True when it did.
+    bool rescale(Editor& editor);
     bool reattach(Editor& editor);  // the effect's current instance, in the same window
     void drop(std::size_t index);
     void restoreContext() const {

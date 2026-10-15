@@ -139,14 +139,14 @@ parents or scales return `host.editor.parent`, path `/editor/parent`, with a
 hint to supply a live native parent and positive finite scale.
 
 Open/resize sizes are pixels on Linux/Windows and points on macOS. Cocoa views
-handle their own backing scale; Linux/Windows receive CLAP set_scale or VST3
-content-scale support when offered. Timers run on the main thread independent
+handle their own backing scale and are never sent a factor; Linux/Windows
+receive CLAP set_scale or VST3 content-scale support when offered. Timers run on the main thread independent
 of editor visibility. CLAP POSIX FD support is advertised on Linux/macOS and
 serviced by their descriptor loops; Windows does not advertise it.
 
 EditorOpen retains its operation number but now carries `u8 kind, u64 handle,
 f64 scale` (17 bytes). Kinds: none=0, x11=1, cocoa=2, win32=3, floating=4.
-POSIX v17 and Windows v18 reject earlier peers at notification subscription.
+POSIX v18 and Windows v19 reject earlier peers at notification subscription.
 Windows HWND values retain all pointer bits. Cocoa proxies send Floating with
 the DAW owner's server NSWindow.windowNumber (unsigned 32-bit, zero if absent),
 instead of an NSView pointer; embedded Cocoa inputs become Floating/zero.
@@ -164,13 +164,27 @@ without activating itself or making the editor key. Plugin-requested show uses
 the retained owner number. DAW activation reorders its open bridged editors via
 the same open operation; the GUI main-loop hook is supplied by port-gui.
 
+`Instance::setEditorScale(double)` renegotiates the scale of an open editor
+when its window's display scale changes (a monitor move or a system scale
+change): CLAP `gui.set_scale` then `get_size`, or VST3
+`IPlugViewContentScaleSupport::setContentScaleFactor` then `getSize`. A plug-in
+that did not change its own size and is resizable keeps its logical size: the
+pixel size before the call is scaled by new/old, then goes through
+`adjust_size`/`set_size` (CLAP) or `checkSizeConstraint`/`onSize` (VST3). It
+returns the pixel size the window must take. Non-positive or non-finite factors
+return `host.editor.scale`, path `/editor/scale`; a closed editor returns
+`host.editor`. Cocoa editors (points, backing scale observed by the view) are
+never told: the call only reports the current size. Bridged instances carry it
+as `EditorScale` (appended operation number): request `f64 scale`, reply as
+EditorOpen (`u32 width, u32 height, u8 resizable`). This is protocol POSIX v18 /
+Windows v19; the audio ABI is unchanged.
+
 Windows bridge main waits for IPC and native messages together; Cocoa uses
 AppKit with CFFileDescriptor run-loop sources. There is no editor polling timer.
 Bridge death/quit destroys its native windows. Cocoa bridge placement and focus
 are not persisted by the DAW. Cross-process transient ownership on macOS is
 unavailable; normal-level windows can be covered by other applications.
 Windows child input is native, with plugin-dependent keyboard/IME behavior.
-Moving between DPI scales currently requires close/reopen to update set_scale.
 Real window tests require SUPPLE_GUI_DISPLAY_TEST=1 and a desktop session;
 normal native CI runs hermetic editor fixtures only. The Cocoa display opt-in
 also checks cross-process relative z-order and normal level with
@@ -178,7 +192,7 @@ CGWindowListCopyWindowInfo, unchanged frontmost application on open/reopen,
 and replacing the owner without recreating the editor. The DAW shell itself
 requires the separate port-gui integration.
 
-### Bridge notifications (POSIX v17, Windows v18; notification design ADR-0031)
+### Bridge notifications (POSIX v18, Windows v19; notification design ADR-0031)
 
 ADR-0037 extends the subscription to native WakeEvent signal targets:
 Linux eventfd (unchanged), a nonblocking write-only pipe on macOS, and a

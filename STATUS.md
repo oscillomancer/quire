@@ -52,8 +52,11 @@ Hermetic editor tests cover partial-open cleanup, resizing and repeated teardown
 Native visual/focus/IME validation remains opt-in; combined DAW-side native
 shell/editor integration tests pass CI. Cocoa bridge placement/focus are not persisted;
 its windows use normal level, order above the DAW window without activating the
-bridge, and are raised again when the DAW window regains focus. Changing display
-scale requires closing/reopening an editor. Windows child keyboard behavior is plugin-dependent.
+bridge, and are raised again when the DAW window regains focus. A display-scale
+change (monitor move, system scale) is passed to open Linux/Windows editors, local
+or bridged, CLAP or VST3, and resizes them; hermetic tests cover the rule, the
+visual result is unchecked without a desktop with mixed scales. Windows child
+keyboard behavior is plugin-dependent.
 
 Evaluation harness fixtures now run on Windows as well as POSIX: executable
 fixtures use Python, credential references can use Windows hard links, and

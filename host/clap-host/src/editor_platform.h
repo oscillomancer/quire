@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #pragma once
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <span>
@@ -36,6 +39,19 @@ inline constexpr NativeWindow cocoaBridgeParent(NativeWindow parent) {
 inline constexpr bool validFloatingEditorParent(NativeWindow parent) {
     return parent.kind == NativeWindow::Kind::Floating &&
            parent.handle <= std::numeric_limits<std::uint32_t>::max();
+}
+inline bool validEditorScale(double scale) { return std::isfinite(scale) && scale > 0; }
+// A resizable editor keeps its logical size when the scale changes: `width` and
+// `height` (pixels at scale `from`) become pixels at scale `to`. Not applied to
+// editors that resized themselves in response to the new scale.
+inline void rescaleEditorSize(std::uint32_t& width, std::uint32_t& height, double from, double to) {
+    if (!validEditorScale(from) || !validEditorScale(to)) return;
+    const auto scaled = [&](std::uint32_t v) {
+        return static_cast<std::uint32_t>(
+            std::max(1.0, std::min(std::round(static_cast<double>(v) * to / from), 1.0e6)));
+    };
+    width = scaled(width);
+    height = scaled(height);
 }
 // Called by the bridge before loading modules (Windows DPI awareness).
 Status initializeEditorPlatform();

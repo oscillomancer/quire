@@ -49,6 +49,8 @@ class Vst3Instance {
     bool hasEditor();
     Result<Instance::EditorSize> openEditor(NativeWindow parent, double scale);
     Result<Instance::EditorSize> resizeEditor(std::uint32_t width, std::uint32_t height);
+    // `from` is the factor the editor had; see Instance::setEditorScale.
+    Result<Instance::EditorSize> setEditorScale(double scale, double from);
     void closeEditor();
     bool editorOpen() const;
     Instance::EditorRequests takeEditorRequests();

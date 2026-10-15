@@ -420,6 +420,7 @@ Result<std::vector<std::uint8_t>> RemoteInstance::call(Op op, const Writer& w, R
         case Op::LoadState:
         case Op::EditorOpen:
         case Op::EditorResize:
+        case Op::EditorScale:
         case Op::EditorClose:
             process_->refreshNeeded_ = true;
             break;
@@ -664,6 +665,12 @@ Result<Instance::EditorSize> RemoteInstance::resizeEditor(std::uint32_t width,
     w.u32(width);
     w.u32(height);
     return editorSize(call(Op::EditorResize, w));
+}
+
+Result<Instance::EditorSize> RemoteInstance::setEditorScale(double scale) {
+    Writer w;
+    w.f64(scale);
+    return editorSize(call(Op::EditorScale, w));
 }
 
 void RemoteInstance::closeEditor() {

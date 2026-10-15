@@ -443,7 +443,15 @@ container sizing goes directly from editor pixels to SDL window coordinates
 using pixel density, avoiding integer design-unit rounding at fractional DPI.
 Cocoa editor sizes are already points.
 The GUI worker's inputScale maps SDL event coordinates to design units. Opening
-uses the current scale; live scale-change renegotiation requires close/reopen.
+uses the window's current pixelRatio; when it later changes (the editor window is
+dragged to a monitor with another scale, or the system scale changes, which SDL
+reports as a display-scale or pixel-size event), `PluginWindows` tells the
+plug-in through `Instance::setEditorScale` and gives the window the size it
+answers with, local or bridged, CLAP or VST3. The scale change is not treated as
+a user resize, so the editor keeps its logical size. This is active where
+pixels are the editor unit (Windows, and X11 where SDL reports a changed
+pixelRatio); Cocoa editors use points and are never sent a factor
+(sandbox.md §1).
 Native run loops deliver local editor input; timers remain GUI deadlines.
 Linux/macOS FD readiness uses the shared watcher; Windows advertises no CLAP
 POSIX FD support. Display tests remain opt-in, never enabled by normal CI.

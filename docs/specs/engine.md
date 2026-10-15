@@ -539,8 +539,8 @@ handles. The existing background/offline bounded-wait exception and failure
 semantics apply on each platform. Native editor hosting follows ADR-0040;
 the DAW shell is integrated separately on port-gui.
 
-POSIX protocol 17 / Windows protocol 18 carry typed native editor parents
-(ADR-0040), with unchanged Header layout. Windows retains the v14
+POSIX protocol 18 / Windows protocol 19 carry typed native editor parents
+(ADR-0040) and live editor scale changes (`EditorScale`), with unchanged Header layout. Windows retains the v14
 u64 recipient-owned resource after each frame prefix (all-ones means
 none) and u64 request/done event handles after Activate's rate/min/max/size.
 Release/acquire on the shared words publishes all arena data. Event waits

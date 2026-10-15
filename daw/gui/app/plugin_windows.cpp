@@ -45,6 +45,11 @@ bool floats(const host::Instance& instance) {
 }
 }  // namespace
 
+bool editorScaleChanged(double given, double current) {
+    return std::isfinite(given) && std::isfinite(current) && given > 0 && current > 0 &&
+           std::fabs(current - given) > 1e-3 * given;
+}
+
 std::pair<int, int> editorWindowSize(std::uint32_t width, std::uint32_t height,
                                      NativeWindow::Kind kind, double pixelRatio,
                                      double inputScale) {
@@ -227,7 +232,8 @@ Status PluginWindows::attach(Editor editor, const std::string& title) {
     if (!parent.valid())
         return Error("gui.editor.parent", "no native editor parent is available", "/editor/parent",
                      "run the GUI in an interactive native desktop session");
-    auto size = editor.instance->openEditor(parent, static_cast<double>((*window)->pixelRatio()));
+    editor.scale = static_cast<double>((*window)->pixelRatio());
+    auto size = editor.instance->openEditor(parent, editor.scale);
     restoreContext();
     if (!size) return std::move(size).error();
     if (watcherError_ && !editor.instance->watchedFds().empty()) {
@@ -290,9 +296,9 @@ bool PluginWindows::reattach(Editor& editor) {
     if (!instance || !instance->hasEditor()) return false;
     // An isolation-mode change can change Cocoa ownership: rebuild that entry.
     if (floats(*instance) != !editor.window) return false;
-    auto size =
-        instance->openEditor(editor.window ? editor.window->nativeParent() : floatingParent(),
-                             editor.window ? static_cast<double>(editor.window->pixelRatio()) : 1);
+    if (editor.window) editor.scale = static_cast<double>(editor.window->pixelRatio());
+    auto size = instance->openEditor(
+        editor.window ? editor.window->nativeParent() : floatingParent(), editor.scale);
     restoreContext();
     if (!size) return false;
     if (watcherError_ && !instance->watchedFds().empty()) {
@@ -318,6 +324,24 @@ bool PluginWindows::reattach(Editor& editor) {
             setEditorSize(*editor.window, size->width, size->height);
         editor.window->setResizable(size->resizable);
     }
+    return true;
+}
+
+bool PluginWindows::rescale(Editor& ed) {
+    // Cocoa editors are in points and observe their backing scale themselves.
+    if (!ed.window || !host::editorTakesScale(ed.window->nativeParent().kind) ||
+        !ed.instance->editorOpen())
+        return false;
+    const double now = static_cast<double>(ed.window->pixelRatio());
+    if (!editorScaleChanged(ed.scale, now)) return false;
+    ed.scale = now;
+    auto size = ed.instance->setEditorScale(now);
+    restoreContext();
+    if (!size) {
+        if (onError) onError(size.error());
+        return true;
+    }
+    if (size->width > 0 && size->height > 0) setEditorSize(*ed.window, size->width, size->height);
     return true;
 }
 
@@ -364,6 +388,9 @@ bool PluginWindows::handle(const SDL_Event& e) {
         }
         if (e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
             drop(i);
+        } else if (rescale(ed)) {
+            // A scale change moves and resizes the window itself (WM_DPICHANGED);
+            // that is not the user's resize, so the plug-in's answer decides.
         } else if (e.type == SDL_EVENT_WINDOW_RESIZED && ed.resizable &&
                    ed.instance->editorOpen()) {
             const auto width = pluginSize(ed.window->width(), *ed.window);

@@ -276,6 +276,7 @@ bool validRequest(Op op, Reader r) {
             break;
         }
         case Op::EditorResize:
+        case Op::EditorScale:
             r.skip(8);
             break;
         case Op::Deactivate:
@@ -363,6 +364,7 @@ bool validReply(Op op, Reader r) {
         }
         case Op::EditorOpen:
         case Op::EditorResize:
+        case Op::EditorScale:
             r.skip(9);
             break;
         case Op::EditorRequests:

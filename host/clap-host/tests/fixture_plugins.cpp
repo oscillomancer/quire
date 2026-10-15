@@ -686,6 +686,10 @@ struct Edge {
     std::uint32_t guiCreates = 0;
     std::uint64_t guiParent = 0;
     std::uint32_t guiWidth = 300, guiHeight = 200;
+    // The last display scale the host set (parameter 11) and how many times
+    // (12). Mode 7 rescales its own size in response, as a plug-in may.
+    double guiScale = 0;
+    std::uint32_t guiScaleCalls = 0;
 };
 Edge* E(const clap_plugin_t* p) { return static_cast<Edge*>(p->plugin_data); }
 
@@ -709,6 +713,10 @@ bool CLAP_ABI edgeParamValue(const clap_plugin_t* pl, clap_id id, double* out) {
     }
     if (id == 10) {
         *out = E(pl)->mainCalls;
+        return true;
+    }
+    if (id == 11 || id == 12) {
+        *out = id == 11 ? E(pl)->guiScale : E(pl)->guiScaleCalls;
         return true;
     }
     if (id == 9) {
@@ -861,7 +869,15 @@ void CLAP_ABI edgeGuiDestroy(const clap_plugin_t* pl) {
     E(pl)->guiCreated = E(pl)->guiShown = false;
     E(pl)->guiParent = 0;
 }
-bool CLAP_ABI edgeGuiScale(const clap_plugin_t*, double) { return true; }
+bool CLAP_ABI edgeGuiScale(const clap_plugin_t* pl, double scale) {
+    E(pl)->guiScale = scale;
+    ++E(pl)->guiScaleCalls;
+    if (E(pl)->config[0] == 7) {
+        E(pl)->guiWidth = static_cast<std::uint32_t>(std::lround(300 * scale));
+        E(pl)->guiHeight = static_cast<std::uint32_t>(std::lround(200 * scale));
+    }
+    return true;
+}
 bool CLAP_ABI edgeGuiGetSize(const clap_plugin_t* pl, uint32_t* w, uint32_t* h) {
     if (E(pl)->config[0] == 3) return false;
     *w = E(pl)->guiWidth;

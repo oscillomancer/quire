@@ -14,6 +14,7 @@
 
 #include "pluginterfaces/base/funknownimpl.h"
 #include "pluginterfaces/base/ibstream.h"
+#include "pluginterfaces/gui/iplugviewcontentscalesupport.h"
 #include "pluginterfaces/vst/ivstevents.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
 #include "public.sdk/source/common/pluginview.h"
@@ -50,6 +51,20 @@ std::atomic<int> gNoteOffs{0}, gWildcardOffs{0};
 // resizable editor in attached() from the last size reported).
 std::atomic<int> gAttachedUnsized{0};
 std::array<std::atomic<int>, 64> gNoteIdOffs{};
+// The last content scale factor a view was given, and how many it was given.
+std::atomic<float> gContentScale{0};
+std::atomic<int> gContentScaleCalls{0};
+// Both test views implement the content-scale interface and only record it.
+#define TEST_VIEW_SCALE_SUPPORT                                             \
+    tresult PLUGIN_API setContentScaleFactor(ScaleFactor factor) override { \
+        gContentScale = factor;                                             \
+        ++gContentScaleCalls;                                               \
+        return kResultOk;                                                   \
+    }                                                                       \
+    DEFINE_INTERFACES                                                       \
+    DEF_INTERFACE(IPlugViewContentScaleSupport)                             \
+    END_DEFINE_INTERFACES(CPluginView)                                      \
+    REFCOUNT_METHODS(CPluginView)
 
 #if defined(__linux__)
 class TestHandler final
@@ -77,9 +92,10 @@ class TestHandler final
         ++gRunLoopFdCalls;
     }
 };
-class TestView final : public CPluginView {
+class TestView final : public CPluginView, public IPlugViewContentScaleSupport {
   public:
     TestView() { rect = {0, 0, 300, 200}; }
+    TEST_VIEW_SCALE_SUPPORT
     tresult PLUGIN_API isPlatformTypeSupported(FIDString type) override {
         return std::strcmp(type, kPlatformTypeX11EmbedWindowID) == 0 ? kResultOk : kResultFalse;
     }
@@ -119,9 +135,10 @@ class TestView final : public CPluginView {
 };
 
 #else
-class TestView final : public CPluginView {
+class TestView final : public CPluginView, public IPlugViewContentScaleSupport {
   public:
     TestView() { rect = {0, 0, 300, 200}; }
+    TEST_VIEW_SCALE_SUPPORT
     tresult PLUGIN_API isPlatformTypeSupported(FIDString type) override {
 #if defined(__APPLE__)
         return std::strcmp(type, kPlatformTypeNSView) == 0 ? kResultOk : kResultFalse;
@@ -452,6 +469,8 @@ extern "C" IPluginFactory* GetPluginFactory() { return new Factory; }
 extern "C" int fixtureRemovedHandlerCalls() { return gRunLoopRemovedCalls.load(); }
 extern "C" int fixtureTimerCalls() { return gRunLoopTimerCalls.load(); }
 extern "C" int fixtureAttachedUnsized() { return gAttachedUnsized.load(); }
+extern "C" float fixtureContentScale() { return gContentScale.load(); }
+extern "C" int fixtureContentScaleCalls() { return gContentScaleCalls.load(); }
 extern "C" int fixtureFdCalls() { return gRunLoopFdCalls.load(); }
 extern "C" int fixtureNoteOffs(int id) {
     return id == -1 ? gNoteOffs.load() : id == -2 ? gWildcardOffs.load() : gNoteIdOffs[id].load();

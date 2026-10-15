@@ -9,6 +9,10 @@ floating level/cooperative activation with normal-level relative ordering,
 adds the owner window-number handle and DAW activation hook, and negotiates
 POSIX 17 / Windows 18. The original decision below is retained as written.
 
+**2026-10-15 amendment:** Live display-scale changes are now renegotiated
+(`Instance::setEditorScale`, bridge `EditorScale`, POSIX 18 / Windows 19); the
+"not renegotiated yet" limit below no longer applies. See sandbox.md §1.
+
 ## Decision
 
 - A borrowed `NativeWindow {kind, uintptr_t handle}` distinguishes X11 XIDs,

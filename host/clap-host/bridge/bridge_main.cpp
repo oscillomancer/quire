@@ -683,6 +683,16 @@ struct Bridge {
 #endif
                 return replyOr(std::move(size), writeSize);
             }
+            case Op::EditorScale: {
+                auto size = instance->setEditorScale(r.f64());
+#if defined(__APPLE__)
+                if (size && slot.floating) {
+                    slot.floatingSize = *size;
+                    slot.floating->resize(size->width, size->height, size->resizable);
+                }
+#endif
+                return replyOr(std::move(size), writeSize);
+            }
             case Op::EditorClose:
                 instance->closeEditor();
 #if defined(__APPLE__)

@@ -68,6 +68,146 @@ TEST_CASE("native CLAP editor parents retain pointer width and clean up partial 
         CHECK_FALSE(instance.openEditor(parent, std::numeric_limits<double>::quiet_NaN()));
     }
 }
+TEST_CASE("a live display-scale change reaches the plug-in and keeps a logical size") {
+    const auto info = editorFixture(FIXTURE_CLAP_PATH, "com.suppleaudio.test.edge");
+    setBridgeExecutable(BRIDGE_PATH);
+    const bool takesScale = editorTakesScale(nativeWindowKind());
+    for (bool isolated : {false, true}) {
+        // Cocoa remote windows require a display; covered by the opt-in test.
+        if (isolated && nativeWindowKind() == NativeWindow::Kind::Cocoa) continue;
+        CAPTURE(isolated);
+        auto made = Instance::create(info, {}, isolated);
+        REQUIRE(made);
+        auto& instance = **made;
+        const NativeWindow parent{nativeWindowKind(), 0x123456789abULL};
+        const auto scaleSeen = [&] { return *instance.paramValue(11); };
+        const auto scaleCalls = [&] { return *instance.paramValue(12); };
+
+        // Nothing is open: no factor to renegotiate.
+        auto early = instance.setEditorScale(2);
+        REQUIRE_FALSE(early);
+        CHECK(early.error().code == "host.editor");
+
+        // A plug-in that keeps its size: the resizable editor keeps the logical
+        // size, 300x200 at 1x becomes 450x300 at 1.5x and 300x200 again at 1x.
+        auto opened = instance.openEditor(parent, 1);
+        REQUIRE(opened);
+        CHECK(opened->width == 300);
+        CHECK(scaleCalls() == (takesScale ? 1 : 0));
+        auto grown = instance.setEditorScale(1.5);
+        REQUIRE(grown);
+        CHECK(grown->resizable);
+        CHECK(grown->width == (takesScale ? 450u : 300u));
+        CHECK(grown->height == (takesScale ? 300u : 200u));
+        CHECK(scaleSeen() == (takesScale ? 1.5 : 0.0));
+        CHECK(scaleCalls() == (takesScale ? 2 : 0));
+        auto back = instance.setEditorScale(1);
+        REQUIRE(back);
+        CHECK(back->width == 300);
+        CHECK(back->height == 200);
+        CHECK(scaleSeen() == (takesScale ? 1.0 : 0.0));
+
+        // Invalid factors are refused without reaching the plug-in.
+        for (double bad : {0.0, -1.0, std::numeric_limits<double>::infinity(),
+                           std::numeric_limits<double>::quiet_NaN()}) {
+            auto refused = instance.setEditorScale(bad);
+            REQUIRE_FALSE(refused);
+            CHECK(refused.error().code == "host.editor.scale");
+            CHECK(refused.error().path == "/editor/scale");
+            CHECK_FALSE(refused.error().hint.empty());
+        }
+        CHECK(scaleCalls() == (takesScale ? 3 : 0));
+        instance.closeEditor();
+        CHECK_FALSE(instance.setEditorScale(2));
+
+        // A plug-in that rescales itself answers with its own size; the host
+        // does not scale it a second time.
+        const std::array<std::uint8_t, 4> selfScaling{7, 0, 0, 0};
+        REQUIRE(instance.loadState(selfScaling));
+        REQUIRE(instance.openEditor(parent, 1));
+        auto own = instance.setEditorScale(2);
+        REQUIRE(own);
+        CHECK(own->width == (takesScale ? 600u : 300u));
+        CHECK(own->height == (takesScale ? 400u : 200u));
+        instance.closeEditor();
+    }
+}
+
+TEST_CASE("a live display-scale change reaches a VST3 content-scale view") {
+    const auto info = editorFixture(FIXTURE_VST3_PATH, "Test VST3 Separate Gain");
+    auto made = Instance::create(info, {});
+    REQUIRE(made);
+    auto& instance = **made;
+    REQUIRE(instance.openEditor({nativeWindowKind(), 0x123456789abULL}, 1));
+    auto size = instance.setEditorScale(2);
+    REQUIRE(size);
+#if defined(__linux__)
+    // The fixture's X11 view cannot resize, so its size is its own.
+    CHECK_FALSE(size->resizable);
+    CHECK(size->width == 300);
+    CHECK(size->height == 200);
+#else
+    CHECK(size->resizable);
+    if (editorTakesScale(nativeWindowKind())) {
+        CHECK(size->width == 427);  // 320x240 at 1x, kept at 2x
+        CHECK(size->height == 320);
+    } else {
+        CHECK(size->width == 320);
+        CHECK(size->height == 240);
+    }
+#endif
+    CHECK_FALSE(instance.setEditorScale(0));
+    instance.closeEditor();
+    CHECK_FALSE(instance.setEditorScale(2));
+}
+
+TEST_CASE("the rescale rule only sizes pixels for editors that take a scale") {
+    CHECK(editorTakesScale(NativeWindow::Kind::X11));
+    CHECK(editorTakesScale(NativeWindow::Kind::Win32));
+    CHECK_FALSE(editorTakesScale(NativeWindow::Kind::Cocoa));
+    CHECK_FALSE(editorTakesScale(NativeWindow::Kind::Floating));
+    CHECK_FALSE(editorTakesScale(NativeWindow::Kind::Unavailable));
+    std::uint32_t w = 800, h = 600;
+    rescaleEditorSize(w, h, 1, 1.5);
+    CHECK(w == 1200);
+    CHECK(h == 900);
+    rescaleEditorSize(w, h, 1.5, 1.25);
+    CHECK(w == 1000);
+    CHECK(h == 750);
+    std::uint32_t tiny = 1, tall = 3;
+    rescaleEditorSize(tiny, tall, 4, 1);
+    CHECK(tiny == 1);  // never zero
+    CHECK(tall == 1);
+    rescaleEditorSize(w, h, 0, 2);  // an unusable source scale leaves the size alone
+    CHECK(w == 1000);
+    CHECK(validEditorScale(1));
+    CHECK_FALSE(validEditorScale(0));
+    CHECK_FALSE(validEditorScale(-2));
+    CHECK_FALSE(validEditorScale(std::numeric_limits<double>::infinity()));
+}
+
+TEST_CASE("the editor scale request round-trips through the bridge protocol") {
+    bridge::Writer request;
+    request.f64(1.75);
+    CHECK(bridge::validRequest(bridge::Op::EditorScale,
+                               {request.bytes.data(), request.bytes.size()}));
+    bridge::Reader read{request.bytes.data(), request.bytes.size()};
+    CHECK(read.f64() == 1.75);
+    CHECK(read.done());
+    request.u8(0);  // trailing bytes
+    CHECK_FALSE(bridge::validRequest(bridge::Op::EditorScale,
+                                     {request.bytes.data(), request.bytes.size()}));
+    CHECK_FALSE(bridge::validRequest(bridge::Op::EditorScale, {nullptr, 0}));
+    bridge::Writer reply;  // the size to give the window, as EditorOpen replies
+    reply.u32(450);
+    reply.u32(300);
+    reply.u8(1);
+    CHECK(bridge::validReply(bridge::Op::EditorScale, {reply.bytes.data(), reply.bytes.size()}));
+    reply.u8(0);
+    CHECK_FALSE(
+        bridge::validReply(bridge::Op::EditorScale, {reply.bytes.data(), reply.bytes.size()}));
+}
+
 TEST_CASE("native hosts advertise timers and only serviceable POSIX descriptors") {
     auto made = Instance::create(editorFixture(FIXTURE_CLAP_PATH, "com.suppleaudio.test.edge"), {});
     REQUIRE(made);

@@ -122,6 +122,7 @@ class RemoteInstance {
     // The plug-in's editor, embedded by the bridge into `x11Parent` (gap log #39).
     Result<Instance::EditorSize> openEditor(NativeWindow parent, double scale);
     Result<Instance::EditorSize> resizeEditor(std::uint32_t width, std::uint32_t height);
+    Result<Instance::EditorSize> setEditorScale(double scale);
     void closeEditor();
     Instance::EditorRequests editorRequests();
 
