@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Supple Audio
+// Xlib defines None as a macro. The borrowed window header must also work
+// after that definition, without requiring the X11 SDK in headless builds.
+#define None 0L
+#include "supple/base/native_window.h"
+#undef None
+static_assert(static_cast<std::uint8_t>(supple::NativeWindow::Kind::Unavailable) == 0);
+
 #include <doctest/doctest.h>
 #include <supple/base/closest.h>
 #include <supple/base/units.h>

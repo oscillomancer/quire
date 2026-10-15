@@ -57,7 +57,7 @@ TEST_CASE("native CLAP editor parents retain pointer width and clean up partial 
             instance.closeEditor();
         }
         for (const auto invalidParent :
-             {NativeWindow{}, NativeWindow{NativeWindow::Kind::None, 7}}) {
+             {NativeWindow{}, NativeWindow{NativeWindow::Kind::Unavailable, 7}}) {
             auto bad = instance.openEditor(invalidParent, 1);
             REQUIRE_FALSE(bad);
             CHECK(bad.error().code == "host.editor.parent");
