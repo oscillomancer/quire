@@ -378,7 +378,9 @@ bool PortAudioBackend::nativeThreadPolicy() const { return impl_->api && impl_->
 Status PortAudioBackend::prepareCurrentThread(bool live) {
     if (!nativeThreadPolicy()) return okStatus();
     auto& self = *impl_;
-    SUPPLE_TRY(detail::prepareDeviceThread(self.config.sampleRate, self.config.blockSize, live));
+    if (self.api->osThreadPolicy)
+        SUPPLE_TRY(
+            detail::prepareDeviceThread(self.config.sampleRate, self.config.blockSize, live));
     // Only helpers that run the device's own cycle join: the renderer and
     // background pool work ahead of it. A refusal keeps the time-constraint
     // policy and is reported through workgroup().
@@ -403,7 +405,7 @@ void PortAudioBackend::releaseCurrentThread() {
         joinedGroup.reset();
         joinedCount = nullptr;
     }
-    detail::releaseDeviceThread();
+    if (impl_->api->osThreadPolicy) detail::releaseDeviceThread();
 }
 WorkgroupStatus PortAudioBackend::workgroup() const {
     const auto& self = *impl_;

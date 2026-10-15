@@ -97,3 +97,16 @@ bounded stable insertion-sort fallback. The 1024-event acceptance policy stays
 port-index/arrival order; merged equal-frame ties stay port-index, then arrival
 order. Full-capacity tests cover all 16 ports, equal-frame ties and reversed
 timestamps. This refines the stable sort above without changing event output.
+
+## Note (2026-10-15): Windows MIDI Services not adopted yet
+
+WinMM cannot tell two identical devices apart, or a replacement from the
+original, so the limit above stays. Windows MIDI Services (the Windows 11 MIDI
+stack) would fix it, but its App SDK is preview-only, with no go-live or
+production licence, and needs Windows 11 25H2 or later. Existing WinMM
+applications already get the service's multi-client access and port naming on
+Windows 11 once it is enabled, so WinMM loses little meanwhile. Revisit when
+the SDK ships for production. The PnP device interface path from
+`midiInMessage(DRV_QUERYDEVICEINTERFACE)` was considered as a stopgap identity
+and deferred, so no MIDI identity or stored-reference change is made.
+

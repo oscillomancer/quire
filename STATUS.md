@@ -281,7 +281,10 @@ Engine and hosting:
   non-restart topology advisories
   (ADR-0042). Device-free timing/overflow/lifecycle tests cover the shared path;
   physical MIDI timing/disconnect behavior needs SUPPLE_MIDI_DEVICE_TEST=1 trials.
-  SysEx is discarded; WinMM timestamps have millisecond resolution.
+  SysEx is discarded; WinMM timestamps have millisecond resolution. WinMM names
+  do not distinguish two identical devices, or a replacement from the original;
+  this will be addressed with Windows MIDI Services once its App SDK is released
+  for production (ADR-0042).
   No direct PipeWire/ALSA backend or MIDI outputs.
 - MIDI learn has no OSC, no "arm envelope" option, and no learn directly on
   track faders (the "(MIDI CC)" actions cover the selected tracks). The last

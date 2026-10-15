@@ -388,6 +388,7 @@ struct FakeWorkgroup : detail::AudioWorkgroup {
 detail::PortAudioApi workgroupApi() {
     auto api = Driver::api;
     api.native = true;
+    api.osThreadPolicy = false;  // the OS may refuse real-time policy (CI VMs)
     api.workgroup = [](PaStream*) -> Result<std::shared_ptr<detail::AudioWorkgroup>> {
         if (!FakeWorkgroup::current)
             return Error("workgroup.unavailable", "no workgroup", "-10851", "use another device");
@@ -401,24 +402,22 @@ void runHelpers(PortAudioBackend& backend, unsigned live, unsigned background,
                 const std::function<void()>& whileRunning) {
     detail::ThreadStartup liveSetup(live, &backend, true);
     detail::ThreadStartup backgroundSetup(background, &backend, false);
-    std::atomic<unsigned> running{0}, release{0};
+    std::atomic<unsigned> entered{0}, release{0};
     std::vector<std::thread> helpers;
     auto spawn = [&](detail::ThreadStartup& setup, unsigned i) {
         helpers.emplace_back([&, i] {
             const bool ready = setup.enter(i);
             detail::ThreadStartup::Cleanup cleanup{ready ? &backend : nullptr};
-            if (ready) {
-                running.fetch_add(1);
-                running.notify_all();
-                release.wait(0);
-            }
+            entered.fetch_add(1);
+            entered.notify_all();
+            if (ready) release.wait(0);
         });
     };
     for (unsigned i = 0; i < live; ++i) spawn(liveSetup, i);
     for (unsigned i = 0; i < background; ++i) spawn(backgroundSetup, i);
     CHECK(liveSetup.finish().ok());
     CHECK(backgroundSetup.finish().ok());
-    for (unsigned seen; (seen = running.load()) < live + background;) running.wait(seen);
+    for (unsigned seen; (seen = entered.load()) < live + background;) entered.wait(seen);
     whileRunning();
     release.store(1);
     release.notify_all();
@@ -429,7 +428,8 @@ TEST_CASE("live helpers join the device audio workgroup on their own threads and
     Driver driver;
     FakeWorkgroup group;
     FakeWorkgroup::current = &group;
-    PortAudioBackend backend({}, workgroupApi());
+    const auto api = workgroupApi();
+    PortAudioBackend backend({}, api);
     CHECK(backend.workgroup().state == "none");
     REQUIRE(backend.start({}, [](auto, auto, auto) {}));
     CHECK(backend.workgroup().state == "ready");
@@ -456,7 +456,8 @@ TEST_CASE("a refused workgroup join is reported and keeps the helpers running") 
     FakeWorkgroup group;
     group.refuse = true;
     FakeWorkgroup::current = &group;
-    PortAudioBackend backend({}, workgroupApi());
+    const auto api = workgroupApi();
+    PortAudioBackend backend({}, api);
     REQUIRE(backend.start({}, [](auto, auto, auto) {}));
     runHelpers(backend, 2, 0, [&] {
         const auto status = backend.workgroup();
@@ -474,7 +475,8 @@ TEST_CASE("a refused workgroup join is reported and keeps the helpers running") 
 TEST_CASE("a missing device workgroup is a reported failure, not a start error") {
     Driver driver;
     FakeWorkgroup::current = nullptr;
-    PortAudioBackend backend({}, workgroupApi());
+    const auto api = workgroupApi();
+    PortAudioBackend backend({}, api);
     REQUIRE(backend.start({}, [](auto, auto, auto) {}));
     runHelpers(backend, 1, 0, [&] {
         const auto status = backend.workgroup();
@@ -540,10 +542,12 @@ TEST_CASE("macOS workgroup wrapper joins once per thread, leaves and rejoins") {
     REQUIRE(group != nullptr);
     auto wrapped = detail::wrapOsWorkgroup(group, true);
     Status first, second, third;
+    bool policy = false;
     std::thread helper([&] {
         // Production order: the time-constraint policy first (joining a
         // workgroup needs it), then the join.
-        CHECK(detail::prepareDeviceThread(48000, 128, true).ok());
+        policy = detail::prepareDeviceThread(48000, 128, true).ok();
+        if (!policy) return;  // some CI VMs refuse real-time policy
         first = wrapped->join();
         second = wrapped->join();  // already a member
         wrapped->leave();
@@ -553,6 +557,10 @@ TEST_CASE("macOS workgroup wrapper joins once per thread, leaves and rejoins") {
         detail::releaseDeviceThread();
     });
     helper.join();
+    if (!policy) {
+        MESSAGE("real-time thread policy refused; workgroup join not exercised");
+        return;
+    }
     CHECK(first.ok());
     REQUIRE_FALSE(second.ok());
     CHECK(second.error().code == "workgroup.join");

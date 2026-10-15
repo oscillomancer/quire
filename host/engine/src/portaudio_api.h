@@ -43,6 +43,8 @@ struct PortAudioApi {
     bool threaded = true;
     // Optional: the opened stream's audio workgroup (null when none applies).
     Result<std::shared_ptr<AudioWorkgroup>> (*workgroup)(PaStream*) = nullptr;
+    // False (fake drivers only): helpers skip the OS scheduling policy.
+    bool osThreadPolicy = true;
 };
 const PortAudioApi* nativePortAudioApi();
 #if defined(__APPLE__)
