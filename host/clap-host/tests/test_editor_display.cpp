@@ -54,7 +54,7 @@ TEST_CASE("native stock editors repeatedly open locally and in a bridge (display
 #endif
             for (int cycle = 0; cycle < 3; ++cycle) {
                 auto opened = (*made)->openEditor(parent, 1);
-                REQUIRE_MESSAGE(opened, opened ? "" : opened.error().toString());
+                REQUIRE_MESSAGE(opened, (opened ? "" : opened.error().toString()));
 #if defined(__APPLE__)
                 if (!isolated) {
                     (*window)->resize(opened->width, opened->height, opened->resizable);
