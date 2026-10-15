@@ -4,6 +4,7 @@
 #include "midi_event_list.h"
 #include "panel_grip.h"
 #include "panel_height.h"
+#include "supple/ui/shortcut.h"
 
 #include <SDL3/SDL_keycode.h>
 
@@ -1149,9 +1150,9 @@ void MidiEditor::compileText(bool write, bool submit) {
     if (const auto current = modelText(); current && *current != baseText_ && !submit) {
         textConflict_ = true;
         textDirty_ = true;
-        showDiagnostics({},
-                        "the MIDI changed elsewhere while you typed: Ctrl+Enter applies "
-                        "your text over that change");
+        showDiagnostics(
+            {}, ui::shortcutLabel("the MIDI changed elsewhere while you typed: Ctrl+Enter applies "
+                                  "your text over that change"));
         return;
     }
     if (textConflict_ && !submit) return;

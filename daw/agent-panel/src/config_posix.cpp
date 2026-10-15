@@ -26,14 +26,20 @@ Status writePrivate(const std::filesystem::path& file, std::string_view text) {
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
     std::string temp = (dir / ("." + file.filename().string() + ".XXXXXX")).string();
+#if defined(__linux__)
+    const int fd = ::mkostemp(temp.data(), O_CLOEXEC);  // atomic close-on-exec, mode 0600
+#else
     const int fd = ::mkstemp(temp.data());  // O_EXCL, mode 0600
+#endif
     if (fd < 0) return writeError(file, errno);
-    if (fd >= 0) (void)::fcntl(fd, F_SETFD, FD_CLOEXEC);
     auto fail = [&](int error) {
         ::close(fd);
         ::unlink(temp.c_str());
         return writeError(file, error);
     };
+#if !defined(__linux__)
+    if (::fcntl(fd, F_SETFD, FD_CLOEXEC) != 0) return fail(errno);
+#endif
     if (::fchmod(fd, 0600) != 0) return fail(errno);  // whatever the C library chose
     for (std::size_t done = 0; done < text.size();) {
         const ssize_t n = ::write(fd, text.data() + done, text.size() - done);

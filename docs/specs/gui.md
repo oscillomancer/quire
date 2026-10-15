@@ -837,6 +837,11 @@ use paths::home(). Product slugs and explicit file overrides remain caller-owned
 Windowing and agent-panel portability are specified in ADR-0039; native
 plugin-editor embedding remains a separate port.
 
+The app accepts `--audio jack|portaudio|dummy|none`. Interactive Linux runs
+default to JACK, native runs to dummy (matching the engine); finite/offscreen
+runs default to none. `--audio portaudio` explicitly selects native device
+audio. Tests use dummy/none and never enable hardware opt-ins.
+
 SDL drivers are forced to X11/Cocoa/Windows respectively. Layout uses design
 units; SDL pixel density and Windows per-monitor display scale determine the
 framebuffer ratio. Pointer, file-drop and IME-caret coordinates use that same

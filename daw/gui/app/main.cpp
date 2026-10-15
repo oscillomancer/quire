@@ -77,7 +77,7 @@ struct Options {
     int generate = 0;                            // tracks of a generated session
     double idleSeconds = 0;                      // measure idle CPU after the frames
     double viewStart = -1, viewPps = 0;          // initial lanes viewport
-    std::string audio;  // jack | dummy | none; default: jack (none offscreen)
+    std::string audio;  // jack | portaudio | dummy | none; native default: dummy
     // Override the saved appearance for this run (not saved): dark | light | a
     // supple.theme/1.0 file, and warm | ink.
     std::string theme, palette;

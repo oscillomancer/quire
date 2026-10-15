@@ -15,6 +15,7 @@
 #include "supple/ui/list.h"
 #include "supple/ui/popup.h"
 #include "supple/ui/root.h"
+#include "supple/ui/shortcut.h"
 #include "supple/ui/text_area.h"
 #include "supple/ui/text_field.h"
 #include "supple/ui/widgets.h"
@@ -1001,5 +1002,13 @@ TEST_CASE("SDL primary-modifier keys map to the portable shortcut bits") {
     CHECK(mods == kSuper);
 #else
     CHECK(mods == kCtrl);
+#endif
+}
+
+TEST_CASE("instructional shortcuts show the platform primary modifier") {
+#if defined(__APPLE__)
+    CHECK(shortcutLabel("Ctrl+Shift+S / Ctrl+click") == "Cmd+Shift+S / Cmd+click");
+#else
+    CHECK(shortcutLabel("Ctrl+Shift+S / Ctrl+click") == "Ctrl+Shift+S / Ctrl+click");
 #endif
 }

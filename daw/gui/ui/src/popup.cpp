@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "supple/ui/popup.h"
+#include "supple/ui/shortcut.h"
 
 #include <algorithm>
 #include <memory>
@@ -15,6 +16,7 @@ class MenuList : public List {
   public:
     MenuList(std::string id, std::vector<MenuItem> items, std::function<void()> close)
         : List(std::move(id)), items_(std::move(items)), close_(std::move(close)) {
+        for (auto& item : items_) item.shortcut = shortcutLabel(std::move(item.shortcut));
         rowHeight = 26;
         setCount(items_.size());
         paintRow = [this](Canvas& c, std::size_t i, const Rect& r, bool) {

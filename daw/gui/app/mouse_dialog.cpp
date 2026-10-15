@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "mouse_dialog.h"
+#include "supple/ui/shortcut.h"
 
 #include "supple/ui/popup.h"
 #include "supple/ui/widgets.h"
@@ -14,7 +15,7 @@ std::string comboLabel(unsigned mods) {
     for (std::size_t i = 0; i < name.size(); ++i)
         if (i == 0 || name[i - 1] == '+')
             name[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(name[i])));
-    return name;
+    return ui::shortcutLabel(std::move(name));
 }
 
 std::string behaviourLabel(std::string_view b) {

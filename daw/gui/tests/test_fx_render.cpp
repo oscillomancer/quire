@@ -820,9 +820,9 @@ TEST_CASE("the plugin browser names the plugin's file and marks a shadowed copy"
     // one; the browser says which copy wins and which is ignored.
     const std::filesystem::path dup = f.dir / "shadow";
     std::filesystem::create_directories(dup);
-    std::filesystem::copy_file(std::filesystem::path(SUPPLE_CLAP_DIR) / "Plumb.clap",
-                               dup / "Plumb.clap",
-                               std::filesystem::copy_options::overwrite_existing);
+    std::filesystem::copy(std::filesystem::path(SUPPLE_CLAP_DIR) / "Plumb.clap", dup / "Plumb.clap",
+                          std::filesystem::copy_options::overwrite_existing |
+                              std::filesystem::copy_options::recursive);
     engine::AppOptions options;
     options.workdir = f.dir / "shadow-work";
     options.pluginPath = {dup, std::filesystem::path(SUPPLE_CLAP_DIR)};

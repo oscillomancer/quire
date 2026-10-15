@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "actions_list.h"
+#include "supple/ui/shortcut.h"
 
 #include <SDL3/SDL_keycode.h>
 
@@ -68,7 +69,8 @@ class ActionsPanel : public ui::Node {
         footer.layout.height = ui::SizeRule::fixed(24);
         footer.layout.gap = 8;
         footer.layout.align = ui::Layout::Align::Center;
-        hint_ = &footer.emplace<ui::Label>("actions.hint", chrome_ ? kChromeHint : kHint,
+        hint_ = &footer.emplace<ui::Label>("actions.hint",
+                                           ui::shortcutLabel(chrome_ ? kChromeHint : kHint),
                                            ui::Font::Ui, "caption", "ink-quiet");
         hint_->layout.width = ui::SizeRule::fraction();
         footer.emplace<ui::Button>("actions.keys.reset", "Reset keys\u2026", [this] {
@@ -259,7 +261,7 @@ class ActionsPanel : public ui::Node {
     void captured(std::optional<actions::Chord> chord) {
         root_.focus(search_);
         if (!chord) {
-            hint_->setText(chrome_ ? kChromeHint : kHint);
+            hint_->setText(ui::shortcutLabel(chrome_ ? kChromeHint : kHint));
             return;
         }
         actions::Binding b{{*chord}, "global", capturing_};

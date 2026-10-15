@@ -33,10 +33,15 @@ that rule. macOS displays Cmd in shortcut labels, accepts both Ctrl and Cmd
 in keymap documents, and uses the secondary kSuper bit for physical Control.
 Shift and Option/Alt retain their meanings. Cmd-Q invokes ui.quit; SDL's
 application-menu Quit event uses the normal shutdown/flush path. No custom
-native menu hierarchy is added.
+native menu hierarchy is added. Interactive native audio defaults to dummy,
+as in the engine; --audio portaudio opts into device audio. Finite/offscreen
+runs retain their default of no backend.
 
 The agent HTTP client keeps libcurl and the existing streaming/cancellation
-contract. Cooperative jobs use core-base's Apple-compatible stop layer.
+contract. Cooperative jobs use core-base's Apple-compatible stop layer. Peak/writer
+condition-variable predicates include stop state, with stop requests protected
+by the same mutex to prevent a lost shutdown wake. GL-free sidecar tests also
+compile against the compatibility types on Linux and run under TSan.
 Tests use Winsock on Windows and POSIX sockets elsewhere, suppress SIGPIPE,
 and handle partial sends. Agent config uses the platform configuration root.
 POSIX publication creates a 0600 exclusive temporary, writes/fsyncs, renames

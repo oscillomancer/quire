@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "app_actions.h"
+#include "supple/ui/shortcut.h"
 #include "track_menu.h"
 
 #include <algorithm>
@@ -374,7 +375,7 @@ void AppActions::addControl(std::string id, std::string name, std::string descri
     a.description = std::move(description);
     a.builtin = [name = a.name](const actions::Context&) -> Result<json::Value> {
         return Error("action.control", name + " follows a MIDI controller", {},
-                     "bind a controller to it: Ctrl+L in the actions list");
+                     ui::shortcutLabel("bind a controller to it: Ctrl+L in the actions list"));
     };
     a.control = [run = std::move(run)](const actions::ControlValue& v,
                                        const actions::Context&) -> Result<json::Value> {

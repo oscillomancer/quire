@@ -539,7 +539,23 @@ TEST_CASE("the endpoint config is replaced atomically and stays owner-only") {
         REQUIRE(GetSecurityDescriptorControl(descriptor, &control, &revision));
         CHECK((control & SE_DACL_PROTECTED) != 0);
         REQUIRE(acl != nullptr);
-        CHECK(acl->AceCount == 1);
+        REQUIRE(acl->AceCount == 1);
+        void* rawAce = nullptr;
+        REQUIRE(GetAce(acl, 0, &rawAce));
+        const auto* ace = static_cast<const ACCESS_ALLOWED_ACE*>(rawAce);
+        CHECK(ace->Header.AceType == ACCESS_ALLOWED_ACE_TYPE);
+        CHECK((ace->Header.AceFlags & INHERITED_ACE) == 0);
+        CHECK((ace->Mask & FILE_ALL_ACCESS) == FILE_ALL_ACCESS);
+        HANDLE token = nullptr;
+        REQUIRE(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token));
+        DWORD bytes = 0;
+        GetTokenInformation(token, TokenUser, nullptr, 0, &bytes);
+        std::vector<unsigned char> user(bytes);
+        const bool haveUser = GetTokenInformation(token, TokenUser, user.data(), bytes, &bytes);
+        CloseHandle(token);
+        REQUIRE(haveUser);
+        CHECK(EqualSid(const_cast<DWORD*>(&ace->SidStart),
+                       reinterpret_cast<TOKEN_USER*>(user.data())->User.Sid));
         LocalFree(descriptor);
         return 0600;
     };
@@ -592,6 +608,12 @@ TEST_CASE("the endpoint config is replaced atomically and stays owner-only") {
     CHECK(Config::load(file)->endpoints.at(0).apiKey == "sk-2");
     CHECK(onlyTheFile());
 #endif
+    const auto unicode = dir / std::filesystem::path(u8"設定") / std::filesystem::path(u8"鍵.json");
+    REQUIRE(c.save(unicode));
+    auto unicodeConfig = Config::load(unicode);
+    REQUIRE(unicodeConfig);
+    CHECK(unicodeConfig->endpoints.at(0).apiKey == c.endpoints[0].apiKey);
+    CHECK(mode(unicode) == 0600);
     const auto blocked = dir / "slug" / "blocked";  // a non-empty directory: rename fails
     std::filesystem::create_directories(blocked / "inside");
     REQUIRE_FALSE(c.save(blocked));

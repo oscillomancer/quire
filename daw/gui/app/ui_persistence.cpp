@@ -17,14 +17,17 @@ UiPersistence::UiPersistence(std::function<void()> completed)
 
 UiPersistence::~UiPersistence() {
     drain();
-    writer_.request_stop();
+    {
+        std::lock_guard lock(mutex_);
+        writer_.request_stop();
+    }
     wake_.notify_all();
 }
 
 void UiPersistence::writerLoop(supple::StopToken stop) {
     std::unique_lock lock(mutex_);
     for (;;) {
-        wake_.wait(lock, stop, [&] { return pending_.has_value(); });
+        wake_.wait(lock, [&] { return stop.stop_requested() || pending_.has_value(); });
         if (!pending_) return;  // stopped
         auto [file, text] = std::move(*pending_);
         pending_.reset();

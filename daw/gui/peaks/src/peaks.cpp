@@ -253,7 +253,10 @@ PeakService::PeakService(std::filesystem::path cacheDir, Post post)
       worker_([this](supple::StopToken stop) { run(stop); }) {}
 
 PeakService::~PeakService() {
-    worker_.request_stop();
+    {
+        std::lock_guard lock(mutex_);
+        worker_.request_stop();
+    }
     wake_.notify_all();
 }
 
@@ -308,7 +311,7 @@ void PeakService::run(supple::StopToken stop) {
         Job job;
         {
             std::unique_lock lock(mutex_);
-            wake_.wait(lock, stop, [&] { return !queue_.empty(); });
+            wake_.wait(lock, [&] { return stop.stop_requested() || !queue_.empty(); });
             if (stop.stop_requested()) return;
             job = std::move(queue_.front());
             queue_.pop_front();

@@ -59,14 +59,18 @@ if(SUPPLE_PLATFORM_LINUX)
   target_sources(gui-service-watcher PRIVATE app/service_watcher_linux.cpp)
 endif()
 
+supple_add_library(gui-persistence SOURCES app/ui_persistence.cpp
+  DEPS supple::core-base supple::core-json)
+target_include_directories(gui-persistence PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/app)
+
 # The app's pieces (shell, generator, actions UI, chrome), shared with tests.
 add_library(gui-app STATIC app/shell.cpp app/generate.cpp app/app_actions.cpp app/actions_list.cpp app/chrome.cpp
-  app/agent_panel.cpp app/plugin_windows.cpp app/ui_persistence.cpp app/screensets.cpp app/file_actions.cpp app/midi_editor.cpp app/routing_matrix.cpp app/mixer.cpp
+  app/agent_panel.cpp app/plugin_windows.cpp app/screensets.cpp app/file_actions.cpp app/midi_editor.cpp app/routing_matrix.cpp app/mixer.cpp
   app/fx_params.cpp app/plugin_browser.cpp app/fx_window.cpp app/render_dialog.cpp app/history_panel.cpp app/transport_bar.cpp app/plugin_scales.cpp
   app/midi_event_list.cpp app/appearance.cpp app/track_menu.cpp app/mouse_dialog.cpp app/selection_edit.cpp app/preferences.cpp
   app/control_map.cpp app/learn_dialog.cpp)
 target_include_directories(gui-app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/app)
-target_link_libraries(gui-app PUBLIC supple::gui-service-watcher supple::agent supple::gui-actions supple::gui-views supple::gui-ui supple::gui-platform
+target_link_libraries(gui-app PUBLIC supple::gui-persistence supple::gui-service-watcher supple::agent supple::gui-actions supple::gui-views supple::gui-ui supple::gui-platform
                       supple::engine supple::control-protocol supple::core-params supple::product-info SDL3::SDL3)
 target_compile_definitions(gui-app PUBLIC SUPPLE_SKILL_DIR="${PROJECT_SOURCE_DIR}/skill")
 supple_target_defaults(gui-app)
@@ -93,6 +97,16 @@ if(SUPPLE_BUILD_TESTS)
   # Mesa's allocations outlive the process by design; leak checks would only
   # report the GL driver.
   set_tests_properties(gui-platform.tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+  supple_add_tests(gui-persistence SOURCES tests/test_persistence.cpp LABELS gui)
+  if(SUPPLE_PLATFORM_LINUX)
+    # Compile the same writer handoffs with Apple's stop-token compatibility
+    # types, so unsupported standard-library overloads fail locally too.
+    supple_add_library(gui-persistence-fallback SOURCES app/ui_persistence.cpp
+      DEPS supple::core-base supple::core-json)
+    target_include_directories(gui-persistence-fallback PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/app)
+    target_compile_definitions(gui-persistence-fallback PUBLIC SUPPLE_TEST_FALLBACK_STOP=1)
+    supple_add_tests(gui-persistence-fallback SOURCES tests/test_persistence.cpp LABELS gui)
+  endif()
   supple_add_tests(gui-service-watcher SOURCES tests/test_service_watcher.cpp LABELS gui)
   supple_add_tests(gui-peaks SOURCES tests/test_peaks.cpp LABELS gui)
   supple_add_tests(gui-views SOURCES tests/test_views.cpp DEPS gui-app LABELS gui tsan-skip)
