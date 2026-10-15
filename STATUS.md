@@ -60,7 +60,8 @@ fixtures use Python, credential references can use Windows hard links, and
 attempt cleanup uses native Jobs or POSIX process groups. Real sandbox/model
 checks remain explicit opt-ins. Source-export player/factory/audio conformance
 runs natively, including binary exports: Windows retains the module trailer;
-macOS uses a bundle resource and ad-hoc signing. Native validation is pending.
+macOS uses a bundle resource and ad-hoc signing. The lifecycle and thirteen
+source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows.
 
 ## What works
 
