@@ -29,7 +29,12 @@ target_include_directories(clap-host PRIVATE ${PROJECT_SOURCE_DIR}/plugins/suite
 # The plugin bridge: hosts dedicated or shared isolated plugin instances (ADR-0013).
 add_executable(${PRODUCT_SLUG}-bridge bridge/bridge_main.cpp)
 if(APPLE)
-  set_source_files_properties(bridge/bridge_main.cpp PROPERTIES LANGUAGE OBJCXX COMPILE_OPTIONS "-std=c++20")
+  set(_bridge_objcxx_options -std=c++20)
+  if(SUPPLE_APPLE_RT_NOEXCEPT_WARNING)
+    list(APPEND _bridge_objcxx_options -Wno-perf-constraint-implies-noexcept)
+  endif()
+  set_source_files_properties(bridge/bridge_main.cpp PROPERTIES LANGUAGE OBJCXX
+                             COMPILE_OPTIONS "${_bridge_objcxx_options}")
 endif()
 target_link_libraries(${PRODUCT_SLUG}-bridge PRIVATE supple::clap-host supple::core-dsp)
 supple_target_defaults(${PRODUCT_SLUG}-bridge)

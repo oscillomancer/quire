@@ -4,7 +4,7 @@
 
 #include <SDL3/SDL.h>
 #if defined(__APPLE__)
-#include <objc/message.h>
+#include <dlfcn.h>
 #include <objc/runtime.h>
 #endif
 #define GL_GLEXT_PROTOTYPES
@@ -150,9 +150,16 @@ NativeWindow Window::nativeParent() const {
     void* window = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
     if (!window) return {};
     // SDL exposes NSWindow*. The embedded plugin API requires its NSView*.
+    // SDL has already loaded Cocoa. Resolve its runtime here so this accessor
+    // does not add a host-library or Objective-C link dependency to gui-platform.
+    using Selector = SEL (*)(const char*);
     using ContentView = void* (*)(void*, SEL);
-    void* view =
-        reinterpret_cast<ContentView>(objc_msgSend)(window, sel_registerName("contentView"));
+    static const auto selector =
+        reinterpret_cast<Selector>(dlsym(RTLD_DEFAULT, "sel_registerName"));
+    static const auto contentView =
+        reinterpret_cast<ContentView>(dlsym(RTLD_DEFAULT, "objc_msgSend"));
+    if (!selector || !contentView) return {};
+    void* view = contentView(window, selector("contentView"));
     return {NativeWindow::Kind::Cocoa, reinterpret_cast<std::uintptr_t>(view)};
 #elif defined(_WIN32)
     void* window = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
