@@ -116,7 +116,7 @@ jobs:
         run: |
           export HOMEBREW_NO_AUTO_UPDATE=1
           export HOMEBREW_CACHE="$GITHUB_WORKSPACE/.deps/homebrew"
-          brew install ninja sdl3
+          brew install ninja sdl3 ccache
           test "$(uname -m)" = arm64
           xcrun clang --version
 
@@ -140,6 +140,14 @@ jobs:
           path: .compiler-cache
           key: clang22-${{ runner.arch }}-${{ github.sha }}
           restore-keys: clang22-${{ runner.arch }}-
+      - name: Restore macOS compiler cache
+        if: matrix.platform == 'macos'
+        id: macos-compiler-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .compiler-cache
+          key: appleclang-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: appleclang-${{ runner.arch }}-
       - name: Configure
         run: |
           if [[ '${{ matrix.platform }}' == linux ]]; then
@@ -147,6 +155,11 @@ jobs:
             echo "CCACHE_NOHASHDIR=true" >> "$GITHUB_ENV"
             echo "CCACHE_MAXSIZE=500M" >> "$GITHUB_ENV"
             cmake --preset dev -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          elif [[ '${{ matrix.platform }}' == macos ]]; then
+            echo "CCACHE_DIR=$GITHUB_WORKSPACE/.compiler-cache" >> "$GITHUB_ENV"
+            echo "CCACHE_NOHASHDIR=true" >> "$GITHUB_ENV"
+            echo "CCACHE_MAXSIZE=1G" >> "$GITHUB_ENV"
+            cmake --preset macos -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           else
             cmake --preset ${{ matrix.preset }}
           fi
@@ -181,6 +194,12 @@ jobs:
         with:
           path: .compiler-cache
           key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
+      - name: Save macOS compiler cache
+        if: always() && matrix.platform == 'macos' && steps.macos-compiler-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .compiler-cache
+          key: ${{ steps.macos-compiler-cache.outputs.cache-primary-key }}
       - name: Test logs
         if: always()
         uses: actions/upload-artifact@v4
