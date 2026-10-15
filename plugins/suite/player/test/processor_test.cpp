@@ -29,6 +29,7 @@
 #include "core/Engine.h"
 #include "dsp/AudioFile.h"
 #include "runner.h"
+#include "supple/script_export.hpp"
 #include "supple/script_native.h"
 
 // Example scripts compiled as C++, as a source export builds them.
@@ -801,6 +802,50 @@ TEST(a_script_reports_the_latency_it_sets_in_prepare) {
     engine.activate(48000.0, 64, 2, 2);
     // The oversampler's delay, which Info does not give.
     CHECK(engine.latency() > 0 && engine.latency() < 16);
+}
+
+TEST(embedded_payloads_are_bounded_and_validate_the_schema) {
+    const auto folder = std::filesystem::temp_directory_path() /
+                        ("supple-player-payload-" + std::to_string(processId()));
+    std::filesystem::remove_all(folder);
+    const auto module = folder / "Reader.clap/Contents/MacOS/Reader";
+#if defined(__APPLE__)
+    const auto storage =
+        module.parent_path().parent_path() / "Resources" / scriptc::kExportResource;
+#else
+    const auto storage = module;
+#endif
+    std::filesystem::create_directories(storage.parent_path());
+    auto write = [&](const std::string& payload) {
+        std::ofstream out(storage, std::ios::binary | std::ios::trunc);
+#if defined(__APPLE__)
+        out << payload;
+#else
+        out << "player prefix" << scriptc::exportTrailer(payload);
+#endif
+    };
+    write(R"({"schema":"supple.script-export/1.0","name":"reader","source":"test source"})");
+    const auto read = embeddedScript(module);
+    CHECK(read.has_value());
+    if (read) {
+        CHECK(read->name == "reader");
+        CHECK(read->source == "test source");
+    }
+    write(R"({"schema":"wrong","name":"reader","source":"test source"})");
+    CHECK(!embeddedScript(module));
+#if defined(__APPLE__)
+    {
+        std::ofstream out(storage, std::ios::binary | std::ios::trunc);
+        out.seekp(static_cast<std::streamoff>(scriptc::kMaxExportPayload));
+        out.put('x');
+    }
+    CHECK(!embeddedScript(module));
+    std::filesystem::remove(storage);
+    std::filesystem::create_directory(storage);
+    CHECK(!embeddedScript(module));
+#endif
+    CHECK(std::filesystem::is_regular_file(ownModule()));
+    std::filesystem::remove_all(folder);
 }
 
 SUPPLE_TEST_MAIN

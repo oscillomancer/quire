@@ -538,3 +538,22 @@ support for MIR is CI-tested upstream but untested here.
   preset tracking and per-project properties in other hosts.
 - **A novel syntax, Faust, Cmajor, EEL2, Lua or WASM**: set aside in the
   brief, for LLM fluency and export fidelity.
+
+### Native binary CLAP exports (2026-10-15)
+
+This dated amendment supersedes the Linux-only player-export limit in the
+implementation/review notes above. Linux retains the exact appended payload
+format. Windows uses the same trailer on a DLL, found with GetModuleHandleExW
+and GetModuleFileNameW and read through native wide paths. macOS copies the
+CLAP bundle, stores the unchanged JSON schema in
+Contents/Resources/supple-script.json, and locates it relative to the module
+reported by dladdr. The Mach-O receives no trailer. The complete copied bundle
+is always re-signed ad hoc using the system codesign tool before publication;
+this seals resources consistently and preserves arm64 loadability. Missing or
+failed signing is a structured dsp.sign error, with staging cleanup and the
+previous export preserved. No signing identity, notarization or Authenticode
+workflow is introduced. Current lifecycle, payload/size, publication and platform
+contracts are in specs/sandbox.md. Native conformance verifies the signed bundle,
+scanner/direct-host/bridge loading, factory patches and exact same-platform
+player/binary/source audio. Headless editor pictures still require EGL in the
+template shared stack and remain Linux-only.

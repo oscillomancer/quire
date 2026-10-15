@@ -137,12 +137,15 @@ run("${CASE}'s semantic conformance" ${CMAKE_COMMAND} -E env ${private_home}
 
 # Factory patches: the same names, in the same order, applying the same
 # values from the library's player, a player export and the built project.
-if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
-    run("exporting ${CASE} for the player" ${sandbox} exec
-        "{\"command\":\"dsp.export\",\"args\":{\"script\":\"${name}\",\"folder\":\"${WORK}/player-export\"}}"
-        --workdir "${WORK}/workdir" --plugin-path "${PLAYER}")
-    string(JSON player_export GET "${output}" path)
+run("exporting ${CASE} for the player" ${sandbox} exec
+    "{\"command\":\"dsp.export\",\"args\":{\"script\":\"${name}\",\"folder\":\"${WORK}/player-export\"}}"
+    --workdir "${WORK}/workdir" --plugin-path "${PLAYER}")
+string(JSON player_export GET "${output}" path)
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+    run("verifying ${CASE}'s signed bundle" /usr/bin/codesign --verify --strict "${player_export}")
 endif()
+run("${CASE}'s binary semantic conformance" ${CMAKE_COMMAND} -E env ${private_home}
+    "${CONFORMANCE}" "${player_export}" "${id}")
 # The patches `plugin` lists from `path`, each as preset.load applies it.
 function(factory_patches plugin path out)
     run("listing ${CASE}'s factory patches from ${path}" ${sandbox} exec
@@ -180,11 +183,8 @@ function(factory_patches plugin path out)
 endfunction()
 factory_patches("${id}" "${PLAYER}" library_patches)
 factory_patches("${id}" "${built}" source_export_patches)
-set(export_modes source_export)
-if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
-    factory_patches("${id}" "${player_export}" player_export_patches)
-    list(APPEND export_modes player_export)
-endif()
+factory_patches("${id}" "${player_export}" player_export_patches)
+set(export_modes source_export player_export)
 foreach(mode IN LISTS export_modes)
     if (NOT ${mode}_patches STREQUAL library_patches)
         message(FATAL_ERROR "${CASE}: the ${mode}'s factory patches differ from the player's:\n"
@@ -245,6 +245,10 @@ run("${CASE}'s player playing" ${sandbox} exec
     "{\"command\":\"dsp.test\",\"args\":{\"script\":\"${name}\",${args}}}"
     --workdir "${WORK}/workdir" --plugin-path "${PLAYER}")
 set(player_result "${output}")
+run("${CASE}'s binary export playing" ${sandbox} exec
+    "{\"command\":\"dsp.test\",\"args\":{\"plugin\":\"${id}\",${args}}}"
+    --workdir "${WORK}/binary-export" --plugin-path "${player_export}")
+set(binary_result "${output}")
 
 # These small dsp.test files are canonical stereo float32 RIFF WAVs at 48 kHz,
 # with a 44-byte header (audio-file's writer). Validate it before counting frames.
@@ -277,7 +281,7 @@ function(wav_frames path out)
 endfunction()
 
 list(LENGTH signals expected_count)
-foreach(mode export player)
+foreach(mode export player binary)
     string(JSON count LENGTH "${${mode}_result}" signals)
     if (NOT count EQUAL expected_count)
         message(FATAL_ERROR "${CASE} ${mode}: expected ${expected_count} signals, got ${count}")
@@ -285,7 +289,7 @@ foreach(mode export player)
 endforeach()
 set(index 0)
 foreach(signal IN LISTS signals)
-    foreach(mode export player)
+    foreach(mode export player binary)
         string(JSON actual GET "${${mode}_result}" signals ${index} signal)
         if (NOT actual STREQUAL signal)
             message(FATAL_ERROR "${CASE} ${mode}: expected ${signal}, got ${actual}")
@@ -310,6 +314,11 @@ foreach(signal IN LISTS signals)
             endif()
         endif()
     endforeach()
+    if (NOT export_frames EQUAL binary_frames)
+        message(FATAL_ERROR "${CASE} ${signal}: binary frame count differs")
+    endif()
+    run("${CASE} ${signal}: comparing binary export" ${CMAKE_COMMAND} -E compare_files
+        "${export_path}" "${binary_path}")
     if (NOT export_frames EQUAL player_frames)
         message(FATAL_ERROR "${CASE} ${signal}: frame counts differ (${export_frames} vs ${player_frames})")
     endif()

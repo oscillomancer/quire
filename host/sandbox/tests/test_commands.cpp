@@ -116,7 +116,7 @@ TEST_CASE("every sandbox command example runs against its fixture" * doctest::de
         },
         [](std::string_view fixture) {
 #if !defined(__linux__)
-            if (fixture == "dsp_player_export" || fixture == "dsp_player_editor") return false;
+            if (fixture == "dsp_player_editor") return false;
 #endif
             return SUPPLE_EDITORS || fixture != "dsp_player_editor";
         });
@@ -125,7 +125,7 @@ TEST_CASE("every sandbox command example runs against its fixture" * doctest::de
 #if defined(__linux__)
     CHECK(n >= 16);
 #else
-    CHECK(n >= 13);  // two editor pictures and the binary export require Linux
+    CHECK(n >= 14);  // two editor pictures still require Linux/EGL
 #endif
 }
 

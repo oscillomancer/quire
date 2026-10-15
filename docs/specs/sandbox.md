@@ -371,7 +371,7 @@ within −120 dBFS for the stock test synth).
 | `session.set` | edit | `sample_rate?`, `block_size?`, `tempo?`, `meter?`, `tail_limit_s?` | settings |
 | `session.reset` | action | — | — |
 | `dsp.write`, `dsp.check`, `dsp.get`, `dsp.list` | action, queries | as in the engine (ADR-0032): the session's script library, `SessionOptions::scriptDir` (`<workdir>/scripts`; the CLI without `--workdir` uses the app's, `<data>/<slug>/scripts`) | diagnostics with hints, the plugin's id, parameters and files (keys for a patch's `properties`) |
-| `dsp.export` | action | `script` (name); `format?` (`clap`, the default, or `source`); `folder?` (absolute; default `<library>/<script>/export`, for source `export/<script>-source`, which must be new or empty); `license?` (source: `MIT`, the default, or `GPL-3.0-or-later`) | `path`, `id`, `name`, `format`. clap: `path` is `<folder>/<plugin name>.clap`, the player that plays the script copied with the script appended (it offers that one plugin), `player` (the module copied), `bytes`, `notices` (the player's licenses, written beside it). source: `path` is a project of the plugin template (the framework, the suite without its compiler, the script under `product/script/`, the product's files) that builds the same plugin |
+| `dsp.export` | action | `script` (name); `format?` (`clap`, the default, or `source`); `folder?` (absolute; default `<library>/<script>/export`, for source `export/<script>-source`, which must be new or empty); `license?` (source: `MIT`, the default, or `GPL-3.0-or-later`) | `path`, `id`, `name`, `format`. clap: `path` is `<folder>/<plugin name>.clap`, the platform player copied with the script embedded (a Linux/Windows file trailer or macOS bundle resource; it offers that one plugin), `player` (the module copied), `bytes`, `notices` (the player's licenses, written beside it). source: `path` is a project of the plugin template (the framework, the suite without its compiler, the script under `product/script/`, the product's files) that builds the same plugin |
 | `dsp.preview` | action | `plugin` (id) or `script` (name); `patch?` (merge); `signal?` (an effect's `sine`, the default, `sweep`, `impulse`, `noise`, `silence`; an instrument's `notes`, the default, `note`, `silence`); `level_db` (-12); `frequency_hz` (1000); `seconds` (1; 0 plays nothing); `scale` (1, 0.5 to 3); `pointer?` (up to 64 steps before the picture, in its pixels at scale 1: `{action, x, y}` with `action` `move`, `press`, `release`, `click`, `double_click`, `drag` (with `to_x`, `to_y`) or `wheel` (`steps`, 1; up positive), and `shift`, `ctrl`, `alt`) | `path` (a PNG of the editor, drawn without a window after the signal played through a fresh instance and the pointer acted, in the renders folder), `width` and `height` in pixels, `plugin`, `edits` (a merge patch: what the pointer changed), `problems` (the editor code's loop budget or out-of-range index, with the line), `log`. Needs the plugin's `com.suppleaudio.editor-picture/1` (`docs/specs/editor-picture-extension.md`), which the script player has |
 | `dsp.test` | action | `plugin` (id) or `script` (name); `patch?` (merge); `signals?` (an effect's `sine`, `sweep`, `impulse`, `noise`, `silence`, all by default; an instrument's `notes`, `note`, `silence`, all by default); `level_db` (each audio signal's peak, -12); `frequency_hz` (1000); `seconds` (1); `save`; `automation?`, `sidechain?`, `notes?` (below) | per signal: `peak_dbfs`, `rms_dbfs`, `dc`, `clipped`, `denormals`, sine `gain_db` and `thd_percent`, impulse `response_db` at octave centres, note `pitch_hz`, an instrument's `release_ms`, `path` when saved, optional `automation` and `sidechain` measurements (below); `latency`, `cpu_percent` (measured), `problems` (prose), `log` |
 
@@ -550,8 +550,8 @@ whose instrument render rejects a sampler silent with no sample loaded).
 The test checks signal names/counts, WAV frame counts and byte equality.
 Sampler/reverb receive generated audio files with audible patches; the
 compressor receives a timed key, and instruments receive custom notes.
-Factory patches must match: the player and built project (also an appended
-player export on Linux) list the same names in the same order, and each applies the same
+Factory patches must match: the player, binary export and built source project
+list the same names in the same order on every platform, and each applies the same
 full patch; tilt's must be Flat, Warm, Air, with Warm at tilt -3 dB,
 pivot 800 Hz, output 0 dB.
 
@@ -706,11 +706,40 @@ instances and retains exact local/bridged output equivalence on each platform.
 The sandbox session's plugin.load command continues to load in process. Native
 device backends remain separate from bridge isolation.
 
-On non-Linux platforms `dsp.export {format: "clap"}` returns `dsp.platform`
-at `/format`, with a hint to select `source`. This is the existing Linux-only
-binary export limit made explicit for bundle players. Source generation and
-DSP measurement remain enabled. The binary-export example uses its own fixture
-and is skipped only where that format is unavailable.
+Binary CLAP exports run on Linux, Windows and macOS. Linux and Windows copy
+only the original player bytes (stripping a previous export's trailer), then
+append the unchanged `supple.script-export/1.0` JSON, little-endian uint64 length
+and `SPLSCRPT` magic (`supple/script_export.hpp`). Windows paths are UTF-8 at
+command boundaries and native wide paths for module/file operations; unsigned
+DLL overlays are supported, Authenticode signing is outside this contract.
+
+macOS exports copy the complete `.clap` bundle, resolve its executable through
+CFBundleExecutable, and store that same JSON without a footer in
+`Contents/Resources/supple-script.json` (at most 8 MiB). The player locates its own
+Mach-O with dladdr, then reads this sibling resource before consulting a library.
+No script bytes are appended to the Mach-O. Every copied bundle is signed ad hoc
+with `/usr/bin/codesign --force --sign - --timestamp=none`, even if the original
+signature did not seal resources. Missing/failed signing returns `dsp.sign` at
+`/folder` with a recovery hint. Signing happens in an adjacent staging directory
+before replacing a previous export; failed signing removes staging and preserves
+the previous export. Publication failure attempts to restore the previous bundle;
+if that fails, the error names the retained backup. `bytes` counts the regular
+files in the signed bundle (a module file's bytes elsewhere). Required combined
+notices still go beside `<name>.clap` as `<name>-NOTICES.txt` on all platforms.
+
+An export of an export replaces its script payload and offers only the newly
+embedded definition. No external samples/IRs or current instance patch are copied.
+The binary-export command example and lifecycle tests run natively, including
+Unicode output paths, generic host and bridge loading. Each of the thirteen
+export cases checks factory patches, standalone CLAP semantic conformance and
+exact same-platform audio against both library player and built source; macOS
+also verifies each bundle with `codesign --verify --strict`.
+
+Install into a platform CLAP directory or a folder named in CLAP_PATH: `;`
+separates Windows entries and `:` separates macOS/Linux entries. Standard folders
+are those listed above; export does not modify CLAP_PATH or install system files.
+`dsp.preview` pictures remain Linux/EGL-only inside the template's shared stack;
+native previews continue returning `dsp.no_picture`.
 
 Script-player source reads require a regular file before opening the bounded
 (1 MiB) stream; directories are rejected even where ifstream reports an empty
@@ -726,5 +755,5 @@ Source-export integration inherits the native compiler/toolchain and macOS
 architecture/deployment target, uses only vendored dependencies (including Metal
 and AudioUnit SDK on macOS), and supplies CI software GL beside exported Windows
 test executables. Nested builds/tests stay within two jobs on macOS, three
-elsewhere, and run serially relative to the outer suite. Native source conformance
-is independent of the Linux-only appended-player binary export capability.
+elsewhere, and run serially relative to the outer suite. Source and binary exports both participate in native conformance and exact
+same-platform player audio comparisons.

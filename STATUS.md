@@ -59,7 +59,8 @@ Evaluation harness fixtures now run on Windows as well as POSIX: executable
 fixtures use Python, credential references can use Windows hard links, and
 attempt cleanup uses native Jobs or POSIX process groups. Real sandbox/model
 checks remain explicit opt-ins. Source-export player/factory/audio conformance
-runs natively; appended-player binary exports still require Linux.
+runs natively, including binary exports: Windows retains the module trailer;
+macOS uses a bundle resource and ad-hoc signing. Native validation is pending.
 
 ## What works
 

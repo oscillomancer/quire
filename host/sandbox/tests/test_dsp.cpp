@@ -6,6 +6,8 @@
 #include <doctest/doctest.h>
 #include "../../../tests/file_platform.h"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -16,7 +18,11 @@
 #include <string>
 
 #include "supple/audio/audio_file.h"
+#include "supple/base/files.h"
 #include "supple/sandbox/commands.h"
+#if defined(__APPLE__)
+#include "../../dsp-commands/dsp_export_platform.h"
+#endif
 
 using namespace supple;
 using namespace supple::sandbox;
@@ -388,8 +394,6 @@ TEST_CASE("dsp.test measures a script through the player and names what goes wro
     CHECK(problems.find("NaN or infinity") != std::string::npos);
 }
 
-#if defined(__linux__)
-// Binary script exports append to the Linux player; native bundle export is a later port.
 TEST_CASE("dsp.export makes a plugin that plays its version of the script, and no other") {
     const fs::path player = kStock / "Script Player.clap";
     if (!fs::exists(player)) {
@@ -428,7 +432,8 @@ TEST_CASE("dsp.export makes a plugin that plays its version of the script, and n
     auto exportTo = [&](Host& h, const fs::path& folder) {
         json::Value a = json::Value::object();
         a["script"] = "boost";
-        a["folder"] = folder.string();
+        const auto utf8 = folder.u8string();
+        a["folder"] = std::string(utf8.begin(), utf8.end());
         return call(h, "dsp.export", std::move(a));
     };
     auto gainDb = [&](Host& h) {
@@ -452,38 +457,95 @@ TEST_CASE("dsp.export makes a plugin that plays its version of the script, and n
     // From the library's player: Boost.clap, with the notices to ship.
     Host library = open("library", player);
     write(library, "boost", boost(6));
-    json::Value first = exportTo(library, root.path / "out");
-    CHECK(first["path"].asString() == (root.path / "out" / "Boost.clap").string());
+#if defined(__linux__)
+    const fs::path output = root.path / "out";
+#else
+    const fs::path output = root.path / fs::path(u8"out café λ");
+#endif
+    auto utf8 = [](const fs::path& path) {
+        const auto bytes = path.u8string();
+        return std::string(bytes.begin(), bytes.end());
+    };
+    const auto plugin = output / "Boost.clap";
+    const auto notices = output / "Boost-NOTICES.txt";
+    json::Value first = exportTo(library, output);
+    CHECK(first["path"].asString() == utf8(plugin));
     CHECK(first["id"].asString() == "com.example.boost");
     CHECK(first["player"].asString() == player.string());
-    CHECK(fs::file_size(first["path"].asString()) ==
-          static_cast<std::uintmax_t>(first["bytes"].asInt()));
-    CHECK(fs::exists(first["notices"].asString()));
+#if defined(__APPLE__)
+    CHECK(fs::is_directory(plugin));
+    CHECK(fs::is_regular_file(plugin / "Contents/Resources/supple-script.json"));
+    CHECK(first["bytes"].asInt() > 0);
+#else
+    CHECK(fs::file_size(plugin) == static_cast<std::uintmax_t>(first["bytes"].asInt()));
+    const auto original = readFile(player);
+    const auto exported = readFile(plugin);
+    REQUIRE(original);
+    REQUIRE(exported);
+    REQUIRE(exported->size() > original->size());
+    CHECK(std::equal(original->begin(), original->end(), exported->begin()));
+#endif
+    CHECK(first["notices"].asString() == utf8(notices));
+    CHECK(fs::exists(notices));
 
     // The library changes and grows; the export keeps its own version and
     // offers nothing else.
     write(library, "boost", boost(12));
     write(library, "other", script("Other", "com.example.other", "    void process(Block& io) {}"));
-    Host anywhere = open("anywhere", root.path / "out");
+    Host anywhere = open("anywhere", output);
     auto listed = anywhere.host->session().plugins(true);
     REQUIRE(listed);
     REQUIRE(listed->size() == 1);
     CHECK(listed->front().id == "com.example.boost");
     CHECK(gainDb(anywhere) == doctest::Approx(6.0).epsilon(0.002));
 
+    // The exported file also loads through the generic host and bridge, with
+    // no library lookup and identical sample output in either process.
+    std::array<float, 64> input{}, left{}, right{}, expected{};
+    input.fill(0.25f);
+    const float* inputs[] = {input.data(), input.data()};
+    float* outputs[] = {left.data(), right.data()};
+    for (bool isolated : {false, true}) {
+        auto instance = host::Instance::create(listed->front(), {}, isolated);
+        REQUIRE_MESSAGE(instance, (instance ? "" : instance.error().toString()));
+        REQUIRE((*instance)->activate(48000, 64, 64));
+        REQUIRE((*instance)->startProcessing());
+        host::ProcessBlock block;
+        block.inputs = inputs;
+        block.inputChannels = 2;
+        block.outputs = outputs;
+        block.outputChannels = 2;
+        block.frames = 64;
+        CHECK((*instance)->process(block));
+        (*instance)->stopProcessing();
+        (*instance)->deactivate();
+        if (!isolated) expected = left;
+        CHECK(left == expected);
+        CHECK(right == expected);
+        CHECK(left.front() == doctest::Approx(0.25 * std::pow(10.0, 6.0 / 20)).epsilon(0.002));
+    }
+
     // An export exported again starts from the player, with the new script.
     write(anywhere, "boost", boost(12));
     json::Value second = exportTo(anywhere, root.path / "again");
     CHECK(second["player"].asString() == first["path"].asString());
+#if !defined(__APPLE__)
     CHECK(second["bytes"].asInt() == first["bytes"].asInt() + 1);  // "12" for "6"
-    CHECK(fs::file_size(second["notices"].asString()) ==
-          fs::file_size(first["notices"].asString()));
+#endif
+    CHECK(fs::file_size(root.path / "again/Boost-NOTICES.txt") == fs::file_size(notices));
     Host again = open("again", root.path / "again");
     CHECK(gainDb(again) == doctest::Approx(12.0).epsilon(0.002));
 
+    // Replacing an existing, unloaded export publishes the new payload too.
+    (void)exportTo(anywhere, root.path / "replacement");
+    write(anywhere, "boost", boost(6));
+    (void)exportTo(anywhere, root.path / "replacement");
+    Host replacement = open("replacement", root.path / "replacement");
+    CHECK(gainDb(replacement) == doctest::Approx(6.0).epsilon(0.002));
+
     // An installed copy missing its notices must not yield an export that
     // cannot be redistributed with the required licenses.
-    REQUIRE(fs::remove(first["notices"].asString()));
+    REQUIRE(fs::remove(notices));
     json::Value missing = json::Value::object();
     missing["script"] = "boost";
     missing["folder"] = (root.path / "without-notices").string();
@@ -495,6 +557,32 @@ TEST_CASE("dsp.export makes a plugin that plays its version of the script, and n
     CHECK_FALSE(fs::exists(root.path / "without-notices" / "Boost.clap"));
 }
 
+#if defined(__APPLE__)
+TEST_CASE("failed bundle signing preserves an existing export and removes staging files") {
+    Root root;
+    const auto broken = root.path / "broken.clap";
+    const auto output = root.path / "output.clap";
+    REQUIRE(writeFileAtomic(broken / "Contents/MacOS/broken", "not a Mach-O"));
+    REQUIRE(writeFileAtomic(output / "keep", "previous valid export"));
+    auto result = dsp_commands::binary_export::writeBundle(broken, output, "{}");
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == "dsp.sign");
+    CHECK(result.error().path == "/folder");
+    CHECK_FALSE(result.error().hint.empty());
+    CHECK(fs::is_regular_file(output / "keep"));
+    for (const auto& entry : fs::directory_iterator(root.path))
+        CHECK_FALSE(entry.path().filename().string().starts_with(".script-export-"));
+
+    // A copied resource-directory link must not write back into the source.
+    const auto outside = root.path / "outside";
+    fs::create_directory(outside);
+    fs::create_directory_symlink(outside, broken / "Contents/Resources");
+    auto linked = dsp_commands::binary_export::writeBundle(broken, output, "{}");
+    REQUIRE_FALSE(linked);
+    CHECK(linked.error().code == "dsp.player");
+    CHECK(fs::is_empty(outside));
+    CHECK(fs::is_regular_file(output / "keep"));
+}
 #endif
 
 TEST_CASE("dsp.test plays notes into an instrument and hears its pitch") {
@@ -613,8 +701,7 @@ TEST_CASE("dsp.test gives a convolution reverb its room through a patch") {
     CHECK(missing.error().toString().find("there is no file there") != std::string::npos);
 }
 
-#if !defined(__linux__)
-TEST_CASE("native plugin-file export gives a source-export hint") {
+TEST_CASE("plugin-file export defaults to the script's export folder") {
     Harness h;
     h.write("native-export",
             script("Native", "com.example.native-export",
@@ -622,9 +709,9 @@ TEST_CASE("native plugin-file export gives a source-export hint") {
     auto args = json::Value::object();
     args["script"] = "native-export";
     auto result = h.bus->execute({"dsp.export", args, kTest});
-    REQUIRE_FALSE(result);
-    CHECK(result.error().code == "dsp.platform");
-    CHECK(result.error().path == "/args/format");
-    CHECK_FALSE(result.error().hint.empty());
+    REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
+    CHECK((*result)["format"].asString() == "clap");
+    CHECK((*result)["path"].asString() ==
+          (h.host->session().scriptDir() / "native-export/export/Native.clap").string());
+    CHECK(fs::exists(h.host->session().scriptDir() / "native-export/export/Native.clap"));
 }
-#endif

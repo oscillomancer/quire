@@ -133,7 +133,6 @@ These gates are explicit, with no no-op RT implementations:
 | Gate | Off on | Reason / follow-up |
 |---|---|---|
 | JACK/fake JACK and hardware capacity benchmark | macOS, Windows | Linux graph/hardware tooling; native device audio uses PortAudio (ADR-0038) |
-| Appended-player binary-export comparison | macOS, Windows | `dsp.export format=clap` is Linux-only; source exports and their full conformance tests run natively |
 
 Research GUI spikes and host fuzzers reject configuration on non-Linux
 platforms rather than silently building incomplete targets. Renders must
@@ -189,8 +188,13 @@ native window close after saving its private project. Native snapshots account
 for framebuffer density. Source-export tests inherit the compiler, toolchain,
 macOS architecture/deployment target and vendored renderer dependencies. They
 build every exported script and check its own tests, factory patches and exact
-same-platform player audio; only appended-player binary export remains Linux-only
-because `dsp.export format=clap` reports unsupported on native platforms.
+same-platform player audio, including binary exports. Linux/Windows binary
+exports retain the appended format; macOS bundles carry a JSON resource and are
+re-signed ad hoc with the system codesign tool before publication. Native tests
+verify macOS signatures, scanner/direct-host/bridge loading, factory patches and
+exact player/source/binary audio. No signing identity or system installation is
+needed; failed/missing macOS signing reports dsp.sign. Headless dsp.preview
+pictures still require Linux/EGL in the template shared stack.
 
 Evaluation harness unit fixtures run everywhere: Python replaces executable shell
 fixtures; stdio readiness uses the portable pipe helper. Windows attempts use a

@@ -382,7 +382,7 @@ Result:
 
 Export a DSP script as a plugin for other DAWs: a CLAP file, or C++ source.
 
-format clap (the default, Linux only): copies the script player that plays the script here and appends the script. The copy is a plugin of its own, under the script's id and name, that plays this version of the script in any CLAP host (it reads no library), written to <folder>/<plugin name>.clap (default: the script's folder, under export/) with the licenses to ship beside it (notices). It runs on this platform, as fast as the player it copies (a debug build's is slow). format source: a C++ project of the plugin template that builds the same plugin (same id, parameters and state) as CLAP and VST3, plus AU on macOS, with the script compiled as C++, written to the empty <folder> (default: the script's folder, under export/<script>-source); its README says how to build it, and license (MIT unless GPL-3.0-or-later) is the license of its own files. Export again after changing the script; an export does not follow the library.
+format clap (the default): copies the platform's script player and embeds the script in its trailer (Linux/Windows) or bundle resource (macOS, re-signed ad hoc with the system codesign tool). The copy is a plugin of its own, under the script's id and name, that plays this version of the script in any CLAP host (it reads no library), written to <folder>/<plugin name>.clap (default: the script's folder, under export/) with the licenses to ship beside it (notices). It runs on this platform, as fast as the player it copies (a debug build's is slow). format source: a C++ project of the plugin template that builds the same plugin (same id, parameters and state) as CLAP and VST3, plus AU on macOS, with the script compiled as C++, written to the empty <folder> (default: the script's folder, under export/<script>-source); its README says how to build it, and license (MIT unless GPL-3.0-or-later) is the license of its own files. Export again after changing the script; an export does not follow the library.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -437,7 +437,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 
 ### Errors
 
-- `dsp.platform`: plugin-file export is unavailable on this platform Hint: use format source to export a C++ project
+- `dsp.sign`: macOS: ad-hoc bundle signing failed or codesign is unavailable Hint: restore the player and system codesign tool, or use format source
 - `dsp.compile`: the script does not compile Hint: dsp.check gives its diagnostics
 - `dsp.id_taken`: another script in the library has the script's id Hint: give each script its own Info.id
 - `dsp.not_listed`: the script compiles but no plugin has its id Hint: put the script player on the plugin path

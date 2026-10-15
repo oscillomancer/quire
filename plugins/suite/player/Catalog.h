@@ -38,9 +38,9 @@ std::shared_ptr<const ScriptDefinition> compileScript(const std::filesystem::pat
                                                       std::string* problems,
                                                       scriptc::Message* firstError = nullptr);
 
-// The file of the module this code is in (the player's .clap), or empty.
+// The binary this code is in (inside Contents/MacOS on macOS), or empty.
 std::filesystem::path ownModule();
-// The script an export carries at the end of its module file
+// The script an export carries in its module trailer or macOS bundle resource
 // (supple/script_export.hpp), or nothing: a player, not an export.
 struct EmbeddedScript {
     std::string name, source;

@@ -113,8 +113,13 @@ in `<workdir>/scripts`; `dsp_list.library` gives the actual location.
 
 ## Export limits
 
-Player exports currently produce Linux CLAP files only. Ship the returned
-`notices` file beside the plugin. Source exports need a new or empty
+Player exports produce a CLAP file on Linux/Windows and a CLAP bundle on macOS,
+for that platform and architecture. Ship the returned `notices` file beside it.
+macOS stores the script as a bundle resource and re-signs the copy ad hoc with
+the system codesign tool; `dsp.sign` means signing failed or the tool is missing.
+Install in the platform's CLAP folder or an absolute folder listed in CLAP_PATH
+(`;` separators on Windows, `:` on macOS/Linux). Export does not change the
+search path or perform system installation. Source exports need a new or empty
 `folder` and at least one visible, automatable parameter for the template's
 host tests, whose name holds none of `"`, `\`, `$`, `;` or `@` (the tests
 find it by name through CMake). They require the source export kit installed beside the stock
@@ -126,8 +131,10 @@ that patch separately, distribute any required samples or impulse responses,
 and set their paths on the destination machine. A source export uses native
 C++: checked indexing remains, but the JIT's loop budget does not. Keep
 loops bounded before exporting; a loop that the player stops can hang a
-native export. Build and test the exported project before distributing it;
-platforms beyond Linux have not been validated here.
+native export. Build and test the exported project before distributing it.
+The automated suite checks CLAP exports on Linux, macOS and Windows; VST3/AU
+source-export host conformance is not claimed. Headless `dsp.preview` pictures
+remain Linux-only because they use EGL inside the template shared GUI stack.
 
 ## Test what changes over time
 

@@ -2,9 +2,10 @@
 // Copyright (c) 2026 Supple Audio
 //
 // A player export (Quire's ADR-0032 §5): a copy of the script player with one
-// script appended to its own file. When the player loads, it reads the end
-// of its file; finding a script there, it offers that one plugin and no
-// library. The file ends:
+// script embedded. Linux and Windows append it to the module file. macOS
+// stores the same JSON in Contents/Resources/supple-script.json and signs
+// the bundle ad hoc; its Mach-O never receives a trailer. An export offers
+// that one plugin and no library. The appended file ends:
 //
 //   <payload> <payload length: 8 bytes, little-endian> "SPLSCRPT"
 //
@@ -35,6 +36,7 @@ inline constexpr std::string_view kPlayerMark = SUPPLE_SCRIPT_PLAYER_MARK;
 
 inline constexpr char kExportMagic[8] = {'S', 'P', 'L', 'S', 'C', 'R', 'P', 'T'};
 inline constexpr std::string_view kExportSchema = "supple.script-export/1.0";
+inline constexpr char kExportResource[] = "supple-script.json";
 // The length and the magic, after the payload.
 inline constexpr std::size_t kExportFooterBytes = 16;
 // The longest payload a player reads: a script is at most 1 MiB, and JSON's

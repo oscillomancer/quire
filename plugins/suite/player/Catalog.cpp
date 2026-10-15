@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Supple Audio
 //
-// The player's catalog (core/Catalog.h). An export (a player with a script
-// appended, supple/script_export.hpp) offers that script's plugin and nothing
+// The player's catalog (core/Catalog.h). An export (a player with an embedded
+// script, supple/script_export.hpp) offers that script's plugin and nothing
 // else. Otherwise the player offers a plugin for each script in the library
 // -- the folders SUPPLE_SCRIPT_LIBRARY names -- at <folder>/<name>/<name>.cpp,
 // each with the ID, name and kind its script declares. A script that does
@@ -128,6 +128,20 @@ std::filesystem::path ownModule() {
 }
 
 std::optional<EmbeddedScript> embeddedScript(const std::filesystem::path& module) {
+#if defined(__APPLE__)
+    const auto resource =
+        module.parent_path().parent_path() / "Resources" / scriptc::kExportResource;
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(resource, ec)) return std::nullopt;
+    std::ifstream in(resource, std::ios::binary | std::ios::ate);
+    if (!in) return std::nullopt;
+    const std::streamoff size = in.tellg();
+    if (size < 0 || static_cast<std::uint64_t>(size) > scriptc::kMaxExportPayload)
+        return std::nullopt;
+    std::string payload(static_cast<size_t>(size), '\0');
+    in.seekg(0);
+    if (!in.read(payload.data(), static_cast<std::streamsize>(payload.size()))) return std::nullopt;
+#else
     std::ifstream in(module, std::ios::binary | std::ios::ate);
     if (!in) return std::nullopt;
     const std::streamoff size = in.tellg();
@@ -141,6 +155,7 @@ std::optional<EmbeddedScript> embeddedScript(const std::filesystem::path& module
     std::string payload(static_cast<size_t>(*length), '\0');
     in.seekg(size - static_cast<std::streamoff>(sizeof footer + payload.size()));
     if (!in.read(payload.data(), static_cast<std::streamsize>(payload.size()))) return std::nullopt;
+#endif
     suite::json::Value doc;
     suite::json::Error error;
     if (!suite::json::parse(payload, doc, error) || !doc.isObject()) return std::nullopt;

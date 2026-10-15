@@ -4,7 +4,7 @@
 // as a plugin for other hosts.
 //
 //   - format clap: a copy of the script player that plays the script here,
-//     with the script appended (supple/script_export.hpp). The copy offers
+//     with the script in a trailer or bundle resource (supple/script_export.hpp). The copy offers
 //     that one plugin, under the script's id, and reads no library. Beside
 //     it go the licenses of the player and what it includes.
 //   - format source: a project of the plugin template that builds the
@@ -29,6 +29,7 @@
 #include <system_error>
 #include <vector>
 
+#include "dsp_export_platform.h"
 #include "dsp_shared.h"
 #include "supple/base/files.h"
 #include "supple/cmd/bus.h"
@@ -74,13 +75,17 @@ inline std::string fileName(std::string_view name, std::string_view fallback) {
 // itself an export, the <stem>-NOTICES.txt that already is that text.
 inline std::optional<std::string> playerNotices(const fs::path& module, bool fromExport) {
     const fs::path dir = module.parent_path();
-    const std::string stem = module.stem().string();
-    auto notices = readTextFile(dir / (stem + "-NOTICES.txt"), std::size_t(4) << 20);
+    const fs::path stem = module.stem();
+    auto notices = readTextFile(dir / fs::path(stem).concat("-NOTICES.txt"), std::size_t(4) << 20);
     if (!notices) return std::nullopt;
     if (fromExport) return std::move(*notices);
-    auto license = readTextFile(dir / (stem + "-LICENSE.txt"), std::size_t(1) << 20);
+    auto license = readTextFile(dir / fs::path(stem).concat("-LICENSE.txt"), std::size_t(1) << 20);
     if (!license) return std::nullopt;
+#if defined(__APPLE__)
+    return "This plugin is a copy of the script player with a DSP script embedded. The script "
+#else
     return "This plugin is a copy of the script player with a DSP script appended. The script "
+#endif
            "is its author's. The player's license and the notices of the software it includes "
            "follow.\n\n"
            "==============================================================================\n" +
@@ -312,9 +317,9 @@ void registerDspExport(cmd::Registry& registry) {
     c.exposure = cmd::Exposure::McpTool;
     c.summary = "Export a DSP script as a plugin for other DAWs: a CLAP file, or C++ source.";
     c.description =
-        "format clap (the default, Linux only): copies the script player that plays the script "
-        "here and "
-        "appends the script. The copy is a plugin of its own, under the script's id and name, "
+        "format clap (the default): copies the platform's script player and embeds the script "
+        "in its trailer (Linux/Windows) or bundle resource (macOS, re-signed ad hoc with the "
+        "system codesign tool). The copy is a plugin of its own, under the script's id and name, "
         "that plays this version of the script in any CLAP host (it reads no library), "
         "written to <folder>/<plugin name>.clap (default: the script's folder, under export/) "
         "with the licenses to ship beside it (notices). It runs on this platform, as fast as "
@@ -355,8 +360,8 @@ void registerDspExport(cmd::Registry& registry) {
                    .field("notices", &ExportResult::notices,
                           schema::string().doc("clap: the licenses to ship with the plugin"))
                    .build();
-    c.errors = {{"dsp.platform", "plugin-file export is unavailable on this platform",
-                 "use format source to export a C++ project"},
+    c.errors = {{"dsp.sign", "macOS: ad-hoc bundle signing failed or codesign is unavailable",
+                 "restore the player and system codesign tool, or use format source"},
                 {"dsp.compile", "the script does not compile", "dsp.check gives its diagnostics"},
                 {"dsp.id_taken", "another script in the library has the script's id",
                  "give each script its own Info.id"},
@@ -393,7 +398,7 @@ void registerDspExport(cmd::Registry& registry) {
     }
     c.run = [](const ExportArgs& a, Context& ctx) -> Result<ExportResult> {
         Host& s = ctx.service<Host>();
-        if (a.folder && !fs::path(*a.folder).is_absolute())
+        if (a.folder && !binary_export::path(*a.folder).is_absolute())
             return Error("dsp.path", "'" + *a.folder + "' is not an absolute folder", "/folder",
                          "give the whole path, such as /home/<you>/.clap");
         auto text = detail::readScript(s, a.script, "/script");
@@ -434,10 +439,6 @@ void registerDspExport(cmd::Registry& registry) {
             return ExportResult{dest.string(), info.id, info.name, "source", {}, {}, {}};
         }
 
-#if !defined(__linux__)
-        return Error("dsp.platform", "plugin-file export is unavailable on this platform",
-                     "/format", "use format source to export a C++ project");
-#endif
         const std::string& id = program.info().id;
         auto info = s.findPlugin(id);
         if (!info) {
@@ -449,22 +450,31 @@ void registerDspExport(cmd::Registry& registry) {
                          "the script player must be on the plugin path");
         if (info->format != "clap" || info->path.extension() != ".clap")
             return Error("dsp.player",
-                         id + " is played by " + info->path.string() + ", not a .clap", "/script",
-                         "put the script player's .clap on the plugin path");
-        auto module = readTextFile(info->path);
+                         id + " is played by " + binary_export::text(info->path) + ", not a .clap",
+                         "/script", "put the script player's .clap on the plugin path");
+        auto binary = binary_export::moduleFile(info->path);
+        if (!binary) return std::move(binary).error();
+        auto module = readTextFile(*binary);
         if (!module) return std::move(module).error();
         // An export of an export starts again from the player, which keeps
         // its mark in its file.
         const std::string_view player = scriptc::exportPlayer(*module);
         if (player.find(scriptc::kPlayerMark) == std::string_view::npos)
-            return Error(
-                "dsp.player",
-                id + " belongs to " + info->path.string() + ", which is not the script player",
-                "/script", "give the script an id no other plugin has");
+            return Error("dsp.player",
+                         id + " belongs to " + binary_export::text(info->path) +
+                             ", which is not the script player",
+                         "/script", "give the script an id no other plugin has");
 
-        auto notices = playerNotices(info->path, player.size() != module->size());
+        bool fromExport = player.size() != module->size();
+#if defined(__APPLE__)
+        std::error_code resourceError;
+        fromExport =
+            fs::exists(info->path / "Contents/Resources" / scriptc::kExportResource, resourceError);
+#endif
+        auto notices = playerNotices(info->path, fromExport);
         if (!notices)
-            return Error("dsp.notices", "cannot read the licenses for " + info->path.string(),
+            return Error("dsp.notices",
+                         "cannot read the licenses for " + binary_export::text(info->path),
                          "/script",
                          "restore the player's -LICENSE.txt and -NOTICES.txt files beside it; "
                          "an existing export needs its -NOTICES.txt file");
@@ -473,27 +483,35 @@ void registerDspExport(cmd::Registry& registry) {
         payload["schema"] = std::string(scriptc::kExportSchema);
         payload["name"] = a.script;
         payload["source"] = *text;
+        const fs::path folder =
+            a.folder ? binary_export::path(*a.folder) : s.scriptDir() / a.script / "export";
+        const fs::path file =
+            folder / binary_export::path(fileName(program.info().name, a.script) + ".clap");
+        std::int64_t byteCount = 0;
+#if defined(__APPLE__)
+        auto written = binary_export::writeBundle(info->path, file, json::writeCompact(payload));
+        if (!written) return std::move(written).error();
+        byteCount = *written;
+#else
         std::string bytes(player);
         bytes += scriptc::exportTrailer(json::writeCompact(payload));
-
-        const fs::path folder =
-            a.folder ? fs::path(*a.folder) : s.scriptDir() / a.script / "export";
-        const fs::path file = folder / (fileName(program.info().name, a.script) + ".clap");
         SUPPLE_TRY(writeFileAtomic(file, bytes));
         std::error_code ec;
         fs::permissions(file,
                         fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec,
                         fs::perm_options::add, ec);
-        ExportResult out{file.string(),
+        byteCount = static_cast<std::int64_t>(bytes.size());
+#endif
+        ExportResult out{binary_export::text(file),
                          id,
                          program.info().name,
                          "clap",
-                         info->path.string(),
-                         static_cast<std::int64_t>(bytes.size()),
+                         binary_export::text(info->path),
+                         byteCount,
                          {}};
-        const fs::path notes = folder / (file.stem().string() + "-NOTICES.txt");
+        const fs::path notes = folder / fs::path(file.stem()).concat("-NOTICES.txt");
         SUPPLE_TRY(writeFileAtomic(notes, *notices));
-        out.notices = notes.string();
+        out.notices = binary_export::text(notes);
         return out;
     };
     registry.add(std::move(c));

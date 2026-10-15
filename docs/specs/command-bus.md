@@ -228,7 +228,7 @@ says whether this build can provide a fixture, and examples whose fixture it
 cannot are skipped: `dsp_player_editor`, a script player with its editor,
 in builds without a GUI (the sanitizer presets), or without the Linux/EGL
 headless drawing backend. Native builds test its structured unavailable error
-separately. The binary `dsp_player_export` fixture also requires Linux.
+separately. The binary `dsp_player_export` fixture runs on Linux, macOS and Windows.
 
 ### 1.9 Error codes owned by the bus
 
