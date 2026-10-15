@@ -28,6 +28,7 @@ Contracts: gui.md §4.5 and sandbox.md §1.
   The DAW retains an editor entry without an SDL placeholder window. Reopening
   a hidden editor raises the same NSWindow. Closing/destroying an instance
   releases the view before the NSWindow; bridge death closes all its windows.
+  Activation uses macOS14's cooperative NSApplication activate API.
 - POSIX protocol 15 / Windows 16 add one u8 parent kind before EditorOpen's
   u64 handle and f64 scale. Numeric kinds are none=0, x11=1, cocoa=2, win32=3,
   floating=4. Cocoa bridges require floating with handle zero, and create the

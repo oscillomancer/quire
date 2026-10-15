@@ -166,7 +166,7 @@ bool FloatingEditorWindow::takeResize(unsigned& width, unsigned& height) {
 }
 void FloatingEditorWindow::show() {
     [state_->window makeKeyAndOrderFront:nil];
-    [NSApp activateIgnoringOtherApps:YES];
+    [NSApp activate];
 }
 void FloatingEditorWindow::hide() { [state_->window orderOut:nil]; }
 bool FloatingEditorWindow::closed() const { return state_->delegate.closed; }
