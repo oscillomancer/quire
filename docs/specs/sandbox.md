@@ -542,7 +542,7 @@ invalid patch and an invalid notation string and asserts the errors carry
 paths, locations and hints.
 
 The slow `plugin.export.source` test builds fresh source exports for every
-script in `plugins/suite/examples`, plus the library tilt regression with
+script in `plugins/suite/examples` on Linux, macOS and Windows, plus the library tilt regression with
 its non-default patch. Each export passes the semantic conformance tool,
 then renders the same explicit signal list as the player. Each export
 also passes its own template test suite (the sampler without host-smoke,
@@ -550,8 +550,8 @@ whose instrument render rejects a sampler silent with no sample loaded).
 The test checks signal names/counts, WAV frame counts and byte equality.
 Sampler/reverb receive generated audio files with audible patches; the
 compressor receives a timed key, and instruments receive custom notes.
-Factory patches must match: the player, a player export and the built
-project list the same names in the same order, and each applies the same
+Factory patches must match: the player and built project (also an appended
+player export on Linux) list the same names in the same order, and each applies the same
 full patch; tilt's must be Flat, Warm, Air, with Warm at tilt -3 dB,
 pivot 800 Hz, output 0 dB.
 
@@ -721,3 +721,10 @@ and proxy on native systems. Its exact numeric documentation transcript remains
 a Linux drift check: DSP is deterministic per platform, not bit-identical
 between platforms (ADR-0034). Portable mode retains an informational Linux
 reference diff in the CTest log for review.
+
+Source-export integration inherits the native compiler/toolchain and macOS
+architecture/deployment target, uses only vendored dependencies (including Metal
+and AudioUnit SDK on macOS), and supplies CI software GL beside exported Windows
+test executables. Nested builds/tests stay within two jobs on macOS, three
+elsewhere, and run serially relative to the outer suite. Native source conformance
+is independent of the Linux-only appended-player binary export capability.

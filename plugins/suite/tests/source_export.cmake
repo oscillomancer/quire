@@ -10,6 +10,20 @@ foreach(var SANDBOX PLAYER KIT SCRIPT PATCH WORK THIRD_PARTY CC CXX BUILD_TYPE C
     endif()
 endforeach()
 
+if(NOT DEFINED CONFIGURE_JOBS OR CONFIGURE_JOBS STREQUAL "")
+    set(CONFIGURE_JOBS 3)
+endif()
+# Carry the parent toolchain into every recursively built export.
+set(native_args)
+foreach(pair TOOLCHAIN:CMAKE_TOOLCHAIN_FILE DEPLOYMENT_TARGET:CMAKE_OSX_DEPLOYMENT_TARGET ARCHITECTURES:CMAKE_OSX_ARCHITECTURES)
+    string(REPLACE ":" ";" pair "${pair}")
+    list(GET pair 0 input)
+    list(GET pair 1 output)
+    if(DEFINED ${input} AND NOT "${${input}}" STREQUAL "")
+        list(APPEND native_args "-D${output}=${${input}}")
+    endif()
+endforeach()
+
 function(run what)
     execute_process(COMMAND ${ARGN} RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
     if (NOT result EQUAL 0)
@@ -39,7 +53,9 @@ if (DEFINED EXAMPLES)
             "-DSCRIPT=${script}" "-DPATCH=${patch}" "-DWORK=${WORK}/${case}"
             "-DTHIRD_PARTY=${THIRD_PARTY}" "-DCC=${CC}" "-DCXX=${CXX}"
             "-DBUILD_TYPE=${BUILD_TYPE}" "-DCONFORMANCE=${CONFORMANCE}"
-            "-DGAIN_SCRIPT=${GAIN_SCRIPT}" "-DCASE=${case}" -P "${CMAKE_CURRENT_LIST_FILE}")
+            "-DGAIN_SCRIPT=${GAIN_SCRIPT}" "-DCASE=${case}"
+            "-DTOOLCHAIN=${TOOLCHAIN}" "-DDEPLOYMENT_TARGET=${DEPLOYMENT_TARGET}"
+            "-DARCHITECTURES=${ARCHITECTURES}" "-DCONFIGURE_JOBS=${CONFIGURE_JOBS}" -P "${CMAKE_CURRENT_LIST_FILE}")
         message(STATUS "${output}")
     endforeach()
     string(TIMESTAMP finished "%s")
@@ -58,7 +74,8 @@ file(COPY "${SCRIPT}" DESTINATION "${WORK}/workdir/scripts/${name}")
 # A private home prevents scanning the user's plugins, including stale exports.
 set(home "${WORK}/home")
 file(MAKE_DIRECTORY "${home}")
-set(sandbox ${CMAKE_COMMAND} -E env "HOME=${home}" "${SANDBOX}")
+set(private_home "HOME=${home}" "USERPROFILE=${home}" "APPDATA=${home}/config" "LOCALAPPDATA=${home}/local")
+set(sandbox ${CMAKE_COMMAND} -E env ${private_home} "${SANDBOX}")
 run("checking ${CASE}" ${sandbox} exec
     "{\"command\":\"dsp.check\",\"args\":{\"name\":\"${name}\"}}"
     --workdir "${WORK}/workdir")
@@ -76,33 +93,56 @@ if (NOT output MATCHES "suite [0-9.]+ -> [0-9.]+")
 endif()
 
 set(tp "${THIRD_PARTY}")
+if(WIN32)
+    # clap-wrapper otherwise adds /CLAP to the generic output directory.
+    string(TOUPPER "${BUILD_TYPE}" configuration)
+    list(APPEND native_args "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_${configuration}=${WORK}/build/plugins")
+endif()
 run("configuring ${CASE}" ${CMAKE_COMMAND} -S "${WORK}/project" -B "${WORK}/build" -G Ninja
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DCMAKE_C_COMPILER=${CC} -DCMAKE_CXX_COMPILER=${CXX}
+    ${native_args}
     -DSUPPLE_BUILD_VST3=OFF -DFETCHCONTENT_FULLY_DISCONNECTED=ON
     -DFETCHCONTENT_SOURCE_DIR_CLAP=${tp}/clap
     -DFETCHCONTENT_SOURCE_DIR_CLAP-WRAPPER=${tp}/clap-wrapper
     -DFETCHCONTENT_SOURCE_DIR_DR_LIBS=${tp}/dr_libs/include
     -DFETCHCONTENT_SOURCE_DIR_PUGL=${tp}/pugl
     -DFETCHCONTENT_SOURCE_DIR_NANOVG=${tp}/nanovg
-    -DFETCHCONTENT_SOURCE_DIR_NANOSVG=${tp}/nanosvg)
-run("building ${CASE}" ${CMAKE_COMMAND} --build "${WORK}/build" --parallel 3)
+    -DFETCHCONTENT_SOURCE_DIR_NANOSVG=${tp}/nanosvg
+    -DFETCHCONTENT_SOURCE_DIR_NANOVG_METAL=${tp}/nanovg_metal
+    -DAUDIOUNIT_SDK_ROOT=${tp}/AudioUnitSDK-1.1.0)
+run("building ${CASE}" ${CMAKE_COMMAND} --build "${WORK}/build" --parallel ${CONFIGURE_JOBS})
+if(WIN32)
+    # Reuse only the CI-provided, pinned software-GL DLLs; never install a driver.
+    get_filename_component(mesa "${CONFORMANCE}" DIRECTORY)
+    file(GLOB_RECURSE probes "${WORK}/build/*.exe")
+    foreach(probe IN LISTS probes)
+        get_filename_component(destination "${probe}" DIRECTORY)
+        foreach(dll opengl32.dll libglapi.dll libgallium_wgl.dll)
+            if(EXISTS "${mesa}/${dll}")
+                file(COPY "${mesa}/${dll}" DESTINATION "${destination}")
+            endif()
+        endforeach()
+    endforeach()
+endif()
 # The project's own tests. A sampler with no sample loaded is silent, which
 # host-smoke's instrument render rejects; its audio is checked below instead.
 set(skip "")
 if (CASE STREQUAL "sampler")
     set(skip -E "^host-smoke-")
 endif()
-run("${CASE}'s own tests" ${CMAKE_CTEST_COMMAND} --test-dir "${WORK}/build" --output-on-failure -j 3 ${skip})
+run("${CASE}'s own tests" ${CMAKE_CTEST_COMMAND} --test-dir "${WORK}/build" --output-on-failure -j ${CONFIGURE_JOBS} ${skip})
 set(built "${WORK}/build/plugins/${plugin_name}.clap")
-run("${CASE}'s semantic conformance" ${CMAKE_COMMAND} -E env "HOME=${home}"
+run("${CASE}'s semantic conformance" ${CMAKE_COMMAND} -E env ${private_home}
     "SUPPLE_SCRIPT_LIBRARY=${WORK}/workdir/scripts" "${CONFORMANCE}" "${built}" "${id}")
 
 # Factory patches: the same names, in the same order, applying the same
 # values from the library's player, a player export and the built project.
-run("exporting ${CASE} for the player" ${sandbox} exec
-    "{\"command\":\"dsp.export\",\"args\":{\"script\":\"${name}\",\"folder\":\"${WORK}/player-export\"}}"
-    --workdir "${WORK}/workdir" --plugin-path "${PLAYER}")
-string(JSON player_export GET "${output}" path)
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+    run("exporting ${CASE} for the player" ${sandbox} exec
+        "{\"command\":\"dsp.export\",\"args\":{\"script\":\"${name}\",\"folder\":\"${WORK}/player-export\"}}"
+        --workdir "${WORK}/workdir" --plugin-path "${PLAYER}")
+    string(JSON player_export GET "${output}" path)
+endif()
 # The patches `plugin` lists from `path`, each as preset.load applies it.
 function(factory_patches plugin path out)
     run("listing ${CASE}'s factory patches from ${path}" ${sandbox} exec
@@ -139,9 +179,13 @@ function(factory_patches plugin path out)
     set(${out} "${patches}" PARENT_SCOPE)
 endfunction()
 factory_patches("${id}" "${PLAYER}" library_patches)
-factory_patches("${id}" "${player_export}" player_export_patches)
 factory_patches("${id}" "${built}" source_export_patches)
-foreach(mode player_export source_export)
+set(export_modes source_export)
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+    factory_patches("${id}" "${player_export}" player_export_patches)
+    list(APPEND export_modes player_export)
+endif()
+foreach(mode IN LISTS export_modes)
     if (NOT ${mode}_patches STREQUAL library_patches)
         message(FATAL_ERROR "${CASE}: the ${mode}'s factory patches differ from the player's:\n"
             "${${mode}_patches}\nvs\n${library_patches}")
@@ -174,6 +218,9 @@ if (CASE STREQUAL "sampler" OR CASE STREQUAL "reverb")
         "{\"command\":\"dsp.test\",\"args\":{\"script\":\"gain\",\"signals\":[\"${fixture_signal}\"],\"frequency_hz\":220,\"seconds\":0.5,\"save\":true}}"
         --workdir "${WORK}/fixtures" --plugin-path "${PLAYER}")
     string(JSON asset GET "${output}" signals 0 path)
+    # The native path must be encoded again when embedded into a JSON command.
+    string(REPLACE "\\" "\\\\" asset "${asset}")
+    string(REPLACE "\"" "\\\"" asset "${asset}")
     set(patch "{\"params\":${params},\"properties\":{\"${property}\":\"${asset}\"}}")
 endif()
 

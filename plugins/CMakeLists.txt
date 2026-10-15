@@ -270,7 +270,6 @@ if(SUPPLE_BUILD_PLUGINS)
       ENVIRONMENT "SUPPLE_SCRIPT_LIBRARY=${example_library}")
     # Fresh source exports of every example plus the non-default library
     # tilt regression: each its own tests, semantic conformance and player audio parity.
-    if(SUPPLE_HOST_SERVICES)
     add_test(NAME plugin.export.source
       COMMAND ${CMAKE_COMMAND} -DSANDBOX=$<TARGET_FILE:${PRODUCT_SLUG}-sandbox>
               -DPLAYER=${player_clap} -DKIT=${CMAKE_BINARY_DIR}/plugins/script-export
@@ -281,9 +280,12 @@ if(SUPPLE_BUILD_PLUGINS)
               "-DPATCH={\"tilt\": 4.5, \"pivot\": 700, \"output\": -2}"
               -DWORK=${CMAKE_BINARY_DIR}/plugins/export-test -DTHIRD_PARTY=${CMAKE_SOURCE_DIR}/third_party
               -DCC=${CMAKE_C_COMPILER} -DCXX=${CMAKE_CXX_COMPILER} -DBUILD_TYPE=${CMAKE_BUILD_TYPE}
+              -DTOOLCHAIN=${CMAKE_TOOLCHAIN_FILE}
+              -DDEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
+              -DARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
+              -DCONFIGURE_JOBS=$<IF:$<BOOL:${APPLE}>,2,3>
               -P ${CMAKE_CURRENT_SOURCE_DIR}/suite/tests/source_export.cmake)
     # Nested builds use three jobs too; do not overlap them with other tests.
-    set_tests_properties(plugin.export.source PROPERTIES LABELS slow TIMEOUT 1800 RUN_SERIAL TRUE)
-    endif()
+    set_tests_properties(plugin.export.source PROPERTIES LABELS slow TIMEOUT 3600 RUN_SERIAL TRUE)
   endif()
 endif()

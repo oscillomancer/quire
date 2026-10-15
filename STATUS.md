@@ -300,8 +300,9 @@ GUI:
   Linux golden references are unchanged. Native editor embedding is integrated
   (ADR-0040), with combined native builds and hermetic tests passing CI.
   Windows config keys use a protected current-user ACL; filesystems without
-  ACL support fail the save. macOS cold-start process timing is unavailable.
-  GUI socket/screenset Python integration scripts remain Linux-only.
+  ACL support fail the save. macOS cold-start timing reads the kernel process
+  start time. GUI socket/screenset and source-export integration fixtures are
+  enabled natively; final cross-platform fixture CI validation is pending.
   Script-player headless editor pictures (`dsp.preview`) still require
   Linux/EGL; native builds return `dsp.no_picture` with a capability hint.
 - No autoscroll during drags; no resize cursor; plugins can be dropped onto
@@ -337,3 +338,9 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
 - Lua ergonomics (a script library path, hot reload).
 - Orrery's structural performance pass.
 - Hardening and ports beyond Linux.
+
+Evaluation harness fixtures now run on Windows as well as POSIX: executable
+fixtures use Python, credential references can use Windows hard links, and
+attempt cleanup uses native Jobs or POSIX process groups. Real sandbox/model
+checks remain explicit opt-ins. Source-export player/factory/audio conformance
+runs natively; appended-player binary exports still require Linux.

@@ -91,7 +91,8 @@ macOS (`macos-15`, arm64) uses
 AppleClang and the system libc++, with deployment target 14.4. Its build preset
 uses two jobs, also enforced explicitly by the workflow, to keep the engine
 command translation units within the hosted runner memory budget. Native macOS
-CI allows 90 minutes for a fresh build plus tests; Linux/Windows retain 60. The root
+CI allows 150 minutes for a fresh build plus serial source-export tests;
+Windows allows 120 minutes and Linux retains 60. The root
 project uses `-gline-tables-only` in this preset: assertions and unoptimized code
 remain enabled, with file/line stack traces. For full variable/type debugging
 on a larger machine, configure with `-DCMAKE_CXX_FLAGS_DEBUG=-g`. Isolated stock
@@ -132,8 +133,6 @@ These gates are explicit, with no no-op RT implementations:
 | Gate | Off on | Reason / follow-up |
 |---|---|---|
 | JACK/fake JACK and hardware capacity benchmark | macOS, Windows | Linux graph/hardware tooling; native device audio uses PortAudio (ADR-0038) |
-| GUI socket/screenset Python integration scripts, source-export integration tests | macOS, Windows | POSIX fixtures; native app smoke/UI logic and editor integration tests run separately (ADR-0039/0040) |
-| POSIX evaluation harness tests | Windows | Unix executable fixtures, symlinks and process groups |
 
 Research GUI spikes and host fuzzers reject configuration on non-Linux
 platforms rather than silently building incomplete targets. Renders must
@@ -179,3 +178,22 @@ still requires exactly `1`; ordinary tests do not open plug-in editors or
 real audio devices. DAW editor integration fixtures compile on all platforms;
 Linux pipe/poll injection fixtures run alongside the portable watcher coverage.
 Native platform smoke images are uploaded with test logs.
+
+GUI socket/screenset integration and source-export integration tests are enabled
+on all three platforms. The GUI agent fixture uses the existing AF_UNIX transport
+(including Windows 10 1803+), bounded anonymous-pipe readiness and an orderly
+native window close after saving its private project. Native snapshots account
+for framebuffer density. Source-export tests inherit the compiler, toolchain,
+macOS architecture/deployment target and vendored renderer dependencies. They
+build every exported script and check its own tests, factory patches and exact
+same-platform player audio; only appended-player binary export remains Linux-only
+because `dsp.export format=clap` reports unsupported on native platforms.
+
+Evaluation harness unit fixtures run everywhere: Python replaces executable shell
+fixtures; stdio readiness uses the portable pipe helper. Windows attempts use a
+kill-on-close Job, assigned to a gated Python bootstrap before any evaluated
+command runs. POSIX keeps sessions/process groups. A descendant-cleanup fixture
+checks cleanup after the leader exits. Credentials remain references: a symlink,
+or on Windows without symlink privilege a same-volume hard link (different-volume
+failure is explicit; credentials are never copied). Real sandbox scorer checks
+still require SUPPLE_EVAL_INTEGRATION=1, and real endpoint runs are never CI tests.
