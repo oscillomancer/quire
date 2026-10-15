@@ -49,17 +49,32 @@ std::string hexOf(const std::string& hash) {
     return hex;
 }
 
+std::string fileTimeKey(std::filesystem::file_time_type time) {
+    // libc++ can use a 128-bit filesystem clock. Preserve all its ticks,
+    // including the most negative value, without narrowing to long long.
+    auto ticks = time.time_since_epoch().count();
+    const bool negative = ticks < 0;
+    std::string key;
+    do {
+        const auto digit = ticks % 10;
+        key.push_back(static_cast<char>('0' + (digit < 0 ? -digit : digit)));
+        ticks /= 10;
+    } while (ticks != 0);
+    if (negative) key.push_back('-');
+    std::reverse(key.begin(), key.end());
+    return key;
+}
+
 // The in-memory key: the content hash, or path + size + mtime when the
 // model has none yet (MediaSource::hash is not populated everywhere).
 std::string keyOf(const std::string& hash, const std::filesystem::path& media) {
     if (!hash.empty()) return hash;
     std::error_code sizeError, timeError;
     const auto size = std::filesystem::file_size(media, sizeError);
-    const auto mtime =
-        std::filesystem::last_write_time(media, timeError).time_since_epoch().count();
+    const auto mtime = std::filesystem::last_write_time(media, timeError);
     return "path:" + media.lexically_normal().string() + ":" +
            (sizeError ? "missing" : std::to_string(size)) + ":" +
-           (timeError ? "missing" : std::to_string(mtime));
+           (timeError ? "missing" : fileTimeKey(mtime));
 }
 
 // The cache file name: the hash's hex, or a digest of path, size and
