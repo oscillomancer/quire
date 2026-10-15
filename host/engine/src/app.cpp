@@ -1302,6 +1302,9 @@ EngineStatus EngineApp::engineStatus() {
     const Engine::Scheduling& sched = engine_->scheduling();
     st.scheduling = {threadClass(sched.callback), threadClass(sched.live),
                      threadClass(sched.renderer), threadClass(sched.background)};
+    const WorkgroupStatus group = backend_->workgroup();
+    st.workgroup = {group.state,   group.joined,  group.failed,
+                    group.osError, group.message, group.hint};
     const auto warnings = engine_->warnings();
     st.warnings.insert(st.warnings.end(), warnings.begin(), warnings.end());
     st.anticipationMisses = static_cast<std::int64_t>(engine_->anticipationMisses());

@@ -124,7 +124,8 @@ Platform directory roots come from `supple::paths`. Native device audio uses Por
 control-side monitor wakes the owner for device recovery. Device callbacks keep
 the same chunked, allocation-free engine contract as JACK. Owned helpers apply
 MMCSS Pro Audio or device-derived Mach time constraints on themselves before
-work, through a startup barrier. GUI embedding remains a separate gate;
+work, through a startup barrier; on macOS the live helpers then join the
+device's CoreAudio workgroup (ADR-0038). GUI embedding remains a separate gate;
 real-device validation remains opt-in.
 Native in-process hosting and supervised scanning are separate from that bridge
 (ADR-0036). clap-host owns a reusable ChildProcess tree/capture helper and

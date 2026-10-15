@@ -42,6 +42,7 @@ class PortAudioBackend final : public Backend {
     bool nativeThreadPolicy() const override;
     Status prepareCurrentThread(bool live) override;
     void releaseCurrentThread() override;
+    WorkgroupStatus workgroup() const override;
     Status prepareLiveThread(std::thread::native_handle_type) override;
     ThreadPolicy callbackPolicy() override;
     static Result<std::vector<AudioDevice>> devices();

@@ -167,6 +167,18 @@ struct BackendStatus {
     bool midiDevicesChanged = false;  // advisory only; audio keeps running
 };
 
+// Whether the live helpers joined the device's audio workgroup (macOS
+// CoreAudio; ADR-0038). `state`: "none" (no workgroup applies: other platforms,
+// JACK, dummy), "ready" (found, no helper joined), "joined" (every helper that
+// tried), "partial", "failed" (lookup refused or every join refused).
+struct WorkgroupStatus {
+    std::string state = "none";
+    std::uint32_t joined = 0;  // helper threads currently in the workgroup
+    std::uint32_t failed = 0;  // helper joins refused since start
+    std::int64_t osError = 0;  // the last refusal's OS error, 0 if none
+    std::string message, hint;
+};
+
 // An audio device driver. The callback runs on the backend's audio thread.
 // Contract for stop(): after the last audio cycle and before stop() returns,
 // the backend calls the callback once more with frames == 0 on its audio
@@ -192,6 +204,8 @@ class Backend {
     virtual bool nativeThreadPolicy() const { return false; }
     virtual Status prepareCurrentThread(bool) { return okStatus(); }
     virtual void releaseCurrentThread() {}
+    // Audio workgroup membership of the live helpers; reads atomics.
+    virtual WorkgroupStatus workgroup() const { return {}; }
     // Main thread after start(), before live jobs: configure an idle helper.
     // Normal/dummy backends keep normal scheduling. RT backends MUST override
     // this and refuse unsafe scheduling/capacity (engine then runs serially).

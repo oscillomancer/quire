@@ -81,6 +81,13 @@ struct EngineScheduling {
     ThreadClass callback, live, renderer, background;
 };
 
+// The live helpers' audio workgroup membership (ADR-0038); see WorkgroupStatus.
+struct EngineWorkgroup {
+    std::string state = "none";
+    std::int64_t joined = 0, failed = 0, osError = 0;
+    std::string message, hint;
+};
+
 // The real-time engine as engine.status reports it.
 struct EngineStatus {
     bool running = false;
@@ -98,6 +105,7 @@ struct EngineStatus {
     std::int64_t anticipationMisses = 0;
     std::int64_t liveHelpers = 0;
     EngineScheduling scheduling;  // recorded at start; "none" while stopped
+    EngineWorkgroup workgroup;
     std::vector<std::string> warnings;
     RuntimeProtectionStatus memoryLock;
     RuntimeProtectionStatus cpuIdleLatency;

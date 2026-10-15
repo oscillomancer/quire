@@ -240,6 +240,7 @@ q = nil
 ---@field anticipation_misses integer
 ---@field live_helpers integer
 ---@field scheduling table
+---@field workgroup table
 ---@field warnings string[]
 ---@field memory_lock table
 ---@field cpu_idle_latency table
@@ -269,6 +270,7 @@ q = nil
 ---@field anticipation_misses integer
 ---@field live_helpers integer
 ---@field scheduling table
+---@field workgroup table
 ---@field warnings string[]
 ---@field memory_lock table
 ---@field cpu_idle_latency table

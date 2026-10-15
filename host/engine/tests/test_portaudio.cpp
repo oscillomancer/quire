@@ -11,6 +11,9 @@
 #include "supple/engine/offline.h"
 #include "supple/engine/portaudio.h"
 #include "thread_startup.h"
+#if defined(__APPLE__)
+#include <os/workgroup.h>
+#endif
 using namespace supple;
 using namespace supple::engine;
 namespace {
@@ -364,6 +367,218 @@ TEST_CASE("native helper setup is self-applied and rolls back all helpers on ref
     }
 }
 
+namespace {
+// Records which threads join and leave; stands in for CoreAudio's workgroup.
+struct FakeWorkgroup : detail::AudioWorkgroup {
+    static inline FakeWorkgroup* current = nullptr;
+    std::mutex mutex;
+    std::vector<std::thread::id> joined, left;
+    bool refuse = false;
+    Status join() override {
+        std::lock_guard lock(mutex);
+        if (refuse) return Error("workgroup.join", "forced refusal", "22", "restart the engine");
+        joined.push_back(std::this_thread::get_id());
+        return okStatus();
+    }
+    void leave() noexcept override {
+        std::lock_guard lock(mutex);
+        left.push_back(std::this_thread::get_id());
+    }
+};
+detail::PortAudioApi workgroupApi() {
+    auto api = Driver::api;
+    api.native = true;
+    api.workgroup = [](PaStream*) -> Result<std::shared_ptr<detail::AudioWorkgroup>> {
+        if (!FakeWorkgroup::current)
+            return Error("workgroup.unavailable", "no workgroup", "-10851", "use another device");
+        return std::shared_ptr<detail::AudioWorkgroup>(std::shared_ptr<detail::AudioWorkgroup>(),
+                                                       FakeWorkgroup::current);
+    };
+    return api;
+}
+// Runs `live` helpers and `background` helpers through the startup barrier.
+void runHelpers(PortAudioBackend& backend, unsigned live, unsigned background,
+                const std::function<void()>& whileRunning) {
+    detail::ThreadStartup liveSetup(live, &backend, true);
+    detail::ThreadStartup backgroundSetup(background, &backend, false);
+    std::atomic<unsigned> running{0}, release{0};
+    std::vector<std::thread> helpers;
+    auto spawn = [&](detail::ThreadStartup& setup, unsigned i) {
+        helpers.emplace_back([&, i] {
+            const bool ready = setup.enter(i);
+            detail::ThreadStartup::Cleanup cleanup{ready ? &backend : nullptr};
+            if (ready) {
+                running.fetch_add(1);
+                running.notify_all();
+                release.wait(0);
+            }
+        });
+    };
+    for (unsigned i = 0; i < live; ++i) spawn(liveSetup, i);
+    for (unsigned i = 0; i < background; ++i) spawn(backgroundSetup, i);
+    CHECK(liveSetup.finish().ok());
+    CHECK(backgroundSetup.finish().ok());
+    for (unsigned seen; (seen = running.load()) < live + background;) running.wait(seen);
+    whileRunning();
+    release.store(1);
+    release.notify_all();
+    for (auto& helper : helpers) helper.join();
+}
+}  // namespace
+TEST_CASE("live helpers join the device audio workgroup on their own threads and leave") {
+    Driver driver;
+    FakeWorkgroup group;
+    FakeWorkgroup::current = &group;
+    PortAudioBackend backend({}, workgroupApi());
+    CHECK(backend.workgroup().state == "none");
+    REQUIRE(backend.start({}, [](auto, auto, auto) {}));
+    CHECK(backend.workgroup().state == "ready");
+    runHelpers(backend, 2, 1, [&] {
+        const auto status = backend.workgroup();
+        CHECK(status.state == "joined");
+        CHECK(status.joined == 2);  // the background helper does not join
+        CHECK(status.failed == 0);
+    });
+    CHECK(group.joined.size() == 2);
+    CHECK(group.joined.size() == group.left.size());
+    for (const auto id : group.joined) {
+        CHECK(id != std::this_thread::get_id());
+        CHECK(std::count(group.left.begin(), group.left.end(), id) == 1);
+    }
+    const auto after = backend.workgroup();
+    CHECK(after.joined == 0);
+    CHECK(after.state == "ready");
+    backend.stop();
+    FakeWorkgroup::current = nullptr;
+}
+TEST_CASE("a refused workgroup join is reported and keeps the helpers running") {
+    Driver driver;
+    FakeWorkgroup group;
+    group.refuse = true;
+    FakeWorkgroup::current = &group;
+    PortAudioBackend backend({}, workgroupApi());
+    REQUIRE(backend.start({}, [](auto, auto, auto) {}));
+    runHelpers(backend, 2, 0, [&] {
+        const auto status = backend.workgroup();
+        CHECK(status.state == "failed");
+        CHECK(status.joined == 0);
+        CHECK(status.failed == 2);
+        CHECK(status.osError == 22);
+        CHECK(status.message == "forced refusal");
+        CHECK(status.hint == "restart the engine");
+    });
+    CHECK(group.left.empty());
+    backend.stop();
+    FakeWorkgroup::current = nullptr;
+}
+TEST_CASE("a missing device workgroup is a reported failure, not a start error") {
+    Driver driver;
+    FakeWorkgroup::current = nullptr;
+    PortAudioBackend backend({}, workgroupApi());
+    REQUIRE(backend.start({}, [](auto, auto, auto) {}));
+    runHelpers(backend, 1, 0, [&] {
+        const auto status = backend.workgroup();
+        CHECK(status.state == "failed");
+        CHECK(status.osError == -10851);
+        CHECK(status.message == "no workgroup");
+        CHECK(status.joined == 0);
+    });
+    backend.stop();
+    // A driver without the hook never claims one.
+    PortAudioBackend plain({}, Driver::api);
+    REQUIRE(plain.start({}, [](auto, auto, auto) {}));
+    CHECK(plain.workgroup().state == "none");
+    plain.stop();
+}
+TEST_CASE("engine start and status report a refused workgroup") {
+    if (allowedCpuCount() < 2) return;
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-workgroup-status-" + std::to_string(supple::test::processId()));
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() { std::filesystem::remove_all(path); }
+    } cleanup{dir};
+    struct GroupBackend : DummyBackend {
+        GroupBackend() : DummyBackend({.mode = DummyBackend::Mode::Manual}) {}
+        bool nativeThreadPolicy() const override { return true; }
+        Status prepareCurrentThread(bool) override { return okStatus(); }
+        WorkgroupStatus workgroup() const override {
+            return {"partial", 1, 1, 22, "forced refusal", "restart the engine"};
+        }
+    } backend;
+    AppOptions options;
+    options.workdir = dir;
+    options.pluginPath = {FIXTURE_CLAP_PATH};
+    auto opened = EngineApp::create(options);
+    REQUIRE(opened);
+    auto& app = **opened;
+    REQUIRE(app.startEngine(backend, {}, {.workers = 1}));
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher dispatcher(registry, app);
+    app.attachCommands(dispatcher);
+    auto result = dispatcher.execute(
+        {"engine.status", json::Value::object(), {cmd::Origin::Type::Test, "workgroup", ""}});
+    REQUIRE(result);
+    auto group = (*result)["workgroup"];
+    CHECK(group["state"] == "partial");
+    CHECK(group["joined"] == 1);
+    CHECK(group["failed"] == 1);
+    CHECK(group["os_error"] == 22);
+    CHECK(group["message"] == "forced refusal");
+    CHECK(group["hint"] == "restart the engine");
+    bool warned = false;
+    for (const auto& warning : (*result)["warnings"].asArray())
+        warned = warned || warning.asString().find("audio workgroup partial: forced refusal") == 0;
+    CHECK(warned);
+    app.stopEngine();
+}
+
+#if defined(__APPLE__)
+TEST_CASE("macOS workgroup wrapper joins once per thread, leaves and rejoins") {
+    os_workgroup_t group = os_workgroup_parallel_create("supple-test", nullptr);
+    REQUIRE(group != nullptr);
+    auto wrapped = detail::wrapOsWorkgroup(group, true);
+    Status first, second, third;
+    std::thread helper([&] {
+        // Production order: the time-constraint policy first (joining a
+        // workgroup needs it), then the join.
+        CHECK(detail::prepareDeviceThread(48000, 128, true).ok());
+        first = wrapped->join();
+        second = wrapped->join();  // already a member
+        wrapped->leave();
+        wrapped->leave();  // not a member: harmless
+        third = wrapped->join();
+        wrapped->leave();
+        detail::releaseDeviceThread();
+    });
+    helper.join();
+    CHECK(first.ok());
+    REQUIRE_FALSE(second.ok());
+    CHECK(second.error().code == "workgroup.join");
+    CHECK(third.ok());
+    // A thread that never joined cannot leave another thread's membership.
+    wrapped->leave();
+}
+TEST_CASE("real device workgroup is joined by live helpers only on explicit opt-in") {
+    const char* enabled = std::getenv("SUPPLE_AUDIO_DEVICE_TEST");
+    if (!enabled || std::string_view(enabled) != "1") return;
+    PortAudioBackend backend;
+    REQUIRE(backend.start({.blockSize = 128}, [](auto, float* const* out, std::uint32_t n) {
+        if (n)
+            for (unsigned c = 0; c < 2; ++c) std::fill_n(out[c], n, 0.0f);
+    }));
+    CHECK(backend.workgroup().state == "ready");
+    runHelpers(backend, 2, 1, [&] {
+        const auto status = backend.workgroup();
+        INFO(status.message);
+        CHECK(status.state == "joined");
+        CHECK(status.joined == 2);
+    });
+    CHECK(backend.workgroup().joined == 0);
+    backend.stop();
+}
+#endif
 TEST_CASE("native background policy leaves two usable CPUs free") {
     const unsigned cpus = allowedCpuCount();
     // EngineOptions caps helpers at 64; above 66 CPUs every legal pool fits.

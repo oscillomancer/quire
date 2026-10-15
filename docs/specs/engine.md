@@ -1364,10 +1364,19 @@ Each helper class's non-RT startup barrier verifies all results before enabling
 it, rolling back the class on refusal. Live setup failure disables that pool;
 background/renderer failures warn and report the actual fallback class. Windows
 uses MMCSS Pro Audio, macOS device-derived Mach time constraints (ADR-0038),
-reported as high/priority 0. The native callback reports none because PortAudio
+reported as high/priority 0. On macOS the live helpers (not the renderer or the
+background pool, which work ahead of the device cycle) also join the opened
+device's CoreAudio IO workgroup (`kAudioDevicePropertyIOThreadOSWorkgroup` of
+the stream's output device) from their own thread, after the time-constraint
+policy and before receiving jobs, and leave when they exit (stop, restart or
+device change all end the helpers). A refused lookup or join never fails the
+start: the helper keeps its time-constraint policy and `engine.status.workgroup`
+reports `state` (`none`, `ready`, `joined`, `partial`, `failed`), the `joined`
+and `failed` helper counts and the last refusal's `os_error`, `message` and
+`hint`; `partial` and `failed` also add a start warning. The per-block path
+makes no workgroup call. The native callback reports none because PortAudio
 does not expose its thread policy; the OS/host API owns it. These are distinct from core-base's generic High
-QoS/priority helper. macOS workgroup joining remains a future device-validated
-improvement. Offline and dummy threads stay normal; background Normal opts out. Native
+QoS/priority helper. Offline and dummy threads stay normal; background Normal opts out. Native
 background elevation also requires leaving two usable CPUs free, as on Linux;
 an oversized explicit pool stays normal with a corrective warning.
 

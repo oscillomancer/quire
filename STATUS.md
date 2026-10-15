@@ -239,8 +239,11 @@ Engine and hosting:
   editor paths supplied by ADR-0040. Hardware behavior still needs opt-in device trials.
   Windows event waits admit 64 unique handles. Generic macOS High QoS must be
   self-applied. Native device helpers instead use a startup barrier with Mach
-  time constraints (macOS) or MMCSS Pro Audio (Windows); workgroup joining and
-  actual hardware trials remain pending. Linux process memory-lock and CPU
+  time constraints (macOS) or MMCSS Pro Audio (Windows). On macOS the live
+  helpers also join the opened device's CoreAudio workgroup (engine.status
+  `workgroup`, ADR-0038); the renderer and background pool and the out-of-process
+  bridge do not (the bridge would need a Mach-port channel it lacks). Hardware
+  trials of the join remain opt-in and unmeasured. Linux process memory-lock and CPU
   latency preferences report unsupported on other platforms. Windows MCP is
   intended for piped/file input; cancelling an interactive console read can
   await a keypress during shutdown.

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include <algorithm>
+#include <cerrno>
+#include <cstring>
 #include <mutex>
 #include "portaudio_api.h"
 #if defined(__APPLE__)
@@ -8,6 +10,7 @@
 #include <mach/mach.h>
 #include <mach/mach_time.h>
 #include <mach/thread_policy.h>
+#include <os/workgroup.h>
 #include <pa_mac_core.h>
 #include <pthread.h>
 #elif defined(_WIN32)
@@ -41,6 +44,64 @@ double deviceRate(PaStream* stream, PaDeviceIndex) {
     return AudioObjectGetPropertyData(device, &address, 0, nullptr, &size, &rate) == noErr ? rate
                                                                                            : 0;
 }
+// One thread joins at most one device workgroup; its token lives with the
+// thread so leave() needs nothing but the thread.
+thread_local os_workgroup_join_token_s joinToken;
+thread_local const void* joinedGroup = nullptr;
+class MacWorkgroup final : public AudioWorkgroup {
+  public:
+    MacWorkgroup(os_workgroup_t group, bool owned) : group_(group), owned_(owned) {}
+    ~MacWorkgroup() override {
+        if (owned_) os_release(group_);
+    }
+    Status join() override {
+        if (joinedGroup)
+            return Error("workgroup.join", "the thread already joined an audio workgroup",
+                         std::to_string(EALREADY), "report this; helpers join once");
+        const int result = os_workgroup_join(group_, &joinToken);
+        if (result != 0)
+            return Error(
+                "workgroup.join",
+                "joining the device audio workgroup failed: " + std::string(std::strerror(result)),
+                std::to_string(result),
+                result == EINVAL ? "the device's workgroup was cancelled or the thread has no "
+                                   "real-time policy; restart the engine"
+                                 : "restart the engine; processing continues on time-constraint "
+                                   "threads");
+        joinedGroup = this;
+        return okStatus();
+    }
+    void leave() noexcept override {
+        if (joinedGroup != this) return;
+        os_workgroup_leave(group_, &joinToken);
+        joinedGroup = nullptr;
+    }
+
+  private:
+    os_workgroup_t group_;
+    bool owned_;
+};
+Result<std::shared_ptr<AudioWorkgroup>> deviceWorkgroup(PaStream* stream) {
+    const AudioDeviceID device = PaMacCore_GetStreamOutputDevice(stream);
+    if (device == kAudioObjectUnknown)
+        return Error("workgroup.unavailable", "PortAudio did not report the output device", {},
+                     "restart the engine");
+    AudioObjectPropertyAddress address{kAudioDevicePropertyIOThreadOSWorkgroup,
+                                       kAudioObjectPropertyScopeGlobal,
+                                       kAudioObjectPropertyElementMain};
+    os_workgroup_t group = nullptr;
+    UInt32 size = sizeof(group);
+    const OSStatus status = AudioObjectGetPropertyData(device, &address, 0, nullptr, &size, &group);
+    if (status != noErr || !group)
+        return Error("workgroup.unavailable",
+                     "CoreAudio did not provide the device's IO workgroup (OSStatus " +
+                         std::to_string(status) + ")",
+                     std::to_string(status),
+                     "helper threads run without it; use another output device or restart");
+    // The property's reference is not released: its ownership is undocumented,
+    // and a leaked reference per stream is harmless where a double release is not.
+    return std::shared_ptr<AudioWorkgroup>(new MacWorkgroup(group, false));
+}
 #elif defined(_WIN32)
 double deviceRate(PaStream*, PaDeviceIndex device) {
     const auto* info = Pa_GetDeviceInfo(device);
@@ -66,11 +127,22 @@ const PortAudioApi api{initialize,
                        Pa_GetStreamInfo,
                        Pa_IsStreamActive,
                        deviceRate,
-                       true};
+                       true,
+                       true,
+#if defined(__APPLE__)
+                       deviceWorkgroup};
+#else
+                       nullptr};
+#endif
 #if defined(_WIN32)
 thread_local HANDLE mmcss = nullptr;
 #endif
 }  // namespace
+#endif
+#if defined(__APPLE__)
+std::shared_ptr<AudioWorkgroup> wrapOsWorkgroup(void* workgroup, bool owned) {
+    return std::make_shared<MacWorkgroup>(static_cast<os_workgroup_t>(workgroup), owned);
+}
 #endif
 const PortAudioApi* nativePortAudioApi() {
 #if defined(__APPLE__) || defined(_WIN32)

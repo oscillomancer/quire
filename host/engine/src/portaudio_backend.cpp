@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
+#include <mutex>
 #include "midi_input.h"
 #include "portaudio_api.h"
 #include "supple/base/rt.h"
@@ -30,6 +32,11 @@ std::uint32_t latency(double seconds, double rate) {
         std::clamp(std::ceil(seconds * rate), 0.0, double(UINT32_MAX)));
 }
 }  // namespace
+namespace {
+// The calling helper's workgroup membership. The backend outlives its helpers.
+thread_local std::shared_ptr<detail::AudioWorkgroup> joinedGroup;
+thread_local std::atomic<std::uint32_t>* joinedCount = nullptr;
+}  // namespace
 struct PortAudioBackend::Impl {
     PortAudioOptions options;
     const detail::PortAudioApi* api;
@@ -51,6 +58,12 @@ struct PortAudioBackend::Impl {
     std::thread monitor;
     std::atomic<std::uint32_t> monitorStop{0};
     std::atomic<bool> rateChanged{false}, midiChanged{false};
+    // The device's audio workgroup (ADR-0038); helpers join it themselves.
+    std::shared_ptr<detail::AudioWorkgroup> workgroup;
+    Error workgroupError;  // why there is none, when the lookup was refused
+    std::atomic<std::uint32_t> workgroupJoined{0}, workgroupFailed{0};
+    mutable std::mutex workgroupMutex;
+    Error workgroupJoinError;  // the last refused join
     void notify() SUPPLE_RT {
         if (wake) wake->notify();
     }
@@ -235,6 +248,18 @@ Status PortAudioBackend::start(const BackendConfig& config, Callback callback) {
         return fail(Error("backend.config", "device returned an invalid stream rate", "/rate",
                           "select another device or supported sample rate"));
     self.config.sampleRate = info->sampleRate;
+    self.workgroup.reset();
+    self.workgroupError = {};
+    self.workgroupJoinError = {};
+    self.workgroupJoined.store(0);
+    self.workgroupFailed.store(0);
+    if (api.workgroup) {
+        auto group = api.workgroup(self.stream);
+        if (group)
+            self.workgroup = std::move(*group);
+        else
+            self.workgroupError = std::move(group).error();
+    }
     self.inputLatency = latency(info->inputLatency, info->sampleRate);
     self.outputLatency = latency(info->outputLatency, info->sampleRate);
     if (config.midiInputs && self.midi) {
@@ -351,12 +376,58 @@ std::uint64_t PortAudioBackend::midiDropped() const {
 }
 bool PortAudioBackend::nativeThreadPolicy() const { return impl_->api && impl_->api->native; }
 Status PortAudioBackend::prepareCurrentThread(bool live) {
-    return nativeThreadPolicy() ? detail::prepareDeviceThread(impl_->config.sampleRate,
-                                                              impl_->config.blockSize, live)
-                                : okStatus();
+    if (!nativeThreadPolicy()) return okStatus();
+    auto& self = *impl_;
+    SUPPLE_TRY(detail::prepareDeviceThread(self.config.sampleRate, self.config.blockSize, live));
+    // Only helpers that run the device's own cycle join: the renderer and
+    // background pool work ahead of it. A refusal keeps the time-constraint
+    // policy and is reported through workgroup().
+    if (live && self.workgroup && !joinedGroup) {
+        if (auto joined = self.workgroup->join()) {
+            joinedGroup = self.workgroup;
+            joinedCount = &self.workgroupJoined;
+            self.workgroupJoined.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            std::lock_guard lock(self.workgroupMutex);
+            self.workgroupJoinError = std::move(joined).error();
+            self.workgroupFailed.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+    return okStatus();
 }
 void PortAudioBackend::releaseCurrentThread() {
-    if (nativeThreadPolicy()) detail::releaseDeviceThread();
+    if (!nativeThreadPolicy()) return;
+    if (joinedGroup) {
+        joinedGroup->leave();
+        joinedCount->fetch_sub(1, std::memory_order_relaxed);
+        joinedGroup.reset();
+        joinedCount = nullptr;
+    }
+    detail::releaseDeviceThread();
+}
+WorkgroupStatus PortAudioBackend::workgroup() const {
+    const auto& self = *impl_;
+    WorkgroupStatus result;
+    if (!self.workgroup && self.workgroupError.code.empty()) return result;
+    const Error* error = &self.workgroupError;
+    Error joinError;
+    if (self.workgroup) {
+        std::lock_guard lock(self.workgroupMutex);
+        joinError = self.workgroupJoinError;
+        error = &joinError;
+    }
+    result.joined = self.workgroupJoined.load(std::memory_order_relaxed);
+    result.failed = self.workgroupFailed.load(std::memory_order_relaxed);
+    result.state = !self.workgroup  ? "failed"
+                   : !result.failed ? (result.joined ? "joined" : "ready")
+                   : result.joined  ? "partial"
+                                    : "failed";
+    if (!error->code.empty() && result.state != "joined" && result.state != "ready") {
+        result.message = error->message;
+        result.hint = error->hint;
+        result.osError = std::strtoll(error->path.c_str(), nullptr, 10);
+    }
+    return result;
 }
 Status PortAudioBackend::prepareLiveThread(std::thread::native_handle_type thread) {
     if (nativeThreadPolicy())

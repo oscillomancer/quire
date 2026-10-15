@@ -71,8 +71,7 @@ Run callback tests under RTSan and concurrent lifecycle tests under TSan.
 Native builds verify the actual library/SDK integration. A real-device test on
 each native platform runs only when SUPPLE_AUDIO_DEVICE_TEST is exactly `1`.
 Hardware latency, driver stability and helper deadline benefit need those
-user-run device trials; fake tests do not establish them. macOS does not yet
-join the CoreAudio workgroup. Device names can change across reconnects; users
+user-run device trials; fake tests do not establish them. Device names can change across reconnects; users
 can select defaults or update the retained recipe.
 
 ## Alternatives
@@ -82,8 +81,7 @@ lifecycle code. PortAudio is permissively licensed and supplies all three
 host APIs. Its API table keeps the callback contract testable on Linux while
 leaving JACK and plugin linkage unchanged. Self-applied native scheduling
 supports MMCSS, which cannot register another thread. macOS time constraints
-are the initial mechanism; workgroup joining can be added after native device
-validation establishes its need.
+are the initial mechanism; the workgroup join was added on 2026-10-15 (below).
 
 ## Amendment (2026-10-15): saves while another program holds the file
 
@@ -97,3 +95,44 @@ file, with a short backoff for about one second through one core-base helper
 (`audio.write`) error with the path, saying another program has the file open
 and to close it and save again; the previous file is unchanged. Linux and macOS
 are unaffected.
+
+## Amendment (2026-10-15): macOS live helpers join the device workgroup
+
+On Apple Silicon a thread outside the device's audio workgroup can be placed on
+an efficiency core or run late, whatever its time-constraint policy. After
+PortAudio opens a stream, the backend reads `kAudioDevicePropertyIOThreadOSWorkgroup`
+from the output device (`PaMacCore_GetStreamOutputDevice`). Each live helper
+joins it with `os_workgroup_join` from its own thread inside the existing
+startup barrier (`prepareCurrentThread(live = true)`), after the time-constraint
+policy (a join without it fails with EINVAL), and leaves in
+`releaseCurrentThread`. The token is thread-local. The renderer and background
+pool do not join: they work ahead of the device cycle and are not bound by its
+deadline, so claiming its interval would mislead the scheduler. Nothing on the
+per-block path calls the workgroup. The reference the property returns is not
+released (its ownership is undocumented; one leaked reference per stream is
+harmless, a double release is not).
+
+A refused lookup or join never fails the start and never rolls helpers back:
+the helper keeps the time-constraint policy. `engine.status.workgroup` reports
+`state` (`none`, `ready`, `joined`, `partial`, `failed`), the joined and
+refused helper counts and the last refusal's OS error, message and hint, and a
+partial or failed state adds a start warning. Other platforms and backends
+report `none`.
+
+**Bridge (ADR-0037), not done.** Bridged plug-ins process on the bridge
+process's audio thread for the same deadline, and `os_workgroup_copy_port` /
+`os_workgroup_create_with_port` can carry a workgroup between processes. But a
+Mach port right travels only in a Mach message or through the bootstrap server;
+the bridge's control channel is a Unix socket and its audio transport shared
+memory, so the join needs a second IPC mechanism (a per-bridge bootstrap
+service or a Mach-message handshake at launch). The bridge's audio thread also
+runs under the renderer's policy and takes no time-constraint policy, which a
+join requires. That is a bridge-design change that cannot be validated without
+an Apple Silicon device trial, so it stays out until the join above has been
+measured on hardware. Revisit then.
+
+Tests: a fake workgroup exercises join/leave on the helper's own thread, the
+live-only rule, refusal and lookup failure, and status/warning serialisation
+(all platforms); on macOS a real `os_workgroup_parallel_create` workgroup
+covers the wrapper's join/leave/rejoin lifecycle; the
+`SUPPLE_AUDIO_DEVICE_TEST=1` path asserts the join on a real device.

@@ -232,6 +232,17 @@ schema::Schema<EngineScheduling> engineSchedulingSchema() {
         .build();
 }
 
+schema::Schema<EngineWorkgroup> engineWorkgroupSchema() {
+    return schema::object<EngineWorkgroup>("engine_workgroup")
+        .field("state", &EngineWorkgroup::state, schema::string())
+        .field("joined", &EngineWorkgroup::joined, schema::integer())
+        .field("failed", &EngineWorkgroup::failed, schema::integer())
+        .field("os_error", &EngineWorkgroup::osError, schema::integer())
+        .field("message", &EngineWorkgroup::message, schema::string())
+        .field("hint", &EngineWorkgroup::hint, schema::string())
+        .build();
+}
+
 schema::Schema<MidiInputWarning> midiInputWarningSchema() {
     return schema::object<MidiInputWarning>("midi_input_warning")
         .field("device", &MidiInputWarning::device, schema::string())
@@ -263,6 +274,7 @@ schema::Schema<EngineStatus> engineStatusSchema() {
         .field("anticipation_misses", &EngineStatus::anticipationMisses, schema::integer())
         .field("live_helpers", &EngineStatus::liveHelpers, schema::integer())
         .field("scheduling", &EngineStatus::scheduling, engineSchedulingSchema())
+        .field("workgroup", &EngineStatus::workgroup, engineWorkgroupSchema())
         .field("warnings", &EngineStatus::warnings, schema::arrayOf(schema::string()))
         .field("memory_lock", &EngineStatus::memoryLock, runtimeProtectionSchema())
         .field("cpu_idle_latency", &EngineStatus::cpuIdleLatency, runtimeProtectionSchema())
@@ -3723,6 +3735,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                                     "live": "<any>",
                                     "renderer": {"policy": "normal", "priority": 0},
                                     "background": "<any>"},
+                     "workgroup": {"state": "none", "joined": 0, "failed": 0, "os_error": 0,
+                                   "message": "", "hint": ""},
                      "warnings": [],
                      "memory_lock": {"requested": false, "active": false},
                      "cpu_idle_latency": {"requested": false, "active": false},
@@ -3837,7 +3851,10 @@ void registerEngineCommands(cmd::Registry& registry) {
             "live_helpers is the enabled live helper capacity. scheduling: each thread class's "
             "policy (none, normal, fifo, rr, high) and priority as applied at start: the device "
             "callback, live helpers, renderer and background helpers (real-time below a "
-            "real-time callback when permitted). warnings includes scheduling fallbacks and "
+            "real-time callback when permitted). workgroup: whether the live helpers joined the "
+            "device's audio workgroup (macOS CoreAudio; state none, ready, joined, partial or "
+            "failed, with the helper counts and the last refusal's OS error, message and hint). "
+            "warnings includes scheduling fallbacks and "
             "plan warnings with corrective actions. failed_errors adds structured code, "
             "message, path and hint to each failure. "
             "failed_fx: isolated plugins whose "
@@ -3855,6 +3872,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                                     "live": {"policy": "none", "priority": 0},
                                     "renderer": {"policy": "none", "priority": 0},
                                     "background": {"policy": "none", "priority": 0}},
+                     "workgroup": {"state": "none", "joined": 0, "failed": 0, "os_error": 0,
+                                   "message": "", "hint": ""},
                      "warnings": [],
                      "memory_lock": {"requested": false, "active": false},
                      "cpu_idle_latency": {"requested": false, "active": false},

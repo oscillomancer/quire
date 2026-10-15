@@ -302,6 +302,11 @@ Status Engine::start(Backend& backend, const BackendConfig& config) {
         // started processing with an older policy.
         scheduleBackground();
     }
+    // Every helper has joined or refused by now (the startup barriers returned).
+    if (const WorkgroupStatus group = backend.workgroup();
+        group.state == "failed" || group.state == "partial")
+        startWarnings_.push_back("audio workgroup " + group.state + ": " + group.message + "; " +
+                                 group.hint);
     warnings_ = startWarnings_;
     return okStatus();
 }
