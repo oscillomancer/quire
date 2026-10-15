@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # Runs clap-probe against the built CLAP in each of its host scenarios and
 # fails if the editor did not come up or the audio path went silent (for a
 # note effect, the notes it sends). Each

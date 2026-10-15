@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # Runs one CI command with its output kept in logs/<name>.log, and on failure
 # repeats the useful part of that output as error annotations: the compiler
 # and linker diagnostics first, then the tail of the log. Annotations are

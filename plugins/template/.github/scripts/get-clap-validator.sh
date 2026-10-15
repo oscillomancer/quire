@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # Fetches free-audio/clap-validator's latest release for this OS and exports
 # CLAP_VALIDATOR (into $GITHUB_ENV) for the configure step, which registers
 # the clap-validator test with it.
