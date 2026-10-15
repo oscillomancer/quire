@@ -7,8 +7,7 @@ namespace supple::engine::detail {
 void MidiInputBuffer::push(std::size_t port, double seconds, std::uint32_t message) SUPPLE_RT {
     const auto status = static_cast<std::uint8_t>(message);
     // Match JACK's channel-message contract; system/SysEx are counted drops.
-    if (port >= names.size() || port >= kMidiInputPorts || status < 0x80 || status >= 0xf0 ||
-        !std::isfinite(seconds)) {
+    if (port >= kMidiInputPorts || status < 0x80 || status >= 0xf0 || !std::isfinite(seconds)) {
         drop();
         return;
     }
@@ -20,6 +19,11 @@ void MidiInputBuffer::push(std::size_t port, double seconds, std::uint32_t messa
     if ((event.bytes[1] & 0x80) || (event.size == 3 && (event.bytes[2] & 0x80)) ||
         !queues_[port].push(event))
         drop();
+}
+void MidiInputBuffer::discard(std::size_t port) {
+    TimedMidi event;
+    while (queues_[port].pop(event)) {
+    }
 }
 void MidiInputBuffer::collect(double end, double rate, std::uint32_t frames) SUPPLE_RT {
     count_ = next_ = 0;

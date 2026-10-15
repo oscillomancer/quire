@@ -22,6 +22,7 @@ class WinMidiSource final : public MidiSource {
         unsigned index = 0;
         double anchor = 0;
         MIDIINCAPSW caps{};
+        MMRESULT capsError = MMSYSERR_NOERROR;
         // SysEx buffers are only recycled on the monitor, never in MidiInProc.
         struct LongBuffer {
             MIDIHDR header{};
@@ -54,6 +55,18 @@ class WinMidiSource final : public MidiSource {
         }
     }
 
+    static void close(Port& port) {
+        if (!port.handle) return;
+        midiInStop(port.handle);
+        midiInReset(port.handle);
+        for (auto& item : port.longBuffers) {
+            if (item.prepared) midiInUnprepareHeader(port.handle, &item.header, sizeof(MIDIHDR));
+            item.prepared = false;
+        }
+        midiInClose(port.handle);
+        port.handle = nullptr;
+    }
+
   public:
     ~WinMidiSource() override { stop(); }
     Status start(MidiInputBuffer& buffer) override {
@@ -64,64 +77,50 @@ class WinMidiSource final : public MidiSource {
         frequency_ = static_cast<double>(frequency.QuadPart);
         deviceCount_ = midiInGetNumDevs();
         count_ = std::min<unsigned>(deviceCount_, kMidiInputPorts);
-        auto fail = [&](MMRESULT error) -> Status {
-            stop();
-            return Error(
-                "backend.midi", "WinMM MIDI input setup failed (" + std::to_string(error) + ")",
-                "/midi_inputs",
-                "close other MIDI clients and reconnect the device, then restart the engine");
-        };
-        // Enumerate before opening any callbacks; names/count never mutate live.
         for (unsigned i = 0; i < count_; ++i) {
             auto& port = ports_[i];
             port.owner = this;
-            port.index = i;
+            port.index = static_cast<unsigned>(buffer.names.size());
+            port.caps = {};
             auto error = midiInGetDevCapsW(i, &port.caps, sizeof(port.caps));
-            if (error) return fail(error);
+            port.capsError = error;
             const int size = WideCharToMultiByte(CP_UTF8, 0, port.caps.szPname, -1, nullptr, 0,
                                                  nullptr, nullptr);
             std::string name(static_cast<std::size_t>(size), '\0');
             WideCharToMultiByte(CP_UTF8, 0, port.caps.szPname, -1, name.data(), size, nullptr,
                                 nullptr);
             if (!name.empty()) name.pop_back();
-            buffer.names.push_back(std::move(name));
-        }
-        for (unsigned i = 0; i < count_; ++i) {
-            auto& port = ports_[i];
-            auto error =
-                midiInOpen(&port.handle, i, reinterpret_cast<DWORD_PTR>(&receive),
-                           reinterpret_cast<DWORD_PTR>(&port), CALLBACK_FUNCTION | MIDI_IO_STATUS);
-            if (error) return fail(error);
+            if (name.empty()) name = "MIDI input " + std::to_string(i + 1);
+            if (!error)
+                error = midiInOpen(&port.handle, i, reinterpret_cast<DWORD_PTR>(&receive),
+                                   reinterpret_cast<DWORD_PTR>(&port),
+                                   CALLBACK_FUNCTION | MIDI_IO_STATUS);
             for (auto& item : port.longBuffers) {
+                if (error) break;
                 item.ready.store(false);
                 item.header = {};
                 item.header.lpData = item.bytes.data();
                 item.header.dwBufferLength = static_cast<DWORD>(item.bytes.size());
                 error = midiInPrepareHeader(port.handle, &item.header, sizeof(MIDIHDR));
-                if (error) return fail(error);
+                if (error) break;
                 item.prepared = true;
                 error = midiInAddBuffer(port.handle, &item.header, sizeof(MIDIHDR));
-                if (error) return fail(error);
             }
             port.anchor = now();
-            error = midiInStart(port.handle);
-            if (error) return fail(error);
+            if (!error) error = midiInStart(port.handle);
+            if (error) {
+                close(port);
+                buffer.discard(port.index);
+                buffer.warnings.push_back(
+                    {std::move(name), error, "WinMM MIDI input setup failed"});
+            } else {
+                buffer.names.push_back(std::move(name));
+            }
         }
         return okStatus();
     }
     void stop() override {
-        for (auto& port : ports_) {
-            if (!port.handle) continue;
-            midiInStop(port.handle);
-            midiInReset(port.handle);
-            for (auto& item : port.longBuffers) {
-                if (item.prepared)
-                    midiInUnprepareHeader(port.handle, &item.header, sizeof(MIDIHDR));
-                item.prepared = false;
-            }
-            midiInClose(port.handle);
-            port.handle = nullptr;
-        }
+        for (auto& port : ports_) close(port);
         count_ = 0;
         buffer_ = nullptr;
     }
@@ -135,10 +134,11 @@ class WinMidiSource final : public MidiSource {
         for (unsigned i = 0; i < count_; ++i) {
             auto& port = ports_[i];
             MIDIINCAPSW caps{};
-            if (midiInGetDevCapsW(i, &caps, sizeof(caps)) != MMSYSERR_NOERROR ||
+            if (midiInGetDevCapsW(i, &caps, sizeof(caps)) != port.capsError ||
                 caps.wMid != port.caps.wMid || caps.wPid != port.caps.wPid ||
                 std::wstring_view(caps.szPname) != port.caps.szPname)
                 return true;
+            if (!port.handle) continue;
             for (auto& item : port.longBuffers)
                 if (item.ready.exchange(false, std::memory_order_acq_rel) &&
                     midiInAddBuffer(port.handle, &item.header, sizeof(MIDIHDR)) != MMSYSERR_NOERROR)

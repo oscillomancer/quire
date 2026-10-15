@@ -1286,6 +1286,10 @@ EngineStatus EngineApp::engineStatus() {
     st.deviceLatency = b.outputLatency;
     st.xruns = static_cast<std::int64_t>(b.xruns);
     st.midiDropped = static_cast<std::int64_t>(backend_->midiDropped());
+    st.midiWarnings = backend_->midiWarnings();
+    for (const auto& warning : st.midiWarnings)
+        st.warnings.push_back(warning.device + ": " + warning.message + " (" +
+                              std::to_string(warning.osError) + "); " + warning.hint);
     st.cycles = static_cast<std::int64_t>(engine_->cycles());
     st.processErrors = static_cast<std::int64_t>(engine_->processErrors());
     st.restartNeeded = b.restartNeeded;

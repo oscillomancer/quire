@@ -232,6 +232,15 @@ schema::Schema<EngineScheduling> engineSchedulingSchema() {
         .build();
 }
 
+schema::Schema<MidiInputWarning> midiInputWarningSchema() {
+    return schema::object<MidiInputWarning>("midi_input_warning")
+        .field("device", &MidiInputWarning::device, schema::string())
+        .field("os_error", &MidiInputWarning::osError, schema::integer())
+        .field("message", &MidiInputWarning::message, schema::string())
+        .field("hint", &MidiInputWarning::hint, schema::string())
+        .build();
+}
+
 schema::Schema<EngineStatus> engineStatusSchema() {
     return schema::object<EngineStatus>("engine_status")
         .field("running", &EngineStatus::running, schema::boolean())
@@ -243,6 +252,8 @@ schema::Schema<EngineStatus> engineStatusSchema() {
         .field("device_latency", &EngineStatus::deviceLatency, schema::integer())
         .field("xruns", &EngineStatus::xruns, schema::integer())
         .field("midi_dropped", &EngineStatus::midiDropped, schema::integer())
+        .field("midi_warnings", &EngineStatus::midiWarnings,
+               schema::arrayOf(midiInputWarningSchema()))
         .field("cycles", &EngineStatus::cycles, schema::integer())
         .field("process_errors", &EngineStatus::processErrors, schema::integer())
         .field("restart_needed", &EngineStatus::restartNeeded, schema::boolean())
@@ -3673,7 +3684,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             "default-off host-process memory policy: requested, active, and a structured OS "
             "error on failure. cpu_idle_latency reports the default-off 20 microsecond PM QoS "
             "request, released on engine stop. A protection failure does not prevent audio "
-            "startup.";
+            "startup. MIDI inputs that refuse to open are skipped: midi_warnings reports each "
+            "device, numeric os_error, message and corrective hint; audio continues.";
         c.tags = {"engine"};
         c.args = schema::object<EngineStartArgs>("engine_start_args")
                      .field("backend", &EngineStartArgs::backend,
@@ -3695,15 +3707,13 @@ void registerEngineCommands(cmd::Registry& registry) {
             {"backend.device", "device or host API was not found",
              "choose names from engine.devices"},
             {"backend.config", "device format is invalid", "check rate and channel capacities"},
-            {"backend.midi", "native MIDI input setup failed",
-             "close other MIDI clients, reconnect the device and restart the engine"},
             {"backend.unavailable", "JACK is not installed", "install pipewire-jack"},
             {"backend.open", "no JACK server answered", "is PipeWire running?"},
             {"backend.unsupported", "backend is unavailable on this platform", "select dummy"}};
         c.examples = {
             {"Without a device", obj(R"({"backend": "dummy", "block": 128})"),
              obj(R"({"running": true, "backend": "dummy", "sample_rate": 48000.0, "block": 128,
-                     "period": 128, "plan_latency": 0, "device_latency": 0, "xruns": 0, "midi_dropped": 0,
+                     "period": 128, "plan_latency": 0, "device_latency": 0, "xruns": 0, "midi_dropped": 0, "midi_warnings": [],
                      "cycles": "<any>", "process_errors": 0, "restart_needed": false,
                      "anticipative": true, "anticipation_misses": 0, "live_helpers": "<any>",
                      "scheduling": {"callback": {"policy": "normal", "priority": 0},
@@ -3810,7 +3820,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             "the engine's outputs to the device. restart_needed: the device changed rate or went "
             "away, or native MIDI topology changed; engine.stop and engine.start again. "
             "midi_dropped: native MIDI messages/packets rejected or lost to bounded queues "
-            "(zero for other backends). meter_drops: meter entries a full ring "
+            "(zero for other backends). midi_warnings lists inputs skipped at start, with "
+            "device, numeric os_error, message and corrective hint. meter_drops: entries a full "
+            "ring "
             "dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, "
             "never audio. dropped/voice_dropped count lost plug-in output/voice records. "
             "memory_lock reports requested/active and an optional OS error with errno and a "
@@ -3830,7 +3842,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.result = engineStatusSchema();
         c.examples = {{"Not running", obj("{}"),
                        obj(R"({"running": false, "backend": "", "sample_rate": 0.0, "block": 0,
-                     "period": 0, "plan_latency": 0, "device_latency": 0, "xruns": 0, "midi_dropped": 0,
+                     "period": 0, "plan_latency": 0, "device_latency": 0, "xruns": 0, "midi_dropped": 0, "midi_warnings": [],
                      "cycles": 0, "process_errors": 0, "restart_needed": false,
                      "anticipative": false, "anticipation_misses": 0, "live_helpers": 0,
                      "scheduling": {"callback": {"policy": "none", "priority": 0},

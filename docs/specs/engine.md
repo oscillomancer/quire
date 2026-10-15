@@ -1416,8 +1416,14 @@ observes source topology changes and requests owner restart with reason
 "MIDI devices changed"; new devices enter only after restart. Identical WinMM
 device replacements with indistinguishable caps/names may not be detected.
 
-No sources is success; any open failure rolls back all MIDI/audio resources
-and returns backend.midi, /midi_inputs, with an actionable reconnect/retry hint.
+No sources is success. Each refusing input is closed and skipped without
+preventing audio startup or other MIDI inputs from opening. `engine.inputs`
+and midiPorts() contain only opened inputs, with compact indices fixed before
+audio starts. `engine.start`/`engine.status.midi_warnings` reports each skipped
+input as {device, os_error, message, hint}; os_error is the numeric OS result,
+and hint is "close the other application and restart the engine". A text copy
+also appears in warnings. Source-wide setup failures are warnings too; audio
+startup fails only for audio reasons.
 Stop joins the monitor/audio callback before resetting/disposal of MIDI and
 queue destruction. Linux keeps JACK and builds only device-free shared logic.
 Real-device tests require SUPPLE_MIDI_DEVICE_TEST exactly 1; they use fake

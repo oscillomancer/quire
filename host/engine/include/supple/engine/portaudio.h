@@ -37,6 +37,7 @@ class PortAudioBackend final : public Backend {
     std::vector<std::string> inputNames() const override;
     std::span<const MidiInputEvent> midiInput() const override;
     std::vector<std::string> midiPorts() const override;
+    std::vector<MidiInputWarning> midiWarnings() const override;
     std::uint64_t midiDropped() const override;
     bool nativeThreadPolicy() const override;
     Status prepareCurrentThread(bool live) override;

@@ -423,13 +423,17 @@ struct FakeMidi : detail::MidiSource {
     detail::MidiInputBuffer* buffer = nullptr;
     std::atomic<double> clock{10};
     std::atomic<bool> topology{false};
-    bool refused = false;
+    bool refused = false, failed = false;
     unsigned starts = 0, stops = 0;
     Status start(detail::MidiInputBuffer& target) override {
         ++starts;
         buffer = &target;
         target.names = {"Keyboard", "Pads"};
-        if (refused) return Error("backend.midi", "fixture refused MIDI", "/midi_inputs", "retry");
+        if (failed) return Error("backend.midi", "fixture setup failure", "/midi_inputs", "retry");
+        if (refused) {
+            target.names = {"Pads"};
+            target.warnings.push_back({"Keyboard", 42, "fixture refused MIDI"});
+        }
         return okStatus();
     }
     void stop() override {
@@ -509,19 +513,78 @@ TEST_CASE("WinMM timestamps retain their QPC anchor across 32-bit rollover") {
     CHECK(detail::winMidiSeconds(5, 10, 4294977.31) == doctest::Approx(4294977.301));
     CHECK(detail::winMidiSeconds(0xfffffffeU, 10, 4294977.295) == doctest::Approx(4294977.294));
 }
-TEST_CASE("native MIDI startup refusal rolls back the audio stream and callbacks") {
+TEST_CASE("native MIDI skips a refusing input while audio and other inputs run") {
     Driver driver;
     auto source = std::make_unique<FakeMidi>();
     auto& midi = *source;
     midi.refused = true;
     PortAudioBackend backend({}, Driver::api, std::move(source));
-    auto started = backend.start({.midiInputs = true}, [](auto, auto, auto) {});
-    REQUIRE_FALSE(started);
-    CHECK(started.error().code == "backend.midi");
+    unsigned received = 0;
+    REQUIRE(backend.start({.midiInputs = true}, [&](auto, auto, auto) {
+        received += static_cast<unsigned>(backend.midiInput().size());
+    }));
+    CHECK(backend.midiPorts() == std::vector<std::string>{"Pads"});
+    const auto warnings = backend.midiWarnings();
+    REQUIRE(warnings.size() == 1);
+    CHECK(warnings[0].device == "Keyboard");
+    CHECK(warnings[0].osError == 42);
+    CHECK(warnings[0].hint == "close the other application and restart the engine");
+    CHECK(midi.stops == 0);
+    midi.send(0, 0, 256, midiWord(0x90, 60, 100));
+    driver.drive(256);
+    CHECK(received == 1);
+    CHECK_FALSE(backend.status().restartNeeded);
+    backend.stop();
     CHECK(midi.stops == 1);
     CHECK(driver.initialized == 0);
     CHECK(driver.closed == 1);
+}
+TEST_CASE("native MIDI source setup failure still permits audio startup") {
+    Driver driver;
+    auto source = std::make_unique<FakeMidi>();
+    source->failed = true;
+    PortAudioBackend backend({}, Driver::api, std::move(source));
+    unsigned frames = 0;
+    REQUIRE(backend.start({.midiInputs = true}, [&](auto, auto, unsigned n) { frames += n; }));
     CHECK(backend.midiPorts().empty());
+    REQUIRE(backend.midiWarnings().size() == 1);
+    CHECK(backend.midiWarnings()[0].message == "fixture setup failure");
+    driver.drive(256);
+    CHECK(frames == 256);
+    backend.stop();
+}
+TEST_CASE("engine status serializes skipped MIDI input warnings") {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-midi-status-" + std::to_string(supple::test::processId()));
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() { std::filesystem::remove_all(path); }
+    } cleanup{dir};
+    Driver driver;
+    auto source = std::make_unique<FakeMidi>();
+    source->refused = true;
+    PortAudioBackend backend({}, Driver::api, std::move(source));
+    AppOptions options;
+    options.workdir = dir;
+    options.pluginPath = {FIXTURE_CLAP_PATH};
+    auto opened = EngineApp::create(options);
+    REQUIRE(opened);
+    auto& app = **opened;
+    REQUIRE(app.startEngine(backend, {.midiInputs = true}, {.workers = 0}));
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher dispatcher(registry, app);
+    app.attachCommands(dispatcher);
+    auto result = dispatcher.execute(
+        {"engine.status", json::Value::object(), {cmd::Origin::Type::Test, "midi-status", ""}});
+    REQUIRE(result);
+    CHECK((*result)["running"] == true);
+    REQUIRE((*result)["midi_warnings"].size() == 1);
+    CHECK((*result)["midi_warnings"].asArray()[0]["device"] == "Keyboard");
+    CHECK((*result)["midi_warnings"].asArray()[0]["os_error"] == 42);
+    CHECK((*result)["midi_warnings"].asArray()[0]["hint"] ==
+          "close the other application and restart the engine");
+    app.stopEngine();
 }
 TEST_CASE("native MIDI SPSC receives concurrent producers per device with bounded loss") {
     auto buffer = std::make_unique<detail::MidiInputBuffer>();

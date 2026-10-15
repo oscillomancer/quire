@@ -148,6 +148,14 @@ inline bool isControlMidi(std::uint8_t status) {
 // the port name; "" or "*" selects every port.
 std::uint64_t midiPortMask(const std::vector<std::string>& ports, std::string_view device);
 
+// A native MIDI input that could not be opened. Owner thread only.
+struct MidiInputWarning {
+    std::string device;
+    std::int64_t osError = 0;
+    std::string message;
+    std::string hint = "close the other application and restart the engine";
+};
+
 // What a running backend reports (for engine.status).
 struct BackendStatus {
     std::uint32_t period = 0;         // the device's period, in frames
@@ -202,6 +210,7 @@ class Backend {
     virtual std::uint64_t midiDropped() const { return 0; }
     // The MIDI input ports, named after their devices (fixed while running).
     virtual std::vector<std::string> midiPorts() const { return {}; }
+    virtual std::vector<MidiInputWarning> midiWarnings() const { return {}; }
     // What each audio input channel is connected to (index 0 = channel 1;
     // "" when unconnected), fixed while running. Main thread.
     virtual std::vector<std::string> inputNames() const { return {}; }

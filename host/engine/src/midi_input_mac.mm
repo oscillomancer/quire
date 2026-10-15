@@ -56,17 +56,11 @@ class CoreMidiSource final : public MidiSource {
                   receive(list, reinterpret_cast<std::uintptr_t>(context));
                 });
         CFRelease(title);
-        auto fail = [&](OSStatus code) -> Status {
-            stop();
-            return Error(
-                "backend.midi", "CoreMIDI input setup failed (" + std::to_string(code) + ")",
-                "/midi_inputs",
-                "close other MIDI clients and reconnect the device, then restart the engine");
-        };
-        if (error) return fail(error);
         sourceCount_ = MIDIGetNumberOfSources();
         const auto count = std::min<ItemCount>(sourceCount_, kMidiInputPorts);
-        // Publish all names before connecting: callbacks may start immediately.
+        const auto setupError = error;
+        if (setupError && !count)
+            buffer.warnings.push_back({"MIDI inputs", setupError, "CoreMIDI input setup failed"});
         for (ItemCount i = 0; i < count; ++i) {
             sources_[i] = MIDIGetSource(i);
             CFStringRef name = nullptr;
@@ -84,11 +78,14 @@ class CoreMidiSource final : public MidiSource {
                 CFRelease(name);
             }
             if (text.empty()) text = "MIDI input " + std::to_string(i + 1);
-            buffer.names.push_back(std::move(text));
-        }
-        for (ItemCount i = 0; i < count; ++i) {
-            error = MIDIPortConnectSource(input_, sources_[i], reinterpret_cast<void*>(i));
-            if (error) return fail(error);
+            error = setupError
+                        ? setupError
+                        : MIDIPortConnectSource(input_, sources_[i],
+                                                reinterpret_cast<void*>(buffer.names.size()));
+            if (error)
+                buffer.warnings.push_back({std::move(text), error, "CoreMIDI input setup failed"});
+            else
+                buffer.names.push_back(std::move(text));
         }
         return okStatus();
     }
@@ -104,7 +101,7 @@ class CoreMidiSource final : public MidiSource {
     }
     bool changed() override {
         if (MIDIGetNumberOfSources() != sourceCount_) return true;
-        for (std::size_t i = 0; i < buffer_->names.size(); ++i)
+        for (std::size_t i = 0; i < std::min<ItemCount>(sourceCount_, kMidiInputPorts); ++i)
             if (MIDIGetSource(i) != sources_[i]) return true;
         return false;
     }

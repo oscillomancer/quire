@@ -265,7 +265,8 @@ Engine and hosting:
   WASAPI/ASIO on Windows), with selection, latency/xruns and restart notifications.
   Fake-device output equals offline in both executors, with native CI coverage.
   Hardware latency, disconnect behavior and scheduling benefit are unmeasured.
-  Native MIDI inputs now use CoreMIDI/WinMM with bounded per-port queues,
+  Refusing native MIDI inputs are skipped with structured startup warnings;
+  audio and other inputs keep running. CoreMIDI/WinMM use bounded per-port queues,
   timestamp mapping, routing/learn/recording and owner restart on topology changes
   (ADR-0042). Device-free timing/overflow/lifecycle tests cover the shared path;
   physical MIDI timing/disconnect behavior needs SUPPLE_MIDI_DEVICE_TEST=1 trials.

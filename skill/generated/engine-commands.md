@@ -2151,7 +2151,7 @@ Result:
 
 Start playback through JACK, native PortAudio, or a device-free dummy.
 
-backend: jack (Linux default), portaudio (macOS/Windows native device), or dummy (default elsewhere, no device). For portaudio, host_api, input_device and output_device select exact names from engine.devices. inputs defaults to 0 (playback only); outputs defaults to 2. rate defaults to the project rate. PortAudio opens up to 16 native MIDI inputs; engine.inputs lists their names. Dummy is paced like a device. block: the device block in frames (default 256); the device's period may differ and is reported. anticipative (default true): render ahead of the playhead on worker threads (edits are heard up to 200 ms later); false renders everything in the audio callback. The engine runs at the device's rate (media is resampled; renders stay at the project's rate). Background and live thread capacities follows the app's Audio processing threads preference (Automatic by default); live helpers join each callback with no added latency. memory_lock reports the default-off host-process memory policy: requested, active, and a structured OS error on failure. cpu_idle_latency reports the default-off 20 microsecond PM QoS request, released on engine stop. A protection failure does not prevent audio startup.
+backend: jack (Linux default), portaudio (macOS/Windows native device), or dummy (default elsewhere, no device). For portaudio, host_api, input_device and output_device select exact names from engine.devices. inputs defaults to 0 (playback only); outputs defaults to 2. rate defaults to the project rate. PortAudio opens up to 16 native MIDI inputs; engine.inputs lists their names. Dummy is paced like a device. block: the device block in frames (default 256); the device's period may differ and is reported. anticipative (default true): render ahead of the playhead on worker threads (edits are heard up to 200 ms later); false renders everything in the audio callback. The engine runs at the device's rate (media is resampled; renders stay at the project's rate). Background and live thread capacities follows the app's Audio processing threads preference (Automatic by default); live helpers join each callback with no added latency. memory_lock reports the default-off host-process memory policy: requested, active, and a structured OS error on failure. cpu_idle_latency reports the default-off 20 microsecond PM QoS request, released on engine stop. A protection failure does not prevent audio startup. MIDI inputs that refuse to open are skipped: midi_warnings reports each device, numeric os_error, message and corrective hint; audio continues.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -2203,6 +2203,29 @@ Kind: `action`. Exposure: `mcp-tool`.
     "midi_dropped": {
       "type": "integer"
     },
+    "midi_warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "midi_input_warning",
+        "properties": {
+          "device": {
+            "type": "string"
+          },
+          "os_error": {
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "hint": {
+            "type": "string"
+          }
+        },
+        "required": ["device", "os_error", "message", "hint"],
+        "additionalProperties": false
+      }
+    },
     "cycles": {
       "type": "integer"
     },
@@ -2415,6 +2438,7 @@ Kind: `action`. Exposure: `mcp-tool`.
     "device_latency",
     "xruns",
     "midi_dropped",
+    "midi_warnings",
     "cycles",
     "process_errors",
     "restart_needed",
@@ -2441,7 +2465,6 @@ Kind: `action`. Exposure: `mcp-tool`.
 - `engine.running`: the engine is already running Hint: engine.stop first
 - `backend.device`: device or host API was not found Hint: choose names from engine.devices
 - `backend.config`: device format is invalid Hint: check rate and channel capacities
-- `backend.midi`: native MIDI input setup failed Hint: close other MIDI clients, reconnect the device and restart the engine
 - `backend.unavailable`: JACK is not installed Hint: install pipewire-jack
 - `backend.open`: no JACK server answered Hint: is PipeWire running?
 - `backend.unsupported`: backend is unavailable on this platform Hint: select dummy
@@ -2471,6 +2494,7 @@ Result:
   "device_latency": 0,
   "xruns": 0,
   "midi_dropped": 0,
+  "midi_warnings": [],
   "cycles": "<any>",
   "process_errors": 0,
   "restart_needed": false,
@@ -2514,7 +2538,7 @@ Result:
 
 Real-time engine state: backend, rate, block, device period, latency, xruns.
 
-plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away, or native MIDI topology changed; engine.stop and engine.start again. midi_dropped: native MIDI messages/packets rejected or lost to bounded queues (zero for other backends). meter_drops: meter entries a full ring dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, never audio. dropped/voice_dropped count lost plug-in output/voice records. memory_lock reports requested/active and an optional OS error with errno and a corrective hint, including while stopped. Bridges are excluded. cpu_idle_latency reports the owned 20 microsecond request with the same status/error fields; it affects system idle while held and leaves CPU frequency policy unchanged. live_helpers is the enabled live helper capacity. scheduling: each thread class's policy (none, normal, fifo, rr, high) and priority as applied at start: the device callback, live helpers, renderer and background helpers (real-time below a real-time callback when permitted). warnings includes scheduling fallbacks and plan warnings with corrective actions. failed_errors adds structured code, message, path and hint to each failure. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them).
+plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away, or native MIDI topology changed; engine.stop and engine.start again. midi_dropped: native MIDI messages/packets rejected or lost to bounded queues (zero for other backends). midi_warnings lists inputs skipped at start, with device, numeric os_error, message and corrective hint. meter_drops: entries a full ring dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, never audio. dropped/voice_dropped count lost plug-in output/voice records. memory_lock reports requested/active and an optional OS error with errno and a corrective hint, including while stopped. Bridges are excluded. cpu_idle_latency reports the owned 20 microsecond request with the same status/error fields; it affects system idle while held and leaves CPU frequency policy unchanged. live_helpers is the enabled live helper capacity. scheduling: each thread class's policy (none, normal, fifo, rr, high) and priority as applied at start: the device callback, live helpers, renderer and background helpers (real-time below a real-time callback when permitted). warnings includes scheduling fallbacks and plan warnings with corrective actions. failed_errors adds structured code, message, path and hint to each failure. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them).
 
 Kind: `query`. Exposure: `mcp-tool`.
 
@@ -2556,6 +2580,29 @@ Kind: `query`. Exposure: `mcp-tool`.
     },
     "midi_dropped": {
       "type": "integer"
+    },
+    "midi_warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "midi_input_warning",
+        "properties": {
+          "device": {
+            "type": "string"
+          },
+          "os_error": {
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "hint": {
+            "type": "string"
+          }
+        },
+        "required": ["device", "os_error", "message", "hint"],
+        "additionalProperties": false
+      }
     },
     "cycles": {
       "type": "integer"
@@ -2769,6 +2816,7 @@ Kind: `query`. Exposure: `mcp-tool`.
     "device_latency",
     "xruns",
     "midi_dropped",
+    "midi_warnings",
     "cycles",
     "process_errors",
     "restart_needed",
@@ -2812,6 +2860,7 @@ Result:
   "device_latency": 0,
   "xruns": 0,
   "midi_dropped": 0,
+  "midi_warnings": [],
   "cycles": 0,
   "process_errors": 0,
   "restart_needed": false,

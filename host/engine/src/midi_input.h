@@ -13,10 +13,14 @@ struct TimedMidi {
     std::uint8_t size = 0;
 };
 // Fixed storage, allocated before any device opens. One OS producer per port;
-// one audio consumer. Names and port count are immutable until both stop.
+// one audio consumer. Names are finalized before audio starts; OS producers
+// use only their assigned queue index, so partial opens can compact the list.
 class MidiInputBuffer {
   public:
     std::vector<std::string> names;
+    std::vector<MidiInputWarning> warnings;
+    // Startup only, after closing a failed source and before reusing its index.
+    void discard(std::size_t port);
     void push(std::size_t port, double seconds, std::uint32_t message) SUPPLE_RT;
     void drop(std::uint64_t count = 1) SUPPLE_RT {
         dropped_.fetch_add(count, std::memory_order_relaxed);
@@ -37,7 +41,8 @@ class MidiInputBuffer {
 class MidiSource {
   public:
     virtual ~MidiSource() = default;
-    // Rollback-safe; stop joins/disposes OS callbacks before buffer destruction.
+    // Best-effort per input; skipped devices go in buffer.warnings. Any source-
+    // wide error is nonfatal to audio. stop joins callbacks before buffer destruction.
     virtual Status start(MidiInputBuffer&) = 0;
     virtual void stop() = 0;
     virtual double now() const SUPPLE_RT = 0;

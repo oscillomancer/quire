@@ -3,6 +3,9 @@
 **Status:** Accepted, 2026-10-15. Amends ADR-0016 and ADR-0038; uses ADR-0027.
 Contract: engine.md, native MIDI inputs.
 
+**2026-10-15 amendment:** The startup policy below is superseded by the
+follow-up decisions at the end of this ADR.
+
 ## Decision
 
 PortAudio opens up to 16 native MIDI sources when BackendConfig.midiInputs is
@@ -67,3 +70,14 @@ References: [CoreMIDI receive block](https://developer.apple.com/documentation/c
 [WinMM timestamps](https://learn.microsoft.com/en-us/windows/win32/multimedia/mim-data),
 [callback restrictions](https://learn.microsoft.com/en-us/previous-versions/dd798460(v=vs.85)),
 [reset/close](https://learn.microsoft.com/en-us/windows/win32/api/mmeapi/nf-mmeapi-midiinclose).
+
+## Follow-up decisions (2026-10-15)
+
+MIDI opening is best-effort per input: skip a refusing input, close its partial
+resources, and continue opening the remaining inputs. Audio startup remains
+successful. Only opened inputs enter the immutable, compact MIDI port list.
+Structured midi_warnings in engine.start/status carry the device name, numeric
+OS error, message and hint "close the other application and restart the engine".
+This supersedes transactional MIDI/audio rollback above; a busy exclusive WinMM
+input must not prevent playback. Tests cover one of two inputs refusing and
+source-wide setup failure, along with command-boundary warning serialization.

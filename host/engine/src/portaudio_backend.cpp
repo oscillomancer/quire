@@ -240,8 +240,13 @@ Status PortAudioBackend::start(const BackendConfig& config, Callback callback) {
     if (config.midiInputs && self.midi) {
         self.midiBuffer = std::make_unique<detail::MidiInputBuffer>();
         auto started = self.midi->start(*self.midiBuffer);
-        if (!started) return fail(std::move(started).error());
-        self.midiStarted = true;
+        if (!started) {
+            self.midi->stop();
+            self.midiBuffer->names.clear();
+            self.midiBuffer->warnings.push_back({"MIDI inputs", 0, started.error().message});
+        } else {
+            self.midiStarted = true;
+        }
     }
     error = api.finished(self.stream, Impl::finished);
     if (error != paNoError) return fail(failure(api, error, "/backend"));
@@ -342,6 +347,9 @@ std::vector<std::string> PortAudioBackend::inputNames() const {
 std::span<const MidiInputEvent> PortAudioBackend::midiInput() const { return impl_->blockMidi; }
 std::vector<std::string> PortAudioBackend::midiPorts() const {
     return impl_->midiBuffer ? impl_->midiBuffer->names : std::vector<std::string>{};
+}
+std::vector<MidiInputWarning> PortAudioBackend::midiWarnings() const {
+    return impl_->midiBuffer ? impl_->midiBuffer->warnings : std::vector<MidiInputWarning>{};
 }
 std::uint64_t PortAudioBackend::midiDropped() const {
     return impl_->midiBuffer ? impl_->midiBuffer->dropped() : 0;
