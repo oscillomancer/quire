@@ -137,7 +137,7 @@ TEST_CASE(
         };
         NSArray* list = windows();
         NSDictionary* editor = editorInfo(list);
-        REQUIRE_MESSAGE(editor != nil,
+        REQUIRE_MESSAGE((editor != nil),
                         "run in an interactive macOS desktop with window-list access");
         NSNumber* editorNumber = editor[(__bridge NSString*)kCGWindowNumber];
         auto position = [](NSArray* entries, NSNumber* number) -> NSUInteger {
@@ -155,7 +155,7 @@ TEST_CASE(
         [NSApp updateWindows];
         REQUIRE((*instance)->openEditor(parent, 1));
         list = windows();
-        REQUIRE(editorInfo(list) != nil);
+        REQUIRE((editorInfo(list) != nil));
         REQUIRE(position(list, @(otherWindow.windowNumber)) != NSNotFound);
         REQUIRE(position(list, @(ownerWindow.windowNumber)) != NSNotFound);
         CHECK([editorInfo(list)[(__bridge NSString*)kCGWindowNumber] isEqual:editorNumber]);
