@@ -45,7 +45,7 @@ target_include_directories(gui-views PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/views/in
 
 # The app's pieces (shell, generator, actions UI, chrome), shared with tests.
 add_library(gui-app STATIC app/shell.cpp app/generate.cpp app/app_actions.cpp app/actions_list.cpp app/chrome.cpp
-  app/agent_panel.cpp app/plugin_windows.cpp app/ui_persistence.cpp app/screensets.cpp app/file_actions.cpp app/midi_editor.cpp app/routing_matrix.cpp app/mixer.cpp
+  app/agent_panel.cpp app/service_watcher.cpp app/plugin_windows.cpp app/ui_persistence.cpp app/screensets.cpp app/file_actions.cpp app/midi_editor.cpp app/routing_matrix.cpp app/mixer.cpp
   app/fx_params.cpp app/plugin_browser.cpp app/fx_window.cpp app/render_dialog.cpp app/history_panel.cpp app/transport_bar.cpp app/plugin_scales.cpp
   app/midi_event_list.cpp app/appearance.cpp app/track_menu.cpp app/mouse_dialog.cpp app/selection_edit.cpp app/preferences.cpp
   app/control_map.cpp app/learn_dialog.cpp)
