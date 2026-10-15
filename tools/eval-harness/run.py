@@ -49,7 +49,7 @@ def render_patch(task, patch, directory, seed, binary=None):
 
 def score_final(task, directory, seed, binary=None, reference=None):
     directory = Path(directory)
-    entries = [json.loads(line) for line in (directory / "tools.jsonl").read_text().splitlines()]
+    entries = [json.loads(line) for line in (directory / "tools.jsonl").read_text(encoding="utf-8").splitlines()]
     metrics = transcript_metrics(entries)
     final = read_json(directory / "final.json")
     session = final["session"]
@@ -143,13 +143,13 @@ def publish(report):
                 f"Pass rate: {report['pass_rate']:.1%}. Median loss: {report['median_loss']}.\n\n"
                 + "\n".join(rows) + "\n\nUsage: `" + json.dumps(report["usage_totals"]) + "`.\n\n"
                 + "\n".join(listening) + "\n")
-    destination.with_suffix(".md").write_text(markdown)
+    destination.with_suffix(".md").write_text(markdown, encoding="utf-8")
     history = ROOT / "docs/benchmarks/synth-eval.md"
     if not history.exists():
         history.write_text("# Synth and notation evaluation history\n\n"
                            "Dry validation is infrastructure coverage, not evidence of model quality.\n\n"
                            "| Date | Suite | Git | Skill SHA256 | Runner/model | Pass rate | Median loss | Report |\n"
-                           "|---|---|---|---|---|---:|---:|---|\n")
+                           "|---|---|---|---|---|---:|---:|---|\n", encoding="utf-8")
     with history.open("a") as stream:
         stream.write(f"| {date} | {suite} | `{report['git_hash'][:10]}` | `{report['skill_hash'][:12]}` | "
                      f"{report['runner']}/{report['model']} | {report['pass_rate']:.1%} | {report['median_loss']} | "

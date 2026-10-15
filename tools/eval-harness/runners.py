@@ -12,13 +12,14 @@ import time
 
 from common import HERE, ROOT, Mcp, capture, check_plugin_provenance, evaluation_profile, recipe_patch, sandbox_command, setup, stop_group, write_json
 from relay import Recorder
+from process_tree import spawn_group
 
 
 def preamble(task, reference=None, seed=42, blind=False):
     files = ["SKILL.md", "guides/sandbox-loop.md", "guides/analysis.md", "guides/notation.md"]
     if task["suite"] != "notation":
         files.append("guides/sound-design.md")
-    skill = "\n\n".join((ROOT / "skill" / name).read_text() for name in files)
+    skill = "\n\n".join((ROOT / "skill" / name).read_text(encoding="utf-8") for name in files)
     prompt = ("You are being evaluated using only the sandbox MCP tools. The following is the "
               "bundled product skill (guides are supplied here because file tools are disabled).\n\n"
               + skill + "\n\nTASK\n" + task["prompt"] +
@@ -65,7 +66,7 @@ def dry(task, directory, seed, binary=None):
         recorder.close()
     write_json(directory / "usage.json", {"model": "scripted", "provider": "none", "total_tokens": 0,
                                            "estimated_cost_usd": 0, "completed": True})
-    (directory / "transcript.jsonl").write_text((directory / "tools.jsonl").read_text())
+    (directory / "transcript.jsonl").write_text((directory / "tools.jsonl").read_text(encoding="utf-8"), encoding="utf-8")
     return {"exit_code": 0, "timed_out": False, "model": "scripted", "provider": "none"}
 
 
@@ -75,7 +76,7 @@ def default_model(source):
     Hermes owns YAML parsing. No YAML dependency is introduced into the harness;
     unusual YAML requires an explicit JSON model identity file via --model-config.
     """
-    text = Path(source).read_text()
+    text = Path(source).read_text(encoding="utf-8")
     keys = {"default", "provider", "base_url", "api_mode", "context_length"}
     if text.lstrip().startswith("{"):
         model = json.loads(text)["model"]
@@ -109,7 +110,15 @@ def isolated_config(task, directory, seed, model, credentials, binary=None, star
     home.mkdir(parents=True, exist_ok=False, mode=0o700)
     # Credentials are referenced, never serialized into configs/reports or copied.
     if credentials:
-        (home / ".env").symlink_to(Path(credentials).expanduser().resolve(strict=True))
+        source = Path(credentials).expanduser().resolve(strict=True)
+        try:
+            (home / ".env").symlink_to(source)
+        except OSError:
+            if os.name != "nt":
+                raise
+            # NTFS hard links reference the same bytes/ACL without symlink privilege.
+            # Different volumes fail explicitly; credentials are never copied.
+            os.link(source, home / ".env")
     relay_config = {"workdir": str(directory), "sandbox_command": sandbox_command(directory, binary),
                     "limit": task["limits"]["tool_calls"], "seed": seed,
                     "task": {key: task[key] for key in ("settings", "setup")}}
@@ -182,13 +191,13 @@ def hermes(task, directory, seed, options, reference=None):
     version = subprocess.run(command + ["--version"], env=env, cwd=directory,
                              capture_output=True, text=True, timeout=30, check=True).stdout.strip()
     prompt = preamble(task, reference, seed, getattr(options, "blind", False))
-    (directory / "prompt.txt").write_text(prompt)
+    (directory / "prompt.txt").write_text(prompt, encoding="utf-8")
     started = time.monotonic()
     timed_out = False
     with (directory / "final-message.txt").open("w") as stdout, (directory / "hermes.stderr").open("w") as stderr:
-        process = subprocess.Popen(command + ["-z", prompt, "--usage-file", str(directory / "usage.json"),
+        process = spawn_group(command + ["-z", prompt, "--usage-file", str(directory / "usage.json"),
                                                "--toolsets", "sandbox", "--ignore-rules"],
-                                   env=env, cwd=directory, stdout=stdout, stderr=stderr, start_new_session=True)
+                                   env=env, cwd=directory, stdout=stdout, stderr=stderr)
         with ACTIVE_LOCK:
             ACTIVE.add(process)
         try:
@@ -202,7 +211,7 @@ def hermes(task, directory, seed, options, reference=None):
     export = subprocess.run(command + ["sessions", "export", str(directory / "transcript.jsonl"),
                                        "--format", "jsonl", "--redact"],
                             env=env, cwd=directory, capture_output=True, text=True, timeout=30)
-    (directory / "export.log").write_text(export.stdout + export.stderr)
+    (directory / "export.log").write_text(export.stdout + export.stderr, encoding="utf-8")
     if export.returncode:
         raise RuntimeError("Hermes transcript export failed; see export.log")
     return {"exit_code": process.returncode, "timed_out": timed_out, "model": model["default"],

@@ -112,7 +112,8 @@ Hermes: one isolated `HERMES_HOME` per attempt under ignored `build/eval/`;
 minimal JSON-as-YAML config, only the `sandbox` MCP toolset/server. Read only
 nonsecret model identity from `~/.hermes/profiles/quire-eval/config.yaml`
 (or an explicitly supplied identity file). Default credentials are
-`~/.hermes/profiles/quire-eval/.env`, referenced through a symlink; do not copy tokens,
+`~/.hermes/profiles/quire-eval/.env`, referenced through a symlink (or a same-volume hard link on Windows when
+symlink privilege is unavailable); do not copy tokens,
 the user's own config, sessions, memory, skills, plugins or OAuth state
 into a run.
 The profile name `quire-eval` is recorded in suite and attempt metadata; the
@@ -138,8 +139,11 @@ and skill hashes, seeds, tool calls/results, wall time, tokens and estimated cos
 (including auxiliary usage). Unknown cost stays explicitly unknown, never zero.
 
 Limits: per-task MCP calls and minutes. The relay rejects the first excess call
-and stops; the last completed capture survives. A process-group deadline
-terminates Hermes/relay/sandbox, with bounded grace then kill; no processes remain.
+and stops; the last completed capture survives. A process-tree deadline
+terminates Hermes/relay/sandbox: POSIX uses a session/process group with bounded
+grace then kill; Windows uses a kill-on-close Job. A gated Python bootstrap is
+assigned to the Job before executing the command, preventing descendants from
+escaping during launch. Cleanup also covers descendants whose leader exited.
 Excess budgets or incomplete inference cannot count as a task pass even if the
 captured patch is measurable. Harness setup, capture queries and independent
 scoring calls do not count as model calls.
@@ -147,7 +151,7 @@ scoring calls do not count as model calls.
 Dry: scripted requests through the same sandbox/capture protocol, known recipe
 or hidden patch, or the task's correct phrase. Every scorer is exercised without
 an endpoint or credentials. Failed scripted answers fail validation. Cheap
-standard-library unit tests run in CTest; opt-in integration tests exercise real
+standard-library unit tests run in CTest on Linux, macOS and Windows; opt-in integration tests exercise real
 capture, limits, profile failures, reference gain invariance and all scorer paths.
 
 ## 3. Capture and production scoring
@@ -210,3 +214,11 @@ Local transcripts, isolated profiles, usage, prompts, capture/audit files and
 intermediate renders live in `build/eval/<run>/`, separate from sanitizer trees.
 Retain or archive them together with the listening WAVs when sharing
 reports.
+
+Fixture launchers use Python rather than Unix executable scripts. Anonymous-pipe
+readiness is bounded on POSIX and Windows, and all text files use UTF-8. Windows
+credential hard links preserve file identity and ACLs without copying bytes;
+cross-volume link failures stay explicit. Process-tree tests check descendant
+cleanup after normal leader exit, and an echo subprocess checks stdio framing.
+The three real-sandbox scorer tests keep the exact SUPPLE_EVAL_INTEGRATION=1
+opt-in on every platform; model quality runs require an explicitly invoked runner.

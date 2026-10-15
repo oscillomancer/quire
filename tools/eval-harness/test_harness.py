@@ -16,6 +16,8 @@ from relay import Recorder, invocations
 from runners import default_model, dry, isolated_config, preamble, preflight
 from run import render_patch, score_final, unpublishable
 from scoring import notation_score, transcript_metrics
+from process_tree import spawn_group, stop_group
+from pipe_ready import wait_pipe
 
 
 class Tasks(unittest.TestCase):
@@ -121,14 +123,14 @@ class Isolation(unittest.TestCase):
     def test_default_identity_excludes_secrets_and_other_config(self):
         with tempfile.TemporaryDirectory(dir=ROOT / "build") as directory:
             path = Path(directory) / "source.yaml"
-            path.write_text('model:\n  default: cheap/model\n  provider: openrouter\n  api_key: private\nmcp_servers:\n  unrelated: bad\n')
+            path.write_text('model:\n  default: cheap/model\n  provider: openrouter\n  api_key: private\nmcp_servers:\n  unrelated: bad\n', encoding="utf-8")
             self.assertEqual(default_model(path), {"default": "cheap/model", "provider": "openrouter"})
 
     def test_isolation_reference_and_tool_restriction(self):
         with tempfile.TemporaryDirectory(dir=ROOT / "build") as directory:
             root = Path(directory)
             credential = root / "external.env"
-            credential.write_text("OPENROUTER_API_KEY=FAKE-UNIT-TEST\n")
+            credential.write_text("OPENROUTER_API_KEY=FAKE-UNIT-TEST\n", encoding="utf-8")
             task = load_tasks("synth-descriptive", ["sub-bass"])[0]
             with mock.patch.dict(os.environ, {"HERMES_INFERENCE_MODEL": "must-not-inherit"}):
                 home, env = isolated_config(task, root / "run", 42,
@@ -137,24 +139,52 @@ class Isolation(unittest.TestCase):
             config = read_json(home / "config.yaml")
             self.assertEqual(set(config["mcp_servers"]), {"sandbox"})
             self.assertEqual(config["platform_toolsets"]["cli"], ["sandbox"])
-            self.assertTrue((home / ".env").is_symlink())
-            self.assertNotIn("FAKE-UNIT-TEST", (home / "config.yaml").read_text())
+            self.assertTrue((home / ".env").samefile(credential))
+            self.assertNotIn("FAKE-UNIT-TEST", (home / "config.yaml").read_text(encoding="utf-8"))
             self.assertNotIn("HERMES_INFERENCE_MODEL", env)
-            self.assertEqual(credential.read_text(), "OPENROUTER_API_KEY=FAKE-UNIT-TEST\n")
-            self.assertNotIn("hidden_patch", (root / "run/relay.json").read_text())
+            self.assertEqual(credential.read_text(encoding="utf-8"), "OPENROUTER_API_KEY=FAKE-UNIT-TEST\n")
+            self.assertNotIn("hidden_patch", (root / "run/relay.json").read_text(encoding="utf-8"))
 
 
     def test_preflight_rejects_a_cli_that_cannot_load_under_an_isolated_home(self):
         with tempfile.TemporaryDirectory() as tmp:
-            fake = Path(tmp) / "hermes"
-            fake.write_text("#!/bin/sh\n[ \"$1\" = config ] && { echo 'No module named ruamel' >&2; exit 1; }\n"
-                            "test -n \"$HERMES_HOME\" || exit 3\nexit 0\n")
-            fake.chmod(0o755)
+            fake = Path(tmp) / "hermes.py"
+            fake.write_text("import sys; print('No module named ruamel', file=sys.stderr); sys.exit(1)\n", encoding="utf-8")
             options = mock.Mock(hermes_python=None, hermes_bin=str(fake))
-            with self.assertRaisesRegex(RuntimeError, "ruamel.*--hermes-python"):
-                preflight(options, Path(tmp) / "a")
-            fake.write_text("#!/bin/sh\ntest -d \"$HERMES_HOME\" || exit 3\nexit 0\n")
-            preflight(options, Path(tmp) / "b")
+            with mock.patch("runners.hermes_command", return_value=[sys.executable, str(fake)]):
+                with self.assertRaisesRegex(RuntimeError, "ruamel.*--hermes-python"):
+                    preflight(options, Path(tmp) / "a")
+                fake.write_text("import os; from pathlib import Path; assert Path(os.environ['HERMES_HOME']).is_dir()\n", encoding="utf-8")
+                preflight(options, Path(tmp) / "b")
+
+    def test_descendants_are_reaped_after_the_leader_exits(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code = ("import subprocess,sys; subprocess.Popen([sys.executable, '-c', "
+                    "'import time; time.sleep(60)']); print('spawned', flush=True)")
+            process = spawn_group([sys.executable, "-u", "-c", code], cwd=directory,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            try:
+                self.assertTrue(wait_pipe(process.stdout, 30))
+                self.assertEqual(process.stdout.readline(), b"spawned\n")
+                process.wait(timeout=30)
+                stop_group(process)
+                self.assertTrue(wait_pipe(process.stdout, 30))
+                self.assertEqual(process.stdout.read(), b"")
+            finally:
+                stop_group(process)
+                process.stdout.close()
+                process.stderr.close()
+
+    def test_mcp_pipe_round_trip_without_a_sandbox(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code = "import sys; [print(line, end='', flush=True) for line in sys.stdin]"
+            client = Mcp([sys.executable, '-u', '-c', code], directory)
+            try:
+                self.assertEqual(client.request(
+                    {"jsonrpc": "2.0", "id": 4, "method": "echo", "params": {"text": "café"}}),
+                    {"jsonrpc": "2.0", "id": 4, "method": "echo", "params": {"text": "café"}})
+            finally:
+                client.close()
 
 
 class PluginProvenance(unittest.TestCase):

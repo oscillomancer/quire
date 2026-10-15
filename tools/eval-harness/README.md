@@ -98,3 +98,10 @@ Transcripts, usage, prompts, captures, stderr and intermediate renders remain in
 `build/eval/<run>/`. These local files and the listening WAVs must be retained or
 archived together if the report is to remain fully reviewable after build cleanup.
 See `docs/specs/eval-harness.md` for task/profile decisions and known limits.
+
+Native test fixtures run under CTest on Linux, macOS and Windows. MCP pipe
+readiness supports Windows anonymous pipes; process deadlines own a POSIX
+process group or Windows Job (assigned before the command runs). Credential
+references use symlinks, with same-volume hard links as the Windows fallback
+when symlink privilege is unavailable. A cross-volume reference fails; the
+harness never copies credential bytes. Text files are UTF-8 on every platform.

@@ -7,29 +7,31 @@ import math
 import os
 from pathlib import Path
 import re
-import selectors
-import signal
 import subprocess
+import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT / "tests/integration"))
+from pipe_ready import wait_pipe
+from process_tree import spawn_group, stop_group
 
 
 def read_json(path):
-    return json.loads(Path(path).read_text())
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 def write_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n")
+    temporary.write_text(json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
     temporary.replace(path)
 
 
 def slug():
-    text = (ROOT / "cmake/Product.cmake").read_text()
+    text = (ROOT / "cmake/Product.cmake").read_text(encoding="utf-8")
     return re.search(r'set\(PRODUCT_SLUG\s+"([a-z0-9-]+)"\)', text)[1]
 
 
@@ -117,23 +119,6 @@ def check_plugin_provenance(client, expect_dir=None, what="the session"):
     return provenance
 
 
-def stop_group(process):
-    # Kill descendants too, even if their parent has already exited.
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
-    try:
-        process.wait(timeout=3)
-    except subprocess.TimeoutExpired:
-        pass
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    process.wait()
-
-
 class Mcp:
     """A bounded, serial JSON-lines MCP client, usable as a transparent relay."""
 
@@ -141,18 +126,21 @@ class Mcp:
         self.workdir = Path(workdir)
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.stderr = (self.workdir / "sandbox.stderr").open("a")
-        self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                        stderr=self.stderr, env=env, start_new_session=own_group)
+        launch = spawn_group if own_group else subprocess.Popen
+        try:
+            self.process = launch(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  stderr=self.stderr, env=env)
+        except BaseException:
+            self.stderr.close()
+            raise
         self.own_group = own_group
-        self.selector = selectors.DefaultSelector()
-        self.selector.register(self.process.stdout, selectors.EVENT_READ)
         self.buffer = b""
         self.serial = 0
 
     def receive(self, timeout=90):
         deadline = time.monotonic() + timeout
         while b"\n" not in self.buffer:
-            if not self.selector.select(max(0, deadline - time.monotonic())):
+            if not wait_pipe(self.process.stdout, max(0, deadline - time.monotonic())):
                 raise TimeoutError("Sandbox MCP response timed out")
             block = os.read(self.process.stdout.fileno(), 65536)
             if not block:
@@ -207,7 +195,8 @@ class Mcp:
                 self.process.kill()
                 self.process.wait()
         finally:
-            self.selector.close()
+            if self.own_group:
+                stop_group(self.process)  # descendants may outlive a normal leader exit
             self.process.stdout.close()
             self.stderr.close()
 
@@ -246,7 +235,7 @@ def setup(client, task, seed):
 
 
 def recipe_patch(task):
-    text = (ROOT / "skill/guides/sound-design.md").read_text()
+    text = (ROOT / "skill/guides/sound-design.md").read_text(encoding="utf-8")
     recipes = [json.loads(block) for block in re.findall(r"```json\n(.*?)\n```", text, re.S)]
     return recipes[task["recipe_index"]]
 
