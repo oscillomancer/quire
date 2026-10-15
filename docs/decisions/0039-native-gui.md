@@ -83,3 +83,7 @@ References: [SDL high DPI](https://wiki.libsdl.org/SDL3/README-highdpi),
 **2026-10-14 validation note:** Windows CI also deploys the same pinned DLLs
 beside stock plugin test/probe executables, matching the template's Windows CI.
 The player's Win32 embedding tests require that software GL setup too.
+
+**2026-10-14 bridge integration note:** After ADR-0037 landed on `port`, the
+DAW executable and GUI tests depend unconditionally on the bridge executable
+on all platforms. Native editor embedding remains the separate editor port.
