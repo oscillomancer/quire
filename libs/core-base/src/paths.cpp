@@ -10,6 +10,9 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <unistd.h>
+#include <climits>
 #elif defined(__linux__)
 #include <sys/stat.h>
 #include <unistd.h>
@@ -104,6 +107,14 @@ std::filesystem::path runtime() {
         (info.st_mode & 077) == 0)
         return user;
     return "/tmp";  // Preserve the Linux control socket contract.
+#elif defined(__APPLE__)
+    // Some launchers (MCP clients on the official SDKs among them) drop
+    // TMPDIR; confstr names the per-user directory it would have held.
+    if (env("TMPDIR").empty()) {
+        char user[PATH_MAX];
+        const auto size = ::confstr(_CS_DARWIN_USER_TEMP_DIR, user, sizeof user);
+        if (size > 0 && size <= sizeof user) return user;
+    }
 #endif
     std::error_code error;
     auto temporary = std::filesystem::temp_directory_path(error);

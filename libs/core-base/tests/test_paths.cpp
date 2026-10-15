@@ -5,7 +5,10 @@
 #include <cstdlib>
 #include <optional>
 #include <string>
-#if defined(__linux__)
+#if defined(__APPLE__)
+#include <unistd.h>
+#include <climits>
+#elif defined(__linux__)
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -58,6 +61,12 @@ TEST_CASE("platform paths select native user directories without creating them")
     CHECK(config() == "/tmp/test-user/Library/Application Support");
     CHECK(data() == config());
     CHECK(cache() == "/tmp/test-user/Library/Caches");
+    // Without TMPDIR: the per-user temporary directory TMPDIR normally names.
+    Environment temporary("TMPDIR", nullptr);
+    char perUser[PATH_MAX];
+    REQUIRE(::confstr(_CS_DARWIN_USER_TEMP_DIR, perUser, sizeof perUser) > 0);
+    CHECK(runtime() == std::filesystem::path(perUser));
+    CHECK(runtime() != "/tmp");
 #else
     CHECK(config() == "/tmp/config");
     CHECK(data() == "/tmp/data");

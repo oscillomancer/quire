@@ -262,7 +262,10 @@ transaction-safe inside a batch), `rpc.*` (§3), `mcp.*` (§4).
   `$XDG_RUNTIME_DIR/<slug>/<instance>.sock` (directory 0700, socket 0600).
   Without `XDG_RUNTIME_DIR` (some MCP clients start servers with a reduced
   environment) the root is `/run/user/<uid>` when that is a private
-  directory of the user, else `/tmp` (`paths::runtime()`).
+  directory of the user, else `/tmp` (`paths::runtime()`). macOS uses
+  `TMPDIR`, else the per-user temporary directory it normally names; Windows
+  uses `LOCALAPPDATA\Temp`, else the native temporary directory (by default
+  the same folder).
   Accepted connection descriptors are nonblocking and close-on-exec.
   Framing: one JSON value per line (UTF-8, `\n`-terminated, compact JSON; no
   embedded newlines), max 16 MiB per message.
