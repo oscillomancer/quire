@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <mutex>
 #include "../../../tests/file_platform.h"
+#include "midi_input.h"
 #include "portaudio_api.h"
 #include "supple/engine/app.h"
 #include "supple/engine/offline.h"
@@ -235,10 +236,11 @@ TEST_CASE("PortAudio failed selection and stream startup release resources") {
     CHECK_FALSE(bad.error().hint.empty());
     CHECK(driver.initialized == 0);
     PortAudioBackend backend({}, Driver::api);
-    auto midi = backend.start({.midiInputs = true}, [](auto, auto, auto) {});
-    REQUIRE_FALSE(midi);
-    CHECK(midi.error().path == "/midi_inputs");
+    REQUIRE(backend.start({.midiInputs = true}, [](auto, auto, auto) {}));
+    CHECK(backend.midiPorts().empty());  // injected audio-only driver
+    backend.stop();
     CHECK(driver.initialized == 0);
+    driver.closed = 0;
     driver.startError = paDeviceUnavailable;
     CHECK_FALSE(backend.start({}, [](auto, auto, auto) {}));
     CHECK(driver.closed == 1);
@@ -414,4 +416,223 @@ TEST_CASE("engine status serializes verified native helper policies") {
     REQUIRE(result);
     CHECK((*result)["scheduling"]["live"]["policy"] == "high");
     app.stopEngine();
+}
+
+namespace {
+struct FakeMidi : detail::MidiSource {
+    detail::MidiInputBuffer* buffer = nullptr;
+    std::atomic<double> clock{10};
+    std::atomic<bool> topology{false};
+    bool refused = false;
+    unsigned starts = 0, stops = 0;
+    Status start(detail::MidiInputBuffer& target) override {
+        ++starts;
+        buffer = &target;
+        target.names = {"Keyboard", "Pads"};
+        if (refused) return Error("backend.midi", "fixture refused MIDI", "/midi_inputs", "retry");
+        return okStatus();
+    }
+    void stop() override {
+        if (buffer) ++stops;
+        buffer = nullptr;
+    }
+    double now() const SUPPLE_RT override { return clock.load(std::memory_order_relaxed); }
+    bool changed() override { return topology.load(std::memory_order_acquire); }
+    void send(unsigned port, unsigned frame, unsigned frames, std::uint32_t message) {
+        buffer->push(port, now() + (static_cast<double>(frame) - frames) / 48000, message);
+    }
+};
+constexpr std::uint32_t midiWord(unsigned status, unsigned key, unsigned value) {
+    return status | key << 8 | value << 16;
+}
+}  // namespace
+TEST_CASE("native MIDI maps timestamps, sorts ports and rebases every PortAudio chunk") {
+    Driver driver;
+    auto source = std::make_unique<FakeMidi>();
+    auto& midi = *source;
+    PortAudioBackend backend({}, Driver::api, std::move(source));
+    std::array<MidiInputEvent, 16> events{};
+    unsigned count = 0, base = 0;
+    REQUIRE(backend.start({.blockSize = 64, .midiInputs = true}, [&](auto, auto, unsigned frames) {
+        for (auto event : backend.midiInput()) {
+            event.frame += base;
+            events[count++] = event;
+        }
+        base += frames;
+    }));
+    CHECK(backend.midiPorts() == std::vector<std::string>{"Keyboard", "Pads"});
+    midi.send(0, 64, 211, midiWord(0x90, 61, 100));
+    midi.send(0, 63, 211, midiWord(0x90, 60, 100));  // deliberately unsorted arrival
+    midi.send(1, 210, 211, midiWord(0xb1, 7, 99));
+    midi.send(1, 128, 211, midiWord(0xc1, 8, 0));
+    midi.buffer->push(1, 9, midiWord(0x91, 59, 80));  // late -> first frame
+    midi.buffer->push(1, 11, midiWord(0x81, 59, 0));  // future -> last frame
+    driver.drive(211);
+    REQUIRE(count == 6);
+    const unsigned expected[]{0, 63, 64, 128, 210, 210};
+    for (unsigned i = 0; i < count; ++i) CHECK(events[i].frame == expected[i]);
+    CHECK(events[3].size == 2);
+    CHECK(events[2].port == 0);
+    CHECK(events[4].port == 1);
+    CHECK(backend.midiInput().empty());
+    count = base = 0;
+    driver.drive(211);
+    CHECK(count == 0);
+    backend.stop();
+    CHECK(midi.stops == 1);
+    REQUIRE(backend.start({.midiInputs = true}, [](auto, auto, auto) {}));
+    CHECK(backend.midiDropped() == 0);
+    backend.stop();
+    CHECK(midi.stops == 2);
+}
+TEST_CASE("native MIDI rejects system messages, bounds queues and counts period overflow") {
+    Driver driver;
+    auto source = std::make_unique<FakeMidi>();
+    auto& midi = *source;
+    PortAudioBackend backend({}, Driver::api, std::move(source));
+    unsigned count = 0;
+    REQUIRE(backend.start({.midiInputs = true}, [&](auto, auto, auto) {
+        count += static_cast<unsigned>(backend.midiInput().size());
+    }));
+    for (unsigned i = 0; i < detail::kMidiQueueSize + 10; ++i)
+        midi.send(0, 0, 256, midiWord(0x90, 60, 100));
+    midi.buffer->push(1, 10, 0xf0);
+    midi.buffer->push(1, 10, 0xf8);
+    midi.buffer->push(1, 10, midiWord(0x90, 255, 100));
+    driver.drive(256);
+    CHECK(count == kMaxMidiInputEvents);
+    CHECK(backend.midiDropped() == detail::kMidiQueueSize + 10 - kMaxMidiInputEvents + 3);
+    backend.stop();
+}
+TEST_CASE("WinMM timestamps retain their QPC anchor across 32-bit rollover") {
+    CHECK(detail::winMidiSeconds(125, 10, 10.2) == doctest::Approx(10.125));
+    CHECK(detail::winMidiSeconds(5, 10, 4294977.31) == doctest::Approx(4294977.301));
+    CHECK(detail::winMidiSeconds(0xfffffffeU, 10, 4294977.295) == doctest::Approx(4294977.294));
+}
+TEST_CASE("native MIDI startup refusal rolls back the audio stream and callbacks") {
+    Driver driver;
+    auto source = std::make_unique<FakeMidi>();
+    auto& midi = *source;
+    midi.refused = true;
+    PortAudioBackend backend({}, Driver::api, std::move(source));
+    auto started = backend.start({.midiInputs = true}, [](auto, auto, auto) {});
+    REQUIRE_FALSE(started);
+    CHECK(started.error().code == "backend.midi");
+    CHECK(midi.stops == 1);
+    CHECK(driver.initialized == 0);
+    CHECK(driver.closed == 1);
+    CHECK(backend.midiPorts().empty());
+}
+TEST_CASE("native MIDI SPSC receives concurrent producers per device with bounded loss") {
+    auto buffer = std::make_unique<detail::MidiInputBuffer>();
+    buffer->names = {"Keys", "Pads"};
+    std::atomic<unsigned> done{0};
+    std::array<std::thread, 2> producers;
+    for (unsigned port = 0; port < producers.size(); ++port)
+        producers[port] = std::thread([&, port] {
+            for (unsigned i = 0; i < 10000; ++i) buffer->push(port, 10, midiWord(0x90, 60, 100));
+            done.fetch_add(1, std::memory_order_release);
+        });
+    std::uint64_t received = 0;
+    do {
+        buffer->collect(10, 48000, 64);
+        received += buffer->chunk(0, 64).size();
+    } while (done.load(std::memory_order_acquire) < 2);
+    for (auto& producer : producers) producer.join();
+    buffer->collect(10, 48000, 64);
+    received += buffer->chunk(0, 64).size();
+    CHECK(received + buffer->dropped() == 20000);
+}
+TEST_CASE("PortAudio MIDI routes, reaches learn and records the heard timeline in both executors") {
+    for (bool ahead : {false, true}) {
+        Driver driver;
+        auto source = std::make_unique<FakeMidi>();
+        auto& midi = *source;
+        PortAudioBackend backend({}, Driver::api, std::move(source));
+        auto instances = pool();
+        MediaCache media;
+        Engine engine(instances, media, {.anticipative = ahead, .workers = 0});
+        REQUIRE(engine.start(backend, {.blockSize = 64, .midiInputs = true}));
+        model::EditTxn edit(model::Session::create({.console9 = false}), 1);
+        model::Track track;
+        track.parent = model::kMaster;
+        track.name = "Keys";
+        const auto tr = edit.create(track);
+        edit.modify<model::Track>(model::kMaster,
+                                  [&](auto& master) { master.children.push_back(tr); });
+        model::FxInstance fx;
+        fx.plugin.id = "com.suppleaudio.test.sine";
+        const auto instrument = edit.create(fx);
+        model::Route route;
+        route.from.midiDevice = "keyboard";
+        route.to.track = tr;
+        route.midi = model::MidiRouting{1, 2};  // channel 1 -> 2
+        const auto input = edit.create(route);
+        edit.modify<model::Track>(tr, [&](auto& value) {
+            value.chain.push_back(instrument);
+            value.record.input = input;
+            value.record.armed = true;
+            value.record.monitor = model::Monitor::On;
+        });
+        REQUIRE(engine.load(edit.commit().value()));
+        RecordTarget target;
+        target.track = tr;
+        target.midi = RecordTarget::Midi{midiPortMask(engine.midiPorts(), "key"), 1, 2};
+        REQUIRE(engine.startRecording({target}));
+        REQUIRE(engine.awaitPlan());
+        engine.play();
+        engine.awaitTransport();
+        midi.send(1, 10, 211, midiWord(0x90, 65, 100));  // wrong device
+        midi.send(0, 20, 211, midiWord(0x91, 66, 100));  // wrong channel
+        midi.send(0, 64, 211, midiWord(0x90, 60, 100));
+        midi.send(0, 192, 211, midiWord(0x80, 60, 0));
+        driver.drive(211);
+        auto takes = engine.stopRecording();
+        REQUIRE(takes);
+        REQUIRE(takes->size() == 1);
+        REQUIRE((*takes)[0].midi.size() == 2);
+        // Existing recorder compensation: 48 input + 96 output frames.
+        CHECK((*takes)[0].midi[0].timeline == -80);
+        CHECK((*takes)[0].midi[0].bytes[0] == 0x91);
+        CHECK((*takes)[0].midi[1].timeline == 48);
+        CHECK(std::any_of(driver.out[0].begin() + 64, driver.out[0].begin() + 192,
+                          [](float sample) { return sample != 0; }));
+        CHECK(std::all_of(driver.out[0].begin(), driver.out[0].begin() + 64,
+                          [](float sample) { return sample == 0; }));
+        std::vector<ControlMidiEvent> controls;
+        engine.takeControlMidi(controls);
+        CHECK(controls.size() == 4);  // learn hears every input/channel
+        engine.stop();
+    }
+}
+#if defined(__APPLE__) || defined(_WIN32)
+TEST_CASE("real native MIDI inputs enumerate and receive only on explicit opt-in") {
+    const char* enabled = std::getenv("SUPPLE_MIDI_DEVICE_TEST");
+    if (!enabled || std::string_view(enabled) != "1") return;
+    Driver driver;  // MIDI alone: never open the audio device
+    PortAudioBackend backend({}, Driver::api, detail::nativeMidiSource());
+    REQUIRE(backend.start({.midiInputs = true}, [](auto, auto, auto) {}));
+    CHECK_FALSE(backend.midiPorts().empty());
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    driver.drive(256);
+    backend.stop();
+}
+#endif
+
+TEST_CASE("native MIDI topology changes wake the owner for restart") {
+    Driver driver;
+    auto api = Driver::api;
+    api.native = true;
+    MainThreadWake wake;
+    auto source = std::make_unique<FakeMidi>();
+    source->topology.store(true);
+    PortAudioBackend backend({}, api, std::move(source));
+    backend.setMainThreadWake(&wake);
+    REQUIRE(backend.start({.midiInputs = true}, [](auto, auto, auto) {}));
+    WaitItem item{wake.waitable(), kWaitRead, 0};
+    REQUIRE(waitFor(std::span(&item, 1), -1) > 0);
+    CHECK(wake.drain());
+    CHECK(backend.status().restartNeeded);
+    CHECK(backend.status().restartReason == "MIDI devices changed");
+    backend.stop();
 }

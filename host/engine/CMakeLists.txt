@@ -8,13 +8,26 @@ supple_add_library(engine
           src/stretch.cpp src/meters.cpp src/runtime_protection.cpp src/media_files.cpp
           src/app.cpp src/plugin_outputs.cpp src/commands.cpp src/extra_commands.cpp src/midi_commands.cpp src/analysis_commands.cpp
           src/render_commands.cpp src/chain_commands.cpp src/take_commands.cpp src/learn.cpp src/dsp_commands.cpp
-          src/midi_control.cpp src/portaudio_backend.cpp src/portaudio_native.cpp
+          src/midi_control.cpp src/midi_input.cpp src/portaudio_backend.cpp src/portaudio_native.cpp
   DEPS supple::model supple::clap-host supple::audio-file supple::timeline supple::semantic-params-abi
        supple::command-bus supple::lua-bus supple::notation supple::core-params supple::core-analysis
        supple::core-dsp supple::signalsmith-stretch supple::console9
   PRIVATE_DEPS supple::product-info supple::script-compiler supple::sandbox-render ZLIB::ZLIB ${CMAKE_DL_LIBS})
 
 target_include_directories(engine SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/third_party/portaudio-19.7.0/include)
+if(APPLE)
+  enable_language(OBJCXX)
+  target_sources(engine PRIVATE src/midi_input_mac.mm)
+  set(_midi_objcxx_options -fobjc-arc -std=c++20)
+  if(SUPPLE_APPLE_RT_NOEXCEPT_WARNING)
+    list(APPEND _midi_objcxx_options -Wno-perf-constraint-implies-noexcept)
+  endif()
+  set_source_files_properties(src/midi_input_mac.mm PROPERTIES COMPILE_OPTIONS "${_midi_objcxx_options}")
+  target_link_libraries(engine PRIVATE "-framework CoreMIDI" "-framework CoreFoundation")
+elseif(WIN32)
+  target_sources(engine PRIVATE src/midi_input_windows.cpp)
+  target_link_libraries(engine PRIVATE winmm)
+endif()
 if(APPLE OR WIN32)
   target_link_libraries(engine PRIVATE supple::portaudio)
   if(WIN32)

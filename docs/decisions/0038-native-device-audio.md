@@ -8,6 +8,9 @@ initial baseline, run exclusively on the monitor. It publishes rate/loss flags
 through atomics; owner-side status reads them and cheap PortAudio stream
 info/activity. Owner status never queries the ASIO/CoreAudio driver rate.
 
+**2026-10-15 amendment:** [ADR-0042](0042-native-midi-input.md) adds CoreMIDI /
+WinMM inputs to the PortAudio backend and supersedes the MIDI deferral below.
+
 ## Decision
 
 - Vendor the latest eligible stable PortAudio release, v19.7.0 (2021-04-06,

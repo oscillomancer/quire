@@ -1322,9 +1322,8 @@ but never builds or initializes the PortAudio library.
 
 `engine.start` accepts backend `jack|portaudio|dummy` and optional `host_api`,
 `input_device`, `output_device`, `rate` (1..768000), `inputs` (0..64) and `outputs`
-(2..64). Native stream inputs default to zero, outputs to two; native MIDI is
-unavailable (a C++ BackendConfig MIDI request returns backend.config at
-/midi_inputs before initializing the device library). JACK keeps its capture/MIDI behavior. Native default backend stays
+(2..64). Native stream audio inputs default to zero, outputs to two;
+engine.start enables native MIDI inputs (ADR-0042). JACK keeps its capture/MIDI behavior. Native default backend stays
 dummy; Linux's existing default stays JACK. The CLI play command forwards these
 fields through --host-api, --input-device, --output-device, --rate, --inputs and
 --outputs. Device recovery retains them alongside block/anticipative settings.
@@ -1381,3 +1380,46 @@ rate differs from the requested stream rate. Engine config reports the stream
 rate; the monitor separately observes nominal hardware changes and requests a
 restart. Hardware output conversion is outside the engine's exact-output
 contract, which is verified at the float callback boundary.
+
+### Native MIDI inputs (2026-10-15, ADR-0042)
+
+PortAudioBackend accepts BackendConfig.midiInputs and opens up to 16 native
+sources: CoreMIDI protocol-1 channel messages on macOS, WinMM CALLBACK_FUNCTION
+on Windows. `engine.start` enables these inputs without adding arguments;
+`engine.inputs` lists their display/device names while running, empty while
+stopped. Existing midiPortMask/routeMidi filtering, rechanneling, monitoring,
+MIDI learn and recording use the same Backend MIDI interface as JACK.
+The injected PortAudio constructor accepts an owned detail::MidiSource for
+device-free tests; audio-only injected drivers return empty MIDI lists.
+
+OS receive threads produce timestamped short channel messages through one
+preallocated SPSC ring (2048 entries) per port, with a single producer per
+source. Audio snapshots and drains each ring, stably sorts at most
+kMaxMidiInputEvents (1024) per device period, and rebases events into each
+engine chunk, including the final short chunk. No allocation, lock, wait or
+logging on receive/audio paths. `Backend::midiDropped()` defaults to zero;
+PortAudio exposes rejected messages and ring/period overflow through it and
+`engine.status.midi_dropped`. SysEx/system messages are dropped and counted
+per reported packet/buffer; driver-unreported SysEx loss cannot be counted.
+Two fixed WinMM long buffers are recycled on the monitor, never inside its
+MIDI callback. Short-message reception does not depend on recycling them.
+
+CoreMIDI host ticks use mach_timebase_info; WinMM milliseconds since start
+use an immediately preceding QPC anchor, with nearest-epoch 32-bit wrap
+reconstruction. At callback entry, timestamps in the preceding audio period
+[end - frames/rate, end] map to [0, frames-1], rounded to nearest frame and
+clamped at endpoints. This preserves received spacing with up to one period
+of delivery delay; it is not sample-accurate hardware/ADC synchronization.
+WinMM has millisecond resolution. Existing recorder capture-latency compensation
+still applies. Names/indices remain fixed while running. The native monitor
+observes source topology changes and requests owner restart with reason
+"MIDI devices changed"; new devices enter only after restart. Identical WinMM
+device replacements with indistinguishable caps/names may not be detected.
+
+No sources is success; any open failure rolls back all MIDI/audio resources
+and returns backend.midi, /midi_inputs, with an actionable reconnect/retry hint.
+Stop joins the monitor/audio callback before resetting/disposal of MIDI and
+queue destruction. Linux keeps JACK and builds only device-free shared logic.
+Real-device tests require SUPPLE_MIDI_DEVICE_TEST exactly 1; they use fake
+audio and never open an audio device. Native SDK tests do not establish physical
+input timing, disconnect reliability or performance on every driver.

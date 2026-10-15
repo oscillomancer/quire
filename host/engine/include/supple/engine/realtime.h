@@ -199,6 +199,7 @@ class Backend {
     // MIDI (ADR-0016). Inside the callback only: this cycle's device events,
     // sorted by frame (at most kMaxMidiInputEvents; more are dropped).
     virtual std::span<const MidiInputEvent> midiInput() const { return {}; }
+    virtual std::uint64_t midiDropped() const { return 0; }
     // The MIDI input ports, named after their devices (fixed while running).
     virtual std::vector<std::string> midiPorts() const { return {}; }
     // What each audio input channel is connected to (index 0 = channel 1;

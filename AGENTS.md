@@ -133,7 +133,8 @@ must not decide pass or fail by it.
 Opt-in tests, skipped unless their variable is exactly `1`:
 `SUPPLE_AUDIO_DEVICE_TEST` opens the real JACK device (two seconds of
 silence); `SUPPLE_GUI_DISPLAY_TEST` opens plugin editor windows on the
-X11 display.
+native display; `SUPPLE_MIDI_DEVICE_TEST` opens native MIDI inputs on macOS/Windows
+(with a fake audio driver, so no audio device is opened).
 
 Other checks, run on demand: `tools/validator/build.sh` and
 `tools/validator/run.sh <plugin.clap>` (clap-validator 0.4.1, built in the

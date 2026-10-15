@@ -242,6 +242,7 @@ schema::Schema<EngineStatus> engineStatusSchema() {
         .field("plan_latency", &EngineStatus::planLatency, schema::integer())
         .field("device_latency", &EngineStatus::deviceLatency, schema::integer())
         .field("xruns", &EngineStatus::xruns, schema::integer())
+        .field("midi_dropped", &EngineStatus::midiDropped, schema::integer())
         .field("cycles", &EngineStatus::cycles, schema::integer())
         .field("process_errors", &EngineStatus::processErrors, schema::integer())
         .field("restart_needed", &EngineStatus::restartNeeded, schema::boolean())
@@ -3658,8 +3659,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             "(default "
             "elsewhere, no device). For portaudio, host_api, input_device and output_device "
             "select exact names from engine.devices. inputs defaults to 0 (playback only); "
-            "outputs defaults to 2. rate defaults to the project rate. Native MIDI is not yet "
-            "available. Dummy is paced like a device. block: the device block in frames "
+            "outputs defaults to 2. rate defaults to the project rate. PortAudio opens up to "
+            "16 native MIDI inputs; engine.inputs lists their names. Dummy is paced like a device. "
+            "block: the device block in frames "
             "(default 256); the device's "
             "period may differ and is reported. anticipative (default true): render ahead of "
             "the playhead on worker threads (edits are heard up to 200 ms later); false renders "
@@ -3693,13 +3695,15 @@ void registerEngineCommands(cmd::Registry& registry) {
             {"backend.device", "device or host API was not found",
              "choose names from engine.devices"},
             {"backend.config", "device format is invalid", "check rate and channel capacities"},
+            {"backend.midi", "native MIDI input setup failed",
+             "close other MIDI clients, reconnect the device and restart the engine"},
             {"backend.unavailable", "JACK is not installed", "install pipewire-jack"},
             {"backend.open", "no JACK server answered", "is PipeWire running?"},
             {"backend.unsupported", "backend is unavailable on this platform", "select dummy"}};
         c.examples = {
             {"Without a device", obj(R"({"backend": "dummy", "block": 128})"),
              obj(R"({"running": true, "backend": "dummy", "sample_rate": 48000.0, "block": 128,
-                     "period": 128, "plan_latency": 0, "device_latency": 0, "xruns": 0,
+                     "period": 128, "plan_latency": 0, "device_latency": 0, "xruns": 0, "midi_dropped": 0,
                      "cycles": "<any>", "process_errors": 0, "restart_needed": false,
                      "anticipative": true, "anticipation_misses": 0, "live_helpers": "<any>",
                      "scheduling": {"callback": {"policy": "normal", "priority": 0},
@@ -3761,7 +3765,8 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.description =
             "audio: one entry per input channel (channel, the 1-based number track.set "
             "record_input takes, and the device port it is connected to). midi: the MIDI devices "
-            "(names track.set record_midi matches). While the engine is stopped: running false and "
+            "(names track.set record_midi matches; JACK ports or native CoreMIDI/WinMM inputs, "
+            "fixed until restart). While the engine is stopped: running false and "
             "empty lists (engine.start opens the device).";
         c.tags = {"engine", "record"};
         c.args = schema::object<NoArgs>("no_args").build();
@@ -3803,7 +3808,9 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.description =
             "plan_latency: the session's plugin delay in frames; device_latency: frames from "
             "the engine's outputs to the device. restart_needed: the device changed rate or went "
-            "away; engine.stop and engine.start again. meter_drops: meter entries a full ring "
+            "away, or native MIDI topology changed; engine.stop and engine.start again. "
+            "midi_dropped: native MIDI messages/packets rejected or lost to bounded queues "
+            "(zero for other backends). meter_drops: meter entries a full ring "
             "dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, "
             "never audio. dropped/voice_dropped count lost plug-in output/voice records. "
             "memory_lock reports requested/active and an optional OS error with errno and a "
@@ -3823,7 +3830,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.result = engineStatusSchema();
         c.examples = {{"Not running", obj("{}"),
                        obj(R"({"running": false, "backend": "", "sample_rate": 0.0, "block": 0,
-                     "period": 0, "plan_latency": 0, "device_latency": 0, "xruns": 0,
+                     "period": 0, "plan_latency": 0, "device_latency": 0, "xruns": 0, "midi_dropped": 0,
                      "cycles": 0, "process_errors": 0, "restart_needed": false,
                      "anticipative": false, "anticipation_misses": 0, "live_helpers": 0,
                      "scheduling": {"callback": {"policy": "none", "priority": 0},

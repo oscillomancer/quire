@@ -168,7 +168,9 @@ Native audio builds PortAudio only in the root DAW project (CoreAudio on macOS;
 WASAPI + ASIO on Windows). Isolated stock-plugin projects never build or link it.
 Fake-driver engine-portaudio.tests runs on all platforms and under Linux RTSan /
 TSan. Real native-device tests require SUPPLE_AUDIO_DEVICE_TEST=1 exactly; leave
-it unset in CI. Native devices have no MIDI input implementation yet.
+it unset in CI. Native MIDI uses CoreMIDI / WinMM through the PortAudio backend (ADR-0042).
+`SUPPLE_MIDI_DEVICE_TEST=1` enables a short native input test using fake audio;
+leave it unset in CI. It opens MIDI inputs but never the audio device.
 
 GUI tests use Linux EGL offscreen windows or hidden native Cocoa/Windows
 windows. Native runners need a desktop session and OpenGL 3.3 (macOS 4.1).

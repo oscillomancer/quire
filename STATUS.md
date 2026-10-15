@@ -265,7 +265,12 @@ Engine and hosting:
   WASAPI/ASIO on Windows), with selection, latency/xruns and restart notifications.
   Fake-device output equals offline in both executors, with native CI coverage.
   Hardware latency, disconnect behavior and scheduling benefit are unmeasured.
-  No direct PipeWire/ALSA backend, native MIDI inputs or MIDI outputs.
+  Native MIDI inputs now use CoreMIDI/WinMM with bounded per-port queues,
+  timestamp mapping, routing/learn/recording and owner restart on topology changes
+  (ADR-0042). Device-free timing/overflow/lifecycle tests cover the shared path;
+  physical MIDI timing/disconnect behavior needs SUPPLE_MIDI_DEVICE_TEST=1 trials.
+  SysEx is discarded; WinMM timestamps have millisecond resolution.
+  No direct PipeWire/ALSA backend or MIDI outputs.
 - MIDI learn has no OSC, no "arm envelope" option, and no learn directly on
   track faders (the "(MIDI CC)" actions cover the selected tracks). The last
   touched parameter misses edits in plug-in editors that report no gestures

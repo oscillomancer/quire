@@ -89,6 +89,7 @@ struct EngineStatus {
     std::int64_t block = 0, period = 0;
     std::int64_t planLatency = 0, deviceLatency = 0;  // frames
     std::int64_t xruns = 0, cycles = 0, processErrors = 0;
+    std::int64_t midiDropped = 0;
     bool restartNeeded = false;
     bool anticipative = false;  // rendering ahead on the worker pool (ADR-0012)
     std::int64_t anticipationMisses = 0;

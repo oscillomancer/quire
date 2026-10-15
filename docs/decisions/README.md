@@ -57,3 +57,4 @@ current state.
 | [0038](0038-native-device-audio.md) | Native device audio through PortAudio | Accepted |
 | [0040](0040-native-plugin-editors.md) | Native plugin editors | Accepted |
 | [0041](0041-cocoa-editor-ordering.md) | Cocoa bridged editor ordering | Accepted |
+| [0042](0042-native-midi-input.md) | Native MIDI input | Accepted |

@@ -229,6 +229,7 @@ q = nil
 ---@field plan_latency integer
 ---@field device_latency integer
 ---@field xruns integer
+---@field midi_dropped integer
 ---@field cycles integer
 ---@field process_errors integer
 ---@field restart_needed boolean
@@ -254,6 +255,7 @@ q = nil
 ---@field plan_latency integer
 ---@field device_latency integer
 ---@field xruns integer
+---@field midi_dropped integer
 ---@field cycles integer
 ---@field process_errors integer
 ---@field restart_needed boolean

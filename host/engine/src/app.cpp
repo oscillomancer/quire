@@ -877,7 +877,6 @@ Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, boo
     } else if (backend == "portaudio") {
         config.inputs = device.inputs;
         config.outputs = device.outputs;
-        config.midiInputs = false;
         ownedBackend_ = std::make_unique<PortAudioBackend>(device.native);
     } else if (backend == "dummy") {
         ownedBackend_ = std::make_unique<DummyBackend>(
@@ -1286,6 +1285,7 @@ EngineStatus EngineApp::engineStatus() {
     st.planLatency = engine_->outputLatency();
     st.deviceLatency = b.outputLatency;
     st.xruns = static_cast<std::int64_t>(b.xruns);
+    st.midiDropped = static_cast<std::int64_t>(backend_->midiDropped());
     st.cycles = static_cast<std::int64_t>(engine_->cycles());
     st.processErrors = static_cast<std::int64_t>(engine_->processErrors());
     st.restartNeeded = b.restartNeeded;

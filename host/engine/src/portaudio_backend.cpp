@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include "midi_input.h"
 #include "portaudio_api.h"
 #include "supple/base/rt.h"
 #include "supple/engine/portaudio.h"
@@ -33,6 +34,10 @@ struct PortAudioBackend::Impl {
     PortAudioOptions options;
     const detail::PortAudioApi* api;
     BackendConfig config;
+    std::unique_ptr<detail::MidiSource> midi;
+    std::unique_ptr<detail::MidiInputBuffer> midiBuffer;
+    std::span<const MidiInputEvent> blockMidi;
+    bool midiStarted = false;
     Callback callback;
     PaStream* stream = nullptr;
     bool initialized = false;
@@ -45,7 +50,7 @@ struct PortAudioBackend::Impl {
     PaDeviceIndex outputDevice = paNoDevice;
     std::thread monitor;
     std::atomic<std::uint32_t> monitorStop{0};
-    std::atomic<bool> rateChanged{false};
+    std::atomic<bool> rateChanged{false}, midiChanged{false};
     void notify() SUPPLE_RT {
         if (wake) wake->notify();
     }
@@ -72,6 +77,7 @@ struct PortAudioBackend::Impl {
             self.xruns.fetch_add(1, std::memory_order_relaxed);
             changed = true;
         }
+        if (self.midiStarted) self.midiBuffer->collect(self.midi->now(), self.config.sampleRate, n);
         std::array<const float*, 64> inputs{};
         std::array<float*, 64> outputs{};
         for (std::uint32_t offset = 0; offset < n;) {
@@ -79,9 +85,12 @@ struct PortAudioBackend::Impl {
             for (std::uint32_t c = 0; c < self.config.inputs; ++c)
                 inputs[c] = in ? in[c] + offset : nullptr;
             for (std::uint32_t c = 0; c < self.config.outputs; ++c) outputs[c] = out[c] + offset;
+            self.blockMidi = self.midiStarted ? self.midiBuffer->chunk(offset, count)
+                                              : std::span<const MidiInputEvent>{};
             self.callback(in ? inputs.data() : nullptr, outputs.data(), count);
             offset += count;
         }
+        self.blockMidi = {};
         if (changed) self.notify();
         return paContinue;
     }
@@ -96,11 +105,17 @@ struct PortAudioBackend::Impl {
 PortAudioBackend::PortAudioBackend(PortAudioOptions options) : impl_(std::make_unique<Impl>()) {
     impl_->options = std::move(options);
     impl_->api = detail::nativePortAudioApi();
+    impl_->midi = detail::nativeMidiSource();
 }
 PortAudioBackend::PortAudioBackend(PortAudioOptions options, const detail::PortAudioApi& api)
     : impl_(std::make_unique<Impl>()) {
     impl_->options = std::move(options);
     impl_->api = &api;
+}
+PortAudioBackend::PortAudioBackend(PortAudioOptions options, const detail::PortAudioApi& api,
+                                   std::unique_ptr<detail::MidiSource> midi)
+    : PortAudioBackend(std::move(options), api) {
+    impl_->midi = std::move(midi);
 }
 PortAudioBackend::~PortAudioBackend() { stop(); }
 void PortAudioBackend::setMainThreadWake(MainThreadWake* wake) { impl_->wake = wake; }
@@ -112,15 +127,13 @@ Status PortAudioBackend::start(const BackendConfig& config, Callback callback) {
         return Error("engine.running", "the device stream is already running", "/backend",
                      "stop the engine before starting another stream");
     if (!self.api) return unsupported();
-    if (config.midiInputs)
-        return Error("backend.config", "native MIDI inputs are not implemented", "/midi_inputs",
-                     "disable MIDI inputs for PortAudio; Linux JACK supports device MIDI");
     if (!std::isfinite(config.sampleRate) || config.sampleRate < 1 || config.sampleRate > 768000 ||
         !config.blockSize || config.blockSize > 65536 || config.inputs > 64 || config.outputs < 2 ||
         config.outputs > 64 || !callback || !std::isfinite(self.options.stopTimeoutSeconds) ||
         self.options.stopTimeoutSeconds <= 0)
         return Error("backend.config", "invalid rate, block, channels or stop timeout", "/backend",
                      "use 1..768000 Hz, a positive block, 0..64 inputs and 2..64 outputs");
+    self.midiBuffer.reset();
     const auto& api = *self.api;
     PaError error = api.initialize();
     if (error != paNoError) return failure(api, error, "/backend");
@@ -130,6 +143,9 @@ Status PortAudioBackend::start(const BackendConfig& config, Callback callback) {
             api.close(self.stream);
             self.stream = nullptr;
         }
+        if (self.midi) self.midi->stop();
+        self.midiStarted = false;
+        self.midiBuffer.reset();
         api.terminate();
         self.initialized = false;
         self.callback = {};
@@ -208,6 +224,7 @@ Status PortAudioBackend::start(const BackendConfig& config, Callback callback) {
     self.period.store(config.blockSize);
     self.xruns.store(0);
     self.rateChanged.store(false);
+    self.midiChanged.store(false);
     self.monitorStop.store(0);
     error = api.open(&self.stream, config.inputs ? &input : nullptr, &output, config.sampleRate,
                      config.blockSize, paClipOff | paDitherOff, Impl::process, &self);
@@ -220,6 +237,12 @@ Status PortAudioBackend::start(const BackendConfig& config, Callback callback) {
     self.config.sampleRate = info->sampleRate;
     self.inputLatency = latency(info->inputLatency, info->sampleRate);
     self.outputLatency = latency(info->outputLatency, info->sampleRate);
+    if (config.midiInputs && self.midi) {
+        self.midiBuffer = std::make_unique<detail::MidiInputBuffer>();
+        auto started = self.midi->start(*self.midiBuffer);
+        if (!started) return fail(std::move(started).error());
+        self.midiStarted = true;
+    }
     error = api.finished(self.stream, Impl::finished);
     if (error != paNoError) return fail(failure(api, error, "/backend"));
     error = api.start(self.stream);
@@ -239,9 +262,12 @@ Status PortAudioBackend::start(const BackendConfig& config, Callback callback) {
                             deviceRateChanged = rate != startedDeviceRate;
                         }
                     }
-                    if (observed.restartNeeded || deviceRateChanged) {
+                    const bool midiChanged = state.midiStarted && state.midi->changed();
+                    if (observed.restartNeeded || deviceRateChanged || midiChanged) {
                         if (deviceRateChanged || observed.restartReason == "sample rate changed")
                             state.rateChanged.store(true, std::memory_order_release);
+                        else if (midiChanged)
+                            state.midiChanged.store(true, std::memory_order_release);
                         else
                             state.gone.store(true, std::memory_order_release);
                         state.notify();
@@ -281,6 +307,10 @@ void PortAudioBackend::stop() {
     self.api->stop(self.stream);
     self.api->close(self.stream);
     self.stream = nullptr;
+    if (self.midi) self.midi->stop();
+    self.midiStarted = false;
+    self.blockMidi = {};
+    self.midiBuffer.reset();
     if (!self.final.load(std::memory_order_acquire)) self.callback(nullptr, nullptr, 0);
     self.callback = {};
     if (self.initialized) self.api->terminate();
@@ -295,12 +325,26 @@ BackendStatus PortAudioBackend::status() const {
         const auto* info = self.api->info(self.stream);
         rateChanged = rateChanged || (info && info->sampleRate != self.config.sampleRate);
     }
-    return {self.period.load(),  self.xruns.load(),
-            self.outputLatency,  self.inputLatency,
-            gone || rateChanged, gone ? "device lost" : rateChanged ? "sample rate changed" : ""};
+    const bool midiChanged = self.midiChanged.load(std::memory_order_acquire);
+    return {self.period.load(),
+            self.xruns.load(),
+            self.outputLatency,
+            self.inputLatency,
+            gone || rateChanged || midiChanged,
+            gone          ? "device lost"
+            : rateChanged ? "sample rate changed"
+            : midiChanged ? "MIDI devices changed"
+                          : ""};
 }
 std::vector<std::string> PortAudioBackend::inputNames() const {
     return std::vector<std::string>(impl_->config.inputs, impl_->inputName);
+}
+std::span<const MidiInputEvent> PortAudioBackend::midiInput() const { return impl_->blockMidi; }
+std::vector<std::string> PortAudioBackend::midiPorts() const {
+    return impl_->midiBuffer ? impl_->midiBuffer->names : std::vector<std::string>{};
+}
+std::uint64_t PortAudioBackend::midiDropped() const {
+    return impl_->midiBuffer ? impl_->midiBuffer->dropped() : 0;
 }
 bool PortAudioBackend::nativeThreadPolicy() const { return impl_->api && impl_->api->native; }
 Status PortAudioBackend::prepareCurrentThread(bool live) {

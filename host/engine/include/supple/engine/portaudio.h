@@ -5,7 +5,8 @@
 namespace supple::engine {
 namespace detail {
 struct PortAudioApi;
-}
+class MidiSource;
+}  // namespace detail
 struct PortAudioOptions {
     // Exact names. Empty selects the platform's default host API/device.
     std::string hostApi, inputDevice, outputDevice;
@@ -23,6 +24,8 @@ class PortAudioBackend final : public Backend {
     explicit PortAudioBackend(PortAudioOptions options = {});
     // Injectable driver seam. It never initializes the platform device library.
     PortAudioBackend(PortAudioOptions options, const detail::PortAudioApi& api);
+    PortAudioBackend(PortAudioOptions options, const detail::PortAudioApi& api,
+                     std::unique_ptr<detail::MidiSource> midi);
     ~PortAudioBackend() override;
     Status start(const BackendConfig&, Callback) override;
     void stop() override;
@@ -32,6 +35,9 @@ class PortAudioBackend final : public Backend {
     void setMainThreadWake(MainThreadWake*) override;
     BackendStatus status() const override;
     std::vector<std::string> inputNames() const override;
+    std::span<const MidiInputEvent> midiInput() const override;
+    std::vector<std::string> midiPorts() const override;
+    std::uint64_t midiDropped() const override;
     bool nativeThreadPolicy() const override;
     Status prepareCurrentThread(bool live) override;
     void releaseCurrentThread() override;

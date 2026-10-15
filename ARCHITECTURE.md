@@ -79,6 +79,12 @@ host, daw or plugins; plugins use only header-light libs.
   meters into SPSC rings. Never allocates, frees, locks, blocks, logs, throws,
   or touches files. Entry points are annotated `SUPPLE_RT` and every audio-path
   test also runs under RealtimeSanitizer.
+- **Native MIDI receive threads** — CoreMIDI's client receive thread or WinMM's
+  per-device callback publishes timestamped short messages into preallocated
+  per-port SPSC rings. PortAudio drains/sorts/rebases them into engine chunks;
+  no receive/audio allocations or locks (ADR-0042). The existing native device
+  monitor observes topology and requests owner restart; it also recycles WinMM
+  SysEx discard buffers outside the receive callback.
 - **Worker threads** — execute graph partitions in parallel (lock-free work
   distribution with atomic dependency counters) and anticipative render-ahead
   for tracks that are not live (not armed / not input-monitored), with larger

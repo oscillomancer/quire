@@ -6,6 +6,9 @@ recording into MIDI takes"), `docs/specs/session-model.md` (routes from
 channel mapping). Builds on ADR-0004 (JACK), ADR-0014 (recording, the live
 region), ADR-0015 (loop passes).
 
+**2026-10-15 amendment:** [ADR-0042](0042-native-midi-input.md) extends the
+backend input contract to CoreMIDI/WinMM through PortAudio on macOS/Windows.
+
 ## Context
 
 The model can already say "this track records from MIDI device X"
