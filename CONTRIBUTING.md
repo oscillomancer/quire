@@ -154,6 +154,11 @@ Windows stock builds enable the CRT math constants with _USE_MATH_DEFINES in
 platform build glue. Product-owned semantic stress tests use a native loader;
 template host/probe/shared-stack sources are unchanged.
 
+Monorepo macOS stock GUI builds select their existing OpenGL backend through
+the projects' Metal options in Quire-owned CMake glue. Standalone template
+defaults are unchanged; their Metal backend requires a NanoVG Metal dependency
+that this repository does not vendor.
+
 Apple libc++'s missing jthread/stop-token facilities are supplied through the
 core-base non-RT job layer, retaining standard types elsewhere. The VST3 loader
 uses Objective-C++20 with ARC. The stock projects' existing AUv2 builds use the

@@ -24,6 +24,12 @@ if(SUPPLE_BUILD_PLUGINS)
   # monorepo's settings map onto <PREFIX>_BUILD_GUI, <PREFIX>_VST3 and
   # <PREFIX>_RTSAN. The plugin's own ctest suite becomes plugin.<dir>.ctest.
   function(supple_add_plugin dir prefix)
+    set(plugin_renderer_args)
+    if(APPLE)
+      # Keep the shared template untouched and use the vendored GL backend.
+      # The template's default Metal renderer needs an unvendored dependency.
+      list(APPEND plugin_renderer_args -D${prefix}_METAL=OFF)
+    endif()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${dir}/cmake/Identity.cmake")
       include("${CMAKE_CURRENT_SOURCE_DIR}/${dir}/cmake/Identity.cmake")
       set(artifact "${${prefix}_DISPLAY_NAME}")
@@ -76,6 +82,7 @@ if(SUPPLE_BUILD_PLUGINS)
         -D${prefix}_NOTICES_PREFIX=${artifact}-
         -DSUPPLE_SEMANTIC_CONFORMANCE=$<TARGET_FILE:semantic-conformance>
         -D${prefix}_BUILD_GUI=${SUPPLE_BUILD_GUI}
+        ${plugin_renderer_args}
         -D${prefix}_VST3=${SUPPLE_PLUGIN_VST3}
         -DVST3_SDK_ROOT=${VST3_SDK_ROOT}
         -DAUDIOUNIT_SDK_ROOT=${CMAKE_SOURCE_DIR}/third_party/AudioUnitSDK-1.1.0
@@ -124,6 +131,10 @@ if(SUPPLE_BUILD_PLUGINS)
   # license and notices are staged in plugins/clap beside the stock plugins.
   # Its own ctest suite becomes plugin.<name>.ctest.
   function(supple_add_template_product name product artifact)
+    set(plugin_renderer_args)
+    if(APPLE)
+      list(APPEND plugin_renderer_args -DSUPPLE_METAL=OFF)
+    endif()
     set(plugin_build "${CMAKE_BINARY_DIR}/plugins/${name}")
     set(plugin_output_args)
     if(WIN32)
@@ -158,6 +169,7 @@ if(SUPPLE_BUILD_PLUGINS)
         -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
         -DSUPPLE_PRODUCT_DIR=${CMAKE_CURRENT_SOURCE_DIR}/${product}
         -DSUPPLE_BUILD_GUI=${SUPPLE_BUILD_GUI}
+        ${plugin_renderer_args}
         -DSUPPLE_BUILD_TESTS=${SUPPLE_BUILD_TESTS}
         -DSUPPLE_BUILD_VST3=${SUPPLE_PLUGIN_VST3}
         -DVST3_SDK_ROOT=${VST3_SDK_ROOT}

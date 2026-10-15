@@ -87,3 +87,9 @@ The player's Win32 embedding tests require that software GL setup too.
 **2026-10-14 bridge integration note:** After ADR-0037 landed on `port`, the
 DAW executable and GUI tests depend unconditionally on the bridge executable
 on all platforms. Native editor embedding remains the separate editor port.
+
+**2026-10-14 stock renderer integration note:** Monorepo CMake selects the
+stock projects' existing OpenGL renderer on macOS (`<PREFIX>_METAL=OFF` and
+`SUPPLE_METAL=OFF`). Their standalone default Metal renderer requires a
+NanoVG Metal dependency that this repository does not vendor. No template
+files or pins change, and no new dependency is introduced.
