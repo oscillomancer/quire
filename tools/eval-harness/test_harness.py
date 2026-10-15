@@ -165,7 +165,7 @@ class Isolation(unittest.TestCase):
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             try:
                 self.assertTrue(wait_pipe(process.stdout, 30))
-                self.assertEqual(process.stdout.readline(), b"spawned\n")
+                self.assertEqual(process.stdout.readline().rstrip(b"\r\n"), b"spawned")
                 process.wait(timeout=30)
                 stop_group(process)
                 self.assertTrue(wait_pipe(process.stdout, 30))
@@ -174,6 +174,20 @@ class Isolation(unittest.TestCase):
                 stop_group(process)
                 process.stdout.close()
                 process.stderr.close()
+
+    def test_owned_process_preserves_arguments_and_exit_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            arguments = ["a b", 'a"b', r"C:\path with spaces\file"]
+            process = spawn_group([sys.executable, "-c",
+                                   "import json,sys; print(json.dumps(sys.argv[1:])); sys.exit(7)",
+                                   *arguments], cwd=directory,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            try:
+                output, error = process.communicate(timeout=30)
+                self.assertEqual(process.returncode, 7, error)
+                self.assertEqual(json.loads(output), arguments)
+            finally:
+                stop_group(process)
 
     def test_mcp_pipe_round_trip_without_a_sandbox(self):
         with tempfile.TemporaryDirectory() as directory:

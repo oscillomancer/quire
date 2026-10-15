@@ -52,12 +52,12 @@ def spawn_group(command, **kwargs):
     process = None
     gate = Path(kwargs.get("cwd") or Path.cwd()).resolve() / (".eval-start-" + uuid.uuid4().hex)
     bootstrap = (
-        "import os,sys,time; from pathlib import Path; "
+        "import subprocess,sys,time; from pathlib import Path; "
         "gate=Path(sys.argv[1]); deadline=time.monotonic()+60\n"
         "while not gate.exists():\n"
         " if time.monotonic()>deadline: sys.exit(125)\n"
         " time.sleep(.01)\n"
-        "gate.unlink(); os.execvpe(sys.argv[2],sys.argv[2:],os.environ)\n"
+        "gate.unlink(); sys.exit(subprocess.call(sys.argv[2:]))\n"
     )
     try:
         if not _kernel.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
