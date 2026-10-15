@@ -1293,6 +1293,9 @@ EngineStatus EngineApp::engineStatus() {
     st.cycles = static_cast<std::int64_t>(engine_->cycles());
     st.processErrors = static_cast<std::int64_t>(engine_->processErrors());
     st.restartNeeded = b.restartNeeded;
+    st.midiDevicesChanged = b.midiDevicesChanged;
+    if (st.midiDevicesChanged)
+        st.midiDevicesMessage = "MIDI devices changed; restart the engine to pick up the new set";
     st.anticipative = engine_->options().anticipative;
     st.liveHelpers = engine_->liveHelpers();
     const auto threadClass = [](ThreadPolicy p) { return ThreadClass{p.kind, p.priority}; };

@@ -2226,6 +2226,12 @@ Kind: `action`. Exposure: `mcp-tool`.
         "additionalProperties": false
       }
     },
+    "midi_devices_changed": {
+      "type": "boolean"
+    },
+    "midi_devices_message": {
+      "type": "string"
+    },
     "cycles": {
       "type": "integer"
     },
@@ -2439,6 +2445,8 @@ Kind: `action`. Exposure: `mcp-tool`.
     "xruns",
     "midi_dropped",
     "midi_warnings",
+    "midi_devices_changed",
+    "midi_devices_message",
     "cycles",
     "process_errors",
     "restart_needed",
@@ -2495,6 +2503,8 @@ Result:
   "xruns": 0,
   "midi_dropped": 0,
   "midi_warnings": [],
+  "midi_devices_changed": false,
+  "midi_devices_message": "",
   "cycles": "<any>",
   "process_errors": 0,
   "restart_needed": false,
@@ -2538,7 +2548,7 @@ Result:
 
 Real-time engine state: backend, rate, block, device period, latency, xruns.
 
-plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away, or native MIDI topology changed; engine.stop and engine.start again. midi_dropped: native MIDI messages/packets rejected or lost to bounded queues (zero for other backends). midi_warnings lists inputs skipped at start, with device, numeric os_error, message and corrective hint. meter_drops: entries a full ring dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, never audio. dropped/voice_dropped count lost plug-in output/voice records. memory_lock reports requested/active and an optional OS error with errno and a corrective hint, including while stopped. Bridges are excluded. cpu_idle_latency reports the owned 20 microsecond request with the same status/error fields; it affects system idle while held and leaves CPU frequency policy unchanged. live_helpers is the enabled live helper capacity. scheduling: each thread class's policy (none, normal, fifo, rr, high) and priority as applied at start: the device callback, live helpers, renderer and background helpers (real-time below a real-time callback when permitted). warnings includes scheduling fallbacks and plan warnings with corrective actions. failed_errors adds structured code, message, path and hint to each failure. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them).
+plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. midi_devices_changed is advisory: MIDI topology changed but audio keeps running. midi_devices_message asks for an explicit engine restart to pick up the new set; existing port names stay fixed. midi_dropped: native MIDI messages/packets rejected or lost to bounded queues (zero for other backends). midi_warnings lists inputs skipped at start, with device, numeric os_error, message and corrective hint. meter_drops: entries a full ring dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, never audio. dropped/voice_dropped count lost plug-in output/voice records. memory_lock reports requested/active and an optional OS error with errno and a corrective hint, including while stopped. Bridges are excluded. cpu_idle_latency reports the owned 20 microsecond request with the same status/error fields; it affects system idle while held and leaves CPU frequency policy unchanged. live_helpers is the enabled live helper capacity. scheduling: each thread class's policy (none, normal, fifo, rr, high) and priority as applied at start: the device callback, live helpers, renderer and background helpers (real-time below a real-time callback when permitted). warnings includes scheduling fallbacks and plan warnings with corrective actions. failed_errors adds structured code, message, path and hint to each failure. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them).
 
 Kind: `query`. Exposure: `mcp-tool`.
 
@@ -2604,6 +2614,12 @@ Kind: `query`. Exposure: `mcp-tool`.
         "additionalProperties": false
       }
     },
+    "midi_devices_changed": {
+      "type": "boolean"
+    },
+    "midi_devices_message": {
+      "type": "string"
+    },
     "cycles": {
       "type": "integer"
     },
@@ -2817,6 +2833,8 @@ Kind: `query`. Exposure: `mcp-tool`.
     "xruns",
     "midi_dropped",
     "midi_warnings",
+    "midi_devices_changed",
+    "midi_devices_message",
     "cycles",
     "process_errors",
     "restart_needed",
@@ -2861,6 +2879,8 @@ Result:
   "xruns": 0,
   "midi_dropped": 0,
   "midi_warnings": [],
+  "midi_devices_changed": false,
+  "midi_devices_message": "",
   "cycles": 0,
   "process_errors": 0,
   "restart_needed": false,

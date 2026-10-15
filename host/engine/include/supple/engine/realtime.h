@@ -164,6 +164,7 @@ struct BackendStatus {
     std::uint32_t inputLatency = 0;   // frames from the device to the backend's inputs
     bool restartNeeded = false;       // the device's rate changed or it went away
     std::string_view restartReason;   // why, for engine.restarting (may be empty)
+    bool midiDevicesChanged = false;  // advisory only; audio keeps running
 };
 
 // An audio device driver. The callback runs on the backend's audio thread.

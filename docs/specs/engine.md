@@ -1412,8 +1412,13 @@ clamped at endpoints. This preserves received spacing with up to one period
 of delivery delay; it is not sample-accurate hardware/ADC synchronization.
 WinMM has millisecond resolution. Existing recorder capture-latency compensation
 still applies. Names/indices remain fixed while running. The native monitor
-observes source topology changes and requests owner restart with reason
-"MIDI devices changed"; new devices enter only after restart. Identical WinMM
+observes source topology changes and publishes `engine.status.midi_devices_changed`
+(true until stop/start), with midi_devices_message "MIDI devices changed; restart
+the engine to pick up the new set". This advisory does not set restart_needed,
+stop playback/recording or restart the engine. Removed inputs go silent; opened
+ports/names remain fixed. Only an explicit user/LLM engine stop/start adopts the
+new set. The monitor keeps checking audio rate/loss and recycling WinMM buffers
+for surviving inputs after this advisory. Identical WinMM
 device replacements with indistinguishable caps/names may not be detected.
 
 No sources is success. Each refusing input is closed and skipped without

@@ -399,6 +399,11 @@ TEST_CASE("engine status serializes verified native helper policies") {
         PolicyBackend() : DummyBackend({.mode = DummyBackend::Mode::Manual}) {}
         bool nativeThreadPolicy() const override { return true; }
         Status prepareCurrentThread(bool) override { return okStatus(); }
+        BackendStatus status() const override {
+            auto result = DummyBackend::status();
+            result.midiDevicesChanged = true;
+            return result;
+        }
     } backend;
     AppOptions options;
     options.workdir = dir;
@@ -415,6 +420,10 @@ TEST_CASE("engine status serializes verified native helper policies") {
         {"engine.status", json::Value::object(), {cmd::Origin::Type::Test, "native-status", ""}});
     REQUIRE(result);
     CHECK((*result)["scheduling"]["live"]["policy"] == "high");
+    CHECK((*result)["midi_devices_changed"] == true);
+    CHECK((*result)["restart_needed"] == false);
+    CHECK((*result)["midi_devices_message"] ==
+          "MIDI devices changed; restart the engine to pick up the new set");
     app.stopEngine();
 }
 
@@ -682,20 +691,34 @@ TEST_CASE("real native MIDI inputs enumerate and receive only on explicit opt-in
 }
 #endif
 
-TEST_CASE("native MIDI topology changes wake the owner for restart") {
+TEST_CASE("native MIDI topology changes are advisory and audio monitoring continues") {
     Driver driver;
     auto api = Driver::api;
     api.native = true;
+    api.deviceRate = [](PaStream*, PaDeviceIndex) {
+        return Driver::current->hardwareRate.load(std::memory_order_acquire);
+    };
     MainThreadWake wake;
     auto source = std::make_unique<FakeMidi>();
     source->topology.store(true);
     PortAudioBackend backend({}, api, std::move(source));
     backend.setMainThreadWake(&wake);
-    REQUIRE(backend.start({.midiInputs = true}, [](auto, auto, auto) {}));
+    unsigned frames = 0;
+    REQUIRE(backend.start({.midiInputs = true}, [&](auto, auto, unsigned n) { frames += n; }));
     WaitItem item{wake.waitable(), kWaitRead, 0};
     REQUIRE(waitFor(std::span(&item, 1), -1) > 0);
     CHECK(wake.drain());
+    REQUIRE_FALSE(backend.status().restartNeeded);
+    CHECK(backend.status().restartReason.empty());
+    CHECK(backend.status().midiDevicesChanged);
+    driver.drive(256);
+    CHECK(frames == 256);
+    // A MIDI advisory must not end the monitor: audio-rate changes still wake it.
+    driver.hardwareRate.store(44100);
+    item = {wake.waitable(), kWaitRead, 0};
+    REQUIRE(waitFor(std::span(&item, 1), -1) > 0);
+    CHECK(wake.drain());
     CHECK(backend.status().restartNeeded);
-    CHECK(backend.status().restartReason == "MIDI devices changed");
+    CHECK(backend.status().restartReason == "sample rate changed");
     backend.stop();
 }

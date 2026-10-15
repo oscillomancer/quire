@@ -3,7 +3,7 @@
 **Status:** Accepted, 2026-10-15. Amends ADR-0016 and ADR-0038; uses ADR-0027.
 Contract: engine.md, native MIDI inputs.
 
-**2026-10-15 amendment:** The startup policy below is superseded by the
+**2026-10-15 amendment:** The startup and topology policies below are superseded by the
 follow-up decisions at the end of this ADR.
 
 ## Decision
@@ -81,3 +81,12 @@ OS error, message and hint "close the other application and restart the engine".
 This supersedes transactional MIDI/audio rollback above; a busy exclusive WinMM
 input must not prevent playback. Tests cover one of two inputs refusing and
 source-wide setup failure, along with command-boundary warning serialization.
+
+A MIDI topology change is advisory, never an automatic engine restart. The
+monitor latches midi_devices_changed and wakes the owner once; the status
+message asks the caller to restart explicitly to adopt the new port set.
+Playback/recording continues, with removed devices silent and surviving inputs
+serviced. Audio rate/loss monitoring and WinMM buffer recycling continue. This
+supersedes the owner-restart policy above: plugging in a controller must not
+interrupt a take. Fake topology tests verify a non-restart flag, continued audio
+and subsequent audio-rate restart notification; command tests cover the message.

@@ -267,7 +267,7 @@ Engine and hosting:
   Hardware latency, disconnect behavior and scheduling benefit are unmeasured.
   Refusing native MIDI inputs are skipped with structured startup warnings;
   audio and other inputs keep running. CoreMIDI/WinMM use bounded per-port queues,
-  timestamp mapping, routing/learn/recording and owner restart on topology changes
+  timestamp mapping, routing/learn/recording and non-restart topology advisories
   (ADR-0042). Device-free timing/overflow/lifecycle tests cover the shared path;
   physical MIDI timing/disconnect behavior needs SUPPLE_MIDI_DEVICE_TEST=1 trials.
   SysEx is discarded; WinMM timestamps have millisecond resolution.

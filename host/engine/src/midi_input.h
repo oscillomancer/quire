@@ -46,7 +46,7 @@ class MidiSource {
     virtual Status start(MidiInputBuffer&) = 0;
     virtual void stop() = 0;
     virtual double now() const SUPPLE_RT = 0;
-    // Monitor only. A topology change asks the owner to restart the backend.
+    // Monitor only. Topology changes are advisory; keep servicing opened inputs.
     virtual bool changed() = 0;
 };
 std::unique_ptr<MidiSource> nativeMidiSource();

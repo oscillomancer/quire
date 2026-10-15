@@ -91,6 +91,8 @@ struct EngineStatus {
     std::int64_t xruns = 0, cycles = 0, processErrors = 0;
     std::int64_t midiDropped = 0;
     std::vector<MidiInputWarning> midiWarnings;
+    bool midiDevicesChanged = false;
+    std::string midiDevicesMessage;
     bool restartNeeded = false;
     bool anticipative = false;  // rendering ahead on the worker pool (ADR-0012)
     std::int64_t anticipationMisses = 0;

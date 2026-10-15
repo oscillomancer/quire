@@ -254,6 +254,8 @@ schema::Schema<EngineStatus> engineStatusSchema() {
         .field("midi_dropped", &EngineStatus::midiDropped, schema::integer())
         .field("midi_warnings", &EngineStatus::midiWarnings,
                schema::arrayOf(midiInputWarningSchema()))
+        .field("midi_devices_changed", &EngineStatus::midiDevicesChanged, schema::boolean())
+        .field("midi_devices_message", &EngineStatus::midiDevicesMessage, schema::string())
         .field("cycles", &EngineStatus::cycles, schema::integer())
         .field("process_errors", &EngineStatus::processErrors, schema::integer())
         .field("restart_needed", &EngineStatus::restartNeeded, schema::boolean())
@@ -3714,6 +3716,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             {"Without a device", obj(R"({"backend": "dummy", "block": 128})"),
              obj(R"({"running": true, "backend": "dummy", "sample_rate": 48000.0, "block": 128,
                      "period": 128, "plan_latency": 0, "device_latency": 0, "xruns": 0, "midi_dropped": 0, "midi_warnings": [],
+                     "midi_devices_changed": false, "midi_devices_message": "",
                      "cycles": "<any>", "process_errors": 0, "restart_needed": false,
                      "anticipative": true, "anticipation_misses": 0, "live_helpers": "<any>",
                      "scheduling": {"callback": {"policy": "normal", "priority": 0},
@@ -3818,7 +3821,9 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.description =
             "plan_latency: the session's plugin delay in frames; device_latency: frames from "
             "the engine's outputs to the device. restart_needed: the device changed rate or went "
-            "away, or native MIDI topology changed; engine.stop and engine.start again. "
+            "away; engine.stop and engine.start again. midi_devices_changed is advisory: "
+            "MIDI topology changed but audio keeps running. midi_devices_message asks for an "
+            "explicit engine restart to pick up the new set; existing port names stay fixed. "
             "midi_dropped: native MIDI messages/packets rejected or lost to bounded queues "
             "(zero for other backends). midi_warnings lists inputs skipped at start, with "
             "device, numeric os_error, message and corrective hint. meter_drops: entries a full "
@@ -3843,6 +3848,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.examples = {{"Not running", obj("{}"),
                        obj(R"({"running": false, "backend": "", "sample_rate": 0.0, "block": 0,
                      "period": 0, "plan_latency": 0, "device_latency": 0, "xruns": 0, "midi_dropped": 0, "midi_warnings": [],
+                     "midi_devices_changed": false, "midi_devices_message": "",
                      "cycles": 0, "process_errors": 0, "restart_needed": false,
                      "anticipative": false, "anticipation_misses": 0, "live_helpers": 0,
                      "scheduling": {"callback": {"policy": "none", "priority": 0},

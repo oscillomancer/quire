@@ -268,11 +268,11 @@ Status PortAudioBackend::start(const BackendConfig& config, Callback callback) {
                         }
                     }
                     const bool midiChanged = state.midiStarted && state.midi->changed();
-                    if (observed.restartNeeded || deviceRateChanged || midiChanged) {
+                    if (midiChanged && !state.midiChanged.exchange(true, std::memory_order_acq_rel))
+                        state.notify();
+                    if (observed.restartNeeded || deviceRateChanged) {
                         if (deviceRateChanged || observed.restartReason == "sample rate changed")
                             state.rateChanged.store(true, std::memory_order_release);
-                        else if (midiChanged)
-                            state.midiChanged.store(true, std::memory_order_release);
                         else
                             state.gone.store(true, std::memory_order_release);
                         state.notify();
@@ -331,15 +331,10 @@ BackendStatus PortAudioBackend::status() const {
         rateChanged = rateChanged || (info && info->sampleRate != self.config.sampleRate);
     }
     const bool midiChanged = self.midiChanged.load(std::memory_order_acquire);
-    return {self.period.load(),
-            self.xruns.load(),
-            self.outputLatency,
-            self.inputLatency,
-            gone || rateChanged || midiChanged,
-            gone          ? "device lost"
-            : rateChanged ? "sample rate changed"
-            : midiChanged ? "MIDI devices changed"
-                          : ""};
+    return {self.period.load(),  self.xruns.load(),
+            self.outputLatency,  self.inputLatency,
+            gone || rateChanged, gone ? "device lost" : rateChanged ? "sample rate changed" : "",
+            midiChanged};
 }
 std::vector<std::string> PortAudioBackend::inputNames() const {
     return std::vector<std::string>(impl_->config.inputs, impl_->inputName);

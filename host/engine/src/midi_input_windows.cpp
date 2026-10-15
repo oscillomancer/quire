@@ -23,6 +23,7 @@ class WinMidiSource final : public MidiSource {
         double anchor = 0;
         MIDIINCAPSW caps{};
         MMRESULT capsError = MMSYSERR_NOERROR;
+        bool recycleFailed = false;
         // SysEx buffers are only recycled on the monitor, never in MidiInProc.
         struct LongBuffer {
             MIDIHDR header{};
@@ -81,6 +82,7 @@ class WinMidiSource final : public MidiSource {
             auto& port = ports_[i];
             port.owner = this;
             port.index = static_cast<unsigned>(buffer.names.size());
+            port.recycleFailed = false;
             port.caps = {};
             auto error = midiInGetDevCapsW(i, &port.caps, sizeof(port.caps));
             port.capsError = error;
@@ -130,21 +132,25 @@ class WinMidiSource final : public MidiSource {
         return static_cast<double>(ticks.QuadPart) / frequency_;
     }
     bool changed() override {
-        if (midiInGetNumDevs() != deviceCount_) return true;
+        bool topologyChanged = midiInGetNumDevs() != deviceCount_;
         for (unsigned i = 0; i < count_; ++i) {
             auto& port = ports_[i];
             MIDIINCAPSW caps{};
             if (midiInGetDevCapsW(i, &caps, sizeof(caps)) != port.capsError ||
                 caps.wMid != port.caps.wMid || caps.wPid != port.caps.wPid ||
                 std::wstring_view(caps.szPname) != port.caps.szPname)
-                return true;
-            if (!port.handle) continue;
+                topologyChanged = true;
+            if (!port.handle || port.recycleFailed) continue;
             for (auto& item : port.longBuffers)
                 if (item.ready.exchange(false, std::memory_order_acq_rel) &&
-                    midiInAddBuffer(port.handle, &item.header, sizeof(MIDIHDR)) != MMSYSERR_NOERROR)
-                    return true;
+                    midiInAddBuffer(port.handle, &item.header, sizeof(MIDIHDR)) !=
+                        MMSYSERR_NOERROR) {
+                    port.recycleFailed = true;
+                    topologyChanged = true;
+                    break;
+                }
         }
-        return false;
+        return topologyChanged;
     }
 };
 }  // namespace

@@ -231,6 +231,8 @@ q = nil
 ---@field xruns integer
 ---@field midi_dropped integer
 ---@field midi_warnings table[]
+---@field midi_devices_changed boolean
+---@field midi_devices_message string
 ---@field cycles integer
 ---@field process_errors integer
 ---@field restart_needed boolean
@@ -258,6 +260,8 @@ q = nil
 ---@field xruns integer
 ---@field midi_dropped integer
 ---@field midi_warnings table[]
+---@field midi_devices_changed boolean
+---@field midi_devices_message string
 ---@field cycles integer
 ---@field process_errors integer
 ---@field restart_needed boolean
