@@ -10,10 +10,11 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
 `main`.
 
 The port branch has on-demand Linux/macOS/Windows CI and portable presets
-(ADR-0034). Linux dev passes all 142 tests including the 12 CLAP validators.
-Native headless services, hosting/scanning, stock wrappers and device backend
-builds pass Windows CI (87 tests) and macOS arm64 CI (88 executed tests;
-12 optional external validators skipped, 100 CTest entries; ADR-0036/0038).
+(ADR-0034). Linux dev passes all 145 tests including the 12 CLAP validators.
+Native headless services, hosting/scanning, bridge, stock wrappers, device
+backend builds and GUI/agent tests pass Windows CI (99 tests) and macOS arm64
+CI (100 executed tests; 12 optional external validators skipped, 112 CTest
+entries; ADR-0036/0037/0038/0039).
 The macOS preset uses AppleClang and system libc++; shared float/double parsing
 uses vendored fast_float (MIT) on all platforms, including the suite's
 self-contained source exports. Native waits/wakes, thread setup, control
@@ -293,8 +294,8 @@ Session and editing:
   squashed steps keep large invocation arguments.
 
 GUI:
-- Native shell/toolkit/agent builds are enabled (ADR-0039), pending native CI
-  verification. Cocoa/Windows hidden-window tests replace Linux EGL offscreen;
+- Native shell/toolkit/agent builds and tests pass CI (ADR-0039).
+  Cocoa/Windows hidden-window tests replace Linux EGL offscreen;
   Linux golden references are unchanged. Native editor embedding is separate.
   Windows config keys use a protected current-user ACL; filesystems without
   ACL support fail the save. macOS cold-start process timing is unavailable.

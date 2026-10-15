@@ -52,4 +52,5 @@ preview parent so the tiling WM cannot enlarge the capture. Host-smoke is exerci
 semantic-rt additionally checks transactional state and patch replacement while
 processing. These checks do not establish REAPER or macOS/Windows acceptance.
 The editor-input test keeps its host/telemetry ring on the heap: the ring
-exceeds Windows' default 1 MiB stack. It also runs with a 1 MiB stack on Linux.
+exceeds Windows' default 1 MiB stack. A manual Linux run with a 1 MiB stack
+also passes.

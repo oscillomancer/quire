@@ -605,7 +605,8 @@ Delete.
 
 - **Endpoints:** any OpenAI-compatible chat endpoint (including a local
   llama-server) or the Anthropic API; base URL, model and key (key stored
-  in the user's keyring or a 0600 file, never in the project). Requests run
+  in an owner-only config file: POSIX mode 0600 or a protected current-user
+  DACL on Windows, never in the project). Requests run
   on a worker thread; the UI streams tokens. A saved endpoint change applies
   from the next turn (a running turn finishes on its endpoint); the
   conversation and a pending proposal stay.
@@ -815,7 +816,9 @@ exposes the selection to agents.
   task durations over 2 ms (each bus pump with its sidecar and editor
   service, each panels' sync pass, each input event; frames are counted on
   their own), idle CPU over 10 s and cold start to first
-  interactive frame. Results in `docs/benchmarks/gui.md`; the gates of
+  interactive frame. macOS reports cold-start process timing as unavailable
+  (`-1`); frame, CPU and idle measurements remain supported. Results in
+  `docs/benchmarks/gui.md`; the gates of
   ADR-0005 §5 are acceptance criteria.
 - Telemetry for long main-thread tasks in debug builds (a watchdog that
   logs any task over 2 ms with its command name).
