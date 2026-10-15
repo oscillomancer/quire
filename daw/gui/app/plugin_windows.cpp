@@ -3,12 +3,17 @@
 #include "plugin_windows.h"
 
 #include <SDL3/SDL.h>
+#if defined(__APPLE__)
+#include <dlfcn.h>
+#include <objc/runtime.h>
+#endif
 #include <clap/clap.h>
 
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <system_error>
 #include <tuple>
 
@@ -157,6 +162,39 @@ void PluginWindows::loadLayout(const json::Value& layout) {
     }
 }
 
+NativeWindow PluginWindows::floatingParent() const {
+    std::uintptr_t number = 0;
+#if defined(__APPLE__)
+    if (owner_) {
+        const auto props = SDL_GetWindowProperties(owner_->sdl());
+        void* window = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
+        using Selector = SEL (*)(const char*);
+        using WindowNumber = long (*)(void*, SEL);  // NSInteger on supported 64-bit macOS
+        static const auto selector =
+            reinterpret_cast<Selector>(dlsym(RTLD_DEFAULT, "sel_registerName"));
+        static const auto windowNumber =
+            reinterpret_cast<WindowNumber>(dlsym(RTLD_DEFAULT, "objc_msgSend"));
+        if (window && selector && windowNumber) {
+            const long value = windowNumber(window, selector("windowNumber"));
+            if (value > 0 &&
+                static_cast<unsigned long>(value) <= std::numeric_limits<std::uint32_t>::max())
+                number = static_cast<std::uintptr_t>(value);
+        }
+    }
+#endif
+    return {NativeWindow::Kind::Floating, number};
+}
+
+void PluginWindows::appActivated() {
+    for (auto& editor : editors_) {
+        if (editor.window || (editor.fx && app_.instanceOf(*editor.fx) != editor.instance) ||
+            !editor.instance->editorOpen())
+            continue;
+        auto shown = editor.instance->openEditor(floatingParent(), 1);
+        if (!shown && onError) onError(shown.error());
+    }
+}
+
 Status PluginWindows::attach(Editor editor, const std::string& title) {
     editor.serial = nextSerial_;
     nextSerial_ += 2;
@@ -166,7 +204,7 @@ Status PluginWindows::attach(Editor editor, const std::string& title) {
         return Error("gui.editor", title + " has no editor this host can embed", "",
                      "use a plugin with a native editor, or restart its failed bridge");
     if (floats(*editor.instance)) {
-        auto size = editor.instance->openEditor({NativeWindow::Kind::Floating, 0}, 1);
+        auto size = editor.instance->openEditor(floatingParent(), 1);
         if (!size) return std::move(size).error();
         editor.resizable = size->resizable;
         editors_.push_back(std::move(editor));
@@ -219,7 +257,7 @@ Status PluginWindows::open(model::Id fx) {
                 SDL_RaiseWindow(e.window->sdl());
                 return {};
             }
-            auto shown = e.instance->openEditor({NativeWindow::Kind::Floating, 0}, 1);
+            auto shown = e.instance->openEditor(floatingParent(), 1);
             if (!shown) return std::move(shown).error();
             return {};
         }
@@ -253,8 +291,7 @@ bool PluginWindows::reattach(Editor& editor) {
     // An isolation-mode change can change Cocoa ownership: rebuild that entry.
     if (floats(*instance) != !editor.window) return false;
     auto size =
-        instance->openEditor(editor.window ? editor.window->nativeParent()
-                                           : NativeWindow{NativeWindow::Kind::Floating, 0},
+        instance->openEditor(editor.window ? editor.window->nativeParent() : floatingParent(),
                              editor.window ? static_cast<double>(editor.window->pixelRatio()) : 1);
     restoreContext();
     if (!size) return false;

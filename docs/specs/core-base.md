@@ -157,7 +157,9 @@ must link only libraries that do not include stop.h, to avoid mixed type definit
 `NativeWindow` carries a Kind (Unavailable, X11, Cocoa, Win32, Floating) and a
 uintptr_t handle. X11 is a server XID, Cocoa an NSView pointer, Win32 an HWND.
 It conveys no ownership. Floating requests a bridge-owned parent without
-transferring a process-local pointer. `nativeWindowKind()` identifies the
+transferring a process-local pointer. Its handle is the Cocoa owner's server
+`NSWindow.windowNumber` (unsigned 32-bit), or zero when no owner is available.
+It is an ordering reference, never an embedded parent pointer. `nativeWindowKind()` identifies the
 platform's embedded API; consumers validate kind, lifetime and thread affinity.
 
 Unavailable is tag0 (the bridge wire's none); its spelling avoids Xlib's None macro.

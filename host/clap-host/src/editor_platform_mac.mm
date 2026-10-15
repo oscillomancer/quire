@@ -105,6 +105,7 @@ int waitEditorEvents(std::span<WaitItem> items, int timeoutMs) {
 }
 struct FloatingEditorWindow::State {
     NSWindow* window = nil;
+    std::uint32_t ownerWindowNumber = 0;
     SuppleEditorDelegate* delegate = nil;
 };
 FloatingEditorWindow::FloatingEditorWindow() : state_(std::make_unique<State>()) {}
@@ -129,7 +130,7 @@ Result<std::unique_ptr<FloatingEditorWindow>> FloatingEditorWindow::create(std::
         s.window.title = [[NSString alloc] initWithBytes:title.data()
                                                   length:title.size()
                                                 encoding:NSUTF8StringEncoding];
-        s.window.level = NSFloatingWindowLevel;
+        s.window.level = NSNormalWindowLevel;
         s.delegate = [SuppleEditorDelegate new];
         s.window.delegate = s.delegate;
         [s.window center];
@@ -165,8 +166,13 @@ bool FloatingEditorWindow::takeResize(unsigned& width, unsigned& height) {
     return true;
 }
 void FloatingEditorWindow::show() {
-    [state_->window makeKeyAndOrderFront:nil];
-    [NSApp activate];
+    // Order within the normal level, without activating the bridge or making
+    // the editor key. The user can activate it by clicking its native window.
+    [state_->window orderWindow:NSWindowAbove relativeTo:state_->ownerWindowNumber];
+}
+void FloatingEditorWindow::showAbove(std::uint32_t ownerWindowNumber) {
+    state_->ownerWindowNumber = ownerWindowNumber;
+    show();
 }
 void FloatingEditorWindow::hide() { [state_->window orderOut:nil]; }
 bool FloatingEditorWindow::closed() const { return state_->delegate.closed; }

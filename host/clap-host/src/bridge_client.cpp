@@ -5,6 +5,7 @@
 // calls are commands in shared memory with a futex wake-up and a deadline.
 #include "bridge_client.h"
 #include "bridge_notifications.h"
+#include "editor_platform.h"
 #include "platform.h"
 
 #include <algorithm>
@@ -647,7 +648,7 @@ Result<Instance::EditorSize> editorSize(Result<std::vector<std::uint8_t>> reply)
 Result<Instance::EditorSize> RemoteInstance::openEditor(NativeWindow parent, double scale) {
     Writer w;
     // NSView pointers are process-local: only the bridge may create its parent.
-    if (nativeWindowKind() == NativeWindow::Kind::Cocoa) parent = {NativeWindow::Kind::Floating, 0};
+    if (nativeWindowKind() == NativeWindow::Kind::Cocoa) parent = cocoaBridgeParent(parent);
     w.u8(static_cast<std::uint8_t>(parent.kind));
     w.u64(parent.handle);
     w.f64(scale);

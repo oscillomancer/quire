@@ -4,7 +4,8 @@
 #include <cstdint>
 namespace supple {
 // Borrowed UI-thread parent. Cocoa means NSView*, Win32 means HWND. Never
-// dereference another process's pointer. Floating asks the bridge to own a window.
+// dereference another process's pointer. Floating asks the bridge to own a window;
+// its handle is the Cocoa owner's server windowNumber (uint32), or zero if absent.
 struct NativeWindow {
     enum class Kind : std::uint8_t { Unavailable, X11, Cocoa, Win32, Floating };
     Kind kind = Kind::Unavailable;

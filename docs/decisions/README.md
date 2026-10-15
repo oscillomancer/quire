@@ -56,3 +56,4 @@ current state.
 | [0037](0037-native-plugin-bridge.md) | Native out-of-process plugin bridge | Accepted |
 | [0038](0038-native-device-audio.md) | Native device audio through PortAudio | Accepted |
 | [0040](0040-native-plugin-editors.md) | Native plugin editors | Accepted |
+| [0041](0041-cocoa-editor-ordering.md) | Cocoa bridged editor ordering | Accepted |

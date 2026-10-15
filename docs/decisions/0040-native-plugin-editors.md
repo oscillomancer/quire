@@ -4,6 +4,11 @@
 ADR-0037. Complements ADR-0039 (native DAW GUI, on port-gui).
 Contracts: gui.md §4.5 and sandbox.md §1.
 
+**2026-10-14 amendment:** [ADR-0041](0041-cocoa-editor-ordering.md) replaces
+floating level/cooperative activation with normal-level relative ordering,
+adds the owner window-number handle and DAW activation hook, and negotiates
+POSIX 17 / Windows 18. The original decision below is retained as written.
+
 ## Decision
 
 - A borrowed `NativeWindow {kind, uintptr_t handle}` distinguishes X11 XIDs,

@@ -265,10 +265,16 @@ bool validRequest(Op op, Reader r) {
         case Op::LoadState:
             r.skipString();
             break;
-        case Op::EditorOpen:
-            if (r.u8() > static_cast<std::uint8_t>(NativeWindow::Kind::Floating)) return false;
-            r.skip(16);
+        case Op::EditorOpen: {
+            const auto kind = r.u8();
+            if (kind > static_cast<std::uint8_t>(NativeWindow::Kind::Floating)) return false;
+            const auto handle = r.u64();
+            if (kind == static_cast<std::uint8_t>(NativeWindow::Kind::Floating) &&
+                handle > std::numeric_limits<std::uint32_t>::max())
+                return false;
+            r.skip(8);
             break;
+        }
         case Op::EditorResize:
             r.skip(8);
             break;

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #pragma once
+#include <limits>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -26,6 +27,16 @@ inline constexpr const char* editorVst3Api() {
     return "X11EmbedWindowID";
 #endif
 }
+// A Cocoa pointer is process-local. Only Floating carries a server window
+// number across processes; zero means no owner (standalone host clients).
+inline constexpr NativeWindow cocoaBridgeParent(NativeWindow parent) {
+    return {NativeWindow::Kind::Floating,
+            parent.kind == NativeWindow::Kind::Floating ? parent.handle : 0};
+}
+inline constexpr bool validFloatingEditorParent(NativeWindow parent) {
+    return parent.kind == NativeWindow::Kind::Floating &&
+           parent.handle <= std::numeric_limits<std::uint32_t>::max();
+}
 // Called by the bridge before loading modules (Windows DPI awareness).
 Status initializeEditorPlatform();
 // Bridge main-thread wait: native UI input and IPC share one event loop.
@@ -38,6 +49,7 @@ class FloatingEditorWindow {
     NativeWindow parent() const;
     void resize(unsigned width, unsigned height, bool resizable);
     void show();
+    void showAbove(std::uint32_t ownerWindowNumber);
     void hide();
     bool closed() const;
     bool takeResize(unsigned& width, unsigned& height);

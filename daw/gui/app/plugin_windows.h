@@ -51,6 +51,8 @@ class PluginWindows {
     // "UI" and the mixer's slot buttons).
     Status toggle(model::Id fx);
     void closeAll();
+    // Re-order Cocoa bridged editors above the owner when the DAW regains focus.
+    void appActivated();
     // The app's window: editors float above it, and its GL context is made
     // current again after plugin code ran (editors draw with their own).
     void setOwner(const Window* owner) { owner_ = owner; }
@@ -95,6 +97,7 @@ class PluginWindows {
     static std::optional<Placement> placementOf(const Editor& editor);
     void remember(const Editor& editor);
     void place(Editor& editor);  // before the window is shown
+    NativeWindow floatingParent() const;
     Status attach(Editor editor, const std::string& title);
     bool reattach(Editor& editor);  // the effect's current instance, in the same window
     void drop(std::size_t index);

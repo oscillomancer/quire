@@ -47,9 +47,9 @@ inline constexpr std::uint32_t kMagic = 0x31474253;  // "SBG1"
 // 13: read-only factory patches through semantic-params.
 #if defined(_WIN32)
 inline constexpr std::uint32_t kVersion =
-    16;  // typed editor parents; native handles in control frames
+    18;  // Floating carries a Cocoa owner window number; native control handles
 #else
-inline constexpr std::uint32_t kVersion = 15;  // typed editor parents
+inline constexpr std::uint32_t kVersion = 17;  // Floating carries a Cocoa owner window number
 #endif
 inline constexpr int kControlFd = 3;  // the bridge's end of the socketpair
 inline constexpr std::uint32_t kMaxChannels = 16;

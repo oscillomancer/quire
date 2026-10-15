@@ -1699,7 +1699,7 @@ bool Instance::hasEditor() const {
 
 Result<Instance::EditorSize> Instance::openEditor(NativeWindow parent, double scale) {
     const bool floating = remote_ && nativeWindowKind() == NativeWindow::Kind::Cocoa &&
-                          parent.kind == NativeWindow::Kind::Floating && parent.handle == 0;
+                          validFloatingEditorParent(parent);
     if ((!floating && (parent.kind != nativeWindowKind() || !parent.valid())) ||
         !std::isfinite(scale) || scale <= 0)
         return Error("host.editor.parent", "invalid editor parent or scale", "/editor/parent",

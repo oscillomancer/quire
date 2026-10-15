@@ -644,12 +644,13 @@ struct Bridge {
                                       "use a matching host and bridge build"));
                 NativeWindow parent{kind, static_cast<std::uintptr_t>(handle)};
 #if defined(__APPLE__)
-                if (kind != NativeWindow::Kind::Floating || handle != 0)
+                if (!validFloatingEditorParent(parent))
                     return fail(Error("host.editor.parent",
                                       "a bridged Cocoa editor requires its own window",
-                                      "/editor/parent", "request a floating bridge editor"));
+                                      "/editor/parent",
+                                      "pass Floating with a 32-bit owner window number or zero"));
                 if (slot.floating) {
-                    slot.floating->show();
+                    slot.floating->showAbove(static_cast<std::uint32_t>(handle));
                     slot.editor = {};
                     return replyOr(Result<Instance::EditorSize>(slot.floatingSize), writeSize);
                 }
@@ -664,7 +665,7 @@ struct Bridge {
 #if defined(__APPLE__)
                 if (size) {
                     (*window)->resize(size->width, size->height, size->resizable);
-                    (*window)->show();
+                    (*window)->showAbove(static_cast<std::uint32_t>(handle));
                     slot.floatingSize = *size;
                     slot.floating = std::move(*window);
                 }

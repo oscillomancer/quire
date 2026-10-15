@@ -146,32 +146,44 @@ serviced by their descriptor loops; Windows does not advertise it.
 
 EditorOpen retains its operation number but now carries `u8 kind, u64 handle,
 f64 scale` (17 bytes). Kinds: none=0, x11=1, cocoa=2, win32=3, floating=4.
-POSIX v15 and Windows v16 reject earlier peers at notification subscription.
-Windows HWND values retain all pointer bits. Cocoa proxies send floating/zero
-instead of an NSView pointer: the child creates an NSWindow hosting the native
-embedded plugin view, and owns its resize/show/hide/close lifecycle. The open
+POSIX v17 and Windows v18 reject earlier peers at notification subscription.
+Windows HWND values retain all pointer bits. Cocoa proxies send Floating with
+the DAW owner's server NSWindow.windowNumber (unsigned 32-bit, zero if absent),
+instead of an NSView pointer; embedded Cocoa inputs become Floating/zero.
+Oversize Floating handles are rejected before native window creation.
+POSIX v17 / Windows v18 change this handle's semantics from the v15/v16
+zero-only contract, retaining the 17-byte payload and all operation numbers.
+The child creates an NSWindow hosting the native embedded plugin view,
+and owns its resize/show/hide/close lifecycle. The open
 reply and other editor operation payloads are unchanged; there is no audio ABI
 change. A successful open clears retained requests from the previous view
 lifetime so a stale close cannot close its replacement. Reopening a Cocoa
-floating editor raises the existing window.
+floating editor reuses the existing window and updates its owner number.
+The bridge orders it just above the owner (or front of normal level for zero),
+without activating itself or making the editor key. Plugin-requested show uses
+the retained owner number. DAW activation reorders its open bridged editors via
+the same open operation; the GUI main-loop hook is supplied by port-gui.
 
 Windows bridge main waits for IPC and native messages together; Cocoa uses
 AppKit with CFFileDescriptor run-loop sources. There is no editor polling timer.
 Bridge death/quit destroys its native windows. Cocoa bridge placement and focus
 are not persisted by the DAW. Cross-process transient ownership on macOS is
-unavailable; floating-level windows can appear above other applications.
+unavailable; normal-level windows can be covered by other applications.
 Windows child input is native, with plugin-dependent keyboard/IME behavior.
 Moving between DPI scales currently requires close/reopen to update set_scale.
 Real window tests require SUPPLE_GUI_DISPLAY_TEST=1 and a desktop session;
-normal native CI runs hermetic editor fixtures only. The DAW shell itself
+normal native CI runs hermetic editor fixtures only. The Cocoa display opt-in
+also checks cross-process relative z-order and normal level with
+CGWindowListCopyWindowInfo, unchanged frontmost application on open/reopen,
+and replacing the owner without recreating the editor. The DAW shell itself
 requires the separate port-gui integration.
 
-### Bridge notifications (POSIX v15, Windows v16; notification design ADR-0031)
+### Bridge notifications (POSIX v17, Windows v18; notification design ADR-0031)
 
 ADR-0037 extends the subscription to native WakeEvent signal targets:
 Linux eventfd (unchanged), a nonblocking write-only pipe on macOS, and a
 manual-reset event duplicated into the child on Windows. POSIX negotiates
-version 15; Windows negotiates native version 16. Invalid resource types,
+version 17; Windows negotiates native version 18. Invalid resource types,
 counts, versions and duplicate subscriptions remain structured errors.
 The Windows control channel transfers recipient-owned handle values; the
 parent rejects handle-bearing replies without acting on the claimed value.

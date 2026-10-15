@@ -50,9 +50,10 @@ with typed full-width parent handles (ADR-0040). Windows bridge editors embed;
 macOS bridge editors own floating NSWindows and service AppKit with IPC.
 Hermetic editor tests cover partial-open cleanup, resizing and repeated teardown.
 Native visual/focus/IME validation remains opt-in; combined DAW-side native
-shell/editor integration tests pass CI. Cocoa bridge placement/focus are not persisted,
-its windows use global floating level, and changing display scale requires
-closing/reopening an editor. Windows child keyboard behavior is plugin-dependent.
+shell/editor integration tests pass CI. Cocoa bridge placement/focus are not persisted;
+its windows use normal level, order above the DAW window without activating the
+bridge, and are raised again when the DAW window regains focus. Changing display
+scale requires closing/reopening an editor. Windows child keyboard behavior is plugin-dependent.
 
 ## What works
 

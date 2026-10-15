@@ -5,6 +5,7 @@
 #include <array>
 #include <limits>
 #include "../src/bridge_protocol.h"
+#include "../src/editor_platform.h"
 #include "supple/host/clap_host.h"
 using namespace supple;
 using namespace supple::host;
@@ -197,4 +198,44 @@ TEST_CASE("stock modules advertise the native editor API without creating a wind
     }
     CHECK(count >= 8);
 #endif
+}
+
+TEST_CASE("Cocoa bridge editor parents carry server window numbers without pointers") {
+    const auto pointer = cocoaBridgeParent({NativeWindow::Kind::Cocoa, 0x123456789abULL});
+    CHECK(pointer.kind == NativeWindow::Kind::Floating);
+    CHECK(pointer.handle == 0);
+    for (std::uintptr_t number :
+         {std::uintptr_t{0}, std::uintptr_t{1234}, std::uintptr_t{0xffffffffU}}) {
+        const auto parent = cocoaBridgeParent({NativeWindow::Kind::Floating, number});
+        CHECK(validFloatingEditorParent(parent));
+        bridge::Writer payload;
+        payload.u8(static_cast<std::uint8_t>(parent.kind));
+        payload.u64(parent.handle);
+        payload.f64(1);
+        REQUIRE(bridge::validRequest(bridge::Op::EditorOpen,
+                                     {payload.bytes.data(), payload.bytes.size()}));
+        bridge::Reader read{payload.bytes.data(), payload.bytes.size()};
+        CHECK(read.u8() == static_cast<std::uint8_t>(NativeWindow::Kind::Floating));
+        CHECK(read.u64() == number);
+        CHECK(read.f64() == 1);
+        CHECK(read.ok());
+    }
+    const NativeWindow invalid{NativeWindow::Kind::Floating, 0x100000000ULL};
+    CHECK_FALSE(validFloatingEditorParent(invalid));
+    CHECK_FALSE(validFloatingEditorParent({NativeWindow::Kind::Cocoa, 1234}));
+    bridge::Writer payload;
+    payload.u8(static_cast<std::uint8_t>(invalid.kind));
+    payload.u64(invalid.handle);
+    payload.f64(1);
+    CHECK_FALSE(
+        bridge::validRequest(bridge::Op::EditorOpen, {payload.bytes.data(), payload.bytes.size()}));
+    if (nativeWindowKind() == NativeWindow::Kind::Cocoa) {
+        setBridgeExecutable(BRIDGE_PATH);
+        auto instance = Instance::create(
+            editorFixture(FIXTURE_CLAP_PATH, "com.suppleaudio.test.edge"), {}, true);
+        REQUIRE(instance);
+        auto opened = (*instance)->openEditor(invalid, 1);
+        REQUIRE_FALSE(opened);
+        CHECK(opened.error().code == "host.editor.parent");
+    }
 }

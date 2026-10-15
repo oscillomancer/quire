@@ -539,7 +539,7 @@ handles. The existing background/offline bounded-wait exception and failure
 semantics apply on each platform. Native editor hosting follows ADR-0040;
 the DAW shell is integrated separately on port-gui.
 
-POSIX protocol 15 / Windows protocol 16 carry typed native editor parents
+POSIX protocol 17 / Windows protocol 18 carry typed native editor parents
 (ADR-0040), with unchanged Header layout. Windows retains the v14
 u64 recipient-owned resource after each frame prefix (all-ones means
 none) and u64 request/done event handles after Activate's rate/min/max/size.
@@ -557,11 +557,14 @@ control plane, with no shared-memory change. It forwards the generic
 [plugin-status extension](plugin-status-extension.md) for shared and
 dedicated instances. Protocol 13 appends `FactoryPatches` after it (no
 payload, canonical JSON patch array string reply). The version subscription
-now negotiates 15 on POSIX or 16 on Windows. Earlier operation numbers and the data plane stay unchanged.
+now negotiates 17 on POSIX or 18 on Windows. Earlier operation numbers and the data plane stay unchanged.
 
 EditorOpen carries `u8 kind, u64 parent, f64 scale`; see sandbox.md §1 for
 kind values and validation. Windows bridge HWNDs embed across processes;
-Cocoa proxies send floating/zero, and the bridge owns its NSWindow/NSView.
+Cocoa Floating handles carry the owner's server NSWindow.windowNumber (zero
+if unavailable), never an NSView pointer. The bridge owns its NSWindow/NSView,
+uses normal level and orders just above the owner on open/reopen without
+activating itself; the DAW activation hook repeats that ordering.
 Native bridge main loops combine UI input, IPC readiness and plugin timer
 deadlines. macOS uses AppKit/CFFileDescriptor; Windows uses native message
 waits. Linux retains its poll/X11 path. Native editor lifecycle/transport

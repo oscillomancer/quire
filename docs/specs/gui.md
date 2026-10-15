@@ -428,9 +428,13 @@ The bridge applies resize/show/hide and user-close itself and reports closure
 through its existing notifications. Replacing a Cocoa bridged instance opens a
 fresh child-owned window; the other editor paths retain their SDL container.
 Cocoa bridge placement and focus are not
-persisted or included in the DAW's MIDI-learn focus predicate. Floating-level
-windows can remain above unrelated applications; cross-process transient
-ownership is unavailable. Windows keyboard accelerators/IME depend on the
+persisted or included in the DAW's MIDI-learn focus predicate. The DAW sends
+its owner's NSWindow.windowNumber as the Floating handle. Bridge windows use
+normal level and order just above that number on open/reopen without activating
+the bridge or taking key focus; other applications can cover them normally.
+`PluginWindows::appActivated()` repeats this ordering for open Cocoa bridged
+editors when the DAW regains app/window focus (main-loop wiring belongs to the
+native GUI integration). Cross-process transient ownership is unavailable. Windows keyboard accelerators/IME depend on the
 plugin's native child; the DAW does not forward shortcut messages.
 
 Window sizes/placements remain design units. Pixel editor sizes on
