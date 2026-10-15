@@ -118,8 +118,13 @@ helpers build on all platforms; Windows atomic writes use native wide paths,
 exclusive temporary creation, flushed binary writes and POSIX-style rename through the open native handle.
 Native file reads allow delete sharing. Concurrent replacement preserves
 the previous file for readers that permit delete sharing and permits
-successive writers to replace the same destination. External Windows readers
-that deny delete sharing cause a structured `file.write` error until closed.
+successive writers to replace the same destination. When another program holds
+the destination open without delete sharing, the replace retries sharing and
+lock violations (and access denied on an existing file) with a short backoff
+for about one second (`retryWhileFileBusy`, shared with audio-file and the
+engine); a longer hold gives a structured `file.write` error that names the
+file, says another program has it open and tells the caller to close it and
+save again, leaving the previous file in place.
 File diagnostics convert native Windows paths to UTF-8 explicitly, so failed
 reads/publications for non-ANSI filenames return Result errors rather than
 throwing during path conversion (including recording sidecars).

@@ -66,7 +66,10 @@ Status copyNew(const fs::path& from, const fs::path& to) {
     const int linked = files::publishNew(temp, to);
     const int error = errno;
     fs::remove(temp, ec);
-    if (linked != 0) return copyError(from, to, std::strerror(error));
+    if (linked != 0)
+        return copyError(from, to,
+                         error == EBUSY ? "another program has the file open; close it and retry"
+                                        : std::strerror(error));
     return {};
 }
 

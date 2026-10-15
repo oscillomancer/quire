@@ -15,6 +15,8 @@
 #endif
 #include <process.h>
 #include <windows.h>
+
+#include "supple/base/files.h"
 #else
 #include <sys/stat.h>
 #include <unistd.h>
@@ -30,11 +32,21 @@ inline int processId() {
 }
 // Publish a complete temporary file without replacing an existing target.
 // The caller removes any remaining temp name afterwards (Windows consumes it).
+// On Windows a temporary file that another program briefly holds open is
+// retried for about a second; a lasting hold reports EBUSY.
 inline int publishNew(const std::filesystem::path& temp, const std::filesystem::path& target) {
 #if defined(_WIN32)
-    if (MoveFileExW(temp.c_str(), target.c_str(), MOVEFILE_WRITE_THROUGH)) return 0;
-    const DWORD error = GetLastError();
+    unsigned long error = 0;
+    if (supple::retryWhileFileBusy(
+            target,
+            [&] { return MoveFileExW(temp.c_str(), target.c_str(), MOVEFILE_WRITE_THROUGH) != 0; },
+            error))
+        return 0;
     switch (error) {
+        case ERROR_SHARING_VIOLATION:
+        case ERROR_LOCK_VIOLATION:
+            errno = EBUSY;
+            break;
         case ERROR_ALREADY_EXISTS:
         case ERROR_FILE_EXISTS:
             errno = EEXIST;

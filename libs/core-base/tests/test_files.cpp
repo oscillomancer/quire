@@ -11,6 +11,7 @@
 #include <unistd.h>
 #endif
 #include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -170,3 +171,103 @@ TEST_CASE("files: Unicode failure paths stay structured") {
     CHECK(written.error().code == "file.write");
     CHECK(written.error().message.find(std::string(name.begin(), name.end())) != std::string::npos);
 }
+
+#ifdef _WIN32
+namespace {
+// A handle that denies delete sharing, as a viewer, indexer or scanner might
+// hold the file.
+struct DenyDeleteHolder {
+    HANDLE handle;
+    explicit DenyDeleteHolder(const fs::path& path)
+        : handle(::CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)) {}
+    void release() {
+        if (handle != INVALID_HANDLE_VALUE) ::CloseHandle(handle);
+        handle = INVALID_HANDLE_VALUE;
+    }
+    ~DenyDeleteHolder() { release(); }
+};
+}  // namespace
+
+TEST_CASE("files: a brief hold without delete sharing delays the replace, then it succeeds") {
+    const fs::path dir = fs::temp_directory_path() / ("supple-busy-" + std::to_string(::getpid()));
+    const fs::path path = dir / "data";
+    REQUIRE(writeFileAtomic(path, std::string_view("old")).ok());
+    DenyDeleteHolder holder(path);
+    REQUIRE(holder.handle != INVALID_HANDLE_VALUE);
+    std::thread releaser([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        holder.release();
+    });
+    const auto replaced = writeFileAtomic(path, std::string_view("new"));
+    releaser.join();
+    INFO((replaced ? "ok" : replaced.error().message));
+    REQUIRE(replaced.ok());
+    CHECK(readTextFile(path).value() == "new");
+    std::error_code ec;
+    int files = 0;
+    for (const auto& e : fs::directory_iterator(dir, ec)) {
+        (void)e;
+        ++files;
+    }
+    CHECK(files == 1);
+    fs::remove_all(dir, ec);
+}
+
+TEST_CASE("files: a lasting hold without delete sharing is a structured error") {
+    const fs::path dir = fs::temp_directory_path() / ("supple-held-" + std::to_string(::getpid()));
+    const fs::path path = dir / "data";
+    REQUIRE(writeFileAtomic(path, std::string_view("old")).ok());
+    {
+        DenyDeleteHolder holder(path);
+        REQUIRE(holder.handle != INVALID_HANDLE_VALUE);
+        const auto replaced = writeFileAtomic(path, std::string_view("new"));
+        REQUIRE_FALSE(replaced);
+        const Error& e = replaced.error();
+        CHECK(e.code == "file.write");
+        CHECK(e.message.find("another program has the file open") != std::string::npos);
+        CHECK(e.path.find("data") != std::string::npos);
+        CHECK(e.hint.find("close the program") != std::string::npos);
+        // The previous content stays and no temporary file is left behind.
+        holder.release();
+        CHECK(readTextFile(path).value() == "old");
+        int files = 0;
+        for (const auto& entry : fs::directory_iterator(dir)) {
+            (void)entry;
+            ++files;
+        }
+        CHECK(files == 1);
+    }
+    // Once released the same save works.
+    CHECK(writeFileAtomic(path, std::string_view("new")).ok());
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+TEST_CASE("files: retryWhileFileBusy gives up at once on other errors") {
+    unsigned long error = 0;
+    int attempts = 0;
+    const bool ok = retryWhileFileBusy(
+        fs::temp_directory_path(),
+        [&] {
+            ++attempts;
+            ::SetLastError(ERROR_DISK_FULL);
+            return false;
+        },
+        error);
+    CHECK_FALSE(ok);
+    CHECK(attempts == 1);
+    CHECK(error == ERROR_DISK_FULL);
+    // Access denied on a directory is not a sharing problem either.
+    attempts = 0;
+    CHECK_FALSE(retryWhileFileBusy(
+        fs::temp_directory_path(),
+        [&] {
+            ++attempts;
+            ::SetLastError(ERROR_ACCESS_DENIED);
+            return false;
+        },
+        error));
+    CHECK(attempts == 1);
+}
+#endif

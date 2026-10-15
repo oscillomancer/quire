@@ -321,11 +321,20 @@ Status writeWav(const fs::path& path, const AudioData& data, const WavOptions& o
         }
         good = detail::files::sync(file) && good;
         good = std::fclose(file) == 0 && good;
-        if (good) good = detail::files::publish(temporary, path);
+        bool busy = false;
+        if (good) good = detail::files::publish(temporary, path, &busy);
         if (!good) {
             fs::remove(temporary, ec);
+            if (busy)
+                return Error("audio.write",
+                             "cannot replace " + detail::files::text(path) +
+                                 ": another program has the file open",
+                             detail::files::text(path),
+                             "close the program using the file (a viewer, sync client, backup or "
+                             "antivirus scan), or wait a moment, then write again; the previous "
+                             "file is unchanged");
             return Error("audio.write", "could not write or publish RF64 WAV", {},
-                         "check free disk space, permissions and readers denying delete sharing");
+                         "check free disk space and permissions");
         }
         return okStatus();
     }

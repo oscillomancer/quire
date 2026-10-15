@@ -3,11 +3,13 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <thread>
 
 #include <supple/audio/audio_file.h>
 #include <supple/audio/wav_stream.h>
@@ -644,3 +646,38 @@ TEST_CASE("recording recovery uses 64-bit positions past Windows long range") {
     CHECK(*repaired == info->fileFrames);
     CHECK(inspectWavStream(path)->headerFrames == *repaired);
 }
+
+#if defined(_WIN32)
+TEST_CASE("publish retries while another program holds the target without delete sharing") {
+    const fs::path dir = fs::temp_directory_path() / "supple-audio-busy";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const fs::path target = dir / "target.wav";
+    const fs::path first = dir / "first.tmp";
+    const fs::path second = dir / "second.tmp";
+    for (const auto& file : {target, first, second}) std::ofstream(file, std::ios::binary) << "x";
+    HANDLE holder = ::CreateFileW(target.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                  nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    REQUIRE(holder != INVALID_HANDLE_VALUE);
+    std::thread releaser([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        ::CloseHandle(holder);
+        holder = INVALID_HANDLE_VALUE;
+    });
+    bool busy = true;
+    const bool published = detail::files::publish(first, target, &busy);
+    releaser.join();
+    CHECK(published);
+    CHECK_FALSE(busy);
+
+    holder = ::CreateFileW(target.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                           nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    REQUIRE(holder != INVALID_HANDLE_VALUE);
+    busy = false;
+    CHECK_FALSE(detail::files::publish(second, target, &busy));
+    CHECK(busy);
+    ::CloseHandle(holder);
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+#endif

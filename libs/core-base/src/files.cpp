@@ -85,6 +85,58 @@ Result<std::string> readTextFile(const fs::path& path, std::size_t maxBytes) {
     return std::string(bytes->begin(), bytes->end());
 }
 
+#ifdef _WIN32
+namespace {
+constexpr DWORD kRetryBudgetMs = 1000;
+constexpr DWORD kFirstDelayMs = 2;
+constexpr DWORD kMaxDelayMs = 64;
+
+// Sharing and lock violations mean another handle is open. Access denied is
+// ambiguous (permissions, a read-only file, a directory in the way), so it
+// counts only for an existing regular file.
+bool isBusyCode(const fs::path& target, DWORD code) {
+    if (code == ERROR_SHARING_VIOLATION || code == ERROR_LOCK_VIOLATION ||
+        code == ERROR_USER_MAPPED_FILE || code == ERROR_DELETE_PENDING)
+        return true;
+    if (code != ERROR_ACCESS_DENIED) return false;
+    std::error_code ec;
+    return fs::is_regular_file(target, ec);
+}
+}  // namespace
+
+bool isFileBusyError(const fs::path& target, unsigned long winError) {
+    return isBusyCode(target, static_cast<DWORD>(winError));
+}
+
+bool retryWhileFileBusy(const fs::path& target, const std::function<bool()>& attempt,
+                        unsigned long& winError) {
+    const ULONGLONG start = ::GetTickCount64();
+    DWORD delay = kFirstDelayMs;
+    for (;;) {
+        if (attempt()) {
+            winError = 0;
+            return true;
+        }
+        winError = ::GetLastError();
+        if (!isBusyCode(target, static_cast<DWORD>(winError))) return false;
+        const ULONGLONG elapsed = ::GetTickCount64() - start;
+        if (elapsed >= kRetryBudgetMs) return false;
+        ::Sleep(static_cast<DWORD>(std::min<ULONGLONG>(delay, kRetryBudgetMs - elapsed)));
+        delay = std::min(delay * 2, kMaxDelayMs);
+    }
+}
+
+Error fileBusyError(const fs::path& target, unsigned long winError) {
+    return Error("file.write",
+                 "cannot replace " + displayPath(target) +
+                     ": another program has the file open (Windows error " +
+                     std::to_string(winError) + ")",
+                 displayPath(target),
+                 "close the program using the file (a viewer, sync client, backup or antivirus "
+                 "scan), or wait a moment, then save again; the previous file is unchanged");
+}
+#endif
+
 Status writeFileAtomic(const fs::path& path, std::span<const std::uint8_t> bytes) {
     std::error_code ec;
     const fs::path dir = path.has_parent_path() ? path.parent_path() : fs::path(".");
@@ -98,10 +150,9 @@ Status writeFileAtomic(const fs::path& path, std::span<const std::uint8_t> bytes
            std::to_string(counter.fetch_add(1)) + ".tmp";
     auto error = [&](const std::string& what, DWORD code) {
         fs::remove(tmp, ec);
-        return Error(
-            "file.write",
-            what + " " + displayPath(path) + ": Windows error " + std::to_string(code), {},
-            "check free disk space and permissions; close readers that deny delete sharing");
+        return Error("file.write",
+                     what + " " + displayPath(path) + ": Windows error " + std::to_string(code), {},
+                     "check free disk space and permissions");
     };
     const auto destination = fs::absolute(path, ec).native();
     if (ec) {
@@ -143,11 +194,20 @@ Status writeFileAtomic(const fs::path& path, std::span<const std::uint8_t> bytes
         ::CloseHandle(file);
         return error("cannot sync", code);
     }
-    if (!::SetFileInformationByHandle(file, FileRenameInfoEx, renameBytes.data(),
-                                      static_cast<DWORD>(renameBytes.size()))) {
-        const DWORD code = ::GetLastError();
+    unsigned long renameError = 0;
+    if (!retryWhileFileBusy(
+            path,
+            [&] {
+                return ::SetFileInformationByHandle(file, FileRenameInfoEx, renameBytes.data(),
+                                                    static_cast<DWORD>(renameBytes.size())) != 0;
+            },
+            renameError)) {
         ::CloseHandle(file);
-        return error("cannot rename temporary file into place", code);
+        if (isFileBusyError(path, renameError)) {
+            fs::remove(tmp, ec);
+            return fileBusyError(path, renameError);
+        }
+        return error("cannot rename temporary file into place", renameError);
     }
     if (!::FlushFileBuffers(file)) {
         const DWORD code = ::GetLastError();

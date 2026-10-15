@@ -154,8 +154,9 @@ Status writePreset(const fs::path& path, std::string_view text, bool replace) {
     if (result == 0) return {};
     return Error(error == EEXIST ? "chain.exists" : "chain.write",
                  "cannot save " + path.string() + ": " + std::strerror(error), "/name",
-                 error == EEXIST ? "choose another name or set replace: true"
-                                 : "check directory permissions and free space");
+                 error == EEXIST  ? "choose another name or set replace: true"
+                 : error == EBUSY ? "another program has the file open; close it and save again"
+                                  : "check directory permissions and free space");
 }
 
 // The effects of a chain as preset entries: the semantic patch when the

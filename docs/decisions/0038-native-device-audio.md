@@ -73,8 +73,7 @@ each native platform runs only when SUPPLE_AUDIO_DEVICE_TEST is exactly `1`.
 Hardware latency, driver stability and helper deadline benefit need those
 user-run device trials; fake tests do not establish them. macOS does not yet
 join the CoreAudio workgroup. Device names can change across reconnects; users
-can select defaults or update the retained recipe. Windows readers that deny
-delete sharing still prevent atomic file replacement until closed.
+can select defaults or update the retained recipe.
 
 ## Alternatives
 
@@ -85,3 +84,16 @@ leaving JACK and plugin linkage unchanged. Self-applied native scheduling
 supports MMCSS, which cannot register another thread. macOS time constraints
 are the initial mechanism; workgroup joining can be added after native device
 validation establishes its need.
+
+## Amendment (2026-10-15): saves while another program holds the file
+
+The Windows limit that readers denying delete sharing block atomic replacement
+no longer holds as a hard failure. Antivirus, indexers, sync clients and
+viewers hold a just-written file open briefly, so every replace step
+(`writeFileAtomic`, the audio-file RF64 publish and the engine's link-style
+publish) retries sharing and lock violations, and access denied on an existing
+file, with a short backoff for about one second through one core-base helper
+(`retryWhileFileBusy`). A hold that outlasts it returns the usual `file.write`
+(`audio.write`) error with the path, saying another program has the file open
+and to close it and save again; the previous file is unchanged. Linux and macOS
+are unaffected.

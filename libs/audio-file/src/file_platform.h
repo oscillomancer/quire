@@ -12,6 +12,8 @@
 #include <fcntl.h>
 #include <io.h>
 #include <windows.h>
+
+#include "supple/base/files.h"
 #else
 #include <fcntl.h>
 #include <unistd.h>
@@ -96,11 +98,23 @@ inline std::FILE* temporary(const std::filesystem::path& target, std::filesystem
     return stream;
 #endif
 }
-inline bool publish(const std::filesystem::path& temp, const std::filesystem::path& target) {
+// `busy` (optional) is set when the replace stayed blocked by another program
+// holding the target open; Windows retries for about a second first.
+inline bool publish(const std::filesystem::path& temp, const std::filesystem::path& target,
+                    bool* busy = nullptr) {
 #if defined(_WIN32)
-    return MoveFileExW(temp.c_str(), target.c_str(),
-                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+    unsigned long error = 0;
+    const bool replaced = supple::retryWhileFileBusy(
+        target,
+        [&] {
+            return MoveFileExW(temp.c_str(), target.c_str(),
+                               MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+        },
+        error);
+    if (busy) *busy = !replaced && supple::isFileBusyError(target, error);
+    return replaced;
 #else
+    if (busy) *busy = false;
     if (::rename(temp.c_str(), target.c_str()) != 0) return false;
     const auto dir = target.has_parent_path() ? target.parent_path() : std::filesystem::path(".");
     const int fd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);

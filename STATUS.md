@@ -28,8 +28,9 @@ GUI/agent gate is lifted (ADR-0039), with native editor embedding (ADR-0040);
 the combined native DAW builds and hermetic tests pass CI on both platforms.
 Portable libraries, the session model, stock DSP cores
 and the script suite build independently of those services; see
-CONTRIBUTING.md for the complete gate list. External Windows readers that
-deny delete sharing prevent atomic file replacement until closed.
+CONTRIBUTING.md for the complete gate list. On Windows, a save blocked by
+another program that holds the file open (no delete sharing) retries for about
+a second, then reports which file and what to close.
 
 The bridge port implements native macOS shared memory/address wakes and Windows
 mapping/event handle transfer, notifications and process isolation (ADR-0037).
