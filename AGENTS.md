@@ -1,8 +1,8 @@
 # Working on Quire
 
 This file is for anyone changing or reviewing Quire, coding agents and
-people alike. Quire is an LLM-native DAW for Linux plus a suite of stock
-plugins (see `README.md`). The code is past the build-out stage: most work
+people alike. Quire is an LLM-native DAW for Linux, macOS and Windows plus a
+suite of stock plugins (see `README.md`). The code is past the build-out stage: most work
 now is maintenance, polish, new features on existing foundations, and
 review. Treat existing behaviour, tests and documents as deliberate unless
 you find evidence otherwise.
@@ -62,6 +62,17 @@ same change, and say what you found.
    infrastructure (GUI stack, wrapper patches, `host_contract.h`,
    `Telemetry.h`, probes) stays byte-identical to the template apart from
    naming; see `plugins/AGENTS.md`.
+8. **Every change works on Linux, macOS and Windows.** Quire ships on all
+   three, and you are probably working on only one of them. A fix or
+   feature covers every platform: when the code you touch has
+   platform-specific paths (`_WIN32`, `__APPLE__`, `__linux__`,
+   Objective-C++, per-platform sources), find the counterparts and fix them
+   in the same change. Look for the same class of bug on the others:
+   assumptions about environment variables, paths, sockets, file sharing,
+   threads, audio/MIDI APIs or windowing rarely carry over unchanged.
+   Verify with native CI (see Build and test) before calling the work done;
+   a local Linux run says nothing about macOS or Windows. A gap you cannot
+   close goes in `STATUS.md` and in your hand-back report.
 
 ## Making a change
 
@@ -117,6 +128,14 @@ and with downloads disabled: run it before a release and after adding files
 or dependencies. Keep `TMPDIR` short; socket tests fail when their path
 exceeds the 108-byte Unix socket limit.
 
+Native CI (`.github/workflows/build.yml`) builds and tests Linux, macOS arm64
+and Windows (clang-cl) on GitHub, on demand only. Push the branch, then
+`gh workflow run build.yml --ref <branch> -f platforms=<linux|macos|windows|all>`
+and `gh run watch <id> --exit-status` (`gh run view <id> --log-failed` for
+failures). Run it for every change that touches shared or platform-specific
+code, limited to the platforms the change can affect; `CONTRIBUTING.md` has
+the details.
+
 Code conventions: C++20, CMake and Ninja, warning-clean with
 `-Wall -Wextra -Wpedantic` on Clang and GCC; `.clang-format` at the root
 (23.1); doctest, at least one test executable per library, named after it
@@ -154,6 +173,8 @@ A review looks for, in this order:
 5. Structured, actionable errors at the command and file boundaries.
 6. The spec, ADRs, generated files and `STATUS.md` updated with the code.
 7. No new license exposure, no hard-coded product name.
+8. The change holds on Linux, macOS and Windows, and native CI ran where it
+   touches shared or platform-specific code.
 
 Report findings with file and line, what goes wrong, and how to see it.
 Separate findings from suggestions.
@@ -167,7 +188,8 @@ changes in their own commit. `main` moves only on a green `run-all.sh`.
 
 ## Definition of done
 
-The code, its tests and its docs are updated; the relevant presets pass;
+The code, its tests and its docs are updated; the relevant presets pass
+locally and native CI passes on every platform the change can affect;
 `STATUS.md` reflects the change; there are no new license issues; and
 someone other than the author has reviewed it. Never report something as
 working that you did not run. When you hand work back, list the files

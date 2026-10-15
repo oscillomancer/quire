@@ -52,13 +52,13 @@ is the sanctioned exception for Windows DAW integration.
 
 ## Continuous integration
 
-`.github/workflows/build.yml` runs only on demand. Once the workflow is on
-`main`, use Actions → Build and test → Run workflow, or
+`.github/workflows/build.yml` runs only on demand: use Actions → Build and
+test → Run workflow, or
 `gh workflow run build.yml --ref <branch> -f platforms=macos`.
 Choices are `linux`, `macos`, `windows`, and `all` (the default).
 Ordinary branch pushes never start a build.
 
-Before the port reaches the default branch, push a deliberate CI tag:
+A deliberate CI tag also starts a run:
 
 ```sh
 git push origin port-ci
