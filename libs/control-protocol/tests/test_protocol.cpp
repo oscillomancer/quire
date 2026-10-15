@@ -490,12 +490,22 @@ TEST_CASE("a signal interrupting a call closes the connection and the next call 
     std::promise<void> release;
     auto gate = release.get_future().share();
     queue.post([gate] { gate.wait(); });
+    const auto beforeRequest = queue.postCount();
     std::optional<Result<json::Value>> interrupted;
     std::atomic<bool> done{false};
     std::thread caller([&] {
         interrupted = client.call("counter.add", parse(R"({"value":3})"));
         done = true;
     });
+    // Interrupt the response wait only after the server has queued add-3.
+    // Otherwise a signal can interrupt the send and the counter stays at zero.
+    const bool queued = queue.waitForPostAfter(beforeRequest);
+    if (!queued) {
+        release.set_value();
+        caller.join();
+        ::sigaction(SIGUSR1, &previous, nullptr);
+        REQUIRE(queued);
+    }
     // The response cannot arrive while the model thread is held, so only a
     // signal ends the wait; keep signalling until one lands in it.
     while (!done) {

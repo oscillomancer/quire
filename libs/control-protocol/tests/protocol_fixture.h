@@ -125,6 +125,7 @@ struct ModelQueue {
     std::mutex mutex;
     std::condition_variable cv;
     std::deque<std::function<void()>> tasks;
+    std::size_t posted = 0;
     bool stopping = false;
     std::thread thread;
     ModelQueue()
@@ -153,8 +154,17 @@ struct ModelQueue {
         {
             std::lock_guard lock(mutex);
             tasks.push_back(std::move(task));
+            ++posted;
         }
-        cv.notify_one();
+        cv.notify_all();
+    }
+    std::size_t postCount() {
+        std::lock_guard lock(mutex);
+        return posted;
+    }
+    bool waitForPostAfter(std::size_t count) {
+        std::unique_lock lock(mutex);
+        return cv.wait_for(lock, kGuard, [&] { return posted > count; });
     }
 };
 json::Value parse(std::string_view text) { return json::parse(text).value(); }
