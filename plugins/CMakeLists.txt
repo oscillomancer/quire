@@ -26,9 +26,9 @@ if(SUPPLE_BUILD_PLUGINS)
   function(supple_add_plugin dir prefix)
     set(plugin_renderer_args)
     if(APPLE)
-      # Keep the shared template untouched and use the vendored GL backend.
-      # The template's default Metal renderer needs an unvendored dependency.
-      list(APPEND plugin_renderer_args -D${prefix}_METAL=OFF)
+      # The template's default Metal renderer, from the vendored pin.
+      list(APPEND plugin_renderer_args
+           -DFETCHCONTENT_SOURCE_DIR_NANOVG_METAL=${CMAKE_SOURCE_DIR}/third_party/nanovg_metal)
     endif()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${dir}/cmake/Identity.cmake")
       include("${CMAKE_CURRENT_SOURCE_DIR}/${dir}/cmake/Identity.cmake")
@@ -133,7 +133,8 @@ if(SUPPLE_BUILD_PLUGINS)
   function(supple_add_template_product name product artifact)
     set(plugin_renderer_args)
     if(APPLE)
-      list(APPEND plugin_renderer_args -DSUPPLE_METAL=OFF)
+      list(APPEND plugin_renderer_args
+           -DFETCHCONTENT_SOURCE_DIR_NANOVG_METAL=${CMAKE_SOURCE_DIR}/third_party/nanovg_metal)
     endif()
     set(plugin_build "${CMAKE_BINARY_DIR}/plugins/${name}")
     set(plugin_output_args)

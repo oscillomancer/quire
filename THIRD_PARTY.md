@@ -30,7 +30,7 @@ declaration and maintainer approval; AGPL is forbidden. LGPL/MPL need the mainta
 | mir | MIT | 1.0.0 / `477d820` (tarball sha256 `fdc934…4055`; upstream files unmodified) | JIT compiler and interpreter behind DSP scripts (ADR-0032); only the core, generator and interpreter sources are vendored | static |
 | clap-wrapper | MIT (bundles fmt: MIT; PreSonus gain-reduction header: public domain) | 0.16.0 / `1cca996` (template pin) | Builds template-derived plugins (CLAP; VST3/AUv2 when enabled) | static, plugins only |
 | pugl | ISC (a few build files 0BSD OR ISC) | 0.5.7 / `b763714` (template pin) | Plugin editor windowing (template GUI stack) | static, plugins only |
-| nanovg_metal | MIT | template pin `1e42439` | macOS-only plugin editor renderer, fetched by the template CMake on Apple; not vendored, never built on Linux | static, macOS plugins only |
+| nanovg_metal | MIT | template pin `1e42439` | macOS-only plugin editor renderer (the template's default on Apple); vendored unmodified, never built on Linux or Windows | static, macOS plugins only |
 | nanovg | Zlib (bundled stb_truetype/stb_image: public domain or MIT) | `ce3bf74` (template's pin) | Vector rendering for the DAW GUI | static |
 | nanosvg | Zlib | `239e102` (template's pin) | SVG parsing for editors of plugins built on the plugin template; only the parser header is vendored, unmodified | static, plugins only |
 

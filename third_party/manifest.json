@@ -121,6 +121,20 @@
       "linkage": "static"
     },
     {
+      "name": "nanovg_metal",
+      "dir": "nanovg_metal",
+      "license": "MIT",
+      "license_file": "nanovg_metal/LICENSE",
+      "version": "master @ 1e42439 (same pin as the plugin template)",
+      "source": "https://github.com/wjakob/nanovg_metal",
+      "commit": "1e4243990741f5b0da73bc0f25c85ae0e31b8766",
+      "purpose": "Metal renderer for plugin editors on macOS (template GUI stack); unmodified, precompiled shader bitcode headers",
+      "linkage": "static (plugins only)",
+      "platforms": [
+        "macos"
+      ]
+    },
+    {
       "name": "clap-wrapper",
       "dir": "clap-wrapper",
       "license": "MIT",

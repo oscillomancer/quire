@@ -154,10 +154,9 @@ Windows stock builds enable the CRT math constants with _USE_MATH_DEFINES in
 platform build glue. Product-owned semantic stress tests use a native loader;
 template host/probe/shared-stack sources are unchanged.
 
-Monorepo macOS stock GUI builds select their existing OpenGL backend through
-the projects' Metal options in Quire-owned CMake glue. Standalone template
-defaults are unchanged; their Metal backend requires a NanoVG Metal dependency
-that this repository does not vendor.
+Monorepo macOS stock GUI builds keep the template's default Metal renderer:
+Quire-owned CMake glue points its `nanovg_metal` FetchContent at the vendored
+pin in `third_party/nanovg_metal`, so offline builds need no download.
 
 Apple libc++'s missing jthread/stop-token facilities are supplied through the
 core-base non-RT job layer, retaining standard types elsewhere. The VST3 loader

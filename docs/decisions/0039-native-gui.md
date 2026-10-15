@@ -88,11 +88,14 @@ The player's Win32 embedding tests require that software GL setup too.
 DAW executable and GUI tests depend unconditionally on the bridge executable
 on all platforms. Native editor embedding remains the separate editor port.
 
-**2026-10-14 stock renderer integration note:** Monorepo CMake selects the
-stock projects' existing OpenGL renderer on macOS (`<PREFIX>_METAL=OFF` and
-`SUPPLE_METAL=OFF`). Their standalone default Metal renderer requires a
-NanoVG Metal dependency that this repository does not vendor. No template
-files or pins change, and no new dependency is introduced.
+**2026-10-14 stock renderer integration note:** Monorepo CMake keeps the
+stock projects' default Metal renderer on macOS. The template fetches
+`nanovg_metal` (MIT) at its pin `1e42439`; Quire vendors that pin unmodified
+in `third_party/nanovg_metal` and redirects the fetch with
+`FETCHCONTENT_SOURCE_DIR_NANOVG_METAL`, matching how pugl and NanoVG are
+supplied. No template files or pins change. (An earlier draft switched the
+stock plug-ins to OpenGL on macOS instead; rejected because it diverges from
+the template's renderer on its primary Apple path.)
 
 **2026-10-14 repaint validation note:** MIDI rectangle borders use framebuffer
 pixel coordinates rather than interpolated local coordinates. Apple's software
