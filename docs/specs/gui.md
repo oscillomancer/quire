@@ -423,7 +423,9 @@ Native editor parents are tagged X11 XIDs, Cocoa NSViews or Win32 HWNDs
 Windows bridged views use the same HWND across processes. macOS bridged views
 float in a bridge-owned NSWindow; no empty SDL editor window is created.
 The bridge applies resize/show/hide and user-close itself and reports closure
-through its existing notifications. Cocoa bridge placement and focus are not
+through its existing notifications. Replacing a Cocoa bridged instance opens a
+fresh child-owned window; the other editor paths retain their SDL container.
+Cocoa bridge placement and focus are not
 persisted or included in the DAW's MIDI-learn focus predicate. Floating-level
 windows can remain above unrelated applications; cross-process transient
 ownership is unavailable. Windows keyboard accelerators/IME depend on the

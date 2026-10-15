@@ -3,8 +3,9 @@
 // Plugin editors in native windows (docs/specs/gui.md §4.5): X11/NSView/HWND
 // embedding, or a bridge-owned floating window on macOS. Their
 // timers and file descriptors serviced from the UI thread (= the plugin's main
-// thread), its resize requests applied. On instance replacement, the editor
-// reopens in the same window; removing the effect closes its window.
+// thread), its resize requests applied. Replacement retains the local/X11/Win32
+// container; a Cocoa bridged replacement opens a fresh child-owned window.
+// Removing the effect closes its editor.
 #pragma once
 
 #include <poll.h>
