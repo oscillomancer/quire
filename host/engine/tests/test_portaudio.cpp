@@ -595,6 +595,31 @@ TEST_CASE("engine status serializes skipped MIDI input warnings") {
           "close the other application and restart the engine");
     app.stopEngine();
 }
+TEST_CASE("native MIDI merges all port runs stably, including nonmonotonic timestamps") {
+    for (bool reverse : {false, true}) {
+        auto buffer = std::make_unique<detail::MidiInputBuffer>();
+        for (unsigned port = 0; port < detail::kMidiInputPorts; ++port) {
+            buffer->names.push_back("Input " + std::to_string(port));
+            for (unsigned i = 0; i < 64; ++i) {
+                const unsigned key = reverse ? 63 - i : i;
+                const double seconds = 10 + (static_cast<double>(key / 2) - 64) / 48000;
+                buffer->push(port, seconds, midiWord(0x90, key, port));
+            }
+        }
+        buffer->collect(10, 48000, 64);
+        const auto events = buffer->chunk(0, 64);
+        REQUIRE(events.size() == kMaxMidiInputEvents);
+        for (unsigned frame = 0; frame < 32; ++frame)
+            for (unsigned port = 0; port < detail::kMidiInputPorts; ++port)
+                for (unsigned tie = 0; tie < 2; ++tie) {
+                    const auto& event = events[(frame * detail::kMidiInputPorts + port) * 2 + tie];
+                    CHECK(event.frame == frame);
+                    CHECK(event.port == port);
+                    CHECK(event.bytes[1] == frame * 2 + (reverse ? 1 - tie : tie));
+                }
+        CHECK(buffer->dropped() == 0);
+    }
+}
 TEST_CASE("native MIDI SPSC receives concurrent producers per device with bounded loss") {
     auto buffer = std::make_unique<detail::MidiInputBuffer>();
     buffer->names = {"Keys", "Pads"};

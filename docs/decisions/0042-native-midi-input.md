@@ -90,3 +90,10 @@ serviced. Audio rate/loss monitoring and WinMM buffer recycling continue. This
 supersedes the owner-restart policy above: plugging in a controller must not
 interrupt a take. Fake topology tests verify a non-restart flag, continued audio
 and subsequent audio-rate restart notification; command tests cover the message.
+
+Audio merges the monotonic per-port runs in O(n * k), k <= 16, using existing
+fixed chunk storage as scratch. Only a run with nonmonotonic timestamps uses a
+bounded stable insertion-sort fallback. The 1024-event acceptance policy stays
+port-index/arrival order; merged equal-frame ties stay port-index, then arrival
+order. Full-capacity tests cover all 16 ports, equal-frame ties and reversed
+timestamps. This refines the stable sort above without changing event output.

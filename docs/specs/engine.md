@@ -1394,8 +1394,12 @@ device-free tests; audio-only injected drivers return empty MIDI lists.
 
 OS receive threads produce timestamped short channel messages through one
 preallocated SPSC ring (2048 entries) per port, with a single producer per
-source. Audio snapshots and drains each ring, stably sorts at most
-kMaxMidiInputEvents (1024) per device period, and rebases events into each
+source. Audio snapshots and drains each ring, accepting at most
+kMaxMidiInputEvents (1024) per device period in port-index/arrival order before
+merging. Monotonic per-port runs merge in O(n * k), k <= 16; a nonmonotonic run
+uses a bounded stable insertion-sort fallback on that port only. Equal frames
+retain port-index order, then arrival order within a port. Preallocated chunk
+storage doubles as merge scratch; no new allocation. Events rebase into each
 engine chunk, including the final short chunk. No allocation, lock, wait or
 logging on receive/audio paths. `Backend::midiDropped()` defaults to zero;
 PortAudio exposes rejected messages and ring/period overflow through it and

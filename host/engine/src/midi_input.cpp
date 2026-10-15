@@ -27,7 +27,11 @@ void MidiInputBuffer::discard(std::size_t port) {
 }
 void MidiInputBuffer::collect(double end, double rate, std::uint32_t frames) SUPPLE_RT {
     count_ = next_ = 0;
+    std::array<std::size_t, kMidiInputPorts> heads{}, ends{};
     for (std::size_t port = 0; port < names.size() && port < queues_.size(); ++port) {
+        const auto begin = count_;
+        heads[port] = begin;
+        bool monotonic = true;
         const auto available = queues_[port].size();
         for (std::size_t i = 0; i < available; ++i) {
             TimedMidi input;
@@ -45,13 +49,27 @@ void MidiInputBuffer::collect(double end, double rate, std::uint32_t frames) SUP
             event.port = static_cast<std::uint16_t>(port);
             event.size = input.size;
             std::copy_n(input.bytes, input.size, event.bytes);
-            period_[count_++] = event;
+            if (count_ > begin && event.frame < block_[count_ - 1].frame) monotonic = false;
+            block_[count_++] = event;
         }
+        ends[port] = count_;
+        // Timestamp order is normally arrival order. A driver can deliver an
+        // older timestamp later; repair only that run, bounded by 1024 events.
+        if (!monotonic)
+            for (std::size_t i = begin + 1; i < count_; ++i)
+                for (std::size_t k = i; k > begin && block_[k].frame < block_[k - 1].frame; --k)
+                    std::swap(block_[k], block_[k - 1]);
     }
-    // Stable insertion sort, bounded by kMaxMidiInputEvents, allocation-free.
-    for (std::size_t i = 1; i < count_; ++i)
-        for (std::size_t k = i; k && period_[k].frame < period_[k - 1].frame; --k)
-            std::swap(period_[k], period_[k - 1]);
+    // Merge the per-port runs in O(n * k), k <= 16. Scanning ports in index
+    // order and replacing only for an earlier frame preserves equal-frame ties.
+    for (std::size_t i = 0; i < count_; ++i) {
+        std::size_t best = kMidiInputPorts;
+        for (std::size_t port = 0; port < kMidiInputPorts; ++port)
+            if (heads[port] < ends[port] &&
+                (best == kMidiInputPorts || block_[heads[port]].frame < block_[heads[best]].frame))
+                best = port;
+        period_[i] = block_[heads[best]++];
+    }
 }
 std::span<const MidiInputEvent> MidiInputBuffer::chunk(std::uint32_t offset,
                                                        std::uint32_t frames) SUPPLE_RT {
