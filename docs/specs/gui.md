@@ -860,7 +860,9 @@ units; SDL pixel density and Windows per-monitor display scale determine the
 framebuffer ratio. Pointer, file-drop and IME-caret coordinates use that same
 mapping. PNG snapshots contain framebuffer pixels (design size times ratio).
 Native `--offscreen` uses hidden desktop windows; Linux retains the EGL
-offscreen driver. Golden comparisons and reference updates are Linux-only;
+offscreen driver. Offscreen and finite-frame runs close without an interactive
+discard prompt, completing normal cleanup and any requested final snapshot.
+Golden comparisons and reference updates are Linux-only;
 native renders require GL and check content/size, with smoke images in CI.
 
 Agent API keys stay out of projects. Config publication is atomic and private

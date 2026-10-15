@@ -1093,7 +1093,8 @@ int main(int argc, char** argv) {
                 SDL_GetWindowFromEvent(&e) == (*window)->sdl())
                 pluginWindows.appActivated();
             if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
-                if (o.frames > 0 || !fileActions.dirty())
+                // Hidden test windows cannot answer an interactive discard prompt.
+                if (o.offscreen || o.frames > 0 || !fileActions.dirty())
                     quit = true;
                 else if (!root.popupOpen())
                     fileActions.confirmDiscard("Quit?", [&] { quit = true; });

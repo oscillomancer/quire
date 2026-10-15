@@ -111,7 +111,7 @@ def main():
             assert not described.get("isError"), described
             text = json.dumps(described)
             assert "Drums" in text and "Kick" in text, text[:400]
-            # A native window-close must not open the unsaved-changes prompt.
+            # Check that the agent can persist the project in its private workdir.
             saved = call(21, "tools/call", {"name": "project_save", "arguments": {
                 "path": str(Path(temporary) / "song.json")}})
             assert not saved.get("isError"), saved
