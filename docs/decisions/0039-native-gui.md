@@ -79,3 +79,7 @@ Native editor embedding and real-device/monitor trials are separate validation.
 References: [SDL high DPI](https://wiki.libsdl.org/SDL3/README-highdpi),
 [Mesa Windows builds](https://github.com/pal1000/mesa-dist-win/releases/tag/24.3.4),
 [Mesa license](https://docs.mesa3d.org/license.html).
+
+**2026-10-14 validation note:** Windows CI also deploys the same pinned DLLs
+beside stock plugin test/probe executables, matching the template's Windows CI.
+The player's Win32 embedding tests require that software GL setup too.

@@ -11,13 +11,15 @@ if [[ ! -f "$archive" ]]; then
 fi
 printf '%s  %s\n' 7ebc711ad1896ac88ab21e142f1017f8ff035f0f342bdb72fbb5e2eb881ba363 "$archive" | sha256sum -c -
 7z x -y "$archive" "-o$root" 'x64/*' > /dev/null
-# DLL search begins beside each test/app executable. Deploy just the GL driver
-# and its shared dispatch library; no machine-wide registration or installers.
-while IFS= read -r -d '' executable; do
-  destination=$(dirname "$executable")
+# Match the template CI: plugin embedding probes also need software OpenGL.
+# DLL search begins beside each executable, including a probe loading a CLAP.
+# Deploy once per directory; never register a machine-wide driver.
+while IFS= read -r -d '' destination; do
   for dll in opengl32.dll libglapi.dll libgallium_wgl.dll; do
     cp "$root/x64/$dll" "$destination/$dll"
   done
-done < <(find build/windows/daw/gui -maxdepth 1 -name '*.exe' -print0)
+  echo "Mesa llvmpipe placed in $destination"
+done < <(find build/windows/daw/gui build/windows/plugins -type f -name '*.exe' \
+  ! -path '*/CMakeFiles/*' ! -path '*/_deps/*' -printf '%h\0' | sort -zu)
 echo 'GALLIUM_DRIVER=llvmpipe' >> "$GITHUB_ENV"
 echo 'LIBGL_ALWAYS_SOFTWARE=1' >> "$GITHUB_ENV"
