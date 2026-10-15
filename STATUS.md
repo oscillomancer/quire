@@ -25,7 +25,7 @@ engine/CLI, dummy/offline rendering and sandbox. PortAudio builds CoreAudio on
 macOS and WASAPI/ASIO on Windows; fake-device tests verify RT/offline equivalence
 in both executors. Actual hardware trials remain opt-in and unmeasured. The
 GUI/agent gate is lifted (ADR-0039), with native editor embedding (ADR-0040);
-combined native DAW CI validation is pending.
+the combined native DAW builds and hermetic tests pass CI on both platforms.
 Portable libraries, the session model, stock DSP cores
 and the script suite build independently of those services; see
 CONTRIBUTING.md for the complete gate list. External Windows readers that
@@ -49,8 +49,8 @@ Native host editor paths now select CLAP cocoa/win32 or VST3 NSView/HWND,
 with typed full-width parent handles (ADR-0040). Windows bridge editors embed;
 macOS bridge editors own floating NSWindows and service AppKit with IPC.
 Hermetic editor tests cover partial-open cleanup, resizing and repeated teardown.
-Native visual/focus/IME validation remains opt-in; DAW-side native shell tests
-are integrated, with combined native CI validation pending. Cocoa bridge placement/focus are not persisted,
+Native visual/focus/IME validation remains opt-in; combined DAW-side native
+shell/editor integration tests pass CI. Cocoa bridge placement/focus are not persisted,
 its windows use global floating level, and changing display scale requires
 closing/reopening an editor. Windows child keyboard behavior is plugin-dependent.
 
@@ -297,7 +297,7 @@ GUI:
 - Native shell/toolkit/agent builds and tests pass CI (ADR-0039).
   Cocoa/Windows hidden-window tests replace Linux EGL offscreen;
   Linux golden references are unchanged. Native editor embedding is integrated
-  (ADR-0040); combined native CI validation is pending.
+  (ADR-0040), with combined native builds and hermetic tests passing CI.
   Windows config keys use a protected current-user ACL; filesystems without
   ACL support fail the save. macOS cold-start process timing is unavailable.
   GUI socket/screenset Python integration scripts remain Linux-only.
