@@ -26,7 +26,8 @@ without calling makeKeyAndOrderFront or activating the bridge. Clicking the
 editor lets AppKit activate it normally. Plugin-requested show retains the
 last owner number; reopen updates it. `PluginWindows::appActivated()` reorders
 open Cocoa bridged editors when the DAW regains focus, skipping instances
-already closed or replaced. The GUI main-loop hook is routed through port-gui.
+already closed or replaced. The GUI main loop calls it when the DAW's main
+window gains focus.
 Other applications can cover these normal-level windows.
 
 ## Validation and limits

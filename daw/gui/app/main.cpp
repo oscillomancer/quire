@@ -1088,6 +1088,10 @@ int main(int argc, char** argv) {
                 inputChanged = true;
             }
             if (pluginWindows.handle(e)) continue;  // an editor window's event
+            // Bridged Cocoa editors follow the DAW window back to the front (ADR-0041).
+            if (e.type == SDL_EVENT_WINDOW_FOCUS_GAINED &&
+                SDL_GetWindowFromEvent(&e) == (*window)->sdl())
+                pluginWindows.appActivated();
             if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
                 if (o.frames > 0 || !fileActions.dirty())
                     quit = true;

@@ -433,8 +433,8 @@ its owner's NSWindow.windowNumber as the Floating handle. Bridge windows use
 normal level and order just above that number on open/reopen without activating
 the bridge or taking key focus; other applications can cover them normally.
 `PluginWindows::appActivated()` repeats this ordering for open Cocoa bridged
-editors when the DAW regains app/window focus (main-loop wiring belongs to the
-native GUI integration). Cross-process transient ownership is unavailable. Windows keyboard accelerators/IME depend on the
+editors when the DAW's main window regains focus (`SDL_EVENT_WINDOW_FOCUS_GAINED`
+in the GUI main loop). Cross-process transient ownership is unavailable. Windows keyboard accelerators/IME depend on the
 plugin's native child; the DAW does not forward shortcut messages.
 
 Window sizes/placements remain design units. Pixel editor sizes on
