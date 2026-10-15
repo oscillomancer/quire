@@ -11,6 +11,12 @@
 #include <sys/resource.h>
 #endif
 namespace supple::gui {
+std::tm localTime(std::time_t time) {
+    std::tm result{};
+    localtime_r(&time, &result);
+    return result;
+}
+
 unsigned long processId() { return static_cast<unsigned long>(::getpid()); }
 // Milliseconds since the kernel started this process (exec and dynamic
 // loading included), for the cold-start gate (ADR-0005 §5: < 300 ms).

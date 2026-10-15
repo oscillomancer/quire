@@ -352,8 +352,8 @@ void PeakService::run(supple::StopToken stop) {
             }
         }
         if (post_)
-            post_([this, alive = std::weak_ptr<int>(alive_), key = key] {
-                if (alive.lock() && onReady) onReady(key);
+            post_([this, alive = std::weak_ptr<int>(alive_), readyKey = key] {
+                if (alive.lock() && onReady) onReady(readyKey);
             });
     }
 }

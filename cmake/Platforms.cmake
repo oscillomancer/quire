@@ -17,6 +17,10 @@ if(NOT SUPPLE_HOST_SERVICES)
   endif()
 endif()
 if(WIN32)
+  # Windows SDK GL headers stop at 1.1. Legacy template-derived stock GUI
+  # backends need these standard enums; keep their shared stack untouched.
+  add_compile_definitions(GL_GENERATE_MIPMAP=0x8191 GL_CLAMP_TO_EDGE=0x812F
+                         GL_INCR_WRAP=0x8507 GL_DECR_WRAP=0x8508)
   # Windows 10 1803; no configuration changes on the build machine.
-  add_compile_definitions(_USE_MATH_DEFINES _CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000005)
+  add_compile_definitions(_USE_MATH_DEFINES _CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN= _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000005)
 endif()

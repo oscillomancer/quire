@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "history_panel.h"
+#include "supple/gui/process.h"
 
 #include <ctime>
 
@@ -17,8 +18,7 @@ const cmd::Origin kOrigin{cmd::Origin::Type::Ui, "gui", {}};
 
 std::string clock(std::int64_t ms) {
     const std::time_t t = static_cast<std::time_t>(ms / 1000);
-    std::tm tm{};
-    localtime_r(&t, &tm);
+    const std::tm tm = localTime(t);
     char buf[16];
     std::strftime(buf, sizeof buf, "%H:%M:%S", &tm);
     return buf;

@@ -43,8 +43,7 @@ std::optional<std::int64_t> integer(std::string_view text) {
 }
 
 std::string baseName(const std::string& path) {
-    const auto slash = path.find_last_of('/');
-    return slash == std::string::npos ? path : path.substr(slash + 1);
+    return std::filesystem::path(path).filename().string();
 }
 
 }  // namespace
@@ -311,9 +310,9 @@ void RenderDialog::setSource(Source source) {
 
 void RenderDialog::showFolder() {
     if (!folder_) return;
-    std::string text = app_.rendersDir().string();
+    std::string text = app_.rendersDir().generic_string();
     if (const auto home = paths::home(); !home.empty()) {
-        const std::string prefix = std::string(home) + "/";
+        const std::string prefix = home.generic_string() + "/";
         if (text.starts_with(prefix)) text = "~/" + text.substr(prefix.size());
     }
     folder_->setText(text);

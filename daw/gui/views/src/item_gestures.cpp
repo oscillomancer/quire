@@ -952,7 +952,7 @@ void ItemGestures::openItemMenu(ui::Point at) {
             ui::MenuItem m;
             m.label = label;
             m.checked = env && shown;
-            m.run = [this, take, env, shown, param = std::string(param)] {
+            m.run = [this, take, env, shown, paramName = std::string(param)] {
                 if (!run) return;
                 json::Value args = json::Value::object();
                 std::string command;
@@ -963,7 +963,7 @@ void ItemGestures::openItemMenu(ui::Point at) {
                 } else {  // a new one, flat at its neutral value from the item's start
                     command = "env.add";
                     args["take"] = take.str();
-                    args["param"] = param;
+                    args["param"] = paramName;
                     json::Value points = json::Value::array(), start = json::Value::object();
                     start["beat"] = 0.0;
                     start["value"] = 0.0;
@@ -998,11 +998,11 @@ void ItemGestures::openItemMenu(ui::Point at) {
                                        {"Explode takes in sequence on this track", "serial"}}) {
                 ui::MenuItem m;
                 m.label = label;
-                m.run = [this, itemId, mode = std::string(mode)] {
+                m.run = [this, itemId, modeName = std::string(mode)] {
                     if (!run) return;
                     json::Value args = json::Value::object();
                     args["item"] = itemId.str();
-                    args["mode"] = mode;
+                    args["mode"] = modeName;
                     if (auto r = run("Explode takes", {{"item.explode-takes", std::move(args)}});
                         !r && onError)
                         onError(r.error());
@@ -1030,7 +1030,7 @@ void ItemGestures::openItemMenu(ui::Point at) {
             ui::MenuItem m;
             m.label = label;
             m.enabled = tk && tk->source.has_value();
-            m.run = [this, itemId, take, heard = *item->activeTake, mode = std::string(mode)] {
+            m.run = [this, itemId, take, heard = *item->activeTake, modeName = std::string(mode)] {
                 if (!run) return;
                 std::vector<EditStep> steps;
                 if (take != heard) {
@@ -1041,7 +1041,7 @@ void ItemGestures::openItemMenu(ui::Point at) {
                 }
                 json::Value args = json::Value::object();
                 args["item"] = itemId.str();
-                args["mode"] = mode;
+                args["mode"] = modeName;
                 steps.push_back({"item.apply-fx", std::move(args)});
                 if (auto r = run("Render item", steps); !r && onError) onError(r.error());
             };

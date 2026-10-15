@@ -984,7 +984,7 @@ TEST_CASE(
         ++unlocks;
         return 0;
     };
-    ops->memoryLimit = [](rlimit* limit) {
+    ops->memoryLimit = [](engine::MemoryLimit* limit) {
         limit->rlim_cur = 0;
         return 0;
     };
@@ -1050,8 +1050,8 @@ TEST_CASE(
         errno = openError;
         return openError ? -1 : 73;
     };
-    ops->writeLatency = [](int, const void*, std::size_t size) -> ssize_t {
-        return static_cast<ssize_t>(size);
+    ops->writeLatency = [](int, const void*, std::size_t size) -> engine::ProtectionWriteSize {
+        return static_cast<engine::ProtectionWriteSize>(size);
     };
     ops->closeLatency = [&](int) {
         ++closes;

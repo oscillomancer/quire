@@ -224,7 +224,8 @@ fs::path scratchFolder(const Options& o) {
     const fs::path base = !o.workdir.empty() ? o.workdir : dataFolder();
     char stamp[32] = {};
     const std::time_t now = std::time(nullptr);
-    std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", std::localtime(&now));
+    const std::tm local = gui::localTime(now);
+    std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", &local);
     return base / "unsaved" / (std::string(stamp) + "-" + std::to_string(gui::processId()));
 }
 

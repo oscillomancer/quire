@@ -9,7 +9,10 @@ Use SDL3's X11 driver on Linux, Cocoa on macOS, and Windows on Windows.
 Keep one OpenGL core context per window: 3.3 on Linux/Windows, 4.1 forward
 compatible on macOS. NanoVG and the existing bulk renderers are unchanged.
 A small original Windows loader resolves the GL entry points through SDL;
-no loader dependency or Metal renderer is added. Fonts are read through the
+no loader dependency or Metal renderer is added. SDL's imported headers are
+marked system headers for the DAW warning policy. Windows build glue supplies
+four standard post-1.1 GL enums required by the older stock GUI copies; their
+template/shared-stack sources remain unchanged. Fonts are read through the
 portable file helper, including wide Windows paths.
 
 Design units remain the toolkit's coordinate system. Cocoa's Retina density

@@ -4,6 +4,12 @@
 #include <chrono>
 #include "supple/gui/process.h"
 namespace supple::gui {
+std::tm localTime(std::time_t time) {
+    std::tm result{};
+    localtime_s(&result, &time);
+    return result;
+}
+
 namespace {
 double milliseconds(FILETIME t) {
     ULARGE_INTEGER ticks{};

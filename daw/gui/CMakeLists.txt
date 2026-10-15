@@ -1,6 +1,9 @@
 # Phase 5 GUI (docs/specs/gui.md, ADR-0005): SDL3 windows (X11 driver; the
 # offscreen driver for tests and benchmarks), OpenGL 3.3 core, NanoVG GL3.
 find_package(SDL3 REQUIRED CONFIG)
+# SDL explicitly marks its headers non-system; keep third-party implementation
+# warnings out of the DAW's warning-as-error policy (notably clang-cl intrinsics).
+set_property(TARGET SDL3::Headers PROPERTY SYSTEM TRUE)
 find_package(OpenGL REQUIRED)
 find_package(ZLIB REQUIRED)
 
