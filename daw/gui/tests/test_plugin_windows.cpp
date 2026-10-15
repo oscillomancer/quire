@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
-// Plugin editors embedded in X11 windows. Needs a display: runs only with
+// Native editor integration. Real editor windows require
 // SUPPLE_GUI_DISPLAY_TEST=1 (a window appears for about a second).
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 #include "product_fixture.h"
 
 #include <clap/clap.h>
+#if defined(__linux__)
 #include <unistd.h>
+#endif
 #include <cerrno>
 #include <chrono>
 #include <condition_variable>
@@ -22,9 +24,21 @@
 #include "supple/engine/app.h"
 #include "supple/host/clap_host.h"
 #include "supple/rpc/model_loop.h"
+#include "test_support.h"
 
 using namespace supple;
+namespace {
+bool displayTestsEnabled() {
+    if (!environmentFlagEnabled("SUPPLE_GUI_DISPLAY_TEST")) return false;
+#if defined(__linux__)
+    return std::getenv("DISPLAY") != nullptr;
+#else
+    return true;
+#endif
+}
+}  // namespace
 
+#if defined(__linux__)
 TEST_CASE("editor FD watching reports startup failure and stops without a display") {
     auto failed = gui::FdWatcher::create([] {},
                                          [](int*) {
@@ -84,6 +98,8 @@ TEST_CASE("editor FD watching reports startup failure and stops without a displa
     CHECK(polls == 1);  // a permanent failure terminates instead of spinning
 }
 
+#endif
+
 TEST_CASE("the stock plugins offer embeddable native editors (no display needed)") {
     const std::filesystem::path dir = SUPPLE_CLAP_DIR;
     auto plugins = host::scan(std::span<const std::filesystem::path>(&dir, 1));
@@ -106,15 +122,15 @@ TEST_CASE("the stock plugins offer embeddable native editors (no display needed)
 }
 
 TEST_CASE("an editor opens in its window, services its timers and closes") {
-    if (!environmentFlagEnabled("SUPPLE_GUI_DISPLAY_TEST") || !std::getenv("DISPLAY")) {
-        MESSAGE("skipped: set SUPPLE_GUI_DISPLAY_TEST=1 with an X11 DISPLAY");
+    if (!displayTestsEnabled()) {
+        MESSAGE("skipped: set SUPPLE_GUI_DISPLAY_TEST=1 in a native desktop session");
         return;
     }
-    auto platform = gui::Platform::start(gui::Platform::Driver::X11);
+    auto platform = gui::Platform::start(gui::Platform::Driver::Native);
     REQUIRE(platform);
     engine::AppOptions options;
     options.workdir = std::filesystem::temp_directory_path() /
-                      ("supple-editor-test-" + std::to_string(::getpid()));
+                      ("supple-editor-test-" + std::to_string(testProcessId()));
     auto app = engine::EngineApp::create(options);
     REQUIRE(app);
     const std::filesystem::path dir = SUPPLE_CLAP_DIR;
@@ -152,13 +168,13 @@ TEST_CASE("an editor opens in its window, services its timers and closes") {
 }
 
 TEST_CASE("isolated plugins' editors embed from their bridge process (opt-in, needs a display)") {
-    if (!environmentFlagEnabled("SUPPLE_GUI_DISPLAY_TEST") || !std::getenv("DISPLAY")) return;
+    if (!displayTestsEnabled()) return;
     host::setBridgeExecutable(SUPPLE_BRIDGE_PATH);
-    auto platform = gui::Platform::start(gui::Platform::Driver::X11);
+    auto platform = gui::Platform::start(gui::Platform::Driver::Native);
     REQUIRE(platform);
     engine::AppOptions options;
     options.workdir = std::filesystem::temp_directory_path() /
-                      ("supple-bridged-editor-" + std::to_string(::getpid()));
+                      ("supple-bridged-editor-" + std::to_string(testProcessId()));
     auto app = engine::EngineApp::create(options);
     REQUIRE(app);
     const std::filesystem::path dir = SUPPLE_CLAP_DIR;
@@ -197,22 +213,18 @@ TEST_CASE("isolated plugins' editors embed from their bridge process (opt-in, ne
 }
 
 TEST_CASE("VST3 editors embed too (installed plugins; opt-in, needs a display)") {
-    if (!environmentFlagEnabled("SUPPLE_GUI_DISPLAY_TEST") || !std::getenv("DISPLAY")) return;
-    std::filesystem::path dir = std::getenv("SUPPLE_VST3_DIR")
-                                    ? std::getenv("SUPPLE_VST3_DIR")
-                                    : std::filesystem::path(std::getenv("HOME")) / ".vst3";
-    if (!std::filesystem::exists(dir)) {
-        MESSAGE("skipped: no VST3 directory " << dir.string());
-        return;
-    }
-    auto platform = gui::Platform::start(gui::Platform::Driver::X11);
+    if (!displayTestsEnabled()) return;
+    auto directories = host::defaultSearchPath();
+    if (const char* directory = std::getenv("SUPPLE_VST3_DIR"))
+        directories = {std::filesystem::path(directory)};
+    auto platform = gui::Platform::start(gui::Platform::Driver::Native);
     REQUIRE(platform);
     engine::AppOptions options;
     options.workdir = std::filesystem::temp_directory_path() /
-                      ("supple-vst3-editor-" + std::to_string(::getpid()));
+                      ("supple-vst3-editor-" + std::to_string(testProcessId()));
     auto app = engine::EngineApp::create(options);
     REQUIRE(app);
-    auto plugins = host::scan(std::span<const std::filesystem::path>(&dir, 1));
+    auto plugins = host::scan(directories);
     REQUIRE(plugins);
     gui::PluginWindows windows(**platform, **app, [] {});
     int opened = 0;
@@ -227,7 +239,7 @@ TEST_CASE("VST3 editors embed too (installed plugins; opt-in, needs a display)")
             continue;
         }
         if (!(*instance)->hasEditor()) {
-            MESSAGE(info.name << ": no X11 editor");
+            MESSAGE(info.name << ": no native editor");
             continue;
         }
         REQUIRE((*instance)->activate(48000, 32, 512));
@@ -267,7 +279,7 @@ TEST_CASE("editor sizing preserves native pixels at fractional Windows DPI") {
           std::pair<int, int>{256, 128});
 }
 
-TEST_CASE("an offscreen editor container has no native parent") {
+TEST_CASE("an offscreen editor container exposes its available native parent") {
     auto platform = gui::Platform::start(gui::Platform::Driver::Offscreen);
     REQUIRE(platform);
     gui::WindowOptions options{"editor-parent", 64, 48, true};
@@ -305,8 +317,12 @@ TEST_CASE("editor show and hide requests preserve the offscreen parent window") 
     requests.height = 60;
     gui::applyEditorRequests(window, requests);
     CHECK((SDL_GetWindowFlags(window.sdl()) & SDL_WINDOW_HIDDEN) != 0);
-    CHECK(window.width() == 80);
-    CHECK(window.height() == 60);
+    CHECK(window.width() *
+              (nativeWindowKind() == NativeWindow::Kind::Cocoa ? 1 : window.pixelRatio()) ==
+          doctest::Approx(80));
+    CHECK(window.height() *
+              (nativeWindowKind() == NativeWindow::Kind::Cocoa ? 1 : window.pixelRatio()) ==
+          doctest::Approx(60));
     requests.hide = false;
     gui::applyEditorRequests(window, requests);
     CHECK((SDL_GetWindowFlags(window.sdl()) & SDL_WINDOW_HIDDEN) == 0);
@@ -315,7 +331,9 @@ TEST_CASE("editor show and hide requests preserve the offscreen parent window") 
     requests.width = 99;
     gui::applyEditorRequests(window, requests);
     CHECK((SDL_GetWindowFlags(window.sdl()) & SDL_WINDOW_HIDDEN) == 0);
-    CHECK(window.width() == 80);
+    CHECK(window.width() *
+              (nativeWindowKind() == NativeWindow::Kind::Cocoa ? 1 : window.pixelRatio()) ==
+          doctest::Approx(80));
     CHECK(window.id() == identity);
 }
 
@@ -324,15 +342,15 @@ TEST_CASE("an editor follows its effect onto a replacement instance (needs a dis
     // closes the old editor while its window exists, and the window shows the
     // new instance's editor (it used to keep a dead editor parented to a
     // destroyed window, which crashed plug-ins and sometimes the app).
-    if (!environmentFlagEnabled("SUPPLE_GUI_DISPLAY_TEST") || !std::getenv("DISPLAY")) {
-        MESSAGE("skipped: set SUPPLE_GUI_DISPLAY_TEST=1 with an X11 DISPLAY");
+    if (!displayTestsEnabled()) {
+        MESSAGE("skipped: set SUPPLE_GUI_DISPLAY_TEST=1 in a native desktop session");
         return;
     }
-    auto platform = gui::Platform::start(gui::Platform::Driver::X11);
+    auto platform = gui::Platform::start(gui::Platform::Driver::Native);
     REQUIRE(platform);
     engine::AppOptions options;
     options.workdir = std::filesystem::temp_directory_path() /
-                      ("supple-editor-replace-" + std::to_string(::getpid()));
+                      ("supple-editor-replace-" + std::to_string(testProcessId()));
     options.pluginPath = {std::filesystem::path(SUPPLE_CLAP_DIR)};
     options.identity = host::HostIdentity{gui::test::name(), "Supple Audio", "", "0"};
     auto app = engine::EngineApp::create(options);
@@ -415,7 +433,7 @@ TEST_CASE("editor placements round-trip through the UI file's section") {
     REQUIRE(platform);
     engine::AppOptions options;
     options.workdir = std::filesystem::temp_directory_path() /
-                      ("supple-editor-layout-" + std::to_string(::getpid()));
+                      ("supple-editor-layout-" + std::to_string(testProcessId()));
     auto app = engine::EngineApp::create(options);
     REQUIRE(app);
     gui::PluginWindows windows(**platform, **app, [] {});
@@ -436,15 +454,15 @@ TEST_CASE("editor placements round-trip through the UI file's section") {
 }
 
 TEST_CASE("an effect's editor reopens where it was moved and at its size (needs a display)") {
-    if (!environmentFlagEnabled("SUPPLE_GUI_DISPLAY_TEST") || !std::getenv("DISPLAY")) {
-        MESSAGE("skipped: set SUPPLE_GUI_DISPLAY_TEST=1 with an X11 DISPLAY");
+    if (!displayTestsEnabled()) {
+        MESSAGE("skipped: set SUPPLE_GUI_DISPLAY_TEST=1 in a native desktop session");
         return;
     }
-    auto platform = gui::Platform::start(gui::Platform::Driver::X11);
+    auto platform = gui::Platform::start(gui::Platform::Driver::Native);
     REQUIRE(platform);
     engine::AppOptions options;
     options.workdir = std::filesystem::temp_directory_path() /
-                      ("supple-editor-place-" + std::to_string(::getpid()));
+                      ("supple-editor-place-" + std::to_string(testProcessId()));
     options.pluginPath = {std::filesystem::path(SUPPLE_CLAP_DIR)};
     options.identity = host::HostIdentity{gui::test::name(), "Supple Audio", "", "0"};
     auto app = engine::EngineApp::create(options);
@@ -554,6 +572,7 @@ TEST_CASE("an effect's editor reopens where it was moved and at its size (needs 
     std::filesystem::remove_all(options.workdir);
 }
 
+#if defined(__linux__)
 TEST_CASE("editor FD readiness never reaches a later registration of the same descriptor") {
     int descriptors[2];
     REQUIRE(::pipe(descriptors) == 0);
@@ -604,12 +623,14 @@ TEST_CASE("editor FD readiness never reaches a later registration of the same de
     ::close(descriptors[1]);
 }
 
+#endif
+
 TEST_CASE("the shared GUI watcher wakes for app and model work without an editor") {
     auto platform = gui::Platform::start(gui::Platform::Driver::Offscreen);
     REQUIRE(platform);
     engine::AppOptions options;
-    options.workdir =
-        std::filesystem::temp_directory_path() / ("supple-gui-wake-" + std::to_string(::getpid()));
+    options.workdir = std::filesystem::temp_directory_path() /
+                      ("supple-gui-wake-" + std::to_string(testProcessId()));
     auto app = engine::EngineApp::create(options);
     REQUIRE(app);
     rpc::ModelLoop loop;
@@ -622,7 +643,7 @@ TEST_CASE("the shared GUI watcher wakes for app and model work without an editor
             notified = true;
             changed.notify_one();
         });
-        windows.setModelWakeFd(loop.wakeFd());
+        windows.setModelWake(loop.waitable());
         CHECK(windows.count() == 0);
         CHECK(windows.service() == -1);
         (*app)->workQueued();

@@ -99,3 +99,9 @@ pixel coordinates rather than interpolated local coordinates. Apple's software
 renderer rounded an interpolated one-pixel border threshold differently under
 partial and full scissors. The same-platform incremental/full pixel comparison
 remains exact; native cross-platform golden comparisons remain disabled.
+
+**2026-10-14 editor integration note:** ADR-0040's native editor implementation
+is now combined with the GUI shell. Its NativeWindow accessor and native sizing
+are preserved alongside the extracted shared Waitable watcher. GUI editor
+integration tests build natively; real plugin display tests retain their exact
+SUPPLE_GUI_DISPLAY_TEST=1 opt-in. Linux pipe/poll fixtures stay Linux-only.

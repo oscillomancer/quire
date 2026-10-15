@@ -840,7 +840,10 @@ Linux retains its XDG/HOME locations. macOS uses Library/Application Support and
 Library/Caches; Windows APPDATA and LOCALAPPDATA. User Documents/media defaults
 use paths::home(). Product slugs and explicit file overrides remain caller-owned.
 Windowing and agent-panel portability are specified in ADR-0039; native
-plugin-editor embedding remains a separate port.
+plugin-editor embedding is integrated through ADR-0040. Editor integration tests
+build on all platforms; actual editor display tests still require the exact
+SUPPLE_GUI_DISPLAY_TEST=1 opt-in. Linux pipe/poll injection fixtures remain
+Linux-only alongside portable waitable coverage.
 
 The app accepts `--audio jack|portaudio|dummy|none`. Interactive Linux runs
 default to JACK, native runs to dummy (matching the engine); finite/offscreen

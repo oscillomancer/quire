@@ -50,7 +50,7 @@ with typed full-width parent handles (ADR-0040). Windows bridge editors embed;
 macOS bridge editors own floating NSWindows and service AppKit with IPC.
 Hermetic editor tests cover partial-open cleanup, resizing and repeated teardown.
 Native visual/focus/IME validation remains opt-in; DAW-side native shell tests
-await port-gui integration. Cocoa bridge placement/focus are not persisted,
+are integrated, with combined native CI validation pending. Cocoa bridge placement/focus are not persisted,
 its windows use global floating level, and changing display scale requires
 closing/reopening an editor. Windows child keyboard behavior is plugin-dependent.
 
@@ -296,7 +296,8 @@ Session and editing:
 GUI:
 - Native shell/toolkit/agent builds and tests pass CI (ADR-0039).
   Cocoa/Windows hidden-window tests replace Linux EGL offscreen;
-  Linux golden references are unchanged. Native editor embedding is separate.
+  Linux golden references are unchanged. Native editor embedding is integrated
+  (ADR-0040); combined native CI validation is pending.
   Windows config keys use a protected current-user ACL; filesystems without
   ACL support fail the save. macOS cold-start process timing is unavailable.
   GUI socket/screenset Python integration scripts remain Linux-only.

@@ -336,5 +336,6 @@ The DAW windowing/agent panel uses SDL3 X11/Cocoa/Windows and OpenGL core
 references (ADR-0039). SDL density/display scale maps design units to pixels.
 The UI's primary modifier maps to Command on macOS. Agent config publication
 uses POSIX 0600 or a protected current-user Windows DACL before writing keys.
-Editor embedding remains separately owned; unsupported host editor operations
-retain structured errors until that port lands.
+Native editor embedding uses typed X11/NSView/HWND parents (ADR-0040); Cocoa
+bridges own floating windows, while local and Windows bridge editors embed.
+The shared GUI watcher services native app/model and plugin waitables.

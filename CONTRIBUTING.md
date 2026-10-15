@@ -177,4 +177,6 @@ The Windows workflow deploys a pinned CI-only Mesa/llvmpipe driver beside GUI
 executables; it changes no system configuration and is not shipped. Linux
 reference PNGs are never updated on native systems. SUPPLE_GUI_DISPLAY_TEST
 still requires exactly `1`; ordinary tests do not open plug-in editors or
-real audio devices. Native platform smoke images are uploaded with test logs.
+real audio devices. DAW editor integration fixtures compile on all platforms;
+Linux pipe/poll injection fixtures run alongside the portable watcher coverage.
+Native platform smoke images are uploaded with test logs.
