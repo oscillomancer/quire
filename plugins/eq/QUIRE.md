@@ -51,3 +51,5 @@ the real engine and telemetry path. On Linux it embeds into a fixed-size native
 preview parent so the tiling WM cannot enlarge the capture. Host-smoke is exercised in stereo and mono;
 semantic-rt additionally checks transactional state and patch replacement while
 processing. These checks do not establish REAPER or macOS/Windows acceptance.
+The editor-input test keeps its host/telemetry ring on the heap: the ring
+exceeds Windows' default 1 MiB stack. It also runs with a 1 MiB stack on Linux.

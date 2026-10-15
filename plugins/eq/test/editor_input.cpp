@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Supple Audio
 #include <array>
 #include <cstdio>
+#include <memory>
 #include "Editor.h"
 using namespace eq;
 using namespace eq::gui;
@@ -23,7 +24,9 @@ struct Host : EditorHost {
     double sampleRate() const override { return 48000; }
 };
 int main() {
-    Host h;
+    // The telemetry ring alone exceeds Windows' default 1 MiB stack.
+    auto host = std::make_unique<Host>();
+    Host& h = *host;
     Editor e(h);
     auto check = [&](bool pass) {
         if (!pass) std::puts("editor input failed");
