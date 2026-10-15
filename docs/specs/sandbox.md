@@ -145,8 +145,9 @@ of editor visibility. CLAP POSIX FD support is advertised on Linux/macOS and
 serviced by their descriptor loops; Windows does not advertise it.
 
 EditorOpen retains its operation number but now carries `u8 kind, u64 handle,
-f64 scale` (17 bytes). Kinds: none=0, x11=1, cocoa=2, win32=3, floating=4.
-POSIX v18 and Windows v19 reject earlier peers at notification subscription.
+f64 scale` (17 bytes), followed since POSIX v19 / Windows v20 by an optional
+window frame (below). Kinds: none=0, x11=1, cocoa=2, win32=3, floating=4.
+POSIX v19 and Windows v20 reject earlier peers at notification subscription.
 Windows HWND values retain all pointer bits. Cocoa proxies send Floating with
 the DAW owner's server NSWindow.windowNumber (unsigned 32-bit, zero if absent),
 instead of an NSView pointer; embedded Cocoa inputs become Floating/zero.
@@ -155,8 +156,8 @@ POSIX v17 / Windows v18 change this handle's semantics from the v15/v16
 zero-only contract, retaining the 17-byte payload and all operation numbers.
 The child creates an NSWindow hosting the native embedded plugin view,
 and owns its resize/show/hide/close lifecycle. The open
-reply and other editor operation payloads are unchanged; there is no audio ABI
-change. A successful open clears retained requests from the previous view
+reply and the other editor operation payloads were unchanged at v17/v18; there
+is no audio ABI change. A successful open clears retained requests from the previous view
 lifetime so a stale close cannot close its replacement. Reopening a Cocoa
 floating editor reuses the existing window and updates its owner number.
 The bridge orders it just above the owner (or front of normal level for zero),
@@ -176,13 +177,31 @@ return `host.editor.scale`, path `/editor/scale`; a closed editor returns
 `host.editor`. Cocoa editors (points, backing scale observed by the view) are
 never told: the call only reports the current size. Bridged instances carry it
 as `EditorScale` (appended operation number): request `f64 scale`, reply as
-EditorOpen (`u32 width, u32 height, u8 resizable`). This is protocol POSIX v18 /
-Windows v19; the audio ABI is unchanged.
+EditorOpen (`u32 width, u32 height, u8 resizable`). This arrived with protocol POSIX
+v18 / Windows v19; the audio ABI is unchanged.
+
+**Window frames (macOS, POSIX v19 / Windows v20).** A bridge-owned Cocoa editor
+window has a content *frame* `{x, y, width, height}` in points, origin at the top
+left of the primary display: the space SDL uses for window positions, so the DAW
+stores it like any other editor placement (gui.md §4.5). On the wire an optional
+frame is `u8 present, i32 x, i32 y, u32 width, u32 height` (17 bytes, fields zero
+when absent; `present` above 1, nonzero fields without `present`, or a size above
+2^20 is malformed). `EditorOpen` ends with the frame to restore (a size only when
+the editor is resizable; the plug-in may adjust it), `EditorRequests` replies end
+with the latest frame the bridge saw move or resize since its last report, and
+the `EditorClose` reply is the window's final frame. The bridge compares the live
+window with the frame it last reported on each service pass (no timer), and
+reports the final frame when the user or the plug-in closes the window. Other
+platforms send absent frames. `Instance::EditorRequests::frame` carries it to the
+host (merged latest-wins; a frame alone wakes the DAW) and
+`Instance::takeClosedEditorFrame()` returns the close reply's frame after
+`closeEditor()`. Reopening an existing window ignores the frame.
 
 Windows bridge main waits for IPC and native messages together; Cocoa uses
 AppKit with CFFileDescriptor run-loop sources. There is no editor polling timer.
-Bridge death/quit destroys its native windows. Cocoa bridge placement and focus
-are not persisted by the DAW. Cross-process transient ownership on macOS is
+Bridge death/quit destroys its native windows. The DAW remembers Cocoa bridge
+placement as above; their focus is not part of its MIDI-learn focus predicate.
+Cross-process transient ownership on macOS is
 unavailable; normal-level windows can be covered by other applications.
 Windows child input is native, with plugin-dependent keyboard/IME behavior.
 Real window tests require SUPPLE_GUI_DISPLAY_TEST=1 and a desktop session;
@@ -192,7 +211,7 @@ CGWindowListCopyWindowInfo, unchanged frontmost application on open/reopen,
 and replacing the owner without recreating the editor. The DAW shell itself
 requires the separate port-gui integration.
 
-### Bridge notifications (POSIX v18, Windows v19; notification design ADR-0031)
+### Bridge notifications (POSIX v19, Windows v20; notification design ADR-0031)
 
 ADR-0037 extends the subscription to native WakeEvent signal targets:
 Linux eventfd (unchanged), a nonblocking write-only pipe on macOS, and a

@@ -1002,6 +1002,9 @@ int main(int argc, char** argv) {
         return next;
     };
     auto waitUntil = [&](int next) {
+        const int plugin = pluginWindows.service();
+        // A bridge-owned editor window moved: no input event told the UI file.
+        if (pluginWindows.takeLayoutChanged()) uiFile.arm();
         const auto now = Clock::now();
         auto include = [&](std::optional<Clock::time_point> deadline) {
             if (!deadline) return;
@@ -1016,7 +1019,6 @@ int main(int argc, char** argv) {
         include(meterFrame);
         // The playhead has a frame deadline only during playback/recording.
         if (shell.arrange()->playing()) include(now + std::chrono::milliseconds(16));
-        const int plugin = pluginWindows.service();
         if (auto error = pluginWindows.fdError()) {
             std::fprintf(stderr, "%s\n", error->toString().c_str());
             quit = true;  // no replacement safety poll after FD service fails

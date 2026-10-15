@@ -1698,7 +1698,8 @@ bool Instance::hasEditor() const {
            extGui_->is_api_supported(plugin_, editorClapApi(), false);
 }
 
-Result<Instance::EditorSize> Instance::openEditor(NativeWindow parent, double scale) {
+Result<Instance::EditorSize> Instance::openEditor(NativeWindow parent, double scale,
+                                                  std::optional<EditorFrame> frame) {
     const bool floating = remote_ && nativeWindowKind() == NativeWindow::Kind::Cocoa &&
                           validFloatingEditorParent(parent);
     if ((!floating && (parent.kind != nativeWindowKind() || !parent.valid())) ||
@@ -1717,7 +1718,7 @@ Result<Instance::EditorSize> Instance::openEditor(NativeWindow parent, double sc
                      "use the parameter panel or a plugin with a native editor");
     if (remote_) {
         if (editorOpen_ && nativeWindowKind() != NativeWindow::Kind::Cocoa) closeEditor();
-        auto size = remote_->openEditor(parent, scale);
+        auto size = remote_->openEditor(parent, scale, frame);
         editorOpen_ = size.ok();
         if (editorOpen_) editorScale_ = scale;
         return size;
@@ -1810,7 +1811,7 @@ void Instance::closeEditor() {
         return;
     }
     if (remote_) {
-        remote_->closeEditor();
+        closedFrame_ = remote_->closeEditor();
         editorOpen_ = false;
         return;
     }

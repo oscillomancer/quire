@@ -13,6 +13,14 @@ POSIX 17 / Windows 18. The original decision below is retained as written.
 (`Instance::setEditorScale`, bridge `EditorScale`, POSIX 18 / Windows 19); the
 "not renegotiated yet" limit below no longer applies. See sandbox.md §1.
 
+**2026-10-15 amendment (placement):** The Cocoa bridge reports its window's
+content frame (top-left origin, points) over the editor channel, `EditorOpen`
+takes one to restore, and the DAW persists it as it does other editor
+placements (POSIX 19 / Windows 20). The "placement ... not represented" limit
+below is lifted for placement; focus tracking remains a limit. Backing-scale
+changes of a bridge-owned window need no host action: sizes are points and the
+view observes its own backing scale.
+
 ## Decision
 
 - A borrowed `NativeWindow {kind, uintptr_t handle}` distinguishes X11 XIDs,

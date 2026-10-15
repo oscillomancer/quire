@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include "../src/bridge_notifications.h"
 #include "../src/bridge_protocol.h"
 #include "../src/editor_platform.h"
 #include "supple/host/clap_host.h"
@@ -208,6 +209,75 @@ TEST_CASE("the editor scale request round-trips through the bridge protocol") {
         bridge::validReply(bridge::Op::EditorScale, {reply.bytes.data(), reply.bytes.size()}));
 }
 
+TEST_CASE("editor window frames round-trip through the bridge protocol") {
+    using Frame = Instance::EditorFrame;
+    const auto request = [](std::optional<Frame> frame) {
+        bridge::Writer w;
+        w.u8(static_cast<std::uint8_t>(NativeWindow::Kind::Floating));
+        w.u64(0);
+        w.f64(1);
+        bridge::writeFrame(w, frame);
+        return w;
+    };
+    for (const std::optional<Frame> frame :
+         {std::optional<Frame>{}, std::optional<Frame>{Frame{-1440, 25, 0, 0}},
+          std::optional<Frame>{Frame{120, 80, 800, 500}}}) {
+        const auto w = request(frame);
+        CHECK(bridge::validRequest(bridge::Op::EditorOpen, {w.bytes.data(), w.bytes.size()}));
+        bridge::Reader r{w.bytes.data() + 17, w.bytes.size() - 17};
+        CHECK(bridge::readFrame(r) == frame);
+        CHECK(r.done());
+        // The same frame closes a window and rides along with its requests.
+        bridge::Writer closed;
+        bridge::writeFrame(closed, frame);
+        CHECK(bridge::validReply(bridge::Op::EditorClose,
+                                 {closed.bytes.data(), closed.bytes.size()}));
+        bridge::Writer requests;
+        for (int i = 0; i < 2; ++i) requests.u8(0);
+        requests.u32(0);
+        requests.u32(0);
+        requests.u8(0);
+        requests.u8(0);
+        bridge::writeFrame(requests, frame);
+        CHECK(bridge::validReply(bridge::Op::EditorRequests,
+                                 {requests.bytes.data(), requests.bytes.size()}));
+    }
+    // Malformed: a flag above 1, an absent frame with values, absurd sizes, and
+    // the pre-frame payloads of an older peer.
+    auto bad = request(std::nullopt);
+    bad.bytes[17] = 2;
+    CHECK_FALSE(bridge::validRequest(bridge::Op::EditorOpen, {bad.bytes.data(), bad.bytes.size()}));
+    bad = request(std::nullopt);
+    bad.bytes[18] = 1;  // x != 0 without a frame
+    CHECK_FALSE(bridge::validRequest(bridge::Op::EditorOpen, {bad.bytes.data(), bad.bytes.size()}));
+    bad = request(Frame{0, 0, bridge::kMaxEditorFrame + 1, 10});
+    CHECK_FALSE(bridge::validRequest(bridge::Op::EditorOpen, {bad.bytes.data(), bad.bytes.size()}));
+    bridge::Writer old;
+    for (int i = 0; i < 12; ++i) old.u8(0);
+    CHECK_FALSE(
+        bridge::validReply(bridge::Op::EditorRequests, {old.bytes.data(), old.bytes.size()}));
+    CHECK_FALSE(bridge::validReply(bridge::Op::EditorClose, {nullptr, 0}));
+}
+
+TEST_CASE("the latest editor window frame survives merged requests") {
+    Instance::EditorRequests pending;
+    CHECK_FALSE(bridge::hasEditorRequests(pending));
+    Instance::EditorRequests moved;
+    moved.frame = Instance::EditorFrame{10, 20, 300, 200};
+    CHECK(bridge::hasEditorRequests(moved));  // a frame alone is worth a wake
+    bridge::mergeEditorRequests(pending, moved);
+    Instance::EditorRequests resized;
+    resized.frame = Instance::EditorFrame{10, 20, 640, 480};
+    bridge::mergeEditorRequests(pending, resized);
+    Instance::EditorRequests other;  // later requests without a frame keep it
+    other.show = true;
+    bridge::mergeEditorRequests(pending, other);
+    REQUIRE(pending.frame);
+    CHECK(pending.frame->width == 640);
+    CHECK(pending.frame->height == 480);
+    CHECK(pending.show);
+}
+
 TEST_CASE("native hosts advertise timers and only serviceable POSIX descriptors") {
     auto made = Instance::create(editorFixture(FIXTURE_CLAP_PATH, "com.suppleaudio.test.edge"), {});
     REQUIRE(made);
@@ -309,6 +379,10 @@ TEST_CASE("typed editor protocol rejects old payloads and unknown parent kinds")
     typed.u8(static_cast<std::uint8_t>(nativeWindowKind()));
     typed.u64(0x123456789abULL);
     typed.f64(1);
+    // Protocol 19/20 ends the payload with the window frame to restore.
+    CHECK_FALSE(
+        bridge::validRequest(bridge::Op::EditorOpen, {typed.bytes.data(), typed.bytes.size()}));
+    bridge::writeFrame(typed, std::nullopt);
     CHECK(bridge::validRequest(bridge::Op::EditorOpen, {typed.bytes.data(), typed.bytes.size()}));
     typed.bytes[0] = 255;
     CHECK_FALSE(
@@ -352,13 +426,15 @@ TEST_CASE("Cocoa bridge editor parents carry server window numbers without point
         payload.u8(static_cast<std::uint8_t>(parent.kind));
         payload.u64(parent.handle);
         payload.f64(1);
+        bridge::writeFrame(payload, std::nullopt);
         REQUIRE(bridge::validRequest(bridge::Op::EditorOpen,
                                      {payload.bytes.data(), payload.bytes.size()}));
         bridge::Reader read{payload.bytes.data(), payload.bytes.size()};
         CHECK(read.u8() == static_cast<std::uint8_t>(NativeWindow::Kind::Floating));
         CHECK(read.u64() == number);
         CHECK(read.f64() == 1);
-        CHECK(read.ok());
+        CHECK_FALSE(bridge::readFrame(read));
+        CHECK(read.done());
     }
     const NativeWindow invalid{NativeWindow::Kind::Floating, 0x100000000ULL};
     CHECK_FALSE(validFloatingEditorParent(invalid));
@@ -367,6 +443,7 @@ TEST_CASE("Cocoa bridge editor parents carry server window numbers without point
     payload.u8(static_cast<std::uint8_t>(invalid.kind));
     payload.u64(invalid.handle);
     payload.f64(1);
+    bridge::writeFrame(payload, std::nullopt);
     CHECK_FALSE(
         bridge::validRequest(bridge::Op::EditorOpen, {payload.bytes.data(), payload.bytes.size()}));
     if (nativeWindowKind() == NativeWindow::Kind::Cocoa) {

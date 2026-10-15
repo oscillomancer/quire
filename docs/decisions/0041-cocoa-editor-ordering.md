@@ -3,6 +3,10 @@
 **Status:** Accepted, 2026-10-14. Amends ADR-0040.
 Contracts: core-base.md, gui.md §4.5 and sandbox.md §1.
 
+**2026-10-15 note:** The placement limit named under "Validation and limits" is
+lifted by the amendment in [ADR-0040](0040-native-plugin-editors.md) (frames over
+the editor channel, protocol POSIX 19 / Windows 20). Ordering is unchanged.
+
 ## Context
 
 An accessory bridge's NSFloatingWindowLevel editor stays above unrelated

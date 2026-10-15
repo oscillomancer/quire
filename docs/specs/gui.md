@@ -427,8 +427,16 @@ float in a bridge-owned NSWindow; no empty SDL editor window is created.
 The bridge applies resize/show/hide and user-close itself and reports closure
 through its existing notifications. Replacing a Cocoa bridged instance opens a
 fresh child-owned window; the other editor paths retain their SDL container.
-Cocoa bridge placement and focus are not
-persisted or included in the DAW's MIDI-learn focus predicate. The DAW sends
+Cocoa bridge placement is remembered like any editor's, in
+the UI file's `plugin_windows` section: the bridge reports its window's content
+frame (points, top-left origin of the primary display, the space SDL positions
+use) as it moves or resizes and when it closes; `PluginWindows` stores it per
+effect, arms a UI-file check when it changes, and on reopen sends it back with
+the open request when `restoredEditorFrame` finds it still on a display (else the
+bridge places the window itself; a size is sent only for a resizable editor). The
+stored form is unchanged, so older projects load as before and files carry
+over between modes. Cocoa bridge focus is not
+included in the DAW's MIDI-learn focus predicate. The DAW sends
 its owner's NSWindow.windowNumber as the Floating handle. Bridge windows use
 normal level and order just above that number on open/reopen without activating
 the bridge or taking key focus; other applications can cover them normally.

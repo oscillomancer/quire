@@ -50,6 +50,21 @@ bool editorScaleChanged(double given, double current) {
            std::fabs(current - given) > 1e-3 * given;
 }
 
+std::optional<host::Instance::EditorFrame> restoredEditorFrame(int x, int y, int width,
+                                                               int height) {
+    // The size is not known before the editor opens: any 48-point corner of
+    // the window on a display is enough to find and drag it.
+    if (!onDisplay(x, y, width > 0 ? width : 48, height > 0 ? height : 48)) return std::nullopt;
+    host::Instance::EditorFrame frame;
+    frame.x = x;
+    frame.y = y;
+    if (width > 0 && height > 0) {
+        frame.width = static_cast<std::uint32_t>(width);
+        frame.height = static_cast<std::uint32_t>(height);
+    }
+    return frame;
+}
+
 std::pair<int, int> editorWindowSize(std::uint32_t width, std::uint32_t height,
                                      NativeWindow::Kind kind, double pixelRatio,
                                      double inputScale) {
@@ -97,7 +112,21 @@ bool PluginWindows::hasFocus(model::Id fx) const {
     return false;
 }
 
+void PluginWindows::noteFrame(Editor& editor, const host::Instance::EditorFrame& frame) {
+    Placement p;
+    p.x = frame.x;
+    p.y = frame.y;
+    if (editor.resizable && frame.width > 0 && frame.height > 0) {
+        p.width = static_cast<int>(frame.width);
+        p.height = static_cast<int>(frame.height);
+    }
+    if (editor.frame == p) return;
+    editor.frame = p;
+    layoutChanged_ = true;
+}
+
 std::optional<PluginWindows::Placement> PluginWindows::placementOf(const Editor& editor) {
+    if (editor.fx && !editor.window) return editor.frame;  // bridge-owned (Cocoa)
     if (!editor.fx || !editor.window) return std::nullopt;
     Placement p;
     std::tie(p.x, p.y) = editor.window->position();
@@ -209,7 +238,12 @@ Status PluginWindows::attach(Editor editor, const std::string& title) {
         return Error("gui.editor", title + " has no editor this host can embed", "",
                      "use a plugin with a native editor, or restart its failed bridge");
     if (floats(*editor.instance)) {
-        auto size = editor.instance->openEditor(floatingParent(), 1);
+        std::optional<host::Instance::EditorFrame> frame;
+        if (editor.fx)
+            if (const auto it = placements_.find(*editor.fx); it != placements_.end())
+                frame = restoredEditorFrame(it->second.x, it->second.y, it->second.width,
+                                            it->second.height);
+        auto size = editor.instance->openEditor(floatingParent(), 1, frame);
         if (!size) return std::move(size).error();
         editor.resizable = size->resizable;
         editors_.push_back(std::move(editor));
@@ -297,8 +331,13 @@ bool PluginWindows::reattach(Editor& editor) {
     // An isolation-mode change can change Cocoa ownership: rebuild that entry.
     if (floats(*instance) != !editor.window) return false;
     if (editor.window) editor.scale = static_cast<double>(editor.window->pixelRatio());
+    // A bridge-owned window of the replacement opens where the last one was.
+    std::optional<host::Instance::EditorFrame> frame;
+    if (!editor.window && editor.frame)
+        frame = restoredEditorFrame(editor.frame->x, editor.frame->y, editor.frame->width,
+                                    editor.frame->height);
     auto size = instance->openEditor(
-        editor.window ? editor.window->nativeParent() : floatingParent(), editor.scale);
+        editor.window ? editor.window->nativeParent() : floatingParent(), editor.scale, frame);
     restoreContext();
     if (!size) return false;
     if (watcherError_ && !instance->watchedFds().empty()) {
@@ -350,7 +389,12 @@ void PluginWindows::drop(std::size_t index) {
     remember(e);
     // The instance may already be gone (the engine replaced it): only close the
     // editor of the instance that is still the effect's.
-    if (!e.fx || app_.instanceOf(*e.fx) == e.instance) e.instance->closeEditor();
+    if (!e.fx || app_.instanceOf(*e.fx) == e.instance) {
+        e.instance->closeEditor();
+        // A bridge-owned window reports where it was as it closes.
+        if (!e.window)
+            if (const auto last = e.instance->takeClosedEditorFrame()) noteFrame(e, *last);
+    }
     editors_.erase(editors_.begin() + static_cast<std::ptrdiff_t>(index));
     restoreContext();
 }
@@ -470,6 +514,7 @@ int PluginWindows::service() {
             continue;
         }
         const auto requests = e.instance->takeEditorRequests();
+        if (requests.frame && !e.window) noteFrame(e, *requests.frame);
         if (requests.closed) {
             remember(e);
             editors_.erase(editors_.begin() + static_cast<std::ptrdiff_t>(i));

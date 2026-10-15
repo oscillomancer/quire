@@ -402,8 +402,19 @@ class Instance {
         std::uint32_t width = 0, height = 0;
         bool resizable = false;
     };
+    // A bridge-owned editor window's content frame (macOS), in points with the
+    // origin at the top left of the primary display: the same space as SDL
+    // window positions, so it is stored like any other editor placement.
+    struct EditorFrame {
+        std::int32_t x = 0, y = 0;
+        std::uint32_t width = 0, height = 0;
+        bool operator==(const EditorFrame&) const = default;
+    };
     bool hasEditor() const;
-    Result<EditorSize> openEditor(NativeWindow parent, double scale);
+    // `frame` asks a bridge-owned window (Cocoa) to open there, size included
+    // when the editor is resizable; other editors ignore it.
+    Result<EditorSize> openEditor(NativeWindow parent, double scale,
+                                  std::optional<EditorFrame> frame = {});
     // Compatibility for existing X11 callers; native callers use the typed API.
     Result<EditorSize> openEditor(unsigned long x11Parent, double scale) {
         return openEditor({NativeWindow::Kind::X11, x11Parent}, scale);
@@ -417,11 +428,15 @@ class Instance {
     // the window, in pixels at the new scale.
     Result<EditorSize> setEditorScale(double scale);
     void closeEditor();
+    // The frame a bridge-owned window had when closeEditor() closed it.
+    std::optional<EditorFrame> takeClosedEditorFrame() { return std::exchange(closedFrame_, {}); }
     bool editorOpen() const { return editorOpen_; }
     // What the plugin asked for since the last call; the window owner applies show/hide.
     struct EditorRequests {
         bool resize = false, closed = false, show = false, hide = false;
         std::uint32_t width = 0, height = 0;
+        // A bridge-owned window moved or resized, or closed (its final frame).
+        std::optional<EditorFrame> frame;
     };
     EditorRequests takeEditorRequests();
     // clap.posix-fd-support: descriptors to watch (fd, CLAP_POSIX_FD_* flags),
@@ -460,6 +475,7 @@ class Instance {
     const clap_plugin_posix_fd_support_t* extFd_ = nullptr;
     bool editorOpen_ = false;
     double editorScale_ = 1;  // the factor the open editor last received
+    std::optional<EditorFrame> closedFrame_;
     std::uint32_t inChannels_ = 0, outChannels_ = 0, keyChannels_ = 0;
     std::vector<AudioPortInfo> auxOutPorts_;
     bool acceptsNotes_ = false, keyActive_ = false;

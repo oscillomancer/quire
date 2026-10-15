@@ -37,6 +37,11 @@ std::pair<int, int> editorWindowSize(std::uint32_t width, std::uint32_t height,
 // last given (`given`), so the plug-in must be told. Ignores float noise.
 bool editorScaleChanged(double given, double current);
 
+// Where to open a bridge-owned (Cocoa) editor window: the remembered placement
+// when it is still on a display, with its size only when one was remembered
+// (a resizable editor). Empty: let the bridge place it.
+std::optional<host::Instance::EditorFrame> restoredEditorFrame(int x, int y, int width, int height);
+
 // Applies coalesced host requests without destroying a hidden editor. Closed
 // editors are removed by the owner; close takes precedence over other flags.
 void applyEditorRequests(Window& window, const host::Instance::EditorRequests& requests);
@@ -63,6 +68,9 @@ class PluginWindows {
     std::size_t count() const { return editors_.size(); }
     bool isOpen(model::Id fx) const;
     bool hasFocus(model::Id fx) const;  // its editor's window has the input focus
+    // True once after an open editor's remembered placement changed without an
+    // input event (a bridge-owned window moved): the UI file should be checked.
+    bool takeLayoutChanged() { return std::exchange(layoutChanged_, false); }
     std::function<void(const Error&)> onError;
 
     // Where each effect's editor was last: its position and, when the editor
@@ -87,19 +95,23 @@ class PluginWindows {
     std::optional<Error> fdError() { return watcher_ ? watcher_->error() : watcherError_; }
 
   private:
+    struct Placement {
+        int x = 0, y = 0;
+        int width = 0, height = 0;  // 0: the editor's own size (not resizable)
+        bool operator==(const Placement&) const = default;
+    };
     struct Editor {
         std::optional<model::Id> fx;  // empty: an instance the caller owns
         host::Instance* instance = nullptr;
         std::uint64_t serial = 0;  // this registration of the instance's descriptors
         std::unique_ptr<Window> window;
         bool resizable = false;
-        double scale = 1;  // the display scale its plug-in was last given
-    };
-    struct Placement {
-        int x = 0, y = 0;
-        int width = 0, height = 0;  // 0: the editor's own size (not resizable)
+        double scale = 1;                // the display scale its plug-in was last given
+        std::optional<Placement> frame;  // a bridge-owned window's last reported place
     };
     static std::optional<Placement> placementOf(const Editor& editor);
+    // A bridge-owned window's reported frame becomes the effect's placement.
+    void noteFrame(Editor& editor, const host::Instance::EditorFrame& frame);
     void remember(const Editor& editor);
     void place(Editor& editor);  // before the window is shown
     NativeWindow floatingParent() const;
@@ -128,6 +140,7 @@ class PluginWindows {
     std::unique_ptr<FdWatcher> watcher_;
     std::optional<Error> watcherError_;
     bool watcherErrorReported_ = false;
+    bool layoutChanged_ = false;
 };
 
 }  // namespace supple::gui

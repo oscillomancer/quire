@@ -292,6 +292,34 @@ TEST_CASE("an editor is told about display-scale changes, not about noise") {
     CHECK_FALSE(gui::editorScaleChanged(1.0, std::numeric_limits<double>::quiet_NaN()));
 }
 
+TEST_CASE("a bridge-owned editor window reopens only where a display still shows it") {
+    auto platform = gui::Platform::start(gui::Platform::Driver::Offscreen);
+    REQUIRE(platform);
+    int count = 0;
+    SDL_DisplayID* displays = SDL_GetDisplays(&count);
+    REQUIRE(displays);
+    REQUIRE(count > 0);
+    SDL_Rect bounds{};
+    REQUIRE(SDL_GetDisplayBounds(displays[0], &bounds));
+    SDL_free(displays);
+    const int x = bounds.x + 40, y = bounds.y + 40;
+    // A remembered position and size on a display is restored as it was.
+    auto frame = gui::restoredEditorFrame(x, y, 320, 240);
+    REQUIRE(frame);
+    CHECK(frame->x == x);
+    CHECK(frame->y == y);
+    CHECK(frame->width == 320);
+    CHECK(frame->height == 240);
+    // A position alone (a fixed-size editor) carries no size.
+    frame = gui::restoredEditorFrame(x, y, 0, 0);
+    REQUIRE(frame);
+    CHECK(frame->width == 0);
+    CHECK(frame->height == 0);
+    // A monitor that is gone: the bridge places the window itself.
+    CHECK_FALSE(gui::restoredEditorFrame(bounds.x + bounds.w + 5000, y, 320, 240));
+    CHECK_FALSE(gui::restoredEditorFrame(x, bounds.y - 9000, 0, 0));
+}
+
 TEST_CASE("an offscreen editor container exposes its available native parent") {
     auto platform = gui::Platform::start(gui::Platform::Driver::Offscreen);
     REQUIRE(platform);

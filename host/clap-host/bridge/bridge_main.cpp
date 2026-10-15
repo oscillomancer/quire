@@ -52,6 +52,7 @@ struct BridgeInstance {
 #if defined(__APPLE__)
     std::unique_ptr<FloatingEditorWindow> floating;
     Instance::EditorSize floatingSize;
+    std::optional<Instance::EditorFrame> reportedFrame;  // the last one sent to the DAW
 #endif
     Instance::Notifications notes;
     Instance::IdleOutputs idle;
@@ -70,10 +71,13 @@ struct BridgeInstance {
 #if defined(__APPLE__)
         if (floating) {
             if (floating->closed() || gui.closed) {
+                const auto last = floating->frame();
                 instance->closeEditor();
                 floating.reset();
+                reportedFrame.reset();
                 gui = {};
                 gui.closed = true;
+                gui.frame = last;  // where the user left it
             } else {
                 unsigned width = 0, height = 0;
                 if (floating->takeResize(width, height)) {
@@ -91,6 +95,11 @@ struct BridgeInstance {
                 if (gui.hide) floating->hide();
                 // Geometry belongs to the child window, not a DAW placeholder.
                 gui.resize = gui.show = gui.hide = false;
+                // The DAW remembers where the window is: report moves and resizes.
+                if (const auto now = floating->frame(); now != reportedFrame) {
+                    reportedFrame = now;
+                    gui.frame = now;
+                }
             }
         }
 #endif
@@ -639,6 +648,7 @@ struct Bridge {
                 const auto kind = static_cast<NativeWindow::Kind>(r.u8());
                 const auto handle = r.u64();
                 const double scale = r.f64();
+                [[maybe_unused]] const auto frame = readFrame(r);  // Cocoa windows only
                 if (!r.ok())
                     return fail(Error("bridge.editor", "malformed EditorOpen request", "/editor",
                                       "use a matching host and bridge build"));
@@ -664,9 +674,16 @@ struct Bridge {
                 if (size) slot.editor = {};
 #if defined(__APPLE__)
                 if (size) {
+                    // Where the DAW remembered the window, and at its size when
+                    // the editor is resizable (the plug-in may adjust it).
+                    if (frame && size->resizable && frame->width > 0 && frame->height > 0)
+                        if (auto accepted = instance->resizeEditor(frame->width, frame->height))
+                            *size = *accepted;
                     (*window)->resize(size->width, size->height, size->resizable);
+                    if (frame) (*window)->moveTo(frame->x, frame->y);
                     (*window)->showAbove(static_cast<std::uint32_t>(handle));
                     slot.floatingSize = *size;
+                    slot.reportedFrame.reset();  // the first service reports where it is
                     slot.floating = std::move(*window);
                 }
 #endif
@@ -693,12 +710,20 @@ struct Bridge {
 #endif
                 return replyOr(std::move(size), writeSize);
             }
-            case Op::EditorClose:
+            case Op::EditorClose: {
+                Writer w;
+                std::optional<Instance::EditorFrame> last;
+#if defined(__APPLE__)
+                if (slot.floating) last = slot.floating->frame();
+#endif
                 instance->closeEditor();
 #if defined(__APPLE__)
                 slot.floating.reset();
+                slot.reportedFrame.reset();
 #endif
-                return reply(Writer{});
+                writeFrame(w, last);
+                return reply(w);
+            }
             case Op::EditorRequests: {
                 collect(slot);
                 const auto q = std::exchange(slot.editor, {});
@@ -709,6 +734,7 @@ struct Bridge {
                 w.u32(q.height);
                 w.u8(q.show ? 1 : 0);
                 w.u8(q.hide ? 1 : 0);
+                writeFrame(w, q.frame);
                 return reply(w);
             }
             case Op::Destroy:

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #import <AppKit/AppKit.h>
+#include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <map>
 #include <vector>
 #include "editor_platform.h"
@@ -175,5 +177,29 @@ void FloatingEditorWindow::showAbove(std::uint32_t ownerWindowNumber) {
     show();
 }
 void FloatingEditorWindow::hide() { [state_->window orderOut:nil]; }
+namespace {
+// AppKit's origin is the bottom left of the primary display; SDL's and ours is
+// the top left. The primary display is the first of NSScreen.screens.
+CGFloat primaryDisplayTop() {
+    NSScreen* primary = NSScreen.screens.firstObject;
+    return primary ? NSMaxY(primary.frame) : 0;
+}
+}  // namespace
+Instance::EditorFrame FloatingEditorWindow::frame() const {
+    NSWindow* window = state_->window;
+    const NSRect content = [window contentRectForFrameRect:window.frame];
+    Instance::EditorFrame f;
+    f.x = static_cast<std::int32_t>(std::lround(content.origin.x));
+    f.y = static_cast<std::int32_t>(std::lround(primaryDisplayTop() - NSMaxY(content)));
+    f.width = static_cast<std::uint32_t>(std::lround(std::max<CGFloat>(content.size.width, 0)));
+    f.height = static_cast<std::uint32_t>(std::lround(std::max<CGFloat>(content.size.height, 0)));
+    return f;
+}
+void FloatingEditorWindow::moveTo(int x, int y) {
+    NSWindow* window = state_->window;
+    NSRect content = [window contentRectForFrameRect:window.frame];
+    content.origin = NSMakePoint(x, primaryDisplayTop() - y - content.size.height);
+    [window setFrame:[window frameRectForContentRect:content] display:NO];
+}
 bool FloatingEditorWindow::closed() const { return state_->delegate.closed; }
 }  // namespace supple::host

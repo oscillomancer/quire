@@ -646,13 +646,15 @@ Result<Instance::EditorSize> editorSize(Result<std::vector<std::uint8_t>> reply)
 }
 }  // namespace
 
-Result<Instance::EditorSize> RemoteInstance::openEditor(NativeWindow parent, double scale) {
+Result<Instance::EditorSize> RemoteInstance::openEditor(
+    NativeWindow parent, double scale, std::optional<Instance::EditorFrame> frame) {
     Writer w;
     // NSView pointers are process-local: only the bridge may create its parent.
     if (nativeWindowKind() == NativeWindow::Kind::Cocoa) parent = cocoaBridgeParent(parent);
     w.u8(static_cast<std::uint8_t>(parent.kind));
     w.u64(parent.handle);
     w.f64(scale);
+    writeFrame(w, frame);
     auto result = editorSize(call(Op::EditorOpen, w));
     editorOpen_ = result.ok();
     pendingEditor_ = {};
@@ -673,10 +675,15 @@ Result<Instance::EditorSize> RemoteInstance::setEditorScale(double scale) {
     return editorSize(call(Op::EditorScale, w));
 }
 
-void RemoteInstance::closeEditor() {
+std::optional<Instance::EditorFrame> RemoteInstance::closeEditor() {
     editorOpen_ = false;
     pendingEditor_ = {};
-    if (!failed()) (void)call(Op::EditorClose, Writer{}, -1, 2000);
+    if (failed()) return {};
+    auto reply = call(Op::EditorClose, Writer{}, -1, 2000);
+    if (!reply) return {};
+    Reader r(reply->data(), reply->size());
+    auto frame = readFrame(r);
+    return r.ok() ? frame : std::nullopt;
 }
 
 Instance::EditorRequests RemoteInstance::pullEditorRequests() {
@@ -697,6 +704,7 @@ Instance::EditorRequests RemoteInstance::pullEditorRequests() {
     q.height = r.u32();
     q.show = r.u8() != 0;
     q.hide = r.u8() != 0;
+    q.frame = readFrame(r);
     return q;
 }
 

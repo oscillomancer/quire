@@ -273,6 +273,7 @@ bool validRequest(Op op, Reader r) {
                 handle > std::numeric_limits<std::uint32_t>::max())
                 return false;
             r.skip(8);
+            (void)readFrame(r);
             break;
         }
         case Op::EditorResize:
@@ -369,6 +370,10 @@ bool validReply(Op op, Reader r) {
             break;
         case Op::EditorRequests:
             r.skip(12);
+            (void)readFrame(r);
+            break;
+        case Op::EditorClose:
+            (void)readFrame(r);
             break;
         case Op::TakeIdleOutputs: {
             (void)r.u64();
@@ -389,7 +394,6 @@ bool validReply(Op op, Reader r) {
         case Op::SetPatch:
         case Op::LoadState:
         case Op::Destroy:
-        case Op::EditorClose:
             break;
         default:
             return false;

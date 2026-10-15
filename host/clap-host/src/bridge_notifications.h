@@ -65,10 +65,11 @@ inline void mergeEditorRequests(Instance::EditorRequests& to,
     to.closed |= from.closed;
     to.show |= from.show;
     to.hide |= from.hide;
+    if (from.frame) to.frame = from.frame;  // the latest frame stands
 }
 
 inline bool hasEditorRequests(const Instance::EditorRequests& q) {
-    return q.resize || q.closed || q.show || q.hide;
+    return q.resize || q.closed || q.show || q.hide || q.frame.has_value();
 }
 
 inline void mergeIdleOutputs(Instance::IdleOutputs& to, const Instance::IdleOutputs& from) {

@@ -3,12 +3,14 @@
 #include <doctest/doctest.h>
 #include <algorithm>
 #include <cstdlib>
+#include <optional>
 #include <string_view>
 #include "../src/editor_platform.h"
 #include "supple/host/clap_host.h"
 #if defined(__APPLE__)
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
+#include <unistd.h>
 #include "../src/bridge_client.h"
 #endif
 #if defined(_WIN32)
@@ -172,6 +174,43 @@ TEST_CASE(
         CHECK(position(list, editorNumber) < position(list, @(otherWindow.windowNumber)));
         CHECK(NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier == activePid);
         (*instance)->closeEditor();
+    }
+}
+
+TEST_CASE("Cocoa bridged editors report their frame and reopen at a given one (display opt-in)") {
+    const char* enabled = std::getenv("SUPPLE_GUI_DISPLAY_TEST");
+    if (!enabled || std::string_view(enabled) != "1") return;
+    @autoreleasepool {
+        ScanOptions options;
+        options.forceInProcess = true;
+        const std::filesystem::path path = FIXTURE_CLAP_PATH;
+        auto scanned = scan(std::span(&path, 1), options);
+        REQUIRE(scanned);
+        const auto found = std::find_if(scanned->begin(), scanned->end(), [](const auto& info) {
+            return info.id == "com.suppleaudio.test.edge";
+        });
+        REQUIRE(found != scanned->end());
+        setBridgeExecutable(BRIDGE_PATH);
+        auto instance = Instance::create(*found, {}, true);
+        REQUIRE(instance);
+        const Instance::EditorFrame wanted{200, 160, 0, 0};
+        REQUIRE((*instance)->openEditor({NativeWindow::Kind::Floating, 0}, 1, wanted));
+        // The bridge reports where the window is once its loop has served it.
+        std::optional<Instance::EditorFrame> reported;
+        for (int i = 0; i < 100 && !reported; ++i) {
+            (*instance)->serviceMainThread();
+            reported = (*instance)->takeEditorRequests().frame;
+            if (!reported) usleep(10000);
+        }
+        REQUIRE(reported);
+        CHECK(reported->x == wanted.x);
+        CHECK(reported->y == wanted.y);  // top-left origin, as SDL positions
+        CHECK(reported->width > 0);
+        (*instance)->closeEditor();
+        const auto closed = (*instance)->takeClosedEditorFrame();
+        REQUIRE(closed);
+        CHECK(closed->x == wanted.x);
+        CHECK(closed->y == wanted.y);
     }
 }
 #endif

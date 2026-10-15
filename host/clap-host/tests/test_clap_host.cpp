@@ -1392,7 +1392,7 @@ TEST_CASE("bridge protocol v6 retains nested structured error details") {
     CHECK(decoded.details[0].hint == "correct it");
     REQUIRE(decoded.details[0].details.size() == 1);
     CHECK(decoded.details[0].details[0].code == "leaf");
-    CHECK(bridge::kVersion == 18);
+    CHECK(bridge::kVersion == 19);
 }
 
 TEST_CASE("editor failures destroy the partial editor and show-hide requests reach its owner") {
@@ -2005,8 +2005,10 @@ TEST_CASE("remote subscribed snapshot consumers skip IPC on unrelated app wakes"
                                reply.bytes.resize(35);  // empty work/notes/log and zero status
                                break;
                            case bridge::Op::TakeIdleOutputs:
+                               reply.bytes.resize(12);  // no idle events
+                               break;
                            case bridge::Op::EditorRequests:
-                               reply.bytes.resize(12);  // no idle events or GUI requests
+                               reply.bytes.resize(29);  // no GUI requests and no window frame
                                break;
                            default:
                                break;  // ACK, SetParam and Destroy have empty success replies

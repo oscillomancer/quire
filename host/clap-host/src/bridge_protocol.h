@@ -47,10 +47,12 @@ inline constexpr std::uint32_t kMagic = 0x31474253;  // "SBG1"
 // 13: read-only factory patches through semantic-params.
 // 17/18: Floating carries a Cocoa owner window number (ADR-0041).
 // 18/19: EditorScale renegotiates a live display-scale change (ADR-0040).
+// 19/20: Cocoa editor window frames: EditorOpen takes one, EditorRequests and
+// EditorClose report one (ADR-0040).
 #if defined(_WIN32)
-inline constexpr std::uint32_t kVersion = 19;  // Windows runs one ahead: native control handles
+inline constexpr std::uint32_t kVersion = 20;  // Windows runs one ahead: native control handles
 #else
-inline constexpr std::uint32_t kVersion = 18;
+inline constexpr std::uint32_t kVersion = 19;
 #endif
 inline constexpr int kControlFd = 3;  // the bridge's end of the socketpair
 inline constexpr std::uint32_t kMaxChannels = 16;
@@ -89,11 +91,11 @@ enum class Op : std::uint32_t {
     NormalizedParam,  // id, plain → normalized
     PlainParam,       // id, normalized → plain
     // Native editor: X11/Win32 embedded; Cocoa floats in a bridge-owned window.
-    EditorOpen,       // u8 parent kind, u64 parent handle, f64 scale → u32 width, u32 height, u8
-                      // resizable
+    EditorOpen,       // u8 parent kind, u64 parent handle, f64 scale, frame → u32 width, u32
+                      // height, u8 resizable
     EditorResize,     // u32 width, u32 height → the accepted size (as EditorOpen)
-    EditorClose,      // → ok
-    EditorRequests,   // → u8 resize, u8 closed, u32 width, u32 height, u8 show, u8 hide
+    EditorClose,      // → frame (the window's final one)
+    EditorRequests,   // → u8 resize, u8 closed, u32 width, u32 height, u8 show, u8 hide, frame
     TakeIdleOutputs,  // → u64 dropped, u32 count, [OutputEvent]
     SubscribeNotifications,  // process id 0: u32 version (+ eventfd) → u32 version
     AckNotifications,        // process id 0: no payload → ok
@@ -145,6 +147,7 @@ class Reader {
     Reader(const std::uint8_t* data, std::size_t size)
         : p_(size ? data : &empty_), end_(p_ + size) {}
     bool ok() const { return ok_; }
+    void fail() { ok_ = false; }
     bool done() const { return ok_ && p_ == end_; }
     void skipString() {
         const auto n = u32();
@@ -249,6 +252,29 @@ using Deadline = std::chrono::steady_clock::time_point;
 inline Deadline deadlineAfter(int timeoutMs) {
     return timeoutMs < 0 ? Deadline::max()
                          : std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+}
+// An optional editor window frame: u8 present, i32 x, i32 y, u32 width, u32 height
+// (17 bytes, fields zero when absent). Sizes beyond kMaxEditorFrame are invalid.
+inline constexpr std::uint32_t kMaxEditorFrame = 1u << 20;
+inline void writeFrame(Writer& w, const std::optional<Instance::EditorFrame>& f) {
+    w.u8(f ? 1 : 0);
+    w.i32(f ? f->x : 0);
+    w.i32(f ? f->y : 0);
+    w.u32(f ? f->width : 0);
+    w.u32(f ? f->height : 0);
+}
+// The reader is left not ok when the flag or a size is out of range.
+inline std::optional<Instance::EditorFrame> readFrame(Reader& r) {
+    const auto present = r.u8();
+    Instance::EditorFrame f;
+    f.x = r.i32();
+    f.y = r.i32();
+    f.width = r.u32();
+    f.height = r.u32();
+    if (present > 1 || f.width > kMaxEditorFrame || f.height > kMaxEditorFrame ||
+        (!present && (f.x || f.y || f.width || f.height)))
+        r.fail();
+    return present == 1 ? std::optional<Instance::EditorFrame>(f) : std::nullopt;
 }
 bool validRequest(Op op, Reader r);
 bool validReply(Op op, Reader r);

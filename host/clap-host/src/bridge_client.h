@@ -120,10 +120,12 @@ class RemoteInstance {
     }
     Instance::IdleOutputs takeIdleOutputs();
     // The plug-in's editor, embedded by the bridge into `x11Parent` (gap log #39).
-    Result<Instance::EditorSize> openEditor(NativeWindow parent, double scale);
+    Result<Instance::EditorSize> openEditor(NativeWindow parent, double scale,
+                                            std::optional<Instance::EditorFrame> frame);
     Result<Instance::EditorSize> resizeEditor(std::uint32_t width, std::uint32_t height);
     Result<Instance::EditorSize> setEditorScale(double scale);
-    void closeEditor();
+    // Returns the frame the bridge's editor window had when it closed (macOS).
+    std::optional<Instance::EditorFrame> closeEditor();
     Instance::EditorRequests editorRequests();
 
     // audio thread
