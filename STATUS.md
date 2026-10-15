@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-10-14. This file describes the present: what works, what is
+Updated 2026-10-15. This file describes the present: what works, what is
 known not to, and what is planned. Keep it current with each change; the
 history is in git.
 
@@ -12,8 +12,8 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
 The port branch has on-demand Linux/macOS/Windows CI and portable presets
 (ADR-0034). Linux dev passes all 145 tests including the 12 CLAP validators.
 Native headless services, hosting/scanning, bridge, stock wrappers, device
-backend builds and GUI/agent tests pass Windows CI (99 tests) and macOS arm64
-CI (100 executed tests; 12 optional external validators skipped, 112 CTest
+backend builds and GUI/agent tests pass Windows CI (103 tests) and macOS arm64
+CI (103 executed tests; 12 optional external validators skipped, 115 CTest
 entries; ADR-0036/0037/0038/0039).
 The macOS preset uses AppleClang and system libc++; shared float/double parsing
 uses vendored fast_float (MIT) on all platforms, including the suite's
@@ -54,6 +54,12 @@ shell/editor integration tests pass CI. Cocoa bridge placement/focus are not per
 its windows use normal level, order above the DAW window without activating the
 bridge, and are raised again when the DAW window regains focus. Changing display
 scale requires closing/reopening an editor. Windows child keyboard behavior is plugin-dependent.
+
+Evaluation harness fixtures now run on Windows as well as POSIX: executable
+fixtures use Python, credential references can use Windows hard links, and
+attempt cleanup uses native Jobs or POSIX process groups. Real sandbox/model
+checks remain explicit opt-ins. Source-export player/factory/audio conformance
+runs natively; appended-player binary exports still require Linux.
 
 ## What works
 
@@ -302,7 +308,8 @@ GUI:
   Windows config keys use a protected current-user ACL; filesystems without
   ACL support fail the save. macOS cold-start timing reads the kernel process
   start time. GUI socket/screenset and source-export integration fixtures are
-  enabled natively; final cross-platform fixture CI validation is pending.
+  enabled and pass native CI on macOS and Windows. macOS bulk rectangle edges
+  align to framebuffer pixels so partial repaints match complete repaints exactly.
   Script-player headless editor pictures (`dsp.preview`) still require
   Linux/EGL; native builds return `dsp.no_picture` with a capability hint.
 - No autoscroll during drags; no resize cursor; plugins can be dropped onto
@@ -338,9 +345,3 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
 - Lua ergonomics (a script library path, hot reload).
 - Orrery's structural performance pass.
 - Hardening and ports beyond Linux.
-
-Evaluation harness fixtures now run on Windows as well as POSIX: executable
-fixtures use Python, credential references can use Windows hard links, and
-attempt cleanup uses native Jobs or POSIX process groups. Real sandbox/model
-checks remain explicit opt-ins. Source-export player/factory/audio conformance
-runs natively; appended-player binary exports still require Linux.

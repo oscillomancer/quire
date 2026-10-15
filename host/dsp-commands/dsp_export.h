@@ -320,7 +320,7 @@ void registerDspExport(cmd::Registry& registry) {
         "with the licenses to ship beside it (notices). It runs on this platform, as fast as "
         "the player it copies (a debug build's is slow). format source: a C++ project of the "
         "plugin template that builds the same plugin (same id, parameters and state) as "
-        "CLAP and VST3, plus AU on macOS (only Linux has been validated here), with the "
+        "CLAP and VST3, plus AU on macOS, with the "
         "script compiled as C++, written to the empty "
         "<folder> (default: the script's folder, under export/<script>-source); its README "
         "says how to build it, and license (MIT unless GPL-3.0-or-later) is the license of its "

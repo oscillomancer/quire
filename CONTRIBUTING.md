@@ -133,6 +133,7 @@ These gates are explicit, with no no-op RT implementations:
 | Gate | Off on | Reason / follow-up |
 |---|---|---|
 | JACK/fake JACK and hardware capacity benchmark | macOS, Windows | Linux graph/hardware tooling; native device audio uses PortAudio (ADR-0038) |
+| Appended-player binary-export comparison | macOS, Windows | `dsp.export format=clap` is Linux-only; source exports and their full conformance tests run natively |
 
 Research GUI spikes and host fuzzers reject configuration on non-Linux
 platforms rather than silently building incomplete targets. Renders must
