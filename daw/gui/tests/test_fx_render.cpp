@@ -964,9 +964,8 @@ TEST_CASE("the render dialog: the preview matches render.dry-run and a job lists
     std::string expected;
     for (const json::Value& file : (*dry)["files"].asArray()) {
         const std::string path = file.find("path")->asString();
-        const auto slash = path.find_last_of('/');
-        expected += (expected.empty() ? "" : "\n") +
-                    (slash == std::string::npos ? path : path.substr(slash + 1));
+        expected +=
+            (expected.empty() ? "" : "\n") + std::filesystem::path(path).filename().string();
     }
     REQUIRE_FALSE(expected.empty());
     CHECK(f.render->preview().find(expected.substr(0, expected.find('\n'))) == 0);
