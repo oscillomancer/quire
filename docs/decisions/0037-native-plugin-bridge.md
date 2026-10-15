@@ -91,3 +91,14 @@ POSIX explicitly inherits fd 2; Windows uses an inheritable duplicate of the
 parent's valid STD_ERROR_HANDLE in its strict handle list, or NUL if duplication
 is unavailable. The parent handle's inheritance flags are not changed. The
 scanner retains the default false/null stderr, and bridge stdout stays null.
+
+## Audio integration note (2026-10-14)
+
+ADR-0038 enables native audio-file I/O, engine/CLI and sandbox rendering on
+Windows as well as macOS. These services now exercise shared and dedicated
+bridges through the same InstancePool boundary, including crash/deadline
+failures, restart ownership and exact render-ahead/offline equivalence.
+Sandbox rendering also compares isolated host instances with local instances;
+the sandbox session's plugin.load command continues to load in process.
+Device callbacks retain the background-only bridge boundary, and native editor
+embedding remains deferred.

@@ -1261,11 +1261,14 @@ offline output, including the anticipative renderer. A native fixture test
 runs this contract through both executors, Console 9, latency compensation and
 multiple worker capacities. JACK/fake JACK and the hardware benchmark stay
 Linux-only; an explicit JACK request returns backend.unsupported,
-path /backend and a hint to select dummy. Windows also enables the engine
-and sandbox through native audio-file I/O. Shared/dedicated bridge creation
+path /backend and a hint to select dummy. Both native platforms also enable
+sandbox rendering through native audio-file I/O. Shared/dedicated bridge creation
 uses the real native bridge through the same InstancePool load boundary; it
 never substitutes a local instance. Native tests compare both isolation modes
-through render-ahead and offline execution on macOS and Windows.
+through render-ahead and offline execution on macOS and Windows. Portable fault
+fixtures verify shared-process failure propagation, dedicated-instance survival,
+structured errors and restart ownership through InstancePool after crashes and
+expired process deadlines.
 
 `engine.start` defaults to JACK on Linux and dummy on other platforms. Its
 registry documents `backend.unsupported` and the default difference, so the CLI's

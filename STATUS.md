@@ -10,7 +10,7 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
 `main`.
 
 The port branch has on-demand Linux/macOS/Windows CI and portable presets
-(ADR-0034). Linux dev passes all 141 tests including the 12 CLAP validators.
+(ADR-0034). Linux dev passes all 142 tests including the 12 CLAP validators.
 Native headless services, hosting/scanning, stock wrappers and device backend
 builds pass Windows CI (87 tests) and macOS arm64 CI (88 executed tests;
 12 optional external validators skipped, 100 CTest entries; ADR-0036/0038).
@@ -36,7 +36,10 @@ explicit IPC inheritance and process-group/Job ownership. Linux retains its
 memfd/futex transport and pidfd death watch. Bridge stderr retains plug-in
 diagnostics; scanner stderr remains suppressed.
 Bridge targets and portable fixture tests are enabled and pass native CI on
-macOS and Windows. Linux bridge and engine
+macOS and Windows. Engine fixtures cover shared/dedicated crash and deadline
+failures, structured errors and restart ownership. Sandbox rendering verifies
+exact isolated/local output through the existing host/render APIs;
+plugin.load continues to load in process. Linux bridge, engine and sandbox
 tests pass under RTSan and TSan, retaining the existing deadlines and
 background-only processing contract.
 
