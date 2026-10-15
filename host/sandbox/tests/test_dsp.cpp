@@ -20,7 +20,7 @@
 #include "supple/audio/audio_file.h"
 #include "supple/base/files.h"
 #include "supple/sandbox/commands.h"
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(_WIN32)
 #include "../../dsp-commands/dsp_export_platform.h"
 #endif
 
@@ -471,7 +471,11 @@ TEST_CASE("dsp.export makes a plugin that plays its version of the script, and n
     json::Value first = exportTo(library, output);
     CHECK(first["path"].asString() == utf8(plugin));
     CHECK(first["id"].asString() == "com.example.boost");
+#if defined(_WIN32)
+    CHECK(fs::equivalent(dsp_commands::binary_export::path(first["player"].asString()), player));
+#else
     CHECK(first["player"].asString() == player.string());
+#endif
 #if defined(__APPLE__)
     CHECK(fs::is_directory(plugin));
     CHECK(fs::is_regular_file(plugin / "Contents/Resources/supple-script.json"));
@@ -528,7 +532,11 @@ TEST_CASE("dsp.export makes a plugin that plays its version of the script, and n
     // An export exported again starts from the player, with the new script.
     write(anywhere, "boost", boost(12));
     json::Value second = exportTo(anywhere, root.path / "again");
+#if defined(_WIN32)
+    CHECK(fs::equivalent(dsp_commands::binary_export::path(second["player"].asString()), plugin));
+#else
     CHECK(second["player"].asString() == first["path"].asString());
+#endif
 #if !defined(__APPLE__)
     CHECK(second["bytes"].asInt() == first["bytes"].asInt() + 1);  // "12" for "6"
 #endif
@@ -711,7 +719,12 @@ TEST_CASE("plugin-file export defaults to the script's export folder") {
     auto result = h.bus->execute({"dsp.export", args, kTest});
     REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
     CHECK((*result)["format"].asString() == "clap");
+#if defined(_WIN32)
+    CHECK(fs::equivalent(dsp_commands::binary_export::path((*result)["path"].asString()),
+                         h.host->session().scriptDir() / "native-export/export/Native.clap"));
+#else
     CHECK((*result)["path"].asString() ==
           (h.host->session().scriptDir() / "native-export/export/Native.clap").string());
+#endif
     CHECK(fs::exists(h.host->session().scriptDir() / "native-export/export/Native.clap"));
 }
