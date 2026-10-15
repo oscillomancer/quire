@@ -6,8 +6,11 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <mmsystem.h>
 #include <windows.h>
+
+// WinMM declarations require the Windows base types; keep these groups ordered.
+#include <mmsystem.h>
+
 #include <algorithm>
 #include "midi_input.h"
 namespace supple::engine::detail {
