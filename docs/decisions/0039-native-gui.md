@@ -93,3 +93,9 @@ stock projects' existing OpenGL renderer on macOS (`<PREFIX>_METAL=OFF` and
 `SUPPLE_METAL=OFF`). Their standalone default Metal renderer requires a
 NanoVG Metal dependency that this repository does not vendor. No template
 files or pins change, and no new dependency is introduced.
+
+**2026-10-14 repaint validation note:** MIDI rectangle borders use framebuffer
+pixel coordinates rather than interpolated local coordinates. Apple's software
+renderer rounded an interpolated one-pixel border threshold differently under
+partial and full scissors. The same-platform incremental/full pixel comparison
+remains exact; native cross-platform golden comparisons remain disabled.

@@ -77,15 +77,13 @@ layout(location = 1) in vec4 color;
 layout(location = 2) in vec4 border;
 out vec4 vColor;
 out vec4 vBorder;
-out vec2 vLocal;   // device pixels from the rect's top-left
-out vec2 vSize;    // device pixels
+flat out vec4 vPixelRect;  // top-left and size in framebuffer pixels
 void main() {
     vec2 corner = vec2(gl_VertexID & 1, gl_VertexID >> 1);
     vec2 p = rect.xy + corner * rect.zw;
     vColor = color;
     vBorder = border;
-    vSize = rect.zw * ratio;
-    vLocal = corner * vSize;
+    vPixelRect = rect * ratio;
     gl_Position = vec4(p * transform.xy + transform.zw, 0.0, 1.0);
 }
 )";
@@ -93,10 +91,14 @@ void main() {
 constexpr std::string_view kRectFragment = R"(#version 330 core
 in vec4 vColor;
 in vec4 vBorder;
-in vec2 vLocal;
-in vec2 vSize;
+flat in vec4 vPixelRect;
+layout(origin_upper_left) in vec4 gl_FragCoord;
 out vec4 fragColor;
 void main() {
+    // Pixel coordinates avoid scissor-dependent interpolation rounding at a
+    // border threshold (notably on Apple's software renderer).
+    vec2 vLocal = gl_FragCoord.xy - vPixelRect.xy;
+    vec2 vSize = vPixelRect.zw;
     // A one-device-pixel border where the rect is big enough to carry one.
     bool edge = vBorder.a > 0.0 && vSize.x >= 5.0 && vSize.y >= 5.0 &&
                 (vLocal.x < 1.0 || vLocal.y < 1.0 || vLocal.x > vSize.x - 1.0 || vLocal.y > vSize.y - 1.0);

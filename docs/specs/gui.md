@@ -150,6 +150,8 @@ only what the DAW needs, designed for virtualized, data-heavy views.
     MIDI notes as instanced rectangles, envelopes as line strips, meters
     and spectra as small textures/buffers. Bulk data never goes through
     NanoVG (the spike measured 81 ms/frame doing so).
+    Rectangle borders use framebuffer pixel coordinates so partial and full
+    scissors produce identical border coverage.
   - Order per frame: background → bulk layers (scissored per lane) →
     chrome → overlays (drag ghosts, menus, tooltips).
 - **Text.** NanoVG fonts: Inter (UI) and IBM Plex Mono (numbers, notation,
