@@ -536,11 +536,12 @@ a pipe notification and kqueue child exit. Windows uses pagefile mappings
 and request/done auto-reset events duplicated into the child, a manual-reset
 outward notification, overlapped duplex control pipe and owned process/Job
 handles. The existing background/offline bounded-wait exception and failure
-semantics apply on each platform; native device audio and GUI embedding are
-separate integration boundaries.
+semantics apply on each platform. Native editor hosting follows ADR-0040;
+the DAW shell is integrated separately on port-gui.
 
-POSIX protocol 13 and Header layout are unchanged. Windows native protocol 14
-adds a u64 recipient-owned resource after each frame prefix (all-ones means
+POSIX protocol 15 / Windows protocol 16 carry typed native editor parents
+(ADR-0040), with unchanged Header layout. Windows retains the v14
+u64 recipient-owned resource after each frame prefix (all-ones means
 none) and u64 request/done event handles after Activate's rate/min/max/size.
 Release/acquire on the shared words publishes all arena data. Event waits
 recheck before parking and after wake; stale signals never acknowledge a
@@ -555,8 +556,17 @@ Protocol 12 appends a main-thread `PluginStatus` query to the existing
 control plane, with no shared-memory change. It forwards the generic
 [plugin-status extension](plugin-status-extension.md) for shared and
 dedicated instances. Protocol 13 appends `FactoryPatches` after it (no
-payload, canonical JSON patch array string reply); the version subscription
-now negotiates 13. Earlier operation numbers and the data plane stay unchanged.
+payload, canonical JSON patch array string reply). The version subscription
+now negotiates 15 on POSIX or 16 on Windows. Earlier operation numbers and the data plane stay unchanged.
+
+EditorOpen carries `u8 kind, u64 parent, f64 scale`; see sandbox.md §1 for
+kind values and validation. Windows bridge HWNDs embed across processes;
+Cocoa proxies send floating/zero, and the bridge owns its NSWindow/NSView.
+Native bridge main loops combine UI input, IPC readiness and plugin timer
+deadlines. macOS uses AppKit/CFFileDescriptor; Windows uses native message
+waits. Linux retains its poll/X11 path. Native editor lifecycle/transport
+fixtures run headless; real display tests are opt-in. Native DAW shell
+validation also requires port-gui integration.
 
 `fx.patch.list {fx}` lists read-only factory patch documents as `patches`
 in declaration order (empty if unsupported). `fx.patch.set` takes exactly
