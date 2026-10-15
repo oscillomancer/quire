@@ -185,10 +185,10 @@ CGFloat primaryDisplayTop() {
     return primary ? NSMaxY(primary.frame) : 0;
 }
 }  // namespace
-Instance::EditorFrame FloatingEditorWindow::frame() const {
+EditorFrame FloatingEditorWindow::frame() const {
     NSWindow* window = state_->window;
     const NSRect content = [window contentRectForFrameRect:window.frame];
-    Instance::EditorFrame f;
+    EditorFrame f;
     f.x = static_cast<std::int32_t>(std::lround(content.origin.x));
     f.y = static_cast<std::int32_t>(std::lround(primaryDisplayTop() - NSMaxY(content)));
     f.width = static_cast<std::uint32_t>(std::lround(std::max<CGFloat>(content.size.width, 0)));

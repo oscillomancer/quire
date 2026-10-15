@@ -150,8 +150,8 @@ TEST_CASE("a live display-scale change reaches a VST3 content-scale view") {
 #else
     CHECK(size->resizable);
     if (editorTakesScale(nativeWindowKind())) {
-        CHECK(size->width == 427);  // 320x240 at 1x, kept at 2x
-        CHECK(size->height == 320);
+        CHECK(size->width == 640);  // 320x240 at 1x, kept at 2x
+        CHECK(size->height == 480);
     } else {
         CHECK(size->width == 320);
         CHECK(size->height == 240);

@@ -31,6 +31,7 @@
 #include "supple/clap/editor_picture.h"
 #include "supple/clap/plugin_status.h"
 #include "supple/clap/semantic_params.h"
+#include "supple/host/editor_frame.h"
 #include "supple/json/value.h"
 
 namespace supple {
@@ -402,14 +403,7 @@ class Instance {
         std::uint32_t width = 0, height = 0;
         bool resizable = false;
     };
-    // A bridge-owned editor window's content frame (macOS), in points with the
-    // origin at the top left of the primary display: the same space as SDL
-    // window positions, so it is stored like any other editor placement.
-    struct EditorFrame {
-        std::int32_t x = 0, y = 0;
-        std::uint32_t width = 0, height = 0;
-        bool operator==(const EditorFrame&) const = default;
-    };
+    using EditorFrame = host::EditorFrame;  // a bridge-owned window's content frame
     bool hasEditor() const;
     // `frame` asks a bridge-owned window (Cocoa) to open there, size included
     // when the editor is resizable; other editors ignore it.

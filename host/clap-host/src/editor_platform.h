@@ -11,7 +11,7 @@
 #include "supple/base/native_window.h"
 #include "supple/base/result.h"
 #include "supple/base/waitable.h"
-#include "supple/host/clap_host.h"
+#include "supple/host/editor_frame.h"
 namespace supple::host {
 inline constexpr const char* editorClapApi() {
 #if defined(__APPLE__)
@@ -70,7 +70,7 @@ class FloatingEditorWindow {
     void hide();
     // The window's content frame in points, origin at the top left of the primary
     // display (the space SDL uses for window positions).
-    Instance::EditorFrame frame() const;
+    EditorFrame frame() const;
     void moveTo(int x, int y);  // the content's top-left corner, same space
     bool closed() const;
     bool takeResize(unsigned& width, unsigned& height);
