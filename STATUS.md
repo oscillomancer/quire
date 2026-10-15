@@ -22,7 +22,8 @@ protocol and standalone MCP/proxy have native coverage on both platforms
 Both native platforms enable and test audio-file I/O, recording recovery,
 engine/CLI, dummy/offline rendering and sandbox. PortAudio builds CoreAudio on
 macOS and WASAPI/ASIO on Windows; fake-device tests verify RT/offline equivalence
-in both executors. Actual hardware trials remain opt-in and unmeasured. GUI embedding remains gated on this branch.
+in both executors. Actual hardware trials remain opt-in and unmeasured.
+GUI embedding remains gated on this branch.
 Portable libraries, the session model, stock DSP cores
 and the script suite build independently of those services; see
 CONTRIBUTING.md for the complete gate list. External Windows readers that
@@ -207,8 +208,7 @@ Engine and hosting:
   equivalence coverage. Windows file helpers and audio-file I/O pass native CI.
   Native hosting/scanning (ADR-0036) and PortAudio device builds (ADR-0038) are
   verified; native bridge targets are enabled (ADR-0037), while GUI embedding
-  remains a separate port. Hardware
-  behavior still needs opt-in device trials.
+  remains a separate port. Hardware behavior still needs opt-in device trials.
   Windows event waits admit 64 unique handles. Generic macOS High QoS must be
   self-applied. Native device helpers instead use a startup barrier with Mach
   time constraints (macOS) or MMCSS Pro Audio (Windows); workgroup joining and

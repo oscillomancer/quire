@@ -645,9 +645,11 @@ Isolated Instance::create and createBridgeProcess use the native bridge on
 Linux, macOS and Windows; shared and dedicated crash scopes remain identical.
 Native editor opening fails with host.editor.unsupported until editor embedding
 lands.
-macOS enables the sandbox/offline renderer; Windows waits for native audio-file
-I/O. The macOS engine and dummy backend are enabled separately from JACK
-and editor integration. Windows engine/sandbox wait for audio-file I/O.
+The engine, sandbox and offline renderer run on macOS and Windows through
+native audio-file I/O (ADR-0038). Sandbox rendering accepts isolated host
+instances and retains exact local/bridged output equivalence on each platform.
+The sandbox session's plugin.load command continues to load in process. Native
+device backends and editor embedding remain separate from bridge isolation.
 
 On non-Linux platforms `dsp.export {format: "clap"}` returns `dsp.platform`
 at `/format`, with a hint to select `source`. This is the existing Linux-only

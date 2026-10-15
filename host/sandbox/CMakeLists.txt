@@ -18,8 +18,9 @@ supple_add_library(sandbox
 if(SUPPLE_BUILD_TESTS)
   supple_add_tests(sandbox SOURCES tests/test_render.cpp tests/test_session.cpp tests/test_commands.cpp
                    tests/test_scripts.cpp tests/test_dsp.cpp LABELS rt)
-  add_dependencies(sandbox.tests clap-host-fixtures)
-  target_compile_definitions(sandbox.tests PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>"
+  add_dependencies(sandbox.tests clap-host-fixtures ${PRODUCT_SLUG}-bridge)
+  target_compile_definitions(sandbox.tests PRIVATE BRIDGE_PATH="$<TARGET_FILE:${PRODUCT_SLUG}-bridge>"
+                             FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>"
                              STOCK_CLAP_DIR="${CMAKE_BINARY_DIR}/plugins/clap"
                              SUPPLE_SCRIPT_EXAMPLES="${PROJECT_SOURCE_DIR}/plugins/suite/examples"
                              SUPPLE_EDITORS=$<BOOL:${SUPPLE_BUILD_GUI}>)

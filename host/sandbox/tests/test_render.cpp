@@ -17,12 +17,12 @@ namespace {
 
 const std::filesystem::path kFixture = FIXTURE_CLAP_PATH;
 
-std::unique_ptr<host::Instance> make(const std::string& id) {
+std::unique_ptr<host::Instance> make(const std::string& id, bool isolated = false) {
     auto list = host::scan(std::span<const std::filesystem::path>(&kFixture, 1));
     REQUIRE(list);
     for (const auto& p : *list)
         if (p.id == id) {
-            auto inst = host::Instance::create(p, {});
+            auto inst = host::Instance::create(p, {}, isolated);
             REQUIRE(inst);
             return std::move(*inst);
         }
@@ -359,4 +359,24 @@ TEST_CASE("render rejects malformed transport, chain, input and nonfinite output
     REQUIRE(edge->startProcessing());
     CHECK_FALSE(render(chain, settings, request));
     edge->stopProcessing();
+}
+
+TEST_CASE("sandbox isolated loading renders bit-identically to local instances") {
+    host::setBridgeExecutable(BRIDGE_PATH);
+    auto local = make("com.suppleaudio.test.sine");
+    auto isolated = make("com.suppleaudio.test.sine", true);
+    REQUIRE(isolated->isolated());
+    RenderSettings settings;
+    settings.tailLimitSeconds = 0;
+    RenderRequest request;
+    request.lengthSamples = 4096;
+    request.events = {note(0, true), note(3000, false)};
+    host::Instance* localChain[]{local.get()};
+    host::Instance* isolatedChain[]{isolated.get()};
+    auto reference = render(localChain, settings, request);
+    auto bridged = render(isolatedChain, settings, request);
+    REQUIRE(reference);
+    REQUIRE_MESSAGE(bridged, (bridged ? "" : bridged.error().toString()));
+    CHECK(bridged->audio.channels == reference->audio.channels);
+    CHECK_FALSE(isolated->failed());
 }

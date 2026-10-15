@@ -536,7 +536,8 @@ a pipe notification and kqueue child exit. Windows uses pagefile mappings
 and request/done auto-reset events duplicated into the child, a manual-reset
 outward notification, overlapped duplex control pipe and owned process/Job
 handles. The existing background/offline bounded-wait exception and failure
-semantics apply on each platform; the engine/device and GUI gates are separate.
+semantics apply on each platform; native device audio and GUI embedding are
+separate integration boundaries.
 
 POSIX protocol 13 and Header layout are unchanged. Windows native protocol 14
 adds a u64 recipient-owned resource after each frame prefix (all-ones means
@@ -1254,7 +1255,7 @@ MoveFileEx. Cache identity strings are internal and are not serialized.
 
 ### Native hosting boundary (2026-10-14, ADR-0036)
 
-macOS enables the engine library and CLI with in-process CLAP/VST3 hosting,
+macOS and Windows enable the engine library and CLI with native CLAP/VST3 hosting,
 dummy audio and offline rendering. The platform's RT output must equal its
 offline output, including the anticipative renderer. A native fixture test
 runs this contract through both executors, Console 9, latency compensation and
