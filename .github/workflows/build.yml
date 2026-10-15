@@ -116,6 +116,8 @@ jobs:
         run: |
           export HOMEBREW_NO_AUTO_UPDATE=1
           export HOMEBREW_CACHE="$GITHUB_WORKSPACE/.deps/homebrew"
+          # Link backups belong to the previous runner, unlike bottle downloads.
+          rm -rf "$HOMEBREW_CACHE/Backup"
           brew install ninja sdl3 ccache
           test "$(uname -m)" = arm64
           xcrun clang --version
