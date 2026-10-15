@@ -151,7 +151,9 @@ Windows HWND values retain all pointer bits. Cocoa proxies send floating/zero
 instead of an NSView pointer: the child creates an NSWindow hosting the native
 embedded plugin view, and owns its resize/show/hide/close lifecycle. The open
 reply and other editor operation payloads are unchanged; there is no audio ABI
-change. Reopening a Cocoa floating editor raises the existing window.
+change. A successful open clears retained requests from the previous view
+lifetime so a stale close cannot close its replacement. Reopening a Cocoa
+floating editor raises the existing window.
 
 Windows bridge main waits for IPC and native messages together; Cocoa uses
 AppKit with CFFileDescriptor run-loop sources. There is no editor polling timer.

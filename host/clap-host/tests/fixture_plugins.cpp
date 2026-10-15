@@ -683,6 +683,7 @@ struct Edge {
     // A display-free editor (gap log #39): it records the parent window it is
     // given (read back as parameter 8) and asks for a resize when shown.
     bool guiCreated = false, guiShown = false;
+    std::uint32_t guiCreates = 0;
     std::uint64_t guiParent = 0;
     std::uint32_t guiWidth = 300, guiHeight = 200;
 };
@@ -853,6 +854,7 @@ bool CLAP_ABI edgeGuiPreferred(const clap_plugin_t*, const char** api, bool* flo
 bool CLAP_ABI edgeGuiCreate(const clap_plugin_t* pl, const char* api, bool floating) {
     if (!edgeGuiApi(pl, api, floating) || E(pl)->guiCreated) return false;
     E(pl)->guiCreated = true;
+    ++E(pl)->guiCreates;
     return true;
 }
 void CLAP_ABI edgeGuiDestroy(const clap_plugin_t* pl) {
@@ -904,6 +906,7 @@ bool CLAP_ABI edgeGuiShow(const clap_plugin_t* pl) {
         static_cast<const clap_host_gui_t*>(E(pl)->host->get_extension(E(pl)->host, CLAP_EXT_GUI));
     if (gui) {
         gui->request_resize(E(pl)->host, 320, 240);
+        if (E(pl)->config[0] == 47 && E(pl)->guiCreates == 1) gui->closed(E(pl)->host, false);
         if (E(pl)->config[0] == 6) {
             gui->request_show(E(pl)->host);
             gui->request_hide(E(pl)->host);

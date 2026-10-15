@@ -139,6 +139,26 @@ TEST_CASE("an open native editor closes when its shared bridge crashes") {
     (*crash)->deactivate();
 }
 
+TEST_CASE("reopening a bridged editor discards the previous window's close snapshot") {
+    if (nativeWindowKind() == NativeWindow::Kind::Cocoa)
+        return;  // native windows require the display opt-in
+    setBridgeExecutable(BRIDGE_PATH);
+    auto made =
+        Instance::create(editorFixture(FIXTURE_CLAP_PATH, "com.suppleaudio.test.edge"), {}, true);
+    REQUIRE(made);
+    const std::array<std::uint8_t, 4> state{47, 0, 0, 0};
+    REQUIRE((*made)->loadState(state));
+    NativeWindow parent{nativeWindowKind(), 0x123456789abULL};
+    REQUIRE((*made)->openEditor(parent, 1));
+    // A control round-trip lets child main retain its close snapshot without
+    // consuming it into the parent's editor cache.
+    REQUIRE((*made)->paramValue(8));
+    REQUIRE((*made)->openEditor(parent, 1));
+    CHECK_FALSE((*made)->takeEditorRequests().closed);
+    CHECK((*made)->editorOpen());
+    (*made)->closeEditor();
+}
+
 TEST_CASE("typed editor protocol rejects old payloads and unknown parent kinds") {
     bridge::Writer old;
     old.u64(123);

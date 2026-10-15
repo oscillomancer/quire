@@ -650,6 +650,7 @@ struct Bridge {
                                       "/editor/parent", "request a floating bridge editor"));
                 if (slot.floating) {
                     slot.floating->show();
+                    slot.editor = {};
                     return replyOr(Result<Instance::EditorSize>(slot.floatingSize), writeSize);
                 }
                 auto window = FloatingEditorWindow::create(instance->info().name);
@@ -657,6 +658,9 @@ struct Bridge {
                 parent = (*window)->parent();
 #endif
                 auto size = instance->openEditor(parent, scale);
+                // A successful open starts a new view lifetime. Retained close
+                // requests from its predecessor must not close the new window.
+                if (size) slot.editor = {};
 #if defined(__APPLE__)
                 if (size) {
                     (*window)->resize(size->width, size->height, size->resizable);
