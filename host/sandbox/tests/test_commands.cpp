@@ -2,10 +2,12 @@
 // Copyright (c) 2026 Supple Audio
 #include <doctest/doctest.h>
 #include <supple/product.h>
+#include <algorithm>
 #include <array>
 #include "../../../tests/file_platform.h"
 
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 
@@ -114,35 +116,57 @@ TEST_CASE("every sandbox command example runs against its fixture" * doctest::de
         [&](std::string_view fixture) -> std::unique_ptr<cmd::Host> {
             return makeHost(root.path / std::to_string(n++), {}, fixture.starts_with("dsp_player"));
         },
-        [](std::string_view fixture) {
-#if !defined(__linux__)
-            if (fixture == "dsp_player_editor") return false;
-#endif
-            return SUPPLE_EDITORS || fixture != "dsp_player_editor";
-        });
+        [](std::string_view fixture) { return SUPPLE_EDITORS || fixture != "dsp_player_editor"; });
     INFO((st ? std::string() : st.error().toString()));
     CHECK(st.ok());
-#if defined(__linux__)
-    CHECK(n >= 16);
-#else
-    CHECK(n >= 14);  // two editor pictures still require Linux/EGL
-#endif
+    CHECK(n >= (SUPPLE_EDITORS ? 16 : 14));
 }
 
-#if !defined(__linux__) && SUPPLE_EDITORS
-TEST_CASE("native DSP previews report the unavailable headless drawing capability") {
+#if SUPPLE_EDITORS
+TEST_CASE("DSP previews draw deterministic native PNGs and report pointer edits") {
     Root root;
     cmd::Registry registry;
     registerCommands(registry);
     auto host = makeHost(root.path / "preview", {}, true);
     cmd::Dispatcher dispatcher(registry, *host);
     host->setupFixture(dispatcher, "dsp_player_editor");
-    auto result = dispatcher.execute({"dsp.preview", j(R"({"script":"gain","seconds":0})"), kTest});
-    REQUIRE_FALSE(result);
-    CHECK(result.error().code == "dsp.no_picture");
-    CHECK(result.error().path == "/args/script");
-    CHECK_FALSE(result.error().message.empty());
-    CHECK(result.error().hint.find("Linux") != std::string::npos);
+    auto preview = [&](std::string_view args) {
+        auto result = dispatcher.execute({"dsp.preview", j(args), kTest});
+        REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
+        return *result;
+    };
+    auto first = preview(R"({"script":"gain","seconds":0})");
+    const fs::path path = first["path"].asString();
+    const auto bytes = readFile(path);
+    REQUIRE(bytes);
+    REQUIRE(bytes->size() > 24);
+    constexpr std::array<std::uint8_t, 8> signature{0x89, 'P', 'N', 'G', 13, 10, 26, 10};
+    CHECK(std::equal(signature.begin(), signature.end(), bytes->begin()));
+    CHECK(first["width"].asInt() > 0);
+    CHECK(first["height"].asInt() > 0);
+    CHECK(first["edits"].size() == 0);
+    CHECK(first["problems"].size() == 0);
+    const char* artifacts = std::getenv("SUPPLE_PICTURE_OUTPUT_DIR");
+    auto keep = [&](const char* name) {
+        if (!artifacts || !*artifacts) return;
+        fs::create_directories(artifacts);
+        fs::copy_file(path, fs::path(artifacts) / name, fs::copy_options::overwrite_existing);
+    };
+    keep("dsp-preview.png");
+    auto again = preview(R"({"script":"gain","seconds":0})");
+    CHECK(again["width"] == first["width"]);
+    CHECK(again["height"] == first["height"]);
+    const auto repeated = readFile(path);
+    REQUIRE(repeated);
+    CHECK(*repeated == *bytes);
+    auto dragged = preview(R"({"script":"gain","seconds":0,"pointer":[
+        {"action":"drag","x":86,"y":132,"to_x":86,"to_y":92}]})");
+    CHECK(dragged["edits"]["params"]["gain"].asDouble() > 0);
+    CHECK(dragged["problems"].size() == 0);
+    const auto changed = readFile(path);
+    REQUIRE(changed);
+    CHECK(*changed != *bytes);
+    keep("dsp-preview-dragged.png");
 }
 #endif
 

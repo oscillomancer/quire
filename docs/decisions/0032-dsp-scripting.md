@@ -557,3 +557,19 @@ contracts are in specs/sandbox.md. Native conformance verifies the signed bundle
 scanner/direct-host/bridge loading, factory patches and exact same-platform
 player/binary/source audio. Headless editor pictures still require EGL in the
 template shared stack and remain Linux-only.
+
+### Native headless editor pictures (2026-10-15)
+
+This dated amendment supersedes the Linux/EGL-only picture limit above.
+The bundled template is framework 1.24.0 (template commits ccdcdf5 and ee51285).
+`dsp.preview` and the editor-picture extension use its native renderer:
+EGL on Linux/BSD, Metal with an unattached layer and synchronized RGBA texture
+readback on macOS, and a never-shown WGL window with framebuffer objects on
+Windows. Device/driver failures retain `dsp.no_picture`, now with the actual
+renderer reason and a platform-specific hint. No picture ABI or schema changes.
+The same state draws identically on one rendering setup; pixels need not match
+across platforms. Pointer edits still use the normal gesture path and close
+before return. CI runs the editor examples and PNG/pointer regressions on every
+platform and requires drawing to succeed; Windows gets only Mesa's WGL DLLs,
+not its Direct3D replacements. The picture/spec contracts are in
+`specs/editor-picture-extension.md` and `specs/sandbox.md`.

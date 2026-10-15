@@ -385,9 +385,13 @@ existing export's combined notices) to be readable before it writes the
 plugin. Missing files fail with `dsp.notices` at `/script`, with a hint to
 restore the files. Every successful CLAP export returns its `notices` path.
 
-The script player's headless pictures through `dsp.preview` currently require
-Linux/EGL; macOS and Windows return `dsp.no_picture` with a platform capability
-hint. This does not limit native editor windows.
+The script player's `dsp.preview` pictures use EGL on Linux/BSD, headless
+Metal on macOS and WGL on a never-shown window on Windows. An editor build
+and an available renderer are required; Windows needs OpenGL framebuffer
+objects. Missing devices/drivers return `dsp.no_picture` with the renderer's
+reason and a platform-specific corrective hint. Pictures return top-row-first
+RGBA through the extension; repeated draws of the same state are identical
+on the same rendering setup. Native editor windows are independent.
 
 `dsp.test` and `dsp.preview` locate patch validation errors beneath
 `/patch` (the command boundary adds `/args`), for example
@@ -738,8 +742,9 @@ also verifies each bundle with `codesign --verify --strict`.
 Install into a platform CLAP directory or a folder named in CLAP_PATH: `;`
 separates Windows entries and `:` separates macOS/Linux entries. Standard folders
 are those listed above; export does not modify CLAP_PATH or install system files.
-`dsp.preview` pictures remain Linux/EGL-only inside the template's shared stack;
-native previews continue returning `dsp.no_picture`.
+`dsp.preview` uses the template's native offscreen renderers on all three
+platforms; renderer availability, PNG determinism and pointer edits are tested
+natively. See `editor-picture-extension.md` for the picture contract.
 
 Script-player source reads require a regular file before opening the bounded
 (1 MiB) stream; directories are rejected even where ifstream reports an empty

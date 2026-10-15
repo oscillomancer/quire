@@ -86,7 +86,7 @@ endif()
 # --- editor -------------------------------------------------------------------------------
 
 if (SUPPLE_BUILD_GUI AND supple_tables)
-    supple_test(ui-tests SOURCES ${SUPPLE_FRAMEWORK}/test/ui_test.cpp LINK ${SUPPLE_GL_GUI})
+    supple_test(ui-tests SOURCES ${SUPPLE_FRAMEWORK}/test/ui_test.cpp LINK product-gui)
 
     add_executable(gui-preview ${SUPPLE_FRAMEWORK}/tools/gui_preview.cpp)
     target_link_libraries(gui-preview PRIVATE ${SUPPLE_GL_GUI})

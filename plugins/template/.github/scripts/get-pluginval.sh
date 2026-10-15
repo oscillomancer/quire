@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: MIT
 # Fetches Tracktion's pluginval for this OS and prints the executable's path
 # on stdout (everything else goes to stderr).
 #   PLUGINVAL="$(get-pluginval.sh macos|linux|windows)"

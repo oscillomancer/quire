@@ -10,7 +10,7 @@ on their own.
 **Implementations:** plugin side in the suite layer
 (`plugins/suite/semantic/src/semantic_layer.cpp`, over the plugin
 template's `Instance::watch()` and `Instance::drawEditor()`, framework
-1.21.0); host side in `host/clap-host` (`Instance::watchEditor`,
+1.24.0); host side in `host/clap-host` (`Instance::watchEditor`,
 `Instance::drawEditor`), used by `dsp.preview`.
 
 ## 1. Purpose
@@ -80,17 +80,19 @@ All functions are `[main-thread]`.
 
   The picture shows what the input left: a hover lit, a menu open, a drag
   still held if no release came. It returns false, writing nothing to
-  `out` and applying no input, when the plugin cannot draw without a
-  window here (no offscreen renderer on the platform, no EGL, a build
-  without an editor). `why`, if not null, then receives one line of UTF-8
+  `out`, when the plugin cannot draw without a window here (an unavailable
+  device/driver or a build without an editor). Input is applied only after
+  renderer and font setup succeed; a later readback failure may still leave
+  edits applied. `why`, if not null, then receives one line of UTF-8
   saying why. Drawing uses a context and a thread of its own: a GL
   context the host has current stays current. An open editor is not
   disturbed, though the picture's editor may take telemetry frames the
   open one would have shown.
 
-The picture is not deterministic across machines (GPU or software
-rasterisers differ in antialiasing); hosts compare pictures loosely, if at
-all.
+Drawing the same editor state twice on the same platform/rendering setup
+produces identical bytes. Pictures need not match across platforms or
+machines (GPU or software rasterisers differ in antialiasing); hosts compare
+pictures from different setups loosely, if at all.
 
 ## 3. Host behaviour
 
@@ -104,10 +106,15 @@ reports what the input edited as a merge patch from the semantic patch
 before `draw` to the one after. Isolated (bridged) instances are not
 pictured.
 
-The script player's headless drawing backend currently requires Linux with
-EGL. On macOS and Windows, `dsp.preview` returns the structured `dsp.no_picture`
-error at `/args/plugin` or `/args/script`, with a hint to use Linux with EGL.
-Native editor windows are independent of this headless picture capability.
+The script player draws headlessly with EGL on Linux/BSD, Metal on macOS,
+and WGL on a never-shown window on Windows (framework 1.24.0). Metal uses
+an unattached layer and an RGBA texture with synchronized readback; WGL needs
+framebuffer objects, which Windows' GDI Generic GL 1.1 driver lacks. No
+available renderer, device or driver yields structured `dsp.no_picture` at
+`/args/plugin` or `/args/script`, with the renderer's reason and a corrective
+platform hint. Native editor windows remain independent of this capability.
+CI requires successful pictures and pointer edits on Linux, macOS and Windows;
+Windows runners supply Mesa software WGL beside the test executables.
 
 ## 4. Versioning
 

@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <mutex>
+#include <memory>
 #include <span>
 #include <string>
 #include <thread>
@@ -15,19 +16,30 @@
 
 #include "gui/EditorBase.h"
 
-#if !defined(_WIN32) && !defined(__APPLE__)
-#include <dlfcn.h>
-
 #include "gui/Canvas.h"
-#define SUPPLE_OFFSCREEN_EGL 1
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <GL/gl.h>
+#elif defined(__APPLE__)
+#if !SUPPLE_METAL
+#include <OpenGL/OpenGL.h>
+#endif
 #else
-#define SUPPLE_OFFSCREEN_EGL 0
+#include <dlfcn.h>
 #endif
 
 namespace supple::gui {
 
-#if SUPPLE_OFFSCREEN_EGL
 namespace {
+
+#if !defined(_WIN32) && !defined(__APPLE__)
 
 // EGL as far as this file uses it, declared here rather than taken from
 // <EGL/egl.h>, which a build machine need not have: these types and numbers
@@ -133,7 +145,137 @@ struct Display {
     Display& operator=(const Display&) = delete;
 };
 
-CanvasProc resolveGl(const char* name) { return reinterpret_cast<CanvasProc>(egl().getProcAddress(name)); }
+#endif
+
+// The platform state lives entirely on the worker thread, including every
+// failure path. No context or window is left current on the caller's thread.
+struct Context {
+#if defined(_WIN32)
+    HWND window = nullptr;
+    HDC dc = nullptr;
+    HGLRC gl = nullptr;
+    bool open(std::string& why) {
+        // The system's own class avoids DLL-owned class registration and its
+        // teardown hazards. WS_POPUP without WS_VISIBLE is never shown.
+        window = CreateWindowExW(0, L"STATIC", L"", WS_POPUP, 0, 0, 1, 1,
+                                 nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        if (!window || !(dc = GetDC(window))) {
+            why = "no offscreen drawing: WGL could not create a hidden window";
+            return false;
+        }
+        PIXELFORMATDESCRIPTOR format{};
+        format.nSize = sizeof(format);
+        format.nVersion = 1;
+        format.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL;
+        format.iPixelType = PFD_TYPE_RGBA;
+        format.cColorBits = 32;
+        format.cDepthBits = 24;
+        format.cStencilBits = 8;
+        const int pixelFormat = ChoosePixelFormat(dc, &format);
+        if (!pixelFormat || !SetPixelFormat(dc, pixelFormat, &format)) {
+            why = "no offscreen drawing: WGL has no OpenGL pixel format";
+            return false;
+        }
+        gl = wglCreateContext(dc);
+        if (!gl || !wglMakeCurrent(dc, gl)) {
+            why = "no offscreen drawing: WGL could not make an OpenGL context current";
+            return false;
+        }
+        return true;
+    }
+    ~Context() {
+        if (gl) {
+            wglMakeCurrent(nullptr, nullptr);
+            wglDeleteContext(gl);
+        }
+        if (dc) ReleaseDC(window, dc);
+        if (window) DestroyWindow(window);
+    }
+#elif defined(__APPLE__)
+#if SUPPLE_METAL
+    // CanvasMetal owns the device, queue and unattached layer, with the target.
+    bool open(std::string&) { return true; }
+#else
+    // The optional GL preview/test backend still builds on macOS. The plugin
+    // uses Metal by default; this does not add GL to the Metal plugin.
+    CGLContextObj gl = nullptr;
+    bool open(std::string& why) {
+        const CGLPixelFormatAttribute attributes[] = {kCGLPFAAccelerated, kCGLPFAColorSize,
+            static_cast<CGLPixelFormatAttribute>(32), kCGLPFADepthSize,
+            static_cast<CGLPixelFormatAttribute>(24), kCGLPFAStencilSize,
+            static_cast<CGLPixelFormatAttribute>(8), static_cast<CGLPixelFormatAttribute>(0)};
+        CGLPixelFormatObj format = nullptr;
+        GLint count = 0;
+        const CGLError chosen = CGLChoosePixelFormat(attributes, &format, &count);
+        const CGLError made = format ? CGLCreateContext(format, nullptr, &gl) : chosen;
+        if (format) CGLDestroyPixelFormat(format);
+        if (made != kCGLNoError || !gl || CGLSetCurrentContext(gl) != kCGLNoError) {
+            why = "no offscreen drawing: CGL could not make an OpenGL context current";
+            return false;
+        }
+        return true;
+    }
+    ~Context() {
+        if (gl) {
+            CGLSetCurrentContext(nullptr);
+            CGLDestroyContext(gl);
+        }
+    }
+#endif
+#else
+    const Egl& e = egl();
+    // Construct Display only after the loader has succeeded.
+    std::unique_ptr<Display> d;
+    EGLContext gl = nullptr;
+    EGLSurface surface = nullptr;
+    bool open(std::string& why) {
+        if (!e.getProcAddress) {
+            why = "no offscreen drawing: " + e.problem;
+            return false;
+        }
+        d = std::make_unique<Display>(e);
+        if (!d->display) {
+            why = "no offscreen drawing: EGL found no display, not even a surfaceless one";
+            return false;
+        }
+        if (!e.bindApi(kOpenGlApi)) {
+            why = "no offscreen drawing: EGL offers no desktop OpenGL";
+            return false;
+        }
+        const EGLint wantPbuffer[] = {kSurfaceType, kPbufferBit, kRenderableType, kOpenGlBit, kNone};
+        EGLConfig config = nullptr;
+        EGLint configs = 0;
+        if (!e.chooseConfig(d->display, wantPbuffer, &config, 1, &configs) || configs < 1) config = nullptr;
+        if (!config && !(d->surfaceless && d->noConfig)) {
+            why = "no offscreen drawing: EGL has no configuration for OpenGL";
+            return false;
+        }
+        gl = e.createContext(d->display, config, nullptr, nullptr);
+        if (!gl) {
+            why = "no offscreen drawing: EGL made no OpenGL context";
+            return false;
+        }
+        if (!d->surfaceless && config) {
+            const EGLint size[] = {kWidth, 1, kHeight, 1, kNone};
+            surface = e.createPbuffer(d->display, config, size);
+        }
+        if (!e.makeCurrent(d->display, surface, surface, gl)) {
+            why = "no offscreen drawing: the OpenGL context would not become current";
+            return false;
+        }
+        return true;
+    }
+    ~Context() {
+        if (!d || !gl) return;
+        e.makeCurrent(d->display, nullptr, nullptr, nullptr);
+        if (surface) e.destroySurface(d->display, surface);
+        e.destroyContext(d->display, gl);
+    }
+#endif
+    Context() = default;
+    Context(const Context&) = delete;
+    Context& operator=(const Context&) = delete;
+};
 
 // The pointer input, as Window would pass it on, with the main button.
 void apply(EditorBase& editor, std::span<const PointerInput> input) {
@@ -153,114 +295,59 @@ void apply(EditorBase& editor, std::span<const PointerInput> input) {
 // One picture, on the calling thread: a context, a framebuffer, the editor
 // drawn into it, read back.
 bool draw(EditorBase& editor, double scale, std::span<const PointerInput> input, Picture& out, std::string& why) {
-    const Egl& e = egl();
-    if (!e.getProcAddress) {
-        why = "no offscreen drawing: " + e.problem;
-        return false;
-    }
-    Display d(e);
-    if (!d.display) {
-        why = "no offscreen drawing: EGL found no display, not even a surfaceless one";
-        return false;
-    }
-    if (!e.bindApi(kOpenGlApi)) {
-        why = "no offscreen drawing: EGL offers no desktop OpenGL";
-        return false;
-    }
-    const EGLint wantPbuffer[] = {kSurfaceType, kPbufferBit, kRenderableType, kOpenGlBit, kNone};
-    EGLConfig config = nullptr;
-    EGLint configs = 0;
-    if (!e.chooseConfig(d.display, wantPbuffer, &config, 1, &configs) || configs < 1) config = nullptr;
-    if (!config && !(d.surfaceless && d.noConfig)) {
-        why = "no offscreen drawing: EGL has no configuration for OpenGL";
-        return false;
-    }
-    EGLContext context = e.createContext(d.display, config, nullptr, nullptr);
-    if (!context) {
-        why = "no offscreen drawing: EGL made no OpenGL context";
-        return false;
-    }
-    // Drawn into a framebuffer object, so a surface is only a formality:
-    // none where EGL allows it, one pixel otherwise.
-    EGLSurface surface = nullptr;
-    if (!d.surfaceless && config) {
-        const EGLint size[] = {kWidth, 1, kHeight, 1, kNone};
-        surface = e.createPbuffer(d.display, config, size);
-    }
-    if (!e.makeCurrent(d.display, surface, surface, context)) {
-        if (surface) e.destroySurface(d.display, surface);
-        e.destroyContext(d.display, context);
-        why = "no offscreen drawing: the OpenGL context would not become current";
-        return false;
-    }
+    Context context;
+    if (!context.open(why)) return false;
 
     const double s = std::clamp(std::isfinite(scale) ? scale : 1.0, 0.25, 4.0);
     const int w = std::max(1, static_cast<int>(std::lround(editor.width() * s)));
     const int h = std::max(1, static_cast<int>(std::lround(editor.height() * s)));
-    bool ok = false;
-    if (const unsigned fb = canvasTargetCreate(w, h, resolveGl)) {
-        if (NVGcontext* vg = canvasCreate(nullptr)) {
-            if (editor.attach(vg)) {
-                editor.idle(0.0);  // telemetry drained: the meters show what played
-                if (!input.empty()) {
-                    apply(editor, input);
-                    editor.idle(0.0);
-                }
-                canvasViewport(w, h);
-                const NVGcolor bg = rgb(editor.background());
-                canvasClear(vg, bg.r, bg.g, bg.b);
-                nvgBeginFrame(vg, static_cast<float>(w), static_cast<float>(h), 1.0f);
-                nvgScale(vg, static_cast<float>(s), static_cast<float>(s));
-                editor.render(vg);
-                nvgEndFrame(vg);
-                std::vector<uint8_t> rows(static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
-                canvasReadPixelsRGBA(w, h, rows.data());
-                // GL's rows run from the bottom.
-                out.width = w;
-                out.height = h;
-                out.rgba.resize(rows.size());
-                const size_t stride = static_cast<size_t>(w) * 4;
-                for (int y = 0; y < h; ++y)
-                    std::memcpy(out.rgba.data() + static_cast<size_t>(y) * stride,
-                                rows.data() + static_cast<size_t>(h - 1 - y) * stride, stride);
-                ok = true;
-                editor.focusLost();  // every gesture the input opened, ended
-                editor.detach();
-            } else {
-                why = "the editor's fonts would not load";
-            }
-            canvasDestroy(vg);
-        } else {
-            why = "NanoVG would not start on the offscreen context";
-        }
-        canvasTargetDestroy(fb);
-    } else {
-        why = "no offscreen drawing: the OpenGL context has no framebuffer objects";
+    const char* problem = nullptr;
+    std::unique_ptr<CanvasTarget, decltype(&canvasTargetDestroy)> target(
+        canvasTargetCreate(w, h, &problem), canvasTargetDestroy);
+    if (!target) {
+        why = problem;
+        return false;
     }
-    e.makeCurrent(d.display, nullptr, nullptr, nullptr);
-    if (surface) e.destroySurface(d.display, surface);
-    e.destroyContext(d.display, context);
+    NVGcontext* vg = canvasTargetContext(target.get());
+    if (!editor.attach(vg)) {
+        why = "the editor's fonts would not load";
+        return false;
+    }
+    editor.idle(0.0);  // telemetry drained: the meters show what played
+    if (!input.empty()) {
+        apply(editor, input);
+        editor.idle(0.0);
+    }
+    canvasViewport(w, h);
+    const NVGcolor bg = rgb(editor.background());
+    canvasClear(vg, bg.r, bg.g, bg.b);
+    nvgBeginFrame(vg, static_cast<float>(w), static_cast<float>(h), 1.0f);
+    nvgScale(vg, static_cast<float>(s), static_cast<float>(s));
+    editor.render(vg);
+    nvgEndFrame(vg);
+    out.width = w;
+    out.height = h;
+    out.rgba.resize(static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
+    const bool ok = canvasReadPixelsRGBA(target.get(), w, h, out.rgba.data()) != 0;
+    editor.focusLost();  // every gesture the input opened, ended
+    editor.detach();
+    if (!ok) {
+        why = "no offscreen drawing: render target readback failed";
+        out = Picture{};
+    }
     return ok;
 }
 
 }  // namespace
-#endif
 
 bool drawOffscreen(EditorBase& editor, double scale, std::span<const PointerInput> input, Picture& out,
                    std::string* why) {
     out = Picture{};
     std::string problem;
-#if SUPPLE_OFFSCREEN_EGL
     bool ok = false;
-    // A thread of its own: whatever GL context the caller has current stays
-    // current, and EGL's per-thread state goes with the thread.
+    // A thread of its own: whatever context the caller has stays current.
     std::thread worker([&] { ok = draw(editor, scale, input, out, problem); });
     worker.join();
-#else
-    (void)editor, (void)scale, (void)input;
-    const bool ok = false;
-    problem = "drawing an editor without a window is not available on this platform yet";
-#endif
     if (!ok && why) *why = problem;
     return ok;
 }

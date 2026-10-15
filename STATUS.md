@@ -208,10 +208,10 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   `Canvas`, `pointer()` to drag and click what it draws, editing
   parameters as a user would, `Shared` members for what the audio code
   shows it); one that does not gets the automatic editor. `dsp.preview`
-  draws a plugin's editor to a PNG without a window (EGL, Linux only; the
-  editor-picture extension), after clicks, drags and wheel turns it is
-  given, and says what they edited. Plugin-file exports are for Linux
-  only.
+  draws a plugin's editor to a PNG without a visible window (EGL on Linux,
+  Metal on macOS, WGL on Windows; the editor-picture extension), after clicks, drags and wheel turns it is
+  given, and says what they edited. Plugin-file exports run on Linux,
+  macOS and Windows.
 
 Benchmarks are in `docs/benchmarks/`: B1, 30 Orrery tracks with EQ and
 compression at 48 kHz and 64 frames without xruns using anticipation
@@ -319,8 +319,9 @@ GUI:
   start time. GUI socket/screenset and source-export integration fixtures are
   enabled and pass native CI on macOS and Windows. macOS bulk rectangle edges
   align to framebuffer pixels so partial repaints match complete repaints exactly.
-  Script-player headless editor pictures (`dsp.preview`) still require
-  Linux/EGL; native builds return `dsp.no_picture` with a capability hint.
+  Script-player headless pictures (`dsp.preview`) use framework 1.24.0's
+  EGL, Metal and WGL renderers. Native CI requires pictures and pointer edits;
+  missing devices/drivers return `dsp.no_picture` with a corrective hint.
 - No autoscroll during drags; no resize cursor; plugins can be dropped onto
   mixer strips but not onto track-panel rows.
 
@@ -329,8 +330,8 @@ Plugins:
   name for their host tests and do not retain the JIT's loop budget (a loop
   that never ends hangs a native export). Exports include declared factory
   patches, but do not package external audio files or the patch of a
-  currently loaded instance. Preview requires an editor build and EGL on
-  Linux.
+  currently loaded instance. Preview requires an editor build and an
+  available offscreen renderer (EGL, Metal or WGL with framebuffer objects).
 - Scripts need a JIT: there is no fallback for hosts that forbid executable
   memory (MIR's interpreter is a test backend, not real-time safe).
 - A script save that redefines the plugin while an editor drag is under way

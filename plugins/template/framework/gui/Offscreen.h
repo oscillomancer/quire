@@ -5,10 +5,11 @@
 // show a person, an agent or a test what it looks like (a layer's
 // Instance::drawEditor).
 //
-// Linux and the BSDs only, for now: through EGL with no surface, which Mesa
-// provides on a GPU and in software alike. libEGL is loaded the first time a
-// picture is asked for, so a plugin has no link dependency on it. Elsewhere,
-// and where EGL is missing, drawOffscreen() says why and draws nothing.
+// Linux and the BSDs use EGL without a surface (Mesa supports GPUs and
+// software rendering); libEGL is loaded on demand, with no link dependency.
+// Windows uses WGL on a hidden window, requiring OpenGL framebuffer objects.
+// macOS uses headless Metal with the same renderer as the plugin (or CGL if
+// configured without Metal). Missing devices/drivers fail with an explanation.
 //
 // The editor gets a context of its own, on a thread of its own (so a GL
 // context the caller has current is left alone), is drained of telemetry
@@ -32,8 +33,9 @@ namespace supple::gui {
 
 class EditorBase;
 
-// False, saying why in `why`, when nothing could be drawn; then the input
-// was not applied either. `scale` is clamped to 0.25 .. 4.
+// False, saying why in `why`, when no picture could be drawn. Pointer input
+// is applied only after context and font setup succeed; a later readback
+// failure can still leave edits applied. `scale` is clamped to 0.25 .. 4.
 bool drawOffscreen(EditorBase& editor, double scale, std::span<const PointerInput> input, Picture& out,
                    std::string* why = nullptr);
 inline bool drawOffscreen(EditorBase& editor, double scale, Picture& out, std::string* why = nullptr) {

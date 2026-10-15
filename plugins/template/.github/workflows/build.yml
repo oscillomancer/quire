@@ -44,6 +44,8 @@ env:
   CPM_SOURCE_CACHE: ${{ github.workspace }}/.deps/cpm
   FETCH_DIR: ${{ github.workspace }}/.deps/fetch
   CTEST_OUTPUT_ON_FAILURE: "1"
+  SUPPLE_REQUIRE_OFFSCREEN: "1"
+  CMAKE_BUILD_PARALLEL_LEVEL: "6"
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -385,6 +387,16 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
+
+      # Before adding Mesa, exercise the real GDI Generic GL 1.1 failure.
+      # The ordinary Test step below requires successful pictures with Mesa.
+      - name: Offscreen failure without a GPU driver
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && matrix.product == 'starter' }}
+        run: |
+          mkdir -p logs
+          env -u SUPPLE_REQUIRE_OFFSCREEN ./build/${{ matrix.preset }}/ui-tests without_a_window > logs/offscreen-no-driver.txt
+          cat logs/offscreen-no-driver.txt
+          grep -F "the OpenGL context has no framebuffer objects" logs/offscreen-no-driver.txt
 
       # The runner has no GPU driver; see get-mesa-windows.sh. Placed beside
       # the build's executables, so win32-embedding and gui-preview draw.

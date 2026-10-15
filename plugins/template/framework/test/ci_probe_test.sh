@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: MIT
 # The CI wrapper must reject the cached-size false positive, native/report
 # mismatches independently, and a silent plugin; a note effect's notes count. Runs on Linux too, without Cocoa or a GPU.
 set -euo pipefail

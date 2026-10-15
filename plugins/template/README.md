@@ -90,6 +90,11 @@ hardware before shipping. Windows (MSVC, OpenGL) is built and tested by CI
 the same way, editor embedding included, on a runner without a GPU; open it
 in real hosts on a real Windows machine before shipping.
 
+Windowless editor pictures (`gui::drawOffscreen`) use EGL on Linux/BSD,
+WGL on a hidden window on Windows, and headless Metal on macOS. They return
+top-row-first RGBA and explain missing rendering devices or drivers. CI
+requires the pictures to render on all three platforms.
+
 ## License
 
 The template, framework included, is MIT licensed, copyright (c) 2026 Supple

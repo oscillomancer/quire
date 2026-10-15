@@ -464,6 +464,7 @@ TEST(a_scripts_pointer_edits_its_parameters_in_a_picture) {
                                                 {CLAP_SUPPLE_POINTER_RELEASE, 0, 200, 160, 0}};
     Text out, why;
     if (!picture->draw(a.plugin, 1.0, drag, 4, &out.out, &why.out)) {
+        CHECK_MSG(!std::getenv("SUPPLE_REQUIRE_OFFSCREEN"), "%s", why.text.c_str());
         std::printf("    (%s: skipped)\n", why.text.c_str());
         return;
     }

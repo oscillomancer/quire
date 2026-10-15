@@ -243,77 +243,124 @@ void canvasReadPixels(int w, int h, unsigned char* rgb)
     glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, rgb);
 }
 
-// Drawing without a window: a framebuffer object of the size asked for, with
-// the stencil NVG_STENCIL_STROKES needs. Its entry points are GL 3.0's (and
-// ARB_framebuffer_object's), resolved through the caller's loader rather
-// than linked, so nothing here depends on how GL was loaded.
+// A target owns its entry points and storage: simultaneous offscreen editors
+// must not delete one another's renderbuffers. Windows' calling convention
+// matters on 32-bit builds as well as on the 64-bit CI runners.
+#include <stdlib.h>
+#include <string.h>
+#if !defined(_WIN32)
+#  include <dlfcn.h>
+#  ifndef APIENTRY
+#    define APIENTRY
+#  endif
+#endif
 
-typedef void (*CanvasGenFn)(GLsizei, GLuint*);
-typedef void (*CanvasDeleteFn)(GLsizei, const GLuint*);
-typedef void (*CanvasBindFn)(GLenum, GLuint);
-typedef void (*CanvasStorageFn)(GLenum, GLenum, GLsizei, GLsizei);
-typedef void (*CanvasAttachFn)(GLenum, GLenum, GLenum, GLuint);
-typedef GLenum (*CanvasStatusFn)(GLenum);
+typedef void (APIENTRY *CanvasGenFn)(GLsizei, GLuint*);
+typedef void (APIENTRY *CanvasDeleteFn)(GLsizei, const GLuint*);
+typedef void (APIENTRY *CanvasBindFn)(GLenum, GLuint);
+typedef void (APIENTRY *CanvasStorageFn)(GLenum, GLenum, GLsizei, GLsizei);
+typedef void (APIENTRY *CanvasAttachFn)(GLenum, GLenum, GLenum, GLuint);
+typedef GLenum (APIENTRY *CanvasStatusFn)(GLenum);
 
-static struct {
+struct CanvasTarget {
     CanvasGenFn genFramebuffers, genRenderbuffers;
     CanvasDeleteFn deleteFramebuffers, deleteRenderbuffers;
     CanvasBindFn bindFramebuffer, bindRenderbuffer;
     CanvasStorageFn renderbufferStorage;
     CanvasAttachFn framebufferRenderbuffer;
     CanvasStatusFn checkFramebufferStatus;
-    GLuint buffers[2];
-} target;
+    GLuint framebuffer, buffers[2];
+    NVGcontext* vg;
+};
 
-unsigned canvasTargetCreate(int w, int h, CanvasProc (*resolve)(const char* name))
+// GL is already linked; resolve the FBO functions here so the renderer seam
+// does not expose a GL loader to its callers.
+static void (*canvasResolve(const char* name))(void)
 {
-    // GL 3.0 and ARB_framebuffer_object use these numbers.
+#if defined(_WIN32)
+    return (void (*)(void))suppleResolveGL(name);
+#else
+    void* symbol = dlsym(RTLD_DEFAULT, name);
+    void (*proc)(void) = NULL;
+    // POSIX guarantees dlsym's conversion; memcpy also satisfies ISO C's
+    // pedantic diagnostics without an object-to-function-pointer cast.
+    memcpy(&proc, &symbol, sizeof(proc));
+    return proc;
+#endif
+}
+
+CanvasTarget* canvasTargetCreate(int w, int h, const char** why)
+{
     const GLenum kFramebuffer = 0x8D40, kRenderbuffer = 0x8D41, kRgba8 = 0x8058, kDepthStencil = 0x88F0,
                  kColour0 = 0x8CE0, kDepthStencilAttachment = 0x821A, kComplete = 0x8CD5;
-    target.genFramebuffers = (CanvasGenFn)resolve("glGenFramebuffers");
-    target.genRenderbuffers = (CanvasGenFn)resolve("glGenRenderbuffers");
-    target.deleteFramebuffers = (CanvasDeleteFn)resolve("glDeleteFramebuffers");
-    target.deleteRenderbuffers = (CanvasDeleteFn)resolve("glDeleteRenderbuffers");
-    target.bindFramebuffer = (CanvasBindFn)resolve("glBindFramebuffer");
-    target.bindRenderbuffer = (CanvasBindFn)resolve("glBindRenderbuffer");
-    target.renderbufferStorage = (CanvasStorageFn)resolve("glRenderbufferStorage");
-    target.framebufferRenderbuffer = (CanvasAttachFn)resolve("glFramebufferRenderbuffer");
-    target.checkFramebufferStatus = (CanvasStatusFn)resolve("glCheckFramebufferStatus");
-    if (!target.genFramebuffers || !target.genRenderbuffers || !target.deleteFramebuffers ||
-        !target.deleteRenderbuffers || !target.bindFramebuffer || !target.bindRenderbuffer ||
-        !target.renderbufferStorage || !target.framebufferRenderbuffer || !target.checkFramebufferStatus)
-        return 0;
-    GLuint fb = 0;
-    target.genFramebuffers(1, &fb);
-    target.bindFramebuffer(kFramebuffer, fb);
-    target.genRenderbuffers(2, target.buffers);
-    target.bindRenderbuffer(kRenderbuffer, target.buffers[0]);
-    target.renderbufferStorage(kRenderbuffer, kRgba8, w, h);
-    target.framebufferRenderbuffer(kFramebuffer, kColour0, kRenderbuffer, target.buffers[0]);
-    target.bindRenderbuffer(kRenderbuffer, target.buffers[1]);
-    target.renderbufferStorage(kRenderbuffer, kDepthStencil, w, h);
-    target.framebufferRenderbuffer(kFramebuffer, kDepthStencilAttachment, kRenderbuffer, target.buffers[1]);
-    if (target.checkFramebufferStatus(kFramebuffer) != kComplete) {
-        canvasTargetDestroy(fb);
-        return 0;
+    CanvasTarget* target = (CanvasTarget*)calloc(1, sizeof(CanvasTarget));
+    *why = "no offscreen drawing: the OpenGL context has no framebuffer objects";
+    if (!target) return NULL;
+    target->genFramebuffers = (CanvasGenFn)canvasResolve("glGenFramebuffers");
+    target->genRenderbuffers = (CanvasGenFn)canvasResolve("glGenRenderbuffers");
+    target->deleteFramebuffers = (CanvasDeleteFn)canvasResolve("glDeleteFramebuffers");
+    target->deleteRenderbuffers = (CanvasDeleteFn)canvasResolve("glDeleteRenderbuffers");
+    target->bindFramebuffer = (CanvasBindFn)canvasResolve("glBindFramebuffer");
+    target->bindRenderbuffer = (CanvasBindFn)canvasResolve("glBindRenderbuffer");
+    target->renderbufferStorage = (CanvasStorageFn)canvasResolve("glRenderbufferStorage");
+    target->framebufferRenderbuffer = (CanvasAttachFn)canvasResolve("glFramebufferRenderbuffer");
+    target->checkFramebufferStatus = (CanvasStatusFn)canvasResolve("glCheckFramebufferStatus");
+    if (!target->genFramebuffers || !target->genRenderbuffers || !target->deleteFramebuffers ||
+        !target->deleteRenderbuffers || !target->bindFramebuffer || !target->bindRenderbuffer ||
+        !target->renderbufferStorage || !target->framebufferRenderbuffer || !target->checkFramebufferStatus) {
+        free(target);
+        return NULL;
     }
-    return fb;
+    target->genFramebuffers(1, &target->framebuffer);
+    target->bindFramebuffer(kFramebuffer, target->framebuffer);
+    target->genRenderbuffers(2, target->buffers);
+    target->bindRenderbuffer(kRenderbuffer, target->buffers[0]);
+    target->renderbufferStorage(kRenderbuffer, kRgba8, w, h);
+    target->framebufferRenderbuffer(kFramebuffer, kColour0, kRenderbuffer, target->buffers[0]);
+    target->bindRenderbuffer(kRenderbuffer, target->buffers[1]);
+    target->renderbufferStorage(kRenderbuffer, kDepthStencil, w, h);
+    target->framebufferRenderbuffer(kFramebuffer, kDepthStencilAttachment, kRenderbuffer, target->buffers[1]);
+    if (target->checkFramebufferStatus(kFramebuffer) != kComplete) {
+        canvasTargetDestroy(target);
+        return NULL;
+    }
+    // Check FBO support first, so GDI Generic GL 1.1 reports the actual limit.
+    if (!canvasLoad() || !(target->vg = canvasCreate(NULL))) {
+        *why = "NanoVG would not start on the offscreen context";
+        canvasTargetDestroy(target);
+        return NULL;
+    }
+    return target;
 }
 
-void canvasTargetDestroy(unsigned fb)
+NVGcontext* canvasTargetContext(CanvasTarget* target) { return target->vg; }
+
+void canvasTargetDestroy(CanvasTarget* target)
 {
-    const GLenum kFramebuffer = 0x8D40;
-    GLuint name = fb;
-    if (!target.bindFramebuffer) return;
-    target.bindFramebuffer(kFramebuffer, 0);
-    target.deleteRenderbuffers(2, target.buffers);
-    target.deleteFramebuffers(1, &name);
-    target.buffers[0] = target.buffers[1] = 0;
+    if (!target) return;
+    canvasDestroy(target->vg);
+    target->bindFramebuffer(0x8D40, 0);
+    target->deleteRenderbuffers(2, target->buffers);
+    target->deleteFramebuffers(1, &target->framebuffer);
+    free(target);
 }
 
-void canvasReadPixelsRGBA(int w, int h, unsigned char* rgba)
+int canvasReadPixelsRGBA(CanvasTarget* target, int w, int h, unsigned char* rgba)
 {
+    (void)target;
     glFinish();
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    // GL reads bottom first. Swap in place, without another picture allocation.
+    const size_t stride = (size_t)w * 4;
+    for (int y = 0; y < h / 2; ++y) {
+        unsigned char* top = rgba + (size_t)y * stride;
+        unsigned char* bottom = rgba + (size_t)(h - 1 - y) * stride;
+        for (size_t x = 0; x < stride; ++x) {
+            const unsigned char c = top[x];
+            top[x] = bottom[x];
+            bottom[x] = c;
+        }
+    }
+    return glGetError() == GL_NO_ERROR;
 }

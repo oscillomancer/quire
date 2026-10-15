@@ -31,6 +31,7 @@ concurrency:
 env:
   CTEST_OUTPUT_ON_FAILURE: '1'
   CMAKE_BUILD_PARALLEL_LEVEL: '6'
+  SUPPLE_REQUIRE_OFFSCREEN: '1'
 
 jobs:
   plan:
@@ -183,12 +184,15 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
           TMPDIR: /tmp
+          SUPPLE_PICTURE_OUTPUT_DIR: ${{ github.workspace }}/build/${{ matrix.preset }}/pictures
         run: xvfb-run -a -s '-screen 0 1920x1080x24' ctest --preset dev
       - name: Windows software OpenGL for GUI tests
         if: matrix.platform == 'windows'
         run: bash .github/scripts/gui-mesa-windows.sh
       - name: Test portable targets
         if: matrix.platform != 'linux'
+        env:
+          SUPPLE_PICTURE_OUTPUT_DIR: ${{ github.workspace }}/build/${{ matrix.preset }}/pictures
         run: ctest --preset ${{ matrix.preset }}
       - name: Save Linux compiler cache
         if: always() && matrix.platform == 'linux' && steps.compiler-cache.outputs.cache-hit != 'true'
@@ -215,4 +219,12 @@ jobs:
         with:
           name: gui-smoke-${{ matrix.platform }}
           path: build/${{ matrix.preset }}/daw/gui/*.png
+          if-no-files-found: ignore
+
+      - name: DSP editor pictures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsp-pictures-${{ matrix.platform }}
+          path: build/${{ matrix.preset }}/pictures/*.png
           if-no-files-found: ignore

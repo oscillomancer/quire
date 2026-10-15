@@ -1769,6 +1769,7 @@ TEST(the_editor_draws_without_a_window_at_any_scale) {
     Picture picture;
     std::string why;
     if (!drawOffscreen(*editor, 1.5, picture, &why)) {
+        CHECK_MSG(!std::getenv("SUPPLE_REQUIRE_OFFSCREEN"), "%s", why.c_str());
         std::printf("    (%s: skipped)\n", why.c_str());
         CHECK(!why.empty() && picture.rgba.empty());
         return;
@@ -1784,6 +1785,51 @@ TEST(the_editor_draws_without_a_window_at_any_scale) {
     // Drawn again, the same picture, and the editor left as it was.
     Picture again;
     CHECK(drawOffscreen(*editor, 1.5, again) && again.rgba == picture.rgba);
+}
+
+// Fixed colours make channel order, row order, scaling and compositing
+// measurable; a product's changing artwork cannot serve as those assertions.
+TEST(offscreen_pixels_have_rgba_channels_top_rows_and_opaque_compositing) {
+    MockHost host;
+    const Theme theme{};
+    struct Swatches final : EditorBase {
+        Swatches(EditorHost& h, const Theme& t) : EditorBase(h, t, 64, 48) { usePeakMeters(false); }
+        void paint(NVGcontext* vg) override {
+            auto fill = [&](float y, NVGcolor colour) {
+                nvgBeginPath(vg);
+                nvgRect(vg, 0, y, 64, 24);
+                nvgFillColor(vg, colour);
+                nvgFill(vg);
+            };
+            fill(0, nvgRGBA(255, 0, 0, 255));
+            fill(24, nvgRGBA(0, 0, 255, 255));
+            nvgBeginPath(vg);
+            nvgRect(vg, 32, 0, 32, 48);
+            nvgFillColor(vg, nvgRGBA(0, 255, 0, 128));
+            nvgFill(vg);
+        }
+    } editor(host, theme);
+    for (double scale : {0.25, 1.0, 1.5, 2.0, 4.0}) {
+        Picture picture;
+        std::string why;
+        if (!drawOffscreen(editor, scale, picture, &why)) {
+            CHECK_MSG(!std::getenv("SUPPLE_REQUIRE_OFFSCREEN"), "%s", why.c_str());
+            std::printf("    (%s: skipped)\n", why.c_str());
+            return;
+        }
+        CHECK(picture.width == static_cast<int>(64 * scale));
+        CHECK(picture.height == static_cast<int>(48 * scale));
+        CHECK(picture.rgb(picture.width / 4, picture.height / 4) == 0xff0000);
+        CHECK(picture.rgb(picture.width / 4, 3 * picture.height / 4) == 0x0000ff);
+        const size_t mixed = (static_cast<size_t>(picture.height / 4) * static_cast<size_t>(picture.width) +
+                              static_cast<size_t>(3 * picture.width / 4)) * 4;
+        CHECK_NEAR(picture.rgba[mixed], 127, 1);
+        CHECK_NEAR(picture.rgba[mixed + 1], 128, 1);
+        CHECK(picture.rgba[mixed + 2] == 0);
+        for (size_t a = 3; a < picture.rgba.size(); a += 4) CHECK(picture.rgba[a] == 255);
+        Picture again;
+        CHECK(drawOffscreen(editor, scale, again) && picture.rgba == again.rgba);
+    }
 }
 
 TEST(an_editor_drawn_without_a_window_takes_pointer_input_first) {
@@ -1808,6 +1854,7 @@ TEST(an_editor_drawn_without_a_window_takes_pointer_input_first) {
     Picture picture;
     std::string why;
     if (!drawOffscreen(*editor, 1.0, drag, picture, &why)) {
+        CHECK_MSG(!std::getenv("SUPPLE_REQUIRE_OFFSCREEN"), "%s", why.c_str());
         std::printf("    (%s: skipped)\n", why.c_str());
         CHECK(host.value(c.param) == before && host.begins == 0);
         return;

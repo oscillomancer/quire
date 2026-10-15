@@ -53,10 +53,10 @@
 // buffer set and a semaphore of one, so renderViewport blocks until the GPU has
 // finished the previous frame -- on the main thread, which in a plugin is the
 // host's UI thread. Three lets the CPU run ahead instead.
+static const int kCanvasFlags = NVG_ANTIALIAS | NVG_TRIPLE_BUFFER;
+
 NVGcontext* canvasCreate(void* nativeContext)
 {
-    const int flags = NVG_ANTIALIAS | NVG_TRIPLE_BUFFER;
-
     CAMetalLayer* layer = (__bridge CAMetalLayer*)nativeContext;
     if (!layer) {
         return NULL;
@@ -83,7 +83,7 @@ NVGcontext* canvasCreate(void* nativeContext)
         return NULL;
     }
 
-    NVGcontext* ctx = nvgCreateMTL((__bridge void*)layer, (__bridge void*)queue, flags);
+    NVGcontext* ctx = nvgCreateMTL((__bridge void*)layer, (__bridge void*)queue, kCanvasFlags);
     [queue release];
     return ctx;
 }
@@ -139,4 +139,95 @@ void canvasReadPixels(int w, int h, unsigned char* rgb)
     (void)w;
     (void)h;
     (void)rgb;
+}
+
+// Headless drawing uses the same renderer and flags as an on-screen editor.
+// Each target keeps an autorelease pool for the entire worker-thread lifetime.
+#include <stdlib.h>
+#include <string.h>
+
+struct CanvasTarget {
+    NSAutoreleasePool* pool;
+    NVGcontext* vg;
+    MNVGframebuffer* framebuffer;
+    id<MTLCommandQueue> queue;
+};
+
+CanvasTarget* canvasTargetCreate(int w, int h, const char** why)
+{
+    CanvasTarget* target = (CanvasTarget*)calloc(1, sizeof(CanvasTarget));
+    *why = "no offscreen drawing: Metal could not allocate a render target";
+    if (!target) return NULL;
+    target->pool = [[NSAutoreleasePool alloc] init];
+    CAMetalLayer* layer = [[CAMetalLayer alloc] init];
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    layer.device = device;
+    [device release];
+    if (!layer.device) {
+        *why = "no offscreen drawing: Metal found no device";
+        [layer release];
+        canvasTargetDestroy(target);
+        return NULL;
+    }
+    target->queue = [layer.device newCommandQueue];
+    if (target->queue)
+        target->vg = nvgCreateMTL((__bridge void*)layer, (__bridge void*)target->queue,
+                                  kCanvasFlags);
+    [layer release];  // retained by NanoVG
+    if (!target->vg) {
+        *why = "NanoVG would not start on the offscreen context";
+        canvasTargetDestroy(target);
+        return NULL;
+    }
+    target->framebuffer = mnvgCreateFramebuffer(target->vg, w, h, 0);
+    if (!target->framebuffer || target->framebuffer->image <= 0) {
+        canvasTargetDestroy(target);
+        return NULL;
+    }
+    // Avoid mnvgBindFramebuffer: the dependency keeps its binding in a global,
+    // which races visible editors and other previews. This fork also offers a
+    // per-context texture target. Readback below handles synchronization itself.
+    mnvgSetColorTexture(target->vg, mnvgImageHandle(target->vg, target->framebuffer->image));
+    return target;
+}
+
+NVGcontext* canvasTargetContext(CanvasTarget* target) { return target->vg; }
+
+void canvasTargetDestroy(CanvasTarget* target)
+{
+    if (!target) return;
+    mnvgDeleteFramebuffer(target->framebuffer);
+    canvasDestroy(target->vg);
+    [target->queue release];
+    [target->pool drain];
+    free(target);
+}
+
+int canvasReadPixelsRGBA(CanvasTarget* target, int w, int h, unsigned char* rgba)
+{
+    // Framebuffer textures are RGBA8Unorm, unlike BGRA layer drawables. Copy
+    // on the rendering queue, then wait: shared staging storage works on both
+    // unified-memory and discrete GPUs, without managed-texture assumptions.
+    id<MTLTexture> texture = (__bridge id<MTLTexture>)mnvgImageHandle(target->vg, target->framebuffer->image);
+    const NSUInteger stride = ((NSUInteger)w * 4 + 255) & ~(NSUInteger)255;
+    id<MTLBuffer> buffer = [texture.device newBufferWithLength:stride * (NSUInteger)h
+                                                     options:MTLResourceStorageModeShared];
+    if (!buffer) return 0;
+    id<MTLCommandBuffer> command = [target->queue commandBuffer];
+    id<MTLBlitCommandEncoder> blit = [command blitCommandEncoder];
+    [blit copyFromTexture:texture sourceSlice:0 sourceLevel:0
+             sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake((NSUInteger)w, (NSUInteger)h, 1)
+                 toBuffer:buffer destinationOffset:0 destinationBytesPerRow:stride
+  destinationBytesPerImage:stride * (NSUInteger)h];
+    [blit endEncoding];
+    [command commit];
+    [command waitUntilCompleted];
+    if (buffer && command.status == MTLCommandBufferStatusCompleted) {
+        for (int y = 0; y < h; ++y)
+            memcpy(rgba + (size_t)y * (size_t)w * 4,
+                   (const unsigned char*)buffer.contents + (NSUInteger)y * stride, (size_t)w * 4);
+    }
+    const int ok = command.status == MTLCommandBufferStatusCompleted;
+    [buffer release];
+    return ok;
 }

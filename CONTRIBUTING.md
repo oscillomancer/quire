@@ -193,8 +193,12 @@ exports retain the appended format; macOS bundles carry a JSON resource and are
 re-signed ad hoc with the system codesign tool before publication. Native tests
 verify macOS signatures, scanner/direct-host/bridge loading, factory patches and
 exact player/source/binary audio. No signing identity or system installation is
-needed; failed/missing macOS signing reports dsp.sign. Headless dsp.preview
-pictures still require Linux/EGL in the template shared stack.
+needed; failed/missing macOS signing reports dsp.sign. Headless `dsp.preview`
+pictures run through the template's EGL (Linux), Metal (macOS) or WGL (Windows)
+renderer. CI requires successful PNGs, repeated identical pictures and pointer
+edits; Windows supplies only Mesa's WGL DLLs beside the test executables.
+`dsp-pictures-<platform>` artifacts contain the untouched and dragged editor
+PNGs. Missing renderer devices/drivers produce `dsp.no_picture`.
 
 Evaluation harness unit fixtures run everywhere: Python replaces executable shell
 fixtures; stdio readiness uses the portable pipe helper. Windows attempts use a

@@ -565,7 +565,8 @@ drive example). Write your own once the product is past its sketch.
   the framework's peak meters calls `usePeakMeters(false)`.
 
 An editor can be drawn without a window or a display: `gui::drawOffscreen
-(editor, scale, picture)` (`gui/Offscreen.h`; Linux, through EGL, for now).
+(editor, scale, picture)` (`gui/Offscreen.h`; EGL on Linux/BSD, hidden WGL on Windows, headless Metal
+on macOS).
 `ui-tests` checks that the starter's draws so.
 
 `ui-tests` fuzzes the real editor with random input and fails on a nested

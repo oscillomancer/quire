@@ -19,7 +19,7 @@ while IFS= read -r -d '' destination; do
     cp "$root/x64/$dll" "$destination/$dll"
   done
   echo "Mesa llvmpipe placed in $destination"
-done < <(find build/windows/daw/gui build/windows/plugins -type f -name '*.exe' \
+done < <(find build/windows/daw/gui build/windows/host/sandbox build/windows/plugins -type f -name '*.exe' \
   ! -path '*/CMakeFiles/*' ! -path '*/_deps/*' -printf '%h\0' | sort -zu)
 echo 'GALLIUM_DRIVER=llvmpipe' >> "$GITHUB_ENV"
 echo 'LIBGL_ALWAYS_SOFTWARE=1' >> "$GITHUB_ENV"

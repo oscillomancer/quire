@@ -4,6 +4,21 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.24.0
+
+What a product must do: nothing. Internal callers of the renderer seam's
+`canvasTarget*` functions must use the new opaque target API.
+
+- **Windowless editor pictures work on macOS and Windows** (`gui/Offscreen.cpp`,
+  `gui/Canvas.h`, `gui/CanvasMetal.m`, `gui/CanvasGL.c`). macOS uses headless
+  Metal and synchronized RGBA texture readback; Windows uses a never-shown
+  WGL window and an FBO, with a precise failure for drivers without FBOs.
+  EGL setup and diagnostics remain unchanged on Linux/BSD. Every target owns
+  its renderer and buffers, and readback returns top-row-first RGBA.
+- **UI tests exercise the plugin's renderer**, including Metal on macOS.
+  CI requires successful offscreen pictures instead of accepting a skip;
+  Windows CI uses checksum-verified Mesa 24.3.4 software OpenGL.
+
 ## 1.23.2
 
 What a product must do: nothing.

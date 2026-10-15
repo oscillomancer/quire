@@ -134,7 +134,11 @@ loops bounded before exporting; a loop that the player stops can hang a
 native export. Build and test the exported project before distributing it.
 The automated suite checks CLAP exports on Linux, macOS and Windows; VST3/AU
 source-export host conformance is not claimed. Headless `dsp.preview` pictures
-remain Linux-only because they use EGL inside the template shared GUI stack.
+use EGL on Linux, headless Metal on macOS and WGL on Windows. An editor build
+and available device/driver are required (Windows needs OpenGL framebuffer
+objects); `dsp.no_picture` includes the renderer's reason and a corrective
+hint. Same-platform repeated pictures are identical; pictures need not match
+across platforms.
 
 ## Test what changes over time
 
