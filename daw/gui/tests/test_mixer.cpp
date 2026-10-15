@@ -205,7 +205,9 @@ TEST_CASE("mixer: a master looks like the others, and \"fx\" sits small at the s
     // The same colour just inside the left edge below the stripe, on both.
     auto pixel = [&](const ui::Rect& r) {
         const gui::Image image = f.root->readBack();
-        const int x = static_cast<int>(r.x) + 1, y = static_cast<int>(r.y) + 120;
+        const float ratio = f.window->pixelRatio();
+        const int x = static_cast<int>((r.x + 1) * ratio);
+        const int y = static_cast<int>((r.y + 120) * ratio);
         const std::size_t at =
             (static_cast<std::size_t>(y) * static_cast<std::size_t>(image.width) +
              static_cast<std::size_t>(x)) *
