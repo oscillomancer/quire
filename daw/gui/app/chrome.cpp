@@ -92,7 +92,7 @@ ChromeLayout ChromeLayout::defaults() {
         {"Edit",
          {"history.undo", "history.redo", "-", "ui.actions", "ui.mouse", "-", "ui.preferences"}},
         {"View",
-         {"ui.actions", "ui.mixer", "ui.routing", "ui.history", "ui.agent", "-", "ui.theme.mode",
+         {"ui.actions", "ui.mixer", "ui.routing", "ui.history", "-", "ui.theme.mode",
           "ui.theme.palette", "ui.mouse.zoom", "-", "ui.screenset.save", "ui.screenset.load",
           "ui.screenset.delete"}},
         {"Track",

@@ -28,10 +28,9 @@ machine, but file formats and commands can still change.
   branches for an A/B comparison. Agents propose work on a branch and the
   person accepts or rejects it.
 - **Agents built in.** An MCP server drives the running app (or a headless
-  engine) from Claude Code or any MCP client; an agent panel in the app talks
-  to the Anthropic API or an OpenAI-compatible endpoint, local servers
-  included. A bundled skill (`skill/`) teaches agents the commands, units and
-  MIDI notation.
+  engine) from Claude Code, Codex or any other MCP client, with any model,
+  local ones included. A bundled skill (`skill/`) teaches agents the
+  commands, units and MIDI notation.
 - **Measurement instead of listening.** Renders can be analyzed for loudness
   (BS.1770/R128), spectrum, pitch, envelope and stereo image, and compared
   against a reference, so an agent can check what it did.
@@ -56,7 +55,7 @@ machine, but file formats and commands can still change.
 ## Building
 
 Requirements: Linux, CMake 3.25+, Ninja, Clang (GCC also builds), Python 3,
-and the development packages for SDL3, OpenGL, libcurl and zlib. All other
+and the development packages for SDL3, OpenGL and zlib. All other
 dependencies are vendored under `third_party/`, so builds work offline.
 Audio runs through JACK (PipeWire's JACK works); the GUI is an X11 window and
 runs under XWayland.
@@ -70,7 +69,7 @@ build/release/daw/gui/quire song.json    # open a project
 ```
 
 [docs/guides/running.md](docs/guides/running.md) covers plugin paths,
-unsaved projects, connecting Claude Code over MCP and the agent panel.
+unsaved projects and connecting an agent over MCP.
 
 ## Repository
 
@@ -78,7 +77,7 @@ unsaved projects, connecting Claude Code over MCP and the agent panel.
 |---|---|
 | `libs/` | Core libraries: JSON and schemas, semantic parameters, patches, MIDI and notation, analysis, DSP, Console 9, command bus, control protocol, Lua |
 | `host/` | Plugin hosting (`clap-host`, with the bridge process), the plugin sandbox, the engine and session model |
-| `daw/` | The GUI application and the agent panel |
+| `daw/` | The GUI application |
 | `mcp/` | The MCP adapter |
 | `plugins/` | The stock plugins and their shared extension code |
 | `skill/` | The agent skill: hand-written guides and generated command reference |

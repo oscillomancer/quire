@@ -3,7 +3,7 @@
 This spec describes the GUI as built and is updated with it. Decisions it
 builds on:
 ADR-0005 (SDL3 windows, GL3 + NanoVG, own retained toolkit, performance
-gates), ADR-0039 (native windowing, scaling, keys and agent config), ADR-0007 (command bus), ADR-0008 (versions, branches, undo),
+gates), ADR-0039 (native windowing, scaling and keys), ADR-0007 (command bus), ADR-0008 (versions, branches, undo),
 ADR-0019 (typed strips), ADR-0030 (main-thread notifications/deadlines),
 `ARCHITECTURE.md` §3 (threads, event delivery) and §10, and the workflow research in `docs/research/reaper-ux.md` (the top-40
 list in §16 is the priority order for workflow coverage).
@@ -23,7 +23,7 @@ The GUI application is the engine process with a window: one binary
 CLAP main-thread callbacks and hosts plugin GUIs. Consequences:
 
 - **Every change is a command.** Views dispatch typed commands with
-  `Origin::Gui` through the same dispatcher as MCP, Lua and the agent panel.
+  `Origin::Gui` through the same dispatcher as MCP and Lua.
   The GUI has no private mutation path; a gesture that needs many edits is a
   `batch` (one undo step). Continuous gestures (fader drags, item drags) use
   the bus's coalescing (one version per gesture, intermediate previews as
@@ -221,7 +221,7 @@ Transport bar (play/stop/record/loop/punch, position in bars|beats and
 time, tempo/meter, CPU/xrun/anticipation readouts from engine telemetry);
 toolbar (actions, §6: only what the transport bar does not already have —
 undo, redo, add channel, the actions list by default); the arrange area (track control panel + timeline);
-a bottom dock (mixer, MIDI editor, FX chain, routing, render queue, agent,
+a bottom dock (mixer, MIDI editor, FX chain, routing, render queue,
 command log) with tabs; floating windows for plugin GUIs and any undocked
 view. Window layout is UI state (§1.2).
 
@@ -621,35 +621,12 @@ starts a new, unsaved project from one (after the unsaved-changes question)
 with its own copy of the template's audio, and a right click offers
 Delete.
 
-## 5. Agent panel (`daw/agent-panel`)
+## 5. Agent panel (removed)
 
-- **Endpoints:** any OpenAI-compatible chat endpoint (including a local
-  llama-server) or the Anthropic API; base URL, model and key (key stored
-  in an owner-only config file: POSIX mode 0600 or a protected current-user
-  DACL on Windows, never in the project). Requests run
-  on a worker thread; the UI streams tokens. A saved endpoint change applies
-  from the next turn (a running turn finishes on its endpoint); the
-  conversation and a pending proposal stay.
-- **Tools:** the agent gets the same MCP tool surface as external agents
-  (generated from the registry) plus the bundled skill as context
-  (progressive disclosure: the entry file, then topics on demand). Its
-  commands carry `Origin::Agent`.
-- **Branches by default:** an agent session works on a new branch from the
-  current version (ADR-0008). The panel shows the branch's **diff** against
-  its base as a readable change list (objects added/changed/removed, with
-  parameter changes in units) and offers **A/B playback**: the transport
-  switches between the base and the branch at the same position (the
-  engine renders whichever version is selected; switching is a plan swap,
-  crossfaded). **Accept** merges (fast-forward or the replay merge), **reject**
-  deletes the branch. Every agent action is in the undo history and the
-  command log.
-- **Proposal identity:** a proposal belongs to the project generation and
-  path at branch creation. Audition, diff, accept, reject and follow-up send
-  check both and refuse a mismatch with a message that the proposal belongs
-  to a different project. Save As also changes this identity through the path.
-- **Listening requests:** when the skill says "ask the human to listen",
-  the agent posts a listening card (what to listen for, which region, A/B
-  targets) instead of deciding alone.
+The app has no built-in agent (ADR-0043). Agents drive it from an external
+harness through the MCP server (`command-bus.md` §4), with the same commands,
+origins, undo history and branches. UI files that still carry `panels.agent`
+load; the key is ignored.
 
 ## 6. Actions, keys, toolbars, menus
 
@@ -860,7 +837,7 @@ Configuration, data and peak-cache defaults share core-base's paths helper.
 Linux retains its XDG/HOME locations. macOS uses Library/Application Support and
 Library/Caches; Windows APPDATA and LOCALAPPDATA. User Documents/media defaults
 use paths::home(). Product slugs and explicit file overrides remain caller-owned.
-Windowing and agent-panel portability are specified in ADR-0039; native
+Windowing portability is specified in ADR-0039; native
 plugin-editor embedding is integrated through ADR-0040. Editor integration tests
 build on all platforms; actual editor display tests still require the exact
 SUPPLE_GUI_DISPLAY_TEST=1 opt-in. Linux pipe/poll injection fixtures remain
@@ -883,13 +860,6 @@ native renders require GL and check content/size, with smoke images in CI.
 macOS bulk rectangles align their edges to whole framebuffer pixels: Apple's
 software rasterizer can otherwise cover half-pixel edges differently under
 partial scissor clipping. Incremental/full repaint checks remain byte-exact.
-
-Agent API keys stay out of projects. Config publication is atomic and private
-throughout: POSIX 0600; Windows a protected current-user-only DACL, established
-before writing any secret. Unsupported ACL filesystems return `agent.config`.
-A Windows reader denying delete sharing can block replacement; the previous
-file remains intact and the temporary file is removed. HTTP and config tests
-run natively, with loopback sockets and no real endpoint or key.
 
 **Native fixture coverage (2026-10-15):** socket-agent and screenset Python
 integration tests run on Linux, macOS and Windows. The socket test uses the

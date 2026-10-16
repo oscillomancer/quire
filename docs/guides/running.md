@@ -36,7 +36,7 @@ To add an effect or instrument: the **fx** button on a track (it opens the
 plugin browser when the track has none, the chain otherwise), **+ FX** in the
 mixer, or Track > FX: add plugin….
 
-## Driving Quire from Claude Code (MCP)
+## Driving Quire from an agent (MCP)
 
 `quire-mcp` serves the running app's commands as MCP tools over stdio: what an
 agent does lands in the same undo history as your own edits. Register it once:
@@ -59,11 +59,17 @@ ln -s "$PWD/skill" ~/.claude/skills/quire
 Without the GUI, `build/release/host/engine/quire-engine --mcp` is a headless
 MCP server with the same commands (renders, no window).
 
-## The agent panel
+## Other MCP clients
 
-View > Agent panel talks to an Anthropic or an OpenAI-compatible endpoint
-(Settings; the key is kept in `~/.config/quire/agent.json`, mode 0600).
-Local servers work: for llama.cpp's `llama-server`, use base URL
-`http://127.0.0.1:8000` (or `.../v1`) and start the server with `--jinja` so it
-accepts tools. The tool list is about 17k tokens, so give the server a context
-of 32k or more.
+Any MCP client can use the same server. For example:
+
+```sh
+codex mcp add quire -- "$PWD/build/release/mcp/quire-mcp"
+hermes mcp add quire --command "$PWD/build/release/mcp/quire-mcp"
+```
+
+Give harnesses without skill support `skill/SKILL.md` as instructions; it
+lists the guides to read on demand. The tool list is large (about 130 tools),
+so with a local model behind a harness that sends every tool with each
+request, give the model a context of 32k or more. llama.cpp's `llama-server`
+needs `--jinja` to accept tools.

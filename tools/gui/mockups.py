@@ -47,7 +47,7 @@ VIEWS = {
     "mixer": (["ui.mixer"], "bass-item"),
     "midi": (["ui.midi.edit"], "lead-item"),
     "fx": (['ui.fx.chain {"track": "{bass-track}"}'], "bass-item"),
-    "agent": (["ui.agent", "ui.history"], "bass-item"),
+    "history": (["ui.history"], "bass-item"),
     "routing": (["ui.routing"], "bass-item"),
     "render": (["ui.render"], "bass-item"),
 }
@@ -177,7 +177,7 @@ def build_session(engine, plugin_dir, workdir):
 
 def snapshot(app, plugin_dir, project, theme, palette, view, ids, out, size):
     actions, selected = VIEWS[view]
-    ui = {"panels": {"agent": False, "mixer": False, "history": False},
+    ui = {"panels": {"mixer": False, "history": False},
           "selection": {"tracks": [ids["bass-track"]], "items": [ids[selected]]},
           "arrange": {"start_seconds": 0, "pixels_per_second": 26, "scroll_y": 0, "row_height": 72}}
     project.with_suffix(".ui.json").write_text(json.dumps(ui, indent=2) + "\n")

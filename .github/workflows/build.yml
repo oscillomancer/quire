@@ -98,7 +98,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y ninja-build ccache libx11-dev libxcursor-dev libxrandr-dev libxext-dev \
-            libgl1-mesa-dev libegl1-mesa-dev libcurl4-openssl-dev zlib1g-dev \
+            libgl1-mesa-dev libegl1-mesa-dev zlib1g-dev \
             libasound2-dev libwayland-dev libxkbcommon-dev xvfb xauth
           wget -q https://apt.llvm.org/llvm.sh -O "$RUNNER_TEMP/llvm.sh"
           sudo bash "$RUNNER_TEMP/llvm.sh" 22
@@ -111,7 +111,7 @@ jobs:
           echo "CLAP_VALIDATOR_BIN=$validator" >> "$GITHUB_ENV"
 
       # AppleClang/system libc++; shared MIT fast_float supplies float parsing.
-      # SDK curl/zlib, arm64, macOS 14.4. No bundled C++ runtime is required.
+      # SDK zlib, arm64, macOS 14.4. No bundled C++ runtime is required.
       - name: macOS tools and libraries
         if: matrix.platform == 'macos'
         run: |

@@ -10,10 +10,10 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
 `main`.
 
 The port branch has on-demand Linux/macOS/Windows CI and portable presets
-(ADR-0034). Linux dev passes all 145 tests including the 12 CLAP validators.
+(ADR-0034). Linux dev passes all 144 tests including the 12 CLAP validators.
 Native headless services, hosting/scanning, bridge, stock wrappers, device
-backend builds and GUI/agent tests pass Windows CI (103 tests) and macOS arm64
-CI (103 executed tests; 12 optional external validators skipped, 115 CTest
+backend builds and GUI tests pass Windows CI (102 tests) and macOS arm64
+CI (102 executed tests; 12 optional external validators skipped, 114 CTest
 entries; ADR-0036/0037/0038/0039).
 The macOS preset uses AppleClang and system libc++; shared float/double parsing
 uses vendored fast_float (MIT) on all platforms, including the suite's
@@ -24,7 +24,7 @@ Both native platforms enable and test audio-file I/O, recording recovery,
 engine/CLI, dummy/offline rendering and sandbox. PortAudio builds CoreAudio on
 macOS and WASAPI/ASIO on Windows; fake-device tests verify RT/offline equivalence
 in both executors. Actual hardware trials remain opt-in and unmeasured. The
-GUI/agent gate is lifted (ADR-0039), with native editor embedding (ADR-0040);
+GUI gate is lifted (ADR-0039), with native editor embedding (ADR-0040);
 the combined native DAW builds and hermetic tests pass CI on both platforms.
 Portable libraries, the session model, stock DSP cores
 and the script suite build independently of those services; see
@@ -168,10 +168,9 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   bindings in `controls.json`. "(MIDI CC)" actions drive the selected tracks'
   volume and pan, the master's volume, a beat jog and the last touched
   plug-in parameter.
-- **Agents**: the MCP server for the running app or a headless engine; the
-  agent panel (Anthropic API or OpenAI-compatible endpoints, local servers
-  included) working on `agent/...` branches with diff, A/B and
-  accept/reject; the bundled skill (`skill/`).
+- **Agents**: the MCP server for the running app or a headless engine, for
+  any MCP client (Claude Code, Codex, Hermes, …); the bundled skill
+  (`skill/`). There is no built-in agent panel (ADR-0043).
 - **Analysis and sound design**: `core-analysis` (BS.1770/R128 loudness
   validated against EBU Tech 3341/3342, spectral, pitch, envelope, stereo,
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
@@ -321,7 +320,7 @@ Session and editing:
   squashed steps keep large invocation arguments.
 
 GUI:
-- Native shell/toolkit/agent builds and tests pass CI (ADR-0039).
+- Native shell/toolkit builds and tests pass CI (ADR-0039).
   Cocoa/Windows hidden-window tests replace Linux EGL offscreen;
   Linux golden references are unchanged. Native editor embedding is integrated
   (ADR-0040), with combined native builds and hermetic tests passing CI.

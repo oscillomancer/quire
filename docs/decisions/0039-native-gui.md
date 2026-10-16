@@ -113,3 +113,6 @@ SUPPLE_GUI_DISPLAY_TEST=1 opt-in. Linux pipe/poll fixtures stay Linux-only.
 now run natively, using portable pipes and native window-close cleanup. macOS
 cold-start timing uses the kernel process start timestamp via proc_pidinfo;
 `-1` remains the failure sentinel. Linux rendering and golden references stay.
+
+**2026-10-16 note:** The agent panel, its libcurl HTTP client and its agent
+config were removed (ADR-0043); the windowing decisions stand.
