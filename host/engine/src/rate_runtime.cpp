@@ -127,8 +127,8 @@ Status Engine::prepareRatePlan(detail::Plan& p) {
                         if (!old.copyPast(*previous->timelines[0], past, seed.device)) {
                             result = Error("playrate.history",
                                            "the changed graph needs unavailable clock history", {},
-                                           "pause and play again to prime the changed graph before "
-                                           "continuing");
+                                           "pause and reload the graph, or restart the engine from "
+                                           "the latest project before continuing");
                             return;
                         }
                     }

@@ -1610,14 +1610,23 @@ Status Engine::startRecording(std::vector<RecordTarget> targets) {
             const auto state =
                 std::bit_cast<detail::PlayrateClock::State>(std::array<std::uint64_t, 6>{
                     heard[0], heard[1], heard[2], heard[3], heard[4], heard[5]});
-            bool unsafe = state.scalar != 1 || state.target != 1 || state.waitFrames != 0 ||
-                          state.rampAt < state.rampFrames;
-            for (const auto& pending : plans_)
-                if (pending->generation >= heard[9])
-                    unsafe |= pending->masterPlayrate.rate != 1 ||
-                              std::any_of(pending->rateEnvelope.points.begin(),
-                                          pending->rateEnvelope.points.end(),
-                                          [](const auto& point) { return point.value != 1; });
+            bool unsafe = state.scalar != 1 || state.target != 1 || effectivePlayrate() != 1;
+            const auto heardStream = std::bit_cast<std::int64_t>(heard[7]);
+            for (const auto& pending : plans_) {
+                if (pending->generation < heard[9]) continue;
+                unsafe |= pending->masterPlayrate.rate != 1 ||
+                          std::any_of(pending->rateEnvelope.points.begin(),
+                                      pending->rateEnvelope.points.end(),
+                                      [](const auto& point) { return point.value != 1; });
+                if (pending->rateEnabled && pending->rateSafeDevice != INT64_MIN) {
+                    const auto drained = pending->handAt + pending->rateSafeDevice -
+                                         pending->rateHandDevice + pending->outputLatency +
+                                         pending->rateBackendLatency;
+                    if (heardStream < drained)
+                        unsafe |= pending->rateControl[0].clock.from != 1 ||
+                                  pending->timelines[0]->hasNonUnityCurveHistory();
+                }
+            }
             if (unsafe)
                 return Error(
                     "record.playrate", "a non-unity source trajectory is still audible or queued",

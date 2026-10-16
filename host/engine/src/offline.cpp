@@ -18,6 +18,7 @@
 #include "supple/base/thread.h"
 #include "supple/clap/semantic_params.h"
 #include "supple/dsp/dsp.h"
+#include "supple/model/numeric.h"
 #include "supple/time/timeline.h"
 
 namespace supple::engine {
@@ -405,6 +406,23 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
         return Error("engine.block_size", "block size out of range", {}, "1 .. 8192");
     if (!(opt.tailSeconds >= 0 && opt.tailSeconds <= 600))
         return Error("engine.tail", "tail out of range", {}, "0 .. 600 s");
+    SUPPLE_TRY(model::checkedSeconds(s, opt.startSeconds, "/start_seconds"));
+    SUPPLE_TRY(model::checkedSeconds(s, opt.endSeconds, "/end_seconds"));
+    // Reject obvious expanded-output excess before constructing media/DSP state
+    // or iterating the inverse clock. Envelopes get an optimistic 4x bound;
+    // their exact duration is checked by the bounded inverse-clock prepass.
+    const double fastest =
+        opt.applyMasterPlayrate
+            ? (model::activePlayrateEnvelope(s) ? model::kMaxPlayrate : s.project->playrate.rate)
+            : 1.;
+    const long double minimumFrames =
+        ((static_cast<long double>(opt.endSeconds) - static_cast<long double>(opt.startSeconds)) /
+             static_cast<long double>(fastest) +
+         static_cast<long double>(opt.tailSeconds)) *
+        static_cast<long double>(s.project->sampleRate);
+    if (minimumFrames > (std::int64_t(1) << 28))
+        return Error("engine.too_long", "playrate-expanded render exceeds the frame budget",
+                     "/end_seconds", "shorten the timeline range or increase the master playrate");
     Session selectedSession = opt.track ? upstreamSession(s, *opt.track) : s;
     if (opt.throughMaster) {
         if (!s.tracks.contains(*opt.throughMaster) || *opt.throughMaster == model::kMaster)

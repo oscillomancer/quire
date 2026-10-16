@@ -8,12 +8,15 @@
 
 namespace supple::engine::detail {
 
-PlayrateTimeline::PlayrateTimeline(std::size_t capacity, double rate, std::vector<RatePoint> points)
+PlayrateTimeline::PlayrateTimeline(std::size_t capacity, double rate, std::vector<RatePoint> points,
+                                   double origin)
     : positions_(std::bit_ceil(std::max<std::size_t>(capacity, 128))),
       checkpoints_(positions_.size() / 64),
       points_(std::move(points)),
       mask_(positions_.size() - 1),
-      scalar_(rate) {
+      scalar_(rate),
+      origin_(origin) {
+    for (auto& point : points_) point.sample += origin_;
     reset(0, 0);
 }
 
@@ -26,7 +29,7 @@ double PlayrateTimeline::valueAt(const void* context, double sample) noexcept {
     const auto& self = *static_cast<const PlayrateTimeline*>(context);
     const auto& points = sample < self.curveSwitchPhase_ ? self.previousPoints_ : self.points_;
     if (points.empty()) return std::numeric_limits<double>::quiet_NaN();
-    sample = self.wrapped(sample);
+    if (self.looping_) sample = self.wrapped(sample - self.origin_) + self.origin_;
     const auto next = std::upper_bound(points.begin(), points.end(), sample,
                                        [](double s, const RatePoint& p) { return s < p.sample; });
     if (next == points.begin()) return points.front().value;
@@ -43,7 +46,7 @@ void PlayrateTimeline::reset(std::int64_t device, double timeline) SUPPLE_RT {
     previousPoints_.clear();
     curveSwitchPhase_ = -std::numeric_limits<double>::infinity();
     looping_ = loopRequested_ && loopEnd_ > loopStart_ && timeline < loopEnd_;
-    clock_.reset(timeline, scalar_);
+    clock_.reset(timeline + origin_, scalar_);
     clock_.setEnvelope(points_.empty() && previousPoints_.empty() ? nullptr : valueAt, this);
     anchor_ = device;
     anchorClock_ = clock_;
@@ -54,7 +57,7 @@ void PlayrateTimeline::reset(std::int64_t device, double timeline) SUPPLE_RT {
     next_ = device;
     for (auto at = first_; at <= device; ++at)
         positions_[static_cast<std::size_t>(at) & mask_].set(
-            at, timeline + double(at - device) * initial, initial);
+            at, (timeline + origin_) + double(at - device) * initial, initial);
 }
 
 PlayrateClock PlayrateTimeline::clockAt(std::int64_t device) const SUPPLE_RT {
@@ -74,12 +77,12 @@ void PlayrateTimeline::adopt(const PlayrateTimeline& previous, std::int64_t devi
     first_ = std::max(previous.first_, device - past);
     next_ = device;
     for (auto at = first_; at <= device; ++at)
-        positions_[static_cast<std::size_t>(at) & mask_].set(at, previous.phase(at),
+        positions_[static_cast<std::size_t>(at) & mask_].set(at, previous.absolutePhase(at),
                                                              previous.rate(at));
     clock_ = previous.clockAt(device);
     if (changed) {
         previousPoints_ = previous.points_;
-        curveSwitchPhase_ = previous.phase(device + waitFrames);
+        curveSwitchPhase_ = previous.absolutePhase(device + waitFrames);
         const double from = previous.rate(device + waitFrames);
         clock_.transition(scalar_, from, rampFrames, waitFrames);
     } else {
@@ -94,6 +97,12 @@ void PlayrateTimeline::adopt(const PlayrateTimeline& previous, std::int64_t devi
     loopEnd_ = previous.loopEnd_;
 }
 
+bool PlayrateTimeline::hasNonUnityCurveHistory() const {
+    const auto different = [](const RatePoint& point) { return point.value != 1; };
+    return std::any_of(points_.begin(), points_.end(), different) ||
+           std::any_of(previousPoints_.begin(), previousPoints_.end(), different);
+}
+
 void PlayrateTimeline::inheritControls(const PlayrateTimeline& previous) {
     previousPoints_ = previous.previousPoints_;
     curveSwitchPhase_ = previous.curveSwitchPhase_;
@@ -105,7 +114,7 @@ PlayrateTimeline::Snapshot PlayrateTimeline::snapshot(std::int64_t device) const
 }
 void PlayrateTimeline::seed(const Snapshot& state, std::int64_t offset) SUPPLE_RT {
     loop(state.loopStart, state.loopEnd, state.looping);
-    reset(state.device + offset, state.clock.timeline);
+    reset(state.device + offset, state.clock.timeline - origin_);
     clock_.restore(state.clock);
     clock_.setEnvelope(points_.empty() && previousPoints_.empty() ? nullptr : valueAt, this);
     anchorClock_ = clock_;
@@ -127,7 +136,7 @@ bool PlayrateTimeline::copyPast(const PlayrateTimeline& previous, std::int64_t f
 void PlayrateTimeline::loop(double start, double end, bool on) SUPPLE_RT {
     if (loopStart_ == start && loopEnd_ == end && loopRequested_ == on) return;
     loopRequested_ = on;
-    looping_ = on && end > start && anchorClock_.timeline() < end;
+    looping_ = on && end > start && anchorClock_.timeline() - origin_ < end;
     loopStart_ = start;
     loopEnd_ = end;
 }
@@ -144,12 +153,18 @@ void PlayrateTimeline::ensure(std::int64_t last) SUPPLE_RT {
     first_ = std::max(first_, next_ - static_cast<std::int64_t>(positions_.size()));
 }
 
-double PlayrateTimeline::phase(std::int64_t device) const SUPPLE_RT {
+double PlayrateTimeline::absolutePhase(std::int64_t device) const SUPPLE_RT {
     return positions_[static_cast<std::size_t>(device) & mask_].phase.load(
         std::memory_order_relaxed);
 }
+double PlayrateTimeline::phase(std::int64_t device) const SUPPLE_RT {
+    return absolutePhase(device) - origin_;
+}
+double PlayrateTimeline::absolutePosition(std::int64_t device) const SUPPLE_RT {
+    return looping_ ? wrapped(phase(device)) + origin_ : absolutePhase(device);
+}
 double PlayrateTimeline::position(std::int64_t device) const SUPPLE_RT {
-    return wrapped(phase(device));
+    return absolutePosition(device) - origin_;
 }
 double PlayrateTimeline::rate(std::int64_t device) const SUPPLE_RT {
     return positions_[static_cast<std::size_t>(device) & mask_].rate.load(

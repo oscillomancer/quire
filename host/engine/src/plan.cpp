@@ -1214,7 +1214,9 @@ Status prepare(Plan& p, const Session& s) {
             return Error("playrate.budget", "source clock history exceeds the render budget", {},
                          "reduce plugin latency or render high-latency chains to audio");
         for (auto& timeline : p.timelines)
-            timeline = std::make_unique<PlayrateTimeline>(capacity, p.masterPlayrate.rate, points);
+            timeline =
+                std::make_unique<PlayrateTimeline>(capacity, p.masterPlayrate.rate, points,
+                                                   double(time::samplesAt(p.startSeconds, p.rate)));
         static const auto table = std::make_shared<const TapeTable>();
         for (auto& node : p.nodes) {
             auto* timeline = p.timelines[node.live ? 1 : 0].get();
@@ -1248,7 +1250,7 @@ Status prepare(Plan& p, const Session& s) {
 host::Transport transportAt(const Plan& p, std::int64_t sample, const LoopRange* loop,
                             bool live) SUPPLE_RT {
     host::Transport t;
-    const double seconds = p.startSeconds + p.rateSample(sample, live) / p.rate;
+    const double seconds = p.rateSeconds(sample, live);
     const double beat = p.timeMap->beatAt(seconds);
     const auto bb = p.timeMap->barBeat(beat);
     const auto meter = p.timeMap->meterAt(bb.bar);
@@ -1257,8 +1259,7 @@ host::Transport transportAt(const Plan& p, std::int64_t sample, const LoopRange*
     if (p.rateEnabled) {
         const auto control = sample - static_cast<std::int64_t>(
                                           static_cast<std::uint64_t>(sample - p.rateOrigin) & 63);
-        const auto controlBeat =
-            p.timeMap->beatAt(p.startSeconds + p.rateSample(control, live) / p.rate);
+        const auto controlBeat = p.timeMap->beatAt(p.rateSeconds(control, live));
         t.tempo = p.timeMap->bpmAt(controlBeat) * p.timelines[live ? 1 : 0]->rate(control);
     }
     t.beat = beat;
@@ -1430,15 +1431,18 @@ void automateStage(Stage& st, std::int64_t pos, std::uint32_t n, std::int64_t or
             const auto& pts = ln.curve.points;
             const auto& timeline = *ln.curve.timeline;
             const auto shift = ln.curve.deviceShift;
-            double previous = timeline.position(pos - 1 - shift) + double(shift);
-            auto point = std::upper_bound(
-                pts.begin(), pts.end(), previous,
-                [](double sample, const Automation::Pt& pt) { return sample < double(pt.sample); });
+            const double projectOrigin = timeline.origin();
+            double previous = timeline.absolutePosition(pos - 1 - shift) + double(shift);
+            auto point = std::upper_bound(pts.begin(), pts.end(), previous,
+                                          [projectOrigin](double sample, const Automation::Pt& pt) {
+                                              return sample < double(pt.sample) + projectOrigin;
+                                          });
             for (std::uint32_t i = 0; i < n; ++i) {
-                const double at = timeline.position(pos + i - shift) + double(shift);
+                const double at = timeline.absolutePosition(pos + i - shift) + double(shift);
                 if (at < previous) point = pts.begin();
-                const bool crossed = point != pts.end() && double(point->sample) <= at;
-                while (point != pts.end() && double(point->sample) <= at) ++point;
+                const bool crossed =
+                    point != pts.end() && double(point->sample) + projectOrigin <= at;
+                while (point != pts.end() && double(point->sample) + projectOrigin <= at) ++point;
                 if (std::isnan(ln.lastSent) || crossed ||
                     (pos + i + origin) % kAutomationStep == 0) {
                     const double value = ln.clapAt(pos + i);
@@ -1762,8 +1766,7 @@ bool runStage(Plan& p, Stage& st, Stereo& sum, std::uint32_t n, const host::Tran
         const auto control =
             pos - static_cast<std::int64_t>(static_cast<std::uint64_t>(pos - p.rateOrigin) & 63) -
             st.inputLatency;
-        const auto beat =
-            p.timeMap->beatAt(p.startSeconds + p.rateSample(control, st.rateLive) / p.rate);
+        const auto beat = p.timeMap->beatAt(p.rateSeconds(control, st.rateLive));
         mappedTransport.tempo =
             p.timeMap->bpmAt(beat) * p.timelines[st.rateLive ? 1 : 0]->rate(control);
     }
@@ -1980,7 +1983,22 @@ bool processTake(Plan& p, Node& node, TakeChain& tc, std::int64_t pos, std::uint
                  node.live);
     const double inputEnd = mappedAt(p, node.live, pos + n + tc.latency, node.latIn);
     const double outputStart = mappedAt(p, node.live, pos, node.latIn);
-    if (!transport.playing || inputEnd <= double(tc.start) || outputStart >= double(tc.end)) {
+    bool intersects = inputEnd > double(tc.start) && outputStart < double(tc.end);
+    if (p.rateEnabled) {
+        const auto& clock = *p.timelines[node.live ? 1 : 0];
+        const double from = clock.phase(pos - node.latIn);
+        const double to = clock.phase(pos + n + tc.latency - node.latIn);
+        const double start = double(tc.start - node.latIn), end = double(tc.end - node.latIn);
+        const double firstEnd = clock.looping() ? std::min(end, clock.loopEnd()) : end;
+        intersects = start < firstEnd && to > start && from < firstEnd;
+        if (!intersects && clock.looping() && end > clock.loopStart() && start < clock.loopEnd()) {
+            const double a = std::max(start, clock.loopStart()), b = std::min(end, clock.loopEnd());
+            const double cycle = std::max(1., std::floor((from - b) / clock.cycleLength()) + 1);
+            intersects =
+                to > a + cycle * clock.cycleLength() && from < b + cycle * clock.cycleLength();
+        }
+    }
+    if (!transport.playing || !intersects) {
         tc.active = false;
         return true;
     }
@@ -2031,9 +2049,13 @@ bool processTake(Plan& p, Node& node, TakeChain& tc, std::int64_t pos, std::uint
     const std::int64_t length = tc.end - tc.start;
     for (std::uint32_t i = 0; i < n; ++i) {
         const std::int64_t t = pos + i;
-        const double mapped = mappedAt(p, node.live, t, node.latIn);
-        if (mapped < double(tc.start) || mapped >= double(tc.end)) continue;
-        const double k = mapped - double(tc.start);
+        const auto* clock = p.rateEnabled ? p.timelines[node.live ? 1 : 0].get() : nullptr;
+        const double origin = clock ? clock->origin() : 0;
+        const double mapped =
+            clock ? clock->absolutePosition(t - node.latIn) + double(node.latIn) : double(t);
+        const double start = double(tc.start) + origin, end = double(tc.end) + origin;
+        if (mapped < start || mapped >= end) continue;
+        const double k = mapped - start;
         double g = 1.0;
         if (tc.fadeIn > 0 && k < tc.fadeIn)
             g *= fadeCurve(tc.fadeInShape, tc.fadeInCurve,

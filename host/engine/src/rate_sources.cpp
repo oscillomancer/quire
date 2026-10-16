@@ -46,8 +46,8 @@ std::int64_t quantumAt(const Plan& p, std::int64_t pos) SUPPLE_RT {
 
 double sourcePosition(const Clip& clip, const PlayrateTimeline& timeline,
                       std::int64_t signalDevice) SUPPLE_RT {
-    return timeline.phase(signalDevice) - double(clip.start - clip.deviceShift) +
-           double(clip.offset);
+    return timeline.absolutePhase(signalDevice) -
+           (double(clip.start - clip.deviceShift) + timeline.origin()) + double(clip.offset);
 }
 
 bool processQuantum(RateClipState& state, const Clip& clip, const PlayrateTimeline& timeline,
@@ -287,8 +287,8 @@ void playRateClip(Plan& p, Clip& clip, Stereo& into, std::int64_t pos, std::uint
         auto& state = before ? *selected.previous : selected;
         auto& trajectory = before ? *p.previousTimelines[live ? 1 : 0] : clock;
         if (q != state.quantum) processQuantum(state, clip, trajectory, q);
-        const double t = clock.position(device);
-        const double k = t - double(clip.start - clip.deviceShift);
+        const double k = clock.absolutePosition(device) -
+                         (double(clip.start - clip.deviceShift) + clock.origin());
         if (k < 0 || k >= double(clip.length)) continue;
         const auto index = static_cast<std::size_t>(device - q);
         float left = state.output[0][index], right = state.output[channels > 1 ? 1 : 0][index];

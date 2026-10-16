@@ -659,8 +659,18 @@ Status checkRenderRange(const model::Session& s, const OfflineSettings& settings
         return model::numericError("/sample_rate");
     SUPPLE_TRY(model::checkedSeconds(s, settings.endSeconds + settings.tailSeconds, "/end_beat",
                                      std::max(rate, s.project->sampleRate)));
-    const long double duration = static_cast<long double>(settings.endSeconds) -
-                                 static_cast<long double>(settings.startSeconds) +
+    double minimumRate = 1;
+    if (settings.applyMasterPlayrate) {
+        minimumRate = s.project->playrate.rate;
+        if (const auto env = model::activePlayrateEnvelope(s)) {
+            const auto points = model::effectivePoints(s, *env);
+            minimumRate = model::kMaxPlayrate;
+            for (const auto& point : points) minimumRate = std::min(minimumRate, point.value);
+        }
+    }
+    const long double duration = (static_cast<long double>(settings.endSeconds) -
+                                  static_cast<long double>(settings.startSeconds)) /
+                                     static_cast<long double>(minimumRate) +
                                  static_cast<long double>(settings.tailSeconds);
     if (!(settings.endSeconds > settings.startSeconds) || !(duration > 0))
         return Error("render.empty", "the end must come after the start", "/end_beat",
@@ -670,7 +680,7 @@ Status checkRenderRange(const model::Session& s, const OfflineSettings& settings
         std::ceil(duration * static_cast<long double>(std::max(rate, s.project->sampleRate)));
     if (!std::isfinite(frames) || frames > (std::int64_t{1} << 28) - 8192)
         return Error("render.budget", "render exceeds the in-memory frame budget", "/end_beat",
-                     "render a shorter range or use a lower sample rate");
+                     "render a shorter range, increase master playrate or use a lower sample rate");
     return {};
 }
 

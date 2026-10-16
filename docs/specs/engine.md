@@ -1452,11 +1452,10 @@ input timing, disconnect reliability or performance on every driver.
 ### Master playrate (ADR-0045)
 
 Project schema 2.1 stores master playrate and its `tr_0/playrate` envelope.
-The control interface is implemented before audio integration: **playback and
-all offline renders still run at 1x**, including when the saved rate or
-active envelope differs. No rate knob or lane UI is provided by this stage.
-The source converter, fractional clock, remapped MIDI/automation, effective
-BPM and metronome timing in ADR-0045 remain pending.
+Playback and mix/stem renders apply the scalar or active rate envelope. File
+source conversion, MIDI, automation, effective plugin BPM, metronome and transport
+use the shared fractional clock; live input stays in device time. GUI controls
+are independent clients of the command API and the cached state accessor below.
 
 - `transport.playrate.get {}` is a query available without a running engine.
   Result: `{requested_rate: number, effective_rate: number,
@@ -1505,7 +1504,9 @@ The model helpers `activePlayrateEnvelope` and `validateRecordingPlayrate`
 are model-thread APIs; no effective-point expansion runs on the callback.
 Recording checks the audible and queued trajectories too: requesting unity
 while an older non-unity transition is still queued does not make recording
-safe. Stop and restore unity before recording in that case. Portable
+safe. Removed curves remain guarded until graph and backend output latency has
+drained their old trajectories, even if the current audible rate happens to be
+1 before a queued non-unity span. A pitch-mode-only transition at unity is safe. Stop and restore unity before recording in that case. Portable
 command/guard and executor tests run on every supported platform.
 
 ### Master playrate DSP building blocks (ADR-0045)
@@ -1529,7 +1530,7 @@ a 6% transition guard. Ratios below unity use the 1x cutoff. Integer source
 positions at exactly unity read the original samples directly. Both channels
 share phase and cutoff; file padding/looping belongs to the source reader.
 
-Pitch-preserving conversion configures stereo Signalsmith Stretch before
+Pitch-preserving conversion configures Signalsmith Stretch for all source channels before
 publication and processes only 64-frame output quanta. The channel count is unrestricted and phase is linked across all channels.
 Decoded in-memory data is fetched once per channel/64-frame quantum, returning
 a direct contiguous span where possible and using prepared scratch for padding
@@ -1566,7 +1567,10 @@ sync. The accessor works without a running engine, using the stopped position.
 The plan owns two bounded windows of a single fractional timeline trajectory:
 the renderer advances one, the callback advances the other, and their node jobs
 only read prepared windows. Device/stream frames remain monotonic through loops;
-timeline position wraps. PDC shifts **device** coordinates before the clock lookup.
+timeline position wraps. Accumulation uses absolute project samples, including
+for nonzero offline range starts, so a fresh seek and a render of the same range
+make identical source phase decisions. PDC shifts **device** coordinates before
+the clock lookup.
 All source converters share a 64-frame grid in compensated source time, including
 preroll: two identical sources with different take-chain latencies remain aligned.
 Looping retains converter history and reseeding occurs only for a fresh seek epoch.
@@ -1600,6 +1604,16 @@ in device frames. `OfflineSettings::applyMasterPlayrate` defaults true; analysis
 taps and item-FX renders set it false. Converted output is capped at 2^28 frames;
 clock history has a separate bounded capacity and reports `playrate.budget` when
 plugin latency exceeds it. Changing a running graph to require unavailable past
-clock history returns `playrate.history`; pause and retry the edit before resuming.
+clock history returns `playrate.history`; pause and reload the graph, or restart
+the engine from the latest project before resuming.
 Source trajectory violations fail the render/process rather than silently
 presenting converter silence as successful audio.
+
+Render-command preflight accounts for scalar speed and conservatively uses the
+minimum effective envelope-point value when a curve is active. It includes the
+unscaled device-time tail and the larger of engine/export sample rates; requests
+whose upper bound exceeds the in-memory frame budget fail with `render.budget`
+before source preparation, files or jobs. Public `renderOffline` also checks
+finite timeline endpoints and rejects obvious expanded-duration excess before
+media preparation, then checks exact inverse-clock output length. Analysis taps
+and item-FX renders opt out of this master-rate expansion as well as conversion.

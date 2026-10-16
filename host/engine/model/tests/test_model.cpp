@@ -816,3 +816,34 @@ TEST_CASE("master playrate: only one non-plugin envelope on tr_0") {
     duplicate.create(env);
     CHECK_FALSE(duplicate.commit());
 }
+
+TEST_CASE("automation items on a time envelope convert beat positions into seconds") {
+    model::EditTxn edit(model::Session::create(), 1);
+    model::Envelope env;
+    env.target = {model::kMaster, "playrate"};
+    env.timebase = model::Timebase::Time;
+    env.points = {{0, 1}, {2, 1}};
+    const auto lane = edit.create(env);
+    model::AutomationItem item;
+    item.envelope = lane;
+    item.position = 1;
+    item.length = 1;
+    item.sourceLength = .5;
+    item.loop = true;
+    item.points = {{0, 2}, {.25, 3}};
+    edit.create(item);
+    const auto session = edit.commit();
+    REQUIRE(session);
+    const auto points = model::effectivePoints(*session, lane);
+    auto at = [&](double seconds) { return model::pointsValueAt(points, seconds, 1); };
+    CHECK(at(.4) == 1);
+    CHECK(at(.5) == 2);
+    CHECK(at(.5625) == 2.5);
+    CHECK(at(.75) == 2);
+    CHECK(at(.8125) == 2.5);
+    CHECK(at(1) == 1);
+    const auto reopened = model::parseProject(model::serializeProject(*session));
+    REQUIRE(reopened);
+    CHECK(model::serializeProject(*reopened) == model::serializeProject(*session));
+    CHECK(model::pointsValueAt(model::effectivePoints(*reopened, lane), .5625, 1) == 2.5);
+}

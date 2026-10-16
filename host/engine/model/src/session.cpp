@@ -7,6 +7,7 @@
 #include <charconv>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <set>
 
 #include "supple/model/env_shape.h"
@@ -990,8 +991,14 @@ std::vector<EnvPoint> effectivePoints(const Session& s, Id envelope) {
         [](const AutomationItem* a, const AutomationItem* b) { return a->position < b->position; });
     const std::vector<EnvPoint>& under = env->points;
     std::vector<EnvPoint> out;
+    // Automation items use beats regardless of the parent envelope's domain.
+    // Expand/clip their repetitions in beats, then place their points in the
+    // envelope domain. Underlying points and interpolation stay in that domain.
+    auto position = [&](double beat) {
+        return env->timebase == Timebase::Time ? s.timeMap->secondsAt(beat) : beat;
+    };
     auto add = [&](double pos, double value, PointShape shape = PointShape::Linear,
-                   double tension = 0.0) { out.push_back({pos, value, shape, tension}); };
+                   double tension = 0.0) { out.push_back({position(pos), value, shape, tension}); };
     double prevEnd = -1e300;
     for (std::size_t k = 0; k < items.size(); ++k) {
         const AutomationItem& ai = *items[k];
@@ -999,9 +1006,12 @@ std::vector<EnvPoint> effectivePoints(const Session& s, Id envelope) {
         double end = ai.position + ai.length;
         if (k + 1 < items.size()) end = std::min(end, items[k + 1]->position);  // cut by the next
         if (!(end > start)) continue;
+        const double fromUnder =
+            prevEnd == -1e300 ? -std::numeric_limits<double>::infinity() : position(prevEnd);
+        const double nativeStart = position(start), nativeEnd = position(end);
         for (const EnvPoint& p : under)  // the envelope between items
-            if (p.pos > prevEnd && p.pos < start) out.push_back(p);
-        if (!under.empty()) add(start, pointsValueAt(under, start, 0.0));
+            if (p.pos > fromUnder && p.pos < nativeStart) out.push_back(p);
+        if (!under.empty()) add(start, pointsValueAt(under, nativeStart, 0.0));
         const double src = ai.sourceLength;
         auto mapped = [&](double v) { return ai.baseline + ai.amplitude * (v - ai.baseline); };
         auto local = [&](double x) {
@@ -1026,11 +1036,11 @@ std::vector<EnvPoint> effectivePoints(const Session& s, Id envelope) {
             }
             add(segEnd, local(segEnd - base));
         }
-        if (!under.empty()) add(end, pointsValueAt(under, end, 0.0));  // back to the envelope
+        if (!under.empty()) add(end, pointsValueAt(under, nativeEnd, 0.0));  // back to the envelope
         prevEnd = end;
     }
     for (const EnvPoint& p : under)
-        if (p.pos > prevEnd) out.push_back(p);
+        if (p.pos > position(prevEnd)) out.push_back(p);
     return out;
 }
 

@@ -322,9 +322,11 @@ Session and editing:
   strip semantics. Rate/mode edits wait for compensated lookahead and coalesce
   during transitions; long-latency take chains can exceed the 200 ms horizon.
   Seeks prepare off-thread while playback/monitoring continues. Changes requiring
-  unavailable clock history must be retried while paused. Portable executor
+  unavailable clock history need a paused graph reload or engine restart. Portable executor
   checks pass in dev and RTSan; native CI and independent review remain for the
-  coordinator.
+  coordinator. Render-command budgets conservatively use the minimum curve
+  value; a long varying-rate range may need splitting even when its exact
+  duration would fit the output budget.
 - Take `stretch_markers` are stored but not applied; stretching and
   resampling run synchronously when a plan is compiled.
 - Track groups are preserved in project files but not implemented.

@@ -33,7 +33,9 @@ class PlayrateTimeline {
     bool copyPast(const PlayrateTimeline& previous, std::int64_t first,
                   std::int64_t last) SUPPLE_RT;
     const std::vector<RatePoint>& points() const { return points_; }
-    PlayrateTimeline(std::size_t capacity, double rate, std::vector<RatePoint> points);
+    bool hasNonUnityCurveHistory() const;  // immutable controls, model-thread guard
+    PlayrateTimeline(std::size_t capacity, double rate, std::vector<RatePoint> points,
+                     double origin = 0);
     void reset(std::int64_t device, double timeline) SUPPLE_RT;
     void adopt(const PlayrateTimeline& previous, std::int64_t device, std::uint32_t rampFrames,
                std::uint32_t waitFrames = 0, bool changed = true);
@@ -41,6 +43,9 @@ class PlayrateTimeline {
     void loop(double start, double end, bool on) SUPPLE_RT;
     void ensure(std::int64_t last) SUPPLE_RT;
     double phase(std::int64_t device) const SUPPLE_RT;
+    double absolutePhase(std::int64_t device) const SUPPLE_RT;
+    double absolutePosition(std::int64_t device) const SUPPLE_RT;
+    double origin() const { return origin_; }
     double position(std::int64_t device) const SUPPLE_RT;
     double rate(std::int64_t device) const SUPPLE_RT;
     double wrapped(double phase) const SUPPLE_RT;
@@ -83,7 +88,7 @@ class PlayrateTimeline {
     std::vector<RatePoint> points_, previousPoints_;
     double curveSwitchPhase_ = -std::numeric_limits<double>::infinity();
     std::size_t mask_;
-    double scalar_, loopStart_ = 0, loopEnd_ = 0;
+    double scalar_, origin_ = 0, loopStart_ = 0, loopEnd_ = 0;
     bool looping_ = false, loopRequested_ = false;
     std::int64_t first_ = 0, next_ = 0, anchor_ = 0;
     PlayrateClock clock_, anchorClock_;

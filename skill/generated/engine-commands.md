@@ -3041,7 +3041,7 @@ Result:
 
 Automate a parameter: a track's or route's mixer control, or a plugin's.
 
-Target one of track (param volume|pan|mute; playrate only on tr_0), route (volume|pan|mute) or fx (a semantic key such as "gain" or "filter1.cutoff", or for other plugins a CLAP id or parameter name). points: [{beat|bar|seconds, value, shape?, tension?}]; values in the parameter's unit (dB, %, Hz… — text like "800 Hz" works for plugins); shapes linear, square, slow, fast_start, fast_end, bezier. Plugin values move along the parameter's curve (a log cutoff sweeps evenly in pitch). take (param volume|pan|mute): a take envelope, its points in beats from the item's start (it moves with the item); it shapes the take after its take FX (a MIDI take needs an instrument in its take FX). Master playrate points are finite numeric ratios 0.25..4.0; master-rate DSP integration is pending, so they currently do not change playback or offline rendering.
+Target one of track (param volume|pan|mute; playrate only on tr_0), route (volume|pan|mute) or fx (a semantic key such as "gain" or "filter1.cutoff", or for other plugins a CLAP id or parameter name). points: [{beat|bar|seconds, value, shape?, tension?}]; values in the parameter's unit (dB, %, Hz… — text like "800 Hz" works for plugins); shapes linear, square, slow, fast_start, fast_end, bezier. Plugin values move along the parameter's curve (a log cutoff sweeps evenly in pitch). take (param volume|pan|mute): a take envelope, its points in beats from the item's start (it moves with the item); it shapes the take after its take FX (a MIDI take needs an instrument in its take FX). Master playrate points are finite numeric ratios 0.25..4.0; an active nonempty master curve replaces the saved scalar during playback and rendering. Audio sources convert before take FX/live mixing; MIDI and automation follow the same timeline clock.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -7902,7 +7902,7 @@ Result:
 
 Render the mix offline to a float WAV (default: start to the last item's end).
 
-start_beat/end_beat in beats; tail_s seconds after the end (reverb tails). analyze: summary or full returns a supple.analysis-report/1.0 inline. The render id can be passed to analyze.render or analyze.compare. add_to_project: the file becomes an item on a new track at start_beat, as its own undo step right after the render (with job: when the job completes).
+start_beat/end_beat select a timeline range; master playrate determines its rendered duration. tail_s adds device-time seconds after the end (reverb tails). analyze: summary or full returns a supple.analysis-report/1.0 inline. The render id can be passed to analyze.render or analyze.compare. add_to_project: the file becomes an item on a new track at start_beat, as its own undo step right after the render (with job: when the job completes).
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -10823,7 +10823,7 @@ Result:
 
 Get requested/effective master playrate, pitch mode and active envelope.
 
-requested_rate is the saved project ratio; envelope names the active nonempty tr_0/playrate envelope, including automation items. No engine is required. DSP integration is pending: effective_rate is currently always 1.0, in playback and offline rendering, regardless of requested_rate or the envelope.
+requested_rate is the saved project ratio; envelope names the active nonempty tr_0/playrate envelope, including automation items. No engine is required. effective_rate follows consumed output, including compensated source transitions and graph/backend output latency; it is 1.0 without a running engine. GUI clients can use EngineApp::playrateState() without executing/logging a query each sync.
 
 Kind: `query`. Exposure: `mcp-tool`.
 
@@ -10882,7 +10882,7 @@ Result:
 
 Set the project's master playrate ratio and preserve-pitch flag.
 
-rate: finite 0.25..4.0 (default 1); preserve_pitch defaults false in a new project. Omitted fields keep their values. Updates during a drag use Origin.gesture like strip faders, and write/touch/latch capture tr_0/playrate with the existing coarse strip-writing behavior (no touch override/return). Recording requires unity. These settings are saved/undoable, but DSP integration is pending: playback and offline rendering still run at 1x; effective_rate reports 1.0.
+rate: finite 0.25..4.0 (default 1); preserve_pitch defaults false in a new project. Omitted fields keep their values. Updates during a drag use Origin.gesture like strip faders, and write/touch/latch capture tr_0/playrate with the existing coarse strip-writing behavior (no touch override/return). Recording requires unity. Settings are saved/undoable. File sources convert before take FX and live input mixing; instruments retain their pitch. Scalar edits ramp and converter changes crossfade for 10 ms after priming. Edits include the render horizon and compensated source lookahead; newer requests coalesce while a transition finishes. Long-latency take chains can exceed the usual 200 ms response. effective_rate follows audible output, independently of requested_rate.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -11195,7 +11195,7 @@ Result:
 
 Move the play position (one of seconds, beat or bar).
 
-
+With master playrate enabled, prepare file-source converters off-thread before publishing the audible seek. Existing playback and live monitoring continue until ready; preparation errors leave the old seek epoch intact.
 
 Kind: `action`. Exposure: `mcp-tool`.
 

@@ -135,15 +135,19 @@ struct Automation {
         for (auto& pt : points) pt.sample += by;
     }
     double at(std::int64_t device) SUPPLE_RT {
-        const double s = timeline ? timeline->position(device - deviceShift) + double(deviceShift)
-                                  : double(device);
-        if (s <= double(points.front().sample)) return points.front().value;
-        if (s < double(points[cursor].sample)) cursor = 0;
-        while (cursor + 1 < points.size() && double(points[cursor + 1].sample) <= s) ++cursor;
+        const double s =
+            timeline ? timeline->absolutePosition(device - deviceShift) + double(deviceShift)
+                     : double(device);
+        const double origin = timeline ? timeline->origin() : 0;
+        if (s <= double(points.front().sample) + origin) return points.front().value;
+        if (s < double(points[cursor].sample) + origin) cursor = 0;
+        while (cursor + 1 < points.size() && double(points[cursor + 1].sample) + origin <= s)
+            ++cursor;
         if (cursor + 1 >= points.size()) return points.back().value;
         const Pt& a = points[cursor];
         const Pt& b = points[cursor + 1];
-        const double t = (s - double(a.sample)) / static_cast<double>(b.sample - a.sample);
+        const double t =
+            (s - (double(a.sample) + origin)) / static_cast<double>(b.sample - a.sample);
         return a.value + (b.value - a.value) * shapeCurve(a.shape, a.tension, t);
     }
 };
@@ -570,6 +574,10 @@ struct Plan {
     bool rateControlsChanged = false;
     double rateSample(std::int64_t device, bool live = false) const SUPPLE_RT {
         return rateEnabled ? timelines[live ? 1 : 0]->position(device) : double(device);
+    }
+    double rateSeconds(std::int64_t device, bool live = false) const SUPPLE_RT {
+        return rateEnabled ? timelines[live ? 1 : 0]->absolutePosition(device) / rate
+                           : startSeconds + double(device) / rate;
     }
     double ratePhase(std::int64_t device, bool live = false) const SUPPLE_RT {
         return rateEnabled ? timelines[live ? 1 : 0]->phase(device) : double(device);
