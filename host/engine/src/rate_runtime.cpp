@@ -107,79 +107,68 @@ Status Engine::prepareRatePlan(detail::Plan& p) {
     p.handAt = handStream;
     Status result;
     try {
-        std::thread prepare([&] {
-            try {
-                if (rateSeekTarget_ || !playing) {
-                    const double timeline =
-                        rateSeekTarget_ ? double(*rateSeekTarget_) : seed.clock.timeline;
-                    result = detail::prepareRateSources(p, handDevice, timeline, &loop);
-                    p.rateOrigin = handDevice - handStream;
-                } else {
-                    const auto points = previous && previous->rateEnabled
-                                            ? previous->timelines[0]->points()
-                                            : std::vector<detail::RatePoint>{};
-                    Timeline old(p.timelines[0]->capacity(), seed.clock.target, points);
-                    old.seed(seed);
-                    if (previous && previous->rateEnabled)
-                        old.inheritControls(*previous->timelines[0]);
-                    if (previous && previous->rateEnabled) {
-                        const auto past = seed.device - p.rateDeviceMargin - 64;
-                        if (!old.copyPast(*previous->timelines[0], past, seed.device)) {
-                            result = Error("playrate.history",
-                                           "the changed graph needs unavailable clock history", {},
-                                           "pause and reload the graph, or restart the engine from "
-                                           "the latest project before continuing");
-                            return;
-                        }
-                    }
-                    for (int attempt = 0; attempt < 3; ++attempt) {
-                        const auto began = std::chrono::steady_clock::now();
-                        old.ensure(handDevice + p.rateDeviceMargin +
-                                   static_cast<std::int64_t>(p.rate * .15) + p.block + 128);
-                        // The legacy unity executor wraps its device coordinate;
-                        // the rate executor keeps it monotonic from adoption on.
-                        if (attempt == 0 && (!previous || !previous->rateEnabled)) {
-                            const auto wrapped =
-                                static_cast<std::int64_t>(std::llround(old.position(handDevice)));
-                            const auto offset = wrapped - handDevice;
-                            handDevice = wrapped;
-                            old.seed(seed, offset);
-                            old.ensure(handDevice + p.rateDeviceMargin +
-                                       static_cast<std::int64_t>(p.rate * .15) + p.block + 128);
-                        }
-                        p.rateOrigin = handDevice - handStream;
-                        result = detail::configureRateTransition(p, previous, old, handDevice);
-                        if (!result || !backend_->ownsThread() ||
-                            playedStream(transport.epoch) + 64 < handStream)
-                            break;
-                        // Priming must finish before its scheduled boundary. A busy
-                        // machine can need more than the ordinary render horizon;
-                        // predict farther ahead and prepare again while old audio runs.
-                        const auto elapsed =
-                            std::chrono::duration<double>(std::chrono::steady_clock::now() - began)
-                                .count();
-                        const auto lead =
-                            static_cast<std::int64_t>(std::ceil(elapsed * p.rate * 2)) + 128;
-                        const auto oldHand = handStream;
-                        handStream = (playedStream(transport.epoch) + lead + 63) / 64 * 64;
-                        handDevice += handStream - oldHand;
-                        p.handAt = handStream;
-                        if (attempt == 2)
-                            result = Error("playrate.prepare_late",
-                                           "source preparation could not reach a future boundary",
-                                           {}, "pause playback, apply the change, then resume");
-                    }
+        if (rateSeekTarget_ || !playing) {
+            const double timeline =
+                rateSeekTarget_ ? double(*rateSeekTarget_) : seed.clock.timeline;
+            result = detail::prepareRateSources(p, handDevice, timeline, &loop);
+            p.rateOrigin = handDevice - handStream;
+        } else {
+            const auto points = previous && previous->rateEnabled
+                                    ? previous->timelines[0]->points()
+                                    : std::vector<detail::RatePoint>{};
+            Timeline old(p.timelines[0]->capacity(), seed.clock.target, points);
+            old.seed(seed);
+            if (previous && previous->rateEnabled) old.inheritControls(*previous->timelines[0]);
+            if (previous && previous->rateEnabled) {
+                const auto past = seed.device - p.rateDeviceMargin - 64;
+                if (!old.copyPast(*previous->timelines[0], past, seed.device)) {
+                    result = Error("playrate.history",
+                                   "the changed graph needs unavailable clock history", {},
+                                   "pause and reload the graph, or restart the engine from "
+                                   "the latest project before continuing");
+                    return result;
                 }
-                p.rateHandDevice = handDevice;
-            } catch (const std::exception& error) {
-                result = Error("playrate.prepare", error.what(), {},
-                               "reduce source/FX count and retry the transport request");
             }
-        });
-        prepare.join();
-    } catch (const std::system_error& error) {
+            for (int attempt = 0; attempt < 3; ++attempt) {
+                const auto began = std::chrono::steady_clock::now();
+                old.ensure(handDevice + p.rateDeviceMargin +
+                           static_cast<std::int64_t>(p.rate * .15) + p.block + 128);
+                // The legacy unity executor wraps its device coordinate;
+                // the rate executor keeps it monotonic from adoption on.
+                if (attempt == 0 && (!previous || !previous->rateEnabled)) {
+                    const auto wrapped =
+                        static_cast<std::int64_t>(std::llround(old.position(handDevice)));
+                    const auto offset = wrapped - handDevice;
+                    handDevice = wrapped;
+                    old.seed(seed, offset);
+                    old.ensure(handDevice + p.rateDeviceMargin +
+                               static_cast<std::int64_t>(p.rate * .15) + p.block + 128);
+                }
+                p.rateOrigin = handDevice - handStream;
+                result = detail::configureRateTransition(p, previous, old, handDevice);
+                if (!result || !backend_->ownsThread() ||
+                    playedStream(transport.epoch) + 64 < handStream)
+                    break;
+                // Priming must finish before its scheduled boundary. A busy
+                // machine can need more than the ordinary render horizon;
+                // predict farther ahead and prepare again while old audio runs.
+                const auto elapsed =
+                    std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
+                const auto lead = static_cast<std::int64_t>(std::ceil(elapsed * p.rate * 2)) + 128;
+                const auto oldHand = handStream;
+                handStream = (playedStream(transport.epoch) + lead + 63) / 64 * 64;
+                handDevice += handStream - oldHand;
+                p.handAt = handStream;
+                if (attempt == 2)
+                    result = Error("playrate.prepare_late",
+                                   "source preparation could not reach a future boundary", {},
+                                   "pause playback, apply the change, then resume");
+            }
+        }
+        p.rateHandDevice = handDevice;
+    } catch (const std::exception& error) {
         return Error("playrate.prepare", error.what(), {},
-                     "reduce worker count and retry the request");
+                     "reduce source/FX count and retry the transport request");
     }
     return result;
 }

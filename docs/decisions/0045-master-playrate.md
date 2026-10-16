@@ -52,7 +52,7 @@ timeline audio and MIDI, so an empty frontier does not remove this problem.
 5. **Mode changes.** Prime the newly selected converter from available file
    source content, then crossfade for 10 ms at a canonical boundary without
    adding graph latency. Do not keep both converters continuously warm.
-   Prepare source-only converter state on a background thread, including
+   Prepare source-only converter state off the audio callback, including
    callback-owned sources; live monitoring continues while preparation runs.
    Delay publication until every newly selected source is ready. The same
    transition applies when leaving unity bypass. Preserve compensated source
