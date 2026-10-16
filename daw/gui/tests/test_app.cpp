@@ -901,7 +901,10 @@ TEST_CASE("playrate transport: context menu actions, errors and key-bindable act
     points.push_back(std::move(point));
     args["points"] = std::move(points);
     a.exec("env.add", std::move(args));
-    CHECK(a.root->find("transport.rate.value")->valueText() == "1.5");
+    // The active authored curve is 1.5x and the requested scalar is 2x,
+    // while the control-stage engine still consumes at 1x.
+    CHECK(a.app->playrateState().envelopeValue == 1.5);
+    CHECK(a.root->find("transport.rate.value")->valueText() == "1.0");
     const auto records = a.app->records().size();
     a.bar->sync();
     a.bar->sync();
@@ -929,9 +932,11 @@ TEST_CASE("playrate transport: context menu actions, errors and key-bindable act
 }
 
 TEST_CASE(
-    "playrate transport: local readback follows the playhead and automation items without "
+    "playrate transport: engine readback follows consumption instead of authored curves without "
     "logging") {
     RateApp a;
+    a.rate(1.137);
+    CHECK(a.root->find("transport.rate.value")->valueText() == "1.137");
     a.exec("engine.start", *json::parse(R"({"backend":"dummy"})"));
     const auto added = a.exec(
         "env.add",
@@ -939,12 +944,15 @@ TEST_CASE(
             R"({"track":"tr_0","param":"playrate","points":[{"beat":0,"value":1},{"beat":4,"value":2}]})"));
     const auto id = added.find("env")->asString();
     a.exec("transport.seek", *json::parse(R"({"beat":2})"));
-    CHECK(a.root->find("transport.rate.value")->valueText() == "1.5");
+    CHECK(a.app->playrateState().envelopeValue == 1.5);
+    CHECK(a.root->find("transport.rate.value")->valueText() == "1.0");
+    CHECK(a.knob().value() == 0.5);
     json::Value args = *json::parse(
         R"({"position":0,"length":4,"points":[{"beat":0,"value":2},{"beat":4,"value":4}]})");
     args["env"] = id;
     a.exec("autoitem.add", std::move(args));
-    CHECK(a.root->find("transport.rate.value")->valueText() == "3.0");
+    CHECK(a.app->playrateState().envelopeValue == 3.0);
+    CHECK(a.root->find("transport.rate.value")->valueText() == "1.0");
     const auto records = a.app->records().size();
     for (int i = 0; i < 4; ++i) a.bar->sync(false);
     CHECK(a.app->records().size() == records);
@@ -952,7 +960,7 @@ TEST_CASE(
     args["env"] = id;
     args["active"] = false;
     a.exec("env.set", std::move(args));
-    CHECK(a.root->find("transport.rate.value")->valueText() == "1.0");
+    CHECK(a.root->find("transport.rate.value")->valueText() == "1.137");
     a.exec("engine.stop");
 }
 

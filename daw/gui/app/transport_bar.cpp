@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 #include "supple/time/timeline.h"
 #include "supple/ui/canvas.h"
@@ -217,21 +218,10 @@ void TransportBar::sync(bool event, std::chrono::steady_clock::time_point now) {
     if (punch_) setIfChanged(punch_, info.punch.enabled ? "punch on" : "punch");
     if (click_) setIfChanged(click_, app_.metronome().enabled ? "click on" : "click");
     if (rate_ && !rate_->dragging()) {
-        double shown = s.project->playrate.rate;
-        // Display the authored curve at the playhead without executing a logged
-        // command. Once integrated, the engine reports the audible rate at the
-        // consumption horizon. Cache expanded points until the model changes.
-        const auto generation = app_.projectGeneration();
-        if (!rateVersion_ || *rateVersion_ != s.version || rateGeneration_ != generation) {
-            rateVersion_ = s.version;
-            rateGeneration_ = generation;
-            ratePoints_.clear();
-            if (const auto id = model::activePlayrateEnvelope(s)) {
-                ratePoints_ = model::effectivePoints(s, *id);
-                rateInSeconds_ = s.envelopes.find(*id)->timebase == model::Timebase::Time;
-            }
-        }
-        shown = model::pointsValueAt(ratePoints_, rateInSeconds_ ? info.seconds : info.beat, shown);
+        // Automation follows consumption telemetry, not the latest authored
+        // curve or renderer lookahead. The accessor executes no logged command.
+        const auto state = app_.playrateState();
+        const double shown = state.envelope ? state.effectiveRate : state.requestedRate;
         rate_->setValue(ratePosition(shown));
         if (rateValue_) setIfChanged(rateValue_, rateText(shown));
     }

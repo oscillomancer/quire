@@ -323,7 +323,9 @@ Session and editing:
   writing has existing coarse strip semantics; transport controls and the
   main master's editable Playrate lane are present, with logarithmic scaling
   and a unity reference. Transport ranges are UI state and never clamp saved
-  values.
+  values. Transport readback uses `EngineApp::playrateState()`: consumed
+  effective rate for an active curve, requested scalar otherwise, with no
+  command logging or transport-side envelope cache.
   Native CI for these new controls is pending coordinator validation.
   The fractional DSP clock and per-source tape/stretch readers are implemented
   and tested in isolation (dev/RTSan); executor integration remains pending.

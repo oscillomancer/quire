@@ -237,11 +237,13 @@ in all display ranges: logarithmic travel on either side maps 0.25..4.0
 resets to 1.0. Drag moves use `transport.playrate.set` with one origin gesture
 per drag, hence one undo step; model/effective readback cannot take over
 while dragging. With an active nonempty master playrate envelope, readback
-evaluates that curve at the playhead using the model's shape and automation-item
-helpers; otherwise it shows the saved scalar. Readback executes no commands
-and adds nothing to the command log. Expanded points are cached by project
-generation and model version. The integrated engine reports the audible rate
-at the consumption horizon; this stage still plays/renders at 1x.
+uses `EngineApp::playrateState().effectiveRate` from consumption telemetry;
+otherwise it shows that accessor's `requestedRate`. It does not display the
+accessor's distinct `envelopeValue`, which describes the latest authored curve
+at the consumed position and may differ from the audible rate. The engine owns
+the cached curve; the transport keeps no local envelope cache. Readback executes
+no commands and adds nothing to the command log. This stage still plays/renders
+at 1x, so an active envelope displays 1x until executor integration.
 
 Right-click either the knob or readout for reset, semitone up/down
 (multiply/divide by `2^(1/12)`), ten cents up/down (`2^(1/120)`), Apply playrate
