@@ -317,6 +317,10 @@ Rect Slider::track() const {
     return {b.x + kInset, b.y, std::max(1.0f, b.w - 2 * kInset), b.h};
 }
 
+double Slider::dragDelta(Point from, Point to) const {
+    return static_cast<double>(to.x - from.x) / static_cast<double>(std::max(1.0f, track().w));
+}
+
 void Slider::change(double value, Gesture g) {
     const double v = std::clamp(value, 0.0, 1.0);
     if (v != value_ || g == Gesture::Begin || g == Gesture::End) {
@@ -358,9 +362,7 @@ bool Slider::onPointer(const PointerEvent& e) {
         case T::Move: {
             if (!dragging_) return false;
             const double scale = (e.mods & kShift) ? 0.1 : 1.0;
-            const double width = static_cast<double>(std::max(1.0f, track().w));
-            const double delta = static_cast<double>(e.pos.x - press_.x) / width;
-            change(pressValue_ + delta * scale, Gesture::Move);
+            change(pressValue_ + dragDelta(press_, e.pos) * scale, Gesture::Move);
             return true;
         }
         case T::Cancel:
@@ -406,6 +408,52 @@ std::string Slider::valueText() const {
     char buf[16];
     std::snprintf(buf, sizeof buf, "%.4f", value_);
     return buf;
+}
+
+// ----------------------------------------------------------------- Knob
+
+Knob::Knob(std::string id) : Slider(std::move(id)) {
+    layout.width = layout.height = SizeRule::fixed(24);
+    setDefault(0.5);
+    setValue(0.5);
+}
+
+void Knob::setValue(double value) {
+    if (!dragging()) Slider::setValue(value);
+}
+
+Size Knob::measure(const Canvas&, Size) { return {24, 24}; }
+
+double Knob::dragDelta(Point from, Point to) const {
+    return static_cast<double>(from.y - to.y) / 150.0;
+}
+
+bool Knob::onPointer(const PointerEvent& e) {
+    // A reset is an explicit Set even when effective readback already equals
+    // the default (the requested setting may still be different).
+    const bool resetUnchanged = e.type == PointerEvent::Type::Down && e.button == 1 &&
+                                e.clicks >= 2 && value() == defaultValue();
+    const bool handled = Slider::onPointer(e);
+    if (resetUnchanged) {
+        auto callback = onChange;
+        if (callback) callback(defaultValue(), Gesture::Set);
+    }
+    return handled;
+}
+
+void Knob::paint(Canvas& c) {
+    const Theme& t = c.theme();
+    const Rect b = bounds();
+    const Point centre{b.x + b.w / 2, b.y + b.h / 2};
+    const float radius = std::max(1.0f, std::min(b.w, b.h) / 2 - 3);
+    constexpr float pi = 3.14159265358979323846f;
+    const float angle = -pi / 2 + static_cast<float>(value() - 0.5) * 1.5f * pi;
+    c.strokeArc(centre, radius + 2, -1.25f * pi, 0.25f * pi, t.color("rule"));
+    c.fillCircle(centre, radius, t.color(dragging() ? "focus" : "raised"));
+    c.strokeCircle(centre, radius, t.color(focused() ? "focus" : "rule"));
+    c.line(centre,
+           {centre.x + std::cos(angle) * (radius - 2), centre.y + std::sin(angle) * (radius - 2)},
+           t.color("ink"), 1.5f);
 }
 
 // ----------------------------------------------------------------- Meter

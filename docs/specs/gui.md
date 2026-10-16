@@ -137,6 +137,11 @@ only what the DAW needs, designed for virtualized, data-heavy views.
   subtree are preserved. A closing popup restores focus only to a node
   still in the tree, visible through all ancestors and enabled through all
   ancestors; otherwise it restores no focus.
+  Normalized round knobs share slider gesture/default, wheel and keyboard
+  behavior. Their relative vertical drag spans 150 design units, with Shift
+  for fine adjustment; double-click resets to the configured default. Model
+  readback is ignored while a knob is being dragged. Every drag reports
+  Begin/Move/End and each one-shot change reports Set.
 - **Damage.** Each window keeps a dirty-rect list; nodes invalidate
   themselves; a frame redraws only damaged regions (scissored). Removed nodes
   survive the current input dispatch; focus, hover and capture are resolved
