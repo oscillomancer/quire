@@ -15,6 +15,9 @@ Native headless services, hosting/scanning, bridge, stock wrappers, device
 backend builds and GUI/agent tests pass Windows CI (103 tests) and macOS arm64
 CI (103 executed tests; 12 optional external validators skipped, 115 CTest
 entries; ADR-0036/0037/0038/0039).
+Windows executables run with the UTF-8 process code page, so non-ASCII
+paths work whatever the system locale; the minimum is Windows 10 1903
+(ADR-0044). Not yet confirmed by Windows CI.
 The macOS preset uses AppleClang and system libc++; shared float/double parsing
 uses vendored fast_float (MIT) on all platforms, including the suite's
 self-contained source exports. Native waits/wakes, thread setup, control

@@ -58,3 +58,4 @@ current state.
 | [0040](0040-native-plugin-editors.md) | Native plugin editors | Accepted |
 | [0041](0041-cocoa-editor-ordering.md) | Cocoa bridged editor ordering | Accepted |
 | [0042](0042-native-midi-input.md) | Native MIDI input | Accepted |
+| [0044](0044-windows-utf8-code-page.md) | Windows processes use the UTF-8 code page | Accepted |

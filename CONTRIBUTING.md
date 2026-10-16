@@ -106,7 +106,7 @@ when supported for the existing RT signatures; `nonblocking` annotations
 and the other warnings remain enabled.
 Windows (`windows-2022`, x64) uses clang-cl, Ninja
 and the Windows SDK, with vcpkg SDL3/zlib/curl and a binary cache. Windows
-10 1803 is the minimum. No packaging or installers run here. Local platform
+10 1903 is the minimum (ADR-0044: every executable runs with the UTF-8 code page). No packaging or installers run here. Local platform
 commands are `cmake --workflow --preset macos` or `windows`; the latter
 requires `VCPKG_ROOT` and an initialized Windows SDK environment.
 
@@ -183,7 +183,7 @@ Native platform smoke images are uploaded with test logs.
 
 GUI socket/screenset integration and source-export integration tests are enabled
 on all three platforms. The GUI agent fixture uses the existing AF_UNIX transport
-(including Windows 10 1803+), bounded anonymous-pipe readiness and an orderly
+(including Windows 10 1903+), bounded anonymous-pipe readiness and an orderly
 native window close after saving its private project. Native snapshots account
 for framebuffer density. Source-export tests inherit the compiler, toolchain,
 macOS architecture/deployment target and vendored renderer dependencies. They

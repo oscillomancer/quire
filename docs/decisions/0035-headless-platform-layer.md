@@ -106,3 +106,5 @@ build independently of the hosting port. The former broad platform-services gate
 is narrowed and renamed `SUPPLE_HOST_SERVICES`: hosting/scanning, bridge, sandbox,
 engine/device backends, GUI/agent and plugin wrappers remain Linux-only. The
 Windows POSIX audio-file gate is unchanged. Linux target/test coverage is retained.
+
+**2026-10-16 note:** The Windows minimum is now Windows 10 1903 (ADR-0044).

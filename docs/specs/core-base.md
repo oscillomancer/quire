@@ -91,7 +91,9 @@ fallback and distinguishes unset HOME from empty HOME (relative .cache and
 runtime means the native temporary directory could not be resolved. Environment
 is read off audio before worker startup; callers append the generated slug and
 choose any existing component-specific fallback. Windows uses wide environment
-APIs to preserve non-ASCII user paths. Linux retains existing relative/empty
+APIs to preserve non-ASCII user paths, and every Windows executable runs with
+the UTF-8 process code page (ADR-0044), so narrow path text and environment
+variables are UTF-8 there too. Linux retains existing relative/empty
 XDG behavior; the supervised scanner's stricter absolute-path policy is separate.
 
 ## Floating-point parsing

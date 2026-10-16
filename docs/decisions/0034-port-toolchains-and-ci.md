@@ -50,3 +50,5 @@ The repository is private, so hosted runner cost makes targeted runs useful.
 Branch builds can run before the workflow reaches main. Port steps remove
 named gates as real platform implementations land. Passing portable tests
 is not evidence that the headless DAW or device audio works on that platform.
+
+**2026-10-16 note:** The Windows minimum is now Windows 10 1903 (ADR-0044).
