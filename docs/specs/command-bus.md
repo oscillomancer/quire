@@ -432,10 +432,7 @@ details and makes the outer transaction roll back even if the script catches
 the error. Its outer failure is `transaction.restore_failed`; a failed outer
 rollback retains this error in its details. Subsequent calls in a poisoned
 transaction refuse, and the failure state is cleared at transaction end. Scoped
-dispatch admission applies to nested batch/Lua invocations too. The agent panel
-uses it to deny branch/project/engine lifecycle changes and save-as, pins each
-turn to the current branch/project generation, and invalidates queued tool calls
-on cancellation. Idle is reported after queued work has drained or been invalidated.
+dispatch admission applies to nested batch/Lua invocations too.
 
 Lua initialization, host JSON pushes and structured error decoding are protected
 against memory/stack failures; error fields are read raw. Once the instruction

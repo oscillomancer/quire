@@ -15,11 +15,9 @@
 #include "test_support.h"
 
 #include "actions_list.h"
-#include "agent_panel.h"
 #include "app_actions.h"
 #include "appearance.h"
 #include "chrome.h"
-#include "fake_llm.h"
 #include "file_actions.h"
 #include "history_panel.h"
 #include "mixer.h"
@@ -355,119 +353,14 @@ TEST_CASE("native dialog completions respect shutdown before posting and running
     }
 }
 
-TEST_CASE("the agent panel: a request streams in, the change is reviewed, A/B'd and accepted") {
-    App a;
-    if (!a.ok) return;
-    using namespace supple::agent::testing;
-    FakeServer server;
-    server.push(anthropicTurn(
-        "Adding a drum buss.",
-        {{"exec", R"({"command": "track.add", "args": {"type": "buss", "name": "Drums"}})"}}));
-    server.push(anthropicTurn("Done: one buss named Drums.", {}));
-    std::vector<std::function<void()>> posted;
-    std::mutex m;
-    gui::AgentPanel panel(
-        *a.root, *a.app, a.registry, *a.dispatcher,
-        [&](std::function<void()> f) {
-            std::lock_guard lock(m);
-            posted.push_back(std::move(f));
-        },
-        a.dir / "config" / "agent.json", SUPPLE_SKILL_DIR);
-    panel.config().endpoints = {
-        {agent::Endpoint::Kind::Anthropic, "fake", server.url(), "test-model", "k"}};
-    auto frame = std::make_unique<ui::Node>("window");
-    frame->layout.dir = ui::Layout::Dir::Row;
-    frame->emplace<ui::Node>("body");
-    frame->add(panel.build());
-    a.root->setContent(std::move(frame));
-    panel.toggle();
-    a.root->frame(false);
-    CHECK(a.root->focused() == a.root->find("agent.input"));
-    a.type("Add a drum buss");
-    REQUIRE(a.root->click("agent.send"));
-    REQUIRE(panel.session());
-    for (int i = 0; i < 2000 && panel.session()->busy(); ++i) {
-        std::vector<std::function<void()>> now;
-        {
-            std::lock_guard lock(m);
-            now.swap(posted);
-        }
-        for (auto& f : now) f();
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-    {  // the idle notification
-        std::lock_guard lock(m);
-        for (auto& f : posted) f();
-        posted.clear();
-    }
-    REQUIRE_FALSE(panel.session()->busy());
-    const auto requests = server.requests();
-    REQUIRE_FALSE(requests.empty());
-    REQUIRE(requests.front().find("messages"));
-    const auto* content = requests.front().find("messages")->asArray().back().find("content");
-    REQUIRE(content);
-    REQUIRE_FALSE(content->asArray().empty());
-    CHECK(content->asArray().front().find("text")->asString().ends_with("\n\nAdd a drum buss"));
-    a.root->frame(false);
-    auto* diff = dynamic_cast<ui::TextBlock*>(a.root->find("agent.review.diff"));
-    REQUIRE(diff);
-    CHECK(a.root->find("agent.review")->visible);
-    CHECK(diff->text() == "+ buss \"Drums\"");  // the master's implied "children" update is hidden
-    a.snapshot("agent-panel.png");
-    CHECK(a.tracks("buss") == 1);
-    REQUIRE(a.root->click("agent.yours"));
-    CHECK(a.tracks("buss") == 0);
-    REQUIRE(a.root->click("agent.theirs"));
-    CHECK(a.tracks("buss") == 1);
-    REQUIRE(a.root->click("agent.accept"));
-    a.root->frame(false);
-    CHECK(a.tracks("buss") == 1);
-    CHECK_FALSE(a.root->find("agent.review")->visible);
-    CHECK(panel.session()->branch().empty());
-}
-
-TEST_CASE("agent settings recover an out-of-range current endpoint") {
-    App a;
-    if (!a.ok) return;
-    const auto file = a.dir / "config" / "agent.json";
-    agent::Config config;
-    config.endpoints.push_back({agent::Endpoint::Kind::OpenAI, "existing", "http://localhost/v1",
-                                "existing-model", "existing-key"});
-    config.current = 42;
-    REQUIRE(config.save(file));
-    gui::AgentPanel panel(
-        *a.root, *a.app, a.registry, *a.dispatcher, [](auto) {}, file, SUPPLE_SKILL_DIR);
-    auto frame = std::make_unique<ui::Node>("window");
-    frame->layout.dir = ui::Layout::Dir::Row;
-    frame->add(panel.build());
-    a.root->setContent(std::move(frame));
-    panel.openSettings();
-    auto* model = dynamic_cast<ui::TextField*>(a.root->find("agent.settings.model"));
-    REQUIRE(model);
-    model->setText("new-model");
-    a.root->frame(false);
-    REQUIRE(a.root->click("agent.settings.save"));
-    const auto loaded = agent::Config::load(file);
-    REQUIRE(loaded);
-    REQUIRE(loaded->active());
-    CHECK(loaded->active()->model == "new-model");
-    REQUIRE(loaded->endpoints.size() == 2);
-    CHECK(loaded->endpoints.front().model == "existing-model");
-    CHECK(loaded->endpoints.front().apiKey == "existing-key");
-}
-
 TEST_CASE("hidden docks release their own focus and preserve focus elsewhere") {
     App a;
     if (!a.ok) return;
-    gui::AgentPanel agentPanel(
-        *a.root, *a.app, a.registry, *a.dispatcher, [](auto) {}, a.dir / "config" / "agent.json",
-        SUPPLE_SKILL_DIR);
     gui::HistoryPanel history(*a.root, *a.actions, *a.dispatcher, *a.app);
     gui::MeterFeed feed;
     gui::Mixer mixer(*a.root, *a.actions, *a.dispatcher, *a.app, feed);
     auto frame = std::make_unique<ui::Node>("window");
     auto& outside = frame->emplace<ui::TextField>("outside");
-    frame->add(agentPanel.build());
     frame->add(history.build());
     frame->add(mixer.build());
     a.root->setContent(std::move(frame));
@@ -489,7 +382,6 @@ TEST_CASE("hidden docks release their own focus and preserve focus elsewhere") {
         dock.setVisible(false);
         CHECK(a.root->focused() == &outside);
     };
-    check(agentPanel, "agent.input");
     check(history, "history.newname");
     check(mixer, "mixer.close");
     mixer.setVisible(true);
@@ -1238,16 +1130,15 @@ TEST_CASE("audit3: project replacement clears the item clipboard") {
 TEST_CASE("audit3: popup close cannot restore focus into a hidden dock") {
     App a;
     REQUIRE(a.ok);
-    gui::AgentPanel panel(
-        *a.root, *a.app, a.registry, *a.dispatcher, [](auto) {}, a.dir / "config" / "agent.json",
-        SUPPLE_SKILL_DIR);
     auto frame = std::make_unique<ui::Node>("window");
-    frame->add(panel.build());
+    auto& dock = frame->emplace<ui::Node>("dock");
+    auto& field = dock.emplace<ui::TextField>("dock.field");
     a.root->setContent(std::move(frame));
-    panel.setVisible(true);
     a.root->frame(false);
-    panel.openSettings();
-    panel.setVisible(false);
+    a.root->focus(&field);
+    a.root->openPopup(std::make_unique<ui::Node>("popup"), {}, ui::Placement::Center);
+    dock.visible = false;
+    a.root->releaseWithin(&dock);
     a.root->closePopup();
     CHECK(a.root->focused() == nullptr);
 }

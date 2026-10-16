@@ -68,14 +68,13 @@ target_include_directories(gui-persistence PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/ap
 
 # The app's pieces (shell, generator, actions UI, chrome), shared with tests.
 add_library(gui-app STATIC app/shell.cpp app/generate.cpp app/app_actions.cpp app/actions_list.cpp app/chrome.cpp
-  app/agent_panel.cpp app/plugin_windows.cpp app/screensets.cpp app/file_actions.cpp app/midi_editor.cpp app/routing_matrix.cpp app/mixer.cpp
+  app/plugin_windows.cpp app/screensets.cpp app/file_actions.cpp app/midi_editor.cpp app/routing_matrix.cpp app/mixer.cpp
   app/fx_params.cpp app/plugin_browser.cpp app/fx_window.cpp app/render_dialog.cpp app/history_panel.cpp app/transport_bar.cpp app/plugin_scales.cpp
   app/midi_event_list.cpp app/appearance.cpp app/track_menu.cpp app/mouse_dialog.cpp app/selection_edit.cpp app/preferences.cpp
   app/control_map.cpp app/learn_dialog.cpp)
 target_include_directories(gui-app PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/app)
-target_link_libraries(gui-app PUBLIC supple::gui-persistence supple::gui-service-watcher supple::agent supple::gui-actions supple::gui-views supple::gui-ui supple::gui-platform
+target_link_libraries(gui-app PUBLIC supple::gui-persistence supple::gui-service-watcher supple::gui-actions supple::gui-views supple::gui-ui supple::gui-platform
                       supple::engine supple::control-protocol supple::core-params supple::product-info SDL3::SDL3)
-target_compile_definitions(gui-app PUBLIC SUPPLE_SKILL_DIR="${PROJECT_SOURCE_DIR}/skill")
 supple_target_defaults(gui-app)
 
 add_executable(${PRODUCT_SLUG} app/main.cpp)
@@ -122,11 +121,11 @@ if(SUPPLE_BUILD_TESTS)
   target_compile_definitions(gui-app.tests PRIVATE SUPPLE_GUI_FONTS_DIR="${PROJECT_SOURCE_DIR}/assets/fonts"
                              SUPPLE_CLAP_DIR="${CMAKE_BINARY_DIR}/plugins/clap"
                              FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>"
-                             SUPPLE_GUI_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden")
+                             SUPPLE_GUI_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden"
+                             SUPPLE_SKILL_DIR="${PROJECT_SOURCE_DIR}/skill")
   add_dependencies(gui-app.tests clap-host-fixtures)
   target_compile_definitions(gui-app.tests PRIVATE SUPPLE_BRIDGE_PATH="$<TARGET_FILE:${PRODUCT_SLUG}-bridge>")
   add_dependencies(gui-app.tests ${PRODUCT_SLUG}-bridge)
-  target_include_directories(gui-app.tests PRIVATE ${PROJECT_SOURCE_DIR}/daw/agent-panel/tests)
   set_tests_properties(gui-app.tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
   supple_add_tests(gui-ui SOURCES tests/test_ui.cpp DEPS SDL3::SDL3 LABELS gui tsan-skip)
   target_compile_definitions(gui-ui.tests PRIVATE

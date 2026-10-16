@@ -30,7 +30,6 @@
 #include <vector>
 
 #include "actions_list.h"
-#include "agent_panel.h"
 #include "app_actions.h"
 #include "appearance.h"
 #include "chrome.h"
@@ -386,11 +385,6 @@ int main(int argc, char** argv) {
     appActions.addUi("ui.actions", "View: actions list",
                      [&] { gui::openActionsList(root, appActions, &chrome); });
     appActions.addUi("ui.quit", "File: quit", [&] { quit = true; });
-    gui::AgentPanel agentPanel(
-        root, **app, registry, dispatcher,
-        [&](std::function<void()> f) { loop.post(std::move(f)); },
-        agent::Config::defaultFile(product::kSlug), SUPPLE_SKILL_DIR);
-    appActions.addUi("ui.agent", "View: agent panel", [&] { agentPanel.toggle(); });
     // The look: switching repaints at once and is saved (not in offscreen runs).
     auto applyLook = [&] {
         root.setTheme(look.theme());
@@ -511,7 +505,6 @@ int main(int argc, char** argv) {
         center.add(midiEditor.build());
         center.add(mixer.build());
         body.add(history.build());
-        body.add(agentPanel.build());
         root.setContent(std::move(frame));
     }
     // Arrange editing gestures (P5.6): one transaction per gesture; a later
@@ -785,14 +778,11 @@ int main(int argc, char** argv) {
         });
     auto panelsSave = [&] {
         json::Value v = json::Value::object();
-        v["agent"] = agentPanel.visible();
         v["mixer"] = mixer.visible();
         v["history"] = history.visible();
         return v;
     };
     auto panelsLoad = [&](const json::Value& v) {
-        if (const json::Value* a = v.find("agent"); a && a->isBool())
-            agentPanel.setVisible(a->asBool());
         if (const json::Value* m = v.find("mixer"); m && m->isBool()) mixer.setVisible(m->asBool());
         if (const json::Value* h = v.find("history"); h && h->isBool())
             history.setVisible(h->asBool());

@@ -130,7 +130,6 @@ Keymap Keymap::defaults() {
     add({"Ctrl+Alt+T"}, "global", "track.add:buss");
     add({"Shift+/"}, "global", "ui.actions");
     add({"Ctrl+Shift+P"}, "global", "ui.actions");
-    add({"Ctrl+Shift+A"}, "global", "ui.agent");
     add({"S"}, "arrange", "item.split:playhead");
     add({"M"}, "arrange", "ui.marker.add");
     add({"Shift+R"}, "arrange", "ui.region.add");

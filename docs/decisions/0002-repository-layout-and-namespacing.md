@@ -71,3 +71,5 @@ the sandbox (Phase 2) and the engine (Phase 4), which is how the sandbox
 
 A single `core` library (simpler CMake, but blurs interfaces that parallel
 workers need frozen); product-named namespaces (makes renaming expensive).
+
+**2026-10-16 note:** `daw/agent-panel/` was removed (ADR-0043).

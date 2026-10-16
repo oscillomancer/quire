@@ -65,7 +65,7 @@ for free, and guarantees that anything a human can do an agent can do.
 | sandbox | `host/sandbox`, `host/analysis-commands` | headless plugin sandbox (library, CLI, MCP); analysis commands shared with the engine | `specs/sandbox.md` |
 | engine | `host/engine` | session model (`model/`), commands, render plans, real-time engine, JACK backend, renders | `specs/session-model.md`, `specs/engine.md` |
 | plugins | `plugins/*` | template-derived stock plugins + shared extension code | ADR-0011 |
-| app | `daw/gui`, `daw/agent-panel` | the GUI application, the agent panel | ADR-0005, `specs/gui.md` |
+| app | `daw/gui` | the GUI application | ADR-0005, `specs/gui.md` |
 | agents | `skill/` | bundled LLM skill: generated reference + guides | — |
 
 Dependency direction is strictly downward in that table: libs never depend on
@@ -323,9 +323,8 @@ model (arrange, TCP, mixer, FX chains, routing matrix, MIDI editor, render
 dialog, actions list with bindable keys and macros, customizable toolbars
 and menus, themes) with Quire's own visual identity. UI work never stalls
 audio: the UI reads model versions and engine telemetry rings; it cannot
-block the RT path. The agent panel talks to OpenAI-compatible endpoints
-(including local llama-server) or the Anthropic API and shows branch diffs
-with A/B and accept/reject.
+block the RT path. Agents work through the MCP server from an external
+harness; the app has no built-in agent (ADR-0043).
 
 ## 11. Quality gates
 
@@ -338,11 +337,10 @@ review by someone other than the author. Nothing is "done" that was not run.
 
 `STATUS.md` lists what works today, the known limits and what is planned.
 
-The DAW windowing/agent panel uses SDL3 X11/Cocoa/Windows and OpenGL core
+The DAW windowing uses SDL3 X11/Cocoa/Windows and OpenGL core
 (3.3, macOS 4.1), with native hidden-window render tests and Linux-only golden
 references (ADR-0039). SDL density/display scale maps design units to pixels.
-The UI's primary modifier maps to Command on macOS. Agent config publication
-uses POSIX 0600 or a protected current-user Windows DACL before writing keys.
+The UI's primary modifier maps to Command on macOS.
 Native editor embedding uses typed X11/NSView/HWND parents (ADR-0040); Cocoa
 bridges own floating windows, while local and Windows bridge editors embed.
 The shared GUI watcher services native app/model and plugin waitables.

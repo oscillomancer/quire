@@ -45,8 +45,6 @@ class Server {
     // deadline (a negative fd reads blocking).
     Status serve(int fd, std::ostream& output, Tick tick = {});
     std::optional<json::Value> handle(const json::Value& request);
-    // Who in-process calls are recorded as (the agent panel: Origin::Type::Agent).
-    void setOrigin(cmd::Origin origin) { origin_ = std::move(origin); }
 
   private:
     Server(rpc::Client& client, Reconnect reconnect);
