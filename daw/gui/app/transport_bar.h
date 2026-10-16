@@ -6,6 +6,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -17,6 +18,7 @@
 namespace supple::ui {
 class Button;
 class Label;
+class Knob;
 class Root;
 }  // namespace supple::ui
 
@@ -32,10 +34,15 @@ class TransportBar {
     void sync(bool event = true,
               std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
     std::optional<std::chrono::steady_clock::time_point> nextDeadline() const;
+    json::Value saveLayout() const;
+    void loadLayout(const json::Value& value);
 
   private:
     void openTempoForm();
     void openMeterForm();
+    void openRateMenu();
+    double ratePosition(double rate) const;
+    double positionRate(double position) const;
 
     engine::EngineApp& app_;
     AppActions& actions_;
@@ -52,6 +59,11 @@ class TransportBar {
     ui::Label* position_ = nullptr;
     ui::Label* time_ = nullptr;
     ui::Label* engine_ = nullptr;
+    ui::Knob* rate_ = nullptr;
+    ui::Label* rateValue_ = nullptr;
+    ui::Node* rateReadout_ = nullptr;
+    std::size_t rateRange_ = 0;
+    std::uint64_t rateGesture_ = 0;
     bool moving_ = false;
     std::optional<std::chrono::steady_clock::time_point> lastStatus_;
 };

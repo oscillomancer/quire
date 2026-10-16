@@ -5,6 +5,10 @@
 `docs/specs/session-model.md` §7 (`transport.loop {range}`). Builds on
 ADR-0012 (anticipation), ADR-0014 (recording, the live region).
 
+**Amendment, 2026-10-16:** [ADR-0045](0045-master-playrate.md) defines master
+playrate with a shared timeline clock and source conversion in device-time
+graphs; model/command support precedes DSP integration.
+
 ## Context
 
 Phase 4 asks for punch-in and loop recording into takes. Playback has no

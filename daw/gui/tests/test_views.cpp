@@ -1872,6 +1872,55 @@ TEST_CASE("audit3: arrange and layout ignore version deltas across generations")
     CHECK(view->trackLayout().show(after, &emptyDelta, 3));
 }
 
+TEST_CASE("playrate envelope scale: logarithmic ratios, unity and bounded editing") {
+    model::Envelope env;
+    env.target = {model::kMaster, "playrate"};
+    const auto scale = views::envScale(env);
+    REQUIRE(scale);
+    CHECK(scale->kind == views::EnvScale::Kind::Playrate);
+    CHECK(scale->reference() == 1);
+    CHECK(scale->toNorm(0.25) == 0);
+    CHECK(scale->toNorm(1) == 0.5);
+    CHECK(scale->toNorm(4) == 1);
+    CHECK(scale->fromNorm(-1) == 0.25);
+    CHECK(scale->fromNorm(2) == 4);
+    CHECK(scale->text(1) == "1.000x");
+    CHECK(views::envTitle(env) == "Playrate");
+    CHECK(views::envUnit(env, *scale) == "playrate");
+    for (double value : {0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 4.0})
+        CHECK(scale->fromNorm(scale->toNorm(value)) == doctest::Approx(value));
+    const std::vector<model::EnvPoint> points{{0, 1}, {4, 2}};
+    const auto moved = views::movePoints(points, points, 0, 2, *scale);
+    for (const auto& point : moved.points) CHECK(point.value == 4);
+    env.target.object = {model::Kind::Track, 1};
+    CHECK_FALSE(views::envScale(env));
+    env.target.object = {model::Kind::Route, 0};
+    CHECK_FALSE(views::envScale(env));
+}
+
+TEST_CASE("master automation lanes are visible while hidden track lanes remain hidden") {
+    model::EditTxn txn(model::Session::create(), 1);
+    model::Track track;
+    track.parent = model::kMaster;
+    track.hiddenTcp = true;
+    const auto hidden = txn.create(track);
+    txn.modify<model::Track>(model::kMaster,
+                             [&](auto& master) { master.children.push_back(hidden); });
+    model::Envelope env;
+    env.target = {model::kMaster, "playrate"};
+    env.points = {{0, 1}};
+    const auto masterEnv = txn.create(env);
+    env.target = {hidden, "volume"};
+    env.points = {{0, 0}};
+    const auto hiddenEnv = txn.create(env);
+    views::TrackLayout layout;
+    REQUIRE(layout.show(txn.preview()));
+    REQUIRE(layout.rowCount() == 1);
+    CHECK(layout.indexOfEnv(masterEnv) == 0);
+    CHECK_FALSE(layout.indexOf(model::kMaster));
+    CHECK_FALSE(layout.indexOfEnv(hiddenEnv));
+}
+
 TEST_CASE("envelope point edits: move stops at the start and keeps time order; paste replaces") {
     using model::EnvPoint;
     const views::EnvScale volume{};

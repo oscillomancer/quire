@@ -7,6 +7,7 @@
 #include <supple/model/session.h>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 
 using namespace supple;
 using namespace supple::model;
@@ -403,7 +404,7 @@ TEST_CASE("project 1.x migration: folders and receives become busses with child 
     }
     CHECK(staging);
     const auto text = serializeProject(*migrated);
-    CHECK(text.find("supple.project/2.0") != std::string::npos);
+    CHECK(text.find(std::string(kProjectSchema)) != std::string::npos);
     auto back = parseProject(text);
     REQUIRE(back);
     CHECK(serializeProject(*back) == text);
@@ -411,7 +412,7 @@ TEST_CASE("project 1.x migration: folders and receives become busses with child 
 
 TEST_CASE("project newer minor ignores unknown fields with load warnings") {
     auto doc = projectToJson(Session::create());
-    doc["schema"] = "supple.project/2.1";
+    doc["schema"] = "supple.project/2.2";
     doc["tracks"]["tr_0"]["future"] = true;
     std::vector<schema::Warning> warnings;
     auto parsed = projectFromJson(doc, &warnings);
@@ -695,4 +696,123 @@ TEST_CASE("known nested project fields reject wrong shapes and drop unknowns wit
     auto bad = projectFromJson(doc);
     REQUIRE_FALSE(bad);
     CHECK(bad.error().path == "/project/render/normalize/mode");
+}
+
+TEST_CASE("master playrate: old projects default to unity without preserving pitch") {
+    for (const char* format : {"supple.project/1.7", "supple.project/2.0", "supple.project/2.1"}) {
+        auto doc = projectToJson(Session::create());
+        CHECK(doc["project"].find("playrate") == nullptr);
+        doc["schema"] = format;
+        std::vector<schema::Warning> warnings;
+        auto loaded = projectFromJson(doc, &warnings);
+        REQUIRE(loaded);
+        CHECK(loaded->project->playrate == Playrate{});
+        CHECK(std::none_of(warnings.begin(), warnings.end(),
+                           [](const auto& w) { return w.code == "project.newer_minor"; }));
+        CHECK(projectToJson(*loaded)["schema"].asString() == kProjectSchema);
+    }
+}
+
+TEST_CASE("master playrate: save reopen includes the first master envelope and automation") {
+    for (double rate : {kMinPlayrate, 1.137, kMaxPlayrate}) {
+        EditTxn edit(Session::create(), 1);
+        auto project = edit.project();
+        project.playrate = {rate, true};
+        edit.setProject(project);
+        Envelope env;
+        env.target = {kMaster, "playrate"};
+        env.timebase = Timebase::Time;
+        env.points = {{0, kMinPlayrate}, {2, kMaxPlayrate, PointShape::Bezier, .8}};
+        const Id id = edit.create(env);
+        AutomationItem item;
+        item.envelope = id;
+        item.position = 1;
+        item.points = {{0, 1}, {4, 2}};
+        item.baseline = 1;
+        item.amplitude = .5;
+        edit.create(item);
+        auto session = edit.commit();
+        REQUIRE(session);
+        const auto bytes = serializeProject(*session);
+        auto reopened = parseProject(bytes);
+        REQUIRE(reopened);
+        CHECK(serializeProject(*reopened) == bytes);
+        CHECK(reopened->project->playrate == project.playrate);
+        CHECK(reopened->envelopes.find(id)->target.param == "playrate");
+        CHECK(reopened->envelopes.find(id)->timebase == Timebase::Time);
+        CHECK(effectivePoints(*reopened, id).size() > 2);
+        CHECK(diff(*session, *reopened).empty());
+        CHECK(diff(Session::create(), *session).front().fields ==
+              std::vector<std::string>{"playrate"});
+    }
+}
+
+TEST_CASE("master playrate: reject invalid settings and scaled automation on edits and load") {
+    for (double rate : {0.0, .249, 4.001, std::numeric_limits<double>::infinity(),
+                        std::numeric_limits<double>::quiet_NaN()}) {
+        EditTxn edit(Session::create(), 1);
+        auto project = edit.project();
+        project.playrate.rate = rate;
+        edit.setProject(project);
+        auto rejected = edit.commit();
+        REQUIRE_FALSE(rejected);
+        CHECK(rejected.error().code == "playrate.range");
+        CHECK(rejected.error().path == "/project/playrate/rate");
+        auto doc = projectToJson(Session::create());
+        doc["project"]["playrate"] = toJson(project.playrate);
+        CHECK_FALSE(projectFromJson(doc));
+    }
+    for (bool scaled : {false, true}) {
+        EditTxn edit(Session::create(), 1);
+        Envelope env;
+        env.target = {kMaster, "playrate"};
+        env.points = {{0, scaled ? 1.0 : 0.0}};
+        const Id id = edit.create(env);
+        if (scaled) {
+            AutomationItem item;
+            item.envelope = id;
+            item.points = {{0, 2}, {4, 3}};
+            item.baseline = 1;
+            item.amplitude = 2;  // effective endpoint is 5, outside the range
+            edit.create(item);
+        }
+        const auto doc = projectToJson(edit.preview());
+        auto result = edit.commit();
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == "playrate.range");
+        CHECK_FALSE(result.error().hint.empty());
+        CHECK_FALSE(projectFromJson(doc));
+    }
+}
+
+TEST_CASE("master playrate: only one non-plugin envelope on tr_0") {
+    EditTxn setup(Session::create(), 1);
+    const Id channel = addTrack(setup, "Channel");
+    Route route;
+    route.from.track = channel;
+    route.to.track = kMaster;
+    const Id send = setup.create(route);
+    const Id take = setup.create(Take{});
+    Item item;
+    item.track = channel;
+    item.length = 1;
+    item.takes = {take};
+    item.activeTake = take;
+    setup.create(item);
+    auto ready = setup.commit();
+    REQUIRE_MESSAGE(ready, (ready ? "" : ready.error().toString()));
+    const auto base = *ready;
+    for (Id target : {channel, send, take}) {
+        EditTxn edit(base, 2);
+        Envelope env;
+        env.target = {target, "playrate"};
+        edit.create(env);
+        CHECK_FALSE(edit.commit());
+    }
+    EditTxn duplicate(base, 2);
+    Envelope env;
+    env.target = {kMaster, "playrate"};
+    duplicate.create(env);
+    duplicate.create(env);
+    CHECK_FALSE(duplicate.commit());
 }

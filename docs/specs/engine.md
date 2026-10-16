@@ -1448,3 +1448,114 @@ queue destruction. Linux keeps JACK and builds only device-free shared logic.
 Real-device tests require SUPPLE_MIDI_DEVICE_TEST exactly 1; they use fake
 audio and never open an audio device. Native SDK tests do not establish physical
 input timing, disconnect reliability or performance on every driver.
+
+### Master playrate control stage (2026-10-16, ADR-0045)
+
+Project schema 2.1 stores master playrate and its `tr_0/playrate` envelope.
+The control interface is implemented before audio integration: **playback and
+all offline renders still run at 1x**, including when the saved rate or
+active envelope differs. GUI controls and lane editing are specified in gui.md.
+The source converter, fractional clock, remapped MIDI/automation, effective
+BPM and metronome timing in ADR-0045 remain pending.
+
+- `transport.playrate.get {}` is a query available without a running engine.
+  Result: `{requested_rate: number, effective_rate: number,
+  preserve_pitch: bool, envelope?: en_id}`. `requested_rate` is the saved
+  scalar; `envelope` is present only for an active master rate envelope with
+  effective points (including automation items). `effective_rate` is currently
+  always 1.0; the engine stage will supply consumption telemetry at the audible
+  render horizon, not the requested or lookahead value.
+- `transport.playrate.set {rate?: number, preserve_pitch?: bool}` is an edit
+  returning the same result. Rate is finite 0.25..4.0, and omitted fields retain
+  their values. Empty arguments or unchanged settings make no version unless
+  the call writes an automation point. GUI drags use `Origin.gesture` for the
+  same live model updates and coalesced undo as strip faders. The range of a
+  future knob is display state, never a model constraint.
+- `transport.playrate.apply-to-tempo {}` is an edit returning `{}`. It
+  multiplies every tempo-point BPM by the scalar and resets rate to 1 in one
+  version, retaining tempo IDs, beats, ramps, pitch mode and meter map. The
+  transport must be stopped, with no recording and no active nonempty rate
+  envelope. Scaled BPM outside 1..1000 produces `tempo.range` at the tempo
+  point path before mutation. Item timebases still govern placement: this is
+  not a sound-preserving bake for time-locked audio. Applying unity is a no-op.
+
+`env.add {track: "tr_0", param: "playrate", points?: [...]}` creates the
+unique global envelope using the existing point/timebase and automation-item
+contracts; other strip/route/take targets are rejected. Values are finite
+numeric ratios 0.25..4.0, not booleans or unit text. The setter captures points
+through the existing strip writer in touch/latch/write modes; latch/write
+hold through pause/stop. Like current strip faders this is coarse capture,
+without explicit held-control override or touch-return behavior. The engine
+still ignores the rate envelope in this control stage.
+
+Recording audio or MIDI requires saved rate 1.0 and an active effective rate
+curve that is absent/empty or everywhere 1.0. `record.playrate` reports the
+scalar or envelope path and a hint to restore unity/disable the envelope.
+Check before files are created, at engine recording/load boundaries, and
+before committing model edits during recording; batch failure rolls back both
+model points and transient writer holds. Commit validation failures restore
+writer state too, including for internal transaction callers.
+Undo/redo restore history on refusal before publishing any engine/event
+change. Branch switching rejects an unsafe destination; merges into the
+recording branch reject unsafe source/replayed snapshots as invalid merge
+conflicts, including fast-forwards. Project replacement follows its existing
+stop/commit-recording lifecycle before replacing the session.
+
+The model helpers `activePlayrateEnvelope` and `validateRecordingPlayrate`
+are model-thread APIs; no effective-point expansion runs on the callback.
+This stage adds no audio-path DSP. Portable command/guard tests are included
+in both native and Linux engine test builds.
+
+### Master playrate DSP building blocks (ADR-0045)
+
+The internal `playrate_dsp` module supplies the fractional `PlayrateClock`,
+original tape reader and streaming `StretchReader`. This is a separately
+validated foundation; plans/executors do not consume it yet, so the control-stage
+1x limitation above still applies.
+
+The clock advances once per device frame and exposes timeline boundaries and
+inverse boundary crossings. Manual scalar changes can ramp over a caller-supplied
+number of device frames; authored envelope values replace the scalar immediately.
+Timeline positions retain their fractional part across arbitrary caller blocks.
+
+Tape conversion uses a shared, control-thread-prepared table: 256-tap Blackman
+windowed sinc, 1024 fractional phases, and 13 anti-alias cutoff banks covering
+1..4x in quarter-rate steps. Banks round up in rate (conservative cutoff), with
+a 6% transition guard. Ratios below unity use the 1x cutoff. Integer source
+positions at exactly unity read the original samples directly. Both channels
+share phase and cutoff; file padding/looping belongs to the source reader.
+
+Pitch-preserving conversion configures stereo Signalsmith Stretch before
+publication and processes only 64-frame output quanta. The channel count is unrestricted and phase is linked across all channels.
+Decoded in-memory data is fetched once per channel/64-frame quantum, returning
+a direct contiguous span where possible and using prepared scratch for padding
+or wrapping; neither tape taps nor stretch frames make per-sample indirect
+reader calls. Source consumption keeps
+a fractional cursor, using successive integer boundaries for input counts.
+Source lookahead compensates both its analysis latency (source frames) and
+synthesis latency (device frames). For a quantum ending at device frame D,
+the required source endpoint is timeline(D + synthesis latency) + analysis
+latency. Priming supplies the corresponding analysis window and future source
+frames, with no graph latency. The owner
+can spread priming over a bounded number of quanta per cycle, waits for ready,
+and owns the audible transition. No reader allocates, frees or accesses files
+while seeking, priming or processing. Unprimed/discontinuous trajectories are
+refused without changing the stretch state.
+
+A documented MIT vendor patch adds `reset(seed)` and resets silence/seek/smoothing
+state. Plain `reset()` retains upstream's random-sequence behavior; existing
+whole-file media variants keep their seed and processing schedule. Shared
+portable DSP tests exercise partition-independent clock/ramp output, exact unity,
+linked stereo, tape anti-aliasing, preserved pitch, unity impulse alignment,
+repeatable seeks at extreme
+rates, non-48k priming and invalid trajectory rejection, including under RTSan.
+
+`EngineApp::playrateState()` is a model/UI-thread accessor for GUI synchronization:
+`{requestedRate, effectiveRate, preservePitch, envelope?, envelopeValue?}`. It
+allocates no memory, executes/logs no command and creates no history entries.
+Effective rate comes from `Engine::effectivePlayrate()` consumption telemetry
+(still 1 until executor integration). The optional envelope value evaluates the
+latest model curve at the consumed transport position; it is distinct from the
+possibly older audible effective rate. Effective points are expanded/cached when
+the model head changes, including history and branch changes, not on each GUI
+sync. The accessor works without a running engine, using the stopped position.

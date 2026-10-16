@@ -73,12 +73,29 @@ class Slider : public Node {
     bool onKey(const KeyEvent& e) override;
     std::string valueText() const override;
 
+  protected:
+    virtual double dragDelta(Point from, Point to) const;
+
   private:
     Rect track() const;
     void change(double value, Gesture g);
     double value_ = 0, pressValue_ = 0, defaultValue_ = 0;
     Point press_{};
     bool dragging_ = false;
+};
+
+// A normalized round knob, with the slider's gestures/default/keys and a
+// relative vertical drag (150 design units over its full travel; Shift fine).
+class Knob : public Slider {
+  public:
+    explicit Knob(std::string id);
+    void setValue(double value);  // model readback never takes over an active drag
+    Size measure(const Canvas& canvas, Size available) override;
+    void paint(Canvas& canvas) override;
+    bool onPointer(const PointerEvent& e) override;
+
+  protected:
+    double dragDelta(Point from, Point to) const override;
 };
 
 // Pan -100 (left) .. +100 (right) as a horizontal bar from the centre.

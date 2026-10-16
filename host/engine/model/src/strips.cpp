@@ -126,8 +126,17 @@ Status validateStripRules(const Session& s) {
                               "/items/" + e.id.str() + "/track",
                               "put the items on a child channel and route it into the buss/master");
     }
+    bool hasPlayrate = false;
     for (const auto& e : s.envelopes) {
         const auto& target = e.value->target;
+        if (target.param == "playrate" && target.object.kind != Kind::Fx) {
+            if (target.object != kMaster || hasPlayrate)
+                return Error("env.target", "master playrate has one envelope on tr_0",
+                             "/envelopes/" + e.id.str() + "/target",
+                             "use one envelope with track tr_0 and param playrate");
+            hasPlayrate = true;
+            continue;
+        }
         if (target.object.kind == Kind::Track && target.param != "volume" &&
             target.param != "pan" && target.param != "mute")
             return trackError("a strip envelope targets volume, pan or mute",

@@ -19,13 +19,18 @@ double EnvScale::toNorm(double value) const {
             return std::clamp((value + 100.0) / 200.0, 0.0, 1.0);
         case Kind::Mute:
             return value >= 0.5 ? 1.0 : 0.0;
+        case Kind::Playrate:
+            return (std::log2(std::clamp(value, 0.25, 4.0)) + 2.0) / 4.0;
         case Kind::Plugin:
             return param ? params::toNormalized(param->spec, value) : 0.0;
     }
     return 0.0;
 }
 
-double EnvScale::reference() const { return kind == Kind::Plugin && param ? param->spec.def : 0.0; }
+double EnvScale::reference() const {
+    if (kind == Kind::Playrate) return 1.0;
+    return kind == Kind::Plugin && param ? param->spec.def : 0.0;
+}
 
 double EnvScale::fromNorm(double norm) const {
     const double n = std::clamp(norm, 0.0, 1.0);
@@ -36,6 +41,8 @@ double EnvScale::fromNorm(double norm) const {
             return std::round(n * 200.0 - 100.0);
         case Kind::Mute:
             return n >= 0.5 ? 1.0 : 0.0;
+        case Kind::Playrate:
+            return std::exp2(4.0 * n - 2.0);
         case Kind::Plugin:
             return param
                        ? params::clampPhysical(param->spec, params::fromNormalized(param->spec, n))
@@ -59,6 +66,9 @@ std::string EnvScale::text(double value) const {
         }
         case Kind::Mute:
             return value >= 0.5 ? "muted" : "on";
+        case Kind::Playrate:
+            std::snprintf(buf, sizeof buf, "%.3fx", value);
+            return buf;
         case Kind::Plugin:
             return param ? params::format(param->spec, value) : std::string{};
     }
@@ -76,6 +86,8 @@ std::optional<EnvScale> envScale(const model::Envelope& env) {
         s.kind = EnvScale::Kind::Pan;
     else if (env.target.param == "mute")
         s.kind = EnvScale::Kind::Mute;
+    else if (env.target.object == model::kMaster && env.target.param == "playrate")
+        s.kind = EnvScale::Kind::Playrate;
     else
         return std::nullopt;
     return s;
@@ -86,6 +98,7 @@ std::string envTitle(const model::Envelope& env) {
     if (p == "volume") return "Volume";
     if (p == "pan") return "Pan";
     if (p == "mute") return "Mute";
+    if (p == "playrate") return "Playrate";
     return p;
 }
 

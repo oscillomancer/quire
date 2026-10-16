@@ -479,6 +479,13 @@ Status automationExpansionBudget(const Session& s) {
 }
 
 Status validateNumeric(const Session& s) {
+    const auto validPlayrate = [](double rate, const std::string& path) -> Status {
+        if (!std::isfinite(rate) || rate < kMinPlayrate || rate > kMaxPlayrate)
+            return Error("playrate.range", "master playrate is outside 0.25..4.0", path,
+                         "provide a finite playback ratio from 0.25 to 4.0");
+        return {};
+    };
+    SUPPLE_TRY(validPlayrate(s.project->playrate.rate, "/project/playrate/rate"));
     if (s.project->historyBudgetBytes == 0)
         return Error("history.budget", "history byte budget must be positive",
                      "/project/history_budget_bytes", "use a positive estimated byte budget");
@@ -619,8 +626,9 @@ Status validateNumeric(const Session& s) {
         }
         return {};
     };
-    auto curveOutput = [](const Envelope* env, double value, const std::string& path) -> Status {
+    auto curveOutput = [&](const Envelope* env, double value, const std::string& path) -> Status {
         if (!env || env->target.object.kind == Kind::Fx) return {};
+        if (env->target.param == "playrate") return validPlayrate(value, path);
         if (env->target.param == "volume") {
             const double gain = value <= kSilenceDb ? 0 : std::pow(10, value / 20);
             if (!std::isfinite(gain) ||
@@ -654,6 +662,9 @@ Status validateNumeric(const Session& s) {
         SUPPLE_TRY(checkedBeat(s, ai.position + ai.length, p + "/length"));
         SUPPLE_TRY(checkedBeat(s, ai.sourceLength, p + "/source_length"));
         SUPPLE_TRY(points(ai.points, Timebase::Beats, p + "/points"));
+        const auto* envelope = s.envelopes.find(ai.envelope);
+        if (envelope && envelope->target.object == kMaster && envelope->target.param == "playrate")
+            for (const auto& pt : ai.points) SUPPLE_TRY(validPlayrate(pt.value, p + "/points"));
         if (!std::isfinite(ai.baseline) || !std::isfinite(ai.amplitude))
             return numericError(p + "/amplitude");
         auto& bounds = curveBounds[ai.envelope];
@@ -925,6 +936,32 @@ void retimeItem(const Session& s, Item& it, Timebase from, Timebase to) {
 
 ItemSpan itemSpan(const Session& s, const Item& it) {
     return spanAs(*s.timeMap, it, itemTimebase(s, it));
+}
+
+std::optional<Id> activePlayrateEnvelope(const Session& s) {
+    for (const auto& e : s.envelopes) {
+        const auto& env = *e.value;
+        if (!env.active || env.target.object != kMaster || env.target.param != "playrate") continue;
+        if (!env.points.empty()) return e.id;
+        for (const auto& item : s.autoItems)
+            if (item.value->envelope == e.id) return e.id;
+    }
+    return {};
+}
+
+Status validateRecordingPlayrate(const Session& s) {
+    auto refused = [](std::string path) -> Status {
+        return Error("record.playrate", "recording requires unity master playrate", std::move(path),
+                     "set transport.playrate.set {rate: 1} and disable the master playrate "
+                     "envelope with env.set {active: false} before recording");
+    };
+    if (s.project->playrate.rate != 1.0) return refused("/project/playrate/rate");
+    if (const auto envelope = activePlayrateEnvelope(s)) {
+        SUPPLE_TRY(automationExpansionBudget(s));
+        for (const auto& pt : effectivePoints(s, *envelope))
+            if (pt.value != 1.0) return refused("/envelopes/" + envelope->str() + "/points");
+    }
+    return {};
 }
 
 double pointsValueAt(const std::vector<EnvPoint>& pts, double pos, double fallback) {

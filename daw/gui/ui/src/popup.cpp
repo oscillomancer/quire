@@ -27,8 +27,12 @@ class MenuList : public List {
                 return;
             }
             const Color ink = item.enabled ? t.color("ink") : t.color("ink-faint");
-            if (item.checked)
-                c.text({r.x + 8, r.y, 16, r.h}, "\xE2\x9C\x93", Font::Ui, t.type("small"), ink);
+            if (item.checked) {
+                // The bundled UI font subset has no checkmark glyph.
+                const float y = r.y + r.h / 2;
+                c.line({r.x + 9, y}, {r.x + 13, y + 4}, ink, 1.5f);
+                c.line({r.x + 13, y + 4}, {r.x + 20, y - 5}, ink, 1.5f);
+            }
             float labelX = r.x + 26;
             if (item.swatch) {
                 c.fillRound({labelX, r.y + (r.h - 12) / 2, 12, 12}, 2, *item.swatch);

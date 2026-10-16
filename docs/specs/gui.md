@@ -137,6 +137,11 @@ only what the DAW needs, designed for virtualized, data-heavy views.
   subtree are preserved. A closing popup restores focus only to a node
   still in the tree, visible through all ancestors and enabled through all
   ancestors; otherwise it restores no focus.
+  Normalized round knobs share slider gesture/default, wheel and keyboard
+  behavior. Their relative vertical drag spans 150 design units, with Shift
+  for fine adjustment; double-click resets to the configured default. Model
+  readback is ignored while a knob is being dragged. Every drag reports
+  Begin/Move/End and each one-shot change reports Set.
 - **Damage.** Each window keeps a dirty-rect list; nodes invalidate
   themselves; a frame redraws only damaged regions (scissored). Removed nodes
   survive the current input dispatch; focus, hover and capture are resolved
@@ -235,6 +240,34 @@ clock at button activation. Tap returns focus to the field; Set or Enter
 applies the value through `tempo.set`, preserving the other tempo points
 and ramps. Cancel discards it; reopening starts a fresh tap sequence.
 
+The transport's time-map controls appear as meter, tempo, a small playrate
+knob and a two-line Rate readout (ADR-0045). Unity is at the knob's top/center
+in all display ranges: logarithmic travel on either side maps 0.25..4.0
+(default), 0.5..2.0, 0.75..1.5 or 0.9..1.1 to its endpoints. Double-click
+resets to 1.0. Drag moves use `transport.playrate.set` with one origin gesture
+per drag, hence one undo step; model/effective readback cannot take over
+while dragging. With an active nonempty master playrate envelope, readback
+uses `EngineApp::playrateState().effectiveRate` from consumption telemetry;
+otherwise it shows that accessor's `requestedRate`. It does not display the
+accessor's distinct `envelopeValue`, which describes the latest authored curve
+at the consumed position and may differ from the audible rate. The engine owns
+the cached curve; the transport keeps no local envelope cache. Readback executes
+no commands and adds nothing to the command log.
+
+Right-click either the knob or readout for reset, semitone up/down
+(multiply/divide by `2^(1/12)`), ten cents up/down (`2^(1/120)`), Apply playrate
+to current BPM, the preserve-pitch toggle, and checked display ranges (the
+first is labeled `Playrate range: 0.25-4.0 (default)`).
+Pitch steps are bounded to the model's 0.25..4.0 range. Reset, the four pitch
+steps and preserve toggle also appear as key-bindable transport actions;
+the menu runs those same actions. Tempo bake uses
+`transport.playrate.apply-to-tempo`; command errors reach the normal status
+message. Display range is per-project UI state in section `transport`, key
+`playrate_range` (strings `0.25-4.0`, `0.5-2.0`, `0.75-1.5`, `0.9-1.1`);
+unknown/missing choices use the default. Changing range never edits/clamps
+the saved or automated rate: knob geometry saturates while the readout keeps
+the actual value.
+
 ### 4.2 Track control panel (TCP)
 
 Per strip: name (rename in place: a double-click; Enter or a click anywhere
@@ -332,6 +365,20 @@ MIDI thumbnails map offset, rate and loop passes
 as playback does. Fade shapes and curve bends share playback's evaluator.
 Automation drawing samples only visible time and bounds loop glyph work;
 plugin automation interpolates in the playback parameter domain (ADR-0010).
+
+The main master's (`tr_0`) envelope menu also offers Playrate (ADR-0045);
+other strips, including secondary masters, do not. Creating it starts flat
+at the saved project rate. The rate menu's `Master envelopes...` entry and
+the key-bindable `Master: envelopes` action open this menu even when the
+master strip has no arrange row. Visible master automation lanes appear
+above the master's child tracks; master strip rows remain hidden. Playrate
+uses the existing lane, visibility, point
+editing, shapes and automation-item controls. Its scale is logarithmic over
+0.25..4.0 with a 1.0 reference at mid-height, ratio text such as `1.000x`, and
+its own clipboard unit. Empty lanes use the saved scalar as their fallback
+and redraw when that scalar changes. The lane display range is independent
+of the transport knob's per-project display range. In the staged engine the
+curve is editable and saved, but audio application remains pending.
 
 **Takes.** An item with several takes shows each in a lane under its name
 bar when the row is tall enough (at least 14 units a lane), the heard one

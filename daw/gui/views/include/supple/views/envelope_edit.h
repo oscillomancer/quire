@@ -35,7 +35,7 @@ struct EnvClip {
     std::string unit;  // which envelopes take the values as they are (envUnit)
     bool empty() const { return points.empty(); }
 };
-// The kind of value an envelope holds: volume, pan, mute or a plug-in
+// The kind of value an envelope holds: volume, pan, mute, playrate or a plug-in
 // parameter's key. Points paste between envelopes of one unit unchanged.
 std::string envUnit(const model::Envelope& env, const EnvScale& scale);
 EnvClip copyPoints(const std::vector<model::EnvPoint>& points,

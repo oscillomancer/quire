@@ -4,6 +4,10 @@
 (recording), `docs/specs/session-model.md` (`track.record`, routes from
 `hw_input`). Builds on ADR-0012 (anticipation) and ADR-0004 (JACK inputs).
 
+**Amendment, 2026-10-16:** [ADR-0045](0045-master-playrate.md) defines master
+playrate with a shared timeline clock and source conversion in device-time
+graphs; model/command support precedes DSP integration.
+
 ## Context
 
 Everything renders ahead today (ADR-0012). Recording needs the device's

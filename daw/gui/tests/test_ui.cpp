@@ -690,6 +690,51 @@ TEST_CASE("the normalized slider: relative drags, a default, keys") {
     CHECK_FALSE(slider.valueText().empty());
 }
 
+TEST_CASE("the round knob: vertical relative drag, fine adjustment, readback and reset") {
+    REQUIRE_GL();
+    Root root(*fixture().window, fixture().fonts, Theme::dark());
+    auto content = std::make_unique<Node>("root");
+    content->layout.dir = Layout::Dir::Row;
+    content->layout.padding = Insets::all(8);
+    auto& knob = content->emplace<Knob>("knob");
+    std::vector<std::pair<double, Gesture>> calls;
+    knob.onChange = [&](double v, Gesture g) { calls.emplace_back(v, g); };
+    root.setContent(std::move(content));
+    root.frame(false);
+    const Rect b = knob.bounds();
+    const Point p{b.x + b.w / 2, b.y + b.h / 2};
+    root.pointer({PointerEvent::Type::Down, p, 1});
+    CHECK(knob.value() == 0.5);
+    CHECK(calls.back().second == Gesture::Begin);
+    root.pointer({PointerEvent::Type::Move, {p.x + 100, p.y - 30}, 1});
+    CHECK(knob.value() == doctest::Approx(0.7));
+    CHECK(calls.back().second == Gesture::Move);
+    knob.setValue(0.1);
+    CHECK(knob.value() == doctest::Approx(0.7));
+    root.pointer({PointerEvent::Type::Up, p, 1});
+    CHECK(calls.back().second == Gesture::End);
+    knob.setValue(0.5);
+    root.pointer({PointerEvent::Type::Down, p, 1});
+    root.pointer({PointerEvent::Type::Move, {p.x, p.y - 30}, 1, 1, kShift});
+    CHECK(knob.value() == doctest::Approx(0.52));
+    root.pointer({PointerEvent::Type::Cancel, p, 1});
+    CHECK_FALSE(knob.dragging());
+    CHECK(calls.back().second == Gesture::End);
+    root.pointer({PointerEvent::Type::Down, p, 1, 2});
+    root.pointer({PointerEvent::Type::Up, p, 1});
+    CHECK(knob.value() == 0.5);
+    CHECK(calls.back().second == Gesture::Set);
+    const auto beforeReset = calls.size();
+    root.pointer({PointerEvent::Type::Down, p, 1, 2});
+    root.pointer({PointerEvent::Type::Up, p, 1});
+    CHECK(calls.size() == beforeReset + 1);
+    CHECK(calls.back().second == Gesture::Set);
+    root.focus(&knob);
+    root.key(SDLK_UP);
+    CHECK(knob.value() > 0.5);
+    root.frame(false);
+}
+
 TEST_CASE("a plugin editor switching GL contexts behind SDL's back cannot break the next frame") {
     REQUIRE_GL();
     Fixture& f = fixture();

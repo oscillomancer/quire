@@ -449,6 +449,19 @@ Schema<Id> idSchema() {
 // --- per-type schemas -------------------------------------------------------------
 
 template <>
+const Schema<Playrate>& schemaOf<Playrate>() {
+    static const Schema<Playrate> s = [] {
+        ObjectBuilder<Playrate> b = schema::object<Playrate>("playrate");
+        b.field("rate", &Playrate::rate, num().range(kMinPlayrate, kMaxPlayrate));
+        dflt(b, 1.0);
+        b.field("preserve_pitch", &Playrate::preservePitch, boolean());
+        dflt(b, false);
+        return b.build();
+    }();
+    return s;
+}
+
+template <>
 const Schema<Project>& schemaOf<Project>() {
     static const Schema<Project> s = [] {
         const Project d;
@@ -471,6 +484,8 @@ const Schema<Project>& schemaOf<Project>() {
         dflt(b, d.mediaDir);
         b.field("console9", &Project::console9, boolean());
         dflt(b, d.console9);
+        b.field("playrate", &Project::playrate, schemaOf<Playrate>());
+        dflt(b, d.playrate);
         b.field("masters", &Project::masters, ids());
         dflt(b, d.masters);
         b.field("seed", &Project::seed, schema::integerOf<std::uint64_t>());
@@ -1130,7 +1145,7 @@ Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Wa
         auto migrated = migrateProject1(std::move(doc), warnings);
         if (!migrated) return std::move(migrated).error();
         doc = std::move(*migrated);
-    } else if (version->minor > 0 && warnings)
+    } else if (version->minor > 1 && warnings)
         warnings->push_back(
             {"project.newer_minor", "loading a newer project minor version", "/schema"});
     options.unknownMembers = schema::UnknownMembers::Ignore;

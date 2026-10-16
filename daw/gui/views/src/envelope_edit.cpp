@@ -43,6 +43,8 @@ std::string envUnit(const model::Envelope& env, const EnvScale& scale) {
             return "pan";
         case EnvScale::Kind::Mute:
             return "mute";
+        case EnvScale::Kind::Playrate:
+            return "playrate";
         case EnvScale::Kind::Plugin:
             break;
     }

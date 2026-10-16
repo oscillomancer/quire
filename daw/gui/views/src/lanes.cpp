@@ -279,9 +279,10 @@ void Lanes::drawEnvelope(ui::Canvas& c, std::size_t row, const ui::Rect& r) {
     if (!env || !scale) return;
     double fallback = scale->reference();
     if (const model::Track* tr = s.tracks.find(env->target.object))
-        fallback = env->target.param == "volume" ? tr->volumeDb
-                   : env->target.param == "pan"  ? tr->pan
-                                                 : (tr->mute ? 1.0 : 0.0);
+        fallback = env->target.param == "playrate" ? s.project->playrate.rate
+                   : env->target.param == "volume" ? tr->volumeDb
+                   : env->target.param == "pan"    ? tr->pan
+                                                   : (tr->mute ? 1.0 : 0.0);
     const ui::Rect a = envArea(r);
     auto yOf = [&](double value) {
         return a.bottom() - static_cast<float>(scale->toNorm(value)) * a.h;

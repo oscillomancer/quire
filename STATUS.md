@@ -80,7 +80,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   versions with stable ids, per-branch undo, branches with object-level diff
   and merge by replay (field-level conflicts, id remapping), A/B renders of
   two branches, a command log with origins, a history budget that squashes
-  the oldest steps. Project format `supple.project/2.0` with migration from
+  the oldest steps. Project format `supple.project/2.1` with migration from
   1.x, autosave, crash recovery of recordings, a per-project UI sidecar.
 - **Command bus** (`specs/command-bus.md`, ADR-0007): about 120 typed
   commands with JSON Schema, units, examples run as tests and structured
@@ -149,7 +149,9 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   the plugin browser, routing matrix, MIDI editor, render dialog, history
   dock with branches, actions list with key bindings and macros, editable
   menus, toolbar and mouse modifiers, screensets, two palettes in dark and
-  light, preferences, and tap tempo in the tempo form. Projects and renders default to
+  light, preferences, and tap tempo in the tempo form. The transport has a
+  master playrate knob, context menu, key-bindable pitch steps and
+  per-project display range (ADR-0045). Projects and renders default to
   `~/Documents/<slug>-media` (the render folder is choosable), each project
   in a folder of its own with its own media; imports are copied into the
   project by default, and Save as into another folder copies the media. FX
@@ -313,6 +315,20 @@ Engine and hosting:
   are).
 
 Session and editing:
+- Master playrate settings and the tr_0 playrate envelope persist in project
+  schema 2.1; audio playback/rendering still run at 1x until DSP integration
+  (ADR-0045). Get/set and atomic tempo-bake commands are available; requested
+  vs effective rate is explicit (effective remains 1). Non-unity audio/MIDI
+  recording and transitions into it during recording are refused. Master-rate
+  writing has existing coarse strip semantics; transport controls and the
+  main master's editable Playrate lane are present, with logarithmic scaling
+  and a unity reference. Transport ranges are UI state and never clamp saved
+  values. Transport readback uses `EngineApp::playrateState()`: consumed
+  effective rate for an active curve, requested scalar otherwise, with no
+  command logging or transport-side envelope cache.
+  Native CI for these new controls is pending coordinator validation.
+  The fractional DSP clock and per-source tape/stretch readers are implemented
+  and tested in isolation (dev/RTSan); executor integration remains pending.
 - Take `stretch_markers` are stored but not applied; stretching and
   resampling run synchronously when a plan is compiled.
 - Track groups are preserved in project files but not implemented.

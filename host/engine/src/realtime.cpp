@@ -409,6 +409,7 @@ void Engine::stop() {
 }
 
 Status Engine::load(const model::Session& session, const std::filesystem::path& projectDir) {
+    if (recording()) SUPPLE_TRY(model::validateRecordingPlayrate(session));
     if (!notificationReload_)
         for (const auto& fx : session.fx) plugins_.resetAutomation(fx.id);
     if (!backend_)
@@ -1364,6 +1365,7 @@ Status Engine::startRecording(std::vector<RecordTarget> targets) {
     if (recorderOwned_)
         return Error("record.running", "already recording", {},
                      "stop the current recording with transport.stop before starting another");
+    if (latest_) SUPPLE_TRY(model::validateRecordingPlayrate(*latest_));
     if (targets.empty())
         return Error("record.nothing_armed", "no track is armed with an input", {},
                      "use track.list for a channel id, then track.set {track, armed: true, "

@@ -60,3 +60,4 @@ current state.
 | [0042](0042-native-midi-input.md) | Native MIDI input | Accepted |
 | [0043](0043-no-built-in-agent.md) | No built-in agent panel | Accepted |
 | [0044](0044-windows-utf8-code-page.md) | Windows processes use the UTF-8 code page | Accepted |
+| [0045](0045-master-playrate.md) | Master playrate in device-time graphs | Accepted |

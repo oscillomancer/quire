@@ -1021,6 +1021,11 @@ void ArrangeView::show(const model::Session& session, const std::vector<model::C
         if (const auto* now = session.autoItems.find(id)) dirtyEnvelopes.insert(now->envelope);
     }
     // Track values are the fallback of mixer envelopes with no points.
+    if (before.project->playrate.rate != session.project->playrate.rate)
+        for (const auto& entry : session.envelopes)
+            if (entry.value->target.object == model::kMaster &&
+                entry.value->target.param == "playrate")
+                dirtyEnvelopes.insert(entry.id);
     if (!tracks.empty())
         for (const auto& entry : session.envelopes)
             if (tracks.contains(entry.value->target.object)) dirtyEnvelopes.insert(entry.id);

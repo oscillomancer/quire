@@ -5,7 +5,7 @@ find_package(ZLIB REQUIRED)
 
 supple_add_library(engine
   SOURCES src/offline.cpp src/plan.cpp src/workers.cpp src/live_workers.cpp src/realtime.cpp src/recording.cpp
-          src/stretch.cpp src/meters.cpp src/runtime_protection.cpp src/media_files.cpp
+          src/stretch.cpp src/playrate_dsp.cpp src/playrate_timeline.cpp src/meters.cpp src/runtime_protection.cpp src/media_files.cpp
           src/app.cpp src/plugin_outputs.cpp src/commands.cpp src/extra_commands.cpp src/midi_commands.cpp src/analysis_commands.cpp
           src/render_commands.cpp src/chain_commands.cpp src/take_commands.cpp src/learn.cpp src/dsp_commands.cpp
           src/midi_control.cpp src/midi_input.cpp src/portaudio_backend.cpp src/portaudio_native.cpp
@@ -50,7 +50,7 @@ if(SUPPLE_BUILD_TESTS AND SUPPLE_PLATFORM_LINUX)
   target_compile_options(engine-fake-jack PRIVATE $<$<CXX_COMPILER_ID:Clang>:-fno-sanitize=function>)
 
   supple_add_tests(engine SOURCES tests/test_offline.cpp tests/test_realtime.cpp tests/test_app.cpp
-                   tests/test_commands.cpp tests/test_scripts.cpp tests/test_strips.cpp
+                   tests/test_commands.cpp tests/test_scripts.cpp tests/test_strips.cpp tests/test_playrate.cpp
                    tests/test_runtime_protection.cpp tests/test_jack.cpp tests/test_workers.cpp tests/test_live_workers.cpp tests/test_meters.cpp
                    tests/test_learn.cpp tests/test_dsp.cpp tests/test_bridge_engine.cpp LABELS rt SPLIT)
   target_include_directories(engine.tests PRIVATE src)
@@ -66,7 +66,7 @@ if(SUPPLE_BUILD_TESTS AND SUPPLE_PLATFORM_LINUX)
 endif()
 
 if(SUPPLE_BUILD_TESTS AND NOT SUPPLE_PLATFORM_LINUX)
-  supple_add_tests(engine SOURCES tests/test_native_engine.cpp tests/test_bridge_engine.cpp LABELS rt)
+  supple_add_tests(engine SOURCES tests/test_native_engine.cpp tests/test_bridge_engine.cpp tests/test_playrate.cpp LABELS rt)
   add_dependencies(engine.tests clap-host-fixtures ${PRODUCT_SLUG}-scanner ${PRODUCT_SLUG}-bridge)
   target_compile_definitions(engine.tests PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>" BRIDGE_PATH="$<TARGET_FILE:${PRODUCT_SLUG}-bridge>")
 endif()
@@ -154,3 +154,19 @@ if(SUPPLE_BUILD_TESTS)
   add_test(NAME engine-dsp-link.tests COMMAND engine-dsp-link.tests)
   set_tests_properties(engine-dsp-link.tests PROPERTIES LABELS "engine;rt")
 endif()
+
+if(SUPPLE_BUILD_TESTS)
+  # Portable DSP tests, including under RTSan, with no devices/plugins.
+  add_executable(engine-playrate-dsp.tests tests/test_playrate_dsp.cpp)
+  target_link_libraries(engine-playrate-dsp.tests PRIVATE supple::engine supple::doctest-main)
+  target_include_directories(engine-playrate-dsp.tests PRIVATE src)
+  supple_target_defaults(engine-playrate-dsp.tests)
+  add_test(NAME engine-playrate-dsp.tests COMMAND engine-playrate-dsp.tests)
+  set_tests_properties(engine-playrate-dsp.tests PROPERTIES LABELS "engine;rt")
+endif()
+
+# Pure in-memory source-conversion CPU probe, never opens an audio device.
+add_executable(engine-playrate-bench bench/playrate_bench.cpp)
+target_include_directories(engine-playrate-bench PRIVATE src)
+target_link_libraries(engine-playrate-bench PRIVATE supple::engine)
+supple_target_defaults(engine-playrate-bench)

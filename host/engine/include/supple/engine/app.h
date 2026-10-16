@@ -160,6 +160,15 @@ struct TransportInfo {
     std::optional<std::vector<RecordedInfo>> recorded;  // takes a stop/pause just committed
 };
 
+struct PlayrateState {
+    double requestedRate = 1, effectiveRate = 1;
+    bool preservePitch = false;
+    std::optional<model::Id> envelope;
+    // Latest model curve at the consumed timeline position, not the renderer's
+    // lookahead position. Absent when no active nonempty envelope exists.
+    std::optional<double> envelopeValue;
+};
+
 // One strip's meter reading (P5.3c): the peak and RMS of the audio of that
 // strip's post signal (post-fader, post-pan) that has been *heard* since the
 // last call. The engine does no decay or peak hold — the GUI does. A strip
@@ -371,8 +380,12 @@ class EngineApp : public cmd::Host {
     // Transport requests. With a device, each waits (at most a second) until
     // the audio thread has acted on it, so the answer is the new state.
     Result<TransportInfo> transport(std::string_view action, std::optional<double> seconds = {});
+    // Model/UI thread, allocation-free read; no command/log/history entry.
+    // Effective rate is consumption telemetry; envelope points are cached when
+    // the model head changes, never expanded during GUI synchronization.
+    PlayrateState playrateState() const;
     // Automation writing (P5.14): while the transport plays, a change to a
-    // strip's volume/pan/mute (inside the edit's transaction) is recorded into
+    // strip's volume/pan/mute or tr_0/playrate (inside the edit's transaction) is recorded into
     // its envelope when that envelope is in touch, latch or write mode. At
     // pause/stop latch and write hold the last value to the stop position, and
     // a write envelope never touched is flattened over the pass (one
@@ -561,12 +574,16 @@ class EngineApp : public cmd::Host {
     Backend* backend_ = nullptr;
     std::unique_ptr<Backend> ownedBackend_;
     double playStart_ = 0.0;  // transport.stop returns here
+    std::optional<model::Id> playrateEnvelope_;
+    model::Timebase playrateTimebase_ = model::Timebase::Beats;
+    std::vector<model::EnvPoint> playratePoints_;
     // Automation written during this pass, per envelope (transient).
     struct AutoWrite {
         double startSeconds = 0, lastSeconds = 0, lastValue = 0;
         bool touched = false;
     };
     std::map<model::Id, AutoWrite> autoWrite_;
+    std::optional<std::map<model::Id, AutoWrite>> autoWriteRollback_;
     struct OutputGesture {
         std::optional<PluginOutput> latest;
         std::vector<PluginOutput> recording;

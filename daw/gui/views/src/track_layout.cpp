@@ -148,12 +148,15 @@ bool TrackLayout::show(const model::Session& session, const std::vector<model::C
         if (row) {
             trackRows_[id] = rows_.size();
             rows_.push_back({id, t->type, depth, std::nullopt});
+        }
+        // Master strip rows stay hidden, but their visible automation lanes
+        // precede the master's children, including the global playrate lane.
+        if (row || t->type == model::StripType::Master)
             if (const auto found = lanes.find(id); found != lanes.end())
                 for (const auto& lane : found->second) {
                     envRows_[lane.second] = rows_.size();
                     rows_.push_back({id, t->type, depth, lane.second});
                 }
-        }
         if (t->folderCompact == 2) return;  // a collapsed folder hides its children
         for (model::Id c : displayChildren(session_, *t)) visit(c, row ? depth + 1 : depth);
     };

@@ -62,6 +62,12 @@ default true: Console 9 summing on every strip; false keeps its gains and pan
 law but runs the stages linear, ADR-0019 §6); `masters` (ordered master
 ids, tr_0 first). *(`pan_law` was removed with ADR-0019.)*
 
+Master playrate (ADR-0045) is `playrate: {rate, preserve_pitch}`: a finite
+ratio 0.25..4.0 (default 1.0) and bool (default false). Missing settings in
+older projects decode to these defaults; the 1.x migration sets them explicitly.
+A schema 2.1 document persists settings and automation, but playback/rendering
+still ignore master playrate until the engine integration stage.
+
 ### 1.3 Time map (`tempo`) — the contract lives in `libs/timeline`
 
 - **Positions** are stored in one of two domains: **seconds** (double) or
@@ -238,6 +244,7 @@ routes from any tap of any strip.
 ### 1.9 Envelopes and automation items
 
 `en_*`: `target` — one of `{track: id, param: volume|pan|mute}`,
+`{track: "tr_0", param: playrate}` (one global master-rate envelope only),
 `{route: id, param: volume|pan|mute}`, `{fx: id, param: <key or CLAP id>}`,
 `{take: id, param: volume|pan|pitch|mute}`, `{tempo: true}` (the tempo map is
 edited through `tempo.*`, not envelopes); `mode`
@@ -247,6 +254,11 @@ envelope's time domain (`time`: seconds; beat timebases: beats), sorted, with `s
 `items`: [ai id], derived at serialization from the authoritative
 `automation_items` map in numeric ID order. It is not a model field. On load,
 stale or mismatched lists are ignored with a `project.derived_items` warning.
+
+Playrate points, including automation-item source points and their scaled
+outputs, must be finite ratios 0.25..4.0 even on inactive envelopes. The
+master target is unique on edits and load; other strips, routes and takes
+cannot target playrate. A plugin parameter named playrate remains independent.
 
 Values are in the target's physical unit (dB, %, Hz for stock plugin
 params, CLAP value for third-party params); interpolation happens in the
@@ -333,7 +345,7 @@ routes: sd_1 tr_2 → tr_6 ch 1/2→3/4 pre-fader −6 dB (sidechain)
 markers: mk_1 "Verse" bar 1 · regions: rg_1 "Chorus" bars 9–17
 ```
 
-## 5. Project file (`supple.project/2.0`)
+## 5. Project file (`supple.project/2.1`)
 
 ### 5.1 Shape
 
@@ -342,7 +354,9 @@ markers: mk_1 "Verse" bar 1 · regions: rg_1 "Chorus" bars 9–17
 `phase_invert` kept since ADR-0022. 1.x files migrate as ADR-0019 §11 says,
 with warnings.)*
 
-The loader accepts 1.x and 2.x documents and saves 2.0. Migration allocates
+Schema 2.1 adds master playrate and its envelope target (ADR-0045).
+
+The loader accepts 1.x and 2.x documents and saves 2.1. Migration allocates
 child channel IDs in track-ID order, inserts each child first, and moves the
 source items and record/input FX there while keeping user inserts on the
 buss. Hardware/MIDI record routes follow the new child. Legacy numeric send
@@ -562,6 +576,14 @@ and naming. All `edit` unless marked (q) query or (a) action.
   to the events below. Not transactional itself: undo its edits with
   `history.undo`.
 - **meta**: `batch`, `registry.*`.
+
+Master playrate commands (ADR-0045) are `transport.playrate.get`,
+`transport.playrate.set {rate?, preserve_pitch?}` and
+`transport.playrate.apply-to-tempo`; their exact contracts and staged audio
+limitation are in engine.md's Master playrate control stage section. The
+model-thread `activePlayrateEnvelope(Session)` identifies an active nonempty
+master curve; `validateRecordingPlayrate(Session)` returns `record.playrate`
+when the saved scalar or effective curve prevents unity recording.
 
 ### 7.3 Render file-name patterns
 

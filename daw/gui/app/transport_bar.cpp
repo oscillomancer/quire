@@ -2,14 +2,18 @@
 // Copyright (c) 2026 Supple Audio
 #include "transport_bar.h"
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 #include "supple/time/timeline.h"
 #include "supple/ui/canvas.h"
+#include "supple/ui/controls.h"
 #include "supple/ui/popup.h"
 #include "supple/ui/root.h"
 #include "supple/ui/text_field.h"
@@ -21,6 +25,37 @@ namespace supple::gui {
 namespace {
 
 const cmd::Origin kOrigin{cmd::Origin::Type::Ui, "gui", {}};
+
+struct RateRange {
+    const char* name;
+    double low, high;
+};
+constexpr std::array<RateRange, 4> kRateRanges{{{"0.25-4.0", 0.25, 4.0},
+                                                {"0.5-2.0", 0.5, 2.0},
+                                                {"0.75-1.5", 0.75, 1.5},
+                                                {"0.9-1.1", 0.9, 1.1}}};
+
+template <class Base>
+class RateMenuControl : public Base {
+  public:
+    explicit RateMenuControl(std::string id) : Base(std::move(id)) { this->interactive = true; }
+    std::function<void()> onMenu;
+    bool onPointer(const ui::PointerEvent& e) override {
+        if (e.button == 3) {
+            if (e.type == ui::PointerEvent::Type::Down && onMenu) onMenu();
+            return true;
+        }
+        return Base::onPointer(e);
+    }
+};
+
+std::string rateText(double rate) {
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%.4f", rate);
+    std::string text(buf);
+    while (text.size() > 2 && text.back() == '0' && text[text.size() - 2] != '.') text.pop_back();
+    return text;
+}
 
 std::string timeText(double seconds) {
     if (seconds < 0) seconds = 0;
@@ -126,12 +161,43 @@ std::unique_ptr<ui::Node> TransportBar::build() {
                                          "title", "ink");
     time_ =
         &bar->emplace<ui::Label>("transport.time", "0:00.000", ui::Font::Mono, "mono", "ink-quiet");
-    tempo_ = &bar->emplace<ui::Button>("transport.tempo", "120", [this] { openTempoForm(); });
-    tempo_->layout.width = ui::SizeRule::fixed(58);
-    tempo_->layout.height = ui::SizeRule::fixed(22);
     meter_ = &bar->emplace<ui::Button>("transport.meter", "4/4", [this] { openMeterForm(); });
     meter_->layout.width = ui::SizeRule::fixed(48);
     meter_->layout.height = ui::SizeRule::fixed(22);
+    tempo_ = &bar->emplace<ui::Button>("transport.tempo", "120", [this] { openTempoForm(); });
+    tempo_->layout.width = ui::SizeRule::fixed(58);
+    tempo_->layout.height = ui::SizeRule::fixed(22);
+    auto& rate = bar->emplace<RateMenuControl<ui::Knob>>("transport.rate");
+    rate_ = &rate;
+    rate.onMenu = [this] { openRateMenu(); };
+    rate.onChange = [this](double position, ui::Gesture g) {
+        if (g == ui::Gesture::Begin) ++rateGesture_;
+        if (g == ui::Gesture::Begin) return;
+        if (g == ui::Gesture::End) {
+            sync();
+            return;
+        }
+        const double value = positionRate(position);
+        json::Value args = json::Value::object();
+        args["rate"] = value;
+        cmd::Origin origin = kOrigin;
+        if (g == ui::Gesture::Move)
+            origin.gesture = "transport.rate:" + std::to_string(rateGesture_);
+        const auto r = dispatcher_.execute({"transport.playrate.set", std::move(args), origin});
+        if (!r && actions_.onError) actions_.onError(r.error().message);
+        if (r && rateValue_) setIfChanged(rateValue_, rateText(value));
+        if (g == ui::Gesture::Set) sync();
+    };
+    auto& readout = bar->emplace<RateMenuControl<ui::Node>>("transport.rate.readout");
+    rateReadout_ = &readout;
+    readout.onMenu = [this] { openRateMenu(); };
+    readout.layout.dir = ui::Layout::Dir::Column;
+    readout.layout.width = ui::SizeRule::fixed(54);
+    readout.layout.height = ui::SizeRule::fixed(28);
+    readout.emplace<ui::Label>("transport.rate.label", "Rate:", ui::Font::Ui, "caption",
+                               "ink-quiet");
+    rateValue_ =
+        &readout.emplace<ui::Label>("transport.rate.value", "1.0", ui::Font::Mono, "caption");
     bar->emplace<ui::Node>("transport.spacer");  // takes the rest
     engine_ =
         &bar->emplace<ui::Label>("transport.engine", "", ui::Font::Mono, "small", "ink-quiet");
@@ -152,6 +218,14 @@ void TransportBar::sync(bool event, std::chrono::steady_clock::time_point now) {
     if (loop_) setIfChanged(loop_, info.loop.enabled ? "loop on" : "loop");
     if (punch_) setIfChanged(punch_, info.punch.enabled ? "punch on" : "punch");
     if (click_) setIfChanged(click_, app_.metronome().enabled ? "click on" : "click");
+    if (rate_ && !rate_->dragging()) {
+        // Automation follows consumption telemetry, not the latest authored
+        // curve or renderer lookahead. The accessor executes no logged command.
+        const auto state = app_.playrateState();
+        const double shown = state.envelope ? state.effectiveRate : state.requestedRate;
+        rate_->setValue(ratePosition(shown));
+        if (rateValue_) setIfChanged(rateValue_, rateText(shown));
+    }
     const bool moving = info.playing || info.recording;
     if (engine_ && (!lastStatus_ || moving != moving_ || (!moving && event) ||
                     (moving && now - *lastStatus_ >= std::chrono::milliseconds(250)))) {
@@ -175,6 +249,73 @@ void TransportBar::sync(bool event, std::chrono::steady_clock::time_point now) {
 std::optional<std::chrono::steady_clock::time_point> TransportBar::nextDeadline() const {
     if (!moving_ || !lastStatus_) return {};
     return *lastStatus_ + std::chrono::milliseconds(250);
+}
+
+double TransportBar::ratePosition(double rate) const {
+    const auto& range = kRateRanges[rateRange_];
+    const double n = rate <= 1 ? 0.5 + 0.5 * std::log(rate) / -std::log(range.low)
+                               : 0.5 + 0.5 * std::log(rate) / std::log(range.high);
+    return std::clamp(n, 0.0, 1.0);
+}
+
+double TransportBar::positionRate(double position) const {
+    const auto& range = kRateRanges[rateRange_];
+    return std::exp(position <= 0.5 ? std::log(range.low) * (1 - 2 * position)
+                                    : std::log(range.high) * (2 * position - 1));
+}
+
+json::Value TransportBar::saveLayout() const {
+    json::Value value = json::Value::object();
+    value["playrate_range"] = kRateRanges[rateRange_].name;
+    return value;
+}
+
+void TransportBar::loadLayout(const json::Value& value) {
+    if (rate_ && rate_->dragging()) root_.releaseWithin(rate_);
+    rateRange_ = 0;
+    if (const auto* name = value.find("playrate_range"); name && name->isString())
+        for (std::size_t i = 0; i < kRateRanges.size(); ++i)
+            if (name->asString() == kRateRanges[i].name) rateRange_ = i;
+    sync();
+}
+
+void TransportBar::openRateMenu() {
+    std::vector<ui::MenuItem> items;
+    auto action = [&](const char* label, const char* id) {
+        items.push_back({label, actions_.keysFor(id), [this, id] {
+                             actions_.invoke(id);
+                             sync();
+                         }});
+    };
+    action("Set to 1.0", "transport.playrate.reset");
+    action("Increase by one semitone (~6%)", "transport.playrate.semitone-up");
+    action("Decrease by one semitone (~6%)", "transport.playrate.semitone-down");
+    action("Increase by ten cents (~0.6%)", "transport.playrate.ten-cents-up");
+    action("Decrease by ten cents (~0.6%)", "transport.playrate.ten-cents-down");
+    action("Apply playrate to current BPM", "transport.playrate.apply-to-tempo");
+    items.push_back({"", "", {}, true, true});
+    action("Preserve pitch in audio items when changing master playrate",
+           "transport.playrate.preserve-pitch");
+    items.back().checked = app_.head().project->playrate.preservePitch;
+    items.push_back({"", "", {}, true, true});
+    for (std::size_t i = 0; i < kRateRanges.size(); ++i) {
+        ui::MenuItem item;
+        item.label = std::string("Playrate range: ") + kRateRanges[i].name;
+        if (i == 0) item.label += " (default)";
+        item.checked = i == rateRange_;
+        item.run = [this, i] {
+            rateRange_ = i;
+            sync();
+        };
+        items.push_back(std::move(item));
+    }
+    if (actions_.registry().find("ui.master.envelopes")) {
+        items.push_back({"", "", {}, true, true});
+        action("Master envelopes...", "ui.master.envelopes");
+    }
+    root_.openPopup(
+        ui::makeMenu("transport.rate.menu", std::move(items), [this] { root_.closePopup(); }),
+        rateReadout_ ? rateReadout_->bounds() : ui::Rect{}, ui::Placement::Below);
 }
 
 void TransportBar::openTempoForm() {
