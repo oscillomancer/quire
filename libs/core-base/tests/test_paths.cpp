@@ -96,3 +96,24 @@ TEST_CASE("platform paths select native user directories without creating them")
 #endif
 #endif
 }
+
+#if defined(_WIN32)
+#include <windows.h>
+
+// Every executable carries the UTF-8 code-page manifest (ADR-0044): narrow
+// text is UTF-8 whatever the system locale, so a user folder outside the
+// legacy code page survives std::filesystem, the CRT environment (how the
+// script library reaches the player) and child processes.
+TEST_CASE("Windows processes use UTF-8 for narrow paths and environment variables") {
+    CHECK(GetACP() == CP_UTF8);
+    const std::string folder = "C:/Zo\xc3\xab \xe6\x97\xa5\xe6\x9c\xac";  // "C:/Zoë 日本"
+    const std::wstring wide = L"C:/Zo\u00eb \u65e5\u672c";
+    Environment user("USERPROFILE", folder.c_str());
+    CHECK(supple::paths::home().wstring() == wide);
+    CHECK(supple::paths::home().string() == folder);
+    CHECK(std::string(std::getenv("USERPROFILE")) == folder);
+    wchar_t inherited[64] = {};
+    REQUIRE(GetEnvironmentVariableW(L"USERPROFILE", inherited, 64) > 0);
+    CHECK(std::wstring(inherited) == wide);
+}
+#endif

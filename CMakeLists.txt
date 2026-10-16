@@ -45,6 +45,9 @@ endif()
 if(SUPPLE_BUILD_FUZZERS)
   add_subdirectory(tests/fuzz)
 endif()
+if(WIN32)
+  supple_windows_utf8_manifests("${PROJECT_SOURCE_DIR}")
+endif()
 
 # License gate: fails the build when a dependency is not declared.
 find_package(Python3 COMPONENTS Interpreter)
