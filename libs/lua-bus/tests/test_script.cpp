@@ -8,6 +8,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <thread>
 
 #include "supple/lua/script.h"
 #include "toy_host.h"
@@ -112,6 +113,39 @@ TEST_CASE("the instruction budget stops a runaway script") {
     REQUIRE(!out);
     CHECK(out.error().code == "script.budget");
     CHECK(out.error().hint.find("budget_ms") != std::string::npos);
+}
+
+TEST_CASE("time spent inside commands does not count against the script's budget") {
+    using supple::lua::tests::AddArgs;
+    using supple::lua::tests::CountResult;
+    // A command slower than the whole budget, called three times: only the
+    // script's own instructions are on its clock.
+    cmd::Registry registry = toyRegistry(false);
+    cmd::Command<AddArgs, CountResult> slow;
+    slow.name = "toy.slow";
+    slow.exposure = cmd::Exposure::Internal;
+    slow.summary = "Wait 60 ms, then read the toy counter.";
+    slow.description = "A slow command for the budget test.";
+    slow.args = schema::object<AddArgs>("slow_args")
+                    .field("value", &AddArgs::value, schema::integer())
+                    .build();
+    slow.result = schema::object<CountResult>("count_result")
+                      .field("count", &CountResult::count, schema::integer())
+                      .build();
+    slow.run = [](const AddArgs&, cmd::Context&) -> Result<CountResult> {
+        std::this_thread::sleep_for(std::chrono::milliseconds(60));
+        return CountResult{0};
+    };
+    registry.add(std::move(slow));
+    ToyHost host;
+    cmd::Dispatcher dispatcher(registry, host);
+    Script script(&registry, &dispatcher);
+    auto out = script.run("for i = 1, 3 do q.run('toy.slow', {value = 0}) end", 100.0);
+    CHECK_MESSAGE(static_cast<bool>(out), (out ? std::string() : out.error().toString()));
+    // The clock still runs between the calls.
+    auto runaway = script.run("q.run('toy.slow', {value = 0}) while true do end", 100.0);
+    REQUIRE_FALSE(runaway);
+    CHECK(runaway.error().code == "script.budget");
 }
 
 TEST_CASE("the memory cap stops a script that allocates too much") {

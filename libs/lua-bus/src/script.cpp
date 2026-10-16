@@ -28,6 +28,10 @@ struct ScriptImpl {
     bool memoryExceeded = false;
     bool budgetSpent = false;
     std::chrono::steady_clock::time_point deadline{};
+    // Commands the script calls run on the clock of the command, not the
+    // script: the deadline moves on by the time spent inside them.
+    int commandDepth = 0;
+    std::chrono::steady_clock::time_point commandStart{};
     std::uint64_t instructions = 0;
     int messageHandlerRef = LUA_NOREF;
     bool running = false;
@@ -52,8 +56,11 @@ struct ScriptImpl {
         if (!dispatcher)
             return Error("script.unavailable", "the script has no command dispatcher", {},
                          "run scripts through a Runtime that has a dispatcher");
-        return dispatcher->execute(
-            cmd::Invocation{std::string(command), std::move(args), origin()});
+        if (commandDepth++ == 0) commandStart = std::chrono::steady_clock::now();
+        auto result =
+            dispatcher->execute(cmd::Invocation{std::string(command), std::move(args), origin()});
+        if (--commandDepth == 0) deadline += std::chrono::steady_clock::now() - commandStart;
+        return result;
     }
     void appendLog(std::string line);
     std::vector<std::string> lines() const;
@@ -639,6 +646,20 @@ void Script::publish(std::string_view topic, const json::Value& payload) {
         bool previous;
         ~Finished() { flag = previous; }
     } finished{impl.running, wasRunning};
+    // A handler the script's own command triggers runs on the script's clock
+    // again: credit the command time so far, then pause again when it returns.
+    struct Resumed {
+        ScriptImpl& impl;
+        int depth;
+        explicit Resumed(ScriptImpl& i) : impl(i), depth(i.commandDepth) {
+            if (depth > 0) impl.deadline += std::chrono::steady_clock::now() - impl.commandStart;
+            impl.commandDepth = 0;
+        }
+        ~Resumed() {
+            impl.commandDepth = depth;
+            if (depth > 0) impl.commandStart = std::chrono::steady_clock::now();
+        }
+    } resumed{impl};
     std::vector<ScriptImpl::Subscription> matches;
     for (const auto& subscription : impl.subscriptions)
         if (topicMatches(subscription.topic, topic) && filterMatches(subscription.filter, payload))
