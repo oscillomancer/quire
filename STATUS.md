@@ -149,7 +149,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   the plugin browser, routing matrix, MIDI editor, render dialog, history
   dock with branches, actions list with key bindings and macros, editable
   menus, toolbar and mouse modifiers, screensets, two palettes in dark and
-  light, preferences. Projects and renders default to
+  light, preferences, and tap tempo in the tempo form. Projects and renders default to
   `~/Documents/<slug>-media` (the render folder is choosable), each project
   in a folder of its own with its own media; imports are copied into the
   project by default, and Save as into another folder copies the media. FX

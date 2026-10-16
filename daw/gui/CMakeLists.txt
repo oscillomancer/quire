@@ -114,7 +114,7 @@ if(SUPPLE_BUILD_TESTS)
     SUPPLE_GUI_FONTS_DIR="${PROJECT_SOURCE_DIR}/assets/fonts"
     SUPPLE_GUI_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden")
   set_tests_properties(gui-views.tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
-  supple_add_tests(gui-actions SOURCES tests/test_actions.cpp DEPS supple::engine SDL3::SDL3 LABELS gui)
+  supple_add_tests(gui-actions SOURCES tests/test_actions.cpp tests/test_tap_tempo.cpp DEPS supple::engine SDL3::SDL3 LABELS gui)
   # The app driven by keys and clicks, asserting on the session (gui.md §10).
   supple_add_tests(gui-app SOURCES tests/test_app.cpp tests/test_plugin_windows.cpp tests/test_gestures.cpp
                    tests/test_midi_editor.cpp tests/test_fx_render.cpp tests/test_ruler.cpp tests/test_tcp_sends.cpp tests/test_mixer.cpp LABELS gui tsan-skip)
