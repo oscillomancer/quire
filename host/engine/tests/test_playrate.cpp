@@ -1074,3 +1074,43 @@ TEST_CASE("master playrate recording: a pitch-mode transition at unity remains s
     h.backend.run(1);
     h.run("transport.stop");
 }
+
+TEST_CASE("master playrate handoffs: unity graph survives an epoch before its first callback") {
+    for (bool changeLoop : {false, true}) {
+        CAPTURE(changeLoop);
+        PlayrateHost h;
+        h.arm();
+        model::EditTxn edit(h.app->head(), 100);
+        auto project = edit.project();
+        project.console9 = false;
+        edit.setProject(project);
+        const auto session = edit.commit().value();
+        auto pool = playrateFixturePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual,
+                              .captureFrames = 128,
+                              .input = [](float* const* inputs, std::uint32_t channels,
+                                          std::uint32_t frames, std::int64_t) {
+                                  for (std::uint32_t c = 0; c < channels; ++c)
+                                      std::fill_n(inputs[c], frames, .125f);
+                              }});
+        Engine engine(pool, media, {.anticipative = true, .workers = 0});
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128, .inputs = 1}));
+        REQUIRE(engine.load(session));
+        engine.play();
+        REQUIRE(engine.awaitRendered(4096));  // old-epoch handoff is now queued
+        // No callback has adopted the graph yet. A locate/loop must not make
+        // that graph disappear just because its handoff predates the epoch.
+        if (changeLoop)
+            engine.setLoop(.5, 1.2, true);
+        else
+            REQUIRE(engine.prepareSeek(1));
+        REQUIRE(engine.awaitRendered(4096));
+        backend.run(1);
+        CHECK(engine.transport().sample == (changeLoop ? 128 : 48128));
+        CHECK(engine.processErrors() == 0);
+        CHECK(engine.anticipationMisses() == 0);
+        CHECK(std::abs(backend.capture().channels[0][100]) > .01f);
+        engine.stop();
+    }
+}

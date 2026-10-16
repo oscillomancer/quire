@@ -2068,14 +2068,19 @@ void Engine::anticipativeCycle(const float* const* in, float* const* out, std::u
         // this queue with a latest pointer would skip an intermediate rate on
         // live sources while its frontier audio was already audible.
         for (detail::Plan* hand = nullptr; planHandoffs_.peek(hand);) {
-            if (hand->handEpoch < e) {
+            const bool oldEpoch = hand->handEpoch < e;
+            // Unity plans have no epoch-specific prepared source state. A
+            // seek/loop between renderer adoption and the first callback must
+            // not discard the only graph for live monitoring. Rate plans keep
+            // the strict epoch check: their converter state belongs to a seek.
+            if (oldEpoch && hand->rateEnabled) {
                 planHandoffs_.consume();
                 continue;
             }
             if (hand->handEpoch > e) break;
             const auto here =
                 livePlan_ && livePlan_->split && liveReady_ ? liveStream_ : playedStream(e);
-            if (!playing || here >= hand->handAt) {
+            if (oldEpoch || !playing || here >= hand->handAt) {
                 adoptLive(hand);
                 planHandoffs_.consume();
                 wakeRenderer();
