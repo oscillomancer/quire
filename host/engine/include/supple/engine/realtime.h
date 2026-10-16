@@ -698,6 +698,10 @@ class Engine {
     std::atomic<std::uint64_t> rateClockSequence_{0};
     std::atomic<std::int64_t> rateSafeStream_{0};
     std::atomic<std::uint64_t> rateSafeEpoch_{0};
+    // Renderer asks the control thread to prepare a fresh seek for an edit it
+    // cannot adopt continuously. Keep playing the old plan; never spin/retry.
+    std::atomic<std::uint64_t> rateReseekGeneration_{0};
+    std::uint64_t rateReseekServiced_ = 0;  // control thread only
     bool rateDeferred_ = false;
     std::atomic<bool> rateDeferredWake_{false};
     std::filesystem::path rateDeferredDir_;

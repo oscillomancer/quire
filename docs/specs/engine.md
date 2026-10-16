@@ -1594,7 +1594,7 @@ requests coalesce while the source transition finishes; requested model settings
 and undo still update immediately. This can delay changes substantially on long
 latency take chains. Slow source preparation can extend the schedule; failure
 publishes no partial trajectory. `Engine::prepareSeek(seconds)` prepares fresh
-source state off-thread before publishing the seek epoch, returning a structured
+source state off the callback before publishing the seek epoch, returning a structured
 error if preparation fails. The old playback and live monitoring continue until
 publication. Stopped playback also prepares before resuming.
 
@@ -1603,9 +1603,26 @@ length. Tail duration stays in device seconds, and fixed output PDC is cropped
 in device frames. `OfflineSettings::applyMasterPlayrate` defaults true; analysis
 taps and item-FX renders set it false. Converted output is capped at 2^28 frames;
 clock history has a separate bounded capacity and reports `playrate.budget` when
-plugin latency exceeds it. Changing a running graph to require unavailable past
-clock history returns `playrate.history`; pause and reload the graph, or restart
-the engine from the latest project before resuming.
+plugin latency exceeds it. Every rate plan reserves four additional seconds of
+past/future clock headroom beyond its current PDC and converter margin, including
+zero-latency graphs, so ordinary multi-second latency insertions retain the
+existing trajectory. Ring capacities round up to powers of two. Unrelated edits
+copy the available tagged past, retaining earlier rate curves rather than
+reconstructing that history from the current rate. If a running edit
+needs history outside that window, or preparation repeatedly misses its future
+boundary, the engine automatically prepares a fresh seek at the consumed position
+using the latest requested model. It publishes the replacement plan before its
+seek epoch, through the same path as a locate. The anticipative renderer requests
+that preparation from the control thread and continues the old plan while it
+waits, without retrying the failed adoption. Live monitoring continues, and
+playback stays requested. Like a locate, this exceptional recovery resets source
+and FX state and may have an audible discontinuity/preroll; it requires no user
+pause/reload and emits no `playrate.history` or `playrate.prepare_late` error.
+Volume moves and compensated bypass normally inherit the trajectory without a
+seek; a busy machine can still invoke the same late-preparation recovery. A PDC
+edit that moves an existing pitch-preserving source in compensated device time
+also uses a prepared seek, because clock samples alone cannot reconstruct its
+past converter state with the phase of unchanged sources.
 Source trajectory violations fail the render/process rather than silently
 presenting converter silence as successful audio.
 

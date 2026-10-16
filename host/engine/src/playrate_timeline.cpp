@@ -53,9 +53,10 @@ void PlayrateTimeline::reset(std::int64_t device, double timeline) SUPPLE_RT {
     const double initial = clock_.rate();
     // Before the new epoch no signal history exists. Linear negative preroll
     // supplies deterministic source/filter context without advancing the epoch.
-    first_ = device - static_cast<std::int64_t>(positions_.size() / 2);
+    first_.store(device - static_cast<std::int64_t>(positions_.size() / 2),
+                 std::memory_order_release);
     next_ = device;
-    for (auto at = first_; at <= device; ++at)
+    for (auto at = first_.load(std::memory_order_relaxed); at <= device; ++at)
         positions_[static_cast<std::size_t>(at) & mask_].set(
             at, (timeline + origin_) + double(at - device) * initial, initial);
 }
@@ -74,9 +75,10 @@ void PlayrateTimeline::adopt(const PlayrateTimeline& previous, std::int64_t devi
                              std::uint32_t rampFrames, std::uint32_t waitFrames, bool changed) {
     const auto past =
         static_cast<std::int64_t>(std::min(positions_.size(), previous.positions_.size()) / 2);
-    first_ = std::max(previous.first_, device - past);
+    first_.store(std::max(previous.first_.load(std::memory_order_acquire), device - past),
+                 std::memory_order_release);
     next_ = device;
-    for (auto at = first_; at <= device; ++at)
+    for (auto at = first_.load(std::memory_order_relaxed); at <= device; ++at)
         positions_[static_cast<std::size_t>(at) & mask_].set(at, previous.absolutePhase(at),
                                                              previous.rate(at));
     clock_ = previous.clockAt(device);
@@ -121,16 +123,33 @@ void PlayrateTimeline::seed(const Snapshot& state, std::int64_t offset) SUPPLE_R
     looping_ = state.looping;
     loopRequested_ = state.looping;
 }
+bool PlayrateTimeline::hasHistory(std::int64_t first, std::int64_t last) const SUPPLE_RT {
+    if (first < first_.load(std::memory_order_acquire)) return false;
+    for (auto frame = first; frame <= last; ++frame) {
+        double value, ratio;
+        if (!positions_[static_cast<std::size_t>(frame) & mask_].get(frame, value, ratio))
+            return false;
+    }
+    return true;
+}
+
 bool PlayrateTimeline::copyPast(const PlayrateTimeline& previous, std::int64_t first,
                                 std::int64_t last) SUPPLE_RT {
-    for (auto frame = first; frame <= last; ++frame) {
+    const auto limit =
+        std::max(previous.first_.load(std::memory_order_acquire),
+                 last - static_cast<std::int64_t>(std::min(capacity(), previous.capacity()) / 2));
+    auto copied = last + 1;
+    for (auto frame = last; frame >= limit; --frame) {
         double value, ratio;
         if (!previous.positions_[static_cast<std::size_t>(frame) & previous.mask_].get(frame, value,
                                                                                        ratio))
-            return false;
+            break;
         positions_[static_cast<std::size_t>(frame) & mask_].set(frame, value, ratio);
+        copied = frame;
     }
-    return true;
+    // Do not pass the seed's synthetic negative preroll off as retained history.
+    first_.store(copied, std::memory_order_release);
+    return copied <= first;
 }
 
 void PlayrateTimeline::loop(double start, double end, bool on) SUPPLE_RT {
@@ -150,7 +169,9 @@ void PlayrateTimeline::ensure(std::int64_t last) SUPPLE_RT {
         clock_.advance(step);
         ++next_;
     }
-    first_ = std::max(first_, next_ - static_cast<std::int64_t>(positions_.size()));
+    first_.store(std::max(first_.load(std::memory_order_relaxed),
+                          next_ - static_cast<std::int64_t>(positions_.size())),
+                 std::memory_order_release);
 }
 
 double PlayrateTimeline::absolutePhase(std::int64_t device) const SUPPLE_RT {

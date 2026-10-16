@@ -343,3 +343,37 @@ TEST_CASE("playrate timeline: nonzero range origins share absolute clock accumul
         CHECK(seek.rate(device + 336) == range.rate(device));
     }
 }
+
+TEST_CASE("playrate timeline: retained history is tagged across ring wrap") {
+    PlayrateTimeline clock(256, .8, {});
+    CHECK(clock.hasHistory(-128, 0));
+    CHECK_FALSE(clock.hasHistory(-129, 0));
+    clock.ensure(320);
+    CHECK_FALSE(clock.hasHistory(0, 320));
+    CHECK(clock.hasHistory(65, 320));
+    CHECK_FALSE(clock.hasHistory(65, 321));
+}
+
+TEST_CASE("playrate timeline: small graph edits retain earlier variable-rate history") {
+    PlayrateTimeline original(2048, 1,
+                              {{0, .5, supple::model::PointShape::Linear, 0},
+                               {1000, 2, supple::model::PointShape::Linear, 0}});
+    original.ensure(1400);
+    PlayrateTimeline copied(2048, 1, original.points());
+    copied.seed(original.snapshot(1000));
+    REQUIRE(copied.copyPast(original, 936, 1000));  // edit currently needs just 64 frames
+    PlayrateTimeline adopted(2048, 1, original.points());
+    copied.ensure(1400);
+    adopted.adopt(copied, 1100, 0, 0, false);
+    adopted.ensure(1400);
+    REQUIRE(adopted.hasHistory(200, 1100));
+    for (std::int64_t at = 200; at <= 1100; ++at) {
+        CHECK(adopted.absolutePhase(at) == original.absolutePhase(at));
+        CHECK(adopted.rate(at) == original.rate(at));
+    }
+    // An oversized new window must not make up history beyond the old floor.
+    PlayrateTimeline oversized(8192, 1, original.points());
+    oversized.seed(original.snapshot(1000));
+    CHECK_FALSE(oversized.copyPast(original, -100, 1000));
+    CHECK_FALSE(oversized.hasHistory(-100, 1000));
+}

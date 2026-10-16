@@ -323,8 +323,11 @@ Session and editing:
   recording is refused, including queued transitions. Writing retains coarse
   strip semantics. Rate/mode edits wait for compensated lookahead and coalesce
   during transitions; long-latency take chains can exceed the 200 ms horizon.
-  Seeks prepare off-thread while playback/monitoring continues. Changes requiring
-  unavailable clock history need a paused graph reload or engine restart.
+  Seeks prepare off the callback while playback/monitoring continues. Clock windows
+  reserve four additional seconds for latency changes; history exhaustion or late
+  preparation recovers automatically through a prepared locate at the consumed
+  position, with the same state reset/preroll as a seek. Moving a compensated
+  stretch source uses this recovery too, preserving phase alignment.
   Render-command budgets conservatively use the minimum curve value; a long
   varying-rate range may need splitting even when its exact duration would fit
   the output budget.
