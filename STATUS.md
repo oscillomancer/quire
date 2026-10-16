@@ -149,7 +149,9 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   the plugin browser, routing matrix, MIDI editor, render dialog, history
   dock with branches, actions list with key bindings and macros, editable
   menus, toolbar and mouse modifiers, screensets, two palettes in dark and
-  light, preferences. Projects and renders default to
+  light, preferences. The transport has a master playrate knob, context menu,
+  key-bindable pitch steps and per-project display range (ADR-0045); audio
+  application remains pending engine integration. Projects and renders default to
   `~/Documents/<slug>-media` (the render folder is choosable), each project
   in a folder of its own with its own media; imports are copied into the
   project by default, and Save as into another folder copies the media. FX
@@ -318,7 +320,8 @@ Session and editing:
   (ADR-0045). Get/set and atomic tempo-bake commands are available; requested
   vs effective rate is explicit (effective remains 1). Non-unity audio/MIDI
   recording and transitions into it during recording are refused. Master-rate
-  writing has existing coarse strip semantics; no knob/lane GUI is present yet.
+  writing has existing coarse strip semantics; transport controls are present,
+  with arrange-lane UI pending.
   Native CI for these new controls is pending coordinator validation.
 - Take `stretch_markers` are stored but not applied; stretching and
   resampling run synchronously when a plan is compiled.

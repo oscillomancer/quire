@@ -7,6 +7,7 @@
 #include "product_fixture.h"
 
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
@@ -135,6 +136,49 @@ struct App {
         REQUIRE(c);
         root->key(c->key, c->mods);
         root->frame(false);
+    }
+};
+
+struct RateApp : App {
+    std::unique_ptr<gui::TransportBar> bar;
+    std::vector<std::string> errors;
+    RateApp() {
+        REQUIRE(ok);
+        actions->onError = [this](const std::string& error) { errors.push_back(error); };
+        bar = std::make_unique<gui::TransportBar>(*app, *actions, *dispatcher, *root);
+        auto frame = std::make_unique<ui::Node>("rate.test");
+        frame->layout.dir = ui::Layout::Dir::Column;
+        frame->add(bar->build());
+        root->setContent(std::move(frame));
+        bar->sync();
+        root->frame(false);
+    }
+    json::Value exec(const char* command, json::Value args = json::Value::object()) {
+        auto result =
+            dispatcher->execute({command, std::move(args), {cmd::Origin::Type::Ui, "test", {}}});
+        REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
+        bar->sync();
+        return *result;
+    }
+    void rate(double value) {
+        json::Value args = json::Value::object();
+        args["rate"] = value;
+        exec("transport.playrate.set", std::move(args));
+    }
+    double rate() const { return app->head().project->playrate.rate; }
+    ui::Knob& knob() { return *dynamic_cast<ui::Knob*>(root->find("transport.rate")); }
+    void menu(std::size_t row, const char* control = "transport.rate") {
+        REQUIRE(root->click(control, 3));
+        root->frame(false);
+        auto* list = root->find("transport.rate.menu");
+        REQUIRE(list);
+        const ui::Point p{list->bounds().x + 40,
+                          list->bounds().y + static_cast<float>(row) * 26 + 13};
+        root->pointer({ui::PointerEvent::Type::Move, p});
+        root->pointer({ui::PointerEvent::Type::Down, p, 1});
+        root->pointer({ui::PointerEvent::Type::Up, p, 1});
+        root->frame(false);
+        CHECK_FALSE(root->find("transport.rate.menu"));
     }
 };
 
@@ -789,6 +833,133 @@ TEST_CASE("an action binds the selected tracks ($selection.track)") {
     auto run = a.actions->run("track.remove");
     REQUIRE_MESSAGE(run, (run ? "" : run.error().toString()));
     CHECK(a.app->head().tracks.find(*model::Id::parse(track)) == nullptr);
+}
+
+TEST_CASE("playrate transport: drag coalesces undo, readback and double-click reset") {
+    RateApp a;
+    CHECK(a.root->find("transport.meter")->bounds().x <
+          a.root->find("transport.tempo")->bounds().x);
+    CHECK(a.root->find("transport.tempo")->bounds().x < a.knob().bounds().x);
+    CHECK(a.knob().bounds().x < a.root->find("transport.rate.readout")->bounds().x);
+    const auto steps = a.exec("history.list")["versions"].size();
+    const auto b = a.knob().bounds();
+    const ui::Point p{b.x + b.w / 2, b.y + b.h / 2};
+    a.root->pointer({ui::PointerEvent::Type::Down, p, 1});
+    a.root->pointer({ui::PointerEvent::Type::Move, {p.x, p.y - 15}, 1});
+    a.root->pointer({ui::PointerEvent::Type::Move, {p.x, p.y - 30}, 1});
+    a.bar->sync();
+    CHECK(a.knob().value() == doctest::Approx(0.7));
+    a.root->pointer({ui::PointerEvent::Type::Up, p, 1});
+    CHECK(a.rate() == doctest::Approx(std::pow(4.0, 0.4)));
+    CHECK(a.exec("history.list")["versions"].size() == steps + 1);
+    a.exec("history.undo");
+    CHECK(a.rate() == 1);
+    a.rate(2);
+    a.root->pointer({ui::PointerEvent::Type::Down, p, 1, 2});
+    a.root->pointer({ui::PointerEvent::Type::Up, p, 1});
+    CHECK(a.rate() == 1);
+    CHECK(a.knob().value() == 0.5);
+    CHECK(a.errors.empty());
+}
+
+TEST_CASE("playrate transport: context menu actions, errors and key-bindable actions") {
+    RateApp a;
+    a.rate(2);
+    a.menu(0);
+    CHECK(a.rate() == 1);
+    a.menu(1);
+    CHECK(a.rate() == doctest::Approx(std::exp2(1.0 / 12)));
+    a.menu(2);
+    CHECK(a.rate() == doctest::Approx(1));
+    a.menu(3);
+    CHECK(a.rate() == doctest::Approx(std::exp2(1.0 / 120)));
+    a.menu(4);
+    CHECK(a.rate() == doctest::Approx(1));
+    a.menu(7, "transport.rate.readout");
+    CHECK(a.app->head().project->playrate.preservePitch);
+    a.menu(7);
+    CHECK_FALSE(a.app->head().project->playrate.preservePitch);
+    a.rate(1.5);
+    a.menu(5);
+    CHECK(a.rate() == 1);
+    CHECK(a.app->head().timeMap->bpmAt(0) == 180);
+    a.rate(4);
+    REQUIRE(a.actions->run("transport.playrate.semitone-up"));
+    CHECK(a.rate() == 4);
+    a.rate(0.25);
+    REQUIRE(a.actions->run("transport.playrate.ten-cents-down"));
+    CHECK(a.rate() == 0.25);
+    a.rate(2);
+    json::Value args = json::Value::object();
+    args["track"] = "tr_0";
+    args["param"] = "playrate";
+    json::Value points = json::Value::array(), point = json::Value::object();
+    point["beat"] = 0;
+    point["value"] = 1.5;
+    points.push_back(std::move(point));
+    args["points"] = std::move(points);
+    a.exec("env.add", std::move(args));
+    // The control-stage engine's audible rate is still 1, even with a curve.
+    CHECK(a.root->find("transport.rate.value")->valueText() == "1.0");
+    a.menu(5);
+    REQUIRE(a.errors.size() == 1);
+    CHECK(a.rate() == 2);
+    CHECK(a.app->head().timeMap->bpmAt(0) == 180);
+    // Even with an active curve, readback must not fight the pointer.
+    const auto b = a.knob().bounds();
+    const ui::Point p{b.x + 12, b.y + 12};
+    a.root->pointer({ui::PointerEvent::Type::Down, p, 1});
+    a.root->pointer({ui::PointerEvent::Type::Move, {p.x, p.y - 15}, 1});
+    a.bar->sync();
+    CHECK(a.knob().value() == doctest::Approx(0.6));
+    a.root->pointer({ui::PointerEvent::Type::Up, p, 1});
+    CHECK(a.knob().value() == 0.5);
+    a.root->pointer({ui::PointerEvent::Type::Down, p, 1, 2});
+    a.root->pointer({ui::PointerEvent::Type::Up, p, 1});
+    CHECK(a.rate() == 1);
+    REQUIRE(a.root->click("transport.rate", 3));
+    a.root->frame(false);
+    a.snapshot("playrate-menu.png");
+}
+
+TEST_CASE("playrate transport: all display ranges center unity and persist outside history") {
+    RateApp a;
+    const char* ranges[] = {"0.25-4.0", "0.5-2.0", "0.75-1.5", "0.9-1.1"};
+    const auto version = a.app->head().version;
+    for (std::size_t i = 0; i < 4; ++i) {
+        a.menu(9 + i);
+        CHECK(a.bar->saveLayout()["playrate_range"].asString() == ranges[i]);
+        CHECK(a.knob().value() == 0.5);
+        CHECK(a.app->head().version == version);
+    }
+    a.rate(4);
+    CHECK(a.knob().value() == 1);
+    CHECK(a.root->find("transport.rate.value")->valueText() == "4.0");
+    gui::UiPersistence persistence;
+    // Defaults are captured at registration, as they are in main.
+    a.bar->loadLayout(json::Value::object());
+    persistence.add(
+        "transport", [&] { return a.bar->saveLayout(); },
+        [&](const json::Value& v) { a.bar->loadLayout(v); });
+    const auto path = a.dir / "rate.project";
+    persistence.tick(path, 1);
+    a.menu(12);
+    REQUIRE(persistence.flush(path));
+    const auto bytes = readFile(gui::UiPersistence::fileFor(path));
+    REQUIRE(bytes);
+    CHECK(std::string(bytes->begin(), bytes->end()).find("0.9-1.1") != std::string::npos);
+    persistence.prepareProjectSwitch();
+    a.menu(9);
+    persistence.tick(path, 2);
+    CHECK(a.bar->saveLayout()["playrate_range"].asString() == "0.9-1.1");
+    CHECK(a.rate() == 4);
+    persistence.tick(a.dir / "other.project", 3);
+    CHECK(a.bar->saveLayout()["playrate_range"].asString() == "0.25-4.0");
+    json::Value bad = json::Value::object();
+    bad["playrate_range"] = "unknown";
+    a.bar->loadLayout(bad);
+    CHECK(a.bar->saveLayout()["playrate_range"].asString() == "0.25-4.0");
+    CHECK(a.rate() == 4);
 }
 
 TEST_CASE("the transport bar drives the transport, the tempo and the meter (P5.5)") {

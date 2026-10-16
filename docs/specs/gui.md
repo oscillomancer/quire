@@ -230,6 +230,29 @@ a bottom dock (mixer, MIDI editor, FX chain, routing, render queue,
 command log) with tabs; floating windows for plugin GUIs and any undocked
 view. Window layout is UI state (§1.2).
 
+The transport's time-map controls appear as meter, tempo, a small playrate
+knob and a two-line Rate readout (ADR-0045). Unity is at the knob's top/center
+in all display ranges: logarithmic travel on either side maps 0.25..4.0
+(default), 0.5..2.0, 0.75..1.5 or 0.9..1.1 to its endpoints. Double-click
+resets to 1.0. Drag moves use `transport.playrate.set` with one origin gesture
+per drag, hence one undo step; model/effective readback cannot take over
+while dragging. With an active nonempty master playrate envelope, readback
+uses `transport.playrate.get`'s effective rate; otherwise it shows the saved
+scalar. The staged engine still reports effective 1x and plays/renders at 1x.
+
+Right-click either the knob or readout for reset, semitone up/down
+(multiply/divide by `2^(1/12)`), ten cents up/down (`2^(1/120)`), Apply playrate
+to current BPM, the preserve-pitch toggle, and checked display ranges.
+Pitch steps are bounded to the model's 0.25..4.0 range. Reset, the four pitch
+steps and preserve toggle also appear as key-bindable transport actions;
+the menu runs those same actions. Tempo bake uses
+`transport.playrate.apply-to-tempo`; command errors reach the normal status
+message. Display range is per-project UI state in section `transport`, key
+`playrate_range` (strings `0.25-4.0`, `0.5-2.0`, `0.75-1.5`, `0.9-1.1`);
+unknown/missing choices use the default. Changing range never edits/clamps
+the saved or automated rate: knob geometry saturates while the readout keeps
+the actual value.
+
 ### 4.2 Track control panel (TCP)
 
 Per strip: name (rename in place: a double-click; Enter or a click anywhere

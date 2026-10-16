@@ -5,6 +5,7 @@
 #include "track_menu.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 #include "supple/engine/midi_control.h"
@@ -120,6 +121,36 @@ AppActions::AppActions(const cmd::Registry& registry, cmd::Dispatcher& dispatche
                     json::Value::object());
     };
     registry_.add(toggle);
+    registry_.add(bound("transport.playrate.reset", "Transport: reset playrate to 1.0",
+                        "transport.playrate.set", obj({{"rate", 1.0}})));
+    struct RateStep {
+        const char* id;
+        const char* name;
+        double cents;
+    };
+    for (const RateStep step :
+         {RateStep{"transport.playrate.semitone-up", "Transport: increase playrate one semitone",
+                   100},
+          {"transport.playrate.semitone-down", "Transport: decrease playrate one semitone", -100},
+          {"transport.playrate.ten-cents-up", "Transport: increase playrate ten cents", 10},
+          {"transport.playrate.ten-cents-down", "Transport: decrease playrate ten cents", -10}}) {
+        actions::Action action;
+        action.id = step.id;
+        action.name = step.name;
+        action.builtin = [this, exec, cents = step.cents](const actions::Context&) {
+            const double rate = app_.head().project->playrate.rate * std::exp2(cents / 1200.0);
+            return exec("transport.playrate.set", obj({{"rate", std::clamp(rate, 0.25, 4.0)}}));
+        };
+        registry_.add(std::move(action));
+    }
+    actions::Action preserve;
+    preserve.id = "transport.playrate.preserve-pitch";
+    preserve.name = "Transport: toggle playrate preserve pitch";
+    preserve.builtin = [this, exec](const actions::Context&) {
+        return exec("transport.playrate.set",
+                    obj({{"preserve_pitch", !app_.head().project->playrate.preservePitch}}));
+    };
+    registry_.add(std::move(preserve));
     actions::Action loop;
     loop.id = "transport.loop.toggle";
     loop.name = "Transport: toggle loop";

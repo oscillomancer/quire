@@ -53,6 +53,8 @@ class Shell {
     void sync(bool event = true);
     std::optional<std::chrono::steady_clock::time_point> nextDeadline() const;
     views::ArrangeView* arrange() const { return arrange_; }
+    json::Value saveTransportLayout() const;
+    void loadTransportLayout(const json::Value& value);
     // The meters the TCP shows; the app sets the source (EngineApp::meters())
     // and polls once per frame. Shared with the mixer: one feed, one poll.
     MeterFeed& meters() { return meters_; }

@@ -249,6 +249,14 @@ std::optional<std::chrono::steady_clock::time_point> Shell::nextDeadline() const
     return transport_ ? transport_->nextDeadline() : std::nullopt;
 }
 
+json::Value Shell::saveTransportLayout() const {
+    return transport_ ? transport_->saveLayout() : json::Value::object();
+}
+
+void Shell::loadTransportLayout(const json::Value& value) {
+    if (transport_) transport_->loadLayout(value);
+}
+
 const json::Value& Shell::inputs(bool force) {
     const double now = nowMs();
     if (!force && inputs_.isObject() && now - inputsAtMs_ < 500.0) return inputs_;

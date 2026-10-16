@@ -789,6 +789,9 @@ int main(int argc, char** argv) {
     };
     uiFile.add("panels", panelsSave, panelsLoad);
     uiFile.add(
+        "transport", [&] { return shell.saveTransportLayout(); },
+        [&](const json::Value& v) { shell.loadTransportLayout(v); });
+    uiFile.add(
         "midi", [&] { return midiEditor.saveLayout(); },
         [&](const json::Value& v) { midiEditor.loadLayout(v); });
     uiFile.add(
