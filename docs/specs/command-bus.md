@@ -446,6 +446,9 @@ dispatch admission applies to nested batch/Lua invocations too.
 Lua initialization, host JSON pushes and structured error decoding are protected
 against memory/stack failures; error fields are read raw. Once the instruction
 budget expires, every subsequent hook check raises until the outermost run returns.
+The time budget measures the script's own work: time spent inside the commands
+it calls does not count, while event handlers those commands run in the same
+script do.
 A deterministic instruction cap is available to embedding tests. Schema `$ref`s
 use bounded root JSON Pointer resolution (with the schema library's local `$defs`
 compatibility); named arrays convert as arrays. LuaLS types use the same references

@@ -153,6 +153,17 @@ TEST_CASE("a handler that edits the session cannot run away") {
     CHECK(scene.host.toy.count < 50);  // it stopped instead of looping forever
 }
 
+TEST_CASE("a handler run by the script's own command is on the script's clock") {
+    Scene scene;
+    // Commands do not spend the budget, but the handlers they trigger in the
+    // running script do: a runaway one still stops the run.
+    auto out = scene.runtime.run(
+        "spin", "q.on('session.changed', function() while true do end end)\nq.toy.add{value = 1}",
+        100.0);
+    REQUIRE_FALSE(out);
+    CHECK(out.error().code == "script.budget");
+}
+
 TEST_CASE("clear() forgets every script") {
     Scene scene;
     REQUIRE(scene.runtime.run("one", "return 1", -1.0));
