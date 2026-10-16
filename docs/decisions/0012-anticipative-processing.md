@@ -16,6 +16,10 @@ runs the renderer and the pool's helpers real-time, below a real-time callback.
 renderer polling with block deadlines and event-driven wakes, extending the
 nonblocking callback futex-wake exception to buffer-space notifications.
 
+**Amendment, 2026-10-16:** [ADR-0045](0045-master-playrate.md) defines master
+playrate with a shared timeline clock and source conversion in device-time
+graphs; model/command support precedes DSP integration.
+
 ## Context
 
 The engine runs every node inside the audio callback, on one core. Phase 4
