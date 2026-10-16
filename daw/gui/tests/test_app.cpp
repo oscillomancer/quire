@@ -35,6 +35,7 @@
 #include "supple/ui/root.h"
 #include "supple/ui/scroll_view.h"
 #include "supple/ui/text_field.h"
+#include "tap_tempo_button.h"
 #include "transport_bar.h"
 #include "ui_persistence.h"
 
@@ -789,6 +790,45 @@ TEST_CASE("an action binds the selected tracks ($selection.track)") {
     auto run = a.actions->run("track.remove");
     REQUIRE_MESSAGE(run, (run ? "" : run.error().toString()));
     CHECK(a.app->head().tracks.find(*model::Id::parse(track)) == nullptr);
+}
+
+TEST_CASE("tap tempo fills the tempo form and applies only on Set or Enter") {
+    App a;
+    REQUIRE_MESSAGE(a.ok, "tap tempo needs an offscreen GL context");
+    gui::TransportBar bar(*a.app, *a.actions, *a.dispatcher, *a.root);
+    a.root->setContent(bar.build());
+    a.root->frame(false);
+    REQUIRE(a.root->click("transport.tempo"));
+    a.root->frame(false);
+    auto* field = dynamic_cast<ui::TextField*>(a.root->find("tempo.field"));
+    auto* tap = dynamic_cast<gui::TapTempoButton*>(a.root->find("tempo.tap"));
+    REQUIRE(field);
+    REQUIRE(tap);
+    // A supplied clock exercises actual pointer clicks without sleeps or
+    // wall-clock assertions. The UI toolkit does not carry event timestamps.
+    gui::TapTempo::TimePoint now{};
+    tap->now = [&] { return now; };
+    field->setText("90");
+    REQUIRE(a.root->click("tempo.tap"));
+    CHECK(field->text() == "90");
+    now += std::chrono::milliseconds(500);
+    REQUIRE(a.root->click("tempo.tap"));
+    CHECK(field->text() == "120");
+    now += std::chrono::milliseconds(498);
+    REQUIRE(a.root->click("tempo.tap"));
+    CHECK(field->text() == "120.2");
+    CHECK(a.app->head().timeMap->bpmAt(0) == 120);
+    CHECK(a.root->focused() == field);
+    a.snapshot("tap-tempo.png");
+    SUBCASE("Set applies the tapped value") { REQUIRE(a.root->click("tempo.set")); }
+    SUBCASE("Enter applies the tapped value") { a.root->key(SDLK_RETURN, 0); }
+    SUBCASE("Cancel discards the tapped value") {
+        REQUIRE(a.root->click("tempo.cancel"));
+        CHECK(a.app->head().timeMap->bpmAt(0) == 120);
+        return;
+    }
+    CHECK(a.app->head().timeMap->bpmAt(0) == doctest::Approx(120.2));
+    CHECK(a.root->find("tempo.form") == nullptr);
 }
 
 TEST_CASE("the transport bar drives the transport, the tempo and the meter (P5.5)") {

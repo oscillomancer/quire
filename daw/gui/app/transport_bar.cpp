@@ -15,6 +15,7 @@
 #include "supple/ui/text_field.h"
 #include "supple/ui/theme.h"
 #include "supple/ui/widgets.h"
+#include "tap_tempo_button.h"
 
 namespace supple::gui {
 namespace {
@@ -215,6 +216,7 @@ void TransportBar::openTempoForm() {
     row.layout.dir = ui::Layout::Dir::Row;
     row.layout.height = ui::SizeRule::fixed(26);
     row.layout.gap = 6;
+    row.emplace<TapTempoButton>("tempo.tap", field, root_);
     row.emplace<ui::Button>("tempo.set", "Set", apply);
     row.emplace<ui::Button>("tempo.cancel", "Cancel", [this] { root_.closePopup(); });
     auto& content = root_.openPopup(std::move(form), {}, ui::Placement::Center);

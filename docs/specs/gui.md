@@ -225,6 +225,16 @@ a bottom dock (mixer, MIDI editor, FX chain, routing, render queue,
 command log) with tabs; floating windows for plugin GUIs and any undocked
 view. Window layout is UI state (§1.2).
 
+The transport tempo button opens a BPM field (1..1000) with Tap, Set and
+Cancel. Tap estimates BPM from the mean interval between the latest eight
+taps, starting with the second tap, and fills the field with at most one
+decimal place. A gap longer than two seconds starts a new sequence, leaving
+the field unchanged until the second new tap. Estimates are clamped to the
+field's range. The toolkit has no input timestamps, so taps use a steady
+clock at button activation. Tap returns focus to the field; Set or Enter
+applies the value through `tempo.set`, preserving the other tempo points
+and ramps. Cancel discards it; reopening starts a fresh tap sequence.
+
 ### 4.2 Track control panel (TCP)
 
 Per strip: name (rename in place: a double-click; Enter or a click anywhere
