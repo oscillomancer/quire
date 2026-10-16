@@ -32,6 +32,9 @@ Result<json::Value> migrateProject1(json::Value doc, std::vector<schema::Warning
         return Error("project.migration", "next_ids must be an object", "/project/next_ids");
     json::Value tracks = *originalTracks;
     json::Value project = *originalProject;
+    // 1.x predates master playrate. Its similarly named extensions cannot
+    // override the new factory defaults during migration.
+    project["playrate"] = toJson(Playrate{});
     json::Value routes = doc.find("routes") ? *doc.find("routes") : json::Value::object();
     json::Value items = doc.find("items") ? *doc.find("items") : json::Value::object();
     json::Value envelopes = doc.find("envelopes") ? *doc.find("envelopes") : json::Value::object();

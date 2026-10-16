@@ -29,6 +29,13 @@ enum class Timebase : std::uint8_t { Time, Beats, BeatsPosition };
 enum class ItemTimebase : std::uint8_t { Track, Time, Beats, BeatsPosition };
 enum class TrackTimebase : std::uint8_t { Project, Time, Beats, BeatsPosition };
 
+inline constexpr double kMinPlayrate = 0.25, kMaxPlayrate = 4.0;
+struct Playrate {
+    double rate = 1.0;
+    bool preservePitch = false;
+    bool operator==(const Playrate&) const = default;
+};
+
 struct Project {
     std::string name, title, author, notes;
     double sampleRate = 48000.0;
@@ -36,6 +43,7 @@ struct Project {
     Timebase timebase = Timebase::Beats;
     std::string mediaDir = "media";
     bool console9 = true;
+    Playrate playrate;
     std::vector<Id> masters{kMaster};
     std::uint64_t seed = 0;
     std::uint64_t historyBudgetBytes = 1ULL << 30;
@@ -284,7 +292,7 @@ struct EnvPoint {
 
 struct EnvTarget {
     Id object = kMaster;  // tr_*, sd_*, fx_* or tk_*
-    std::string param;    // volume|pan|mute (pitch for takes), or a plugin key / CLAP id
+    std::string param;    // volume|pan|mute, pitch for takes, playrate on tr_0, or plugin key/id
 };
 
 struct Envelope {

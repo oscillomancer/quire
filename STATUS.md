@@ -80,7 +80,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   versions with stable ids, per-branch undo, branches with object-level diff
   and merge by replay (field-level conflicts, id remapping), A/B renders of
   two branches, a command log with origins, a history budget that squashes
-  the oldest steps. Project format `supple.project/2.0` with migration from
+  the oldest steps. Project format `supple.project/2.1` with migration from
   1.x, autosave, crash recovery of recordings, a per-project UI sidecar.
 - **Command bus** (`specs/command-bus.md`, ADR-0007): about 120 typed
   commands with JSON Schema, units, examples run as tests and structured
@@ -313,6 +313,9 @@ Engine and hosting:
   are).
 
 Session and editing:
+- Master playrate settings and the tr_0 playrate envelope persist in project
+  schema 2.1; audio playback/rendering still run at 1x until DSP integration
+  (ADR-0045). No master-rate GUI control is present yet.
 - Take `stretch_markers` are stored but not applied; stretching and
   resampling run synchronously when a plan is compiled.
 - Track groups are preserved in project files but not implemented.
