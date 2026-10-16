@@ -320,6 +320,8 @@ Session and editing:
   recording and transitions into it during recording are refused. Master-rate
   writing has existing coarse strip semantics; no knob/lane GUI is present yet.
   Native CI for these new controls is pending coordinator validation.
+  The fractional DSP clock and per-source tape/stretch readers are implemented
+  and tested in isolation (dev/RTSan); executor integration remains pending.
 - Take `stretch_markers` are stored but not applied; stretching and
   resampling run synchronously when a plan is compiled.
 - Track groups are preserved in project files but not implemented.

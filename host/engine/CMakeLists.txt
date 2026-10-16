@@ -5,7 +5,7 @@ find_package(ZLIB REQUIRED)
 
 supple_add_library(engine
   SOURCES src/offline.cpp src/plan.cpp src/workers.cpp src/live_workers.cpp src/realtime.cpp src/recording.cpp
-          src/stretch.cpp src/meters.cpp src/runtime_protection.cpp src/media_files.cpp
+          src/stretch.cpp src/playrate_dsp.cpp src/meters.cpp src/runtime_protection.cpp src/media_files.cpp
           src/app.cpp src/plugin_outputs.cpp src/commands.cpp src/extra_commands.cpp src/midi_commands.cpp src/analysis_commands.cpp
           src/render_commands.cpp src/chain_commands.cpp src/take_commands.cpp src/learn.cpp src/dsp_commands.cpp
           src/midi_control.cpp src/midi_input.cpp src/portaudio_backend.cpp src/portaudio_native.cpp
@@ -153,4 +153,14 @@ if(SUPPLE_BUILD_TESTS)
   supple_target_defaults(engine-dsp-link.tests)
   add_test(NAME engine-dsp-link.tests COMMAND engine-dsp-link.tests)
   set_tests_properties(engine-dsp-link.tests PROPERTIES LABELS "engine;rt")
+endif()
+
+if(SUPPLE_BUILD_TESTS)
+  # Portable DSP tests, including under RTSan, with no devices/plugins.
+  add_executable(engine-playrate-dsp.tests tests/test_playrate_dsp.cpp)
+  target_link_libraries(engine-playrate-dsp.tests PRIVATE supple::engine supple::doctest-main)
+  target_include_directories(engine-playrate-dsp.tests PRIVATE src)
+  supple_target_defaults(engine-playrate-dsp.tests)
+  add_test(NAME engine-playrate-dsp.tests COMMAND engine-playrate-dsp.tests)
+  set_tests_properties(engine-playrate-dsp.tests PROPERTIES LABELS "engine;rt")
 endif()
