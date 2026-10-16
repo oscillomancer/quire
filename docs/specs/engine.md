@@ -1526,10 +1526,17 @@ positions at exactly unity read the original samples directly. Both channels
 share phase and cutoff; file padding/looping belongs to the source reader.
 
 Pitch-preserving conversion configures stereo Signalsmith Stretch before
-publication and processes only 64-frame output quanta. Source consumption keeps
+publication and processes only 64-frame output quanta. The channel count is unrestricted and phase is linked across all channels.
+Decoded in-memory data is fetched once per channel/64-frame quantum, returning
+a direct contiguous span where possible and using prepared scratch for padding
+or wrapping; neither tape taps nor stretch frames make per-sample indirect
+reader calls. Source consumption keeps
 a fractional cursor, using successive integer boundaries for input counts.
-Source lookahead compensates its synthesis latency; priming supplies preceding
-analysis history plus future source frames, with no graph latency. The owner
+Source lookahead compensates both its analysis latency (source frames) and
+synthesis latency (device frames). For a quantum ending at device frame D,
+the required source endpoint is timeline(D + synthesis latency) + analysis
+latency. Priming supplies the corresponding analysis window and future source
+frames, with no graph latency. The owner
 can spread priming over a bounded number of quanta per cycle, waits for ready,
 and owns the audible transition. No reader allocates, frees or accesses files
 while seeking, priming or processing. Unprimed/discontinuous trajectories are
@@ -1539,5 +1546,6 @@ A documented MIT vendor patch adds `reset(seed)` and resets silence/seek/smoothi
 state. Plain `reset()` retains upstream's random-sequence behavior; existing
 whole-file media variants keep their seed and processing schedule. Shared
 portable DSP tests exercise partition-independent clock/ramp output, exact unity,
-linked stereo, tape anti-aliasing, preserved pitch, repeatable seeks at extreme
+linked stereo, tape anti-aliasing, preserved pitch, unity impulse alignment,
+repeatable seeks at extreme
 rates, non-48k priming and invalid trajectory rejection, including under RTSan.

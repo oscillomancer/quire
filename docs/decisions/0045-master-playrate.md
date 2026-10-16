@@ -54,7 +54,9 @@ timeline audio and MIDI, so an empty frontier does not remove this problem.
    adding graph latency. Do not keep both converters continuously warm.
    Callback-owned sources spread bounded priming work across cycles, never
    blocking the callback. The same transition applies when leaving unity
-   bypass. No callback calls a synchronous bridge or the background pool.
+   bypass. Prepare fresh seek state off-thread and delay the audible seek
+   until it is ready; live monitoring continues throughout. No callback calls
+   a synchronous bridge or the background pool.
 6. **Saved settings.** `project.playrate` holds `{rate, preserve_pitch}`.
    Rate is finite and bounded to 0.25..4.0, default 1.0; preserve-pitch defaults
    false. This matches a fresh private REAPER 7.82/Linux Dummy Audio experiment:

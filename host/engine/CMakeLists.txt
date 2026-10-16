@@ -5,7 +5,7 @@ find_package(ZLIB REQUIRED)
 
 supple_add_library(engine
   SOURCES src/offline.cpp src/plan.cpp src/workers.cpp src/live_workers.cpp src/realtime.cpp src/recording.cpp
-          src/stretch.cpp src/playrate_dsp.cpp src/meters.cpp src/runtime_protection.cpp src/media_files.cpp
+          src/stretch.cpp src/playrate_dsp.cpp src/playrate_timeline.cpp src/meters.cpp src/runtime_protection.cpp src/media_files.cpp
           src/app.cpp src/plugin_outputs.cpp src/commands.cpp src/extra_commands.cpp src/midi_commands.cpp src/analysis_commands.cpp
           src/render_commands.cpp src/chain_commands.cpp src/take_commands.cpp src/learn.cpp src/dsp_commands.cpp
           src/midi_control.cpp src/midi_input.cpp src/portaudio_backend.cpp src/portaudio_native.cpp
@@ -164,3 +164,9 @@ if(SUPPLE_BUILD_TESTS)
   add_test(NAME engine-playrate-dsp.tests COMMAND engine-playrate-dsp.tests)
   set_tests_properties(engine-playrate-dsp.tests PROPERTIES LABELS "engine;rt")
 endif()
+
+# Pure in-memory source-conversion CPU probe, never opens an audio device.
+add_executable(engine-playrate-bench bench/playrate_bench.cpp)
+target_include_directories(engine-playrate-bench PRIVATE src)
+target_link_libraries(engine-playrate-bench PRIVATE supple::engine)
+supple_target_defaults(engine-playrate-bench)

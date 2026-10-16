@@ -41,25 +41,41 @@ class PlayrateClock {
 // inside the reader when the take loops). Neither reader nor converter owns
 // files or touches the media cache. Stereo phase/consumption is always linked.
 struct RateSource {
-    using Read = float (*)(const void*, int channel, std::int64_t frame) noexcept;
+    // Return a stable contiguous span when available, otherwise fill scratch
+    // (padding/wrapping at file boundaries). One indirect call per channel
+    // per quantum, never per tap or source frame.
+    using Fetch = const float* (*)(const void*, std::size_t channel, std::int64_t first,
+                                   std::span<float> scratch) noexcept;
     const void* context = nullptr;
-    Read read = nullptr;
-    float at(int channel, std::int64_t frame) const SUPPLE_RT {
-        return read(context, channel, frame);
-    }
+    Fetch fetch = nullptr;
+    std::size_t channels = 0;
 };
 
-// Original, windowed-sinc polyphase tape reader. Construct/share on the
-// control thread; all rate/phase coefficients are prepared before publication.
-// Cutoff banks round UP in rate so rapid rate changes cannot alias.
+class TapeReader;
+// Original polyphase sinc table, shared by every source in a plan.
 class TapeTable {
   public:
     TapeTable();
-    std::array<float, 2> read(RateSource source, double position, double rate) const SUPPLE_RT;
 
   private:
+    friend class TapeReader;
     static constexpr int kTaps = 256, kPhases = 1024, kBanks = 13;
     std::vector<float> coefficients_;
+};
+
+// Any channel count; one shared phase and cutoff trajectory. Scratch is sized
+// before publication. positions contains 65 monotonically increasing source
+// boundaries, each increment in [.25,4]. Output is 64 frames per channel.
+class TapeReader {
+  public:
+    TapeReader(std::shared_ptr<const TapeTable> table, std::size_t channels);
+    bool process(RateSource source, std::span<const double, kRateQuantum + 1> positions,
+                 std::span<float* const> output) SUPPLE_RT;
+
+  private:
+    std::shared_ptr<const TapeTable> table_;
+    std::size_t channels_;
+    std::vector<float> scratch_;
 };
 
 // Signalsmith wrapper with fixed 64-output-frame calls and explicit reseeding.
@@ -70,7 +86,7 @@ class TapeTable {
 // there. It must not publish incomplete output as stretched audio.
 class StretchReader {
   public:
-    explicit StretchReader(double sampleRate);
+    explicit StretchReader(double sampleRate, std::size_t channels = 2);
     ~StretchReader();
     StretchReader(StretchReader&&) noexcept;
     StretchReader& operator=(StretchReader&&) noexcept;
@@ -79,15 +95,16 @@ class StretchReader {
 
     void seek(RateSource source, double position, double rate) SUPPLE_RT;
     void prime(RateSource source, std::uint32_t quanta) SUPPLE_RT;
+    bool primeTo(RateSource source, double end) SUPPLE_RT;
     bool ready() const SUPPLE_RT;
-    int lookahead() const SUPPLE_RT;
+    int analysisLookahead() const SUPPLE_RT;  // source frames
+    int lookahead() const SUPPLE_RT;          // device frames
     double inputPosition() const SUPPLE_RT;
-    // end is the source position needed AFTER this quantum, including the
-    // stretcher's source lookahead. It must advance by 16..256 source frames.
+    // end is timeline(quantum end + lookahead()) + analysisLookahead(), in
+    // source frames. It must advance by 16..256 source frames.
     // Returns false (without advancing state) if the trajectory violates that
     // bound, e.g. a loop discontinuity requiring seek(). Output is always 64.
-    bool process(RateSource source, double end, std::span<float, kRateQuantum> left,
-                 std::span<float, kRateQuantum> right) SUPPLE_RT;
+    bool process(RateSource source, double end, std::span<float* const> output) SUPPLE_RT;
 
   private:
     struct State;
