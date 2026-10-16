@@ -30,6 +30,9 @@ class PlayrateTimeline {
     };
     Snapshot snapshot(std::int64_t device) const SUPPLE_RT;
     void seed(const Snapshot& state, std::int64_t deviceOffset = 0) SUPPLE_RT;
+    bool hasHistory(std::int64_t first, std::int64_t last) const SUPPLE_RT;
+    // Retain all available past (up to half the smaller ring), requiring at
+    // least [first, last]. Safe to copy from the other executor's active ring.
     bool copyPast(const PlayrateTimeline& previous, std::int64_t first,
                   std::int64_t last) SUPPLE_RT;
     const std::vector<RatePoint>& points() const { return points_; }
@@ -90,7 +93,8 @@ class PlayrateTimeline {
     std::size_t mask_;
     double scalar_, origin_ = 0, loopStart_ = 0, loopEnd_ = 0;
     bool looping_ = false, loopRequested_ = false;
-    std::int64_t first_ = 0, next_ = 0, anchor_ = 0;
+    std::atomic<std::int64_t> first_{0};  // retained floor, read by control-side copying
+    std::int64_t next_ = 0, anchor_ = 0;
     PlayrateClock clock_, anchorClock_;
 };
 

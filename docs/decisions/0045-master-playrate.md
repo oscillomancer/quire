@@ -61,9 +61,13 @@ timeline audio and MIDI, so an empty frontier does not remove this problem.
    finish the transition. Long-latency take chains can therefore exceed the
    usual approximately 200 ms control response. Requested settings update
    immediately; effective rate follows consumed output. Prepare fresh seek
-   state off-thread and delay the audible seek
-   until it is ready; live monitoring continues throughout. No callback calls
-   a synchronous bridge or the background pool.
+   state off the callback and delay the audible seek until it is ready; live
+   monitoring continues throughout. Reserve clock history for ordinary multi-second
+   PDC changes. If a graph edit exhausts clock/converter history or repeatedly
+   misses its prepared boundary, recover automatically through a prepared seek at
+   the consumed position, with the same state reset/preroll as a locate. No user
+   pause/reload is required. No callback calls a synchronous bridge or the
+   background pool.
 6. **Saved settings.** `project.playrate` holds `{rate, preserve_pitch}`.
    Rate is finite and bounded to 0.25..4.0, default 1.0; preserve-pitch defaults
    false. This matches a fresh private REAPER 7.82/Linux Dummy Audio experiment:

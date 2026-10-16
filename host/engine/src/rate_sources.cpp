@@ -110,6 +110,11 @@ void prepareRateWindow(Plan& p, std::int64_t pos, std::uint32_t frames, int live
 Status prepareRateSources(Plan& p, std::int64_t device, double timeline, const LoopRange* loop) {
     if (!p.rateEnabled) return {};
     p.rateOrigin = device;
+    p.rateControlsChanged = false;
+    p.rateSwitchDevice = p.rateSafeDevice = INT64_MIN;
+    for (auto& clock : p.previousTimelines) clock.reset();
+    for (auto& node : p.nodes)
+        for (auto& clip : node.clips) clip.rateState->previous.reset();
     for (auto& clock : p.timelines) clock->reset(device, timeline);
     prepareRateWindow(p, device, p.block, -1, loop);
     return primeRateSources(p, device);
@@ -204,6 +209,39 @@ Status prepareRateAdoption(Plan& p, Plan* previous, std::int64_t device, std::in
 
 Status configureRateTransition(Plan& p, Plan* previous, PlayrateTimeline& old,
                                std::int64_t device) {
+    if (previous && previous->rateEnabled &&
+        (p.masterPlayrate.preservePitch || previous->masterPlayrate.preservePitch)) {
+        // Moving an existing stretch source in compensated device time needs
+        // its past converter state, not just past clock samples. Independent
+        // priming would shift its phase relative to unchanged linked sources.
+        for (const auto& node : p.nodes)
+            for (const auto& clip : node.clips)
+                for (const auto& oldNode : previous->nodes) {
+                    if (oldNode.id != node.id) continue;
+                    for (const auto& oldClip : oldNode.clips) {
+                        if (oldClip.item != clip.item || oldClip.take != clip.take ||
+                            oldClip.data != clip.data)
+                            continue;
+                        const auto before =
+                            (oldClip.takeChain >= 0
+                                 ? oldNode.takeChains[static_cast<std::size_t>(oldClip.takeChain)]
+                                       .latency
+                                 : 0) -
+                            oldClip.deviceShift;
+                        const auto after =
+                            (clip.takeChain >= 0
+                                 ? node.takeChains[static_cast<std::size_t>(clip.takeChain)].latency
+                                 : 0) -
+                            clip.deviceShift;
+                        if (before != after)
+                            return Error(
+                                "playrate.history",
+                                "a compensated stretch source needs fresh converter history", {},
+                                "prepare a fresh seek at the consumed position");
+                    }
+                    break;
+                }
+    }
     const bool changed = !previous || !previous->rateEnabled ||
                          p.masterPlayrate.rate != previous->masterPlayrate.rate ||
                          p.masterPlayrate.preservePitch != previous->masterPlayrate.preservePitch ||
@@ -214,8 +252,18 @@ Status configureRateTransition(Plan& p, Plan* previous, PlayrateTimeline& old,
     p.rateSafeDevice = changed ? p.rateSwitchDevice + p.smoothFrames + p.rateSourceBehind + 64
                                : previous->rateSafeDevice;
     const auto wait = changed ? static_cast<std::uint32_t>(p.rateSwitchDevice - device) : 0;
-    old.ensure(device + wait + p.rateDeviceMargin + static_cast<std::int64_t>(p.rate * .15) +
-               p.block + 128);
+    const auto first = device - p.rateDeviceMargin - 64;
+    const auto last = device + wait + p.rateDeviceMargin + static_cast<std::int64_t>(p.rate * .15) +
+                      p.block + 128;
+    // Check before advancing the old ring: a large latency jump must not evict
+    // the trajectory still used by playback while its replacement is prepared.
+    if (last - first >= static_cast<std::int64_t>(old.capacity()) ||
+        device - first >
+            static_cast<std::int64_t>(std::min(old.capacity(), p.timelines[0]->capacity()) / 2) ||
+        !old.hasHistory(first, device))
+        return Error("playrate.history", "the changed graph needs unavailable clock history", {},
+                     "prepare a fresh seek at the consumed position");
+    old.ensure(last);
     for (std::size_t c = 0; c < 2; ++c) {
         p.timelines[c]->adopt(old, device, p.smoothFrames, wait, changed);
         const auto& prior = old;

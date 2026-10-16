@@ -1075,6 +1075,131 @@ TEST_CASE("master playrate recording: a pitch-mode transition at unity remains s
     h.run("transport.stop");
 }
 
+TEST_CASE("master playrate edits: inserting multi-second latent FX preserves playback") {
+    constexpr double fs = 8000;
+    for (bool anticipative : {false, true})
+        for (bool preserve : {false, true})
+            for (int seconds : {3, 12})
+                for (bool takeFx : {false, true}) {
+                    CAPTURE(anticipative);
+                    CAPTURE(preserve);
+                    CAPTURE(seconds);
+                    CAPTURE(takeFx);
+                    PlayrateHost h;
+                    audio::AudioData tone;
+                    tone.sampleRate = fs;
+                    tone.channels.assign(2, std::vector<float>(128000));
+                    for (std::size_t i = 0; i < tone.frames(); ++i)
+                        tone.channels[0][i] = tone.channels[1][i] =
+                            static_cast<float>(.2 * std::sin(double(i) * .07));
+                    REQUIRE(audio::writeWav(h.root / "latent.wav", tone));
+                    h.run("track.add");
+                    h.run("track.add");
+                    auto args = json::Value::object();
+                    args["audio_file"] = (h.root / "latent.wav").string();
+                    for (const char* tr : {"tr_1", "tr_2"}) {
+                        args["track"] = tr;
+                        h.run("item.add", json::writeCompact(args));
+                    }
+                    model::EditTxn initial(h.app->head(), 100);
+                    auto project = initial.project();
+                    project.console9 = false;
+                    project.playrate = {.8, preserve};
+                    initial.setProject(project);
+                    const auto inverted = h.app->head().items.begin()->value->activeTake.value();
+                    initial.modify<model::Take>(inverted,
+                                                [](auto& take) { take.phaseInvert = true; });
+                    auto session = initial.commit().value();
+                    auto pool = playrateFixturePool();
+                    MediaCache media;
+                    DummyBackend backend(
+                        {.mode = DummyBackend::Mode::Manual, .captureFrames = 200000});
+                    Engine engine(pool, media, {.anticipative = anticipative, .workers = 0});
+                    REQUIRE(engine.start(backend, {.sampleRate = fs, .blockSize = 128}));
+                    REQUIRE(engine.load(session));
+                    engine.play();
+                    auto run = [&](int cycles) {
+                        for (int i = 0; i < cycles; ++i) {
+                            // Recovery can start a new epoch in service(), so wait
+                            // relative to its consumed stream, not lifetime cycles.
+                            engine.service();
+                            if (anticipative) {
+                                const auto clock = engine.meterClock();
+                                REQUIRE(engine.awaitRendered(clock.heardStream + 128));
+                            }
+                            backend.run(1);
+                        }
+                    };
+                    run(100);
+                    const auto epoch = engine.meterClock().epoch;
+                    const auto before = engine.transport().seconds;
+                    const auto latency = static_cast<std::uint32_t>(seconds * fs);
+                    model::EditTxn insert(session, session.version + 1);
+                    model::FxInstance fx;
+                    fx.plugin.id = "com.suppleaudio.test.edge";
+                    fx.state = "sha256:playrate-long-latency";
+                    insert.putBlob(*fx.state, std::make_shared<const model::Blob>(model::Blob{
+                                                  {49, static_cast<std::uint8_t>(latency),
+                                                   static_cast<std::uint8_t>(latency >> 8),
+                                                   static_cast<std::uint8_t>(latency >> 16)}}));
+                    const auto id = insert.create(fx);
+                    if (takeFx)
+                        insert.modify<model::Take>(inverted,
+                                                   [&](auto& take) { take.chain.push_back(id); });
+                    else
+                        insert.modify<model::Track>(
+                            model::Id{model::Kind::Track, 1},
+                            [&](auto& track) { track.chain.push_back(id); });
+                    session = insert.commit().value();
+                    REQUIRE(engine.load(session));
+                    // The old engine used to reject this insertion in the callback
+                    // executor; both executors must now adopt it automatically.
+                    run(static_cast<int>(latency / 128) + 100);
+                    CHECK(engine.transport().playing);
+                    CHECK(engine.transport().seconds > before);
+                    CHECK(engine.effectivePlayrate() == .8);
+                    CHECK(engine.outputLatency() == (takeFx ? 0 : latency));
+                    CHECK(engine.processErrors() == 0);
+                    CHECK(engine.warnings().empty());
+                    if (seconds == 3 && !(takeFx && preserve))
+                        CHECK(engine.meterClock().epoch == epoch);
+                    else
+                        CHECK(engine.meterClock().epoch == epoch + 1);
+                    const auto end = static_cast<std::size_t>(backend.cycles() * 128);
+                    double difference = 0;
+                    for (auto i = end - 2048; i < end; ++i)
+                        difference = std::max(difference,
+                                              std::abs(double(backend.capture().channels[0][i])));
+                    CHECK(difference == 0);  // latent and unlatented takes still cancel
+                    // A volume edit and an FX bypass remain ordinary graph edits,
+                    // including after the automatic recovery. Confirm audibility
+                    // rather than accepting an engine that kept its original plan.
+                    const auto adoptedEpoch = engine.meterClock().epoch;
+                    model::EditTxn volume(session, session.version + 1);
+                    volume.modify<model::Track>(model::Id{model::Kind::Track, 1},
+                                                [](auto& track) { track.volumeDb = -6; });
+                    session = volume.commit().value();
+                    REQUIRE(engine.load(session));
+                    run(32);
+                    double peak = 0;
+                    const auto volumeEnd = static_cast<std::size_t>(backend.cycles() * 128);
+                    for (auto i = volumeEnd - 1024; i < volumeEnd; ++i)
+                        peak = std::max(peak, std::abs(double(backend.capture().channels[0][i])));
+                    CHECK(peak > .01);
+                    model::EditTxn bypass(session, session.version + 1);
+                    bypass.modify<model::FxInstance>(
+                        id, [](auto& instance) { instance.bypass = true; });
+                    REQUIRE(engine.load(bypass.commit().value()));
+                    run(32);
+                    CHECK(engine.outputLatency() == (takeFx ? 0 : latency));  // compensated bypass
+                    CHECK(engine.meterClock().epoch == adoptedEpoch);
+                    CHECK(engine.transport().playing);
+                    CHECK(engine.processErrors() == 0);
+                    CHECK(engine.warnings().empty());
+                    engine.stop();
+                }
+}
+
 TEST_CASE("master playrate handoffs: unity graph survives an epoch before its first callback") {
     for (bool changeLoop : {false, true}) {
         CAPTURE(changeLoop);

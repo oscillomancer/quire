@@ -1208,8 +1208,11 @@ Status prepare(Plan& p, const Session& s) {
                 p.rateDeviceMargin = std::max(p.rateDeviceMargin, std::abs(stage.inputLatency));
             });
         }
+        // Keep four seconds of additional past/future headroom even in a
+        // zero-latency graph, so inserting ordinary latent FX can inherit the
+        // existing trajectory. Larger jumps use a prepared seek instead.
         const auto capacity = static_cast<std::size_t>(
-            2 * (2 * p.rateDeviceMargin + p.block + static_cast<std::int64_t>(p.rate * .5) + 256));
+            2 * (2 * p.rateDeviceMargin + p.block + static_cast<std::int64_t>(p.rate * 4.5) + 256));
         if (capacity > (1u << 24))
             return Error("playrate.budget", "source clock history exceeds the render budget", {},
                          "reduce plugin latency or render high-latency chains to audio");

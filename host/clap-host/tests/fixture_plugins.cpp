@@ -15,9 +15,9 @@
 //     bytes 1..3 = reported tail in samples (little endian; mode 20: twice
 //     that once it has processed a block). Loading state
 //     calls request_flush; param 7 ("Flushes") reads back how many times
-//     params.flush has been called. Byte 0 = 50: an underflow probe, out =
-//     (in · 2^-100) · 2^100, exact for |in| >= 2^-26 and zero below it when
-//     process() runs with FTZ/DAZ (ADR-0025).
+//     params.flush has been called. Byte 0 = 49: stereo delay, bytes 1..3 =
+//     latency in frames. Byte 0 = 50: an underflow probe, out = (in · 2^-100) · 2^100, exact for
+//     |in| >= 2^-26 and zero below it when process() runs with FTZ/DAZ (ADR-0025).
 #include <clap/clap.h>
 #if defined(_WIN32)
 #include <io.h>
@@ -36,6 +36,7 @@
 #include <cstring>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "supple/clap/semantic_params.h"
 #include "supple/json/json.h"
@@ -679,6 +680,8 @@ struct Edge {
     std::atomic<bool> processing{false};
     std::atomic<int> editorPending{0}, hostDeliveries{0};
     std::atomic<double> editorValue{0};
+    std::vector<std::array<float, 2>> delay;
+    std::size_t delayPos = 0;
     clap_id timers[2] = {CLAP_INVALID_ID, CLAP_INVALID_ID};
     // A display-free editor (gap log #39): it records the parent window it is
     // given (read back as parameter 8) and asks for a resize when shown.
@@ -801,13 +804,14 @@ uint32_t CLAP_ABI edgeTail(const clap_plugin_t* pl) {
                       (static_cast<uint32_t>(c[2].load()) << 8) |
                       (static_cast<uint32_t>(c[3].load()) << 16);
     // Mode 20: a tail learned while processing (a delay hearing the tempo).
-    return c[0] == 20 && E(pl)->processCalls > 0 ? 2 * tail : tail;
+    return c[0] == 49 ? 0 : c[0] == 20 && E(pl)->processCalls > 0 ? 2 * tail : tail;
 }
 const clap_plugin_tail_t kEdgeTail = {edgeTail};
 bool CLAP_ABI edgeStateSave(const clap_plugin_t* pl, const clap_ostream_t* os) {
     std::array<std::uint8_t, 4> state;
     for (std::size_t i = 0; i < 4; ++i) state[i] = E(pl)->config[i].load();
-    if (state[0] >= 30) state[1] = static_cast<std::uint8_t>(E(pl)->editorValue.load());
+    if (state[0] >= 30 && state[0] != 49)
+        state[1] = static_cast<std::uint8_t>(E(pl)->editorValue.load());
     return state[0] != 7 && os->write(os, state.data(), 4) == 4;
 }
 bool CLAP_ABI edgeStateLoad(const clap_plugin_t* pl, const clap_istream_t* is) {
@@ -822,7 +826,7 @@ bool CLAP_ABI edgeStateLoad(const clap_plugin_t* pl, const clap_istream_t* is) {
         timer->register_timer(E(pl)->host, 0, &E(pl)->timers[0]);
         timer->register_timer(E(pl)->host, 0, &E(pl)->timers[1]);
     }
-    if (buf[0] == 5) E(pl)->host->request_restart(E(pl)->host);
+    if (buf[0] == 5 || buf[0] == 49) E(pl)->host->request_restart(E(pl)->host);
     const auto* hp = static_cast<const clap_host_params_t*>(
         E(pl)->host->get_extension(E(pl)->host, CLAP_EXT_PARAMS));
     if (buf[0] == 20) {
@@ -1009,7 +1013,12 @@ void CLAP_ABI edgeMain(const clap_plugin_t* pl) {
         (void)fixtureWrite(E(pl)->config[1], &done, 1);  // main-thread callback receipt
     }
 }
-uint32_t CLAP_ABI edgeLatency(const clap_plugin_t* pl) { return E(pl)->config[0] == 5 ? 64 : 0; }
+uint32_t CLAP_ABI edgeLatency(const clap_plugin_t* pl) {
+    const auto& c = E(pl)->config;
+    if (c[0] == 49)
+        return c[1].load() | (uint32_t(c[2].load()) << 8) | (uint32_t(c[3].load()) << 16);
+    return c[0] == 5 ? 64 : 0;
+}
 const clap_plugin_latency_t kEdgeLatency = {edgeLatency};
 
 const void* CLAP_ABI edgeExt(const clap_plugin_t* pl, const char* id) {
@@ -1026,6 +1035,10 @@ const void* CLAP_ABI edgeExt(const clap_plugin_t* pl, const char* id) {
     return nullptr;
 }
 bool CLAP_ABI edgeActivate(const clap_plugin_t* pl, double, uint32_t, uint32_t) {
+    if (E(pl)->config[0] == 49) {
+        E(pl)->delay.assign(edgeLatency(pl), {});
+        E(pl)->delayPos = 0;
+    }
     return ++E(pl)->activations == 1 || E(pl)->config[0] != 5;
 }
 bool CLAP_ABI edgeStart(const clap_plugin_t* pl) {
@@ -1035,6 +1048,18 @@ bool CLAP_ABI edgeStart(const clap_plugin_t* pl) {
 void CLAP_ABI edgeStop(const clap_plugin_t* pl) { E(pl)->processing = false; }
 clap_process_status CLAP_ABI edgeProcess(const clap_plugin_t* pl, const clap_process_t* p) {
     const auto calls = ++E(pl)->processCalls;
+    if (!E(pl)->delay.empty()) {
+        auto& e = *E(pl);
+        for (uint32_t i = 0; i < p->frames_count; ++i) {
+            for (uint32_t c = 0; c < 2; ++c) {
+                const float input = p->audio_inputs[0].data32[c][i];
+                p->audio_outputs[0].data32[c][i] = e.delay[e.delayPos][c];
+                e.delay[e.delayPos][c] = input;
+            }
+            e.delayPos = (e.delayPos + 1) % e.delay.size();
+        }
+        return CLAP_PROCESS_CONTINUE;
+    }
     if (E(pl)->config[0] == 42 || E(pl)->config[0] == 44)
         E(pl)->host->request_callback(E(pl)->host);
     edgeHostInput(pl, p->in_events);
@@ -1465,6 +1490,10 @@ const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const 
     if (!std::strcmp(id, edgeDescriptor()->id)) {
         const clap_plugin_t* p =
             make<Edge>(host, edgeDescriptor(), edgeActivate, edgeProcess, edgeExt);
+        const_cast<clap_plugin_t*>(p)->reset = [](const clap_plugin_t* pl) {
+            std::fill(E(pl)->delay.begin(), E(pl)->delay.end(), std::array<float, 2>{});
+            E(pl)->delayPos = 0;
+        };
         const_cast<clap_plugin_t*>(p)->on_main_thread = edgeMain;
         const_cast<clap_plugin_t*>(p)->start_processing = edgeStart;
         const_cast<clap_plugin_t*>(p)->stop_processing = edgeStop;

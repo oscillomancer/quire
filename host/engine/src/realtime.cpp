@@ -404,6 +404,8 @@ void Engine::stop() {
     for (const auto& plan : plans_)
         for (auto* instance : plan->instances) instance->setAudioWake(nullptr);
     ratePreparedTail_ = nullptr;
+    rateReseekGeneration_.store(0);
+    rateReseekServiced_ = 0;
     rateDeferred_ = false;
     rateDeferredWake_.store(false);
     rateSafeStream_.store(0);
@@ -568,6 +570,7 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
         for (std::size_t i : p.liveNodes)
             if (p.nodes[i].meterSlot != MeterBank::kNoSlot) p.liveMeterNodes.push_back(i);
     }
+    std::optional<double> recoverySeek;
     plan->generation = ++publishedGen_;
     plan->rateEpochSeekSequence =
         seekSeq_.load(std::memory_order_relaxed) + (rateSeekTarget_ ? 1 : 0);
@@ -576,7 +579,19 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
             if (!options_.anticipative && planHandoffs_.free() == 0)
                 return Error("playrate.busy", "the prepared-plan queue is full", {},
                              "let audio consume pending edits before retrying");
-            SUPPLE_TRY(prepareRatePlan(*plan));
+            auto prepared = prepareRatePlan(*plan);
+            if (!prepared && !rateSeekTarget_ &&
+                (prepared.error().code == "playrate.history" ||
+                 prepared.error().code == "playrate.prepare_late")) {
+                // The model edit is valid. Reuse locate's off-callback priming
+                // and publish its epoch only once the new source state is ready.
+                recoverySeek = transport().seconds;
+                rateSeekTarget_ = *recoverySeek * config_.sampleRate;
+                plan->rateEpochSeekSequence = seekSeq_.load(std::memory_order_relaxed) + 1;
+                prepared = prepareRatePlan(*plan);
+                rateSeekTarget_.reset();
+            }
+            SUPPLE_TRY(prepared);
         }
         if (!options_.anticipative && plan->rateSafeDevice != INT64_MIN) {
             rateSafeStream_.store(plan->handAt + plan->rateSafeDevice - plan->rateHandDevice,
@@ -594,6 +609,12 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
         ratePreparedTail_ = plan.get();
     }
     latestPlan_.store(plan.get(), std::memory_order_release);
+    if (recoverySeek)
+        writeTransport([&] {
+            seekSample_.store(time::samplesAt(*recoverySeek, config_.sampleRate),
+                              std::memory_order_relaxed);
+            seekSeq_.fetch_add(1, std::memory_order_relaxed);
+        });
     wakeRenderer();
     notifyMain();
     plans_.push_back(std::move(plan));
@@ -875,6 +896,17 @@ void Engine::wakeOutputConsumed() SUPPLE_RT {
 
 void Engine::service() {
     bool reload = false;
+    const auto reseek = rateReseekGeneration_.load(std::memory_order_acquire);
+    if (reseek != 0 && reseek != rateReseekServiced_) {
+        rateReseekServiced_ = reseek;
+        const auto* requested = latestPlan_.load(std::memory_order_acquire);
+        // A newer graph or explicit locate can supersede the failed adoption
+        // before this wake is serviced. Do not reset it a second time.
+        if (latest_ && requested && requested->generation == reseek) {
+            const auto ready = prepareSeek(transport().seconds);
+            if (!ready) warnings_.push_back("playrate recovery: " + ready.error().toString());
+        }
+    }
     if (rateDeferred_ && latest_) {
         const auto e = epoch_.load(std::memory_order_acquire);
         const auto lead =
@@ -1849,21 +1881,25 @@ void Engine::rendererLoop(std::uint64_t seen) {
                                plan->rateSeekSequence != 0 || streamLocal_ % 64 == 0;
         const bool sourceSafe = !playing_ || !plan_ || !plan || plan->rateSeekSequence != 0 ||
                                 !plan_->rateEnabled || pos_ >= plan_->rateSafeDevice;
-        if (plan != plan_ && planHandoffs_.free() > 0 && seekReady && canonical && sourceSafe) {
-            if (plan && plan->rateEnabled) {
-                const auto extra =
-                    std::max(plan->rateSourceAhead, plan_ ? plan_->rateSourceAhead : 0) +
-                    plan->smoothFrames + plan->rateSourceBehind + 128;
-                rateSafeStream_.store(streamLocal_ + extra, std::memory_order_release);
-                rateSafeEpoch_.store(control.epoch, std::memory_order_release);
-                const auto prepared = detail::prepareRateAdoption(*plan, plan_, pos_, streamLocal_,
-                                                                  epochStartLocal_, control.loop);
-                if (!prepared) {
-                    processErrors_.fetch_add(1);
-                    notifyMain();
-                    continue;
-                }
+        bool adopt =
+            plan != plan_ && planHandoffs_.free() > 0 && seekReady && canonical && sourceSafe &&
+            (!plan || plan->generation != rateReseekGeneration_.load(std::memory_order_acquire));
+        if (adopt && plan && plan->rateEnabled) {
+            const auto extra = std::max(plan->rateSourceAhead, plan_ ? plan_->rateSourceAhead : 0) +
+                               plan->smoothFrames + plan->rateSourceBehind + 128;
+            rateSafeStream_.store(streamLocal_ + extra, std::memory_order_release);
+            rateSafeEpoch_.store(control.epoch, std::memory_order_release);
+            const auto prepared = detail::prepareRateAdoption(*plan, plan_, pos_, streamLocal_,
+                                                              epochStartLocal_, control.loop);
+            const bool late = playing_ && backend_->ownsThread() && plan->rateSeekSequence == 0 &&
+                              playedStream(control.epoch) + 64 >= streamLocal_;
+            if (!prepared || late) {
+                rateReseekGeneration_.store(plan->generation, std::memory_order_release);
+                notifyMain();
+                adopt = false;
             }
+        }
+        if (adopt) {
             if (plan_ && plan) {
                 detail::carryRateSources(*plan_, *plan, 0);
                 detail::carryMix(*plan_, *plan, 0);

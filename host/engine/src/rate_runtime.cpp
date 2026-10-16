@@ -124,8 +124,7 @@ Status Engine::prepareRatePlan(detail::Plan& p) {
                 if (!old.copyPast(*previous->timelines[0], past, seed.device)) {
                     result = Error("playrate.history",
                                    "the changed graph needs unavailable clock history", {},
-                                   "pause and reload the graph, or restart the engine from "
-                                   "the latest project before continuing");
+                                   "prepare a fresh seek at the consumed position");
                     return result;
                 }
             }
@@ -162,7 +161,7 @@ Status Engine::prepareRatePlan(detail::Plan& p) {
                 if (attempt == 2)
                     result = Error("playrate.prepare_late",
                                    "source preparation could not reach a future boundary", {},
-                                   "pause playback, apply the change, then resume");
+                                   "prepare a fresh seek at the consumed position");
             }
         }
         p.rateHandDevice = handDevice;
