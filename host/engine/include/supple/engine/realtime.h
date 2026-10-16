@@ -395,6 +395,7 @@ class Engine {
         return backend_ ? backend_->midiPorts() : std::vector<std::string>{};
     }
     TransportState transport() const;
+    double effectivePlayrate() const { return effectivePlayrate_.load(std::memory_order_relaxed); }
     // Main thread: waits (bounded) until the renderer has acted on every
     // transport request, so transport() reports the new state. With the
     // renderer in the callback: two audio cycles (none for a manual backend).
@@ -679,6 +680,7 @@ class Engine {
     bool rtPrimed_ = false;                        // audio thread: played a chunk of rtEpoch_
     std::atomic<std::uint64_t> rtEpochSeen_{0};
     std::atomic<std::int64_t> rtPos_{0};        // after the last frame played...
+    std::atomic<double> effectivePlayrate_{1};  // consumed output, never render lookahead
     std::atomic<std::int64_t> rtStream_{0};     // (frames played in the epoch)
     std::atomic<std::uint64_t> rtPosEpoch_{0};  // ...in this epoch
     LoopRange loopC_;                           // audio thread: the loop it plays

@@ -1549,3 +1549,13 @@ portable DSP tests exercise partition-independent clock/ramp output, exact unity
 linked stereo, tape anti-aliasing, preserved pitch, unity impulse alignment,
 repeatable seeks at extreme
 rates, non-48k priming and invalid trajectory rejection, including under RTSan.
+
+`EngineApp::playrateState()` is a model/UI-thread accessor for GUI synchronization:
+`{requestedRate, effectiveRate, preservePitch, envelope?, envelopeValue?}`. It
+allocates no memory, executes/logs no command and creates no history entries.
+Effective rate comes from `Engine::effectivePlayrate()` consumption telemetry
+(still 1 until executor integration). The optional envelope value evaluates the
+latest model curve at the consumed transport position; it is distinct from the
+possibly older audible effective rate. Effective points are expanded/cached when
+the model head changes, including history and branch changes, not on each GUI
+sync. The accessor works without a running engine, using the stopped position.

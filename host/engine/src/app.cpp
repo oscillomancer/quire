@@ -2462,7 +2462,28 @@ Result<std::vector<RecordedInfo>> EngineApp::recover(const std::vector<std::stri
     return commitTakes(takes, "recover");
 }
 
+PlayrateState EngineApp::playrateState() const {
+    PlayrateState state;
+    state.requestedRate = head().project->playrate.rate;
+    state.preservePitch = head().project->playrate.preservePitch;
+    state.effectiveRate = engine_ ? engine_->effectivePlayrate() : 1.;
+    state.envelope = playrateEnvelope_;
+    if (state.envelope) {
+        const double seconds = engine_ ? engine_->transport().seconds : playStart_;
+        const double pos =
+            playrateTimebase_ == model::Timebase::Time ? seconds : head().timeMap->beatAt(seconds);
+        state.envelopeValue = model::pointsValueAt(playratePoints_, pos, state.requestedRate);
+    }
+    return state;
+}
+
 void EngineApp::headChanged() {
+    playrateEnvelope_ = model::activePlayrateEnvelope(head());
+    playratePoints_.clear();
+    if (playrateEnvelope_) {
+        playrateTimebase_ = head().envelopes.find(*playrateEnvelope_)->timebase;
+        playratePoints_ = model::effectivePoints(head(), *playrateEnvelope_);
+    }
     mainWake_.notify();
     if (!engine_) return;
     // Returning to a version before the first patch/state edit means defaults,
