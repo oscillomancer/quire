@@ -10,10 +10,10 @@ license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
 `main`.
 
 The port branch has on-demand Linux/macOS/Windows CI and portable presets
-(ADR-0034). Linux dev passes all 145 tests including the 12 CLAP validators.
+(ADR-0034). Linux dev passes all 144 tests including the 12 CLAP validators.
 Native headless services, hosting/scanning, bridge, stock wrappers, device
-backend builds and GUI tests pass Windows CI (103 tests) and macOS arm64
-CI (103 executed tests; 12 optional external validators skipped, 115 CTest
+backend builds and GUI tests pass Windows CI (102 tests) and macOS arm64
+CI (102 executed tests; 12 optional external validators skipped, 114 CTest
 entries; ADR-0036/0037/0038/0039).
 The macOS preset uses AppleClang and system libc++; shared float/double parsing
 uses vendored fast_float (MIT) on all platforms, including the suite's
