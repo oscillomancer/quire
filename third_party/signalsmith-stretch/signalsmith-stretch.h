@@ -45,6 +45,12 @@ struct SignalsmithStretch {
 	int outputLatency() const {
 		return int(stft.synthesisLatency() + _splitComputation*stft.defaultInterval());
 	}
+
+	// Supple: deterministic streaming seeks reuse the configured allocation.
+	void reset(long seed) {
+		randomEngine.seed(seed);
+		reset();
+	}
 	
 	void reset() {
 		stft.reset(0.1);
@@ -54,9 +60,12 @@ struct SignalsmithStretch {
 		prevInputOffset = -1;
 		_channelBands.assign(_channelBands.size(), Band());
 		silenceCounter = 0;
+		silenceFirst = true;
 		didSeek = false;
+		seekTimeFactor = 1;
 		blockProcess = {};
 		freqEstimateWeighted = freqEstimateWeight = 0;
+		smoothEnergyState = 0;
 	}
 
 	// Configures using a default preset

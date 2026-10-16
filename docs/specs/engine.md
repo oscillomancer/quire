@@ -1505,3 +1505,57 @@ The model helpers `activePlayrateEnvelope` and `validateRecordingPlayrate`
 are model-thread APIs; no effective-point expansion runs on the callback.
 This stage adds no audio-path DSP. Portable command/guard tests are included
 in both native and Linux engine test builds.
+
+### Master playrate DSP building blocks (ADR-0045)
+
+The internal `playrate_dsp` module supplies the fractional `PlayrateClock`,
+original tape reader and streaming `StretchReader`. This is a separately
+validated foundation; plans/executors do not consume it yet, so the control-stage
+1x limitation above still applies.
+
+The clock advances once per device frame and exposes timeline boundaries and
+inverse boundary crossings. Manual scalar changes can ramp over a caller-supplied
+number of device frames; authored envelope values replace the scalar immediately.
+Timeline positions retain their fractional part across arbitrary caller blocks.
+
+Tape conversion uses a shared, control-thread-prepared table: 256-tap Blackman
+windowed sinc, 1024 fractional phases, and 13 anti-alias cutoff banks covering
+1..4x in quarter-rate steps. Banks round up in rate (conservative cutoff), with
+a 6% transition guard. Ratios below unity use the 1x cutoff. Integer source
+positions at exactly unity read the original samples directly. Both channels
+share phase and cutoff; file padding/looping belongs to the source reader.
+
+Pitch-preserving conversion configures stereo Signalsmith Stretch before
+publication and processes only 64-frame output quanta. The channel count is unrestricted and phase is linked across all channels.
+Decoded in-memory data is fetched once per channel/64-frame quantum, returning
+a direct contiguous span where possible and using prepared scratch for padding
+or wrapping; neither tape taps nor stretch frames make per-sample indirect
+reader calls. Source consumption keeps
+a fractional cursor, using successive integer boundaries for input counts.
+Source lookahead compensates both its analysis latency (source frames) and
+synthesis latency (device frames). For a quantum ending at device frame D,
+the required source endpoint is timeline(D + synthesis latency) + analysis
+latency. Priming supplies the corresponding analysis window and future source
+frames, with no graph latency. The owner
+can spread priming over a bounded number of quanta per cycle, waits for ready,
+and owns the audible transition. No reader allocates, frees or accesses files
+while seeking, priming or processing. Unprimed/discontinuous trajectories are
+refused without changing the stretch state.
+
+A documented MIT vendor patch adds `reset(seed)` and resets silence/seek/smoothing
+state. Plain `reset()` retains upstream's random-sequence behavior; existing
+whole-file media variants keep their seed and processing schedule. Shared
+portable DSP tests exercise partition-independent clock/ramp output, exact unity,
+linked stereo, tape anti-aliasing, preserved pitch, unity impulse alignment,
+repeatable seeks at extreme
+rates, non-48k priming and invalid trajectory rejection, including under RTSan.
+
+`EngineApp::playrateState()` is a model/UI-thread accessor for GUI synchronization:
+`{requestedRate, effectiveRate, preservePitch, envelope?, envelopeValue?}`. It
+allocates no memory, executes/logs no command and creates no history entries.
+Effective rate comes from `Engine::effectivePlayrate()` consumption telemetry
+(still 1 until executor integration). The optional envelope value evaluates the
+latest model curve at the consumed transport position; it is distinct from the
+possibly older audible effective rate. Effective points are expanded/cached when
+the model head changes, including history and branch changes, not on each GUI
+sync. The accessor works without a running engine, using the stopped position.

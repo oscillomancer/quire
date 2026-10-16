@@ -105,9 +105,12 @@
       "source": "https://github.com/Signalsmith-Audio/signalsmith-stretch",
       "commit": "a670068d9aeb64913331d5cc29337b19a457a7df",
       "sha256": "077235709ecf2a358545e3ca7bdf32859f70f5c9afb4493e078bd753c9aff284",
-      "purpose": "Pitch-preserving offline time-stretch for media takes (take.playrate/preserve_pitch/pitch, engine.md \u00a74). Header only",
+      "purpose": "Pitch-preserving offline media variants and streaming master-playrate source conversion (ADR-0045). Header only",
       "linkage": "headers",
-      "notes": "sha256 is the upstream release tarball; the vendored files are verbatim except that upstream cmd/, web/ and tests/ are not vendored"
+      "notes": "sha256 is the upstream release tarball; upstream cmd/, web/ and tests/ are not vendored. Local patch adds reset(seed) and clears seek/silence/smoothing state for deterministic allocation-free streaming seeks; default reset still retains the RNG sequence.",
+      "local_patches": [
+        "cmake/patches/signalsmith-stretch-streaming-reset.patch"
+      ]
     },
     {
       "name": "nanovg",

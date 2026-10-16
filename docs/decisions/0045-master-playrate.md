@@ -54,7 +54,9 @@ timeline audio and MIDI, so an empty frontier does not remove this problem.
    adding graph latency. Do not keep both converters continuously warm.
    Callback-owned sources spread bounded priming work across cycles, never
    blocking the callback. The same transition applies when leaving unity
-   bypass. No callback calls a synchronous bridge or the background pool.
+   bypass. Prepare fresh seek state off-thread and delay the audible seek
+   until it is ready; live monitoring continues throughout. No callback calls
+   a synchronous bridge or the background pool.
 6. **Saved settings.** `project.playrate` holds `{rate, preserve_pitch}`.
    Rate is finite and bounded to 0.25..4.0, default 1.0; preserve-pitch defaults
    false. This matches a fresh private REAPER 7.82/Linux Dummy Audio experiment:
@@ -73,7 +75,7 @@ timeline audio and MIDI, so an empty frontier does not remove this problem.
    project edit with optional rate/preserve fields. The effective rate is
    what audio consumption has reached, not lookahead or the latest request.
    In the staged control-only implementation it is explicitly 1.0.
-   `transport.playrate.apply_to_tempo` scales every tempo-point BPM by the
+   `transport.playrate.apply-to-tempo` scales every tempo-point BPM by the
    saved scalar rate, retaining beat positions, ramps and meter changes, then
    resets rate to 1 in one version. Require stopped transport, no recording
    and no active nonempty rate envelope. Reject resulting BPM outside 1..1000
@@ -126,10 +128,3 @@ timeline audio and MIDI, so an empty frontier does not remove this problem.
 - Duplicate playback/monitor graphs: loses shared nonlinear FX, sidechain and
   instrument-state behavior. A pre-encode split eventually needs the same
   source/event clock work as the chosen design.
-
-## Implementation naming (2026-10-16)
-
-The command registry permits hyphens, not underscores, within command-name
-segments. The tempo bake's registered name is therefore
-`transport.playrate.apply-to-tempo`; `apply_to_tempo` above describes the
-operation, not an accepted command alias.

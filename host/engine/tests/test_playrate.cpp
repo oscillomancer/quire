@@ -369,6 +369,33 @@ TEST_CASE("master playrate Lua bindings expose nested commands and tempo bake") 
     CHECK(h.app->head().timeMap->bpmAt(0) == 180);
 }
 
+TEST_CASE("master playrate UI accessor reads cached curves without commands or history") {
+    PlayrateHost h;
+    auto state = h.app->playrateState();
+    CHECK(state.requestedRate == 1);
+    CHECK(state.effectiveRate == 1);
+    CHECK_FALSE(state.envelope);
+    CHECK_FALSE(state.envelopeValue);
+    h.run("transport.playrate.set", R"({"rate":1.137,"preserve_pitch":true})");
+    h.run("env.add", R"({"track":"tr_0","param":"playrate","points":[
+        {"beat":0,"value":0.5},{"beat":1,"value":2.5}]})");
+    const auto version = h.app->head().version;
+    const auto steps = h.app->versions().history().size();
+    for (int i = 0; i < 1000; ++i) {
+        state = h.app->playrateState();
+        CHECK(state.requestedRate == 1.137);
+        CHECK(state.preservePitch);
+        CHECK(state.envelope == model::Id{model::Kind::Envelope, 1});
+        CHECK(state.envelopeValue == .5);
+    }
+    CHECK(h.app->head().version == version);
+    CHECK(h.app->versions().history().size() == steps);
+    h.run("env.set", R"({"env":"en_1","active":false})");
+    CHECK_FALSE(h.app->playrateState().envelopeValue);
+    REQUIRE(h.app->undo());
+    CHECK(h.app->playrateState().envelopeValue == .5);
+}
+
 TEST_CASE("master playrate writing: a failed batch cannot leave a later latch hold") {
     PlayrateHost h;
     h.run("env.add", R"({"track":"tr_0","param":"playrate","points":[{"beat":0,"value":1}]})");
