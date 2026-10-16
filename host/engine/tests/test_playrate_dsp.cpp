@@ -314,3 +314,16 @@ TEST_CASE("timeline window: partitioning, PDC history, loops and plan adoption s
     CHECK(changed.rate(813) == 2);
     CHECK(changed.phase(332) == scalar.phase(332));
 }
+
+TEST_CASE("playrate timeline: manual transitions wait for compensated lookahead") {
+    PlayrateTimeline previous(262144, 1.137, {}), next(262144, 2, {});
+    previous.ensure(40000);
+    next.adopt(previous, 1024, 480, 32768);
+    next.ensure(40000);
+    for (std::int64_t device = 1024; device <= 33792; ++device) {
+        CHECK(next.phase(device) == previous.phase(device));
+        CHECK(next.rate(device) == 1.137);
+    }
+    CHECK(next.rate(33793) > 1.137);
+    CHECK(next.rate(34272) == 2);
+}

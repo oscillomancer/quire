@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
-// Portable control-stage tests: no real device, plugins or native windowing.
+// Portable master-rate tests: dummy devices and in-process test fixtures only.
 #include <doctest/doctest.h>
 
 #include <algorithm>
@@ -22,7 +22,7 @@ struct PlayrateHost {
                     ("supple-playrate-" +
                      std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     DummyBackend backend{
-        DummyBackend::Options{.mode = DummyBackend::Mode::Manual, .captureFrames = 8192}};
+        DummyBackend::Options{.mode = DummyBackend::Mode::Manual, .captureFrames = 131072}};
     std::unique_ptr<EngineApp> app;
     cmd::Registry registry;
     std::unique_ptr<cmd::Dispatcher> bus;
@@ -53,9 +53,9 @@ struct PlayrateHost {
         REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
         return *result;
     }
-    void start() {
+    void start(bool anticipative = false) {
         REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 128, .inputs = 1},
-                                 {.anticipative = false, .workers = 0}));
+                                 {.anticipative = anticipative, .workers = 0}));
     }
     void arm(bool midi = false) {
         run("track.add", R"({"name":"Input"})");
@@ -95,7 +95,7 @@ TEST_CASE("master playrate commands: schemas, queries, gesture undo and save/reo
     CHECK(h.app->versions().history().size() == 2);
     info = h.run("transport.playrate.get");
     CHECK(info["requested_rate"].asDouble() == 4);
-    CHECK(info["effective_rate"].asDouble() == 1);  // control stage does not alter DSP
+    CHECK(info["effective_rate"].asDouble() == 1);  // no engine is running
     CHECK(info["preserve_pitch"].asBool());
     const auto content = model::serializeProject(h.app->head());
     for (const char* args :
@@ -287,7 +287,7 @@ TEST_CASE("master playrate writing: touch latch and write use strip capture time
     }
 }
 
-TEST_CASE("master playrate controls leave audio at unity pending engine integration") {
+TEST_CASE("master playrate envelope replaces scalar in audio and telemetry") {
     PlayrateHost h;
     audio::AudioData tone;
     tone.sampleRate = 48000;
@@ -309,21 +309,23 @@ TEST_CASE("master playrate controls leave audio at unity pending engine integrat
     h.run("env.add", R"({"track":"tr_0","param":"playrate","points":[{"beat":0,"value":0.25}]})");
     const auto pending = h.app->renderMix(settings);
     REQUIRE(pending);
-    CHECK(pending->audio.channels == unity->audio.channels);
+    CHECK(pending->audio.frames() == unity->audio.frames() * 4);
     h.start();
     h.run("transport.play");
     h.backend.run(20);
-    CHECK(h.app->engine()->transport().sample == 2560);
+    CHECK(h.app->engine()->transport().sample == 640);
     for (std::size_t channel = 0; channel < 2; ++channel) {
         const auto& captured = h.backend.capture().channels[channel];
-        const auto& expected = unity->audio.channels[channel];
-        REQUIRE(captured.size() >= expected.size());
+        const auto& expected = pending->audio.channels[channel];
+        const auto count =
+            std::min(static_cast<std::size_t>(h.backend.cycles() * 128), expected.size());
+        REQUIRE(count > 0);
         double maxDiff = 0;
-        for (std::size_t i = 0; i < expected.size(); ++i)
+        for (std::size_t i = 0; i < count; ++i)
             maxDiff = std::max(maxDiff, std::abs(double(captured[i]) - double(expected[i])));
         CHECK(maxDiff == 0);
     }
-    CHECK(h.run("transport.playrate.get")["effective_rate"].asDouble() == 1);
+    CHECK(h.run("transport.playrate.get")["effective_rate"].asDouble() == .25);
     auto refused = h.execute("transport.playrate.apply-to-tempo");
     REQUIRE_FALSE(refused);
     CHECK(refused.error().code == "playrate.playing");
@@ -413,4 +415,495 @@ TEST_CASE("master playrate writing: a failed batch cannot leave a later latch ho
     REQUIRE(envelope);
     CHECK(std::all_of(envelope->points.begin(), envelope->points.end(),
                       [](const auto& p) { return p.value == 1; }));
+}
+
+TEST_CASE("master playrate audio: scalar conversion is exact offline and in both executors") {
+    for (bool anticipative : {false, true})
+        for (bool live : {false, true})
+            for (bool preserve : {false, true})
+                for (double rate : {.25, 1.137, 4.}) {
+                    CAPTURE(anticipative);
+                    CAPTURE(live);
+                    CAPTURE(preserve);
+                    CAPTURE(rate);
+                    PlayrateHost h;
+                    audio::AudioData tone;
+                    tone.sampleRate = 48000;
+                    tone.channels.assign(2, std::vector<float>(48000));
+                    for (std::size_t i = 0; i < tone.frames(); ++i)
+                        tone.channels[0][i] = tone.channels[1][i] =
+                            static_cast<float>(.2 * std::sin(double(i) * .03));
+                    REQUIRE(audio::writeWav(h.root / "rate-tone.wav", tone));
+                    h.run("track.add");
+                    auto item = json::Value::object();
+                    item["track"] = "tr_1";
+                    item["audio_file"] = (h.root / "rate-tone.wav").string();
+                    h.run("item.add", json::writeCompact(item));
+                    if (live)
+                        h.run("track.set",
+                              R"({"track":"tr_1","armed":true,"monitor":"on","record_input":[1]})");
+                    auto args = json::Value::object();
+                    args["rate"] = rate;
+                    args["preserve_pitch"] = preserve;
+                    h.run("transport.playrate.set", json::writeCompact(args));
+                    OfflineSettings settings;
+                    settings.endSeconds = .03;
+                    settings.blockSize = 127;
+                    settings.threads = 1;
+                    const auto offline = h.app->renderMix(settings);
+                    REQUIRE_MESSAGE(offline, (offline ? "" : offline.error().toString()));
+                    settings.blockSize = 512;
+                    const auto other = h.app->renderMix(settings);
+                    REQUIRE(other);
+                    CHECK(other->audio.channels == offline->audio.channels);
+                    CHECK(std::abs(double(offline->audio.frames()) - 1440. / rate) < 2);
+                    h.start(anticipative);
+                    h.run("transport.play");
+                    if (anticipative)
+                        REQUIRE(h.app->engine()->awaitRendered(
+                            static_cast<std::int64_t>(offline->audio.frames())));
+                    const auto cycles =
+                        static_cast<std::int64_t>((offline->audio.frames() + 127) / 128);
+                    h.backend.run(cycles);
+                    for (std::size_t c = 0; c < 2; ++c) {
+                        const auto& actual = h.backend.capture().channels[c];
+                        REQUIRE(actual.size() >= offline->audio.frames());
+                        double maxDiff = 0;
+                        for (std::size_t i = 0; i < offline->audio.frames(); ++i)
+                            maxDiff =
+                                std::max(maxDiff, std::abs(double(actual[i]) -
+                                                           double(offline->audio.channels[c][i])));
+                        CHECK(maxDiff == 0);
+                    }
+                    CHECK(h.app->engine()->effectivePlayrate() == rate);
+                    CHECK(h.app->playrateState().effectiveRate == rate);
+                    CHECK(h.app->engine()->transport().seconds ==
+                          doctest::Approx(double(cycles * 128) * rate / 48000));
+                    h.run("transport.stop");
+                }
+}
+
+namespace {
+InstancePool playrateFixturePool() {
+    return InstancePool([](const model::PluginRef& ref) -> Result<host::PluginInfo> {
+        const fs::path fixture = FIXTURE_CLAP_PATH;
+        host::ScanOptions options;
+        options.forceInProcess = true;
+        auto list = host::scan(std::span(&fixture, 1), options);
+        if (!list) return list.error();
+        for (const auto& plugin : *list)
+            if (plugin.id == ref.id) return plugin;
+        return Error("engine.plugin_missing", "playrate fixture is missing", {},
+                     "rebuild the fixture target");
+    });
+}
+}  // namespace
+
+TEST_CASE("master playrate transitions: compensated take sources remain aligned") {
+    for (bool anticipative : {false, true})
+        for (bool preserve : {false, true}) {
+            CAPTURE(preserve);
+            CAPTURE(anticipative);
+            PlayrateHost h;
+            audio::AudioData tone;
+            tone.sampleRate = 48000;
+            tone.channels.assign(2, std::vector<float>(48000));
+            for (std::size_t i = 0; i < tone.frames(); ++i)
+                tone.channels[0][i] = tone.channels[1][i] =
+                    static_cast<float>(.2 * std::sin(double(i) * .03));
+            REQUIRE(audio::writeWav(h.root / "alignment.wav", tone));
+            h.run("track.add");
+            h.run("track.add");
+            auto item = json::Value::object();
+            item["audio_file"] = (h.root / "alignment.wav").string();
+            for (const char* track : {"tr_1", "tr_2"}) {
+                item["track"] = track;
+                h.run("item.add", json::writeCompact(item));
+            }
+            model::EditTxn edit(h.app->head(), h.app->head().version + 1);
+            auto project = edit.project();
+            project.console9 = false;
+            project.playrate = {1.137, preserve};
+            edit.setProject(project);
+            model::FxInstance fx;
+            fx.plugin.id = "com.suppleaudio.test.gain";
+            fx.patch =
+                json::parse(
+                    R"({"schema":"supple.test-gain-patch/1.0","params":{"latency":"short"}})")
+                    .value();
+            const auto id = edit.create(fx);
+            for (const auto& entry : h.app->head().items)
+                if (entry.value->track.n == 2)
+                    edit.modify<model::Take>(*entry.value->activeTake, [&](auto& take) {
+                        take.chain.push_back(id);
+                        take.phaseInvert = true;
+                    });
+            const auto session = edit.commit().value();
+            auto pool = playrateFixturePool();
+            MediaCache media;
+            DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 50000});
+            Engine engine(pool, media, {.anticipative = anticipative, .workers = 0});
+            REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}));
+            REQUIRE(engine.load(session));
+            engine.play();
+            auto run = [&](int cycles) {
+                for (int i = 0; i < cycles; ++i) {
+                    if (anticipative) REQUIRE(engine.awaitRendered((backend.cycles() + 1) * 128));
+                    backend.run(1);
+                    engine.service();
+                }
+            };
+            run(64);
+            double initial = 0;
+            for (std::size_t i = 512; i < static_cast<std::size_t>(backend.cycles() * 128); ++i)
+                initial = std::max(initial, std::abs(double(backend.capture().channels[0][i])));
+            REQUIRE(initial == 0);
+            model::EditTxn change(session, session.version + 1);
+            project.playrate.rate = 2;
+            project.playrate.preservePitch = !preserve;
+            change.setProject(project);
+            const auto changed = change.commit().value();
+            REQUIRE(engine.load(changed));
+            model::EditTxn newer(changed, changed.version + 1);
+            project.playrate.rate = 2.5;
+            newer.setProject(project);
+            REQUIRE(engine.load(newer.commit().value()));
+            run(250);
+            CHECK(engine.effectivePlayrate() == 2.5);
+            double after = 0;
+            for (std::size_t i = 8192; i < static_cast<std::size_t>(backend.cycles() * 128); ++i)
+                after = std::max(after, std::abs(double(backend.capture().channels[0][i])));
+            CHECK(after == 0);
+            engine.stop();
+        }
+}
+
+namespace {
+model::Session rateMidiSession(bool split, bool preserve) {
+    model::EditTxn edit(model::Session::create({.console9 = false}), 1);
+    auto project = edit.project();
+    project.playrate = {1.137, preserve};
+    edit.setProject(project);
+    model::Track track;
+    track.parent = model::kMaster;
+    const auto tr = edit.create(track);
+    edit.modify<model::Track>(model::kMaster, [&](auto& master) { master.children.push_back(tr); });
+    model::FxInstance synth;
+    synth.plugin.id = "com.suppleaudio.test.sine";
+    const auto instrument = edit.create(synth);
+    model::FxInstance delay;
+    delay.plugin.id = "com.suppleaudio.test.gain";
+    delay.patch =
+        json::parse(R"({"schema":"supple.test-gain-patch/1.0","params":{"latency":"short"}})")
+            .value();
+    const auto fx = edit.create(delay);
+    model::MidiSource source;
+    source.sequence.ppq = 960;
+    source.sequence.length = 960;
+    source.sequence.notes = {{4, 14, 0, 69, 100, 0}, {15, 20, 0, 72, 100, 0}};
+    model::Take take;
+    take.source = edit.create(source);
+    take.chain = {instrument, fx};
+    const auto tk = edit.create(take);
+    model::Item item;
+    item.track = tr;
+    item.length = 1;
+    item.takes = {tk};
+    item.activeTake = tk;
+    edit.create(item);
+    model::Envelope env;
+    env.target = {model::kMaster, "playrate"};
+    env.timebase = model::Timebase::Time;
+    env.points = {
+        {0, .5}, {.01, 2}, {.02, 4, model::PointShape::Square}, {.025, .25}, {.035, 1.137}};
+    edit.create(env);
+    if (split) {
+        model::Track live;
+        live.parent = model::kMaster;
+        const auto id = edit.create(live);
+        edit.modify<model::Track>(model::kMaster,
+                                  [&](auto& master) { master.children.push_back(id); });
+        model::Route route;
+        route.from.hwChannels = std::vector<int>{1};
+        route.to.track = id;
+        const auto input = edit.create(route);
+        edit.modify<model::Track>(id, [&](auto& t) {
+            t.record.armed = true;
+            t.record.monitor = model::Monitor::On;
+            t.record.input = input;
+        });
+    }
+    auto session = edit.commit();
+    REQUIRE_MESSAGE(session, (session ? "" : session.error().toString()));
+    return *session;
+}
+}  // namespace
+
+TEST_CASE(
+    "master playrate MIDI: authored curves, compensated takes and split executors match offline") {
+    for (bool split : {false, true}) {
+        const auto session = rateMidiSession(split, false);
+        auto offlinePool = playrateFixturePool();
+        OfflineSettings settings;
+        settings.endSeconds = .05;
+        settings.blockSize = 127;
+        settings.threads = 1;
+        const auto reference = renderOffline(session, offlinePool, settings);
+        REQUIRE_MESSAGE(reference, (reference ? "" : reference.error().toString()));
+        REQUIRE(reference->outputLatency == 0);  // take-chain latency is source lookahead
+        settings.blockSize = 17;
+        const auto partitioned = renderOffline(session, offlinePool, settings);
+        REQUIRE(partitioned);
+        CHECK(bool(reference->audio.channels == partitioned->audio.channels));
+        double peak = 0;
+        for (float sample : reference->audio.channels[0])
+            peak = std::max(peak, std::abs(double(sample)));
+        REQUIRE(peak > .01);
+        for (bool anticipative : {false, true}) {
+            CAPTURE(split);
+            CAPTURE(anticipative);
+            auto pool = playrateFixturePool();
+            MediaCache media;
+            DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 10000});
+            Engine engine(pool, media, {.anticipative = anticipative, .workers = 1});
+            REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 73, .inputs = 1}));
+            REQUIRE(engine.load(session));
+            engine.play();
+            const auto count = static_cast<std::int64_t>((reference->audio.frames() + 72) / 73);
+            if (anticipative) REQUIRE(engine.awaitRendered(count * 73));
+            backend.run(count);
+            double maxDiff = 0;
+            for (std::size_t c = 0; c < 2; ++c)
+                for (std::size_t i = 0; i < reference->audio.frames(); ++i)
+                    maxDiff = std::max(maxDiff, std::abs(double(reference->audio.channels[c][i]) -
+                                                         double(backend.capture().channels[c][i])));
+            CHECK(maxDiff == 0);
+            CHECK(engine.processErrors() == 0);
+            engine.stop();
+        }
+    }
+}
+
+TEST_CASE(
+    "master playrate MIDI: compensated loop boundaries and device clicks agree in both executors") {
+    for (bool split : {false, true}) {
+        std::vector<std::vector<float>> expected;
+        for (bool anticipative : {false, true}) {
+            CAPTURE(split);
+            CAPTURE(anticipative);
+            auto pool = playrateFixturePool();
+            MediaCache media;
+            DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 16000});
+            Engine engine(pool, media, {.anticipative = anticipative, .workers = 1});
+            REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 73, .inputs = 1}));
+            REQUIRE(engine.load(rateMidiSession(split, false)));
+            engine.setLoop(0, 600. / 48000., true);
+            engine.setMetronome(true, -12);
+            engine.play();
+            constexpr std::int64_t frames = 73 * 90;
+            if (anticipative) REQUIRE(engine.awaitRendered(frames));
+            backend.run(90);
+            if (!anticipative) {
+                expected.resize(2);
+                for (std::size_t c = 0; c < 2; ++c)
+                    expected[c].assign(backend.capture().channels[c].begin(),
+                                       backend.capture().channels[c].begin() + frames);
+            } else {
+                double diff = 0;
+                for (std::size_t c = 0; c < 2; ++c)
+                    for (std::size_t i = 0; i < expected[c].size(); ++i)
+                        diff = std::max(diff, std::abs(double(expected[c][i]) -
+                                                       double(backend.capture().channels[c][i])));
+                CHECK(diff == 0);
+            }
+            CHECK(engine.transport().sample < 600);
+            CHECK(engine.processErrors() == 0);
+            // Fresh seeks reseed source/graph state rather than retaining loop history.
+            REQUIRE(engine.prepareSeek(0));
+            if (anticipative) REQUIRE(engine.awaitRendered(frames));
+            backend.run(90);
+            double repeatDiff = 0;
+            for (std::size_t c = 0; c < 2; ++c)
+                for (std::size_t i = 0; i < static_cast<std::size_t>(frames); ++i)
+                    repeatDiff = std::max(
+                        repeatDiff, std::abs(double(backend.capture().channels[c][i]) -
+                                             double(backend.capture().channels[c][i + frames])));
+            CHECK(repeatDiff == 0);
+            engine.stop();
+        }
+    }
+}
+
+TEST_CASE("master playrate tempo: plugins receive effective BPM through the bridge") {
+    host::setBridgeExecutable(BRIDGE_PATH);
+    for (auto isolation : {model::Isolation::InProcess, model::Isolation::SharedBridge}) {
+        model::EditTxn edit(model::Session::create({.console9 = false}), 1);
+        model::Envelope envelope;
+        envelope.target = {model::kMaster, "playrate"};
+        envelope.timebase = model::Timebase::Time;
+        envelope.points = {{0, .5, model::PointShape::Square}, {.01, 2}};
+        edit.create(envelope);
+        model::FxInstance fx;
+        fx.plugin.id = "com.suppleaudio.test.edge";
+        fx.state = "sha256:master-rate-tempo-probe";
+        fx.isolation = isolation;
+        fx.autoBypassOnSilence = false;
+        edit.putBlob(*fx.state, std::make_shared<const model::Blob>(model::Blob{{48, 0, 0, 0}}));
+        const auto id = edit.create(fx);
+        edit.modify<model::Track>(model::kMaster, [&](auto& track) { track.chain.push_back(id); });
+        const auto session = edit.commit().value();
+        auto pool = playrateFixturePool();
+        OfflineSettings settings;
+        settings.endSeconds = .02;
+        settings.blockSize = 17;
+        settings.threads = 1;
+        const auto small = renderOffline(session, pool, settings);
+        REQUIRE_MESSAGE(small, (small ? "" : small.error().toString()));
+        settings.blockSize = 512;
+        const auto reference = renderOffline(session, pool, settings);
+        REQUIRE(reference);
+        CHECK(bool(reference->audio.channels == small->audio.channels));
+        CHECK(reference->audio.channels[0][0] == .06f);
+        CHECK(reference->audio.channels[0][960] == .24f);
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 4096});
+        Engine engine(pool, media, {.anticipative = true, .workers = 0});
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 73}));
+        REQUIRE(engine.load(session));
+        engine.play();
+        const auto cycles = static_cast<std::int64_t>((reference->audio.frames() + 72) / 73);
+        REQUIRE(engine.awaitRendered(cycles * 73));
+        backend.run(cycles);
+        double diff = 0;
+        for (std::size_t i = 0; i < reference->audio.frames(); ++i)
+            diff = std::max(diff, std::abs(double(reference->audio.channels[0][i]) -
+                                           double(backend.capture().channels[0][i])));
+        CHECK(diff == 0);
+        engine.stop();
+    }
+}
+
+TEST_CASE("master playrate monitoring: live input stays in device time across edits and seeks") {
+    for (bool anticipative : {false, true}) {
+        auto base = rateMidiSession(true, false);
+        model::EditTxn edit(base, base.version + 1);
+        // Only the armed input track remains audible; timeline instruments
+        // still exercise the renderer share of a split graph.
+        edit.modify<model::Track>({model::Kind::Track, 1}, [](auto& track) { track.mute = true; });
+        auto project = edit.project();
+        project.playrate = {1, false};
+        edit.setProject(project);
+        for (const auto& env : base.envelopes)
+            edit.modify<model::Envelope>(env.id, [](auto& lane) { lane.active = false; });
+        auto session = edit.commit().value();
+        auto pool = playrateFixturePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual,
+                              .captureFrames = 20000,
+                              .input = [](float* const* input, std::uint32_t, std::uint32_t frames,
+                                          std::int64_t first) {
+                                  for (std::uint32_t i = 0; i < frames; ++i)
+                                      input[0][i] = (first + i) % 2 == 0 ? .125f : -.125f;
+                              }});
+        Engine engine(pool, media, {.anticipative = anticipative, .workers = 0});
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128, .inputs = 1}));
+        REQUIRE(engine.load(session));
+        engine.play();
+        if (anticipative) REQUIRE(engine.awaitRendered(4096));
+        backend.run(32);
+        const float even = backend.capture().channels[0][2048];
+        const float odd = backend.capture().channels[0][2049];
+        REQUIRE(even != 0);
+        model::EditTxn change(session, session.version + 1);
+        project.playrate = {.25, true};
+        change.setProject(project);
+        session = change.commit().value();
+        REQUIRE(engine.load(session));
+        for (int i = 0; i < 80; ++i) {
+            if (anticipative) REQUIRE(engine.awaitRendered((backend.cycles() + 1) * 128));
+            backend.run(1);
+            engine.service();
+        }
+        REQUIRE(engine.prepareSeek(.005));
+        if (anticipative) REQUIRE(engine.awaitRendered(2048));
+        backend.run(16);
+        bool same = true;
+        for (std::size_t i = 4096; i < static_cast<std::size_t>(backend.cycles() * 128); ++i)
+            same &= backend.capture().channels[0][i] == (i % 2 == 0 ? even : odd);
+        CHECK(same);
+        engine.stop();
+    }
+}
+
+TEST_CASE(
+    "master playrate recording: a unity request does not clear an audible non-unity trajectory") {
+    PlayrateHost h;
+    h.arm();
+    h.run("transport.playrate.set", R"({"rate":2})");
+    h.start();
+    h.run("transport.play");
+    h.backend.run(8);
+    REQUIRE(h.app->playrateState().effectiveRate == 2);
+    h.run("transport.playrate.set", R"({"rate":1})");
+    REQUIRE(h.app->head().project->playrate.rate == 1);
+    const auto files = h.files();
+    recordError(h.execute("transport.record"));
+    CHECK(h.files() == files);
+    h.run("transport.pause");
+    h.run("transport.record");
+    h.backend.run(8);
+    h.run("transport.stop");
+}
+
+TEST_CASE("master playrate recording: returning to unity preserves loop pass coordinates") {
+    for (bool anticipative : {false, true}) {
+        PlayrateHost h;
+        h.arm();
+        auto pool = playrateFixturePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+        Engine engine(pool, media, {.anticipative = anticipative, .workers = 0});
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 127, .inputs = 1}));
+        model::EditTxn rate(h.app->head(), h.app->head().version + 1);
+        auto project = rate.project();
+        project.playrate.rate = 2;
+        rate.setProject(project);
+        auto session = rate.commit().value();
+        REQUIRE(engine.load(session));
+        model::EditTxn unity(session, session.version + 1);
+        project.playrate.rate = 1;
+        unity.setProject(project);
+        REQUIRE(engine.load(unity.commit().value()));
+        engine.setLoop(0, .01, true);
+        REQUIRE(engine.startRecording(
+            {{{model::Kind::Track, 1}, {0}, h.root / "unity-loop.wav", std::nullopt}}));
+        engine.play();
+        for (int i = 0; i < 100; ++i) {
+            if (anticipative) REQUIRE(engine.awaitRendered((i + 1) * 127));
+            backend.run(1);
+        }
+        const auto takes = engine.stopRecording();
+        REQUIRE(takes);
+        REQUIRE(takes->size() == 1);
+        const auto& take = takes->front();
+        CHECK(take.frames == 12700);
+        REQUIRE(take.segments.size() == 27);
+        for (std::size_t i = 0; i < take.segments.size(); ++i) {
+            CHECK(take.segments[i].timeline == 0);
+            CHECK(take.segments[i].fileFrame == static_cast<std::int64_t>(i * 480));
+        }
+        engine.stop();
+    }
+}
+
+TEST_CASE("master playrate seek: play retains a prepared stopped seek before the first callback") {
+    PlayrateHost h;
+    h.run("transport.playrate.set", R"({"rate":2})");
+    h.start();
+    h.run("transport.seek", R"({"seconds":0.125})");
+    CHECK(h.app->engine()->transport().sample == 6000);
+    h.run("transport.play");
+    h.backend.run(1);
+    CHECK(h.app->engine()->transport().sample == 6256);
+    h.run("transport.stop");
 }

@@ -19,9 +19,27 @@ inline constexpr int kRateQuantum = 64;
 // An authored envelope replaces the scalar (and never acquires its ramp).
 class PlayrateClock {
   public:
+    struct State {
+        double timeline = 0, scalar = 1, from = 1, target = 1;
+        std::uint32_t rampFrames = 0, rampAt = 0, waitFrames = 0, reserved = 0;
+    };
+    State state() const SUPPLE_RT {
+        return {timeline_, scalar_, from_, target_, rampFrames_, rampAt_, waitFrames_, 0};
+    }
+    void restore(State state) SUPPLE_RT {
+        timeline_ = state.timeline;
+        scalar_ = state.scalar;
+        from_ = state.from;
+        target_ = state.target;
+        rampFrames_ = state.rampFrames;
+        rampAt_ = state.rampAt;
+        waitFrames_ = state.waitFrames;
+    }
     using Envelope = double (*)(const void*, double) noexcept;
     void reset(double timeline, double rate) SUPPLE_RT;
     void setRate(double rate, std::uint32_t rampFrames) SUPPLE_RT;
+    void transition(double rate, double from, std::uint32_t rampFrames,
+                    std::uint32_t waitFrames) SUPPLE_RT;
     void setEnvelope(Envelope envelope, const void* context) SUPPLE_RT;
     double timeline() const SUPPLE_RT { return timeline_; }
     double rate() const SUPPLE_RT;
@@ -32,7 +50,7 @@ class PlayrateClock {
 
   private:
     double timeline_ = 0, scalar_ = 1, from_ = 1, target_ = 1;
-    std::uint32_t rampFrames_ = 0, rampAt_ = 0;
+    std::uint32_t rampFrames_ = 0, rampAt_ = 0, waitFrames_ = 0;
     Envelope envelope_ = nullptr;
     const void* context_ = nullptr;
 };

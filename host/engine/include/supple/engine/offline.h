@@ -156,6 +156,8 @@ class MediaCache {
 };
 
 struct OfflineSettings {
+    // Playback/stems apply master rate; analysis and item-FX renders opt out.
+    bool applyMasterPlayrate = true;
     model::Id master = model::kMaster;  // mix output root, ignored for isolated track taps
     double startSeconds = 0.0;
     double endSeconds = 0.0;   // exclusive; the tail follows

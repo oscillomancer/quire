@@ -313,15 +313,18 @@ Engine and hosting:
   are).
 
 Session and editing:
-- Master playrate settings and the tr_0 playrate envelope persist in project
-  schema 2.1; audio playback/rendering still run at 1x until DSP integration
-  (ADR-0045). Get/set and atomic tempo-bake commands are available; requested
-  vs effective rate is explicit (effective remains 1). Non-unity audio/MIDI
-  recording and transitions into it during recording are refused. Master-rate
-  writing has existing coarse strip semantics; no knob/lane GUI is present yet.
-  Native CI for these new controls is pending coordinator validation.
-  The fractional DSP clock and per-source tape/stretch readers are implemented
-  and tested in isolation (dev/RTSan); executor integration remains pending.
+- Master playrate 0.25..4x and its tr_0 envelope persist in schema 2.1.
+  Tape and pitch-preserving source conversion run before take FX/live mixing;
+  MIDI, automation, plugin tempo, loops and transport share the fractional clock
+  (ADR-0045). Requested and consumed effective rate are exposed, including the
+  allocation-free EngineApp::playrateState() GUI accessor. Non-unity audio/MIDI
+  recording is refused, including queued transitions. Writing retains coarse
+  strip semantics. Rate/mode edits wait for compensated lookahead and coalesce
+  during transitions; long-latency take chains can exceed the 200 ms horizon.
+  Seeks prepare off-thread while playback/monitoring continues. Changes requiring
+  unavailable clock history must be retried while paused. Portable executor
+  checks pass in dev and RTSan; native CI and independent review remain for the
+  coordinator.
 - Take `stretch_markers` are stored but not applied; stretching and
   resampling run synchronously when a plan is compiled.
 - Track groups are preserved in project files but not implemented.

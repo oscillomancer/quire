@@ -350,7 +350,7 @@ schema::Schema<PlayrateInfo> playrateSchema() {
         .field("envelope", &PlayrateInfo::envelope, schema::string())
         .build();
 }
-PlayrateInfo playrateInfo(const model::Session& session) {
+PlayrateInfo playrateInfo(const model::Session& session, const Engine* engine = nullptr) {
     PlayrateInfo out;
     out.requestedRate = session.project->playrate.rate;
     out.preservePitch = session.project->playrate.preservePitch;
@@ -358,7 +358,7 @@ PlayrateInfo playrateInfo(const model::Session& session) {
         out.envelope = envelope->str();
     // ADR-0045 control stage: DSP still plays/renders at 1x. Replace this
     // effective value with consumption telemetry when the engine stage lands.
-    out.effectiveRate = 1.0;
+    out.effectiveRate = engine ? engine->effectivePlayrate() : 1.;
     return out;
 }
 
@@ -3954,7 +3954,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                        obj(R"({"requested_rate":1.0,"effective_rate":1.0,"preserve_pitch":false})"),
                        "empty"}};
         c.run = [](const NoArgs&, Context& ctx) -> Result<PlayrateInfo> {
-            return playrateInfo(A(ctx).view());
+            return playrateInfo(A(ctx).view(), A(ctx).engine());
         };
         addChecked(registry, std::move(c));
     }
@@ -3999,7 +3999,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 if (next.playrate != project->playrate) app.txn().setProject(std::move(next));
                 if (a.rate) app.recordAutomation(model::kMaster, "playrate", *a.rate);
             }
-            return playrateInfo(app.view());
+            return playrateInfo(app.view(), app.engine());
         };
         addChecked(registry, std::move(c));
     }

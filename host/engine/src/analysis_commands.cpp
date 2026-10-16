@@ -57,6 +57,7 @@ Result<Loaded> trackAudio(EngineApp& a, std::string_view track, std::optional<do
         return Error("engine.range", "analysis range is empty", "/end_beat",
                      "add an item or pass end_beat greater than start_beat");
     OfflineSettings settings;
+    settings.applyMasterPlayrate = false;
     settings.startSeconds = s.timeMap->secondsAt(first);
     settings.endSeconds = s.timeMap->secondsAt(last);
     settings.track = *id;

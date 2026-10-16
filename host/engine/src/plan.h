@@ -21,6 +21,7 @@
 #include <tuple>
 #include <vector>
 
+#include "playrate_timeline.h"
 #include "recording.h"
 #include "strip.h"
 #include "supple/dsp/oversampler.h"
@@ -126,18 +127,23 @@ struct Automation {
     };
     std::vector<Pt> points;
     std::size_t cursor = 0;
+    PlayrateTimeline* timeline = nullptr;
+    std::int64_t deviceShift = 0;
     bool active() const { return !points.empty(); }
     void shift(std::int64_t by) {
+        deviceShift += by;
         for (auto& pt : points) pt.sample += by;
     }
-    double at(std::int64_t s) SUPPLE_RT {
-        if (s <= points.front().sample) return points.front().value;
-        while (cursor + 1 < points.size() && points[cursor + 1].sample <= s) ++cursor;
+    double at(std::int64_t device) SUPPLE_RT {
+        const double s = timeline ? timeline->position(device - deviceShift) + double(deviceShift)
+                                  : double(device);
+        if (s <= double(points.front().sample)) return points.front().value;
+        if (s < double(points[cursor].sample)) cursor = 0;
+        while (cursor + 1 < points.size() && double(points[cursor + 1].sample) <= s) ++cursor;
         if (cursor + 1 >= points.size()) return points.back().value;
         const Pt& a = points[cursor];
         const Pt& b = points[cursor + 1];
-        const double t =
-            static_cast<double>(s - a.sample) / static_cast<double>(b.sample - a.sample);
+        const double t = (s - double(a.sample)) / static_cast<double>(b.sample - a.sample);
         return a.value + (b.value - a.value) * shapeCurve(a.shape, a.tension, t);
     }
 };
@@ -150,6 +156,7 @@ struct Chunk {
     std::int64_t stream = 0;  // frames rendered in this epoch before it (ADR-0015)
     std::uint32_t frames = 0;
     std::vector<float> l, r;
+    std::vector<double> timeline, rates;  // root ring only, per consumed boundary
 };
 
 // Single producer (the renderer), single consumer (the audio callback).
@@ -159,12 +166,16 @@ struct ChunkRing {
     alignas(64) std::atomic<std::size_t> write{0};
     alignas(64) std::atomic<std::size_t> read{0};
 
-    ChunkRing(std::size_t capacity, std::uint32_t frames) {
+    ChunkRing(std::size_t capacity, std::uint32_t frames, bool metadata = false) {
         chunks.resize(std::bit_ceil(std::max<std::size_t>(capacity, 4)));
         mask = chunks.size() - 1;
         for (Chunk& c : chunks) {
             c.l.assign(frames, 0.0f);
             c.r.assign(frames, 0.0f);
+            if (metadata) {
+                c.timeline.resize(frames + 1);
+                c.rates.resize(frames + 1, 1.);
+            }
         }
     }
     // Producer: the next free chunk, or null when the ring is full.
@@ -320,7 +331,8 @@ struct Stage {
     bool bypass = false, instrument = false;
     bool autoBypassOnSilence = false, sleeping = false, processed = false;
     std::int64_t inputLatency = 0;  // output event timeline correction
-    bool callbackBypass = false;    // synchronous bridges never run on the device thread
+    bool rateLive = false;
+    bool callbackBypass = false;  // synchronous bridges never run on the device thread
     double wet = 1.0;
     // The wet level applied at the end of the last block (-1: none yet) and
     // a ramp toward the target (0 when bypassed): a bypass or wet change
@@ -385,11 +397,34 @@ struct Stage {
 // The latency a stage adds to its chain's compensation.
 inline std::int64_t compLatency(const Stage& st) { return st.pdcIgnore ? 0 : st.latency; }
 
+struct RateClipState {
+    TapeReader tape;
+    std::unique_ptr<StretchReader> stretch;
+    std::unique_ptr<RateClipState> previous;
+    std::vector<std::array<float, kRateQuantum>> output;
+    std::vector<float*> pointers;
+    std::int64_t quantum = std::numeric_limits<std::int64_t>::min();
+    bool primed = false, failed = false;
+    bool preserve = false;
+    RateClipState(std::shared_ptr<const TapeTable> table, std::size_t channels, double rate,
+                  bool mode)
+        : tape(std::move(table), channels),
+          stretch(mode ? std::make_unique<StretchReader>(rate, channels) : nullptr),
+          output(channels),
+          pointers(channels),
+          preserve(mode) {
+        for (std::size_t c = 0; c < channels; ++c) pointers[c] = output[c].data();
+    }
+};
+
 // An audio item ready to play: which source frames land on which samples.
 struct Clip {
+    Id item, take;
+    std::unique_ptr<RateClipState> rateState;
     std::shared_ptr<const audio::AudioData> data;
     std::int64_t start = 0, length = 0;  // samples on the track's timeline (PDC-shifted)
-    std::int64_t offset = 0;             // source frame at the item start
+    std::int64_t deviceShift = 0;
+    std::int64_t offset = 0;  // source frame at the item start
     bool loop = false;
     model::ChannelMode mode = model::ChannelMode::Normal;
     double gainL = 1.0, gainR = 1.0;
@@ -417,6 +452,7 @@ struct TakeChain {
     int clip = -1;                    // its audio (an index into Node::clips), or -1
     std::vector<TimedEvent> events;   // a MIDI take's, for its instrument, input side
     std::size_t nextEvent = 0;
+    bool rateEventFresh = true;
     int noteTarget = -1;
     std::array<std::uint8_t, 16 * 128> held{};
     bool releaseHeld = false;
@@ -458,6 +494,7 @@ struct Node {
     Stereo sum, preFx, preFader, post, postKey;
     std::vector<TimedEvent> events;
     std::size_t nextEvent = 0;
+    bool rateEventFresh = true;
     // Notes delivered and not yet ended, per MIDI channel and key; a loop
     // wrap ends them (note-offs at the start of the next block).
     std::array<std::uint8_t, 16 * 128> held{};
@@ -519,6 +556,24 @@ struct Plan {
     std::size_t mainMaster = 0;    // tr_0 need not be last (multiple roots and key routes)
     std::vector<Edge> edges;
     bool linearConsole = false;
+    model::Playrate masterPlayrate;
+    Automation rateEnvelope;
+    bool rateEnabled = false;
+    std::array<std::unique_ptr<PlayrateTimeline>, 2> timelines, previousTimelines;
+    std::array<PlayrateTimeline::Snapshot, 2> rateControl;
+    std::int64_t rateHandDevice = 0;
+    std::uint64_t rateSeekSequence = 0, rateEpochSeekSequence = 0, rateFromGeneration = 0;
+    bool ratePrepared = false;
+    std::int64_t rateOrigin = 0, rateDeviceMargin = 0, rateBackendLatency = 0;
+    std::int64_t rateSourceAhead = 0, rateSourceBehind = 0;
+    std::int64_t rateSwitchDevice = INT64_MIN, rateSafeDevice = INT64_MIN;
+    bool rateControlsChanged = false;
+    double rateSample(std::int64_t device, bool live = false) const SUPPLE_RT {
+        return rateEnabled ? timelines[live ? 1 : 0]->position(device) : double(device);
+    }
+    double ratePhase(std::int64_t device, bool live = false) const SUPPLE_RT {
+        return rateEnabled ? timelines[live ? 1 : 0]->phase(device) : double(device);
+    }
     double rate = 48000.0;
     std::uint32_t smoothFrames = 480;  // 10 ms: ramps at plan swaps (carryMix)
     double startSeconds = 0.0;
@@ -545,6 +600,7 @@ struct Plan {
     // iterates a list after a block instead of scanning every node.
     std::vector<std::size_t> rendererMeterNodes, liveMeterNodes, meterNodes;
     std::vector<std::size_t> frontier;
+    std::unique_ptr<ChunkRing> rateOutput;  // canonical rate blocks, nonsplit renderer only
     std::vector<std::unique_ptr<ChunkRing>> frontierRings;  // allocated by the engine
     // Set by the renderer when it adopts the plan, read by the callback after
     // the plan is handed over: the stream position (frames into the epoch,
@@ -567,6 +623,24 @@ struct Plan {
     // raw device input (filled by prepare(), pointing into the nodes).
     std::vector<ProcessedInput> processedInputs;
 };
+
+// Source-only preparation; caller runs this off the callback before making a
+// seek epoch or a changed plan audible. Renderer/live state is disjoint.
+Status prepareRateSources(Plan& p, std::int64_t device, double timeline,
+                          const LoopRange* loop = nullptr);
+Status primeRateSources(Plan& p, std::int64_t device);
+void prepareRateWindow(Plan& p, std::int64_t pos, std::uint32_t frames, int liveClass,
+                       const LoopRange* loop = nullptr) SUPPLE_RT;
+
+void playRateClip(Plan& p, Clip& clip, Stereo& into, std::int64_t pos, std::uint32_t frames,
+                  std::int64_t ahead, bool live) SUPPLE_RT;
+
+std::uint32_t rateUntil(Plan& p, std::int64_t pos, std::uint32_t frames, const LoopRange& loop,
+                        int liveClass) SUPPLE_RT;
+bool rateWrapped(const Plan& p, std::int64_t from, std::int64_t to, const LoopRange& loop,
+                 bool live) SUPPLE_RT;
+Status prepareRateAdoption(Plan& p, Plan* previous, std::int64_t device, std::int64_t stream,
+                           std::int64_t epochStart, const LoopRange& loop);
 
 // Structural invariant checker, also exposed to the randomized plan tests.
 Status checkStrips(const Plan& p);
@@ -629,10 +703,12 @@ void carryLiveNotes(Plan& from, Plan& to, bool liveOnly) SUPPLE_RT;
 // delay histories carry into the new
 // one's matching nodes (by track) and stages (by instance), so a changed
 // value ramps from where the old plan left it. `liveClass` as for wrapTo.
+Status configureRateTransition(Plan& p, Plan* previous, PlayrateTimeline& old, std::int64_t device);
+void carryRateSources(Plan& from, Plan& to, int liveClass) SUPPLE_RT;
 void carryMix(Plan& from, Plan& to, int liveClass) SUPPLE_RT;
 
 // `loop`: the executor's transport loop, for plugins that follow it.
-host::Transport transportAt(const Plan& p, std::int64_t sample,
-                            const LoopRange* loop = nullptr) SUPPLE_RT;
+host::Transport transportAt(const Plan& p, std::int64_t sample, const LoopRange* loop = nullptr,
+                            bool live = false) SUPPLE_RT;
 
 }  // namespace supple::engine::detail
