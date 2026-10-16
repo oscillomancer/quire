@@ -652,6 +652,12 @@ Result<model::Replayed> EngineApp::replay(const cmd::Registry& registry, const m
 
 Status EngineApp::undo() {
     SUPPLE_TRY(versions_->undo());
+    if (engine_ && engine_->recording())
+        if (auto valid = model::validateRecordingPlayrate(head()); !valid) {
+            // Restore history before publishing any audio/model notification.
+            SUPPLE_TRY(versions_->redo());
+            return valid;
+        }
     headChanged();
     json::Value ev = json::Value::object();
     ev["version"] = head().version;
@@ -662,6 +668,11 @@ Status EngineApp::undo() {
 
 Status EngineApp::redo() {
     SUPPLE_TRY(versions_->redo());
+    if (engine_ && engine_->recording())
+        if (auto valid = model::validateRecordingPlayrate(head()); !valid) {
+            SUPPLE_TRY(versions_->undo());
+            return valid;
+        }
     headChanged();
     json::Value ev = json::Value::object();
     ev["version"] = head().version;
@@ -671,6 +682,9 @@ Status EngineApp::redo() {
 }
 
 Status EngineApp::switchBranch(std::string_view name) {
+    if (engine_ && engine_->recording())
+        if (const auto target = versions_->head(name))
+            SUPPLE_TRY(model::validateRecordingPlayrate(*target));
     SUPPLE_TRY(versions_->switchBranch(name));
     headChanged();
     return okStatus();
@@ -678,10 +692,41 @@ Status EngineApp::switchBranch(std::string_view name) {
 
 model::MergeOutcome EngineApp::mergeBranch(const cmd::Registry& registry, std::string_view from,
                                            std::string_view into) {
+    const bool recordingTarget = engine_ && engine_->recording() && versions_->branch() == into;
+    // Fast-forwards bypass the replayer. Only preflight those: an unsafe
+    // source snapshot need not make a replay unsafe (its rate may be inherited
+    // from the fork and already reset on the recording branch).
+    if (recordingTarget)
+        if (const auto source = versions_->head(from)) {
+            bool fastForward = false;
+            std::vector<std::uint64_t> pending{source->version};
+            std::set<std::uint64_t> seen;
+            const auto target = versions_->headVersion(into);
+            while (!pending.empty() && !fastForward) {
+                const auto id = pending.back();
+                pending.pop_back();
+                if (!seen.insert(id).second) continue;
+                fastForward = id == target;
+                if (const auto* version = versions_->version(id))
+                    pending.insert(pending.end(), version->parents.begin(), version->parents.end());
+            }
+            if (auto valid = model::validateRecordingPlayrate(*source); fastForward && !valid) {
+                model::MergeOutcome refused;
+                refused.head = target;
+                refused.conflicts.push_back(
+                    {model::Conflict::Kind::Invalid, 0, 0, {}, valid.error().toString()});
+                return refused;
+            }
+        }
     auto outcome = versions_->merge(
         from, into,
         [&](const model::Session& base, const std::vector<model::Invocation>& inv,
-            std::uint64_t version) { return replay(registry, base, inv, version); },
+            std::uint64_t version) -> Result<model::Replayed> {
+            auto next = replay(registry, base, inv, version);
+            if (!next) return std::move(next).error();
+            if (recordingTarget) SUPPLE_TRY(model::validateRecordingPlayrate(next->session));
+            return next;
+        },
         [&](std::string_view command) -> const json::Value* {
             const cmd::CommandInfo* info = registry.find(command);
             return info ? &info->argsSchema : nullptr;
@@ -1340,6 +1385,7 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
     std::optional<std::vector<RecordedInfo>> recorded;
     if (action == "record") {
         const model::Session s = view();
+        SUPPLE_TRY(model::validateRecordingPlayrate(s));  // before creating a record folder/file
         const fs::path dir = recordDir();
         std::vector<RecordTarget> targets;
         for (const auto& e : s.tracks) {
@@ -1458,6 +1504,7 @@ void insertPoint(std::vector<model::EnvPoint>& pts, double position, double valu
 // A strip's static value for an envelope's parameter (a write pass that never
 // moved the control flattens to it).
 double staticValue(const model::Session& s, const model::EnvTarget& t) {
+    if (t.object == model::kMaster && t.param == "playrate") return s.project->playrate.rate;
     if (const model::Track* tr = s.tracks.find(t.object))
         return t.param == "volume" ? tr->volumeDb
                : t.param == "pan"  ? tr->pan
@@ -2453,6 +2500,7 @@ Result<std::uint64_t> EngineApp::beginTransaction(const cmd::Origin& origin,
             "history.nested", "a transaction is already open", {},
             "commit or roll back the open transaction before beginning another transaction");
     txn_ = std::make_unique<model::EditTxn>(head(), versions_->nextVersion());
+    autoWriteRollback_ = autoWrite_;
     record_ = model::TxnRecord{std::string(label), originText(origin), {}, {}};
     // Scoped by origin, so two clients' gestures never merge into one step.
     if (!origin.gesture.empty()) record_.coalesceKey = record_.origin + "|" + origin.gesture;
@@ -2464,18 +2512,32 @@ Status EngineApp::commitTransaction(std::uint64_t id) {
         return Error(
             "history.transaction", "no such open transaction", {},
             "use the id returned by beginTransaction while that transaction is still open");
+    // Automation has transient latch/write state as well as model points.
+    // Restore both on failure, including internal callers without a dispatcher.
+    struct WriterRollback {
+        std::map<model::Id, AutoWrite>& writer;
+        std::optional<std::map<model::Id, AutoWrite>> before;
+        bool committed = false;
+        ~WriterRollback() {
+            if (!committed && before) writer = std::move(*before);
+        }
+    } writing{autoWrite_, std::exchange(autoWriteRollback_, std::nullopt)};
     std::unique_ptr<model::EditTxn> t = std::move(txn_);
     mainWake_.notify();  // resume work deferred by this transaction
     auto changes = t->changes();
-    if (changes.empty() && !t->projectChanged() && t->created().empty())
+    if (changes.empty() && !t->projectChanged() && t->created().empty()) {
+        writing.committed = true;
         return okStatus();  // nothing to record
+    }
     auto created = t->created();
     SUPPLE_TRY(model::validateStripRules(t->preview()));
     auto s = t->commit();
     if (!s) return std::move(s).error();
+    if (engine_ && engine_->recording()) SUPPLE_TRY(model::validateRecordingPlayrate(*s));
     auto v = versions_->commit(std::move(*s), std::move(record_), std::move(changes),
                                std::move(created), clockMs());
     if (!v) return std::move(v).error();
+    writing.committed = true;
     json::Value ev = json::Value::object();
     ev["version"] = *v;
     ev["branch"] = versions_->branch();
@@ -2487,6 +2549,8 @@ Status EngineApp::commitTransaction(std::uint64_t id) {
 Status EngineApp::rollbackTransaction(std::uint64_t id) {
     if (id == txnId_) {
         txn_.reset();
+        if (autoWriteRollback_) autoWrite_ = std::move(*autoWriteRollback_);
+        autoWriteRollback_.reset();
         mainWake_.notify();
     }
     return okStatus();

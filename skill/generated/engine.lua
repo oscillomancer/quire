@@ -1130,6 +1130,22 @@ q = nil
 ---@field punch table
 ---@field recorded? table[]
 
+---@class Quire.transport_playrate_get_result
+---@field requested_rate number
+---@field effective_rate number
+---@field preserve_pitch boolean
+---@field envelope? string
+
+---@class Quire.transport_playrate_set_args
+---@field rate? number
+---@field preserve_pitch? boolean
+
+---@class Quire.transport_playrate_set_result
+---@field requested_rate number
+---@field effective_rate number
+---@field preserve_pitch boolean
+---@field envelope? string
+
 ---@class Quire.transport_punch_args
 ---@field enabled? boolean
 ---@field start_seconds? number
@@ -1392,6 +1408,11 @@ q = nil
 ---@field record fun(): Quire.transport_record_result Play and record every armed track's input.
 ---@field seek fun(args?: Quire.transport_seek_args): Quire.transport_seek_result Move the play position (one of seconds, beat or bar).
 ---@field stop fun(): Quire.transport_stop_result Stop playback and return to where it started (ends a recording).
+
+---@class Quire.transport.playrate
+---@field ["apply-to-tempo"] fun(): table Scale every tempo-point BPM by master playrate, then reset the rate to 1.
+---@field get fun(): Quire.transport_playrate_get_result Get requested/effective master playrate, pitch mode and active envelope.
+---@field set fun(args?: Quire.transport_playrate_set_args): Quire.transport_playrate_set_result Set the project's master playrate ratio and preserve-pitch flag.
 
 ---@class Quire
 ---@field analyze Quire.analyze Commands named analyze.*

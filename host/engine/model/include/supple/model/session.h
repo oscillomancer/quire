@@ -248,6 +248,13 @@ std::vector<EnvPoint> effectivePoints(const Session& s, Id envelope);
 // (`fallback` without points).
 double pointsValueAt(const std::vector<EnvPoint>& points, double pos, double fallback);
 
+// Active master-rate envelope with effective points (including automation items),
+// or none. Model thread only; the audio engine uses a compiled curve instead.
+std::optional<Id> activePlayrateEnvelope(const Session& s);
+// Recording currently requires unity scalar and effective master-rate curve.
+// Used before creating files and before publishing any edit/history transition.
+Status validateRecordingPlayrate(const Session& s);
+
 // Where an item sits after resolving its timebase (item, then track, then
 // project): its start in beats and seconds and its end in seconds. The
 // engine plays and the GUI draws items through this one mapping.

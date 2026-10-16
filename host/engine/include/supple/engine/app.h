@@ -372,7 +372,7 @@ class EngineApp : public cmd::Host {
     // the audio thread has acted on it, so the answer is the new state.
     Result<TransportInfo> transport(std::string_view action, std::optional<double> seconds = {});
     // Automation writing (P5.14): while the transport plays, a change to a
-    // strip's volume/pan/mute (inside the edit's transaction) is recorded into
+    // strip's volume/pan/mute or tr_0/playrate (inside the edit's transaction) is recorded into
     // its envelope when that envelope is in touch, latch or write mode. At
     // pause/stop latch and write hold the last value to the stop position, and
     // a write envelope never touched is flattened over the pass (one
@@ -567,6 +567,7 @@ class EngineApp : public cmd::Host {
         bool touched = false;
     };
     std::map<model::Id, AutoWrite> autoWrite_;
+    std::optional<std::map<model::Id, AutoWrite>> autoWriteRollback_;
     struct OutputGesture {
         std::optional<PluginOutput> latest;
         std::vector<PluginOutput> recording;

@@ -333,6 +333,35 @@ schema::Schema<TransportInfo> transportSchema() {
         .build();
 }
 
+struct PlayrateArgs {
+    std::optional<double> rate;
+    std::optional<bool> preservePitch;
+};
+struct PlayrateInfo {
+    double requestedRate = 1, effectiveRate = 1;
+    bool preservePitch = false;
+    std::optional<std::string> envelope;
+};
+schema::Schema<PlayrateInfo> playrateSchema() {
+    return schema::object<PlayrateInfo>("transport_playrate")
+        .field("requested_rate", &PlayrateInfo::requestedRate, schema::number())
+        .field("effective_rate", &PlayrateInfo::effectiveRate, schema::number())
+        .field("preserve_pitch", &PlayrateInfo::preservePitch, schema::boolean())
+        .field("envelope", &PlayrateInfo::envelope, schema::string())
+        .build();
+}
+PlayrateInfo playrateInfo(const model::Session& session) {
+    PlayrateInfo out;
+    out.requestedRate = session.project->playrate.rate;
+    out.preservePitch = session.project->playrate.preservePitch;
+    if (const auto envelope = model::activePlayrateEnvelope(session))
+        out.envelope = envelope->str();
+    // ADR-0045 control stage: DSP still plays/renders at 1x. Replace this
+    // effective value with consumption telemetry when the engine stage lands.
+    out.effectiveRate = 1.0;
+    return out;
+}
+
 // --- automation envelopes ---------------------------------------------------------------
 
 struct EnvPointArg {
@@ -418,6 +447,7 @@ std::optional<units::Unit> mixerUnit(model::Kind, const std::string& param) {
 // How an envelope's values are read: a mixer unit, a plugin's semantic
 // parameter (physical units, text with units accepted), or a plain CLAP value.
 struct EnvDomain {
+    bool playrate = false;
     std::optional<units::Unit> mixer;
     std::unique_ptr<params::DescribedParam> semantic;
     std::optional<std::pair<double, double>> clapRange;
@@ -426,6 +456,13 @@ struct EnvDomain {
 Result<EnvDomain> envDomain(EngineApp& app, const model::Session& s, const model::EnvTarget& t,
                             const char* path) {
     EnvDomain d;
+    if (t.param == "playrate" && t.object.kind != model::Kind::Fx) {
+        if (t.object != model::kMaster)
+            return Error("env.target", "master playrate belongs to tr_0", path,
+                         "use env.add {track: tr_0, param: playrate}");
+        d.playrate = true;
+        return d;
+    }
     if (t.object.kind != model::Kind::Fx) {
         d.mixer = mixerUnit(t.object.kind, t.param);
         if (!d.mixer)
@@ -467,6 +504,13 @@ Result<EnvDomain> envDomain(EngineApp& app, const model::Session& s, const model
 }
 
 Result<double> envValue(const EnvDomain& d, const json::Value& v, const std::string& path) {
+    if (d.playrate) {
+        if (!v.isNumber() || !std::isfinite(v.asDouble()) || v.asDouble() < model::kMinPlayrate ||
+            v.asDouble() > model::kMaxPlayrate)
+            return Error("playrate.range", "master playrate needs a ratio in 0.25..4.0", path,
+                         "provide a finite numeric playback ratio from 0.25 to 4.0");
+        return v.asDouble();
+    }
     auto located = [&](Result<double> r) -> Result<double> {
         if (r) return r;
         Error e = std::move(r).error();
@@ -3061,7 +3105,8 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.exposure = cmd::Exposure::McpTool;
         c.summary = "Automate a parameter: a track's or route's mixer control, or a plugin's.";
         c.description =
-            "Target one of track (param volume|trim|pan|width|mute), route (volume|pan|mute) or "
+            "Target one of track (param volume|pan|mute; playrate only on tr_0), route "
+            "(volume|pan|mute) or "
             "fx (a semantic key such as \"gain\" or \"filter1.cutoff\", or for other plugins a "
             "CLAP id or parameter name). points: [{beat|bar|seconds, value, shape?, tension?}]; "
             "values in the parameter's unit (dB, %, Hz… — text like \"800 Hz\" works for "
@@ -3069,7 +3114,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             "move along the parameter's curve (a log cutoff sweeps evenly in pitch). take (param "
             "volume|pan|mute): a take envelope, its points in beats from the item's start (it "
             "moves with the item); it shapes the take after its take FX (a MIDI take needs an "
-            "instrument in its take FX).";
+            "instrument in its take FX). Master playrate points are finite numeric ratios "
+            "0.25..4.0; master-rate DSP integration is pending, so they currently do not "
+            "change playback or offline rendering.";
         c.tags = {"automation"};
         c.args = schema::object<EnvAddArgs>("env_add_args")
                      .field("track", &EnvAddArgs::track, idArg("tr", "Track"))
@@ -3092,7 +3139,10 @@ void registerEngineCommands(cmd::Registry& registry) {
              obj(R"({"env": "en_1", "points": 2})"), "song_with_fx"},
             {"Duck a take halfway through its item",
              obj(R"({"take": "tk_1", "param": "volume", "points": [{"beat": 0, "value": 0}, {"beat": 2, "value": "-12 dB"}]})"),
-             obj(R"({"env": "en_1", "points": 2})"), "song_with_audio"}};
+             obj(R"({"env": "en_1", "points": 2})"), "song_with_audio"},
+            {"Master rate envelope",
+             obj(R"({"track":"tr_0","param":"playrate","points":[{"beat":0,"value":1},{"beat":4,"value":2}]})"),
+             obj(R"({"env":"en_1","points":2})"), "empty"}};
         c.run = [](const EnvAddArgs& a, Context& ctx) -> Result<EnvAddResult> {
             EngineApp& app = A(ctx);
             const model::Session s = app.view();
@@ -3885,6 +3935,135 @@ void registerEngineCommands(cmd::Registry& registry) {
         };
         addChecked(registry, std::move(c));
     }
+    // ---------------------------------------------------------------- transport.playrate.*
+    {
+        Command<NoArgs, PlayrateInfo> c;
+        c.name = "transport.playrate.get";
+        c.kind = Kind::Query;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Get requested/effective master playrate, pitch mode and active envelope.";
+        c.description =
+            "requested_rate is the saved project ratio; envelope names the active nonempty "
+            "tr_0/playrate envelope, including automation items. No engine is required. "
+            "DSP integration is pending: effective_rate is currently always 1.0, in playback "
+            "and offline rendering, regardless of requested_rate or the envelope.";
+        c.tags = {"transport", "automation"};
+        c.args = schema::object<NoArgs>("no_args").build();
+        c.result = playrateSchema();
+        c.examples = {{"Factory settings", obj("{}"),
+                       obj(R"({"requested_rate":1.0,"effective_rate":1.0,"preserve_pitch":false})"),
+                       "empty"}};
+        c.run = [](const NoArgs&, Context& ctx) -> Result<PlayrateInfo> {
+            return playrateInfo(A(ctx).view());
+        };
+        addChecked(registry, std::move(c));
+    }
+    {
+        Command<PlayrateArgs, PlayrateInfo> c;
+        c.name = "transport.playrate.set";
+        c.kind = Kind::Edit;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Set the project's master playrate ratio and preserve-pitch flag.";
+        c.description =
+            "rate: finite 0.25..4.0 (default 1); preserve_pitch defaults false in a new project. "
+            "Omitted fields keep their values. Updates during a drag use Origin.gesture like "
+            "strip faders, and write/touch/latch capture tr_0/playrate with the existing coarse "
+            "strip-writing behavior (no touch override/return). Recording requires unity. "
+            "These settings are saved/undoable, but DSP integration is pending: playback and "
+            "offline rendering still run at 1x; effective_rate reports 1.0.";
+        c.tags = {"transport", "automation"};
+        c.args = schema::object<PlayrateArgs>("transport_playrate_set_args")
+                     .field("rate", &PlayrateArgs::rate,
+                            schema::number().range(model::kMinPlayrate, model::kMaxPlayrate))
+                     .field("preserve_pitch", &PlayrateArgs::preservePitch, schema::boolean())
+                     .build();
+        c.result = playrateSchema();
+        c.errors = {{"record.playrate", "recording requires unity master playrate",
+                     "stop recording before changing rate or enabling a non-unity rate envelope"}};
+        c.examples = {{"Store double speed with pitch preservation",
+                       obj(R"({"rate":2,"preserve_pitch":true})"),
+                       obj(R"({"requested_rate":2.0,"effective_rate":1.0,"preserve_pitch":true})"),
+                       "empty"}};
+        c.run = [](const PlayrateArgs& a, Context& ctx) -> Result<PlayrateInfo> {
+            EngineApp& app = A(ctx);
+            // Refuse before recording an automation move into transient writer
+            // state; a failed transaction must not leave a latch hold behind.
+            if (app.engine() && app.engine()->recording() && a.rate && *a.rate != 1)
+                return Error("record.playrate", "recording requires unity master playrate", "/rate",
+                             "stop recording before changing master playrate");
+            auto project = app.view().project;
+            if (a.rate || a.preservePitch) {
+                auto next = *project;
+                if (a.rate) next.playrate.rate = *a.rate;
+                if (a.preservePitch) next.playrate.preservePitch = *a.preservePitch;
+                if (next.playrate != project->playrate) app.txn().setProject(std::move(next));
+                if (a.rate) app.recordAutomation(model::kMaster, "playrate", *a.rate);
+            }
+            return playrateInfo(app.view());
+        };
+        addChecked(registry, std::move(c));
+    }
+    {
+        Command<NoArgs, Empty> c;
+        c.name = "transport.playrate.apply-to-tempo";
+        c.kind = Kind::Edit;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Scale every tempo-point BPM by master playrate, then reset the rate to 1.";
+        c.description =
+            "One version: multiply every BPM by the saved scalar rate, preserving beat "
+            "positions, ramp flags and meter changes, and reset rate to 1. Require stopped "
+            "transport, no recording and no active nonempty master playrate envelope. "
+            "Reject resulting BPM outside 1..1000 before mutation. Existing item timebases "
+            "still apply; time-locked audio is not made sound-equivalent by this tempo edit.";
+        c.tags = {"transport", "tempo"};
+        c.args = schema::object<NoArgs>("no_args").build();
+        c.result = emptySchema();
+        c.errors = {{"playrate.playing", "the transport is playing",
+                     "transport.stop before applying playrate to tempo"},
+                    {"record.playrate", "a recording is active", "transport.stop first"},
+                    {"playrate.envelope", "an active nonempty master playrate envelope exists",
+                     "disable it with env.set {active: false} before applying the scalar rate"},
+                    {"tempo.range", "a scaled BPM is outside 1..1000",
+                     "reduce the master rate or adjust the tempo map first"}};
+        c.examples = {{"Apply the factory unity rate", obj("{}"), obj("{}"), "empty"}};
+        c.run = [](const NoArgs&, Context& ctx) -> Result<Empty> {
+            EngineApp& app = A(ctx);
+            if (const auto* engine = app.engine()) {
+                if (engine->recording())
+                    return Error("record.playrate", "stop recording before applying playrate",
+                                 "/project/playrate",
+                                 "call transport.stop, then apply the playrate to tempo");
+                if (engine->transport().playing || engine->transport().countingIn)
+                    return Error("playrate.playing", "stop playback before applying playrate",
+                                 "/transport/playing",
+                                 "call transport.stop, then apply the playrate to tempo");
+            }
+            const auto s = app.view();
+            if (const auto env = model::activePlayrateEnvelope(s))
+                return Error("playrate.envelope", "an active master playrate envelope exists",
+                             "/envelopes/" + env->str(),
+                             "disable the envelope with env.set {active: false} first");
+            const double rate = s.project->playrate.rate;
+            for (const auto& e : s.tempo) {
+                const double bpm = e.value->bpm * rate;
+                if (!std::isfinite(bpm) || bpm < 1 || bpm > 1000)
+                    return Error("tempo.range", "applying playrate puts BPM outside 1..1000",
+                                 "/tempo/points/" + e.id.str() + "/bpm",
+                                 "reduce master playrate or adjust this tempo point first");
+            }
+            if (rate != 1) {
+                for (const auto& e : s.tempo)
+                    app.txn().modify<model::TempoPointObj>(
+                        e.id, [rate](auto& point) { point.bpm *= rate; });
+                auto project = *s.project;
+                project.playrate.rate = 1;
+                app.txn().setProject(std::move(project));
+            }
+            return Empty{};
+        };
+        addChecked(registry, std::move(c));
+    }
+
     // ---------------------------------------------------------------- transport.*
     for (const auto& [action, summary, playing] :
          {std::tuple{"play", "Start playback from the current position.", true},
@@ -3906,6 +4085,14 @@ void registerEngineCommands(cmd::Registry& registry) {
                     {"record.busy", "the audio callback did not return for 2 s (still recording)",
                      "stop again, or engine.stop (the files stay recoverable)"}};
         const bool rec = std::string(action) == "record";
+        if (rec) {
+            c.description =
+                "Recording requires saved master rate 1 and no active master rate "
+                "envelope that leaves 1 anywhere, including automation items. "
+                "Non-unity recording is refused before opening files.";
+            c.errors.push_back({"record.playrate", "master playrate can leave unity",
+                                "set rate to 1 and disable non-unity master playrate automation"});
+        }
         c.examples = {{"While the engine runs", obj("{}"),
                        obj(std::string(R"({"playing": )") + (playing ? "true" : "false") +
                            R"(, "recording": )" + (rec ? "true" : "false") +

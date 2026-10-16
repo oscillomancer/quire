@@ -315,7 +315,11 @@ Engine and hosting:
 Session and editing:
 - Master playrate settings and the tr_0 playrate envelope persist in project
   schema 2.1; audio playback/rendering still run at 1x until DSP integration
-  (ADR-0045). No master-rate GUI control is present yet.
+  (ADR-0045). Get/set and atomic tempo-bake commands are available; requested
+  vs effective rate is explicit (effective remains 1). Non-unity audio/MIDI
+  recording and transitions into it during recording are refused. Master-rate
+  writing has existing coarse strip semantics; no knob/lane GUI is present yet.
+  Native CI for these new controls is pending coordinator validation.
 - Take `stretch_markers` are stored but not applied; stretching and
   resampling run synchronously when a plan is compiled.
 - Track groups are preserved in project files but not implemented.

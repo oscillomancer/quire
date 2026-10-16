@@ -577,6 +577,14 @@ and naming. All `edit` unless marked (q) query or (a) action.
   `history.undo`.
 - **meta**: `batch`, `registry.*`.
 
+Master playrate commands (ADR-0045) are `transport.playrate.get`,
+`transport.playrate.set {rate?, preserve_pitch?}` and
+`transport.playrate.apply-to-tempo`; their exact contracts and staged audio
+limitation are in engine.md's Master playrate control stage section. The
+model-thread `activePlayrateEnvelope(Session)` identifies an active nonempty
+master curve; `validateRecordingPlayrate(Session)` returns `record.playrate`
+when the saved scalar or effective curve prevents unity recording.
+
 ### 7.3 Render file-name patterns
 
 A closed set of `{variable}` tokens with explicit formatting args instead of

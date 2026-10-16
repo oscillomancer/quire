@@ -2530,7 +2530,7 @@
   {
     "name": "env_add",
     "title": "Automate a parameter: a track's or route's mixer control, or a plugin's.",
-    "description": "Automate a parameter: a track's or route's mixer control, or a plugin's. Target one of track (param volume|trim|pan|width|mute), route (volume|pan|mute) or fx (a semantic key such as \"gain\" or \"filter1.cutoff\", or for other plugins a CLAP id or parameter name). points: [{beat|bar|seconds, value, shape?, tension?}]; values in the parameter's unit (dB, %, Hz… — text like \"800 Hz\" works for plugins); shapes linear, square, slow, fast_start, fast_end, bezier. Plugin values move along the parameter's curve (a log cutoff sweeps evenly in pitch). take (param volume|pan|mute): a take envelope, its points in beats from the item's start (it moves with the item); it shapes the take after its take FX (a MIDI take needs an instrument in its take FX). See describe for errors and examples.",
+    "description": "Automate a parameter: a track's or route's mixer control, or a plugin's. Target one of track (param volume|pan|mute; playrate only on tr_0), route (volume|pan|mute) or fx (a semantic key such as \"gain\" or \"filter1.cutoff\", or for other plugins a CLAP id or parameter name). points: [{beat|bar|seconds, value, shape?, tension?}]; values in the parameter's unit (dB, %, Hz… — text like \"800 Hz\" works for plugins); shapes linear, square, slow, fast_start, fast_end, bezier. Plugin values move along the parameter's curve (a log cutoff sweeps evenly in pitch). take (param volume|pan|mute): a take envelope, its points in beats from the item's start (it moves with the item); it shapes the take after its take FX (a MIDI take needs an instrument in its take FX). Master playrate points are finite numeric ratios 0.25..4.0; master-rate DSP integration is pending, so they currently do not change playback or offline rendering. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "env_add_args",
@@ -8420,6 +8420,109 @@
     }
   },
   {
+    "name": "transport_playrate_apply-to-tempo",
+    "title": "Scale every tempo-point BPM by master playrate, then reset the rate to 1.",
+    "description": "Scale every tempo-point BPM by master playrate, then reset the rate to 1. One version: multiply every BPM by the saved scalar rate, preserving beat positions, ramp flags and meter changes, and reset rate to 1. Require stopped transport, no recording and no active nonempty master playrate envelope. Reject resulting BPM outside 1..1000 before mutation. Existing item timebases still apply; time-locked audio is not made sound-equivalent by this tempo edit. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "transport_playrate_get",
+    "title": "Get requested/effective master playrate, pitch mode and active envelope.",
+    "description": "Get requested/effective master playrate, pitch mode and active envelope. requested_rate is the saved project ratio; envelope names the active nonempty tr_0/playrate envelope, including automation items. No engine is required. DSP integration is pending: effective_rate is currently always 1.0, in playback and offline rendering, regardless of requested_rate or the envelope. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "transport_playrate",
+      "properties": {
+        "requested_rate": {
+          "type": "number"
+        },
+        "effective_rate": {
+          "type": "number"
+        },
+        "preserve_pitch": {
+          "type": "boolean"
+        },
+        "envelope": {
+          "type": "string"
+        }
+      },
+      "required": ["requested_rate", "effective_rate", "preserve_pitch"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "transport_playrate_set",
+    "title": "Set the project's master playrate ratio and preserve-pitch flag.",
+    "description": "Set the project's master playrate ratio and preserve-pitch flag. rate: finite 0.25..4.0 (default 1); preserve_pitch defaults false in a new project. Omitted fields keep their values. Updates during a drag use Origin.gesture like strip faders, and write/touch/latch capture tr_0/playrate with the existing coarse strip-writing behavior (no touch override/return). Recording requires unity. These settings are saved/undoable, but DSP integration is pending: playback and offline rendering still run at 1x; effective_rate reports 1.0. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "transport_playrate_set_args",
+      "properties": {
+        "rate": {
+          "type": "number",
+          "minimum": 0.25,
+          "maximum": 4.0
+        },
+        "preserve_pitch": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "transport_playrate",
+      "properties": {
+        "requested_rate": {
+          "type": "number"
+        },
+        "effective_rate": {
+          "type": "number"
+        },
+        "preserve_pitch": {
+          "type": "boolean"
+        },
+        "envelope": {
+          "type": "string"
+        }
+      },
+      "required": ["requested_rate", "effective_rate", "preserve_pitch"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
     "name": "transport_punch",
     "title": "Set or toggle the punch range: recordings keep only that range.",
     "description": "Set or toggle the punch range: recordings keep only that range. start and end as seconds, beat or bar; a range turns punch on unless enabled says otherwise. The recording keeps running; the committed items cover only the punch range (the file keeps everything). Not an undo step. See describe for errors and examples.",
@@ -8485,7 +8588,7 @@
   {
     "name": "transport_record",
     "title": "Play and record every armed track's input.",
-    "description": "Play and record every armed track's input.  See describe for errors and examples.",
+    "description": "Play and record every armed track's input. Recording requires saved master rate 1 and no active master rate envelope that leaves 1 anywhere, including automation items. Non-unity recording is refused before opening files. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "no_args",

@@ -938,6 +938,32 @@ ItemSpan itemSpan(const Session& s, const Item& it) {
     return spanAs(*s.timeMap, it, itemTimebase(s, it));
 }
 
+std::optional<Id> activePlayrateEnvelope(const Session& s) {
+    for (const auto& e : s.envelopes) {
+        const auto& env = *e.value;
+        if (!env.active || env.target.object != kMaster || env.target.param != "playrate") continue;
+        if (!env.points.empty()) return e.id;
+        for (const auto& item : s.autoItems)
+            if (item.value->envelope == e.id) return e.id;
+    }
+    return {};
+}
+
+Status validateRecordingPlayrate(const Session& s) {
+    auto refused = [](std::string path) -> Status {
+        return Error("record.playrate", "recording requires unity master playrate", std::move(path),
+                     "set transport.playrate.set {rate: 1} and disable the master playrate "
+                     "envelope with env.set {active: false} before recording");
+    };
+    if (s.project->playrate.rate != 1.0) return refused("/project/playrate/rate");
+    if (const auto envelope = activePlayrateEnvelope(s)) {
+        SUPPLE_TRY(automationExpansionBudget(s));
+        for (const auto& pt : effectivePoints(s, *envelope))
+            if (pt.value != 1.0) return refused("/envelopes/" + envelope->str() + "/points");
+    }
+    return {};
+}
+
 double pointsValueAt(const std::vector<EnvPoint>& pts, double pos, double fallback) {
     if (pts.empty()) return fallback;
     if (pos < pts.front().pos) return pts.front().value;

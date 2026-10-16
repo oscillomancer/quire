@@ -126,3 +126,10 @@ timeline audio and MIDI, so an empty frontier does not remove this problem.
 - Duplicate playback/monitor graphs: loses shared nonlinear FX, sidechain and
   instrument-state behavior. A pre-encode split eventually needs the same
   source/event clock work as the chosen design.
+
+## Implementation naming (2026-10-16)
+
+The command registry permits hyphens, not underscores, within command-name
+segments. The tempo bake's registered name is therefore
+`transport.playrate.apply-to-tempo`; `apply_to_tempo` above describes the
+operation, not an accepted command alias.
