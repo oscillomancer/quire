@@ -397,9 +397,23 @@ void Engine::stop() {
     plan_ = nullptr;
     livePlan_ = nullptr;
     handPlan_.store(nullptr);
+    detail::Plan* discarded = nullptr;
+    while (planHandoffs_.pop(discarded)) {
+    }
     latestPlan_.store(nullptr);
     for (const auto& plan : plans_)
         for (auto* instance : plan->instances) instance->setAudioWake(nullptr);
+    ratePreparedTail_ = nullptr;
+    rateDeferred_ = false;
+    rateDeferredWake_.store(false);
+    rateSafeStream_.store(0);
+    rateSafeEpoch_.store(0);
+    rateScheduling_.store(false);
+    effectivePlayrate_.store(1);
+    rtTimeline_.store(0);
+    timelineEpoch_.store(0);
+    rateClockSequence_.store(0);
+    for (auto& word : rateClockWords_) word.store(0);
     plans_.clear();  // nothing runs a plan now
     callbackGen_.store(0);
     workers_.reset();
@@ -410,6 +424,21 @@ void Engine::stop() {
 
 Status Engine::load(const model::Session& session, const std::filesystem::path& projectDir) {
     if (recording()) SUPPLE_TRY(model::validateRecordingPlayrate(session));
+    const auto controlEpoch = epoch_.load(std::memory_order_acquire);
+    const auto lead =
+        static_cast<std::int64_t>(config_.sampleRate * options_.renderAheadMs / 1000.);
+    if (!rateSeekTarget_ && wantPlaying_.load(std::memory_order_acquire) &&
+        rateSafeEpoch_.load(std::memory_order_acquire) == controlEpoch &&
+        playedStream(controlEpoch) + lead < rateSafeStream_.load(std::memory_order_acquire)) {
+        latest_ = std::make_shared<const model::Session>(session);
+        rateDeferredDir_ = projectDir;
+        rateDeferred_ = true;
+        rateDeferredWake_.store(true);
+        if (playedStream(controlEpoch) + lead >= rateSafeStream_.load()) notifyMain();
+        return {};
+    }
+    rateDeferred_ = false;
+    rateDeferredWake_.store(false);
     if (!notificationReload_)
         for (const auto& fx : session.fx) plugins_.resetAutomation(fx.id);
     if (!backend_)
@@ -442,6 +471,8 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
         auto built = std::make_unique<detail::Plan>(std::move(*compiled));
         built->projectDir = projectDir;
         built->media = &media_;
+        built->rateBackendLatency = backend_->status().outputLatency;
+        built->rateEnabled |= rateScheduling_.load(std::memory_order_acquire);
         SUPPLE_TRY(detail::prepare(*built, session));
         return built;
     };
@@ -500,14 +531,18 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
             "more than " + std::to_string(kMaxInstances) + " plugin instances", {},
             "remove unused FX or render tracks and remove their FX to reduce the number of "
             "live plugin instances");
-    if (options_.anticipative && plan->anyLive) {
-        // The renderer hands its frontier taps to the callback (ADR-0014).
-        plan->split = true;
-        const auto chunks = static_cast<std::size_t>(
-            std::ceil(options_.renderAheadMs / 1000.0 * 192000.0 / options_.renderBlock));
-        for (std::size_t i = 0; i < plan->frontier.size(); ++i)
-            plan->frontierRings.push_back(
-                std::make_unique<detail::ChunkRing>(chunks + 2, options_.renderBlock));
+    if (options_.anticipative) {
+        const auto quantum = plan->rateEnabled ? 64u : options_.renderBlock;
+        const auto chunks =
+            static_cast<std::size_t>(std::ceil(options_.renderAheadMs / 1000. * 192000. / quantum));
+        if (plan->anyLive) {
+            plan->split = true;
+            for (std::size_t i = 0; i < plan->frontier.size(); ++i)
+                plan->frontierRings.push_back(
+                    std::make_unique<detail::ChunkRing>(chunks + 2, quantum));
+        } else if (plan->rateEnabled) {
+            plan->rateOutput = std::make_unique<detail::ChunkRing>(chunks + 2, quantum, true);
+        }
     }
     outputLatency_ = static_cast<std::uint32_t>(plan->outputLatency);
     warnings_ = plan->warnings;
@@ -533,11 +568,31 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
         for (std::size_t i : p.liveNodes)
             if (p.nodes[i].meterSlot != MeterBank::kNoSlot) p.liveMeterNodes.push_back(i);
     }
+    plan->generation = ++publishedGen_;
+    plan->rateEpochSeekSequence =
+        seekSeq_.load(std::memory_order_relaxed) + (rateSeekTarget_ ? 1 : 0);
+    if (plan->rateEnabled) {
+        if (!options_.anticipative || rateSeekTarget_) {
+            if (!options_.anticipative && planHandoffs_.free() == 0)
+                return Error("playrate.busy", "the prepared-plan queue is full", {},
+                             "let audio consume pending edits before retrying");
+            SUPPLE_TRY(prepareRatePlan(*plan));
+        }
+        if (!options_.anticipative && plan->rateSafeDevice != INT64_MIN) {
+            rateSafeStream_.store(plan->handAt + plan->rateSafeDevice - plan->rateHandDevice,
+                                  std::memory_order_release);
+            rateSafeEpoch_.store(plan->handEpoch, std::memory_order_release);
+        }
+        rateScheduling_.store(true, std::memory_order_release);
+    }
     latest_ = std::make_shared<const model::Session>(session);
     prunePending_ = true;
-    plan->generation = ++publishedGen_;
     if (options_.anticipative)
         for (auto* instance : plan->instances) instance->setAudioWake(&rendererEvent_);
+    if (!options_.anticipative && plan->rateEnabled) {
+        planHandoffs_.push(plan.get());
+        ratePreparedTail_ = plan.get();
+    }
     latestPlan_.store(plan.get(), std::memory_order_release);
     wakeRenderer();
     notifyMain();
@@ -560,6 +615,20 @@ void Engine::writeTransport(F&& change) {
 }
 
 void Engine::play() {
+    const auto* prepared = latestPlan_.load(std::memory_order_acquire);
+    const bool preparedSeek =
+        prepared && prepared->rateSeekSequence != 0 &&
+        prepared->handEpoch == epoch_.load(std::memory_order_acquire) &&
+        prepared->rateSeekSequence == seekSeq_.load(std::memory_order_acquire);
+    if (!wantPlaying_.load(std::memory_order_acquire) &&
+        rateScheduling_.load(std::memory_order_acquire) && !preparedSeek) {
+        auto ready = prepareSeek(transport().seconds);
+        if (!ready) {
+            warnings_.push_back(ready.error().toString());
+            notifyMain();
+            return;
+        }
+    }
     wantPlaying_.store(true, std::memory_order_release);
     wakeRenderer();
     notifyMain();
@@ -569,14 +638,47 @@ void Engine::pause() {
     writeTransport([] {});
 }
 void Engine::seek(double seconds) {
+    auto ready = prepareSeek(seconds);
+    if (!ready) {
+        warnings_.push_back(ready.error().toString());
+        notifyMain();
+    }
+}
+
+Status Engine::prepareSeek(double seconds) {
+    if (rateScheduling_.load(std::memory_order_acquire) && latest_) {
+        rateSeekTarget_ = std::max(0., seconds) * config_.sampleRate;
+        const auto dir = plans_.empty() ? std::filesystem::path{} : plans_.back()->projectDir;
+        const auto status = load(*latest_, dir);
+        rateSeekTarget_.reset();
+        if (!status) return status;
+    }
     writeTransport([&] {
-        seekSample_.store(time::samplesAt(std::max(0.0, seconds), config_.sampleRate),
+        seekSample_.store(time::samplesAt(std::max(0., seconds), config_.sampleRate),
                           std::memory_order_relaxed);
         seekSeq_.fetch_add(1, std::memory_order_relaxed);
+        if (rateLoopTarget_) {
+            loopStart_.store(rateLoopTarget_->start, std::memory_order_relaxed);
+            loopEnd_.store(rateLoopTarget_->end, std::memory_order_relaxed);
+            loopOn_.store(rateLoopTarget_->on, std::memory_order_relaxed);
+        }
     });
+    return {};
 }
 
 void Engine::setLoop(double startSeconds, double endSeconds, bool on) {
+    if (rateScheduling_.load(std::memory_order_acquire) && latest_) {
+        rateLoopTarget_ =
+            LoopRange{time::samplesAt(std::max(0., startSeconds), config_.sampleRate),
+                      time::samplesAt(std::max(0., endSeconds), config_.sampleRate), on};
+        const auto ready = prepareSeek(transport().seconds);
+        rateLoopTarget_.reset();
+        if (!ready) {
+            warnings_.push_back(ready.error().toString());
+            notifyMain();
+        }
+        return;
+    }
     writeTransport([&] {
         loopStart_.store(time::samplesAt(std::max(0.0, startSeconds), config_.sampleRate),
                          std::memory_order_relaxed);
@@ -624,9 +726,21 @@ TransportState Engine::transport() const {
     TransportState t;
     t.playing = reportedPlaying_.load();
     t.countingIn = counting_.load(std::memory_order_relaxed);
-    t.sample = options_.anticipative ? playedPosition(epoch_.load(), epochStart_.load())
-                                     : reportedPos_.load();
-    t.seconds = static_cast<double>(t.sample) / config_.sampleRate;
+    const auto epoch = epoch_.load(std::memory_order_acquire);
+    if (rateScheduling_.load(std::memory_order_acquire) &&
+        timelineEpoch_.load(std::memory_order_acquire) == epoch) {
+        const double sample = rtTimeline_.load(std::memory_order_relaxed);
+        t.sample = static_cast<std::int64_t>(std::llround(sample));
+        t.seconds = sample / config_.sampleRate;
+    } else {
+        t.sample =
+            options_.anticipative ? playedPosition(epoch, epochStart_.load()) : reportedPos_.load();
+        const auto* prepared = latestPlan_.load(std::memory_order_acquire);
+        if (prepared && prepared->rateSeekSequence != 0 && prepared->handEpoch == epoch)
+            t.sample =
+                static_cast<std::int64_t>(std::llround(prepared->rateControl[0].clock.timeline));
+        t.seconds = double(t.sample) / config_.sampleRate;
+    }
     t.loop = readLoop();
     return t;
 }
@@ -761,6 +875,20 @@ void Engine::wakeOutputConsumed() SUPPLE_RT {
 
 void Engine::service() {
     bool reload = false;
+    if (rateDeferred_ && latest_) {
+        const auto e = epoch_.load(std::memory_order_acquire);
+        const auto lead =
+            static_cast<std::int64_t>(config_.sampleRate * options_.renderAheadMs / 1000.);
+        if (!wantPlaying_.load(std::memory_order_acquire) ||
+            e != rateSafeEpoch_.load(std::memory_order_acquire) ||
+            playedStream(e) + lead >= rateSafeStream_.load(std::memory_order_acquire)) {
+            const auto session = *latest_;
+            const auto dir = rateDeferredDir_;
+            const auto loaded = load(session, dir);
+            if (!loaded)
+                warnings_.push_back("deferred playrate edit: " + loaded.error().toString());
+        }
+    }
     if (latest_) {
         const auto clock = transport();
         std::set<host::Instance*> serviced;
@@ -837,7 +965,7 @@ void Engine::service() {
     const std::uint64_t live =
         options_.anticipative ? std::min(rendered, callbackGen_.load(std::memory_order_acquire))
                               : rendered;
-    if (prunePending_ && latest_ && live >= publishedGen_) {
+    if (prunePending_ && !rateDeferred_ && latest_ && live >= publishedGen_) {
         // Every executor has adopted the newest plan and stopped what it dropped.
         plugins_.prune(*latest_, live);
         prunePending_ = false;
@@ -878,8 +1006,9 @@ void Engine::publishPluginOutputs(detail::Plan& p, bool renderer, std::uint64_t 
                 output.fx = st.fx;
                 output.planGeneration = p.generation;
                 output.epoch = epoch;
-                output.timelineSample =
-                    time::samplesAt(p.startSeconds, p.rate) + pos + event.time - st.inputLatency;
+                output.timelineSample = time::samplesAt(p.startSeconds, p.rate) +
+                                        static_cast<std::int64_t>(std::llround(p.rateSample(
+                                            pos + event.time - st.inputLatency, node.live)));
                 output.streamSample = stream + event.time;
                 output.event = event;
                 output.anticipative = renderer;
@@ -1073,15 +1202,52 @@ void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t 
         cycles_.fetch_add(1, std::memory_order_release);
         return;
     }
-    detail::Plan* plan = latestPlan_.load(std::memory_order_acquire);
+    TransportSnapshot xport;
+    std::uint64_t xportSeq = 0;
+    const bool xportNew = xportSeq_.load(std::memory_order_acquire) != xportSeen_ &&
+                          readTransport(xport, kAudioTransportTries, &xportSeq);
+    const auto handEpoch = xportNew ? xport.epoch : rtEpoch_;
+    detail::Plan* plan = plan_;
+    if (rateScheduling_.load(std::memory_order_acquire)) {
+        for (detail::Plan* candidate = nullptr; planHandoffs_.peek(candidate);) {
+            if (candidate->handEpoch < handEpoch) {
+                planHandoffs_.consume();
+                continue;
+            }
+            if (candidate->handEpoch > handEpoch) break;
+            const auto stream = rtStream_.load(std::memory_order_relaxed);
+            const bool immediate = !wantNow() || candidate->rateSeekSequence != 0;
+            if (!immediate && candidate->handAt > stream) {
+                if (candidate->handAt - stream < frames) {
+                    const auto first = static_cast<std::uint32_t>(candidate->handAt - stream);
+                    cycleBody(in, out, first, midiBase);
+                    std::array<const float*, 64> input{};
+                    for (std::uint32_t c = 0; c < deviceInputs_ && c < input.size(); ++c)
+                        input[c] = in && in[c] ? in[c] + first : nullptr;
+                    float* rest[] = {out[0] + first, out[1] + first};
+                    cycleBody(in ? input.data() : nullptr, rest, frames - first, midiBase + first);
+                    return;
+                }
+                break;
+            }
+            plan = candidate;
+            planHandoffs_.consume();
+            // Each trajectory is prepared against the preceding queued plan;
+            // never skip a ready plan and its source transition.
+            break;
+        }
+    } else
+        plan = latestPlan_.load(std::memory_order_acquire);
     if (plan != plan_) {
-        if (plan_ && plan) {  // the old plan is still ours here
+        if (plan_ && plan) {
             detail::carryLiveNotes(*plan_, *plan, false);
+            detail::carryRateSources(*plan_, *plan, -1);
             detail::carryMix(*plan_, *plan, -1);
         }
         adoptShare(processing_, plan ? &plan->instances : nullptr, &processing_);
         plan_ = plan;
         if (plan) {
+            if (plan->rateEnabled) pos_ = plan->rateHandDevice;
             detail::locate(*plan, pos_, false);
             stoppedGen_.store(plan->generation, std::memory_order_release);
         }
@@ -1096,13 +1262,9 @@ void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t 
         stoppedOnAudioThread_ = true;
         shutDown_.store(true);
     }
-    TransportSnapshot xport;
-    std::uint64_t xportSeq = 0;
-    const bool xportNew =
-        xportSeq_.load(std::memory_order_acquire) != xportSeen_ &&
-        readTransport(xport, kAudioTransportTries, &xportSeq);  // else: next cycle
     if (xportNew && xport.seekSeq != seekSeen_) {
         seekSeen_ = xport.seekSeq;
+        clickAge_ = -1;
         pos_ = xport.seekSample;
         if (plan) {
             detail::locate(*plan, pos_);
@@ -1135,6 +1297,7 @@ void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t 
         // is both renderer and player, so what it processes is what is heard;
         // the anticipative path keeps these in pullAhead/liveRender.
         rtEpoch_ = xport.epoch;
+        rateEpochStart_ = double(pos_);
         rtStream_.store(0, std::memory_order_relaxed);
         rtPosEpoch_.store(rtEpoch_, std::memory_order_release);
     }
@@ -1179,7 +1342,8 @@ void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t 
     // rtEpoch_. It is the only writer here, so a plain local then one store.
     std::int64_t meterStream = rtStream_.load(std::memory_order_relaxed);
     for (std::uint32_t done = 0; ok && done < frames;) {
-        const std::uint32_t k = loopC_.until(pos_, frames - done);  // split at a loop wrap
+        const std::uint32_t k =
+            detail::rateUntil(*plan, pos_, frames - done, loopC_, -1);  // split at a loop wrap
         for (std::uint32_t c = 0; c < deviceInputs_ && c < inAt.size(); ++c)
             inAt[c] = in && in[c] ? in[c] + done : nullptr;
         const float* const* ins = in ? inAt.data() : nullptr;
@@ -1196,15 +1360,17 @@ void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t 
         std::copy_n(master.post.r.begin(), k, out[1] + done);
         addClicks(*plan, out, done, pos_, k);
         if (detail::Recorder* r = recorder_.load()) {
-            r->capture(ins, deviceInputs_, k, pos_, plan->processedInputs);
-            r->captureMidi(plan->deviceMidi, midiBase + done, k, pos_);
+            const auto timeline = static_cast<std::int64_t>(std::llround(plan->rateSample(pos_)));
+            r->capture(ins, deviceInputs_, k, timeline, plan->processedInputs);
+            r->captureMidi(plan->deviceMidi, midiBase + done, k, timeline);
         }
         // Metering (P5.3c): no anticipation here, so the callback renders and
         // plays in step; its own stream is the position a reader aligns to.
         if (meters_) pushMeters(*meters_, *plan, plan->meterNodes, rtEpoch_, meterStream, k, false);
         meterStream += k;
-        const std::int64_t next = loopC_.next(pos_, pos_ + k);
-        if (next != pos_ + k) detail::wrapTo(*plan, next, -1);
+        const auto next = plan->rateEnabled ? pos_ + k : loopC_.next(pos_, pos_ + k);
+        if (detail::rateWrapped(*plan, pos_, pos_ + k, loopC_, false))
+            detail::wrapTo(*plan, next, -1);
         pos_ = next;
         done += k;
     }
@@ -1217,6 +1383,16 @@ void Engine::cycleBody(const float* const* in, float* const* out, std::uint32_t 
         rtPos_.store(pos_, std::memory_order_relaxed);
         rtStream_.store(meterStream);
         rtPosEpoch_.store(rtEpoch_, std::memory_order_release);
+    }
+    if (plan && ok && run) {
+        rtTimeline_.store(plan->rateSample(pos_), std::memory_order_relaxed);
+        effectivePlayrate_.store(plan->rateEnabled
+                                     ? plan->timelines[0]->rate(pos_ - 1 - plan->outputLatency -
+                                                                plan->rateBackendLatency)
+                                     : 1.,
+                                 std::memory_order_relaxed);
+        timelineEpoch_.store(rtEpoch_, std::memory_order_release);
+        publishRateClock(*plan, pos_, meterStream, rtEpoch_, false);
     }
     reportedPos_.store(pos_);
     reportedPlaying_.store(playing_);
@@ -1233,11 +1409,27 @@ void Engine::setMetronome(bool on, double gainDb) {
 }
 
 void Engine::playCountIn(std::int64_t frames, std::int64_t beatFrames, int beatsPerBar) {
+    const auto* prepared = latestPlan_.load(std::memory_order_acquire);
+    const bool preparedSeek =
+        prepared && prepared->rateSeekSequence != 0 &&
+        prepared->handEpoch == epoch_.load(std::memory_order_acquire) &&
+        prepared->rateSeekSequence == seekSeq_.load(std::memory_order_acquire);
+    if (!wantPlaying_.load(std::memory_order_acquire) &&
+        rateScheduling_.load(std::memory_order_acquire) && !preparedSeek) {
+        const auto ready = prepareSeek(transport().seconds);
+        if (!ready) {
+            warnings_.push_back(ready.error().toString());
+            notifyMain();
+            return;
+        }
+    }
     countFrames_.store(std::max<std::int64_t>(0, frames), std::memory_order_relaxed);
     countBeat_.store(std::max<std::int64_t>(1, beatFrames), std::memory_order_relaxed);
     countBar_.store(std::max(1, beatsPerBar), std::memory_order_relaxed);
     countSeq_.fetch_add(1, std::memory_order_release);
-    play();  // after the request: a cycle that sees this play() sees the count too
+    wantPlaying_.store(true, std::memory_order_release);
+    wakeRenderer();
+    notifyMain();
 }
 
 void Engine::startClick(bool accent, double rate) SUPPLE_RT {  // a 40 ms decaying sine
@@ -1275,6 +1467,32 @@ void Engine::addClicks(const detail::Plan& p, float* const* out, std::uint32_t o
     const bool on = metroOn_.load(std::memory_order_acquire);
     if ((!on && clickAge_ < 0) || k == 0 || !p.timeMap) return;
     const time::TimeMap& tm = *p.timeMap;
+    if (p.rateEnabled) {
+        const auto& clock = *p.timelines[options_.anticipative ? 1 : 0];
+        const float gain = metroGain_.load(std::memory_order_relaxed);
+        for (std::uint32_t i = 0; i < k; ++i) {
+            const auto device = pos + i - p.outputLatency;
+            const double here = clock.position(device);
+            double before = clock.position(device - 1);
+            if (clock.cycle(clock.phase(device)) != clock.cycle(clock.phase(device - 1)))
+                before =
+                    std::nextafter(clock.loopStart(), -std::numeric_limits<double>::infinity());
+            const double beat = tm.beatAt(p.startSeconds + here / p.rate);
+            const double previousBeat = tm.beatAt(p.startSeconds + before / p.rate);
+            const auto bb = tm.barBeat(beat);
+            const auto meter = tm.meterAt(bb.bar);
+            const double unit = 4. / meter.denominator;
+            const double bar = tm.beatOfBar(bb.bar);
+            const double index = std::floor((beat - bar) / unit + 1e-9);
+            const double tick = bar + index * unit;
+            if (on && tick > previousBeat + 1e-9 && tick <= beat + 1e-9)
+                startClick(index == 0, p.rate);
+            const float value = gain * clickSample();
+            out[0][offset + i] += value;
+            out[1][offset + i] += value;
+        }
+        return;
+    }
     const double s0 = p.startSeconds + static_cast<double>(pos) / p.rate;
     const double s1 = p.startSeconds + static_cast<double>(pos + k) / p.rate;
     const double b0 = tm.beatAt(s0), b1 = tm.beatAt(s1);
@@ -1316,7 +1534,7 @@ Engine::Pulled Engine::pullAhead(float* const* out, std::uint32_t frames) SUPPLE
         epochDone_.load(std::memory_order_acquire) == e)
         options_.benchProbe->observeAhead(renderedStream_.load(std::memory_order_acquire) -
                                           playedStream(e));
-    detail::ChunkRing& ring = *ring_;
+    detail::ChunkRing& ring = livePlan_ && livePlan_->rateOutput ? *livePlan_->rateOutput : *ring_;
     while (const detail::Chunk* c = ring.front()) {  // flushed by a seek or pause
         if (c->epoch >= e) break;
         ring.pop();
@@ -1326,8 +1544,13 @@ Engine::Pulled Engine::pullAhead(float* const* out, std::uint32_t frames) SUPPLE
     while (done < frames) {
         const detail::Chunk* c = ring.front();
         if (!c || c->epoch != e) break;
-        if (done > 0 && c->start + rtOffset_ != first + done)  // a loop wrap: stop there
-            return {first, done, true};
+        bool wrapped = c->start + rtOffset_ != first + done;
+        if (done > 0 && livePlan_ && livePlan_->rateEnabled) {
+            const auto& clock = *livePlan_->timelines[1];
+            wrapped |=
+                clock.cycle(clock.phase(c->start + rtOffset_)) != clock.cycle(clock.phase(first));
+        }
+        if (done > 0 && wrapped) return {first, done, true};
         const std::uint32_t take = std::min(frames - done, c->frames - rtOffset_);
         if (first == kNothingPlayed) first = c->start + rtOffset_;
         std::copy_n(c->l.begin() + rtOffset_, take, out[0] + done);
@@ -1336,6 +1559,15 @@ Engine::Pulled Engine::pullAhead(float* const* out, std::uint32_t frames) SUPPLE
         rtOffset_ += take;
         const auto pos = c->start + rtOffset_;
         const auto stream = c->stream + rtOffset_;
+        const double timeline = c->timeline.empty() ? double(pos) : c->timeline[rtOffset_];
+        double rate = c->rates.empty() ? 1. : c->rates[rtOffset_ - 1];
+        if (c->stream == 0) rateEpochStart_ = double(c->start);
+        if (livePlan_ && livePlan_->rateEnabled) {
+            detail::prepareRateWindow(*livePlan_, pos, 1, 1, &loopC_);
+            rate = livePlan_->timelines[1]->rate(pos - 1 - livePlan_->outputLatency -
+                                                 livePlan_->rateBackendLatency);
+        }
+        if (livePlan_) publishRateClock(*livePlan_, pos, stream, e, true);
         if (rtOffset_ == c->frames) {
             ring.pop();
             rtOffset_ = 0;
@@ -1343,6 +1575,9 @@ Engine::Pulled Engine::pullAhead(float* const* out, std::uint32_t frames) SUPPLE
         // Publish freed slots before consumption, for the renderer arm/recheck
         // handshake. The chunk may be reused as soon as pop returns.
         rtPos_.store(pos, std::memory_order_relaxed);
+        rtTimeline_.store(timeline, std::memory_order_relaxed);
+        effectivePlayrate_.store(rate, std::memory_order_relaxed);
+        timelineEpoch_.store(e, std::memory_order_release);
         rtStream_.store(stream);
         rtPosEpoch_.store(e);
     }
@@ -1366,6 +1601,38 @@ Status Engine::startRecording(std::vector<RecordTarget> targets) {
         return Error("record.running", "already recording", {},
                      "stop the current recording with transport.stop before starting another");
     if (latest_) SUPPLE_TRY(model::validateRecordingPlayrate(*latest_));
+    if (rateScheduling_.load(std::memory_order_acquire)) {
+        if (!wantPlaying_.load(std::memory_order_acquire)) {
+            SUPPLE_TRY(prepareSeek(transport().seconds));
+            if (backend_->ownsThread()) awaitTransport();
+        } else {
+            const auto heard = readRateClock();
+            const auto state =
+                std::bit_cast<detail::PlayrateClock::State>(std::array<std::uint64_t, 6>{
+                    heard[0], heard[1], heard[2], heard[3], heard[4], heard[5]});
+            bool unsafe = state.scalar != 1 || state.target != 1 || effectivePlayrate() != 1;
+            const auto heardStream = std::bit_cast<std::int64_t>(heard[7]);
+            for (const auto& pending : plans_) {
+                if (pending->generation < heard[9]) continue;
+                unsafe |= pending->masterPlayrate.rate != 1 ||
+                          std::any_of(pending->rateEnvelope.points.begin(),
+                                      pending->rateEnvelope.points.end(),
+                                      [](const auto& point) { return point.value != 1; });
+                if (pending->rateEnabled && pending->rateSafeDevice != INT64_MIN) {
+                    const auto drained = pending->handAt + pending->rateSafeDevice -
+                                         pending->rateHandDevice + pending->outputLatency +
+                                         pending->rateBackendLatency;
+                    if (heardStream < drained)
+                        unsafe |= pending->rateControl[0].clock.from != 1 ||
+                                  pending->timelines[0]->hasNonUnityCurveHistory();
+                }
+            }
+            if (unsafe)
+                return Error(
+                    "record.playrate", "a non-unity source trajectory is still audible or queued",
+                    "/project/playrate/rate", "stop playback and restore unity before recording");
+        }
+    }
     if (targets.empty())
         return Error("record.nothing_armed", "no track is armed with an input", {},
                      "use track.list for a channel id, then track.set {track, armed: true, "
@@ -1511,7 +1778,7 @@ std::int64_t Engine::rendererSpaceTarget(std::uint64_t epoch) const {
     if (plan_->split) {
         for (const auto& ring : plan_->frontierRings) requireSlot(*ring);
     } else {
-        requireSlot(*ring_);
+        requireSlot(plan_->rateOutput ? *plan_->rateOutput : *ring_);
     }
     return target;
 }
@@ -1528,7 +1795,7 @@ bool Engine::rendererHasRoom(std::uint64_t epoch) const {
             if (!ring->slot()) return false;
         return true;
     }
-    return ring_->slot() != nullptr;
+    return (plan_->rateOutput ? plan_->rateOutput->slot() : ring_->slot()) != nullptr;
 }
 
 void Engine::rendererLoop(std::uint64_t seen) {
@@ -1552,33 +1819,73 @@ void Engine::rendererLoop(std::uint64_t seen) {
             // like rendering would (stream and timeline together, through the
             // loop), before the adoption below: the callback may have run far
             // since the last pass.
-            const std::int64_t target = playedStream(seen) + aheadFrames_;
+            const std::int64_t target = (playedStream(seen) + aheadFrames_ + 63) / 64 * 64;
             for (std::int64_t left = target - streamLocal_; left > 0;) {
-                const std::uint32_t k = loopR_.until(
-                    pos_, static_cast<std::uint32_t>(std::min<std::int64_t>(left, 1 << 30)));
-                pos_ = loopR_.next(pos_, pos_ + k);
+                const auto k = detail::rateUntil(
+                    *plan_, pos_,
+                    static_cast<std::uint32_t>(std::min<std::int64_t>(left, plan_->block)), loopR_,
+                    0);
+                pos_ = plan_->rateEnabled ? pos_ + k : loopR_.next(pos_, pos_ + k);
                 streamLocal_ += k;
                 left -= k;
             }
             renderedStream_.store(streamLocal_, std::memory_order_release);
         }
         detail::Plan* plan = latestPlan_.load(std::memory_order_acquire);
-        if (plan != plan_) {  // edits take effect here: after what is already rendered
-            if (plan_ && plan) detail::carryMix(*plan_, *plan, 0);
+        TransportSnapshot control;
+        if (!readTransport(control, kRendererTransportTries)) continue;
+        if (rateScheduling_.load(std::memory_order_acquire) && control.seekSeq != seekSeen_) {
+            // The transport publication follows its prepared plan. Reload
+            // after acquiring that publication: the first load above may have
+            // preceded it. Never render the new epoch with the previous
+            // source state, even for one block.
+            plan = latestPlan_.load(std::memory_order_acquire);
+            if (!plan || plan->rateSeekSequence != control.seekSeq) continue;
+        }
+        const bool seekReady =
+            !plan || plan->rateSeekSequence == 0 ||
+            (control.seekSeq >= plan->rateSeekSequence && control.epoch >= plan->handEpoch);
+        const bool canonical = !playing_ || !plan || !plan->rateEnabled ||
+                               plan->rateSeekSequence != 0 || streamLocal_ % 64 == 0;
+        const bool sourceSafe = !playing_ || !plan_ || !plan || plan->rateSeekSequence != 0 ||
+                                !plan_->rateEnabled || pos_ >= plan_->rateSafeDevice;
+        if (plan != plan_ && planHandoffs_.free() > 0 && seekReady && canonical && sourceSafe) {
+            if (plan && plan->rateEnabled) {
+                const auto extra =
+                    std::max(plan->rateSourceAhead, plan_ ? plan_->rateSourceAhead : 0) +
+                    plan->smoothFrames + plan->rateSourceBehind + 128;
+                rateSafeStream_.store(streamLocal_ + extra, std::memory_order_release);
+                rateSafeEpoch_.store(control.epoch, std::memory_order_release);
+                const auto prepared = detail::prepareRateAdoption(*plan, plan_, pos_, streamLocal_,
+                                                                  epochStartLocal_, control.loop);
+                if (!prepared) {
+                    processErrors_.fetch_add(1);
+                    notifyMain();
+                    continue;
+                }
+            }
+            if (plan_ && plan) {
+                detail::carryRateSources(*plan_, *plan, 0);
+                detail::carryMix(*plan_, *plan, 0);
+            }
             adoptShare(processing_, plan ? &plan->rendererInstances : nullptr, self);
             plan_ = plan;
             if (plan) {
+                if (plan->rateSeekSequence != 0) pos_ = plan->rateHandDevice;
+                if (epoch_.load(std::memory_order_acquire) != seen) seen = relocate(seen);
                 detail::locateClass(*plan, pos_, false, false);
                 plan->handAt = streamLocal_;  // where the callback follows (ADR-0014)
                 plan->handEpoch = seen;
                 stoppedGen_.store(plan->generation, std::memory_order_release);
+                planHandoffs_.push(plan);  // space checked before adoption
                 handPlan_.store(plan, std::memory_order_release);
                 notifyMain();
             }
-        } else if (plan) {
-            startFree(processing_, &plan->rendererInstances, self);  // let go by the callback
+        } else if (plan_) {
+            startFree(processing_, &plan_->rendererInstances, self);  // let go by the callback
         }
         if (epoch_.load(std::memory_order_acquire) != seen) seen = relocate(seen);
+        if (plan_ && plan_->rateEnabled && plan_->rateEpochSeekSequence != seekSeen_) continue;
         if (const bool want = wantPlaying_.load(std::memory_order_acquire); want != playing_) {
             playing_ = want;
             if (!want) resetOwned(processing_, plan_);  // no hanging notes
@@ -1634,7 +1941,12 @@ void Engine::rendererLoop(std::uint64_t seen) {
                                            rendererSafetyTimeout()));
             continue;
         }
-        const std::uint32_t n = loopR_.until(pos_, block);  // no chunk crosses a loop wrap
+        auto renderFrames = block;
+        if (plan != plan_ && plan && plan->rateEnabled && streamLocal_ % 64 != 0)
+            renderFrames =
+                std::min(renderFrames, static_cast<std::uint32_t>(64 - streamLocal_ % 64));
+        const std::uint32_t n = detail::rateUntil(*plan_, pos_, renderFrames, loopR_,
+                                                  0);  // no chunk crosses a loop wrap
         const bool ok = [&] {
             BenchProbe::Timer timer(options_.benchProbe, false, n);
             return detail::processRendererBlock(workers_.get(), *plan_, pos_, n, self, &loopR_);
@@ -1656,6 +1968,14 @@ void Engine::rendererLoop(std::uint64_t seen) {
             c->start = pos_;
             c->stream = streamLocal_;
             c->frames = n;
+            if (!c->timeline.empty()) {
+                for (std::uint32_t i = 0; i <= n; ++i) {
+                    c->timeline[i] = plan_->rateSample(pos_ + i);
+                    c->rates[i] = plan_->rateEnabled
+                                      ? plan_->timelines[0]->rate(pos_ + i - plan_->outputLatency)
+                                      : 1.;
+                }
+            }
         };
         if (plan_->split) {  // the frontier taps, for the callback's live nodes
             for (std::size_t j = 0; j < plan_->frontier.size(); ++j) {
@@ -1664,16 +1984,18 @@ void Engine::rendererLoop(std::uint64_t seen) {
                 plan_->frontierRings[j]->publish();
             }
         } else {
-            fill(ring_->slot(), plan_->nodes[plan_->mainMaster].post);
-            ring_->publish();
+            auto& output = plan_->rateOutput ? *plan_->rateOutput : *ring_;
+            fill(output.slot(), plan_->nodes[plan_->mainMaster].post);
+            output.publish();
         }
         // Metering (P5.3c): the renderer publishes what it just rendered, at
         // the same coordinates as the chunk it just handed over. The reader
         // holds these back until the callback has played them.
         if (ok && meters_)
             pushMeters(*meters_, *plan_, plan_->rendererMeterNodes, seen, streamLocal_, n, true);
-        const std::int64_t next = loopR_.next(pos_, pos_ + n);
-        if (next != pos_ + n) detail::wrapTo(*plan_, next, 0);
+        const auto next = plan_->rateEnabled ? pos_ + n : loopR_.next(pos_, pos_ + n);
+        if (detail::rateWrapped(*plan_, pos_, pos_ + n, loopR_, false))
+            detail::wrapTo(*plan_, next, 0);
         pos_ = next;
         streamLocal_ += n;
         renderedStream_.store(streamLocal_, std::memory_order_release);
@@ -1695,6 +2017,7 @@ void Engine::rendererLoop(std::uint64_t seen) {
 
 void Engine::adoptLive(detail::Plan* next) SUPPLE_RT {
     if (livePlan_ && next && next->split) {
+        detail::carryRateSources(*livePlan_, *next, 1);
         detail::carryLiveNotes(*livePlan_, *next, true);
         detail::carryMix(*livePlan_, *next, 1);
     }
@@ -1722,7 +2045,12 @@ void Engine::anticipativeCycle(const float* const* in, float* const* out, std::u
     if (epoch_.load(std::memory_order_acquire) != rtEpoch_ &&
         readTransport(xport,
                       kAudioTransportTries)) {  // else: the main thread is writing, next cycle
+        if (clickSeekSeen_ != xport.seekSeq) {
+            clickAge_ = -1;
+            clickSeekSeen_ = xport.seekSeq;
+        }
         rtEpoch_ = xport.epoch;
+        rtOffset_ = 0;
         rtPrimed_ = false;
         liveReady_ = false;
         loopC_ = xport.loop;  // the renderer takes the loop with the epoch too
@@ -1736,14 +2064,25 @@ void Engine::anticipativeCycle(const float* const* in, float* const* out, std::u
     const std::uint32_t inputs = deviceInputs_;
     for (std::uint32_t done = 0; done < frames;) {
         std::uint32_t k = frames - done;
-        // Follow the renderer's plan where it took effect (split the cycle there).
-        if (detail::Plan* h = handPlan_.load(std::memory_order_acquire); h != livePlan_) {
-            const std::int64_t here =  // stream positions: they only grow (ADR-0015)
+        // Adopt every rendered trajectory at its stream boundary. Replacing
+        // this queue with a latest pointer would skip an intermediate rate on
+        // live sources while its frontier audio was already audible.
+        for (detail::Plan* hand = nullptr; planHandoffs_.peek(hand);) {
+            if (hand->handEpoch < e) {
+                planHandoffs_.consume();
+                continue;
+            }
+            if (hand->handEpoch > e) break;
+            const auto here =
                 livePlan_ && livePlan_->split && liveReady_ ? liveStream_ : playedStream(e);
-            if (!h || h->handEpoch != e || !playing || here >= h->handAt)
-                adoptLive(h);
-            else if (h->handAt - here < k)
-                k = static_cast<std::uint32_t>(h->handAt - here);
+            if (!playing || here >= hand->handAt) {
+                adoptLive(hand);
+                planHandoffs_.consume();
+                wakeRenderer();
+                continue;
+            }
+            if (hand->handAt - here < k) k = static_cast<std::uint32_t>(hand->handAt - here);
+            break;
         }
         for (std::uint32_t c = 0; c < inputs; ++c) inAt[c] = in && in[c] ? in[c] + done : nullptr;
         float* outAt[2] = {out[0] + done, out[1] + done};
@@ -1762,9 +2101,13 @@ void Engine::anticipativeCycle(const float* const* in, float* const* out, std::u
             // during a dropout had no timeline position and counts as lost.
             if (detail::Recorder* r = recorder_.load()) {
                 if (played.first != kNothingPlayed) {
-                    r->capture(ins, inputs, played.frames, played.first);
+                    const auto timeline =
+                        livePlan_ ? static_cast<std::int64_t>(
+                                        std::llround(livePlan_->rateSample(played.first, true)))
+                                  : played.first;
+                    r->capture(ins, inputs, played.frames, timeline);
                     r->captureMidi(midiSource_->midiInput(), midiBase + done, played.frames,
-                                   played.first);
+                                   timeline);
                     r->lose(k - played.frames);
                 } else if (playing) {
                     r->lose(k);
@@ -1799,7 +2142,7 @@ std::uint32_t Engine::liveRender(const float* const* in, float* const* out, std:
         epochDone_.load(std::memory_order_acquire) == rtEpoch_)
         options_.benchProbe->observeAhead(renderedStream_.load(std::memory_order_acquire) -
                                           liveStream_);
-    if (playing) k = loopC_.until(livePos_, k);  // stop at a loop wrap
+    if (playing) k = detail::rateUntil(p, livePos_, k, loopC_, 1);  // stop at a loop wrap
     std::uint32_t found = k;
     for (std::size_t j = 0; j < p.frontier.size(); ++j) {
         detail::Edge& e = p.edges[p.frontier[j]];
@@ -1846,14 +2189,25 @@ std::uint32_t Engine::liveRender(const float* const* in, float* const* out, std:
     if (playing) addClicks(p, out, 0, livePos_, k);
     if (playing) {
         if (detail::Recorder* r = recorder_.load()) {
-            r->capture(in, deviceInputs_, k, livePos_, p.processedInputs);
-            r->captureMidi(p.deviceMidi, offset, k, livePos_);
+            const auto timeline =
+                static_cast<std::int64_t>(std::llround(p.rateSample(livePos_, true)));
+            r->capture(in, deviceInputs_, k, timeline, p.processedInputs);
+            r->captureMidi(p.deviceMidi, offset, k, timeline);
         }
-        const std::int64_t next = loopC_.next(livePos_, livePos_ + k);
-        if (next != livePos_ + k) detail::wrapTo(p, next, 1);
+        const auto next = p.rateEnabled ? livePos_ + k : loopC_.next(livePos_, livePos_ + k);
+        if (detail::rateWrapped(p, livePos_, livePos_ + k, loopC_, true))
+            detail::wrapTo(p, next, 1);
         livePos_ = next;
         liveStream_ += k;
         rtPos_.store(livePos_, std::memory_order_relaxed);
+        rtTimeline_.store(p.rateSample(livePos_, true), std::memory_order_relaxed);
+        effectivePlayrate_.store(
+            p.rateEnabled
+                ? p.timelines[1]->rate(livePos_ - 1 - p.outputLatency - p.rateBackendLatency)
+                : 1.,
+            std::memory_order_relaxed);
+        timelineEpoch_.store(rtEpoch_, std::memory_order_release);
+        publishRateClock(p, livePos_, liveStream_, rtEpoch_, true);
         rtStream_.store(liveStream_);
         rtPosEpoch_.store(rtEpoch_);
     }

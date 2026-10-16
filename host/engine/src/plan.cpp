@@ -537,6 +537,8 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
             }
         }
     }
+    p.masterPlayrate = s.project->playrate;
+    p.rateEnabled = p.masterPlayrate.rate != 1 || model::activePlayrateEnvelope(s).has_value();
     // Envelopes on mixer targets and plugin parameters.
     const std::int64_t origin = time::samplesAt(startSeconds, p.rate);
     for (const auto& e : s.envelopes) {
@@ -557,10 +559,11 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
         Automation* slot = nullptr;
         if (o.kind == Kind::Track && index.count(o)) {
             Node& n = p.nodes[index.at(o)];
-            slot = param == "volume" ? &n.autoVolume
-                   : param == "pan"  ? &n.autoPan
-                   : param == "mute" ? &n.autoMute
-                                     : nullptr;
+            slot = param == "playrate" && o == model::kMaster ? &p.rateEnvelope
+                   : param == "volume"                        ? &n.autoVolume
+                   : param == "pan"                           ? &n.autoPan
+                   : param == "mute"                          ? &n.autoMute
+                                                              : nullptr;
         } else if (o.kind == Kind::Route) {
             for (Edge& ed : p.edges)
                 if (ed.route == o)
@@ -997,6 +1000,9 @@ Status prepare(Plan& p, const Session& s) {
             const model::ItemSpan span = model::itemSpan(s, it);
             const std::int64_t origin = time::samplesAt(p.startSeconds, p.rate);
             Clip c;
+            c.item = e.id;
+            c.take = *it.activeTake;
+            c.deviceShift = n.latIn;
             c.data = *data;
             c.start = time::samplesAt(span.startSec, p.rate) - origin + n.latIn;
             c.length =
@@ -1041,7 +1047,9 @@ Status prepare(Plan& p, const Session& s) {
                 tc.events = trackEvents(s, n.id, p.startSeconds, p.rate,
                                         [&](Id item) { return item == tc.item; });
                 for (auto& ev : tc.events)  // its input runs the chain's latency ahead
-                    ev.sample = std::max<std::int64_t>(0, ev.sample + n.latIn - tc.latency);
+                    ev.sample = p.rateEnabled
+                                    ? ev.sample + n.latIn - tc.latency
+                                    : std::max<std::int64_t>(0, ev.sample + n.latIn - tc.latency);
             }
             // Reserve every block's events (processing never allocates): notes
             // and their releases for its instrument, parameter automation.
@@ -1068,7 +1076,8 @@ Status prepare(Plan& p, const Session& s) {
         for (std::size_t a = 0, b = 0; a < n.events.size(); ++a) {
             if (b < a) b = a;
             while (b < n.events.size() &&
-                   n.events[b].sample < n.events[a].sample + static_cast<std::int64_t>(block))
+                   n.events[b].sample < n.events[a].sample + static_cast<std::int64_t>(block) *
+                                                                 (p.rateEnabled ? 4 : 1))
                 ++b;
             windowMax = std::max(windowMax, b - a);
         }
@@ -1182,17 +1191,77 @@ Status prepare(Plan& p, const Session& s) {
                 p.edges[e].frontierBuf.init(block);
                 p.frontier.push_back(e);
             }
+    if (p.rateEnabled) {
+        std::vector<RatePoint> points;
+        for (const auto& pt : p.rateEnvelope.points)
+            points.push_back({double(pt.sample), pt.value, pt.shape, pt.tension});
+        p.rateDeviceMargin = p.outputLatency + p.rateBackendLatency;
+        for (const auto& node : p.nodes) {
+            p.rateDeviceMargin = std::max(p.rateDeviceMargin, node.latIn + node.latChain);
+            p.rateSourceBehind = std::max(p.rateSourceBehind, node.latIn);
+            for (const auto& take : node.takeChains) {
+                p.rateDeviceMargin = std::max(p.rateDeviceMargin, take.latency + node.latIn);
+                p.rateSourceAhead = std::max(p.rateSourceAhead, take.latency - node.latIn);
+                p.rateSourceBehind = std::max(p.rateSourceBehind, node.latIn - take.latency);
+            }
+            forEachStage(node, [&](const Stage& stage) {
+                p.rateDeviceMargin = std::max(p.rateDeviceMargin, std::abs(stage.inputLatency));
+            });
+        }
+        const auto capacity = static_cast<std::size_t>(
+            2 * (2 * p.rateDeviceMargin + p.block + static_cast<std::int64_t>(p.rate * .5) + 256));
+        if (capacity > (1u << 24))
+            return Error("playrate.budget", "source clock history exceeds the render budget", {},
+                         "reduce plugin latency or render high-latency chains to audio");
+        for (auto& timeline : p.timelines)
+            timeline =
+                std::make_unique<PlayrateTimeline>(capacity, p.masterPlayrate.rate, points,
+                                                   double(time::samplesAt(p.startSeconds, p.rate)));
+        static const auto table = std::make_shared<const TapeTable>();
+        for (auto& node : p.nodes) {
+            auto* timeline = p.timelines[node.live ? 1 : 0].get();
+            for (Automation* lane : {&node.autoVolume, &node.autoPan, &node.autoMute})
+                lane->timeline = timeline;
+            forEachStage(node, [&](Stage& st) {
+                st.rateLive = node.live;
+                for (auto& lane : st.lanes) lane.curve.timeline = timeline;
+            });
+            for (auto& take : node.takeChains)
+                for (Automation* lane : {&take.volume, &take.pan, &take.mute})
+                    lane->timeline = timeline;
+            for (auto& clip : node.clips)
+                clip.rateState = std::make_unique<RateClipState>(
+                    table, clip.data->channelCount(), p.rate,
+                    p.masterPlayrate.preservePitch &&
+                        (p.masterPlayrate.rate != 1 || !points.empty()));
+        }
+        for (auto& edge : p.edges) {
+            // Source-owned send envelopes use the source's executor clock;
+            // unencoded key edges use their target's (same trajectory).
+            auto* timeline = p.timelines[p.nodes[edge.from].live ? 1 : 0].get();
+            for (Automation* lane : {&edge.autoVolume, &edge.autoPan, &edge.autoMute,
+                                     &edge.stripVolume, &edge.stripPan, &edge.stripMute})
+                lane->timeline = timeline;
+        }
+    }
     return okStatus();
 }
 
-host::Transport transportAt(const Plan& p, std::int64_t sample, const LoopRange* loop) SUPPLE_RT {
+host::Transport transportAt(const Plan& p, std::int64_t sample, const LoopRange* loop,
+                            bool live) SUPPLE_RT {
     host::Transport t;
-    const double seconds = p.startSeconds + static_cast<double>(sample) / p.rate;
+    const double seconds = p.rateSeconds(sample, live);
     const double beat = p.timeMap->beatAt(seconds);
     const auto bb = p.timeMap->barBeat(beat);
     const auto meter = p.timeMap->meterAt(bb.bar);
     t.playing = true;
     t.tempo = p.timeMap->bpmAt(beat);
+    if (p.rateEnabled) {
+        const auto control = sample - static_cast<std::int64_t>(
+                                          static_cast<std::uint64_t>(sample - p.rateOrigin) & 63);
+        const auto controlBeat = p.timeMap->beatAt(p.rateSeconds(control, live));
+        t.tempo = p.timeMap->bpmAt(controlBeat) * p.timelines[live ? 1 : 0]->rate(control);
+    }
     t.beat = beat;
     t.barStartBeat = p.timeMap->beatOfBar(bb.bar);
     t.bar = bb.bar == std::numeric_limits<int>::min() ? bb.bar : bb.bar - 1;
@@ -1301,8 +1370,12 @@ void addEdge(Plan& p, Edge& e, double panLawDb, Stereo& into, std::int64_t pos,
 
 namespace {
 // An audio item's samples for [pos, pos + n), added into `into`.
-void playClip(const Clip& c, Stereo& into, std::int64_t pos, std::uint32_t n,
-              std::int64_t shift) SUPPLE_RT {
+void playClip(Plan& p, Clip& c, Stereo& into, std::int64_t pos, std::uint32_t n, std::int64_t shift,
+              bool live) SUPPLE_RT {
+    if (p.rateEnabled) {
+        playRateClip(p, c, into, pos, n, shift, live);
+        return;
+    }
     // Timeline sample t plays the clip at t + shift (a take chain's input
     // runs its latency ahead).
     const std::int64_t from = std::max<std::int64_t>(pos, c.start - shift);
@@ -1354,6 +1427,39 @@ void automateStage(Stage& st, std::int64_t pos, std::uint32_t n, std::int64_t or
     if (st.lanes.empty()) return;
     const std::size_t before = st.blockEvents.size();
     for (ParamLane& ln : st.lanes) {
+        if (ln.curve.timeline) {
+            const auto& pts = ln.curve.points;
+            const auto& timeline = *ln.curve.timeline;
+            const auto shift = ln.curve.deviceShift;
+            const double projectOrigin = timeline.origin();
+            double previous = timeline.absolutePosition(pos - 1 - shift) + double(shift);
+            auto point = std::upper_bound(pts.begin(), pts.end(), previous,
+                                          [projectOrigin](double sample, const Automation::Pt& pt) {
+                                              return sample < double(pt.sample) + projectOrigin;
+                                          });
+            for (std::uint32_t i = 0; i < n; ++i) {
+                const double at = timeline.absolutePosition(pos + i - shift) + double(shift);
+                if (at < previous) point = pts.begin();
+                const bool crossed =
+                    point != pts.end() && double(point->sample) + projectOrigin <= at;
+                while (point != pts.end() && double(point->sample) + projectOrigin <= at) ++point;
+                if (std::isnan(ln.lastSent) || crossed ||
+                    (pos + i + origin) % kAutomationStep == 0) {
+                    const double value = ln.clapAt(pos + i);
+                    if (value != ln.lastSent && st.blockEvents.size() < st.blockEvents.capacity()) {
+                        host::Event event;
+                        event.kind = host::Event::Kind::Param;
+                        event.time = i;
+                        event.paramId = ln.clapId;
+                        event.value = value;
+                        st.blockEvents.push_back(event);
+                        ln.lastSent = value;
+                    }
+                }
+                previous = at;
+            }
+            continue;
+        }
         const auto& pts = ln.curve.points;
         auto pi =
             static_cast<std::size_t>(std::lower_bound(pts.begin(), pts.end(), pos,
@@ -1648,7 +1754,23 @@ bool runStage(Plan& p, Stage& st, Stereo& sum, std::uint32_t n, const host::Tran
     }
     b.frames = n * os;
     b.events = st.blockEvents;
-    b.transport = &transport;
+    host::Transport mappedTransport = transport;
+    if (p.rateEnabled) {
+        mappedTransport = transportAt(p, pos - st.inputLatency, nullptr, st.rateLive);
+        mappedTransport.playing = transport.playing;
+        mappedTransport.loopActive = transport.loopActive;
+        mappedTransport.loopStartSeconds = transport.loopStartSeconds;
+        mappedTransport.loopEndSeconds = transport.loopEndSeconds;
+        mappedTransport.loopStartBeat = transport.loopStartBeat;
+        mappedTransport.loopEndBeat = transport.loopEndBeat;
+        const auto control =
+            pos - static_cast<std::int64_t>(static_cast<std::uint64_t>(pos - p.rateOrigin) & 63) -
+            st.inputLatency;
+        const auto beat = p.timeMap->beatAt(p.rateSeconds(control, st.rateLive));
+        mappedTransport.tempo =
+            p.timeMap->bpmAt(beat) * p.timelines[st.rateLive ? 1 : 0]->rate(control);
+    }
+    b.transport = &mappedTransport;
     b.steadyTime = pos * os;
     const bool processed = st.instance->process(b, &st.outEvents);
     if (os > 1) {
@@ -1751,6 +1873,99 @@ bool runPinned(Plan& p, Node& node, Stage& st, std::uint32_t n, const host::Tran
     return true;
 }
 
+double mappedAt(const Plan& p, bool live, std::int64_t device, std::int64_t shift) SUPPLE_RT {
+    return p.rateSample(device - shift, live) + double(shift);
+}
+std::uint32_t eventOffset(const Plan& p, bool live, std::int64_t pos, std::uint32_t frames,
+                          std::int64_t shift, std::int64_t event) SUPPLE_RT {
+    std::uint32_t lo = 0, hi = frames;
+    while (lo < hi) {
+        const auto mid = lo + (hi - lo) / 2;
+        if (mappedAt(p, live, pos + mid, shift) < double(event))
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return lo;
+}
+
+// Emit timeline events at their first device boundary. Unwrapped phase
+// permits a compensated instrument to cross a loop before the output does.
+void rateEvents(Plan& p, bool live, std::span<const TimedEvent> events, Stage& stage,
+                std::int64_t pos, std::uint32_t frames, std::int64_t shift, bool& fresh) SUPPLE_RT {
+    auto& clock = *p.timelines[live ? 1 : 0];
+    auto& held = stage.pendingVoices;
+    held.clear();
+    for (const auto& voice : stage.voices)
+        if (!voice.live && voice.sourceId >= 0 && held.size() < held.capacity())
+            held.push_back(voice);
+    auto emit = [&](host::Event event) {
+        if (stage.blockEvents.size() == stage.blockEvents.capacity()) {
+            ++stage.voiceDropped;
+            return;
+        }
+        stage.blockEvents.push_back(event);
+        if (event.kind == host::Event::Kind::NoteOn) {
+            if (held.size() < held.capacity()) {
+                HeldVoice voice;
+                voice.sourceId = event.noteId;
+                voice.port = event.port;
+                voice.channel = event.channel;
+                voice.key = event.key;
+                held.push_back(voice);
+            }
+        } else if (event.kind == host::Event::Kind::NoteOff ||
+                   event.kind == host::Event::Kind::NoteChoke) {
+            std::erase_if(held,
+                          [&](const HeldVoice& voice) { return voice.sourceId == event.noteId; });
+        }
+    };
+    for (std::uint32_t i = 0; i < frames; ++i) {
+        const double here = clock.phase(pos + i - shift);
+        double before = clock.phase(pos + i - 1 - shift);
+        if (fresh) {
+            before = std::nextafter(here, -std::numeric_limits<double>::infinity());
+            fresh = false;
+        }
+        const auto firstCycle = clock.cycle(before), lastCycle = clock.cycle(here);
+        for (auto cycle = firstCycle; cycle <= lastCycle; ++cycle) {
+            if (cycle != firstCycle) {
+                // Compiled source ids are resolved to running ids by prepareNoteIds.
+                while (!held.empty()) {
+                    const auto voice = held.back();
+                    held.pop_back();
+                    host::Event off;
+                    off.kind = host::Event::Kind::NoteOff;
+                    off.time = i;
+                    off.noteId = voice.sourceId;
+                    off.port = voice.port;
+                    off.channel = voice.channel;
+                    off.key = voice.key;
+                    if (stage.blockEvents.size() < stage.blockEvents.capacity())
+                        stage.blockEvents.push_back(off);
+                    else
+                        ++stage.voiceDropped;
+                }
+            }
+            const double offset = double(cycle) * (clock.looping() ? clock.cycleLength() : 0.);
+            const double lower = before + double(shift) - offset;
+            const double upper = here + double(shift) - offset;
+            auto event = std::upper_bound(
+                events.begin(), events.end(), lower,
+                [](double sample, const TimedEvent& e) { return sample < double(e.sample); });
+            for (; event != events.end() && double(event->sample) <= upper; ++event) {
+                const double original = double(event->sample - shift);
+                if (clock.looping() &&
+                    (original >= clock.loopEnd() || (cycle > 0 && original < clock.loopStart())))
+                    continue;
+                auto e = event->event;
+                e.time = i;
+                emit(e);
+            }
+        }
+    }
+}
+
 // A take chain's block (gap log #22): its source (the clip, or its MIDI for
 // its instrument) runs `latency` ahead through its stages; the output, cut to
 // the item's span with the item and take gain, pan, fades and the take's
@@ -1762,7 +1977,28 @@ bool processTake(Plan& p, Node& node, TakeChain& tc, std::int64_t pos, std::uint
         st.blockEvents.clear();
         st.outEvents.clear();
     }
-    if (!transport.playing || pos + n <= tc.start - tc.latency || pos >= tc.end) {
+    tc.buf.clear(n);
+    if (p.rateEnabled && transport.playing && tc.clip >= 0)
+        playClip(p, node.clips[static_cast<std::size_t>(tc.clip)], tc.buf, pos, n, tc.latency,
+                 node.live);
+    const double inputEnd = mappedAt(p, node.live, pos + n + tc.latency, node.latIn);
+    const double outputStart = mappedAt(p, node.live, pos, node.latIn);
+    bool intersects = inputEnd > double(tc.start) && outputStart < double(tc.end);
+    if (p.rateEnabled) {
+        const auto& clock = *p.timelines[node.live ? 1 : 0];
+        const double from = clock.phase(pos - node.latIn);
+        const double to = clock.phase(pos + n + tc.latency - node.latIn);
+        const double start = double(tc.start - node.latIn), end = double(tc.end - node.latIn);
+        const double firstEnd = clock.looping() ? std::min(end, clock.loopEnd()) : end;
+        intersects = start < firstEnd && to > start && from < firstEnd;
+        if (!intersects && clock.looping() && end > clock.loopStart() && start < clock.loopEnd()) {
+            const double a = std::max(start, clock.loopStart()), b = std::min(end, clock.loopEnd());
+            const double cycle = std::max(1., std::floor((from - b) / clock.cycleLength()) + 1);
+            intersects =
+                to > a + cycle * clock.cycleLength() && from < b + cycle * clock.cycleLength();
+        }
+    }
+    if (!transport.playing || !intersects) {
         tc.active = false;
         return true;
     }
@@ -1777,9 +2013,10 @@ bool processTake(Plan& p, Node& node, TakeChain& tc, std::int64_t pos, std::uint
                 st.instance->reset();
         }
     }
-    tc.buf.clear(n);
-    if (tc.clip >= 0)
-        playClip(node.clips[static_cast<std::size_t>(tc.clip)], tc.buf, pos, n, tc.latency);
+    if (!p.rateEnabled) tc.buf.clear(n);
+    if (!p.rateEnabled && tc.clip >= 0)
+        playClip(p, node.clips[static_cast<std::size_t>(tc.clip)], tc.buf, pos, n, tc.latency,
+                 node.live);
     if (tc.noteTarget >= 0) {
         auto& target = tc.chain[static_cast<std::size_t>(tc.noteTarget)].blockEvents;
         if (tc.releaseHeld) {  // a loop wrap: what is held ends first
@@ -1787,11 +2024,18 @@ bool processTake(Plan& p, Node& node, TakeChain& tc, std::int64_t pos, std::uint
             releaseVoices(tc.chain[static_cast<std::size_t>(tc.noteTarget)], true);
             tc.held.fill(0);
         } else
-            releaseVoices(tc.chain[static_cast<std::size_t>(tc.noteTarget)], true, true, pos);
-        while (tc.nextEvent < tc.events.size() && tc.events[tc.nextEvent].sample < pos + n) {
+            releaseVoices(
+                tc.chain[static_cast<std::size_t>(tc.noteTarget)], true, true,
+                static_cast<std::int64_t>(mappedAt(p, node.live, pos, node.latIn - tc.latency)));
+        if (p.rateEnabled)
+            rateEvents(p, node.live, tc.events, tc.chain[static_cast<std::size_t>(tc.noteTarget)],
+                       pos, n, node.latIn - tc.latency, tc.rateEventFresh);
+        while (!p.rateEnabled && tc.nextEvent < tc.events.size() &&
+               double(tc.events[tc.nextEvent].sample) <
+                   mappedAt(p, node.live, pos + n, node.latIn - tc.latency)) {
             const TimedEvent& te = tc.events[tc.nextEvent++];
             host::Event e = te.event;
-            e.time = static_cast<std::uint32_t>(std::max<std::int64_t>(0, te.sample - pos));
+            e.time = eventOffset(p, node.live, pos, n, node.latIn - tc.latency, te.sample);
             if (target.size() < target.capacity()) target.push_back(e);  // never allocate here
         }
     }
@@ -1805,8 +2049,13 @@ bool processTake(Plan& p, Node& node, TakeChain& tc, std::int64_t pos, std::uint
     const std::int64_t length = tc.end - tc.start;
     for (std::uint32_t i = 0; i < n; ++i) {
         const std::int64_t t = pos + i;
-        if (t < tc.start || t >= tc.end) continue;
-        const std::int64_t k = t - tc.start;
+        const auto* clock = p.rateEnabled ? p.timelines[node.live ? 1 : 0].get() : nullptr;
+        const double origin = clock ? clock->origin() : 0;
+        const double mapped =
+            clock ? clock->absolutePosition(t - node.latIn) + double(node.latIn) : double(t);
+        const double start = double(tc.start) + origin, end = double(tc.end) + origin;
+        if (mapped < start || mapped >= end) continue;
+        const double k = mapped - start;
         double g = 1.0;
         if (tc.fadeIn > 0 && k < tc.fadeIn)
             g *= fadeCurve(tc.fadeInShape, tc.fadeInCurve,
@@ -1917,8 +2166,8 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
     }
     node.preFx.copyFrom(node.sum, n);
     // Audio items play after the pre-FX tap, before the chain (not when stopped).
-    for (const Clip& c : node.clips)
-        if (transport.playing && c.takeChain < 0) playClip(c, node.sum, pos, n, 0);
+    for (Clip& c : node.clips)
+        if (transport.playing && c.takeChain < 0) playClip(p, c, node.sum, pos, n, 0, node.live);
     // Takes with chains or envelopes: through their chains, into the sum.
     for (TakeChain& tc : node.takeChains)
         if (!processTake(p, node, tc, pos, n, transport, self)) return false;
@@ -1934,14 +2183,19 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
         }
         node.held.fill(0);
     } else if (node.noteTarget >= 0) {
-        releaseVoices(node.chain[static_cast<std::size_t>(node.noteTarget)], true, true, pos);
+        releaseVoices(node.chain[static_cast<std::size_t>(node.noteTarget)], true, true,
+                      static_cast<std::int64_t>(mappedAt(p, node.live, pos, node.latIn)));
     }
-    while (transport.playing && node.nextEvent < node.events.size() &&
-           node.events[node.nextEvent].sample < pos + n) {
+    if (p.rateEnabled && transport.playing && node.noteTarget >= 0)
+        rateEvents(p, node.live, node.events, node.chain[static_cast<std::size_t>(node.noteTarget)],
+                   pos, n, node.latIn, node.rateEventFresh);
+    while (!p.rateEnabled && transport.playing && node.nextEvent < node.events.size() &&
+           double(node.events[node.nextEvent].sample) <
+               mappedAt(p, node.live, pos + n, node.latIn)) {
         const TimedEvent& te = node.events[node.nextEvent++];
         if (node.noteTarget < 0) continue;
         host::Event e = te.event;
-        e.time = static_cast<std::uint32_t>(std::max<std::int64_t>(0, te.sample - pos));
+        e.time = eventOffset(p, node.live, pos, n, node.latIn, te.sample);
         auto& target = node.chain[static_cast<std::size_t>(node.noteTarget)].blockEvents;
         if (target.size() < target.capacity()) target.push_back(e);  // never allocate here
     }
@@ -2140,11 +2394,17 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
             e.applyMap(e.encoded.l[i], e.encoded.r[i]);
         }
     }
+    if (p.rateEnabled)
+        for (const auto& clip : node.clips)
+            if (clip.rateState->failed ||
+                (clip.rateState->previous && clip.rateState->previous->failed))
+                return false;
     return true;
 }
 
 bool processBlock(Plan& p, std::int64_t pos, std::uint32_t n, bool playing,
                   const LoopRange* loop) SUPPLE_RT {
+    prepareRateWindow(p, pos, n, -1, loop);
     host::Transport transport = transportAt(p, pos, loop);
     transport.playing = playing;
     for (std::size_t i = 0; i < p.nodes.size(); ++i)
@@ -2173,7 +2433,8 @@ void runNode(void* ctx, std::uint32_t task) SUPPLE_RT {
 bool processCallbackBlock(LiveWorkers* workers, Plan& p, std::int64_t pos, std::uint32_t n,
                           bool playing, bool split, const void* self,
                           const LoopRange* loop) SUPPLE_RT {
-    host::Transport transport = transportAt(p, pos, loop);
+    prepareRateWindow(p, pos, n, split ? 1 : -1, loop);
+    host::Transport transport = transportAt(p, pos, loop, split);
     transport.playing = playing;
     BlockRun run{&p, pos, n, &transport, split ? &p.liveNodes : nullptr, self};
     TaskGraph& graph = split ? *p.liveGraph : *p.graph;
@@ -2186,6 +2447,7 @@ bool processCallbackBlock(LiveWorkers* workers, Plan& p, std::int64_t pos, std::
 
 bool processRendererBlock(Workers* workers, Plan& p, std::int64_t pos, std::uint32_t n,
                           const void* self, const LoopRange* loop, bool playing) {
+    prepareRateWindow(p, pos, n, 0, loop);
     host::Transport transport = transportAt(p, pos, loop);
     transport.playing = playing;
     if (!workers || workers->helpers() == 0) {
@@ -2215,6 +2477,7 @@ void locateTakes(Node& n, std::int64_t pos, bool wrap, bool keepPlaying = false)
             std::lower_bound(tc.events.begin(), tc.events.end(), pos,
                              [](const TimedEvent& e, std::int64_t x) { return e.sample < x; });
         tc.nextEvent = static_cast<std::size_t>(it - tc.events.begin());
+        if (!wrap) tc.rateEventFresh = !keepPlaying;
         for (Automation* a : {&tc.volume, &tc.pan, &tc.mute}) a->cursor = 0;
         for (Stage& st : tc.chain) {
             if (!wrap && !keepPlaying) {
@@ -2246,6 +2509,7 @@ void locateClass(Plan& p, std::int64_t pos, bool live, bool restartConsole) SUPP
             std::lower_bound(n.events.begin(), n.events.end(), pos,
                              [](const TimedEvent& e, std::int64_t x) { return e.sample < x; });
         n.nextEvent = static_cast<std::size_t>(it - n.events.begin());
+        n.rateEventFresh = restartConsole;
         if (restartConsole) {
             n.encoder.reset();
             n.keyEncoder.reset();
@@ -2289,6 +2553,7 @@ void locateClass(Plan& p, std::int64_t pos, bool live, bool restartConsole) SUPP
 }
 
 bool processBlockOn(Workers& workers, Plan& p, std::int64_t pos, std::uint32_t n) {
+    prepareRateWindow(p, pos, n, -1);
     const host::Transport transport = transportAt(p, pos);
     BlockRun run{&p, pos, n, &transport};
     workers.run(*p.graph, &runNode, &run);
@@ -2302,6 +2567,7 @@ void locate(Plan& p, std::int64_t pos, bool restartConsole) SUPPLE_RT {
             std::lower_bound(n.events.begin(), n.events.end(), pos,
                              [](const TimedEvent& e, std::int64_t x) { return e.sample < x; });
         n.nextEvent = static_cast<std::size_t>(it - n.events.begin());
+        n.rateEventFresh = restartConsole;
         if (restartConsole) {
             n.encoder.reset();
             n.keyEncoder.reset();
@@ -2344,7 +2610,7 @@ void locate(Plan& p, std::int64_t pos, bool restartConsole) SUPPLE_RT {
 void wrapTo(Plan& p, std::int64_t pos, int liveClass) SUPPLE_RT {
     for (Node& n : p.nodes) {
         if (liveClass >= 0 && n.live != (liveClass == 1)) continue;
-        locateTakes(n, pos, true);
+        if (!p.rateEnabled) locateTakes(n, pos, true);
         auto it =
             std::lower_bound(n.events.begin(), n.events.end(), pos,
                              [](const TimedEvent& e, std::int64_t x) { return e.sample < x; });
@@ -2359,7 +2625,7 @@ void wrapTo(Plan& p, std::int64_t pos, int liveClass) SUPPLE_RT {
                                   &e.stripPan, &e.stripMute})
                 a->cursor = 0;
         }
-        n.releaseHeld = true;
+        if (!p.rateEnabled) n.releaseHeld = true;
         for (Automation* a : {&n.autoVolume, &n.autoPan, &n.autoMute}) a->cursor = 0;
         for (Stage& st : n.chain)
             for (ParamLane& ln : st.lanes) {

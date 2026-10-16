@@ -314,3 +314,32 @@ TEST_CASE("timeline window: partitioning, PDC history, loops and plan adoption s
     CHECK(changed.rate(813) == 2);
     CHECK(changed.phase(332) == scalar.phase(332));
 }
+
+TEST_CASE("playrate timeline: manual transitions wait for compensated lookahead") {
+    PlayrateTimeline previous(262144, 1.137, {}), next(262144, 2, {});
+    previous.ensure(40000);
+    next.adopt(previous, 1024, 480, 32768);
+    next.ensure(40000);
+    for (std::int64_t device = 1024; device <= 33792; ++device) {
+        CHECK(next.phase(device) == previous.phase(device));
+        CHECK(next.rate(device) == 1.137);
+    }
+    CHECK(next.rate(33793) > 1.137);
+    CHECK(next.rate(34272) == 2);
+}
+
+TEST_CASE("playrate timeline: nonzero range origins share absolute clock accumulation") {
+    std::vector<RatePoint> absolute{{0, .5, supple::model::PointShape::Linear, 0},
+                                    {960, 2, supple::model::PointShape::Linear, 0}};
+    auto relative = absolute;
+    for (auto& point : relative) point.sample -= 336;
+    PlayrateTimeline seek(32768, 1.137, absolute), range(32768, 1.137, relative, 336);
+    seek.reset(336, 336);
+    range.reset(0, 0);
+    seek.ensure(3336);
+    range.ensure(3000);
+    for (std::int64_t device = 0; device < 3000; ++device) {
+        CHECK(seek.absolutePhase(device + 336) == range.absolutePhase(device));
+        CHECK(seek.rate(device + 336) == range.rate(device));
+    }
+}

@@ -1435,7 +1435,7 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
         const double stopSeconds = engine_->transport().seconds;
         const bool wasPlaying = engine_->transport().playing;
         engine_->pause();
-        if (action == "stop") engine_->seek(playStart_);
+        if (action == "stop") SUPPLE_TRY(engine_->prepareSeek(playStart_));
         if (engine_->recording()) {
             auto takes = engine_->stopRecording();
             if (!takes) return std::move(takes).error();  // record.busy: still recording
@@ -1446,7 +1446,7 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
         }
         if (wasPlaying) SUPPLE_TRY(finishAutomationPass(stopSeconds));
     } else if (action == "seek") {
-        engine_->seek(seconds.value_or(0.0));
+        SUPPLE_TRY(engine_->prepareSeek(seconds.value_or(0.0)));
         if (!engine_->transport().playing) playStart_ = seconds.value_or(0.0);
     }
     if (action != "get") engine_->awaitTransport();
@@ -1625,7 +1625,10 @@ void EngineApp::startPlaying(int countInBars) {
     const time::TimeMap& tm = *view().timeMap;
     const double beat = tm.beatAt(engine_->transport().seconds);
     const time::MeterChange m = tm.meterAt(tm.barBeat(beat).bar);
-    const double beatSeconds = 4.0 / static_cast<double>(m.denominator) * 60.0 / tm.bpmAt(beat);
+    const auto state = playrateState();
+    const double rate = state.envelopeValue.value_or(state.requestedRate);
+    const double beatSeconds =
+        4.0 / static_cast<double>(m.denominator) * 60.0 / (tm.bpmAt(beat) * rate);
     const auto beatFrames =
         static_cast<std::int64_t>(std::llround(beatSeconds * engine_->config().sampleRate));
     engine_->playCountIn(beatFrames * m.numerator * countInBars, beatFrames, m.numerator);

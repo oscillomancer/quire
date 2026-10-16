@@ -13,6 +13,7 @@
 // output latency (the transport reports the render position).
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <climits>
@@ -368,6 +369,9 @@ class Engine {
     void play();
     void pause();  // stops the transport; plugin state is reset (no hanging notes)
     void seek(double seconds);
+    // Control thread: source preparation completes off-thread before publishing
+    // the audible seek epoch. Structured failures leave the old epoch intact.
+    Status prepareSeek(double seconds);
     // The transport loop (ADR-0015): playback reaching `end` continues at
     // `start` (a play position at or past the end plays on). Changing it
     // re-renders what was rendered ahead, like a seek to where the listener is.
@@ -646,6 +650,9 @@ class Engine {
     // playing_ and pos_ (the render position) instead of the audio thread.
     // Seek and pause bump epoch_; the callback drops chunks of older epochs.
     std::unique_ptr<detail::ChunkRing> ring_;
+    // Rendered plans cannot be coalesced: callback-owned sources must consume
+    // every clock trajectory already represented in frontier/master audio.
+    SpscRing<detail::Plan*, 1024> planHandoffs_;
     std::unique_ptr<detail::Workers> workers_;
     std::unique_ptr<detail::LiveWorkers> liveWorkers_;
     std::atomic<detail::LiveWorkers*> liveWorkersReady_{nullptr};
@@ -681,6 +688,26 @@ class Engine {
     std::atomic<std::uint64_t> rtEpochSeen_{0};
     std::atomic<std::int64_t> rtPos_{0};        // after the last frame played...
     std::atomic<double> effectivePlayrate_{1};  // consumed output, never render lookahead
+    std::atomic<double> rtTimeline_{0};
+    std::atomic<std::uint64_t> timelineEpoch_{0};
+    std::atomic<bool> rateScheduling_{false};
+    std::optional<double> rateSeekTarget_;
+    std::optional<LoopRange> rateLoopTarget_;
+    detail::Plan* ratePreparedTail_ = nullptr;  // control thread only
+    std::array<std::atomic<std::uint64_t>, 13> rateClockWords_{};
+    std::atomic<std::uint64_t> rateClockSequence_{0};
+    std::atomic<std::int64_t> rateSafeStream_{0};
+    std::atomic<std::uint64_t> rateSafeEpoch_{0};
+    bool rateDeferred_ = false;
+    std::atomic<bool> rateDeferredWake_{false};
+    std::filesystem::path rateDeferredDir_;
+    std::uint64_t clickSeekSeen_ = 0;
+    double rateEpochStart_ = 0;  // callback-only, unity trajectory before activation
+    void publishRateClock(detail::Plan& plan, std::int64_t device, std::int64_t stream,
+                          std::uint64_t epoch, bool live) SUPPLE_RT;
+    std::array<std::uint64_t, 13> readRateClock() const;
+    Status prepareRatePlan(detail::Plan& plan);
+
     std::atomic<std::int64_t> rtStream_{0};     // (frames played in the epoch)
     std::atomic<std::uint64_t> rtPosEpoch_{0};  // ...in this epoch
     LoopRange loopC_;                           // audio thread: the loop it plays

@@ -315,20 +315,19 @@ Engine and hosting:
   are).
 
 Session and editing:
-- Master playrate settings and the tr_0 playrate envelope persist in project
-  schema 2.1; audio playback/rendering still run at 1x until DSP integration
-  (ADR-0045). Get/set and atomic tempo-bake commands are available; requested
-  vs effective rate is explicit (effective remains 1). Non-unity audio/MIDI
-  recording and transitions into it during recording are refused. Master-rate
-  writing has existing coarse strip semantics; transport controls and the
-  main master's editable Playrate lane are present, with logarithmic scaling
-  and a unity reference. Transport ranges are UI state and never clamp saved
-  values. Transport readback uses `EngineApp::playrateState()`: consumed
-  effective rate for an active curve, requested scalar otherwise, with no
-  command logging or transport-side envelope cache.
-  Native CI for these new controls is pending coordinator validation.
-  The fractional DSP clock and per-source tape/stretch readers are implemented
-  and tested in isolation (dev/RTSan); executor integration remains pending.
+- Master playrate 0.25..4x and its tr_0 envelope persist in schema 2.1.
+  Tape and pitch-preserving source conversion run before take FX/live mixing;
+  MIDI, automation, plugin tempo, loops and transport share the fractional clock
+  (ADR-0045). The transport knob, menu and the master Playrate lane edit it;
+  knob ranges are UI state and never clamp saved values. Non-unity audio/MIDI
+  recording is refused, including queued transitions. Writing retains coarse
+  strip semantics. Rate/mode edits wait for compensated lookahead and coalesce
+  during transitions; long-latency take chains can exceed the 200 ms horizon.
+  Seeks prepare off-thread while playback/monitoring continues. Changes requiring
+  unavailable clock history need a paused graph reload or engine restart.
+  Render-command budgets conservatively use the minimum curve value; a long
+  varying-rate range may need splitting even when its exact duration would fit
+  the output budget.
 - Take `stretch_markers` are stored but not applied; stretching and
   resampling run synchronously when a plan is compiled.
 - Track groups are preserved in project files but not implemented.

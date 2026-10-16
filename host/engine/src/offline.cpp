@@ -18,6 +18,7 @@
 #include "supple/base/thread.h"
 #include "supple/clap/semantic_params.h"
 #include "supple/dsp/dsp.h"
+#include "supple/model/numeric.h"
 #include "supple/time/timeline.h"
 
 namespace supple::engine {
@@ -405,6 +406,23 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
         return Error("engine.block_size", "block size out of range", {}, "1 .. 8192");
     if (!(opt.tailSeconds >= 0 && opt.tailSeconds <= 600))
         return Error("engine.tail", "tail out of range", {}, "0 .. 600 s");
+    SUPPLE_TRY(model::checkedSeconds(s, opt.startSeconds, "/start_seconds"));
+    SUPPLE_TRY(model::checkedSeconds(s, opt.endSeconds, "/end_seconds"));
+    // Reject obvious expanded-output excess before constructing media/DSP state
+    // or iterating the inverse clock. Envelopes get an optimistic 4x bound;
+    // their exact duration is checked by the bounded inverse-clock prepass.
+    const double fastest =
+        opt.applyMasterPlayrate
+            ? (model::activePlayrateEnvelope(s) ? model::kMaxPlayrate : s.project->playrate.rate)
+            : 1.;
+    const long double minimumFrames =
+        ((static_cast<long double>(opt.endSeconds) - static_cast<long double>(opt.startSeconds)) /
+             static_cast<long double>(fastest) +
+         static_cast<long double>(opt.tailSeconds)) *
+        static_cast<long double>(s.project->sampleRate);
+    if (minimumFrames > (std::int64_t(1) << 28))
+        return Error("engine.too_long", "playrate-expanded render exceeds the frame budget",
+                     "/end_seconds", "shorten the timeline range or increase the master playrate");
     Session selectedSession = opt.track ? upstreamSession(s, *opt.track) : s;
     if (opt.throughMaster) {
         if (!s.tracks.contains(*opt.throughMaster) || *opt.throughMaster == model::kMaster)
@@ -424,6 +442,7 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     auto compiled = detail::compile(selectedSession, pool, opt.startSeconds, opt.blockSize);
     if (!compiled) return std::move(compiled).error();
     Plan& p = *compiled;
+    if (!opt.applyMasterPlayrate) p.rateEnabled = false;
     MediaCache localMedia;
     p.projectDir = opt.projectDir;
     p.media = opt.media ? opt.media : &localMedia;
@@ -447,9 +466,38 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     const auto outputLatency =
         opt.track ? selected->latIn + (opt.tap == model::Tap::PreFx ? 0 : selected->latChain)
                   : selected->latIn + selected->latChain;
-    const std::int64_t length = time::samplesAt(opt.endSeconds, p.rate) -
-                                time::samplesAt(opt.startSeconds, p.rate) +
-                                time::samplesAt(opt.tailSeconds, p.rate);
+    const std::int64_t timelineLength =
+        time::samplesAt(opt.endSeconds, p.rate) - time::samplesAt(opt.startSeconds, p.rate);
+    const auto tailFrames = time::samplesAt(opt.tailSeconds, p.rate);
+    std::int64_t contentFrames = timelineLength;
+    if (p.rateEnabled) {
+        // Count inverse-clock boundaries using bounded scratch/history. This
+        // prepass never renders audio and never allocates an expanded timeline.
+        auto& timeline = *p.timelines[0];
+        std::int64_t device = 0;
+        while (timeline.phase(device) < double(timelineLength)) {
+            if (device + tailFrames + outputLatency > (std::int64_t(1) << 28))
+                return Error("engine.too_long", "playrate-expanded render exceeds the frame budget",
+                             {}, "shorten the timeline range or increase the master playrate");
+            const auto end = device + 4096;
+            timeline.ensure(end);
+            if (timeline.phase(end) >= double(timelineLength)) {
+                auto lo = device, hi = end;
+                while (lo < hi) {
+                    const auto mid = lo + (hi - lo) / 2;
+                    if (timeline.phase(mid) < double(timelineLength))
+                        lo = mid + 1;
+                    else
+                        hi = mid;
+                }
+                device = lo;
+                break;
+            }
+            device = end;
+        }
+        contentFrames = device;
+    }
+    const std::int64_t length = contentFrames + tailFrames;
     const std::int64_t total = length + outputLatency;
     if (total > (std::int64_t(1) << 28))
         return Error("engine.too_long", "render too long", {},
@@ -460,6 +508,7 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     stemDecoder.init(console9::seedsFor(s.project->seed, (selected->id.n << 3) | 4),
                      p.linearConsole);
     bool failed = false, startFailed = false, cancelled = false;
+    std::optional<Error> preparationError;
 
     // Every instance the plan processes (track and take chains), once each.
     const std::vector<host::Instance*> instances = p.instances;
@@ -468,20 +517,25 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     std::thread audio([&] {
         auto progressAt = std::chrono::steady_clock::time_point::min();
         nameThread("audio-offline");
+        const auto primed = detail::prepareRateSources(p, 0, 0);
+        if (!primed) {
+            preparationError = primed.error();
+            return;
+        }
         for (host::Instance* in : instances) {
             in->reset();
             in->flushParams();
             if (!in->startProcessing()) startFailed = true;
         }
         if (!startFailed) {
-            for (std::int64_t pos = 0; pos < total; pos += p.block) {
+            for (std::int64_t pos = 0; pos < total;) {
                 if (opt.stopToken.stop_requested() ||
                     (opt.cancelFlag && opt.cancelFlag->load(std::memory_order_relaxed))) {
                     cancelled = true;
                     break;
                 }
-                const auto n =
-                    static_cast<std::uint32_t>(std::min<std::int64_t>(p.block, total - pos));
+                auto n = static_cast<std::uint32_t>(std::min<std::int64_t>(p.block, total - pos));
+                if (p.rateEnabled) n = std::min(n, static_cast<std::uint32_t>(64 - (pos & 63)));
                 if (!(workers.helpers() ? processBlockOn(workers, p, pos, n)
                                         : processBlock(p, pos, n))) {
                     failed = true;
@@ -508,6 +562,7 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
                     opt.progress(fraction);
                     progressAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
                 }
+                pos += n;
             }
         }
         for (host::Instance* in : instances) in->stopProcessing();
@@ -519,6 +574,7 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     for (host::Instance* in : instances) {
         for (auto& line : in->takeLog()) r.log.push_back(in->info().name + ": " + line);
     }
+    if (preparationError) return *preparationError;
     if (startFailed)
         return Error("engine.start_failed", "a plugin refused to start processing", {},
                      "restart or replace the FX that refused processing with a plugin supporting "

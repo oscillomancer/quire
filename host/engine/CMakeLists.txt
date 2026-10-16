@@ -5,7 +5,7 @@ find_package(ZLIB REQUIRED)
 
 supple_add_library(engine
   SOURCES src/offline.cpp src/plan.cpp src/workers.cpp src/live_workers.cpp src/realtime.cpp src/recording.cpp
-          src/stretch.cpp src/playrate_dsp.cpp src/playrate_timeline.cpp src/meters.cpp src/runtime_protection.cpp src/media_files.cpp
+          src/stretch.cpp src/playrate_dsp.cpp src/playrate_timeline.cpp src/rate_sources.cpp src/rate_runtime.cpp src/meters.cpp src/runtime_protection.cpp src/media_files.cpp
           src/app.cpp src/plugin_outputs.cpp src/commands.cpp src/extra_commands.cpp src/midi_commands.cpp src/analysis_commands.cpp
           src/render_commands.cpp src/chain_commands.cpp src/take_commands.cpp src/learn.cpp src/dsp_commands.cpp
           src/midi_control.cpp src/midi_input.cpp src/portaudio_backend.cpp src/portaudio_native.cpp
@@ -170,3 +170,8 @@ add_executable(engine-playrate-bench bench/playrate_bench.cpp)
 target_include_directories(engine-playrate-bench PRIVATE src)
 target_link_libraries(engine-playrate-bench PRIVATE supple::engine)
 supple_target_defaults(engine-playrate-bench)
+
+add_executable(engine-playrate-project-bench bench/playrate_project_bench.cpp)
+target_include_directories(engine-playrate-project-bench PRIVATE src)
+target_link_libraries(engine-playrate-project-bench PRIVATE supple::engine)
+supple_target_defaults(engine-playrate-project-bench)

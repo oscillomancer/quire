@@ -376,6 +376,7 @@ void registerTakeCommands(cmd::Registry& registry) {
             if (!alone) return std::move(alone).error();
             const model::ItemSpan span = model::itemSpan(s, it);
             OfflineSettings settings;
+            settings.applyMasterPlayrate = false;
             settings.track = it.track;
             settings.tap = model::Tap::PreFader;
             settings.startSeconds = span.startSec;

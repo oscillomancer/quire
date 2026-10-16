@@ -350,15 +350,15 @@ schema::Schema<PlayrateInfo> playrateSchema() {
         .field("envelope", &PlayrateInfo::envelope, schema::string())
         .build();
 }
-PlayrateInfo playrateInfo(const model::Session& session) {
+PlayrateInfo playrateInfo(const model::Session& session, const Engine* engine = nullptr) {
     PlayrateInfo out;
     out.requestedRate = session.project->playrate.rate;
     out.preservePitch = session.project->playrate.preservePitch;
     if (const auto envelope = model::activePlayrateEnvelope(session))
         out.envelope = envelope->str();
-    // ADR-0045 control stage: DSP still plays/renders at 1x. Replace this
-    // effective value with consumption telemetry when the engine stage lands.
-    out.effectiveRate = 1.0;
+    // Consumption telemetry can lag requested settings at the render horizon
+    // and through a compensated source transition (ADR-0045).
+    out.effectiveRate = engine ? engine->effectivePlayrate() : 1.;
     return out;
 }
 
@@ -2613,7 +2613,8 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.summary =
             "Render the mix offline to a float WAV (default: start to the last item's end).";
         c.description =
-            "start_beat/end_beat in beats; tail_s seconds after the end (reverb tails). "
+            "start_beat/end_beat select a timeline range; master playrate determines its "
+            "rendered duration. tail_s adds device-time seconds after the end (reverb tails). "
             "analyze: summary or full returns a supple.analysis-report/1.0 inline. "
             "The render id can be passed to analyze.render or analyze.compare. "
             "add_to_project: the file becomes an item on a new track at start_beat, as its own "
@@ -3115,8 +3116,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             "volume|pan|mute): a take envelope, its points in beats from the item's start (it "
             "moves with the item); it shapes the take after its take FX (a MIDI take needs an "
             "instrument in its take FX). Master playrate points are finite numeric ratios "
-            "0.25..4.0; master-rate DSP integration is pending, so they currently do not "
-            "change playback or offline rendering.";
+            "0.25..4.0; an active nonempty master curve replaces the saved scalar during "
+            "playback and rendering. Audio sources convert before take FX/live mixing; MIDI "
+            "and automation follow the same timeline clock.";
         c.tags = {"automation"};
         c.args = schema::object<EnvAddArgs>("env_add_args")
                      .field("track", &EnvAddArgs::track, idArg("tr", "Track"))
@@ -3945,8 +3947,9 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.description =
             "requested_rate is the saved project ratio; envelope names the active nonempty "
             "tr_0/playrate envelope, including automation items. No engine is required. "
-            "DSP integration is pending: effective_rate is currently always 1.0, in playback "
-            "and offline rendering, regardless of requested_rate or the envelope.";
+            "effective_rate follows consumed output, including compensated source transitions "
+            "and graph/backend output latency; it is 1.0 without a running engine. GUI clients "
+            "can use EngineApp::playrateState() without executing/logging a query each sync.";
         c.tags = {"transport", "automation"};
         c.args = schema::object<NoArgs>("no_args").build();
         c.result = playrateSchema();
@@ -3954,7 +3957,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                        obj(R"({"requested_rate":1.0,"effective_rate":1.0,"preserve_pitch":false})"),
                        "empty"}};
         c.run = [](const NoArgs&, Context& ctx) -> Result<PlayrateInfo> {
-            return playrateInfo(A(ctx).view());
+            return playrateInfo(A(ctx).view(), A(ctx).engine());
         };
         addChecked(registry, std::move(c));
     }
@@ -3969,8 +3972,12 @@ void registerEngineCommands(cmd::Registry& registry) {
             "Omitted fields keep their values. Updates during a drag use Origin.gesture like "
             "strip faders, and write/touch/latch capture tr_0/playrate with the existing coarse "
             "strip-writing behavior (no touch override/return). Recording requires unity. "
-            "These settings are saved/undoable, but DSP integration is pending: playback and "
-            "offline rendering still run at 1x; effective_rate reports 1.0.";
+            "Settings are saved/undoable. File sources convert before take FX and live input "
+            "mixing; instruments retain their pitch. Scalar edits ramp and converter changes "
+            "crossfade for 10 ms after priming. Edits include the render horizon and compensated "
+            "source lookahead; newer requests coalesce while a transition finishes. Long-latency "
+            "take chains can exceed the usual 200 ms response. effective_rate follows audible "
+            "output, independently of requested_rate.";
         c.tags = {"transport", "automation"};
         c.args = schema::object<PlayrateArgs>("transport_playrate_set_args")
                      .field("rate", &PlayrateArgs::rate,
@@ -3999,7 +4006,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 if (next.playrate != project->playrate) app.txn().setProject(std::move(next));
                 if (a.rate) app.recordAutomation(model::kMaster, "playrate", *a.rate);
             }
-            return playrateInfo(app.view());
+            return playrateInfo(app.view(), app.engine());
         };
         addChecked(registry, std::move(c));
     }
@@ -4110,6 +4117,10 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.kind = Kind::Action;
         c.exposure = cmd::Exposure::McpTool;
         c.summary = "Move the play position (one of seconds, beat or bar).";
+        c.description =
+            "With master playrate enabled, prepare file-source converters off-thread "
+            "before publishing the audible seek. Existing playback and live monitoring "
+            "continue until ready; preparation errors leave the old seek epoch intact.";
         c.tags = {"transport"};
         c.args = schema::object<SeekArgs>("seek_args")
                      .field("seconds", &SeekArgs::seconds, schema::number().min(0))

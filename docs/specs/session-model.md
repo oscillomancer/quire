@@ -65,8 +65,9 @@ ids, tr_0 first). *(`pan_law` was removed with ADR-0019.)*
 Master playrate (ADR-0045) is `playrate: {rate, preserve_pitch}`: a finite
 ratio 0.25..4.0 (default 1.0) and bool (default false). Missing settings in
 older projects decode to these defaults; the 1.x migration sets them explicitly.
-A schema 2.1 document persists settings and automation, but playback/rendering
-still ignore master playrate until the engine integration stage.
+A schema 2.1 document persists settings and automation. Playback and mix/stem
+renders apply the master rate before file sources reach take FX or live mixing;
+MIDI and automation follow the same fractional clock (engine.md, ADR-0045).
 
 ### 1.3 Time map (`tempo`) — the contract lives in `libs/timeline`
 
@@ -269,7 +270,11 @@ points and source_length), points (beats from the item's start), baseline,
 amplitude, name}`. An item replaces the envelope over its span: its points
 repeat every `source_length` while `loop`, values play as `baseline +
 amplitude × (value − baseline)`, a later item cuts an earlier one it
-overlaps, and the envelope steps at each edge (gap log #28). Take envelopes
+overlaps, and the envelope steps at each edge (gap log #28). Item positions,
+lengths and source points are beats even when the parent is a time envelope.
+Expansion places those beat points through the tempo map into the parent's
+seconds domain, retaining the underlying envelope's native interpolation.
+Expanded points interpolate in the parent envelope's domain. Take envelopes
 (`{take: id, param}`) use item-relative beats and move with the item; they
 take no automation items. Expansion is bounded to 100,000 repetitions/points
 per envelope; over-budget edits and files refuse with `automation.budget`.
@@ -579,8 +584,8 @@ and naming. All `edit` unless marked (q) query or (a) action.
 
 Master playrate commands (ADR-0045) are `transport.playrate.get`,
 `transport.playrate.set {rate?, preserve_pitch?}` and
-`transport.playrate.apply-to-tempo`; their exact contracts and staged audio
-limitation are in engine.md's Master playrate control stage section. The
+`transport.playrate.apply-to-tempo`; their exact contracts and recording limit
+are in engine.md's Master playrate section. The
 model-thread `activePlayrateEnvelope(Session)` identifies an active nonempty
 master curve; `validateRecordingPlayrate(Session)` returns `record.playrate`
 when the saved scalar or effective curve prevents unity recording.

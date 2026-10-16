@@ -1449,22 +1449,21 @@ Real-device tests require SUPPLE_MIDI_DEVICE_TEST exactly 1; they use fake
 audio and never open an audio device. Native SDK tests do not establish physical
 input timing, disconnect reliability or performance on every driver.
 
-### Master playrate control stage (2026-10-16, ADR-0045)
+### Master playrate (ADR-0045)
 
 Project schema 2.1 stores master playrate and its `tr_0/playrate` envelope.
-The control interface is implemented before audio integration: **playback and
-all offline renders still run at 1x**, including when the saved rate or
-active envelope differs. GUI controls and lane editing are specified in gui.md.
-The source converter, fractional clock, remapped MIDI/automation, effective
-BPM and metronome timing in ADR-0045 remain pending.
+Playback and mix/stem renders apply the scalar or active rate envelope. File
+source conversion, MIDI, automation, effective plugin BPM, metronome and transport
+use the shared fractional clock; live input stays in device time. GUI controls
+are independent clients of the command API and the cached state accessor below.
 
 - `transport.playrate.get {}` is a query available without a running engine.
   Result: `{requested_rate: number, effective_rate: number,
   preserve_pitch: bool, envelope?: en_id}`. `requested_rate` is the saved
   scalar; `envelope` is present only for an active master rate envelope with
-  effective points (including automation items). `effective_rate` is currently
-  always 1.0; the engine stage will supply consumption telemetry at the audible
-  render horizon, not the requested or lookahead value.
+  effective points (including automation items). `effective_rate` reports
+  consumed output, accounting for graph and backend output latency, rather than the
+  requested or render-lookahead value. Without an engine it is 1.0.
 - `transport.playrate.set {rate?: number, preserve_pitch?: bool}` is an edit
   returning the same result. Rate is finite 0.25..4.0, and omitted fields retain
   their values. Empty arguments or unchanged settings make no version unless
@@ -1485,8 +1484,8 @@ contracts; other strip/route/take targets are rejected. Values are finite
 numeric ratios 0.25..4.0, not booleans or unit text. The setter captures points
 through the existing strip writer in touch/latch/write modes; latch/write
 hold through pause/stop. Like current strip faders this is coarse capture,
-without explicit held-control override or touch-return behavior. The engine
-still ignores the rate envelope in this control stage.
+without explicit held-control override or touch-return behavior. Authored
+points replace the scalar without an extra smoothing ramp.
 
 Recording audio or MIDI requires saved rate 1.0 and an active effective rate
 curve that is absent/empty or everywhere 1.0. `record.playrate` reports the
@@ -1503,15 +1502,21 @@ stop/commit-recording lifecycle before replacing the session.
 
 The model helpers `activePlayrateEnvelope` and `validateRecordingPlayrate`
 are model-thread APIs; no effective-point expansion runs on the callback.
-This stage adds no audio-path DSP. Portable command/guard tests are included
-in both native and Linux engine test builds.
+Recording checks the audible and queued trajectories too: requesting unity
+while an older non-unity transition is still queued does not make recording
+safe. Removed curves remain guarded until graph and backend output latency has
+drained their old trajectories, even if the current audible rate happens to be
+1 before a queued non-unity span. A pitch-mode-only transition at unity is safe. Stop and restore unity before recording in that case. Portable
+command/guard and executor tests run on every supported platform.
 
 ### Master playrate DSP building blocks (ADR-0045)
 
 The internal `playrate_dsp` module supplies the fractional `PlayrateClock`,
-original tape reader and streaming `StretchReader`. This is a separately
-validated foundation; plans/executors do not consume it yet, so the control-stage
-1x limitation above still applies.
+original tape reader and streaming `StretchReader`. Plans apply them to each
+file source before take FX and before live input joins. Instruments retain
+note pitch; effects, live audio/MIDI, Console 9 and frontier rings run in device
+time. A fresh exactly-unity project without an active nonempty rate envelope
+keeps the previous path and its bytes.
 
 The clock advances once per device frame and exposes timeline boundaries and
 inverse boundary crossings. Manual scalar changes can ramp over a caller-supplied
@@ -1525,7 +1530,7 @@ a 6% transition guard. Ratios below unity use the 1x cutoff. Integer source
 positions at exactly unity read the original samples directly. Both channels
 share phase and cutoff; file padding/looping belongs to the source reader.
 
-Pitch-preserving conversion configures stereo Signalsmith Stretch before
+Pitch-preserving conversion configures Signalsmith Stretch for all source channels before
 publication and processes only 64-frame output quanta. The channel count is unrestricted and phase is linked across all channels.
 Decoded in-memory data is fetched once per channel/64-frame quantum, returning
 a direct contiguous span where possible and using prepared scratch for padding
@@ -1553,9 +1558,62 @@ rates, non-48k priming and invalid trajectory rejection, including under RTSan.
 `EngineApp::playrateState()` is a model/UI-thread accessor for GUI synchronization:
 `{requestedRate, effectiveRate, preservePitch, envelope?, envelopeValue?}`. It
 allocates no memory, executes/logs no command and creates no history entries.
-Effective rate comes from `Engine::effectivePlayrate()` consumption telemetry
-(still 1 until executor integration). The optional envelope value evaluates the
+Effective rate comes from `Engine::effectivePlayrate()` consumption telemetry. The optional envelope value evaluates the
 latest model curve at the consumed transport position; it is distinct from the
 possibly older audible effective rate. Effective points are expanded/cached when
 the model head changes, including history and branch changes, not on each GUI
 sync. The accessor works without a running engine, using the stopped position.
+
+The plan owns two bounded windows of a single fractional timeline trajectory:
+the renderer advances one, the callback advances the other, and their node jobs
+only read prepared windows. Device/stream frames remain monotonic through loops;
+timeline position wraps. Accumulation uses absolute project samples, including
+for nonzero offline range starts, so a fresh seek and a render of the same range
+make identical source phase decisions. PDC shifts **device** coordinates before
+the clock lookup.
+All source converters share a 64-frame grid in compensated source time, including
+preroll: two identical sources with different take-chain latencies remain aligned.
+Looping retains converter history and reseeding occurs only for a fresh seek epoch.
+MIDI uses the first device boundary reaching each timeline event; compensated
+instruments wrap/release timeline notes in their own input coordinates, preserving
+live notes. Strip/send/take automation uses the same mapping. Plugins receive
+timeline seconds/beats and effective BPM (project BPM multiplied by rate); BPM is
+sampled on the canonical 64-frame control grid. Other source and event timing
+retains per-frame precision. Clicks are synthesized in device time at mapped beat
+crossings, retaining their pitch and 40 ms duration. Count-in freezes the timeline
+and uses the selected rate at its start.
+
+Manual scalar edits ramp for 10 ms; changes of converter/rate configuration prime
+the selected source state and crossfade for 10 ms. The old path runs only through
+that transition. Preparation runs off the callback; a prepared-plan queue preserves
+the exact sequence of trajectories already rendered. Source state and compensated
+delays carry across unrelated model changes. The usual edit response includes the
+render horizon (normally 200 ms). For alignment, a rate/mode/curve edit additionally
+waits for maximum compensated source lookahead and a canonical boundary. Further
+requests coalesce while the source transition finishes; requested model settings
+and undo still update immediately. This can delay changes substantially on long
+latency take chains. Slow source preparation can extend the schedule; failure
+publishes no partial trajectory. `Engine::prepareSeek(seconds)` prepares fresh
+source state off-thread before publishing the seek epoch, returning a structured
+error if preparation fails. The old playback and live monitoring continue until
+publication. Stopped playback also prepares before resuming.
+
+Offline ranges are timeline ranges; inverse clock boundaries determine output
+length. Tail duration stays in device seconds, and fixed output PDC is cropped
+in device frames. `OfflineSettings::applyMasterPlayrate` defaults true; analysis
+taps and item-FX renders set it false. Converted output is capped at 2^28 frames;
+clock history has a separate bounded capacity and reports `playrate.budget` when
+plugin latency exceeds it. Changing a running graph to require unavailable past
+clock history returns `playrate.history`; pause and reload the graph, or restart
+the engine from the latest project before resuming.
+Source trajectory violations fail the render/process rather than silently
+presenting converter silence as successful audio.
+
+Render-command preflight accounts for scalar speed and conservatively uses the
+minimum effective envelope-point value when a curve is active. It includes the
+unscaled device-time tail and the larger of engine/export sample rates; requests
+whose upper bound exceeds the in-memory frame budget fail with `render.budget`
+before source preparation, files or jobs. Public `renderOffline` also checks
+finite timeline endpoints and rejects obvious expanded-duration excess before
+media preparation, then checks exact inverse-clock output length. Analysis taps
+and item-FX renders opt out of this master-rate expansion as well as conversion.

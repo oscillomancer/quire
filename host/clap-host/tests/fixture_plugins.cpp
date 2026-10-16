@@ -1104,10 +1104,14 @@ clap_process_status CLAP_ABI edgeProcess(const clap_plugin_t* pl, const clap_pro
     // Mode 50: the scaled-down intermediate is subnormal for |x| < 2^-26, so
     // the output shows this thread's FP environment in normal-range audio.
     const bool probe = E(pl)->config[0] == 50;
+    const bool tempoProbe = E(pl)->config[0] == 48;
     for (uint32_t c = 0; c < 2; ++c)
         for (uint32_t i = 0; i < p->frames_count; ++i) {
             const float x = p->audio_inputs[0].data32[c][i];
-            p->audio_outputs[0].data32[c][i] = probe ? x * 0x1p-100f * 0x1p100f : x;
+            p->audio_outputs[0].data32[c][i] =
+                tempoProbe ? static_cast<float>(p->transport ? p->transport->tempo / 1000. : 0.)
+                : probe    ? x * 0x1p-100f * 0x1p100f
+                           : x;
         }
     return E(pl)->config[0] == 11 ? CLAP_PROCESS_SLEEP : CLAP_PROCESS_CONTINUE;
 }
@@ -1400,8 +1404,16 @@ const clap_plugin_descriptor_t* CLAP_ABI factoryDesc(const clap_plugin_factory_t
 }
 const clap_plugin_t* CLAP_ABI factoryCreate(const clap_plugin_factory_t*, const clap_host_t* host,
                                             const char* id) {
-    if (!std::strcmp(id, gainDescriptor()->id))
-        return make<Gain>(host, gainDescriptor(), gainActivate, gainProcess, gainExt);
+    if (!std::strcmp(id, gainDescriptor()->id)) {
+        auto* plugin = const_cast<clap_plugin_t*>(
+            make<Gain>(host, gainDescriptor(), gainActivate, gainProcess, gainExt));
+        plugin->reset = [](const clap_plugin_t* pl) {
+            // A seek must clear latency history just as activation does.
+            std::memset(G(pl)->delay, 0, sizeof(G(pl)->delay));
+            G(pl)->delayPos = 0;
+        };
+        return plugin;
+    }
     if (!std::strcmp(id, checkedGainDescriptor(false)->id) ||
         !std::strcmp(id, checkedGainDescriptor(true)->id) ||
         !std::strcmp(id, slowGainDescriptor()->id) || !std::strcmp(id, badCurveDescriptor()->id)) {

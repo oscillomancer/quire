@@ -20,7 +20,7 @@ constexpr long kSeed = 20261016;
 void PlayrateClock::reset(double timeline, double rate) SUPPLE_RT {
     timeline_ = timeline;
     scalar_ = from_ = target_ = boundedRate(rate);
-    rampFrames_ = rampAt_ = 0;
+    rampFrames_ = rampAt_ = waitFrames_ = 0;
 }
 void PlayrateClock::setRate(double rate, std::uint32_t frames) SUPPLE_RT {
     rate = boundedRate(rate);
@@ -31,19 +31,31 @@ void PlayrateClock::setRate(double rate, std::uint32_t frames) SUPPLE_RT {
     rampAt_ = 0;
     if (frames == 0) scalar_ = target_;
 }
+void PlayrateClock::transition(double rate, double from, std::uint32_t frames,
+                               std::uint32_t wait) SUPPLE_RT {
+    scalar_ = from_ = boundedRate(from);
+    target_ = boundedRate(rate);
+    rampFrames_ = frames;
+    rampAt_ = 0;
+    waitFrames_ = wait;
+    if (frames == 0 && wait == 0) scalar_ = target_;
+}
 void PlayrateClock::setEnvelope(Envelope envelope, const void* context) SUPPLE_RT {
     envelope_ = envelope;
     context_ = context;
 }
 double PlayrateClock::rate() const SUPPLE_RT {
-    return envelope_ ? boundedRate(envelope_(context_, timeline_)) : scalar_;
+    const double value = envelope_ ? envelope_(context_, timeline_) : scalar_;
+    return std::isnan(value) ? scalar_ : boundedRate(value);
 }
 void PlayrateClock::advance(std::span<double> boundaries) SUPPLE_RT {
     if (boundaries.empty()) return;
     for (std::size_t i = 0; i + 1 < boundaries.size(); ++i) {
         boundaries[i] = timeline_;
         timeline_ += rate();
-        if (rampAt_ < rampFrames_) {
+        if (waitFrames_ > 0) {
+            if (--waitFrames_ == 0 && rampFrames_ == 0) scalar_ = target_;
+        } else if (rampAt_ < rampFrames_) {
             ++rampAt_;
             scalar_ = rampAt_ == rampFrames_
                           ? target_

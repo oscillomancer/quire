@@ -52,9 +52,16 @@ timeline audio and MIDI, so an empty frontier does not remove this problem.
 5. **Mode changes.** Prime the newly selected converter from available file
    source content, then crossfade for 10 ms at a canonical boundary without
    adding graph latency. Do not keep both converters continuously warm.
-   Callback-owned sources spread bounded priming work across cycles, never
-   blocking the callback. The same transition applies when leaving unity
-   bypass. Prepare fresh seek state off-thread and delay the audible seek
+   Prepare source-only converter state on a background thread, including
+   callback-owned sources; live monitoring continues while preparation runs.
+   Delay publication until every newly selected source is ready. The same
+   transition applies when leaving unity bypass. Preserve compensated source
+   alignment: schedule the shared content-time transition after the maximum
+   compensated source lookahead, then coalesce newer requests until all sources
+   finish the transition. Long-latency take chains can therefore exceed the
+   usual approximately 200 ms control response. Requested settings update
+   immediately; effective rate follows consumed output. Prepare fresh seek
+   state off-thread and delay the audible seek
    until it is ready; live monitoring continues throughout. No callback calls
    a synchronous bridge or the background pool.
 6. **Saved settings.** `project.playrate` holds `{rate, preserve_pitch}`.
