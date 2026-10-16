@@ -97,6 +97,10 @@ if(WIN32)
     # clap-wrapper otherwise adds /CLAP to the generic output directory.
     string(TOUPPER "${BUILD_TYPE}" configuration)
     list(APPEND native_args "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_${configuration}=${WORK}/build/plugins")
+    # The parent's vcpkg toolchain would copy DLLs beside every executable
+    # after linking; parallel copies into the one build folder collide
+    # ("being used by another process"). Exports use no vcpkg libraries.
+    list(APPEND native_args "-DVCPKG_APPLOCAL_DEPS=OFF")
 endif()
 run("configuring ${CASE}" ${CMAKE_COMMAND} -S "${WORK}/project" -B "${WORK}/build" -G Ninja
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE} -DCMAKE_C_COMPILER=${CC} -DCMAKE_CXX_COMPILER=${CXX}
