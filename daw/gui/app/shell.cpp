@@ -91,6 +91,8 @@ std::unique_ptr<ui::Node> Shell::build(ui::Root& root, AppActions& actions) {
     shell->layout.dir = ui::Layout::Dir::Column;
     transport_ = std::make_unique<TransportBar>(app_, actions, dispatcher_, root);
     shell->add(transport_->build());
+    actions.addUi("ui.master.envelopes", "Master: envelopes",
+                  [this] { openEnvelopeMenu(model::kMaster, {}); });
     auto& body = shell->emplace<ui::Node>("body");
     body.layout.dir = ui::Layout::Dir::Row;
     engine::EngineApp& app = app_;
@@ -307,7 +309,9 @@ void Shell::openEnvelopeMenu(const model::Id& track, const ui::Rect& anchor) {
     const model::Track* tr = s.tracks.find(track);
     if (!tr) return;
     std::vector<ui::MenuItem> items, removals;
-    for (const char* param : {"volume", "pan", "mute"}) {
+    std::vector<const char*> params{"volume", "pan", "mute"};
+    if (track == model::kMaster) params.push_back("playrate");
+    for (const char* param : params) {
         std::optional<model::Id> env;
         bool shown = false;
         for (const auto& e : s.envelopes)
@@ -316,9 +320,10 @@ void Shell::openEnvelopeMenu(const model::Id& track, const ui::Rect& anchor) {
                 shown = e.value->visible;
             }
         ui::MenuItem m;
-        m.label = std::string(param == std::string_view("volume") ? "Volume"
-                              : param == std::string_view("pan")  ? "Pan"
-                                                                  : "Mute") +
+        m.label = std::string(param == std::string_view("volume")     ? "Volume"
+                              : param == std::string_view("pan")      ? "Pan"
+                              : param == std::string_view("playrate") ? "Playrate"
+                                                                      : "Mute") +
                   " envelope";
         m.checked = env && shown;
         if (env) {
@@ -338,9 +343,10 @@ void Shell::openEnvelopeMenu(const model::Id& track, const ui::Rect& anchor) {
             removals.push_back(std::move(remove));
         } else {
             // A new envelope starts flat at the strip's current value.
-            const double value = param == std::string_view("volume") ? tr->volumeDb
-                                 : param == std::string_view("pan")  ? tr->pan
-                                                                     : (tr->mute ? 1.0 : 0.0);
+            const double value = param == std::string_view("playrate") ? s.project->playrate.rate
+                                 : param == std::string_view("volume") ? tr->volumeDb
+                                 : param == std::string_view("pan")    ? tr->pan
+                                                                       : (tr->mute ? 1.0 : 0.0);
             m.run = [this, track, param = std::string(param), value] {
                 json::Value args = json::Value::object(), points = json::Value::array(),
                             first = json::Value::object();

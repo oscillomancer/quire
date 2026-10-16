@@ -237,12 +237,16 @@ in all display ranges: logarithmic travel on either side maps 0.25..4.0
 resets to 1.0. Drag moves use `transport.playrate.set` with one origin gesture
 per drag, hence one undo step; model/effective readback cannot take over
 while dragging. With an active nonempty master playrate envelope, readback
-uses `transport.playrate.get`'s effective rate; otherwise it shows the saved
-scalar. The staged engine still reports effective 1x and plays/renders at 1x.
+evaluates that curve at the playhead using the model's shape and automation-item
+helpers; otherwise it shows the saved scalar. Readback executes no commands
+and adds nothing to the command log. Expanded points are cached by project
+generation and model version. The integrated engine reports the audible rate
+at the consumption horizon; this stage still plays/renders at 1x.
 
 Right-click either the knob or readout for reset, semitone up/down
 (multiply/divide by `2^(1/12)`), ten cents up/down (`2^(1/120)`), Apply playrate
-to current BPM, the preserve-pitch toggle, and checked display ranges.
+to current BPM, the preserve-pitch toggle, and checked display ranges (the
+first is labeled `Playrate range: 0.25-4.0 (default)`).
 Pitch steps are bounded to the model's 0.25..4.0 range. Reset, the four pitch
 steps and preserve toggle also appear as key-bindable transport actions;
 the menu runs those same actions. Tempo bake uses
@@ -350,6 +354,20 @@ MIDI thumbnails map offset, rate and loop passes
 as playback does. Fade shapes and curve bends share playback's evaluator.
 Automation drawing samples only visible time and bounds loop glyph work;
 plugin automation interpolates in the playback parameter domain (ADR-0010).
+
+The main master's (`tr_0`) envelope menu also offers Playrate (ADR-0045);
+other strips, including secondary masters, do not. Creating it starts flat
+at the saved project rate. The rate menu's `Master envelopes...` entry and
+the key-bindable `Master: envelopes` action open this menu even when the
+master strip has no arrange row. Visible master automation lanes appear
+above the master's child tracks; master strip rows remain hidden. Playrate
+uses the existing lane, visibility, point
+editing, shapes and automation-item controls. Its scale is logarithmic over
+0.25..4.0 with a 1.0 reference at mid-height, ratio text such as `1.000x`, and
+its own clipboard unit. Empty lanes use the saved scalar as their fallback
+and redraw when that scalar changes. The lane display range is independent
+of the transport knob's per-project display range. In the staged engine the
+curve is editable and saved, but audio application remains pending.
 
 **Takes.** An item with several takes shows each in a lane under its name
 bar when the row is tall enough (at least 14 units a lane), the heard one

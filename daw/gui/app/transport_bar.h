@@ -6,9 +6,11 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "app_actions.h"
 #include "supple/engine/app.h"
@@ -63,6 +65,10 @@ class TransportBar {
     ui::Node* rateReadout_ = nullptr;
     std::size_t rateRange_ = 0;
     std::uint64_t rateGesture_ = 0;
+    std::optional<std::uint64_t> rateVersion_;
+    std::uint64_t rateGeneration_ = 0;
+    bool rateInSeconds_ = false;
+    std::vector<model::EnvPoint> ratePoints_;
     bool moving_ = false;
     std::optional<std::chrono::steady_clock::time_point> lastStatus_;
 };

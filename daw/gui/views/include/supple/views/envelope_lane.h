@@ -18,7 +18,7 @@
 namespace supple::views {
 
 struct EnvScale {
-    enum class Kind { Volume, Pan, Mute, Plugin };
+    enum class Kind { Volume, Pan, Mute, Playrate, Plugin };
     Kind kind = Kind::Volume;
     std::shared_ptr<const params::DescribedParam> param;  // Plugin: range, curve, units
     bool normalizedInterpolation = true;                  // semantic and normalized plug-in lanes
@@ -28,9 +28,9 @@ struct EnvScale {
     double reference() const;  // the lane's guide line: unity, centre, default
 };
 
-// The scale of a track's, route's or take's mixer envelope; nullopt for others.
+// The scale of a mixer envelope or the main master's playrate; nullopt for others.
 std::optional<EnvScale> envScale(const model::Envelope& env);
-// "Volume", "Pan", "Mute" (or the parameter key).
+// "Volume", "Pan", "Mute", "Playrate" (or the parameter key).
 std::string envTitle(const model::Envelope& env);
 // The envelope's value at a beat (points are in beats), with the segment
 // shapes the engine plays; `fallback` when it has no points.

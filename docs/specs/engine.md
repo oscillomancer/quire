@@ -1454,7 +1454,7 @@ input timing, disconnect reliability or performance on every driver.
 Project schema 2.1 stores master playrate and its `tr_0/playrate` envelope.
 The control interface is implemented before audio integration: **playback and
 all offline renders still run at 1x**, including when the saved rate or
-active envelope differs. No rate knob or lane UI is provided by this stage.
+active envelope differs. GUI controls and lane editing are specified in gui.md.
 The source converter, fractional clock, remapped MIDI/automation, effective
 BPM and metronome timing in ADR-0045 remain pending.
 

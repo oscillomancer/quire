@@ -218,13 +218,20 @@ void TransportBar::sync(bool event, std::chrono::steady_clock::time_point now) {
     if (click_) setIfChanged(click_, app_.metronome().enabled ? "click on" : "click");
     if (rate_ && !rate_->dragging()) {
         double shown = s.project->playrate.rate;
-        // Effective rate is consumption telemetry, including rate automation.
-        // The control-stage engine currently reports 1x for an active curve.
-        if (model::activePlayrateEnvelope(s)) {
-            if (auto r =
-                    dispatcher_.execute({"transport.playrate.get", json::Value::object(), kOrigin}))
-                shown = (*r)["effective_rate"].asDouble();
+        // Display the authored curve at the playhead without executing a logged
+        // command. Once integrated, the engine reports the audible rate at the
+        // consumption horizon. Cache expanded points until the model changes.
+        const auto generation = app_.projectGeneration();
+        if (!rateVersion_ || *rateVersion_ != s.version || rateGeneration_ != generation) {
+            rateVersion_ = s.version;
+            rateGeneration_ = generation;
+            ratePoints_.clear();
+            if (const auto id = model::activePlayrateEnvelope(s)) {
+                ratePoints_ = model::effectivePoints(s, *id);
+                rateInSeconds_ = s.envelopes.find(*id)->timebase == model::Timebase::Time;
+            }
         }
+        shown = model::pointsValueAt(ratePoints_, rateInSeconds_ ? info.seconds : info.beat, shown);
         rate_->setValue(ratePosition(shown));
         if (rateValue_) setIfChanged(rateValue_, rateText(shown));
     }
@@ -303,12 +310,17 @@ void TransportBar::openRateMenu() {
     for (std::size_t i = 0; i < kRateRanges.size(); ++i) {
         ui::MenuItem item;
         item.label = std::string("Playrate range: ") + kRateRanges[i].name;
+        if (i == 0) item.label += " (default)";
         item.checked = i == rateRange_;
         item.run = [this, i] {
             rateRange_ = i;
             sync();
         };
         items.push_back(std::move(item));
+    }
+    if (actions_.registry().find("ui.master.envelopes")) {
+        items.push_back({"", "", {}, true, true});
+        action("Master envelopes...", "ui.master.envelopes");
     }
     root_.openPopup(
         ui::makeMenu("transport.rate.menu", std::move(items), [this] { root_.closePopup(); }),
