@@ -520,7 +520,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "%s\n", message.c_str());
     };
     appActions.addUi("ui.mouse", "Edit: mouse modifiers…", [&] { mouseDialog.open(); });
-    appActions.addUi("ui.mouse.zoom", "View: wheel zoom anchor…",
+    appActions.addUi("ui.mouse.zoom", "Edit: wheel zoom anchor…",
                      [&] { mouseDialog.open("wheel.zoom"); });
     // Preferences (Edit menu): the default monitoring of new channels, the
     // wheel zoom anchor, a way into the mouse modifiers.
