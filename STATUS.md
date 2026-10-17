@@ -316,8 +316,9 @@ Session and editing:
 - Master playrate 0.25..4x and its tr_0 envelope persist in schema 2.1.
   Tape and pitch-preserving source conversion run before take FX/live mixing;
   MIDI, automation, plugin tempo, loops and transport share the fractional clock
-  (ADR-0045). Requested and consumed effective rate are exposed, including the
-  allocation-free EngineApp::playrateState() GUI accessor. Non-unity audio/MIDI
+  (ADR-0045). Seeded stretch phase variation uses a portable integer RNG and
+  explicit uniform conversion across standard libraries. Requested and consumed
+  effective rate are exposed, including the allocation-free EngineApp::playrateState() GUI accessor. Non-unity audio/MIDI
   recording is refused, including queued transitions. Writing retains coarse
   strip semantics. Rate/mode edits wait for compensated lookahead and coalesce
   during transitions; long-latency take chains can exceed the 200 ms horizon.
@@ -327,8 +328,8 @@ Session and editing:
   reserve four additional seconds for latency changes; history exhaustion or late
   preparation recovers automatically through a prepared locate at the consumed
   position, with the same state reset/preroll as a seek. Moving a compensated
-  stretch source uses this recovery too, preserving phase alignment. Portable executor
-  checks pass in dev and RTSan; native CI and independent review remain for the
+  stretch source uses this recovery too, preserving phase alignment. Portable
+  executor checks pass in dev, TSan and RTSan; native CI and independent review remain for the
   coordinator. Render-command budgets conservatively use the minimum curve
   value; a long varying-rate range may need splitting even when its exact
   duration would fit the output budget.

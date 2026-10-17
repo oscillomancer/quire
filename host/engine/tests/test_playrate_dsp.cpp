@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -11,6 +12,7 @@
 
 #include "playrate_dsp.h"
 #include "playrate_timeline.h"
+#include "signalsmith-stretch/signalsmith-stretch.h"
 #include "supple/dsp/dsp.h"
 
 using namespace supple::engine::detail;
@@ -79,9 +81,25 @@ double amplitude(std::span<const float> samples, double frequency) {
     }
     return 2 * std::hypot(real, imaginary) / double(samples.size());
 }
+// Phase variation can cancel a long-window complex amplitude while preserving
+// energy and pitch. Average short-window tone power against total steady
+// energy.
+double toneEnergyRatio(std::span<const float> samples, double frequency) {
+    double total = 0, tone = 0;
+    for (float value : samples) total += double(value) * double(value);
+    for (std::size_t at = 0; at < samples.size(); at += 1024) {
+        const auto window = samples.subspan(at, std::min<std::size_t>(1024, samples.size() - at));
+        const auto value = amplitude(window, frequency);
+        tone += .5 * value * value * double(window.size());
+    }
+    return total > 0 ? tone / total : 0;
+}
+
 }  // namespace
 
-TEST_CASE("playrate clock: fractional consumption and ramps ignore caller partitioning") {
+TEST_CASE(
+    "playrate clock: fractional consumption and ramps ignore caller "
+    "partitioning") {
     for (const double rate : {.25, .731, 1., 1.137, 4.}) {
         PlayrateClock whole, split;
         whole.reset(-123.5, rate);
@@ -103,7 +121,9 @@ TEST_CASE("playrate clock: fractional consumption and ramps ignore caller partit
     }
 }
 
-TEST_CASE("playrate clock: authored square steps are immediate and crossings are device offsets") {
+TEST_CASE(
+    "playrate clock: authored square steps are immediate and crossings "
+    "are device offsets") {
     PlayrateClock clock;
     clock.reset(0, 1);
     clock.setEnvelope(square, nullptr);
@@ -122,7 +142,9 @@ TEST_CASE("playrate clock: authored square steps are immediate and crossings are
     for (std::size_t i = 0; i < unity.size(); ++i) CHECK(unity[i] == 9.25 + double(i));
 }
 
-TEST_CASE("tape reader: exact unity, fractional DC, stereo linking and anti-alias cutoff") {
+TEST_CASE(
+    "tape reader: exact unity, fractional DC, stereo linking and "
+    "anti-alias cutoff") {
     TapeReader tape(std::make_shared<TapeTable>(), 2);
     auto tapeAt = [&](RateSource source, double pos, double rate) {
         std::array<double, 65> positions{};
@@ -158,7 +180,9 @@ TEST_CASE("tape reader: exact unity, fractional DC, stereo linking and anti-alia
     CHECK(amplitude(pass, .04) > .39);
 }
 
-TEST_CASE("streaming stretch: seek reseeds, priming budgets and caller groups are deterministic") {
+TEST_CASE(
+    "streaming stretch: seek reseeds, priming budgets and caller groups "
+    "are deterministic") {
     Source source;
     StretchReader a(48000), b(48000);
     constexpr std::size_t n = 64 * 512;
@@ -174,9 +198,15 @@ TEST_CASE("streaming stretch: seek reseeds, priming budgets and caller groups ar
         CHECK(al == bl);
         CHECK(ar == br);
         CHECK(std::all_of(al.begin(), al.end(), [](float v) { return std::isfinite(v); }));
-        CHECK(amplitude(std::span(al).subspan(8192), source.frequency) > .25);
+        const auto steady = std::span(al).subspan(8192);
+        double power = 0;
+        for (float value : steady) power += double(value) * double(value);
+        const double rms = std::sqrt(power / double(steady.size()));
+        CHECK(rms > .2);
+        CHECK(rms < .35);
+        CHECK(toneEnergyRatio(steady, source.frequency) > .8);
         if (rate == .25 || rate == 4.)
-            CHECK(amplitude(std::span(al).subspan(8192), source.frequency * rate) < .04);
+            CHECK(toneEnergyRatio(steady, source.frequency * rate) < .02);
         start(a, source.reader(), rate, 3);
         stretchRun(a, source.reader(), rate, al, ar);
         CHECK(al == bl);
@@ -184,7 +214,9 @@ TEST_CASE("streaming stretch: seek reseeds, priming budgets and caller groups ar
     }
 }
 
-TEST_CASE("streaming stretch: unprimed and discontinuous trajectories do not advance") {
+TEST_CASE(
+    "streaming stretch: unprimed and discontinuous trajectories do not "
+    "advance") {
     StretchReader reader(44100);
     Source source;
     reader.seek(source.reader(), 1000, .25);
@@ -225,7 +257,9 @@ TEST_CASE("streaming stretch: primed output aligns with the requested source tim
     }
 }
 
-TEST_CASE("source conversion: mono and multichannel use one block fetch per channel") {
+TEST_CASE(
+    "source conversion: mono and multichannel use one block fetch per "
+    "channel") {
     struct Memory {
         std::vector<std::vector<float>> channels;
         mutable std::size_t calls = 0;
@@ -277,7 +311,9 @@ TEST_CASE("source conversion: mono and multichannel use one block fetch per chan
     }
 }
 
-TEST_CASE("timeline window: partitioning, PDC history, loops and plan adoption share phase") {
+TEST_CASE(
+    "timeline window: partitioning, PDC history, loops and plan adoption "
+    "share phase") {
     using supple::model::PointShape;
     const std::vector<RatePoint> points{{0, .731, PointShape::Linear, 0},
                                         {10000, 2.137, PointShape::Square, 0},
@@ -328,7 +364,9 @@ TEST_CASE("playrate timeline: manual transitions wait for compensated lookahead"
     CHECK(next.rate(34272) == 2);
 }
 
-TEST_CASE("playrate timeline: nonzero range origins share absolute clock accumulation") {
+TEST_CASE(
+    "playrate timeline: nonzero range origins share absolute clock "
+    "accumulation") {
     std::vector<RatePoint> absolute{{0, .5, supple::model::PointShape::Linear, 0},
                                     {960, 2, supple::model::PointShape::Linear, 0}};
     auto relative = absolute;
@@ -354,14 +392,17 @@ TEST_CASE("playrate timeline: retained history is tagged across ring wrap") {
     CHECK_FALSE(clock.hasHistory(65, 321));
 }
 
-TEST_CASE("playrate timeline: small graph edits retain earlier variable-rate history") {
+TEST_CASE(
+    "playrate timeline: small graph edits retain earlier variable-rate "
+    "history") {
     PlayrateTimeline original(2048, 1,
                               {{0, .5, supple::model::PointShape::Linear, 0},
                                {1000, 2, supple::model::PointShape::Linear, 0}});
     original.ensure(1400);
     PlayrateTimeline copied(2048, 1, original.points());
     copied.seed(original.snapshot(1000));
-    REQUIRE(copied.copyPast(original, 936, 1000));  // edit currently needs just 64 frames
+    REQUIRE(copied.copyPast(original, 936,
+                            1000));  // edit currently needs just 64 frames
     PlayrateTimeline adopted(2048, 1, original.points());
     copied.ensure(1400);
     adopted.adopt(copied, 1100, 0, 0, false);
@@ -376,4 +417,23 @@ TEST_CASE("playrate timeline: small graph edits retain earlier variable-rate his
     oversized.seed(original.snapshot(1000));
     CHECK_FALSE(oversized.copyPast(original, -100, 1000));
     CHECK_FALSE(oversized.hasHistory(-100, 1000));
+}
+
+TEST_CASE(
+    "streaming stretch: default RNG and uniform conversion have fixed "
+    "bit patterns") {
+    using signalsmith::stretch::_impl::PortableRandomEngine;
+    using signalsmith::stretch::_impl::portableUnit;
+    PortableRandomEngine random(0);
+    for (auto expected : {0xe220a839u, 0x6e789e6au, 0x06c45d18u, 0xf88bb8a8u, 0x1b39896au,
+                          0x53cb9f0cu, 0x2c829abeu, 0xc584133au})
+        CHECK(random() == expected);
+    random.seed(0);
+    for (auto expected : {0x3f6220a8u, 0x3edcf13cu, 0x3cd88ba0u, 0x3f788bb8u, 0x3dd9cc48u,
+                          0x3ea7973eu, 0x3e320a68u, 0x3f458413u})
+        CHECK(std::bit_cast<std::uint32_t>(portableUnit<float>(random)) == expected);
+    random.seed(0);
+    for (auto expected : {0x3fec4415072dcf13ull, 0x3f9b117463e22ee0ull, 0x3fbb39896a53cb98ull,
+                          0x3fc6414d5f62c208ull})
+        CHECK(std::bit_cast<std::uint64_t>(portableUnit<double>(random)) == expected);
 }

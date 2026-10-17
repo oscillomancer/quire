@@ -1548,9 +1548,14 @@ while seeking, priming or processing. Unprimed/discontinuous trajectories are
 refused without changing the stretch state.
 
 A documented MIT vendor patch adds `reset(seed)` and resets silence/seek/smoothing
-state. Plain `reset()` retains upstream's random-sequence behavior; existing
-whole-file media variants keep their seed and processing schedule. Shared
-portable DSP tests exercise partition-independent clock/ramp output, exact unity,
+state. Its default RNG uses a fixed SplitMix64 integer sequence and explicit
+24-bit float/53-bit double uniform conversion, independent of standard-library
+engine/distribution choices. Plain `reset()` retains the current RNG state;
+explicitly supplied custom engines keep upstream distribution behavior. Existing
+whole-file media variants keep their seed and processing schedule, with the new
+portable phase sequence. Steady-state quality checks measure RMS and local tone
+energy rather than a phase-sensitive long-window amplitude. Shared portable DSP
+tests exercise partition-independent clock/ramp output, exact unity,
 linked stereo, tape anti-aliasing, preserved pitch, unity impulse alignment,
 repeatable seeks at extreme
 rates, non-48k priming and invalid trajectory rejection, including under RTSan.
