@@ -182,8 +182,12 @@ RateAdoption rateAdoption(const Plan& p, const Plan* previous, std::int64_t stre
     if (p.handEpoch > epoch) return RateAdoption::Wait;
     if (!p.ratePrepared || p.handEpoch != epoch) return RateAdoption::Reseek;
     if (p.rateSeekSequence != 0 || !playing) return RateAdoption::Ready;
-    if (stream > p.handAt || p.rateFromGeneration != (previous ? previous->generation : 0))
-        return RateAdoption::Reseek;
+    // The consumed clock can name an older unity plan than the renderer runs
+    // (unity plans publish no trajectory of their own); between unity plans
+    // the identity trajectory is the same, so either is the predecessor.
+    const bool predecessor = p.rateFromGeneration == (previous ? previous->generation : 0) ||
+                             (p.rateFromUnity && (!previous || !previous->rateEnabled));
+    if (stream > p.handAt || !predecessor) return RateAdoption::Reseek;
     return stream == p.handAt ? RateAdoption::Ready : RateAdoption::Wait;
 }
 
@@ -248,8 +252,17 @@ Status configureRateTransition(Plan& p, Plan* previous, PlayrateTimeline& old,
     if (previous)
         for (const auto& edit : previous->scalarHistory)
             if (edit.device > device) p.scalarHistory.push_back(edit);
+    // Leaving 1.0 for a scalar rate in the same mode, from the unity bypass or a
+    // preserve-pitch plan compiled at 1.0 (Engine::loadScalarRate), is a knob
+    // move: glide as live knob moves do, not in 10 ms. The rate holds 1.0
+    // through the converter crossfade, so both sources agree while both play.
+    const bool knob = previous && p.timelines[0]->points().empty() && old.points().empty() &&
+                      (!previous->rateEnabled || previous->requestedScalar == 1) &&
+                      p.masterPlayrate.preservePitch == previous->masterPlayrate.preservePitch;
+    const auto ramp = knob ? scalarRampFrames(p.rate) : p.smoothFrames;
+    const auto smoothing = knob ? scalarSmoothingFrames(p.rate) : 0u;
     for (std::size_t c = 0; c < 2; ++c) {
-        p.timelines[c]->adopt(old, device, p.smoothFrames, wait, changed);
+        p.timelines[c]->adopt(old, device, ramp, wait, changed, smoothing);
         const auto& prior = old;
         p.previousTimelines[c] = std::make_unique<PlayrateTimeline>(
             old.capacity(), prior.snapshot(device).clock.target, prior.points());

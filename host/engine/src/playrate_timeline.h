@@ -11,6 +11,15 @@
 
 namespace supple::engine::detail {
 
+// Live knob moves (Engine::loadScalarRate): the longest linear ramp, and the
+// low-pass that joins ramps into one smooth glide, in frames at `sampleRate`.
+inline std::uint32_t scalarRampFrames(double sampleRate) {
+    return static_cast<std::uint32_t>(std::lround(0.3 * sampleRate));
+}
+inline std::uint32_t scalarSmoothingFrames(double sampleRate) {
+    return static_cast<std::uint32_t>(std::lround(0.15 * sampleRate));
+}
+
 struct ScalarRateEdit {
     std::int64_t device = 0;
     double rate = 1;
@@ -56,8 +65,9 @@ class PlayrateTimeline {
     PlayrateTimeline(std::size_t capacity, double rate, std::vector<RatePoint> points,
                      double origin = 0);
     void reset(std::int64_t device, double timeline) SUPPLE_RT;
+    // `smoothing`: a changed scalar glides as a live knob move does.
     void adopt(const PlayrateTimeline& previous, std::int64_t device, std::uint32_t rampFrames,
-               std::uint32_t waitFrames = 0, bool changed = true);
+               std::uint32_t waitFrames = 0, bool changed = true, std::uint32_t smoothing = 0);
     void inheritControls(const PlayrateTimeline& previous);
     void loop(double start, double end, bool on) SUPPLE_RT;
     void ensure(std::int64_t last) SUPPLE_RT;

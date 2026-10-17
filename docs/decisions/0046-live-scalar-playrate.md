@@ -15,9 +15,9 @@ becoming audible until the gesture ends.
 
 ## Decision
 
-An edit changing only the saved scalar, with the same pitch mode and unity
-bypass state, publishes a small scheduled control transaction to the existing
-plan. Persistent session collection identity identifies these edits without
+An edit changing only the saved scalar, with the same pitch mode, on a
+rate-enabled plan, publishes a small scheduled control transaction to the
+existing plan, including a move to or through exactly 1.0 (a MIDI knob's centre). Persistent session collection identity identifies these edits without
 walking tracks. It does not compile the graph, recreate plugins, prime sources,
 change the transport epoch or replace converters.
 
@@ -44,8 +44,11 @@ so an unrelated graph edit does not revert or skip a scheduled scalar ramp.
 Queue saturation coalesces requests on the control thread and service retries
 the latest value; ordinary 60–100 Hz gestures do not wait for earlier ramps.
 
-Mode changes, unity bypass crossings and structural edits retain the prepared
-plan path. Choose and validate that path's handoff against the actual renderer
+Mode changes, leaving the unity bypass, leaving 1.0 on a preserve-pitch plan
+compiled at 1.0 (its sources read as tape) and structural edits retain the
+prepared plan path. A prepared change of only the scalar away from a steady 1.0
+glides as a knob move does. Unity-bypass plans share the identity trajectory, so
+the renderer accepts any of them as the predecessor of a prepared rate plan. Choose and validate that path's handoff against the actual renderer
 frontier, rounded to the canonical grid, with headroom for render block size and
 observed preparation duration. Retry a missed boundary farther ahead. Keep
 prepared-locate recovery for exceptional lateness/history exhaustion.

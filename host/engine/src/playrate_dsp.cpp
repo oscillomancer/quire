@@ -38,14 +38,14 @@ void PlayrateClock::setRate(double rate, std::uint32_t frames, std::uint32_t smo
     smoothing_ = smoothing;
     if (frames == 0 && smoothing == 0) scalar_ = target_;
 }
-void PlayrateClock::transition(double rate, double from, std::uint32_t frames,
-                               std::uint32_t wait) SUPPLE_RT {
+void PlayrateClock::transition(double rate, double from, std::uint32_t frames, std::uint32_t wait,
+                               std::uint32_t smoothing) SUPPLE_RT {
     scalar_ = from_ = boundedRate(from);
     target_ = boundedRate(rate);
     rampFrames_ = frames;
     rampAt_ = 0;
     waitFrames_ = wait;
-    smoothing_ = 0;
+    smoothing_ = smoothing;
     if (frames == 0 && wait == 0) scalar_ = target_;
 }
 void PlayrateClock::setEnvelope(Envelope envelope, const void* context) SUPPLE_RT {
@@ -61,7 +61,9 @@ void PlayrateClock::advance(std::span<double> boundaries) SUPPLE_RT {
     for (std::size_t i = 0; i + 1 < boundaries.size(); ++i) {
         boundaries[i] = timeline_;
         timeline_ += rate();
-        if (smoothing_ > 0) {
+        if (smoothing_ > 0 && waitFrames_ > 0) {
+            --waitFrames_;  // holding `from` until the ramp starts
+        } else if (smoothing_ > 0) {
             if (rampAt_ < rampFrames_) ++rampAt_;
             const double ramp = ramped();
             scalar_ += (ramp - scalar_) / smoothing_;

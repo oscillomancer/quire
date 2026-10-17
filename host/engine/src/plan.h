@@ -576,6 +576,9 @@ struct Plan {
     } preparedRateBoundary;
     std::int64_t rateHandDevice = 0;
     std::uint64_t rateSeekSequence = 0, rateEpochSeekSequence = 0, rateFromGeneration = 0;
+    // Prepared from a unity-bypass plan (or none): any unity predecessor plays
+    // the same identity trajectory, so the renderer may adopt from either.
+    bool rateFromUnity = false;
     bool ratePrepared = false;
     std::int64_t rateOrigin = 0, rateDeviceMargin = 0, rateBackendLatency = 0;
     std::int64_t rateSourceAhead = 0, rateSourceBehind = 0;

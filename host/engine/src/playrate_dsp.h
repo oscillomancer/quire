@@ -45,8 +45,9 @@ class PlayrateClock {
     void reset(double timeline, double rate) SUPPLE_RT;
     // `smoothing` 0: the scalar is the ramp itself.
     void setRate(double rate, std::uint32_t rampFrames, std::uint32_t smoothing = 0) SUPPLE_RT;
-    void transition(double rate, double from, std::uint32_t rampFrames,
-                    std::uint32_t waitFrames) SUPPLE_RT;
+    // Holds `from` for `waitFrames`, then ramps to `rate` (smoothed as setRate).
+    void transition(double rate, double from, std::uint32_t rampFrames, std::uint32_t waitFrames,
+                    std::uint32_t smoothing = 0) SUPPLE_RT;
     void setEnvelope(Envelope envelope, const void* context) SUPPLE_RT;
     double timeline() const SUPPLE_RT { return timeline_; }
     double rate() const SUPPLE_RT;

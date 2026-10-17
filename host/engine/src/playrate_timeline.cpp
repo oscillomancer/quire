@@ -72,7 +72,8 @@ PlayrateClock PlayrateTimeline::clockAt(std::int64_t device) const SUPPLE_RT {
 }
 
 void PlayrateTimeline::adopt(const PlayrateTimeline& previous, std::int64_t device,
-                             std::uint32_t rampFrames, std::uint32_t waitFrames, bool changed) {
+                             std::uint32_t rampFrames, std::uint32_t waitFrames, bool changed,
+                             std::uint32_t smoothing) {
     const auto past =
         static_cast<std::int64_t>(std::min(positions_.size(), previous.positions_.size()) / 2);
     first_.store(std::max(previous.first_.load(std::memory_order_acquire), device - past),
@@ -86,7 +87,7 @@ void PlayrateTimeline::adopt(const PlayrateTimeline& previous, std::int64_t devi
         previousPoints_ = previous.points_;
         curveSwitchPhase_ = previous.absolutePhase(device + waitFrames);
         const double from = previous.rate(device + waitFrames);
-        clock_.transition(scalar_, from, rampFrames, waitFrames);
+        clock_.transition(scalar_, from, rampFrames, waitFrames, smoothing);
     } else {
         inheritControls(previous);
     }

@@ -1591,7 +1591,19 @@ and uses the selected rate at its start.
 Compatible scalar-only live edits (ADR-0046) retain the current graph and source
 converters. Persistent collection identity detects that only the project scalar
 changed, without traversing tracks. Unchanged-session and plugin maintenance
-reloads retain graph compilation. Two bounded SPSC queues carry identical
+reloads retain graph compilation. A rate-enabled plan glides through exactly
+1.0 like any value (a MIDI knob's centre lands there), on the converters it was
+compiled with; once rate scheduling has started the engine keeps rate-enabled
+plans until it stops, and tape reads at exactly 1.0 are the original samples.
+Two cases prepare a plan instead: leaving the unity bypass (no rate plan yet),
+and leaving 1.0 on a preserve-pitch plan compiled at 1.0, whose sources read as
+tape and need the stretch converter. When that prepared transition only changes
+the scalar from a steady 1.0 in the same mode, its clock holds 1.0 through the
+converter crossfade and then glides like a knob move (the longest ramp and the
+same low-pass), not in 10 ms. The renderer accepts a prepared plan whose
+predecessor is any unity-bypass plan when it runs one: the consumed clock can
+name an older unity plan than the renderer's, and unity plans share the
+identity trajectory. Two bounded SPSC queues carry identical
 64-frame device boundaries and values to the executor timelines; a shared
 release/acquire gate commits both queues together. Boundaries follow both
 already generated clock windows plus a render/device block of publication
