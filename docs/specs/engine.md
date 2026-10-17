@@ -1585,7 +1585,14 @@ and uses the selected rate at its start.
 
 Manual scalar edits ramp for 10 ms; changes of converter/rate configuration prime
 the selected source state and crossfade for 10 ms. The old path runs only through
-that transition. Preparation runs off the callback; a prepared-plan queue preserves
+that transition. All source allocation, configuration and priming run on the
+control thread before publication, including non-seek anticipative edits. An
+ordered control-to-renderer queue carries prepared plans to a future canonical
+stream boundary; the renderer only validates that boundary, transfers source
+state and publishes the callback handoff through RT-annotated functions. It
+caps old-plan rendering/virtual advancement at that boundary. A late boundary or
+predecessor mismatch requests a prepared seek on the control thread without
+allocating or priming on the renderer. A prepared-plan queue preserves
 the exact sequence of trajectories already rendered. Source state and compensated
 delays carry across unrelated model changes. The usual edit response includes the
 render horizon (normally 200 ms). For alignment, a rate/mode/curve edit additionally

@@ -525,6 +525,8 @@ class Engine {
     std::uint32_t liveRender(const float* const* in, float* const* out, std::uint32_t frames,
                              std::uint32_t offset) SUPPLE_RT;
     void adoptLive(detail::Plan* next) SUPPLE_RT;
+    void adoptRendererSources(detail::Plan* next) SUPPLE_RT;
+    void publishRendererPlan(detail::Plan& next, std::uint64_t epoch, bool queuedRate) SUPPLE_RT;
     // What a pull played: the timeline sample of its first frame (or
     // kNothingPlayed) and how many frames, from the start of the buffer, came
     // from rendered chunks (the rest is silence: the renderer fell behind).
@@ -653,6 +655,9 @@ class Engine {
     // Rendered plans cannot be coalesced: callback-owned sources must consume
     // every clock trajectory already represented in frontier/master audio.
     SpscRing<detail::Plan*, 1024> planHandoffs_;
+    // Control producer -> renderer consumer. Converter preparation is complete
+    // before publication; the renderer preserves these scheduled trajectories.
+    SpscRing<detail::Plan*, 1024> ratePlanRequests_;
     std::unique_ptr<detail::Workers> workers_;
     std::unique_ptr<detail::LiveWorkers> liveWorkers_;
     std::atomic<detail::LiveWorkers*> liveWorkersReady_{nullptr};

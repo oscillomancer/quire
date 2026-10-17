@@ -321,7 +321,9 @@ Session and editing:
   recording is refused, including queued transitions. Writing retains coarse
   strip semantics. Rate/mode edits wait for compensated lookahead and coalesce
   during transitions; long-latency take chains can exceed the 200 ms horizon.
-  Seeks prepare off the callback while playback/monitoring continues. Clock windows
+  All source allocation/priming runs on the control thread; the renderer and
+  callback adopt prepared state at scheduled boundaries under RTSan. Seeks prepare
+  off the audio executors while playback/monitoring continues. Clock windows
   reserve four additional seconds for latency changes; history exhaustion or late
   preparation recovers automatically through a prepared locate at the consumed
   position, with the same state reset/preroll as a seek. Moving a compensated

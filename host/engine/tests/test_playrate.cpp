@@ -1239,3 +1239,64 @@ TEST_CASE("master playrate handoffs: unity graph survives an epoch before its fi
         engine.stop();
     }
 }
+
+TEST_CASE("master playrate RT adoption: prepared knob edits keep their epoch") {
+    constexpr double fs = 8000;
+    for (bool anticipative : {false, true})
+        for (bool live : {false, true})
+            for (bool preserve : {false, true}) {
+                CAPTURE(anticipative);
+                CAPTURE(live);
+                CAPTURE(preserve);
+                PlayrateHost h;
+                if (live)
+                    h.arm();
+                else
+                    h.run("track.add");
+                audio::AudioData tone;
+                tone.sampleRate = fs;
+                tone.channels.assign(2, std::vector<float>(32000));
+                for (std::size_t i = 0; i < tone.frames(); ++i)
+                    tone.channels[0][i] = tone.channels[1][i] =
+                        static_cast<float>(.2 * std::sin(double(i) * .07));
+                REQUIRE(audio::writeWav(h.root / "prepared.wav", tone));
+                auto args = json::Value::object();
+                args["track"] = "tr_1";
+                args["audio_file"] = (h.root / "prepared.wav").string();
+                h.run("item.add", json::writeCompact(args));
+                model::EditTxn edit(h.app->head(), 100);
+                auto project = edit.project();
+                project.console9 = false;
+                project.playrate = {.8, preserve};
+                edit.setProject(project);
+                const auto initial = edit.commit().value();
+                auto pool = playrateFixturePool();
+                MediaCache media;
+                DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+                Engine engine(pool, media, {.anticipative = anticipative, .workers = 0});
+                REQUIRE(engine.start(backend, {.sampleRate = fs, .blockSize = 128, .inputs = 1}));
+                REQUIRE(engine.load(initial));
+                engine.play();
+                auto run = [&](int cycles) {
+                    for (int i = 0; i < cycles; ++i) {
+                        if (anticipative) REQUIRE(engine.awaitRendered(1024));
+                        backend.run(1);
+                        engine.service();
+                        (void)engine.transport();  // concurrent renderer/control metadata reads
+                    }
+                };
+                run(32);
+                const auto epoch = engine.meterClock().epoch;
+                model::EditTxn knob(initial, initial.version + 1);
+                project.playrate.rate = 1.137;
+                knob.setProject(project);
+                REQUIRE(engine.load(knob.commit().value()));
+                run(64);
+                REQUIRE(engine.awaitPlan());
+                CHECK(engine.effectivePlayrate() == 1.137);
+                CHECK(engine.meterClock().epoch == epoch);  // non-seek RT adoption actually ran
+                CHECK(engine.processErrors() == 0);
+                CHECK(engine.warnings().empty());
+                engine.stop();
+            }
+}
