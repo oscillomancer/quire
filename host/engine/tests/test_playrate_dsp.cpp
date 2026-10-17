@@ -476,3 +476,35 @@ TEST_CASE("playrate timeline: scheduled scalar edits leave authored envelopes au
     CHECK(timeline.position(512) == 384);
     CHECK(timeline.snapshot(512).clock.target == 1.7);
 }
+
+TEST_CASE("playrate timeline: a smoothed scalar glide resumes exactly from a snapshot") {
+    // Live knob moves: ramps joined through a low-pass (PlayrateClock smoothing).
+    const std::vector<ScalarRateEdit> edits{
+        {128, 1.3, 0, 300, 600}, {448, 1.1, 0, 200, 600}, {640, 1.6, 0, 300, 600}};
+    PlayrateTimeline whole(16384, .8, {});
+    for (const auto& edit : edits) REQUIRE(whole.scalarEdits.push(edit));
+    whole.ensure(12000);
+    CHECK(whole.rate(128) == .8);
+    CHECK(whole.rate(11999) == 1.6);  // settled exactly
+    // The rate and its slope are continuous: no step and no corner.
+    double steepest = 0, corner = 0;
+    for (int at = 130; at < 12000; ++at) {
+        const double slope = whole.rate(at) - whole.rate(at - 1);
+        const double before = whole.rate(at - 1) - whole.rate(at - 2);
+        steepest = std::max(steepest, std::abs(slope));
+        corner = std::max(corner, std::abs(slope - before));
+    }
+    CHECK(corner < .02 * steepest);
+    // Structural preparation seeds a timeline from a snapshot mid-glide and
+    // replays the later edits: it must continue the same trajectory.
+    for (const std::int64_t at : {200, 520, 700}) {
+        CAPTURE(at);
+        PlayrateTimeline resumed(16384, .8, {});
+        resumed.seed(whole.snapshot(at));
+        for (const auto& edit : edits)
+            if (edit.device > at) REQUIRE(resumed.scalarEdits.push(edit));
+        resumed.ensure(12000);
+        for (std::int64_t device = at; device < 12000; ++device)
+            REQUIRE(resumed.rate(device) == whole.rate(device));
+    }
+}

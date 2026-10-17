@@ -23,13 +23,17 @@ change the transport epoch or replace converters.
 
 Both executor timelines receive the same device boundary and value through
 bounded SPSC queues with a shared release/acquire publication gate. Their sole
-owners apply the control on the 64-frame clock grid and ramp linearly from the
-current scalar over 1.5 times the audio played since the previous scalar edit,
-between one device block (at least 10 ms) and 200 ms. Fixed 10 ms ramps
-turned a knob's spaced steps into audible jumps and holds; ramps measured from
-played audio (which advances with the device, unlike the render frontier) join
-them into one glide that follows the gesture, the next edit normally arriving
-mid-ramp. Existing source trajectories and stretch history continue.
+owners apply the control on the 64-frame clock grid. A linear ramp runs from
+the current ramp value over 1.5 times the audio played since the previous
+scalar edit, between one device block (at least 10 ms) and 300 ms, and the
+scalar follows those ramps through a one-pole low-pass with a 150 ms time
+constant. Fixed 10 ms ramps turned a knob's spaced steps into audible jumps
+and holds; ramps measured from played audio (which advances with the device,
+unlike the render frontier) join them, and the low-pass removes the remaining
+corners where one ramp meets the next, so rate and slope are both continuous.
+Smoothness takes priority over response: the knob is heard as a glide, never
+as steps. The filter state is part of the clock state, so checkpoints and
+structural replay reproduce it exactly. Existing source trajectories and stretch history continue.
 The boundary follows both timelines' already generated windows, including source
 and PDC lookahead, plus publication headroom. Automation remains authoritative;
 scalar controls do not smooth authored envelope steps.

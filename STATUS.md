@@ -335,7 +335,8 @@ Session and editing:
   recording is refused, including queued transitions. Writing retains coarse
   strip semantics. Compatible scalar-only live edits publish bounded clock
   controls, retain source/converter state and glide over the time between
-  moves (one continuous pitch glide for a mouse drag or MIDI knob) without graph
+  moves through a 150 ms low-pass (one smooth pitch glide for a mouse drag or
+  MIDI knob, at the cost of some extra lag) without graph
   compilation or an epoch change (ADR-0046). Structural prediction retains
   pending scalar ramps. Bypass/mode/curve edits wait for compensated lookahead
   and coalesce during prepared transitions; long-latency take chains can exceed

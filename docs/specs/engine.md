@@ -1599,10 +1599,14 @@ headroom (at least 128 frames), so existing PDC and
 stretch lookahead is respected. Each timeline ramps linearly from its current
 scalar, without restarting the converter or replacing the plan/epoch, over one
 and a half times the audio played since the previous scalar edit (at least one
-device block and 10 ms, at most 200 ms; 200 ms after a pause or a new epoch).
-A mouse drag's or MIDI knob's steps therefore join into one continuous glide
-that follows the gesture: the next edit normally arrives mid-ramp and
-continues from there. Authored
+device block and 10 ms, at most 300 ms; 300 ms after a pause or a new epoch):
+the next edit normally arrives mid-ramp and continues from there. The scalar
+follows that chain of ramps through a one-pole low-pass with a 150 ms time
+constant (`PlayrateClock` smoothing, part of its state, so checkpoints and
+structural replay reproduce it), which removes the corners where ramps meet:
+a mouse drag's or MIDI knob's steps become one glide with continuous rate and
+slope. It settles exactly once within 1e-5 of the target. Smoothness takes
+priority over response here. Authored
 rate envelopes remain authoritative and retain their shapes. A control-side
 history replays scheduled future scalar edits during structural preparation.
 Queue saturation coalesces the latest value for service to retry. Ordinary

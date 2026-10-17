@@ -15,7 +15,7 @@ struct ScalarRateEdit {
     std::int64_t device = 0;
     double rate = 1;
     std::uint64_t sequence = 0;
-    std::uint32_t rampFrames = 0;
+    std::uint32_t rampFrames = 0, smoothing = 0;  // PlayrateClock::setRate's
 };
 
 struct RatePoint {
