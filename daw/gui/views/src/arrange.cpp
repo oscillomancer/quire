@@ -1303,17 +1303,17 @@ bool ArrangeView::onPointer(const ui::PointerEvent& e) {
     // Over the TCP the editable tcp.wheel bindings scroll or resize tracks.
     // Over the lanes and the ruler the wheel zooms
     // at the project cursor or the pointer (Shift: scroll in time, Ctrl: scroll the tracks,
-    // Ctrl+Shift: the rows' height; a sideways wheel scrolls in time).
+    // Ctrl+Shift: additive all-row resize; a sideways wheel scrolls in time).
     Viewport v = view_;
     const bool ctrl = (e.mods & ui::kCtrl) != 0, shift = (e.mods & ui::kShift) != 0;
     const bool overTracks = tcp_ && tcp_->bounds().contains(e.pos);
     const auto tcpWheel =
         overTracks ? gestures_->mouse.behaviour("tcp.wheel", e.mods) : std::string_view{};
-    if (tcpWheel == "resize_all") {
+    if (tcpWheel == "resize_all" || (!overTracks && ctrl && shift)) {
         std::optional<std::size_t> anchor;
         float fraction = 0;
         for (std::size_t i = 0; i < layout_.rowCount(); ++i) {
-            const auto row = tcp_->rowRect(i);
+            const auto row = rowRect(i);
             if (row.y <= e.pos.y && e.pos.y < row.bottom()) {
                 anchor = i;
                 fraction = (e.pos.y - row.y) / row.h;
@@ -1324,14 +1324,8 @@ bool ArrangeView::onPointer(const ui::PointerEvent& e) {
         layout_.adjustAllTrackHeights(e.wheelY * 8.0f);
         if (anchor)
             v.scrollY = layout_.yOf(*anchor) + fraction * layout_.heightOf(*anchor) -
-                        (e.pos.y - tcp_->bounds().y);
+                        (e.pos.y - lanesRect().y);
         setViewport(v);  // clamps at the timeline's top/end when the anchor cannot hold
-        return true;
-    }
-    if (tcpWheel == "zoom_height" || (!overTracks && ctrl && shift)) {
-        layout_.setGlobalHeight(static_cast<float>(static_cast<double>(layout_.globalHeight()) *
-                                                   std::pow(1.25, static_cast<double>(e.wheelY))));
-        if (tcp_) tcp_->scrolled();
         return true;
     }
     if (overTracks || (ctrl && !shift)) {  // vertical scroll
