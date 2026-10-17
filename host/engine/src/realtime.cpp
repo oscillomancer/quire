@@ -409,6 +409,8 @@ void Engine::stop() {
     rateReseekGeneration_.store(0);
     rateReseekServiced_ = 0;
     rateDeferred_ = false;
+    scalarPending_ = false;
+    ratePreparationSeconds_ = 0;
     rateDeferredWake_.store(false);
     rateSafeStream_.store(0);
     rateSafeEpoch_.store(0);
@@ -428,6 +430,7 @@ void Engine::stop() {
 
 Status Engine::load(const model::Session& session, const std::filesystem::path& projectDir) {
     if (recording()) SUPPLE_TRY(model::validateRecordingPlayrate(session));
+    if (loadScalarRate(session, projectDir)) return {};
     const auto controlEpoch = epoch_.load(std::memory_order_acquire);
     const auto lead =
         options_.anticipative
@@ -444,6 +447,7 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
         return {};
     }
     rateDeferred_ = false;
+    scalarPending_ = false;
     rateDeferredWake_.store(false);
     if (!notificationReload_)
         for (const auto& fx : session.fx) plugins_.resetAutomation(fx.id);
@@ -609,6 +613,11 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
     if (options_.anticipative)
         for (auto* instance : plan->instances) instance->setAudioWake(&rendererEvent_);
     if (plan->rateEnabled) {
+        // The input can alias the session snapshot replaced above.
+        plan->requestedScalar = plan->masterPlayrate.rate;
+        plan->scalarHistory.reserve(1024);
+        for (auto& timeline : plan->timelines)
+            timeline->bindScalarPublication(plan->scalarPublication.get());
         if (options_.anticipative)
             ratePlanRequests_.push(plan.get());
         else
@@ -904,6 +913,20 @@ void Engine::wakeOutputConsumed() SUPPLE_RT {
 
 void Engine::service() {
     bool reload = false;
+    bool scalarLate = false;
+    for (const auto& p : plans_)
+        if (p->rateEnabled)
+            for (const auto& timeline : p->timelines)
+                scalarLate |= timeline->scalarLate.exchange(false, std::memory_order_acq_rel);
+    if (scalarLate && latest_) {
+        const auto ready = prepareSeek(transport().seconds);
+        if (!ready) warnings_.push_back("playrate recovery: " + ready.error().toString());
+    }
+    if (scalarPending_ && latest_) {
+        const auto session = latest_;
+        const auto dir = rateDeferredDir_;
+        loadScalarRate(*session, dir);
+    }
     const auto reseek = rateReseekGeneration_.load(std::memory_order_acquire);
     if (reseek != 0 && reseek != rateReseekServiced_) {
         rateReseekServiced_ = reseek;
@@ -927,6 +950,7 @@ void Engine::service() {
             playedStream(e) + lead >= rateSafeStream_.load(std::memory_order_acquire)) {
             const auto session = *latest_;
             const auto dir = rateDeferredDir_;
+            rateDeferred_ = false;
             const auto loaded = load(session, dir);
             if (!loaded)
                 warnings_.push_back("deferred playrate edit: " + loaded.error().toString());

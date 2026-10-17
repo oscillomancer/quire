@@ -1180,7 +1180,9 @@ TEST_CASE("master playrate edits: inserting multi-second latent FX preserves pla
                                                 [](auto& track) { track.volumeDb = -6; });
                     session = volume.commit().value();
                     REQUIRE(engine.load(session));
-                    run(32);
+                    // Include the renderer frontier and canonical publication
+                    // headroom, rather than assuming the old consumed horizon.
+                    run(64);
                     double peak = 0;
                     const auto volumeEnd = static_cast<std::size_t>(backend.cycles() * 128);
                     for (auto i = volumeEnd - 1024; i < volumeEnd; ++i)
@@ -1190,7 +1192,9 @@ TEST_CASE("master playrate edits: inserting multi-second latent FX preserves pla
                     bypass.modify<model::FxInstance>(
                         id, [](auto& instance) { instance.bypass = true; });
                     REQUIRE(engine.load(bypass.commit().value()));
-                    run(32);
+                    // Include the renderer frontier and canonical publication
+                    // headroom, rather than assuming the old consumed horizon.
+                    run(64);
                     CHECK(engine.outputLatency() == (takeFx ? 0 : latency));  // compensated bypass
                     CHECK(engine.meterClock().epoch == adoptedEpoch);
                     CHECK(engine.transport().playing);
@@ -1299,4 +1303,285 @@ TEST_CASE("master playrate RT adoption: prepared knob edits keep their epoch") {
                 CHECK(engine.warnings().empty());
                 engine.stop();
             }
+}
+
+TEST_CASE("master playrate scalar control: sustained sweep retains converters and epoch") {
+    constexpr double fs = 8000;
+    for (bool anticipative : {false, true})
+        for (bool live : {false, true})
+            for (bool preserve : {false, true}) {
+                CAPTURE(anticipative);
+                CAPTURE(live);
+                CAPTURE(preserve);
+                PlayrateHost h;
+                if (live)
+                    h.arm();
+                else
+                    h.run("track.add");
+                for (int i = 1; i < 8; ++i) h.run("track.add");
+                audio::AudioData tone;
+                tone.sampleRate = fs;
+                tone.channels.assign(1, std::vector<float>(80000));
+                for (std::size_t i = 0; i < tone.frames(); ++i)
+                    tone.channels[0][i] = static_cast<float>(
+                        .2 * std::sin(double(i) * 2 * 3.141592653589793 * 55 / fs));
+                REQUIRE(audio::writeWav(h.root / "sweep.wav", tone));
+                auto args = json::Value::object();
+                args["track"] = "tr_1";
+                args["audio_file"] = (h.root / "sweep.wav").string();
+                h.run("item.add", json::writeCompact(args));
+                if (live) {
+                    args["track"] = "tr_2";
+                    h.run("item.add", json::writeCompact(args));
+                }
+                model::EditTxn edit(h.app->head(), 100);
+                auto project = edit.project();
+                project.console9 = false;
+                project.playrate = {1.1, preserve};
+                edit.setProject(project);
+                if (live) {
+                    // Compare a callback source with its renderer
+                    // twin in separate output channels through the same glide.
+                    edit.modify<model::Track>({model::Kind::Track, 1},
+                                              [](auto& track) { track.pan = -100; });
+                    edit.modify<model::Track>({model::Kind::Track, 2},
+                                              [](auto& track) { track.pan = 100; });
+                }
+                auto session = edit.commit().value();
+                auto pool = playrateFixturePool();
+                MediaCache media;
+                DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 80000});
+                Engine engine(pool, media,
+                              {.anticipative = anticipative, .renderBlock = 256, .workers = 0});
+                REQUIRE(engine.start(backend, {.sampleRate = fs, .blockSize = 64, .inputs = 1}));
+                REQUIRE(engine.load(session));
+                engine.play();
+                std::size_t capturedFrames = 0;
+                auto run = [&](int cycles) {
+                    for (int i = 0; i < cycles; ++i) {
+                        if (anticipative) REQUIRE(engine.awaitRendered(1024));
+                        backend.run(1);
+                        capturedFrames += 64;
+                        engine.service();
+                    }
+                };
+                auto rate = [&](double value) {
+                    project.playrate.rate = value;
+                    model::EditTxn knob(session, session.version + 1);
+                    knob.setProject(project);
+                    session = knob.commit().value();
+                    REQUIRE(engine.load(session));
+                };
+                run(64);
+                const auto epoch = engine.meterClock().epoch;
+                const auto generation = engine.planGeneration();
+                // 128 device frames/edit at 8 kHz = 62.5 Hz. All assertions
+                // use device progress, never elapsed wall time.
+                for (int step = 1; step <= 180; ++step) {
+                    const double requested = 1.1 + .4 * std::sin(step * 3.141592653589793 / 180);
+                    rate(requested);
+                    run(2);
+                    CHECK(engine.planGeneration() == generation);
+                    CHECK(engine.meterClock().epoch == epoch);
+                    if (step > 40) CHECK(std::abs(engine.effectivePlayrate() - requested) < .19);
+                }
+                rate(1.37);
+                run(128);
+                CHECK(engine.effectivePlayrate() == 1.37);
+                CHECK(engine.meterClock().epoch == epoch);
+                // A structural edit must inherit already scheduled scalar
+                // controls as well as the clock's consumed ramp state.
+                rate(1.43);
+                model::EditTxn rename(session, session.version + 1);
+                rename.modify<model::Track>({model::Kind::Track, 1},
+                                            [](auto& track) { track.name = "Renamed"; });
+                session = rename.commit().value();
+                REQUIRE(engine.load(session));
+                run(128);
+                CHECK(engine.effectivePlayrate() == 1.43);
+                CHECK(engine.meterClock().epoch == epoch);
+                CHECK(engine.processErrors() == 0);
+                engine.stop();
+                const auto& captured = backend.capture();
+                const auto& x = captured.channels[0];
+                std::size_t clicks = 0, gaps = 0, zeros = 0;
+                for (std::size_t i = 2048; i < std::min(capturedFrames, captured.frames()); ++i) {
+                    if (live) CHECK(x[i] == captured.channels[1][i]);
+                    if (std::abs(x[i] - 2 * x[i - 1] + x[i - 2]) > .02f) ++clicks;
+                    if (x[i] == 0) {
+                        if (++zeros == 64) ++gaps;
+                    } else
+                        zeros = 0;
+                }
+                CHECK(clicks == 0);
+                CHECK(gaps == 0);
+            }
+}
+
+TEST_CASE("master playrate scalar control: transport changes retain later edits") {
+    for (bool anticipative : {false, true})
+        for (bool preserve : {false, true}) {
+            CAPTURE(anticipative);
+            CAPTURE(preserve);
+            PlayrateHost h;
+            h.run("track.add");
+            audio::AudioData tone;
+            tone.sampleRate = 8000;
+            tone.channels.assign(2, std::vector<float>(64000));
+            for (std::size_t i = 0; i < tone.frames(); ++i)
+                tone.channels[0][i] = tone.channels[1][i] =
+                    static_cast<float>(.2 * std::sin(double(i) * .07));
+            REQUIRE(audio::writeWav(h.root / "transport.wav", tone));
+            auto args = json::Value::object();
+            args["track"] = "tr_1";
+            args["audio_file"] = (h.root / "transport.wav").string();
+            h.run("item.add", json::writeCompact(args));
+            auto session = h.app->head();
+            model::EditTxn first(session, 2);
+            auto project = first.project();
+            project.playrate = {.8, preserve};
+            first.setProject(project);
+            session = first.commit().value();
+            auto pool = playrateFixturePool();
+            MediaCache media;
+            DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+            Engine engine(pool, media,
+                          {.anticipative = anticipative, .renderBlock = 256, .workers = 0});
+            REQUIRE(engine.start(backend, {.sampleRate = 8000, .blockSize = 128}));
+            REQUIRE(engine.load(session));
+            engine.play();
+            auto run = [&](int cycles) {
+                for (int i = 0; i < cycles; ++i) {
+                    if (anticipative) REQUIRE(engine.awaitRendered(1024));
+                    backend.run(1);
+                    engine.service();
+                }
+            };
+            auto rate = [&](double value) {
+                model::EditTxn knob(session, session.version + 1);
+                project.playrate.rate = value;
+                knob.setProject(project);
+                session = knob.commit().value();
+                REQUIRE(engine.load(session));
+            };
+            run(32);
+            for (int i = 0; i < 20; ++i) {
+                rate(.9 + .01 * i);
+                run(1);
+            }
+            REQUIRE(engine.prepareSeek(.1));
+            rate(1.31);  // control queued before the prepared seek reaches the callback
+            run(48);
+            engine.pause();
+            run(4);
+            rate(1.22);
+            engine.play();
+            run(48);
+            engine.setLoop(.1, .3, true);
+            run(96);  // wraps repeatedly; the device coordinate remains monotonic
+            const auto epoch = engine.meterClock().epoch;
+            rate(1.47);
+            run(64);
+            CHECK(engine.effectivePlayrate() == 1.47);
+            CHECK(engine.meterClock().epoch == epoch);
+            CHECK(engine.processErrors() == 0);
+            engine.stop();
+        }
+}
+
+TEST_CASE("master playrate scalar control: saturation coalesces without losing the final value") {
+    for (bool anticipative : {false, true}) {
+        CAPTURE(anticipative);
+        auto session = model::Session::create();
+        model::EditTxn initial(session, 2);
+        auto project = initial.project();
+        project.playrate.rate = .8;
+        initial.setProject(project);
+        session = initial.commit().value();
+        auto pool = playrateFixturePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+        Engine engine(pool, media,
+                      {.anticipative = anticipative, .renderBlock = 256, .workers = 0});
+        REQUIRE(engine.start(backend, {.sampleRate = 8000, .blockSize = 128}));
+        REQUIRE(engine.load(session));
+        engine.play();
+        auto run = [&](int cycles) {
+            for (int i = 0; i < cycles; ++i) {
+                if (anticipative) REQUIRE(engine.awaitRendered(1024));
+                backend.run(1);
+                engine.service();
+            }
+        };
+        run(32);
+        const auto generation = engine.planGeneration();
+        const auto epoch = engine.meterClock().epoch;
+        for (int step = 0; step < 1100; ++step) {
+            model::EditTxn edit(session, session.version + 1);
+            project.playrate.rate = step == 1099 ? 1.47 : .7 + .001 * (step % 100);
+            edit.setProject(project);
+            session = edit.commit().value();
+            REQUIRE(engine.load(session));
+        }
+        run(128);
+        CHECK(engine.effectivePlayrate() == 1.47);
+        CHECK(engine.planGeneration() == generation);
+        CHECK(engine.meterClock().epoch == epoch);
+        engine.stop();
+    }
+}
+
+TEST_CASE("master playrate scalar control: plugin maintenance still recompiles compensation") {
+    for (bool anticipative : {false, true}) {
+        CAPTURE(anticipative);
+        model::EditTxn edit(model::Session::create(), 2);
+        auto project = edit.project();
+        project.playrate.rate = .8;
+        edit.setProject(project);
+        model::FxInstance fx;
+        fx.plugin.id = "com.suppleaudio.test.gain";
+        fx.patch =
+            json::parse(R"({"schema":"supple.test-gain-patch/1.0","params":{"latency":"none"}})")
+                .value();
+        const auto id = edit.create(fx);
+        edit.modify<model::Track>(model::kMaster, [&](auto& track) { track.chain.push_back(id); });
+        auto session = edit.commit().value();
+        auto pool = playrateFixturePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+        Engine engine(pool, media,
+                      {.anticipative = anticipative, .renderBlock = 256, .workers = 0});
+        REQUIRE(engine.start(backend, {.sampleRate = 8000, .blockSize = 128}));
+        REQUIRE(engine.load(session));
+        engine.play();
+        auto run = [&](int cycles) {
+            for (int i = 0; i < cycles; ++i) {
+                if (anticipative) REQUIRE(engine.awaitRendered(1024));
+                backend.run(1);
+                engine.service();
+            }
+        };
+        run(32);
+        auto* instance = pool.find(id);
+        REQUIRE(instance);
+        CHECK(instance->processing());
+        model::EditTxn change(session, session.version + 1);
+        change.modify<model::FxInstance>(id, [](auto& plugin) {
+            plugin.patch =
+                json::parse(
+                    R"({"schema":"supple.test-gain-patch/1.0","params":{"latency":"short"}})")
+                    .value();
+        });
+        REQUIRE(engine.load(change.commit().value()));
+        // The restart's notifications reload the same model twice: first to
+        // release the instance, then to restore it with its new compensation.
+        run(128);
+        CHECK(pool.find(id) == instance);
+        CHECK(instance->latency() == 64);
+        CHECK(instance->processing());
+        CHECK_FALSE(pool.restarting(id));
+        CHECK(engine.outputLatency() == 64);
+        CHECK(engine.processErrors() == 0);
+        engine.stop();
+    }
 }

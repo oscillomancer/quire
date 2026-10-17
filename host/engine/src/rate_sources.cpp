@@ -223,7 +223,7 @@ Status configureRateTransition(Plan& p, Plan* previous, PlayrateTimeline& old,
                 }
     }
     const bool changed = !previous || !previous->rateEnabled ||
-                         p.masterPlayrate.rate != previous->masterPlayrate.rate ||
+                         p.masterPlayrate.rate != previous->requestedScalar ||
                          p.masterPlayrate.preservePitch != previous->masterPlayrate.preservePitch ||
                          p.timelines[0]->points() != old.points();
     p.rateControlsChanged = changed;
@@ -244,12 +244,21 @@ Status configureRateTransition(Plan& p, Plan* previous, PlayrateTimeline& old,
         return Error("playrate.history", "the changed graph needs unavailable clock history", {},
                      "prepare a fresh seek at the consumed position");
     old.ensure(last);
+    p.scalarHistory.clear();
+    if (previous)
+        for (const auto& edit : previous->scalarHistory)
+            if (edit.device > device) p.scalarHistory.push_back(edit);
     for (std::size_t c = 0; c < 2; ++c) {
         p.timelines[c]->adopt(old, device, p.smoothFrames, wait, changed);
         const auto& prior = old;
         p.previousTimelines[c] = std::make_unique<PlayrateTimeline>(
             old.capacity(), prior.snapshot(device).clock.target, prior.points());
         p.previousTimelines[c]->adopt(prior, device, 0, 0, false);
+        for (auto edit : p.scalarHistory) {
+            edit.sequence = 0;
+            p.previousTimelines[c]->scalarEdits.push(edit);
+            if (!changed) p.timelines[c]->scalarEdits.push(edit);
+        }
     }
     for (auto& node : p.nodes)
         for (auto& clip : node.clips) {
@@ -261,6 +270,7 @@ Status configureRateTransition(Plan& p, Plan* previous, PlayrateTimeline& old,
             clip.rateState->previous =
                 std::make_unique<RateClipState>(table, clip.data->channelCount(), p.rate, mode);
         }
+    if (changed) p.scalarHistory.clear();
     return primeRateSources(p, device);
 }
 

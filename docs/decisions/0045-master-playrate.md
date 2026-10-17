@@ -139,3 +139,7 @@ timeline audio and MIDI, so an empty frontier does not remove this problem.
 - Duplicate playback/monitor graphs: loses shared nonlinear FX, sidechain and
   instrument-state behavior. A pre-encode split eventually needs the same
   source/event clock work as the chosen design.
+
+**2026-10-17 amendment:** [ADR-0046](0046-live-scalar-playrate.md) replaces
+prepared-plan/coalescing delivery for compatible scalar-only live edits with
+scheduled clock controls and specifies renderer-frontier handoff scheduling.

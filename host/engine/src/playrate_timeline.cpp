@@ -162,6 +162,18 @@ void PlayrateTimeline::loop(double start, double end, bool on) SUPPLE_RT {
 
 void PlayrateTimeline::ensure(std::int64_t last) SUPPLE_RT {
     while (next_ <= last) {
+        ScalarRateEdit edit;
+        while (scalarEdits.peek(edit) && edit.device <= next_ &&
+               (!scalarPublication_ ||
+                edit.sequence <= scalarPublication_->load(std::memory_order_acquire))) {
+            if (edit.device < next_) {
+                scalarLate.store(true, std::memory_order_release);
+                if ((next_ & 63) != 0) break;
+            }
+            scalar_ = edit.rate;
+            clock_.setRate(edit.rate, edit.rampFrames);
+            scalarEdits.consume();
+        }
         const auto index = static_cast<std::size_t>(next_) & mask_;
         if ((index & 63) == 0) checkpoints_[index / 64] = clock_;
         positions_[index].set(next_, clock_.timeline(), clock_.rate());
@@ -169,6 +181,7 @@ void PlayrateTimeline::ensure(std::int64_t last) SUPPLE_RT {
         clock_.advance(step);
         ++next_;
     }
+    frontier_.store(next_, std::memory_order_release);
     first_.store(std::max(first_.load(std::memory_order_relaxed),
                           next_ - static_cast<std::int64_t>(positions_.size())),
                  std::memory_order_release);

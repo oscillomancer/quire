@@ -437,3 +437,42 @@ TEST_CASE(
                           0x3fc6414d5f62c208ull})
         CHECK(std::bit_cast<std::uint64_t>(portableUnit<double>(random)) == expected);
 }
+
+TEST_CASE("playrate timeline: scheduled scalar ramps survive checkpoints and partitioning") {
+    PlayrateTimeline whole(8192, .8, {}), split(8192, .8, {});
+    std::atomic<std::uint64_t> publication{0};
+    whole.bindScalarPublication(&publication);
+    split.bindScalarPublication(&publication);
+    for (const ScalarRateEdit edit :
+         {ScalarRateEdit{128, 1.3, 1, 80}, ScalarRateEdit{192, .9, 2, 80},
+          ScalarRateEdit{320, 1.7, 3, 80}}) {
+        REQUIRE(whole.scalarEdits.push(edit));
+        REQUIRE(split.scalarEdits.push(edit));
+    }
+    whole.ensure(64);
+    split.ensure(64);
+    CHECK(whole.rate(64) == .8);
+    publication.store(3, std::memory_order_release);
+    whole.ensure(1024);
+    for (int end = 65; end <= 1024; ++end) split.ensure(end);
+    for (int at = 0; at < 1024; ++at) {
+        CHECK(whole.phase(at) == split.phase(at));
+        CHECK(whole.rate(at) == split.rate(at));
+        const auto state = whole.snapshot(at).clock;
+        CHECK(state.timeline == whole.absolutePhase(at));
+    }
+    CHECK(whole.rate(128) == .8);
+    CHECK(whole.rate(192) > .8);
+    CHECK(whole.rate(400) == 1.7);
+    CHECK_FALSE(whole.scalarLate.load());
+    CHECK_FALSE(split.scalarLate.load());
+}
+
+TEST_CASE("playrate timeline: scheduled scalar edits leave authored envelopes authoritative") {
+    PlayrateTimeline timeline(4096, .8, {{0, .75, supple::model::PointShape::Linear, 0}});
+    REQUIRE(timeline.scalarEdits.push({128, 1.7, 0, 80}));
+    timeline.ensure(1024);
+    CHECK(timeline.rate(512) == .75);
+    CHECK(timeline.position(512) == 384);
+    CHECK(timeline.snapshot(512).clock.target == 1.7);
+}

@@ -563,8 +563,8 @@ struct Plan {
     model::Playrate masterPlayrate;
     Automation rateEnvelope;
     bool rateEnabled = false;
-    // Controls/anchors are complete before publication. Executors only advance
-    // their disjoint timeline windows and source DSP state, never reconfigure.
+    // Curves/anchors are complete before publication. Executors advance their
+    // disjoint windows and source DSP state; scalar transactions use RT queues.
     std::array<std::unique_ptr<PlayrateTimeline>, 2> timelines, previousTimelines;
     std::array<PlayrateTimeline::Snapshot, 2> rateControl;
     // Main writes before publication; main never reads the renderer/callback
@@ -581,6 +581,12 @@ struct Plan {
     std::int64_t rateSourceAhead = 0, rateSourceBehind = 0;
     std::int64_t rateSwitchDevice = INT64_MIN, rateSafeDevice = INT64_MIN;
     bool rateControlsChanged = false;
+    std::unique_ptr<std::atomic<std::uint64_t>> scalarPublication =
+        std::make_unique<std::atomic<std::uint64_t>>(0);
+    // Control-thread history retains edits ahead of the consumed snapshot so
+    // structural preparation can reconstruct the same future trajectory.
+    std::vector<ScalarRateEdit> scalarHistory;
+    double requestedScalar = 1;
     double rateSample(std::int64_t device, bool live = false) const SUPPLE_RT {
         return rateEnabled ? timelines[live ? 1 : 0]->position(device) : double(device);
     }
