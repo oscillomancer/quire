@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <ostream>
 
 using namespace supple;
 using namespace supple::model;
