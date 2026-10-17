@@ -3,10 +3,12 @@
 #include "learn_dialog.h"
 
 #include <memory>
+#include <set>
 #include <utility>
 
 #include "supple/engine/midi_control.h"
 #include "supple/ui/popup.h"
+#include "supple/ui/scroll_view.h"
 #include "supple/ui/widgets.h"
 
 namespace supple::gui {
@@ -42,6 +44,8 @@ class LearnPanel : public ui::Node {
         control_ = &row("learn.control", "Control")
                         .emplace<ui::Label>("learn.control.value", "", ui::Font::Ui, "small");
         control_->layout.width = ui::SizeRule::fraction();
+        warning_ = &emplace<ui::TextBlock>("learn.warning", "", ui::Font::Ui, "small", "ink");
+        warning_->visible = false;
         mode_ = &row("learn.mode", "CC mode").emplace<ui::Button>("learn.mode.set", "");
         mode_->layout.width = ui::SizeRule::fraction();
         mode_->onClick = [this] { openModes(); };
@@ -114,6 +118,11 @@ class LearnPanel : public ui::Node {
     void heard(const std::vector<engine::EngineApp::ControlEvent>& events) {
         for (const auto& e : events)
             if (auto c = engine::controlOf(e.midi, e.device)) {
+                if (!heard_ ||
+                    !(c->kind == choice_.control.kind && c->channel == choice_.control.channel &&
+                      c->number == choice_.control.number))
+                    values_.clear();
+                values_.insert((e.midi.bytes[1] & 0x7f) | ((e.midi.bytes[2] & 0x7f) << 7));
                 choice_.control = *c;
                 heardDevice_ = e.device;
                 heard_ = true;
@@ -151,6 +160,19 @@ class LearnPanel : public ui::Node {
         device_->setText(anyDevice_ || device.empty() ? "Any MIDI input" : "Only " + device);
         for (const auto& [button, field] : options_) button->setText(choice_.*field ? "On" : "Off");
         ok_->enabled = heard_;
+        // A button sends one or two values; a knob or fader sends many.
+        const bool knob = heard_ && values_.size() > 2 &&
+                          ((cc && choice_.mode == model::ControlMode::Absolute) ||
+                           choice_.control.kind == model::ControlKind::PitchBend);
+        warning_->visible = request_.pressOnly && knob;
+        if (warning_->visible) {
+            std::string warning =
+                "This action runs once per movement; the knob's position is not "
+                "passed on.";
+            if (!request_.alternative.empty())
+                warning += " Bind \"" + request_.alternative + "\" to follow it.";
+            warning_->setText(warning);
+        }
     }
 
     void finish(bool ok) {
@@ -174,7 +196,9 @@ class LearnPanel : public ui::Node {
     LearnChoice choice_;
     bool heard_ = false, anyDevice_ = true;
     std::string heardDevice_;
+    std::set<int> values_;  // of the control heard last: more than two is a knob
     ui::Label* control_ = nullptr;
+    ui::TextBlock* warning_ = nullptr;
     ui::Button *mode_ = nullptr, *device_ = nullptr, *ok_ = nullptr;
     std::vector<std::pair<ui::Button*, bool LearnChoice::*>> options_;
 };

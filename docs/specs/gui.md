@@ -267,6 +267,11 @@ message. Display range is per-project UI state in section `transport`, key
 unknown/missing choices use the default. Changing range never edits/clamps
 the saved or automated rate: knob geometry saturates while the readout keeps
 the actual value.
+The action **Transport: playrate (MIDI CC)** (`control.transport.playrate`)
+lets a MIDI knob or fader drive the rate along the same travel, in the chosen
+display range; CC 64 of 0..127 (a centre detent) gives exactly 1.0. An encoder
+moves the rate ten cents a step. Like the on-screen knob it runs
+`transport.playrate.set`, one undo step per movement.
 
 ### 4.2 Track control panel (TCP)
 
@@ -726,10 +731,15 @@ Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
   change, an encoder step) runs the action once; the "(MIDI CC)" actions
   follow the value instead — the selected tracks' volume (the fader's
   travel) and pan (an encoder step is 1 %), the master's volume, a beat
-  jog of the play cursor, and the **last touched parameter** (the plug-in
-  parameter edited last in the FX window or a plug-in's own editor; a knob
-  takes over softly, an encoder at once; the FX window's tab row names it)
-  — one undo step per movement. A control drives one
+  jog of the play cursor, the master playrate (§4.1), and the **last touched
+  parameter** (the plug-in parameter edited last in the FX window or a
+  plug-in's own editor; a knob takes over softly, an encoder at once; the FX
+  window's tab row names it) — one undo step per movement. Other actions,
+  the registry's commands among them, receive no value: when the learn
+  dialog hears a knob or fader (an absolute CC or pitch bend sending more
+  than two values) for one of them, it warns that the position is not passed
+  on and names the "(MIDI CC)" action that follows it, if there is one
+  (`transport.playrate.set` → Transport: playrate (MIDI CC)). A control drives one
   action (learning it for another moves it); the bindings are user settings
   in `controls.json` (`supple.controls/1.0`: `{bindings: [{action, midi,
   mode}]}`, beside the keymap). Its keys work with the focus on the search

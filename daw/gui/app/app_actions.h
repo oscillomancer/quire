@@ -90,6 +90,12 @@ class AppActions {
     void control(const std::vector<engine::EngineApp::ControlEvent>& events);
     // Set while a learn dialog listens: it gets the messages instead.
     std::function<void(const std::vector<engine::EngineApp::ControlEvent>&)> learnSink;
+    // The "(MIDI CC)" action that follows a knob for `action`, when `action`
+    // only runs per press (a command whose value a knob cannot pass); "" if none.
+    std::string followingControl(std::string_view action) const;
+    // The playrate knob's range (kRateRanges in playrate_range.h), chosen in
+    // the transport bar's menu; "Transport: playrate (MIDI CC)" follows it.
+    std::size_t playrateRange = 0;
     // A built-in that follows a controller (listed as "… (MIDI CC)").
     void addControl(std::string id, std::string name, std::string description,
                     std::function<Status(const actions::ControlValue&)> run);

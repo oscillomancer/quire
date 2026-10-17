@@ -159,6 +159,10 @@ class ActionsPanel : public ui::Node {
         const std::string id = a->id;
         LearnRequest request;
         request.title = a->name;
+        request.pressOnly = !a->control;
+        if (const std::string follow = actions_.followingControl(id); !follow.empty())
+            if (const actions::Action* f = actions_.registry().find(follow))
+                request.alternative = f->name;
         if (const auto bound = actions_.controls().bindingsFor(id); !bound.empty())
             request.current = LearnChoice{bound.front().control, bound.front().mode};
         request.onOk = [this, id](const LearnChoice& choice) {

@@ -28,6 +28,11 @@ struct LearnRequest {
     std::string title;                   // what is bound: an action's or a parameter's name
     std::optional<LearnChoice> current;  // its binding now: Remove is offered
     bool param = false;                  // a plug-in parameter: soft takeover, enable only when …
+    // An action that runs once per press: a knob heard here gets a warning
+    // that its position is not passed on, naming `alternative` (the "(MIDI
+    // CC)" action that follows one) when there is one.
+    bool pressOnly = false;
+    std::string alternative;
     std::function<void(const LearnChoice&)> onOk;
     std::function<void()> onRemove;
 };

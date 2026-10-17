@@ -3,7 +3,6 @@
 #include "transport_bar.h"
 
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -11,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "playrate_range.h"
 #include "supple/time/timeline.h"
 #include "supple/ui/canvas.h"
 #include "supple/ui/controls.h"
@@ -25,15 +25,6 @@ namespace supple::gui {
 namespace {
 
 const cmd::Origin kOrigin{cmd::Origin::Type::Ui, "gui", {}};
-
-struct RateRange {
-    const char* name;
-    double low, high;
-};
-constexpr std::array<RateRange, 4> kRateRanges{{{"0.25-4.0", 0.25, 4.0},
-                                                {"0.5-2.0", 0.5, 2.0},
-                                                {"0.75-1.5", 0.75, 1.5},
-                                                {"0.9-1.1", 0.9, 1.1}}};
 
 template <class Base>
 class RateMenuControl : public Base {
@@ -177,7 +168,7 @@ std::unique_ptr<ui::Node> TransportBar::build() {
             sync();
             return;
         }
-        const double value = positionRate(position);
+        const double value = positionRate(position, actions_.playrateRange);
         json::Value args = json::Value::object();
         args["rate"] = value;
         cmd::Origin origin = kOrigin;
@@ -223,7 +214,7 @@ void TransportBar::sync(bool event, std::chrono::steady_clock::time_point now) {
         // curve or renderer lookahead. The accessor executes no logged command.
         const auto state = app_.playrateState();
         const double shown = state.envelope ? state.effectiveRate : state.requestedRate;
-        rate_->setValue(ratePosition(shown));
+        rate_->setValue(ratePosition(shown, actions_.playrateRange));
         if (rateValue_) setIfChanged(rateValue_, rateText(shown));
     }
     const bool moving = info.playing || info.recording;
@@ -251,31 +242,18 @@ std::optional<std::chrono::steady_clock::time_point> TransportBar::nextDeadline(
     return *lastStatus_ + std::chrono::milliseconds(250);
 }
 
-double TransportBar::ratePosition(double rate) const {
-    const auto& range = kRateRanges[rateRange_];
-    const double n = rate <= 1 ? 0.5 + 0.5 * std::log(rate) / -std::log(range.low)
-                               : 0.5 + 0.5 * std::log(rate) / std::log(range.high);
-    return std::clamp(n, 0.0, 1.0);
-}
-
-double TransportBar::positionRate(double position) const {
-    const auto& range = kRateRanges[rateRange_];
-    return std::exp(position <= 0.5 ? std::log(range.low) * (1 - 2 * position)
-                                    : std::log(range.high) * (2 * position - 1));
-}
-
 json::Value TransportBar::saveLayout() const {
     json::Value value = json::Value::object();
-    value["playrate_range"] = kRateRanges[rateRange_].name;
+    value["playrate_range"] = kRateRanges[actions_.playrateRange].name;
     return value;
 }
 
 void TransportBar::loadLayout(const json::Value& value) {
     if (rate_ && rate_->dragging()) root_.releaseWithin(rate_);
-    rateRange_ = 0;
+    actions_.playrateRange = 0;
     if (const auto* name = value.find("playrate_range"); name && name->isString())
         for (std::size_t i = 0; i < kRateRanges.size(); ++i)
-            if (name->asString() == kRateRanges[i].name) rateRange_ = i;
+            if (name->asString() == kRateRanges[i].name) actions_.playrateRange = i;
     sync();
 }
 
@@ -302,9 +280,9 @@ void TransportBar::openRateMenu() {
         ui::MenuItem item;
         item.label = std::string("Playrate range: ") + kRateRanges[i].name;
         if (i == 0) item.label += " (default)";
-        item.checked = i == rateRange_;
+        item.checked = i == actions_.playrateRange;
         item.run = [this, i] {
-            rateRange_ = i;
+            actions_.playrateRange = i;
             sync();
         };
         items.push_back(std::move(item));
