@@ -16,7 +16,9 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+#include "supple/base/files.h"
 #include "test_support.h"
+#include "ui_persistence.h"
 
 #include "../app/generate.h"
 #include "generated_media.h"
@@ -516,6 +518,162 @@ TEST_CASE("the arrange view's saved UI state round-trips") {
     restored.setGlobalHeight(48);
     for (const auto& [id, h] : layout.heights()) restored.setTrackHeight(id, h);
     CHECK(restored.heights() == layout.heights());
+}
+
+TEST_CASE("track heights clamp to a complete TCP top line and resize all rows additively") {
+    model::EditTxn txn(model::Session::create(), 1);
+    std::vector<model::Id> tracks;
+    for (int i = 0; i < 5; ++i) {
+        model::Track track;
+        track.parent = model::kMaster;
+        if (i == 3) track.folderCompact = 1;
+        if (i == 4) track.hiddenTcp = true;
+        tracks.push_back(txn.create(track));
+    }
+    txn.modify<model::Track>(model::kMaster, [&](auto& t) { t.children = tracks; });
+    views::TrackLayout layout;
+    const auto session = txn.preview();
+    layout.show(session);
+    const float min = views::TrackLayout::kMinHeight;
+    CHECK(min >= views::TcpRowGeometry::kTopLineBottom + views::TcpRowGeometry::kResizeGrip);
+    layout.setGlobalHeight(8);
+    CHECK(layout.globalHeight() == min);
+    CHECK(layout.heightOf(*layout.indexOf(tracks[3])) == min);  // compact also clamps
+    layout.setGlobalHeight(72);
+    layout.setTrackHeight(tracks[0], 8);
+    layout.setTrackHeight(tracks[1], 398);
+    layout.setTrackHeight(tracks[2], 120);
+    layout.setTrackHeight(tracks[4], 70);
+    int changes = 0;
+    layout.onChanged = [&] { ++changes; };
+    layout.adjustAllTrackHeights(8);
+    CHECK(changes == 1);
+    CHECK(layout.heightOf(*layout.indexOf(tracks[0])) == min + 8);
+    CHECK(layout.heightOf(*layout.indexOf(tracks[1])) == views::TrackLayout::kMaxHeight);
+    CHECK(layout.heightOf(*layout.indexOf(tracks[2])) == 128);
+    CHECK(layout.heightOf(*layout.indexOf(tracks[3])) == 44);  // compact grows by eight, too
+    CHECK(layout.heights().at(tracks[4]) == 78);               // hidden tracks participate
+    layout.adjustAllTrackHeights(-1000);
+    for (const auto id : tracks) CHECK(layout.heights().at(id) == min);
+    layout.adjustAllTrackHeights(0.5f);
+    for (const auto id : tracks) CHECK(layout.heights().at(id) == min + 0.5f);
+
+    // An expanded row has several take lanes: its total height gets the same step.
+    model::Item item;
+    item.track = tracks[2];
+    item.takes = {model::Id{model::Kind::Take, 1}, model::Id{model::Kind::Take, 2}};
+    const auto id = txn.create(item);
+    layout.show(txn.preview(), nullptr, 1);
+    layout.setTrackHeight(tracks[2], 72);
+    layout.setTakesExpanded(id, true);
+    const float expanded = layout.heightOf(*layout.indexOf(tracks[2]));
+    layout.adjustAllTrackHeights(8);
+    CHECK(layout.heightOf(*layout.indexOf(tracks[2])) ==
+          doctest::Approx(static_cast<double>(expanded) + 8));
+}
+
+TEST_CASE("TCP wheel resizes mixed rows only over the panel and can be rebound") {
+    Gl& g = gl();
+    REQUIRE(g.ok);
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    auto* arrange = mount(root);
+    auto& layout = arrange->trackLayout();
+    layout.setGlobalHeight(120);
+    const auto track = layout.rows()[1].track;
+    layout.setTrackHeight(track, 160);
+    arrange->setViewport({0, 40, 80});
+    root.frame(false);
+    const auto row = arrange->tcpRowRect(1);
+    ui::PointerEvent wheel{ui::PointerEvent::Type::Wheel, {row.x + 100, row.y + row.h / 2}};
+    wheel.mods = ui::kCtrl;
+    wheel.wheelY = 0.25f;
+    const auto version = arrange->session().version;
+    root.pointer(wheel);
+    root.frame(false);
+    CHECK(layout.globalHeight() == 122);
+    CHECK(layout.heightOf(*layout.indexOf(track)) == 162);
+    const auto after = arrange->tcpRowRect(1);
+    CHECK(after.y + after.h / 2 == doctest::Approx(static_cast<double>(wheel.pos.y)));
+    CHECK(arrange->session().version == version);
+    const auto scroll = arrange->viewport().scrollY;
+    wheel.pos.x = arrange->lanesRect().x + 100;
+    root.pointer(wheel);
+    CHECK(layout.globalHeight() == 122);
+    CHECK(layout.heightOf(*layout.indexOf(track)) == 162);
+    CHECK(arrange->viewport().scrollY < scroll);  // lanes retain Ctrl+wheel scroll
+    wheel.mods |= ui::kShift;
+    wheel.wheelY = 1;
+    root.pointer(wheel);
+    CHECK(layout.globalHeight() == doctest::Approx(122 * 1.25));
+    CHECK(layout.heightOf(*layout.indexOf(track)) == 162);  // global zoom retains overrides
+    wheel.pos.x = row.x + 100;
+    root.pointer(wheel);
+    CHECK(layout.globalHeight() == doctest::Approx(122 * 1.25 * 1.25));
+    REQUIRE(arrange->gestures().mouse.set("tcp.wheel", ui::kCtrl, "scroll"));
+    auto saved = views::MouseMap::fromJson(arrange->gestures().mouse.toJson());
+    REQUIRE(saved);
+    CHECK(saved->behaviour("tcp.wheel", ui::kCtrl) == "scroll");
+    CHECK(saved->behaviour("tcp.wheel", ui::kCtrl | ui::kShift) == "zoom_height");
+    wheel.mods = ui::kCtrl;
+    root.pointer(wheel);
+    CHECK(layout.globalHeight() == doctest::Approx(122 * 1.25 * 1.25));
+}
+
+TEST_CASE("an old arrange sidecar clamps tiny heights and keeps the TCP top line visible") {
+    Gl& g = gl();
+    REQUIRE(g.ok);
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    auto* arrange = mount(root);
+    const auto track = arrange->trackLayout().rows()[0].track;
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-height-sidecar-" + std::to_string(testProcessId()));
+    std::filesystem::create_directories(dir);
+    const auto project = dir / "song.json";
+    REQUIRE(writeFileAtomic(
+        gui::UiPersistence::fileFor(project),
+        "{\"schema\":\"supple.ui/1.0\",\"arrange\":{\"row_height\":8,\"track_heights\":{\"" +
+            track.str() + "\":9}}}"));
+    {
+        gui::UiPersistence persistence;
+        persistence.add(
+            "arrange", [&] { return arrange->saveLayout(); },
+            [&](const auto& v) { arrange->loadLayout(v); });
+        persistence.tick(project);
+        CHECK(arrange->trackLayout().globalHeight() == views::TrackLayout::kMinHeight);
+        CHECK(arrange->trackLayout().heightOf(*arrange->trackLayout().indexOf(track)) ==
+              views::TrackLayout::kMinHeight);
+        // Keep the first row minimal beside normal rows for the real-render check.
+        arrange->trackLayout().setGlobalHeight(72);
+        root.frame(false);
+        const auto row = arrange->tcpRowRect(0);
+        for (const auto* name : {"name", "fx", "addfx"}) {
+            const auto* control = arrange->tcpPanel().controlNode(track, name);
+            REQUIRE(control);
+            CHECK(control->visible);
+            CHECK(control->bounds().y >= row.y);
+            CHECK(control->bounds().bottom() <= row.bottom() - views::TcpRowGeometry::kResizeGrip);
+        }
+        for (const auto* name : {"mute", "solo", "fader", "pan", "input", "out"}) {
+            const auto* control = arrange->tcpPanel().controlNode(track, name);
+            REQUIRE(control);
+            CHECK_FALSE(control->visible);
+        }
+        if (const char* out = std::getenv("SUPPLE_TEST_SNAPSHOTS"))
+            REQUIRE(
+                gui::writePng(std::filesystem::path(out) / "minimum-height.png", root.readBack()));
+        REQUIRE(persistence.flush(project));
+    }
+    arrange->trackLayout().setTrackHeight(track, 120);
+    {
+        gui::UiPersistence persistence;
+        persistence.add(
+            "arrange", [&] { return arrange->saveLayout(); },
+            [&](const auto& v) { arrange->loadLayout(v); });
+        persistence.tick(project);
+        CHECK(arrange->trackLayout().heightOf(*arrange->trackLayout().indexOf(track)) ==
+              views::TrackLayout::kMinHeight);
+    }
+    std::filesystem::remove_all(dir);
 }
 
 TEST_CASE("the playhead overlay moves without damaging the content") {

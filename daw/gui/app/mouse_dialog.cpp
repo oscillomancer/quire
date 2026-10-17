@@ -19,6 +19,8 @@ std::string comboLabel(unsigned mods) {
 }
 
 std::string behaviourLabel(std::string_view b) {
+    if (b == "resize_all") return "resize all track heights";
+    if (b == "zoom_height") return "zoom global row height";
     if (b == "project_cursor") return "the project cursor (the transport position)";
     if (b == "mouse_pointer") return "the mouse pointer";
     std::string s(b);

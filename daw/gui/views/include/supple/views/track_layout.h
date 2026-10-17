@@ -16,6 +16,7 @@
 
 #include "supple/model/session.h"
 #include "supple/views/envelope_lane.h"
+#include "supple/views/tcp_geometry.h"
 
 namespace supple::views {
 
@@ -57,7 +58,7 @@ struct Viewport {
 class TrackLayout {
   public:
     static constexpr float kDefaultHeight = 72;
-    static constexpr float kMinHeight = 8;
+    static constexpr float kMinHeight = TcpRowGeometry::kMinHeight;
     static constexpr float kMaxHeight = 400;
 
     // Updates the snapshot; returns true only when row geometry changed. A track
@@ -76,6 +77,10 @@ class TrackLayout {
 
     float globalHeight() const { return globalHeight_; }
     void setGlobalHeight(float h);  // vertical zoom
+    // Add design units to every track row, preserving mixed heights and
+    // compact-folder sizes. Expanded-take rows share the delta among takes.
+    // One geometry notification; no model/history edits.
+    void adjustAllTrackHeights(float delta);
     // Per-track height in design units; <= 0 clears the override.
     void setTrackHeight(model::Id track, float h);
     void clearTrackHeights();  // every track back to the global height
@@ -104,6 +109,7 @@ class TrackLayout {
 
   private:
     float baseHeight(model::Id track) const;
+    std::map<model::Id, std::size_t> expandedTakeCounts() const;
     void rebuildGeometry();
 
     std::uint64_t rebuilds_ = 0;

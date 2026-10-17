@@ -321,6 +321,14 @@ TEST_CASE("the mouse modifiers dialog edits the live map and saves it (gap log #
     dialog.set("wheel.zoom", 0, "mouse_pointer");
     CHECK(map.behaviour("wheel.zoom", 0) == "mouse_pointer");
     CHECK(a.root->find("mouse.set.")->valueText() == "the mouse pointer");
+    dialog.open("tcp.wheel");
+    a.root->frame(false);
+    CHECK(a.root->find("mouse.set.ctrl")->valueText() == "resize all track heights");
+    CHECK(a.root->find("mouse.set.ctrl+shift")->valueText() == "zoom global row height");
+    dialog.set("tcp.wheel", ui::kCtrl, "scroll");
+    saved = views::MouseMap::load(file);
+    REQUIRE(saved);
+    CHECK(saved->behaviour("tcp.wheel", ui::kCtrl) == "scroll");
 }
 
 TEST_CASE("native dialog completions respect shutdown before posting and running") {

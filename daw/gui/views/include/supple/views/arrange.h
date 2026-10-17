@@ -100,6 +100,9 @@ class ArrangeView : public ui::Node {
     bool playing() const { return transport_.playing; }
     void setFollow(Follow f) { follow_ = f; }
     Follow follow() const { return follow_; }
+    // Per-project UI sidecar/screensets: viewport, row heights, follow and takes.
+    json::Value saveLayout() const;
+    void loadLayout(const json::Value& value);
     // Clamps the vertical scroll once the children have their bounds (a
     // viewport set before the first layout cannot know the visible height).
     void arrange(const ui::Canvas& canvas, const ui::Rect& r) override;

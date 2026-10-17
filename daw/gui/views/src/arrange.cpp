@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 
 #include "supple/time/timeline.h"
@@ -1246,22 +1247,90 @@ ui::Rect ArrangeView::tcpRowRect(std::size_t row) const {
     return tcp_ ? tcp_->rowRect(row) : ui::Rect{};
 }
 
+json::Value ArrangeView::saveLayout() const {
+    const views::Viewport& vp = viewport();
+    json::Value v = json::Value::object();
+    v["start_seconds"] = vp.startSeconds;
+    v["pixels_per_second"] = vp.pixelsPerSecond;
+    v["scroll_y"] = static_cast<double>(vp.scrollY);
+    v["row_height"] = static_cast<double>(trackLayout().globalHeight());
+    v["follow"] = std::string(views::followName(follow()));
+    json::Value heights = json::Value::object();
+    for (const auto& [track, h] : trackLayout().heights())
+        heights[track.str()] = static_cast<double>(h);
+    v["track_heights"] = std::move(heights);
+    json::Value expanded = json::Value::array();  // "Show all takes"
+    for (model::Id item : trackLayout().expandedItems()) expanded.push_back(item.str());
+    v["expanded_takes"] = std::move(expanded);
+    return v;
+}
+
+void ArrangeView::loadLayout(const json::Value& v) {
+    views::Viewport vp = viewport();
+    auto num = [&](const char* k, auto& out) {
+        if (const json::Value* x = v.find(k); x && x->isNumber())
+            out = static_cast<std::remove_reference_t<decltype(out)>>(x->asDouble());
+    };
+    num("start_seconds", vp.startSeconds);
+    num("pixels_per_second", vp.pixelsPerSecond);
+    num("scroll_y", vp.scrollY);
+    setViewport(vp);
+    if (const json::Value* rh = v.find("row_height"); rh && rh->isNumber())
+        trackLayout().setGlobalHeight(static_cast<float>(rh->asDouble()));
+    trackLayout().clearTrackHeights();
+    if (const json::Value* th = v.find("track_heights"); th && th->isObject())
+        for (const auto& m : th->asObject()) {
+            const auto id = model::Id::parse(m.key);
+            if (id && m.value.isNumber())
+                trackLayout().setTrackHeight(*id, static_cast<float>(m.value.asDouble()));
+        }
+    if (const json::Value* f = v.find("follow"); f && f->isString())
+        if (const auto mode = views::followFrom(f->asString())) setFollow(*mode);
+    trackLayout().clearTakesExpanded();
+    if (const json::Value* ex = v.find("expanded_takes"); ex && ex->isArray())
+        for (const json::Value& item : ex->asArray())
+            if (const auto id = item.isString() ? model::Id::parse(item.asString()) : std::nullopt)
+                trackLayout().setTakesExpanded(*id, true);
+}
+
 bool ArrangeView::onPointer(const ui::PointerEvent& e) {
     if (e.type != ui::PointerEvent::Type::Wheel) return gestures_->pointer(e);
-    // Where the pointer is decides: over the track panel the wheel scrolls the
-    // tracks (and the lanes with them); over the lanes and the ruler it zooms
+    // Over the TCP the editable tcp.wheel bindings scroll or resize tracks.
+    // Over the lanes and the ruler the wheel zooms
     // at the project cursor or the pointer (Shift: scroll in time, Ctrl: scroll the tracks,
     // Ctrl+Shift: the rows' height; a sideways wheel scrolls in time).
     Viewport v = view_;
     const bool ctrl = (e.mods & ui::kCtrl) != 0, shift = (e.mods & ui::kShift) != 0;
     const bool overTracks = tcp_ && tcp_->bounds().contains(e.pos);
-    if (overTracks || (ctrl && !shift)) {  // vertical scroll
-        v.scrollY -= e.wheelY * layout_.globalHeight();
-    } else if (ctrl && shift) {  // vertical zoom: the global row height
+    const auto tcpWheel =
+        overTracks ? gestures_->mouse.behaviour("tcp.wheel", e.mods) : std::string_view{};
+    if (tcpWheel == "resize_all") {
+        std::optional<std::size_t> anchor;
+        float fraction = 0;
+        for (std::size_t i = 0; i < layout_.rowCount(); ++i) {
+            const auto row = tcp_->rowRect(i);
+            if (row.y <= e.pos.y && e.pos.y < row.bottom()) {
+                anchor = i;
+                fraction = (e.pos.y - row.y) / row.h;
+                break;
+            }
+        }
+        // Keep fractional/trackpad deltas: one wheel notch is eight design units.
+        layout_.adjustAllTrackHeights(e.wheelY * 8.0f);
+        if (anchor)
+            v.scrollY = layout_.yOf(*anchor) + fraction * layout_.heightOf(*anchor) -
+                        (e.pos.y - tcp_->bounds().y);
+        setViewport(v);  // clamps at the timeline's top/end when the anchor cannot hold
+        return true;
+    }
+    if (tcpWheel == "zoom_height" || (!overTracks && ctrl && shift)) {
         layout_.setGlobalHeight(static_cast<float>(static_cast<double>(layout_.globalHeight()) *
                                                    std::pow(1.25, static_cast<double>(e.wheelY))));
         if (tcp_) tcp_->scrolled();
         return true;
+    }
+    if (overTracks || (ctrl && !shift)) {  // vertical scroll
+        v.scrollY -= e.wheelY * layout_.globalHeight();
     } else if (shift || e.wheelX != 0) {  // horizontal scroll
         const float dx = e.wheelX != 0 ? e.wheelX : e.wheelY;
         v.startSeconds =
