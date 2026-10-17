@@ -68,6 +68,7 @@ constexpr std::array kDefaults = {
     Default{"ruler.marker", ui::kAlt, "remove"},
     Default{"ruler.tempo", ui::kAlt, "toggle_ramp"},
     Default{"tcp.wheel", ui::kCtrl, "resize_all"},
+    Default{"tcp.wheel", ui::kCtrl | ui::kShift, "resize_all"},
 };
 
 constexpr std::array<unsigned, 8> kCombos = {0,

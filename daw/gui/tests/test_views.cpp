@@ -622,22 +622,22 @@ TEST_CASE("track wheel gestures resize mixed rows additively, anchor and can be 
     wheel.wheelY = 1;
     wheel.pos.x = row.x + 100;
     root.pointer(wheel);
-    CHECK(layout.globalHeight() == 128);  // unbound Ctrl+Shift over TCP scrolls
-    CHECK(layout.heightOf(*layout.indexOf(track)) == 168);
+    CHECK(layout.globalHeight() == 136);  // Ctrl+Shift resizes over the TCP too
+    CHECK(layout.heightOf(*layout.indexOf(track)) == 176);
     REQUIRE(arrange->gestures().mouse.set("tcp.wheel", ui::kCtrl, "scroll"));
     auto saved = views::MouseMap::fromJson(arrange->gestures().mouse.toJson());
     REQUIRE(saved);
     CHECK(saved->behaviour("tcp.wheel", ui::kCtrl) == "scroll");
-    CHECK(saved->behaviour("tcp.wheel", ui::kCtrl | ui::kShift) == "scroll");
+    CHECK(saved->behaviour("tcp.wheel", ui::kCtrl | ui::kShift) == "resize_all");
     wheel.mods = ui::kCtrl;
     root.pointer(wheel);
-    CHECK(layout.globalHeight() == 128);
+    CHECK(layout.globalHeight() == 136);
     // The gesture also retains its former scope over the ruler, with no row to anchor.
     wheel.mods |= ui::kShift;
     wheel.pos = {arrange->lanesRect().x + 100, arrange->lanesRect().y - 10};
     root.pointer(wheel);
-    CHECK(layout.globalHeight() == 136);
-    CHECK(layout.heightOf(*layout.indexOf(track)) == 176);
+    CHECK(layout.globalHeight() == 144);
+    CHECK(layout.heightOf(*layout.indexOf(track)) == 184);
 }
 
 TEST_CASE("retired TCP wheel zoom settings load with current defaults") {
@@ -648,7 +648,7 @@ TEST_CASE("retired TCP wheel zoom settings load with current defaults") {
     const auto loaded = views::MouseMap::fromJson(*doc);
     REQUIRE(loaded);
     CHECK(loaded->behaviour("tcp.wheel", ui::kCtrl) == "resize_all");
-    CHECK(loaded->behaviour("tcp.wheel", ui::kCtrl | ui::kShift) == "scroll");
+    CHECK(loaded->behaviour("tcp.wheel", ui::kCtrl | ui::kShift) == "resize_all");
     CHECK(loaded->behaviour("tcp.wheel", ui::kAlt) == "resize_all");
     CHECK(loaded->behaviour("item.drag", ui::kAlt) == "copy");
     CHECK_FALSE(loaded->toJson()["contexts"]["tcp.wheel"].find("ctrl+shift"));
