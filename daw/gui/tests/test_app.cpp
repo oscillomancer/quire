@@ -371,11 +371,26 @@ TEST_CASE("the mouse modifiers dialog edits the live map and saves it (gap log #
     dialog.open("tcp.wheel");
     a.root->frame(false);
     CHECK(a.root->find("mouse.set.ctrl")->valueText() == "resize all track heights");
-    CHECK(a.root->find("mouse.set.ctrl+shift")->valueText() == "resize all track heights");
+    CHECK(a.root->find("mouse.set.alt")->valueText() == "resize all track heights");
+    CHECK(a.root->find("mouse.set.ctrl+shift")->valueText() == "scroll the tracks  (plain)");
     dialog.set("tcp.wheel", ui::kCtrl, "scroll");
     saved = views::MouseMap::load(file);
     REQUIRE(saved);
     CHECK(saved->behaviour("tcp.wheel", ui::kCtrl) == "scroll");
+    // The wheel over the arrangement, the mixer and the MIDI editor.
+    dialog.open("arrange.wheel");
+    a.root->frame(false);
+    CHECK(a.root->find("mouse.set.")->valueText() == "zoom in time");
+    CHECK(a.root->find("mouse.set.ctrl")->valueText() == "scroll the tracks");
+    dialog.open("mixer.wheel");
+    a.root->frame(false);
+    CHECK(a.root->find("mouse.set.")->valueText() == "move the fader or pan under the pointer");
+    dialog.open("midi.wheel");
+    a.root->frame(false);
+    CHECK(a.root->find("mouse.set.")->valueText() == "zoom in time");
+    CHECK(a.root->find("mouse.set.ctrl")->valueText() == "scroll the pitches");
+    CHECK(a.root->find("mouse.set.alt")->valueText() == "zoom the keys and rows");
+    a.snapshot("mouse-midi-wheel.png");
 }
 
 TEST_CASE("native dialog completions respect shutdown before posting and running") {

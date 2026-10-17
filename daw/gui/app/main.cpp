@@ -510,14 +510,17 @@ int main(int argc, char** argv) {
     // Arrange editing gestures (P5.6): one transaction per gesture; a later
     // step may use an earlier one's result ("$step0.track").
     // Mouse modifiers (gap log #37): the arrange view's map, from the user's file.
+    // The mixer and the MIDI editor take their wheel bindings from it too.
     const fs::path mouseFile = views::MouseMap::defaultFile(product::kSlug);
+    midiEditor.setMouseMap(&shell.arrange()->gestures().mouse);
+    mixer.setMouseMap(&shell.arrange()->gestures().mouse);
     gui::MouseDialog mouseDialog(root, shell.arrange()->gestures().mouse,
                                  o.offscreen ? fs::path{} : mouseFile);
     mouseDialog.onError = [](const std::string& message) {
         std::fprintf(stderr, "%s\n", message.c_str());
     };
     appActions.addUi("ui.mouse", "Edit: mouse modifiers…", [&] { mouseDialog.open(); });
-    appActions.addUi("ui.mouse.zoom", "View: wheel zoom anchor…",
+    appActions.addUi("ui.mouse.zoom", "Edit: wheel zoom anchor…",
                      [&] { mouseDialog.open("wheel.zoom"); });
     // Preferences (Edit menu): the default monitoring of new channels, the
     // wheel zoom anchor, a way into the mouse modifiers.

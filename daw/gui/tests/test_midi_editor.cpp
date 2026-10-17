@@ -23,6 +23,7 @@
 #include "supple/ui/controls.h"
 #include "supple/ui/text_area.h"
 #include "supple/ui/widgets.h"
+#include "supple/views/mouse_map.h"
 
 using namespace supple;
 
@@ -351,8 +352,8 @@ TEST_CASE("MIDI editor: Alt+wheel zooms the rows around the pointer's pitch") {
     CHECK(s.rowHeight == near(gui::MidiEditor::kMinRowHeight));
     f.wheel(at, 100, alt);
 
-    // Over the keys and the velocity lane too (anywhere in the editor), but not
-    // with Ctrl (time zoom) held, and the plain wheel still scrolls pitch.
+    // Over the keys and the velocity lane too (anywhere in the editor); the
+    // plain wheel zooms time instead, and Ctrl scrolls pitch.
     s.rowHeight = 12;
     const ui::Rect keys = f.root->find("midi.keys")->bounds();
     f.wheel({keys.x + 10, keys.y + 40}, 2, alt);
@@ -362,14 +363,43 @@ TEST_CASE("MIDI editor: Alt+wheel zooms the rows around the pointer's pitch") {
     f.wheel({vel.x + 200, vel.y + 20}, 2, alt);
     CHECK(s.rowHeight > 12);
     s.rowHeight = 12;
-    f.wheel(at, 2, ui::kCtrl);
+    f.wheel(at, 2, 0);
     CHECK(s.rowHeight == near(12));
     CHECK(s.pixelsPerBeat > ppb);
     const double top = s.topPitch;
-    f.wheel(at, 1, 0);
+    f.wheel(at, 1, ui::kCtrl);
     CHECK(s.rowHeight == near(12));
     CHECK(s.topPitch == near(top + 3));
     f.snapshot("midi-editor-row-zoom.png");
+}
+
+TEST_CASE("MIDI editor: the wheel follows the mouse map") {
+    Fixture f;
+    if (!f.ok) return;
+    REQUIRE(f.editor->open(f.item));
+    f.root->frame(false);
+    gui::RollState& s = f.editor->state();
+    views::MouseMap map;
+    REQUIRE(map.set("midi.wheel", 0, "zoom_rows"));
+    REQUIRE(map.set("midi.wheel", ui::kShift, "zoom"));
+    f.editor->setMouseMap(&map);
+    s.rowHeight = 12;
+    const ui::Rect b = f.editor->roll()->bounds();
+    const double ppb = s.pixelsPerBeat;
+    f.wheel({b.x + 200, b.y + 90}, 2, 0);  // plain zooms the rows now, not scrolls pitch
+    CHECK(s.rowHeight > 12);
+    s.rowHeight = 12;
+    const ui::Rect keys = f.root->find("midi.keys")->bounds();
+    f.wheel({keys.x + 10, keys.y + 40}, 2, 0);  // over the keys too
+    CHECK(s.rowHeight > 12);
+    f.wheel({b.x + 200, b.y + 90}, 2, ui::kShift);
+    CHECK(s.pixelsPerBeat > ppb);
+    f.editor->setMouseMap(nullptr);
+    s.rowHeight = 12;
+    const double zoomed = s.pixelsPerBeat;
+    f.wheel({b.x + 200, b.y + 90}, 1, 0);  // the defaults again: plain zooms time
+    CHECK(s.pixelsPerBeat > zoomed);
+    CHECK(s.rowHeight == near(12));
 }
 
 TEST_CASE("MIDI editor: an empty roll can marquee without a note anchor") {

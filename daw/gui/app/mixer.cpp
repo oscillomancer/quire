@@ -16,6 +16,7 @@
 #include "supple/ui/popup.h"
 #include "supple/ui/text_field.h"
 #include "supple/ui/widgets.h"
+#include "supple/views/mouse_map.h"
 #include "supple/views/track_layout.h"
 
 namespace supple::gui {
@@ -901,6 +902,11 @@ void Mixer::rebuild() {
         st.polarity->layout.height = st.mono->layout.height = ui::SizeRule::fixed(14);
         st.polarity->pill = st.mono->pill = true;
         st.pan = &frame->emplace<ui::PanControl>("mixer.pan." + tid);
+        auto adjusts = [this](unsigned mods) {
+            static const views::MouseMap defaults;
+            return (mouse_ ? *mouse_ : defaults).behaviour("mixer.wheel", mods) == "adjust";
+        };
+        st.pan->wheelWith = adjusts;
         st.pan->onChange = [this, tid](double pan, ui::Gesture g) {
             if (g == ui::Gesture::Begin) ++gesture_;
             if (g == ui::Gesture::Begin || g == ui::Gesture::End) return;
@@ -915,6 +921,7 @@ void Mixer::rebuild() {
         auto& spacer = faderRow.emplace<ui::Node>("mixer.spacer." + tid);
         spacer.layout.width = ui::SizeRule::fraction();
         st.fader = &faderRow.emplace<ui::Fader>("mixer.fader." + tid);
+        st.fader->wheelWith = adjusts;
         st.meter = &faderRow.emplace<ui::Meter>("mixer.meter." + tid);
         auto& spacer2 = faderRow.emplace<ui::Node>("mixer.spacer2." + tid);
         spacer2.layout.width = ui::SizeRule::fraction();

@@ -601,7 +601,7 @@ TEST_CASE("track wheel gestures resize mixed rows additively, anchor and can be 
     CHECK(layout.globalHeight() == 122);
     CHECK(layout.heightOf(*layout.indexOf(track)) == 162);
     CHECK(arrange->viewport().scrollY < scroll);  // lanes retain Ctrl+wheel scroll
-    wheel.mods |= ui::kShift;
+    wheel.mods = ui::kAlt;
     wheel.wheelY = 1;
     const auto laneRow = arrange->rowRect(1);
     const float fraction = (wheel.pos.y - laneRow.y) / laneRow.h;
@@ -622,18 +622,19 @@ TEST_CASE("track wheel gestures resize mixed rows additively, anchor and can be 
     wheel.wheelY = 1;
     wheel.pos.x = row.x + 100;
     root.pointer(wheel);
-    CHECK(layout.globalHeight() == 136);  // Ctrl+Shift resizes over the TCP too
+    CHECK(layout.globalHeight() == 136);  // Alt resizes over the TCP too
     CHECK(layout.heightOf(*layout.indexOf(track)) == 176);
     REQUIRE(arrange->gestures().mouse.set("tcp.wheel", ui::kCtrl, "scroll"));
     auto saved = views::MouseMap::fromJson(arrange->gestures().mouse.toJson());
     REQUIRE(saved);
     CHECK(saved->behaviour("tcp.wheel", ui::kCtrl) == "scroll");
-    CHECK(saved->behaviour("tcp.wheel", ui::kCtrl | ui::kShift) == "resize_all");
+    CHECK(saved->behaviour("tcp.wheel", ui::kAlt) == "resize_all");
+    CHECK(saved->behaviour("tcp.wheel", ui::kCtrl | ui::kShift) == "scroll");  // the plain wheel
     wheel.mods = ui::kCtrl;
     root.pointer(wheel);
     CHECK(layout.globalHeight() == 136);
-    // The gesture also retains its former scope over the ruler, with no row to anchor.
-    wheel.mods |= ui::kShift;
+    // Over the ruler too, with no row to anchor.
+    wheel.mods = ui::kAlt;
     wheel.pos = {arrange->lanesRect().x + 100, arrange->lanesRect().y - 10};
     root.pointer(wheel);
     CHECK(layout.globalHeight() == 144);
@@ -648,7 +649,7 @@ TEST_CASE("retired TCP wheel zoom settings load with current defaults") {
     const auto loaded = views::MouseMap::fromJson(*doc);
     REQUIRE(loaded);
     CHECK(loaded->behaviour("tcp.wheel", ui::kCtrl) == "resize_all");
-    CHECK(loaded->behaviour("tcp.wheel", ui::kCtrl | ui::kShift) == "resize_all");
+    CHECK(loaded->behaviour("tcp.wheel", ui::kCtrl | ui::kShift) == "scroll");
     CHECK(loaded->behaviour("tcp.wheel", ui::kAlt) == "resize_all");
     CHECK(loaded->behaviour("item.drag", ui::kAlt) == "copy");
     CHECK_FALSE(loaded->toJson()["contexts"]["tcp.wheel"].find("ctrl+shift"));
@@ -2153,4 +2154,34 @@ TEST_CASE("envelope point edits: move stops at the start and keeps time order; p
     const auto shaped = views::shapePoints(pts, {pts[3]}, model::PointShape::Square);
     CHECK(shaped.points[3].shape == model::PointShape::Square);
     CHECK(shaped.points[0].shape == model::PointShape::Linear);
+}
+
+TEST_CASE("the arrangement's wheel follows the mouse map over the lanes and the TCP") {
+    Gl& g = gl();
+    REQUIRE(g.ok);
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    auto* arrange = mount(root);
+    arrange->trackLayout().setGlobalHeight(200);  // room to scroll
+    arrange->setViewport({10, 40, 0});
+    root.frame(false);
+    ui::PointerEvent wheel{ui::PointerEvent::Type::Wheel,
+                           {arrange->lanesRect().x + 100, arrange->lanesRect().y + 50}};
+    wheel.wheelY = -1;
+    // Plain over the lanes scrolls the tracks once rebound, instead of zooming.
+    REQUIRE(arrange->gestures().mouse.set("arrange.wheel", 0, "scroll"));
+    root.pointer(wheel);
+    CHECK(arrange->viewport().scrollY > 0);
+    CHECK(arrange->viewport().pixelsPerSecond == 40);
+    // Over the TCP, a binding to zoom zooms in time.
+    REQUIRE(arrange->gestures().mouse.set("tcp.wheel", ui::kAlt, "zoom"));
+    wheel.pos.x = arrange->tcpRowRect(0).x + 20;
+    wheel.mods = ui::kAlt;
+    root.pointer(wheel);
+    CHECK(arrange->viewport().pixelsPerSecond < 40);
+    // Both are saved and read back.
+    auto saved = views::MouseMap::fromJson(arrange->gestures().mouse.toJson());
+    REQUIRE(saved);
+    CHECK(saved->behaviour("arrange.wheel", 0) == "scroll");
+    CHECK(saved->behaviour("arrange.wheel", ui::kShift) == "scroll_time");
+    CHECK(saved->behaviour("tcp.wheel", ui::kAlt) == "zoom");
 }

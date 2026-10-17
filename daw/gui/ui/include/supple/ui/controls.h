@@ -26,6 +26,8 @@ constexpr double kFaderSilenceDb = -150.0;
 class Fader : public Node {
   public:
     bool wheel = true;  // false: wheel events pass to the parent (a scrolled list)
+    // Set: decides per wheel event, from its modifiers (false passes it on).
+    std::function<bool(unsigned mods)> wheelWith;
     enum class Orientation { Vertical, Horizontal };
     Fader(std::string id, Orientation orientation = Orientation::Vertical);
     std::function<void(double db, Gesture)> onChange;
@@ -57,6 +59,8 @@ class Fader : public Node {
 class Slider : public Node {
   public:
     bool wheel = true;  // false: wheel events pass to the parent (a scrolled list)
+    // Set: decides per wheel event, from its modifiers (false passes it on).
+    std::function<bool(unsigned mods)> wheelWith;
     explicit Slider(std::string id);
     std::function<void(double value, Gesture)> onChange;
     void setValue(double value);  // from the model; no callback
@@ -102,6 +106,8 @@ class Knob : public Slider {
 class PanControl : public Node {
   public:
     bool wheel = true;  // false: wheel events pass to the parent (a scrolled list)
+    // Set: decides per wheel event, from its modifiers (false passes it on).
+    std::function<bool(unsigned mods)> wheelWith;
     explicit PanControl(std::string id);
     std::function<void(double pan, Gesture)> onChange;
     void setValue(double pan);

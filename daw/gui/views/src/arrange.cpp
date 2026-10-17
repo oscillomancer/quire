@@ -1300,17 +1300,17 @@ void ArrangeView::loadLayout(const json::Value& v) {
 
 bool ArrangeView::onPointer(const ui::PointerEvent& e) {
     if (e.type != ui::PointerEvent::Type::Wheel) return gestures_->pointer(e);
-    // Over the TCP the editable tcp.wheel bindings scroll or resize tracks
-    // (Ctrl and Ctrl+Shift resize by default). Over the lanes and the ruler the
-    // wheel zooms at the project cursor or the pointer (Shift: scroll in time,
-    // Ctrl: scroll the tracks, Ctrl+Shift: resize every track; a sideways wheel
-    // scrolls in time).
+    // The mouse map says what the wheel does: over the TCP its tcp.wheel
+    // bindings (plain scrolls the tracks, Ctrl and Alt resize them), over the
+    // lanes and the ruler its arrange.wheel ones (plain zooms at the project
+    // cursor or the pointer, Shift scrolls in time, Ctrl scrolls the tracks,
+    // Alt resizes every track). A sideways wheel scrolls in time where the
+    // wheel would zoom.
     Viewport v = view_;
-    const bool ctrl = (e.mods & ui::kCtrl) != 0, shift = (e.mods & ui::kShift) != 0;
     const bool overTracks = tcp_ && tcp_->bounds().contains(e.pos);
-    const auto tcpWheel =
-        overTracks ? gestures_->mouse.behaviour("tcp.wheel", e.mods) : std::string_view{};
-    if (tcpWheel == "resize_all" || (!overTracks && ctrl && shift)) {
+    const std::string_view behaviour =
+        gestures_->mouse.behaviour(overTracks ? "tcp.wheel" : "arrange.wheel", e.mods);
+    if (behaviour == "resize_all") {
         std::optional<std::size_t> anchor;
         float fraction = 0;
         for (std::size_t i = 0; i < layout_.rowCount(); ++i) {
@@ -1329,9 +1329,9 @@ bool ArrangeView::onPointer(const ui::PointerEvent& e) {
         setViewport(v);  // clamps at the timeline's top/end when the anchor cannot hold
         return true;
     }
-    if (overTracks || (ctrl && !shift)) {  // vertical scroll
+    if (behaviour == "scroll") {  // vertical scroll
         v.scrollY -= e.wheelY * layout_.globalHeight();
-    } else if (shift || e.wheelX != 0) {  // horizontal scroll
+    } else if (behaviour == "scroll_time" || e.wheelX != 0) {  // horizontal scroll
         const float dx = e.wheelX != 0 ? e.wheelX : e.wheelY;
         v.startSeconds =
             std::max(0.0, v.startSeconds - static_cast<double>(dx) * 60.0 / v.pixelsPerSecond);
@@ -1349,7 +1349,9 @@ bool ArrangeView::onPointer(const ui::PointerEvent& e) {
                 return true;
             }
         }
-        zoomBy(factor, timeAt(e.pos.x), e.pos.x - lanes.x, false);
+        // Over the TCP the pointer's x is not a time: hold the lanes' left edge.
+        const float x = overTracks ? lanes.x : e.pos.x;
+        zoomBy(factor, timeAt(x), x - lanes.x, false);
         return true;
     }
     setViewport(v);

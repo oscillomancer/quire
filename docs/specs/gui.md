@@ -358,7 +358,7 @@ the original track for fader, pan, resize and rename gestures; rebinding
 cancels the gesture. Wheel zoom holds the **project cursor** (the playhead,
 the transport position the position display shows) still by default, or the
 mouse pointer when the mouse setting `wheel.zoom` is `mouse_pointer` (Edit >
-Mouse modifiers, or View > Wheel zoom anchor); a cursor outside the visible
+Mouse modifiers, or Edit > Preferences); a cursor outside the visible
 lanes falls back to the pointer. Keyboard zoom anchors at the playhead. The
 timeline's start stops the view, so zooming out near it pulls the anchor left
 on screen; zooming back in returns it to where it was, as each step holds
@@ -366,18 +366,23 @@ the anchor where the first step of the run found it. The run ends when anything
 else moves the view in time (a scroll, follow, the scrollbar), the cursor
 moves, or (with the pointer anchor) the pointer moves. Horizontal zoom is continuous;
 vertical track height per track and global.
-By default Ctrl+wheel or Ctrl+Shift+wheel over the TCP adds eight design
-units per notch to every track row, including hidden tracks and compact folders, preserving
+By default Alt+wheel anywhere over the arrange view, and Ctrl+wheel over the
+TCP, adds eight design units per notch to every track row, including hidden tracks and compact folders, preserving
 mixed heights and clamping each independently. Fractional wheel deltas work
 continuously; expanded rows divide the step among their take lanes. The row
 under the pointer stays anchored at the same fractional position unless a
 scroll boundary prevents it. Heights are UI state, saved with individual
-resizes, without commands or undo entries. Over the lanes Ctrl+wheel still
-scrolls vertically. Outside the TCP, Ctrl+Shift+wheel applies the same additive
-all-row step and pointer-row anchoring (including fractional deltas), keeping
-its existing scope over lanes and ruler. Over the ruler there is no row to
-anchor; scrolling is clamped normally. Proportional track-height zoom is
-removed. Saved absolute `row_height` values still load.
+resizes, without commands or undo entries. Over the lanes Ctrl+wheel
+scrolls vertically. Over the ruler there is no row to anchor; scrolling is
+clamped normally. Proportional track-height zoom is
+removed. Saved absolute `row_height` values still load. All of these are
+defaults of two mouse contexts (§6): `tcp.wheel` over the TCP (plain scrolls
+the tracks, Ctrl and Alt resize them) and `arrange.wheel` over the lanes and
+ruler (plain zooms, Shift scrolls in time, Ctrl scrolls the tracks, Alt
+resizes them; other combinations do what the plain wheel does). Either can
+bind any combination to scroll the tracks, scroll in time, zoom in time or
+resize every track. Where the binding zooms, a sideways wheel scrolls in time;
+a zoom over the TCP holds the lanes' left edge when it anchors at the pointer.
 Left trim shifts every take's source offset by the trimmed duration times
 its play rate, in the same transaction; dragging the left edge out past a
 take's material (down to the timeline's start) and slipping its material
@@ -479,7 +484,10 @@ chain has a fixed height and the chain takes what a strip's missing rows
 leave, so every strip's fader sits at the same height. The strip's plug-in chain lists every plug-in,
 scrolling when it is longer than its section, and takes the room a strip's
 unused rows would leave (sends show only when there are some, up to two;
-busses and masters have no arm row or monitoring). Alt+click on a plug-in removes it
+busses and masters have no arm row or monitoring). The wheel over a fader or
+pan moves it (Shift finer) and elsewhere scrolls the strips; the mouse context
+`mixer.wheel` (§6) can make any combination scroll the strips even over a
+control. Alt+click on a plug-in removes it
 (`fx.remove`, one undo step); a double-click on the chain's empty part opens
 the plugin browser for that strip. A double-click on the strips' empty space
 (not on a strip) adds a channel; a right-click there offers Channel, Buss or
@@ -633,10 +641,13 @@ The panel's top border is a drag handle: dragging resizes the panel (up is
 taller; up to nearly the whole window, always leaving the transport and a strip
 of arrange, and clamped again whenever the window shrinks or a neighbouring
 dock grows), double-clicking resets it to the default height. The height is
-UI state (the `midi` section of the sidecar, §1.2). Wheel in the roll: scrolls
-pitch; Shift scrolls time; Ctrl zooms time around the pointer; **Alt zooms the
-key/row height** around the pointer's pitch (4–48 px per key), and also works
-over the keys, lanes and header. Row height is not persisted.
+UI state (the `midi` section of the sidecar, §1.2). Wheel in the roll, as over
+the arrangement: zooms time around the pointer (a sideways wheel scrolls time);
+Shift scrolls time; Ctrl scrolls pitch; **Alt zooms the key/row height** around the pointer's pitch (4–48 px per key), and also works
+over the keys, lanes and header. Row height is not persisted. These are the
+defaults of the `midi.wheel` mouse context (§6), which can bind any
+combination to scroll the pitches, scroll in time, zoom in time or zoom the
+rows.
 
 Native file-dialog completions check owner lifetime before posting and again
 on the UI thread; outstanding dialogs may safely outlive shutdown.
@@ -775,21 +786,25 @@ Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
   actions list puts the selected action on the toolbar (or takes it off),
   Ctrl+M adds it to a menu or removes it; a toolbar button's right-click menu
   moves or removes it, or resets menus and toolbar.
-- **Mouse modifiers:** a map per context of the arrange view — item drag
+- **Mouse modifiers:** a map per context — item drag
   (move, copy, slip; each also off the grid), item edge (trim, stretch), item
   click (select, toggle, extend), automation item edge (stretch, loop), fade
   handle (drag, cycle shape), empty-lane drag (select, add), automation lane
   (edit, toggle, delete), ruler markers/regions
-  (move, remove), tempo points (toggle ramp), and TCP wheel
-  (`tcp.wheel`: scroll, resize all track heights) —
+  (move, remove), tempo points (toggle ramp), and the wheel over the TCP
+  (`tcp.wheel`) and the arrangement's lanes and ruler (`arrange.wheel`):
+  scroll the tracks, scroll in time, zoom in time, resize all track heights;
+  over the mixer (`mixer.wheel`: move the fader or pan under the pointer,
+  scroll the strips); and over the MIDI editor (`midi.wheel`: scroll the
+  pitches, scroll in time, zoom in time, zoom the keys and rows) —
   from each modifier combination to a behaviour. The defaults are the built-in gestures;
   `mouse.json` (supple.mouse/1.0, only what differs) overrides them, and
   Edit > Mouse modifiers edits the live map. One context, `wheel.zoom`, is a
   single setting rather than a modifier map: the wheel's zoom anchor
   (`project_cursor`, the default, or `mouse_pointer`).
-  TCP wheel defaults are plain scroll, and Ctrl and Ctrl+Shift resize all, so
-  Ctrl+Shift+wheel resizes every track wherever the pointer is over the
-  arrange view. Each modifier combination can be rebound.
+  TCP wheel defaults are plain scroll, and Ctrl and Alt resize all; over the
+  lanes Alt resizes too, so Alt+wheel resizes every track wherever the pointer
+  is over the arrange view. Each modifier combination can be rebound.
   Saved `zoom_height` bindings are ignored on load, retaining current defaults
   and unrelated customizations without changing the mouse file schema.
 - **Preferences** (Edit > Preferences…): app-wide settings, never project
