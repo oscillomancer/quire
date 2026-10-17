@@ -17,14 +17,19 @@ inline constexpr int kRateQuantum = 64;
 // Fractional timeline samples, distinct from device/stream frames. Advance
 // once per device sample, regardless of how callers partition their buffers.
 // An authored envelope replaces the scalar (and never acquires its ramp).
+//
+// A scalar ramps linearly from `from` to `target`. With smoothing (live knob
+// moves), the scalar instead follows that ramp through a one-pole low-pass
+// of `smoothing` frames: a continuous chain of ramps comes out with a
+// continuous slope too, so a knob's steps leave no corners in the pitch.
 class PlayrateClock {
   public:
     struct State {
         double timeline = 0, scalar = 1, from = 1, target = 1;
-        std::uint32_t rampFrames = 0, rampAt = 0, waitFrames = 0, reserved = 0;
+        std::uint32_t rampFrames = 0, rampAt = 0, waitFrames = 0, smoothing = 0;
     };
     State state() const SUPPLE_RT {
-        return {timeline_, scalar_, from_, target_, rampFrames_, rampAt_, waitFrames_, 0};
+        return {timeline_, scalar_, from_, target_, rampFrames_, rampAt_, waitFrames_, smoothing_};
     }
     void restore(State state) SUPPLE_RT {
         timeline_ = state.timeline;
@@ -34,10 +39,12 @@ class PlayrateClock {
         rampFrames_ = state.rampFrames;
         rampAt_ = state.rampAt;
         waitFrames_ = state.waitFrames;
+        smoothing_ = state.smoothing;
     }
     using Envelope = double (*)(const void*, double) noexcept;
     void reset(double timeline, double rate) SUPPLE_RT;
-    void setRate(double rate, std::uint32_t rampFrames) SUPPLE_RT;
+    // `smoothing` 0: the scalar is the ramp itself.
+    void setRate(double rate, std::uint32_t rampFrames, std::uint32_t smoothing = 0) SUPPLE_RT;
     void transition(double rate, double from, std::uint32_t rampFrames,
                     std::uint32_t waitFrames) SUPPLE_RT;
     void setEnvelope(Envelope envelope, const void* context) SUPPLE_RT;
@@ -49,8 +56,9 @@ class PlayrateClock {
     static std::size_t crossing(std::span<const double> boundaries, double timeline) SUPPLE_RT;
 
   private:
+    double ramped() const SUPPLE_RT;  // the linear ramp's value now
     double timeline_ = 0, scalar_ = 1, from_ = 1, target_ = 1;
-    std::uint32_t rampFrames_ = 0, rampAt_ = 0, waitFrames_ = 0;
+    std::uint32_t rampFrames_ = 0, rampAt_ = 0, waitFrames_ = 0, smoothing_ = 0;
     Envelope envelope_ = nullptr;
     const void* context_ = nullptr;
 };

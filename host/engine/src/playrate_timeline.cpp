@@ -171,7 +171,7 @@ void PlayrateTimeline::ensure(std::int64_t last) SUPPLE_RT {
                 if ((next_ & 63) != 0) break;
             }
             scalar_ = edit.rate;
-            clock_.setRate(edit.rate, edit.rampFrames);
+            clock_.setRate(edit.rate, edit.rampFrames, edit.smoothing);
             scalarEdits.consume();
         }
         const auto index = static_cast<std::size_t>(next_) & mask_;

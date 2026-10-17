@@ -544,7 +544,7 @@ TEST_CASE("master playrate transitions: compensated take sources remain aligned"
                 const auto session = edit.commit().value();
                 auto pool = playrateFixturePool();
                 MediaCache media;
-                DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 50000});
+                DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 140000});
                 Engine engine(pool, media, {.anticipative = anticipative, .workers = 0});
                 REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}));
                 REQUIRE(engine.load(session));
@@ -573,7 +573,7 @@ TEST_CASE("master playrate transitions: compensated take sources remain aligned"
                 project.playrate.rate = 2.5;
                 newer.setProject(project);
                 REQUIRE(engine.load(newer.commit().value()));
-                run(250);
+                run(1000);  // lookahead, then the knob's ramp and smoothing settle
                 CHECK(engine.effectivePlayrate() == 2.5);
                 double after = 0;
                 for (std::size_t i = 8192; i < static_cast<std::size_t>(backend.cycles() * 128);
@@ -1295,7 +1295,7 @@ TEST_CASE("master playrate RT adoption: prepared knob edits keep their epoch") {
                 project.playrate.rate = 1.137;
                 knob.setProject(project);
                 REQUIRE(engine.load(knob.commit().value()));
-                run(64);
+                run(256);  // the knob's smoothing settles
                 REQUIRE(engine.awaitPlan());
                 CHECK(engine.effectivePlayrate() == 1.137);
                 CHECK(engine.meterClock().epoch == epoch);  // non-seek RT adoption actually ran
@@ -1321,7 +1321,7 @@ TEST_CASE("master playrate scalar control: sustained sweep retains converters an
                 for (int i = 1; i < 8; ++i) h.run("track.add");
                 audio::AudioData tone;
                 tone.sampleRate = fs;
-                tone.channels.assign(1, std::vector<float>(80000));
+                tone.channels.assign(1, std::vector<float>(200000));
                 for (std::size_t i = 0; i < tone.frames(); ++i)
                     tone.channels[0][i] = static_cast<float>(
                         .2 * std::sin(double(i) * 2 * 3.141592653589793 * 55 / fs));
@@ -1383,10 +1383,11 @@ TEST_CASE("master playrate scalar control: sustained sweep retains converters an
                     run(2);
                     CHECK(engine.planGeneration() == generation);
                     CHECK(engine.meterClock().epoch == epoch);
-                    if (step > 40) CHECK(std::abs(engine.effectivePlayrate() - requested) < .19);
+                    // Lookahead and the knob's smoothing both lag the request.
+                    if (step > 40) CHECK(std::abs(engine.effectivePlayrate() - requested) < .25);
                 }
                 rate(1.37);
-                run(128);
+                run(384);
                 CHECK(engine.effectivePlayrate() == 1.37);
                 CHECK(engine.meterClock().epoch == epoch);
                 // A structural edit must inherit already scheduled scalar
@@ -1397,7 +1398,7 @@ TEST_CASE("master playrate scalar control: sustained sweep retains converters an
                                             [](auto& track) { track.name = "Renamed"; });
                 session = rename.commit().value();
                 REQUIRE(engine.load(session));
-                run(128);
+                run(384);
                 CHECK(engine.effectivePlayrate() == 1.43);
                 CHECK(engine.meterClock().epoch == epoch);
                 CHECK(engine.processErrors() == 0);
@@ -1418,7 +1419,7 @@ TEST_CASE("master playrate scalar control: sustained sweep retains converters an
             }
 }
 
-TEST_CASE("master playrate scalar control: spaced knob steps join into one continuous glide") {
+TEST_CASE("master playrate scalar control: spaced knob steps join into one smooth glide") {
     constexpr double fs = 8000;
     for (bool anticipative : {false, true}) {
         CAPTURE(anticipative);
@@ -1457,7 +1458,7 @@ TEST_CASE("master playrate scalar control: spaced knob steps join into one conti
             REQUIRE(engine.load(session));
             run(8);
         }
-        run(128);
+        run(384);
         REQUIRE(heard.back() == doctest::Approx(1.4));
         // From the first audible change to the final value the rate rises at
         // every block: no step is a jump followed by a hold.
@@ -1467,6 +1468,16 @@ TEST_CASE("master playrate scalar control: spaced knob steps join into one conti
             std::find_if(heard.begin(), heard.end(), [](double r) { return r >= 1.4 - 1e-9; });
         REQUIRE(first < last);
         for (auto it = first + 1; it <= last; ++it) CHECK(*it > *(it - 1));
+        // And its slope bends gradually: where one step's ramp meets the next
+        // there is no corner (unsmoothed ramps bend by about 80 % of the
+        // steepest slope in one block; smoothed, under 10 %).
+        double steepest = 0, corner = 0;
+        for (auto it = first + 2; it <= last; ++it) {
+            const double slope = *it - *(it - 1), before = *(it - 1) - *(it - 2);
+            steepest = std::max(steepest, slope);
+            corner = std::max(corner, std::abs(slope - before));
+        }
+        CHECK(corner < .2 * steepest);
         engine.stop();
     }
 }
@@ -1534,7 +1545,7 @@ TEST_CASE("master playrate scalar control: transport changes retain later edits"
             run(96);  // wraps repeatedly; the device coordinate remains monotonic
             const auto epoch = engine.meterClock().epoch;
             rate(1.47);
-            run(64);
+            run(256);
             CHECK(engine.effectivePlayrate() == 1.47);
             CHECK(engine.meterClock().epoch == epoch);
             CHECK(engine.processErrors() == 0);
@@ -1576,7 +1587,7 @@ TEST_CASE("master playrate scalar control: saturation coalesces without losing t
             session = edit.commit().value();
             REQUIRE(engine.load(session));
         }
-        run(128);
+        run(384);
         CHECK(engine.effectivePlayrate() == 1.47);
         CHECK(engine.planGeneration() == generation);
         CHECK(engine.meterClock().epoch == epoch);

@@ -130,16 +130,19 @@ bool Engine::loadScalarRate(const model::Session& session, const std::filesystem
         // refill burst (and at least two canonical quanta) before the edit.
         const auto headroom = std::max({p->block, config_.blockSize, 128u});
         const auto device = (frontier + headroom + 63) / 64 * 64;
-        // Each move glides over half as long again as the audio played since
-        // the previous one (at least one device block, at most 200 ms), so the
-        // steps of a mouse drag or a MIDI knob join into one continuous glide
+        // Each move ramps over half as long again as the audio played since
+        // the previous one (at least one device block, at most 300 ms), so the
+        // steps of a mouse drag or a MIDI knob join into one continuous ramp
         // that follows the hand, instead of short jumps with holds between
-        // them: the next move normally arrives mid-glide and continues from
-        // there. A move after a pause takes the longest glide. Played audio,
-        // unlike the render frontier, advances with the device.
+        // them: the next move normally arrives mid-ramp and continues from
+        // there. A move after a pause takes the longest ramp. Played audio,
+        // unlike the render frontier, advances with the device. The rate then
+        // follows that chain of ramps through a 150 ms low-pass, which rounds
+        // off the corners where one ramp meets the next: smoothness matters
+        // more here than response.
         const auto epoch = epoch_.load(std::memory_order_acquire);
         const auto heard = playedStream(epoch);
-        const auto longest = std::max<std::int64_t>(std::llround(0.2 * p->rate), p->smoothFrames);
+        const auto longest = std::max<std::int64_t>(std::llround(0.3 * p->rate), p->smoothFrames);
         const auto shortest = std::min<std::int64_t>(
             longest, std::max<std::int64_t>(p->smoothFrames, config_.blockSize));
         std::int64_t ramp = longest;
@@ -147,8 +150,9 @@ bool Engine::loadScalarRate(const model::Session& session, const std::filesystem
             ramp = std::clamp((heard - scalarHeard_) * 3 / 2, shortest, longest);
         scalarHeard_ = heard;
         scalarHeardEpoch_ = epoch;
-        const detail::ScalarRateEdit edit{device, value, sequence,
-                                          static_cast<std::uint32_t>(ramp)};
+        const auto smoothing = static_cast<std::uint32_t>(std::llround(0.15 * p->rate));
+        const detail::ScalarRateEdit edit{device, value, sequence, static_cast<std::uint32_t>(ramp),
+                                          smoothing};
         p->scalarHistory.push_back(edit);
         p->timelines[0]->scalarEdits.push(edit);
         p->timelines[1]->scalarEdits.push(edit);

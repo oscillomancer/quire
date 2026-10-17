@@ -20,16 +20,23 @@ constexpr long kSeed = 20261016;
 void PlayrateClock::reset(double timeline, double rate) SUPPLE_RT {
     timeline_ = timeline;
     scalar_ = from_ = target_ = boundedRate(rate);
-    rampFrames_ = rampAt_ = waitFrames_ = 0;
+    rampFrames_ = rampAt_ = waitFrames_ = smoothing_ = 0;
 }
-void PlayrateClock::setRate(double rate, std::uint32_t frames) SUPPLE_RT {
+double PlayrateClock::ramped() const SUPPLE_RT {
+    return rampAt_ >= rampFrames_ ? target_
+                                  : from_ + (target_ - from_) * (double(rampAt_) / rampFrames_);
+}
+void PlayrateClock::setRate(double rate, std::uint32_t frames, std::uint32_t smoothing) SUPPLE_RT {
     rate = boundedRate(rate);
     if (target_ == rate) return;
-    from_ = scalar_;
+    // A smoothed scalar lags its ramp: the next ramp starts where the ramp is,
+    // and the filter carries on from where the scalar is.
+    from_ = smoothing_ > 0 && smoothing > 0 ? ramped() : scalar_;
     target_ = rate;
     rampFrames_ = frames;
     rampAt_ = 0;
-    if (frames == 0) scalar_ = target_;
+    smoothing_ = smoothing;
+    if (frames == 0 && smoothing == 0) scalar_ = target_;
 }
 void PlayrateClock::transition(double rate, double from, std::uint32_t frames,
                                std::uint32_t wait) SUPPLE_RT {
@@ -38,6 +45,7 @@ void PlayrateClock::transition(double rate, double from, std::uint32_t frames,
     rampFrames_ = frames;
     rampAt_ = 0;
     waitFrames_ = wait;
+    smoothing_ = 0;
     if (frames == 0 && wait == 0) scalar_ = target_;
 }
 void PlayrateClock::setEnvelope(Envelope envelope, const void* context) SUPPLE_RT {
@@ -53,7 +61,13 @@ void PlayrateClock::advance(std::span<double> boundaries) SUPPLE_RT {
     for (std::size_t i = 0; i + 1 < boundaries.size(); ++i) {
         boundaries[i] = timeline_;
         timeline_ += rate();
-        if (waitFrames_ > 0) {
+        if (smoothing_ > 0) {
+            if (rampAt_ < rampFrames_) ++rampAt_;
+            const double ramp = ramped();
+            scalar_ += (ramp - scalar_) / smoothing_;
+            // Settled within 1e-5 (a fiftieth of a cent): the scalar is exact again.
+            if (rampAt_ >= rampFrames_ && std::abs(ramp - scalar_) < 1e-5) scalar_ = ramp;
+        } else if (waitFrames_ > 0) {
             if (--waitFrames_ == 0 && rampFrames_ == 0) scalar_ = target_;
         } else if (rampAt_ < rampFrames_) {
             ++rampAt_;
