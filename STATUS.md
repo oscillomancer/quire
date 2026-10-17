@@ -330,10 +330,17 @@ Session and editing:
   variation uses a portable integer RNG, so it matches across standard
   libraries. Non-unity audio/MIDI
   recording is refused, including queued transitions. Writing retains coarse
-  strip semantics. Rate/mode edits wait for compensated lookahead and coalesce
-  during transitions; long-latency take chains can exceed the 200 ms horizon.
+  strip semantics. Compatible scalar-only live edits publish bounded clock
+  controls, retain source/converter state and ramp for 10 ms without graph
+  compilation or an epoch change (ADR-0046). Structural prediction retains
+  pending scalar ramps. Bypass/mode/curve edits wait for compensated lookahead
+  and coalesce during prepared transitions; long-latency take chains can exceed
+  the 200 ms horizon.
   All source allocation/priming runs on the control thread; the renderer and
-  callback adopt prepared state at scheduled boundaries under RTSan. Seeks prepare
+  callback adopt prepared state at scheduled boundaries under RTSan. Prepared
+  boundaries and lateness checks use the renderer frontier, block granularity
+  and observed preparation time. A live knob move becomes audible after about
+  350–400 ms (the render horizon plus clock and source lookahead). Seeks prepare
   off the audio executors while playback/monitoring continues. Clock windows
   reserve four additional seconds for latency changes; history exhaustion or late
   preparation recovers automatically through a prepared locate at the consumed

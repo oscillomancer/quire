@@ -1588,27 +1588,48 @@ retains per-frame precision. Clicks are synthesized in device time at mapped bea
 crossings, retaining their pitch and 40 ms duration. Count-in freezes the timeline
 and uses the selected rate at its start.
 
-Manual scalar edits ramp for 10 ms; changes of converter/rate configuration prime
+Compatible scalar-only live edits (ADR-0046) retain the current graph and source
+converters. Persistent collection identity detects that only the project scalar
+changed, without traversing tracks. Unchanged-session and plugin maintenance
+reloads retain graph compilation. Two bounded SPSC queues carry identical
+64-frame device boundaries and values to the executor timelines; a shared
+release/acquire gate commits both queues together. Boundaries follow both
+already generated clock windows plus a render/device block of publication
+headroom (at least 128 frames), so existing PDC and
+stretch lookahead is respected. Each timeline ramps its current scalar for
+10 ms without restarting the converter or replacing the plan/epoch. Authored
+rate envelopes remain authoritative and retain their shapes. A control-side
+history replays scheduled future scalar edits during structural preparation.
+Queue saturation coalesces the latest value for service to retry. Ordinary
+60–100 Hz edits can arrive during an earlier ramp and do not debounce until the
+gesture ends. The saved scalar remains the offline render setting; arbitrary
+live gesture timing carries no offline null promise.
+
+Unity bypass crossings and changes of converter/rate configuration prime
 the selected source state and crossfade for 10 ms. The old path runs only through
 that transition. All source allocation, configuration and priming run on the
 control thread before publication, including non-seek anticipative edits. An
 ordered control-to-renderer queue carries prepared plans to a future canonical
-stream boundary; the renderer only validates that boundary, transfers source
-state and publishes the callback handoff through RT-annotated functions. It
+stream boundary measured against the renderer's actual frontier (consumed
+stream in callback mode), rounded to 64 frames with headroom for block
+granularity and observed preparation time. Lateness validation uses the same
+frontier and retries farther ahead; the renderer validates that boundary,
+transfers source state and publishes the callback handoff through RT-annotated functions. It
 caps old-plan rendering/virtual advancement at that boundary. A late boundary or
 predecessor mismatch requests a prepared seek on the control thread without
 allocating or priming on the renderer. A prepared-plan queue preserves
 the exact sequence of trajectories already rendered. Control-side transport,
 play/count-in and recording queries use an immutable prepared-boundary snapshot,
-not the renderer-to-callback handoff fields. Converter controls, saved anchors,
-origins and transition metadata are finalized before publication; control-side
-history copying reads only immutable curves and atomic tagged boundaries/floors.
+not the renderer-to-callback handoff fields. Converter configuration, saved anchors,
+origins and transition metadata are finalized before publication; scalar controls
+use the queues above. Control-side prediction reads immutable curves, the
+control-owned scalar log and atomic tagged boundaries/floors.
 Source state and compensated
 delays carry across unrelated model changes. The usual edit response includes the
-render horizon (normally 200 ms). For alignment, a rate/mode/curve edit additionally
-waits for maximum compensated source lookahead and a canonical boundary. Further
-requests coalesce while the source transition finishes; requested model settings
-and undo still update immediately. This can delay changes substantially on long
+render horizon (normally 200 ms). For alignment, a prepared bypass/mode/curve edit
+additionally waits for maximum compensated source lookahead and a canonical
+boundary. Further requests requiring preparation coalesce while the source
+transition finishes; requested model settings and undo still update immediately. This can delay changes substantially on long
 latency take chains. Slow source preparation can extend the schedule; failure
 publishes no partial trajectory. `Engine::prepareSeek(seconds)` prepares fresh
 source state off the callback before publishing the seek epoch, returning a structured
@@ -1628,7 +1649,8 @@ copy the available tagged past, retaining earlier rate curves rather than
 reconstructing that history from the current rate. If a running edit
 needs history outside that window, or preparation repeatedly misses its future
 boundary, the engine automatically prepares a fresh seek at the consumed position
-using the latest requested model. It publishes the replacement plan before its
+using the latest requested model. Exceptionally late scalar control publication
+uses the same recovery. It publishes the replacement plan before its
 seek epoch, through the same path as a locate. The anticipative renderer requests
 that preparation from the control thread and continues the old plan while it
 waits, without retrying the failed adoption. Live monitoring continues, and

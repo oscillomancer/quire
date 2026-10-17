@@ -708,6 +708,7 @@ class Engine {
     std::atomic<std::uint64_t> rateReseekGeneration_{0};
     std::uint64_t rateReseekServiced_ = 0;  // control thread only
     bool rateDeferred_ = false;
+    bool scalarPending_ = false;
     std::atomic<bool> rateDeferredWake_{false};
     std::filesystem::path rateDeferredDir_;
     std::uint64_t clickSeekSeen_ = 0;
@@ -716,6 +717,8 @@ class Engine {
                           std::uint64_t epoch, bool live) SUPPLE_RT;
     std::array<std::uint64_t, 13> readRateClock() const;
     Status prepareRatePlan(detail::Plan& plan);
+    bool loadScalarRate(const model::Session& session, const std::filesystem::path& projectDir);
+    double ratePreparationSeconds_ = 0;
 
     std::atomic<std::int64_t> rtStream_{0};     // (frames played in the epoch)
     std::atomic<std::uint64_t> rtPosEpoch_{0};  // ...in this epoch

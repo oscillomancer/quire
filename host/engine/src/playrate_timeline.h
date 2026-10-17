@@ -6,9 +6,17 @@
 #include <cmath>
 #include <limits>
 #include "playrate_dsp.h"
+#include "supple/base/spsc.h"
 #include "supple/model/env_shape.h"
 
 namespace supple::engine::detail {
+
+struct ScalarRateEdit {
+    std::int64_t device = 0;
+    double rate = 1;
+    std::uint64_t sequence = 0;
+    std::uint32_t rampFrames = 0;
+};
 
 struct RatePoint {
     double sample, value;
@@ -28,6 +36,14 @@ class PlayrateTimeline {
         double loopStart = 0, loopEnd = 0;
         bool looping = false;
     };
+    // Control producer; advancement is the sole consumer. Publication gates
+    // both executor queues so neither observes half a control transaction.
+    SpscRing<ScalarRateEdit, 1024> scalarEdits;
+    std::atomic<bool> scalarLate{false};
+    void bindScalarPublication(const std::atomic<std::uint64_t>* publication) {
+        scalarPublication_ = publication;
+    }
+    std::int64_t frontier() const { return frontier_.load(std::memory_order_acquire); }
     Snapshot snapshot(std::int64_t device) const SUPPLE_RT;
     void seed(const Snapshot& state, std::int64_t deviceOffset = 0) SUPPLE_RT;
     bool hasHistory(std::int64_t first, std::int64_t last) const SUPPLE_RT;
@@ -96,6 +112,8 @@ class PlayrateTimeline {
     std::atomic<std::int64_t> first_{0};  // retained floor, read by control-side copying
     std::int64_t next_ = 0, anchor_ = 0;
     PlayrateClock clock_, anchorClock_;
+    const std::atomic<std::uint64_t>* scalarPublication_ = nullptr;
+    std::atomic<std::int64_t> frontier_{0};
 };
 
 }  // namespace supple::engine::detail
