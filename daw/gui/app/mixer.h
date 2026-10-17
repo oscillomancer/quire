@@ -34,10 +34,6 @@ class Meter;
 class MonitorButton;
 }  // namespace supple::ui
 
-namespace supple::views {
-class MouseMap;
-}  // namespace supple::views
-
 namespace supple::gui {
 
 class Mixer {
@@ -66,10 +62,6 @@ class Mixer {
     // shared with the TCP).
     std::function<std::string(const model::Id& track)> inputText;
     std::function<void(const model::Id& track, const ui::Rect& anchor)> pickInput;
-    // The mouse modifiers (Edit > Mouse modifiers): its mixer.wheel bindings say
-    // whether the wheel over a fader or pan moves it or scrolls the strips.
-    // Unset: the defaults (it moves them).
-    void setMouseMap(const views::MouseMap* map) { mouse_ = map; }
 
     // Tests.
     struct Strip {
@@ -130,7 +122,6 @@ class Mixer {
     cmd::Dispatcher& dispatcher_;
     engine::EngineApp& app_;
     MeterFeed& meters_;
-    const views::MouseMap* mouse_ = nullptr;
     SelectionEdit selectionEdit_;              // a strip control on a selected track: all of them
     TrackMenu trackMenu_;                      // a strip's right-click menu
     std::vector<std::string> shownSelection_;  // the track selection the strips show

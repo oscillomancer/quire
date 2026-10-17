@@ -480,9 +480,8 @@ leave, so every strip's fader sits at the same height. The strip's plug-in chain
 scrolling when it is longer than its section, and takes the room a strip's
 unused rows would leave (sends show only when there are some, up to two;
 busses and masters have no arm row or monitoring). The wheel over a fader or
-pan moves it (Shift finer) and elsewhere scrolls the strips; the mouse context
-`mixer.wheel` (§6) can make any combination scroll the strips even over a
-control. Alt+click on a plug-in removes it
+pan moves it (Shift finer) and elsewhere scrolls the strips. Alt+click on a
+plug-in removes it
 (`fx.remove`, one undo step); a double-click on the chain's empty part opens
 the plugin browser for that strip. A double-click on the strips' empty space
 (not on a strip) adds a channel; a right-click there offers Channel, Buss or
@@ -784,9 +783,8 @@ Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
   (move, remove), tempo points (toggle ramp), and the wheel over the TCP
   (`tcp.wheel`) and the arrangement's lanes and ruler (`arrange.wheel`):
   scroll the tracks, scroll in time, zoom in time, resize all track heights;
-  over the mixer (`mixer.wheel`: move the fader or pan under the pointer,
-  scroll the strips); and over the MIDI editor (`midi.wheel`: scroll the
-  pitches, scroll in time, zoom in time, zoom the keys and rows) —
+  and over the MIDI editor (`midi.wheel`: scroll the pitches, scroll in time,
+  zoom in time, zoom the keys and rows) —
   from each modifier combination to a behaviour. The defaults are the built-in gestures;
   `mouse.json` (supple.mouse/1.0, only what differs) overrides them, and
   Edit > Mouse modifiers edits the live map. One context, `wheel.zoom`, is a
