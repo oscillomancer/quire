@@ -1548,9 +1548,14 @@ while seeking, priming or processing. Unprimed/discontinuous trajectories are
 refused without changing the stretch state.
 
 A documented MIT vendor patch adds `reset(seed)` and resets silence/seek/smoothing
-state. Plain `reset()` retains upstream's random-sequence behavior; existing
-whole-file media variants keep their seed and processing schedule. Shared
-portable DSP tests exercise partition-independent clock/ramp output, exact unity,
+state. Its default RNG uses a fixed SplitMix64 integer sequence and explicit
+24-bit float/53-bit double uniform conversion, independent of standard-library
+engine/distribution choices. Plain `reset()` retains the current RNG state;
+explicitly supplied custom engines keep upstream distribution behavior. Existing
+whole-file media variants keep their seed and processing schedule, with the new
+portable phase sequence. Steady-state quality checks measure RMS and local tone
+energy rather than a phase-sensitive long-window amplitude. Shared portable DSP
+tests exercise partition-independent clock/ramp output, exact unity,
 linked stereo, tape anti-aliasing, preserved pitch, unity impulse alignment,
 repeatable seeks at extreme
 rates, non-48k priming and invalid trajectory rejection, including under RTSan.
@@ -1585,8 +1590,20 @@ and uses the selected rate at its start.
 
 Manual scalar edits ramp for 10 ms; changes of converter/rate configuration prime
 the selected source state and crossfade for 10 ms. The old path runs only through
-that transition. Preparation runs off the callback; a prepared-plan queue preserves
-the exact sequence of trajectories already rendered. Source state and compensated
+that transition. All source allocation, configuration and priming run on the
+control thread before publication, including non-seek anticipative edits. An
+ordered control-to-renderer queue carries prepared plans to a future canonical
+stream boundary; the renderer only validates that boundary, transfers source
+state and publishes the callback handoff through RT-annotated functions. It
+caps old-plan rendering/virtual advancement at that boundary. A late boundary or
+predecessor mismatch requests a prepared seek on the control thread without
+allocating or priming on the renderer. A prepared-plan queue preserves
+the exact sequence of trajectories already rendered. Control-side transport,
+play/count-in and recording queries use an immutable prepared-boundary snapshot,
+not the renderer-to-callback handoff fields. Converter controls, saved anchors,
+origins and transition metadata are finalized before publication; control-side
+history copying reads only immutable curves and atomic tagged boundaries/floors.
+Source state and compensated
 delays carry across unrelated model changes. The usual edit response includes the
 render horizon (normally 200 ms). For alignment, a rate/mode/curve edit additionally
 waits for maximum compensated source lookahead and a canonical boundary. Further

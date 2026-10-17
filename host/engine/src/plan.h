@@ -563,8 +563,17 @@ struct Plan {
     model::Playrate masterPlayrate;
     Automation rateEnvelope;
     bool rateEnabled = false;
+    // Controls/anchors are complete before publication. Executors only advance
+    // their disjoint timeline windows and source DSP state, never reconfigure.
     std::array<std::unique_ptr<PlayrateTimeline>, 2> timelines, previousTimelines;
     std::array<PlayrateTimeline::Snapshot, 2> rateControl;
+    // Main writes before publication; main never reads the renderer/callback
+    // handoff fields below. Keep scheduling/transport queries independent of
+    // executor adoption, including a seek not yet heard by the callback.
+    struct PreparedRateBoundary {
+        std::int64_t stream = 0;
+        std::uint64_t epoch = 0;
+    } preparedRateBoundary;
     std::int64_t rateHandDevice = 0;
     std::uint64_t rateSeekSequence = 0, rateEpochSeekSequence = 0, rateFromGeneration = 0;
     bool ratePrepared = false;
@@ -610,9 +619,9 @@ struct Plan {
     std::vector<std::size_t> frontier;
     std::unique_ptr<ChunkRing> rateOutput;  // canonical rate blocks, nonsplit renderer only
     std::vector<std::unique_ptr<ChunkRing>> frontierRings;  // allocated by the engine
-    // Set by the renderer when it adopts the plan, read by the callback after
-    // the plan is handed over: the stream position (frames into the epoch,
-    // ADR-0015) and epoch where it applies.
+    // Rate plans: prepared by the control thread before publication. Unity
+    // plans: filled by the renderer before its callback handoff (ADR-0014/15).
+    // Stream position is in frames into the transport epoch.
     std::int64_t handAt = 0;
     std::uint64_t handEpoch = 0;
     // Two executors at work (anticipative engine with live nodes): frontier
@@ -647,8 +656,9 @@ std::uint32_t rateUntil(Plan& p, std::int64_t pos, std::uint32_t frames, const L
                         int liveClass) SUPPLE_RT;
 bool rateWrapped(const Plan& p, std::int64_t from, std::int64_t to, const LoopRange& loop,
                  bool live) SUPPLE_RT;
-Status prepareRateAdoption(Plan& p, Plan* previous, std::int64_t device, std::int64_t stream,
-                           std::int64_t epochStart, const LoopRange& loop);
+enum class RateAdoption { Wait, Ready, Reseek };
+RateAdoption rateAdoption(const Plan& p, const Plan* previous, std::int64_t stream,
+                          std::uint64_t epoch, bool playing) SUPPLE_RT;
 
 // Structural invariant checker, also exposed to the randomized plan tests.
 Status checkStrips(const Plan& p);

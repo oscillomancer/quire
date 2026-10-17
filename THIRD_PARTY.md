@@ -22,7 +22,7 @@ declaration and maintainer approval; AGPL is forbidden. LGPL/MPL need the mainta
 | fast_float | MIT (selected option) | 8.3.0 / `b0ab987` (2026-09-15; tarball SHA-256 `904859…b13f`) | Shared float/double parsing in core-base; MIT libraries, stock plugins and source exports | headers |
 | dr_libs | Unlicense OR MIT-0 | dr_wav 0.14.5 / `fa931f3` | WAV read/write; FLAC and MP3 decode | static (header) |
 | pocketfft | BSD-3-Clause | cpp branch / `c90e55b` | FFT for offline analysis and analyzer displays | headers |
-| signalsmith-stretch | MIT | 1.4.0 / `a670068` (tarball sha256 `077235…f284`) | Pitch-preserving offline media variants and streaming master-playrate source conversion; [deterministic reset patch](cmake/patches/signalsmith-stretch-streaming-reset.patch) | headers |
+| signalsmith-stretch | MIT | 1.4.0 / `a670068` (tarball sha256 `077235…f284`) | Pitch-preserving offline media variants and streaming master-playrate source conversion; [portable RNG/reset patch](cmake/patches/signalsmith-stretch-streaming-reset.patch) | headers |
 | signalsmith-linear | MIT | 0.6.4 / `de55e6a` (tarball sha256 `2cb10d…a56`) | STFT/FFT layer Signalsmith Stretch is built on (its pinned dependency) | headers |
 | vst3sdk | MIT | v3.8.0_build_66 / `9fad977` | VST3 hosting ABI, Linux/macOS/Windows module loaders, event and parameter helpers | static |
 | AudioUnitSDK | Apache-2.0 | AudioUnitSDK-1.1.0 / `53a9a20` | Existing macOS stock-plugin AUv2 wrappers, clap-wrapper pin | static |
@@ -91,3 +91,9 @@ DAW device audio on macOS (CoreAudio) and Windows (WASAPI + ASIO). Windows's
 ASIO-enabled static build also contains the separately licensed ASIO SDK
 GPL-3.0-only subset; neither dependency enters plugin binaries. PortAudio's
 non-binding requests are preserved in its license. Linux retains JACK.
+
+The Signalsmith Stretch patch fixes the default random sequence and uniform
+sample conversion across standard libraries, in addition to allocation-free
+seeded resets. It deliberately changes seeded phase variation from the previous
+standard-library RNG. Plain `reset()` retains the current sequence; explicitly
+supplied custom engines retain upstream distribution behavior.

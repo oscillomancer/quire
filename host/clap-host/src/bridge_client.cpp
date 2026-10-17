@@ -733,7 +733,7 @@ bool RemoteInstance::pullService() {
     const auto clears = r.u32();  // validated by call()
     for (std::uint32_t i = 0; i < clears; ++i) n.paramsClear.push_back({r.u32(), r.u32()});
     n.droppedEvents = r.u32();
-    needsAudioFlush_ = r.u8() != 0;
+    needsAudioFlush_.store(r.u8() != 0, std::memory_order_release);
     const std::uint32_t lines = r.u32();
     for (std::uint32_t i = 0; i < lines && r.ok(); ++i) log.push_back(r.str());
     latency_ = r.u32();

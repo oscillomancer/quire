@@ -326,11 +326,15 @@ Session and editing:
   Tape and pitch-preserving source conversion run before take FX/live mixing;
   MIDI, automation, plugin tempo, loops and transport share the fractional clock
   (ADR-0045). The transport knob, menu and the master Playrate lane edit it;
-  knob ranges are UI state and never clamp saved values. Non-unity audio/MIDI
+  knob ranges are UI state and never clamp saved values. Seeded stretch phase
+  variation uses a portable integer RNG, so it matches across standard
+  libraries. Non-unity audio/MIDI
   recording is refused, including queued transitions. Writing retains coarse
   strip semantics. Rate/mode edits wait for compensated lookahead and coalesce
   during transitions; long-latency take chains can exceed the 200 ms horizon.
-  Seeks prepare off the callback while playback/monitoring continues. Clock windows
+  All source allocation/priming runs on the control thread; the renderer and
+  callback adopt prepared state at scheduled boundaries under RTSan. Seeks prepare
+  off the audio executors while playback/monitoring continues. Clock windows
   reserve four additional seconds for latency changes; history exhaustion or late
   preparation recovers automatically through a prepared locate at the consumed
   position, with the same state reset/preroll as a seek. Moving a compensated

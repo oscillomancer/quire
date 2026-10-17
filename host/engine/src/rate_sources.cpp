@@ -177,34 +177,14 @@ bool rateWrapped(const Plan& p, std::int64_t from, std::int64_t to, const LoopRa
     const auto& clock = *p.timelines[live ? 1 : 0];
     return clock.cycle(clock.phase(from)) != clock.cycle(clock.phase(to));
 }
-Status prepareRateAdoption(Plan& p, Plan* previous, std::int64_t device, std::int64_t stream,
-                           std::int64_t epochStart, const LoopRange& loop) {
-    if (!p.rateEnabled) return {};
-    if (p.rateSeekSequence != 0 && p.ratePrepared) return {};
-    std::unique_ptr<PlayrateTimeline> unity;
-    PlayrateTimeline* old = nullptr;
-    std::vector<RatePoint> points;
-    if (previous && previous->rateEnabled) {
-        old = previous->timelines[0].get();
-        points = old->points();
-        p.rateOrigin = previous->rateOrigin;
-    } else {
-        unity = std::make_unique<PlayrateTimeline>(p.timelines[0]->capacity(), 1, points);
-        PlayrateTimeline::Snapshot state;
-        state.device = device;
-        state.clock.timeline = double(epochStart + stream);
-        state.loopStart = double(loop.start);
-        state.loopEnd = double(loop.end);
-        state.looping = loop.active() && epochStart < loop.end;
-        unity->seed(state);
-        unity->ensure(device + p.rateDeviceMargin + static_cast<std::int64_t>(p.rate * .15) +
-                      p.block + 128);
-        old = unity.get();
-        p.rateOrigin = device - stream;
-    }
-    p.rateHandDevice = device;
-    p.rateFromGeneration = previous ? previous->generation : 0;
-    return configureRateTransition(p, previous, *old, device);
+RateAdoption rateAdoption(const Plan& p, const Plan* previous, std::int64_t stream,
+                          std::uint64_t epoch, bool playing) SUPPLE_RT {
+    if (p.handEpoch > epoch) return RateAdoption::Wait;
+    if (!p.ratePrepared || p.handEpoch != epoch) return RateAdoption::Reseek;
+    if (p.rateSeekSequence != 0 || !playing) return RateAdoption::Ready;
+    if (stream > p.handAt || p.rateFromGeneration != (previous ? previous->generation : 0))
+        return RateAdoption::Reseek;
+    return stream == p.handAt ? RateAdoption::Ready : RateAdoption::Wait;
 }
 
 Status configureRateTransition(Plan& p, Plan* previous, PlayrateTimeline& old,

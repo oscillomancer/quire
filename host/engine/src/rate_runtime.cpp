@@ -51,7 +51,10 @@ void Engine::publishRateClock(detail::Plan& p, std::int64_t device, std::int64_t
     words[12] = looping ? 1 : 0;
     if (rateDeferredWake_.load(std::memory_order_acquire) &&
         (epoch != rateSafeEpoch_.load(std::memory_order_acquire) ||
-         stream + static_cast<std::int64_t>(config_.sampleRate * options_.renderAheadMs / 1000.) >=
+         stream + (options_.anticipative
+                       ? aheadFrames_
+                       : static_cast<std::int64_t>(config_.sampleRate * options_.renderAheadMs /
+                                                   1000.)) >=
              rateSafeStream_.load(std::memory_order_acquire))) {
         if (rateDeferredWake_.exchange(false)) notifyMain();
     }
@@ -82,11 +85,11 @@ Status Engine::prepareRatePlan(detail::Plan& p) {
         if (candidate->generation == words[9]) previous = candidate.get();
     // Prepared trajectories form an ordered control history even before the
     // listener reaches them. Replacing pending plans would debounce a drag.
-    if (ratePreparedTail_ && ratePreparedTail_->handEpoch == transport.epoch &&
+    if (ratePreparedTail_ && ratePreparedTail_->preparedRateBoundary.epoch == transport.epoch &&
         ratePreparedTail_->generation > words[9]) {
         previous = ratePreparedTail_;
         seed = previous->rateControl[0];
-        baseStream = previous->handAt;
+        baseStream = previous->preparedRateBoundary.stream;
     }
     p.rateFromGeneration = previous ? previous->generation : 0;
     const bool playing = previous && wantPlaying_.load(std::memory_order_acquire);
@@ -99,8 +102,10 @@ Status Engine::prepareRatePlan(detail::Plan& p) {
         handDevice = static_cast<std::int64_t>(std::llround(*rateSeekTarget_));
     } else if (playing) {
         const auto lead =
-            static_cast<std::int64_t>(config_.sampleRate * options_.renderAheadMs / 1000.);
-        handStream = std::max(heard + std::max<std::int64_t>(lead, 64), baseStream + 64);
+            options_.anticipative
+                ? aheadFrames_
+                : static_cast<std::int64_t>(config_.sampleRate * options_.renderAheadMs / 1000.);
+        handStream = std::max(heard + std::max<std::int64_t>(lead, 64) + 64, baseStream + 64);
         handStream = (handStream + 63) / 64 * 64;
         handDevice = seed.device + handStream - baseStream;
     }
@@ -113,15 +118,17 @@ Status Engine::prepareRatePlan(detail::Plan& p) {
             result = detail::prepareRateSources(p, handDevice, timeline, &loop);
             p.rateOrigin = handDevice - handStream;
         } else {
+            const auto clockClass = options_.anticipative ? 1u : 0u;
             const auto points = previous && previous->rateEnabled
-                                    ? previous->timelines[0]->points()
+                                    ? previous->timelines[clockClass]->points()
                                     : std::vector<detail::RatePoint>{};
             Timeline old(p.timelines[0]->capacity(), seed.clock.target, points);
             old.seed(seed);
-            if (previous && previous->rateEnabled) old.inheritControls(*previous->timelines[0]);
+            if (previous && previous->rateEnabled)
+                old.inheritControls(*previous->timelines[clockClass]);
             if (previous && previous->rateEnabled) {
                 const auto past = seed.device - p.rateDeviceMargin - 64;
-                if (!old.copyPast(*previous->timelines[0], past, seed.device)) {
+                if (!old.copyPast(*previous->timelines[clockClass], past, seed.device)) {
                     result = Error("playrate.history",
                                    "the changed graph needs unavailable clock history", {},
                                    "prepare a fresh seek at the consumed position");
@@ -165,6 +172,7 @@ Status Engine::prepareRatePlan(detail::Plan& p) {
             }
         }
         p.rateHandDevice = handDevice;
+        p.preparedRateBoundary = {handStream, p.handEpoch};
     } catch (const std::exception& error) {
         return Error("playrate.prepare", error.what(), {},
                      "reduce source/FX count and retry the transport request");

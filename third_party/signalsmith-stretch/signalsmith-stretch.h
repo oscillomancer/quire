@@ -3,6 +3,7 @@
 
 #include "signalsmith-linear/stft.h" // https://github.com/Signalsmith-Audio/linear
 
+#include <cstdint>
 #include <vector>
 #include <array>
 #include <algorithm>
@@ -14,6 +15,32 @@
 namespace signalsmith { namespace stretch {
 
 namespace _impl {
+	// Supple: explicit integer sequence and sample conversion across standard libraries.
+	struct PortableRandomEngine {
+		using result_type = std::uint32_t;
+		std::uint64_t state;
+		explicit PortableRandomEngine(std::uint64_t value=1) : state(value) {}
+		void seed(std::uint64_t value) { state = value; }
+		static constexpr result_type min() { return 0; }
+		static constexpr result_type max() { return UINT32_MAX; }
+		result_type operator()() {
+			std::uint64_t value = (state += UINT64_C(0x9e3779b97f4a7c15));
+			value = (value^(value >> 30))*UINT64_C(0xbf58476d1ce4e5b9);
+			value = (value^(value >> 27))*UINT64_C(0x94d049bb133111eb);
+			return result_type((value^(value >> 31)) >> 32);
+		}
+	};
+	template<typename Sample>
+	Sample portableUnit(PortableRandomEngine &engine) {
+		if constexpr (std::numeric_limits<Sample>::digits <= 24) {
+			return Sample(engine() >> 8)*Sample(0x1p-24);
+		} else {
+			std::uint64_t bits = std::uint64_t(engine()) << 32;
+			bits |= engine();
+			return Sample(bits >> 11)*Sample(0x1p-53);
+		}
+	}
+
 	template<bool conjugateSecond=false, typename V>
 	static std::complex<V> mul(const std::complex<V> &a, const std::complex<V> &b) {
 		return conjugateSecond ? std::complex<V>{
@@ -616,10 +643,10 @@ private:
 		return channelPredictions.data() + c*bands;
 	}
 
-	// If RandomEngine=void, use std::default_random_engine;
+	// Supple: the default RNG is independent of the standard library.
 	using RandomEngineImpl = typename std::conditional<
 		std::is_void<RandomEngine>::value,
-		std::default_random_engine,
+		_impl::PortableRandomEngine,
 		RandomEngine
 	>::type;
 	RandomEngineImpl randomEngine;
@@ -646,7 +673,15 @@ private:
 		int longVerticalStep = static_cast<int>(std::round(smoothingBins));
 		timeFactor = std::max<Sample>(timeFactor, 1/maxCleanStretch);
 		bool randomTimeFactor = (timeFactor > maxCleanStretch);
-		std::uniform_real_distribution<Sample> timeFactorDist(maxCleanStretch*2*randomTimeFactor - timeFactor, timeFactor);
+		const Sample lowerTimeFactor = maxCleanStretch*2*randomTimeFactor - timeFactor;
+		auto timeFactorDist = [&](RandomEngineImpl &engine) {
+			if constexpr (std::is_void<RandomEngine>::value) {
+				return lowerTimeFactor + (timeFactor - lowerTimeFactor)*_impl::portableUnit<Sample>(engine);
+			} else {
+				// Keep the upstream behavior for an explicitly supplied custom RNG.
+				return std::uniform_real_distribution<Sample>(lowerTimeFactor, timeFactor)(engine);
+			}
+		};
 
 		if (blockProcess.newSpectrum) {
 			if (step < size_t(channels)) {

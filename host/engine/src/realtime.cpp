@@ -400,6 +400,8 @@ void Engine::stop() {
     detail::Plan* discarded = nullptr;
     while (planHandoffs_.pop(discarded)) {
     }
+    while (ratePlanRequests_.pop(discarded)) {
+    }
     latestPlan_.store(nullptr);
     for (const auto& plan : plans_)
         for (auto* instance : plan->instances) instance->setAudioWake(nullptr);
@@ -428,7 +430,9 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
     if (recording()) SUPPLE_TRY(model::validateRecordingPlayrate(session));
     const auto controlEpoch = epoch_.load(std::memory_order_acquire);
     const auto lead =
-        static_cast<std::int64_t>(config_.sampleRate * options_.renderAheadMs / 1000.);
+        options_.anticipative
+            ? aheadFrames_
+            : static_cast<std::int64_t>(config_.sampleRate * options_.renderAheadMs / 1000.);
     if (!rateSeekTarget_ && wantPlaying_.load(std::memory_order_acquire) &&
         rateSafeEpoch_.load(std::memory_order_acquire) == controlEpoch &&
         playedStream(controlEpoch) + lead < rateSafeStream_.load(std::memory_order_acquire)) {
@@ -575,8 +579,8 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
     plan->rateEpochSeekSequence =
         seekSeq_.load(std::memory_order_relaxed) + (rateSeekTarget_ ? 1 : 0);
     if (plan->rateEnabled) {
-        if (!options_.anticipative || rateSeekTarget_) {
-            if (!options_.anticipative && planHandoffs_.free() == 0)
+        {
+            if ((options_.anticipative ? ratePlanRequests_.free() : planHandoffs_.free()) == 0)
                 return Error("playrate.busy", "the prepared-plan queue is full", {},
                              "let audio consume pending edits before retrying");
             auto prepared = prepareRatePlan(*plan);
@@ -593,7 +597,7 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
             }
             SUPPLE_TRY(prepared);
         }
-        if (!options_.anticipative && plan->rateSafeDevice != INT64_MIN) {
+        if (plan->rateSafeDevice != INT64_MIN) {
             rateSafeStream_.store(plan->handAt + plan->rateSafeDevice - plan->rateHandDevice,
                                   std::memory_order_release);
             rateSafeEpoch_.store(plan->handEpoch, std::memory_order_release);
@@ -604,8 +608,11 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
     prunePending_ = true;
     if (options_.anticipative)
         for (auto* instance : plan->instances) instance->setAudioWake(&rendererEvent_);
-    if (!options_.anticipative && plan->rateEnabled) {
-        planHandoffs_.push(plan.get());
+    if (plan->rateEnabled) {
+        if (options_.anticipative)
+            ratePlanRequests_.push(plan.get());
+        else
+            planHandoffs_.push(plan.get());
         ratePreparedTail_ = plan.get();
     }
     latestPlan_.store(plan.get(), std::memory_order_release);
@@ -639,7 +646,7 @@ void Engine::play() {
     const auto* prepared = latestPlan_.load(std::memory_order_acquire);
     const bool preparedSeek =
         prepared && prepared->rateSeekSequence != 0 &&
-        prepared->handEpoch == epoch_.load(std::memory_order_acquire) &&
+        prepared->preparedRateBoundary.epoch == epoch_.load(std::memory_order_acquire) &&
         prepared->rateSeekSequence == seekSeq_.load(std::memory_order_acquire);
     if (!wantPlaying_.load(std::memory_order_acquire) &&
         rateScheduling_.load(std::memory_order_acquire) && !preparedSeek) {
@@ -757,7 +764,8 @@ TransportState Engine::transport() const {
         t.sample =
             options_.anticipative ? playedPosition(epoch, epochStart_.load()) : reportedPos_.load();
         const auto* prepared = latestPlan_.load(std::memory_order_acquire);
-        if (prepared && prepared->rateSeekSequence != 0 && prepared->handEpoch == epoch)
+        if (prepared && prepared->rateSeekSequence != 0 &&
+            prepared->preparedRateBoundary.epoch == epoch)
             t.sample =
                 static_cast<std::int64_t>(std::llround(prepared->rateControl[0].clock.timeline));
         t.seconds = double(t.sample) / config_.sampleRate;
@@ -900,9 +908,10 @@ void Engine::service() {
     if (reseek != 0 && reseek != rateReseekServiced_) {
         rateReseekServiced_ = reseek;
         const auto* requested = latestPlan_.load(std::memory_order_acquire);
-        // A newer graph or explicit locate can supersede the failed adoption
-        // before this wake is serviced. Do not reset it a second time.
-        if (latest_ && requested && requested->generation == reseek) {
+        // A newer prepared locate supersedes the failed queue entry. Ordinary
+        // edits remain ordered behind it, so recover with the latest model.
+        if (latest_ && requested &&
+            (requested->generation == reseek || requested->rateSeekSequence == 0)) {
             const auto ready = prepareSeek(transport().seconds);
             if (!ready) warnings_.push_back("playrate recovery: " + ready.error().toString());
         }
@@ -910,7 +919,9 @@ void Engine::service() {
     if (rateDeferred_ && latest_) {
         const auto e = epoch_.load(std::memory_order_acquire);
         const auto lead =
-            static_cast<std::int64_t>(config_.sampleRate * options_.renderAheadMs / 1000.);
+            options_.anticipative
+                ? aheadFrames_
+                : static_cast<std::int64_t>(config_.sampleRate * options_.renderAheadMs / 1000.);
         if (!wantPlaying_.load(std::memory_order_acquire) ||
             e != rateSafeEpoch_.load(std::memory_order_acquire) ||
             playedStream(e) + lead >= rateSafeStream_.load(std::memory_order_acquire)) {
@@ -1444,7 +1455,7 @@ void Engine::playCountIn(std::int64_t frames, std::int64_t beatFrames, int beats
     const auto* prepared = latestPlan_.load(std::memory_order_acquire);
     const bool preparedSeek =
         prepared && prepared->rateSeekSequence != 0 &&
-        prepared->handEpoch == epoch_.load(std::memory_order_acquire) &&
+        prepared->preparedRateBoundary.epoch == epoch_.load(std::memory_order_acquire) &&
         prepared->rateSeekSequence == seekSeq_.load(std::memory_order_acquire);
     if (!wantPlaying_.load(std::memory_order_acquire) &&
         rateScheduling_.load(std::memory_order_acquire) && !preparedSeek) {
@@ -1651,9 +1662,9 @@ Status Engine::startRecording(std::vector<RecordTarget> targets) {
                                       pending->rateEnvelope.points.end(),
                                       [](const auto& point) { return point.value != 1; });
                 if (pending->rateEnabled && pending->rateSafeDevice != INT64_MIN) {
-                    const auto drained = pending->handAt + pending->rateSafeDevice -
-                                         pending->rateHandDevice + pending->outputLatency +
-                                         pending->rateBackendLatency;
+                    const auto drained = pending->preparedRateBoundary.stream +
+                                         pending->rateSafeDevice - pending->rateHandDevice +
+                                         pending->outputLatency + pending->rateBackendLatency;
                     if (heardStream < drained)
                         unsafe |= pending->rateControl[0].clock.from != 1 ||
                                   pending->timelines[0]->hasNonUnityCurveHistory();
@@ -1830,6 +1841,35 @@ bool Engine::rendererHasRoom(std::uint64_t epoch) const {
     return (plan_->rateOutput ? plan_->rateOutput->slot() : ring_->slot()) != nullptr;
 }
 
+// Both halves of adoption follow the callback's RT rules. Transport relocation
+// between them may wait for the callback's epoch acknowledgement; source/graph
+// preparation never belongs to either half.
+void Engine::adoptRendererSources(detail::Plan* next) SUPPLE_RT {
+    if (plan_ && next) {
+        detail::carryRateSources(*plan_, *next, 0);
+        detail::carryMix(*plan_, *next, 0);
+    }
+    adoptShare(processing_, next ? &next->rendererInstances : nullptr, &processing_);
+    plan_ = next;
+    if (next && next->rateEnabled) pos_ = next->rateHandDevice;
+}
+
+void Engine::publishRendererPlan(detail::Plan& next, std::uint64_t epoch,
+                                 bool queuedRate) SUPPLE_RT {
+    detail::locateClass(next, pos_, false, false);
+    if (next.rateEnabled) {
+        if (!playing_) streamLocal_ = next.handAt;
+    } else {
+        next.handAt = streamLocal_;  // unity handoff, renderer -> callback only
+        next.handEpoch = epoch;
+    }
+    if (queuedRate) ratePlanRequests_.consume();
+    stoppedGen_.store(next.generation, std::memory_order_release);
+    planHandoffs_.push(&next);  // space checked before adoption
+    handPlan_.store(&next, std::memory_order_release);
+    notifyMain();
+}
+
 void Engine::rendererLoop(std::uint64_t seen) {
     const std::uint32_t block = options_.renderBlock;
     const auto blockTime = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
@@ -1851,7 +1891,11 @@ void Engine::rendererLoop(std::uint64_t seen) {
             // like rendering would (stream and timeline together, through the
             // loop), before the adoption below: the callback may have run far
             // since the last pass.
-            const std::int64_t target = (playedStream(seen) + aheadFrames_ + 63) / 64 * 64;
+            std::int64_t target = (playedStream(seen) + aheadFrames_ + 63) / 64 * 64;
+            detail::Plan* pending = nullptr;
+            if (ratePlanRequests_.peek(pending) && pending->handEpoch == seen &&
+                pending->rateSeekSequence == 0 && pending->handAt >= streamLocal_)
+                target = std::min(target, pending->handAt);
             for (std::int64_t left = target - streamLocal_; left > 0;) {
                 const auto k = detail::rateUntil(
                     *plan_, pos_,
@@ -1863,17 +1907,23 @@ void Engine::rendererLoop(std::uint64_t seen) {
             }
             renderedStream_.store(streamLocal_, std::memory_order_release);
         }
-        detail::Plan* plan = latestPlan_.load(std::memory_order_acquire);
         TransportSnapshot control;
         if (!readTransport(control, kRendererTransportTries)) continue;
-        if (rateScheduling_.load(std::memory_order_acquire) && control.seekSeq != seekSeen_) {
-            // The transport publication follows its prepared plan. Reload
-            // after acquiring that publication: the first load above may have
-            // preceded it. Never render the new epoch with the previous
-            // source state, even for one block.
-            plan = latestPlan_.load(std::memory_order_acquire);
-            if (!plan || plan->rateSeekSequence != control.seekSeq) continue;
+        detail::Plan* plan = latestPlan_.load(std::memory_order_acquire);
+        bool queuedRate = false;
+        if (rateScheduling_.load(std::memory_order_acquire)) {
+            while (ratePlanRequests_.peek(plan)) {
+                if (plan->handEpoch >= control.epoch) {
+                    queuedRate = true;
+                    break;
+                }
+                ratePlanRequests_.consume();
+            }
+            if (!queuedRate) plan = plan_;
         }
+        if (rateScheduling_.load(std::memory_order_acquire) && control.seekSeq != seekSeen_ &&
+            (!plan || plan->rateSeekSequence != control.seekSeq))
+            continue;
         const bool seekReady =
             !plan || plan->rateSeekSequence == 0 ||
             (control.seekSeq >= plan->rateSeekSequence && control.epoch >= plan->handEpoch);
@@ -1885,37 +1935,19 @@ void Engine::rendererLoop(std::uint64_t seen) {
             plan != plan_ && planHandoffs_.free() > 0 && seekReady && canonical && sourceSafe &&
             (!plan || plan->generation != rateReseekGeneration_.load(std::memory_order_acquire));
         if (adopt && plan && plan->rateEnabled) {
-            const auto extra = std::max(plan->rateSourceAhead, plan_ ? plan_->rateSourceAhead : 0) +
-                               plan->smoothFrames + plan->rateSourceBehind + 128;
-            rateSafeStream_.store(streamLocal_ + extra, std::memory_order_release);
-            rateSafeEpoch_.store(control.epoch, std::memory_order_release);
-            const auto prepared = detail::prepareRateAdoption(*plan, plan_, pos_, streamLocal_,
-                                                              epochStartLocal_, control.loop);
-            const bool late = playing_ && backend_->ownsThread() && plan->rateSeekSequence == 0 &&
-                              playedStream(control.epoch) + 64 >= streamLocal_;
-            if (!prepared || late) {
+            const auto ready = detail::rateAdoption(*plan, plan_, streamLocal_, control.epoch,
+                                                    wantPlaying_.load(std::memory_order_acquire));
+            if (ready == detail::RateAdoption::Reseek) {
                 rateReseekGeneration_.store(plan->generation, std::memory_order_release);
                 notifyMain();
-                adopt = false;
             }
+            adopt = ready == detail::RateAdoption::Ready;
         }
         if (adopt) {
-            if (plan_ && plan) {
-                detail::carryRateSources(*plan_, *plan, 0);
-                detail::carryMix(*plan_, *plan, 0);
-            }
-            adoptShare(processing_, plan ? &plan->rendererInstances : nullptr, self);
-            plan_ = plan;
+            adoptRendererSources(plan);
             if (plan) {
-                if (plan->rateSeekSequence != 0) pos_ = plan->rateHandDevice;
                 if (epoch_.load(std::memory_order_acquire) != seen) seen = relocate(seen);
-                detail::locateClass(*plan, pos_, false, false);
-                plan->handAt = streamLocal_;  // where the callback follows (ADR-0014)
-                plan->handEpoch = seen;
-                stoppedGen_.store(plan->generation, std::memory_order_release);
-                planHandoffs_.push(plan);  // space checked before adoption
-                handPlan_.store(plan, std::memory_order_release);
-                notifyMain();
+                publishRendererPlan(*plan, seen, queuedRate);
             }
         } else if (plan_) {
             startFree(processing_, &plan_->rendererInstances, self);  // let go by the callback
@@ -1965,12 +1997,18 @@ void Engine::rendererLoop(std::uint64_t seen) {
             }
         }
         if (!rendererHasRoom(seen)) {
-            const auto target = rendererSpaceTarget(seen);
+            const bool pendingBoundary = queuedRate && plan && plan->handEpoch == seen &&
+                                         plan->rateSeekSequence == 0 && plan->handAt > streamLocal_;
+            auto target = rendererSpaceTarget(seen);
+            if (pendingBoundary)
+                target = std::min(target, std::max<std::int64_t>(0, plan->handAt - aheadFrames_));
             rendererWakeAt_.store(target);
             // Seq-cst arm/stream handshake: either this observes consumption
             // before arming, or the callback observes the arm after publishing
             // consumption (and ring slots). No callback wakes below threshold.
-            if (rendererHasRoom(seen)) continue;
+            if (rendererHasRoom(seen) ||
+                (pendingBoundary && playedStream(seen) + aheadFrames_ >= plan->handAt))
+                continue;
             const auto idleDue = stoppedRenderDeadline(idleNext, idleLast, requested());
             rt::waitUntil(rendererEvent_, event,
                           rendererDeadline(std::chrono::steady_clock::now(), idleDue, idleWork,
@@ -1978,6 +2016,10 @@ void Engine::rendererLoop(std::uint64_t seen) {
             continue;
         }
         auto renderFrames = block;
+        if (queuedRate && plan != plan_ && plan->handEpoch == seen && plan->rateSeekSequence == 0 &&
+            plan->handAt > streamLocal_)
+            renderFrames =
+                std::min(renderFrames, static_cast<std::uint32_t>(plan->handAt - streamLocal_));
         if (plan != plan_ && plan && plan->rateEnabled && streamLocal_ % 64 != 0)
             renderFrames =
                 std::min(renderFrames, static_cast<std::uint32_t>(64 - streamLocal_ % 64));

@@ -1,30 +1,62 @@
 diff --git a/third_party/signalsmith-stretch/signalsmith-stretch.h b/third_party/signalsmith-stretch/signalsmith-stretch.h
-index cd13f2e9..d305835d 100644
 --- a/third_party/signalsmith-stretch/signalsmith-stretch.h
 +++ b/third_party/signalsmith-stretch/signalsmith-stretch.h
-@@ -45,6 +45,12 @@ struct SignalsmithStretch {
- 	int outputLatency() const {
- 		return int(stft.synthesisLatency() + _splitComputation*stft.defaultInterval());
- 	}
+@@ -5,0 +6 @@
++#include <cstdint>
+@@ -16,0 +18,26 @@
++	// Supple: explicit integer sequence and sample conversion across standard libraries.
++	struct PortableRandomEngine {
++		using result_type = std::uint32_t;
++		std::uint64_t state;
++		explicit PortableRandomEngine(std::uint64_t value=1) : state(value) {}
++		void seed(std::uint64_t value) { state = value; }
++		static constexpr result_type min() { return 0; }
++		static constexpr result_type max() { return UINT32_MAX; }
++		result_type operator()() {
++			std::uint64_t value = (state += UINT64_C(0x9e3779b97f4a7c15));
++			value = (value^(value >> 30))*UINT64_C(0xbf58476d1ce4e5b9);
++			value = (value^(value >> 27))*UINT64_C(0x94d049bb133111eb);
++			return result_type((value^(value >> 31)) >> 32);
++		}
++	};
++	template<typename Sample>
++	Sample portableUnit(PortableRandomEngine &engine) {
++		if constexpr (std::numeric_limits<Sample>::digits <= 24) {
++			return Sample(engine() >> 8)*Sample(0x1p-24);
++		} else {
++			std::uint64_t bits = std::uint64_t(engine()) << 32;
++			bits |= engine();
++			return Sample(bits >> 11)*Sample(0x1p-53);
++		}
++	}
++
+@@ -47,0 +75,6 @@
 +
 +	// Supple: deterministic streaming seeks reuse the configured allocation.
 +	void reset(long seed) {
 +		randomEngine.seed(seed);
 +		reset();
 +	}
- 	
- 	void reset() {
- 		stft.reset(0.1);
-@@ -54,9 +60,12 @@ struct SignalsmithStretch {
- 		prevInputOffset = -1;
- 		_channelBands.assign(_channelBands.size(), Band());
- 		silenceCounter = 0;
+@@ -56,0 +90 @@
 +		silenceFirst = true;
- 		didSeek = false;
+@@ -57,0 +92 @@
 +		seekTimeFactor = 1;
- 		blockProcess = {};
- 		freqEstimateWeighted = freqEstimateWeight = 0;
+@@ -59,0 +95 @@
 +		smoothEnergyState = 0;
- 	}
- 
- 	// Configures using a default preset
+@@ -610 +646 @@
+-	// If RandomEngine=void, use std::default_random_engine;
++	// Supple: the default RNG is independent of the standard library.
+@@ -613 +649 @@
+-		std::default_random_engine,
++		_impl::PortableRandomEngine,
+@@ -640 +676,9 @@
+-		std::uniform_real_distribution<Sample> timeFactorDist(maxCleanStretch*2*randomTimeFactor - timeFactor, timeFactor);
++		const Sample lowerTimeFactor = maxCleanStretch*2*randomTimeFactor - timeFactor;
++		auto timeFactorDist = [&](RandomEngineImpl &engine) {
++			if constexpr (std::is_void<RandomEngine>::value) {
++				return lowerTimeFactor + (timeFactor - lowerTimeFactor)*_impl::portableUnit<Sample>(engine);
++			} else {
++				// Keep the upstream behavior for an explicitly supplied custom RNG.
++				return std::uniform_real_distribution<Sample>(lowerTimeFactor, timeFactor)(engine);
++			}
++		};
