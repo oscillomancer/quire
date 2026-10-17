@@ -820,7 +820,7 @@ TEST_CASE("preferences: the dialog applies each setting at once and saves it") {
     views::MouseMap map;
     gui::MouseDialog mouse(*f.root, map, {});
     const auto file = f.dir / "config" / "preferences.json";
-    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, map, gui::Preferences{}, file);
+    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, gui::Preferences{}, file);
     CHECK(f.app->defaultMonitor() == model::Monitor::On);
     CHECK(f.app->copyImportedMedia());
     prefs.open();
@@ -830,9 +830,6 @@ TEST_CASE("preferences: the dialog applies each setting at once and saves it") {
     prefs.setDefaultMonitor(model::Monitor::Off);
     CHECK(f.node("prefs.monitor.set")->valueText() == "Off");
     CHECK(f.track(f.addTrack("channel", "A")).record.monitor == model::Monitor::Off);
-    // The wheel zoom anchor lives in the mouse map.
-    prefs.setZoomAnchor("mouse_pointer");
-    CHECK(map.behaviour("wheel.zoom", 0) == "mouse_pointer");
     // Audio threads, from the menu; out of range refused.
     REQUIRE(f.root->click("prefs.threads.set"));
     auto* menu = dynamic_cast<ui::List*>(f.root->find("prefs.threads.menu"));
@@ -863,7 +860,7 @@ TEST_CASE("preferences: the dialog applies each setting at once and saves it") {
     REQUIRE(f.root->click("prefs.close"));
     // A loaded file applies to the app when the dialog is made.
     f.app->setRendersDir({});
-    gui::PreferencesDialog again(*f.root, *f.app, mouse, map, *saved, {});
+    gui::PreferencesDialog again(*f.root, *f.app, mouse, *saved, {});
     CHECK(f.app->rendersDir() == f.dir / "my renders");
 }
 
@@ -997,7 +994,7 @@ TEST_CASE(
     views::MouseMap map;
     gui::MouseDialog mouse(*f.root, map, {});
     const auto file = f.dir / "preferences.json";
-    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, map, {}, file);
+    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, {}, file);
     prefs.open();
     f.root->frame(false);
     const float offHeight = f.node("prefs")->bounds().h;
@@ -1066,7 +1063,7 @@ TEST_CASE(
     views::MouseMap map;
     gui::MouseDialog mouse(*f.root, map, {});
     const auto file = f.dir / "preferences.json";
-    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, map, {}, file);
+    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, {}, file);
     prefs.open();
     f.root->frame(false);
     const float offHeight = f.node("prefs")->bounds().h;

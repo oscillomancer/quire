@@ -41,10 +41,6 @@ std::string monitorLabel(model::Monitor m) {
     return "On";
 }
 
-std::string zoomLabel(std::string_view b) {
-    return b == "mouse_pointer" ? "The mouse pointer" : "The project cursor";
-}
-
 ui::Node& row(ui::Node& form, const std::string& id, const std::string& label) {
     auto& r = form.emplace<ui::Node>(id);
     r.layout.dir = ui::Layout::Dir::Row;
@@ -139,9 +135,8 @@ Status Preferences::save(const std::filesystem::path& file) const {
 }
 
 PreferencesDialog::PreferencesDialog(ui::Root& root, engine::EngineApp& app, MouseDialog& mouse,
-                                     views::MouseMap& map, Preferences prefs,
-                                     std::filesystem::path file)
-    : root_(root), app_(app), mouse_(mouse), map_(map), prefs_(prefs), file_(std::move(file)) {
+                                     Preferences prefs, std::filesystem::path file)
+    : root_(root), app_(app), mouse_(mouse), prefs_(prefs), file_(std::move(file)) {
     app_.setDefaultMonitor(prefs_.defaultMonitor);
     // Loaded preferences are validated; callers constructing a struct directly
     // still cannot pass an invalid engine setting.
@@ -187,24 +182,6 @@ void PreferencesDialog::open() {
         root_.openPopup(
             ui::makeMenu("prefs.monitor.menu", std::move(items), [this] { root_.closePopup(); }),
             monitor_->bounds());
-    };
-
-    auto& zoom = row(*form, "prefs.zoom", "Wheel zoom anchors at");
-    zoom_ = &zoom.emplace<ui::Button>("prefs.zoom.set", "");
-    zoom_->layout.width = ui::SizeRule::fraction();
-    zoom_->layout.height = ui::SizeRule::fixed(26);
-    zoom_->onClick = [this] {
-        std::vector<ui::MenuItem> items;
-        for (const char* b : {"project_cursor", "mouse_pointer"}) {
-            ui::MenuItem item;
-            item.label = zoomLabel(b);
-            item.checked = map_.behaviour("wheel.zoom", 0) == b;
-            item.run = [this, value = std::string(b)] { setZoomAnchor(value); };
-            items.push_back(std::move(item));
-        }
-        root_.openPopup(
-            ui::makeMenu("prefs.zoom.menu", std::move(items), [this] { root_.closePopup(); }),
-            zoom_->bounds());
     };
 
     auto& threads = row(*form, "prefs.threads", "Audio processing threads");
@@ -299,7 +276,6 @@ void PreferencesDialog::open() {
         .layout.height = ui::SizeRule::fixed(26);
     root_.openPopup(std::move(form), {}, ui::Placement::Center, [this] {
         monitor_ = nullptr;
-        zoom_ = nullptr;
         threads_ = nullptr;
         memory_ = nullptr;
         memoryNote_.fill(nullptr);
@@ -345,7 +321,6 @@ void PreferencesDialog::refresh() {
     protectionNote(memoryNote_, app_.memoryLockStatus(), "Locked");
     if (threads_) threads_->setText(threadLabel(prefs_.audioThreads));
     if (monitor_) monitor_->setText(monitorLabel(prefs_.defaultMonitor));
-    if (zoom_) zoom_->setText(zoomLabel(map_.behaviour("wheel.zoom", 0)));
 }
 
 void PreferencesDialog::setDefaultMonitor(model::Monitor m) {
@@ -409,11 +384,6 @@ Status PreferencesDialog::setRenderDirectory(const std::filesystem::path& dir) {
     prefs_ = next;
     app_.setRendersDir(dir);
     return {};
-}
-
-void PreferencesDialog::setZoomAnchor(const std::string& behaviour) {
-    mouse_.set("wheel.zoom", 0, behaviour);  // the mouse map's own file keeps it
-    refresh();
 }
 
 }  // namespace supple::gui

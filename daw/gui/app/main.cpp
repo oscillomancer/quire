@@ -533,8 +533,8 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "preferences: %s (using the defaults)\n",
                          loaded.error().toString().c_str());
     }
-    gui::PreferencesDialog preferences(root, **app, mouseDialog, shell.arrange()->gestures().mouse,
-                                       prefs, o.offscreen ? fs::path{} : prefsFile);
+    gui::PreferencesDialog preferences(root, **app, mouseDialog, prefs,
+                                       o.offscreen ? fs::path{} : prefsFile);
     preferences.onError = [](const std::string& message) {
         std::fprintf(stderr, "%s\n", message.c_str());
     };
