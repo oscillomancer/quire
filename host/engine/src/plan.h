@@ -567,6 +567,13 @@ struct Plan {
     // their disjoint timeline windows and source DSP state, never reconfigure.
     std::array<std::unique_ptr<PlayrateTimeline>, 2> timelines, previousTimelines;
     std::array<PlayrateTimeline::Snapshot, 2> rateControl;
+    // Main writes before publication; main never reads the renderer/callback
+    // handoff fields below. Keep scheduling/transport queries independent of
+    // executor adoption, including a seek not yet heard by the callback.
+    struct PreparedRateBoundary {
+        std::int64_t stream = 0;
+        std::uint64_t epoch = 0;
+    } preparedRateBoundary;
     std::int64_t rateHandDevice = 0;
     std::uint64_t rateSeekSequence = 0, rateEpochSeekSequence = 0, rateFromGeneration = 0;
     bool ratePrepared = false;

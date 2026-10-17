@@ -646,7 +646,7 @@ void Engine::play() {
     const auto* prepared = latestPlan_.load(std::memory_order_acquire);
     const bool preparedSeek =
         prepared && prepared->rateSeekSequence != 0 &&
-        prepared->handEpoch == epoch_.load(std::memory_order_acquire) &&
+        prepared->preparedRateBoundary.epoch == epoch_.load(std::memory_order_acquire) &&
         prepared->rateSeekSequence == seekSeq_.load(std::memory_order_acquire);
     if (!wantPlaying_.load(std::memory_order_acquire) &&
         rateScheduling_.load(std::memory_order_acquire) && !preparedSeek) {
@@ -764,7 +764,8 @@ TransportState Engine::transport() const {
         t.sample =
             options_.anticipative ? playedPosition(epoch, epochStart_.load()) : reportedPos_.load();
         const auto* prepared = latestPlan_.load(std::memory_order_acquire);
-        if (prepared && prepared->rateSeekSequence != 0 && prepared->handEpoch == epoch)
+        if (prepared && prepared->rateSeekSequence != 0 &&
+            prepared->preparedRateBoundary.epoch == epoch)
             t.sample =
                 static_cast<std::int64_t>(std::llround(prepared->rateControl[0].clock.timeline));
         t.seconds = double(t.sample) / config_.sampleRate;
@@ -1454,7 +1455,7 @@ void Engine::playCountIn(std::int64_t frames, std::int64_t beatFrames, int beats
     const auto* prepared = latestPlan_.load(std::memory_order_acquire);
     const bool preparedSeek =
         prepared && prepared->rateSeekSequence != 0 &&
-        prepared->handEpoch == epoch_.load(std::memory_order_acquire) &&
+        prepared->preparedRateBoundary.epoch == epoch_.load(std::memory_order_acquire) &&
         prepared->rateSeekSequence == seekSeq_.load(std::memory_order_acquire);
     if (!wantPlaying_.load(std::memory_order_acquire) &&
         rateScheduling_.load(std::memory_order_acquire) && !preparedSeek) {
@@ -1661,9 +1662,9 @@ Status Engine::startRecording(std::vector<RecordTarget> targets) {
                                       pending->rateEnvelope.points.end(),
                                       [](const auto& point) { return point.value != 1; });
                 if (pending->rateEnabled && pending->rateSafeDevice != INT64_MIN) {
-                    const auto drained = pending->handAt + pending->rateSafeDevice -
-                                         pending->rateHandDevice + pending->outputLatency +
-                                         pending->rateBackendLatency;
+                    const auto drained = pending->preparedRateBoundary.stream +
+                                         pending->rateSafeDevice - pending->rateHandDevice +
+                                         pending->outputLatency + pending->rateBackendLatency;
                     if (heardStream < drained)
                         unsafe |= pending->rateControl[0].clock.from != 1 ||
                                   pending->timelines[0]->hasNonUnityCurveHistory();

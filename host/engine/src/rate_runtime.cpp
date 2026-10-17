@@ -85,11 +85,11 @@ Status Engine::prepareRatePlan(detail::Plan& p) {
         if (candidate->generation == words[9]) previous = candidate.get();
     // Prepared trajectories form an ordered control history even before the
     // listener reaches them. Replacing pending plans would debounce a drag.
-    if (ratePreparedTail_ && ratePreparedTail_->handEpoch == transport.epoch &&
+    if (ratePreparedTail_ && ratePreparedTail_->preparedRateBoundary.epoch == transport.epoch &&
         ratePreparedTail_->generation > words[9]) {
         previous = ratePreparedTail_;
         seed = previous->rateControl[0];
-        baseStream = previous->handAt;
+        baseStream = previous->preparedRateBoundary.stream;
     }
     p.rateFromGeneration = previous ? previous->generation : 0;
     const bool playing = previous && wantPlaying_.load(std::memory_order_acquire);
@@ -172,6 +172,7 @@ Status Engine::prepareRatePlan(detail::Plan& p) {
             }
         }
         p.rateHandDevice = handDevice;
+        p.preparedRateBoundary = {handStream, p.handEpoch};
     } catch (const std::exception& error) {
         return Error("playrate.prepare", error.what(), {},
                      "reduce source/FX count and retry the transport request");

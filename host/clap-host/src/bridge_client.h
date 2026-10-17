@@ -110,7 +110,9 @@ class RemoteInstance {
     Status loadState(std::span<const std::uint8_t> bytes);
     // Drain retained snapshots; pull on demand only without a wake subscription.
     bool service(Instance::Notifications& notes, std::vector<std::string>& log);
-    bool needsAudioFlush() const { return needsAudioFlush_; }
+    bool needsAudioFlush() const SUPPLE_RT {
+        return needsAudioFlush_.load(std::memory_order_acquire);
+    }
     bool restartPending() const { return restartPending_; }  // as of the last service()
     bool processRequested() const SUPPLE_RT {
         return processRequested_.load(std::memory_order_acquire);
@@ -169,7 +171,9 @@ class RemoteInstance {
     std::uint32_t seq_ = 0;
     int deadlineMs_ = 2000;  // for process(); lifecycle commands get longer
     std::uint32_t latency_ = 0, tail_ = 0;
-    bool reportsTail_ = false, needsAudioFlush_ = false, restartPending_ = false;
+    bool reportsTail_ = false, restartPending_ = false;
+    // Control servicing publishes this flag while audio checks for idle work.
+    std::atomic<bool> needsAudioFlush_{false};
     std::atomic<bool> processRequested_{false};
 };
 

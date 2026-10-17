@@ -1593,7 +1593,12 @@ state and publishes the callback handoff through RT-annotated functions. It
 caps old-plan rendering/virtual advancement at that boundary. A late boundary or
 predecessor mismatch requests a prepared seek on the control thread without
 allocating or priming on the renderer. A prepared-plan queue preserves
-the exact sequence of trajectories already rendered. Source state and compensated
+the exact sequence of trajectories already rendered. Control-side transport,
+play/count-in and recording queries use an immutable prepared-boundary snapshot,
+not the renderer-to-callback handoff fields. Converter controls, saved anchors,
+origins and transition metadata are finalized before publication; control-side
+history copying reads only immutable curves and atomic tagged boundaries/floors.
+Source state and compensated
 delays carry across unrelated model changes. The usual edit response includes the
 render horizon (normally 200 ms). For alignment, a rate/mode/curve edit additionally
 waits for maximum compensated source lookahead and a canonical boundary. Further
