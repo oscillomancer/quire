@@ -48,6 +48,7 @@ struct Project {
     std::uint64_t seed = 0;
     std::uint64_t historyBudgetBytes = 1ULL << 30;
     json::Value render = json::Value::object();  // render.* defaults and matrix
+    bool operator==(const Project&) const = default;
 };
 
 struct TempoPointObj {

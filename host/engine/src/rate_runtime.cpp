@@ -71,16 +71,13 @@ void Engine::publishRateClock(detail::Plan& p, std::int64_t device, std::int64_t
 
 namespace {
 // Persistent collections make scalar-only detection independent of track count.
-// Project metadata is small; keep this list in step with model::Project.
+// The whole project compares equal apart from the scalar rate, so a field added
+// to model::Project can never pass as a scalar edit. Keep the collections in
+// step with model::Session.
 bool scalarOnly(const model::Session& a, const model::Session& b) {
-    const auto& x = *a.project;
-    const auto& y = *b.project;
-    return x.name == y.name && x.title == y.title && x.author == y.author && x.notes == y.notes &&
-           x.sampleRate == y.sampleRate && x.ppq == y.ppq && x.timebase == y.timebase &&
-           x.mediaDir == y.mediaDir && x.console9 == y.console9 &&
-           x.playrate.preservePitch == y.playrate.preservePitch && x.masters == y.masters &&
-           x.seed == y.seed && x.historyBudgetBytes == y.historyBudgetBytes &&
-           x.render == y.render && a.tempo.sameStorage(b.tempo) && a.meters.sameStorage(b.meters) &&
+    model::Project x = *a.project;
+    x.playrate.rate = b.project->playrate.rate;
+    return x == *b.project && a.tempo.sameStorage(b.tempo) && a.meters.sameStorage(b.meters) &&
            a.tracks.sameStorage(b.tracks) && a.items.sameStorage(b.items) &&
            a.takes.sameStorage(b.takes) && a.media.sameStorage(b.media) &&
            a.midi.sameStorage(b.midi) && a.fx.sameStorage(b.fx) && a.routes.sameStorage(b.routes) &&
