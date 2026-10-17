@@ -99,9 +99,14 @@ bool Engine::loadScalarRate(const model::Session& session, const std::filesystem
     // An unchanged session can be an explicit maintenance reload. Only value
     // edits (or retrying a coalesced value) qualify for the control shortcut.
     if (!scalarPending_ && value == latest_->project->playrate.rate) return false;
-    // Entering/leaving unity may require a different converter, notably the
-    // preserve-pitch unity bypass. Those transitions still prepare a plan.
-    if ((value == 1) != (p->requestedScalar == 1)) return false;
+    // A rate-enabled plan glides through exactly 1.0 like any other value (a
+    // MIDI knob's centre lands there), on the converters it was compiled with.
+    // A preserve-pitch plan compiled at exactly 1.0 reads its sources as tape
+    // (exact at unity, plan.cpp): leaving 1.0 needs the stretch converter, so
+    // that prepares a plan, as leaving the unity bypass does.
+    if (value != 1 && p->masterPlayrate.preservePitch && p->masterPlayrate.rate == 1 &&
+        p->timelines[0]->points().empty())
+        return false;
     if (!std::isfinite(value) || value < .25 || value > 4) return false;
     if (value != p->requestedScalar) {
         // Keep controls newer than the consumed anchor for structural prediction.
@@ -142,7 +147,8 @@ bool Engine::loadScalarRate(const model::Session& session, const std::filesystem
         // more here than response.
         const auto epoch = epoch_.load(std::memory_order_acquire);
         const auto heard = playedStream(epoch);
-        const auto longest = std::max<std::int64_t>(std::llround(0.3 * p->rate), p->smoothFrames);
+        const auto longest =
+            std::max<std::int64_t>(detail::scalarRampFrames(p->rate), p->smoothFrames);
         const auto shortest = std::min<std::int64_t>(
             longest, std::max<std::int64_t>(p->smoothFrames, config_.blockSize));
         std::int64_t ramp = longest;
@@ -150,7 +156,7 @@ bool Engine::loadScalarRate(const model::Session& session, const std::filesystem
             ramp = std::clamp((heard - scalarHeard_) * 3 / 2, shortest, longest);
         scalarHeard_ = heard;
         scalarHeardEpoch_ = epoch;
-        const auto smoothing = static_cast<std::uint32_t>(std::llround(0.15 * p->rate));
+        const auto smoothing = detail::scalarSmoothingFrames(p->rate);
         const detail::ScalarRateEdit edit{device, value, sequence, static_cast<std::uint32_t>(ramp),
                                           smoothing};
         p->scalarHistory.push_back(edit);
@@ -191,6 +197,7 @@ Status Engine::prepareRatePlan(detail::Plan& p) {
         baseStream = previous->preparedRateBoundary.stream;
     }
     p.rateFromGeneration = previous ? previous->generation : 0;
+    p.rateFromUnity = !previous || !previous->rateEnabled;
     const bool playing = previous && wantPlaying_.load(std::memory_order_acquire);
     const LoopRange loop = rateLoopTarget_.value_or(transport.loop);
     const auto heard = playedStream(transport.epoch);

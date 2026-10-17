@@ -1482,6 +1482,126 @@ TEST_CASE("master playrate scalar control: spaced knob steps join into one smoot
     }
 }
 
+TEST_CASE("master playrate scalar control: a knob glides through and away from 1.0") {
+    constexpr double fs = 8000;
+    for (bool anticipative : {false, true})
+        for (bool preserve : {false, true})
+            for (double start : {.94, 1.}) {
+                CAPTURE(anticipative);
+                CAPTURE(preserve);
+                CAPTURE(start);
+                PlayrateHost h;
+                h.run("track.add");
+                audio::AudioData tone;
+                tone.sampleRate = fs;
+                tone.channels.assign(1, std::vector<float>(200000));
+                for (std::size_t i = 0; i < tone.frames(); ++i)
+                    tone.channels[0][i] = static_cast<float>(
+                        .2 * std::sin(double(i) * 2 * 3.141592653589793 * 55 / fs));
+                REQUIRE(audio::writeWav(h.root / "unity.wav", tone));
+                auto args = json::Value::object();
+                args["track"] = "tr_1";
+                args["audio_file"] = (h.root / "unity.wav").string();
+                h.run("item.add", json::writeCompact(args));
+                model::EditTxn edit(h.app->head(), 100);
+                auto project = edit.project();
+                project.console9 = false;
+                project.playrate = {start, preserve};
+                edit.setProject(project);
+                auto session = edit.commit().value();
+                auto pool = playrateFixturePool();
+                MediaCache media;
+                DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 80000});
+                Engine engine(pool, media,
+                              {.anticipative = anticipative, .renderBlock = 256, .workers = 0});
+                REQUIRE(engine.start(backend, {.sampleRate = fs, .blockSize = 64}));
+                REQUIRE(engine.load(session));
+                engine.play();
+                std::vector<double> heard;
+                std::size_t capturedFrames = 0;
+                auto run = [&](int cycles) {
+                    for (int i = 0; i < cycles; ++i) {
+                        if (anticipative) REQUIRE(engine.awaitRendered(1024));
+                        backend.run(1);
+                        capturedFrames += 64;
+                        engine.service();
+                        heard.push_back(engine.effectivePlayrate());
+                    }
+                };
+                auto rate = [&](double value) {
+                    project.playrate.rate = value;
+                    model::EditTxn knob(session, session.version + 1);
+                    knob.setProject(project);
+                    session = knob.commit().value();
+                    REQUIRE(engine.load(session));
+                };
+                // A smooth glide: the slope bends gradually (see "spaced knob steps").
+                auto smooth = [&](std::size_t from) {
+                    double steepest = 0, corner = 0;
+                    for (std::size_t i = from + 2; i < heard.size(); ++i) {
+                        const double slope = heard[i] - heard[i - 1];
+                        const double before = heard[i - 1] - heard[i - 2];
+                        steepest = std::max(steepest, std::abs(slope));
+                        corner = std::max(corner, std::abs(slope - before));
+                    }
+                    return corner < .2 * steepest;
+                };
+                run(64);
+                const auto epoch = engine.meterClock().epoch;
+                // A MIDI knob through its centre (CC 64 is exactly 1.0), or away
+                // from 1.0 when playback started there (the unity bypass).
+                const auto generation = engine.planGeneration();
+                std::size_t mark = heard.size();
+                for (const double value : {.96, .98, 1., 1.02, 1.04, 1.06}) {
+                    if (value < start) continue;
+                    rate(value);
+                    run(8);
+                }
+                run(384);
+                if (start != 1) CHECK(engine.planGeneration() == generation);  // no rebuild
+                CHECK(heard.back() == doctest::Approx(1.06));
+                CHECK(smooth(mark));
+                // Back to rest at 1.0, where an unrelated edit compiles the plan;
+                // a preserve-pitch plan compiled at 1.0 reads tape and must
+                // prepare the stretch converter to leave it, still gliding.
+                rate(1);
+                run(384);
+                CHECK(engine.effectivePlayrate() == 1);
+                model::EditTxn rename(session, session.version + 1);
+                rename.modify<model::Track>({model::Kind::Track, 1},
+                                            [](auto& track) { track.name = "Renamed"; });
+                session = rename.commit().value();
+                REQUIRE(engine.load(session));
+                run(64);
+                const auto compiled = engine.planGeneration();
+                mark = heard.size();
+                for (const double value : {1.02, 1.04}) {
+                    rate(value);
+                    run(8);
+                }
+                run(384);
+                CHECK((engine.planGeneration() != compiled) == preserve);
+                CHECK(heard.back() == doctest::Approx(1.04));
+                CHECK(smooth(mark));
+                CHECK(engine.meterClock().epoch == epoch);
+                CHECK(engine.processErrors() == 0);
+                CHECK(engine.warnings().empty());
+                engine.stop();
+                const auto& captured = backend.capture();
+                const auto& x = captured.channels[0];
+                std::size_t clicks = 0, gaps = 0, zeros = 0;
+                for (std::size_t i = 2048; i < std::min(capturedFrames, captured.frames()); ++i) {
+                    if (std::abs(x[i] - 2 * x[i - 1] + x[i - 2]) > .02f) ++clicks;
+                    if (x[i] == 0) {
+                        if (++zeros == 64) ++gaps;
+                    } else
+                        zeros = 0;
+                }
+                CHECK(clicks == 0);
+                CHECK(gaps == 0);
+            }
+}
+
 TEST_CASE("master playrate scalar control: transport changes retain later edits") {
     for (bool anticipative : {false, true})
         for (bool preserve : {false, true}) {
