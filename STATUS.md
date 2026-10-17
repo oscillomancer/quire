@@ -163,13 +163,12 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   deadlines; stopped transport and stationary meters have no refresh timer.
   Input/commands coalesce UI sidecar checks, and writer completion wakes main.
   TCP rows keep their full top line at a 24-unit minimum; older sidecars
-  clamp on load. Ctrl+wheel over the TCP resizes every track additively,
-  with fractional deltas and pointer anchoring, through the editable mouse
-  map. Outside the TCP, Ctrl+Shift+wheel uses the same additive resize and
-  pointer anchoring; Ctrl+wheel over lanes still scrolls. Proportional track
-  height zoom is removed; legacy mouse bindings fall back to current defaults
-  and saved absolute heights still load. Native verification of these
-  height changes remains pending with the coordinator.
+  clamp on load. Ctrl+Shift+wheel anywhere over the arrange view, and
+  Ctrl+wheel over the TCP, resize every track by the same step, with the row
+  under the pointer anchored (editable in the mouse map); Ctrl+wheel over
+  lanes still scrolls. Proportional track height zoom is removed; legacy
+  mouse bindings fall back to current defaults and saved absolute heights
+  still load.
 - **MIDI learn** (ADR-0027): any plug-in parameter (the FX window's MIDI
   button, or `fx.learn.set` for agents) and any action (Ctrl+L in the
   actions list) learns a controller by moving it: CC, note, pitch bend or

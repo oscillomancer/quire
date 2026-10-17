@@ -1295,10 +1295,11 @@ void ArrangeView::loadLayout(const json::Value& v) {
 
 bool ArrangeView::onPointer(const ui::PointerEvent& e) {
     if (e.type != ui::PointerEvent::Type::Wheel) return gestures_->pointer(e);
-    // Over the TCP the editable tcp.wheel bindings scroll or resize tracks.
-    // Over the lanes and the ruler the wheel zooms
-    // at the project cursor or the pointer (Shift: scroll in time, Ctrl: scroll the tracks,
-    // Ctrl+Shift: additive all-row resize; a sideways wheel scrolls in time).
+    // Over the TCP the editable tcp.wheel bindings scroll or resize tracks
+    // (Ctrl and Ctrl+Shift resize by default). Over the lanes and the ruler the
+    // wheel zooms at the project cursor or the pointer (Shift: scroll in time,
+    // Ctrl: scroll the tracks, Ctrl+Shift: resize every track; a sideways wheel
+    // scrolls in time).
     Viewport v = view_;
     const bool ctrl = (e.mods & ui::kCtrl) != 0, shift = (e.mods & ui::kShift) != 0;
     const bool overTracks = tcp_ && tcp_->bounds().contains(e.pos);

@@ -318,8 +318,8 @@ the anchor where the first step of the run found it. The run ends when anything
 else moves the view in time (a scroll, follow, the scrollbar), the cursor
 moves, or (with the pointer anchor) the pointer moves. Horizontal zoom is continuous;
 vertical track height per track and global.
-By default Ctrl+wheel over the TCP adds eight design units per notch to
-every track row, including hidden tracks and compact folders, preserving
+By default Ctrl+wheel or Ctrl+Shift+wheel over the TCP adds eight design
+units per notch to every track row, including hidden tracks and compact folders, preserving
 mixed heights and clamping each independently. Fractional wheel deltas work
 continuously; expanded rows divide the step among their take lanes. The row
 under the pointer stays anchored at the same fractional position unless a
@@ -720,8 +720,9 @@ Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
   Edit > Mouse modifiers edits the live map. One context, `wheel.zoom`, is a
   single setting rather than a modifier map: the wheel's zoom anchor
   (`project_cursor`, the default, or `mouse_pointer`).
-  TCP wheel defaults are plain scroll and Ctrl resize all; Ctrl+Shift is
-  unbound and follows plain scroll. Each modifier combination can be rebound.
+  TCP wheel defaults are plain scroll, and Ctrl and Ctrl+Shift resize all, so
+  Ctrl+Shift+wheel resizes every track wherever the pointer is over the
+  arrange view. Each modifier combination can be rebound.
   Saved `zoom_height` bindings are ignored on load, retaining current defaults
   and unrelated customizations without changing the mouse file schema.
 - **Preferences** (Edit > Preferences…): app-wide settings, never project
