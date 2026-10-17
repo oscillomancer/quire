@@ -33,9 +33,7 @@ const std::vector<MouseMap::Context>& table() {
         {"ruler.marker", "Press a marker or region", {"move", "move_free", "remove"}},
         {"ruler.tempo", "Click a tempo point", {"none", "toggle_ramp"}},
         {"wheel.zoom", "Zoom with the wheel (anchor)", {"project_cursor", "mouse_pointer"}, false},
-        {"tcp.wheel",
-         "Wheel over the track control panel",
-         {"scroll", "resize_all", "zoom_height"}},
+        {"tcp.wheel", "Wheel over the track control panel", {"scroll", "resize_all"}},
     };
     return t;
 }
@@ -70,7 +68,6 @@ constexpr std::array kDefaults = {
     Default{"ruler.marker", ui::kAlt, "remove"},
     Default{"ruler.tempo", ui::kAlt, "toggle_ramp"},
     Default{"tcp.wheel", ui::kCtrl, "resize_all"},
-    Default{"tcp.wheel", ui::kCtrl | ui::kShift, "zoom_height"},
 };
 
 constexpr std::array<unsigned, 8> kCombos = {0,
@@ -197,6 +194,8 @@ Result<MouseMap> MouseMap::fromJson(const json::Value& doc) {
             if (!value.isString())
                 return Error("mouse.behaviour", "a behaviour is a string",
                              "/contexts/" + id + "/" + combo);
+            // Retired proportional height zoom falls back to the current default.
+            if (id == "tcp.wheel" && value.asString() == "zoom_height") continue;
             if (auto r = m.set(id, *mods, value.asString()); !r) {
                 Error e = r.error();
                 e.path = "/contexts/" + id + "/" + combo;

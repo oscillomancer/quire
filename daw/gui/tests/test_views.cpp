@@ -572,7 +572,7 @@ TEST_CASE("track heights clamp to a complete TCP top line and resize all rows ad
           doctest::Approx(static_cast<double>(expanded) + 8));
 }
 
-TEST_CASE("TCP wheel resizes mixed rows only over the panel and can be rebound") {
+TEST_CASE("track wheel gestures resize mixed rows additively, anchor and can be rebound") {
     Gl& g = gl();
     REQUIRE(g.ok);
     ui::Root root(*g.window, g.fonts, ui::Theme::dark());
@@ -603,20 +603,57 @@ TEST_CASE("TCP wheel resizes mixed rows only over the panel and can be rebound")
     CHECK(arrange->viewport().scrollY < scroll);  // lanes retain Ctrl+wheel scroll
     wheel.mods |= ui::kShift;
     wheel.wheelY = 1;
+    const auto laneRow = arrange->rowRect(1);
+    const float fraction = (wheel.pos.y - laneRow.y) / laneRow.h;
     root.pointer(wheel);
-    CHECK(layout.globalHeight() == doctest::Approx(122 * 1.25));
-    CHECK(layout.heightOf(*layout.indexOf(track)) == 162);  // global zoom retains overrides
+    root.frame(false);
+    CHECK(layout.globalHeight() == 130);
+    CHECK(layout.heightOf(*layout.indexOf(track)) == 170);
+    auto anchored = arrange->rowRect(1);
+    CHECK(anchored.y + fraction * anchored.h == doctest::Approx(static_cast<double>(wheel.pos.y)));
+    wheel.wheelY = -0.25f;
+    root.pointer(wheel);
+    root.frame(false);
+    CHECK(layout.globalHeight() == 128);
+    CHECK(layout.heightOf(*layout.indexOf(track)) == 168);
+    anchored = arrange->rowRect(1);
+    CHECK(anchored.y + fraction * anchored.h == doctest::Approx(static_cast<double>(wheel.pos.y)));
+    CHECK(arrange->session().version == version);
+    wheel.wheelY = 1;
     wheel.pos.x = row.x + 100;
     root.pointer(wheel);
-    CHECK(layout.globalHeight() == doctest::Approx(122 * 1.25 * 1.25));
+    CHECK(layout.globalHeight() == 128);  // unbound Ctrl+Shift over TCP scrolls
+    CHECK(layout.heightOf(*layout.indexOf(track)) == 168);
     REQUIRE(arrange->gestures().mouse.set("tcp.wheel", ui::kCtrl, "scroll"));
     auto saved = views::MouseMap::fromJson(arrange->gestures().mouse.toJson());
     REQUIRE(saved);
     CHECK(saved->behaviour("tcp.wheel", ui::kCtrl) == "scroll");
-    CHECK(saved->behaviour("tcp.wheel", ui::kCtrl | ui::kShift) == "zoom_height");
+    CHECK(saved->behaviour("tcp.wheel", ui::kCtrl | ui::kShift) == "scroll");
     wheel.mods = ui::kCtrl;
     root.pointer(wheel);
-    CHECK(layout.globalHeight() == doctest::Approx(122 * 1.25 * 1.25));
+    CHECK(layout.globalHeight() == 128);
+    // The gesture also retains its former scope over the ruler, with no row to anchor.
+    wheel.mods |= ui::kShift;
+    wheel.pos = {arrange->lanesRect().x + 100, arrange->lanesRect().y - 10};
+    root.pointer(wheel);
+    CHECK(layout.globalHeight() == 136);
+    CHECK(layout.heightOf(*layout.indexOf(track)) == 176);
+}
+
+TEST_CASE("retired TCP wheel zoom settings load with current defaults") {
+    const auto doc = json::parse(R"({"schema":"supple.mouse/1.0","contexts":{
+        "tcp.wheel":{"ctrl":"zoom_height","ctrl+shift":"zoom_height","alt":"resize_all"},
+        "item.drag":{"alt":"copy"}}})");
+    REQUIRE(doc);
+    const auto loaded = views::MouseMap::fromJson(*doc);
+    REQUIRE(loaded);
+    CHECK(loaded->behaviour("tcp.wheel", ui::kCtrl) == "resize_all");
+    CHECK(loaded->behaviour("tcp.wheel", ui::kCtrl | ui::kShift) == "scroll");
+    CHECK(loaded->behaviour("tcp.wheel", ui::kAlt) == "resize_all");
+    CHECK(loaded->behaviour("item.drag", ui::kAlt) == "copy");
+    CHECK_FALSE(loaded->toJson()["contexts"]["tcp.wheel"].find("ctrl+shift"));
+    auto edited = *loaded;
+    CHECK_FALSE(edited.set("tcp.wheel", ui::kShift, "zoom_height"));
 }
 
 TEST_CASE("an old arrange sidecar clamps tiny heights and keeps the TCP top line visible") {

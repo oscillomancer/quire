@@ -324,7 +324,7 @@ TEST_CASE("the mouse modifiers dialog edits the live map and saves it (gap log #
     dialog.open("tcp.wheel");
     a.root->frame(false);
     CHECK(a.root->find("mouse.set.ctrl")->valueText() == "resize all track heights");
-    CHECK(a.root->find("mouse.set.ctrl+shift")->valueText() == "zoom global row height");
+    CHECK(a.root->find("mouse.set.ctrl+shift")->valueText() == "scroll  (plain)");
     dialog.set("tcp.wheel", ui::kCtrl, "scroll");
     saved = views::MouseMap::load(file);
     REQUIRE(saved);

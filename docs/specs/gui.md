@@ -325,8 +325,11 @@ continuously; expanded rows divide the step among their take lanes. The row
 under the pointer stays anchored at the same fractional position unless a
 scroll boundary prevents it. Heights are UI state, saved with individual
 resizes, without commands or undo entries. Over the lanes Ctrl+wheel still
-scrolls vertically. Ctrl+Shift+wheel retains multiplicative global height
-zoom (1.25 per notch); explicit track overrides stay fixed.
+scrolls vertically. Outside the TCP, Ctrl+Shift+wheel applies the same additive
+all-row step and pointer-row anchoring (including fractional deltas), keeping
+its existing scope over lanes and ruler. Over the ruler there is no row to
+anchor; scrolling is clamped normally. Proportional track-height zoom is
+removed. Saved absolute `row_height` values still load.
 Left trim shifts every take's source offset by the trimmed duration times
 its play rate, in the same transaction; dragging the left edge out past a
 take's material (down to the timeline's start) and slipping its material
@@ -711,14 +714,16 @@ Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
   handle (drag, cycle shape), empty-lane drag (select, add), automation lane
   (edit, toggle, delete), ruler markers/regions
   (move, remove), tempo points (toggle ramp), and TCP wheel
-  (`tcp.wheel`: scroll, resize all track heights, zoom global row height) —
+  (`tcp.wheel`: scroll, resize all track heights) —
   from each modifier combination to a behaviour. The defaults are the built-in gestures;
   `mouse.json` (supple.mouse/1.0, only what differs) overrides them, and
   Edit > Mouse modifiers edits the live map. One context, `wheel.zoom`, is a
   single setting rather than a modifier map: the wheel's zoom anchor
   (`project_cursor`, the default, or `mouse_pointer`).
-  TCP wheel defaults are plain scroll, Ctrl resize all and Ctrl+Shift
-  global height zoom; each modifier combination can be rebound.
+  TCP wheel defaults are plain scroll and Ctrl resize all; Ctrl+Shift is
+  unbound and follows plain scroll. Each modifier combination can be rebound.
+  Saved `zoom_height` bindings are ignored on load, retaining current defaults
+  and unrelated customizations without changing the mouse file schema.
 - **Preferences** (Edit > Preferences…): app-wide settings, never project
   state. The default monitoring of new channels (off, on — the default — or
   auto; `preferences.json`, supple.preferences/1.4, sets

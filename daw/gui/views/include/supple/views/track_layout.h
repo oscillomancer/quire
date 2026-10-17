@@ -76,7 +76,7 @@ class TrackLayout {
     float envHeight() const;  // an automation lane's height (follows the global height)
 
     float globalHeight() const { return globalHeight_; }
-    void setGlobalHeight(float h);  // vertical zoom
+    void setGlobalHeight(float h);  // absolute height, including saved row_height
     // Add design units to every track row, preserving mixed heights and
     // compact-folder sizes. Expanded-take rows share the delta among takes.
     // One geometry notification; no model/history edits.
