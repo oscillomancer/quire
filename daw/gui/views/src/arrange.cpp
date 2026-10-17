@@ -1301,11 +1301,11 @@ void ArrangeView::loadLayout(const json::Value& v) {
 bool ArrangeView::onPointer(const ui::PointerEvent& e) {
     if (e.type != ui::PointerEvent::Type::Wheel) return gestures_->pointer(e);
     // The mouse map says what the wheel does: over the TCP its tcp.wheel
-    // bindings (plain scrolls the tracks, Ctrl and Ctrl+Shift resize them),
-    // over the lanes and the ruler its arrange.wheel ones (plain zooms at the
-    // project cursor or the pointer, Shift scrolls in time, Ctrl scrolls the
-    // tracks, Ctrl+Shift resizes every track). A sideways wheel scrolls in
-    // time where the wheel would zoom.
+    // bindings (plain scrolls the tracks, Ctrl and Alt resize them), over the
+    // lanes and the ruler its arrange.wheel ones (plain zooms at the project
+    // cursor or the pointer, Shift scrolls in time, Ctrl scrolls the tracks,
+    // Alt resizes every track). A sideways wheel scrolls in time where the
+    // wheel would zoom.
     Viewport v = view_;
     const bool overTracks = tcp_ && tcp_->bounds().contains(e.pos);
     const std::string_view behaviour =

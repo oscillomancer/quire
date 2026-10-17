@@ -200,7 +200,9 @@ class Roll : public ui::Node {
         if (e.type == T::Wheel) {
             // What each combination does is the mouse map's (midi.wheel).
             const std::string_view behaviour = editor_.wheelBehaviour(e.mods);
-            if (behaviour == "zoom") {  // zoom in time around the pointer
+            if (behaviour == "zoom" && e.wheelX != 0) {  // a sideways wheel scrolls in time
+                s_.scrollBeat -= static_cast<double>(e.wheelX) * 60 / s_.pixelsPerBeat;
+            } else if (behaviour == "zoom") {  // zoom in time around the pointer
                 const double at = g.beatOf(e.pos.x);
                 s_.pixelsPerBeat =
                     std::clamp(s_.pixelsPerBeat * std::pow(1.15, e.wheelY), 8.0, 1200.0);

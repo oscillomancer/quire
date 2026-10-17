@@ -165,10 +165,10 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   deadlines; stopped transport and stationary meters have no refresh timer.
   Input/commands coalesce UI sidecar checks, and writer completion wakes main.
   TCP rows keep their full top line at a 24-unit minimum; older sidecars
-  clamp on load. Ctrl+Shift+wheel anywhere over the arrange view, and
-  Ctrl+wheel over the TCP, resize every track by the same step, with the row
-  under the pointer anchored (editable in the mouse map); Ctrl+wheel over
-  lanes still scrolls. Proportional track height zoom is removed; legacy
+  clamp on load. Alt+wheel anywhere over the arrange view, and Ctrl+wheel
+  over the TCP, resize every track by the same step, with the row under the
+  pointer anchored (editable in the mouse map); Ctrl+wheel over lanes
+  scrolls. Proportional track height zoom is removed; legacy
   mouse bindings fall back to current defaults and saved absolute heights
   still load. Every wheel combination over the TCP, the arrangement's lanes
   and ruler, the mixer and the MIDI editor can be rebound in Edit > Mouse

@@ -42,7 +42,7 @@ const std::vector<MouseMap::Context>& table() {
         {"mixer.wheel", "Wheel over the mixer", {"adjust", "scroll"}},
         {"midi.wheel",
          "Wheel over the MIDI editor",
-         {"scroll_pitch", "scroll_time", "zoom", "zoom_rows"}},
+         {"zoom", "scroll_time", "scroll_pitch", "zoom_rows"}},
     };
     return t;
 }
@@ -77,12 +77,12 @@ constexpr std::array kDefaults = {
     Default{"ruler.marker", ui::kAlt, "remove"},
     Default{"ruler.tempo", ui::kAlt, "toggle_ramp"},
     Default{"tcp.wheel", ui::kCtrl, "resize_all"},
-    Default{"tcp.wheel", ui::kCtrl | ui::kShift, "resize_all"},
+    Default{"tcp.wheel", ui::kAlt, "resize_all"},
     Default{"arrange.wheel", ui::kShift, "scroll_time"},
     Default{"arrange.wheel", ui::kCtrl, "scroll"},
-    Default{"arrange.wheel", ui::kCtrl | ui::kShift, "resize_all"},
+    Default{"arrange.wheel", ui::kAlt, "resize_all"},
     Default{"midi.wheel", ui::kShift, "scroll_time"},
-    Default{"midi.wheel", ui::kCtrl, "zoom"},
+    Default{"midi.wheel", ui::kCtrl, "scroll_pitch"},
     Default{"midi.wheel", ui::kAlt, "zoom_rows"},
 };
 
