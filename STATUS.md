@@ -339,8 +339,8 @@ Session and editing:
   All source allocation/priming runs on the control thread; the renderer and
   callback adopt prepared state at scheduled boundaries under RTSan. Prepared
   boundaries and lateness checks use the renderer frontier, block granularity
-  and observed preparation time. Native macOS/Windows validation of ADR-0046
-  and independent review are pending coordinator integration. Seeks prepare
+  and observed preparation time. A live knob move becomes audible after about
+  350–400 ms (the render horizon plus clock and source lookahead). Seeks prepare
   off the audio executors while playback/monitoring continues. Clock windows
   reserve four additional seconds for latency changes; history exhaustion or late
   preparation recovers automatically through a prepared locate at the consumed
