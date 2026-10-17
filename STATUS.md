@@ -178,8 +178,9 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   takeover, and "only when selected / focused / visible" for parameters.
   Parameter bindings are saved with the project and chain presets; action
   bindings in `controls.json`. "(MIDI CC)" actions drive the selected tracks'
-  volume and pan, the master's volume, a beat jog and the last touched
-  plug-in parameter.
+  volume and pan, the master's volume, the master playrate, a beat jog and
+  the last touched plug-in parameter; the learn dialog warns when a knob is
+  learned for an action that only runs per press.
 - **Agents**: the MCP server for the running app or a headless engine, for
   any MCP client (Claude Code, Codex, Hermes, …); the bundled skill
   (`skill/`). There is no built-in agent panel (ADR-0043).

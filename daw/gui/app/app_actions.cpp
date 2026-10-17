@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "app_actions.h"
+
+#include "playrate_range.h"
 #include "supple/ui/shortcut.h"
 #include "track_menu.h"
 
@@ -269,6 +271,29 @@ AppActions::AppActions(const cmd::Registry& registry, cmd::Dispatcher& dispatche
                    return {};
                });
 
+    addControl("control.transport.playrate", "Transport: playrate (MIDI CC)",
+               "A knob or fader sets the master playrate along the transport knob's travel "
+               "(1.0 at the middle, its chosen range at the ends); an encoder moves it ten cents "
+               "a step.",
+               [this](const actions::ControlValue& v) -> Status {
+                   const double now = app_.head().project->playrate.rate;
+                   double rate;
+                   if (v.relative) {
+                       if (v.steps == 0) return {};
+                       rate = now * std::exp2(v.steps * 10 / 1200.0);
+                   } else {
+                       // CC 64 of 0..127 is the middle: a centre detent gives 1.0 exactly.
+                       const double p = std::abs(v.value - 0.5) <= 0.5 / 127 ? 0.5 : v.value;
+                       rate = positionRate(p, playrateRange);
+                   }
+                   rate = std::clamp(rate, 0.25, 4.0);
+                   if (rate == now) return {};
+                   SUPPLE_TRY(dispatcher_.execute(
+                       {"transport.playrate.set", obj({{"rate", rate}}),
+                        cmd::Origin{cmd::Origin::Type::Ui, "midi", {}, v.gesture}}));
+                   return {};
+               });
+
     addControl(
         "control.fx.last", "FX: last touched parameter (MIDI CC)",
         "Moves the plug-in parameter edited last, in the FX window or a plug-in's own "
@@ -451,6 +476,13 @@ Result<json::Value> AppActions::controlTracks(const actions::ControlValue& v, bo
 Status AppActions::saveControls() const {
     if (controlsFile_.empty()) return {};
     return controls_.save(controlsFile_);
+}
+
+std::string AppActions::followingControl(std::string_view action) const {
+    const actions::Action* a = registry_.find(action);
+    if (!a || a->control) return {};
+    if (action == "transport.playrate.set") return "control.transport.playrate";
+    return {};
 }
 
 std::string AppActions::controlsFor(std::string_view action) const {

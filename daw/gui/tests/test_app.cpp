@@ -826,6 +826,59 @@ TEST_CASE("MIDI learn: knobs drive the selected tracks' volume and pan, a step p
     CHECK(error.find("follows a MIDI controller") != std::string::npos);
 }
 
+TEST_CASE("MIDI learn: a knob drives the master playrate along the transport knob's travel") {
+    App a;
+    if (!a.ok) return;
+    a.app->setFixedClock(1'000'000);
+    a.actions->controls().bind({"control.transport.playrate",
+                                {model::ControlKind::Cc, 1, 20, ""},
+                                model::ControlMode::Absolute});
+    a.actions->controls().bind({"control.transport.playrate",
+                                {model::ControlKind::Cc, 1, 21, ""},
+                                model::ControlMode::Relative2});
+    auto rate = [&] { return a.app->head().project->playrate.rate; };
+    const std::size_t before = a.app->versions().history(1000).size();
+    a.actions->control({controlEvent(0xb0, 20, 127)});
+    CHECK(rate() == doctest::Approx(4.0));
+    a.actions->control({controlEvent(0xb0, 20, 0)});
+    CHECK(rate() == doctest::Approx(0.25));
+    a.actions->control({controlEvent(0xb0, 20, 64)});
+    CHECK(rate() == 1.0);  // the middle of the travel is exactly 1.0
+    CHECK(a.app->versions().history(1000).size() == before + 1);  // one movement, one step
+    // The range chosen for the transport knob applies.
+    a.actions->playrateRange = 2;  // 0.75-1.5
+    a.actions->control({controlEvent(0xb0, 20, 127)});
+    CHECK(rate() == doctest::Approx(1.5));
+    // An encoder moves it ten cents a step.
+    a.actions->control({controlEvent(0xb0, 21, 63)});
+    CHECK(rate() == doctest::Approx(1.5 * std::exp2(-10 / 1200.0)));
+}
+
+TEST_CASE("MIDI learn: a knob learned for a press-only action gets a warning") {
+    App a;
+    if (!a.ok) return;
+    gui::openActionsList(*a.root, *a.actions);
+    a.type("transport.playrate.set");
+    a.key("Ctrl+L");
+    a.root->frame(false);
+    REQUIRE(a.root->find("learn"));
+    CHECK(a.root->find("learn.title")->valueText() == "MIDI learn: Transport: playrate set");
+    auto warning = [&] { return a.root->find("learn.warning"); };
+    // A button sends 127 and 0: no warning.
+    a.actions->control({controlEvent(0xb0, 30, 127)});
+    a.actions->control({controlEvent(0xb0, 30, 0)});
+    a.root->frame(false);
+    CHECK_FALSE(warning()->visibleInTree());
+    // A knob sends many values: the dialog names the action that follows it.
+    a.actions->control({controlEvent(0xb0, 31, 10), controlEvent(0xb0, 31, 11)});
+    a.actions->control({controlEvent(0xb0, 31, 12)});
+    a.root->frame(false);
+    REQUIRE(warning()->visibleInTree());
+    CHECK(warning()->valueText().find("Transport: playrate (MIDI CC)") != std::string::npos);
+    a.snapshot("actions-midi-learn-warning.png");
+    a.root->closePopups();
+}
+
 TEST_CASE("an action binds the selected tracks ($selection.track)") {
     App a;
     if (!a.ok) {

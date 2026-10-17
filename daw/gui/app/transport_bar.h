@@ -41,8 +41,6 @@ class TransportBar {
     void openTempoForm();
     void openMeterForm();
     void openRateMenu();
-    double ratePosition(double rate) const;
-    double positionRate(double position) const;
 
     engine::EngineApp& app_;
     AppActions& actions_;
@@ -62,7 +60,6 @@ class TransportBar {
     ui::Knob* rate_ = nullptr;
     ui::Label* rateValue_ = nullptr;
     ui::Node* rateReadout_ = nullptr;
-    std::size_t rateRange_ = 0;
     std::uint64_t rateGesture_ = 0;
     bool moving_ = false;
     std::optional<std::chrono::steady_clock::time_point> lastStatus_;
