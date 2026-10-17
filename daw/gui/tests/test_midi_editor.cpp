@@ -23,6 +23,7 @@
 #include "supple/ui/controls.h"
 #include "supple/ui/text_area.h"
 #include "supple/ui/widgets.h"
+#include "supple/views/mouse_map.h"
 
 using namespace supple;
 
@@ -370,6 +371,34 @@ TEST_CASE("MIDI editor: Alt+wheel zooms the rows around the pointer's pitch") {
     CHECK(s.rowHeight == near(12));
     CHECK(s.topPitch == near(top + 3));
     f.snapshot("midi-editor-row-zoom.png");
+}
+
+TEST_CASE("MIDI editor: the wheel follows the mouse map") {
+    Fixture f;
+    if (!f.ok) return;
+    REQUIRE(f.editor->open(f.item));
+    f.root->frame(false);
+    gui::RollState& s = f.editor->state();
+    views::MouseMap map;
+    REQUIRE(map.set("midi.wheel", 0, "zoom_rows"));
+    REQUIRE(map.set("midi.wheel", ui::kShift, "zoom"));
+    f.editor->setMouseMap(&map);
+    s.rowHeight = 12;
+    const ui::Rect b = f.editor->roll()->bounds();
+    const double ppb = s.pixelsPerBeat;
+    f.wheel({b.x + 200, b.y + 90}, 2, 0);  // plain zooms the rows now, not scrolls pitch
+    CHECK(s.rowHeight > 12);
+    s.rowHeight = 12;
+    const ui::Rect keys = f.root->find("midi.keys")->bounds();
+    f.wheel({keys.x + 10, keys.y + 40}, 2, 0);  // over the keys too
+    CHECK(s.rowHeight > 12);
+    f.wheel({b.x + 200, b.y + 90}, 2, ui::kShift);
+    CHECK(s.pixelsPerBeat > ppb);
+    f.editor->setMouseMap(nullptr);
+    s.rowHeight = 12;
+    const double pitch = s.topPitch;
+    f.wheel({b.x + 200, b.y + 90}, 1, 0);  // the defaults again: plain scrolls pitch
+    CHECK(s.topPitch != pitch);
 }
 
 TEST_CASE("MIDI editor: an empty roll can marquee without a note anchor") {

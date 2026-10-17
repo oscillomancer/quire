@@ -12,6 +12,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "app_actions.h"
@@ -23,6 +24,10 @@ class Button;
 class Label;
 class TextBlock;
 }  // namespace supple::ui
+
+namespace supple::views {
+class MouseMap;
+}  // namespace supple::views
 
 namespace supple::gui {
 
@@ -108,6 +113,10 @@ class MidiEditor {
     // Row (key) height zoom, anchored at the window y whose pitch stays put.
     static constexpr float kMinRowHeight = 4, kMaxRowHeight = 48;
     void zoomRows(float wheel, float anchorY);
+    // The mouse modifiers (Edit > Mouse modifiers): what the wheel does here
+    // for `mods`, from its midi.wheel bindings (the defaults when unset).
+    void setMouseMap(const views::MouseMap* map) { mouse_ = map; }
+    std::string_view wheelBehaviour(unsigned mods) const;
 
     // Tests and the actions.
     RollState& state() { return state_; }
@@ -142,6 +151,7 @@ class MidiEditor {
     RollState state_;
     std::string lastItem_;  // the item opened last (ui.midi.toggle reopens it)
     float height_ = kDefaultHeight;
+    const views::MouseMap* mouse_ = nullptr;
     ui::Node* panel_ = nullptr;
     std::unique_ptr<MidiEventList> eventList_;
     ui::Node* listPane_ = nullptr;

@@ -2154,3 +2154,33 @@ TEST_CASE("envelope point edits: move stops at the start and keeps time order; p
     CHECK(shaped.points[3].shape == model::PointShape::Square);
     CHECK(shaped.points[0].shape == model::PointShape::Linear);
 }
+
+TEST_CASE("the arrangement's wheel follows the mouse map over the lanes and the TCP") {
+    Gl& g = gl();
+    REQUIRE(g.ok);
+    ui::Root root(*g.window, g.fonts, ui::Theme::dark());
+    auto* arrange = mount(root);
+    arrange->trackLayout().setGlobalHeight(200);  // room to scroll
+    arrange->setViewport({10, 40, 0});
+    root.frame(false);
+    ui::PointerEvent wheel{ui::PointerEvent::Type::Wheel,
+                           {arrange->lanesRect().x + 100, arrange->lanesRect().y + 50}};
+    wheel.wheelY = -1;
+    // Plain over the lanes scrolls the tracks once rebound, instead of zooming.
+    REQUIRE(arrange->gestures().mouse.set("arrange.wheel", 0, "scroll"));
+    root.pointer(wheel);
+    CHECK(arrange->viewport().scrollY > 0);
+    CHECK(arrange->viewport().pixelsPerSecond == 40);
+    // Over the TCP, a binding to zoom zooms in time.
+    REQUIRE(arrange->gestures().mouse.set("tcp.wheel", ui::kAlt, "zoom"));
+    wheel.pos.x = arrange->tcpRowRect(0).x + 20;
+    wheel.mods = ui::kAlt;
+    root.pointer(wheel);
+    CHECK(arrange->viewport().pixelsPerSecond < 40);
+    // Both are saved and read back.
+    auto saved = views::MouseMap::fromJson(arrange->gestures().mouse.toJson());
+    REQUIRE(saved);
+    CHECK(saved->behaviour("arrange.wheel", 0) == "scroll");
+    CHECK(saved->behaviour("arrange.wheel", ui::kShift) == "scroll_time");
+    CHECK(saved->behaviour("tcp.wheel", ui::kAlt) == "zoom");
+}

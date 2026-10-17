@@ -29,6 +29,7 @@
 #include "supple/ui/root.h"
 #include "supple/ui/text_field.h"
 #include "supple/ui/widgets.h"
+#include "supple/views/mouse_map.h"
 
 using namespace supple;
 
@@ -1099,4 +1100,29 @@ TEST_CASE(
     CHECK_FALSE(prefs.setPreventDeepIdle(false));
     CHECK(prefs.preferences().preventDeepIdle);
     CHECK(f.app->cpuIdleLatencyStatus().requested);
+}
+
+TEST_CASE("mixer: the wheel over a fader moves it, or scrolls the strips as the mouse map says") {
+    Fixture f;
+    if (!f.ok) return;
+    std::vector<std::string> ids;
+    for (int i = 0; i < 30; ++i) ids.push_back(f.addTrack("channel", "T"));
+    f.refresh();
+    const std::string t = ids.front();
+    ui::PointerEvent wheel;
+    wheel.type = ui::PointerEvent::Type::Wheel;
+    wheel.pos = f.centre(f.node("mixer.fader." + t));
+    wheel.wheelY = 1;
+    f.root->pointer(wheel);
+    CHECK(f.track(t).volumeDb == doctest::Approx(0.5));  // by default it moves the fader
+    views::MouseMap map;
+    REQUIRE(map.set("mixer.wheel", 0, "scroll"));
+    f.mixer->setMouseMap(&map);
+    const float x = f.node("mixer.fader." + ids[1])->bounds().x;
+    wheel.wheelY = -1;
+    f.root->pointer(wheel);
+    f.root->frame(false);
+    CHECK(f.track(t).volumeDb == doctest::Approx(0.5));  // the strips scrolled instead
+    CHECK(f.node("mixer.fader." + ids[1])->bounds().x < x);
+    f.mixer->setMouseMap(nullptr);
 }

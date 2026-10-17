@@ -33,7 +33,16 @@ const std::vector<MouseMap::Context>& table() {
         {"ruler.marker", "Press a marker or region", {"move", "move_free", "remove"}},
         {"ruler.tempo", "Click a tempo point", {"none", "toggle_ramp"}},
         {"wheel.zoom", "Zoom with the wheel (anchor)", {"project_cursor", "mouse_pointer"}, false},
-        {"tcp.wheel", "Wheel over the track control panel", {"scroll", "resize_all"}},
+        {"tcp.wheel",
+         "Wheel over the track control panel",
+         {"scroll", "resize_all", "scroll_time", "zoom"}},
+        {"arrange.wheel",
+         "Wheel over the arrangement (lanes and ruler)",
+         {"zoom", "scroll_time", "scroll", "resize_all"}},
+        {"mixer.wheel", "Wheel over the mixer", {"adjust", "scroll"}},
+        {"midi.wheel",
+         "Wheel over the MIDI editor",
+         {"scroll_pitch", "scroll_time", "zoom", "zoom_rows"}},
     };
     return t;
 }
@@ -69,6 +78,12 @@ constexpr std::array kDefaults = {
     Default{"ruler.tempo", ui::kAlt, "toggle_ramp"},
     Default{"tcp.wheel", ui::kCtrl, "resize_all"},
     Default{"tcp.wheel", ui::kCtrl | ui::kShift, "resize_all"},
+    Default{"arrange.wheel", ui::kShift, "scroll_time"},
+    Default{"arrange.wheel", ui::kCtrl, "scroll"},
+    Default{"arrange.wheel", ui::kCtrl | ui::kShift, "resize_all"},
+    Default{"midi.wheel", ui::kShift, "scroll_time"},
+    Default{"midi.wheel", ui::kCtrl, "zoom"},
+    Default{"midi.wheel", ui::kAlt, "zoom_rows"},
 };
 
 constexpr std::array<unsigned, 8> kCombos = {0,
@@ -131,11 +146,12 @@ bool MouseMap::bound(std::string_view context, unsigned mods) const {
 
 Status MouseMap::set(std::string_view context, unsigned mods, std::string_view behaviour) {
     const Context* c = MouseMap::context(context);
-    if (!c)
+    if (!c) {
+        std::string known;
+        for (const Context& k : table()) known += (known.empty() ? "" : ", ") + std::string(k.id);
         return Error("mouse.context", "unknown mouse context \"" + std::string(context) + "\"",
-                     "/contexts",
-                     "one of item.drag, item.edge, item.click, fade, lane.drag, "
-                     "envelope, ruler.marker, ruler.tempo, wheel.zoom, tcp.wheel");
+                     "/contexts", "one of " + known);
+    }
     if (behaviour.empty()) {
         map_[std::string(context)].erase(mods & kMods);
         return {};

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
-// Contextual mouse modifiers (gap log #37): what a press does in each context
-// of the arrange view for each modifier combination. The defaults are the
+// Contextual mouse modifiers (gap log #37): what a press or the wheel does in
+// each context (the arrange view's, the mixer's, the MIDI editor's) for each
+// modifier combination. The defaults are the
 // built-in gestures; <config>/<slug>/mouse.json (supple.mouse/1.0) overrides
 // them per context and combination:
 //   {"schema": "supple.mouse/1.0",

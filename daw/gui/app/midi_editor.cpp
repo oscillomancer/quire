@@ -16,6 +16,7 @@
 #include "supple/ui/scroll_view.h"
 #include "supple/ui/text_area.h"
 #include "supple/ui/widgets.h"
+#include "supple/views/mouse_map.h"
 
 namespace supple::gui {
 namespace {
@@ -197,14 +198,16 @@ class Roll : public ui::Node {
         }
         if (e.type == T::Down) s_.gestureVersion = editor_.beginGesture();
         if (e.type == T::Wheel) {
-            if (e.mods & ui::kCtrl) {  // zoom around the pointer
+            // What each combination does is the mouse map's (midi.wheel).
+            const std::string_view behaviour = editor_.wheelBehaviour(e.mods);
+            if (behaviour == "zoom") {  // zoom in time around the pointer
                 const double at = g.beatOf(e.pos.x);
                 s_.pixelsPerBeat =
                     std::clamp(s_.pixelsPerBeat * std::pow(1.15, e.wheelY), 8.0, 1200.0);
                 s_.scrollBeat = at - static_cast<double>(e.pos.x - bounds().x) / s_.pixelsPerBeat;
-            } else if (e.mods & ui::kAlt) {  // zoom the keys and rows around the pointer
+            } else if (behaviour == "zoom_rows") {  // zoom the keys and rows around the pointer
                 editor_.zoomRows(e.wheelY != 0 ? e.wheelY : e.wheelX, e.pos.y);
-            } else if (e.mods & ui::kShift) {
+            } else if (behaviour == "scroll_time") {
                 s_.scrollBeat -= static_cast<double>(e.wheelY + e.wheelX) * 60 / s_.pixelsPerBeat;
             } else {
                 s_.topPitch =
@@ -700,14 +703,16 @@ class RollPlayhead : public ui::Node {
 // ----------------------------------------------------------------- panel
 
 // The docked panel. The wheel anywhere in it that no child used (the keys, the
-// lanes, the header) zooms the rows with Alt, the same as over the roll.
+// lanes, the header) zooms the rows when the mouse map says so for its
+// modifiers (Alt by default), the same as over the roll.
 class Panel : public ui::Node {
   public:
     explicit Panel(MidiEditor& editor) : Node("midi.editor"), editor_(editor) {
         interactive = true;
     }
     bool onPointer(const ui::PointerEvent& e) override {
-        if (e.type != ui::PointerEvent::Type::Wheel || !(e.mods & ui::kAlt) || (e.mods & ui::kCtrl))
+        if (e.type != ui::PointerEvent::Type::Wheel ||
+            editor_.wheelBehaviour(e.mods) != "zoom_rows")
             return false;
         float y = e.pos.y;
         if (const ui::Node* roll = editor_.roll())
@@ -979,6 +984,11 @@ void MidiEditor::loadLayout(const json::Value& v) {
         height_ = std::clamp(static_cast<float>(h->asDouble()), kMinHeight, 4000.0f);
         applyHeight();
     }
+}
+
+std::string_view MidiEditor::wheelBehaviour(unsigned mods) const {
+    static const views::MouseMap defaults;
+    return (mouse_ ? *mouse_ : defaults).behaviour("midi.wheel", mods);
 }
 
 void MidiEditor::zoomRows(float wheel, float anchorY) {
