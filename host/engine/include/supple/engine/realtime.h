@@ -709,6 +709,9 @@ class Engine {
     std::uint64_t rateReseekServiced_ = 0;  // control thread only
     bool rateDeferred_ = false;
     bool scalarPending_ = false;
+    // Control thread: audio played at the latest scalar playrate move.
+    std::int64_t scalarHeard_ = 0;
+    std::uint64_t scalarHeardEpoch_ = UINT64_MAX;
     std::atomic<bool> rateDeferredWake_{false};
     std::filesystem::path rateDeferredDir_;
     std::uint64_t clickSeekSeen_ = 0;

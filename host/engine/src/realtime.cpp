@@ -410,6 +410,7 @@ void Engine::stop() {
     rateReseekServiced_ = 0;
     rateDeferred_ = false;
     scalarPending_ = false;
+    scalarHeardEpoch_ = UINT64_MAX;
     ratePreparationSeconds_ = 0;
     rateDeferredWake_.store(false);
     rateSafeStream_.store(0);

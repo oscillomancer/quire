@@ -1418,6 +1418,59 @@ TEST_CASE("master playrate scalar control: sustained sweep retains converters an
             }
 }
 
+TEST_CASE("master playrate scalar control: spaced knob steps join into one continuous glide") {
+    constexpr double fs = 8000;
+    for (bool anticipative : {false, true}) {
+        CAPTURE(anticipative);
+        PlayrateHost h;
+        h.run("track.add");
+        model::EditTxn edit(h.app->head(), 100);
+        auto project = edit.project();
+        project.playrate = {1.1, false};
+        edit.setProject(project);
+        auto session = edit.commit().value();
+        auto pool = playrateFixturePool();
+        MediaCache media;
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+        Engine engine(pool, media,
+                      {.anticipative = anticipative, .renderBlock = 256, .workers = 0});
+        REQUIRE(engine.start(backend, {.sampleRate = fs, .blockSize = 64}));
+        REQUIRE(engine.load(session));
+        engine.play();
+        std::vector<double> heard;
+        auto run = [&](int cycles) {
+            for (int i = 0; i < cycles; ++i) {
+                if (anticipative) REQUIRE(engine.awaitRendered(1024));
+                backend.run(1);
+                engine.service();
+                heard.push_back(engine.effectivePlayrate());
+            }
+        };
+        run(64);
+        heard.clear();
+        // A MIDI knob's coarse steps, 512 device frames (64 ms) apart.
+        for (int step = 1; step <= 10; ++step) {
+            project.playrate.rate = 1.1 + .03 * step;
+            model::EditTxn knob(session, session.version + 1);
+            knob.setProject(project);
+            session = knob.commit().value();
+            REQUIRE(engine.load(session));
+            run(8);
+        }
+        run(128);
+        REQUIRE(heard.back() == doctest::Approx(1.4));
+        // From the first audible change to the final value the rate rises at
+        // every block: no step is a jump followed by a hold.
+        const auto first =
+            std::find_if(heard.begin(), heard.end(), [](double r) { return r > 1.1; });
+        const auto last =
+            std::find_if(heard.begin(), heard.end(), [](double r) { return r >= 1.4 - 1e-9; });
+        REQUIRE(first < last);
+        for (auto it = first + 1; it <= last; ++it) CHECK(*it > *(it - 1));
+        engine.stop();
+    }
+}
+
 TEST_CASE("master playrate scalar control: transport changes retain later edits") {
     for (bool anticipative : {false, true})
         for (bool preserve : {false, true}) {

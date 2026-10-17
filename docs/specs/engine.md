@@ -1596,8 +1596,13 @@ reloads retain graph compilation. Two bounded SPSC queues carry identical
 release/acquire gate commits both queues together. Boundaries follow both
 already generated clock windows plus a render/device block of publication
 headroom (at least 128 frames), so existing PDC and
-stretch lookahead is respected. Each timeline ramps its current scalar for
-10 ms without restarting the converter or replacing the plan/epoch. Authored
+stretch lookahead is respected. Each timeline ramps linearly from its current
+scalar, without restarting the converter or replacing the plan/epoch, over one
+and a half times the audio played since the previous scalar edit (at least one
+device block and 10 ms, at most 200 ms; 200 ms after a pause or a new epoch).
+A mouse drag's or MIDI knob's steps therefore join into one continuous glide
+that follows the gesture: the next edit normally arrives mid-ramp and
+continues from there. Authored
 rate envelopes remain authoritative and retain their shapes. A control-side
 history replays scheduled future scalar edits during structural preparation.
 Queue saturation coalesces the latest value for service to retry. Ordinary

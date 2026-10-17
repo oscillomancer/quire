@@ -2,7 +2,9 @@
 // Copyright (c) 2026 Supple Audio
 #include "supple/engine/realtime.h"
 
+#include <algorithm>
 #include <bit>
+#include <cmath>
 #include <exception>
 
 #include "plan.h"
@@ -128,7 +130,25 @@ bool Engine::loadScalarRate(const model::Session& session, const std::filesystem
         // refill burst (and at least two canonical quanta) before the edit.
         const auto headroom = std::max({p->block, config_.blockSize, 128u});
         const auto device = (frontier + headroom + 63) / 64 * 64;
-        const detail::ScalarRateEdit edit{device, value, sequence, p->smoothFrames};
+        // Each move glides over half as long again as the audio played since
+        // the previous one (at least one device block, at most 200 ms), so the
+        // steps of a mouse drag or a MIDI knob join into one continuous glide
+        // that follows the hand, instead of short jumps with holds between
+        // them: the next move normally arrives mid-glide and continues from
+        // there. A move after a pause takes the longest glide. Played audio,
+        // unlike the render frontier, advances with the device.
+        const auto epoch = epoch_.load(std::memory_order_acquire);
+        const auto heard = playedStream(epoch);
+        const auto longest = std::max<std::int64_t>(std::llround(0.2 * p->rate), p->smoothFrames);
+        const auto shortest = std::min<std::int64_t>(
+            longest, std::max<std::int64_t>(p->smoothFrames, config_.blockSize));
+        std::int64_t ramp = longest;
+        if (scalarHeardEpoch_ == epoch && heard >= scalarHeard_)
+            ramp = std::clamp((heard - scalarHeard_) * 3 / 2, shortest, longest);
+        scalarHeard_ = heard;
+        scalarHeardEpoch_ = epoch;
+        const detail::ScalarRateEdit edit{device, value, sequence,
+                                          static_cast<std::uint32_t>(ramp)};
         p->scalarHistory.push_back(edit);
         p->timelines[0]->scalarEdits.push(edit);
         p->timelines[1]->scalarEdits.push(edit);
