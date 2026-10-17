@@ -171,7 +171,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   scrolls. Proportional track height zoom is removed; legacy
   mouse bindings fall back to current defaults and saved absolute heights
   still load. Every wheel combination over the TCP, the arrangement's lanes
-  and ruler, the mixer and the MIDI editor can be rebound in Edit > Mouse
+  and ruler, and the MIDI editor can be rebound in Edit > Mouse
   modifiers.
 - **MIDI learn** (ADR-0027): any plug-in parameter (the FX window's MIDI
   button, or `fx.learn.set` for agents) and any action (Ctrl+L in the

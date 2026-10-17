@@ -18,14 +18,13 @@ std::string comboLabel(unsigned mods) {
     return ui::shortcutLabel(std::move(name));
 }
 
-std::string behaviourLabel(std::string_view context, std::string_view b) {
+std::string behaviourLabel(std::string_view b) {
     if (b == "resize_all") return "resize all track heights";
-    if (b == "scroll") return context == "mixer.wheel" ? "scroll the strips" : "scroll the tracks";
+    if (b == "scroll") return "scroll the tracks";
     if (b == "scroll_time") return "scroll in time";
     if (b == "scroll_pitch") return "scroll the pitches";
     if (b == "zoom") return "zoom in time";
     if (b == "zoom_rows") return "zoom the keys and rows";
-    if (b == "adjust") return "move the fader or pan under the pointer";
     if (b == "project_cursor") return "the project cursor (the transport position)";
     if (b == "mouse_pointer") return "the mouse pointer";
     std::string s(b);
@@ -86,7 +85,7 @@ void MouseDialog::open(std::string context) {
             const views::MouseMap::Context& c = *views::MouseMap::context(context_);
             for (std::string_view behaviour : c.behaviours) {
                 ui::MenuItem m;
-                m.label = behaviourLabel(context_, behaviour);
+                m.label = behaviourLabel(behaviour);
                 m.checked =
                     map_.bound(context_, combo) && map_.behaviour(context_, combo) == behaviour;
                 m.run = [this, combo, value = std::string(behaviour)] {
@@ -119,7 +118,7 @@ void MouseDialog::refresh() {
         return;
     }
     for (auto [combo, button] : buttons_)
-        button->setText(behaviourLabel(context_, map_.behaviour(context_, combo)) +
+        button->setText(behaviourLabel(map_.behaviour(context_, combo)) +
                         (combo != 0 && !map_.bound(context_, combo) ? "  (plain)" : ""));
 }
 

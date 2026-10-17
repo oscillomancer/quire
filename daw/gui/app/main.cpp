@@ -510,10 +510,9 @@ int main(int argc, char** argv) {
     // Arrange editing gestures (P5.6): one transaction per gesture; a later
     // step may use an earlier one's result ("$step0.track").
     // Mouse modifiers (gap log #37): the arrange view's map, from the user's file.
-    // The mixer and the MIDI editor take their wheel bindings from it too.
+    // The MIDI editor takes its wheel bindings from it too.
     const fs::path mouseFile = views::MouseMap::defaultFile(product::kSlug);
     midiEditor.setMouseMap(&shell.arrange()->gestures().mouse);
-    mixer.setMouseMap(&shell.arrange()->gestures().mouse);
     gui::MouseDialog mouseDialog(root, shell.arrange()->gestures().mouse,
                                  o.offscreen ? fs::path{} : mouseFile);
     mouseDialog.onError = [](const std::string& message) {
@@ -533,8 +532,8 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "preferences: %s (using the defaults)\n",
                          loaded.error().toString().c_str());
     }
-    gui::PreferencesDialog preferences(root, **app, mouseDialog, shell.arrange()->gestures().mouse,
-                                       prefs, o.offscreen ? fs::path{} : prefsFile);
+    gui::PreferencesDialog preferences(root, **app, mouseDialog, prefs,
+                                       o.offscreen ? fs::path{} : prefsFile);
     preferences.onError = [](const std::string& message) {
         std::fprintf(stderr, "%s\n", message.c_str());
     };

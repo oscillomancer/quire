@@ -382,9 +382,6 @@ TEST_CASE("the mouse modifiers dialog edits the live map and saves it (gap log #
     a.root->frame(false);
     CHECK(a.root->find("mouse.set.")->valueText() == "zoom in time");
     CHECK(a.root->find("mouse.set.ctrl")->valueText() == "scroll the tracks");
-    dialog.open("mixer.wheel");
-    a.root->frame(false);
-    CHECK(a.root->find("mouse.set.")->valueText() == "move the fader or pan under the pointer");
     dialog.open("midi.wheel");
     a.root->frame(false);
     CHECK(a.root->find("mouse.set.")->valueText() == "zoom in time");

@@ -39,7 +39,6 @@ const std::vector<MouseMap::Context>& table() {
         {"arrange.wheel",
          "Wheel over the arrangement (lanes and ruler)",
          {"zoom", "scroll_time", "scroll", "resize_all"}},
-        {"mixer.wheel", "Wheel over the mixer", {"adjust", "scroll"}},
         {"midi.wheel",
          "Wheel over the MIDI editor",
          {"zoom", "scroll_time", "scroll_pitch", "zoom_rows"}},

@@ -820,7 +820,7 @@ TEST_CASE("preferences: the dialog applies each setting at once and saves it") {
     views::MouseMap map;
     gui::MouseDialog mouse(*f.root, map, {});
     const auto file = f.dir / "config" / "preferences.json";
-    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, map, gui::Preferences{}, file);
+    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, gui::Preferences{}, file);
     CHECK(f.app->defaultMonitor() == model::Monitor::On);
     CHECK(f.app->copyImportedMedia());
     prefs.open();
@@ -830,9 +830,6 @@ TEST_CASE("preferences: the dialog applies each setting at once and saves it") {
     prefs.setDefaultMonitor(model::Monitor::Off);
     CHECK(f.node("prefs.monitor.set")->valueText() == "Off");
     CHECK(f.track(f.addTrack("channel", "A")).record.monitor == model::Monitor::Off);
-    // The wheel zoom anchor lives in the mouse map.
-    prefs.setZoomAnchor("mouse_pointer");
-    CHECK(map.behaviour("wheel.zoom", 0) == "mouse_pointer");
     // Audio threads, from the menu; out of range refused.
     REQUIRE(f.root->click("prefs.threads.set"));
     auto* menu = dynamic_cast<ui::List*>(f.root->find("prefs.threads.menu"));
@@ -863,7 +860,7 @@ TEST_CASE("preferences: the dialog applies each setting at once and saves it") {
     REQUIRE(f.root->click("prefs.close"));
     // A loaded file applies to the app when the dialog is made.
     f.app->setRendersDir({});
-    gui::PreferencesDialog again(*f.root, *f.app, mouse, map, *saved, {});
+    gui::PreferencesDialog again(*f.root, *f.app, mouse, *saved, {});
     CHECK(f.app->rendersDir() == f.dir / "my renders");
 }
 
@@ -997,7 +994,7 @@ TEST_CASE(
     views::MouseMap map;
     gui::MouseDialog mouse(*f.root, map, {});
     const auto file = f.dir / "preferences.json";
-    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, map, {}, file);
+    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, {}, file);
     prefs.open();
     f.root->frame(false);
     const float offHeight = f.node("prefs")->bounds().h;
@@ -1066,7 +1063,7 @@ TEST_CASE(
     views::MouseMap map;
     gui::MouseDialog mouse(*f.root, map, {});
     const auto file = f.dir / "preferences.json";
-    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, map, {}, file);
+    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, {}, file);
     prefs.open();
     f.root->frame(false);
     const float offHeight = f.node("prefs")->bounds().h;
@@ -1100,29 +1097,4 @@ TEST_CASE(
     CHECK_FALSE(prefs.setPreventDeepIdle(false));
     CHECK(prefs.preferences().preventDeepIdle);
     CHECK(f.app->cpuIdleLatencyStatus().requested);
-}
-
-TEST_CASE("mixer: the wheel over a fader moves it, or scrolls the strips as the mouse map says") {
-    Fixture f;
-    if (!f.ok) return;
-    std::vector<std::string> ids;
-    for (int i = 0; i < 30; ++i) ids.push_back(f.addTrack("channel", "T"));
-    f.refresh();
-    const std::string t = ids.front();
-    ui::PointerEvent wheel;
-    wheel.type = ui::PointerEvent::Type::Wheel;
-    wheel.pos = f.centre(f.node("mixer.fader." + t));
-    wheel.wheelY = 1;
-    f.root->pointer(wheel);
-    CHECK(f.track(t).volumeDb == doctest::Approx(0.5));  // by default it moves the fader
-    views::MouseMap map;
-    REQUIRE(map.set("mixer.wheel", 0, "scroll"));
-    f.mixer->setMouseMap(&map);
-    const float x = f.node("mixer.fader." + ids[1])->bounds().x;
-    wheel.wheelY = -1;
-    f.root->pointer(wheel);
-    f.root->frame(false);
-    CHECK(f.track(t).volumeDb == doctest::Approx(0.5));  // the strips scrolled instead
-    CHECK(f.node("mixer.fader." + ids[1])->bounds().x < x);
-    f.mixer->setMouseMap(nullptr);
 }
