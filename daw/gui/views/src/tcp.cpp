@@ -422,10 +422,13 @@ void TcpPanel::Row::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
     const float indent = 14.0f * static_cast<float>(depth_);
     // "fx" and "+" end the name line, so every row has them at any height.
     const float fxWidth = 22.0f, addWidth = 16.0f;
-    addFx_->arrange(canvas, {right - 10 - addWidth, r.y + 3, addWidth, 15});
-    fx_->arrange(canvas, {right - 12 - addWidth - fxWidth, r.y + 3, fxWidth, 15});
-    nameRect_ = {x + 26 + indent, r.y + 2,
-                 std::max(20.0f, right - x - 42 - fxWidth - addWidth - indent), 18};
+    addFx_->arrange(canvas, {right - 10 - addWidth, r.y + TcpRowGeometry::kFxTop, addWidth,
+                             TcpRowGeometry::kFxHeight});
+    fx_->arrange(canvas, {right - 12 - addWidth - fxWidth, r.y + TcpRowGeometry::kFxTop, fxWidth,
+                          TcpRowGeometry::kFxHeight});
+    nameRect_ = {x + 26 + indent, r.y + TcpRowGeometry::kNameTop,
+                 std::max(20.0f, right - x - 42 - fxWidth - addWidth - indent),
+                 TcpRowGeometry::kNameHeight};
     name_->arrange(canvas, nameRect_);
     rename_->arrange(canvas, {nameRect_.x, nameRect_.y + 1, nameRect_.w, 17});
     meter_->arrange(canvas, {right - 5, r.y + 3, 4, std::max(4.0f, r.h - 6)});
@@ -488,7 +491,9 @@ void TcpPanel::Row::paint(ui::Canvas& c) {
         c.fillRect({px, r.y + r.h / 2 - 3, 6, 1}, t.color("rule"));
     }
     // The strip-type badge: colour and letter differ per type (ADR-0019, §7).
-    const ui::Rect badge{r.x + 6 + 14.0f * static_cast<float>(depth_), r.y + 4, 16, 16};
+    const ui::Rect badge{r.x + 6 + 14.0f * static_cast<float>(depth_),
+                         r.y + TcpRowGeometry::kBadgeTop, TcpRowGeometry::kBadgeSize,
+                         TcpRowGeometry::kBadgeSize};
     c.fillRound(badge, tr->type == model::StripType::Master ? t.radius("s") : 2.0f,
                 t.color(typeToken(tr->type)));
     c.text(badge,
@@ -541,7 +546,8 @@ bool TcpPanel::Row::onPointer(const ui::PointerEvent& e) {
     }
     if (e.type != T::Down || !track_.has_value()) return false;
     // The bottom edge: drag to set this track's height, double-click to reset it.
-    if (e.button == 1 && e.pos.y >= bounds().bottom() - 4 && panel_.cb_.resizeTrack) {
+    if (e.button == 1 && e.pos.y >= bounds().bottom() - TcpRowGeometry::kResizeGrip &&
+        panel_.cb_.resizeTrack) {
         if (e.clicks >= 2) {
             panel_.cb_.resizeTrack(*track_, 0);
             return true;

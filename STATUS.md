@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-10-15. This file describes the present: what works, what is
+Updated 2026-10-16. This file describes the present: what works, what is
 known not to, and what is planned. Keep it current with each change; the
 history is in git.
 
@@ -164,6 +164,11 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   waits on app/local plug-in/ModelLoop notifications and demand-driven
   deadlines; stopped transport and stationary meters have no refresh timer.
   Input/commands coalesce UI sidecar checks, and writer completion wakes main.
+  TCP rows keep their full top line at a 24-unit minimum; older sidecars
+  clamp on load. Ctrl+wheel over the TCP resizes every track additively,
+  with fractional deltas and pointer anchoring, through the editable mouse
+  map. Ctrl+Shift retains global height zoom. Native verification of these
+  height changes remains pending with the coordinator.
 - **MIDI learn** (ADR-0027): any plug-in parameter (the FX window's MIDI
   button, or `fx.learn.set` for agents) and any action (Ctrl+L in the
   actions list) learns a controller by moving it: CC, note, pitch bend or

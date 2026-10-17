@@ -815,53 +815,8 @@ int main(int argc, char** argv) {
                 (*window)->setSize(static_cast<int>(w->asInt()), static_cast<int>(h->asInt()));
         });
     // The arrange view's state (zoom, scroll, row heights, follow).
-    auto arrangeSave = [&] {
-        const views::ArrangeView& a = *shell.arrange();
-        const views::Viewport& vp = a.viewport();
-        json::Value v = json::Value::object();
-        v["start_seconds"] = vp.startSeconds;
-        v["pixels_per_second"] = vp.pixelsPerSecond;
-        v["scroll_y"] = static_cast<double>(vp.scrollY);
-        v["row_height"] = static_cast<double>(a.trackLayout().globalHeight());
-        v["follow"] = std::string(views::followName(a.follow()));
-        json::Value heights = json::Value::object();
-        for (const auto& [track, h] : a.trackLayout().heights())
-            heights[track.str()] = static_cast<double>(h);
-        v["track_heights"] = std::move(heights);
-        json::Value expanded = json::Value::array();  // "Show all takes"
-        for (model::Id item : a.trackLayout().expandedItems()) expanded.push_back(item.str());
-        v["expanded_takes"] = std::move(expanded);
-        return v;
-    };
-    auto arrangeLoad = [&](const json::Value& v) {
-        views::ArrangeView& a = *shell.arrange();
-        views::Viewport vp = a.viewport();
-        auto num = [&](const char* k, auto& out) {
-            if (const json::Value* x = v.find(k); x && x->isNumber())
-                out = static_cast<std::remove_reference_t<decltype(out)>>(x->asDouble());
-        };
-        num("start_seconds", vp.startSeconds);
-        num("pixels_per_second", vp.pixelsPerSecond);
-        num("scroll_y", vp.scrollY);
-        a.setViewport(vp);
-        if (const json::Value* rh = v.find("row_height"); rh && rh->isNumber())
-            a.trackLayout().setGlobalHeight(static_cast<float>(rh->asDouble()));
-        a.trackLayout().clearTrackHeights();
-        if (const json::Value* th = v.find("track_heights"); th && th->isObject())
-            for (const auto& m : th->asObject()) {
-                const auto id = model::Id::parse(m.key);
-                if (id && m.value.isNumber())
-                    a.trackLayout().setTrackHeight(*id, static_cast<float>(m.value.asDouble()));
-            }
-        if (const json::Value* f = v.find("follow"); f && f->isString())
-            if (const auto mode = views::followFrom(f->asString())) a.setFollow(*mode);
-        a.trackLayout().clearTakesExpanded();
-        if (const json::Value* ex = v.find("expanded_takes"); ex && ex->isArray())
-            for (const json::Value& item : ex->asArray())
-                if (const auto id =
-                        item.isString() ? model::Id::parse(item.asString()) : std::nullopt)
-                    a.trackLayout().setTakesExpanded(*id, true);
-    };
+    auto arrangeSave = [&] { return shell.arrange()->saveLayout(); };
+    auto arrangeLoad = [&](const json::Value& v) { shell.arrange()->loadLayout(v); };
     uiFile.add("arrange", arrangeSave, arrangeLoad);
     // Named screensets (gap log #38): panels + the arrange view, by name.
     gui::Screensets screensets(

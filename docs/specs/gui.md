@@ -288,6 +288,12 @@ matrix shows one send per pair), meters. The mixer's strips carry the same contr
 looks (§4.4). The button row starts at the TCP's left edge with mute and
 solo (over polarity and mono) and ends at its right edge with "env" and
 "out", at any depth; a channel's input button takes the room between.
+Rows shrink to 24 design units: the name, strip badge, "fx" and "+" fit
+above a four-unit bottom resize grip. The lower buttons hide below 40 units;
+the fader/pan row hides below 58. Track heights clamp to 24–400 units,
+including compact folders and older UI sidecars; expanded takes retain that
+minimum per take lane, plus their item name bar. MIDI key heights remain
+independent (4–48 units, §4.7).
 Every view names a track the same way (`model::trackLabel`):
 its name, which track.add sets to the first free `ch_N`, `buss_N` or
 `mstr_N` (the session's own master is "Master"); an unnamed track from an
@@ -355,6 +361,15 @@ the anchor where the first step of the run found it. The run ends when anything
 else moves the view in time (a scroll, follow, the scrollbar), the cursor
 moves, or (with the pointer anchor) the pointer moves. Horizontal zoom is continuous;
 vertical track height per track and global.
+By default Ctrl+wheel over the TCP adds eight design units per notch to
+every track row, including hidden tracks and compact folders, preserving
+mixed heights and clamping each independently. Fractional wheel deltas work
+continuously; expanded rows divide the step among their take lanes. The row
+under the pointer stays anchored at the same fractional position unless a
+scroll boundary prevents it. Heights are UI state, saved with individual
+resizes, without commands or undo entries. Over the lanes Ctrl+wheel still
+scrolls vertically. Ctrl+Shift+wheel retains multiplicative global height
+zoom (1.25 per notch); explicit track overrides stay fixed.
 Left trim shifts every take's source offset by the trimmed duration times
 its play rate, in the same transaction; dragging the left edge out past a
 take's material (down to the timeline's start) and slipping its material
@@ -752,12 +767,15 @@ Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
   click (select, toggle, extend), automation item edge (stretch, loop), fade
   handle (drag, cycle shape), empty-lane drag (select, add), automation lane
   (edit, toggle, delete), ruler markers/regions
-  (move, remove) and tempo points (toggle ramp) — from each modifier
-  combination to a behaviour. The defaults are the built-in gestures;
+  (move, remove), tempo points (toggle ramp), and TCP wheel
+  (`tcp.wheel`: scroll, resize all track heights, zoom global row height) —
+  from each modifier combination to a behaviour. The defaults are the built-in gestures;
   `mouse.json` (supple.mouse/1.0, only what differs) overrides them, and
   Edit > Mouse modifiers edits the live map. One context, `wheel.zoom`, is a
   single setting rather than a modifier map: the wheel's zoom anchor
   (`project_cursor`, the default, or `mouse_pointer`).
+  TCP wheel defaults are plain scroll, Ctrl resize all and Ctrl+Shift
+  global height zoom; each modifier combination can be rebound.
 - **Preferences** (Edit > Preferences…): app-wide settings, never project
   state. The default monitoring of new channels (off, on — the default — or
   auto; `preferences.json`, supple.preferences/1.4, sets

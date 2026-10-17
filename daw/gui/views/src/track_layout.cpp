@@ -3,8 +3,10 @@
 #include "supple/views/track_layout.h"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <iterator>
+#include <utility>
 
 #include "supple/views/envelope_lane.h"
 #include "supple/views/session_changes.h"
@@ -216,6 +218,29 @@ void TrackLayout::setGlobalHeight(float h) {
     rebuildGeometry();
 }
 
+void TrackLayout::adjustAllTrackHeights(float delta) {
+    if (delta == 0 || !std::isfinite(delta)) return;
+    const float global = clampHeight(globalHeight_ + delta);
+    const auto expanded = expandedTakeCounts();
+    auto heights = heights_;
+    for (const auto& entry : session_.tracks) {
+        const auto& track = *entry.value;
+        if (track.type == model::StripType::Master) continue;
+        float share = delta;
+        if (const auto found = expanded.find(entry.id); found != expanded.end())
+            share /= static_cast<float>(found->second);
+        const float height = clampHeight(baseHeight(entry.id) + share);
+        const float inherited = track.folderCompact == 1 ? clampHeight(global * 0.5f) : global;
+        // Retain explicit overrides; default rows can keep following global
+        // zoom. Compact and expanded rows need an override for an equal step.
+        if (hasTrackHeight(entry.id) || height != inherited) heights[entry.id] = height;
+    }
+    if (global == globalHeight_ && heights == heights_) return;
+    globalHeight_ = global;
+    heights_ = std::move(heights);
+    rebuildGeometry();
+}
+
 void TrackLayout::setTrackHeight(model::Id track, float h) {
     if (h <= 0)
         heights_.erase(track);
@@ -236,24 +261,27 @@ float TrackLayout::baseHeight(model::Id track) const {
     return globalHeight_;
 }
 
+std::map<model::Id, std::size_t> TrackLayout::expandedTakeCounts() const {
+    std::map<model::Id, std::size_t> counts;
+    for (model::Id id : expanded_)
+        if (const model::Item* it = session_.items.find(id))
+            counts[it->track] = std::max(counts[it->track], it->takes.size());
+    return counts;
+}
+
 void TrackLayout::rebuildGeometry() {
     rowHeights_.clear();
     yOffsets_.clear();
     rowHeights_.reserve(rows_.size());
     yOffsets_.reserve(rows_.size());
     // Rows holding an expanded item: a lane per take, each as tall as the row.
-    std::map<model::Id, float> spread;
-    for (model::Id id : expanded_)
-        if (const model::Item* it = session_.items.find(id)) {
-            const float lanes = static_cast<float>(it->takes.size()) * baseHeight(it->track);
-            spread[it->track] = std::max(spread[it->track], kTakeBar + lanes);
-        }
+    const auto spread = expandedTakeCounts();
     float y = 0;
     for (const TrackRow& r : rows_) {
         float h = r.env ? envHeight() : baseHeight(r.track);
         if (!r.env)
             if (const auto found = spread.find(r.track); found != spread.end())
-                h = std::max(h, found->second);
+                h = std::max(h, kTakeBar + static_cast<float>(found->second) * h);
         yOffsets_.push_back(y);
         rowHeights_.push_back(h);
         y += h;
