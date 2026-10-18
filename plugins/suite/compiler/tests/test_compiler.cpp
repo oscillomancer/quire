@@ -114,6 +114,33 @@ TEST_CASE("factory patches are constant checked declarations with physical value
     CHECK(patch.values[2].second == 1.0);
 }
 
+TEST_CASE("a choice's options may have keys of their own") {
+    const auto source = [](const std::string& slope, const std::string& patch = "") {
+        std::string s = kGain;
+        s.insert(s.find("    void update()"), "    Param slope = " + slope +
+                                                  ";\n    void factoryPatches(Patches& p) { " +
+                                                  patch + " }\n");
+        return s;
+    };
+    const std::string slope = "choice(\"Slope\", {\"12 dB/oct\", \"24 dB/oct\"}, 0)";
+    auto compiled = compileOk(
+        source(slope + ".keys({\"db12\", \"db24\"})", "p.add(\"Steep\").set(slope, \"db24\");"));
+    const auto& model = compiled.program->params().back();
+    CHECK(model.choiceKeys == std::vector<std::string>{"db12", "db24"});
+    CHECK(script::detail::choiceKey(model, 1) == "db24");
+    CHECK(compiled.program->factoryPatches().at(0).values.at(0).second == 1.0);
+    // Without .keys(), a key is its label in snake_case.
+    CHECK(firstError(source(slope, "p.add(\"Steep\").set(slope, \"p24_db_oct\");")) == "");
+    CHECK(firstError(source(slope + ".keys({\"db12\", \"db24\"})",
+                            "p.add(\"Steep\").set(slope, \"p24_db_oct\");")) ==
+          "script.patch.choice");
+    CHECK(firstError(source(slope + ".keys({\"db12\"})")) == "script.param.range");
+    CHECK(firstError(source(slope + ".keys({\"db12\", \"db12\"})")) == "script.param.range");
+    CHECK(firstError(source(slope + ".keys({\"12db\", \"db24\"})")) == "script.param.range");
+    CHECK(firstError(source("decibels(\"Slope\", 0, 1, 0).keys({\"a\"})")) == "script.param.range");
+    CHECK(firstError(source(slope + ".keys(\"db12\")")) == "script.param.modifier");
+}
+
 TEST_CASE("a gain script compiles and applies its gain") {
     for (bool interpret : {false, true}) {
         CAPTURE(interpret);

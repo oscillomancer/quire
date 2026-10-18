@@ -76,6 +76,11 @@ std::string factoryChoiceKey(std::string_view label) {
     return key;
 }
 
+std::string choiceKey(const ParamModel& param, size_t k) {
+    if (k < param.choiceKeys.size()) return param.choiceKeys[k];
+    return k < param.choices.size() ? factoryChoiceKey(param.choices[k]) : std::string();
+}
+
 std::string factoryPatchProblems(const std::vector<ParamModel>& params,
                                  const std::vector<FactoryPatchModel>& patches) {
     std::set<std::string> names;

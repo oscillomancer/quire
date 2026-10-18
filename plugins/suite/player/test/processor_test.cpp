@@ -218,12 +218,14 @@ struct P : Effect {
     static constexpr Info info = {.name = "P", .id = "com.example.p"};
     Param mix = percent("Mix", 25);
     Param mode = choice("Mode", {"Soft Clip", "Hard"}, 1);
+    Param slope = choice("Slope", {"12 dB/oct", "24 dB/oct"}, 0).keys({"db12", "db24"});
     void process(Block& io) { io[0][0] *= mix; }
 };
 )");
     CHECK(percent->params().at(0).max == 1.0 && percent->params().at(0).def == 0.25);
     CHECK(percent->meaning().params[1].choiceKeys ==
           (std::vector<std::string>{"soft_clip", "hard"}));
+    CHECK(percent->meaning().params[2].choiceKeys == (std::vector<std::string>{"db12", "db24"}));
 }
 
 TEST(the_engine_plays_a_script_as_its_own_runner_does_bit_for_bit) {

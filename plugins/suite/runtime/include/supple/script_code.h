@@ -51,6 +51,7 @@ struct ParamModel {
     Curve curve = Curve::Linear;
     double curveK = 1.0;
     std::vector<std::string> choices;
+    std::vector<std::string> choiceKeys;  // given by .keys(); empty: from the labels
     std::string group, description;
     double smoothingMs = 0.0;
     bool automatable = true, modulatable = false, offAtMinimum = false, output = false,
@@ -99,6 +100,8 @@ struct FactoryPatchModel {
 std::string factoryPatchProblems(const std::vector<ParamModel>& params,
                                  const std::vector<FactoryPatchModel>& patches);
 std::string factoryChoiceKey(std::string_view label);
+// Option k's patch key: the one .keys() gave, or its label in snake_case.
+std::string choiceKey(const ParamModel& param, size_t k);
 
 // A parameter's CLAP id from its key (FNV-1a), stable however the members
 // are ordered; never CLAP's invalid id, never 0.

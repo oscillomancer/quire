@@ -97,6 +97,7 @@ positive, and integer parameter ranges must fit in `int`.
 | `.modulated()`, `.notAutomatable()` | As named |
 | `.polyModulated()` | An instrument's: modulated per note by the host; each voice reads `p.forVoice(v)` |
 | `.role({"level"})` | What it does, for agents: `level`, `time`, `brightness` ... |
+| `.keys({"db12", "db24"})` | A choice's patch keys, one per option, where its labels make poor ones (see below) |
 | `.curved(Curve::Log)`, `.curved(Curve::Pow, k)` | Knob travel |
 | `.withKey("key")`, `.withId(n)` | Override the patch key or the CLAP id (see below) |
 
@@ -123,7 +124,12 @@ the compiler checks names, ranges and choices.
 **Keys and IDs.** A parameter's patch key is its member's name in
 snake_case (`lowCut` is `low_cut`), and its CLAP id is a hash of the key.
 Renaming a member changes both, and sessions that saved the old one lose
-that value: give the new name `.withKey("old_key")` to keep it. A member
+that value: give the new name `.withKey("old_key")` to keep it. A choice's
+options have keys too, each its label in snake_case (`"Low Pass"` is
+`low_pass`, and a label that starts with a digit gains a `p`: `"12 dB/oct"`
+is `p12_db_oct`). Where labels make poor keys, name them: a unit before the
+number, as the stock plugins do, `choice("Slope", {"12 dB/oct", "24 dB/oct"},
+0).keys({"db12", "db24"})`. Patches may give a choice by key or by label. A member
 cannot share its factory's name, as in C++ (`Param ratio = ratio(...)`
 does not compile): write `Param slope = ratio("Ratio", 1, 20, 4).withKey("ratio")`.
 

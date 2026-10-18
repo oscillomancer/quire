@@ -220,7 +220,8 @@ struct ParamSpec {
     bool automatable = true, modulatable = false, offAtMinimum = false, output = false;
     bool polyModulatable = false;  // an instrument's, modulated per voice: forVoice(v)
     bool bypass = false, hidden = false;
-    std::initializer_list<const char*> roles = {};  // "level", "time", "brightness" ...
+    std::initializer_list<const char*> roles = {};       // "level", "time", "brightness" ...
+    std::initializer_list<const char*> choiceKeys = {};  // a choice's patch keys (.keys())
 
     // In a group, which the automatic editor and hosts show as a section.
     ParamSpec in(const char* g) const {
@@ -284,6 +285,14 @@ struct ParamSpec {
     ParamSpec role(std::initializer_list<const char*> r) const {
         ParamSpec p = *this;
         p.roles = r;
+        return p;
+    }
+    // A choice's patch keys, one for each option, where its labels would make
+    // poor ones: choice("Slope", {"12 dB/oct", "24 dB/oct"}, 0).keys({"db12", "db24"}).
+    // Without it each key is its label in snake_case ("Low Pass": low_pass).
+    ParamSpec keys(std::initializer_list<const char*> k) const {
+        ParamSpec p = *this;
+        p.choiceKeys = k;
         return p;
     }
     ParamSpec curved(Curve c, double k = 1.0) const {
