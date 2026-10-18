@@ -109,16 +109,16 @@ and finite decoded samples. The reader handles PCM 8/16/24/32 and IEEE float
 than asserting the plugin's internal floating-point safety.
 
 Default output must be non-silent. Instrument bypass must be silent. Plumb,
-Gauge and neutral Flint must match bypass sample-for-sample; other defaults
-must differ. Facet's default includes a 30 Hz high-pass, so it is intentionally
-not in the passthrough group. Dynamics differences may include startup ramps.
+Gauge, neutral Flint and Contour (every band off) must match bypass
+sample-for-sample; other defaults must differ. Dynamics differences may
+include startup ramps.
 
 | CLAP id suffix | Artifact / host name | Automated parameter | Points at 0 / 2 seconds | Expectation |
 |---|---|---|---|---|
 | `probe-synth` | ProbeSynth / Probe Synth | Output Gain | −12 / −24 dB | −12 ±1 dB |
 | `orrery` | Orrery | Output Level | 0 / −12 dB | −12 ±1 dB |
 | `utility` | Plumb | Gain | 0 / −12 dB | −12 ±1 dB |
-| `eq` | Facet | Band 3 Gain | 0 / −18 dB | second half >3 dB quieter |
+| `contour` | Contour | Output | 0 / −12 dB | −12 ±1 dB |
 | `comp` | Ballast | Threshold | 0 / −36 dB | second half >3 dB quieter |
 | `analyzer` | Analyzer / Gauge | Hold | false / true | envelope reload + unchanged audio |
 | `gate` | Gate / Sluice | Threshold | −80 / −6 dB | second half >3 dB quieter |
@@ -151,7 +151,8 @@ or copied.
 `TrackFX_GetParamIdent()` records its host identifier. `GetFXEnvelope(track,
 fx,index,true)` takes the **zero-based REAPER parameter index**, not the CLAP
 id. REAPER saves `<PARMENV index:CLAP-id min max default`, e.g. Plumb Gain
-`0:0`, Facet Band 3 Gain `17:17`, and Orrery Output Level **`219:2500`**.
+`0:0`, Facet (the EQ Contour replaced) Band 3 Gain `17:17`, and Orrery Output
+Level **`219:2500`**.
 The Orrery observation distinguishes index from id. Indices may change with
 parameter enumeration; runtime discovery avoids assuming index equals id.
 The script reopens the saved automation RPP and checks all three envelope

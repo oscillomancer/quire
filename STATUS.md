@@ -190,10 +190,18 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   validated against EBU Tech 3341/3342, spectral, pitch, envelope, stereo,
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
   the LLM evaluation harness (`tools/eval-harness`).
-- **Stock plugins** (ADR-0011): Orrery, Facet, Ballast, Sluice, Flint, Kiln,
-  Echelon, Nave, Plumb and Gauge, each passing clap-validator, a reset
-  determinism check and an unload test (all but Nave also pass the headless
-  REAPER check); JSON patches and the semantic-parameters extension.
+- **Stock plugins** (ADR-0011, ADR-0047): Orrery, Contour, Ballast, Sluice,
+  Flint, Kiln, Echelon, Nave, Plumb and Gauge, each passing clap-validator, a
+  reset determinism check and an unload test (all but Nave also pass the
+  headless REAPER check); JSON patches and the semantic-parameters extension.
+  Contour, the EQ, is the first written as a DSP script
+  (`plugins/stock/contour`) and compiled natively from it, playing the same
+  samples as the script in the player: eight matched zero-latency bands
+  (bells, shelves, cuts to 48 dB/oct, notch, tilt) on stereo, mid, side or
+  one channel, dynamic bells and shelves, band listening, gain scale, auto
+  gain, and an editor of its own with a 32768-point spectrum line. It
+  replaced Facet (`com.suppleaudio.eq`); sessions that used Facet keep the
+  slot but no longer load it (there is no automatic conversion).
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The
@@ -387,6 +395,13 @@ Plugins:
   patches, but do not package external audio files or the patch of a
   currently loaded instance. Preview requires an editor build and an
   available offscreen renderer (EGL, Metal or WGL with framebuffer objects).
+- Contour has no linear-phase mode; its editor (drawn by the script) takes
+  no keyboard input or right-click menus, draws the summed curve without
+  regard to each band's channel, and analyses the output only. Its
+  analysis costs about 0.3 ms per transform in a standalone -O2 copy (at
+  most 25 a second at 48 kHz, under 1% of a core, on the editor thread);
+  the plugin itself has not been profiled. Sessions saved with Facet are
+  not converted to Contour.
 - Scripts need a JIT: there is no fallback for hosts that forbid executable
   memory (MIR's interpreter is a test backend, not real-time safe).
 - A script save that redefines the plugin while an editor drag is under way

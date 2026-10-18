@@ -6,11 +6,12 @@ adds what maintainers need beyond it: the shared layout, real-time rules,
 tests, GUI and skill deliverables, and per-plugin implementation notes.
 
 Code identity uses the functional ids; each display name is defined once,
-in the plugin's `cmake/Identity.cmake`.
+in the plugin's `cmake/Identity.cmake` (for a scripted stock plugin,
+ADR-0047, in its script's `Info` and its `product.cmake`).
 
 | id (dir, code, CLAP id suffix) | display name | CLAP id | State magic | AU subtype | Features |
 |---|---|---|---|---|---|
-| `eq` | Facet | `com.suppleaudio.eq` | `QEQ1` | `QEq_` | audio-effect, equalizer, stereo |
+| `contour` (`plugins/stock/contour`) | Contour | `com.suppleaudio.contour` | `TQNk` (the player's for the id) | `Cntr` | audio-effect, equalizer |
 | `comp` | Ballast | `com.suppleaudio.comp` | `QCM1` | `QCmp` | audio-effect, compressor, limiter, stereo |
 | `utility` | Plumb | `com.suppleaudio.utility` | `QUT1` | `QUtl` | audio-effect, utility, stereo |
 | `analyzer` | Gauge | `com.suppleaudio.analyzer` | `QAN1` | `QAna` | audio-effect, analyzer, stereo |
@@ -20,8 +21,8 @@ in the plugin's `cmake/Identity.cmake`.
 | `delay` | Echelon | `com.suppleaudio.delay` | `QDL1` | `QDly` | audio-effect, delay, stereo |
 | `reverb` | Nave | `com.suppleaudio.reverb` | `QRV1` | `QRvb` | audio-effect, reverb, stereo |
 
-In the template's identity checklist the code name is the id (`Eq`/`eq`/`EQ`,
-`Comp`/`comp`/`COMP`, `Utility`/`utility`/`UTILITY`,
+In the template's identity checklist the code name is the id
+(`Comp`/`comp`/`COMP`, `Utility`/`utility`/`UTILITY`,
 `Analyzer`/`analyzer`/`ANALYZER`); only the user-visible name string is the
 working name, defined once per plugin.
 
@@ -163,75 +164,35 @@ In the plugin copy (as ProbeSynth): `host_smoke`, `semantic_rt`,
   Linked from `skill/SKILL.md` and `skill/guides/mixing.md`.
 - `plugins/<id>/QUIRE.md` (deviations from the template) and a STATUS row.
 
-## 2. EQ — Facet [`eq`] (`stock-effects.md` §1)
+## 2. EQ — Contour [`contour`] (`stock-effects.md` §1)
 
-- **`minimum` phase:** each second-order section is a trapezoidal
-  state-variable filter (Simper/Cytomic "linear trapezoidal SVF"): per
-  channel state `ic1eq, ic2eq`,
+A DSP script (ADR-0047), `plugins/stock/contour/script/contour.cpp`; the
+spec section holds the designs and measured accuracy. Notes for maintainers:
 
-      g = tan(π·f/fs), k = 1/Q, a1 = 1/(1 + g(g + k)), a2 = g·a1, a3 = g·a2
-      v3 = v0 − ic2eq; v1 = a1·ic1eq + a2·v3; v2 = ic2eq + a2·ic1eq + a3·v3
-      ic1eq = 2·v1 − ic1eq; ic2eq = 2·v2 − ic2eq
-      y = m0·v0 + m1·v1 + m2·v2
-
-  with (A = 10^(gain/40)):
-
-  | type | g | k | m0 | m1 | m2 |
-  |---|---|---|---|---|---|
-  | bell | tan(πf/fs) | 1/(Q·A) | 1 | k(A² − 1) | 0 |
-  | low shelf | tan(πf/fs)/√A | 1/Q | 1 | k(A − 1) | A² − 1 |
-  | high shelf | tan(πf/fs)·√A | 1/Q | A² | k(1 − A)·A | 1 − A² |
-  | notch | tan(πf/fs) | 1/Q | 1 | −k | 0 |
-  | band-pass (0 dB peak) | tan(πf/fs) | 1/Q | 0 | k | 0 |
-  | low-pass section | tan(πf/fs) | 1/Q | 0 | 0 | 1 |
-  | high-pass section | tan(πf/fs) | 1/Q | 1 | −k | −1 |
-
-  Pass slopes are Butterworth cascades (odd orders start with a first-order
-  TPT section; section Qs from the Butterworth pole angles); at 12 dB/oct the
-  single section uses `bandN.q` (0.71 = Butterworth). Tilt: first-order low
-  shelf −gain/2 and high shelf +gain/2 at `freq`.
-- **`natural` (default):** the magnitude of the analog prototype held to
-  20 kHz at 44.1/48 kHz — matched second-order sections (magnitude matched at
-  DC, centre and Nyquist) or 2× oversampling of the `minimum` design,
-  whichever the tests show more exact. Decided 2026-09-30: matched sections
-  (oversampling cost 50× the minimum mode); the bound is ≤ 0.3 dB for bells
-  with Q ≤ 4 and shelves with Q ≤ 1, f0 ≤ 10 kHz, to 20 kHz at 44.1/48 kHz,
-  with measured limits for resonant and near-Nyquist bands
-  (`stock-effects.md` §1).
-- **`linear`:** a linear-phase FIR of the current magnitude response,
-  partitioned convolution, latency 2048 samples at 48 kHz (scaled with the
-  rate); recomputed off the audio thread when parameters change and swapped
-  in with a 20 ms crossfade. May land in a second commit after the other two
-  modes.
-- Mid/side bands encode M = (L+R)/2, S = (L−R)/2 around that band only;
-  left/right bands leave the other channel untouched.
-- `freq` (log2), `gain` (dB) and `q` (log) are smoothed per sample (20 ms);
-  coefficients are recomputed only while a band's smoother moves. Enabling
-  a band or changing its type or slope crossfades the band's output with its
-  input over 10 ms (a type change fades out, switches and clears state,
-  fades in). A disabled band, or a gain type at 0 dB, passes finite input bit-exactly.
-- `auto_gain`: output compensation for the static curve (the negative of the
-  mean dB gain of the summed response over 20 Hz–20 kHz on a log axis,
-  pink-weighted), updated with the smoothed parameters.
-- `double magnitudeDb(const Values&, double hz, double fs)` evaluates the
-  exact response of the digital cascade for the GUI curve and tests.
-
-Tests: a bell at 1 kHz, +6 dB, Q 1 gives +6.0 ± 0.05 dB at 1 kHz; shelves
-reach their gain within 0.1 dB two octaves out; passes are −3.0 ± 0.1 dB at
-`freq` with the stated slope (±1 dB/oct) further out; sine-sweep
-measurements through `process` match `magnitudeDb` within 0.05 dB at 20
-frequencies at every rate of the sweep; `natural` matches the analog
-prototype per the spec; `linear` is linear phase (symmetric impulse
-response) with the reported latency; a mid band leaves S = 0 for L = R input;
-a side band leaves L = R input unchanged.
-
-GUI: the response display over most of the window (log 20 Hz–20 kHz, ±24 dB
-with a ±12 dB zoom), the summed curve and a faint curve per enabled band over
-a live input spectrum (telemetry), numbered band handles (drag = freq/gain,
-wheel = Q, double-click = enable, right-click = type menu), a strip of eight
-band columns below (enabled, type, freq, gain, Q, slope for passes, channel),
-phase mode, auto gain and output. `gui_preview` scenarios: `flat`, `mix`
-(high-pass, a bell cut, a high shelf, a side band).
+- **Audio.** `update()` reads the parameters into eight `Setting`s and, when
+  auto gain is on, works out its offset; `control()` runs every 16 samples
+  (a counter kept across blocks) and takes structure changes once a band
+  has faded out, glides frequency, gain and Q, follows dynamic bands and
+  redesigns a band only when its values moved; `process()` runs each band
+  that is on or fading, in index order, placing it on both channels, the
+  mid or side (encoded around that band only) or one channel, then listen,
+  then the output gain. The first `update()` after `prepare()` (or a reset)
+  snaps every glide, so a render after `reset()` matches a fresh instance.
+  Non-finite input is zeroed before any band.
+- **Editor.** Its own members only: the band settings read from the
+  parameters each repaint, each band's sections designed once per repaint,
+  the transform's tables and buffers, and the pointer's state. The audio
+  code shares the output ring (`SharedArray<float, 32768>`), its head and a
+  running sample count (the analyser's clock), peaks, each band's live gain
+  and detector level, and the auto-gain offset. Edits go through
+  `change()`/`act()`, which select a band's parameter by index.
+- **Tests.** `plugin.contour.response` measures bells, cuts and shelves
+  through the built plugin; `plugin.contour.catalog` keeps `Catalog.cpp` in
+  step; the template's suite, reset, unload, semantic conformance and
+  clap-validator checks run as for every stock plugin. During development,
+  `dsp.test` with `automation` (no excess step on type, channel or enable
+  switches) and `dsp.preview` with `pointer` steps covered clicks and every
+  gesture.
 
 ## 3. Compressor / limiter — Ballast [`comp`] (`stock-effects.md` §2)
 

@@ -98,7 +98,7 @@ envelope; render and `compare` to hear what it did.
 
 Use [Plumb, the utility](utility.md) for gain staging, channel checks and bass mono. Render and compare after width or polarity changes.
 For track compression, external-key ducking and master peak limiting, see [the compressor/limiter guide](comp.md).
-Use [Facet, the stock EQ](eq.md) for measured rumble, masking and harshness cuts.
+Use [Contour, the stock EQ](eq.md) for measured rumble, masking and harshness cuts, de-essing and dynamic or mid/side bands.
 Use [the gate / expander guide](gate.md) to reduce between-hit spill or steady room noise with a filtered key, hysteresis and hold.
 Use [Kiln, the saturation](drive.md) for drive, asymmetry and wavefolding with reference level compensation.
 For onset punch, softened attacks and shorter or longer decays, see [Flint, the transient shaper](transient.md).

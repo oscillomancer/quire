@@ -64,7 +64,7 @@ for free, and guarantees that anything a human can do an agent can do.
 | hosting | `host/clap-host` | CLAP and VST3 hosting, the semantic-params extension, the bridge process (`bridge/`) | ADR-0013, ADR-0017, `specs/semantic-params-extension.md` |
 | sandbox | `host/sandbox`, `host/analysis-commands` | headless plugin sandbox (library, CLI, MCP); analysis commands shared with the engine | `specs/sandbox.md` |
 | engine | `host/engine` | session model (`model/`), commands, render plans, real-time engine, JACK backend, renders | `specs/session-model.md`, `specs/engine.md` |
-| plugins | `plugins/*` | template-derived stock plugins + shared extension code | ADR-0011 |
+| plugins | `plugins/*` | stock plugins (template-derived, or DSP scripts in `plugins/stock`) + shared extension code and the script suite | ADR-0011, ADR-0047, ADR-0032 |
 | app | `daw/gui` | the GUI application | ADR-0005, `specs/gui.md` |
 | agents | `skill/` | bundled LLM skill: generated reference + guides | — |
 
@@ -275,6 +275,11 @@ interface; the semantic-params extension for hosts that understand it,
 standard CLAP params/state for those that don't; seeded randomness;
 real-time and denormal safe; a GUI that reflects the patch structure; a
 compact prose `describe()` of the current patch.
+
+Newer stock plugins are DSP scripts (ADR-0047): one script each in
+`plugins/stock/<name>/`, compiled as C++ into a plugin of its own from the
+same template and the script suite, with the same patch, semantic and
+editor contracts.
 
 Value domains (ADR-0010): physical units on the bus and in patches;
 normalized curve positions as the CLAP value for generic hosts; DSP values

@@ -9,13 +9,13 @@ mode=(-i)
 mapfile -t files < <(git ls-files --cached --others --exclude-standard -- \
   'libs/*' 'host/*' 'plugins/*' 'daw/*' 'mcp/*' 'tools/*' 'tests/*' \
   | grep -E '\.(c|cc|cpp|h|hpp)$' | grep -v '/third_party/' \
-  | grep -Ev '^plugins/(analyzer|comp|delay|drive|eq|gate|orrery|probe-synth|transient|utility)/test/vst3_unload_probe\.cpp$' \
+  | grep -Ev '^plugins/(analyzer|comp|delay|drive|gate|orrery|probe-synth|transient|utility)/test/vst3_unload_probe\.cpp$' \
   | grep -v '^plugins/probe-synth/' \
   | grep -v '^plugins/template/' \
   | grep -v '^plugins/utility/' \
   | grep -Ev '^plugins/delay/(plugin/gui/(Gui|Widgets|Window|Telemetry|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/delay_entry\.(h|cpp)|test/(host_(smoke\.cpp|contract\.h)|vst3_unload_probe\.cpp)|tools/((clap|linux)_host_probe\.cpp|wav\.h))$' \
   | grep -Ev '^plugins/analyzer/(plugin/gui/(Gui|Widgets|Window|Telemetry|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/analyzer_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/((clap|linux)_host_probe\.cpp|wav\.h))$' \
-  | grep -v '^plugins/eq/' \
+  | grep -Ev '^plugins/stock/[^/]+/Catalog\.cpp$' \
   | grep -Ev '^plugins/gate/(plugin/gui/(Gui|Widgets|Window|Telemetry|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/gate_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/((clap|linux)_host_probe\.cpp|wav\.h))$' \
   | grep -v '^plugins/drive/' \
   | grep -v '^plugins/reverb/' \
@@ -62,18 +62,6 @@ files+=(
   plugins/utility/test/semantic_rt.cpp
   plugins/utility/test/editor_input.cpp
   plugins/utility/tools/gui_preview.cpp
-  plugins/eq/engine/include/eq/params.h
-  plugins/eq/engine/include/eq/processor.h
-  plugins/eq/engine/src/{params,processor,linear}.cpp
-  plugins/eq/engine/src/{design,linear,matched}.h
-  plugins/eq/engine/tests/test_eq.cpp
-  plugins/eq/engine/bench/{accuracy.h,eq_bench.cpp}
-  plugins/eq/plugin/src/EqParams.h
-  plugins/eq/plugin/src/eq_clap.cpp
-  plugins/eq/plugin/gui/Editor.{h,cpp}
-  plugins/eq/plugin/gui/Telemetry.h
-  plugins/eq/test/{test_core,editor_input,semantic_rt}.cpp
-  plugins/eq/tools/{gui_preview,clap_host_probe}.cpp
   plugins/probe-synth/dsp/include/probesynth/Processor.h
   plugins/probe-synth/plugin/src/ProbeSynthParams.h
   plugins/probe-synth/plugin/src/probesynth_clap.cpp

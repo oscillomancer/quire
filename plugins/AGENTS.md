@@ -5,7 +5,13 @@ specific to `plugins/`.
 
 ## Layout
 
-Each plugin directory (`eq`, `comp`, `gate`, `transient`, `drive`, `delay`,
+Stock plugins written as DSP scripts live in `stock/` (ADR-0047): one
+folder each, holding the script and the product folder a source export
+makes from it, built from `template/` with `suite/`. `stock/README.md` says
+how to change one. Contour (`stock/contour`) is the first; the rest of this
+section is about the older, hand-written plugins.
+
+Each plugin directory (`comp`, `gate`, `transient`, `drive`, `delay`,
 `reverb`, `utility`, `analyzer`, `orrery`, and the internal test instrument
 `probe-synth`) is an instance of Supple Audio's plugin template (ADR-0011):
 

@@ -3,7 +3,8 @@
 **Status:** Implemented. Each plugin's section records its decisions;
 `docs/specs/effects.md` holds the implementation notes.
 **Common rules:** ADR-0010 (semantic params, value domains), ADR-0011
-(template instantiation), `docs/specs/core-params.md`, `core-patch.md`,
+(template instantiation), ADR-0047 (stock plugins written as DSP scripts),
+`docs/specs/core-params.md`, `core-patch.md`,
 `semantic-params-extension.md`.
 
 ## 0. Conventions shared by every stock effect
@@ -11,7 +12,8 @@
 - **Enum keys** start with a lowercase letter (core-params validation):
   numeric choices take a unit prefix — `db12`, `ms5`, `x4` — while their
   display labels keep the numbers ("12 dB/oct", "5 ms", "4x"). Tables below
-  that still show digit-led keys mean these prefixed forms.
+  that still show digit-led keys mean these prefixed forms. A scripted stock
+  plugin names them with `.keys({...})` (ADR-0047).
 - **Patch form:** flat (core-patch `FlatPatchType`): `"params": {"<key>":
   value}` with dotted keys (`band2.freq`). One form for every effect, so an
   agent learns it once. Keys and units are the parameter table.
@@ -36,6 +38,10 @@
   registered as `plugin.<id>.reset` for every stock plugin and Orrery) renders
   state S1, then S2 after `reset()`, and requires that S2 render to be
   bit-identical to a fresh instance holding S2 — at block 256 and again at 64.
+  Scripted stock plugins (ADR-0047) also run it with `--stepped`
+  (`plugin.<name>.reset-stepped`): every switch and choice moved off its
+  default in both states, so a plugin whose default is a passthrough still
+  shows its processing state.
 - **Readonly telemetry parameters** (gain reduction, levels) exist for
   generic hosts; the GUI uses the telemetry ring.
 - **Tests beyond the template's:** frequency/phase response against analytic
@@ -43,130 +49,106 @@
   against spec, sidechain behaviour, parameter-sweep automation stress, and
   golden renders (tolerance-aware null) for every factory preset.
 
-## 1. EQ — "Facet" [`eq`]
+## 1. EQ — "Contour" [`contour`]
 
-Parametric EQ with 8 bands, per-band stereo placement, analysis-driven
-workflow in mind ("cut 250 Hz by 3 dB, Q 1.2" is one merge patch).
+An eight-band equaliser with zero latency, written as a DSP script
+(ADR-0047: `plugins/stock/contour/script/contour.cpp`). Built for the
+analysis-driven workflow ("cut 250 Hz by 3 dB, Q 1.2" is one merge patch)
+and for hands: dynamic bands, mid/side placement, band listening, gain
+scaling, and a spectrum analyser that favours bass resolution.
 
 | key | type | range | curve | default |
 |---|---|---|---|---|
-| `bandN.enabled` (N = 1..8) | bool | | | band1–4 on, 5–8 off |
-| `bandN.type` | enum | `bell`, `low_shelf`, `high_shelf`, `high_pass`, `low_pass`, `notch`, `band_pass`, `tilt` | | 1 `high_pass`, 2 `bell`, 3 `bell`, 4 `high_shelf`, 5–8 `bell` |
-| `bandN.freq` | Hz | 10..30000 (clamped < 0.49 fs) | log | 30, 200, 1000, 8000, 500, 2000, 4000, 12000 |
-| `bandN.gain` | dB | −30..+30 | linear | 0 |
-| `bandN.q` | none | 0.1..24 | log | 0.71 |
-| `bandN.slope` | enum | `db6`, `db12`, `db18`, `db24`, `db36`, `db48`, `db72`, `db96` (dB/oct; HP/LP only) | | `db24` |
-| `bandN.channel` | enum | `stereo`, `left`, `right`, `mid`, `side` | | `stereo` |
-| `phase` | enum | `minimum`, `natural` (analog-matched magnitude near Nyquist), `linear` (latency; stepped) | | `natural` |
-| `auto_gain` | bool | output level compensation for the static curve | | false |
-| `output` | dB | −24..+24 | linear | 0 |
+| `bandN.enabled` (N = 1..8) | bool | | | off (a fresh instance is flat) |
+| `bandN.type` | enum | `bell`, `low_shelf`, `high_shelf`, `low_cut`, `high_cut`, `notch`, `tilt` | | 1 `low_cut`, 2 `low_shelf`, 3–6 `bell`, 7 `high_shelf`, 8 `high_cut` |
+| `bandN.freq` | Hz | 20..20000 (designed at most 0.45 fs) | log | 30, 100, 250, 800, 2500, 6000, 10000, 18000 |
+| `bandN.gain` | dB | −30..+30 (bells, shelves, tilt) | linear | 0 |
+| `bandN.q` | none | 0.1..30 (shelves use 0.25..2, tilt 0.25..1) | log | 0.71 (shelves, cuts), 1 (bells) |
+| `bandN.slope` | enum | `db6`, `db12`, `db18`, `db24`, `db36`, `db48` (cuts) | | `db24` |
+| `bandN.channel` | enum | `stereo`, `mid`, `side`, `left`, `right` | | `stereo` |
+| `bandN.dynamic` | bool | bells and shelves only | | off |
+| `bandN.threshold` | dB | −60..0 | linear | −30 |
+| `scale` | % | 0..200: every bell, shelf and tilt gain times this | linear | 100 |
+| `auto_gain` | bool | output offset by the static curve's average effect | | off |
+| `output` | dB | −24..+24, smoothed 20 ms | linear | 0 |
+| `listen` | int | 0..8: plays only band N's region; not automatable | | 0 |
 
-DSP: `natural` uses filter-specific matched second-order sections at the host
-sample rate; `minimum` uses bilinear SVFs with prewarping; `linear` uses a
-partitioned FIR from the minimum-phase design (fixed latency 2048 samples at
-48 kHz, scaled with rate). The natural magnitude target is ≤0.3 dB deviation
-from the analog prototype through 20 kHz at 44.1/48 kHz for bells with Q ≤4
-and shelves with Q ≤1, f0 ≤10 kHz, over the full ±30 dB gain range. Resonant
-shelves and near-Nyquist bands have the measured limits below, rather than the
-same accuracy guarantee. Cascaded HP/LP slopes use Butterworth sections (odd
-orders include a first-order section). Float changes have 20 ms smoothing;
-matched coefficients update on a fixed 16-sample grid only while moving.
-GUI centrepiece: the summed response over a live spectrum (core-analysis
-LTAS of the input, pre/post).
+DSP: every section is a second-order (or first-order) filter in transposed
+direct form II, in double precision. Poles sit where the analog prototype's
+are (impulse invariance); zeros are fitted to the prototype's magnitude,
+exact at DC and at the band's frequency (a shelf's zero frequency below
+0.6·Nyquist), with the Nyquist term chosen by least squares of the relative
+power error at 16 log-spaced frequencies from a quarter of that frequency
+up. Bells use the RBJ analog prototype (boost and cut mirror each other); a
+cut, and a shelf designed past its corner, is the opposite design inverted,
+so poles always lie below the corner. Cuts are matched Butterworth
+cascades (odd orders end with a matched first-order section); `q` scales
+the most resonant section (0.71 is Butterworth). Notch: poles from `q`,
+zeros on the unit circle, unity gain at DC. Tilt: low shelf −gain/2 and
+high shelf +gain/2 at `freq`. A band's section count is fixed by its type
+and slope, and a gain type at 0 dB is sections that pass the input exactly.
+Reported latency is zero. Measured against the analog prototypes through
+20 kHz at 44.1 and 48 kHz (25 centres 10 Hz–10 kHz, gains in 3 dB steps,
+2049 log-spaced probes): bells with Q 0.3..4 within 0.35 dB at ±12 dB and
+0.54 dB at ±30 dB; shelves (Q 0.25..1) within 0.19 dB at ±12 dB and 0.42 dB
+at ±30 dB. Wide bells above 5 kHz are the worst case; resonant shelves are
+limited to Q 2, where the fit stays within 0.95 dB at ±30 dB.
 
-### EQ implementation decisions (2026-09-30)
+Every 16 samples, on a grid kept across host blocks, frequencies glide in
+log frequency, gains in dB and Q in log over 25 ms, and a band redesigns
+only while something moves. Turning a band on or off, or changing its type,
+slope or channel, fades the band out over 12 ms, switches and clears its
+state, and fades it back in.
 
-- Approved correction: slope enum keys are `db6`…`db96`, with dB/oct display
-  labels. Numeric-only enum keys violate core-params validation.
+Dynamic bands follow the level of their own region at their input (a
+band-pass at the band's frequency and Q for bells, the low- or high-pass
+side of a shelf), detected per channel as the band is placed (both stereo
+channels linked), with a 3 ms attack and a 90 ms release (both longer
+below 100 and 200 Hz). Above the threshold the band moves toward its gain
+by three quarters of the overshoot, with a 6 dB soft knee, never past its
+gain; below it the band rests at 0 dB.
 
-- The authoritative 0.49·fs frequency clamp here takes precedence over the
-  generic implementation plan's 0.45·fs. Values in patches remain unclamped.
-- Natural mode uses original matched sections derived from the mathematical
-  method in [Vicanek (2016)](https://vicanek.de/articles/BiquadFits.pdf), with
-  no oversampling or half-band filters. Main boost poles use impulse invariance.
-  Bell numerators match DC, centre magnitude and the stationary centre. Shelf
-  numerators match DC, Nyquist and the midpoint; Q >1 uses the analog bump.
-  An unrealizable resonant shelf numerator, or one that misses the opposite
-  extremum by >0.5 dB, falls back to damped analog zeros; out-of-band zeros
-  are omitted rather than aliased into the audible band. A second, stable
-  minimum-phase SOS fits the smooth magnitude residual using 24 fixed samples
-  in the φ basis, DC held exact and two numerator terms solved by weighted
-  least squares. Its fixed poles are −0.4; corrections with near-unit zeros
-  are rejected. Cuts are reciprocal boost designs and high shelves use the
-  low-shelf complement. Passes use matched Butterworth sections; tilt uses
-  matched first-order shelves. Double-state transposed direct-form-II runs
-  every matched section. Frequency-dependent IIR phase remains intrinsic to
-  the filter, without resampling group delay. Reported latency is zero.
-  Zero-gain gain-type bands still bypass exactly.
-- Coefficient fits use extended intermediates for low-frequency cancellation,
-  then store double coefficients. Matched coefficients update every 16 samples
-  while a smoother is moving (including its final grid update), with the grid
-  retained across host blocks. Auto gain and response sweeps reuse already
-  designed sections; unchanged curves do not trigger repeated auto-gain work.
-- Accuracy was measured using `eq-bench --accuracy`, 25 centre frequencies
-  from 10 Hz through 10 kHz, gains −30…+30 dB in 3 dB steps, Q 0.1…4 for
-  bells / 0.1…1 for normal shelves. Each case probes 2049 log-spaced and 2049
-  linearly spaced frequencies from 20 Hz to 20 kHz, plus centre/resonance probes.
-  The engine tests require the same normal-domain ≤0.3 dB bound and independently
-  compare processed sinusoids with the digital response. Worst measured errors:
+Auto gain offsets the output by the negative of the curve's mean power gain
+across 30 Hz–16 kHz (40 log-spaced points, weighted toward the midrange by
+two second-order roll-offs at 90 Hz and 7 kHz), with dynamic bands at rest,
+within ±18 dB, gliding over 150 ms. It is a static estimate, not a loudness
+match.
 
-  | Domain | 44.1 kHz | 48 kHz |
-  |---|---:|---:|
-  | Bell, normal domain | 0.173604 dB | 0.059654 dB |
-  | Either shelf, normal domain | 0.254058 dB | 0.223204 dB |
-  | Resonant shelves, f0 ≤10 kHz, Q 1.2…24 | 17.219869 dB | 0.840856 dB |
-  | Bell near Nyquist, Q 4…24 | 1.500638 dB | 1.291749 dB |
-  | Resonant shelves near Nyquist, Q 1.2…24 | 21.030647 dB | 16.180889 dB |
+Listen plays the band's region: a band-pass at its frequency and Q for
+bells, notches and tilts, the low-pass side for low shelves and low cuts
+(what a low cut removes), the high-pass side for high shelves and high cuts,
+faded in and out over 12 ms.
 
-  The extra-domain sample set uses ±6/12/30 dB, centre frequencies 1/4/8/10 kHz
-  for resonant shelves; near Nyquist uses 10/16 kHz and 0.45/0.49·fs. The large
-  resonant-shelf errors occur at Q=24, where a pole/zero extremum is at or beyond
-  the available bandwidth. They are explicit approximation limits, not part of
-  the normal-domain guarantee. Complete worst-case coordinates are printed by
-  the measurement executable and saved in the worker verification log.
-- CPU budget: `eq-bench 120`, Clang `-O2`, 48 kHz, 512-frame stereo blocks,
-  fixed non-flat HP/bell/high-shelf and eight-band mixed-filter patches,
-  median of five CPU-time trials per variant (percent of one core):
+Editor (1000 × 624, the script's own drawing): the response graph over
+most of the window, log 20 Hz–20 kHz with a ±6/12/24/30 dB scale; the summed
+curve (every band that is on, whatever channel it works on, plus the
+output gain) over the output's spectrum; numbered nodes for the eight bands
+(switched-off bands faint, still draggable); the selected band shaded; a
+dynamic band drawn at full reach with a ring where its gain is now; a
+channel badge under mid, side, left and right bands; input and output peak
+meters; a panel for the selected band (switch, listen, type, channel,
+frequency, gain, Q, slope, dynamics with a live detector meter and
+threshold) and one for the output (gain scale, output, auto gain, peak).
+Drag a node for frequency and gain (Q for cuts and notches); wheel for Q
+(Alt: slope for cuts); Shift for fine moves; Ctrl snaps to semitones (A4 =
+440 Hz); Alt-drag listens to the band; double-click a node to switch it off,
+empty graph to add a band there (a cut below 32 Hz and above 15 kHz, a bell
+between). Hovering reads out frequency, note and cents.
 
-  | Bands | Auto gain | Minimum | Natural | Natural/minimum |
-  |---:|---|---:|---:|---:|
-  | 4 | off | 0.3103% | 0.2440% | 0.787× |
-  | 8 | off | 0.6081% | 0.4259% | 0.700× |
-  | 4 | on | 0.3431% | 0.3138% | 0.915× |
-  | 8 | on | 0.6675% | 0.4987% | 0.747× |
+The analyser runs in the editor, never on the audio thread: the audio code
+keeps the newest 32768 samples of the output (mono) in a shared ring; at
+most every 40 ms of new audio the editor transforms them (Hann window,
+1.46 Hz bins at 48 kHz), smooths each of 420 log-spaced points over a
+sixteenth of an octave where bins are dense and interpolates in dB (cubic)
+where they are sparse, averages power over about half a second, rounds peaks
+with a five-point binomial kernel across neighbouring points, tilts 4.5 dB
+per octave about 1 kHz, and eases the drawn line toward that (rising with a
+50 ms and falling with a 120 ms time constant). It is drawn as one smooth
+line (Catmull-Rom through the points), unfilled, from −96 dB at the floor to
+0 dB at the top; silence lies along the floor.
 
-  This meets the ≤2× minimum budget. It is an offline benchmark executable,
-  not a timing test or an audio-device test.
-- All three phase choices are nonautomatable and require reactivation; latency
-  remains fixed while active. Linear latency is round(2048·fs/48000); its
-  128-sample convolution partition delay is included in that number. Symmetric
-  Lanczos-windowed FIR kernels have 2·(latency−128)+1 taps. Narrow low-frequency
-  responses have finite-length approximation limits. Linear kernel compilation
-  is asynchronous and coalesces updates, followed by a 20 ms interpolation on
-  the fixed partition grid; exact-offset automation applies to minimum/natural.
-- Auto gain samples the summed affected-channel curve at 64 equally spaced
-  log-frequency midpoints from 20 Hz to min(20 kHz,0.49·fs). It is a static
-  pink-weighted estimate, bounded to ±24 dB compensation so deep stopbands
-  cannot create unbounded gain, including for selective channel placement, not an
-  input-dependent loudness match. Updates use a fixed 128-sample grid and a
-  20 ms output ramp. The linear summed curve evaluates the actual windowed FIR;
-  faint per-band curves show their design targets.
-- Type/slope/channel changes fade out for 5 ms, clear filter state, then fade in
-  for 10 ms; enables/disables use 10 ms ramps. Floats use 20 ms ramps in log
-  frequency, dB gain and log Q.
-- Shelf settling and pass −3 dB checks refer to the default Q (0.71); resonant
-  user Q intentionally changes the response. Tilt uses symmetric first-order
-  shelves around its frequency.
-- Full-range stress uses low-level noise: simultaneous +30 dB boosts across
-  eight bands legitimately exceed +40 dBFS on full-scale input. The EQ does not
-  impose an undocumented limiter. Finite output and the +40 dBFS test bound are
-  checked with −480 dBFS excitation throughout the full parameter domain in
-  each phase mode, followed by two seconds of silence. Linear stress coalesces
-  kernel publication every 4096 samples; phase itself is fixed per activation.
-- The editor's pre/post spectrum uses core-analysis LTAS on 4096-sample batches
-  copied as separate left/right channels through its telemetry ring; analysis runs on the GUI thread, never RT.
-  Factory defaults include the high-pass, so the bit-exact null fixture disables
-  it (or makes every band a zero-gain gain-type filter).
+Factory patches: Flat, Clean Up, Vocal Polish (auto gain), De-Ess, Air and
+Weight (auto gain), Mono Bass (side cut), Telephone.
 
 ## 2. Compressor / limiter — "Ballast" [`comp`]
 

@@ -148,7 +148,12 @@ that scales audio directly (levels, mix) so that moving it does not click.
 | `void editor(Editor& e)`, `void draw(Canvas& g)`, `void pointer(const Pointer& p)` | The editor's (optional) | Its controls, its drawing, and what the pointer does to the drawing: see The editor |
 
 There is no `reset()` to write: the runtime returns every member to what
-`prepare()` left, by itself. The script never calls a hook.
+`prepare()` left, by itself. The script never calls a hook. Values that
+glide or fade of the script's own should jump to where they are going until
+the first block plays (a `bool unplayed = true;` set in `prepare()` and
+cleared at the top of `process()`): a host sets a fresh instance's values
+after `update()` has already run once, and a render must depend only on the
+values it is given, as `.smoothed()` parameters do by themselves.
 
 `Block`: `io.channels`, `io.frames` (a block may be a single frame),
 `io[c][i]` (read the input, write the output, in place), `io.transport`

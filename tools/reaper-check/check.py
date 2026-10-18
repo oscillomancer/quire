@@ -50,7 +50,7 @@ CASES = {
                                  normalized(0, -60, 12), normalized(-12, -60, 12), "gain"),
     "com.suppleaudio.utility": Case("Plumb", False, "Gain",
                                   normalized(0, -120, 24), normalized(-12, -120, 24), "gain", True),
-    "com.suppleaudio.eq": Case("Facet", False, "Band 3 Gain", .5, .2),
+    "com.suppleaudio.contour": Case("Contour", False, "Output", .5, .25, "gain", True),
     "com.suppleaudio.comp": Case("Ballast", False, "Threshold", 1, .4),
     "com.suppleaudio.analyzer": Case("Analyzer", False, "Hold", 0, 1, "transparent", True, "Gauge"),
     "com.suppleaudio.gate": Case("Gate", False, "Threshold", 0, .925, display="Sluice"),

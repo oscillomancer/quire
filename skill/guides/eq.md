@@ -1,68 +1,76 @@
-# Facet: parametric EQ
+# Contour: equaliser
 
-Use `com.suppleaudio.eq` for rumble removal, tonal shaping and cuts around regions
-reported by `analyze.masking`. Patches use `supple.eq-patch/1.0`, with physical
-values under `params`. A merge changes only the specified keys.
+Use `com.suppleaudio.contour` for rumble removal, tonal shaping, cuts around
+regions reported by `analyze.masking`, de-essing and taming resonances that
+come and go (dynamic bands), and mid/side work. Patches use
+`supple.contour-patch/1.0`, with physical values under `params`; a merge
+changes only the keys it names. A fresh instance is flat: every band is off.
 
-Each `bandN` below means all eight bands, N = 1…8. IDs are permanent; address
-keys rather than guessing host-normalized values.
+Each `bandN` below means all eight bands, N = 1…8. Bands run in index order.
 
 | Key | Unit and range | Default |
 |---|---|---|
-| `bandN.enabled` | bool | bands 1–4 on; 5–8 off |
-| `bandN.type` | bell, low_shelf, high_shelf, high_pass, low_pass, notch, band_pass, tilt | high_pass, bell, bell, high_shelf; then bell |
-| `bandN.freq` | Hz, 10…30000, logarithmic | 30, 200, 1000, 8000, 500, 2000, 4000, 12000 |
-| `bandN.gain` | dB, −30…+30 | 0 |
-| `bandN.q` | unitless, 0.1…24, logarithmic | 0.71 |
-| `bandN.slope` | db6, db12, db18, db24, db36, db48, db72, db96 (dB/oct labels) | "db24" |
-| `bandN.channel` | stereo, left, right, mid, side | stereo |
-| `phase` | minimum, natural, linear; nonautomatable, requires restart | natural |
-| `auto_gain` | bool | false |
+| `bandN.enabled` | bool | false |
+| `bandN.type` | bell, low_shelf, high_shelf, low_cut, high_cut, notch, tilt | 1 low_cut, 2 low_shelf, 3–6 bell, 7 high_shelf, 8 high_cut |
+| `bandN.freq` | Hz, 20…20000, logarithmic | 30, 100, 250, 800, 2500, 6000, 10000, 18000 |
+| `bandN.gain` | dB, −30…+30 (bells, shelves, tilt) | 0 |
+| `bandN.q` | 0.1…30, logarithmic: width for bells and notches, resonance for shelves (0.25…2) and cuts | 0.71, bells 1 |
+| `bandN.slope` | db6, db12, db18, db24, db36, db48 (cuts) | db24 |
+| `bandN.channel` | stereo, mid, side, left, right | stereo |
+| `bandN.dynamic` | bool: a bell or shelf acts only while its region is loud | false |
+| `bandN.threshold` | dB, −60…0: the region's level where a dynamic band starts | −30 |
+| `scale` | %, 0…200: multiplies every bell, shelf and tilt gain | 100 |
+| `auto_gain` | bool: offsets the output by the curve's average effect | false |
 | `output` | dB, −24…+24 | 0 |
+| `listen` | 0…8: plays only band N's region (0 off); for people, not mixes | 0 |
 
-Bands are serial in index order. Gain applies to bells, shelves and tilt; Q is
-width/resonance, with the user Q used by 12 dB/oct passes and fixed Butterworth
-Qs for higher slopes. Tilt applies −gain/2 to lows and +gain/2 to highs. A side
-band leaves the mono sum untouched; a mid band changes only the mono component.
+Turn a band on with its settings in one merge. Units may be strings
+(`"80 Hz"`, `"-3 dB"`); a choice may be given by key or label (`"db24"` or
+`"24 dB/oct"`).
 
 Remove rumble:
 
 ```json
-{"params":{"band1.enabled":true,"band1.type":"high_pass","band1.freq":"80 Hz","band1.slope":"db24"}}
+{"params":{"band1.enabled":true,"band1.type":"low_cut","band1.freq":"80 Hz","band1.slope":"db24"}}
 ```
 
 Carve a masking region: after measuring a conflict around 250 Hz, cut the less
 important source, then render and compare again:
 
 ```json
-{"params":{"band2.enabled":true,"band2.type":"bell","band2.freq":250,"band2.gain":-3,"band2.q":1.2}}
+{"params":{"band3.enabled":true,"band3.type":"bell","band3.freq":250,"band3.gain":-3,"band3.q":1.2}}
 ```
 
-De-harsh the centre while preserving the sides:
+De-ess, or tame a resonance that comes and goes: a dynamic bell rests at 0 dB
+and moves toward its gain only while its region is above the threshold (by
+three quarters of the overshoot, never past its gain). Set the threshold a
+few dB under the region's level on the loud moments:
 
 ```json
-{"params":{"band3.enabled":true,"band3.type":"bell","band3.freq":3500,"band3.gain":-2.5,"band3.q":1.4,"band3.channel":"mid"}}
+{"params":{"band6.enabled":true,"band6.type":"bell","band6.freq":6500,"band6.gain":-8,"band6.q":2,"band6.dynamic":true,"band6.threshold":-34}}
 ```
 
-Minimum phase is zero reported latency and uses a bilinear design. Natural uses
-matched sections without oversampling, with ≤0.3 dB measured analog-magnitude
-error through 20 kHz at 44.1/48 kHz for f0 ≤10 kHz, bells Q ≤4 and shelves Q ≤1.
-Highly resonant shelves and near-Nyquist bands have larger approximation errors
-(up to about 21 dB in the measured extreme-shelf set); inspect their actual
-response curve. Natural also reports zero latency; its IIR phase is intrinsic.
-Disabled bands, and bell, shelf and tilt bands at zero gain, are exact
-bypasses; high-pass, low-pass, notch and band-pass bands filter at any gain
-(their gain is unused). The factory patch has a 30 Hz
-high-pass, so it intentionally removes subsonic audio; disable band1 for a flat
-null comparison. Internal frequency clamps to 0.49 × the sample rate, while the
-patch retains the requested Hz value.
+Mono the low end and open the top of the sides, leaving the centre alone:
 
-Linear phase reports round(2048 × sampleRate / 48000) samples. Its symmetric,
-finite FIR can ring before transients and cannot represent arbitrarily narrow
-low-frequency filters exactly. Linear-band changes compile asynchronously and
-coalesce, then crossfade over 20 ms; use minimum/natural for dense sample-accurate
-automation. Phase changes require host reactivation. Auto gain compensates the
-mean static curve on a log-frequency axis, capped at ±24 dB compensation; it is not a loudness measurement and
-is only an estimate for selective channel placement. The live LTAS is displayed
-while the editor is open; it is not an audio-path loudness meter. Gains accumulate:
-this EQ has no ceiling limiter. Check true peak after large boosts.
+```json
+{"params":{"band1.enabled":true,"band1.type":"low_cut","band1.freq":140,"band1.slope":"db12","band1.channel":"side",
+           "band7.enabled":true,"band7.type":"high_shelf","band7.freq":9000,"band7.gain":1.5,"band7.channel":"side"}}
+```
+
+Make a whole curve subtler or stronger without touching its bands:
+`{"params":{"scale":50}}` halves every gain (cuts and notches are unchanged).
+
+Factory patches (`fx_patch_list`, `fx_patch_set`): Flat, Clean Up, Vocal
+Polish, De-Ess, Air and Weight, Mono Bass, Telephone.
+
+Limits. Latency is zero and the phase is the analog prototypes' (minimum
+phase); there is no linear-phase mode. Magnitudes follow the analog
+prototypes to 20 kHz within 0.35 dB for bells and 0.19 dB for shelves at
+±12 dB (wider at ±30 dB; wide bells above 5 kHz are the worst case). Shelf
+resonance stops at Q 2, tilt at 1. A band's frequency is designed at most at
+0.45 × the sample rate; the patch keeps the value asked for. Auto gain is a
+static estimate over a typical mix's spectrum, not a loudness match: measure
+loudness after large changes. Gains add up and there is no ceiling: check
+true peak after big boosts. A side band does nothing to a mono track. The
+analyser (in the editor) shows the output only, as a smoothed long-term
+spectrum; it is not a meter on the audio path.

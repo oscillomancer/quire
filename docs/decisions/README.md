@@ -62,3 +62,4 @@ current state.
 | [0044](0044-windows-utf8-code-page.md) | Windows processes use the UTF-8 code page | Accepted |
 | [0045](0045-master-playrate.md) | Master playrate in device-time graphs | Accepted |
 | [0046](0046-live-scalar-playrate.md) | Live scalar playrate controls | Accepted |
+| [0047](0047-stock-plugins-as-scripts.md) | Stock plugins written as DSP scripts | Accepted |

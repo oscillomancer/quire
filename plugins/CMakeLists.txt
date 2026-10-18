@@ -3,7 +3,6 @@ add_subdirectory(suite)
 add_subdirectory(gate/engine)
 add_subdirectory(delay/engine)
 add_subdirectory(analyzer/engine)
-add_subdirectory(eq/engine)
 add_subdirectory(orrery/engine)
 add_subdirectory(utility/engine)
 add_subdirectory(comp/engine)
@@ -213,7 +212,6 @@ if(SUPPLE_BUILD_PLUGINS)
   supple_add_plugin(analyzer ANALYZER)
   supple_add_plugin(delay DELAY)
   supple_add_plugin(comp COMP)
-  supple_add_plugin(eq EQ)
   supple_add_plugin(drive DRIVE)
   supple_add_plugin(transient TRANSIENT)
   supple_add_plugin(reverb REVERB)
@@ -288,4 +286,47 @@ if(SUPPLE_BUILD_PLUGINS)
     # Nested builds use three jobs too; do not overlap them with other tests.
     set_tests_properties(plugin.export.source PROPERTIES LABELS slow TIMEOUT 3600 RUN_SERIAL TRUE)
   endif()
+
+  # The stock plugins written as DSP scripts (plugins/stock/README.md): each
+  # folder is a source export's product folder holding its script, built
+  # from the template like the player, with the checks every stock plugin
+  # has. supple_add_stock_script(<folder> <artifact> <CLAP id>).
+  function(supple_add_stock_script name artifact id)
+    supple_add_template_product(${name} stock/${name} "${artifact}")
+    if(SUPPLE_BUILD_TESTS)
+      set(clap "${CMAKE_BINARY_DIR}/plugins/clap/${artifact}.clap")
+      add_test(NAME plugin.${name}.reset COMMAND clap-reset-check "${clap}")
+      # Again with its switches and choices moved too: a script whose default
+      # state is a passthrough (an EQ with every band off) shows its state there.
+      add_test(NAME plugin.${name}.reset-stepped COMMAND clap-reset-check "${clap}" ${id} --stepped)
+      set_tests_properties(plugin.${name}.reset plugin.${name}.reset-stepped PROPERTIES
+        LABELS "rt;plugin-reset" TIMEOUT 180)
+      add_test(NAME plugin.${name}.semantic COMMAND semantic-conformance "${clap}" ${id})
+      # Catalog.cpp, the folder's one generated file, still matches the script.
+      add_test(NAME plugin.${name}.catalog
+        COMMAND ${CMAKE_COMMAND} -DSANDBOX=$<TARGET_FILE:${PRODUCT_SLUG}-sandbox> -DNAME=${name}
+                -DDIR=${CMAKE_CURRENT_SOURCE_DIR}/stock/${name}
+                -DWORK=${CMAKE_BINARY_DIR}/plugins/stock-test/${name}-catalog
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/stock/catalog.cmake)
+      # The plugin's own measurements, where it has them.
+      if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/stock/${name}/response.cmake")
+        add_test(NAME plugin.${name}.response
+          COMMAND ${CMAKE_COMMAND} -DSANDBOX=$<TARGET_FILE:${PRODUCT_SLUG}-sandbox> -DPLUGIN=${clap}
+                  -DWORK=${CMAKE_BINARY_DIR}/plugins/stock-test/${name}-response
+                  -P ${CMAKE_CURRENT_SOURCE_DIR}/stock/${name}/response.cmake)
+      endif()
+      if(UNIX AND NOT APPLE)
+        add_test(NAME plugin.${name}.unload COMMAND clap-unload-probe "${clap}")
+        set_tests_properties(plugin.${name}.unload PROPERTIES LABELS "rt;plugin-unload" TIMEOUT 30)
+      endif()
+      if(NOT SUPPLE_SANITIZE AND UNIX)
+        # Factory presets: clap-validator 0.4.1 deadlocks in preset discovery.
+        add_test(NAME plugin.${name}.validator
+          COMMAND "${CMAKE_SOURCE_DIR}/tools/validator/run.sh"
+                  --exclude "^preset-discovery-(crawl|load)$" "${clap}")
+        set_tests_properties(plugin.${name}.validator PROPERTIES LABELS slow SKIP_RETURN_CODE 77)
+      endif()
+    endif()
+  endfunction()
+  supple_add_stock_script(contour Contour com.suppleaudio.contour)
 endif()

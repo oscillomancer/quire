@@ -385,7 +385,7 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     }
     const model::Id track = f.addTrack("Guitar");
     const std::string plumb = f.pluginId("Plumb");
-    const std::string facet = f.pluginId("Facet");
+    const std::string contour = f.pluginId("Contour");
 
     REQUIRE(f.fx->open(track));
     REQUIRE(f.fx->isOpen());
@@ -405,11 +405,11 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
 
     // Add a second one and reorder it by dragging (fx.move).
     f.click("fx.add");
-    f.type("Facet");
+    f.type("Contour");
     f.key("Return");
     REQUIRE(f.fx->chain().size() == 2);
     const model::Id fx2 = f.fx->chain()[1];
-    CHECK(f.app->head().fx.find(fx2)->plugin.id == facet);
+    CHECK(f.app->head().fx.find(fx2)->plugin.id == contour);
     const auto secondSelected = f.root->readBack();
     f.fx->select(fx1);
     f.frame();
@@ -577,7 +577,7 @@ TEST_CASE(
                                            gui::Favourites::defaultFile(gui::test::slug()));
     const model::Id track = f.addTrack("Keys");
     std::vector<model::Id> fx;
-    for (const char* name : {"Plumb", "Facet", "Plumb"}) {
+    for (const char* name : {"Plumb", "Contour", "Plumb"}) {
         auto made = f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId(name)}}));
         REQUIRE(made);
         fx.push_back(*model::Id::parse((*made)["fx"].asString()));
@@ -625,7 +625,8 @@ TEST_CASE(
     CHECK(f.fx->selection() == std::vector<model::Id>{fx[1]});
     CHECK(opened.empty());
     // A double click opens that effect's editor, and only that one.
-    auto more = f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId("Facet")}}));
+    auto more =
+        f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId("Contour")}}));
     REQUIRE(more);
     const model::Id fx4 = *model::Id::parse((*more)["fx"].asString());
     f.fx->refresh();
@@ -795,7 +796,7 @@ TEST_CASE("golden image: the FX chain") {
     f.type("Plumb");
     f.key("Return");
     f.click("fx.add");
-    f.type("Facet");
+    f.type("Contour");
     f.key("Return");
     f.click("fx.offline." + f.fx->chain()[0].str());
     f.frame();
@@ -1213,7 +1214,7 @@ TEST_CASE("the FX window shows a take's chain (take FX): add, reorder, no input 
     REQUIRE(item);
     const auto take = *model::Id::parse((*item)["take"].asString());
     REQUIRE(f.run("fx.add", f.args({{"take", take.str()}, {"plugin", f.pluginId("Plumb")}})));
-    REQUIRE(f.run("fx.add", f.args({{"take", take.str()}, {"plugin", f.pluginId("Facet")}})));
+    REQUIRE(f.run("fx.add", f.args({{"take", take.str()}, {"plugin", f.pluginId("Contour")}})));
     REQUIRE(f.fx->openTake(take));
     f.frame();
     REQUIRE(f.fx->take());

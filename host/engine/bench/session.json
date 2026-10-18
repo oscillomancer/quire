@@ -86,13 +86,20 @@
       }
     },
     {
-      "plugin": "com.suppleaudio.eq",
+      "plugin": "com.suppleaudio.contour",
       "patch": {
-        "schema": "supple.eq-patch/1.0",
+        "schema": "supple.contour-patch/1.0",
         "params": {
-          "band2.gain": -3,
-          "band3.gain": 2,
-          "band4.gain": -2
+          "band1.enabled": true,
+          "band3.enabled": true,
+          "band3.freq": 200,
+          "band3.gain": -3,
+          "band4.enabled": true,
+          "band4.freq": 1000,
+          "band4.gain": 2,
+          "band7.enabled": true,
+          "band7.freq": 8000,
+          "band7.gain": -2
         }
       }
     },
