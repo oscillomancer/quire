@@ -159,6 +159,25 @@ TEST_CASE("a replacing patch sets what it says and defaults the rest") {
     CHECK(prose.size() <= 600);
 }
 
+TEST_CASE("the prose names a grouped parameter by what its group does not say") {
+    PluginInfo info;
+    info.id = "com.example.bands";
+    info.name = "Bands";
+    ParamTable::Builder b;
+    b.add(toggle(1, "Band 1 On", false).in("Band 1"));
+    b.add(decibels(2, "Band 1 Gain", -24.0, 24.0, 0.0).normalizedHostValue().in("Band 1"));
+    b.add(toggle(3, "Auto Gain", true));
+    const Definition d(info, b.build(), PropertyList::Builder().build());
+    const PatchCodec codec(d);
+    state::Snapshot s(d);
+    Envelope env;
+    std::vector<json::Error> errors;
+    REQUIRE(codec.apply(parsed(R"({"params": {"band_1.band_1_on": true, "band_1.band_1_gain": -3,
+        "auto_gain": false}})"),
+                        true, s, env, errors));
+    CHECK(codec.describe(s, true) == "Bands: Band 1: On, Gain -3.0 dB; Auto Gain off");
+}
+
 TEST_CASE("a file property takes an existing file by absolute path, or none") {
     const auto d = fixture();
     PatchCodec codec(*d);
