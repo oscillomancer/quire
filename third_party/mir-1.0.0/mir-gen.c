@@ -7918,8 +7918,11 @@ static int try_spilled_reg_mem (gen_ctx_t gen_ctx, MIR_insn_t insn, int nop, MIR
   int n = 0, op_nums[MAX_INSN_RELOAD_MEM_OPS];
   for (int i = nop; i < (int) insn->nops; i++)
     if (insn->ops[i].mode == MIR_OP_VAR && insn->ops[i].u.var == reg) {
+      if (n >= MAX_INSN_RELOAD_MEM_OPS) { /* e.g. d = d * d: reload it instead */
+        for (int j = 0; j < n; j++) insn->ops[op_nums[j]] = saved_op;
+        return FALSE;
+      }
       insn->ops[i] = mem_op;
-      gen_assert (n < MAX_INSN_RELOAD_MEM_OPS);
       op_nums[n++] = i;
     }
   if (target_insn_ok_p (gen_ctx, insn)) return TRUE;

@@ -745,3 +745,26 @@ struct T : Effect {
     });
     CHECK(audio.data[0] == std::vector<double>{1, 0, 0, 1, 0});
 }
+
+TEST_CASE("a value squared where registers spill compiles (MIR's allocator, patched)") {
+    // MIR 1.0.0 asserted on an instruction naming one spilled register as its
+    // result and both operands (e = e * e after coalescing), aborting the host.
+    compileOk(R"(#include <supple/script.h>
+struct Sec { double b0 = 1.0, b1 = 0.0, b2 = 0.0, a1 = 0.0, a2 = 0.0; };
+void poles(Sec& s, double wn, double zeta) {
+    const double e = exp(-zeta * wn);
+    s.a2 = e * e;
+    if (zeta < 1.0)
+        s.a1 = -2.0 * e * cos(wn * sqrt(1.0 - zeta * zeta));
+    else
+        s.a1 = -2.0 * e * cosh(wn * sqrt(zeta * zeta - 1.0));
+}
+struct T : Effect {
+    static constexpr Info info = {.name = "T", .id = "com.example.t"};
+    Param zeta = continuous("Zeta", 0.1, 4, 0.7);
+    Sec s;
+    void update() { poles(s, 0.3, zeta); }
+    void process(Block& io) {}
+};
+)");
+}
