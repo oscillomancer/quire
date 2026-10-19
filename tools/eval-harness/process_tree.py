@@ -90,9 +90,12 @@ def stop_group(process):
                 process._eval_job = None
         process.wait()
         return
+    # The group is ours (same user), so a refusal can only mean nothing in it
+    # is left to signal: macOS answers EPERM, not ESRCH, while the last
+    # member is a zombie its new parent has not reaped yet.
     try:
         os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         pass
     try:
         process.wait(timeout=3)
@@ -100,6 +103,6 @@ def stop_group(process):
         pass
     try:
         os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         pass
     process.wait()
