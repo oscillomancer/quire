@@ -806,6 +806,28 @@ TEST(a_script_reports_the_latency_it_sets_in_prepare) {
     CHECK(engine.latency() > 0 && engine.latency() < 16);
 }
 
+TEST(a_parameter_that_restarts_sets_the_latency_of_the_next_activation) {
+    const auto d = compileText(R"(#include <supple/script.h>
+struct L : Effect {
+    static constexpr Info info = {.name = "L", .id = "com.example.ahead"};
+    Param ahead = choice("Lookahead", {"Off", "On"}, 0).restarts();
+    void prepare() { setLatency(ahead.index() * 32); }
+    void process(Block& io) {}
+};
+)");
+    if (!d) return;
+    const ParamDef& p = d->params().at(0);
+    CHECK(p.is(pflag::kRestart));
+    CHECK(!p.is(pflag::kAutomatable));
+    Engine engine(d);
+    engine.activate(48000.0, 64, 2, 2);
+    CHECK(engine.latency() == 0);
+    setPlain(engine, p.id, 1.0);
+    engine.deactivate();
+    engine.activate(48000.0, 64, 2, 2);
+    CHECK(engine.latency() == 32);
+}
+
 TEST(embedded_payloads_are_bounded_and_validate_the_schema) {
     const auto folder = std::filesystem::temp_directory_path() /
                         ("supple-player-payload-" + std::to_string(processId()));

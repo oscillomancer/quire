@@ -57,6 +57,7 @@ struct ParamModel {
     bool automatable = true, modulatable = false, offAtMinimum = false, output = false,
          bypass = false, hidden = false;
     bool polyModulatable = false;  // modulated per voice (an instrument's)
+    bool restarts = false;         // a change restarts the plugin (.restarts())
     std::vector<std::string> roles;
     int offset = 0;  // of the Param member in the plugin struct
 };

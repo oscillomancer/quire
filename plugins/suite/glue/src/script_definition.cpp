@@ -78,6 +78,7 @@ ParamDef paramOf(const ParamModel& m, ParamTable::Builder& b) {
     if (m.modulatable) p = p.modulatable();
     if (m.polyModulatable) p = p.polyModulatable();
     if (!m.automatable) p = p.notAutomatable();
+    if (m.restarts) p = p.restartOnChange();
     if (m.offAtMinimum) p = p.offAtMinimum();
     if (m.bypass) p = p.bypass();
     if (m.hidden) p.flags |= pflag::kHidden;

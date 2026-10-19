@@ -220,6 +220,7 @@ struct ParamSpec {
     bool automatable = true, modulatable = false, offAtMinimum = false, output = false;
     bool polyModulatable = false;  // an instrument's, modulated per voice: forVoice(v)
     bool bypass = false, hidden = false;
+    bool restart = false;  // a change restarts the plugin: prepare() runs again
     std::initializer_list<const char*> roles = {};       // "level", "time", "brightness" ...
     std::initializer_list<const char*> choiceKeys = {};  // a choice's patch keys (.keys())
 
@@ -269,6 +270,15 @@ struct ParamSpec {
     }
     ParamSpec notAutomatable() const {
         ParamSpec p = *this;
+        p.automatable = false;
+        return p;
+    }
+    // Changing it restarts the plugin (the host stops it and starts it
+    // again), so prepare() runs again with the new value and may report
+    // another latency with setLatency(): a lookahead. Not automatable.
+    ParamSpec restarts() const {
+        ParamSpec p = *this;
+        p.restart = true;
         p.automatable = false;
         return p;
     }

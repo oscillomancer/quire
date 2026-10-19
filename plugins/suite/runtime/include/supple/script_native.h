@@ -255,6 +255,7 @@ class NativeCode final : public Code {
         m.automatable = s.automatable;
         m.modulatable = s.modulatable;
         m.polyModulatable = s.polyModulatable;
+        m.restarts = s.restart;
         m.offAtMinimum = s.offAtMinimum;
         m.output = s.output;
         m.bypass = s.bypass;

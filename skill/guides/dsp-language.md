@@ -95,6 +95,7 @@ positive, and integer parameter ranges must fit in `int`.
 | `.offAtMin()` | Its minimum means off ("-inf dB"); `.gain()` is exactly 0 there |
 | `.meter()` | An output the plugin reports with `p.set(v)`: read-only, never saved |
 | `.modulated()`, `.notAutomatable()` | As named |
+| `.restarts()` | Changing it restarts the plugin (the host stops and starts it), so `prepare()` runs again with the new value and may `setLatency()` for it: a lookahead. Not automatable |
 | `.polyModulated()` | An instrument's: modulated per note by the host; each voice reads `p.forVoice(v)` |
 | `.role({"level"})` | What it does, for agents: `level`, `time`, `brightness` ... |
 | `.keys({"db12", "db24"})` | A choice's patch keys, one per option, where its labels make poor ones (see below) |
@@ -168,7 +169,9 @@ From any member function: `sampleRate()`, `maxBlockSize()`, `channels()`,
 a script that sounds different offline no longer renders the same as it
 plays). In `prepare()`, `setLatency(samples)` reports a delay the plugin
 adds that depends on the sample rate (an `Oversampler`'s, a lookahead),
-where Info's `.latency` is fixed.
+where Info's `.latency` is fixed. A delay a parameter chooses (a
+lookahead switch) needs `.restarts()` on that parameter: the latency
+changes only across a restart, which `prepare()` sees.
 
 Saving a script while it plays swaps the new code in with a 10 ms crossfade
 when the plugin is otherwise the same. When a save changes what the plugin

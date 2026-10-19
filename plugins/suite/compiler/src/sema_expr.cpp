@@ -2175,7 +2175,7 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
             };
             const std::string& mod = m->member;
             const bool flag = mod == "modulated" || mod == "polyModulated" || mod == "offAtMin" ||
-                              mod == "meter" || mod == "notAutomatable";
+                              mod == "meter" || mod == "notAutomatable" || mod == "restarts";
             const bool single = mod == "in" || mod == "help" || mod == "withKey" ||
                                 mod == "withId" || mod == "smoothed" || mod == "role" ||
                                 mod == "keys";
@@ -2225,6 +2225,9 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                 p.automatable = false;
             } else if (mod == "notAutomatable") {
                 p.automatable = false;
+            } else if (mod == "restarts") {
+                p.restarts = true;
+                p.automatable = false;
             } else if (mod == "role") {
                 if (args.size() != 1 || args[0].kind != Constant::Kind::List) {
                     error(call->loc, "script.param.modifier",
@@ -2273,7 +2276,7 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                       "a parameter has no modifier '." + mod + "()'",
                       "the modifiers are .in(group), .help(text), .smoothed(ms), .modulated(), "
                       ".polyModulated(), .offAtMin(), "
-                      ".meter(), .notAutomatable(), .role({...}), .keys({...}), "
+                      ".meter(), .notAutomatable(), .restarts(), .role({...}), .keys({...}), "
                       ".curved(Curve::..., k), .withKey(key), .withId(n)");
                 return std::nullopt;
             }
