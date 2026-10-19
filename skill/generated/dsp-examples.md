@@ -668,6 +668,11 @@ struct Bell : Effect {
         g.fillText(freq.text(), gx, 284);
         g.fillText(gain.text(), gx + 144, 284);
         g.fillText(width.text(), gx + 288, 284);
+        g.serifFont(15);
+        g.fillStyle(Theme::text);
+        g.textAlign(TextAlign::Right);
+        g.fillText("Bell", gx + gw, 284);
+        g.textAlign(TextAlign::Left);
     }
 
     void pointer(const Pointer& p) {

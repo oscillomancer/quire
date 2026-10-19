@@ -372,7 +372,7 @@ taken), `keyboard(lowKey, highKey, ...)` (an instrument's) and
 | `fillRect` `strokeRect` `clearRect` `(x, y, w, h)` | Each a path of its own |
 | `beginPath()` `moveTo` `lineTo` `bezierCurveTo` `quadraticCurveTo` `arc(x, y, r, start, end)` `arcTo` `rect` `roundRect(x, y, w, h, r)` `ellipse(x, y, rx, ry)` `circle(x, y, r)` `closePath()`, then `fill()` or `stroke()` | Paths. Angles in radians, 0 to the right, clockwise |
 | `save()` `restore()` `translate` `rotate` `scale` `clip(x, y, w, h)` | Transforms and a rectangular clip |
-| `font(size)` `boldFont(size)` `monoFont(size)` `textAlign(TextAlign::Center)` `textBaseline(TextBaseline::Middle)` `fillText(text, x, y)` `measureText(text)` | Text (`monoFont` for numbers) |
+| `font(size)` `boldFont(size)` `monoFont(size)` `serifFont(size)` `serifItalicFont(size)` `textAlign(TextAlign::Center)` `textBaseline(TextBaseline::Middle)` `fillText(text, x, y)` `measureText(text)` | Text: Inter, `monoFont` (Plex Mono) for numbers, `serifFont` (Fraunces SemiBold) for a name or heading, `serifItalicFont` for an aside |
 | `panel(x, y, w, h, "Title")` `well` `meter(levelDb, ...)` `frequencyGrid(x, y, w, h, lowHz, highHz)` `levelGrid(x, y, w, h, lowDb, highDb, stepDb)` | The editor's furniture, in its look |
 | `width()` `height()` | The editor's size |
 

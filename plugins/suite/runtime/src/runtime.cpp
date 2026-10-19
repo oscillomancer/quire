@@ -1063,6 +1063,12 @@ void Canvas::boldFont(double size) {
 void Canvas::monoFont(double size) {
     if (painter_) painter_->font(detail::Painter::Face::Mono, size);
 }
+void Canvas::serifFont(double size) {
+    if (painter_) painter_->font(detail::Painter::Face::Serif, size);
+}
+void Canvas::serifItalicFont(double size) {
+    if (painter_) painter_->font(detail::Painter::Face::SerifItalic, size);
+}
 void Canvas::textAlign(TextAlign align) {
     if (painter_) painter_->textAlign(align);
 }

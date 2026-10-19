@@ -340,9 +340,11 @@ class Painter final : public D::Painter {
         nvgIntersectScissor(vg_, f(x), f(y), f(std::max(0.0, w)), f(std::max(0.0, h)));
     }
     void font(Face face, double size) override {
-        nvgFontFace(vg_, face == Face::Bold   ? gui::font::kUiBold
-                         : face == Face::Mono ? gui::font::kMono
-                                              : gui::font::kUi);
+        nvgFontFace(vg_, face == Face::Bold          ? gui::font::kUiBold
+                         : face == Face::Mono        ? gui::font::kMono
+                         : face == Face::Serif       ? gui::font::kSerif
+                         : face == Face::SerifItalic ? gui::font::kSerifItalic
+                                                     : gui::font::kUi);
         nvgFontSize(vg_, f(std::clamp(size, 1.0, 400.0)));
     }
     void textAlign(S::TextAlign align) override {

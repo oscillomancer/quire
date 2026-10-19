@@ -1047,10 +1047,14 @@ class Canvas {
     // until restore().
     void clip(double x, double y, double w, double h);
 
-    // Text: Inter, a bold Inter, or Plex Mono for numbers, at a size.
+    // Text: Inter, a bold Inter, or Plex Mono for numbers, at a size; or
+    // Fraunces, a soft serif, for a name or a heading (serifFont) and an
+    // aside (serifItalicFont).
     void font(double size);
     void boldFont(double size);
     void monoFont(double size);
+    void serifFont(double size);
+    void serifItalicFont(double size);
     void textAlign(TextAlign align);
     void textBaseline(TextBaseline baseline);
     void fillText(const char* text, double x, double y);

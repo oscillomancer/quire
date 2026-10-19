@@ -874,6 +874,12 @@ void Builtins::addEditor() {
     r.method(
         g, "void monoFont(double size)", +[](C* c, double v) { c->monoFont(v); }, Writes::Self, ui);
     r.method(
+        g, "void serifFont(double size)", +[](C* c, double v) { c->serifFont(v); }, Writes::Self,
+        ui);
+    r.method(
+        g, "void serifItalicFont(double size)", +[](C* c, double v) { c->serifItalicFont(v); },
+        Writes::Self, ui);
+    r.method(
         g, "void textAlign(TextAlign align)",
         +[](C* c, int v) { c->textAlign(static_cast<S::TextAlign>(v)); }, Writes::Self, ui);
     r.method(
