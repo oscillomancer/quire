@@ -11,7 +11,7 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 
 | id (dir, code, CLAP id suffix) | display name | CLAP id | State magic | AU subtype | Features |
 |---|---|---|---|---|---|
-| `contour` (`plugins/stock/contour`) | Contour | `com.suppleaudio.contour` | `TQNk` (the player's for the id) | `Cntr` | audio-effect, equalizer |
+| `yarrow` (`plugins/stock/yarrow`) | Yarrow | `com.suppleaudio.yarrow` | `LzjE` (the player's for the id) | `Yarw` | audio-effect, equalizer |
 | `comp` | Ballast | `com.suppleaudio.comp` | `QCM1` | `QCmp` | audio-effect, compressor, limiter, stereo |
 | `utility` | Plumb | `com.suppleaudio.utility` | `QUT1` | `QUtl` | audio-effect, utility, stereo |
 | `analyzer` | Gauge | `com.suppleaudio.analyzer` | `QAN1` | `QAna` | audio-effect, analyzer, stereo |
@@ -123,7 +123,8 @@ one physical value, independent of fine mode; floats retain normalized steps.
 `tools/gui_preview` renders at least two scenarios per plugin to PNG for review.
 Design size ≤ 900 × 560. The look follows the product theme used by Orrery
 (`plugins/orrery/plugin/gui/Theme.h`): same palette and type, so the stock
-plugins read as one family.
+plugins read as one family. The scripted stock plugins that replace them
+(ADR-0047) take the scripts' warm palette instead (`stock-effects.md` §0).
 
 ### 1.6 describe()
 
@@ -164,9 +165,9 @@ In the plugin copy (as ProbeSynth): `host_smoke`, `semantic_rt`,
   Linked from `skill/SKILL.md` and `skill/guides/mixing.md`.
 - `plugins/<id>/QUIRE.md` (deviations from the template) and a STATUS row.
 
-## 2. EQ — Contour [`contour`] (`stock-effects.md` §1)
+## 2. EQ — Yarrow [`yarrow`] (`stock-effects.md` §1)
 
-A DSP script (ADR-0047), `plugins/stock/contour/script/contour.cpp`; the
+A DSP script (ADR-0047), `plugins/stock/yarrow/script/yarrow.cpp`; the
 spec section holds the designs and measured accuracy. Notes for maintainers:
 
 - **Audio.** `update()` reads the parameters into eight `Setting`s and, when
@@ -186,8 +187,8 @@ spec section holds the designs and measured accuracy. Notes for maintainers:
   running sample count (the analyser's clock), peaks, each band's live gain
   and detector level, and the auto-gain offset. Edits go through
   `change()`/`act()`, which select a band's parameter by index.
-- **Tests.** `plugin.contour.response` measures bells, cuts and shelves
-  through the built plugin; `plugin.contour.catalog` keeps `Catalog.cpp` in
+- **Tests.** `plugin.yarrow.response` measures bells, cuts and shelves
+  through the built plugin; `plugin.yarrow.catalog` keeps `Catalog.cpp` in
   step; the template's suite, reset, unload, semantic conformance and
   clap-validator checks run as for every stock plugin. During development,
   `dsp.test` with `automation` (no excess step on type, channel or enable

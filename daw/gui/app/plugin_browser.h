@@ -24,7 +24,7 @@ class Label;
 namespace supple::gui {
 
 // $XDG_CONFIG_HOME/<slug>/favourites.json — a supple.favourites/1.0 document
-// {"favourites": ["com.suppleaudio.contour", …]}. Order is the user's, not sorted.
+// {"favourites": ["com.suppleaudio.yarrow", …]}. Order is the user's, not sorted.
 struct Favourites {
     std::vector<std::string> ids;  // plugin ids
     static std::filesystem::path defaultFile(std::string_view slug);

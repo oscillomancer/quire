@@ -1,4 +1,4 @@
-# Contour, Quire's stock equaliser: the DSP script in script/ as a plugin of
+# Yarrow, Quire's stock equaliser: the DSP script in script/ as a plugin of
 # its own, compiled as C++ and run by the suite's glue (plugins/suite) as the
 # script player runs it. The plugin is what the script declares (Catalog.cpp,
 # from a source export of the script): its parameters, buses and identity
@@ -8,14 +8,14 @@
 # PRODUCT_ID and PRODUCT_STATE_TAG are the plugin's own, permanent once
 # shipped. The state tag is the one the player gives this ID.
 
-set(PRODUCT_NAME        "Contour")
-set(PRODUCT_ID          "com.suppleaudio.contour")
+set(PRODUCT_NAME        "Yarrow")
+set(PRODUCT_ID          "com.suppleaudio.yarrow")
 set(PRODUCT_VERSION     "1.0.0")
 set(PRODUCT_DESCRIPTION "Eight-band zero-latency equaliser with dynamic bands, mid/side placement and a high-resolution spectrum.")
 set(PRODUCT_VENDOR      "Supple Audio")
 set(PRODUCT_URL         "")
 set(PRODUCT_COPYRIGHT   "Copyright (c) 2026 Supple Audio")
-set(PRODUCT_CODE        "contour")
+set(PRODUCT_CODE        "yarrow")
 
 set(PRODUCT_RUNTIME     ON)
 set(PRODUCT_PRESETS     ON)
@@ -29,8 +29,8 @@ set(PRODUCT_LAYER           ON)
 set(PRODUCT_LAYER_SOURCES   product/Layer.cpp)
 
 set(PRODUCT_AU_MANUFACTURER "Supl")
-set(PRODUCT_AU_SUBTYPE      "Cntr")
-set(PRODUCT_STATE_TAG       "TQNk")
+set(PRODUCT_AU_SUBTYPE      "Yarw")
+set(PRODUCT_STATE_TAG       "LzjE")
 
 set(PRODUCT_DSP_SOURCES     product/Catalog.cpp)
 # The script draws its own editor (script_editor.cpp, from the suite).

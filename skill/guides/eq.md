@@ -1,9 +1,9 @@
-# Contour: equaliser
+# Yarrow: equaliser
 
-Use `com.suppleaudio.contour` for rumble removal, tonal shaping, cuts around
+Use `com.suppleaudio.yarrow` for rumble removal, tonal shaping, cuts around
 regions reported by `analyze.masking`, de-essing and taming resonances that
 come and go (dynamic bands), and mid/side work. Patches use
-`supple.contour-patch/1.0`, with physical values under `params`; a merge
+`supple.yarrow-patch/1.0`, with physical values under `params`; a merge
 changes only the keys it names. A fresh instance is flat: every band is off.
 
 Each `bandN` below means all eight bands, N = 1…8. Bands run in index order.

@@ -20,12 +20,12 @@
 #include "supple/suite/script_definition.h"
 
 namespace supple::script::user {
-#include "script/contour.cpp"
+#include "script/yarrow.cpp"
 }  // namespace supple::script::user
 
 namespace {
 
-using Script = supple::script::user::Contour;
+using Script = supple::script::user::Yarrow;
 using Code = supple::script::detail::NativeCode<Script>;
 
 class OneScript final : public supple::Catalog {
@@ -115,7 +115,7 @@ class OneScript final : public supple::Catalog {
             });
             std::string problems;
             definition_ = supple::suite::makeScriptDefinition(std::move(code), {}, {}, &problems);
-            if (!definition_) std::fprintf(stderr, "Contour: %s\n", problems.c_str());
+            if (!definition_) std::fprintf(stderr, "Yarrow: %s\n", problems.c_str());
         }
         if (!definition_) return {};
         return {definition_};

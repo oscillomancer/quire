@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Supple Audio
 #include <supple/script.h>
 
-// Contour: an eight-band equaliser with zero latency.
+// Yarrow: an eight-band equaliser with zero latency.
 //
 // Each band is a bell, a shelf, a cut, a notch or a tilt, on both channels,
 // the mid, the side, or one channel alone. Bells and shelves can be dynamic:
@@ -392,35 +392,44 @@ double chain(const Array<Sec, 4>& sec, int count, Array<Mem, 4>& m, double x) {
     return y;
 }
 
-// Colours: the bands', and the editor's own beside the palette.
+// Colours: the bands' (earth and meadow: clay, marigold, ochre, moss, sage,
+// dusk, heather, madder), and the editor's own beside the palette.
 int bandColour(int b) {
     switch (b) {
         case 0:
-            return 0xE8735E;
+            return 0xD9775A;
         case 1:
-            return 0xEBA04C;
+            return 0xE29A52;
         case 2:
-            return 0xDCC85C;
+            return 0xD5BA62;
         case 3:
-            return 0x92C76C;
+            return 0x9DB36E;
         case 4:
-            return 0x4EC6B4;
+            return 0x72AE9B;
         case 5:
-            return 0x5CA8E6;
+            return 0x82A3C3;
         case 6:
-            return 0x9488EC;
+            return 0xAB91C6;
         default:
-            return 0xD67CC2;
+            return 0xCF8099;
     }
 }
 
-constexpr int kInk = 0x0B0D10;
-constexpr int kGraphTop = 0x111419;
-constexpr int kGraphBottom = 0x0A0B0E;
-constexpr int kGrid = 0x1B1F25;
-constexpr int kGridLit = 0x262B33;
-constexpr int kSpectrum = 0xCFCBC2;
-constexpr int kCurve = 0xF1EDE4;
+constexpr int kInk = 0x1A1411;        // text on a lit colour, unlit wells
+constexpr int kGroundTop = 0x2B221B;  // the walnut ground, lighter at the top
+constexpr int kGroundBottom = 0x201914;
+constexpr int kGraphTop = 0x1D1713;  // the graph's soil
+constexpr int kGraphBottom = 0x130F0C;
+constexpr int kGrid = 0x2B231D;
+constexpr int kGridLit = 0x3E332A;
+constexpr int kSpectrum = 0xE3D5BE;  // the analyser's line: unbleached linen
+constexpr int kCurve = 0xF7EEDF;
+constexpr int kTip = 0x2C231C;
+constexpr int kMeterLow = 0x6E7A4B;  // moss to dry grass
+constexpr int kMeterHigh = 0xD8CE9C;
+constexpr int kKnobLight = 0x54463B;
+constexpr int kKnobDark = 0x2A221C;
+constexpr int kIdle = 0x76675A;
 
 // Fields of a band, for editing one from the editor.
 constexpr int fOn = 0;
@@ -442,9 +451,9 @@ constexpr double kSmooth = 16.0;  // a sixteenth of an octave
 constexpr double kSlopeDb = 4.5;  // dB per octave, about 1 kHz
 constexpr double kAverage = 0.5;  // seconds of power averaging
 
-struct Contour : Effect {
-    static constexpr Info info = {.name = "Contour",
-                                  .id = "com.suppleaudio.contour",
+struct Yarrow : Effect {
+    static constexpr Info info = {.name = "Yarrow",
+                                  .id = "com.suppleaudio.yarrow",
                                   .vendor = "Supple Audio",
                                   .version = "1.0.0",
                                   .description =
@@ -1654,6 +1663,9 @@ struct Contour : Effect {
         g.beginPath();
         g.roundRect(gx, gy, gw, gh, 6);
         g.fill();
+        g.strokeStyle(Theme::line);
+        g.lineWidth(1);
+        g.stroke();
         g.save();
         g.clip(gx, gy, gw, gh);
         g.lineWidth(1);
@@ -1982,7 +1994,7 @@ struct Contour : Effect {
         double tx = x + 16, ty = y - h - 10;
         if (tx + w > gx + gw - 4) tx = x - 16 - w;
         if (ty < gy + 4) ty = y + 14;
-        g.fillStyle(0x1C2026);
+        g.fillStyle(kTip);
         g.globalAlpha(0.94);
         g.beginPath();
         g.roundRect(tx, ty, w, h, 5);
@@ -2026,7 +2038,8 @@ struct Contour : Effect {
             g.fill();
             const double t = clamp((db + 60.0) / 66.0, 0.0, 1.0);
             if (t > 0.0) {
-                g.linearGradient(0, top + h, 0, top, 0x3E7F76, db > -0.1 ? Theme::alert : 0x9BD3C8);
+                g.linearGradient(0, top + h, 0, top, kMeterLow,
+                                 db > -0.1 ? Theme::alert : kMeterHigh);
                 g.beginPath();
                 g.roundRect(mx, top + h * (1.0 - t), 5, h * t, 2.5);
                 g.fill();
@@ -2040,6 +2053,56 @@ struct Contour : Effect {
     }
 
     // --- controls -------------------------------------------------------------------
+
+    // A raised panel: lit a little from above, with a hairline edge.
+    void panel(Canvas& g, double x, double y, double w, double h) {
+        g.linearGradient(0, y, 0, y + h, Theme::surface, kGroundBottom);
+        g.beginPath();
+        g.roundRect(x, y, w, h, 10);
+        g.fill();
+        g.strokeStyle(Theme::line);
+        g.lineWidth(1);
+        g.stroke();
+        g.strokeStyle(Theme::lineLit);
+        g.globalAlpha(0.5);
+        g.beginPath();
+        g.moveTo(x + 10, y + 0.5);
+        g.lineTo(x + w - 10, y + 0.5);
+        g.stroke();
+        g.globalAlpha(1.0);
+    }
+
+    // The mark: a yarrow's flat-topped head, clusters of florets on stems
+    // that branch from one point.
+    void drawMark(Canvas& g, double cx, double cy) {
+        g.strokeStyle(Theme::accent2);
+        g.lineWidth(1.1);
+        g.lineCap(LineCap::Round);
+        g.beginPath();
+        g.moveTo(cx, cy + 15);
+        g.lineTo(cx, cy + 6);
+        g.stroke();
+        for (int k = 0; k < 5; ++k) {
+            const double hx = cx + (k - 2) * 5.0, hy = cy - 4 + abs(k - 2) * abs(k - 2) * 0.7;
+            g.beginPath();
+            g.moveTo(cx, cy + 6);
+            g.lineTo(hx, hy + 1.5);
+            g.stroke();
+        }
+        for (int k = 0; k < 5; ++k) {
+            const double hx = cx + (k - 2) * 5.0, hy = cy - 4 + abs(k - 2) * abs(k - 2) * 0.7;
+            for (int j = 0; j < 4; ++j) {
+                g.fillStyle(Theme::text);
+                g.beginPath();
+                g.circle(hx + (j - 1.5) * 1.9, hy - (j == 1 || j == 2 ? 1.7 : 0.4), 1.25);
+                g.fill();
+            }
+        }
+        g.fillStyle(Theme::accent);
+        g.beginPath();
+        g.circle(cx, cy - 6.3, 1.25);
+        g.fill();
+    }
 
     void pill(Canvas& g, double x, double y, double w, double h, const char* text, bool lit,
               int colour, bool enabled) {
@@ -2084,7 +2147,7 @@ struct Contour : Effect {
         else
             g.arc(cx, cy, r, at, from);
         g.stroke();
-        g.radialGradient(cx, cy - 6, 2, r - 4, 0x3A3F48, 0x1D2026);
+        g.radialGradient(cx, cy - 6, 2, r - 4, kKnobLight, kKnobDark);
         g.beginPath();
         g.circle(cx, cy, r - 6);
         g.fill();
@@ -2161,10 +2224,7 @@ struct Contour : Effect {
     void drawBandPanel(Canvas& g) {
         const Setting& s = ui[selected];
         const int colour = bandColour(selected);
-        g.fillStyle(Theme::surface);
-        g.beginPath();
-        g.roundRect(bx, by, bw, bh, 8);
-        g.fill();
+        panel(g, bx, by, bw, bh);
 
         // The band: its number, name and switch.
         g.fillStyle(s.on ? colour : kInk);
@@ -2181,10 +2241,10 @@ struct Contour : Effect {
         g.fillText(format("%.0f", selected + 1.0), bx + 26, rowY + 13.5);
         g.textAlign(TextAlign::Left);
         g.fillStyle(Theme::text);
-        g.boldFont(12);
-        g.fillText(format("Band %.0f", selected + 1.0), bx + 48, rowY + 7);
+        g.serifFont(14);
+        g.fillText(format("Band %.0f", selected + 1.0), bx + 48, rowY + 6);
         g.fillStyle(Theme::textMuted);
-        g.font(10.5);
+        g.serifItalicFont(11.5);
         drawKindName(g, s.kind, bx + 48, rowY + 21);
         pill(g, bx + 118, rowY + 2, 42, 22, s.on ? "ON" : "OFF", s.on, colour, true);
         pill(g, bx + 166, rowY + 2, 54, 22, "LISTEN", listening && dragging == 3, colour, s.on);
@@ -2292,7 +2352,7 @@ struct Contour : Effect {
         g.fill();
         const double level = levelDb[selected];
         if (dyn && level > -60.0) {
-            g.fillStyle(level > s.threshold ? colour : 0x5B636E);
+            g.fillStyle(level > s.threshold ? colour : kIdle);
             g.beginPath();
             g.roundRect(mx, my, mw * clamp((level + 60.0) / 60.0, 0.0, 1.0), 8, 4);
             g.fill();
@@ -2348,15 +2408,12 @@ struct Contour : Effect {
     }
 
     void drawOutputPanel(Canvas& g) {
-        g.fillStyle(Theme::surface);
-        g.beginPath();
-        g.roundRect(ox, by, ow, bh, 8);
-        g.fill();
-        g.fillStyle(Theme::textMuted);
-        g.boldFont(10);
+        panel(g, ox, by, ow, bh);
+        g.fillStyle(Theme::text);
+        g.serifFont(14);
         g.textAlign(TextAlign::Left);
         g.textBaseline(TextBaseline::Middle);
-        g.fillText("OUTPUT", ox + 16, rowY + 13);
+        g.fillText("Output", ox + 16, rowY + 13);
         pill(g, ox + ow - 104, rowY + 2, 88, 22, "AUTO GAIN", autoGain.on(), Theme::accent, true);
         g.strokeStyle(Theme::line);
         g.lineWidth(1);
@@ -2386,14 +2443,17 @@ struct Contour : Effect {
     }
 
     void drawHeader(Canvas& g) {
+        drawMark(g, 30, 29);
         g.fillStyle(Theme::text);
-        g.boldFont(17);
+        g.serifFont(23);
         g.textAlign(TextAlign::Left);
+        g.textBaseline(TextBaseline::Alphabetic);
+        g.fillText("Yarrow", 50, 37);
+        const double tw = g.measureText("Yarrow");
+        g.fillStyle(Theme::textMuted);
+        g.serifItalicFont(13);
+        g.fillText("equaliser", 58 + tw, 37);
         g.textBaseline(TextBaseline::Middle);
-        g.fillText("CONTOUR", 20, 30);
-        g.fillStyle(Theme::textFaint);
-        g.font(10);
-        g.fillText("EQUALISER", 116, 31);
         // The bands, to pick one and see which are on.
         for (int b = 0; b < 8; ++b) {
             const double x = 336 + b * 42, y = 17;
@@ -2422,7 +2482,7 @@ struct Contour : Effect {
     void draw(Canvas& g) {
         refresh();
         analyse();
-        g.fillStyle(Theme::ground);
+        g.linearGradient(0, 0, 0, kH, kGroundTop, kGroundBottom);
         g.fillRect(0, 0, kW, kH);
         drawHeader(g);
         drawGrid(g);

@@ -17,8 +17,17 @@
 - **Patch form:** flat (core-patch `FlatPatchType`): `"params": {"<key>":
   value}` with dotted keys (`band2.freq`). One form for every effect, so an
   agent learns it once. Keys and units are the parameter table.
-- **Names:** craft nouns; code identifiers use the functional id in
-  brackets. CLAP ids `com.suppleaudio.<id>`.
+- **Names:** the template plugins carry craft nouns; their scripted
+  replacements are named after plants and the natural world (ADR-0047).
+  Code identifiers use the functional id in brackets. CLAP ids
+  `com.suppleaudio.<id>`.
+- **Look (scripted stock plugins):** the scripts' palette, warm and earthy
+  and distinct from the host's graphite: walnut panels lit a little from
+  above, a soil-dark graph floor, parchment text, clay (`Theme::accent`) and
+  sage (`Theme::accent2`); the name and panel headings in Fraunces
+  (`serifFont`, asides in `serifItalicFont`), labels in Inter, numbers in
+  Plex Mono. Colours a plugin adds (band colours, curves) keep to the same
+  earth and meadow tones.
 - **Every effect:** mono/stereo configs (plus sidechain input where
   listed), float/double, sample-accurate automation, block-size invariant
   (null −120 dBFS across 1..4096), denormal-safe, deterministic (seeded where
@@ -49,10 +58,10 @@
   against spec, sidechain behaviour, parameter-sweep automation stress, and
   golden renders (tolerance-aware null) for every factory preset.
 
-## 1. EQ — "Contour" [`contour`]
+## 1. EQ — "Yarrow" [`yarrow`]
 
 An eight-band equaliser with zero latency, written as a DSP script
-(ADR-0047: `plugins/stock/contour/script/contour.cpp`). Built for the
+(ADR-0047: `plugins/stock/yarrow/script/yarrow.cpp`). Built for the
 analysis-driven workflow ("cut 250 Hz by 3 dB, Q 1.2" is one merge patch)
 and for hands: dynamic bands, mid/side placement, band listening, gain
 scaling, and a spectrum analyser that favours bass resolution.
@@ -119,7 +128,9 @@ bells, notches and tilts, the low-pass side for low shelves and low cuts
 (what a low cut removes), the high-pass side for high shelves and high cuts,
 faded in and out over 12 ms.
 
-Editor (1000 × 624, the script's own drawing): the response graph over
+Editor (1000 × 624, the script's own drawing; band colours clay,
+marigold, ochre, moss, sage, dusk, heather and madder; a yarrow head beside
+the name): the response graph over
 most of the window, log 20 Hz–20 kHz with a ±6/12/24/30 dB scale; the summed
 curve (every band that is on, whatever channel it works on, plus the
 output gain) over the output's spectrum; numbered nodes for the eight bands

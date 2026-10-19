@@ -9,7 +9,7 @@ player, and every check the other stock plugins have.
 
 | Folder | Plugin | Id |
 |---|---|---|
-| `contour` | Contour, the equaliser | `com.suppleaudio.contour` |
+| `yarrow` | Yarrow, the equaliser | `com.suppleaudio.yarrow` |
 
 ## Files
 

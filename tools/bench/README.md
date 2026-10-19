@@ -4,7 +4,7 @@ B1 builds the session through the engine command bus. B2 exports that model's
 compiled notation MIDI and the plugins' own CLAP-saved states, then uses public
 ReaScript APIs to generate and save an RPP. The recipe lives once in
 `host/engine/bench/session.json`: 120 BPM, a four-bar eight-note chord loop,
-Orrery's synth.md §9 reference patch → non-flat four-band Contour → Ballast on
+Orrery's synth.md §9 reference patch → non-flat four-band Yarrow → Ballast on
 N playback tracks; an additional armed stereo-input track with the same
 chain, monitoring on; Ballast in limiter mode on the master. N excludes the
 monitored track. Playback tracks use −18 dB faders. The export includes the

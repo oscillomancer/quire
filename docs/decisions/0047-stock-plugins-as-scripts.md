@@ -49,9 +49,17 @@ plugins ship as CLAP (and VST3, AU) files of their own that other hosts load.
 5. **Replacing the template plugins.** The template-instance plugins are
    replaced one at a time, each by a new design under a new name and id.
    The old plugin's folder, build entries and documents go in the same
-   change; sessions that used it keep the effect slot but cannot load the
-   plugin. The first is Contour, replacing Facet (`com.suppleaudio.eq`).
-6. **Changing one.** Edit the script, try it in the player under a
+   change, with no conversion of old sessions (none exist outside tests).
+   The first is Yarrow, replacing Facet (`com.suppleaudio.eq`).
+6. **Names and look.** A stock plugin is named after a plant or something
+   else of the natural world, not after its effect type (Yarrow, the EQ).
+   Every stock script draws with the scripts' palette (`kScriptTheme` in
+   `plugins/suite/glue`): warm and earthy, set apart from the host's
+   graphite (walnut panels, a soil-dark floor under graphs, parchment
+   text, clay and sage accents), with Fraunces (`serifFont`, framework
+   1.25.0) for its name and headings. A script's own colours (band
+   colours, curves) stay in that key.
+7. **Changing one.** Edit the script, try it in the player under a
    scratch id (two plugins with one id would both be listed), then restore
    the id, run the catalog check and the plugin's tests. A change to the
    language or the suite that a stock script needs is made in

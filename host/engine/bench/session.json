@@ -86,9 +86,9 @@
       }
     },
     {
-      "plugin": "com.suppleaudio.contour",
+      "plugin": "com.suppleaudio.yarrow",
       "patch": {
-        "schema": "supple.contour-patch/1.0",
+        "schema": "supple.yarrow-patch/1.0",
         "params": {
           "band1.enabled": true,
           "band3.enabled": true,
