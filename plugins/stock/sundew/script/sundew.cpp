@@ -1049,11 +1049,12 @@ struct Sundew : Effect {
     // --- the history ----------------------------------------------------------------------
 
     double levelY(double db) const { return gy + gh * clamp(-db / 48.0, 0.0, 1.0); }
-    double gainY(double db) const {
+    double gainY(double db, bool lift) const {
         // Gain change at twice the level scale: a cut hangs from the top, a
-        // lift rises from the bottom.
-        if (db >= 0.0) return gy + gh - gh * clamp(db / 30.0, 0.0, 1.0);
-        return gy + gh * clamp(-db / 30.0, 0.0, 1.0);
+        // lift rises from the bottom. Which one is the character's, not the
+        // sign's: no change at all lies along the cut's edge, at the top.
+        const double depth = gh * clamp(abs(db) / 30.0, 0.0, 1.0);
+        return lift ? gy + gh - depth : gy + depth;
     }
 
     // Column j back from the newest, averaged with its neighbours.
@@ -1146,7 +1147,7 @@ struct Sundew : Effect {
             g.moveTo(gx + gw, lift ? gy + gh : gy);
             for (int j = 0; j < count; ++j) {
                 const int at = wrap(head - 1 - j, kCols);
-                g.lineTo(gx + gw - j * step, gainY(hGain[at]));
+                g.lineTo(gx + gw - j * step, gainY(hGain[at], lift));
             }
             g.lineTo(gx + gw - (count - 1) * step, lift ? gy + gh : gy);
             g.closePath();
@@ -1157,7 +1158,7 @@ struct Sundew : Effect {
             g.beginPath();
             for (int j = 0; j < count; ++j) {
                 const int at = wrap(head - 1 - j, kCols);
-                const double x = gx + gw - j * step, y = gainY(hGain[at]);
+                const double x = gx + gw - j * step, y = gainY(hGain[at], lift);
                 if (j == 0)
                     g.moveTo(x, y);
                 else
@@ -1222,7 +1223,7 @@ struct Sundew : Effect {
         g.textAlign(TextAlign::Left);
         for (int k = 1; k <= 3; ++k) {
             const double db = c == kBloom ? 6.0 * k : -6.0 * k;
-            g.fillText(format("%+.0f", db), gx + 5, gainY(db));
+            g.fillText(format("%+.0f", db), gx + 5, gainY(db, c == kBloom));
         }
         g.globalAlpha(1.0);
         // The legend.
@@ -1431,8 +1432,7 @@ struct Sundew : Effect {
             g.fillStyle(live ? Theme::textMuted : Theme::textFaint);
             g.serifItalicFont(10);
             g.textAlign(TextAlign::Left);
-            g.fillText(live ? "sidechain connected" : "nothing connected: hearing itself",
-                       kKey + 34, ly);
+            g.fillText(live ? "connected" : "not connected", kKey + 34, ly);
         }
         pill(g, kKey, cy - 11, 70, 22, "INTERNAL", !ext, Theme::accent, true);
         pill(g, kKey + 76, cy - 11, 70, 22, "EXTERNAL", ext, Theme::accent, true);
@@ -1891,7 +1891,16 @@ struct Sundew : Effect {
         g.fillStyle(abs(needle) > 0.05 ? kCurve : Theme::textMuted);
         g.monoFont(11);
         g.textAlign(TextAlign::Center);
-        g.fillText(format("%+.1f dB", needle), x + w * 0.5, y + h - 10.5);
+        fillDb(g, needle, x + w * 0.5, y + h - 10.5);
+    }
+
+    // A signed level, where the fill style and alignment are set; one that
+    // rounds to nothing reads 0.0, not -0.0 or +0.0.
+    void fillDb(Canvas& g, double db, double x, double y) {
+        if (abs(db) < 0.05)
+            g.fillText("0.0 dB", x, y);
+        else
+            g.fillText(format("%+.1f dB", db), x, y);
     }
 
     void drawOutput(Canvas& g) {
@@ -1916,12 +1925,12 @@ struct Sundew : Effect {
         g.fillStyle(Theme::text);
         g.monoFont(10.5);
         g.textAlign(TextAlign::Right);
-        g.fillText(format("%+.1f dB", loud), ox + ow - 18, by + 164);
+        fillDb(g, loud, ox + ow - 18, by + 164);
         label(g, "MATCH ADDS", ox + 18, by + 180, TextAlign::Left);
         g.fillStyle(match.on() ? Theme::accent : Theme::textFaint);
         g.textAlign(TextAlign::Right);
         if (match.on())
-            g.fillText(format("%+.1f dB", matchShown.get()), ox + ow - 18, by + 180);
+            fillDb(g, matchShown.get(), ox + ow - 18, by + 180);
         else
             g.fillText("off", ox + ow - 18, by + 180);
         const bool tinted = c != kClean && c != kBloom;
