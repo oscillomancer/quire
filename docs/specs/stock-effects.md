@@ -161,105 +161,135 @@ line (Catmull-Rom through the points), unfilled, from −96 dB at the floor to
 Factory patches: Flat, Clean Up, Vocal Polish (auto gain), De-Ess, Air and
 Weight (auto gain), Mono Bass (side cut), Telephone.
 
-## 2. Compressor / limiter — "Ballast" [`comp`]
+## 2. Compressor — "Sundew" [`sundew`]
 
-Inputs: main stereo + sidechain stereo (CLAP port 1).
+A compressor with six characters and zero latency unless lookahead is on,
+written as a DSP script (ADR-0047: `plugins/stock/sundew/script/sundew.cpp`).
+A character is a whole gain cell (detector, law and ballistics), not a
+preset; ratio, attack and release mean the same in each. Main stereo or mono
+in and out, and a key input as wide as the main bus.
 
 | key | type | range | curve | default |
 |---|---|---|---|---|
-| `mode` | enum | `compressor`, `limiter` | | `compressor` |
-| `threshold` | dB | −60..0 | linear | −18 |
-| `ratio` | ratio | 1..100 (100 shown as ∞) | pow 3 | 4 |
-| `knee` | dB | 0..24 | linear | 6 |
-| `attack` | ms | 0.01..300 | log | 10 |
-| `release` | ms | 5..5000 | log | 150 |
-| `auto_release` | bool | program-dependent release | | false |
-| `detector` | enum | `peak`, `rms` | | `peak` |
-| `rms_window` | ms | 1..100 | log | 10 |
-| `topology` | enum | `feedforward`, `feedback` | | `feedforward` |
-| `sidechain` | enum | `internal`, `external` | | `internal` |
-| `sc_highpass` | Hz | 10..500 (10 = off) | log | 10 |
-| `sc_lowpass` | Hz | 1000..20000 (20000 = off) | log | 20000 |
-| `sc_listen` | bool | | | false |
-| `stereo_link` | % | 0..100 | linear | 100 |
-| `lookahead` | enum | `off`, `ms1`, `ms5` (latency) | | `off` |
-| `makeup` | dB | −12..+24 | linear | 0 |
-| `auto_makeup` | bool | | | false |
-| `ceiling` | dB | −24..0 (limiter mode: output ceiling) | linear | −1 |
-| `true_peak` | bool | limiter mode: 4× oversampled detection | | true |
-| `mix` | % | 0..100 | linear | 100 |
-| `output` | dB | −24..+24 | linear | 0 |
-| `gr` (readonly) | dB | −60..0 | | |
+| `character` | enum | `clean`, `glue`, `opto`, `fet`, `vari_mu`, `bloom` | | `clean` |
+| `threshold` | dB | −60..0 (Bloom: the level it lifts below) | linear | −18 |
+| `ratio` | ratio | 1..20 (Vari-Mu: the ratio it grows toward) | log | 3 |
+| `attack` | ms | 0.05..250 | log | 10 |
+| `release` | ms | 5..3000 (ignored while `sync` is on) | log | 150 |
+| `sync` | enum | `off`, `n32`, `n16`, `n8`, `n4`, `n2`, `bar` | | `off` |
+| `knee` | dB | 0..24, full width | linear | 6 |
+| `range` | dB | 1..40: the deepest cut, or Bloom's highest lift | linear | 24 |
+| `key` | enum | `internal`, `external` | | `internal` |
+| `key_hpf` | Hz | 20..800, 12 dB/oct on the key; 20 is off | log | 20 |
+| `link` | % | 0..100 | linear | 100 |
+| `stereo` | enum | `lr`, `ms` | | `lr` |
+| `lookahead` | enum | `off`, `ms1`, `ms2`, `ms5`; restarts, not automatable | | `off` |
+| `listen` | enum | `off`, `key`, `delta`; not automatable | | `off` |
+| `colour` | % | 0..100 | linear | 0 |
+| `output` | dB | −24..+24, smoothed 20 ms | linear | 0 |
+| `mix` | % | 0..100, smoothed 20 ms | linear | 100 |
+| `match` | bool | | | off |
+| `gain_change` | dB | readonly, −48..+24: the largest change in the last block | | |
+| `loudness_change` | dB | readonly, −24..+24: output against input, before the match | | |
 
-DSP: log-domain gain computer with quadratic soft knee; attack/release
-one-pole smoothing in the dB domain (branching); limiter mode = ratio ∞
-with lookahead peak hold + release, true-peak mode guarantees output ≤
-ceiling dBTP on the Tech 3341 TP signals and on programme material (tested
-with core-analysis true peak).
+Detector. The key is the input, or the sidechain when `external` and the
+host reports it connected (otherwise the input), high-passed when
+`key_hpf` is above 20 Hz, in left/right or mid/side (mid = (L+R)/2, side =
+(L−R)/2) as `stereo` says. Each channel's level is in dB: the sample's
+magnitude (Clean, FET) or a mean square with a one-pole of 3 ms (Glue),
+5 ms (Opto), 8 ms (Vari-Mu) or 12 ms (Bloom), plus 3.01 dB so a sine reads
+its peak. Link: each channel's level moves toward the louder by `link`.
+The audio (not the key) is delayed by the lookahead, which is the reported
+latency.
 
-Implementation decisions (2026-09-29):
+Law: an amount in dB, 0 or more, from the level L, threshold T, ratio R
+and a soft knee (the quadratic corner of max(0, d) over the knee's width;
+Glue adds 3 dB to it, Opto 10, Vari-Mu 14, FET halves it), rounded into
+`range` over up to 3 dB. Feedforward: (1 − 1/R)·over. Feedback (Opto,
+FET): (R − 1)·over, where L is the output's level, so the static ratio is R
+as for the others; FET multiplies it by 1 + over/12. Vari-Mu: the ratio at
+an overshoot is 1 + (R − 1)(0.25 + 0.75(1 − e^(−over/9))). Bloom lifts:
+(1 − 1/R)·under, faded to nothing over 24 dB below 30 dB under the
+threshold, so noise and silence are not raised.
 
-- `rms_window` is the exponential mean-square time constant (one pole),
-  not a rectangular window. The RMS sine curve uses input RMS dBFS, while
-  the peak curve uses the detector sample level; a sine's peak and RMS differ
-  by 3.0103 dB. Timing checks use a 20 dB constant-amplitude input step.
-- Feedback detects the previous compressed wet sample before makeup, mix
-  and output gain. An external sidechain always takes precedence over topology.
-- Auto release blends the fast `release` and slow `5 * release` one-pole
-  coefficients. Weight ramps from 0 to 1 over one second while a deeper
-  reduction is held, and returns to 0 over one second when it is releasing.
-  Auto makeup adds the negative static feedforward reduction at -18 dBFS
-  to manual makeup, only in compressor mode.
-- A limiter processes the makeup/mix/output-adjusted signal, then enforces
-  its ceiling. Compressor threshold, detector, topology and sidechain do not
-  alter limiter gain. `sc_listen` auditions the filtered key at the reported
-  latency, for internal/external keys and audition/key-source transitions;
-  its delay storage is prepared before processing. In limiter mode the audition
-  passes through the limiter too. Peak parameters in the GUI
-  measure sample peaks; they are labeled dBFS.
-- True-peak limiting adds 16 samples of latency whenever limiter mode and
-  `true_peak` are selected, including lookahead `off`. With `off`, only the
-  sample ceiling is guaranteed. Use `ms1` or `ms5` for the true-peak ceiling.
-  Mode and true-peak changes are non-automatable because they can change latency,
-  as is lookahead. All three configuration controls request a restart even
-  when the resulting delay is equal, avoiding an unsmoothed topology switch.
-  The active DSP retains the old latency configuration until
-  the host reactivates; other parameters can continue to change.
-- The limiter's minimum deque holds targets across the lookahead window;
-  release is capped by the moving average, allowing the attack to ramp instead
-  of jumping to the window minimum. The average has lookahead-samples + 1
-  entries; the interpolator's 16-sample delay is excluded from that ramp.
-  True-peak detection uses only the shared 4x interpolated driven signal,
-  without an L1 reconstruction bound or additional detection margin. With TP
-  lookahead the hold spans twice the total delay to cover the FIR support.
-  Ceiling checks allow 0.1 dBTP measurement tolerance. A -3 dBFS sine below a
-  -1 dBTP ceiling passes unchanged apart from delay; seeded pink noise driven
-  +12 dB retains sample peaks within 0.6 dB of that ceiling. No lookahead
-  setting is a loudness target.
-- The design is 900 x 560, below Orrery's 1120 x 700 limit. Knob values sit
-  below the knob and label, clear of the pointer. Limiter mode disables
-  threshold, ratio, knee, attack, detector, RMS window, topology, auto release
-  and auto makeup; key selection and filters are enabled only while key
-  audition is on. Limiter key audition uses feedforward key filtering.
-  Release, stereo link, makeup, mix, output, ceiling, true peak and lookahead
-  remain active. Its transfer curve includes the makeup/dry-wet/output drive
-  and flattens at the ceiling. Linux previews embed in a fixed-size parent
-  so a tiling window manager cannot enlarge or distort the capture.
-- Sidechain filters use 12 dB/oct Butterworth TPT sections. Endpoint bypass
-  blends across 10–20 Hz for highpass and 19–20 kHz for lowpass; endpoints are
-  exactly off. Continuous parameters smooth over 20 ms, positive log-domain
-  controls in log space; ratio smooths its inverse in the gain-computer slope
-  so the infinity endpoint has no jump. Detector/source/topology/listen
-  switches use 10 ms ramps.
+Ballistics, on the amount, with one-poles of the given time constant:
 
-Lookahead choice keys are `ms1` and `ms5` (displayed as 1 ms and 5 ms):
-core-params requires enum keys to start with a lowercase letter, so the
-original `1ms` / `5ms` spellings could not pass table validation.
+- Clean: a decoupled peak detector: the amount held and released with
+  `release`, then smoothed with `attack`, so a steady tone gets a steady gain.
+- Glue: attack and release, and a slow stage (350 ms up, 6 × release
+  down, at most 8 s) whose 75 % holds the amount when compression lasted:
+  short peaks recover with `release`, sustained passages slowly.
+- Opto: feedback, solved for the output it makes each sample (three Newton
+  steps on the implicit one-pole), so a fast loop never rings. Attack scales
+  from 1.5× (small steps) to 0.5× (12 dB and more); a memory stage (600 ms
+  up, 12 × release down) holds 60 % of the reduction: a fast drop, then a
+  slow tail, longer after long compression.
+- FET: feedback, solved as Opto; release quickens with depth
+  (release / (1 + amount/8)).
+- Vari-Mu: two stages in series at 0.47 × attack and release: S-shaped
+  movement.
+- Bloom: attack is how fast the lift gives way to a louder sound, release
+  how fast it returns.
 
-Mono main configurations retain a stereo key; its maximum detector level
-controls the mono gain regardless of `stereo_link`. The implementation also
-accepts positive sample rates through 768 kHz for host-validator coverage;
-the response contract remains 22.05–384 kHz.
+`sync` sets the release to a note value at the host tempo (a bar from the
+time signature): a third of the note's length, so 95 % of the way back
+within it. A change of character keeps the gain where it was: the new cell
+starts from the old amount, or, between cutting and lifting, at rest with a
+30 ms glide from the old gain.
+
+Colour adds the character's second and third harmonics to the compressed
+signal (even/odd coefficients: Glue 0.02/−0.10, Opto 0.06/−0.03, FET
+0.05/−0.16, Vari-Mu 0.11/−0.05; Clean and Bloom none), times `colour` and
+0.35 + 0.65·min(1, amount/10 dB), the input to the polynomial limited to
+±1.5 and the DC its even part makes removed (8 Hz). Then `mix` against the
+delayed dry signal, the match, and `output`. Listen plays the key (delayed
+as the audio) or the delta (dry minus compressed, before mix and output),
+faded over 10 ms.
+
+Match measures the dry and the mixed signal's power (one-poles of 600 ms)
+and, while the input is above −57 dBFS, moves an offset toward their ratio
+(within ±24 dB) over a second; the offset applies when `match` is on and
+glides out over 40 ms when it is turned off. It starts at 0 dB.
+
+Editor (1000 × 700, the script's own drawing; a sundew leaf beside the
+name; each character has a colour: Clean linen, Glue moss, Opto
+marigold, FET clay, Vari-Mu heather, Bloom madder):
+
+- **History.** Four seconds scrolling: the input as a faint line over the
+  compressed signal as a filled level (both peak per 10 ms, −48..0 dB),
+  the gain change in the character's colour from the top (Bloom's lift from
+  the floor) at twice the level scale, bar and beat lines while the
+  transport plays, and the threshold, dragged up and down, wheeled, or
+  reset by double-click.
+- **Transfer.** The steady input/output curve the character makes, with
+  unity, the threshold, a dot and its trail where the key is now, the ratio
+  and the effective knee. A drag moves threshold across and ratio up and
+  down; the wheel changes ratio. Beside it a gain-change bar.
+- **Key strip.** Key, key high-pass, link, left/right or mid/side,
+  lookahead and listen.
+- **Character list.** Each with a small plot of its own ballistics.
+- **Dynamics.** Threshold, ratio, attack, release, knee and range; the
+  ballistics plot: a hit, a rest, a held note and a rest played through a
+  cell of the character's own, each part given its share of the width;
+  dragging across a note sets attack, across a rest release; the sync
+  choices with the release they give at the tempo.
+- **Output.** A moving-coil gain-change meter on a lamp-lit face (−20 to
+  +6 dB, a peak tick), the loudness change and what the match adds,
+  output, mix and colour (dimmed where the character adds none), the
+  match switch; input and output peak meters in the header.
+
+Knobs drag vertically (Shift fine), wheel, and reset on a double click.
+
+Factory patches: Clean Start, Vocal Leveler (Opto, match), Drum Bus Glue
+(Glue, key HPF 90 Hz, mix 75 %, match), Snare Bite (FET), Parallel Smash
+(FET, mix 30 %), Mix Bus Warmth (Vari-Mu, range 6 dB), Bass Steady
+(Opto), Kick Duck (Clean, external key, 1/8 release), Detail Bloom
+(Bloom), Mid-Side Master (Glue, mid/side, link 50 %, match), Peak Catcher
+(Clean, 1 ms lookahead, 20:1).
+
+Not a limiter: there is no ceiling and no true-peak detection. Clean at
+20:1 with lookahead holds sample peaks closely; delivery ceilings belong to
+a limiter (render normalization has a true-peak limiter of its own).
 
 ## 3. Gate / expander — "Sluice" [`gate`]
 

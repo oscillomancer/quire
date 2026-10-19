@@ -119,7 +119,7 @@ include startup ramps.
 | `orrery` | Orrery | Output Level | 0 / −12 dB | −12 ±1 dB |
 | `utility` | Plumb | Gain | 0 / −12 dB | −12 ±1 dB |
 | `yarrow` | Yarrow | Output | 0 / −12 dB | −12 ±1 dB |
-| `comp` | Ballast | Threshold | 0 / −36 dB | second half >3 dB quieter |
+| `sundew` | Sundew | Threshold | 0 / −36 dB | second half >3 dB quieter |
 | `analyzer` | Analyzer / Gauge | Hold | false / true | envelope reload + unchanged audio |
 | `gate` | Gate / Sluice | Threshold | −80 / −6 dB | second half >3 dB quieter |
 | `drive` | Kiln | Output | 0 / −12 dB | −12 ±1 dB |

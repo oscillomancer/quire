@@ -46,7 +46,8 @@ Clip off is zero latency. Clip on adds exactly 72 samples, aligned with
 the dry path, through the shared 2x `dsp::Oversampler`. Toggle it while stopped
 or let the host service the requested restart. Clip is a soft tone change;
 it does not guarantee a sample or true-peak ceiling, and output gain can
-raise peaks afterwards. Use Ballast limiting for a mastering ceiling.
+raise peaks afterwards. For a mastering ceiling use render normalization's
+true-peak limiter.
 
 This is a linked broadband effect: it cannot isolate a snare from bass or
 cymbals in a full mix, and it has no external key or frequency selectors.
@@ -56,6 +57,6 @@ material below that floor is treated as silence. Tanh is anti-aliased by 2x
 filtering but is not claimed alias-free at arbitrary drive/frequency.
 GUI histories and readonly meters describe the signal, not loudness targets.
 
-See [mixing](mixing.md), [compression/limiting](comp.md),
+See [mixing](mixing.md), [compression](comp.md),
 [stock spec §4](../../docs/specs/stock-effects.md#4-transient-shaper--flint-transient)
 and [implementation §9](../../docs/specs/effects.md#9-second-wave-transient-shaper--flint-transient-stock-effectsmd-4).

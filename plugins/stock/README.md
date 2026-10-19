@@ -10,6 +10,7 @@ player, and every check the other stock plugins have.
 | Folder | Plugin | Id |
 |---|---|---|
 | `yarrow` | Yarrow, the equaliser | `com.suppleaudio.yarrow` |
+| `sundew` | Sundew, the compressor | `com.suppleaudio.sundew` |
 
 ## Files
 

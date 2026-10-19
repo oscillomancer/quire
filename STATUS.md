@@ -190,7 +190,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   validated against EBU Tech 3341/3342, spectral, pitch, envelope, stereo,
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
   the LLM evaluation harness (`tools/eval-harness`).
-- **Stock plugins** (ADR-0011, ADR-0047): Orrery, Yarrow, Ballast, Sluice,
+- **Stock plugins** (ADR-0011, ADR-0047): Orrery, Yarrow, Sundew, Sluice,
   Flint, Kiln, Echelon, Nave, Plumb and Gauge, each passing clap-validator, a
   reset determinism check and an unload test (all but Nave also pass the
   headless REAPER check); JSON patches and the semantic-parameters extension.
@@ -200,7 +200,17 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   (bells, shelves, cuts to 48 dB/oct, notch, tilt) on stereo, mid, side or
   one channel, dynamic bells and shelves, band listening, gain scale, auto
   gain, and an editor of its own with a 32768-point spectrum line. It
-  replaced Facet (`com.suppleaudio.eq`).
+  replaced Facet (`com.suppleaudio.eq`). Sundew, the compressor
+  (`plugins/stock/sundew`), is the second: six characters (Clean, Glue,
+  Opto, FET, Vari-Mu and the upward Bloom), the feedback ones solved sample
+  by sample; an external key, a key high-pass, link, mid/side, lookahead
+  (a restart), tempo-locked release, colour, mix and loudness matching; an
+  editor with a scrolling history with bars and beats, a transfer curve, a
+  gain-change needle and a plot of each character's ballistics. It replaced
+  Ballast (`com.suppleaudio.comp`), and with it the stock set's only peak
+  limiter: until a limiter of its own is written, master peaks are held by
+  Sundew's Clean character with lookahead (sample peaks only) or by render
+  normalization's true-peak limiter.
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The

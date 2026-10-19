@@ -51,7 +51,7 @@ CASES = {
     "com.suppleaudio.utility": Case("Plumb", False, "Gain",
                                   normalized(0, -120, 24), normalized(-12, -120, 24), "gain", True),
     "com.suppleaudio.yarrow": Case("Yarrow", False, "Output", .5, .25, "gain", True),
-    "com.suppleaudio.comp": Case("Ballast", False, "Threshold", 1, .4),
+    "com.suppleaudio.sundew": Case("Sundew", False, "Threshold", 1, .4),
     "com.suppleaudio.analyzer": Case("Analyzer", False, "Hold", 0, 1, "transparent", True, "Gauge"),
     "com.suppleaudio.gate": Case("Gate", False, "Threshold", 0, .925, display="Sluice"),
     "com.suppleaudio.drive": Case("Kiln", False, "Output", .5, .25, "gain"),

@@ -104,9 +104,9 @@
       }
     },
     {
-      "plugin": "com.suppleaudio.comp",
+      "plugin": "com.suppleaudio.sundew",
       "patch": {
-        "schema": "supple.comp-patch/1.0",
+        "schema": "supple.sundew-patch/1.0",
         "params": {
           "threshold": -18,
           "ratio": 4
@@ -115,12 +115,15 @@
     }
   ],
   "master": {
-    "plugin": "com.suppleaudio.comp",
+    "plugin": "com.suppleaudio.sundew",
     "patch": {
-      "schema": "supple.comp-patch/1.0",
+      "schema": "supple.sundew-patch/1.0",
       "params": {
-        "mode": "limiter",
-        "ceiling": -1
+        "threshold": -6,
+        "ratio": 20,
+        "attack": 0.1,
+        "release": 60,
+        "knee": 2
       }
     }
   }
