@@ -4,6 +4,17 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.25.1
+
+What a product must do: nothing.
+
+- **host-smoke serves an outstanding restart before its state-and-reset
+  check** (`test/host_smoke.cpp`). A product with a restart parameter (a
+  lookahead) had its restart asked for when the state check set every
+  value, and asks only once until restarted; the next check reset the
+  count and so never restarted it, and compared an instance still at the
+  old latency with a fresh one at the new.
+
 ## 1.25.0
 
 What a product must do: nothing. A product that wants the serif draws with

@@ -518,6 +518,15 @@ int main(int argc, char** argv) {
             return out;
         };
 
+        // A host restarts the plugin when asked: a value set above may have
+        // moved a restart parameter, and the plugin asks only once until it
+        // is restarted, so serve that request before counting new ones.
+        if (g_restarts > 0) {
+            plug->stop_processing(plug);
+            plug->deactivate(plug);
+            plug->activate(plug, 48000.0, 32, block);
+            plug->start_processing(plug);
+        }
         g_restarts = 0;
         setAll(0.35);
         MemStream wanted;
