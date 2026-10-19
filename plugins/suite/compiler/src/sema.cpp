@@ -792,8 +792,11 @@ void Sema::signature(FunctionDecl* f) {
         error(f->result->loc, "script.function.result",
               f->name + "() returns " + r->name +
                   " by value; a function returns a number, a bool, an enum or nothing",
-              "fill a struct passed by reference instead: void " + f->name + "(" + r->name +
-                  "& out)");
+              r->kind == TypeKind::String
+                  ? "draw the text where it is made: void " + f->name +
+                        "(Canvas& g, double x, double y) that calls g.fillText()"
+                  : "fill a struct passed by reference instead: void " + f->name + "(" + r->name +
+                        "& out)");
     if (f->result->isRef)
         error(f->result->loc, "script.function.result_reference",
               "functions cannot return references in the subset",
@@ -1009,8 +1012,7 @@ void Sema::checkLocalDecl(VarDecl* v) {
         return;
     }
     const bool braced = v->init->kind == ExprKind::InitList;
-    if (!braced) v->init = check(v->init);
-    v->init = convert(v->init, v->qt, v->loc, "'" + v->name + "'", braced);
+    v->init = convert(check(v->init), v->qt, v->loc, "'" + v->name + "'", braced);
     if (spec->isConstexpr && !(v->init && v->init->constant))
         error(v->loc, "script.constant.required", "a constexpr variable needs a constant value",
               "use literals, constexpr constants and arithmetic on them, or drop constexpr");
@@ -1260,8 +1262,7 @@ void Sema::checkStmt(Stmt* s) {
                 return;
             }
             const bool braced = r->value->kind == ExprKind::InitList;
-            if (!braced) r->value = check(r->value);
-            r->value = convert(r->value, QualType{rt.type, false, false}, r->loc,
+            r->value = convert(check(r->value), QualType{rt.type, false, false}, r->loc,
                                "the result of " + fn_->name + "()", braced);
             return;
         }

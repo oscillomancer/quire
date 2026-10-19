@@ -173,6 +173,36 @@ TEST_CASE("a gain script compiles and applies its gain") {
     }
 }
 
+TEST_CASE("a local or a result may start from braces") {
+    for (bool interpret : {false, true}) {
+        CAPTURE(interpret);
+        scriptc::Options options;
+        options.interpret = interpret;
+        auto result = compileOk(R"(#include <supple/script.h>
+struct Pair {
+    double a = 0.0, b = 0.0;
+};
+double zero() { return {}; }
+struct T : Effect {
+    static constexpr Info info = {.name = "T", .id = "com.example.t"};
+    void process(Block& io) {
+        Array<double, 3> marks = {-1, 0.5, 3};
+        const Pair p = {4, -2};
+        for (int i = 0; i < io.frames; ++i)
+            io[0][i] = marks[0] + marks[1] + marks[2] + p.a + p.b + zero();
+    }
+};
+)",
+                                options);
+        JitRunner run(result.program);
+        run.prepare();
+        run.update();
+        Audio audio(2, 4);
+        run.process(audio, 4);
+        CHECK(audio.data[0][3] == 4.5);
+    }
+}
+
 TEST_CASE("deep nesting is refused before the compiler's walks could exhaust its stack") {
     auto nested = [](const std::string& open, const std::string& middle, const std::string& close,
                      int levels) {
