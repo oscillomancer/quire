@@ -51,10 +51,11 @@ plugins ship as CLAP (and VST3, AU) files of their own that other hosts load.
    The old plugin's folder, build entries and documents go in the same
    change, with no conversion of old sessions (none exist outside tests).
    The first is Yarrow, replacing Facet (`com.suppleaudio.eq`); the second
-   Sundew, replacing Ballast (`com.suppleaudio.comp`).
+   Sundew, replacing Ballast (`com.suppleaudio.comp`). A stock plugin with
+   no predecessor is added the same way: Treeline, the limiter, the third.
 6. **Names and look.** A stock plugin is named after a plant or something
    else of the natural world, not after its effect type (Yarrow, the EQ;
-   Sundew, the compressor).
+   Sundew, the compressor; Treeline, the limiter).
    Every stock script draws with the scripts' palette (`kScriptTheme` in
    `plugins/suite/glue`): warm and earthy, set apart from the host's
    graphite (walnut panels, a soil-dark floor under graphs, parchment

@@ -13,6 +13,7 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 |---|---|---|---|---|---|
 | `yarrow` (`plugins/stock/yarrow`) | Yarrow | `com.suppleaudio.yarrow` | `LzjE` (the player's for the id) | `Yarw` | audio-effect, equalizer |
 | `sundew` (`plugins/stock/sundew`) | Sundew | `com.suppleaudio.sundew` | `pqwP` (the player's for the id) | `Sndw` | audio-effect, compressor |
+| `treeline` (`plugins/stock/treeline`) | Treeline | `com.suppleaudio.treeline` | `tdOY` (the player's for the id) | `Trln` | audio-effect, limiter |
 | `utility` | Plumb | `com.suppleaudio.utility` | `QUT1` | `QUtl` | audio-effect, utility, stereo |
 | `analyzer` | Gauge | `com.suppleaudio.analyzer` | `QAN1` | `QAna` | audio-effect, analyzer, stereo |
 | `drive` | Kiln | `com.suppleaudio.drive` | `QDR1` | `QDrv` | audio-effect, distortion, stereo |
@@ -233,6 +234,53 @@ spec section holds the laws and ballistics. Notes for maintainers:
   character (including to and from Bloom), threshold, mix, output, stereo,
   key filter, match, colour and sync; `dsp.preview` with `pointer` steps
   covered every gesture.
+
+## 12. Limiter — Treeline [`treeline`] (`stock-effects.md` §10)
+
+A DSP script (ADR-0047), `plugins/stock/treeline/script/treeline.cpp`; the
+spec section holds the detector, the gain path and the loudness meters.
+Notes for maintainers:
+
+- **Audio.** `TruePeak` is one channel's detector (the phases are designed
+  in `prepare()`); `Hold` the monotonic queue; `Box` a running sum that is
+  summed afresh every 65536 samples so rounding never builds up; `Bell`
+  three boxes in a row. `process()` per sample: drive → detector →
+  requirement → `listenTo()` (sharpness and the bass guard) → hold →
+  two-stage release → both bells and their blend → the delayed audio →
+  the output's own detector and K-weighting → listen. The guarantee rests
+  on each bell's span being no longer than the hold and on the delay
+  matching the broad bell's span: keep them together when tuning.
+- **No second stage.** A gain moving within a millisecond widens the
+  signal's spectrum, so in principle the product can pass the ceiling
+  between samples. A second, 0.5 ms stage on the output was tried: it
+  never took more than 0.001 dB on any test material, while costing a third
+  of the CPU and a millisecond of latency, so it went. What decided the
+  accuracy was the interpolator's length (32 taps per phase read up to
+  0.5 dB low on noise-like hits; 48 do not).
+- **Loudness.** `closeBlock()` every 100 ms: the 30-block ring, the
+  integrated histogram (gate recomputed from bin sums: no block list grows),
+  the LRA histogram. `restartLoudness()` on the transport's start.
+- **Editor.** Its own members only: eased values for the engine plots (the
+  first frame starts where the audio is, so a preview shows the moment),
+  the gain bar's held peak and the pointer's state. The audio code shares
+  the history (1024 columns of 10 ms: input and output envelopes, the
+  reduction and its sustained part, the momentary loudness, bar or beat) and
+  the engine's and meters' values. The gain-to-target button edits `gain`
+  as a click on a knob would.
+- **Tests.** The template's suite, reset (also `--stepped`), unload,
+  semantic conformance, clap-validator and the catalog check run as for
+  every stock plugin; `plugin.treeline.response` drives a sine, a sweep,
+  noise and an impulse 12 dB into a −3 dB ceiling (each peaks at −3.0) and
+  checks a sine under the ceiling passes unchanged. During development, on
+  synthetic club, acoustic, dense and true-peak material driven 12 dB:
+  the output's true peak, read offline with the same detector, stayed
+  within 0.001 dB of the ceiling; against BS.1770's example meter within
+  that meter's own +0.17 dB passband ripple; an ideal (24 kHz brickwall)
+  reconstruction reads up to 0.5 dB higher only on material with strong
+  content above 21 kHz (clipped noise). A 50 Hz sine under 7 dB of
+  reduction at a 20 ms release had 0.0003 % THD with the bass guard and
+  0.0055 % without. CPU: about 2 % of a core in a release build at 48 kHz
+  stereo (four interpolators).
 
 ## 4. Utility — Plumb [`utility`] (`stock-effects.md` §8)
 

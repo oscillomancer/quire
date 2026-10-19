@@ -49,6 +49,7 @@ their undo history and can be reviewed.
 | Designing a synth sound (Orrery) | `guides/sound-design.md`, then `plugin_describe` / `fx_describe` for exact fields |
 | Corrective mixing (levels, rumble, masking, loudness targets) and automation | `guides/mixing.md` |
 | Compressing (six characters, upward too), external-key ducking, catching peaks (Sundew/compressor) | `guides/comp.md` |
+| Limiting the master to a true-peak ceiling, loudness targets (LUFS), level-matched comparison (Treeline/limiter) | `guides/limiter.md` |
 | Gain staging, balance, width, polarity, bass mono (Plumb/utility) | `guides/utility.md` |
 | Cleaning spill or noise with a gate or expander (Sluice/gate) | `guides/gate.md` |
 | Saturation: drive, asymmetry, wavefolding (Kiln/drive) | `guides/drive.md` |

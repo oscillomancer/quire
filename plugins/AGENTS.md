@@ -8,9 +8,10 @@ specific to `plugins/`.
 Stock plugins written as DSP scripts live in `stock/` (ADR-0047): one
 folder each, holding the script and the product folder a source export
 makes from it, built from `template/` with `suite/`. `stock/README.md` says
-how to change one. Yarrow (`stock/yarrow`, the EQ) and Sundew
-(`stock/sundew`, the compressor) are written so far; the rest of this
-section is about the older, hand-written plugins.
+how to change one. Yarrow (`stock/yarrow`, the EQ), Sundew
+(`stock/sundew`, the compressor) and Treeline (`stock/treeline`, the
+limiter) are written so far; the rest of this section is about the older,
+hand-written plugins.
 
 Each plugin directory (`gate`, `transient`, `drive`, `delay`,
 `reverb`, `utility`, `analyzer`, `orrery`, and the internal test instrument

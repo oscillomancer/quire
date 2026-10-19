@@ -79,7 +79,7 @@ says how much quieter the compression made it.
 
 Sundew is not a limiter: there is no ceiling and no true-peak detection.
 Clean at 20:1 with `lookahead` `ms1` holds sample peaks closely; for a
-delivery ceiling use render normalization's true-peak limiter. A feedback
+true-peak ceiling use [Treeline, the limiter](limiter.md). A feedback
 character (Opto, FET) with an external key detects the key, feedforward.
 Lookahead delays the audio, not the detector, and the latency changes only
 after the host restarts the plugin. Match is a slow gain (about a second);

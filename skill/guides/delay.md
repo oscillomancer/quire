@@ -68,5 +68,5 @@ release freeze or reduce feedback before an offline render that needs to end.
 The safety limiter leaves echoes below −6 dBFS unchanged and bounds each
 normal echo to 0 dBFS. Wider stereo settings, positive output, dry signal and
 frozen material can exceed that bound. It is not a true-peak master limiter.
-For delivery ceilings use render normalization's true-peak limiter. Latency is zero; no parameter requires a
+For a true-peak ceiling use [Treeline, the limiter](limiter.md), or render normalization's. Latency is zero; no parameter requires a
 restart. The GUI pattern is a nominal per-line picture, before width/mix/duck.

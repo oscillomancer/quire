@@ -330,6 +330,7 @@ if(SUPPLE_BUILD_PLUGINS)
   endfunction()
   supple_add_stock_script(yarrow Yarrow com.suppleaudio.yarrow)
   supple_add_stock_script(sundew Sundew com.suppleaudio.sundew)
+  supple_add_stock_script(treeline Treeline com.suppleaudio.treeline)
 
   # A plugin taken out of the suite leaves its staged files behind, and the
   # app loads every plugin in plugins/clap: keep only what this build makes.

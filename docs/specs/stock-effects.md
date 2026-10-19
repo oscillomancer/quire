@@ -288,8 +288,8 @@ Factory patches: Clean Start, Vocal Leveler (Opto, match), Drum Bus Glue
 (Clean, 1 ms lookahead, 20:1).
 
 Not a limiter: there is no ceiling and no true-peak detection. Clean at
-20:1 with lookahead holds sample peaks closely; delivery ceilings belong to
-a limiter (render normalization has a true-peak limiter of its own).
+20:1 with lookahead holds sample peaks closely; a ceiling belongs to
+Treeline (§10).
 
 ## 3. Gate / expander — "Sluice" [`gate`]
 
@@ -813,7 +813,110 @@ can read live measurements of any point in the graph. Keys: `window` enum,
   Silence/unavailable values use finite meter floors. Generic-host scalar
   events are no more frequent than 50 ms; GUI frames exist only when visible.
 
-## 10. Acceptance
+## 10. Limiter — "Treeline" [`treeline`]
+
+A true-peak limiter for the end of a mix, written as a DSP script
+(ADR-0047: `plugins/stock/treeline/script/treeline.cpp`). Three controls
+shape the sound; attack, hold and release adapt to the music. Main stereo
+or mono in and out, one gain for every channel (stereo-linked), fixed
+latency.
+
+| key | type | range | curve | default |
+|---|---|---|---|---|
+| `gain` | dB | 0..24, smoothed 30 ms: drive into the ceiling | linear | 0 |
+| `ceiling` | dB | −24..0, true peak, smoothed 30 ms | linear | −1 |
+| `release` | ms | 10..1000: the peaks' recovery | log | 120 |
+| `target` | dB (LUFS) | −24..−6: what the loudness readings compare against | linear | −14 |
+| `listen` | enum | `output`, `matched`, `delta`; not automatable | | `output` |
+| `gain_reduction` | dB | readonly, −48..0: the deepest reduction in the last block | | |
+| `short_term_loudness` | dB (LUFS) | readonly, −70..0: the output, 3 s | | |
+| `integrated_loudness` | dB (LUFS) | readonly, −70..0: the output since the transport started | | |
+| `true_peak` | dB (dBTP) | readonly, −70..+6: the output's highest since the transport started | | |
+| `loudness_range` | dB (LU) | readonly, 0..40: EBU R128 LRA since the transport started | | |
+
+Detector. The input times `gain`, each channel's true peak read at the
+samples and at three points between each pair (a 48-tap windowed sinc per
+phase, Kaiser β 8, each phase summing to 1), every local top refined by the
+vertex of the parabola through it and its neighbours: within 0.01 dB of
+the reconstructed peak for tones to 20 kHz at 48 kHz. A sample's peak is
+its own and the highest between it and either neighbour; channels take the
+louder. The requirement is min(0, ceiling − peak) in dB.
+
+Gain path, per sample, in dB:
+
+- **Hold.** The lowest requirement of the last H samples (a monotonic
+  queue): H is the broad attack plus 3 ms or, while a bass line leads and
+  its period is longer, that period (at most 45 ms more).
+- **Release, two stages.** A plateau follows the held value (80 ms toward
+  more reduction, 10 × `release` toward less, at least 0.4 s and at most
+  4 s). The gain is the held value or, when that asks for less, a recovery:
+  toward the plateau at `release` while below it, toward 0 dB at the
+  plateau's pace above it.
+- **Attack, two curves.** Three moving averages in a row (lengths 42 %, 33 %
+  and the rest of span + 2) make a bell-shaped curve over the span: a
+  broad one over 4 ms and a sharp one over 1 ms, the sharp one fed 3 ms
+  later so both land on the same sample. Each output is an average of
+  values no higher than the requirement it lands on, so neither overshoots,
+  and nor does any blend of them. The blend's sharp share follows how
+  sudden the moment is: the detector's 1 ms power against its 50 ms power,
+  3 dB above mapping to 0 and 9 dB to 1, rising in 0.5 ms and falling over
+  40 ms.
+- **Bass guard.** The mono sum through two 110 Hz low-passes; its period
+  from rising crossings (hysteresis 0.3 × its RMS), 25 to 300 Hz, eased;
+  it leads while the low band holds more than 30 % of the power (30 ms
+  means) and crossings keep coming (within 50 ms). The guard eases in and
+  out over 40 ms.
+
+The gain applies to the input delayed by the broad span − 1 + 24 samples,
+the latency: 215 samples at 48 kHz (199 at 44.1 kHz). Read by the same
+detector, the output stays at the ceiling (within 0.001 dB).
+
+Loudness (BS.1770-5, EBU Tech 3341/3342). K-weighting at any rate, from the
+analogue prototypes of the standard's 48 kHz filters through the bilinear
+transform, on the output (and on the dry input, for `matched`); channels
+summed with weight 1. 100 ms blocks: momentary over 4, short-term over 30.
+Integrated: each momentary block above −70 LUFS goes into a histogram of
+0.1 LU bins, gated again 10 LU under the absolutely gated loudness. LRA:
+short-term values (once 3 s have played) above −70 LUFS and 20 LU under
+their own loudness, the 95th percentile minus the 10th. Integrated, LRA,
+true peak and the count of over-ceiling samples restart when the transport
+starts.
+
+Listen: `matched` turns the output down by the dry input's short-term
+loudness against the output's (−30..+6 dB, gliding over 400 ms, back over
+40 ms); `delta` plays what was taken (the delayed driven input minus the
+output, divided by the drive), crossfading over 10 ms.
+
+Editor (1000 × 700, the script's own drawing; a mountainside whose trees stop
+at a dashed line beside the name):
+
+- **History.** Eight seconds scrolling (10 ms columns, peak envelopes with
+  a 120 ms fall), +9..−27 dBFS: the driven input's true peak, filled in clay
+  where it rises above the ceiling (what was held down); the output's true
+  peak filled in linen; the momentary loudness in marigold; the target,
+  dotted; the ceiling, a sage line; bar and beat lines while the transport
+  plays. Under it a lane of gain reduction (0..−9 dB): the sustained part
+  (the plateau) in moss, the peaks' part in clay. Drag the ceiling or the
+  target line; drag elsewhere or wheel for gain; double-click resets.
+- **Loudness.** Integrated (large), how far from the target and what a
+  service normalizing to it would do, a button that sets the gain the
+  difference suggests, momentary and short-term bars with the target,
+  true peak, loudness range, peak to loudness, short-term and samples over
+  the ceiling; the target's slider.
+- **Limiter.** Gain, ceiling and release knobs; the listen choice.
+- **Engine.** The attack curve in use between the broad and the sharp one,
+  the bass it follows and the hold that spans it, the two-stage release
+  with the music's sustained share, and a gain-reduction bar in its two
+  parts with a held peak.
+
+Knobs drag vertically (Shift fine), wheel, and reset on a double click.
+
+Factory patches: Transparent Master (+3 dB, −1 dBTP), Streaming Loud (+6,
+−1, 90 ms), Club Master (+9, −0.3, 60 ms, target −8), Broadcast Safe (+2,
+−2, 200 ms, target −23), Acoustic Gentle (+2, −1, 300 ms, target −16), Bus
+Peak Catcher (0, −3, 50 ms).
+
+## 11. Acceptance
 
 A plugin is done when its tests, the CLAP validator, the RT sanitizer run,
 a REAPER load and automation check, and its skill page exist.

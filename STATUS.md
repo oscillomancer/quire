@@ -190,8 +190,8 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   validated against EBU Tech 3341/3342, spectral, pitch, envelope, stereo,
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
   the LLM evaluation harness (`tools/eval-harness`).
-- **Stock plugins** (ADR-0011, ADR-0047): Orrery, Yarrow, Sundew, Sluice,
-  Flint, Kiln, Echelon, Nave, Plumb and Gauge, each passing clap-validator, a
+- **Stock plugins** (ADR-0011, ADR-0047): Orrery, Yarrow, Sundew, Treeline,
+  Sluice, Flint, Kiln, Echelon, Nave, Plumb and Gauge, each passing clap-validator, a
   reset determinism check and an unload test (all but Nave also pass the
   headless REAPER check); JSON patches and the semantic-parameters extension.
   Yarrow, the EQ, is the first written as a DSP script
@@ -207,10 +207,16 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   (a restart), tempo-locked release, colour, mix and loudness matching; an
   editor with a scrolling history with bars and beats, a transfer curve, a
   gain-change needle and a plot of each character's ballistics. It replaced
-  Ballast (`com.suppleaudio.comp`), and with it the stock set's only peak
-  limiter: until a limiter of its own is written, master peaks are held by
-  Sundew's Clean character with lookahead (sample peaks only) or by render
-  normalization's true-peak limiter.
+  Ballast (`com.suppleaudio.comp`). Treeline, the limiter
+  (`plugins/stock/treeline`), is the third: a true-peak ceiling (a 4×
+  interpolating detector, within 0.01 dB to 20 kHz), attack along two
+  overshoot-free curves blended by how sudden the music is, a hold that
+  spans a cycle of a leading bass line, a two-stage release, 4.5 ms of
+  latency at 48 kHz; BS.1770/R128 loudness of the output (momentary,
+  short-term, integrated and LRA since play, true peak) against a target,
+  level-matched and delta listening, and an editor with a history of what
+  was held down, the loudness and the reduction in its sustained and peak
+  parts, and plots of what the engine is doing.
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The

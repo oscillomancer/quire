@@ -46,8 +46,7 @@ Clip off is zero latency. Clip on adds exactly 72 samples, aligned with
 the dry path, through the shared 2x `dsp::Oversampler`. Toggle it while stopped
 or let the host service the requested restart. Clip is a soft tone change;
 it does not guarantee a sample or true-peak ceiling, and output gain can
-raise peaks afterwards. For a mastering ceiling use render normalization's
-true-peak limiter.
+raise peaks afterwards. For a mastering ceiling use [Treeline, the limiter](limiter.md).
 
 This is a linked broadband effect: it cannot isolate a snare from bass or
 cymbals in a full mix, and it has no external key or frequency selectors.
