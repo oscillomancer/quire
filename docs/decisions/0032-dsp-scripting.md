@@ -562,6 +562,7 @@ template shared stack and remain Linux-only.
 
 This dated amendment supersedes the Linux/EGL-only picture limit above.
 The bundled template is framework 1.24.0 (template commits ccdcdf5 and ee51285).
+(Note, 2026-10-18: now framework 1.25.0, which adds a serif face; see ADR-0047.)
 `dsp.preview` and the editor-picture extension use its native renderer:
 EGL on Linux/BSD, Metal with an unattached layer and synchronized RGBA texture
 readback on macOS, and a never-shown WGL window with framebuffer objects on

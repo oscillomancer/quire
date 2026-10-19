@@ -39,7 +39,7 @@ from pipewire-jack (MIT, dlopen'ed), libpipewire-0.3 (MIT), alsa-lib (LGPL,
 OS library, dynamic only — explicitly permitted by policy), libX11/libGL, and libEGL (dlopen'ed by
 plugins of the template to draw an editor without a window).
 
-Fonts are assets, not code: SIL OFL-1.1 fonts (Inter, IBM Plex — the fonts the plugin template already ships) are permitted for bundling; see
+Fonts are assets, not code: SIL OFL-1.1 fonts (Inter, IBM Plex, Fraunces — the fonts the plugin template ships) are permitted for bundling; see
 ADR-0003. The DAW GUI bundles Inter (Regular, SemiBold) and IBM Plex Mono (Regular,
 Medium) under `assets/fonts/` with their OFL-1.1 license texts.
 
@@ -54,7 +54,7 @@ patches without mutating the shared vendored tree.
 Template-derived stock plugins build offline against the vendored clap,
 clap-wrapper, Pugl and NanoVG trees above (ADR-0011). The VST3 SDK hosting subset
 is vendored for the host; stock-plugin VST3 builds remain opt-in. Plugin fonts (Inter, IBM
-Plex; OFL-1.1) travel with each plugin copy with their license files.
+Plex, Fraunces; OFL-1.1) travel with each plugin copy with their license files.
 
 Development tool (not linked, bundled, or used at runtime):
 `free-audio/clap-validator` 0.4.1, tag `0.4.1` at

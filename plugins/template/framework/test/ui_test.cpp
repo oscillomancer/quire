@@ -1012,6 +1012,21 @@ TEST(a_product_font_that_will_not_load_draws_in_inter) {
     nvgDeleteInternal(vg);
 }
 
+TEST(the_serif_faces_draw_in_fraunces_not_inter) {
+    NVGcontext* vg = test::createHeadlessCanvas();
+    CHECK(loadFonts(vg));
+    // Each face sets the same words to its own width: a face that failed to
+    // load would fall back and measure exactly as Inter does.
+    const char* words = "Equaliser \xE2\x80\x94 Band 3";
+    const float bold = widgets::textWidth(vg, words, 14.0f, font::kUiBold);
+    const float serif = widgets::textWidth(vg, words, 14.0f, font::kSerif);
+    const float italic = widgets::textWidth(vg, words, 14.0f, font::kSerifItalic);
+    CHECK(serif > 0.0f && italic > 0.0f);
+    CHECK(serif != bold && italic != serif);
+    CHECK(italic != widgets::textWidth(vg, words, 14.0f, font::kUi));
+    nvgDeleteInternal(vg);
+}
+
 TEST(text_too_long_for_its_space_shrinks_then_ends_in_an_ellipsis) {
     NVGcontext* vg = test::createHeadlessCanvas();
     CHECK(loadFonts(vg));

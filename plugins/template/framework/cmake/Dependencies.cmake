@@ -380,7 +380,9 @@ if (SUPPLE_BUILD_GUI)
             "Inter-SemiBold:supple_font_inter_semibold"
             "PlexMono-Regular:supple_font_plex_mono_regular"
             "PlexMono-Medium:supple_font_plex_mono_medium"
-            "PlexSansCondensed-SemiBold:supple_font_plex_sans_condensed_semibold")
+            "PlexSansCondensed-SemiBold:supple_font_plex_sans_condensed_semibold"
+            "Fraunces-SemiBold:supple_font_fraunces_semibold"
+            "Fraunces-Italic:supple_font_fraunces_italic")
         string(REPLACE ":" ";" parts "${spec}")
         list(GET parts 0 file)
         list(GET parts 1 symbol)

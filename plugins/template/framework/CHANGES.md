@@ -4,6 +4,18 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.25.0
+
+What a product must do: nothing. A product that wants the serif draws with
+`font::kSerif` or `font::kSerifItalic`.
+
+- **A serif face** (`gui/fonts/Fraunces-*.ttf`, `gui/Fonts.cpp`,
+  `gui/Theme.h`). Fraunces 9pt Soft, SemiBold and Italic, subset to Latin-1
+  and common punctuation (about 28 KB each), registered as `serif` and
+  `serif-italic` and falling back to Inter. For a product whose name and
+  headings want a warmer voice than Plex Sans Condensed. Its OFL notice is
+  in `NOTICES.txt` and `gui/fonts/LICENSE-Fraunces.txt`.
+
 ## 1.24.0
 
 What a product must do: nothing. Internal callers of the renderer seam's
