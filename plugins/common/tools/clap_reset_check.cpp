@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Supple Audio
-// clap-reset-check <plugin.clap> [plugin-id]
+// clap-reset-check <plugin.clap> [plugin-id] [--stepped]
 //
 // CLAP's contract: reset() clears all processing state (filters, oscillators,
 // envelopes, LFOs, smoothers, delay lines) and keeps the parameter values. The
@@ -17,6 +17,10 @@
 //
 // A's second render and B's render must match exactly, at block 256 and again
 // at block 64. Every stock plugin registers this as plugin.<id>.reset.
+//
+// --stepped also moves every writable stepped parameter (switches, choices)
+// off its default, the same way in S1 and S2, for a plugin whose default
+// state leaves its processing switched off (an EQ with every band off).
 // Exit 0 = every plugin in the file passed.
 #include <algorithm>
 #include <cmath>
@@ -184,12 +188,21 @@ std::int64_t firstDifference(const Capture& a, const Capture& b) {
     return -1;
 }
 
-std::vector<host::ParamInfo> continuousParams(host::Instance& in) {
+bool stepped = false;  // --stepped
+
+std::vector<host::ParamInfo> paramsOf(host::Instance& in, bool wantStepped) {
     std::vector<host::ParamInfo> out;
     for (const auto& p : in.params())
-        if (!(p.flags & CLAP_PARAM_IS_STEPPED) && !(p.flags & CLAP_PARAM_IS_READONLY))
+        if (((p.flags & CLAP_PARAM_IS_STEPPED) != 0) == wantStepped &&
+            !(p.flags & CLAP_PARAM_IS_READONLY))
             out.push_back(p);
     return out;
+}
+
+// The next step up from a stepped parameter's default, or the one below at the top.
+double nextStep(const host::ParamInfo& p) {
+    const double up = std::round(p.def) + 1.0;
+    return up <= p.max ? up : std::max(p.min, std::round(p.def) - 1.0);
 }
 
 // A value this parameter's default is not, so that the "before" state is
@@ -236,7 +249,8 @@ bool compareAtBlock(const host::PluginInfo& info, std::uint32_t block, int pass,
         detail = "the plugin has no audio output";
         return false;
     }
-    const auto params = continuousParams(**a);
+    const auto params = paramsOf(**a, false);
+    const auto steps = stepped ? paramsOf(**a, true) : std::vector<host::ParamInfo>{};
     // An instrument (or anything with no audio input) is only driven by notes.
     const auto notes =
         (info.instrument || (*a)->audioInputChannels() == 0) ? makeNotes() : std::vector<Timed>{};
@@ -254,8 +268,12 @@ bool compareAtBlock(const host::PluginInfo& info, std::uint32_t block, int pass,
         differ = differ || s1.back() != s2.back();
     }
 
+    std::vector<double> moved;
+    for (const auto& p : steps) moved.push_back(nextStep(p));
+
     std::string error;
-    if (!applyAll(**a, params, s1, error) || !applyAll(**b, params, s2, error)) {
+    if (!applyAll(**a, steps, moved, error) || !applyAll(**b, steps, moved, error) ||
+        !applyAll(**a, params, s1, error) || !applyAll(**b, params, s2, error)) {
         detail = "setParam failed: " + error;
         return false;
     }
@@ -277,8 +295,8 @@ bool compareAtBlock(const host::PluginInfo& info, std::uint32_t block, int pass,
 
     char summary[256];
     std::snprintf(summary, sizeof(summary),
-                  "[pass %d block %u] %zu continuous params, peaks %.9g/%.9g", pass, block,
-                  params.size(), peakOf(afterReset), peakOf(fresh));
+                  "[pass %d block %u] %zu continuous params, %zu stepped moved, peaks %.9g/%.9g",
+                  pass, block, params.size(), steps.size(), peakOf(afterReset), peakOf(fresh));
     detail = summary;
 
     // Guard against a comparison that proves nothing: the reference has to
@@ -317,12 +335,16 @@ void testPlugin(const host::PluginInfo& info) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 2 || argc > 3) {
-        std::fprintf(stderr, "usage: %s <plugin.clap> [plugin-id]\n", argv[0]);
+    std::vector<std::string> args(argv + 1, argv + argc);
+    const auto flag = std::find(args.begin(), args.end(), "--stepped");
+    stepped = flag != args.end();
+    if (stepped) args.erase(flag);
+    if (args.empty() || args.size() > 2) {
+        std::fprintf(stderr, "usage: %s <plugin.clap> [plugin-id] [--stepped]\n", argv[0]);
         return 2;
     }
-    const std::filesystem::path path = argv[1];
-    const std::string only = argc == 3 ? argv[2] : std::string();
+    const std::filesystem::path path = args[0];
+    const std::string only = args.size() == 2 ? args[1] : std::string();
     auto list = host::scan(std::span<const std::filesystem::path>(&path, 1));
     if (!list) {
         std::fprintf(stderr, "scan failed: %s\n", list.error().toString().c_str());

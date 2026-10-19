@@ -199,8 +199,7 @@ class NativeCode final : public Code {
             double value = std::numeric_limits<double>::quiet_NaN();
             if (i < params.size() && params[i].kind == ParamModel::Kind::Choice && key)
                 for (size_t j = 0; j < params[i].choices.size(); ++j)
-                    if (factoryChoiceKey(params[i].choices[j]) == key)
-                        value = static_cast<double>(j);
+                    if (choiceKey(params[i], j) == key) value = static_cast<double>(j);
             set(param, value);
         }
     };
@@ -249,12 +248,14 @@ class NativeCode final : public Code {
         m.curve = static_cast<ParamModel::Curve>(s.curve);
         m.curveK = s.curveK;
         for (const char* c : s.choices) m.choices.emplace_back(c);
+        for (const char* k : s.choiceKeys) m.choiceKeys.emplace_back(k);
         m.group = s.group;
         m.description = s.description;
         m.smoothingMs = s.smoothingMs;
         m.automatable = s.automatable;
         m.modulatable = s.modulatable;
         m.polyModulatable = s.polyModulatable;
+        m.restarts = s.restart;
         m.offAtMinimum = s.offAtMinimum;
         m.output = s.output;
         m.bypass = s.bypass;

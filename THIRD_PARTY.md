@@ -27,7 +27,7 @@ declaration and maintainer approval; AGPL is forbidden. LGPL/MPL need the mainta
 | vst3sdk | MIT | v3.8.0_build_66 / `9fad977` | VST3 hosting ABI, Linux/macOS/Windows module loaders, event and parameter helpers | static |
 | AudioUnitSDK | Apache-2.0 | AudioUnitSDK-1.1.0 / `53a9a20` | Existing macOS stock-plugin AUv2 wrappers, clap-wrapper pin | static |
 | lua | MIT | 5.4.9 (lua.org tarball, sha256 `2335b6c5…`; upstream `src/` unmodified) | The embedded scripting language behind `libs/lua-bus` and the `script.run` command (ADR-0006); built as a static library with only the core and sandbox libraries compiled | static |
-| mir | MIT | 1.0.0 / `477d820` (tarball sha256 `fdc934…4055`; upstream files unmodified) | JIT compiler and interpreter behind DSP scripts (ADR-0032); only the core, generator and interpreter sources are vendored | static |
+| mir | MIT | 1.0.0 / `477d820` (tarball sha256 `fdc934…4055`; one local patch in the register allocator, `cmake/patches/mir-spilled-reg-reload.patch`) | JIT compiler and interpreter behind DSP scripts (ADR-0032); only the core, generator and interpreter sources are vendored | static |
 | clap-wrapper | MIT (bundles fmt: MIT; PreSonus gain-reduction header: public domain) | 0.16.0 / `1cca996` (template pin) | Builds template-derived plugins (CLAP; VST3/AUv2 when enabled) | static, plugins only |
 | pugl | ISC (a few build files 0BSD OR ISC) | 0.5.7 / `b763714` (template pin) | Plugin editor windowing (template GUI stack) | static, plugins only |
 | nanovg_metal | MIT | template pin `1e42439` | macOS-only plugin editor renderer (the template's default on Apple); vendored unmodified, never built on Linux or Windows | static, macOS plugins only |
@@ -39,7 +39,7 @@ from pipewire-jack (MIT, dlopen'ed), libpipewire-0.3 (MIT), alsa-lib (LGPL,
 OS library, dynamic only — explicitly permitted by policy), libX11/libGL, and libEGL (dlopen'ed by
 plugins of the template to draw an editor without a window).
 
-Fonts are assets, not code: SIL OFL-1.1 fonts (Inter, IBM Plex — the fonts the plugin template already ships) are permitted for bundling; see
+Fonts are assets, not code: SIL OFL-1.1 fonts (Inter, IBM Plex, Fraunces — the fonts the plugin template ships) are permitted for bundling; see
 ADR-0003. The DAW GUI bundles Inter (Regular, SemiBold) and IBM Plex Mono (Regular,
 Medium) under `assets/fonts/` with their OFL-1.1 license texts.
 
@@ -54,7 +54,7 @@ patches without mutating the shared vendored tree.
 Template-derived stock plugins build offline against the vendored clap,
 clap-wrapper, Pugl and NanoVG trees above (ADR-0011). The VST3 SDK hosting subset
 is vendored for the host; stock-plugin VST3 builds remain opt-in. Plugin fonts (Inter, IBM
-Plex; OFL-1.1) travel with each plugin copy with their license files.
+Plex, Fraunces; OFL-1.1) travel with each plugin copy with their license files.
 
 Development tool (not linked, bundled, or used at runtime):
 `free-audio/clap-validator` 0.4.1, tag `0.4.1` at

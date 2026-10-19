@@ -1,74 +1,87 @@
-# Compressor and limiter (`comp`)
+# Sundew: compressor
 
-Ballast controls track dynamics, ducks a track from an external key, or
-limits a master to a peak ceiling. CLAP id: `com.suppleaudio.comp`.
-Patches use `supple.comp-patch/1.0` with physical values under `params`.
+Use `com.suppleaudio.sundew` to control a track's dynamics, glue a bus, duck
+a track from an external key, lift quiet detail (upward compression), or
+catch peaks. Patches use `supple.sundew-patch/1.0`, with physical values
+under `params`; a merge changes only the keys it names.
 
-| Key | Unit / range | Default |
+Pick a `character` first; ratio, attack and release mean the same in each:
+
+| Character | What it is | Reach for it on |
 |---|---|---|
-| `mode` | `compressor`, `limiter` | `compressor` |
-| `threshold` | dB, -60..0 | -18 |
-| `ratio` | ratio, 1..100; 100 = infinity, pow 3 curve | 4 |
-| `knee` | dB, 0..24, full width | 6 |
-| `attack` | ms, 0.01..300, log | 10 |
-| `release` | ms, 5..5000, log | 150 |
-| `auto_release` | bool | false |
-| `detector` | `peak`, `rms` | `peak` |
-| `rms_window` | ms, 1..100, log; exponential averaging | 10 |
-| `topology` | `feedforward`, `feedback` | `feedforward` |
-| `sidechain` | `internal`, `external` | `internal` |
-| `sc_highpass` | Hz, 10..500, log; 10 = off | 10 |
-| `sc_lowpass` | Hz, 1000..20000, log; 20000 = off | 20000 |
-| `sc_listen` | bool, filtered-key audition | false |
-| `stereo_link` | percent, 0..100 | 100 |
-| `lookahead` | `off`, `ms1`, `ms5`; host restart | `off` |
-| `makeup` | dB, -12..24 | 0 |
-| `auto_makeup` | bool | false |
-| `ceiling` | dB, -24..0; limiter ceiling | -1 |
-| `true_peak` | bool; host restart when latency changes | true |
-| `mix` | percent, 0..100; delayed dry/wet | 100 |
-| `output` | dB, -24..24 | 0 |
-| `gr` | dB, -60..0, readonly, deepest since report | 0 |
+| `clean` | Feedforward, peak, exact; no colour | Anything where only the numbers should change; peak control; ducking |
+| `glue` | Feedforward RMS; a slow stage makes release program-dependent (short peaks recover fast, long passages slowly) | Drum and mix buses |
+| `opto` | Feedback RMS; drops fast then lets the last few dB go over seconds, longer after long compression; big jumps grab faster | Vocals, bass, anything that needs leveling |
+| `fet` | Feedback peak, very fast, ratio steepening above the threshold, release quickening when it works hard | Snare and drum attack, aggressive parallel compression |
+| `vari_mu` | Feedforward RMS, the ratio growing with the reduction (the ratio set is where it ends up), S-shaped movement | Gentle mix-bus compression, mastering |
+| `bloom` | Upward: lifts what is below the threshold, up to `range`, never the noise floor | Room tails, quiet detail, acoustic sources |
 
-## Three starting recipes
+| Key | Unit and range | Default |
+|---|---|---|
+| `character` | clean, glue, opto, fet, vari_mu, bloom | clean |
+| `threshold` | dB, −60…0 (Bloom: the level it lifts below) | −18 |
+| `ratio` | 1…20, logarithmic | 3 |
+| `attack` | ms, 0.05…250, logarithmic | 10 |
+| `release` | ms, 5…3000, logarithmic; ignored while `sync` is on | 150 |
+| `sync` | off, n32, n16, n8, n4, n2, bar: release recovers within that note at the tempo | off |
+| `knee` | dB, 0…24 (Glue, Opto and Vari-Mu add their own) | 6 |
+| `range` | dB, 1…40: the deepest cut, or Bloom's highest lift | 24 |
+| `key` | internal, external (the sidechain input, when connected) | internal |
+| `key_hpf` | Hz, 20…800 high-pass on the key; 20 is off | 20 |
+| `link` | %, 0…100: how much the channels share one gain | 100 |
+| `stereo` | lr, ms: left/right or mid/side (lower `link` to treat mid and side apart) | lr |
+| `lookahead` | off, ms1, ms2, ms5; adds that latency; changing it restarts the plugin | off |
+| `listen` | off, key, delta: hear the key, or what the compression removes; for people, not mixes | off |
+| `colour` | %, 0…100: the character's harmonics, more as it works harder (Clean, Bloom: none) | 0 |
+| `output` | dB, −24…+24, after mix and match | 0 |
+| `mix` | %, 0…100: below 100 is parallel compression | 100 |
+| `match` | bool: keeps the output as loud as the input, measured over about a second | false |
+| `gain_change` | dB, readonly: the largest gain change in the last block (negative cuts) | |
+| `loudness_change` | dB, readonly: output against input, before the match | |
 
-Track control: merge `{"params":{"threshold":-24,"ratio":3,"knee":6,
-"attack":20,"release":150,"auto_makeup":true}}`. Render, compare crest
-factor and loudness, and set makeup for a fair A/B. Auto makeup compensates
-static reduction at -18 dBFS, so it is a starting estimate rather than a
-measured loudness match.
+## Recipes
 
-Kick-keyed bass: merge `{"params":{"sidechain":"external","threshold":-24,
-"ratio":10,"knee":0,"attack":2,"release":120}}`. Connect the kick using
-`route.add {"from":"tr_kick","fx":"fx_bass_comp","tap":"post_fader"}`.
-Listen to the key with `sc_listen`, then turn audition off. Missing or silent
-keys yield no compressor reduction; key filters can remove unwanted triggers.
+Level a vocal, compared at equal loudness:
 
-Master peak delivery: merge `{"params":{"mode":"limiter","lookahead":"ms1",
-"true_peak":true,"ceiling":-1,"output":3}}`. Render and check
-`loudness.true_peak_dbtp` and integrated LUFS. Adjust output drive only if
-more limiting is wanted. This controls peaks; it does not normalize LUFS.
+```json
+{"params":{"character":"opto","threshold":-26,"ratio":3,"attack":10,"release":120,"match":true}}
+```
 
-## Limits and timing
+Glue a drum bus, keeping the kick from driving it and some of the dry punch:
 
-The limiter ignores compressor threshold/ratio/topology/detector and external
-key for gain control. Ceiling applies after makeup, mix and output, including
-key audition. True-peak detection uses the 4x-interpolated driven signal;
-the moving-average gain ramps through the lookahead rather than stepping.
-There is no additional detection margin or reconstruction bound. Below-ceiling
-transparency is verified for -10 and -3 dBFS sines with a -1 dB ceiling;
-true-peak ceiling checks allow 0.1 dB measurement tolerance.
+```json
+{"params":{"character":"glue","threshold":-20,"ratio":4,"attack":30,"release":100,"key_hpf":90,"mix":75,"match":true}}
+```
 
-Lookahead delays dry, wet and filtered-key audition (`sc_listen`) equally.
-With limiter true-peak detection, add 16 samples to the selected lookahead.
-`off` guarantees sample peaks only, even if true-peak is selected. Mode,
-lookahead and true-peak are stepped, non-automatable controls; changes wait
-for host restart, including a mode switch with equal latency.
-Feedback detects the previous compressed wet sample before makeup/mix/output;
-external key overrides feedback. Auto release blends release and five-times
-release coefficients according to reduction held over the last second.
-The GUI peak readouts are sample peak dBFS, and `gr` is not a loudness meter.
-In limiter mode the editor disables unused compressor controls. Key selection
-and filters remain available during key audition; topology does not affect
-that audition. Makeup, mix and output set the limiter's input drive, shown
-in its transfer curve before flattening at the ceiling.
+Duck a bass from the kick, recovering by the next eighth note: set the key,
+then route the kick to it (`route.add {"from":"tr_kick","fx":"fx_bass_comp",
+"tap":"post_fader"}`). Without a connected key, Sundew hears its own input.
+
+```json
+{"params":{"character":"clean","key":"external","threshold":-30,"ratio":10,"attack":1,"sync":"n8","knee":0,"range":12}}
+```
+
+Lift a room's tail and quiet detail without touching the loud hits:
+
+```json
+{"params":{"character":"bloom","threshold":-30,"ratio":2.5,"attack":3,"release":250,"range":10}}
+```
+
+## Measuring it
+
+Render and read `gain_change` (or the analysis report): crest factor falls
+as compression rises; loudness falls unless `match` or `output` makes it up.
+`match` exists so a bypass comparison is fair: compare with it on, then
+decide whether the result is better, not merely louder. `loudness_change`
+says how much quieter the compression made it.
+
+## Limits
+
+Sundew is not a limiter: there is no ceiling and no true-peak detection.
+Clean at 20:1 with `lookahead` `ms1` holds sample peaks closely; for a
+delivery ceiling use render normalization's true-peak limiter. A feedback
+character (Opto, FET) with an external key detects the key, feedforward.
+Lookahead delays the audio, not the detector, and the latency changes only
+after the host restarts the plugin. Match is a slow gain (about a second);
+it follows the song's loudness, so turn it off before printing if the level
+should stay put.

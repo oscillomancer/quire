@@ -3,7 +3,8 @@
 **Status:** Implemented. Each plugin's section records its decisions;
 `docs/specs/effects.md` holds the implementation notes.
 **Common rules:** ADR-0010 (semantic params, value domains), ADR-0011
-(template instantiation), `docs/specs/core-params.md`, `core-patch.md`,
+(template instantiation), ADR-0047 (stock plugins written as DSP scripts),
+`docs/specs/core-params.md`, `core-patch.md`,
 `semantic-params-extension.md`.
 
 ## 0. Conventions shared by every stock effect
@@ -11,12 +12,22 @@
 - **Enum keys** start with a lowercase letter (core-params validation):
   numeric choices take a unit prefix — `db12`, `ms5`, `x4` — while their
   display labels keep the numbers ("12 dB/oct", "5 ms", "4x"). Tables below
-  that still show digit-led keys mean these prefixed forms.
+  that still show digit-led keys mean these prefixed forms. A scripted stock
+  plugin names them with `.keys({...})` (ADR-0047).
 - **Patch form:** flat (core-patch `FlatPatchType`): `"params": {"<key>":
   value}` with dotted keys (`band2.freq`). One form for every effect, so an
   agent learns it once. Keys and units are the parameter table.
-- **Names:** craft nouns; code identifiers use the functional id in
-  brackets. CLAP ids `com.suppleaudio.<id>`.
+- **Names:** the template plugins carry craft nouns; their scripted
+  replacements are named after plants and the natural world (ADR-0047).
+  Code identifiers use the functional id in brackets. CLAP ids
+  `com.suppleaudio.<id>`.
+- **Look (scripted stock plugins):** the scripts' palette, warm and earthy
+  and distinct from the host's graphite: walnut panels lit a little from
+  above, a soil-dark graph floor, parchment text, clay (`Theme::accent`) and
+  sage (`Theme::accent2`); the name and panel headings in Fraunces
+  (`serifFont`, asides in `serifItalicFont`), labels in Inter, numbers in
+  Plex Mono. Colours a plugin adds (band colours, curves) keep to the same
+  earth and meadow tones.
 - **Every effect:** mono/stereo configs (plus sidechain input where
   listed), float/double, sample-accurate automation, block-size invariant
   (null −120 dBFS across 1..4096), denormal-safe, deterministic (seeded where
@@ -36,6 +47,10 @@
   registered as `plugin.<id>.reset` for every stock plugin and Orrery) renders
   state S1, then S2 after `reset()`, and requires that S2 render to be
   bit-identical to a fresh instance holding S2 — at block 256 and again at 64.
+  Scripted stock plugins (ADR-0047) also run it with `--stepped`
+  (`plugin.<name>.reset-stepped`): every switch and choice moved off its
+  default in both states, so a plugin whose default is a passthrough still
+  shows its processing state.
 - **Readonly telemetry parameters** (gain reduction, levels) exist for
   generic hosts; the GUI uses the telemetry ring.
 - **Tests beyond the template's:** frequency/phase response against analytic
@@ -43,230 +58,238 @@
   against spec, sidechain behaviour, parameter-sweep automation stress, and
   golden renders (tolerance-aware null) for every factory preset.
 
-## 1. EQ — "Facet" [`eq`]
+## 1. EQ — "Yarrow" [`yarrow`]
 
-Parametric EQ with 8 bands, per-band stereo placement, analysis-driven
-workflow in mind ("cut 250 Hz by 3 dB, Q 1.2" is one merge patch).
-
-| key | type | range | curve | default |
-|---|---|---|---|---|
-| `bandN.enabled` (N = 1..8) | bool | | | band1–4 on, 5–8 off |
-| `bandN.type` | enum | `bell`, `low_shelf`, `high_shelf`, `high_pass`, `low_pass`, `notch`, `band_pass`, `tilt` | | 1 `high_pass`, 2 `bell`, 3 `bell`, 4 `high_shelf`, 5–8 `bell` |
-| `bandN.freq` | Hz | 10..30000 (clamped < 0.49 fs) | log | 30, 200, 1000, 8000, 500, 2000, 4000, 12000 |
-| `bandN.gain` | dB | −30..+30 | linear | 0 |
-| `bandN.q` | none | 0.1..24 | log | 0.71 |
-| `bandN.slope` | enum | `db6`, `db12`, `db18`, `db24`, `db36`, `db48`, `db72`, `db96` (dB/oct; HP/LP only) | | `db24` |
-| `bandN.channel` | enum | `stereo`, `left`, `right`, `mid`, `side` | | `stereo` |
-| `phase` | enum | `minimum`, `natural` (analog-matched magnitude near Nyquist), `linear` (latency; stepped) | | `natural` |
-| `auto_gain` | bool | output level compensation for the static curve | | false |
-| `output` | dB | −24..+24 | linear | 0 |
-
-DSP: `natural` uses filter-specific matched second-order sections at the host
-sample rate; `minimum` uses bilinear SVFs with prewarping; `linear` uses a
-partitioned FIR from the minimum-phase design (fixed latency 2048 samples at
-48 kHz, scaled with rate). The natural magnitude target is ≤0.3 dB deviation
-from the analog prototype through 20 kHz at 44.1/48 kHz for bells with Q ≤4
-and shelves with Q ≤1, f0 ≤10 kHz, over the full ±30 dB gain range. Resonant
-shelves and near-Nyquist bands have the measured limits below, rather than the
-same accuracy guarantee. Cascaded HP/LP slopes use Butterworth sections (odd
-orders include a first-order section). Float changes have 20 ms smoothing;
-matched coefficients update on a fixed 16-sample grid only while moving.
-GUI centrepiece: the summed response over a live spectrum (core-analysis
-LTAS of the input, pre/post).
-
-### EQ implementation decisions (2026-09-30)
-
-- Approved correction: slope enum keys are `db6`…`db96`, with dB/oct display
-  labels. Numeric-only enum keys violate core-params validation.
-
-- The authoritative 0.49·fs frequency clamp here takes precedence over the
-  generic implementation plan's 0.45·fs. Values in patches remain unclamped.
-- Natural mode uses original matched sections derived from the mathematical
-  method in [Vicanek (2016)](https://vicanek.de/articles/BiquadFits.pdf), with
-  no oversampling or half-band filters. Main boost poles use impulse invariance.
-  Bell numerators match DC, centre magnitude and the stationary centre. Shelf
-  numerators match DC, Nyquist and the midpoint; Q >1 uses the analog bump.
-  An unrealizable resonant shelf numerator, or one that misses the opposite
-  extremum by >0.5 dB, falls back to damped analog zeros; out-of-band zeros
-  are omitted rather than aliased into the audible band. A second, stable
-  minimum-phase SOS fits the smooth magnitude residual using 24 fixed samples
-  in the φ basis, DC held exact and two numerator terms solved by weighted
-  least squares. Its fixed poles are −0.4; corrections with near-unit zeros
-  are rejected. Cuts are reciprocal boost designs and high shelves use the
-  low-shelf complement. Passes use matched Butterworth sections; tilt uses
-  matched first-order shelves. Double-state transposed direct-form-II runs
-  every matched section. Frequency-dependent IIR phase remains intrinsic to
-  the filter, without resampling group delay. Reported latency is zero.
-  Zero-gain gain-type bands still bypass exactly.
-- Coefficient fits use extended intermediates for low-frequency cancellation,
-  then store double coefficients. Matched coefficients update every 16 samples
-  while a smoother is moving (including its final grid update), with the grid
-  retained across host blocks. Auto gain and response sweeps reuse already
-  designed sections; unchanged curves do not trigger repeated auto-gain work.
-- Accuracy was measured using `eq-bench --accuracy`, 25 centre frequencies
-  from 10 Hz through 10 kHz, gains −30…+30 dB in 3 dB steps, Q 0.1…4 for
-  bells / 0.1…1 for normal shelves. Each case probes 2049 log-spaced and 2049
-  linearly spaced frequencies from 20 Hz to 20 kHz, plus centre/resonance probes.
-  The engine tests require the same normal-domain ≤0.3 dB bound and independently
-  compare processed sinusoids with the digital response. Worst measured errors:
-
-  | Domain | 44.1 kHz | 48 kHz |
-  |---|---:|---:|
-  | Bell, normal domain | 0.173604 dB | 0.059654 dB |
-  | Either shelf, normal domain | 0.254058 dB | 0.223204 dB |
-  | Resonant shelves, f0 ≤10 kHz, Q 1.2…24 | 17.219869 dB | 0.840856 dB |
-  | Bell near Nyquist, Q 4…24 | 1.500638 dB | 1.291749 dB |
-  | Resonant shelves near Nyquist, Q 1.2…24 | 21.030647 dB | 16.180889 dB |
-
-  The extra-domain sample set uses ±6/12/30 dB, centre frequencies 1/4/8/10 kHz
-  for resonant shelves; near Nyquist uses 10/16 kHz and 0.45/0.49·fs. The large
-  resonant-shelf errors occur at Q=24, where a pole/zero extremum is at or beyond
-  the available bandwidth. They are explicit approximation limits, not part of
-  the normal-domain guarantee. Complete worst-case coordinates are printed by
-  the measurement executable and saved in the worker verification log.
-- CPU budget: `eq-bench 120`, Clang `-O2`, 48 kHz, 512-frame stereo blocks,
-  fixed non-flat HP/bell/high-shelf and eight-band mixed-filter patches,
-  median of five CPU-time trials per variant (percent of one core):
-
-  | Bands | Auto gain | Minimum | Natural | Natural/minimum |
-  |---:|---|---:|---:|---:|
-  | 4 | off | 0.3103% | 0.2440% | 0.787× |
-  | 8 | off | 0.6081% | 0.4259% | 0.700× |
-  | 4 | on | 0.3431% | 0.3138% | 0.915× |
-  | 8 | on | 0.6675% | 0.4987% | 0.747× |
-
-  This meets the ≤2× minimum budget. It is an offline benchmark executable,
-  not a timing test or an audio-device test.
-- All three phase choices are nonautomatable and require reactivation; latency
-  remains fixed while active. Linear latency is round(2048·fs/48000); its
-  128-sample convolution partition delay is included in that number. Symmetric
-  Lanczos-windowed FIR kernels have 2·(latency−128)+1 taps. Narrow low-frequency
-  responses have finite-length approximation limits. Linear kernel compilation
-  is asynchronous and coalesces updates, followed by a 20 ms interpolation on
-  the fixed partition grid; exact-offset automation applies to minimum/natural.
-- Auto gain samples the summed affected-channel curve at 64 equally spaced
-  log-frequency midpoints from 20 Hz to min(20 kHz,0.49·fs). It is a static
-  pink-weighted estimate, bounded to ±24 dB compensation so deep stopbands
-  cannot create unbounded gain, including for selective channel placement, not an
-  input-dependent loudness match. Updates use a fixed 128-sample grid and a
-  20 ms output ramp. The linear summed curve evaluates the actual windowed FIR;
-  faint per-band curves show their design targets.
-- Type/slope/channel changes fade out for 5 ms, clear filter state, then fade in
-  for 10 ms; enables/disables use 10 ms ramps. Floats use 20 ms ramps in log
-  frequency, dB gain and log Q.
-- Shelf settling and pass −3 dB checks refer to the default Q (0.71); resonant
-  user Q intentionally changes the response. Tilt uses symmetric first-order
-  shelves around its frequency.
-- Full-range stress uses low-level noise: simultaneous +30 dB boosts across
-  eight bands legitimately exceed +40 dBFS on full-scale input. The EQ does not
-  impose an undocumented limiter. Finite output and the +40 dBFS test bound are
-  checked with −480 dBFS excitation throughout the full parameter domain in
-  each phase mode, followed by two seconds of silence. Linear stress coalesces
-  kernel publication every 4096 samples; phase itself is fixed per activation.
-- The editor's pre/post spectrum uses core-analysis LTAS on 4096-sample batches
-  copied as separate left/right channels through its telemetry ring; analysis runs on the GUI thread, never RT.
-  Factory defaults include the high-pass, so the bit-exact null fixture disables
-  it (or makes every band a zero-gain gain-type filter).
-
-## 2. Compressor / limiter — "Ballast" [`comp`]
-
-Inputs: main stereo + sidechain stereo (CLAP port 1).
+An eight-band equaliser with zero latency, written as a DSP script
+(ADR-0047: `plugins/stock/yarrow/script/yarrow.cpp`). Built for the
+analysis-driven workflow ("cut 250 Hz by 3 dB, Q 1.2" is one merge patch)
+and for hands: dynamic bands, mid/side placement, band listening, gain
+scaling, and a spectrum analyser that favours bass resolution.
 
 | key | type | range | curve | default |
 |---|---|---|---|---|
-| `mode` | enum | `compressor`, `limiter` | | `compressor` |
-| `threshold` | dB | −60..0 | linear | −18 |
-| `ratio` | ratio | 1..100 (100 shown as ∞) | pow 3 | 4 |
-| `knee` | dB | 0..24 | linear | 6 |
-| `attack` | ms | 0.01..300 | log | 10 |
-| `release` | ms | 5..5000 | log | 150 |
-| `auto_release` | bool | program-dependent release | | false |
-| `detector` | enum | `peak`, `rms` | | `peak` |
-| `rms_window` | ms | 1..100 | log | 10 |
-| `topology` | enum | `feedforward`, `feedback` | | `feedforward` |
-| `sidechain` | enum | `internal`, `external` | | `internal` |
-| `sc_highpass` | Hz | 10..500 (10 = off) | log | 10 |
-| `sc_lowpass` | Hz | 1000..20000 (20000 = off) | log | 20000 |
-| `sc_listen` | bool | | | false |
-| `stereo_link` | % | 0..100 | linear | 100 |
-| `lookahead` | enum | `off`, `ms1`, `ms5` (latency) | | `off` |
-| `makeup` | dB | −12..+24 | linear | 0 |
-| `auto_makeup` | bool | | | false |
-| `ceiling` | dB | −24..0 (limiter mode: output ceiling) | linear | −1 |
-| `true_peak` | bool | limiter mode: 4× oversampled detection | | true |
-| `mix` | % | 0..100 | linear | 100 |
-| `output` | dB | −24..+24 | linear | 0 |
-| `gr` (readonly) | dB | −60..0 | | |
+| `bandN.enabled` (N = 1..8) | bool | | | off (a fresh instance is flat) |
+| `bandN.type` | enum | `bell`, `low_shelf`, `high_shelf`, `low_cut`, `high_cut`, `notch`, `tilt` | | 1 `low_cut`, 2 `low_shelf`, 3–6 `bell`, 7 `high_shelf`, 8 `high_cut` |
+| `bandN.freq` | Hz | 20..20000 (designed at most 0.45 fs) | log | 30, 100, 250, 800, 2500, 6000, 10000, 18000 |
+| `bandN.gain` | dB | −30..+30 (bells, shelves, tilt) | linear | 0 |
+| `bandN.q` | none | 0.1..30 (shelves use 0.25..2, tilt 0.25..1) | log | 0.71 (shelves, cuts), 1 (bells) |
+| `bandN.slope` | enum | `db6`, `db12`, `db18`, `db24`, `db36`, `db48` (cuts) | | `db24` |
+| `bandN.channel` | enum | `stereo`, `mid`, `side`, `left`, `right` | | `stereo` |
+| `bandN.dynamic` | bool | bells and shelves only | | off |
+| `bandN.threshold` | dB | −60..0 | linear | −30 |
+| `scale` | % | 0..200: every bell, shelf and tilt gain times this | linear | 100 |
+| `auto_gain` | bool | output offset by the static curve's average effect | | off |
+| `output` | dB | −24..+24, smoothed 20 ms | linear | 0 |
+| `listen` | int | 0..8: plays only band N's region; not automatable | | 0 |
 
-DSP: log-domain gain computer with quadratic soft knee; attack/release
-one-pole smoothing in the dB domain (branching); limiter mode = ratio ∞
-with lookahead peak hold + release, true-peak mode guarantees output ≤
-ceiling dBTP on the Tech 3341 TP signals and on programme material (tested
-with core-analysis true peak).
+DSP: every section is a second-order (or first-order) filter in transposed
+direct form II, in double precision. Poles sit where the analog prototype's
+are (impulse invariance); zeros are fitted to the prototype's magnitude,
+exact at DC and at the band's frequency (a shelf's zero frequency below
+0.6·Nyquist), with the Nyquist term chosen by least squares of the relative
+power error at 16 log-spaced frequencies from a quarter of that frequency
+up. Bells use the RBJ analog prototype (boost and cut mirror each other); a
+cut, and a shelf designed past its corner, is the opposite design inverted,
+so poles always lie below the corner. Cuts are matched Butterworth
+cascades (odd orders end with a matched first-order section); `q` scales
+the most resonant section (0.71 is Butterworth). Notch: poles from `q`,
+zeros on the unit circle, unity gain at DC. Tilt: low shelf −gain/2 and
+high shelf +gain/2 at `freq`. A band's section count is fixed by its type
+and slope, and a gain type at 0 dB is sections that pass the input exactly.
+Reported latency is zero. Measured against the analog prototypes through
+20 kHz at 44.1 and 48 kHz (25 centres 10 Hz–10 kHz, gains in 3 dB steps,
+2049 log-spaced probes): bells with Q 0.3..4 within 0.35 dB at ±12 dB and
+0.54 dB at ±30 dB; shelves (Q 0.25..1) within 0.19 dB at ±12 dB and 0.42 dB
+at ±30 dB. Wide bells above 5 kHz are the worst case; resonant shelves are
+limited to Q 2, where the fit stays within 0.95 dB at ±30 dB.
 
-Implementation decisions (2026-09-29):
+Every 16 samples, on a grid kept across host blocks, frequencies glide in
+log frequency, gains in dB and Q in log over 25 ms, and a band redesigns
+only while something moves. Turning a band on or off, or changing its type,
+slope or channel, fades the band out over 12 ms, switches and clears its
+state, and fades it back in.
 
-- `rms_window` is the exponential mean-square time constant (one pole),
-  not a rectangular window. The RMS sine curve uses input RMS dBFS, while
-  the peak curve uses the detector sample level; a sine's peak and RMS differ
-  by 3.0103 dB. Timing checks use a 20 dB constant-amplitude input step.
-- Feedback detects the previous compressed wet sample before makeup, mix
-  and output gain. An external sidechain always takes precedence over topology.
-- Auto release blends the fast `release` and slow `5 * release` one-pole
-  coefficients. Weight ramps from 0 to 1 over one second while a deeper
-  reduction is held, and returns to 0 over one second when it is releasing.
-  Auto makeup adds the negative static feedforward reduction at -18 dBFS
-  to manual makeup, only in compressor mode.
-- A limiter processes the makeup/mix/output-adjusted signal, then enforces
-  its ceiling. Compressor threshold, detector, topology and sidechain do not
-  alter limiter gain. `sc_listen` auditions the filtered key at the reported
-  latency, for internal/external keys and audition/key-source transitions;
-  its delay storage is prepared before processing. In limiter mode the audition
-  passes through the limiter too. Peak parameters in the GUI
-  measure sample peaks; they are labeled dBFS.
-- True-peak limiting adds 16 samples of latency whenever limiter mode and
-  `true_peak` are selected, including lookahead `off`. With `off`, only the
-  sample ceiling is guaranteed. Use `ms1` or `ms5` for the true-peak ceiling.
-  Mode and true-peak changes are non-automatable because they can change latency,
-  as is lookahead. All three configuration controls request a restart even
-  when the resulting delay is equal, avoiding an unsmoothed topology switch.
-  The active DSP retains the old latency configuration until
-  the host reactivates; other parameters can continue to change.
-- The limiter's minimum deque holds targets across the lookahead window;
-  release is capped by the moving average, allowing the attack to ramp instead
-  of jumping to the window minimum. The average has lookahead-samples + 1
-  entries; the interpolator's 16-sample delay is excluded from that ramp.
-  True-peak detection uses only the shared 4x interpolated driven signal,
-  without an L1 reconstruction bound or additional detection margin. With TP
-  lookahead the hold spans twice the total delay to cover the FIR support.
-  Ceiling checks allow 0.1 dBTP measurement tolerance. A -3 dBFS sine below a
-  -1 dBTP ceiling passes unchanged apart from delay; seeded pink noise driven
-  +12 dB retains sample peaks within 0.6 dB of that ceiling. No lookahead
-  setting is a loudness target.
-- The design is 900 x 560, below Orrery's 1120 x 700 limit. Knob values sit
-  below the knob and label, clear of the pointer. Limiter mode disables
-  threshold, ratio, knee, attack, detector, RMS window, topology, auto release
-  and auto makeup; key selection and filters are enabled only while key
-  audition is on. Limiter key audition uses feedforward key filtering.
-  Release, stereo link, makeup, mix, output, ceiling, true peak and lookahead
-  remain active. Its transfer curve includes the makeup/dry-wet/output drive
-  and flattens at the ceiling. Linux previews embed in a fixed-size parent
-  so a tiling window manager cannot enlarge or distort the capture.
-- Sidechain filters use 12 dB/oct Butterworth TPT sections. Endpoint bypass
-  blends across 10–20 Hz for highpass and 19–20 kHz for lowpass; endpoints are
-  exactly off. Continuous parameters smooth over 20 ms, positive log-domain
-  controls in log space; ratio smooths its inverse in the gain-computer slope
-  so the infinity endpoint has no jump. Detector/source/topology/listen
-  switches use 10 ms ramps.
+Dynamic bands follow the level of their own region at their input (a
+band-pass at the band's frequency and Q for bells, the low- or high-pass
+side of a shelf), detected per channel as the band is placed (both stereo
+channels linked), with a 3 ms attack and a 90 ms release (both longer
+below 100 and 200 Hz). Above the threshold the band moves toward its gain
+by three quarters of the overshoot, with a 6 dB soft knee, never past its
+gain; below it the band rests at 0 dB.
 
-Lookahead choice keys are `ms1` and `ms5` (displayed as 1 ms and 5 ms):
-core-params requires enum keys to start with a lowercase letter, so the
-original `1ms` / `5ms` spellings could not pass table validation.
+Auto gain offsets the output by the negative of the curve's mean power gain
+across 30 Hz–16 kHz (40 log-spaced points, weighted toward the midrange by
+two second-order roll-offs at 90 Hz and 7 kHz), with dynamic bands at rest,
+within ±18 dB, gliding over 150 ms. It is a static estimate, not a loudness
+match.
 
-Mono main configurations retain a stereo key; its maximum detector level
-controls the mono gain regardless of `stereo_link`. The implementation also
-accepts positive sample rates through 768 kHz for host-validator coverage;
-the response contract remains 22.05–384 kHz.
+Listen plays the band's region: a band-pass at its frequency and Q for
+bells, notches and tilts, the low-pass side for low shelves and low cuts
+(what a low cut removes), the high-pass side for high shelves and high cuts,
+faded in and out over 12 ms.
+
+Editor (1000 × 624, the script's own drawing; band colours clay,
+marigold, ochre, moss, sage, dusk, heather and madder; a yarrow head beside
+the name): the response graph over
+most of the window, log 20 Hz–20 kHz with a ±6/12/24/30 dB scale; the summed
+curve (every band that is on, whatever channel it works on, plus the
+output gain) over the output's spectrum; numbered nodes for the eight bands
+(switched-off bands faint, still draggable); the selected band shaded; a
+dynamic band drawn at full reach with a ring where its gain is now; a
+channel badge under mid, side, left and right bands; input and output peak
+meters; a panel for the selected band (switch, listen, type, channel,
+frequency, gain, Q, slope, dynamics with a live detector meter and
+threshold) and one for the output (gain scale, output, auto gain, peak).
+Drag a node for frequency and gain (Q for cuts and notches); wheel for Q
+(Alt: slope for cuts); Shift for fine moves; Ctrl snaps to semitones (A4 =
+440 Hz); Alt-drag listens to the band; double-click a node to switch it off,
+empty graph to add a band there (a cut below 32 Hz and above 15 kHz, a bell
+between). Hovering reads out frequency, note and cents.
+
+The analyser runs in the editor, never on the audio thread: the audio code
+keeps the newest 32768 samples of the output (mono) in a shared ring; at
+most every 40 ms of new audio the editor transforms them (Hann window,
+1.46 Hz bins at 48 kHz), smooths each of 420 log-spaced points over a
+sixteenth of an octave where bins are dense and interpolates in dB (cubic)
+where they are sparse, averages power over about half a second, rounds peaks
+with a five-point binomial kernel across neighbouring points, tilts 4.5 dB
+per octave about 1 kHz, and eases the drawn line toward that (rising with a
+50 ms and falling with a 120 ms time constant). It is drawn as one smooth
+line (Catmull-Rom through the points), unfilled, from −96 dB at the floor to
+0 dB at the top; silence lies along the floor.
+
+Factory patches: Flat, Clean Up, Vocal Polish (auto gain), De-Ess, Air and
+Weight (auto gain), Mono Bass (side cut), Telephone.
+
+## 2. Compressor — "Sundew" [`sundew`]
+
+A compressor with six characters and zero latency unless lookahead is on,
+written as a DSP script (ADR-0047: `plugins/stock/sundew/script/sundew.cpp`).
+A character is a whole gain cell (detector, law and ballistics), not a
+preset; ratio, attack and release mean the same in each. Main stereo or mono
+in and out, and a key input as wide as the main bus.
+
+| key | type | range | curve | default |
+|---|---|---|---|---|
+| `character` | enum | `clean`, `glue`, `opto`, `fet`, `vari_mu`, `bloom` | | `clean` |
+| `threshold` | dB | −60..0 (Bloom: the level it lifts below) | linear | −18 |
+| `ratio` | ratio | 1..20 (Vari-Mu: the ratio it grows toward) | log | 3 |
+| `attack` | ms | 0.05..250 | log | 10 |
+| `release` | ms | 5..3000 (ignored while `sync` is on) | log | 150 |
+| `sync` | enum | `off`, `n32`, `n16`, `n8`, `n4`, `n2`, `bar` | | `off` |
+| `knee` | dB | 0..24, full width | linear | 6 |
+| `range` | dB | 1..40: the deepest cut, or Bloom's highest lift | linear | 24 |
+| `key` | enum | `internal`, `external` | | `internal` |
+| `key_hpf` | Hz | 20..800, 12 dB/oct on the key; 20 is off | log | 20 |
+| `link` | % | 0..100 | linear | 100 |
+| `stereo` | enum | `lr`, `ms` | | `lr` |
+| `lookahead` | enum | `off`, `ms1`, `ms2`, `ms5`; restarts, not automatable | | `off` |
+| `listen` | enum | `off`, `key`, `delta`; not automatable | | `off` |
+| `colour` | % | 0..100 | linear | 0 |
+| `output` | dB | −24..+24, smoothed 20 ms | linear | 0 |
+| `mix` | % | 0..100, smoothed 20 ms | linear | 100 |
+| `match` | bool | | | off |
+| `gain_change` | dB | readonly, −48..+24: the largest change in the last block | | |
+| `loudness_change` | dB | readonly, −24..+24: output against input, before the match | | |
+
+Detector. The key is the input, or the sidechain when `external` and the
+host reports it connected (otherwise the input), high-passed when
+`key_hpf` is above 20 Hz, in left/right or mid/side (mid = (L+R)/2, side =
+(L−R)/2) as `stereo` says. Each channel's level is in dB: the sample's
+magnitude (Clean, FET) or a mean square with a one-pole of 3 ms (Glue),
+5 ms (Opto), 8 ms (Vari-Mu) or 12 ms (Bloom), plus 3.01 dB so a sine reads
+its peak. Link: each channel's level moves toward the louder by `link`.
+The audio (not the key) is delayed by the lookahead, which is the reported
+latency.
+
+Law: an amount in dB, 0 or more, from the level L, threshold T, ratio R
+and a soft knee (the quadratic corner of max(0, d) over the knee's width;
+Glue adds 3 dB to it, Opto 10, Vari-Mu 14, FET halves it), rounded into
+`range` over up to 3 dB. Feedforward: (1 − 1/R)·over. Feedback (Opto,
+FET): (R − 1)·over, where L is the output's level, so the static ratio is R
+as for the others; FET multiplies it by 1 + over/12. Vari-Mu: the ratio at
+an overshoot is 1 + (R − 1)(0.25 + 0.75(1 − e^(−over/9))). Bloom lifts:
+(1 − 1/R)·under, faded to nothing over 24 dB below 30 dB under the
+threshold, so noise and silence are not raised.
+
+Ballistics, on the amount, with one-poles of the given time constant:
+
+- Clean: a decoupled peak detector: the amount held and released with
+  `release`, then smoothed with `attack`, so a steady tone gets a steady gain.
+- Glue: attack and release, and a slow stage (350 ms up, 6 × release
+  down, at most 8 s) whose 75 % holds the amount when compression lasted:
+  short peaks recover with `release`, sustained passages slowly.
+- Opto: feedback, solved for the output it makes each sample (three Newton
+  steps on the implicit one-pole), so a fast loop never rings. Attack scales
+  from 1.5× (small steps) to 0.5× (12 dB and more); a memory stage (600 ms
+  up, 12 × release down) holds 60 % of the reduction: a fast drop, then a
+  slow tail, longer after long compression.
+- FET: feedback, solved as Opto; release quickens with depth
+  (release / (1 + amount/8)).
+- Vari-Mu: two stages in series at 0.47 × attack and release: S-shaped
+  movement.
+- Bloom: attack is how fast the lift gives way to a louder sound, release
+  how fast it returns.
+
+`sync` sets the release to a note value at the host tempo (a bar from the
+time signature): a third of the note's length, so 95 % of the way back
+within it. A change of character keeps the gain where it was: the new cell
+starts from the old amount, or, between cutting and lifting, at rest with a
+30 ms glide from the old gain.
+
+Colour adds the character's second and third harmonics to the compressed
+signal (even/odd coefficients: Glue 0.02/−0.10, Opto 0.06/−0.03, FET
+0.05/−0.16, Vari-Mu 0.11/−0.05; Clean and Bloom none), times `colour` and
+0.35 + 0.65·min(1, amount/10 dB), the input to the polynomial limited to
+±1.5 and the DC its even part makes removed (8 Hz). Then `mix` against the
+delayed dry signal, the match, and `output`. Listen plays the key (delayed
+as the audio) or the delta (dry minus compressed, before mix and output),
+faded over 10 ms.
+
+Match measures the dry and the mixed signal's power (one-poles of 600 ms)
+and, while the input is above −57 dBFS, moves an offset toward their ratio
+(within ±24 dB) over a second; the offset applies when `match` is on and
+glides out over 40 ms when it is turned off. It starts at 0 dB.
+
+Editor (1000 × 700, the script's own drawing; a sundew leaf beside the
+name; each character has a colour: Clean linen, Glue moss, Opto
+marigold, FET clay, Vari-Mu heather, Bloom madder):
+
+- **History.** Four seconds scrolling: the input as a faint line over the
+  compressed signal as a filled level (both peak per 10 ms, −48..0 dB),
+  the gain change in the character's colour from the top (Bloom's lift from
+  the floor) at twice the level scale, bar and beat lines while the
+  transport plays, and the threshold, dragged up and down, wheeled, or
+  reset by double-click.
+- **Transfer.** The steady input/output curve the character makes, with
+  unity, the threshold, a dot and its trail where the key is now, the ratio
+  and the effective knee. A drag moves threshold across and ratio up and
+  down; the wheel changes ratio. Beside it a gain-change bar.
+- **Key strip.** Key, key high-pass, link, left/right or mid/side,
+  lookahead and listen.
+- **Character list.** Each with a small plot of its own ballistics.
+- **Dynamics.** Threshold, ratio, attack, release, knee and range; the
+  ballistics plot: a hit, a rest, a held note and a rest played through a
+  cell of the character's own, each part given its share of the width;
+  dragging across a note sets attack, across a rest release; the sync
+  choices with the release they give at the tempo.
+- **Output.** A moving-coil gain-change meter on a lamp-lit face (−20 to
+  +6 dB, a peak tick), the loudness change and what the match adds,
+  output, mix and colour (dimmed where the character adds none), the
+  match switch; input and output peak meters in the header.
+
+Knobs drag vertically (Shift fine), wheel, and reset on a double click.
+
+Factory patches: Clean Start, Vocal Leveler (Opto, match), Drum Bus Glue
+(Glue, key HPF 90 Hz, mix 75 %, match), Snare Bite (FET), Parallel Smash
+(FET, mix 30 %), Mix Bus Warmth (Vari-Mu, range 6 dB), Bass Steady
+(Opto), Kick Duck (Clean, external key, 1/8 release), Detail Bloom
+(Bloom), Mid-Side Master (Glue, mid/side, link 50 %, match), Peak Catcher
+(Clean, 1 ms lookahead, 20:1).
+
+Not a limiter: there is no ceiling and no true-peak detection. Clean at
+20:1 with lookahead holds sample peaks closely; delivery ceilings belong to
+a limiter (render normalization has a true-peak limiter of its own).
 
 ## 3. Gate / expander — "Sluice" [`gate`]
 

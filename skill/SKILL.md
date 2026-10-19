@@ -44,11 +44,11 @@ their undo history and can be reviewed.
 |---|---|
 | Writing melodies, chords, drums, bass lines, controller moves | `guides/notation.md` |
 | The sandbox loop: load a plugin, program it, render, analyze, iterate | `guides/sandbox-loop.md` |
-| Corrective EQ (rumble, masking, harshness) | `guides/eq.md` |
+| EQ: rumble, masking, harshness, de-essing, dynamic and mid/side bands (Yarrow) | `guides/eq.md` |
 | Early reflections, room/hall tails, held ambience (Nave/reverb) | `guides/reverb.md` |
 | Designing a synth sound (Orrery) | `guides/sound-design.md`, then `plugin_describe` / `fx_describe` for exact fields |
 | Corrective mixing (levels, rumble, masking, loudness targets) and automation | `guides/mixing.md` |
-| Compressing, external-key ducking, or limiting master peaks | `guides/comp.md` |
+| Compressing (six characters, upward too), external-key ducking, catching peaks (Sundew/compressor) | `guides/comp.md` |
 | Gain staging, balance, width, polarity, bass mono (Plumb/utility) | `guides/utility.md` |
 | Cleaning spill or noise with a gate or expander (Sluice/gate) | `guides/gate.md` |
 | Saturation: drive, asymmetry, wavefolding (Kiln/drive) | `guides/drive.md` |

@@ -117,8 +117,8 @@ def build_session(engine, plugin_dir, workdir):
         steps = [
             step("track.add", {"name": "Bass"}, "bass"),
             step("fx.add", {"track": "${bass.track}", "plugin": "com.suppleaudio.orrery", "patch": BASS}),
-            step("fx.add", {"track": "${bass.track}", "plugin": "com.suppleaudio.eq"}),
-            step("fx.add", {"track": "${bass.track}", "plugin": "com.suppleaudio.comp"}),
+            step("fx.add", {"track": "${bass.track}", "plugin": "com.suppleaudio.yarrow"}),
+            step("fx.add", {"track": "${bass.track}", "plugin": "com.suppleaudio.sundew"}),
             step("track.add", {"name": "Synths", "type": "buss"}, "synths"),
         ]
         for name, patch in (("Pad", PAD), ("Lead", LEAD), ("Arp", ARP)):

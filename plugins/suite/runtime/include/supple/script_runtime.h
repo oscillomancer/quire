@@ -119,7 +119,7 @@ class Painter {
     virtual void fill() = 0;
     virtual void stroke() = 0;
     virtual void clip(double x, double y, double w, double h) = 0;
-    enum class Face { Regular, Bold, Mono };
+    enum class Face { Regular, Bold, Mono, Serif, SerifItalic };
     virtual void font(Face face, double size) = 0;
     virtual void textAlign(TextAlign align) = 0;
     virtual void textBaseline(TextBaseline baseline) = 0;

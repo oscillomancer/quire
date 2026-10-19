@@ -2,7 +2,9 @@
 // Copyright (c) 2026 Supple Audio
 //
 // The palette of every plugin made from a script, which its automatic
-// editor takes: the player's and a source export's look alike.
+// editor takes: the player's, a source export's and the stock plugins' look
+// alike. Warm and earthy, apart from the host's graphite: walnut panels,
+// a soil-dark floor for graphs, parchment text, clay and sage.
 #pragma once
 
 #include "gui/Theme.h"
@@ -10,23 +12,23 @@
 namespace supple::suite {
 
 inline constexpr gui::Theme kScriptTheme = {
-    /* ground     */ 0x0D0F12,
-    /* surface    */ 0x171A1F,
-    /* raised     */ 0x22262D,
-    /* recess     */ 0x08090B,
-    /* line       */ 0x282C34,
-    /* lineLit    */ 0x39404A,
-    /* textFaint  */ 0x626874,
-    /* textMuted  */ 0x949AA5,
-    /* text       */ 0xEAE8E3,
-    /* accent     */ 0x6FB3A8,
-    /* accent2    */ 0xE8944A,
-    /* modulation */ 0x9D8DF1,
-    /* alert      */ 0xE0584A,
-    /* knobTrack  */ 0x0C0D10,
-    /* knobTop    */ 0x3E434D,
-    /* knobBottom */ 0x1A1D22,
-    /* knobRim    */ 0x4A505B,
+    /* ground     */ 0x251D17,  // walnut
+    /* surface    */ 0x30271F,
+    /* raised     */ 0x3E3229,
+    /* recess     */ 0x171210,  // soil
+    /* line       */ 0x43372D,
+    /* lineLit    */ 0x5E4E41,
+    /* textFaint  */ 0x8A7B6C,
+    /* textMuted  */ 0xBBAA96,
+    /* text       */ 0xF4ECDF,  // parchment
+    /* accent     */ 0xD97757,  // clay
+    /* accent2    */ 0xA3B27C,  // sage
+    /* modulation */ 0xB59BCB,  // heather
+    /* alert      */ 0xE5553F,
+    /* knobTrack  */ 0x14100D,
+    /* knobTop    */ 0x4D4036,
+    /* knobBottom */ 0x2A221C,
+    /* knobRim    */ 0x605043,
     /* radius     */ 7.0f,
 };
 

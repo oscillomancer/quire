@@ -792,8 +792,11 @@ void Sema::signature(FunctionDecl* f) {
         error(f->result->loc, "script.function.result",
               f->name + "() returns " + r->name +
                   " by value; a function returns a number, a bool, an enum or nothing",
-              "fill a struct passed by reference instead: void " + f->name + "(" + r->name +
-                  "& out)");
+              r->kind == TypeKind::String
+                  ? "draw the text where it is made: void " + f->name +
+                        "(Canvas& g, double x, double y) that calls g.fillText()"
+                  : "fill a struct passed by reference instead: void " + f->name + "(" + r->name +
+                        "& out)");
     if (f->result->isRef)
         error(f->result->loc, "script.function.result_reference",
               "functions cannot return references in the subset",
@@ -1009,8 +1012,7 @@ void Sema::checkLocalDecl(VarDecl* v) {
         return;
     }
     const bool braced = v->init->kind == ExprKind::InitList;
-    if (!braced) v->init = check(v->init);
-    v->init = convert(v->init, v->qt, v->loc, "'" + v->name + "'", braced);
+    v->init = convert(check(v->init), v->qt, v->loc, "'" + v->name + "'", braced);
     if (spec->isConstexpr && !(v->init && v->init->constant))
         error(v->loc, "script.constant.required", "a constexpr variable needs a constant value",
               "use literals, constexpr constants and arithmetic on them, or drop constexpr");
@@ -1260,8 +1262,7 @@ void Sema::checkStmt(Stmt* s) {
                 return;
             }
             const bool braced = r->value->kind == ExprKind::InitList;
-            if (!braced) r->value = check(r->value);
-            r->value = convert(r->value, QualType{rt.type, false, false}, r->loc,
+            r->value = convert(check(r->value), QualType{rt.type, false, false}, r->loc,
                                "the result of " + fn_->name + "()", braced);
             return;
         }
@@ -1633,17 +1634,20 @@ void Sema::evaluatePatches(FunctionDecl* f) {
             if (!value) continue;
             double physical = 0;
             if (value->kind == Constant::Kind::String && p->kind == ParamModel::Kind::Choice) {
-                auto choice = std::find_if(
-                    p->choices.begin(), p->choices.end(), [&](const std::string& label) {
-                        return script::detail::factoryChoiceKey(label) == value->stringValue;
-                    });
-                if (choice == p->choices.end()) {
+                size_t choice = 0;
+                std::string all;
+                while (choice < p->choices.size() &&
+                       script::detail::choiceKey(*p, choice) != value->stringValue)
+                    ++choice;
+                for (size_t k = 0; k < p->choices.size(); ++k)
+                    all += (all.empty() ? "\"" : ", \"") + script::detail::choiceKey(*p, k) + "\"";
+                if (choice == p->choices.size()) {
                     error(set->loc, "script.patch.choice",
                           "unknown choice key '" + value->stringValue + "'",
-                          "use a choice key as shown in the parameter's patch schema");
+                          "use one of " + p->key + "'s keys: " + all);
                     continue;
                 }
-                physical = static_cast<double>(choice - p->choices.begin());
+                physical = static_cast<double>(choice);
             } else if (value->numeric()) {
                 physical = value->asDouble();
             } else {
@@ -1951,6 +1955,26 @@ void Sema::evaluateParam(FieldDecl* f) {
     if (p.output && p.modulatable)
         bad("a meter cannot be modulated",
             "remove .modulated() or .polyModulated() from the meter");
+    if (!p.choiceKeys.empty()) {
+        if (p.kind != ParamModel::Kind::Choice)
+            bad(".keys() names a choice's options", "remove .keys(), or make it a choice()");
+        else if (p.choiceKeys.size() != p.choices.size())
+            bad(".keys() gives " + std::to_string(p.choiceKeys.size()) + " keys for " +
+                    std::to_string(p.choices.size()) + " choices",
+                "give one key for each choice, in the same order");
+        std::set<std::string> seen;
+        for (const auto& k : p.choiceKeys) {
+            bool ok = !k.empty() && k[0] >= 'a' && k[0] <= 'z';
+            for (char c : k)
+                ok = ok && ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_');
+            if (!ok)
+                bad("'" + k + "' is not a usable choice key",
+                    "keys are lowercase letters, digits and _, starting with a letter: \"db12\"");
+            else if (!seen.insert(k).second)
+                bad("the choice key '" + k + "' is given twice",
+                    "give each choice a key of its own");
+        }
+    }
     for (const auto& r : p.roles)
         if (!roleVocabulary().count(r)) {
             std::string all;

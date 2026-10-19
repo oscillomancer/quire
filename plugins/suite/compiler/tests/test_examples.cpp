@@ -430,6 +430,7 @@ void sameDescription(const char* file,
         CHECK(p.automatable == q.automatable);
         CHECK(p.modulatable == q.modulatable);
         CHECK(p.polyModulatable == q.polyModulatable);
+        CHECK(p.restarts == q.restarts);
         CHECK(p.offAtMinimum == q.offAtMinimum);
         CHECK(p.output == q.output);
         CHECK(p.bypass == q.bypass);

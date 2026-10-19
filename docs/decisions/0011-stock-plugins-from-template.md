@@ -1,6 +1,8 @@
 # ADR-0011: Stock plugins built from the template
 
 **Status:** Accepted, 2026-09-26. Evidence: `docs/research/template.md`.
+(2026-10-18: amended by ADR-0047 for stock plugins written as DSP scripts,
+which live in `plugins/stock/` and build from `plugins/template`.)
 
 ## Context
 

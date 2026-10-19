@@ -218,12 +218,14 @@ struct P : Effect {
     static constexpr Info info = {.name = "P", .id = "com.example.p"};
     Param mix = percent("Mix", 25);
     Param mode = choice("Mode", {"Soft Clip", "Hard"}, 1);
+    Param slope = choice("Slope", {"12 dB/oct", "24 dB/oct"}, 0).keys({"db12", "db24"});
     void process(Block& io) { io[0][0] *= mix; }
 };
 )");
     CHECK(percent->params().at(0).max == 1.0 && percent->params().at(0).def == 0.25);
     CHECK(percent->meaning().params[1].choiceKeys ==
           (std::vector<std::string>{"soft_clip", "hard"}));
+    CHECK(percent->meaning().params[2].choiceKeys == (std::vector<std::string>{"db12", "db24"}));
 }
 
 TEST(the_engine_plays_a_script_as_its_own_runner_does_bit_for_bit) {
@@ -802,6 +804,28 @@ TEST(a_script_reports_the_latency_it_sets_in_prepare) {
     engine.activate(48000.0, 64, 2, 2);
     // The oversampler's delay, which Info does not give.
     CHECK(engine.latency() > 0 && engine.latency() < 16);
+}
+
+TEST(a_parameter_that_restarts_sets_the_latency_of_the_next_activation) {
+    const auto d = compileText(R"(#include <supple/script.h>
+struct L : Effect {
+    static constexpr Info info = {.name = "L", .id = "com.example.ahead"};
+    Param ahead = choice("Lookahead", {"Off", "On"}, 0).restarts();
+    void prepare() { setLatency(ahead.index() * 32); }
+    void process(Block& io) {}
+};
+)");
+    if (!d) return;
+    const ParamDef& p = d->params().at(0);
+    CHECK(p.is(pflag::kRestart));
+    CHECK(!p.is(pflag::kAutomatable));
+    Engine engine(d);
+    engine.activate(48000.0, 64, 2, 2);
+    CHECK(engine.latency() == 0);
+    setPlain(engine, p.id, 1.0);
+    engine.deactivate();
+    engine.activate(48000.0, 64, 2, 2);
+    CHECK(engine.latency() == 32);
 }
 
 TEST(embedded_payloads_are_bounded_and_validate_the_schema) {

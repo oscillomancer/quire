@@ -114,6 +114,33 @@ TEST_CASE("factory patches are constant checked declarations with physical value
     CHECK(patch.values[2].second == 1.0);
 }
 
+TEST_CASE("a choice's options may have keys of their own") {
+    const auto source = [](const std::string& slope, const std::string& patch = "") {
+        std::string s = kGain;
+        s.insert(s.find("    void update()"), "    Param slope = " + slope +
+                                                  ";\n    void factoryPatches(Patches& p) { " +
+                                                  patch + " }\n");
+        return s;
+    };
+    const std::string slope = "choice(\"Slope\", {\"12 dB/oct\", \"24 dB/oct\"}, 0)";
+    auto compiled = compileOk(
+        source(slope + ".keys({\"db12\", \"db24\"})", "p.add(\"Steep\").set(slope, \"db24\");"));
+    const auto& model = compiled.program->params().back();
+    CHECK(model.choiceKeys == std::vector<std::string>{"db12", "db24"});
+    CHECK(script::detail::choiceKey(model, 1) == "db24");
+    CHECK(compiled.program->factoryPatches().at(0).values.at(0).second == 1.0);
+    // Without .keys(), a key is its label in snake_case.
+    CHECK(firstError(source(slope, "p.add(\"Steep\").set(slope, \"p24_db_oct\");")) == "");
+    CHECK(firstError(source(slope + ".keys({\"db12\", \"db24\"})",
+                            "p.add(\"Steep\").set(slope, \"p24_db_oct\");")) ==
+          "script.patch.choice");
+    CHECK(firstError(source(slope + ".keys({\"db12\"})")) == "script.param.range");
+    CHECK(firstError(source(slope + ".keys({\"db12\", \"db12\"})")) == "script.param.range");
+    CHECK(firstError(source(slope + ".keys({\"12db\", \"db24\"})")) == "script.param.range");
+    CHECK(firstError(source("decibels(\"Slope\", 0, 1, 0).keys({\"a\"})")) == "script.param.range");
+    CHECK(firstError(source(slope + ".keys(\"db12\")")) == "script.param.modifier");
+}
+
 TEST_CASE("a gain script compiles and applies its gain") {
     for (bool interpret : {false, true}) {
         CAPTURE(interpret);
@@ -143,6 +170,36 @@ TEST_CASE("a gain script compiles and applies its gain") {
         const double expected = 0.5 * std::pow(10.0, -6.0 * 0.05);
         CHECK(audio.data[0][0] == expected);
         CHECK(audio.data[1][99] == expected);
+    }
+}
+
+TEST_CASE("a local or a result may start from braces") {
+    for (bool interpret : {false, true}) {
+        CAPTURE(interpret);
+        scriptc::Options options;
+        options.interpret = interpret;
+        auto result = compileOk(R"(#include <supple/script.h>
+struct Pair {
+    double a = 0.0, b = 0.0;
+};
+double zero() { return {}; }
+struct T : Effect {
+    static constexpr Info info = {.name = "T", .id = "com.example.t"};
+    void process(Block& io) {
+        Array<double, 3> marks = {-1, 0.5, 3};
+        const Pair p = {4, -2};
+        for (int i = 0; i < io.frames; ++i)
+            io[0][i] = marks[0] + marks[1] + marks[2] + p.a + p.b + zero();
+    }
+};
+)",
+                                options);
+        JitRunner run(result.program);
+        run.prepare();
+        run.update();
+        Audio audio(2, 4);
+        run.process(audio, 4);
+        CHECK(audio.data[0][3] == 4.5);
     }
 }
 
@@ -744,4 +801,27 @@ struct T : Effect {
         callRealtime(result.program->process(), &run.instance, run.self(), &block);
     });
     CHECK(audio.data[0] == std::vector<double>{1, 0, 0, 1, 0});
+}
+
+TEST_CASE("a value squared where registers spill compiles (MIR's allocator, patched)") {
+    // MIR 1.0.0 asserted on an instruction naming one spilled register as its
+    // result and both operands (e = e * e after coalescing), aborting the host.
+    compileOk(R"(#include <supple/script.h>
+struct Sec { double b0 = 1.0, b1 = 0.0, b2 = 0.0, a1 = 0.0, a2 = 0.0; };
+void poles(Sec& s, double wn, double zeta) {
+    const double e = exp(-zeta * wn);
+    s.a2 = e * e;
+    if (zeta < 1.0)
+        s.a1 = -2.0 * e * cos(wn * sqrt(1.0 - zeta * zeta));
+    else
+        s.a1 = -2.0 * e * cosh(wn * sqrt(zeta * zeta - 1.0));
+}
+struct T : Effect {
+    static constexpr Info info = {.name = "T", .id = "com.example.t"};
+    Param zeta = continuous("Zeta", 0.1, 4, 0.7);
+    Sec s;
+    void update() { poles(s, 0.3, zeta); }
+    void process(Block& io) {}
+};
+)");
 }

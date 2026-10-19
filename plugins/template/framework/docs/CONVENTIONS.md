@@ -216,13 +216,16 @@ mid-drag, cannot nest gestures.
 Shared widgets take every colour from the product's `Theme`. Products should
 not look like a reskinned template: keep the interaction language, the
 typography (Inter for words, Plex Mono for numbers, Plex Sans Condensed for
-display) and the spacing discipline, and derive layout, centrepiece and
+display, and optionally Fraunces, a soft serif, for a product's name and
+headings) and the spacing discipline, and derive layout, centrepiece and
 palette from what the DSP does. A graph earns its space only by explaining
 product state; a meter's label must say what it measures (the framework's are
 sample peak, input before processing, output after bypass).
 
 Fonts are registered per NanoVG context. Plex Mono's subset is ASCII plus
 ° × – — − and falls back to Inter (Latin-1, arrows, ≤ ≥ ≈ ∞) for the rest.
+Fraunces (`font::kSerif`, `font::kSerifItalic`) covers Latin-1, quotes,
+dashes, the ellipsis and −, and falls back to Inter too.
 Check coverage before drawing a new symbol.
 
 ## Symbols and the shared process

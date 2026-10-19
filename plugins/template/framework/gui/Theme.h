@@ -60,13 +60,17 @@ inline NVGcolor withAlpha(NVGcolor c, float alpha) {
 }
 
 // Face names, registered per NanoVG context (so per editor, never shared).
-// Inter for words, Plex Mono for numbers, Plex Sans Condensed for display.
+// Inter for words, Plex Mono for numbers, Plex Sans Condensed for display,
+// and Fraunces, a soft serif, for a product that wants a warmer voice in its
+// name and headings (SemiBold) or an aside (Italic).
 namespace font {
 inline constexpr const char* kUi = "ui";
 inline constexpr const char* kUiBold = "ui-semibold";
 inline constexpr const char* kMono = "mono";
 inline constexpr const char* kMonoMedium = "mono-medium";
 inline constexpr const char* kDisplay = "display";
+inline constexpr const char* kSerif = "serif";
+inline constexpr const char* kSerifItalic = "serif-italic";
 }  // namespace font
 
 }  // namespace supple::gui

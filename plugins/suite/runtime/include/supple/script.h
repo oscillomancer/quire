@@ -220,7 +220,9 @@ struct ParamSpec {
     bool automatable = true, modulatable = false, offAtMinimum = false, output = false;
     bool polyModulatable = false;  // an instrument's, modulated per voice: forVoice(v)
     bool bypass = false, hidden = false;
-    std::initializer_list<const char*> roles = {};  // "level", "time", "brightness" ...
+    bool restart = false;  // a change restarts the plugin: prepare() runs again
+    std::initializer_list<const char*> roles = {};       // "level", "time", "brightness" ...
+    std::initializer_list<const char*> choiceKeys = {};  // a choice's patch keys (.keys())
 
     // In a group, which the automatic editor and hosts show as a section.
     ParamSpec in(const char* g) const {
@@ -271,6 +273,15 @@ struct ParamSpec {
         p.automatable = false;
         return p;
     }
+    // Changing it restarts the plugin (the host stops it and starts it
+    // again), so prepare() runs again with the new value and may report
+    // another latency with setLatency(): a lookahead. Not automatable.
+    ParamSpec restarts() const {
+        ParamSpec p = *this;
+        p.restart = true;
+        p.automatable = false;
+        return p;
+    }
     ParamSpec withKey(const char* k) const {
         ParamSpec p = *this;
         p.key = k;
@@ -284,6 +295,14 @@ struct ParamSpec {
     ParamSpec role(std::initializer_list<const char*> r) const {
         ParamSpec p = *this;
         p.roles = r;
+        return p;
+    }
+    // A choice's patch keys, one for each option, where its labels would make
+    // poor ones: choice("Slope", {"12 dB/oct", "24 dB/oct"}, 0).keys({"db12", "db24"}).
+    // Without it each key is its label in snake_case ("Low Pass": low_pass).
+    ParamSpec keys(std::initializer_list<const char*> k) const {
+        ParamSpec p = *this;
+        p.choiceKeys = k;
         return p;
     }
     ParamSpec curved(Curve c, double k = 1.0) const {
@@ -1038,10 +1057,14 @@ class Canvas {
     // until restore().
     void clip(double x, double y, double w, double h);
 
-    // Text: Inter, a bold Inter, or Plex Mono for numbers, at a size.
+    // Text: Inter, a bold Inter, or Plex Mono for numbers, at a size; or
+    // Fraunces, a soft serif, for a name or a heading (serifFont) and an
+    // aside (serifItalicFont).
     void font(double size);
     void boldFont(double size);
     void monoFont(double size);
+    void serifFont(double size);
+    void serifItalicFont(double size);
     void textAlign(TextAlign align);
     void textBaseline(TextBaseline baseline);
     void fillText(const char* text, double x, double y);

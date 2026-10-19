@@ -78,6 +78,7 @@ ParamDef paramOf(const ParamModel& m, ParamTable::Builder& b) {
     if (m.modulatable) p = p.modulatable();
     if (m.polyModulatable) p = p.polyModulatable();
     if (!m.automatable) p = p.notAutomatable();
+    if (m.restarts) p = p.restartOnChange();
     if (m.offAtMinimum) p = p.offAtMinimum();
     if (m.bypass) p = p.bypass();
     if (m.hidden) p.flags |= pflag::kHidden;
@@ -141,7 +142,8 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
         ParamMeaning pm;
         pm.key = m.key;
         for (const std::string& role : m.roles) pm.tags.push_back("role:" + role);
-        for (const std::string& choice : m.choices) pm.choiceKeys.push_back(snakeCase(choice));
+        for (size_t k = 0; k < m.choices.size(); ++k)
+            pm.choiceKeys.push_back(script::detail::choiceKey(m, k));
         meaning.params.push_back(std::move(pm));
     }
     // Each file member is a file property: its path, saved and set by patch.

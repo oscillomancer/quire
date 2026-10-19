@@ -918,7 +918,17 @@ std::string PatchCodec::describe(const state::Snapshot& s, bool changedOnly) con
             it = groups.end() - 1;
         }
         if (!it->second.empty()) it->second += ", ";
-        it->second += std::string(p.displayLabel()) + " " + value;
+        // Under its group's name, a name that repeats it says the rest
+        // ("Band 1: Gain -3.0 dB", not "Band 1: Band 1 Gain -3.0 dB"); a
+        // switch that is on says its name alone.
+        std::string label = p.displayLabel();
+        if (!group.empty() && label.size() > group.size() + 1 && label.starts_with(group) &&
+            label[group.size()] == ' ')
+            label = label.substr(group.size() + 1);
+        if (p.kind == ParamKind::Toggle)
+            it->second += toPlain(p, s.host[i]) >= 0.5 ? label : label + " off";
+        else
+            it->second += label + " " + value;
     }
     std::string out;
     for (const auto& [group, text] : groups) {

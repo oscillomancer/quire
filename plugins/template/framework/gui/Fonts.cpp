@@ -21,6 +21,10 @@ extern const unsigned char supple_font_plex_mono_medium[];
 extern const size_t supple_font_plex_mono_medium_size;
 extern const unsigned char supple_font_plex_sans_condensed_semibold[];
 extern const size_t supple_font_plex_sans_condensed_semibold_size;
+extern const unsigned char supple_font_fraunces_semibold[];
+extern const size_t supple_font_fraunces_semibold_size;
+extern const unsigned char supple_font_fraunces_italic[];
+extern const size_t supple_font_fraunces_italic_size;
 }
 
 namespace supple::gui {
@@ -48,6 +52,8 @@ bool loadFonts(NVGcontext* vg) {
         {font::kMono, supple_font_plex_mono_regular, supple_font_plex_mono_regular_size},
         {font::kMonoMedium, supple_font_plex_mono_medium, supple_font_plex_mono_medium_size},
         {font::kDisplay, supple_font_plex_sans_condensed_semibold, supple_font_plex_sans_condensed_semibold_size},
+        {font::kSerif, supple_font_fraunces_semibold, supple_font_fraunces_semibold_size},
+        {font::kSerifItalic, supple_font_fraunces_italic, supple_font_fraunces_italic_size},
     };
     for (const Face& f : faces) {
         if (nvgFindFont(vg, f.name) >= 0) continue;
@@ -58,6 +64,8 @@ bool loadFonts(NVGcontext* vg) {
     nvgAddFallbackFont(vg, font::kMono, font::kUi);
     nvgAddFallbackFont(vg, font::kMonoMedium, font::kUiBold);
     nvgAddFallbackFont(vg, font::kDisplay, font::kUiBold);
+    nvgAddFallbackFont(vg, font::kSerif, font::kUiBold);
+    nvgAddFallbackFont(vg, font::kSerifItalic, font::kUi);
     // The product's own faces (PRODUCT_ASSETS), by file stem: "Orbitron.ttf"
     // is the face "Orbitron", falling back to Inter for what it lacks.
     for (size_t i = 0; i < assets::count(); ++i) {

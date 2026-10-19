@@ -6,12 +6,13 @@ adds what maintainers need beyond it: the shared layout, real-time rules,
 tests, GUI and skill deliverables, and per-plugin implementation notes.
 
 Code identity uses the functional ids; each display name is defined once,
-in the plugin's `cmake/Identity.cmake`.
+in the plugin's `cmake/Identity.cmake` (for a scripted stock plugin,
+ADR-0047, in its script's `Info` and its `product.cmake`).
 
 | id (dir, code, CLAP id suffix) | display name | CLAP id | State magic | AU subtype | Features |
 |---|---|---|---|---|---|
-| `eq` | Facet | `com.suppleaudio.eq` | `QEQ1` | `QEq_` | audio-effect, equalizer, stereo |
-| `comp` | Ballast | `com.suppleaudio.comp` | `QCM1` | `QCmp` | audio-effect, compressor, limiter, stereo |
+| `yarrow` (`plugins/stock/yarrow`) | Yarrow | `com.suppleaudio.yarrow` | `LzjE` (the player's for the id) | `Yarw` | audio-effect, equalizer |
+| `sundew` (`plugins/stock/sundew`) | Sundew | `com.suppleaudio.sundew` | `pqwP` (the player's for the id) | `Sndw` | audio-effect, compressor |
 | `utility` | Plumb | `com.suppleaudio.utility` | `QUT1` | `QUtl` | audio-effect, utility, stereo |
 | `analyzer` | Gauge | `com.suppleaudio.analyzer` | `QAN1` | `QAna` | audio-effect, analyzer, stereo |
 | `drive` | Kiln | `com.suppleaudio.drive` | `QDR1` | `QDrv` | audio-effect, distortion, stereo |
@@ -20,8 +21,8 @@ in the plugin's `cmake/Identity.cmake`.
 | `delay` | Echelon | `com.suppleaudio.delay` | `QDL1` | `QDly` | audio-effect, delay, stereo |
 | `reverb` | Nave | `com.suppleaudio.reverb` | `QRV1` | `QRvb` | audio-effect, reverb, stereo |
 
-In the template's identity checklist the code name is the id (`Eq`/`eq`/`EQ`,
-`Comp`/`comp`/`COMP`, `Utility`/`utility`/`UTILITY`,
+In the template's identity checklist the code name is the id
+(`Utility`/`utility`/`UTILITY`,
 `Analyzer`/`analyzer`/`ANALYZER`); only the user-visible name string is the
 working name, defined once per plugin.
 
@@ -122,7 +123,8 @@ one physical value, independent of fine mode; floats retain normalized steps.
 `tools/gui_preview` renders at least two scenarios per plugin to PNG for review.
 Design size ≤ 900 × 560. The look follows the product theme used by Orrery
 (`plugins/orrery/plugin/gui/Theme.h`): same palette and type, so the stock
-plugins read as one family.
+plugins read as one family. The scripted stock plugins that replace them
+(ADR-0047) take the scripts' warm palette instead (`stock-effects.md` §0).
 
 ### 1.6 describe()
 
@@ -163,134 +165,74 @@ In the plugin copy (as ProbeSynth): `host_smoke`, `semantic_rt`,
   Linked from `skill/SKILL.md` and `skill/guides/mixing.md`.
 - `plugins/<id>/QUIRE.md` (deviations from the template) and a STATUS row.
 
-## 2. EQ — Facet [`eq`] (`stock-effects.md` §1)
+## 2. EQ — Yarrow [`yarrow`] (`stock-effects.md` §1)
 
-- **`minimum` phase:** each second-order section is a trapezoidal
-  state-variable filter (Simper/Cytomic "linear trapezoidal SVF"): per
-  channel state `ic1eq, ic2eq`,
+A DSP script (ADR-0047), `plugins/stock/yarrow/script/yarrow.cpp`; the
+spec section holds the designs and measured accuracy. Notes for maintainers:
 
-      g = tan(π·f/fs), k = 1/Q, a1 = 1/(1 + g(g + k)), a2 = g·a1, a3 = g·a2
-      v3 = v0 − ic2eq; v1 = a1·ic1eq + a2·v3; v2 = ic2eq + a2·ic1eq + a3·v3
-      ic1eq = 2·v1 − ic1eq; ic2eq = 2·v2 − ic2eq
-      y = m0·v0 + m1·v1 + m2·v2
+- **Audio.** `update()` reads the parameters into eight `Setting`s and, when
+  auto gain is on, works out its offset; `control()` runs every 16 samples
+  (a counter kept across blocks) and takes structure changes once a band
+  has faded out, glides frequency, gain and Q, follows dynamic bands and
+  redesigns a band only when its values moved; `process()` runs each band
+  that is on or fading, in index order, placing it on both channels, the
+  mid or side (encoded around that band only) or one channel, then listen,
+  then the output gain. The first `update()` after `prepare()` (or a reset)
+  snaps every glide, so a render after `reset()` matches a fresh instance.
+  Non-finite input is zeroed before any band.
+- **Editor.** Its own members only: the band settings read from the
+  parameters each repaint, each band's sections designed once per repaint,
+  the transform's tables and buffers, and the pointer's state. The audio
+  code shares the output ring (`SharedArray<float, 32768>`), its head and a
+  running sample count (the analyser's clock), peaks, each band's live gain
+  and detector level, and the auto-gain offset. Edits go through
+  `change()`/`act()`, which select a band's parameter by index.
+- **Tests.** `plugin.yarrow.response` measures bells, cuts and shelves
+  through the built plugin; `plugin.yarrow.catalog` keeps `Catalog.cpp` in
+  step; the template's suite, reset, unload, semantic conformance and
+  clap-validator checks run as for every stock plugin. During development,
+  `dsp.test` with `automation` (no excess step on type, channel or enable
+  switches) and `dsp.preview` with `pointer` steps covered clicks and every
+  gesture.
 
-  with (A = 10^(gain/40)):
+## 3. Compressor — Sundew [`sundew`] (`stock-effects.md` §2)
 
-  | type | g | k | m0 | m1 | m2 |
-  |---|---|---|---|---|---|
-  | bell | tan(πf/fs) | 1/(Q·A) | 1 | k(A² − 1) | 0 |
-  | low shelf | tan(πf/fs)/√A | 1/Q | 1 | k(A − 1) | A² − 1 |
-  | high shelf | tan(πf/fs)·√A | 1/Q | A² | k(1 − A)·A | 1 − A² |
-  | notch | tan(πf/fs) | 1/Q | 1 | −k | 0 |
-  | band-pass (0 dB peak) | tan(πf/fs) | 1/Q | 0 | k | 0 |
-  | low-pass section | tan(πf/fs) | 1/Q | 0 | 0 | 1 |
-  | high-pass section | tan(πf/fs) | 1/Q | 1 | −k | −1 |
+A DSP script (ADR-0047), `plugins/stock/sundew/script/sundew.cpp`; the
+spec section holds the laws and ballistics. Notes for maintainers:
 
-  Pass slopes are Butterworth cascades (odd orders start with a first-order
-  TPT section; section Qs from the Butterworth pole angles); at 12 dB/oct the
-  single section uses `bandN.q` (0.71 = Butterworth). Tilt: first-order low
-  shelf −gain/2 and high shelf +gain/2 at `freq`.
-- **`natural` (default):** the magnitude of the analog prototype held to
-  20 kHz at 44.1/48 kHz — matched second-order sections (magnitude matched at
-  DC, centre and Nyquist) or 2× oversampling of the `minimum` design,
-  whichever the tests show more exact. Decided 2026-09-30: matched sections
-  (oversampling cost 50× the minimum mode); the bound is ≤ 0.3 dB for bells
-  with Q ≤ 4 and shelves with Q ≤ 1, f0 ≤ 10 kHz, to 20 kHz at 44.1/48 kHz,
-  with measured limits for resonant and near-Nyquist bands
-  (`stock-effects.md` §1).
-- **`linear`:** a linear-phase FIR of the current magnitude response,
-  partitioned convolution, latency 2048 samples at 48 kHz (scaled with the
-  rate); recomputed off the audio thread when parameters change and swapped
-  in with a 20 ms crossfade. May land in a second commit after the other two
-  modes.
-- Mid/side bands encode M = (L+R)/2, S = (L−R)/2 around that band only;
-  left/right bands leave the other channel untouched.
-- `freq` (log2), `gain` (dB) and `q` (log) are smoothed per sample (20 ms);
-  coefficients are recomputed only while a band's smoother moves. Enabling
-  a band or changing its type or slope crossfades the band's output with its
-  input over 10 ms (a type change fades out, switches and clears state,
-  fades in). A disabled band, or a gain type at 0 dB, passes finite input bit-exactly.
-- `auto_gain`: output compensation for the static curve (the negative of the
-  mean dB gain of the summed response over 20 Hz–20 kHz on a log axis,
-  pink-weighted), updated with the smoothed parameters.
-- `double magnitudeDb(const Values&, double hz, double fs)` evaluates the
-  exact response of the digital cascade for the GUI curve and tests.
-
-Tests: a bell at 1 kHz, +6 dB, Q 1 gives +6.0 ± 0.05 dB at 1 kHz; shelves
-reach their gain within 0.1 dB two octaves out; passes are −3.0 ± 0.1 dB at
-`freq` with the stated slope (±1 dB/oct) further out; sine-sweep
-measurements through `process` match `magnitudeDb` within 0.05 dB at 20
-frequencies at every rate of the sweep; `natural` matches the analog
-prototype per the spec; `linear` is linear phase (symmetric impulse
-response) with the reported latency; a mid band leaves S = 0 for L = R input;
-a side band leaves L = R input unchanged.
-
-GUI: the response display over most of the window (log 20 Hz–20 kHz, ±24 dB
-with a ±12 dB zoom), the summed curve and a faint curve per enabled band over
-a live input spectrum (telemetry), numbered band handles (drag = freq/gain,
-wheel = Q, double-click = enable, right-click = type menu), a strip of eight
-band columns below (enabled, type, freq, gain, Q, slope for passes, channel),
-phase mode, auto gain and output. `gui_preview` scenarios: `flat`, `mix`
-(high-pass, a bell cut, a high shelf, a side band).
-
-## 3. Compressor / limiter — Ballast [`comp`] (`stock-effects.md` §2)
-
-Ports: main stereo in/out plus a second, non-main stereo input "Sidechain"
-(`CLAP_PORT_STEREO`, not `CLAP_AUDIO_PORT_IS_MAIN`), as ADR-0018 hosts
-expect. With `sidechain: external` and no key (or silence), nothing is
-reduced.
-
-Compressor mode:
-- Detector: the key (internal = main input) through `sc_highpass` and
-  `sc_lowpass` (12 dB/oct, `off` at their end values), per channel level
-  (peak |s|, or RMS over `rms_window`), stereo link
-  `link·max(L, R) + (1 − link)·own`. `feedback` topology detects on the
-  output of the previous sample instead.
-- Gain computer in dB with the quadratic soft knee (Giannoulis, Massberg &
-  Reiss 2012): below T − W/2: 0; above T + W/2: (1/R − 1)(x − T); inside:
-  (1/R − 1)(x − T + W/2)² / (2W). Ratio 100 is ∞.
-- Ballistics on the reduction in dB: branching one-pole, α = exp(−1/(t·fs)),
-  attack when the target is deeper, release otherwise. `auto_release`: a
-  two-stage release (fast `release`, slow 5× `release`) weighted by how long
-  the reduction has been held — document the rule in `stock-effects.md`.
-- `auto_makeup`: compensates the static reduction at −18 dBFS input (so a
-  typical level is roughly level-matched); documented.
-- Lookahead delays the audio, the dry path of `mix`, and filtered-key audition
-  by the reported latency, but not the detector. A prepared key delay stays
-  populated while audition is off, so audition and key-source transitions
-  retain the same sample alignment; latency = lookahead samples.
-
-Limiter mode (ratio ∞, the compressor's threshold ignored, `ceiling` sets
-the output):
-- Detector per channel on the input; with `true_peak`, on the 4× interpolated
-  signal from `dsp::PolyphaseUpsampler` (the interpolator `core-analysis`
-  uses for BS.1770 true peak; its delay of 16 input samples is added to the
-  audio path and to the reported latency).
-- Target gain `min(1, ceiling/peak)`; the minimum over the lookahead window
-  (sliding-window minimum, preallocated monotonic deque), then a moving
-  average over the same window (the gain is fully down when the peak reaches
-  the output), then release with `release`, never above the windowed target.
-  With `lookahead: off` the limiter is a zero-latency peak limiter with
-  instant attack (only sample peaks are guaranteed, by the final clip).
-- A final clip at the ceiling catches rounding; no output sample exceeds it.
-
-Tests: static curve (steady sines −60…0 dBFS within 0.2 dB of the gain
-computer, knee included); attack/release (63 % of a 20 dB change in the set
-time ±10 %); external key (silent main keyed loud → no change; loud main
-keyed by silence → no reduction); `sc_highpass` 200 Hz (a 50 Hz key reduces
-< 1 dB where a 1 kHz key at the same level reduces fully); lookahead
-alignment and reported latency; limiter ceiling: sine bursts, clipped
-squares, +20 dBFS noise and a 0.25·fs sine with inter-sample peaks come out
-≤ ceiling + 0.1 dBTP (measured with `core-analysis`, lookahead ≥ 1 ms,
-`true_peak` on) and never above the ceiling in sample peak; a −10 dBFS sine
-under a −1 dB ceiling passes delayed and otherwise within 1e-6; recovery
-after a 10 ms +12 dB burst within 0.1 dB after ≈ 5·release.
-
-GUI: transfer curve (input vs output dB, knee, a moving dot for the current
-level), gain-reduction history (~4 s), controls grouped as detector,
-sidechain, output, with the mode switch prominent; the limiter mode shows
-the ceiling and input/output peak meters. Scenarios: `default`, `heavy`
-(ratio 10, knee 0, external key), `limiter`.
+- **Audio.** `Law` holds a character's static law and its one-pole steps at
+  one sample rate (`set()` in `update()`, again when the tempo moves a synced
+  release); `Cell` is one channel's gain cell, stepped once per sample with
+  that channel's detector level. The feedback cells (Opto, FET) take the
+  key's level before their own gain and solve the implicit one-pole with
+  three Newton steps, so the loop is stable at any attack and ratio.
+  `process()` per sample: key (input or connected sidechain, high-pass,
+  mid/side) → level (peak or mean square, then link) → cells → gain on the
+  lookahead-delayed audio → colour → mix → match → output → listen. A change
+  of character settles the new cells on the old amount, or (to or from
+  Bloom) at rest with `bridge`, a 30 ms glide of the old gain. `unplayed`
+  zeroes the match until audio plays, so a render depends only on its values.
+- **Lookahead** is a `.restarts()` choice: `prepare()` reads it and reports
+  the latency, so a change waits for the host's restart, and the delay in use
+  is always the one reported. The key is never delayed (the detector looks
+  ahead); listening to the key reads it through its own delay.
+- **Editor.** Its own members only: a `Law` and a `Cell` for the
+  ballistics plot and the character icons (computed once, and again only
+  when a value the plot depends on moves), the needle's motion and peak, the
+  dot's trail and the pointer's state. The audio code shares the history
+  (512 columns of 10 ms: input and compressed peaks, gain change, bar or
+  beat), the key level, the gain change, peaks, the match and loudness, the
+  tempo, the bar length and whether the external key is live.
+- **Tests.** The template's suite, reset (also `--stepped`), unload,
+  semantic conformance, clap-validator and the catalog check run as for
+  every stock plugin. During development, `dsp.test` measured the static
+  law of every character (within 0.3 dB of the set ratio at 6 and 24 dB
+  over), external-key ducking (−21.4 dB for −21.6 expected), the latency
+  of each lookahead, onset peaks with and without lookahead, the match
+  converging on the dry loudness, and no excess step when switching
+  character (including to and from Bloom), threshold, mix, output, stereo,
+  key filter, match, colour and sync; `dsp.preview` with `pointer` steps
+  covered every gesture.
 
 ## 4. Utility — Plumb [`utility`] (`stock-effects.md` §8)
 
@@ -616,6 +558,6 @@ An original design; write its structure and constants into
 
 Once built, the plugins are in the build's `plugins/clap/`; the engine
 finds them when its CLAP search path includes that directory. B1 proper
-uses the EQ and the compressor on every track and the limiter on the master
-(docs/benchmarks/); the MCP arrangement acceptance test gains a mixing pass
+uses the EQ and the compressor on every track and the compressor as a peak
+catcher on the master (docs/benchmarks/); the MCP arrangement acceptance test gains a mixing pass
 with them in a later round.

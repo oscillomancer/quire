@@ -76,8 +76,8 @@ typedef struct clap_plugin_supple_semantic_params {
 ```json
 {
   "schema": "supple.semantic-schema/1.0",
-  "plugin": { "id": "com.suppleaudio.eq", "name": "…", "version": "0.1.0" },
-  "patch_type": "supple.eq-patch/1.0",
+  "plugin": { "id": "com.suppleaudio.yarrow", "name": "…", "version": "1.0.0" },
+  "patch_type": "supple.yarrow-patch/1.0",
   "params": { …core-params describeTable() "params" member… },
   "patch": { …JSON Schema (2020-12) of the patch document… },
   "docs": "One paragraph: what the plugin is and how its patch is organised."

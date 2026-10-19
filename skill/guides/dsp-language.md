@@ -95,8 +95,10 @@ positive, and integer parameter ranges must fit in `int`.
 | `.offAtMin()` | Its minimum means off ("-inf dB"); `.gain()` is exactly 0 there |
 | `.meter()` | An output the plugin reports with `p.set(v)`: read-only, never saved |
 | `.modulated()`, `.notAutomatable()` | As named |
+| `.restarts()` | Changing it restarts the plugin (the host stops and starts it), so `prepare()` runs again with the new value and may `setLatency()` for it: a lookahead. Not automatable |
 | `.polyModulated()` | An instrument's: modulated per note by the host; each voice reads `p.forVoice(v)` |
 | `.role({"level"})` | What it does, for agents: `level`, `time`, `brightness` ... |
+| `.keys({"db12", "db24"})` | A choice's patch keys, one per option, where its labels make poor ones (see below) |
 | `.curved(Curve::Log)`, `.curved(Curve::Pow, k)` | Knob travel |
 | `.withKey("key")`, `.withId(n)` | Override the patch key or the CLAP id (see below) |
 
@@ -123,7 +125,12 @@ the compiler checks names, ranges and choices.
 **Keys and IDs.** A parameter's patch key is its member's name in
 snake_case (`lowCut` is `low_cut`), and its CLAP id is a hash of the key.
 Renaming a member changes both, and sessions that saved the old one lose
-that value: give the new name `.withKey("old_key")` to keep it. A member
+that value: give the new name `.withKey("old_key")` to keep it. A choice's
+options have keys too, each its label in snake_case (`"Low Pass"` is
+`low_pass`, and a label that starts with a digit gains a `p`: `"12 dB/oct"`
+is `p12_db_oct`). Where labels make poor keys, name them: a unit before the
+number, as the stock plugins do, `choice("Slope", {"12 dB/oct", "24 dB/oct"},
+0).keys({"db12", "db24"})`. Patches may give a choice by key or by label. A member
 cannot share its factory's name, as in C++ (`Param ratio = ratio(...)`
 does not compile): write `Param slope = ratio("Ratio", 1, 20, 4).withKey("ratio")`.
 
@@ -142,7 +149,12 @@ that scales audio directly (levels, mix) so that moving it does not click.
 | `void editor(Editor& e)`, `void draw(Canvas& g)`, `void pointer(const Pointer& p)` | The editor's (optional) | Its controls, its drawing, and what the pointer does to the drawing: see The editor |
 
 There is no `reset()` to write: the runtime returns every member to what
-`prepare()` left, by itself. The script never calls a hook.
+`prepare()` left, by itself. The script never calls a hook. Values that
+glide or fade of the script's own should jump to where they are going until
+the first block plays (a `bool unplayed = true;` set in `prepare()` and
+cleared at the top of `process()`): a host sets a fresh instance's values
+after `update()` has already run once, and a render must depend only on the
+values it is given, as `.smoothed()` parameters do by themselves.
 
 `Block`: `io.channels`, `io.frames` (a block may be a single frame),
 `io[c][i]` (read the input, write the output, in place), `io.transport`
@@ -157,7 +169,9 @@ From any member function: `sampleRate()`, `maxBlockSize()`, `channels()`,
 a script that sounds different offline no longer renders the same as it
 plays). In `prepare()`, `setLatency(samples)` reports a delay the plugin
 adds that depends on the sample rate (an `Oversampler`'s, a lookahead),
-where Info's `.latency` is fixed.
+where Info's `.latency` is fixed. A delay a parameter chooses (a
+lookahead switch) needs `.restarts()` on that parameter: the latency
+changes only across a restart, which `prepare()` sees.
 
 Saving a script while it plays swaps the new code in with a 10 ms crossfade
 when the plugin is otherwise the same. When a save changes what the plugin
@@ -361,7 +375,7 @@ taken), `keyboard(lowKey, highKey, ...)` (an instrument's) and
 | `fillRect` `strokeRect` `clearRect` `(x, y, w, h)` | Each a path of its own |
 | `beginPath()` `moveTo` `lineTo` `bezierCurveTo` `quadraticCurveTo` `arc(x, y, r, start, end)` `arcTo` `rect` `roundRect(x, y, w, h, r)` `ellipse(x, y, rx, ry)` `circle(x, y, r)` `closePath()`, then `fill()` or `stroke()` | Paths. Angles in radians, 0 to the right, clockwise |
 | `save()` `restore()` `translate` `rotate` `scale` `clip(x, y, w, h)` | Transforms and a rectangular clip |
-| `font(size)` `boldFont(size)` `monoFont(size)` `textAlign(TextAlign::Center)` `textBaseline(TextBaseline::Middle)` `fillText(text, x, y)` `measureText(text)` | Text (`monoFont` for numbers) |
+| `font(size)` `boldFont(size)` `monoFont(size)` `serifFont(size)` `serifItalicFont(size)` `textAlign(TextAlign::Center)` `textBaseline(TextBaseline::Middle)` `fillText(text, x, y)` `measureText(text)` | Text: Inter, `monoFont` (Plex Mono) for numbers, `serifFont` (Fraunces SemiBold) for a name or heading, `serifItalicFont` for an aside |
 | `panel(x, y, w, h, "Title")` `well` `meter(levelDb, ...)` `frequencyGrid(x, y, w, h, lowHz, highHz)` `levelGrid(x, y, w, h, lowDb, highDb, stepDb)` | The editor's furniture, in its look |
 | `width()` `height()` | The editor's size |
 

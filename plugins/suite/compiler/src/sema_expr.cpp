@@ -2175,9 +2175,10 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
             };
             const std::string& mod = m->member;
             const bool flag = mod == "modulated" || mod == "polyModulated" || mod == "offAtMin" ||
-                              mod == "meter" || mod == "notAutomatable";
+                              mod == "meter" || mod == "notAutomatable" || mod == "restarts";
             const bool single = mod == "in" || mod == "help" || mod == "withKey" ||
-                                mod == "withId" || mod == "smoothed" || mod == "role";
+                                mod == "withId" || mod == "smoothed" || mod == "role" ||
+                                mod == "keys";
             if ((flag && !args.empty()) || (single && args.size() != 1) ||
                 (mod == "curved" && (args.empty() || args.size() > 2))) {
                 error(call->loc, "script.param.modifier",
@@ -2224,6 +2225,9 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                 p.automatable = false;
             } else if (mod == "notAutomatable") {
                 p.automatable = false;
+            } else if (mod == "restarts") {
+                p.restarts = true;
+                p.automatable = false;
             } else if (mod == "role") {
                 if (args.size() != 1 || args[0].kind != Constant::Kind::List) {
                     error(call->loc, "script.param.modifier",
@@ -2237,6 +2241,21 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                         return std::nullopt;
                     }
                     p.roles.push_back(r.stringValue);
+                }
+            } else if (mod == "keys") {
+                if (args[0].kind != Constant::Kind::List) {
+                    error(call->loc, "script.param.modifier",
+                          ".keys() takes a list, a key for each choice",
+                          ".keys({\"db12\", \"db24\"})");
+                    return std::nullopt;
+                }
+                for (const Constant& k : args[0].list) {
+                    if (k.kind != Constant::Kind::String) {
+                        error(call->loc, "script.param.modifier", ".keys(): each key is text",
+                              ".keys({\"db12\", \"db24\"})");
+                        return std::nullopt;
+                    }
+                    p.choiceKeys.push_back(k.stringValue);
                 }
             } else if (mod == "curved") {
                 if (args.empty() || args[0].builtinEnum != "Curve") {
@@ -2257,8 +2276,8 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                       "a parameter has no modifier '." + mod + "()'",
                       "the modifiers are .in(group), .help(text), .smoothed(ms), .modulated(), "
                       ".polyModulated(), .offAtMin(), "
-                      ".meter(), .notAutomatable(), .role({...}), .curved(Curve::..., k), "
-                      ".withKey(key), .withId(n)");
+                      ".meter(), .notAutomatable(), .restarts(), .role({...}), .keys({...}), "
+                      ".curved(Curve::..., k), .withKey(key), .withId(n)");
                 return std::nullopt;
             }
             return c;
