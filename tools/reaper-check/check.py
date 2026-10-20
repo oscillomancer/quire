@@ -57,8 +57,8 @@ CASES = {
     "com.suppleaudio.sorrel": Case("Sorrel", False, "Threshold",
                                  normalized(-80, -80, 0), normalized(-6, -80, 0), passthrough=True),
     "com.suppleaudio.teasel": Case("Teasel", False, "Output", .5, .25, "gain"),
+    "com.suppleaudio.bracken": Case("Bracken", False, "Output", .5, .25, "gain"),
     "com.suppleaudio.analyzer": Case("Analyzer", False, "Hold", 0, 1, "transparent", True, "Gauge"),
-    "com.suppleaudio.delay": Case("Echelon", False, "Output", .5, .25, "gain"),
 }
 
 

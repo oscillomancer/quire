@@ -58,7 +58,7 @@ their undo history and can be reviewed.
 | Writing a plugin of your own: an effect or an instrument as a DSP script (`dsp_write`, then `fx_add`) | `guides/dsp-workflow.md`, `guides/dsp-language.md`, `generated/dsp-examples.md` |
 | Exact command arguments and results | `generated/sandbox-commands.md` (sandbox), `generated/engine-commands.md` (DAW), or the `describe` tool |
 | A stock plugin's parameters and patch format | its guide, and `plugin_describe` (sandbox) or `fx_describe` (DAW) for every field, unit and range |
-| Tempo-synced echoes, ping-pong, freeze and wet ducking (Echelon/delay) | `guides/delay.md` |
+| Echoes: in time or free, ping-pong, groove, tape and analog, pitch-shifted, reversed or smeared, ducked or frozen (Bracken) | `guides/delay.md` |
 | Live loudness, spectrum and stereo monitoring (Gauge/analyzer) | `guides/analyzer.md` |
 | What the analysis numbers mean | `guides/analysis.md` |
 

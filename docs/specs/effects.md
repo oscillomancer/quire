@@ -18,8 +18,8 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 | `hickory` (`plugins/stock/hickory`) | Hickory | `com.suppleaudio.hickory` | `iEKh` (the player's for the id) | `Hkry` | audio-effect, utility |
 | `sorrel` (`plugins/stock/sorrel`) | Sorrel | `com.suppleaudio.sorrel` | `sTMn` (the player's for the id) | `Sorl` | audio-effect, gate |
 | `teasel` (`plugins/stock/teasel`) | Teasel | `com.suppleaudio.teasel` | `BLWw` (the player's for the id) | `Tesl` | audio-effect, distortion |
+| `bracken` (`plugins/stock/bracken`) | Bracken | `com.suppleaudio.bracken` | `PzKJ` (the player's for the id) | `Brkn` | audio-effect, delay |
 | `analyzer` | Gauge | `com.suppleaudio.analyzer` | `QAN1` | `QAna` | audio-effect, analyzer, stereo |
-| `delay` | Echelon | `com.suppleaudio.delay` | `QDL1` | `QDly` | audio-effect, delay, stereo |
 | `reverb` | Nave | `com.suppleaudio.reverb` | `QRV1` | `QRvb` | audio-effect, reverb, stereo |
 
 In the template's identity checklist the code name is the id
@@ -524,77 +524,48 @@ maintainers:
   Follow closed a tom ringing at 30 dB/s at about 120 dB/s (the clamp) where
   the fixed release fell at 400 dB/s; about 2 % of a core in the player.
 
-## 10. Third wave: delay — Echelon [`delay`] (`stock-effects.md` §6)
+## 10. Delay — Bracken [`bracken`] (`stock-effects.md` §6)
 
-Identity: display name Echelon, id `delay`, CLAP id `com.suppleaudio.delay`,
-state magic `QDL1`, AU subtype `QDly`, features audio-effect, delay,
-stereo. Everything in §1 applies; no sidechain port; latency 0.
+A DSP script (ADR-0047), `plugins/stock/bracken/script/bracken.cpp`. It
+replaced Echelon (`com.suppleaudio.delay`) with a new design. Notes for
+maintainers:
 
-- **`sync`** keys and labels exactly as Orrery's note values
-  (`plugins/orrery/engine/src/params.cpp` `kNotes`: `off`, `n8_1` … `n1_32`,
-  labels `8/1` … `1/32`; default `n1_8d` = "1/8."). Copy the table, do not
-  link Orrery. Tempo comes from the CLAP process transport
-  (`CLAP_TRANSPORT_HAS_TEMPO`), 120 BPM without one. A synced time is the
-  note length at the current tempo; every line time (synced or `time`, and
-  the offset right time `time·(1 + offset/100)`) is clamped to 1..5000 ms —
-  document the clamp.
-- **Lines:** one circular buffer per line (float storage), sized in
-  `prepare` for 5000 ms + the maximum modulation + interpolation margin at
-  the prepared rate. Fractional reads with 4-point cubic Hermite
-  interpolation.
-- **Glide:** each line's delay (in samples) follows its target through a
-  critically damped two-pole smoother (time constant 100 ms), so time and
-  tempo changes move the read head continuously (tape-like pitch bend, no
-  clicks, no crossfades). The same smoother serves sync and free time.
-- **Wow (`mod_rate`, `mod_depth`):** delay offset = depth·3 ms·(0.8·sin +
-  0.2·seeded smooth random), right line's sine at +90°; capped at 45 % of
-  the line's current delay; `mod_depth` 0 is exactly no modulation. The
-  random part is seeded at `reset()` (deterministic renders).
-- **Loop, per line:** y = read → high-pass then low-pass (12 dB/oct TPT
-  SVFs, Butterworth Q; `highpass`/`lowpass` smoothed) → `drive` (at 0 dB
-  bypassed exactly; above, tanh(g·y)/g with g from `drive`, i.e. level-
-  preserving for small signals) → safety limiter → this is the echo (wet)
-  and, × `feedback`, what is written back with the input. The safety
-  limiter is linear below 0.5 and soft-saturates to ±1.0 above (document
-  the curve), so feedback > 100 % self-oscillates up to ≈ 0 dBFS and never
-  beyond, and nothing below −6 dBFS is touched.
-- **Modes:** `stereo` — two independent lines; `ping_pong` — the mono sum
-  (L+R)/2 enters the left line only; left line input = in + fb·R_echo,
-  right line input = fb·L_echo (first echo left, then alternating);
-  `mono` — the mono sum through the left line, echo to both outputs.
-- **`width`:** mid/side on the echo only (S × width/100); `mono` ignores it.
-- **`duck`:** detector = input peak max(|L|,|R|) with 1 ms attack, 250 ms
-  release, in dB; echo attenuation = `duck`·clamp((level + 60)/30, 0, 1) dB
-  (none at −60 dBFS and below, the full `duck` at −30 dBFS and above).
-- **`freeze`:** input to the lines fades out over 10 ms; the loop moves
-  (10 ms crossfade) to exact recirculation (gain 1, filters, drive and
-  limiter out of the loop), modulation fades to 0, line times hold their
-  current values until unfrozen. Off returns to the normal loop over 10 ms.
-- **`mix`/`output`:** linear dry/wet crossfade (as the other stock
-  effects), then output gain; both smoothed.
-- **Tail:** add the CLAP tail extension to this plugin (the template has
-  none; the host already queries it): infinite while `freeze` is on or
-  `feedback` ≥ 100 %, otherwise the longest line time ×
-  ceil(ln(1e-4)/ln(feedback)) + 50 ms (at least one repeat). Tell the host
-  (`clap_host_tail::changed`, from the main thread via `request_callback`)
-  when it changes.
-- Tests (beyond §1.7): impulse → first echo at the line time (fractional,
-  within one sample, measured by cross-correlation) and each repeat × fb
-  (within 0.2 dB at filters wide open); sync at 120 BPM, 1/8. = 375 ms, and a
-  transport tempo change moves the echo with the glide; a time jump
-  (375 → 200 ms) on a sine gives no click (the second difference of the
-  output stays within 4× its steady-state peak); ping-pong alternates left
-  and right with the offset spacing; feedback 110 % after a noise burst
-  stays ≤ 0 dBFS peak for 30 s, keeps oscillating (last-second RMS above
-  −30 dBFS) and never produces NaN/Inf; freeze holds the loop RMS within
-  0.2 dB over 20 s and ignores new input; duck 12 dB with a steady −20 dBFS
-  input attenuates the echo by 12 ± 0.5 dB and recovers after the input
-  stops; `mono` gives L = R; width 0 gives echo L = R; tail values.
-- GUI: the echo pattern (left and right tap positions and levels for the
-  first repeats, drawn from the parameters and tempo), time/sync and
-  feedback large, filters as a small loop-response curve, mod, drive, duck,
-  width, freeze, mode, mix, output. Scenarios: `default`, `pingpong` (1/4,
-  `ping_pong`, feedback 55, mod_depth 30).
+- **Two halves a loop.** Groove needs every second echo moved while the
+  pair stays on the beat, which one line cannot do; two lines in a ring,
+  each with its own pass, can, and each echo still gets exactly one pass
+  of the tone and medium. Linear behaviour is a single line's; only the
+  guards differ, so a runaway's two halves can each sit near full scale,
+  and the echoes leave through a ceiling.
+- **Reads before writes.** Each half reads before the loop writes this
+  sample, so a time of T samples reads T back (`Ring::read`, at least 2
+  for the cubic); freeze reads whole samples and hands them on untouched,
+  which is why a held loop never dulls (float storage, no interpolation,
+  no pass).
+- **Heads.** One pair of crossfading heads does three things: a pitch
+  shift (each sweeps its window), a fade to a new time (each takes it at
+  its window's start) and plain reading (both at one place: one read).
+  Reversed playback cannot use them: two overlapping backward heads play
+  each slice twice, at different times. It has its own heads, one slice
+  at a time with a 10 ms crossfade at the joins (`Slices`).
+- **The diffusers' delay** (20.2 ms together) is taken off the read, so
+  diffusion moves nothing in time and 0 % is the direct read to float
+  rounding; under 23.2 ms they cannot fit and the read goes direct.
+- **Switches** (medium, cuts at their range ends, freeze, reverse, routing,
+  the diffusers' path) glide per sample, decided per frame, so renders do
+  not depend on block size; a medium or a reversed pass that falls silent
+  is cleared, so it comes back the same however long it was away.
+- **The tail** is `setTail()`'s (the language gained it for this plugin,
+  with framework 1.25.2): it follows the tempo in `process()`, the time and
+  feedback in `update()`.
+- **Tests.** The suite every stock plugin has, and
+  `plugin.bracken.response`: dry (mix 0) a −12 dBFS sine passes at
+  0.00 dB, −6.00 with output −6; one echo 1 ms late, alone, is the sine at
+  0.00 dB, and −12.00 ducked by 12 dB while it plays; `echo_time` reads
+  375 ms for 1/8 D at 120 BPM and `decay` 2491.4 ms for 250 ms at 50 %.
+  Measurements are in `stock-effects.md` §6. Release build, one core,
+  stereo 48 kHz, noise: 1.4 % at the defaults; 2.2 % tape with modulation;
+  2.0 % reversed; 2.9 % with reverse, shift, diffusion, analog, drive,
+  modulation and fades at once.
 
 ## 11. Third wave: reverb — Nave [`reverb`] (`stock-effects.md` §7)
 

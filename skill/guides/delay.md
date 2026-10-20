@@ -1,72 +1,138 @@
-# Delay: Echelon (`delay`)
+# Bracken: echoes
 
-Use Echelon for rhythmic echoes, stereo movement, tape-style timing glides,
-wet ducking and held loops. Patch schema: `supple.delay-patch/1.0`; values
-are physical units and enums are keys. Changes can be merge patches through
-`fx.patch.merge`; inspect the generated schema for the installed version.
+Use `com.suppleaudio.bracken` for echoes: slapback, rhythmic repeats in
+time with the song, ping-pong, tape and analog echo, pitch-shifted,
+reversed or smeared repeats, ducked throws and held loops. Patches use
+`supple.bracken-patch/1.0`, with physical values under `params`; a merge
+changes only the keys it names.
 
-| Key | Unit/range or choices | Default |
+| Key | Unit and range | Default |
 |---|---|---|
-| `sync` | `off`, `n8_1`, `n4_1`, `n2_1`, `n1_1`, `n1_2`, `n1_2d`, `n1_2t`, `n1_4`, `n1_4d`, `n1_4t`, `n1_8`, `n1_8d`, `n1_8t`, `n1_16`, `n1_16d`, `n1_16t`, `n1_32` | `n1_8d` |
-| `time` | ms, 1–5000, log; used with sync off | 375 |
-| `mode` | `stereo`, `ping_pong`, `mono` | `stereo` |
-| `offset` | %, −50–50; right time relative to left | 0 |
-| `feedback` | %, 0–110 | 35 |
-| `highpass` | Hz, 20–2000, log | 80 |
-| `lowpass` | Hz, 1000–20000, log | 8000 |
-| `mod_rate` | Hz, 0.05–10, log | 0.5 |
-| `mod_depth` | %, 0–100 | 0 |
-| `drive` | dB, 0–24 | 0 |
-| `duck` | dB, 0–24; maximum wet attenuation | 0 |
-| `width` | %, 0–200, echo only; ignored in mono | 100 |
-| `freeze` | bool | false |
-| `mix` | %, 0–100, linear dry/wet | 25 |
-| `output` | dB, −24–24 | 0 |
+| `sync` | `free`, `n32`, `n16t`, `n16`, `n16d`, `n8t`, `n8`, `n8d`, `n4t`, `n4`, `n4d`, `n2t`, `n2`, `n2d`, `n1` (`t` triplet, `d` dotted) | n4 |
+| `time` | ms, 1…5000: used when `sync` is `free` | 400 |
+| `groove` | %, −50…50: every second echo later (+) or earlier, each pair on the beat | 0 |
+| `offset` | %, −50…50: the right side's times against the left's | 0 |
+| `time_changes` | `bend` (glides, bending pitch like tape) or `fade` (crossfades, no bend) | bend |
+| `feedback` | %, 0…110: each echo's level against the one before | 40 |
+| `routing` | `stereo`, `ping_pong` (the sum bounces left, right, left), `mono` (the sum, centred) | stereo |
+| `low_cut` | Hz, 20…2000 in the loop: each echo thinner; 20 is off | 80 |
+| `high_cut` | Hz, 1000…20000 in the loop: each echo darker; 20000 is off | 9000 |
+| `diffusion` | %, 0…100: each echo blurred more than the last, to a wash | 0 |
+| `shift` | semitones, −12…12: each echo's pitch from the one before | 0 |
+| `reverse` | bool: every echo backwards, in slices as long as the time | false |
+| `medium` | `clean`, `tape`, `analog` (a bucket brigade) | clean |
+| `age` | %, 0…100: the medium's wear (below) | 30 |
+| `drive` | dB, 0…24: saturation in the loop through the medium's curve | 0 |
+| `modulation` | %, 0…100: the time wanders up to ±4 ms | 0 |
+| `mod_rate` | Hz, 0.05…10 | 0.8 |
+| `duck` | dB, 0…24: the echoes down by this while the input plays | 0 |
+| `freeze` | bool: hold the loop forever, the input shut out | false |
+| `width` | %, 0…200: the echoes' width | 100 |
+| `input` | dB, −48…12: how much input enters the echoes; −48 is closed | 0 |
+| `mix` | %, 0…100: the dry stays full to 50%, the echoes are full from 50% | 25 |
+| `output` | dB, −24…24 | 0 |
+| `echo_time` | ms, readonly: the time between echoes now, at the song's tempo | |
+| `decay` | ms, readonly: how long the echoes take to fall 60 dB (at 1 kHz); 600000 when held or growing | |
+| `duck_now` | dB, readonly: the ducking this moment | |
+| `echo_level`, `input_level`, `output_level` | dBFS, readonly: peaks, falling 20 dB/s | |
 
-Note labels follow Orrery: `n1_8d` displays `1/8.`, a dotted eighth;
-`t` means triplet. At 120 BPM the dotted eighth is 375 ms. Missing transport
-uses 120 BPM. Both times clamp to 1–5000 ms, including long notes and offsets.
+Note values follow the host's tempo (120 BPM when there is none): at 120
+BPM `n4` is 500 ms, `n8d` 375 ms, `n8t` 167 ms. Each echo goes through the
+loop once more than the one before, so `low_cut`, `high_cut`, `shift`,
+`diffusion`, `drive` and the medium all build up repeat by repeat.
 
-Three starting recipes (apply the `params` object as a merge):
+## The media
+
+| `medium` | What `age` does | Sound |
+|---|---|---|
+| `clean` | 0: transparent. Up: the band narrows to 8 kHz and the bits fall to 11, like an early digital unit | exact copies |
+| `tape` | the highs roll off sooner (19 kHz down to 5.7 kHz) and it wobbles: wow and flutter even with `modulation` at 0 | soft, rounded, unsteady |
+| `analog` | fewer bucket-brigade stages: darker and coarser. Longer times are always darker (at 500 ms and 30%, a band to about 3 kHz) | dark, warm, gritty |
+
+`drive` keeps quiet echoes at their level and flattens loud ones from
+that many dB below full scale: at 24 dB a runaway loop settles near
+−20 dBFS rather than 0.
+
+## Setting it by numbers
+
+Read `echo_time` and `decay` after a change. Decay is what most requests
+mean by "shorter" or "longer echoes":
+
+| Aim | `decay` | Typical setting |
+|---|---|---|
+| A single slap | one echo | `feedback` 0–10 |
+| Short rhythmic tail | 1–2 s | `feedback` 25–40 at an eighth or quarter |
+| Long, washy | 4–8 s | `feedback` 60–75, `diffusion` 40+ |
+| Endless | 600 s (held or growing) | `feedback` 100+, or `freeze` |
+
+Decay grows with the time as well as the feedback: halving the time at the
+same feedback halves it. Cuts and age shorten it a little (they take level
+each pass).
+
+## Recipes
+
+A vocal slap, tape-soft:
 
 ```json
-{"params":{"sync":"off","time":95,"feedback":10,"highpass":120,"lowpass":6500,"mix":15}}
+{"params":{"sync":"free","time":95,"feedback":8,"low_cut":150,"high_cut":6500,"medium":"tape","age":20,"mix":18}}
 ```
 
-A short vocal slap; keep feedback low so consonants remain clear.
+Dotted-eighth throws that stay out of the vocal's way:
 
 ```json
-{"params":{"sync":"n1_4","mode":"ping_pong","feedback":55,"mod_depth":30,"mix":25}}
+{"params":{"sync":"n8d","feedback":45,"low_cut":180,"high_cut":5500,"duck":10,"mix":30}}
 ```
 
-Quarter-note alternating echoes. Ping-pong feeds the mono sum into the left
-line; the first echo is left, then right. Offset changes the right spacing.
+Swung ping-pong (a third: triplet swing):
 
 ```json
-{"params":{"sync":"n1_8d","feedback":40,"duck":12,"highpass":180,"lowpass":6000,"mix":30}}
+{"params":{"sync":"n8","routing":"ping_pong","groove":33,"feedback":50,"high_cut":7000}}
 ```
 
-Ducked rhythmic throws: the wet echo falls by 12 dB under input above
-−30 dBFS and recovers with a 250 ms detector release. Below −60 dBFS there
-is no ducking. Duck never alters stored repeats.
+A wide double (no repeats, the right side half as late again):
 
-Time and tempo changes glide with two 100 ms time constants, bending pitch.
-Wow combines a sine with deterministic smooth random variation; maximum
-excursion is 3 ms, capped at 45% of the current line time. Zero depth is exact.
-The filters sit in the loop and therefore darken/thin each repeat; endpoints
-remain active. Drive is a small-signal-preserving loop saturator, not makeup.
-It bypasses exactly at 0 dB and fades into its saturation curve over the first
-1 dB, so raising drive from zero does not cause a level step.
+```json
+{"params":{"sync":"free","time":14,"offset":50,"feedback":0,"low_cut":120,"modulation":25,"mod_rate":0.6,"mix":30}}
+```
 
-Freeze fades the input and loop processing out over 10 ms, holds the current
-read times and replays the captured period without cumulative interpolation
-loss. Its period rounds to the nearest sample while retaining fractional
-playback phase. New input is ignored once frozen; new time/tempo targets
-apply on unfreeze. Freeze and feedback ≥100% have infinite reported tails;
-release freeze or reduce feedback before an offline render that needs to end.
+Shimmer (each echo an octave up, blurring into a wash):
 
-The safety limiter leaves echoes below −6 dBFS unchanged and bounds each
-normal echo to 0 dBFS. Wider stereo settings, positive output, dry signal and
-frozen material can exceed that bound. It is not a true-peak master limiter.
-For a true-peak ceiling use [Treeline, the limiter](limiter.md), or render normalization's. Latency is zero; no parameter requires a
-restart. The GUI pattern is a nominal per-line picture, before width/mix/duck.
+```json
+{"params":{"sync":"n4","feedback":65,"shift":12,"diffusion":70,"low_cut":300,"high_cut":10000,"time_changes":"fade","mix":30}}
+```
+
+Reversed swells:
+
+```json
+{"params":{"sync":"n2","feedback":35,"reverse":true,"diffusion":30,"mix":40}}
+```
+
+A dub spiral (feedback at the edge; automate `feedback` past 100 to let it run away):
+
+```json
+{"params":{"sync":"n4d","feedback":98,"medium":"tape","age":45,"drive":9,"low_cut":220,"high_cut":3500,"modulation":10,"mix":35}}
+```
+
+On a send return, set `mix` to 100.
+
+## Throws and freezes
+
+To echo only some words, automate `input`: −48 (closed) normally, 0 dB
+on the words to throw. The echoes already in the loop carry on; the dry
+sound is untouched. Freeze holds whatever is in the loop exactly, forever,
+and ignores new input: set it just after the sound to hold, and release it
+before a render that should end.
+
+## Limits
+
+What feeds back is held under full scale (the first echo is not), and the
+echoes leave through a ceiling that eases peaks above −2 dBFS toward 0 dBFS,
+so a runaway peaks at 0 dBFS before `mix` and `output`. With `mix` 50% or more the dry and the
+echoes sum: watch `output_level`. Diffusion needs a time of 24 ms or more.
+The pitch shift is a two-head shifter: a sustained tone's echoes carry a
+slight 17 Hz roughness. The tail Bracken reports follows the time, feedback
+and tempo, so renders end when the echoes have died; held or growing loops
+never end. Latency is zero.
+
+See [mixing](mixing.md) and
+[stock spec §6](../../docs/specs/stock-effects.md#6-delay--bracken-bracken).

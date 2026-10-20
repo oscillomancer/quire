@@ -638,81 +638,147 @@ Air, Iron Bass, Bass Growl, Drum Crunch, Sustain Fuzz, Master Clipper,
 Lo-Fi Sampler, Bitcrushed, Octave Up, Folded Pulse, Ringing Throat, Broken
 Radio.
 
-## 6. Delay — "Echelon" [`delay`]
+## 6. Delay — "Bracken" [`bracken`]
 
-Keys: `sync` enum `off` + note values (as in the synth spec) (`1/8.`),
-`time` ms 1..5000 log (375; used when `sync` off), `mode` enum `stereo`,
-`ping_pong`, `mono` (`stereo`), `offset` % −50..+50 (0; right-channel time
-offset relative to left), `feedback` % 0..110 (35; > 100 is safety-limited
-self-oscillation), `highpass` Hz 20..2000 log (80), `lowpass` Hz
-1000..20000 log (8000) (in the feedback loop), `mod_rate` Hz 0.05..10 log
-(0.5), `mod_depth` % 0..100 (0; tape-style wow), `drive` dB 0..24 (0; loop
-saturation), `duck` dB 0..24 (0; wet ducking under the input), `width` %
-0..200 (100), `freeze` bool, `mix` % (25), `output` dB. DSP: fractional
-delay (cubic/allpass), smooth time changes (tape-like glide, no clicks),
-tempo sync via CLAP transport.
+Echoes from a clean slapback to a smeared, shifting, reversed wash, written
+as a DSP script (ADR-0047: `plugins/stock/bracken/script/bracken.cpp`).
+Main stereo or mono in and out (mono plays as `mono` routing); no latency.
 
+| key | type | range | curve | default |
+|---|---|---|---|---|
+| `sync` | enum | `free`, `n32`, `n16t`, `n16`, `n16d`, `n8t`, `n8`, `n8d`, `n4t`, `n4`, `n4d`, `n2t`, `n2`, `n2d`, `n1` | | `n4` |
+| `time` | ms | 1..5000: with `sync` free | log | 400 |
+| `groove` | % | −50..50: every second echo later (+) or earlier | linear | 0 |
+| `offset` | % | −50..50: the right side's times against the left's | linear | 0 |
+| `time_changes` | enum | `bend`, `fade` | | `bend` |
+| `feedback` | % | 0..110 | linear | 40 |
+| `routing` | enum | `stereo`, `ping_pong`, `mono` | | `stereo` |
+| `low_cut` | Hz | 20..2000 in the loop; 20 is off | log | 80 |
+| `high_cut` | Hz | 1000..20000 in the loop; 20000 is off | log | 9000 |
+| `diffusion` | % | 0..100 | linear | 0 |
+| `shift` | st | −12..12: each echo's pitch from the one before | linear | 0 |
+| `reverse` | bool | each echo reversed | | false |
+| `medium` | enum | `clean`, `tape`, `analog` | | `clean` |
+| `age` | % | 0..100: the medium's wear | linear | 30 |
+| `drive` | dB | 0..24: saturation in the loop | linear | 0 |
+| `modulation` | % | 0..100: ±4 ms at 100 | linear | 0 |
+| `mod_rate` | Hz | 0.05..10 | log | 0.8 |
+| `duck` | dB | 0..24 | linear | 0 |
+| `freeze` | bool | hold the loop | | false |
+| `width` | % | 0..200: the echoes' | linear | 100 |
+| `input` | dB | −48..12 into the echoes; −48 is closed | linear | 0 |
+| `mix` | % | 0..100 | linear | 25 |
+| `output` | dB | −24..24 | linear | 0 |
+| `echo_time` | ms | readonly: the time between echoes now | | |
+| `decay` | ms | readonly: see below | | |
+| `duck_now` | dB | readonly: the ducking this moment | | |
+| `echo_level`, `input_level`, `output_level` | dBFS | readonly: peaks, falling 20 dB/s | | |
 
-### Delay implementation decisions (2026-09-30)
+- **Time.** T is the note's length at the host's tempo (120 BPM without
+  one), or `time`. Each side's loop is two halves in a ring: A = T(1 + g)
+  and B = T(1 − g), g = `groove`, so echoes land at A, 2T, 2T + A, 4T…;
+  the right side's halves are × (1 + `offset`) in `stereo`, and in
+  `ping_pong` B (the bounce back from the right) is. Every half is clamped
+  to 1 ms..5 s. `bend`: each half's time follows its target through two
+  70 ms one-pole lags (tape changing speed); `fade`: each of the two read
+  heads takes the new time at the start of its window, so a change
+  crossfades over 30 to 60 ms without a bend.
+- **Lines.** Float, each sized for 5 s + 2.5 s (reversed slices) + the
+  modulation's reach; reads are 4-point cubic Hermite, at least 2 samples
+  back. Two heads half a 60 ms window apart, each sin² over its window (the
+  two sum to 1): with no shift and nothing held both read one place, a
+  single read. `shift` r = 2^(st/12) sweeps each head through its window
+  at 1 − r samples a sample (the window shortens for short times so a head
+  never reaches the newest sample).
+- **A pass** (each echo, once per half): the diffusers (four allpasses of
+  2.31, 3.73, 5.87 and 8.29 ms, gains ±0.72 × `diffusion`, alternating
+  sign, the read taken 20.2 ms earlier so the echo stays on time; under
+  23.2 ms the read goes direct, crossfading over 20 ms); `low_cut` and
+  `high_cut` (12 dB/oct, each faded in and out over 10 ms at its end of the
+  range); the medium; drive y = f(gx)/g, g from `drive`, faded in over its
+  first dB (0 dB is exactly no drive).
+  - clean: a 12 dB/oct low-pass at 20·(1 − 0.6a²) kHz (faded in over age
+    0..25 %), rounding to 24 − 13a² bits; curve x/(1 + x⁴)^¼.
+  - tape: a one-pole low-pass at 19·(1 − 0.7a^0.8) kHz; curve tanh.
+  - analog: a bucket brigade of 10000·(1 − 0.7a) stages clocked at
+    stages / 2T: 12 dB/oct low-passes at 0.4 × the clock (at most 18 kHz)
+    either side of a hold at the clock rate (none at or above the host's
+    rate); curve (tanh(x + 0.3) − tanh 0.3)/(1 − tanh² 0.3), then a 2 Hz
+    DC blocker.
+  Medium changes crossfade over 30 ms; a medium that falls silent is
+  cleared, so it starts afresh.
+- **Feedback.** Each half hands on guard(`feedback` × its echo), guard
+  untouched to 0.6 and easing to 1.0 above (tanh); A takes the input
+  (× `input`) as well. The first echo never passes the guard.
+- **Routing.** `stereo`: each side's loop takes its own input and plays
+  both halves; `ping_pong`: the left loop takes (L + R)/2, A plays left and
+  B right; `mono`: the left loop takes the sum and plays both halves to
+  both sides. A change dips the echoes for 8 ms each way; the right loop is
+  cleared when a routing that leaves it silent takes over.
+- **Reverse.** Each half also reads backwards, in slices as long as its
+  time (at most 2.5 s; with a shift, the slice spans its reach at the
+  shifted speed), centred on the echo's time, through a pass of its own;
+  each slice fades in as the last fades out over 10 ms. The loop itself
+  stays forward, so every echo is reversed. Toggling crossfades over 30 ms.
+- **Modulation.** Added to every read, at most 45 % of the half's time:
+  clean a sine, analog a triangle, tape 0.7 sine + 0.3 a random value per
+  cycle glided with a raised cosine, plus age's own wow (0.35 ms at
+  0.55 Hz, random) and flutter (0.06 ms at 7.1 Hz); the right side a
+  quarter cycle on.
+- **Freeze** (20 ms crossfades): the input is shut out and each half reads
+  a whole number of samples (its time rounded as freeze began) and hands
+  it on untouched, so the held loop repeats exactly; the echoes still pass
+  through the tone and medium on their way out. Unfrozen, the halves go on
+  from their times now.
+- **Out.** Each side's echoes through a ceiling (untouched to 0.8, easing
+  to 1.0: two halves held near full scale would sum past it), `width` (mid
+  and side, 100 % exactly nothing), ducking, then dry × min(1, 2(1 −
+  `mix`)) + echoes × min(1, 2·`mix`), × `output`: the dry stays full to
+  50 %.
+- **Duck.** The input's peak (1 ms up, 60 ms down), in dB: the echoes go
+  down by `duck` × clamp((level + 60)/30, 0, 1) dB, rising in 5 ms and
+  letting go over 150 ms.
+- **Tail and decay.** A pass's gain at a frequency is the cuts' and the
+  medium's (analytic). `decay` is the time the echoes take to fall 60 dB
+  at 1 kHz with the feedback as set (drive aside), 600 s when held or past
+  the loop's losses. The tail (`setTail`) is the time to fall 80 dB at the
+  slowest of 60 Hz, 250 Hz, 1 kHz and 4 kHz, plus 1.5 T, a reversed slice
+  and the diffusers' ring (0.5 s × `diffusion`): forever when frozen or
+  past the losses. It follows the tempo as it changes.
 
-- Identity is `delay`, CLAP `com.suppleaudio.delay`, state `QDL1`, AU `QDly`;
-  the display name is defined once in `plugins/delay/cmake/Identity.cmake`.
-  Sync copies Orrery's `off`, `n8_1` … `n1_32` choices; `n1_8d` is default.
-  Both line times clamp to 1–5000 ms after converting the note and applying
-  the right offset to the original, unclamped left time. Missing, nonfinite
-  or nonpositive transport tempo means 120 BPM. Output is −24…+24 dB (0),
-  mix is 0…100 % (25), width is 0…200 % (100), freeze defaults off.
-- A two-pole critically damped glide consists of cascaded one-poles with
-  100 ms time constants, initialized to restored times before processing.
-  This applies to free time, sync, offset and transport tempo. Other floats
-  ramp for 20 ms (frequencies/rate in log space); routing modes and freeze
-  use 10 ms ramps. Loop coefficients update on a fixed 16-sample grid.
-  Frequencies clamp internally to 0.45·fs. Filters are always active;
-  their range endpoints are wide settings, not bypasses.
-- Float circular storage uses four-point cubic Hermite reads. Two lines are
-  allocated for 5000 ms + 3 ms wow + interpolation margin. At validator-only
-  rates below the 22.05 kHz response contract, reads have a two-sample causal
-  minimum; activation accepts 1000…768000 Hz.
-- Wow uses 0.8 sine + 0.2 smooth random, ±3 ms at full depth, capped to
-  45 % of the current line time. The random endpoints come from fixed
-  per-line xorshift32 seeds and join with a cubic smoothstep once per wow
-  cycle. The right sine starts a quarter cycle later. Depth zero is exact.
-- The safety curve is x for |x| ≤ 0.5, otherwise
-  sign(x)·[0.5 + 0.5·tanh(2·(|x|−0.5))]. Every normal echo is bounded by
-  unity before width/output. Drive zero bypasses its nonlinearity exactly;
-  it crossfades linearly from bypass to tanh(g·x)/g over drive 0–1 dB,
-  g = 10^(drive/20), using the full curve from 1 dB upward. This avoids a
-  level step when leaving zero. Stereo, ping-pong and mono routing
-  interpolate over 10 ms. Width 100 bypasses M/S arithmetic
-  exactly; mono sends the left line to both wet outputs and ignores width.
-- Duck measures the linked main input peak in dB with 1 ms attack and
-  250 ms release; attenuation is duck·clamp((level+60)/30,0,1). It affects
-  the wet outputs only, after recirculation, so it never changes the loop.
-- Freeze holds the current unmodulated read times immediately; modulation,
-  input and loop processing fade out over 10 ms. At completion each line
-  replays a stationary view of its existing ring period, rounded to the
-  nearest sample, with the held fractional phase interpolated only at output.
-  The original samples are never rewritten. This avoids accumulating cubic
-  interpolation loss on every frozen repeat; the held period differs by at
-  most half a sample. No extra allocation, copy or filter reset occurs.
-  Unfreeze aligns the write head with the frozen playback cursor and restores
-  the normal loop over 10 ms. New time/tempo targets take effect on unfreeze.
-- Tail is the longest requested line time × max(1,ceil(ln(1e-4)/ln(fb)))
-  + 50 ms, rounded up to samples; zero feedback still has one repeat.
-  Freeze or feedback ≥100 % reports INT32_MAX (infinite). **Approved
-  correction to effects.md §10:** `clap_host_tail::changed` runs in
-  `process()`, following CLAP's audio-thread contract; parameter/state edits
-  set an atomic pending flag and notifications coalesce there. No restart
-  is needed; latency is always zero.
-- Nonfinite inputs become zero and finite inputs clamp to ±1e8 before the
-  recursive loop. Recursive filter/storage states below 1e-30 flush to zero.
-  The documented self-oscillation ceiling applies to each normal echo at
-  width 100/output 0; width >100 or positive output gain can exceed 0 dBFS,
-  and freeze intentionally bypasses the limiter.
-- The 900×560 editor shows parameter/tempo-derived repeat positions and
-  levels, a digital loop response, telemetry for wet level and ducking,
-  and values below each knob. These are per-line nominal repeats, before
-  output width/mix/duck; the fractional glide and wow alter actual timing.
+Measured (dev build, 48 kHz):
+
+| check | result |
+|---|---|
+| a 1 kHz burst, 250 ms, feedback 50 %, cuts off, age 0 | each echo 6.02 dB below the last, on the sample; `decay` 2.491 s |
+| `groove` 33.3 %, `ping_pong`, 250 ms | left at 333.25, 833.25 ms; right at 500, 1000 ms |
+| a 0.4 s pluck reversed, 500 ms, feedback 50 % | each echo once, swelling to where the pluck began |
+| `shift` 12, a 440 Hz tone | echoes at 873, 1740, 3474 Hz (the shifter's 16.7 Hz line grid about 880, 1760, 3520) |
+| freeze after 0.8 s (tape, age 60, shift, diffusion, modulation) | the loop's level and centroid unchanged to 0.01 dB over 5 s |
+| `feedback` 110 %, drums, each medium | bounded: peaks 0.0 dBFS at drive 0, −20 to −17 dBFS at 24 dB (the curve holds the loop lower) |
+| duck 12 dB under a held note | the echoes 12 dB down, back within 0.3 s of its end |
+| automation of time (bend, fade), sync, routing, medium, reverse, freeze, cuts, input | no step above the unautomated render's (shift and steep glides raise the material's own) |
+| the render after a 1 s sine, 1/16, feedback 30 % | ends 0.37 s after the echoes fall below −80 dBFS |
+
+Editor (1080 × 780): the echoes to come after a sound, as stems along the
+time (left up, right down), their height the level, browning as the loop
+darkens them, smeared with diffusion, a swell before each when reversed,
+each shifted echo's pitch above it; grid lines in beats and bars when
+synced; a playhead from the last sound that came in, lighting each echo
+as it passes. Dragged across, the time (by octaves free, a note value per
+40 units synced), up and down, the feedback. The time as a note or in
+ms with the other beside it, the note grid, bend or fade, the time,
+groove and offset; the loop's knobs and each echo's tone (the 1st, 2nd,
+4th and 8th echo's response); routing and direction; the media, age and
+drive with what age does in numbers, the modulation's wave; a strip of the
+last 4 s of input, echoes and ducking; the output knobs and freeze. The
+header's frond has a leaflet for each echo, lit as the playhead passes,
+and browns with age.
+
+Factory patches: Quarter Echo (the defaults), Vocal Slap, Dotted Throw,
+Swung Ping-Pong, Wide Double, Tape Echo, Bucket Brigade, Dub Spiral,
+Shimmer, Falling Steps, Reverse Swell, Ambient Smear, Early Digital,
+Centre Echo.
 
 ## 7. Reverb — "Nave" [`reverb`]
 

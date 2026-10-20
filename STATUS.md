@@ -191,7 +191,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
   the LLM evaluation harness (`tools/eval-harness`).
 - **Stock plugins** (ADR-0011, ADR-0047): Orrery, Yarrow, Sundew, Treeline,
-  Gorse, Hickory, Sorrel, Teasel, Echelon, Nave and Gauge, each passing clap-validator, a
+  Gorse, Hickory, Sorrel, Teasel, Bracken, Nave and Gauge, each passing clap-validator, a
   reset determinism check and an unload test (all but Nave also pass the
   headless REAPER check); JSON patches and the semantic-parameters extension.
   Yarrow, the EQ, is the first written as a DSP script
@@ -262,7 +262,20 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   curve as set and the distortion it adds to the music; its editor shows
   the spectrum in and out with what the curve adds, the curve with where
   the music sits on it, the harmonics, the dynamics and the LFO. It
-  replaced Kiln (`com.suppleaudio.drive`).
+  replaced Kiln (`com.suppleaudio.drive`). Bracken, the delay
+  (`plugins/stock/bracken`), is the eighth: each side's loop in two halves,
+  so every second echo can come early or late with each pair still on the
+  beat (groove); stereo, ping-pong or mono; time free or in note values,
+  bent like tape or faded to when it changes; tone, diffusion and a pitch
+  shift in the loop; echoes forward or reversed; clean, tape or a bucket
+  brigade (darker the longer the time) worn by age, with drive into the
+  medium's curve; modulation, ducking, an input to throw sounds in by,
+  width, and a freeze that holds the loop exactly. It tells the host its
+  tail as the time, feedback and tempo change, and reads out the echo time
+  and how long the echoes take to fall 60 dB; its editor shows the echoes
+  to come (dragged across for the time, up and down for the feedback) with
+  a playhead from the last sound, each echo's tone, the medium and the
+  ducking. It replaced Echelon (`com.suppleaudio.delay`).
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The
@@ -275,7 +288,8 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   `<data>/<slug>/scripts`, shared with the sandbox), `dsp.test` measures
   one with standard signals at any sample rate (and, when asked, parameter
   automation, a timed sidechain key or a note sequence) and reports its
-  meters as of each signal's end, and a script that compiles is loaded
+  meters as of each signal's end; a script tells the host a tail that
+  follows its settings and the tempo (`setTail`), and a script that compiles is loaded
   and set like a stock plugin (`skill/guides/dsp-workflow.md`).
   `fx.describe` and the sandbox's `plugin.describe` report a live
   instance's loop-budget stops, out-of-range indices and failed reloads as

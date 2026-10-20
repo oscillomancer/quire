@@ -125,8 +125,8 @@ include startup ramps.
 | `hickory` | Hickory | Gain | 0 / −12 dB | −12 ±1 dB |
 | `sorrel` | Sorrel | Threshold | −80 / −6 dB | second half >3 dB quieter |
 | `teasel` | Teasel | Output | 0 / −12 dB | −12 ±1 dB |
+| `bracken` | Bracken | Output | 0 / −12 dB | −12 ±1 dB |
 | `analyzer` | Analyzer / Gauge | Hold | false / true | envelope reload + unchanged audio |
-| `delay` | Echelon | Output | 0 / −12 dB | −12 ±1 dB |
 
 Continuous values use ADR-0010's normalized CLAP domain. The table keeps those
 values explicit; stepped Hold uses 0/1. Add a plugin in a few lines in `CASES`

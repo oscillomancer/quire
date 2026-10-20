@@ -16,6 +16,7 @@ player, and every check the other stock plugins have.
 | `hickory` | Hickory, the stereo utility | `com.suppleaudio.hickory` |
 | `sorrel` | Sorrel, the gate and expander | `com.suppleaudio.sorrel` |
 | `teasel` | Teasel, the saturation | `com.suppleaudio.teasel` |
+| `bracken` | Bracken, the delay | `com.suppleaudio.bracken` |
 
 ## Files
 

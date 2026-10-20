@@ -1,6 +1,5 @@
 add_subdirectory(common)
 add_subdirectory(suite)
-add_subdirectory(delay/engine)
 add_subdirectory(analyzer/engine)
 add_subdirectory(orrery/engine)
 add_subdirectory(reverb/engine)
@@ -205,7 +204,6 @@ if(SUPPLE_BUILD_PLUGINS)
   supple_add_plugin(probe-synth PROBESYNTH ProbeSynth)
   supple_add_plugin(orrery ORRERY Orrery)
   supple_add_plugin(analyzer ANALYZER)
-  supple_add_plugin(delay DELAY)
   supple_add_plugin(reverb REVERB)
 
   # The player runs DSP scripts (ADR-0032): its plugins are the scripts in
@@ -327,6 +325,7 @@ if(SUPPLE_BUILD_PLUGINS)
   supple_add_stock_script(hickory Hickory com.suppleaudio.hickory)
   supple_add_stock_script(sorrel Sorrel com.suppleaudio.sorrel)
   supple_add_stock_script(teasel Teasel com.suppleaudio.teasel)
+  supple_add_stock_script(bracken Bracken com.suppleaudio.bracken)
 
   # A plugin taken out of the suite leaves its staged files behind, and the
   # app loads every plugin in plugins/clap: keep only what this build makes.
