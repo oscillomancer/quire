@@ -27,7 +27,8 @@
 //               the bar after it.
 //
 // The loudness panel measures the output as BS.1770 and EBU R128 say:
-// momentary, short-term, integrated since play, loudness range, true peak,
+// momentary, short-term, integrated, loudness range and true peak, over
+// the recent music or (accumulating, the clock lit) since play started,
 // and how far all that sits from a target. Listen Matched plays the output
 // as loud as the input, so the only difference left to hear is what the
 // limiting costs; Delta plays what it takes away.
@@ -269,9 +270,11 @@ constexpr int kClay = 0xD9775A;      // the peaks' reduction
 constexpr int kMarigold = 0xE2B04F;  // loudness
 constexpr int kSpruce = 0x5F7A5A;    // the mark's trees
 
-constexpr int kCols = 1024;  // history columns, a hundredth of a second each
-constexpr int kShown = 800;  // eight seconds across the graph
-constexpr int kBins = 900;   // loudness histograms: -70 to +20 LUFS in tenths
+constexpr int kCols = 1024;      // history columns, a hundredth of a second each
+constexpr int kShown = 800;      // eight seconds across the graph
+constexpr int kBins = 900;       // loudness histograms: -70 to +20 LUFS in tenths
+constexpr int kRecent = 300;     // the recent meters' window: 30 s in tenths of a second
+constexpr int kRecentPeak = 20;  // the recent true peak's: 2 s
 
 struct Treeline : Effect {
     static constexpr Info info = {
@@ -310,6 +313,13 @@ struct Treeline : Effect {
             .help(
                 "The output; the output as loud as the input, to hear only what limiting costs; or "
                 "what it takes away.");
+    Param accumulate =
+        toggle("Accumulate", false)
+            .notAutomatable()
+            .in("Loudness")
+            .help(
+                "Off, the meters follow the last 30 s (true peak the last 2 s, overs the last 5 "
+                "s); on, they total everything since it was switched on or play started.");
 
     Param gainReduction =
         decibels("Gain Reduction", -48, 0, 0).meter().help("The gain it applies now, 0 or less.");
@@ -320,15 +330,21 @@ struct Treeline : Effect {
     Param integratedLoudness =
         decibels("Integrated Loudness", -70, 0, -70)
             .meter()
-            .help("The output's loudness since the transport started, in LUFS.");
+            .help(
+                "The output's gated loudness over the last 30 s, or since play started while "
+                "accumulating, in LUFS.");
     Param truePeak =
         decibels("True Peak", -70, 6, -70)
             .meter()
-            .help("The output's highest true peak since the transport started, in dBTP.");
+            .help(
+                "The output's highest true peak in the last 2 s, or since play started while "
+                "accumulating, in dBTP.");
     Param loudnessRange =
         decibels("Loudness Range", 0, 40, 0)
             .meter()
-            .help("The output's loudness range (EBU R128 LRA) since the transport started, in LU.");
+            .help(
+                "The output's loudness range (EBU R128 LRA) over the last 30 s, or since play "
+                "started while accumulating, in LU.");
 
     void factoryPatches(Patches& p) {
         p.add("Transparent Master").set(gain, 3).set(ceiling, -1).set(release, 120);
@@ -379,6 +395,14 @@ struct Treeline : Effect {
     double momentaryNow = -120.0, shortNow = -120.0, integratedNow = -120.0, rangeNow = 0.0;
     double shortIn = -120.0, peakHeld = 0.0, measuredSeconds = 0.0;
     int overs = 0;
+    bool accumulating = false;
+    // The recent meters: the last 30 s in tenths of a second (momentary
+    // energies, short-term loudness, true peaks), and overs until 5 s pass
+    // without one.
+    Array<double, kRecent> recentMomentary, recentShort, recentPeak, sorted;
+    int recentAt = 0, recentFilled = 0;
+    double blockPeak = 0.0, peak2 = 0.0, peak30 = 0.0;
+    int recentOvers = 0, overAge = 0, overHold = 240000;
     // Listening.
     int listenMode = 0;
     double matchDb = 0.0, kMatch = 0.0, kMatchOff = 0.0, deltaMix = 0.0, deltaStep = 0.001;
@@ -401,7 +425,7 @@ struct Treeline : Effect {
     Shared<double> inLeft, inRight, outLeft, outRight, grShown, plateauShown, sharpShown;
     Shared<double> guardShown, holdShown, bassShown, releaseShown, sustainShown;
     Shared<double> momentaryShown, shortShown, integratedShown, rangeShown, peakShown;
-    Shared<double> secondsShown, matchShown;
+    Shared<double> secondsShown, matchShown, plrPeakShown;
 
     void prepare() {
         rate = sampleRate();
@@ -454,6 +478,8 @@ struct Treeline : Effect {
         kMatchOff = stepFor(40.0, rate);
         deltaStep = 1.0 / (0.01 * rate);
         blockLength = max(1, roundToInt(0.1 * rate));
+        overHold = roundToInt(5.0 * rate);
+        accumulating = accumulate.on();
         setRelease(release);
         // A restart prepares an instance that has played: start it afresh.
         plateau = 0.0;
@@ -500,14 +526,8 @@ struct Treeline : Effect {
         kPlateauOut = stepFor(clamp(10.0 * ms, 400.0, 4000.0), rate);
     }
 
-    void restartLoudness() {
-        blockOut.fill(0.0);
-        blockIn.fill(0.0);
-        blockAt = 0;
-        blocksFilled = 0;
-        blockCount = 0;
-        sumOut = 0.0;
-        sumIn = 0.0;
+    // Everything accumulated: on a start of play, and when accumulating is switched.
+    void restartTotals() {
         gatedEnergy.fill(0.0);
         rangeEnergy.fill(0.0);
         gatedCount.fill(0);
@@ -516,20 +536,45 @@ struct Treeline : Effect {
         rangeTotal = 0.0;
         gatedBlocks = 0;
         rangeBlocks = 0;
-        momentaryNow = -120.0;
-        shortNow = -120.0;
         integratedNow = -120.0;
         rangeNow = 0.0;
-        shortIn = -120.0;
         peakHeld = 0.0;
         measuredSeconds = 0.0;
         overs = 0;
+    }
+
+    void restartLoudness() {
+        restartTotals();
+        recentMomentary.fill(-1.0);
+        recentShort.fill(-200.0);
+        recentPeak.fill(0.0);
+        recentAt = 0;
+        recentFilled = 0;
+        blockPeak = 0.0;
+        peak2 = 0.0;
+        peak30 = 0.0;
+        recentOvers = 0;
+        overAge = overHold;
+        blockOut.fill(0.0);
+        blockIn.fill(0.0);
+        blockAt = 0;
+        blocksFilled = 0;
+        blockCount = 0;
+        sumOut = 0.0;
+        sumIn = 0.0;
+        momentaryNow = -120.0;
+        shortNow = -120.0;
+        shortIn = -120.0;
     }
 
     void update() {
         listenMode = listen.index();
         if (release.changed() || unplayed) setRelease(release);
         if (unplayed) deltaMix = listenMode == 2 ? 1.0 : 0.0;
+        if (accumulate.on() != accumulating) {
+            accumulating = accumulate.on();
+            restartTotals();
+        }
     }
 
     // What the music is doing at the detector: how sudden it is (the sharp
@@ -627,7 +672,15 @@ struct Treeline : Effect {
             const double tr = stereoNow ? outDetect[1].push(orr, fir) : tl;
             const double tp = max(tl, tr);
             peakHeld = max(peakHeld, tp);
-            if (tp > dbToGain(ceiling.at(i) + 0.05)) overs += 1;
+            blockPeak = max(blockPeak, tp);
+            if (tp > dbToGain(ceiling.at(i) + 0.05)) {
+                overs += 1;
+                recentOvers += 1;
+                overAge = 0;
+            } else if (overAge < overHold) {
+                overAge += 1;
+                if (overAge == overHold) recentOvers = 0;
+            }
             const double ko0 = kOut[0].process(ol);
             const double ki0 = kIn[0].process(l);
             double energy = ko0 * ko0;
@@ -685,7 +738,8 @@ struct Treeline : Effect {
         beatNext = beatPos;
         hHead.set(hw);
         hFilled.set(filled);
-        oversShown.set(overs);
+        const double peakNow = accumulating ? peakHeld : max(peak2, blockPeak);
+        oversShown.set(accumulating ? overs : recentOvers);
         inLeft.set(gainToDb(peakIn0));
         inRight.set(gainToDb(stereoNow ? peakIn1 : peakIn0));
         outLeft.set(gainToDb(peakOut0));
@@ -702,13 +756,14 @@ struct Treeline : Effect {
         shortShown.set(shortNow);
         integratedShown.set(integratedNow);
         rangeShown.set(rangeNow);
-        peakShown.set(gainToDb(peakHeld));
+        peakShown.set(gainToDb(peakNow));
+        plrPeakShown.set(gainToDb(accumulating ? peakHeld : max(peak30, blockPeak)));
         secondsShown.set(measuredSeconds);
         matchShown.set(matchDb);
         gainReduction.set(deepest);
         shortTermLoudness.set(max(-70.0, shortNow));
         integratedLoudness.set(max(-70.0, integratedNow));
-        truePeak.set(max(-70.0, gainToDb(peakHeld)));
+        truePeak.set(max(-70.0, gainToDb(peakNow)));
         loudnessRange.set(rangeNow);
     }
 
@@ -736,7 +791,9 @@ struct Treeline : Effect {
     }
 
     // A hundred milliseconds of loudness: the momentary (400 ms) block
-    // enters the integrated gate, the short-term (3 s) the range.
+    // enters the integrated gate, the short-term (3 s) the range; while
+    // accumulating into histograms since play started, otherwise into the
+    // last 30 s.
     void closeBlock() {
         blockOut[blockAt] = sumOut / blockCount;
         blockIn[blockAt] = sumIn / blockCount;
@@ -756,6 +813,23 @@ struct Treeline : Effect {
         momentaryNow = lufs(m / min(4, blocksFilled));
         shortNow = lufs(s / blocksFilled);
         shortIn = lufs(si / blocksFilled);
+        recentMomentary[recentAt] = blocksFilled >= 4 ? m / 4.0 : -1.0;
+        recentShort[recentAt] = blocksFilled >= 30 ? shortNow : -200.0;
+        recentPeak[recentAt] = blockPeak;
+        blockPeak = 0.0;
+        recentAt = recentAt == kRecent - 1 ? 0 : recentAt + 1;
+        recentFilled = min(recentFilled + 1, kRecent);
+        peak2 = 0.0;
+        peak30 = 0.0;
+        for (int k = 0; k < recentFilled; ++k) {
+            const double v = recentPeak[wrap(recentAt - 1 - k, kRecent)];
+            peak30 = max(peak30, v);
+            if (k < kRecentPeak) peak2 = max(peak2, v);
+        }
+        if (!accumulating) {
+            recentLoudness();
+            return;
+        }
         if (blocksFilled >= 4 && momentaryNow > -70.0) {
             const int bin = clamp(floorToInt((momentaryNow + 70.0) * 10.0), 0, kBins - 1);
             gatedEnergy[bin] += m / 4.0;
@@ -805,6 +879,63 @@ struct Treeline : Effect {
         }
     }
 
+    // The last 30 s as BS.1770 and EBU 3342 gate a whole programme.
+    void recentLoudness() {
+        double e = 0.0;
+        int n = 0;
+        for (int k = 0; k < recentFilled; ++k) {
+            const double v = recentMomentary[k];
+            if (v >= 0.0 && lufs(v) > -70.0) {
+                e += v;
+                n += 1;
+            }
+        }
+        integratedNow = -120.0;
+        if (n > 0) {
+            const double gate = lufs(e / n) - 10.0;
+            double passed = 0.0;
+            int m = 0;
+            for (int k = 0; k < recentFilled; ++k) {
+                const double v = recentMomentary[k];
+                if (v >= 0.0 && lufs(v) > gate) {
+                    passed += v;
+                    m += 1;
+                }
+            }
+            integratedNow = m > 0 ? lufs(passed / m) : -120.0;
+        }
+        // The range: short-term values gated at -70 LUFS and 20 LU under,
+        // from the 10th to the 95th percentile.
+        double se = 0.0;
+        int sn = 0;
+        for (int k = 0; k < recentFilled; ++k) {
+            const double v = recentShort[k];
+            if (v > -70.0) {
+                se += pow(10.0, (v + 0.691) / 10.0);
+                sn += 1;
+            }
+        }
+        rangeNow = 0.0;
+        if (sn < 2) return;
+        const double gate = lufs(se / sn) - 20.0;
+        int count = 0;
+        for (int k = 0; k < recentFilled; ++k) {
+            const double v = recentShort[k];
+            if (v <= -70.0 || v <= gate) continue;
+            int j = count;
+            while (j > 0 && sorted[j - 1] > v) {
+                sorted[j] = sorted[j - 1];
+                j -= 1;
+            }
+            sorted[j] = v;
+            count += 1;
+        }
+        if (count < 2) return;
+        const double low = sorted[roundToInt(0.10 * (count - 1))];
+        const double high = sorted[roundToInt(0.95 * (count - 1))];
+        rangeNow = max(0.0, high - low);
+    }
+
     // --- the editor ---------------------------------------------------------------------------
 
     static constexpr double kW = 1000;
@@ -844,6 +975,7 @@ struct Treeline : Effect {
     double sharpEased = 0.0, guardEased = 0.0, grEased = 0.0, grPeak = 0.0;
     int grAge = 0;
     bool drawn = false;
+    double clockX = mx + mw - 60;  // the clock's centre, where the timer's text leaves it
 
     void editor(Editor& e) { e.size(kW, kH); }
 
@@ -1361,6 +1493,7 @@ struct Treeline : Effect {
 
     static constexpr double applyX = mx + mw - 16 - 86;  // the gain-to-target button
     static constexpr double applyY = hy + 106;
+    static constexpr double clockY = hy + 20;  // the timer's clock
 
     // The gain that would bring the integrated loudness to the target, when
     // it has been measured and is off by half a unit or more; the gain as it
@@ -1400,16 +1533,59 @@ struct Treeline : Effect {
         g.textBaseline(TextBaseline::Middle);
     }
 
+    // The timer and its clock: accumulating since play started (a running
+    // time), or following the last 30 s. A click on either switches.
+    void drawClock(Canvas& g) {
+        const bool on = accumulate.on();
+        const double right = mx + mw - 16;
+        g.textAlign(TextAlign::Right);
+        g.textBaseline(TextBaseline::Middle);
+        double tw = 0.0;
+        if (on) {
+            const int whole = toInt(secondsShown.get());
+            g.fillStyle(Theme::textMuted);
+            g.monoFont(9.5);
+            g.fillText(format("%d:%02d", idiv(whole, 60), imod(whole, 60)), right, clockY);
+            tw = g.measureText(format("%d:%02d", idiv(whole, 60), imod(whole, 60)));
+        } else {
+            g.fillStyle(Theme::textFaint);
+            g.serifItalicFont(10.5);
+            g.fillText("last 30 s", right, clockY);
+            tw = g.measureText("last 30 s");
+        }
+        clockX = right - tw - 11;
+        const bool hot = hoverY > clockY - 10 && hoverY < clockY + 10 && hoverX > clockX - 9 &&
+                         hoverX < right + 2;
+        const int colour = on ? kMarigold : (hot ? Theme::textMuted : Theme::textFaint);
+        if (on) {
+            g.fillStyle(kMarigold);
+            g.globalAlpha(0.18);
+            g.beginPath();
+            g.circle(clockX, clockY, 6);
+            g.fill();
+            g.globalAlpha(1.0);
+        }
+        g.strokeStyle(colour);
+        g.lineWidth(1.3);
+        g.beginPath();
+        g.circle(clockX, clockY, 5.5);
+        g.stroke();
+        g.lineWidth(1.2);
+        g.beginPath();
+        g.moveTo(clockX, clockY - 3.4);
+        g.lineTo(clockX, clockY);
+        g.lineTo(clockX + 2.6, clockY);
+        g.stroke();
+    }
+
+    bool onClock(double x, double y) const {
+        return y > clockY - 10 && y < clockY + 10 && x > clockX - 9 && x < mx + mw - 14;
+    }
+
     void drawLoudness(Canvas& g) {
         panel(g, mx, hy, mw, hh);
         heading(g, "Loudness", mx + 16, hy + 20);
-        const double seconds = secondsShown.get();
-        g.fillStyle(Theme::textFaint);
-        g.monoFont(9.5);
-        g.textAlign(TextAlign::Right);
-        g.textBaseline(TextBaseline::Middle);
-        const int whole = toInt(seconds);
-        g.fillText(format("%d:%02d", idiv(whole, 60), imod(whole, 60)), mx + mw - 16, hy + 20);
+        drawClock(g);
         const double integ = integratedShown.get();
         const bool measured = integ > -70.0;
         label(g, "INTEGRATED", mx + 18, hy + 48, TextAlign::Left);
@@ -1429,8 +1605,10 @@ struct Treeline : Effect {
         // Against the target.
         const double off = integ - target;
         if (!measured) {
-            aside(g, "plays to measure, from the start of play", mx + 18, hy + 116,
-                  TextAlign::Left);
+            aside(g,
+                  accumulate.on() ? "plays to measure, from the start of play"
+                                  : "plays to measure, over the last 30 s",
+                  mx + 18, hy + 116, TextAlign::Left);
         } else if (abs(off) < 0.5) {
             g.fillStyle(kMarigold);
             g.boldFont(10);
@@ -1478,8 +1656,9 @@ struct Treeline : Effect {
         g.fillText(rangeShown.get() > 0.0 ? format("%.1f LU", rangeShown.get()) : "--",
                    mx + mw - 18, hy + 246);
         row(g, hy + 266, "PEAK TO LOUDNESS");
-        g.fillText(measured && tp > -70.0 ? format("%.1f dB", tp - integ) : "--", mx + mw - 18,
-                   hy + 266);
+        const double plrPeak = plrPeakShown.get();
+        g.fillText(measured && plrPeak > -70.0 ? format("%.1f dB", plrPeak - integ) : "--",
+                   mx + mw - 18, hy + 266);
         row(g, hy + 286, "SHORT-TERM");
         const double st = shortShown.get();
         g.fillText(st > -70.0 ? format("%.1f LUFS", st) : "--", mx + mw - 18, hy + 286);
@@ -1881,6 +2060,10 @@ struct Treeline : Effect {
             } else {
                 dragging = 4;
             }
+            return;
+        }
+        if (onClock(x, y)) {
+            act(0, accumulate, accumulate.on() ? 0 : 1);
             return;
         }
         if (p.over(applyX, applyY, 86, 20) && abs(suggestedGain() - gain) >= 0.05) {

@@ -39,6 +39,7 @@ class OneScript final : public supple::Catalog {
                 {&Script::release, "release"},
                 {&Script::target, "target"},
                 {&Script::listen, "listen"},
+                {&Script::accumulate, "accumulate"},
                 {&Script::gainReduction, "gain_reduction"},
                 {&Script::shortTermLoudness, "short_term_loudness"},
                 {&Script::integratedLoudness, "integrated_loudness"},

@@ -257,9 +257,14 @@ Notes for maintainers:
   of the CPU and a millisecond of latency, so it went. What decided the
   accuracy was the interpolator's length (32 taps per phase read up to
   0.5 dB low on noise-like hits; 48 do not).
-- **Loudness.** `closeBlock()` every 100 ms: the 30-block ring, the
-  integrated histogram (gate recomputed from bin sums: no block list grows),
-  the LRA histogram. `restartLoudness()` on the transport's start.
+- **Loudness.** `closeBlock()` every 100 ms: the 30-block ring and the
+  300-block recent rings (momentary energies, short-term values, true
+  peaks), then either the recent readings (two passes over the ring for
+  the integrated gate; the LRA's gated values insertion-sorted, at most
+  300) or, while accumulating, the integrated histogram (gate recomputed
+  from bin sums: no block list grows) and the LRA histogram.
+  `restartLoudness()` on the transport's start; `restartTotals()` when
+  `accumulate` changes (in `update()`).
 - **Editor.** Its own members only: eased values for the engine plots (the
   first frame starts where the audio is, so a preview shows the moment),
   the gain bar's held peak and the pointer's state. The audio code shares

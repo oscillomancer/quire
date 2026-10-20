@@ -213,7 +213,8 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   overshoot-free curves blended by how sudden the music is, a hold that
   spans a cycle of a leading bass line, a two-stage release, 4.5 ms of
   latency at 48 kHz; BS.1770/R128 loudness of the output (momentary,
-  short-term, integrated and LRA since play, true peak) against a target,
+  short-term, integrated and LRA over the last 30 s or accumulated since
+  play, true peak) against a target,
   level-matched and delta listening, and an editor with a history of what
   was held down, the loudness and the reduction in its sustained and peak
   parts, and plots of what the engine is doing.

@@ -28,15 +28,20 @@ It has three controls because the rest adapts to the music by itself:
 | `release` | ms, 10…1000, logarithmic: how fast peaks recover | 120 |
 | `target` | LUFS, −24…−6: the integrated loudness the meters read against | −14 |
 | `listen` | output, matched, delta: the output; the output at the input's loudness; what it removes. For people, not mixes | output |
+| `accumulate` | bool: the meters total everything since it was switched on or play started, instead of following the last 30 s | false |
 | `gain_reduction` | dB, readonly: the deepest reduction in the last block | |
 | `short_term_loudness` | LUFS, readonly: the output over the last 3 s | |
-| `integrated_loudness` | LUFS, readonly: the output since the transport started | |
-| `true_peak` | dBTP, readonly: the output's highest true peak since the transport started | |
-| `loudness_range` | LU, readonly: EBU R128 LRA since the transport started | |
+| `integrated_loudness` | LUFS, readonly: the output over the last 30 s, or since play started while accumulating | |
+| `true_peak` | dBTP, readonly: the output's highest true peak in the last 2 s, or since play started while accumulating | |
+| `loudness_range` | LU, readonly: EBU R128 LRA over the last 30 s, or since play started while accumulating | |
 
 The meters follow BS.1770 and EBU R128 (K-weighting, 400 ms blocks gated
 at −70 LUFS and 10 LU under, short-term 3 s, LRA from the 10th to the 95th
-percentile). They restart when the transport starts.
+percentile). By default they follow the recent music: integrated and
+LRA the last 30 s, true peak the last 2 s, overs the last 5 s. With
+`accumulate` on they total the whole performance since play started (or
+since it was switched on). Starting the transport and switching
+`accumulate` restart them.
 
 ## Recipes
 
@@ -46,12 +51,12 @@ A mix 3 dB louder with a −1 dBTP ceiling (common streaming delivery):
 {"params":{"gain":3,"ceiling":-1}}
 ```
 
-Aim for a loudness: set `target`, play the whole song, read
-`integrated_loudness`, and change `gain` by the difference; above the
+Aim for a loudness: set `target` and `accumulate`, play the whole song,
+read `integrated_loudness`, and change `gain` by the difference; above the
 ceiling loudness rises less than the gain, so play it again and repeat once.
 
 ```json
-{"params":{"target":-14}}
+{"params":{"target":-14,"accumulate":true}}
 ```
 
 Broadcast (EBU R128: −23 LUFS, −1 dBTP or lower), slow and safe:

@@ -828,11 +828,12 @@ latency.
 | `release` | ms | 10..1000: the peaks' recovery | log | 120 |
 | `target` | dB (LUFS) | −24..−6: what the loudness readings compare against | linear | −14 |
 | `listen` | enum | `output`, `matched`, `delta`; not automatable | | `output` |
+| `accumulate` | bool | not automatable: the meters total everything since it was switched on or play started, instead of following the last 30 s | | false |
 | `gain_reduction` | dB | readonly, −48..0: the deepest reduction in the last block | | |
 | `short_term_loudness` | dB (LUFS) | readonly, −70..0: the output, 3 s | | |
-| `integrated_loudness` | dB (LUFS) | readonly, −70..0: the output since the transport started | | |
-| `true_peak` | dB (dBTP) | readonly, −70..+6: the output's highest since the transport started | | |
-| `loudness_range` | dB (LU) | readonly, 0..40: EBU R128 LRA since the transport started | | |
+| `integrated_loudness` | dB (LUFS) | readonly, −70..0: the output over the last 30 s, or since play started while accumulating | | |
+| `true_peak` | dB (dBTP) | readonly, −70..+6: the output's highest in the last 2 s, or since play started while accumulating | | |
+| `loudness_range` | dB (LU) | readonly, 0..40: EBU R128 LRA over the last 30 s, or since play started while accumulating | | |
 
 Detector. The input times `gain`, each channel's true peak read at the
 samples and at three points between each pair (a 48-tap windowed sinc per
@@ -875,12 +876,21 @@ Loudness (BS.1770-5, EBU Tech 3341/3342). K-weighting at any rate, from the
 analogue prototypes of the standard's 48 kHz filters through the bilinear
 transform, on the output (and on the dry input, for `matched`); channels
 summed with weight 1. 100 ms blocks: momentary over 4, short-term over 30.
-Integrated: each momentary block above −70 LUFS goes into a histogram of
-0.1 LU bins, gated again 10 LU under the absolutely gated loudness. LRA:
-short-term values (once 3 s have played) above −70 LUFS and 20 LU under
-their own loudness, the 95th percentile minus the 10th. Integrated, LRA,
-true peak and the count of over-ceiling samples restart when the transport
-starts.
+Integrated: momentary blocks above −70 LUFS, gated again 10 LU under their
+loudness. LRA: short-term values (once 3 s have played) above −70 LUFS and
+20 LU under their own loudness, the 95th percentile minus the 10th. Two
+modes:
+
+- **Recent** (`accumulate` off, the default): integrated and LRA from the
+  last 300 blocks (30 s); true peak the highest of the last 2 s (it falls
+  2 s after a peak is last reached); samples over the ceiling counted
+  until 5 s pass without one. Peak to loudness uses the last 30 s' true
+  peak.
+- **Accumulating** (`accumulate` on): integrated and LRA from histograms
+  of 0.1 LU bins, and true peak and overs, since it was switched on; the
+  editor shows the running time.
+
+Switching the mode and starting the transport restart the measurement.
 
 Listen: `matched` turns the output down by the dry input's short-term
 loudness against the output's (−30..+6 dB, gliding over 400 ms, back over
@@ -898,7 +908,8 @@ at a dashed line beside the name):
   plays. Under it a lane of gain reduction (0..−9 dB): the sustained part
   (the plateau) in moss, the peaks' part in clay. Drag the ceiling or the
   target line; drag elsewhere or wheel for gain; double-click resets.
-- **Loudness.** Integrated (large), how far from the target and what a
+- **Loudness.** A clock beside the heading switches accumulating: lit,
+  with the running time; dim, with "last 30 s". Integrated (large), how far from the target and what a
   service normalizing to it would do, a button that sets the gain the
   difference suggests, momentary and short-term bars with the target,
   true peak, loudness range, peak to loudness, short-term and samples over
@@ -906,8 +917,7 @@ at a dashed line beside the name):
 - **Limiter.** Gain, ceiling and release knobs; the listen choice.
 - **Engine.** The attack curve in use between the broad and the sharp one,
   the bass it follows and the hold that spans it, the two-stage release
-  with the music's sustained share, and a gain-reduction bar in its two
-  parts with a held peak.
+  with the music's sustained share, and a gain-reduction bar in its two parts with a held peak.
 
 Knobs drag vertically (Shift fine), wheel, and reset on a double click.
 
