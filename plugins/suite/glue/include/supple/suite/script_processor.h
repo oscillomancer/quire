@@ -196,6 +196,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         instance_.maxBlockSize = setup.maxBlockSize;
         instance_.channels = setup.channels;
         instance_.offline = setup.offline;
+        instance_.tail = D::Instance::kInfoTail;
         offlineNow_.store(setup.offline, std::memory_order_relaxed);
         // A replacement offered before this prepare is prepared again for it.
         if (Generation* waiting = incoming_.exchange(nullptr, std::memory_order_acq_rel))
@@ -374,7 +375,12 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
 
     // setLatency()'s, from prepare(), or Info's.
     int latencySamples() const { return instance_.latency >= 0 ? instance_.latency : latency_; }
-    uint32_t tailSamples() const { return tail_; }
+    // setTail()'s, from any hook but the editor's, or Info's.
+    uint32_t tailSamples() const {
+        const int set = instance_.tail;
+        if (set == D::Instance::kInfoTail) return tail_;
+        return set < 0 ? UINT32_MAX : static_cast<uint32_t>(set);
+    }
 
     // --- the layer's (main thread) ---------------------------------------------------
 
@@ -509,7 +515,9 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
                        rangeLine = s.outOfRangeLine.load(relaxed),
                        budget = s.budgetExceeded.load(relaxed),
                        budgetLine = s.budgetLine.load(relaxed);
+        const int tail = instance_.tail;  // nor is the tail it would set
         hook();
+        instance_.tail = tail;
         if (s.budgetExceeded.load(relaxed) != budget) fadingStopped_ = true;
         s.outOfRange.store(range, relaxed);
         s.outOfRangeLine.store(rangeLine, relaxed);
@@ -522,6 +530,8 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         const bool stopped = stopped_;
         instance_.status.clear();
         budgetSeen_ = 0;
+        // Info's tail until the new code sets its own.
+        instance_.tail = D::Instance::kInfoTail;
         // Its values are the running one's; it starts from them, snapped.
         for (size_t i = 0; i < next->paramCount() && i < current_->paramCount(); ++i)
             if (S::Param* p = next->param(i); p && current_->param(i))

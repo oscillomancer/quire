@@ -347,6 +347,9 @@ bool Plugin::offline() const { return instanceOf(instance_).offline; }
 void Plugin::setLatency(int samples) {
     if (instance_) instance_->latency = samples < 0 ? 0 : samples;
 }
+void Plugin::setTail(int samples) {
+    if (instance_) instance_->tail = samples < 0 ? -1 : samples;
+}
 
 // --- instruments -----------------------------------------------------------------
 

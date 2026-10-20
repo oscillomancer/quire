@@ -806,6 +806,32 @@ TEST(a_script_reports_the_latency_it_sets_in_prepare) {
     CHECK(engine.latency() > 0 && engine.latency() < 16);
 }
 
+TEST(a_script_reports_the_tail_it_sets_as_it_plays) {
+    const auto d = compileText(R"(#include <supple/script.h>
+struct T : Effect {
+    static constexpr Info info = {.name = "T", .id = "com.example.tail", .tail = 100};
+    Param seconds = continuous("Seconds", 0, 10, 0);
+    void update() { setTail(roundToInt(seconds * sampleRate())); }
+    void process(Block& io) {
+        if (seconds > 9) setTail(-1);
+    }
+};
+)");
+    if (!d) return;
+    Engine engine(d);
+    engine.activate(48000.0, 64, 2, 2);
+    CHECK(engine.tail() == 0);
+    const uint32_t id = d->params().at(0).id;
+    double left[64]{}, right[64]{};
+    double* io[] = {left, right};
+    setPlain(engine, id, 2.0);
+    engine.process<double>(io, io, 64);
+    CHECK(engine.tail() == 96000);
+    setPlain(engine, id, 9.5);
+    engine.process<double>(io, io, 64);
+    CHECK(engine.tail() == UINT32_MAX);  // set in process(): forever
+}
+
 TEST(a_parameter_that_restarts_sets_the_latency_of_the_next_activation) {
     const auto d = compileText(R"(#include <supple/script.h>
 struct L : Effect {

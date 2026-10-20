@@ -174,8 +174,10 @@ struct Instance {
     // Back-edges a hook may take before it is stopped (audio hooks only).
     std::int64_t budget = std::int64_t{1} << 31;
     Status status;
-    VoiceBank* voices = nullptr;       // an instrument's
-    int latency = -1;                  // setLatency()'s, or -1: Info's
+    VoiceBank* voices = nullptr;  // an instrument's
+    int latency = -1;             // setLatency()'s, or -1: Info's
+    int tail = kInfoTail;         // setTail()'s: samples, -1 forever
+    static constexpr int kInfoTail = -2;
     EditorServices* editor = nullptr;  // the editor's copy of the plugin: text, names
 
     static void bind(Plugin& plugin, Instance* instance) { plugin.instance_ = instance; }

@@ -507,6 +507,10 @@ void Builtins::addClasses() {
     r.method(
         plugin, "void setLatency(int samples)", +[](S::Plugin* p, int n) { p->setLatency(n); },
         Writes::Self, kInit);
+    // And in the audio hooks too: a tail may follow the tempo.
+    r.method(
+        plugin, "void setTail(int samples)", +[](S::Plugin* p, int n) { p->setTail(n); },
+        Writes::Self, kInit | kAudio);
     plugin_ = plugin;
 
     // DSP objects.

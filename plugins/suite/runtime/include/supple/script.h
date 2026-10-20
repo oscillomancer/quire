@@ -647,6 +647,11 @@ class Plugin {
     // on the sample rate (an oversampler's, a lookahead); Info's .latency
     // otherwise. The host compensates it.
     void setLatency(int samples);
+    // In prepare(), update() or process(): how long the output goes on after
+    // the input stops, in samples (-1 forever), when it follows what the
+    // plugin hears or is set to (a delay's, its time and feedback); Info's
+    // .tail until called. The host is told of each change.
+    void setTail(int samples);
 
   private:
     friend struct detail::Instance;

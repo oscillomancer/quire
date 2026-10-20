@@ -262,6 +262,10 @@ TEST_CASE("the first scripts' mistakes are refused with a hint") {
                             "void prepare() { o[0].prepare(1); o[1].prepare(4, "
                             "Oversampler::Phase::Linear); }\n"
                             "void process(Block& io) {}")) == "");
+    CHECK(firstError(plugin("void update() { setTail(4800); }\n"
+                            "void process(Block& io) { setTail(-1); }")) == "");
+    CHECK(firstError(plugin("void process(Block& io) {}\n"
+                            "void draw(Canvas& g) { setTail(0); }")) == "script.editor.call");
     CHECK(firstError(plugin("void process(Block& io) { double y = min(1, 0.5); }")) ==
           "script.call.ambiguous");
     CHECK(firstError(plugin("void process(Block& io) { double y = M_PI; }")) ==

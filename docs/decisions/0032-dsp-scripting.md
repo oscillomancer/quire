@@ -601,3 +601,15 @@ reach. Teasel offers both as its `phase` parameter.
 end; the renderer records each stage's reported outputs until then. Before,
 a script's readouts could be read only through a sandbox batch, after the
 tail had moved them.
+
+### A tail that follows the plugin (2026-10-20)
+
+`setTail(samples)` (`-1` forever), from `prepare()`, `update()` or
+`process()`, reports how long the output goes on after the input stops when
+that follows the settings or the song: a delay's tail is its time, synced to
+the tempo, times the repeats its feedback lets through. Before, a script had
+only Info's fixed `.tail`, so a delay could say "forever" (renders then end
+by silence detection or the cap) or a guess. The framework (1.25.2) now
+reads a processor's tail after every block as well as after updates, so a
+change made in `process()` reaches the host; a replacement's code starts
+from Info's tail, and the old code's fading blocks do not set it.

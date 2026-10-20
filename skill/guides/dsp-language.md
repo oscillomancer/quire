@@ -61,7 +61,7 @@ struct Tilt : Effect {
 | `outputs` | Names of extra outputs (`io.output(bus, c)`) |
 | `voices` | An instrument's voices, 1 to 64 (8 when not given) |
 | `latency` | Samples of delay the plugin adds, reported to the host |
-| `tail` | Samples of output after the input stops; `-1` forever (feedback) |
+| `tail` | Samples of output after the input stops; `-1` forever (feedback). `setTail()` when it follows the settings |
 
 ## Parameters
 
@@ -171,7 +171,11 @@ plays). In `prepare()`, `setLatency(samples)` reports a delay the plugin
 adds that depends on the sample rate (an `Oversampler`'s, a lookahead),
 where Info's `.latency` is fixed. A delay a parameter chooses (a
 lookahead switch) needs `.restarts()` on that parameter: the latency
-changes only across a restart, which `prepare()` sees.
+changes only across a restart, which `prepare()` sees. A tail that follows
+the settings or the song, as a delay's follows its time, feedback and the
+tempo, is `setTail(samples)` (`-1` forever) from `prepare()`, `update()` or
+`process()`: the host hears of each change, and a render ends when it has
+passed.
 
 Saving a script while it plays swaps the new code in with a 10 ms crossfade
 when the plugin is otherwise the same. When a save changes what the plugin
