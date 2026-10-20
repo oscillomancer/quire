@@ -160,6 +160,10 @@ notes. Each signal still gets a fresh instance.
 - `notes: [{key, velocity, start_s, length_s}]`: an instrument's notes
   (MIDI keys) in place of the fixed note and chord; `release_ms` counts
   from the last note-off.
+- `sample_rate`: render at another rate (44100, 96000, …) instead of the
+  session's. Anything sized or tuned from `sampleRate()` (filters, delays,
+  latency) should measure the same at every rate; `latency` is in samples
+  at the rate used.
 
 ```json
 {"script": "compressor", "signals": ["sine"], "level_db": -30,

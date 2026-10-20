@@ -89,6 +89,7 @@ struct TestArgs {
     double levelDb = -12.0;
     double frequencyHz = 1000.0;
     double seconds = 1.0;
+    std::optional<double> sampleRate;
     bool save = false;
 };
 struct ResponsePoint {
@@ -114,6 +115,7 @@ struct SignalResult {
 };
 struct TestResult {
     std::string plugin;
+    double sampleRate = 0.0;
     std::int64_t latency = 0;
     std::vector<SignalResult> signals;
     double cpuPercent = 0.0;
@@ -517,7 +519,10 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
         "instrument's sequence ({key, velocity, start_s, length_s}), replacing the notes "
         "signal; defaults become notes and silence. Do not combine it with the A4 note "
         "signal or select only silence. release_ms starts at its last note-off. "
-        "Times round to samples at the render rate; spans must fit within seconds.";
+        "Times round to samples at the render rate; spans must fit within seconds. "
+        "sample_rate renders at that rate instead of the session's (sandbox) or the "
+        "project's (DAW); latency is in samples at the rate used, which sample_rate in the "
+        "result reports.";
     c.tags = {"dsp", "analysis"};
     auto automationEvent = schema::object<AutomationEvent>("dsp_automation_event")
                                .field("param", &AutomationEvent::param,
@@ -584,6 +589,11 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                  .defaultValue(1000.0)
                  .field("seconds", &TestArgs::seconds, schema::number().range(0.1, 10))
                  .defaultValue(1.0)
+                 .field("sample_rate", &TestArgs::sampleRate,
+                        schema::number()
+                            .range(8000, 384000)
+                            .unit(units::Unit::Hz)
+                            .doc("default: the session's or project's rate"))
                  .field("save", &TestArgs::save, schema::boolean())
                  .defaultValue(false)
                  .build();
@@ -636,6 +646,8 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                       .build();
     c.result = schema::object<TestResult>("dsp_test_result")
                    .field("plugin", &TestResult::plugin, schema::string())
+                   .field("sample_rate", &TestResult::sampleRate,
+                          schema::number().unit(units::Unit::Hz).doc("the rate rendered at"))
                    .field("latency", &TestResult::latency, schema::integer().doc("samples"))
                    .field("signals", &TestResult::signals, schema::arrayOf(signal))
                    .field("cpu_percent", &TestResult::cpuPercent,
@@ -657,17 +669,20 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                 {"dsp.sidechain", "no key input or invalid key timing",
                  "choose a plugin with a key and a nonempty span within seconds"},
                 {"dsp.notes", "invalid custom sequence or signal selection",
-                 "use an instrument, notes or notes and silence, and spans within seconds"}};
+                 "use an instrument, notes or notes and silence, and spans within seconds"},
+                {"dsp.frequency", "a sine at or above half the sample rate",
+                 "lower frequency_hz or raise sample_rate"}};
     if (!exampleEffect.empty()) {
         json::Value args = json::Value::object();
         args["plugin"] = exampleEffect;
         args["signals"] = json::Value::array();
         args["signals"].push_back("sine");
         c.examples = {{"Measure an effect with a sine", args,
-                       detail::j(R"({"plugin":"<any>","latency":"<any>",
+                       detail::j(R"({"plugin":"<any>","sample_rate":"<any>","latency":"<any>",
                           "signals":"<any>","cpu_percent":"<any>","problems":"<any>","log":"<any>"})"),
                        "empty"}};
-        auto expected = detail::j(R"({"plugin":"<any>","latency":"<any>","signals":"<any>",
+        auto expected = detail::j(
+            R"({"plugin":"<any>","sample_rate":"<any>","latency":"<any>","signals":"<any>",
                                      "cpu_percent":"<any>","problems":"<any>","log":"<any>"})");
         c.examples.push_back({"Automate an effect in dB",
                               detail::j(R"({"plugin":"com.suppleaudio.test.gain","signals":["sine"],
@@ -679,6 +694,10 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
              detail::j(R"({"plugin":"com.suppleaudio.test.keymix","signals":["sine"],
                                             "sidechain":{"level_db":-6}})"),
              expected, "empty"});
+        c.examples.push_back({"Measure an effect at 96 kHz",
+                              detail::j(R"({"plugin":"com.suppleaudio.test.gain","signals":["sine"],
+                              "sample_rate":96000})"),
+                              expected, "empty"});
         c.examples.push_back({"Play a custom note sequence",
                               detail::j(R"({"plugin":"com.suppleaudio.test.sine",
                               "notes":[{"key":60,"start_s":0.013,"length_s":0.2},
@@ -753,7 +772,25 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                              "/signals/" + std::to_string(k),
                              instrument ? "use notes, note or silence"
                                         : "use sine, sweep, impulse, noise or silence");
-        const sandbox::RenderSettings settings = Traits::settings(s);
+        sandbox::RenderSettings settings = Traits::settings(s);
+        if (a.sampleRate) settings.sampleRate = *a.sampleRate;
+        const double nyquist = 0.5 * settings.sampleRate;
+        if (a.frequencyHz >= nyquist &&
+            std::find(signals.begin(), signals.end(), Signal::Sine) != signals.end())
+            return Error(
+                "dsp.frequency",
+                "a " + fixed(a.frequencyHz) + " Hz sine cannot be sampled at " +
+                    fixed(settings.sampleRate, 0) + " Hz",
+                "/frequency_hz",
+                "use a frequency below " + fixed(nyquist, 0) + " Hz, or a higher sample_rate");
+        if (a.sidechain && a.sidechain->signal == Signal::Sine &&
+            a.sidechain->frequencyHz >= nyquist)
+            return Error(
+                "dsp.frequency",
+                "a " + fixed(a.sidechain->frequencyHz) + " Hz key cannot be sampled at " +
+                    fixed(settings.sampleRate, 0) + " Hz",
+                "/sidechain/frequency_hz",
+                "use a frequency below " + fixed(nyquist, 0) + " Hz, or a higher sample_rate");
         auto automated = automationEvents(instance, a, settings.sampleRate);
         if (!automated) return std::move(automated).error();
         auto sequence = customNoteEvents(a, settings.sampleRate);
@@ -930,6 +967,7 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
             }
             out.signals.push_back(std::move(m));
         }
+        out.sampleRate = settings.sampleRate;
         out.cpuPercent = rendered > 0.0 ? rounded(100.0 * spent / rendered, 2) : 0.0;
         for (const std::string& line : out.log) {
             if (line.find("non-finite") != std::string::npos)

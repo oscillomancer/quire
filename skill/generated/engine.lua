@@ -181,10 +181,12 @@ q = nil
 ---@field level_db? number|string Quantity strings are range-checked by the server. (default: -12.0)
 ---@field frequency_hz? number|string Quantity strings are range-checked by the server. (default: 1000.0)
 ---@field seconds? number (default: 1.0)
+---@field sample_rate? number|string default: the session's or project's rate Quantity strings are range-checked by the server.
 ---@field save? boolean (default: false)
 
 ---@class Quire.dsp_test_result
 ---@field plugin string
+---@field sample_rate number|string the rate rendered at Quantity strings are range-checked by the server.
 ---@field latency integer samples
 ---@field signals table[]
 ---@field cpu_percent number of real time, measured

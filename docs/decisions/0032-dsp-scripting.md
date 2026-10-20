@@ -465,6 +465,9 @@ Where the work stands, and where it departs from the text above:
   takes its kind and bus layouts from the script, and its host tests move
   a level in decibels when it has one (a neutral bell's frequency changes
   nothing).
+- 2026-10-19: `dsp.test` takes `sample_rate` (8 to 384 kHz), rendering at
+  that rate instead of the session's or project's, and reports the rate it
+  used; a sine at or above half of it is refused (`dsp.frequency`).
 
 ### Review clarifications (2026-10-13)
 

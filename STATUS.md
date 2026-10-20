@@ -227,8 +227,8 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   script when its file changes. `dsp.write`, `dsp.check`, `dsp.get` and
   `dsp.list` write and compile scripts (the app's library is
   `<data>/<slug>/scripts`, shared with the sandbox), `dsp.test` measures
-  one with standard signals (and, when asked, parameter automation, a timed
-  sidechain key or a note sequence), and a script that compiles is loaded
+  one with standard signals at any sample rate (and, when asked, parameter
+  automation, a timed sidechain key or a note sequence), and a script that compiles is loaded
   and set like a stock plugin (`skill/guides/dsp-workflow.md`).
   `fx.describe` and the sandbox's `plugin.describe` report a live
   instance's loop-budget stops, out-of-range indices and failed reloads as

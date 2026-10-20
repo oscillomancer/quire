@@ -301,6 +301,26 @@ TEST_CASE("dsp.test rejects invalid automation, key and custom-note arguments at
         "/notes");
 }
 
+TEST_CASE("dsp.test renders at the sample rate it is given") {
+    Harness h;
+    h.write("rate", script("Rate", "com.example.rate",
+                           "    void prepare() { setLatency(roundToInt(sampleRate() / 1000)); }\n"
+                           "    void process(Block& io) {}"));
+    auto session = h.measured(R"({"script":"rate","signals":["sine"],"seconds":0.1})");
+    CHECK(session["sample_rate"].asDouble() == 48000.0);
+    CHECK(session["latency"].asInt() == 48);
+    auto given =
+        h.measured(R"({"script":"rate","signals":["sine"],"seconds":0.1,"sample_rate":96000})");
+    CHECK(given["sample_rate"].asDouble() == 96000.0);
+    CHECK(given["latency"].asInt() == 96);
+    CHECK(std::abs(given["signals"].at(0).find("gain_db")->asDouble()) < 0.01);
+    auto aliased =
+        h.test(R"({"script":"rate","signals":["sine"],"frequency_hz":5000,"sample_rate":8000})");
+    REQUIRE_FALSE(aliased);
+    CHECK(aliased.error().code == "dsp.frequency");
+    CHECK(aliased.error().path == "/args/frequency_hz");
+}
+
 TEST_CASE("dsp.test measures a script through the player and names what goes wrong") {
     if (!fs::exists(kStock / "Script Player.clap")) {
         MESSAGE("skipped: no script player in " << kStock.string());

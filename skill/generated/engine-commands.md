@@ -1526,7 +1526,7 @@ Result:
 
 Play test signals or notes through a plugin and measure it: levels, THD, pitch.
 
-Give plugin (an id: a script's, or any effect's or instrument's) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays each signal. An effect: sine (frequency_hz; gain_db and thd_percent), sweep (20 Hz to 20 kHz), impulse (response_db at octave centres), pink noise and silence, each peaking at level_db. An instrument, at velocity 0.8: notes (a note, then a chord), note (A4; pitch_hz, the pitch heard), and silence (no notes); release_ms is how long the sound lasts after the last release. Each reports peak and RMS in dBFS, DC, samples beyond 0 dBFS and denormals; problems says in words what looks wrong (clipping, DC, sound from silence, no output, a note out of tune, sound that never dies away, non-finite samples the framework silenced, a script stopped by its loop budget or indexing outside an array). cpu_percent is measured, so it varies between runs. save: true keeps each output as a WAV (path) for analyze and compare. automation is a list of {param, at_s, value}: semantic patch keys and physical values, as discrete sample-accurate changes applied to every signal (no implicit ramps). automation.max_step is the largest adjacent-sample change in full-scale amplitude; baseline_max_step uses the same render without automation; excess_step is their positive difference. A step above both four times baseline and 0.05 suggests clicks or zipper noise: a screening heuristic, not proof of an artifact or of inaudibility. sidechain supplies a timed key; its middle half is measured against a connected silent key with identical automation: gain_change_db is negative for ducking, null if either output is below -120 dBFS. Slow attack may not settle in that window. Each pass has a fresh instance and initial patch. THD and impulse response are omitted during automation or a non-silent key; gain_db then describes the changing render, not static gain. notes supplies an instrument's sequence ({key, velocity, start_s, length_s}), replacing the notes signal; defaults become notes and silence. Do not combine it with the A4 note signal or select only silence. release_ms starts at its last note-off. Times round to samples at the render rate; spans must fit within seconds.
+Give plugin (an id: a script's, or any effect's or instrument's) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays each signal. An effect: sine (frequency_hz; gain_db and thd_percent), sweep (20 Hz to 20 kHz), impulse (response_db at octave centres), pink noise and silence, each peaking at level_db. An instrument, at velocity 0.8: notes (a note, then a chord), note (A4; pitch_hz, the pitch heard), and silence (no notes); release_ms is how long the sound lasts after the last release. Each reports peak and RMS in dBFS, DC, samples beyond 0 dBFS and denormals; problems says in words what looks wrong (clipping, DC, sound from silence, no output, a note out of tune, sound that never dies away, non-finite samples the framework silenced, a script stopped by its loop budget or indexing outside an array). cpu_percent is measured, so it varies between runs. save: true keeps each output as a WAV (path) for analyze and compare. automation is a list of {param, at_s, value}: semantic patch keys and physical values, as discrete sample-accurate changes applied to every signal (no implicit ramps). automation.max_step is the largest adjacent-sample change in full-scale amplitude; baseline_max_step uses the same render without automation; excess_step is their positive difference. A step above both four times baseline and 0.05 suggests clicks or zipper noise: a screening heuristic, not proof of an artifact or of inaudibility. sidechain supplies a timed key; its middle half is measured against a connected silent key with identical automation: gain_change_db is negative for ducking, null if either output is below -120 dBFS. Slow attack may not settle in that window. Each pass has a fresh instance and initial patch. THD and impulse response are omitted during automation or a non-silent key; gain_db then describes the changing render, not static gain. notes supplies an instrument's sequence ({key, velocity, start_s, length_s}), replacing the notes signal; defaults become notes and silence. Do not combine it with the A4 note signal or select only silence. release_ms starts at its last note-off. Times round to samples at the render rate; spans must fit within seconds. sample_rate renders at that rate instead of the session's (sandbox) or the project's (DAW); latency is in samples at the rate used, which sample_rate in the result reports.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -1544,6 +1544,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `level_db` | value | dB | -60.0..0.0 | -12.0 | Quantity strings are range-checked by the server. |
 | `frequency_hz` | value | Hz | 10.0..20000.0 | 1000.0 | Quantity strings are range-checked by the server. |
 | `seconds` | number |  | 0.1..10.0 | 1.0 |  |
+| `sample_rate` | value | Hz | 8000.0..384000.0 |  | default: the session's or project's rate Quantity strings are range-checked by the server. |
 | `save` | boolean |  |  | false |  |
 
 ### Result
@@ -1555,6 +1556,20 @@ Kind: `action`. Exposure: `mcp-tool`.
   "properties": {
     "plugin": {
       "type": "string"
+    },
+    "sample_rate": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "string",
+          "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:[hH][zZ]|[kK][hH][zZ]|[kK]))?\\s*$"
+        }
+      ],
+      "x-unit": "Hz",
+      "x-unit-strings": true,
+      "description": "the rate rendered at Quantity strings are range-checked by the server."
     },
     "latency": {
       "type": "integer",
@@ -1677,7 +1692,7 @@ Kind: `action`. Exposure: `mcp-tool`.
       }
     }
   },
-  "required": ["plugin", "latency", "signals", "cpu_percent", "problems", "log"],
+  "required": ["plugin", "sample_rate", "latency", "signals", "cpu_percent", "problems", "log"],
   "additionalProperties": false
 }
 
@@ -1693,6 +1708,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 - `dsp.automation`: unavailable parameter or automation time outside the render Hint: choose a writable semantic parameter and a time before seconds
 - `dsp.sidechain`: no key input or invalid key timing Hint: choose a plugin with a key and a nonempty span within seconds
 - `dsp.notes`: invalid custom sequence or signal selection Hint: use an instrument, notes or notes and silence, and spans within seconds
+- `dsp.frequency`: a sine at or above half the sample rate Hint: lower frequency_hz or raise sample_rate
 
 ### Examples
 
@@ -1711,6 +1727,7 @@ Result:
 ```json
 {
   "plugin": "<any>",
+  "sample_rate": "<any>",
   "latency": "<any>",
   "signals": "<any>",
   "cpu_percent": "<any>",
@@ -1747,6 +1764,7 @@ Result:
 ```json
 {
   "plugin": "<any>",
+  "sample_rate": "<any>",
   "latency": "<any>",
   "signals": "<any>",
   "cpu_percent": "<any>",
@@ -1774,6 +1792,33 @@ Result:
 ```json
 {
   "plugin": "<any>",
+  "sample_rate": "<any>",
+  "latency": "<any>",
+  "signals": "<any>",
+  "cpu_percent": "<any>",
+  "problems": "<any>",
+  "log": "<any>"
+}
+
+```
+
+**Measure an effect at 96 kHz** (`empty`)
+
+```json
+{
+  "plugin": "com.suppleaudio.test.gain",
+  "signals": ["sine"],
+  "sample_rate": 96000
+}
+
+```
+
+Result:
+
+```json
+{
+  "plugin": "<any>",
+  "sample_rate": "<any>",
   "latency": "<any>",
   "signals": "<any>",
   "cpu_percent": "<any>",
@@ -1810,6 +1855,7 @@ Result:
 ```json
 {
   "plugin": "<any>",
+  "sample_rate": "<any>",
   "latency": "<any>",
   "signals": "<any>",
   "cpu_percent": "<any>",
