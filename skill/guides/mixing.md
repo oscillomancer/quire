@@ -96,7 +96,7 @@ pitch), or a CLAP id/name for other plugins. `env.points.set` replaces
 points (or a beat range of them); `env.set {active: false}` bypasses an
 envelope; render and `compare` to hear what it did.
 
-Use [Plumb, the utility](utility.md) for gain staging, channel checks and bass mono. Render and compare after width or polarity changes.
+Use [Hickory, the stereo utility](utility.md) for gain staging, channel checks, bass mono and lining up multi-miked tracks; its `correlation` and `side_level` readouts say what the stereo image is doing. Render and compare after width or polarity changes.
 For track and bus compression, external-key ducking, upward compression and peak catching, see [Sundew, the compressor](comp.md).
 For a true-peak ceiling on the master and loudness against a LUFS target, see [Treeline, the limiter](limiter.md).
 Use [Yarrow, the stock EQ](eq.md) for measured rumble, masking and harshness cuts, de-essing and dynamic or mid/side bands.

@@ -10,11 +10,12 @@ folder each, holding the script and the product folder a source export
 makes from it, built from `template/` with `suite/`. `stock/README.md` says
 how to change one. Yarrow (`stock/yarrow`, the EQ), Sundew
 (`stock/sundew`, the compressor), Treeline (`stock/treeline`, the
-limiter) and Gorse (`stock/gorse`, the transient shaper) are written so far; the rest of this section is about the older,
-hand-written plugins.
+limiter), Gorse (`stock/gorse`, the transient shaper) and Hickory
+(`stock/hickory`, the stereo utility) are written so far; the rest of this
+section is about the older, hand-written plugins.
 
 Each plugin directory (`gate`, `drive`, `delay`,
-`reverb`, `utility`, `analyzer`, `orrery`, and the internal test instrument
+`reverb`, `analyzer`, `orrery`, and the internal test instrument
 `probe-synth`) is an instance of Supple Audio's plugin template (ADR-0011):
 
 - `engine/`: the SDK-free DSP core and the parameter table (core-params

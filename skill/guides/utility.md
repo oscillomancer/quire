@@ -1,48 +1,97 @@
-# Plumb — stereo utility
+# Hickory: stereo utility
 
-CLAP id `com.suppleaudio.utility`; artifact `Plumb.clap`. Use Plumb for gain
-staging, balance, channel inspection, polarity checks and bass mono.
-Patch schema: `supple.utility-patch/1.0`. Values are physical units:
-`{"schema":"supple.utility-patch/1.0","params":{"width":150,"mono_below":120}}`.
-Use merge patches for adjustments; query the schema rather than guessing ids.
+Use `com.suppleaudio.hickory` for the plain jobs: gain staging, a polarity
+flip, checking a mix in mono or hearing only its side, narrowing or
+widening, making the lows mono, removing DC, and delaying a track to line
+it up with another. Patches use `supple.hickory-patch/1.0`, with physical
+values under `params`; a merge changes only the keys it names.
 
-| Key | Unit / values | Range | Default |
-|---|---|---|---|
-| `gain` | dB | −120..24; −120 is silence (−inf) | 0 |
-| `pan` | percent | −100..100; positive attenuates left | 0 |
-| `width` | percent | 0..200; side multiplier | 100 |
-| `invert_left` | bool | false / true | false |
-| `invert_right` | bool | false / true | false |
-| `swap` | bool | false / true | false |
-| `channels` | enum | stereo, left_to_both, right_to_both, mid, side | stereo |
-| `mono_below` | Hz | 0..500; 0 is off | 0 |
-| `dc_block` | bool | false / true; 5 Hz high-pass | false |
-| `mute` | bool | false / true | false |
-| `input_level` | readonly dBFS | −120..40 | −120 |
-| `output_level` | readonly dBFS | −120..40 | −120 |
-| `correlation` | readonly | −1..1; silence is 0 | 0 |
+At rest it changes nothing (the output is the input, bit for bit), and it
+adds no latency. Every switch fades over 10 ms, so all of it can be
+automated.
 
-Three recipes:
+| Key | Unit and range | Default |
+|---|---|---|
+| `gain` | dB, −60…24; −60 is silence | 0 |
+| `mute` | bool | false |
+| `delay` | ms, 0…50, to the nearest sample; not reported as latency | 0 |
+| `channels` | stereo, swap, left, right, mono, side | stereo |
+| `width` | %, 0…200: the side's level; 0 is mono | 100 |
+| `balance` | %, −100…100: positive lowers the left, negative the right | 0 |
+| `invert_left`, `invert_right` | bool: polarity, before the routing | false |
+| `bass_mono` | bool: the side below `mono_below` removed | false |
+| `mono_below` | Hz, 30…500: bass mono's crossover | 120 |
+| `dc_block` | bool: a 12 dB/oct high-pass at 5 Hz | false |
+| `output_peak` | dBFS, readonly: the highest sample peak of the last 3 s | |
+| `correlation` | readonly, −1…1: 1 mono, 0 unrelated sides, −1 one side inverted; 0 in silence | |
+| `level_balance` | dB, readonly: how much louder the right is than the left | |
+| `side_level` | dB, readonly: the side against the mid; −60 is mono, 0 as much side as mid | |
 
-1. Leave headroom: merge `{"params":{"gain":-6}}`, render, inspect output
-   peak and loudness. This attenuates without limiting peaks.
-2. Stabilize a wide bass: merge `{"params":{"mono_below":120,"width":150}}`.
-   Compare stereo and mono renders. M stays unchanged; low S is attenuated.
-3. Inspect channel problems: merge `{"params":{"channels":"side"}}` to
-   audition differences, then restore `stereo`. Test `invert_right:true`
-   only when measurements suggest a polarity fault; compare before keeping it.
+The order is polarity, channels, DC block, delay, width and bass mono,
+balance, then gain and mute. `mono` and `side` put (L+R)/2 or (L−R)/2 on
+both outputs; width and bass mono act on the side only, so the mono sum
+never changes. On a mono track only gain, mute, `invert_left`, the DC block
+and the delay apply.
 
-Linear balance leaves the favoured side unchanged and attenuates the other.
-Width 0 produces the average on both sides; 200 doubles S. Swap precedes
-channel selection, then polarity, DC block, width/bass mono, pan, gain, mute.
-Gain, pan, width and crossover move over 20 ms, switches over 10 ms.
+The readouts cover the last 3 s of output: render at least that much, then
+read them with `param_get`.
 
-Non-finite input samples are treated as zero inside the DC blocker and side
-filter, so one bad sample cannot poison later output; at exact unity the
-output is still a bit copy of the input.
+## Recipes
 
-Limits: no limiter, loudness normalization or intentional delay. Bass mono
-uses minimum-phase LR4 on S, has zero latency and does not fully remove
-bass: 50 Hz at a 150 Hz crossover is attenuated about 38.3 dB. DC block
-also affects very low audio. +6 dB is approximately double; exact doubling
-is +6.0206 dB. Metering uses sample peaks, not true peaks, every 50 ms.
+Leave headroom before a saturator or a bus:
+
+```json
+{"params":{"gain":-6}}
+```
+
+Check a mix in mono, then go back:
+
+```json
+{"params":{"channels":"mono"}}
+```
+
+A wide synth bass that should stay solid in mono (`side_level` falls; the
+mono sum is untouched):
+
+```json
+{"params":{"bass_mono":true,"mono_below":150}}
+```
+
+A little wider without the lows spreading:
+
+```json
+{"params":{"width":130,"bass_mono":true,"mono_below":150}}
+```
+
+A stereo pair with one side wired backwards: `correlation` near −1 on
+material that should be centred. Flip one side and compare:
+
+```json
+{"params":{"invert_right":true}}
+```
+
+Line a DI up with its amp mic (the DI arrives first; 1 ms is about 34 cm
+of distance): find the offset by comparing the two renders' onsets, then
+delay the earlier one:
+
+```json
+{"params":{"delay":1.4}}
+```
+
+## Measuring it
+
+Polarity and width changes shift the balance between the mid and the side;
+compare loudness of stereo and mono renders before and after. Bass mono
+leaves the mid alone, so a mono render does not change at all; listen to
+the side (`channels: side`) to hear what it took.
+
+## Limits
+
+No panning law for a mono source (`balance` turns one side down), no
+fractional delay, no limiter or loudness normalization (see
+[Treeline](limiter.md)). The 24 dB/oct crossover leaves some side below it:
+at 150 Hz, the side at 50 Hz is 38 dB down, not gone. The DC block is
+0.02 dB down at 20 Hz. `output_peak` is a sample peak, not a true peak.
+
+See [mixing](mixing.md) and
+[stock spec §8](../../docs/specs/stock-effects.md#8-utility--hickory-hickory).

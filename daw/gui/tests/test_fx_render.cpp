@@ -300,7 +300,8 @@ TEST_CASE("FX drags survive model refresh and separate drags have separate undo 
     Fixture f;
     if (!f.ok || !f.stockPlugins()) return;
     const auto track = f.addTrack("Drag");
-    auto added = f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId("Plumb")}}));
+    auto added =
+        f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId("Hickory")}}));
     REQUIRE(added);
     REQUIRE(f.fx->open(track));
     REQUIRE(f.fx->chain().size() == 1);
@@ -384,7 +385,7 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
         return;
     }
     const model::Id track = f.addTrack("Guitar");
-    const std::string plumb = f.pluginId("Plumb");
+    const std::string hickory = f.pluginId("Hickory");
     const std::string yarrow = f.pluginId("Yarrow");
 
     REQUIRE(f.fx->open(track));
@@ -395,13 +396,13 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     REQUIRE(f.fx->browser().isOpen());
     auto* search = dynamic_cast<ui::TextField*>(f.root->find("browser.search"));
     REQUIRE(search);
-    f.type("Plumb");
+    f.type("Hickory");
     f.key("Return");
     CHECK_FALSE(f.fx->browser().isOpen());
     REQUIRE(f.fx->chain().size() == 1);
     const model::Id fx1 = f.fx->chain()[0];
-    CHECK(f.app->head().fx.find(fx1)->plugin.name == "Plumb");
-    CHECK(f.app->head().fx.find(fx1)->plugin.id == plumb);
+    CHECK(f.app->head().fx.find(fx1)->plugin.name == "Hickory");
+    CHECK(f.app->head().fx.find(fx1)->plugin.id == hickory);
 
     // Add a second one and reorder it by dragging (fx.move).
     f.click("fx.add");
@@ -502,14 +503,14 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
 
     // Favourites persist to the user config.
     f.click("fx.add");
-    f.type("Plumb");
+    f.type("Hickory");
     f.click("browser.fav");
     const auto favFile = gui::Favourites::defaultFile(gui::test::slug());
     CHECK(std::filesystem::exists(favFile));
     auto loaded = gui::Favourites::load(favFile);
     REQUIRE(loaded);
-    CHECK(loaded->has(plumb));
-    CHECK(f.fx->browser().favourites().has(plumb));
+    CHECK(loaded->has(hickory));
+    CHECK(f.fx->browser().favourites().has(hickory));
     f.key("Escape");  // close the browser
     CHECK_FALSE(f.fx->browser().isOpen());
 
@@ -518,12 +519,12 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     f.click("fx.tab.chain");
     f.click("fx.add.input");
     REQUIRE(f.fx->browser().isOpen());
-    f.type("Plumb");
+    f.type("Hickory");
     f.key("Return");
     CHECK(f.fx->inputChain().size() == 1);
     CHECK(f.fx->chain().size() == 2);  // the main chain is untouched
     const model::Id inputFx = f.fx->inputChain()[0];
-    CHECK(f.app->head().fx.find(inputFx)->plugin.name == "Plumb");
+    CHECK(f.app->head().fx.find(inputFx)->plugin.name == "Hickory");
     CHECK(f.root->find("ifx.row." + inputFx.str()) != nullptr);
     f.click("ifx.remove." + inputFx.str());
     CHECK(f.fx->inputChain().empty());
@@ -540,7 +541,7 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     CHECK_FALSE(f.fx->browser().isOpen());
     REQUIRE(f.fx->openToAdd(selection, json::Value::object()));
     f.frame();
-    f.type("Plumb");
+    f.type("Hickory");
     f.key("Return");
     CHECK_FALSE(f.fx->browser().isOpen());
     CHECK(f.fx->inputChain().empty());
@@ -577,7 +578,7 @@ TEST_CASE(
                                            gui::Favourites::defaultFile(gui::test::slug()));
     const model::Id track = f.addTrack("Keys");
     std::vector<model::Id> fx;
-    for (const char* name : {"Plumb", "Yarrow", "Plumb"}) {
+    for (const char* name : {"Hickory", "Yarrow", "Hickory"}) {
         auto made = f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId(name)}}));
         REQUIRE(made);
         fx.push_back(*model::Id::parse((*made)["fx"].asString()));
@@ -657,7 +658,8 @@ TEST_CASE("the FX window's MIDI button learns a controller for a parameter (fx.l
                                                                 }},
                                            gui::Favourites::defaultFile(gui::test::slug()));
     const model::Id track = f.addTrack("Keys");
-    auto made = f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId("Plumb")}}));
+    auto made =
+        f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId("Hickory")}}));
     REQUIRE(made);
     const model::Id fx = *model::Id::parse((*made)["fx"].asString());
     // A writable parameter of the plug-in.
@@ -726,7 +728,8 @@ TEST_CASE("a knob bound to the last touched parameter follows the panel's last e
         return;
     }
     const model::Id track = f.addTrack("Keys");
-    auto made = f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId("Plumb")}}));
+    auto made =
+        f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId("Hickory")}}));
     REQUIRE(made);
     const model::Id fx = *model::Id::parse((*made)["fx"].asString());
     f.actions->controls().bind(
@@ -758,7 +761,7 @@ TEST_CASE("a knob bound to the last touched parameter follows the panel's last e
     field->onSubmit("-6");
     f.fx->tick();
     f.frame();
-    CHECK(f.root->find("fx.touched")->valueText() == "Last touched: Plumb · Gain");
+    CHECK(f.root->find("fx.touched")->valueText() == "Last touched: Hickory · Gain");
     f.snapshot("fx-last-touched.png");
     auto gain = [&] {
         const model::FxInstance& inst = *f.app->head().fx.find(fx);
@@ -792,7 +795,7 @@ TEST_CASE("golden image: the FX chain") {
 
     REQUIRE(f.fx->open(track));
     f.click("fx.add");
-    f.type("Plumb");
+    f.type("Hickory");
     f.key("Return");
     f.click("fx.add");
     f.type("Yarrow");
@@ -809,9 +812,9 @@ TEST_CASE("the plugin browser names the plugin's file and marks a shadowed copy"
     REQUIRE(f.fx->open(track));
     f.click("fx.add");
     REQUIRE(f.fx->browser().isOpen());
-    f.type("Plumb");
+    f.type("Hickory");
     // The detail line names the file the plugin would be loaded from.
-    CHECK(f.fx->browser().detail().find("Plumb.clap") != std::string::npos);
+    CHECK(f.fx->browser().detail().find("Hickory.clap") != std::string::npos);
     CHECK(f.fx->browser().detail().find("shadowed") == std::string::npos);
     CHECK(f.fx->browser().rowText(0).vendor == "stock");
     f.key("Escape");
@@ -820,7 +823,8 @@ TEST_CASE("the plugin browser names the plugin's file and marks a shadowed copy"
     // one; the browser says which copy wins and which is ignored.
     const std::filesystem::path dup = f.dir / "shadow";
     std::filesystem::create_directories(dup);
-    std::filesystem::copy(std::filesystem::path(SUPPLE_CLAP_DIR) / "Plumb.clap", dup / "Plumb.clap",
+    std::filesystem::copy(std::filesystem::path(SUPPLE_CLAP_DIR) / "Hickory.clap",
+                          dup / "Hickory.clap",
                           std::filesystem::copy_options::overwrite_existing |
                               std::filesystem::copy_options::recursive);
     engine::AppOptions options;
@@ -839,14 +843,14 @@ TEST_CASE("the plugin browser names the plugin's file and marks a shadowed copy"
     auto* search = dynamic_cast<ui::TextField*>(f.root->find("browser.search"));
     REQUIRE(search);
     f.root->focus(search);
-    f.type("Plumb");
+    f.type("Hickory");
     auto* list = dynamic_cast<ui::List*>(f.root->find("browser.results"));
     REQUIRE(list);
     bool sawShadowed = false, sawWinner = false;
     std::optional<std::size_t> shadowedRow;
     for (std::size_t i = 0; i < browser.rowCount(); ++i) {
         const auto row = browser.rowText(i);
-        if (row.id != "com.suppleaudio.utility") continue;
+        if (row.id != "com.suppleaudio.hickory") continue;
         if (row.vendor == "shadowed") {
             sawShadowed = true;
             shadowedRow = i;
@@ -859,7 +863,7 @@ TEST_CASE("the plugin browser names the plugin's file and marks a shadowed copy"
     REQUIRE(shadowedRow);
     list->select(*shadowedRow, true);  // as a click or the arrow keys would
     // The shadowed copy is the built one: its own file, and why it is ignored.
-    CHECK(browser.detail().find("Plumb.clap") != std::string::npos);
+    CHECK(browser.detail().find("Hickory.clap") != std::string::npos);
     CHECK(browser.detail().find("shadowed") != std::string::npos);
     // The copy the loader would use is the one earlier on the search path.
     list->select(*shadowedRow == 0 ? 1 : 0, true);
@@ -873,7 +877,7 @@ TEST_CASE("the FX chain badges each effect's state, and a failed one offers a re
     const model::Id track = f.addTrack("Guitar");
     REQUIRE(f.fx->open(track));
     f.click("fx.add");
-    f.type("Plumb");
+    f.type("Hickory");
     f.key("Return");
     REQUIRE(f.fx->chain().size() == 1);
     const model::Id fx = f.fx->chain()[0];
@@ -903,7 +907,7 @@ TEST_CASE(
     const model::Id track = f.addTrack("Guitar");
     REQUIRE(f.fx->open(track));
     f.click("fx.add");
-    f.type("Plumb");
+    f.type("Hickory");
     f.key("Return");
     REQUIRE(f.fx->chain().size() == 1);
     const model::Id fx = f.fx->chain()[0];
@@ -1074,7 +1078,7 @@ TEST_CASE("FX chain preset buttons save, append and Shift-replace through the bu
     const auto source = f.addTrack("Source");
     const auto target = f.addTrack("Target");
     REQUIRE(f.run("fx.add", f.args({{"track", source.str()},
-                                    {"plugin", f.pluginId("Plumb")},
+                                    {"plugin", f.pluginId("Hickory")},
                                     {"patch", json::parse(R"({"params":{"gain":-6}})").value()}})));
     REQUIRE(f.fx->open(source));
     f.frame();
@@ -1097,7 +1101,7 @@ TEST_CASE("FX chain preset buttons save, append and Shift-replace through the bu
     CHECK(f.historyCount() == beforeLoad + 1);
     REQUIRE(f.fx->chain().size() == 1);
     const auto loaded = f.fx->chain()[0];
-    CHECK(f.app->head().fx.find(loaded)->plugin.id == f.pluginId("Plumb"));
+    CHECK(f.app->head().fx.find(loaded)->plugin.id == f.pluginId("Hickory"));
     auto patch = f.run("fx.patch.get", f.args({{"fx", loaded.str()}}));
     auto original = f.run("fx.patch.get", f.args({{"fx", "fx_1"}}));
     REQUIRE(patch);
@@ -1136,7 +1140,7 @@ TEST_CASE("FX chain preset buttons toggle their popups; a right click deletes a 
         return;
     }
     const auto track = f.addTrack("Source");
-    REQUIRE(f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId("Plumb")}})));
+    REQUIRE(f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId("Hickory")}})));
     REQUIRE(f.fx->open(track));
     for (const char* name : {"Keep", "Drop"}) {
         REQUIRE(f.run("fx.chain.save", f.args({{"track", track.str()}, {"name", name}})));
@@ -1212,7 +1216,7 @@ TEST_CASE("the FX window shows a take's chain (take FX): add, reorder, no input 
             {{"track", track.str()}, {"position", 0.0}, {"length", 4.0}, {"notation", "1: C4:w"}}));
     REQUIRE(item);
     const auto take = *model::Id::parse((*item)["take"].asString());
-    REQUIRE(f.run("fx.add", f.args({{"take", take.str()}, {"plugin", f.pluginId("Plumb")}})));
+    REQUIRE(f.run("fx.add", f.args({{"take", take.str()}, {"plugin", f.pluginId("Hickory")}})));
     REQUIRE(f.run("fx.add", f.args({{"take", take.str()}, {"plugin", f.pluginId("Yarrow")}})));
     REQUIRE(f.fx->openTake(take));
     f.frame();

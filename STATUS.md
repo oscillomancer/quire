@@ -191,7 +191,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
   the LLM evaluation harness (`tools/eval-harness`).
 - **Stock plugins** (ADR-0011, ADR-0047): Orrery, Yarrow, Sundew, Treeline,
-  Gorse, Sluice, Kiln, Echelon, Nave, Plumb and Gauge, each passing clap-validator, a
+  Gorse, Hickory, Sluice, Kiln, Echelon, Nave and Gauge, each passing clap-validator, a
   reset determinism check and an unload test (all but Nave also pass the
   headless REAPER check); JSON patches and the semantic-parameters extension.
   Yarrow, the EQ, is the first written as a DSP script
@@ -225,7 +225,15 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   soft clip that keeps sample peaks under 0 dBFS; an editor that lays the
   recent hits over each other at their onsets and shows what each part
   changed, and a history with each hit it found. It replaced Flint
-  (`com.suppleaudio.transient`).
+  (`com.suppleaudio.transient`). Hickory, the stereo utility
+  (`plugins/stock/hickory`), is the fifth: gain, mute, polarity, channel
+  routing (swap, left, right, mono, side), width, balance, bass mono on
+  the side only, a DC block and a delay of up to 50 ms to line tracks up,
+  every switch crossfaded and the output the input bit for bit at rest;
+  readouts of the last 3 s (peak, correlation, balance, side level) and an
+  editor with an image of where the sound sits and the correlation an
+  octave at a time, where bass mono's crossover is dragged. It replaced
+  Plumb (`com.suppleaudio.utility`).
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The

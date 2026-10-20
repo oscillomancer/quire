@@ -50,7 +50,8 @@
   Scripted stock plugins (ADR-0047) also run it with `--stepped`
   (`plugin.<name>.reset-stepped`): every switch and choice moved off its
   default in both states, so a plugin whose default is a passthrough still
-  shows its processing state.
+  shows its processing state; a switch that silences the plugin by itself
+  (a mute) stays at its default, since the reference must carry signal.
 - **Readonly telemetry parameters** (gain reduction, levels) exist for
   generic hosts; the GUI uses the telemetry ring.
 - **Tests beyond the template's:** frequency/phase response against analytic
@@ -795,40 +796,66 @@ octave band against the parameters (within 10 %) and echo density.
   120 audio seconds per trial, median of five CPU-time trials with the editor
   closed; timing is never a CTest pass/fail condition.
 
-## 8. Utility — "Plumb" [`utility`]
+## 8. Utility — "Hickory" [`hickory`]
 
-Keys: `gain` dB −inf..+24 (0), `pan` % −100..100 (0), `width` % 0..200 (100),
-`invert_left`, `invert_right` bool, `swap` bool, `channels` enum `stereo`,
-`left_to_both`, `right_to_both`, `mid`, `side` (`stereo`), `mono_below` Hz
-0..500 (0 = off; bass mono: a 4th-order Linkwitz–Riley high-pass on the
-side only — zero latency, the mid untouched so the mono sum is exact;
-automatable; amended 2026-09-29, `docs/specs/effects.md` §4), `dc_block`
-bool, `mute` bool.
+The plain stereo tool, written as a DSP script (ADR-0047:
+`plugins/stock/hickory/script/hickory.cpp`): level, polarity, routing,
+width, balance, bass mono, a DC block and a delay to line tracks up, with
+readouts an agent can check a render against. Main stereo or mono in and
+out, zero latency. On a mono bus only gain, mute, `invert_left`, the DC
+block and the delay apply.
 
-Implementation decisions (2026-09-29):
-- `gain` uses a finite −120 dB endpoint with `kOffAtMin`: that endpoint
-  means exact silence and displays −inf; all other values are finite dB.
-  +6 dB means 10^(6/20), approximately 1.9953; exact doubling is
-  20·log10(2), approximately 6.0206 dB.
-- `mono_below` has a linear Hz host curve because its range includes zero.
-- Pan is linear balance: L × (1 − max(0, pan/100)),
-  R × (1 + min(0, pan/100)); centre leaves both at unity.
-- Channel selection sees the swapped input. `mid` and `side` send
-  (L+R)/2 or (L−R)/2 respectively to both outputs.
-- Non-finite working inputs are zero before DC/side-filter state updates.
-  Exact unity output preserves the original bits, including non-finite samples,
-  signed zero and subnormals, without contaminating that state.
-- DC blocking is a 5 Hz one-pole high-pass. Gain, balance, width and the
-  crossover use finite 20 ms ramps; routing, polarity, DC enable,
-  crossover enable and mute use 10 ms ramps. Restored values snap before
-  the first processed sample. Gain ramps in amplitude to reach exact zero.
-- An LR4 high-pass at 150 Hz attenuates 50 Hz by approximately 38.3 dB,
-  rather than the implementation plan's 40 dB. Tests use the exact
-  prewarped digital LR4 response (±0.02 dB), and require < 0.1 dB loss
-  at 1 kHz. The filter operates only on S and has zero reported latency.
-- Append-only readonly parameters `input_level` and `output_level`
-  (dBFS, −120..40), and `correlation` (−1..1, silence = 0), publish
-  once per 50 ms. Correlation is the normalized output cross-product.
+| key | type | range | curve | default |
+|---|---|---|---|---|
+| `gain` | dB | −60..+24, smoothed 20 ms; −60 is silence (−inf) | linear | 0 |
+| `mute` | bool | silence, faded over 10 ms | | false |
+| `delay` | ms | 0..50, whole samples; not latency | cubic | 0 |
+| `channels` | enum | `stereo`, `swap`, `left`, `right`, `mono`, `side` | | `stereo` |
+| `width` | % | 0..200, smoothed 20 ms: the side's level | linear | 100 |
+| `balance` | % | −100..100, smoothed 20 ms; positive lowers the left | linear | 0 |
+| `invert_left`, `invert_right` | bool | polarity, before the routing | | false |
+| `bass_mono` | bool | the side below `mono_below` removed | | false |
+| `mono_below` | Hz | 30..500: bass mono's crossover | log | 120 |
+| `dc_block` | bool | a 12 dB/oct high-pass at 5 Hz | | false |
+| `output_peak` | dBFS | readonly, −120..24: the highest sample peak of the last 3 s | | |
+| `correlation` | | readonly, −1..1: left against right over the last 3 s; 0 in silence | | |
+| `level_balance` | dB | readonly, −24..24: right over left over the last 3 s | | |
+| `side_level` | dB | readonly, −60..12: side over mid over the last 3 s; −60 is mono | | |
+
+Order: polarity → `channels` → DC block → delay → width and bass mono →
+balance → gain and mute.
+
+- `channels`: `swap` exchanges the sides; `left` and `right` put one on
+  both; `mono` is (L+R)/2 on both and `side` (L−R)/2 on both.
+- Width scales S = (L−R)/2 and leaves M = (L+R)/2: 0 % is mono, 200 %
+  doubles the side.
+- Bass mono: the side through a 4th-order Linkwitz–Riley high-pass
+  (two Butterworth sections at `mono_below`); the mid is untouched, so the
+  mono sum is exact and there is no latency. At a 150 Hz crossover the
+  side at 50 Hz falls 38.3 dB and at 1 kHz is unchanged.
+- Balance is linear: L × (1 − max(0, b)), R × (1 + min(0, b)) for b in
+  −1..1; centre leaves both at unity.
+- Switches (routing, polarity, DC block, bass mono, mute) crossfade over
+  10 ms; a delay change crossfades between the two times over 20 ms. All
+  are automatable.
+- With every control at rest the output is the input, bit for bit
+  (non-finite samples included); a non-finite sample never reaches a
+  filter's or the delay's state.
+- The readouts are sums over 30 chunks of 100 ms, reported each block.
+
+Editor (900 × 580): an image of where the sound sits (the mid up, the side
+across, scaled to the level), with the correlation and the left-right
+balance of the last 300 ms under it and a warning while the correlation is
+under −0.3; width by frequency: the correlation of each octave from 31 Hz
+to 16 kHz, from mono at the top through unrelated to inverted, faded with
+its level, with bass mono's crossover dragged there (a press turns it on;
+a double-click off); level (gain, delay, mute, DC block) and stereo
+(routing, width, balance, polarity, the crossover) panels. A horizontal
+drag across the image changes the width.
+
+Factory patches: Unity, Headroom (−6 dB), Mono Check, Side Solo, Bass Mono
+(120 Hz), Wider, Mono Bass (140 %, 150 Hz), Narrower (60 %), Flip Right,
+DC Clean.
 
 ## 9. Analyzer — "Gauge" [`analyzer`]
 

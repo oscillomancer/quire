@@ -9,10 +9,9 @@ mode=(-i)
 mapfile -t files < <(git ls-files --cached --others --exclude-standard -- \
   'libs/*' 'host/*' 'plugins/*' 'daw/*' 'mcp/*' 'tools/*' 'tests/*' \
   | grep -E '\.(c|cc|cpp|h|hpp)$' | grep -v '/third_party/' \
-  | grep -Ev '^plugins/(analyzer|delay|drive|gate|orrery|probe-synth|utility)/test/vst3_unload_probe\.cpp$' \
+  | grep -Ev '^plugins/(analyzer|delay|drive|gate|orrery|probe-synth)/test/vst3_unload_probe\.cpp$' \
   | grep -v '^plugins/probe-synth/' \
   | grep -v '^plugins/template/' \
-  | grep -v '^plugins/utility/' \
   | grep -Ev '^plugins/delay/(plugin/gui/(Gui|Widgets|Window|Telemetry|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/delay_entry\.(h|cpp)|test/(host_(smoke\.cpp|contract\.h)|vst3_unload_probe\.cpp)|tools/((clap|linux)_host_probe\.cpp|wav\.h))$' \
   | grep -Ev '^plugins/analyzer/(plugin/gui/(Gui|Widgets|Window|Telemetry|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/analyzer_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/((clap|linux)_host_probe\.cpp|wav\.h))$' \
   | grep -Ev '^plugins/stock/[^/]+/Catalog\.cpp$' \
@@ -47,19 +46,6 @@ files+=(
   plugins/reverb/plugin/gui/{Editor.h,Editor.cpp,Theme.h}
   plugins/reverb/test/{test_core,editor_input,semantic_rt,tail_rt}.cpp
   plugins/reverb/tools/{reverb_cli,gui_preview}.cpp
-  plugins/utility/engine/include/utility/params.h
-  plugins/utility/engine/include/utility/processor.h
-  plugins/utility/engine/src/params.cpp
-  plugins/utility/engine/src/processor.cpp
-  plugins/utility/engine/tests/test_utility.cpp
-  plugins/utility/plugin/src/UtilityParams.h
-  plugins/utility/plugin/src/utility_clap.cpp
-  plugins/utility/plugin/gui/Editor.cpp
-  plugins/utility/plugin/gui/Editor.h
-  plugins/utility/plugin/gui/Theme.h
-  plugins/utility/test/semantic_rt.cpp
-  plugins/utility/test/editor_input.cpp
-  plugins/utility/tools/gui_preview.cpp
   plugins/probe-synth/dsp/include/probesynth/Processor.h
   plugins/probe-synth/plugin/src/ProbeSynthParams.h
   plugins/probe-synth/plugin/src/probesynth_clap.cpp

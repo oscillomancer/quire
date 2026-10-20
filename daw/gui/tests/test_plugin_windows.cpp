@@ -412,7 +412,7 @@ TEST_CASE("an editor follows its effect onto a replacement instance (needs a dis
     std::string plugin;
     json::Value list = run("plugin.list", json::Value::object());
     for (const json::Value& p : list["plugins"].asArray())
-        if (const json::Value* n = p.find("name"); n && n->isString() && n->asString() == "Plumb")
+        if (const json::Value* n = p.find("name"); n && n->isString() && n->asString() == "Hickory")
             plugin = p.find("id")->asString();
     if (plugin.empty()) {
         MESSAGE("skipped: the stock plugins are not built");

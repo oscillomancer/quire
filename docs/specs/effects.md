@@ -15,7 +15,7 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 | `sundew` (`plugins/stock/sundew`) | Sundew | `com.suppleaudio.sundew` | `pqwP` (the player's for the id) | `Sndw` | audio-effect, compressor |
 | `treeline` (`plugins/stock/treeline`) | Treeline | `com.suppleaudio.treeline` | `tdOY` (the player's for the id) | `Trln` | audio-effect, limiter |
 | `gorse` (`plugins/stock/gorse`) | Gorse | `com.suppleaudio.gorse` | `dEQG` (the player's for the id) | `Gors` | audio-effect, transient-shaper |
-| `utility` | Plumb | `com.suppleaudio.utility` | `QUT1` | `QUtl` | audio-effect, utility, stereo |
+| `hickory` (`plugins/stock/hickory`) | Hickory | `com.suppleaudio.hickory` | `iEKh` (the player's for the id) | `Hkry` | audio-effect, utility |
 | `analyzer` | Gauge | `com.suppleaudio.analyzer` | `QAN1` | `QAna` | audio-effect, analyzer, stereo |
 | `drive` | Kiln | `com.suppleaudio.drive` | `QDR1` | `QDrv` | audio-effect, distortion, stereo |
 | `gate` | Sluice | `com.suppleaudio.gate` | `QGT1` | `QGat` | audio-effect, gate, expander, stereo |
@@ -23,8 +23,7 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 | `reverb` | Nave | `com.suppleaudio.reverb` | `QRV1` | `QRvb` | audio-effect, reverb, stereo |
 
 In the template's identity checklist the code name is the id
-(`Utility`/`utility`/`UTILITY`,
-`Analyzer`/`analyzer`/`ANALYZER`); only the user-visible name string is the
+(`Analyzer`/`analyzer`/`ANALYZER`); only the user-visible name string is the
 working name, defined once per plugin.
 
 ## 1. The shape every effect shares
@@ -97,8 +96,8 @@ example), with their tests.
 - Any sample rate 22 050–384 000 Hz; frequencies above 0.45·fs are clamped
   internally (the parameter keeps its value).
 - EQ replaces non-finite input samples with zero before recursive/FIR state.
-  Utility sanitizes its working inputs before DC/side-filter state updates,
-  while its exact unity output copy preserves the original sample bits.
+  Hickory (the utility) makes its working values finite before any filter
+  or delay state, while at rest its output keeps the input's bits.
 - Denormals: `dsp::DenormalGuard` around processing; recursive states are
   also flushed to zero below 1e-30 when the input has been silent.
 - Parameter changes are smoothed (no zipper noise); a switch that cannot be
@@ -119,8 +118,7 @@ runs, processes and sample-rate-independent block partitions (§1.3).
 Product-owned `Editor.cpp`/`Theme.h`/`Widgets.h` usage (the template's widgets
 and window stay as shipped). Each plugin's layout is in its section below;
 all read names, units and formatted values from the table, and every edit is
-a gesture-bracketed parameter change. Utility's discrete arrow-key edits step
-one physical value, independent of fine mode; floats retain normalized steps.
+a gesture-bracketed parameter change.
 `tools/gui_preview` renders at least two scenarios per plugin to PNG for review.
 Design size ≤ 900 × 560. The look follows the product theme used by Orrery
 (`plugins/orrery/plugin/gui/Theme.h`): same palette and type, so the stock
@@ -341,24 +339,58 @@ changes what Flint got wrong in use. Notes for maintainers:
   snare, hats at 120 BPM), attack ±6 changed every hit's first 2 ms by
   ±6.00 dB, at −6 and at −26 dBFS alike, and defaults passed bit-exactly.
 
-## 4. Utility — Plumb [`utility`] (`stock-effects.md` §8)
+## 4. Utility — Hickory [`hickory`] (`stock-effects.md` §8)
 
-- Order: channels/swap → polarity → dc block → width and mono-below (M/S)
-  → pan → gain → mute (10 ms ramps for mute and channel changes).
-- `pan` is a balance: the opposite side falls, 0 dB at centre (document
-  the law).
-- **Change to the spec:** `mono_below` removes the side below the crossover
-  with a 4th-order Linkwitz–Riley high-pass on S only — zero latency and M
-  untouched, so the mono sum is exact and nothing needs a linear-phase pair
-  or a stepped parameter (it stays automatable). Write this into
-  `stock-effects.md` §8.
-- Tests: defaults bit-exact; −inf gain is silence, +6 dB doubles; width 0 =
-  (L+R)/2 on both, width 200 doubles S; pan +100: left silent, right
-  unchanged; mono_below 150 Hz: side of a 50 Hz tone below −40 dB, of a
-  1 kHz tone within 0.1 dB, and the output's mono sum equals the input's.
-- GUI: one compact panel (≤ 520 × 300): gain and pan, width, channel mode,
-  swap, polarity and mute toggles, mono-below, dc block, a small
-  correlation/level meter from telemetry. Scenarios: `default`, `wide`.
+A DSP script (ADR-0047), `plugins/stock/hickory/script/hickory.cpp`. It
+keeps Plumb's controls and laws (the linear balance, bass mono as a
+Linkwitz–Riley high-pass on the side only, bit-exact at rest) and changes
+the rest. Notes for maintainers:
+
+- **Order.** Polarity → channels → DC block → delay → width and bass mono
+  (M/S) → balance → gain and mute. Polarity comes first (Plumb flipped
+  after the routing), so `mono` with `invert_right` sums a flipped pair
+  correctly. Swap is a `channels` option rather than a switch of its own,
+  which removes Plumb's redundant combinations (swap with left-to-both).
+- **At rest.** Each stage that is at rest leaves the sample alone, and a
+  sample no stage touched is not written back: the output is the input's
+  bits, non-finite values included. Working values are made finite before
+  any filter or the delay line sees them, and those filters run all the
+  time, so switching the DC block or bass mono on fades in settled state.
+- **Ramps.** The routing matrix, polarity, the DC block, bass mono and
+  mute crossfade over 10 ms (`Ramp`, which jumps while unplayed); gain,
+  width and balance glide over 20 ms (`.smoothed()`). A new delay time
+  crossfades from the old tap over 20 ms, and a change that arrives during
+  a crossfade waits for it to end, so automation never jumps.
+- **Delay** is whole samples (`roundToInt`), so a delayed signal is an
+  exact copy; it is not reported as latency, since lining a track up
+  against another is the point.
+- **DC block** is a 12 dB/oct Butterworth high-pass at 5 Hz (Plumb's was a
+  one-pole): 0.02 dB down at 20 Hz.
+- **Readouts.** 100 ms chunks of LL, RR, LR, MM, SS and the peak, summed
+  over the last 30 (`closeChunk()`): `output_peak`, `correlation` (0 in
+  silence), `level_balance` (R over L) and `side_level` (S over M, −60 when
+  mono).
+- **Editor.** The image is 1024 points of (M, S), one every 1/12000 s,
+  scaled so their spread fills a third of the circle (and their peaks no
+  more than twice it). Width by frequency is ten octave band-passes
+  (Q 1.414, 31 Hz to 16 kHz) on each output channel, their correlation
+  over 250 ms; an octave fades with its level. A press there moves the
+  crossover and turns bass mono on; a horizontal drag across the image
+  changes the width. The warning under the image shows while the 300 ms
+  correlation is below −0.3.
+- **Tests.** The suite every stock plugin has (reset, also `--stepped`,
+  which leaves alone a switch that silences the plugin by itself, here
+  `mute`; unload; semantic conformance; clap-validator; catalog), and
+  `plugin.hickory.response`: a sine passes at 0.00 dB, gain −6 and +12.5
+  measure exactly, gain −60 (−inf), mute and `side` of identical channels
+  are silent, mono with width 0 and bass mono leaves identical channels at
+  0.00 dB, and the DC block takes 0.02 dB at 20 Hz. During development on
+  stereo test tones, bass mono at 150 Hz lowered the side at 50 Hz by
+  38.3 dB and left it at 1 kHz unchanged, with the mono sum unchanged to
+  float rounding; width 0 and 200, every routing, the flips and a 10 ms
+  delay (an exact shift) measured as specified, and the readouts read
+  correlation −0.71 on a flipped pair, a −6.02 dB balance where the right
+  was 6 dB down, and −60 dB of side at width 0.
 
 ## 5. Analyzer — Gauge [`analyzer`] (`stock-effects.md` §9)
 
@@ -562,7 +594,7 @@ stereo. Everything in §1 applies; no sidechain port; latency 0.
 An original design; write its structure and constants into
 `stock-effects.md` §7 as you settle them.
 
-- **`early`** dB uses the utility's convention: a finite −60 dB endpoint
+- **`early`** dB uses the utility's gain convention: a finite −60 dB endpoint
   with `kOffAtMin` (exactly off, displayed −inf), up to +6.
 - **Input:** the stereo input → `low_cut`/`high_cut` (12 dB/oct) →
   `predelay` (fractional, glides with a 50 ms two-pole smoother like the

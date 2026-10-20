@@ -13,6 +13,7 @@ player, and every check the other stock plugins have.
 | `sundew` | Sundew, the compressor | `com.suppleaudio.sundew` |
 | `treeline` | Treeline, the limiter | `com.suppleaudio.treeline` |
 | `gorse` | Gorse, the transient shaper | `com.suppleaudio.gorse` |
+| `hickory` | Hickory, the stereo utility | `com.suppleaudio.hickory` |
 
 ## Files
 

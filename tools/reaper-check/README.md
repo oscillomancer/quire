@@ -12,7 +12,7 @@ python3 tools/reaper-check/check.py --build-dir build/dev
 # Open, confirm and close floating editors (requires a desktop display):
 python3 tools/reaper-check/check.py --build-dir build/dev --editor
 # A focused run, another preset or an explicit executable:
-python3 tools/reaper-check/check.py --build-dir build/release --plugin com.suppleaudio.utility
+python3 tools/reaper-check/check.py --build-dir build/release --plugin com.suppleaudio.hickory
 python3 tools/reaper-check/check.py --reaper /usr/lib/REAPER/reaper --timeout 30
 # Pure helper/process tests: no REAPER or audio device required.
 python3 -m unittest discover -s tools/reaper-check -p 'test_*.py' -v
@@ -108,7 +108,7 @@ and finite decoded samples. The reader handles PCM 8/16/24/32 and IEEE float
 24-bit PCM, normalization/dither/tail off. This checks the output file rather
 than asserting the plugin's internal floating-point safety.
 
-Default output must be non-silent. Instrument bypass must be silent. Plumb,
+Default output must be non-silent. Instrument bypass must be silent. Hickory,
 Gauge, neutral Gorse, Yarrow (every band off) and Treeline (no gain, the
 signal under its ceiling) must match bypass sample-for-sample; other defaults must differ. Dynamics differences may
 include startup ramps.
@@ -117,11 +117,11 @@ include startup ramps.
 |---|---|---|---|---|
 | `probe-synth` | ProbeSynth / Probe Synth | Output Gain | −12 / −24 dB | −12 ±1 dB |
 | `orrery` | Orrery | Output Level | 0 / −12 dB | −12 ±1 dB |
-| `utility` | Plumb | Gain | 0 / −12 dB | −12 ±1 dB |
 | `yarrow` | Yarrow | Output | 0 / −12 dB | −12 ±1 dB |
 | `sundew` | Sundew | Threshold | 0 / −36 dB | second half >3 dB quieter |
 | `treeline` | Treeline | Ceiling | 0 / −24 dB | second half >3 dB quieter |
 | `gorse` | Gorse | Output | 0 / −12 dB | −12 ±1 dB |
+| `hickory` | Hickory | Gain | 0 / −12 dB | −12 ±1 dB |
 | `analyzer` | Analyzer / Gauge | Hold | false / true | envelope reload + unchanged audio |
 | `gate` | Gate / Sluice | Threshold | −80 / −6 dB | second half >3 dB quieter |
 | `drive` | Kiln | Output | 0 / −12 dB | −12 ±1 dB |
@@ -151,9 +151,9 @@ or copied.
 `TrackFX_GetParamName()` finds the table's unique display name;
 `TrackFX_GetParamIdent()` records its host identifier. `GetFXEnvelope(track,
 fx,index,true)` takes the **zero-based REAPER parameter index**, not the CLAP
-id. REAPER saves `<PARMENV index:CLAP-id min max default`, e.g. Plumb Gain
-`0:0`, Facet (the EQ Yarrow replaced) Band 3 Gain `17:17`, and Orrery Output
-Level **`219:2500`**.
+id. REAPER saves `<PARMENV index:CLAP-id min max default`, e.g. Plumb (the
+utility Hickory replaced) Gain `0:0`, Facet (the EQ Yarrow replaced) Band 3
+Gain `17:17`, and Orrery Output Level **`219:2500`**.
 The Orrery observation distinguishes index from id. Indices may change with
 parameter enumeration; runtime discovery avoids assuming index equals id.
 The script reopens the saved automation RPP and checks all three envelope

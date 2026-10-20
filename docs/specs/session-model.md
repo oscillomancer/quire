@@ -127,7 +127,7 @@ Fields:
 | `locked`, `hidden_tcp`, `hidden_mixer`, `folder_compact` | bool / enum | UI state kept in the model because it is user intent, but tagged `ui: true` so diffs/merges can ignore it |
 
 `volume`, `pan` and `mute` are automatable (§1.9). Width and trim are not
-strip fields: insert a utility (Plumb) for them.
+strip fields: insert a utility (Hickory) for them.
 
 Track templates (`supple.track-template/1.0`) persist the strip's `channels`
 in their `track` object and pass it to `track.add` when loaded. The optional

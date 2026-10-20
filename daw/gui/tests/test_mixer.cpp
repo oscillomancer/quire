@@ -228,7 +228,7 @@ TEST_CASE("mixer: a master looks like the others, and \"fx\" sits small at the s
     CHECK(fx.y < strip.y + 12);
     CHECK(sa.name->bounds().right() <= fx.x + 1);
     // No plug-in count beside "fx", however long the chain.
-    f.addFx(a, "Plumb");
+    f.addFx(a, "Hickory");
     f.refresh();
     CHECK(f.strip(a).fx->valueText() == "fx");
 }
@@ -238,7 +238,7 @@ TEST_CASE(
     Fixture f;
     if (!f.ok) return;
     const auto a = f.addTrack("channel", "A");
-    for (int i = 0; i < 12; ++i) f.addFx(a, "Plumb");
+    for (int i = 0; i < 12; ++i) f.addFx(a, "Hickory");
     f.refresh();
     ui::Node* list = f.strip(a).chain;
     // The default height fits five plug-ins whole.
@@ -398,8 +398,8 @@ TEST_CASE("mixer: Alt+click on a plug-in removes it, in one undo step") {
     Fixture f;
     if (!f.ok) return;
     const auto a = f.addTrack("channel", "A");
-    const auto p1 = f.addFx(a, "Plumb");
-    const auto p2 = f.addFx(a, "Plumb");
+    const auto p1 = f.addFx(a, "Hickory");
+    const auto p2 = f.addFx(a, "Hickory");
     f.refresh();
     const auto before = f.steps();
     ui::PointerEvent down;
@@ -476,7 +476,7 @@ TEST_CASE("mixer: a click on a plug-in still opens it; a drag within the chain r
     Fixture f;
     if (!f.ok) return;
     const auto a = f.addTrack("channel", "A");
-    const auto p1 = f.addFx(a, "Plumb"), p2 = f.addFx(a, "Plumb"), p3 = f.addFx(a, "Plumb");
+    const auto p1 = f.addFx(a, "Hickory"), p2 = f.addFx(a, "Hickory"), p3 = f.addFx(a, "Hickory");
     f.refresh();
     const auto before = f.steps();
     // A click, or a nudge under the threshold, is not a drag.
@@ -535,8 +535,8 @@ TEST_CASE(
     const auto a = f.addTrack("channel", "A");
     const auto b = f.addTrack("channel", "B");
     const auto master = std::string("tr_0");
-    const auto p1 = f.addFx(a, "Plumb");
-    const auto b1 = f.addFx(b, "Plumb");
+    const auto p1 = f.addFx(a, "Hickory");
+    const auto b1 = f.addFx(b, "Hickory");
     f.exec("fx.set", R"({"fx":")" + p1 + R"(","label":"Mine","wet":40})");
     f.refresh();
     const auto before = f.steps();
