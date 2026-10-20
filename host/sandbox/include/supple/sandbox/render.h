@@ -47,13 +47,22 @@ struct RenderRequest {
     const audio::AudioData* sidechain = nullptr;
 };
 
+// A read-only parameter's (a meter's) value, as the plugin at chain index
+// `stage` last reported it by the musical end: the tail does not move it.
+struct ReportedValue {
+    std::size_t stage = 0;
+    std::uint32_t paramId = 0;
+    double value = 0.0;
+};
+
 struct RenderResult {
     audio::AudioData audio;        // stereo, latency-compensated
     std::uint32_t latency = 0;     // total chain latency that was compensated (samples)
     std::int64_t tailSamples = 0;  // samples rendered after lengthSamples
     bool tailCapped = false;       // the tail hit tailLimitSeconds
     double peakDbfs = -1000.0;
-    std::vector<std::string> log;  // plugin log lines
+    std::vector<std::string> log;       // plugin log lines
+    std::vector<ReportedValue> meters;  // every stage's read-only parameters
 };
 
 // Activates inactive instances (at the settings' rate and block size),

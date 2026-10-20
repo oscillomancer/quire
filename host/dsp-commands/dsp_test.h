@@ -112,6 +112,7 @@ struct SignalResult {
     std::optional<std::string> path;
     std::optional<AutomationResult> automation;
     std::optional<SidechainResult> sidechain;
+    std::optional<json::Value> meters;  // read-only parameters by key, physical
 };
 struct TestResult {
     std::string plugin;
@@ -522,7 +523,9 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
         "Times round to samples at the render rate; spans must fit within seconds. "
         "sample_rate renders at that rate instead of the session's (sandbox) or the "
         "project's (DAW); latency is in samples at the rate used, which sample_rate in the "
-        "result reports.";
+        "result reports. meters gives a semantic plugin's read-only parameters (its meters "
+        "and readouts) by patch key in physical units, as they stood when the signal ended "
+        "(the tail after it does not move them).";
     c.tags = {"dsp", "analysis"};
     auto automationEvent = schema::object<AutomationEvent>("dsp_automation_event")
                                .field("param", &AutomationEvent::param,
@@ -643,6 +646,9 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                       .field("path", &SignalResult::path, schema::string())
                       .field("automation", &SignalResult::automation, automationResult)
                       .field("sidechain", &SignalResult::sidechain, sidechainResult)
+                      .field("meters", &SignalResult::meters,
+                             schema::any().doc("read-only parameters (meters) by patch key, "
+                                               "physical, as of the signal's end"))
                       .build();
     c.result = schema::object<TestResult>("dsp_test_result")
                    .field("plugin", &TestResult::plugin, schema::string())
@@ -748,6 +754,32 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
             auto applied = instance.setPatch(json::writeCompact(*a.patch), CLAP_SUPPLE_SET_MERGE);
             if (!applied) return patchError(std::move(applied).error());
         }
+
+        // The meters a semantic plugin reports, by CLAP id: key and units.
+        std::vector<std::unique_ptr<params::DescribedParam>> meters;
+        if (instance.info().semantic && !instance.paramsNormalized()) {
+            auto schema = instance.semanticSchema();
+            if (!schema) return std::move(schema).error();
+            if (const auto* entries = schema->find("params"); entries && entries->isObject())
+                for (const auto& m : entries->asObject()) {
+                    auto described = params::fromDescription(m.key, m.value);
+                    if (described && ((*described)->spec.flags & params::kReadonly))
+                        meters.push_back(std::move(*described));
+                }
+        }
+        auto meterValues = [&](const sandbox::RenderResult& r) -> std::optional<json::Value> {
+            if (meters.empty()) return std::nullopt;
+            json::Value values = json::Value::object();
+            for (const auto& reported : r.meters)
+                for (const auto& m : meters)
+                    if (reported.stage == 0 && m->spec.id == reported.paramId) {
+                        const double physical = params::fromClap(m->spec, reported.value);
+                        values[m->key] = m->spec.type == params::Type::Float
+                                             ? json::Value(rounded(physical, 4))
+                                             : params::toJson(m->spec, physical);
+                    }
+            return values;
+        };
 
         TestResult out;
         out.plugin = info->id;
@@ -917,6 +949,7 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
             if (!r) return std::move(r).error();
             out.latency = r->latency;
             SignalResult m = measure(sig, r->audio, inputFrames, a, releasedAt);
+            m.meters = meterValues(*r);
             diagnose(sig, *r, m, "");
             if (a.automation) {
                 auto baselineRequest = request;

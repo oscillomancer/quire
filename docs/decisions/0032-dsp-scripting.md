@@ -577,3 +577,27 @@ before return. CI runs the editor examples and PNG/pointer regressions on every
 platform and requires drawing to succeed; Windows gets only Mesa's WGL DLLs,
 not its Direct3D replacements. The picture/spec contracts are in
 `specs/editor-picture-extension.md` and `specs/sandbox.md`.
+
+### What earns a built-in; Oversampler phase; dsp.test meters (2026-10-20)
+
+A new built-in is added for what a script cannot do in the language: reach
+the host, the editor, files or the framework's own machinery, or do work the
+loop budget forbids. One that only saves a script some code, however
+convenient, is not added. The built-ins already here stay as they are. An
+analyser (`Spectrum`) and a Linkwitz-Riley `Crossover` were written under
+this amendment and withdrawn by that rule: the stock scripts Yarrow, Teasel
+and Hickory already do both in script.
+
+`Oversampler` reaches the framework's oversampler more fully.
+`prepare(factor)` takes 1, which passes samples through: before, a used
+instance could not go back to 1x, so a restart from 4x to 1x went on at 4x
+unless the script passed it by. `prepare(factor, Oversampler::Phase::Linear)`
+gives the framework's linear-phase half-bands (65 to 75 samples of latency,
+against 3 to 5 for the minimum-phase default), which scripts could not
+reach. Teasel offers both as its `phase` parameter.
+
+`dsp.test` reports a semantic plugin's read-only parameters per signal
+(`meters`, by patch key, in physical units) as they stood at the musical
+end; the renderer records each stage's reported outputs until then. Before,
+a script's readouts could be read only through a sandbox batch, after the
+tail had moved them.

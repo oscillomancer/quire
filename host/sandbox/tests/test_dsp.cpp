@@ -321,6 +321,23 @@ TEST_CASE("dsp.test renders at the sample rate it is given") {
     CHECK(aliased.error().path == "/args/frequency_hz");
 }
 
+TEST_CASE("dsp.test reports meters as they stood when the signal ended") {
+    Harness h;
+    // Each block's peak: the sine's while it plays, -60 once the tail is silent.
+    h.write("peak", script("Peak", "com.example.peak",
+                           "    Param level = decibels(\"Level\", -60, 0, -60).meter();\n"
+                           "    void process(Block& io) {\n"
+                           "        double peak = 0.0;\n"
+                           "        for (int i = 0; i < io.frames; ++i) peak = max(peak, "
+                           "abs(io[0][i]));\n"
+                           "        level.set(max(-60.0, gainToDb(peak)));\n"
+                           "    }"));
+    auto result = h.measured(R"({"script":"peak","signals":["sine"],"level_db":-12})");
+    const json::Value* meters = result["signals"].at(0).find("meters");
+    REQUIRE(meters);
+    CHECK(meters->find("level")->asDouble() == doctest::Approx(-12.0).epsilon(0.01));
+}
+
 TEST_CASE("dsp.test measures a script through the player and names what goes wrong") {
     if (!fs::exists(kStock / "Script Player.clap")) {
         MESSAGE("skipped: no script player in " << kStock.string());
