@@ -3,7 +3,8 @@
 # oversampling; a curve driven only gently, with auto gain, keeps the level;
 # without auto gain the clip curve below its ceiling is the drive's gain
 # alone; driving only the side leaves a centred sine clean, as does a band
-# above it; output trims what leaves.
+# above it; output trims what leaves. The thd readout (a probe of its own)
+# agrees with dsp.test's measurement of a 100 Hz sine at -18 dBFS RMS.
 # Required: SANDBOX (quire-sandbox), PLUGIN (Teasel.clap), WORK.
 foreach(var SANDBOX PLUGIN WORK)
     if(NOT DEFINED ${var} OR "${${var}}" STREQUAL "")
@@ -34,10 +35,14 @@ set(home "${WORK}/home")
 file(MAKE_DIRECTORY "${home}")
 
 function(measure params hz out)
+    set(level -12)
+    if(ARGC GREATER 3)
+        set(level ${ARGV3})
+    endif()
     execute_process(
         COMMAND ${CMAKE_COMMAND} -E env "HOME=${home}" "USERPROFILE=${home}" "APPDATA=${home}/config"
                 "LOCALAPPDATA=${home}/local" "XDG_DATA_HOME=${home}/data" "${SANDBOX}" exec
-                "{\"command\":\"dsp.test\",\"args\":{\"plugin\":\"${PLUGIN}\",\"seconds\":2,\"frequency_hz\":${hz},\"signals\":[\"sine\"],\"patch\":{\"params\":${params}}}}"
+                "{\"command\":\"dsp.test\",\"args\":{\"plugin\":\"${PLUGIN}\",\"seconds\":2,\"frequency_hz\":${hz},\"level_db\":${level},\"signals\":[\"sine\"],\"patch\":{\"params\":${params}}}}"
                 --workdir "${WORK}/workdir"
         RESULT_VARIABLE result OUTPUT_VARIABLE json ERROR_VARIABLE err)
     if(NOT result EQUAL 0)
@@ -74,3 +79,21 @@ expect("{\"style\":\"soft\",\"drive\":-12}" 1000 0)
 expect("{\"style\":\"clip\",\"character\":0,\"drive\":6,\"auto_gain\":false}" 1000 6)
 expect("{\"style\":\"clip\",\"drive\":24,\"auto_gain\":false,\"channels\":\"side\"}" 1000 0)
 expect("{\"style\":\"clip\",\"drive\":24,\"auto_gain\":false,\"band_low\":2000}" 100 0)
+expect("{\"mix\":0,\"phase\":\"linear\",\"quality\":\"x8\"}" 10000 0)
+
+# The probe's THD against the sine's, within a tenth of a percent.
+function(expect_thd params)
+    measure("${params}" 100 json -14.99)
+    string(JSON measured GET "${json}" signals 0 thd_percent)
+    string(JSON readout GET "${json}" signals 0 meters thd)
+    milli("${measured}" a)
+    milli("${readout}" b)
+    math(EXPR off "${a} - ${b}")
+    if(off GREATER 100 OR off LESS -100)
+        message(FATAL_ERROR "${params}: thd reads ${readout}%, dsp.test measures ${measured}%")
+    endif()
+    message(STATUS "${params}: thd reads ${readout}%, measured ${measured}%")
+endfunction()
+
+expect_thd("{\"style\":\"tape\",\"drive\":6}")
+expect_thd("{\"style\":\"tube\",\"drive\":12,\"bias\":30}")

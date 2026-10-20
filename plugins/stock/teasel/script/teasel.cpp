@@ -495,6 +495,13 @@ struct Teasel : Effect {
             .help(
                 "Oversampling: higher keeps harmonics above hearing from folding back down "
                 "(up to 768 kHz inside); adds a few samples of latency.");
+    Param phase = choice("Phase", {"Minimum", "Linear"}, 0)
+                      .restarts()
+                      .in("Output")
+                      .help(
+                          "The oversampling filters: minimum adds 3 to 5 samples of latency and "
+                          "turns the top octave's phase a little; linear turns no phase at all, "
+                          "for about 70 samples of latency.");
     Param listen = choice("Listen", {"Off", "Band", "Delta"}, 0)
                        .notAutomatable()
                        .in("Output")
@@ -531,7 +538,8 @@ struct Teasel : Effect {
             .set(drive, 3)
             .set(character, 40)
             .set(emphasis, 4)
-            .set(quality, "x8");
+            .set(quality, "x8")
+            .set(phase, "linear");
         p.add("Mid Warmth")
             .set(style, "tube")
             .set(drive, 5)
@@ -570,7 +578,8 @@ struct Teasel : Effect {
             .set(drive, 3)
             .set(character, 15)
             .set(autoGain, false)
-            .set(quality, "x8");
+            .set(quality, "x8")
+            .set(phase, "linear");
         p.add("Lo-Fi Sampler")
             .set(style, "alias")
             .set(drive, 3)
@@ -682,8 +691,10 @@ struct Teasel : Effect {
         while (factor > 1 && rate * factor > 770000.0) factor = factor / 2;
         hi = rate * factor;
         loopMax = ceilToInt(hi / 18.0) + 8;
+        const Oversampler::Phase filters =
+            phase.index() == 1 ? Oversampler::Phase::Linear : Oversampler::Phase::Minimum;
         for (int c = 0; c < 2; ++c) {
-            if (factor > 1) over[c].prepare(factor);
+            over[c].prepare(factor, filters);
             over[c].clear();
             lane[c].clear();
             lane[c].now.prepare(hi);
@@ -691,8 +702,7 @@ struct Teasel : Effect {
             loop[c].prepare(loopMax);
             loop[c].clear();
         }
-        // An oversampler once prepared stays so: at 1x it is passed by.
-        latency = factor > 1 ? over[0].latency() : 0;
+        latency = over[0].latency();
         setLatency(latency);
         probe.prepare(rate);
         probeStep = kProbeHz / rate;
@@ -1029,10 +1039,9 @@ struct Teasel : Effect {
                 Oversampler& o = over[ch];
                 Lane& s = lane[ch];
                 const double in = ch == 0 ? v0 : v1;
-                double result = in;
-                if (factor > 1) o.up(in);
+                o.up(in);
                 for (int k = 0; k < factor; ++k) {
-                    const double x = factor > 1 ? o.sample(k) : in;
+                    const double x = o.sample(k);
                     // The band: low and high pass clean around it.
                     double low = 0.0, band = x, high = 0.0;
                     // (Filters about to come in run beforehand, so none
@@ -1089,12 +1098,9 @@ struct Teasel : Effect {
                         const double heard = listenMode == 1 ? y : wet * (y - band);
                         out += listenMix * (heard - out);
                     }
-                    if (factor > 1)
-                        o.set(k, out);
-                    else
-                        result = out;
+                    o.set(k, out);
                 }
-                const double d = factor > 1 ? o.down() : result;
+                const double d = o.down();
                 if (ch == 0)
                     v0 = d;
                 else
@@ -1252,6 +1258,10 @@ struct Teasel : Effect {
     static constexpr double mvw = 268;
     static constexpr double ox = 828;  // the output panel
     static constexpr double ow = 236;
+    static constexpr double kChannelsY = 182;  // its rows of pills, down from py
+    static constexpr double kOverY = 230;
+    static constexpr double kPhaseY = 278;
+    static constexpr double kListenY = 326;
     static constexpr double tx = 32;  // the transfer plot
     static constexpr double ty = 524;
     static constexpr double ts = 168;
@@ -2663,37 +2673,46 @@ struct Teasel : Effect {
         const double x = ox + 16, w = ow - 32;
         pill(g, x, py + 136, w, 22, autoGain.on() ? "AUTO GAIN ON" : "AUTO GAIN OFF", autoGain.on(),
              kLinen, hovered(x, py + 136, w, 22));
-        label(g, "CHANNELS", x, py + 176, TextAlign::Left);
+        label(g, "CHANNELS", x, py + kChannelsY - 10, TextAlign::Left);
         for (int k = 0; k < 3; ++k) {
             const double px = x + k * (w + 4) / 3.0;
             const char* name = k == 0 ? "STEREO" : (k == 1 ? "MID" : "SIDE");
-            pill(g, px, py + 186, (w + 4) / 3.0 - 4, 22, name, channelMode.index() == k, kLinen,
-                 hovered(px, py + 186, (w + 4) / 3.0 - 4, 22));
+            pill(g, px, py + kChannelsY, (w + 4) / 3.0 - 4, 22, name, channelMode.index() == k,
+                 kLinen, hovered(px, py + kChannelsY, (w + 4) / 3.0 - 4, 22));
         }
-        label(g, "OVERSAMPLING", x, py + 232, TextAlign::Left);
+        label(g, "OVERSAMPLING", x, py + kOverY - 10, TextAlign::Left);
         for (int k = 0; k < 5; ++k) {
             const double px = x + k * (w + 4) / 5.0;
             const char* name =
                 k == 0 ? "1x" : (k == 1 ? "2x" : (k == 2 ? "4x" : (k == 3 ? "8x" : "16x")));
-            pill(g, px, py + 242, (w + 4) / 5.0 - 4, 22, name, quality.index() == k, kLinen,
-                 hovered(px, py + 242, (w + 4) / 5.0 - 4, 22));
+            pill(g, px, py + kOverY, (w + 4) / 5.0 - 4, 22, name, quality.index() == k, kLinen,
+                 hovered(px, py + kOverY, (w + 4) / 5.0 - 4, 22));
         }
-        label(g, "LISTEN", x, py + 288, TextAlign::Left);
+        label(g, "PHASE", x, py + kPhaseY - 10, TextAlign::Left);
+        for (int k = 0; k < 2; ++k) {
+            const double px = x + k * (w + 4) / 2.0;
+            pill(g, px, py + kPhaseY, (w + 4) / 2.0 - 4, 22, k == 0 ? "MINIMUM" : "LINEAR",
+                 phase.index() == k, kLinen, hovered(px, py + kPhaseY, (w + 4) / 2.0 - 4, 22));
+        }
+        label(g, "LISTEN", x, py + kListenY - 10, TextAlign::Left);
         for (int k = 0; k < 3; ++k) {
             const double px = x + k * (w + 4) / 3.0;
             const char* name = k == 0 ? "OFF" : (k == 1 ? "BAND" : "DELTA");
-            pill(g, px, py + 298, (w + 4) / 3.0 - 4, 22, name, listen.index() == k,
-                 k == 0 ? kLinen : Theme::accent, hovered(px, py + 298, (w + 4) / 3.0 - 4, 22));
+            pill(g, px, py + kListenY, (w + 4) / 3.0 - 4, 22, name, listen.index() == k,
+                 k == 0 ? kLinen : Theme::accent,
+                 hovered(px, py + kListenY, (w + 4) / 3.0 - 4, 22));
         }
         const char* says = listen.index() == 1   ? "playing the driven band alone"
                            : listen.index() == 2 ? "playing only what the drive changes"
                            : autoGain.on()       ? "level held as the drive moves"
                                                  : "level rises with the drive";
-        aside(g, says, x, py + 340, TextAlign::Left);
+        aside(g, says, x, py + kListenY + 38, TextAlign::Left);
         g.fillStyle(Theme::textFaint);
         g.monoFont(9);
         g.textAlign(TextAlign::Left);
-        g.fillText(format("latency %d samples", latencyShown.get()), x, py + ph - 22);
+        g.fillText(format("latency %d samples, %.2f ms", latencyShown.get(),
+                          1000.0 * latencyShown.get() / rateNow()),
+                   x, py + ph - 22);
     }
 
     void draw(Canvas& g) {
@@ -2899,17 +2918,22 @@ struct Teasel : Effect {
             return;
         }
         for (int c = 0; c < 3; ++c)
-            if (p.over(ox0 + c * (w + 4) / 3.0, py + 186, (w + 4) / 3.0 - 4, 22)) {
+            if (p.over(ox0 + c * (w + 4) / 3.0, py + kChannelsY, (w + 4) / 3.0 - 4, 22)) {
                 act(0, channelMode, c);
                 return;
             }
         for (int c = 0; c < 5; ++c)
-            if (p.over(ox0 + c * (w + 4) / 5.0, py + 242, (w + 4) / 5.0 - 4, 22)) {
+            if (p.over(ox0 + c * (w + 4) / 5.0, py + kOverY, (w + 4) / 5.0 - 4, 22)) {
                 act(0, quality, c);
                 return;
             }
+        for (int c = 0; c < 2; ++c)
+            if (p.over(ox0 + c * (w + 4) / 2.0, py + kPhaseY, (w + 4) / 2.0 - 4, 22)) {
+                act(0, phase, c);
+                return;
+            }
         for (int c = 0; c < 3; ++c)
-            if (p.over(ox0 + c * (w + 4) / 3.0, py + 298, (w + 4) / 3.0 - 4, 22)) {
+            if (p.over(ox0 + c * (w + 4) / 3.0, py + kListenY, (w + 4) / 3.0 - 4, 22)) {
                 act(0, listen, c);
                 return;
             }

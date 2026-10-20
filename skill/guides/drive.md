@@ -29,6 +29,7 @@ changes only the keys it names.
 | `output` | dB, −24…24 | 0 |
 | `channels` | `stereo`, `mid` (centre only), `side` (width only) | stereo |
 | `quality` | oversampling `x1`, `x2`, `x4`, `x8`, `x16` (at most 768 kHz inside); a restart | x4 |
+| `phase` | the oversampling filters: `minimum` (3 to 5 samples of latency; the top octave's phase turns a little) or `linear` (no phase change; about 70 samples); a restart | minimum |
 | `listen` | `off`, `band` (the driven band alone), `delta` (only what the drive changes) | off |
 | `thd` | %, readonly: harmonics and noise (share of RMS) of a 100 Hz sine at −18 dBFS RMS through the curve as set | |
 | `even` | %, readonly: the even harmonics' share of that sine's harmonic power | |
@@ -107,10 +108,10 @@ Sustain thickened, attacks left clean:
 {"params":{"style":"fuzz","drive":18,"character":30,"dynamics":-70,"high_cut":6000}}
 ```
 
-A clipper before a limiter (level rises with the drive):
+A clipper before a limiter (level rises with the drive), phase untouched:
 
 ```json
-{"params":{"style":"clip","drive":3,"character":15,"auto_gain":false,"quality":"x8"}}
+{"params":{"style":"clip","drive":3,"character":15,"auto_gain":false,"quality":"x8","phase":"linear"}}
 ```
 
 A ringing, tuned distortion (pitch is the note's frequency):
@@ -143,7 +144,9 @@ into `clip` leaves aliases about 45 dB down, at 16x about 70. `rectify`
 and `alias` are never subtle. Feedback never sustains itself, and lets go
 a second after the input falls digitally silent; at high drive with
 `rectify` and strong feedback peaks can pass 0 dBFS: trim `output`.
-Changing `quality` restarts the plugin.
+Changing `quality` or `phase` restarts the plugin. On a master, or
+anywhere the processed signal is compared or blended with the original,
+use `phase: "linear"`; elsewhere `minimum` keeps the latency down.
 
 See [mixing](mixing.md) and
 [stock spec §5](../../docs/specs/stock-effects.md#5-saturation--teasel-teasel).

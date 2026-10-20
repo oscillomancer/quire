@@ -56,6 +56,7 @@ class OneScript final : public supple::Catalog {
                 {&Script::output, "output"},
                 {&Script::channelMode, "channels"},
                 {&Script::quality, "quality"},
+                {&Script::phase, "phase"},
                 {&Script::listen, "listen"},
                 {&Script::inputLevel, "input_level"},
                 {&Script::outputLevel, "output_level"},

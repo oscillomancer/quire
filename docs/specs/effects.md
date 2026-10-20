@@ -433,10 +433,11 @@ maintainers:
 
 - **Everything oversampled.** The band split, the dry signal and the clean
   bands run at the high rate with the curve, so mixing and splitting
-  never comb against the minimum-phase half-bands. The script runtime's
-  `Oversampler` cannot be unprepared: at 1x the code passes it by (and
-  reports no latency), or a restart from 4x to 1x would go on at 4x.
-  Oversampling stops at 768 kHz inside.
+  never comb against the oversampling filters. `phase` picks the script
+  runtime's minimum-phase half-bands or its linear-phase ones (a restart);
+  at 1x the oversampler is prepared at a factor of 1 and passes samples
+  through (before the runtime took 1, a restart from 4x to 1x went on at
+  4x). Oversampling stops at 768 kHz inside.
 - **Filters about to come in run beforehand.** A low-pass switched in
   from a cold state (the high cut, the band's upper crossover) outputs
   nothing at first, a click; each runs while its parameter's target is
@@ -463,7 +464,10 @@ maintainers:
   0.00 dB, and −6.00 with output −6; `soft` at −12 dB with auto gain
   keeps 0.00; `clip` without auto gain below its ceiling is the drive
   (+6.00); driving only the side leaves a centred sine at 0.00, and a band
-  above 2 kHz leaves 100 Hz at 0.00 under 24 dB of drive. Host-smoke's
+  above 2 kHz leaves 100 Hz at 0.00 under 24 dB of drive; dry at 8x with
+  linear phase a 10 kHz sine passes at 0.00; and the `thd` readout is
+  within 0.1 % of `dsp.test`'s own THD (its `meters`) for tape at 6 dB and
+  tube at 12 dB with bias. Host-smoke's
   latency check (quality) caught the 1x restart above. Measurements are in
   `stock-effects.md` §5. Release build, one core, stereo 48 kHz, pink
   noise: 1.9 % at the defaults (4x), 0.9 % at 1x, 3.0 % at 8x, 5.0 % at

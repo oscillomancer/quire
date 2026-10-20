@@ -516,6 +516,7 @@ latency is the oversampler's (0 to 5 samples).
 | `output` | dB | −24..24 | linear | 0 |
 | `channels` | enum | `stereo`, `mid`, `side` | | `stereo` |
 | `quality` | enum | `x1`, `x2`, `x4`, `x8`, `x16`; a restart | | `x4` |
+| `phase` | enum | `minimum`, `linear`: the oversampling filters; a restart | | `minimum` |
 | `listen` | enum | `off`, `band`, `delta`; not automatable | | `off` |
 | `thd` | % | readonly: see the probe | | |
 | `even` | % | readonly: see the probe | | |
@@ -524,10 +525,12 @@ latency is the oversampler's (0 to 5 samples).
 | `input_level`, `output_level` | dBFS | readonly: peaks, falling 20 dB/s | | |
 
 - **Path.** Each channel (left and right, or mid and side) is upsampled
-  (the script runtime's minimum-phase half-bands; `quality` 2x to 16x, but
-  no further than 768 kHz inside, so 16x is 8x at 96 kHz; 1x bypasses the
-  oversampler) and everything below runs at the high rate, the clean bands
-  and the dry signal too, so neither mixing nor the band split combs.
+  (the script runtime's half-bands, minimum phase, 3 to 5 samples of
+  latency, or with `phase` linear, 65 to 75; `quality` 1x to 16x, but no
+  further than 768 kHz inside, so 16x is 8x at 96 kHz) and everything below
+  runs at the high rate, the clean bands and the dry signal too, so neither
+  mixing nor the band split combs. Linear phase turns no phase at all: dry,
+  the output is the input delayed.
 - **Band.** Linkwitz-Riley 24 dB/oct crossovers at `band_low` and
   `band_high` (`band_high` at least 1.05 × `band_low`); the low band takes
   the high crossover's all-pass so the three sum flat (0.00 dB, 50 Hz to
@@ -612,6 +615,8 @@ Measured (dev build, 48 kHz):
 | `feedback` 95 %, 30 Hz, drive 48, bias 60 %, every style | silence stays silent; rectify peaks reach +6.7 dBFS |
 | an impulse into `feedback` 95 % at 220 Hz, drive 12 | every style below −120 dBFS within 1.5 s |
 | automation of style, band, cuts, emphasis, channels | no step above the unautomated render's |
+| mix 0 against the input, music, 4x, 20 Hz–20 kHz | the level is flat either way; the residual from the phase: minimum 9.5 dB below the input (34 dB up to 5 kHz, none above), linear 91 dB below |
+| latency, minimum / linear phase | 0 / 0 at 1x, 3 / 65 at 2x, 4 / 72 at 4x, 5 / 74 at 8x, 5 / 75 at 16x |
 
 Editor (1080 × 780): the spectrum of the input and the output (16384
 points, a twelfth of an octave, tilted 4.5 dB an octave), with what the
@@ -624,10 +629,11 @@ and its path over the last 20 ms, and faintly the curve at the drive of the
 moment; the probe's harmonics, second to twelfth; the readouts; dynamics
 with a sketch of one hit and the drive it gets; the LFO's wave with a dot
 where it is, its shapes, targets, depth, rate and sync; mix, output, auto
-gain, channels, oversampling, listen. The header's teasel head warms with
+gain, channels, oversampling and its phase, listen, and the latency in
+samples and milliseconds. The header's teasel head warms with
 what the curve adds and its spines reach with the drive.
 
-Factory patches: Warm Start (the defaults), Bus Tape, Master Sheen, Mid Warmth, Side
+Factory patches (the two Master ones with linear phase): Warm Start (the defaults), Bus Tape, Master Sheen, Mid Warmth, Side
 Air, Iron Bass, Bass Growl, Drum Crunch, Sustain Fuzz, Master Clipper,
 Lo-Fi Sampler, Bitcrushed, Octave Up, Folded Pulse, Ringing Throat, Broken
 Radio.

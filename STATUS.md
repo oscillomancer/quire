@@ -255,7 +255,8 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   driving only a band, the mid or the side; emphasis, cuts, tuned feedback
   through the curve, dynamics that drive the attacks or the sustain, and
   an LFO free or in time on the drive, character, bias or pitch;
-  oversampling to 16x with the dry signal and the clean bands inside it,
+  oversampling to 16x, minimum or linear phase, with the dry signal and
+  the clean bands inside it,
   and auto gain that holds a −18 dBFS RMS signal's level at any drive.
   Its readouts give the THD and even share of a 100 Hz sine through the
   curve as set and the distortion it adds to the music; its editor shows
