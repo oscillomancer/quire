@@ -20,7 +20,9 @@
 //
 // --stepped also moves every writable stepped parameter (switches, choices)
 // off its default, the same way in S1 and S2, for a plugin whose default
-// state leaves its processing switched off (an EQ with every band off).
+// state leaves its processing switched off (an EQ with every band off). A
+// switch that silences the plugin by itself (a mute) stays at its default,
+// since the reference render has to carry signal.
 // Exit 0 = every plugin in the file passed.
 #include <algorithm>
 #include <cmath>
@@ -215,6 +217,16 @@ double nonDefaultValue(const host::ParamInfo& p) {
     return p.def;  // min == max: nothing to vary
 }
 
+// Whether moving this one parameter alone to `value` silences the plugin.
+bool silences(const host::PluginInfo& info, std::uint32_t block, const host::ParamInfo& p,
+              double value, const Stimulus& stimulus, const std::vector<Timed>& notes) {
+    auto in = host::Instance::create(info, {});
+    if (!in || !(*in)->activate(kSampleRate, 1, block).ok() || !(*in)->setParam(p.id, value).ok())
+        return false;
+    const Capture c = renderSecond(**in, stimulus, block, notes);
+    return c.ok && peakOf(c) <= 0.0;
+}
+
 bool applyAll(host::Instance& in, const std::vector<host::ParamInfo>& params,
               const std::vector<double>& values, std::string& error) {
     for (std::size_t i = 0; i < params.size(); ++i) {
@@ -269,7 +281,11 @@ bool compareAtBlock(const host::PluginInfo& info, std::uint32_t block, int pass,
     }
 
     std::vector<double> moved;
-    for (const auto& p : steps) moved.push_back(nextStep(p));
+    for (const auto& p : steps) {
+        const double v = nextStep(p);
+        moved.push_back(
+            silences(info, block, p, v, stimulus, notes) ? std::clamp(p.def, p.min, p.max) : v);
+    }
 
     std::string error;
     if (!applyAll(**a, steps, moved, error) || !applyAll(**b, steps, moved, error) ||
