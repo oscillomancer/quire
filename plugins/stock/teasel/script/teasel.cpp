@@ -2518,12 +2518,14 @@ struct Teasel : Effect {
               sx0 + sw0, sy0 + sh0 + 12, TextAlign::Right);
     }
 
-    // The LFO's wave over two cycles, a dot where it is.
+    // The LFO's wave over two cycles, a dot where it is: it crosses both,
+    // and the wave is drawn again as it wraps, every second cycle.
     void drawWave(Canvas& g) {
         well(g, wx, wy, ww, wh);
         const int shape = motionShape.index();
         const double depth = motion.value();
         const int cycle = lfoCycleShown.get();
+        const int first = 2 * floorToInt(cycle * 0.5);
         g.save();
         g.clip(wx, wy, ww, wh);
         g.strokeStyle(kGrid);
@@ -2542,7 +2544,7 @@ struct Teasel : Effect {
         for (int k = 0; k <= 200; ++k) {
             const double at = 2.0 * k / 200.0;
             const int n = min(floorToInt(at), 1);
-            const double v = lfoShape(shape, at - n, cycle + n);
+            const double v = lfoShape(shape, at - n, first + n);
             const double x = wx + ww * k / 200.0, y = wy + wh * 0.5 - v * (wh * 0.5 - 7);
             if (k == 0)
                 g.moveTo(x, y);
@@ -2554,7 +2556,8 @@ struct Teasel : Effect {
             const double ph = lfoPhaseShown.get();
             g.fillStyle(kCurve);
             g.beginPath();
-            g.circle(wx + ww * 0.5 * ph, wy + wh * 0.5 - lfoShown.get() * (wh * 0.5 - 7), 3.5);
+            g.circle(wx + ww * 0.5 * (cycle - first + ph),
+                     wy + wh * 0.5 - lfoShown.get() * (wh * 0.5 - 7), 3.5);
             g.fill();
         }
         g.globalAlpha(1.0);
