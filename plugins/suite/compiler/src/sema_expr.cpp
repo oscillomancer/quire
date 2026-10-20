@@ -2109,7 +2109,7 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                         if (args[4].builtinEnum != "Unit") {
                             error(call->args[4]->loc, "script.param.argument",
                                   "continuous(): the unit must be a Unit",
-                                  "Unit::Bpm, Unit::Samples, ... (or Unit::None)");
+                                  "Unit::Bpm, Unit::Meters, Unit::Samples, ... (or Unit::None)");
                             return std::nullopt;
                         }
                         p.unit = static_cast<ParamModel::Unit>(args[4].intValue);
@@ -2290,7 +2290,7 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
             {"Curve", {"Linear", "Log", "Pow"}},
             {"Unit",
              {"None", "Decibels", "Hertz", "Milliseconds", "Percent", "Ratio", "Semitones", "Cents",
-              "Octaves", "Degrees", "Bpm", "Samples"}}};
+              "Octaves", "Degrees", "Bpm", "Samples", "Meters"}}};
         const auto known = n->path.size() == 2 ? builtinEnums.find(n->path[0]) : builtinEnums.end();
         if (known != builtinEnums.end()) {
             const auto& names = known->second;

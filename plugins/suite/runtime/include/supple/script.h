@@ -193,7 +193,8 @@ enum class Unit {
     Octaves,
     Degrees,
     Bpm,
-    Samples
+    Samples,
+    Meters
 };
 
 // How a parameter's value maps onto a knob's travel and a host's 0..1

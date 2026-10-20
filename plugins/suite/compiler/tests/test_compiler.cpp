@@ -473,13 +473,15 @@ struct T : Effect {
     static constexpr Info info = {.name = "T", .id = "com.example.t"};
     Param tempo = continuous("Tempo", 40, 240, 120, Unit::Bpm);
     Param plain = continuous("Amount", 0, 1, 0.5);
+    Param across = continuous("Width", 1, 60, 18, Unit::Meters);
     void process(Block& io) {}
 };
 )";
     auto r = compileOk(source);
-    REQUIRE(r.program->params().size() == 2);
+    REQUIRE(r.program->params().size() == 3);
     CHECK(r.program->params()[0].unit == scriptc::ParamModel::Unit::Bpm);
     CHECK(r.program->params()[1].unit == scriptc::ParamModel::Unit::None);
+    CHECK(r.program->params()[2].unit == scriptc::ParamModel::Unit::Meters);
 }
 
 TEST_CASE("an instrument takes its notes through voice hooks") {

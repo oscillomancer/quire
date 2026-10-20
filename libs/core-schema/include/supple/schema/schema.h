@@ -100,6 +100,9 @@ inline std::string quantityPattern(Unit unit) {
         case Unit::samples:
             suffix = "(?:samples|smp)";
             break;
+        case Unit::m:
+            suffix = "(?:m|meters|metres|cm|ft)";
+            break;
         case Unit::none:
             suffix.clear();
             break;

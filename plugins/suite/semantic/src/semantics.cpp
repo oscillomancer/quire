@@ -185,6 +185,8 @@ PhysicalUnit physicalUnit(const ParamDef& p) {
             return {"oct", 1.0};
         case Unit::Bpm:
             return {"bpm", 1.0};
+        case Unit::Meters:
+            return {"m", 1.0};
         default:
             return {nullptr, 1.0};
     }
@@ -206,7 +208,8 @@ constexpr Alias kAliases[] = {
     {"octave", "oct", 1},   {"octaves", "oct", 1},  {"%", "%", 1},
     {":1", "ratio", 1},     {"ratio", "ratio", 1},  {"deg", "deg", 1},
     {"\xC2\xB0", "deg", 1}, {"bpm", "bpm", 1},      {"samples", "samples", 1},
-    {"smp", "samples", 1},
+    {"smp", "samples", 1},  {"m", "m", 1},          {"meters", "m", 1},
+    {"metres", "m", 1},     {"cm", "m", 0.01},      {"ft", "m", 0.3048},
 };
 
 std::string lower(std::string_view s) {

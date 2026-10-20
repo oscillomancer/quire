@@ -232,7 +232,7 @@ class NativeCode final : public Code {
     // script.h's, value for value.
     static_assert(static_cast<int>(ParamSpec::Kind::Toggle) ==
                   static_cast<int>(ParamModel::Kind::Toggle));
-    static_assert(static_cast<int>(Unit::Samples) == static_cast<int>(ParamModel::Unit::Samples));
+    static_assert(static_cast<int>(Unit::Meters) == static_cast<int>(ParamModel::Unit::Meters));
     static_assert(static_cast<int>(Unit::Bpm) == static_cast<int>(ParamModel::Unit::Bpm));
     static_assert(static_cast<int>(Curve::Pow) == static_cast<int>(ParamModel::Curve::Pow));
     static ParamModel model(const ParamSpec& s) {

@@ -38,6 +38,8 @@ Unit unitOf(ParamModel::Unit u) {
             return Unit::Bpm;
         case ParamModel::Unit::Samples:
             return Unit::Samples;
+        case ParamModel::Unit::Meters:
+            return Unit::Meters;
         default:
             return Unit::None;
     }

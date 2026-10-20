@@ -26,7 +26,8 @@ constexpr Alias aliases[] = {
     {"ratio", Unit::ratio, 1},  {"x", Unit::x, 1},       {"×", Unit::x, 1},
     {"deg", Unit::deg, 1},      {"°", Unit::deg, 1},     {"bpm", Unit::bpm, 1},
     {"beats", Unit::beats, 1},  {"qn", Unit::beats, 1},  {"samples", Unit::samples, 1},
-    {"smp", Unit::samples, 1}};
+    {"smp", Unit::samples, 1},  {"m", Unit::m, 1},       {"meters", Unit::m, 1},
+    {"metres", Unit::m, 1},     {"cm", Unit::m, .01},    {"ft", Unit::m, .3048}};
 std::string lower(std::string_view s) {
     std::string o(s);
     for (char& c : o)
@@ -35,17 +36,17 @@ std::string lower(std::string_view s) {
 }
 }  // namespace
 std::string_view unitName(Unit u) {
-    constexpr std::string_view names[] = {"Hz",  "ms",    "dB",      "LUFS",  "LU", "st",
-                                          "ct",  "oct",   "%",       "ratio", "x",  "deg",
-                                          "bpm", "beats", "samples", "none"};
+    constexpr std::string_view names[] = {"Hz",  "ms",    "dB",      "LUFS",  "LU",  "st",
+                                          "ct",  "oct",   "%",       "ratio", "x",   "deg",
+                                          "bpm", "beats", "samples", "m",     "none"};
     return names[static_cast<std::size_t>(u)];
 }
 std::string_view dimensionName(Unit u) {
     constexpr std::string_view names[] = {
-        "frequency",      "time",       "level",           "loudness",     "loudness difference",
-        "pitch interval", "fine pitch", "octave interval", "proportion",   "compression ratio",
-        "multiplier",     "angle",      "tempo",           "musical time", "sample count",
-        "dimensionless"};
+        "frequency",      "time",         "level",           "loudness",     "loudness difference",
+        "pitch interval", "fine pitch",   "octave interval", "proportion",   "compression ratio",
+        "multiplier",     "angle",        "tempo",           "musical time", "sample count",
+        "distance",       "dimensionless"};
     return names[static_cast<std::size_t>(u)];
 }
 Result<double> parseQuantity(std::string_view text, Unit fieldUnit) {

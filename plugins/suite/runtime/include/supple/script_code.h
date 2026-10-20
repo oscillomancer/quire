@@ -37,7 +37,8 @@ struct ParamModel {
         Octaves,
         Degrees,
         Bpm,
-        Samples
+        Samples,
+        Meters
     };
     enum class Curve { Linear, Log, Pow };
 
