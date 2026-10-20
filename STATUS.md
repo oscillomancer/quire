@@ -191,7 +191,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
   the LLM evaluation harness (`tools/eval-harness`).
 - **Stock plugins** (ADR-0011, ADR-0047): Orrery, Yarrow, Sundew, Treeline,
-  Sluice, Flint, Kiln, Echelon, Nave, Plumb and Gauge, each passing clap-validator, a
+  Gorse, Sluice, Kiln, Echelon, Nave, Plumb and Gauge, each passing clap-validator, a
   reset determinism check and an unload test (all but Nave also pass the
   headless REAPER check); JSON patches and the semantic-parameters extension.
   Yarrow, the EQ, is the first written as a DSP script
@@ -217,7 +217,15 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   play, true peak) against a target,
   level-matched and delta listening, and an editor with a history of what
   was held down, the loudness and the reduction in its sustained and peak
-  parts, and plots of what the engine is doing.
+  parts, and plots of what the engine is doing. Gorse, the transient
+  shaper (`plugins/stock/gorse`), is the fourth: attack and sustain the
+  same at any level, a detector whose hold spans a cycle of what plays (so
+  held tones, bass lines and voices get no gain), a focus on the lows,
+  mids or highs, a 1 ms lookahead that lands the gain on each onset, and a
+  soft clip that keeps sample peaks under 0 dBFS; an editor that lays the
+  recent hits over each other at their onsets and shows what each part
+  changed, and a history with each hit it found. It replaced Flint
+  (`com.suppleaudio.transient`).
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The

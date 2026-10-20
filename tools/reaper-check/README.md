@@ -109,7 +109,7 @@ and finite decoded samples. The reader handles PCM 8/16/24/32 and IEEE float
 than asserting the plugin's internal floating-point safety.
 
 Default output must be non-silent. Instrument bypass must be silent. Plumb,
-Gauge, neutral Flint, Yarrow (every band off) and Treeline (no gain, the
+Gauge, neutral Gorse, Yarrow (every band off) and Treeline (no gain, the
 signal under its ceiling) must match bypass sample-for-sample; other defaults must differ. Dynamics differences may
 include startup ramps.
 
@@ -121,10 +121,10 @@ include startup ramps.
 | `yarrow` | Yarrow | Output | 0 / −12 dB | −12 ±1 dB |
 | `sundew` | Sundew | Threshold | 0 / −36 dB | second half >3 dB quieter |
 | `treeline` | Treeline | Ceiling | 0 / −24 dB | second half >3 dB quieter |
+| `gorse` | Gorse | Output | 0 / −12 dB | −12 ±1 dB |
 | `analyzer` | Analyzer / Gauge | Hold | false / true | envelope reload + unchanged audio |
 | `gate` | Gate / Sluice | Threshold | −80 / −6 dB | second half >3 dB quieter |
 | `drive` | Kiln | Output | 0 / −12 dB | −12 ±1 dB |
-| `transient` | Flint | Output | 0 / −12 dB | −12 ±1 dB |
 | `delay` | Echelon | Output | 0 / −12 dB | −12 ±1 dB |
 
 Continuous values use ADR-0010's normalized CLAP domain. The table keeps those

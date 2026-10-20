@@ -1,1 +1,0 @@
-set(TRANSIENT_DISPLAY_NAME "Flint")

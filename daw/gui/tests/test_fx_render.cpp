@@ -1235,7 +1235,7 @@ TEST_CASE("FX latency badge follows an effect edit and undo without reopening") 
     REQUIRE(f.ok);
     if (!f.stockPlugins()) return;
     const auto track = f.addTrack("Latency");
-    REQUIRE(f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId("Flint")}})));
+    REQUIRE(f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId("Sundew")}})));
     REQUIRE(f.fx->open(track));
     f.frame();
     const auto effect = f.fx->chain().front();
@@ -1246,7 +1246,7 @@ TEST_CASE("FX latency badge follows an effect edit and undo without reopening") 
     };
     CHECK(text() == "0 spl");
     json::Value values = json::Value::object();
-    values["clip"] = true;
+    values["lookahead"] = "ms2";
     REQUIRE(f.run("fx.param.set", f.args({{"fx", effect.str()}, {"values", values}})));
     engine::DummyBackend backend({.mode = engine::DummyBackend::Mode::Manual});
     struct StopEngine {
@@ -1258,7 +1258,7 @@ TEST_CASE("FX latency badge follows an effect edit and undo without reopening") 
 
     f.fx->tick();
     f.frame();
-    CHECK(text() == "72 spl");
+    CHECK(text() == "96 spl");
     REQUIRE(f.run("history.undo", json::Value::object()));
     REQUIRE(f.run("fx.restart", f.args({{"fx", effect.str()}})));
     f.fx->tick();

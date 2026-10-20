@@ -53,7 +53,7 @@ their undo history and can be reviewed.
 | Gain staging, balance, width, polarity, bass mono (Plumb/utility) | `guides/utility.md` |
 | Cleaning spill or noise with a gate or expander (Sluice/gate) | `guides/gate.md` |
 | Saturation: drive, asymmetry, wavefolding (Kiln/drive) | `guides/drive.md` |
-| Onset punch, softer attacks, shorter or longer decays (Flint/transient) | `guides/transient.md` |
+| Onset punch, softer attacks, shorter or longer decays (Gorse, the transient shaper) | `guides/transient.md` |
 | Writing a Lua script (loops, conditionals, subscriptions, one transaction) | `guides/lua.md`, `generated/engine.lua` |
 | Writing a plugin of your own: an effect or an instrument as a DSP script (`dsp_write`, then `fx_add`) | `guides/dsp-workflow.md`, `guides/dsp-language.md`, `generated/dsp-examples.md` |
 | Exact command arguments and results | `generated/sandbox-commands.md` (sandbox), `generated/engine-commands.md` (DAW), or the `describe` tool |

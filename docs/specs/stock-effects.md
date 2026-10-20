@@ -343,53 +343,111 @@ Sidechain input as for the compressor. Keys: `mode` (`gate`, `expander`),
   gain before mix/output; `open` is bool. Both publish every 50 ms. Editor
   key level is the current linked detector sample at that same cadence.
 
-## 4. Transient shaper — "Flint" [`transient`]
+## 4. Transient shaper — "Gorse" [`gorse`]
 
-Keys: `attack` % −100..+100 (0; boost/cut of the transient portion, ±12 dB
-at the extremes), `sustain` % −100..+100 (0), `speed` ms 1..50 log (10;
-detector time constant separating attack from sustain), `sensitivity` %
-0..100 (50), `clip` bool (soft clip output), `mix` %, `output` dB. DSP: dual
-envelope followers (fast/slow) on a detector signal; gain = f(fast − slow);
-level-independent (a 10 dB louder input yields the same shaping).
+Raises or softens each hit's onset and its tail, the same at any level,
+written as a DSP script (ADR-0047: `plugins/stock/gorse/script/gorse.cpp`).
+Main stereo or mono in and out, one gain for every channel (stereo-linked),
+a fixed 1 ms lookahead.
 
-Implementation decisions (2026-09-30):
+| key | type | range | curve | default |
+|---|---|---|---|---|
+| `attack` | dB | −12..+12, smoothed 20 ms: the change at a clear onset | linear | 0 |
+| `sustain` | dB | −12..+12, smoothed 20 ms: the change through a clear decay | linear | 0 |
+| `length` | ms | 1..100, smoothed 20 ms: the detector's time scale | log | 10 |
+| `sensitivity` | % | 0..100, smoothed 20 ms | linear | 50 |
+| `focus` | enum | `full`, `low`, `mid`, `high`: what the detector hears; not automatable | | `full` |
+| `clip` | bool | the soft clip, last of all; automatable (it fades over 10 ms) | | false |
+| `mix` | % | 0..100, smoothed 20 ms: shaped against dry, in time | linear | 100 |
+| `output` | dB | −24..+24, smoothed 20 ms, before the clip | linear | 0 |
+| `gain_change` | dB | readonly, −12..+12: the largest change in the last block | | |
+| `onset_change` | dB | readonly, −12..+12: the recent hits' onsets, at the most | | |
+| `tail_change` | dB | readonly, −12..+12: the recent hits' tails, on average | | |
 
-- Defaults for the abbreviated keys: `clip` false, `mix` 100 % (0..100),
-  `output` 0 dB (-24..+24). All continuous controls smooth for 20 ms,
-  speed in log space; restored values snap before processing.
-- The stereo maximum rectifier feeds a cycle-aware rectangular peak hold:
-  at least 1 ms, otherwise the interval between the two most recent local
-  maxima plus one sample, capped at 50 ms. This suppresses carrier zero
-  crossings so steady tones do not get constant onset gain. It adds no audio
-  latency, but low-frequency decay detection can lag by up to half a cycle.
-  A bounded preallocated monotonic deque implements the hold.
-- Fast attack is `0.1 ms * speed/10`, fast release and slow attack are
-  `speed`, slow release is `4*speed`; both operate in dB. At the first
-  nonzero detector sample, both start 60 dB below that level. The silence
-  floor tracks 120 dB below the largest detector level since reset. These
-  relative references preserve identical gain curves under level scaling.
-- With `d = fast - slow`, onset gain is
-  `12*(attack/100)*clamp(d*sensitivity/500,0,1)`, sustain gain is
-  `12*(sustain/100)*clamp(-d*sensitivity/500,0,1)`. Their sum feeds a 1 ms
-  one-pole. Total gain is bounded to +/-12 dB because only one part is
-  nonzero at a time. Sensitivity zero disables shaping. No threshold/key.
-- Clip is `tanh`, unity small-signal slope, applied after shaping and before
-  mix/output. The shared `dsp::Oversampler` at 2x uses a 145-tap Kaiser
-  (beta 11) half-band pair with 72 base samples of round-trip delay. The dry
-  path and reported latency follow the prepared oversampler's integer delay.
-  Clip off has zero delay; `clip` is non-automatable and requests restart,
-  retaining the old DSP and latency until reactivation. Output gain can raise
-  clipped peaks; clip is a tone control, not a ceiling limiter.
-  The alias regression uses a 5 kHz sine at amplitude 3 peak, 48 kHz sample
-  rate: harmonics 7/9/11 fold to 13/3/7 kHz at 1x and must each be at least
-  20 dB lower with 2x than base-rate tanh. Aliases between 20 kHz and
-  Nyquist are accepted; the fifth harmonic's 23 kHz fold is outside this
-  acceptance band.
-- Appended readonly host meters: `input_level`, `output_level` (sample peak
-  dBFS, -120..40), and `gain` (average shaping dB, -12..12), every 50 ms.
-  The visible editor gets the same frames; its 900 x 560 design plots two
-  seconds of envelopes plus gain. Knob values are below the face; attack,
-  sustain and output arcs start at their zero centre.
+Detector. The key is the input, or with `focus` the input through two
+biquads: `low` two 150 Hz low-passes, `mid` a 250 Hz high-pass and a 4 kHz
+low-pass, `high` two 5 kHz high-passes (Q 0.707 each). Channels take the
+louder rectified sample, held over the last H samples (a monotonic queue),
+H the longest of:
+
+- **the cycle:** the span between the last two crests that had a dip below
+  half of each between them, plus an eighth (1..50 ms). Crests without such
+  a dip (a quantized waveform's ripple near its top, a hit's own decay)
+  do not count;
+- **the low band:** while the key's mono sum through two 200 Hz low-passes
+  holds more than 20 % of its power (20 ms means) and rising crossings
+  (hysteresis 0.3 × its RMS, 20 to 400 Hz) keep coming within 50 ms, its
+  period plus an eighth: a saw or a pulse dips once a cycle;
+- **`length`** (at most 50 ms).
+
+So a held tone, a bass line, a voice or a saw reads as a steady level and
+gets no gain (under 0.03 dB with attack and sustain at +12 on a 60 Hz +
+1 kHz tone, a 55 Hz saw, a 180 Hz voice-like pulse); a chord's beating is
+a real movement and moves it a little (1.4 dB at +12/+12).
+
+Followers, in dB of the held level (the floor 120 dB under the loudest
+level since reset; at the first sound both start 60 dB under it): fast
+(attack `length`/100, release `length`), slow (attack `length`, release
+4 × `length`), the slow one never more than 30 dB under the fast one, so a
+hit after silence is not treated as longer than one over a bed. With
+d = fast − slow and s = `sensitivity`:
+
+- o = d·s/5 above 0 (a 10 dB lead is a full onset at 50 %), 3·d·s/5 below
+  (a fall a third as steep is a full tail), clamped to −1..1.
+- The gain asked for is `attack`·o while o > 0, −`sustain`·o while o < 0:
+  one part at a time, so never more than 12 dB.
+
+Gain path. The gain asked for passes two moving averages whose ramp spans
+the lookahead (1 ms, at least 2 samples), and applies to the input delayed
+by the lookahead: a change asked for at an onset has fully arrived when the
+onset plays, from its first sample, a cut included. Then mix (dry + mix ×
+(shaped − dry)), output, and the clip. Latency: the lookahead plus the
+clip's oversampler, 52 samples at 48 kHz (48 at 44.1, 100 at 96, 196 at
+192), the same with the clip off.
+
+Clip. At four times the rate (the suite's minimum-phase oversampler): straight
+to −6 dBFS, then 0.5 + 0.5·tanh((|x| − 0.5)/0.5), never reaching 0 dBFS;
+coming down, any sample the filters ring past full scale (a noisy hit
+driven 20 dB over) is held at it. Off, the signal takes a plain delay of
+the same length; switching crossfades over 10 ms.
+
+Defaults pass the input bit-exactly, delayed by the latency.
+
+The hits (for the editor and the meters): a hit is o reaching 0.5 (an
+onset the shaping treats as half of one or more), after it was under 0.1,
+at least 20 ms after the last. From the lookahead before it to 500 ms after (or the next hit),
+256 points on a square-law time axis (16 for the lookahead, 240 after the
+onset) take the peaks of the delayed input and the mixed output and the
+mean of o; each hit, in dB from its own peak, joins an average (each new
+hit weighs 0.3). `onset_change` is the average's largest change where
+o ≥ 0, `tail_change` its mean change where o < 0 up to 300 ms.
+
+Editor (1000 × 700, the script's own drawing; a sprig of gorse beside the
+name):
+
+- **The hit.** The average of the recent hits, onset-aligned, on the
+  square-law axis (the lookahead, then 0 to 500 ms) and in dB from the
+  hit's peak (+12..−48): what came in (a line), what goes out (filled), and
+  between them the change, gorse yellow where the onset made it, moss where
+  the tail did. A dotted line where the next hit usually comes. Until hits
+  play, a model hit (a sharp onset decaying 100 dB a second) through the
+  same law. Length's line can be dragged; dragging left of it sets attack,
+  right of it sustain (and the wheel); double-click resets. The onset's and
+  the tail's change read at the top right.
+- **History.** Four seconds (5 ms columns): the input's and the output's
+  peak envelopes (+6..−42 dBFS), a dot at each hit the detector found, bar
+  and beat lines while the transport plays, and a lane of the gain (±12 dB)
+  in the colour of the part that made it.
+- **Shape.** Attack and sustain (bipolar knobs), length, sensitivity and
+  focus, with what the detector hears.
+- **Output.** Mix, output, and the clip's curve with its switch.
+
+Knobs drag vertically (Shift fine), wheel, and reset on a double click.
+
+Factory patches: Punch (+6, −2), Kick Thump (+6, 15 ms, low), Snare Crack
+(+7, −3, 6 ms, mid), Tighten (sustain −9, 12 ms, 60 %), Soften Attack (−6,
+5 ms), Room Bloom (−2, +6, 30 ms, 70 %), Drum Bus Snap (+4, −2, mix 60 %,
+clip).
 
 ## 5. Saturation — "Kiln" [`drive`]
 

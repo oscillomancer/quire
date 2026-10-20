@@ -45,12 +45,13 @@ machine, but file formats and commands can still change.
   Console 9 encode/decode; it can be switched off per project with levels
   matched.
 - **Stock plugins.** Orrery (synth), Yarrow (EQ), Sundew (compressor),
-  Treeline (limiter), Sluice (gate and expander), Flint (transient shaper),
+  Treeline (limiter), Gorse (transient shaper), Sluice (gate and expander),
   Kiln (saturation), Echelon (delay), Nave (reverb), Plumb (utility) and
   Gauge (analyzer), as CLAP plugins usable in any host. Each has JSON
   patches and exposes its parameters in physical units through a CLAP
-  extension. Newer ones, starting with Yarrow, Sundew and Treeline, are written as DSP scripts and compiled
-  into plugins of their own (`plugins/stock`).
+  extension. Newer ones, starting with Yarrow, Sundew, Treeline and Gorse,
+  are written as DSP scripts and compiled into plugins of their own
+  (`plugins/stock`).
 - **Text formats.** Projects, patches and FX chains are canonical JSON; MIDI
   can be written in a compact text notation.
 

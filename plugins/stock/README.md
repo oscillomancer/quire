@@ -12,6 +12,7 @@ player, and every check the other stock plugins have.
 | `yarrow` | Yarrow, the equaliser | `com.suppleaudio.yarrow` |
 | `sundew` | Sundew, the compressor | `com.suppleaudio.sundew` |
 | `treeline` | Treeline, the limiter | `com.suppleaudio.treeline` |
+| `gorse` | Gorse, the transient shaper | `com.suppleaudio.gorse` |
 
 ## Files
 

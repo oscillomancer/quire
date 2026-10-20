@@ -9,7 +9,7 @@ mode=(-i)
 mapfile -t files < <(git ls-files --cached --others --exclude-standard -- \
   'libs/*' 'host/*' 'plugins/*' 'daw/*' 'mcp/*' 'tools/*' 'tests/*' \
   | grep -E '\.(c|cc|cpp|h|hpp)$' | grep -v '/third_party/' \
-  | grep -Ev '^plugins/(analyzer|delay|drive|gate|orrery|probe-synth|transient|utility)/test/vst3_unload_probe\.cpp$' \
+  | grep -Ev '^plugins/(analyzer|delay|drive|gate|orrery|probe-synth|utility)/test/vst3_unload_probe\.cpp$' \
   | grep -v '^plugins/probe-synth/' \
   | grep -v '^plugins/template/' \
   | grep -v '^plugins/utility/' \
@@ -20,7 +20,6 @@ mapfile -t files < <(git ls-files --cached --others --exclude-standard -- \
   | grep -v '^plugins/drive/' \
   | grep -v '^plugins/reverb/' \
   | grep -Ev '^plugins/orrery/(plugin/gui/(Gui|Widgets|Window|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/orrery_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/(clap|linux)_host_probe\.cpp)$' \
-  | grep -Ev '^plugins/transient/(plugin/gui/(Gui|Window|Telemetry|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/transient_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/(clap|linux)_host_probe\.cpp)$' \
   || true)
 # Template infrastructure stays byte-identical to the source copy apart from
 # product naming. Check only product-owned code inside the copied plugin.

@@ -14,11 +14,11 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 | `yarrow` (`plugins/stock/yarrow`) | Yarrow | `com.suppleaudio.yarrow` | `LzjE` (the player's for the id) | `Yarw` | audio-effect, equalizer |
 | `sundew` (`plugins/stock/sundew`) | Sundew | `com.suppleaudio.sundew` | `pqwP` (the player's for the id) | `Sndw` | audio-effect, compressor |
 | `treeline` (`plugins/stock/treeline`) | Treeline | `com.suppleaudio.treeline` | `tdOY` (the player's for the id) | `Trln` | audio-effect, limiter |
+| `gorse` (`plugins/stock/gorse`) | Gorse | `com.suppleaudio.gorse` | `dEQG` (the player's for the id) | `Gors` | audio-effect, transient-shaper |
 | `utility` | Plumb | `com.suppleaudio.utility` | `QUT1` | `QUtl` | audio-effect, utility, stereo |
 | `analyzer` | Gauge | `com.suppleaudio.analyzer` | `QAN1` | `QAna` | audio-effect, analyzer, stereo |
 | `drive` | Kiln | `com.suppleaudio.drive` | `QDR1` | `QDrv` | audio-effect, distortion, stereo |
 | `gate` | Sluice | `com.suppleaudio.gate` | `QGT1` | `QGat` | audio-effect, gate, expander, stereo |
-| `transient` | Flint | `com.suppleaudio.transient` | `QTS1` | `QTrn` | audio-effect, transient-shaper, stereo |
 | `delay` | Echelon | `com.suppleaudio.delay` | `QDL1` | `QDly` | audio-effect, delay, stereo |
 | `reverb` | Nave | `com.suppleaudio.reverb` | `QRV1` | `QRvb` | audio-effect, reverb, stereo |
 
@@ -289,6 +289,58 @@ Notes for maintainers:
   0.0055 % without. CPU: about 2 % of a core in a release build at 48 kHz
   stereo (four interpolators).
 
+## 9. Transient shaper — Gorse [`gorse`] (`stock-effects.md` §4)
+
+A DSP script (ADR-0047), `plugins/stock/gorse/script/gorse.cpp`; the spec
+section holds the detector, the law and the hit view. It keeps Flint's
+design (a held peak, fast and slow followers in dB, one part at a time) and
+changes what Flint got wrong in use. Notes for maintainers:
+
+- **The hold.** Flint measured a cycle between any two local maxima. On
+  real material, noise or a quantized waveform's ripple near its crest
+  makes maxima every few samples, so its hold sat at 1 ms and a bass line
+  or a kick's body rode through the detector as onsets: on 16-bit drums a
+  kick's tail read as onsets every cycle (sustain −6 dB gave −0.5 dB). The
+  hold now counts crests only across a real dip, follows a leading low band
+  for a whole cycle (`listenLow()`), and is never shorter than `length`
+  (a voice-like 180 Hz pulse took +11.9 dB of attack at +12 before that,
+  0.0 after).
+- **The law.** A fall counts three times as readily as a rise (`kTail`),
+  since a decay's lead is a few dB where an onset's is tens: on a kick
+  decaying 78 dB/s, sustain −6 dB now gives about −4 dB at default
+  settings. The slow follower stays within 30 dB of the fast one
+  (`kSpread`). To watch the law at work, have a scratch copy
+  (`plugins/stock/README.md`) write o and fast − slow to its output in
+  place of the audio, and render material through it.
+- **Lookahead.** Flint's 1 ms one-pole let the first millisecond through:
+  an attack cut missed the click it was meant to soften. Two boxes ramp the
+  gain over the 1 ms lookahead and land on the onset. `low` focus hears
+  through about 2 ms of filter delay, so its gain lands about a millisecond
+  after the onset; it is for the kick's body, not its click.
+- **The clip** moved to the end (after mix and output), where its
+  minimum-phase oversampler cannot comb against the dry path, and runs only
+  while it is on or fading. Its output is clamped to ±1: on a snare driven
+  24 dB over, the decimator rang to +7.5 dBFS.
+- **Hits.** `startHit()` on a trigger (closing the hit being captured),
+  `captureStep()` per sample on the delayed input and the mixed output,
+  `closeBin()` per point (a point shorter than a sample repeats the last),
+  `finishHit()` into the average (a capture under 10 ms is a double
+  trigger and is dropped), `measureHits()` for the meters. The arrays reach
+  the editor only when a hit finished.
+- **Editor.** Its own: the model hit (`refreshModel()`, recomputed when
+  attack, sustain, length or sensitivity change; 16 kHz steps for 501 ms),
+  the eased points it draws, and the pointer's state. The colour of a
+  point is the sign of the mean o over it.
+- **Tests.** The suite every stock plugin has (reset, also `--stepped`;
+  unload; semantic conformance; clap-validator; catalog), and
+  `plugin.gorse.response`: a sine starting from silence is a hit with no
+  tail; with attack +6 its onset peaks exactly 6 dB higher at −12 dBFS
+  (44.1, 48, 96 kHz) and at −32 dBFS, its steady part passes at 0.0 dB and
+  0.0 % THD; driven 24 dB into the clip, a sine, a sweep, noise and an
+  impulse peak at 0.0 dBFS. During development on synthetic drums (kick,
+  snare, hats at 120 BPM), attack ±6 changed every hit's first 2 ms by
+  ±6.00 dB, at −6 and at −26 dBFS alike, and defaults passed bit-exactly.
+
 ## 4. Utility — Plumb [`utility`] (`stock-effects.md` §8)
 
 - Order: channels/swap → polarity → dc block → width and mono-below (M/S)
@@ -428,39 +480,6 @@ main stereo plus a non-main "Sidechain" input.
 - GUI: a level/threshold meter with the hysteresis band, open/closed
   indicator and gain history, controls grouped as the compressor's.
   Scenarios: `default`, `drums` (hold 50 ms, range −30, key high-pass).
-
-## 9. Second wave: transient shaper — Flint [`transient`] (`stock-effects.md` §4)
-
-Identity: display name Flint, id `transient`, CLAP id
-`com.suppleaudio.transient`, state magic `QTS1`, AU subtype `QTrn`,
-features audio-effect, transient-shaper (plus `utility` if CLAP has no
-closer feature), stereo. Everything in §1 applies; no sidechain port.
-
-- Detector: the stereo-linked rectified signal (max |L|, |R|) of the input.
-  Two envelope followers in the dB domain: fast (attack 0.1 ms scaled by
-  `speed`/10, release `speed`) and slow (attack `speed`, release 4·`speed`).
-  Their difference d = fast − slow (dB) is positive at onsets, negative in
-  decays.
-- Gain (dB): onset part = (attack/100)·12·clamp(d/10·(sensitivity/50), 0, 1),
-  sustain part = (sustain/100)·12·clamp(−d/10·(sensitivity/50), 0, 1),
-  total = onset + sustain, smoothed with a 1 ms one-pole. This keeps the
-  shaping level-independent (the detector works on dB differences) and
-  bounds it to ±12 dB per part as the spec says; document the final formula
-  in `stock-effects.md` §4 if you refine it.
-- `clip`: a soft clip (tanh-style, unity small-signal slope) after the gain,
-  with 2× oversampling of the clip stage only (latency reported; 2× via the
-  shared `dsp::Oversampler`, 72 samples round-trip delay).
-- `mix` (dry aligned with any latency) and `output`.
-- Tests: attack +100 on a synthetic drum hit (a 5 ms 1 kHz burst on a decay)
-  raises the first 5 ms by ≥ 6 dB and leaves the tail within 1 dB; sustain
-  −100 lowers the tail by ≥ 6 dB and leaves the onset within 1 dB;
-  level independence: the same hit 10 dB louder gets the same gain curve
-  within 0.5 dB; a steady sine gets no gain change after settling (< 0.1 dB);
-  defaults are bit-exact.
-- GUI: the input and output envelopes of the last ~2 s with the gain curve,
-  attack and sustain large (bipolar arcs from the centre), speed,
-  sensitivity, clip, mix, output. Scenarios: `default`, `punch`
-  (attack +60, sustain −30).
 
 ## 10. Third wave: delay — Echelon [`delay`] (`stock-effects.md` §6)
 

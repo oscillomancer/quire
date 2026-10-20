@@ -102,7 +102,7 @@ For a true-peak ceiling on the master and loudness against a LUFS target, see [T
 Use [Yarrow, the stock EQ](eq.md) for measured rumble, masking and harshness cuts, de-essing and dynamic or mid/side bands.
 Use [the gate / expander guide](gate.md) to reduce between-hit spill or steady room noise with a filtered key, hysteresis and hold.
 Use [Kiln, the saturation](drive.md) for drive, asymmetry and wavefolding with reference level compensation.
-For onset punch, softened attacks and shorter or longer decays, see [Flint, the transient shaper](transient.md).
+For onset punch, softened attacks and shorter or longer decays, see [Gorse, the transient shaper](transient.md).
 For tempo-synced echoes, alternating stereo repeats and ducked throws, see [Echelon, the delay](delay.md).
 Use [Nave, the stock reverb](reverb.md) for room/hall ambience, predelay and frequency-dependent tails; use 100% wet on a send return.
 
