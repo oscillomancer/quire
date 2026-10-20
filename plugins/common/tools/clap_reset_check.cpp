@@ -54,8 +54,9 @@ void check(bool ok, const std::string& what) {
 }
 
 // A deterministic stimulus: a 220 Hz tone with a short seeded noise burst, so
-// an effect sees both steady-state and transient material. Right is the
-// inverse of left, which keeps a stereo tool from seeing a mono signal.
+// an effect sees both steady-state and transient material, and a quiet last
+// quarter. Right is the inverse of left, which keeps a stereo tool from
+// seeing a mono signal.
 struct Stimulus {
     std::vector<float> left, right;
 };
@@ -70,7 +71,9 @@ Stimulus makeStimulus() {
     std::uniform_real_distribution<float> noise(-0.5f, 0.5f);
     for (std::size_t i = 0; i < frames; ++i) {
         const double t = static_cast<double>(i) / kSampleRate;
-        float v = static_cast<float>(0.25 * std::sin(2.0 * kPi * 220.0 * t));
+        // A quiet passage, 40 dB down, for a gate or an expander to act on.
+        const double level = i < frames * 3 / 4 ? 0.25 : 0.0025;
+        float v = static_cast<float>(level * std::sin(2.0 * kPi * 220.0 * t));
         if (i < burst) v += noise(rng);
         s.left[i] = v;
         s.right[i] = -v;
