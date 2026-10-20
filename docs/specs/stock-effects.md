@@ -780,151 +780,138 @@ Swung Ping-Pong, Wide Double, Tape Echo, Bucket Brigade, Dub Spiral,
 Shimmer, Falling Steps, Reverse Swell, Ambient Smear, Early Digital,
 Centre Echo.
 
-## 7. Reverb — "Nave" [`reverb`]
+## 7. Reverb — "Canopy" [`canopy`]
 
-Keys: `size` % 0..100 (50), `decay` ms 100..60000 log (2000; RT60 at mid
-frequencies), `predelay` ms 0..500 (10), `low_decay` x 0.25..4 log (1;
-RT60 multiplier below `crossover`), `high_decay` x 0.1..1 log (0.5; above
-`damping_freq`), `crossover` Hz 100..1000 log (250), `damping_freq` Hz
-1000..16000 log (6000), `diffusion` % 0..100 (70), `early` dB −inf..+6 (−6;
-early reflections level), `modulation` % 0..100 (20), `width` % 0..200 (100),
-`low_cut` Hz 20..1000 log (20), `high_cut` Hz 1000..20000 log (16000),
-`freeze` bool, `mix` % (20), `output` dB. DSP: an original 16-line feedback
-delay network with a Householder (or Hadamard) mixing matrix, per-line
-two-band decay filters derived from the RT60 targets, input allpass
-diffusion, seeded line-length jitter and modulation; tests measure RT60 per
-octave band against the parameters (within 10 %) and echo density.
+A real room built from its walls, written as a DSP script (ADR-0047:
+`plugins/stock/canopy/script/canopy.cpp`). The reflections, the decay of
+each octave, the room's modes and the level all follow from the room's
+size, its surfaces and the two places in it. Main stereo or mono in and
+out; no latency. The dry signal is the direct sound: at `mix` 50 % the room
+is as loud against it as at the listener's place.
 
-### Reverb implementation decisions (2026-09-30)
+| key | type | range | curve | default |
+|---|---|---|---|---|
+| `room_width`, `room_depth`, `room_height` | m | 1.5..60, 1.5..100, 2..40 | log | 17, 25, 11 |
+| `walls`, `floor`, `ceiling` | enum | `stone`, `concrete`, `brick`, `plaster`, `wood`, `glass`, `carpet`, `curtains`, `audience`, `acoustic`, `open` | | `plaster`, `audience`, `wood` |
+| `decay` | % | 25..400: the reverberation time against the room's | log | 100 |
+| `scatter` | % | 0..100: how rough the surfaces are | linear | 40 |
+| `source_x`, `source_y`, `listener_x`, `listener_y` | % | 0..100 across from the left wall, back from the front wall | linear | 44, 22, 54, 44 |
+| `mic` | enum | `ortf`, `spaced`, `head`, `mono` | | `ortf` |
+| `predelay` | ms | 0..250 | cubic | 0 |
+| `early`, `late` | dB | −30..12 against the room's own; −30 is off | linear | 0 |
+| `low_cut`, `high_cut` | Hz | 20..1000 (20 off), 1000..20000 (20000 off), on the room | log | 20, 20000 |
+| `width` | % | 0..200: the room's | linear | 100 |
+| `freeze` | bool | hold the tail | | false |
+| `mix` | % | 0..100 | linear | 25 |
+| `output` | dB | −24..24 | linear | 0 |
+| `rt60`, `rt60_low`, `rt60_high` | ms | readonly: the RT60 at 500 Hz–1 kHz, 125 Hz, 4 kHz | | |
+| `distance`, `critical_distance` | m | readonly | | |
+| `first_reflection` | ms | readonly: after the direct sound, predelay included | | |
+| `clarity` | dB | readonly: C80 | | |
+| `definition` | % | readonly: D50 | | |
+| `input_level`, `output_level`, `room_level` | dBFS | readonly: peaks, falling 20 dB/s | | |
 
-- Identity follows the compressor: `plugins/reverb/cmake/Identity.cmake`
-  defines `REVERB_DISPLAY_NAME`; the engine receives
-  `SUPPLE_REVERB_DISPLAY_NAME`, and all artifact paths use the CMake variable.
-  CLAP id `com.suppleaudio.reverb`, state `QRV1`, AU subtype `QRvb` remain
-  functional identities. Decay multipliers use core unit `x`, with text such
-  as `1.5 x` accepted by patches and CLAP. Mono/stereo, float/double, zero latency;
-  predelay is a musical delay, not reported latency. The dry null uses mix 0;
-  defaults intentionally contain wet audio.
-- Structure: 12 early taps per input channel, then four Schroeder allpasses
-  per channel into a 16-line normalized Hadamard FDN. A private original LCG
-  (`1664525*s + 1013904223`, unsigned 32-bit wrap) starts at `0x4e415645`.
-  Line i's base milliseconds are `25*(95/25)^(i/15)*(0.95+0.1*u)`.
-  Subsequent seeded early times are `5+75*(j+0.6*u)/12` ms; gains are
-  `exp(-time/35)`, normalized to sum to 1 per input. Each tap alternates
-  80/20 and 20/80 output pan (the other input reverses it). Allpass times
-  are `(1+11*j/3)*(0.9+0.2*u)` ms. Size multiplies all times by
-  `2^((size-50)*0.03)`. Stationary lengths round to samples; early taps and
-  diffusers glide through cubic Hermite reads when size moves.
-- The feedback transform is the 16-point Walsh–Hadamard butterfly scaled
-  by 1/4. Input sign vectors are Hadamard columns 8 and 4, injected at 1/4;
-  output sign vectors are columns 1 and 2, scaled by 1/sqrt(8). They are
-  mutually orthogonal. Width acts on the combined early/late wet signal;
-  mono output takes its mid. There is no limiter or automatic level match.
-- Approved correction: decay shelves are second-order Butterworth-Q
-  (1/sqrt(2)) sections rather than the plan's first-order shelves. The latter
-  gave 11.7572% worst RT60 error in the requested matrix. Each line's mid
-  attenuation is `10^(-3*L/(fs*T))`, with DC/Nyquist shelf gains derived from
-  the low/high RT60 ratios. Geometric analog pole/zero placement holds the
-  shelf midpoint at its frequency; the bilinear transform preserves the
-  endpoints. Double-state transposed direct-form-II runs the sections, with
-  exact bypass for flat shelves. Coefficients update on a fixed 16-sample
-  grid while size/decay/filter controls move, including the final update;
-  mix, output, width and texture changes do not redesign decay filters.
-- Diffuser coefficient is `0.7*diffusion/100`, capped at
-  `10^(-3*longest_allpass_seconds/(0.5*shortest_band_RT60))`. Without this
-  cap, input diffusion itself outlasted short high-frequency tails at large
-  size (40.87% error in the expanded matrix). Defaults/hall retain the
-  planned coefficient. This cap keeps diffuser RT60 at most half the shortest
-  requested band tail. `early` uses finite -60 dB with `kOffAtMin`, exactly
-  off at the endpoint; all other values retain their finite dB gain.
-- Fractional FDN reads use an original twelve-point centred Lagrange basis,
-  precomputed at activation into 257 phases and linearly blended between
-  adjacent rows. Integer positions bypass interpolation exactly. This
-  replaces cubic FDN interpolation: with default modulation, size 20,
-  decay 8 s and damping 2 kHz, cubic gave 8 kHz T30 RT60 3.277741/3.362107 s
-  at 44.1/48 kHz against a 4 s target. The twelve-point read gives
-  3.945919/3.949229 s (1.35/1.27% error). It also serves size glides, avoiding
-  an interpolation-mode switch. Predelay, early taps and diffusers retain
-  cubic reads; predelay below one sample uses a causal linear read.
-- Each modulation oscillator has rate
-  `0.1+1.1*(i+0.7*u)/16` Hz and phase `2*pi*u`, from seed `0x53504143`.
-  A double sine/cosine rotation runs per sample; depth is at most 0.5 ms.
-  Zero modulation is exactly zero offset. All buffers are preallocated
-  powers of two, with double storage and recursive states flushed below
-  1e-30. RT processing has no allocation or synchronization.
-- Controls have finite 20 ms physical ramps; output gain ramps in amplitude.
-  Delay positions use two cascaded one-pole smoothers with 50 ms time
-  constants (critically damped); initial/restored values snap before audio.
-  Frequency targets clamp to 0.45*fs internally. The response contract is
-  22.05–384 kHz; activation also accepts 1–768000 Hz for host-validation
-  coverage, with seven-sample minimum FDN lengths and bounded shelf ratios
-  protecting unusually low rates.
-- Freeze fades wet excitation out in 10 ms, moves loop attenuation to unity,
-  removes modulation, and holds size. Held line lengths settle on the nearest
-  integer sample; full freeze bypasses the damping sections and recirculates
-  through the orthogonal matrix. This avoids interpolation loss in a held
-  tail. After unfreezing, the latest size target glides into place. The
-  measured stereo tail RMS change over the ten-second comparison is
-  -0.0326 dB. Dry input still passes according to mix.
-- Tail extension correction: `clap_host_tail::changed` is an **audio-thread**
-  callback. Main-thread edits/state loads set an atomic pending flag;
-  `process()` adopts values and notifies the host. Freeze reports UINT32_MAX;
-  otherwise tail samples are ceil(fs/1000 * (predelay + 1.5*longest_RT60_ms
-  + 100)). Tail queries are safe on either permitted thread. No restart is
-  required. A product-owned test checks state edits, inactive flush,
-  sample-offset freeze automation and callback thread placement.
-- RT60 measurements use stereo octave-filtered impulse energies (fourth-order
-  Butterworth edges), Schroeder backward integration, and a least-squares
-  -5..-35 dB T30 fit. The matrix is 44.1/48/88.2/96/192 kHz,
-  decay 0.5/2/8 s, size 20/50/90; both the default decay shape and
-  low_decay 1.5 / crossover 1 kHz / damping 2 kHz. High_decay is 0.5,
-  modulation and early taps off for these static measurements. Bands at least
-  an octave from both transition frequencies are compared with their region
-  target; other bands are measured but excluded from the plateau bound.
+- **The room.** A box W × D × H; c = 343 m/s. The source stands 1.5 m up,
+  the listener's ears 1.7 m (both kept 0.3 m from floor and ceiling and
+  0.25 m from the walls); the listener faces the source. Each material
+  absorbs a share α of the sound in each octave (125 Hz…4 kHz; 8 kHz takes
+  4 kHz's), with in-room values for the hard surfaces (doors, windows and
+  fittings take a little more than a laboratory sample):
 
-  | Octave band | Worst absolute relative RT60 error |
-  |---:|---:|
-  | 125 Hz | 7.4396% |
-  | 250 Hz | 4.3463% |
-  | 500 Hz | 7.4759% |
-  | 1 kHz | 6.0268% |
-  | 2 kHz | 7.6802% |
-  | 4 kHz | 6.3230% |
-  | 8 kHz | 2.7007% |
+  | material | 125 | 250 | 500 | 1k | 2k | 4k |
+  |---|---|---|---|---|---|---|
+  | stone | .03 | .03 | .03 | .035 | .04 | .05 |
+  | concrete | .04 | .04 | .04 | .05 | .06 | .08 |
+  | brick | .04 | .04 | .045 | .05 | .06 | .08 |
+  | plaster | .10 | .07 | .05 | .045 | .045 | .05 |
+  | wood | .18 | .12 | .10 | .08 | .07 | .07 |
+  | glass | .20 | .08 | .05 | .04 | .03 | .03 |
+  | carpet | .02 | .06 | .14 | .37 | .60 | .65 |
+  | curtains | .14 | .35 | .55 | .72 | .70 | .65 |
+  | audience | .60 | .74 | .88 | .96 | .93 | .85 |
+  | acoustic | .50 | .70 | .80 | .90 | .90 | .85 |
+  | open | 1 | 1 | 1 | 1 | 1 | 1 |
 
-  The normal matrix meets 10%; default-modulation long/bright-tail coverage
-  is the separate 8 kHz measurement above. Extreme ratios, overlapping
-  transitions and the 100 ms/maximum-size corner remain approximation limits,
-  outside this measured matrix. Input cuts change excitation, not loop RT60.
-- Echo density follows the statistical definition of
-  [Abel and Huang (2006)](https://aes.org/publications/elibrary-page/?id=13819):
-  the fraction of samples outside the local standard deviation, divided by
-  erfc(1/sqrt(2)). Tests use a centred 20 ms rectangular window, 1 ms steps,
-  and a crossing sustained for 10 ms: default 67 ms, diffusion 100 at 52 ms.
-  Late-tail correlation at width 100 is 0.049305; width 0 renders identical
-  channels. Commands and CPU numbers are in `plugins/reverb/VERIFICATION.md`.
-  The engine test requires density >=0.8 by 150 ms, earlier with diffusion 100,
-  late-tail correlation magnitude <0.3 at width 100 and >0.99 at width 0.
-- Test-cost correction after review: `reverb-engine.measure` is an opt-in,
-  unregistered, `EXCLUDE_FROM_ALL` executable. It retains the full 90-response
-  RT60 matrix, seven bands, original density/stereo windows and both long
-  modulated-decay measurements above. Routine CTest uses three 48 kHz cases:
-  decay 0.5/2 s at size 50 (flat low shelf), and decay 0.5 s at size 90 with
-  low_decay 1.5/crossover 1 kHz; damping 2 kHz, bands 250 Hz / 1 kHz / 4 kHz
-  outside active transitions. IR duration is 1.2 times the longest RT60 plus
-  200 ms, leaving the truncation floor below the T30 fit. Density/stereo use
-  1.25 s IRs, and the modulated 8 kHz check uses decay 2 s at 48 kHz.
-  All sample-level predicates are aggregated without dropping samples; the
-  ten-second freeze comparison and five-second automation stress are retained.
-  The TSan-specific timeout override is removed, not increased. Timings and
-  runner commands are in `plugins/reverb/VERIFICATION.md`.
-- The editor is 900 x 560, with the small Supple Audio header, values below
-  knobs, a bipolar output arc, decay target/input-bandwidth curves and gated
-  sample-peak telemetry. Linux previews use a fixed embedded parent so a
-  tiling window manager cannot resize the capture. CPU uses a standalone
-  `reverb-bench` executable, Clang -O2, 48 kHz stereo 512-frame blocks,
-  120 audio seconds per trial, median of five CPU-time trials with the editor
-  closed; timing is never a CTest pass/fail condition.
+  The air absorbs 0.44, 1.31, 2.73, 4.66, 9.86, 32.8 and 117 dB/km in the
+  octaves 125 Hz…8 kHz (20 °C, 50 %), m = that / 4343 per metre.
+- **Decay.** Each octave's RT60 is Eyring's, 0.161 V / A with
+  A = (−S ln(1 − ᾱ) + 4mV) / `decay`, ᾱ the area-weighted absorption; so
+  `decay` scales every octave's time exactly, and it scales the
+  reflections' losses with it (each surface's reflection ^ 1/`decay`, the
+  air's / `decay`). The critical distance is √(Q A / 16π), Q = 1.92 (the
+  source's directivity, 0.7 + 0.3 cos θ: a voice or an instrument).
+- **Reflections.** The 62 mirror images off one, two and three surfaces.
+  Each arrives (r − r₀)/c after the direct sound (r₀ source to listener,
+  0.5 m at least) plus `predelay`, at r₀/r, × each surface's √(1 − α) per
+  band and the air's e^(−m(r − r₀)/2), × the source's pattern along the
+  path it left by (the image's direction folded back through its mirrors),
+  × the capsule's pattern from its direction over its pattern toward the
+  source (the dry is the direct sound each hears). Three bands: below
+  500 Hz (α the mean of 125 and 250), 500 Hz–4 kHz (500, 1k, 2k), above
+  (4k; the air the geometric mean of 4 and 8 kHz's), split by one-poles at
+  500 Hz and 4 kHz into one line. Scatter s takes a share 1 − (1 − s·k)ⁿ of
+  an n-th order path into a blur (three allpasses, gain 0.6, 5, 8.3 and
+  13.1 % of the mean free path's time, 13 % longer for the right
+  microphone), k = 0.3, 0.75, 1 for the three bands. Settled, every path
+  reads a whole sample; when the room changes the paths glide (50 ms) and
+  read between samples until 0.4 s after the last change.
+- **Microphones.** `ortf`: cardioids 17 cm apart, 55° either side of the
+  source; `spaced`: omnis 60 cm apart; `head`: ears 17.5 cm apart, each
+  shadowed by a sphere (Brown and Duda's one-pole, one-zero model, its gain
+  taken at 200 Hz, 1.3 kHz and 6.5 kHz for the bands); `mono`: one omni.
+- **The tail.** Sixteen lines, each a prime number of samples near
+  T × 0.62 × 2.6^(k/15) (ranks shuffled), T the mean free path's time
+  4V/Sc, at least 15 ms per second of mid-band RT60 (a small, long room
+  would ring otherwise) and 8 to 110 ms. A fast Walsh–Hadamard transform
+  mixes them (× ¼); each line wanders ±0.25 ms (less in rooms under 20 ms
+  of free path) at 0.13 to 0.9 Hz, read by a cubic. Each line loses its
+  length's share of each octave's 60 dB through a low shelf (200 Hz), two
+  high shelves (2.5 kHz and 7 kHz, the air) and a gain, fitted in three
+  rounds to the targets at 125 Hz, 1 kHz, 4 kHz and 8 kHz; a change of
+  loss steps the designs a quarter of the way every 32 samples. The input
+  (the dry's mid) enters at the first-order reflections' mean time less the
+  shortest line, through four allpasses (gain 0.62; 11, 17, 27 and 41 % of
+  T). Its level: the reverberant energy for the distance, 16πr₀² / (Q A),
+  less the reflections' (an omni's, mid band), a quarter of it at the
+  least; a cardioid hears a third of it against its direct sound, a head
+  all of it. The lines give an impulse g² / 16(1 − g²) (g² the mid-band
+  energy kept per pass of the mean line), scaled to that. The tail's side
+  is high-passed at 250 Hz (`ortf`), 150 Hz (`spaced`) or 500 Hz (`head`),
+  as the capsules' coherence has it; `mono` folds it to the middle.
+- **Modes.** Below the Schroeder frequency 2000 √(RT60₁₂₅ / V), held to
+  30..250 Hz and lowered until at most 48 fit, the room's own modes
+  replace the tail (Butterworth crossover, 12 dB/oct): each a resonator at
+  f = c/2 √((nx/W)² + (ny/D)² + (nz/H)²), decaying at the RT60 there
+  weighted by (Σ εᵢAᵢ) / (2 ΣAᵢ), εᵢ 2 along an axis it runs on and 1
+  across (an axial mode meets the side walls only at grazing incidence and
+  rings longer), heard as cos(nπx/L) at the source × at each capsule over
+  the mode's norm, × 1/√(modal density). Scaled so that, averaged over the
+  room, they carry the tail's energy below the crossover.
+- **Freeze** (50 ms): the input is shut out of the reflections, the tail
+  and the modes; the lines' losses fade to none and their wander to
+  nothing, so each reads a whole sample and the tail repeats exactly; the
+  modes ring without decay.
+- **Out.** Reflections × `early` and tail × `late` (each fading to nothing
+  over its last 6 dB), `low_cut` and `high_cut` (12 dB/oct, faded in and
+  out over 10 ms at their range ends), `width`, then dry × min(1, 2(1 −
+  `mix`)) + room × min(1, 2·`mix`), × `output`.
+- **Readouts.** The RT60s and distances as above; `clarity` C80 and
+  `definition` D50 from the energies an omni hears (the direct sound 1,
+  each reflection, the tail as an exponential from its entry).
+- **Tail** (`setTail`): `predelay` + the first reflection + 0.2 s + the
+  slowest octave's time to fall 80 dB; forever when frozen.
+
+Measured (dev build, 48 kHz):
+
+| check | result |
+|---|---|
+| the defaults (a 17 × 25 × 11 m hall, 1.29 s at 1 kHz), T30 of the impulse response per octave, 125 Hz…8 kHz | 1.57, 1.43, 1.34, 1.29, 1.28, 1.15, 0.73 s against 1.55, 1.51, 1.37, 1.29, 1.29, 1.17, 0.75 predicted; the same within 3 % at 44.1 and 96 kHz |
+| the tail's energy (an omni, reflections off), seven rooms from 3 × 3 × 2.5 m to 30 × 60 × 20 m and decay 30 to 300 % | 0.85 to 1.19 of its target at 500 Hz–1 kHz |
+| the tail's spectrum, 0.15–0.6 s: the spread of its dB magnitude about its trend (5.6 dB is a dense random tail) | 5.7 to 6.2 dB in the hall, a tiled bathroom and an echo chamber |
+| the left and right tails, `ortf` | correlation 0.04 |
+| modes, a 5 × 6 × 2.6 m living room, the 31.5 Hz octave | 24 dB down with the listener in the middle (the first axial modes' nodes), 3 dB up in a corner; the 63 Hz octave 8 dB down at a quarter of the room |
+| freeze after 1 s of notes | each band's energy unchanged to 0.3 dB over 6 s |
+| automation of every switch, the room's size and places, `decay`, `scatter`, `predelay`, cuts and levels | no step at the change above the unautomated render's; a louder or brighter room raises the material's own |
 
 ## 8. Utility — "Hickory" [`hickory`]
 

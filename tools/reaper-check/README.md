@@ -126,6 +126,7 @@ include startup ramps.
 | `sorrel` | Sorrel | Threshold | −80 / −6 dB | second half >3 dB quieter |
 | `teasel` | Teasel | Output | 0 / −12 dB | −12 ±1 dB |
 | `bracken` | Bracken | Output | 0 / −12 dB | −12 ±1 dB |
+| `canopy` | Canopy | Output | 0 / −12 dB | −12 ±1 dB |
 | `analyzer` | Analyzer / Gauge | Hold | false / true | envelope reload + unchanged audio |
 
 Continuous values use ADR-0010's normalized CLAP domain. The table keeps those

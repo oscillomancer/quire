@@ -19,8 +19,8 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 | `sorrel` (`plugins/stock/sorrel`) | Sorrel | `com.suppleaudio.sorrel` | `sTMn` (the player's for the id) | `Sorl` | audio-effect, gate |
 | `teasel` (`plugins/stock/teasel`) | Teasel | `com.suppleaudio.teasel` | `BLWw` (the player's for the id) | `Tesl` | audio-effect, distortion |
 | `bracken` (`plugins/stock/bracken`) | Bracken | `com.suppleaudio.bracken` | `PzKJ` (the player's for the id) | `Brkn` | audio-effect, delay |
+| `canopy` (`plugins/stock/canopy`) | Canopy | `com.suppleaudio.canopy` | `TtYY` (the player's for the id) | `Cnpy` | audio-effect, reverb |
 | `analyzer` | Gauge | `com.suppleaudio.analyzer` | `QAN1` | `QAna` | audio-effect, analyzer, stereo |
-| `reverb` | Nave | `com.suppleaudio.reverb` | `QRV1` | `QRvb` | audio-effect, reverb, stereo |
 
 In the template's identity checklist the code name is the id
 (`Analyzer`/`analyzer`/`ANALYZER`); only the user-visible name string is the
@@ -567,80 +567,41 @@ maintainers:
   2.0 % reversed; 2.9 % with reverse, shift, diffusion, analog, drive,
   modulation and fades at once.
 
-## 11. Third wave: reverb — Nave [`reverb`] (`stock-effects.md` §7)
+## 11. Reverb — Canopy [`canopy`] (`stock-effects.md` §7)
 
-Identity: display name Nave, id `reverb`, CLAP id `com.suppleaudio.reverb`,
-state magic `QRV1`, AU subtype `QRvb`, features audio-effect, reverb,
-stereo. Everything in §1 applies; no sidechain port; latency 0.
+A DSP script (ADR-0047), `plugins/stock/canopy/script/canopy.cpp`. It
+replaced Nave (`com.suppleaudio.reverb`) with a new design. Notes for
+maintainers:
 
-An original design; write its structure and constants into
-`stock-effects.md` §7 as you settle them.
-
-- **`early`** dB uses the utility's gain convention: a finite −60 dB endpoint
-  with `kOffAtMin` (exactly off, displayed −inf), up to +6.
-- **Input:** the stereo input → `low_cut`/`high_cut` (12 dB/oct) →
-  `predelay` (fractional, glides with a 50 ms two-pole smoother like the
-  delay's) → early reflections and the diffuser.
-- **Early reflections:** a tapped delay per channel, 12 taps in 5..80 ms
-  scaled by size, gains falling with time, seeded tap times (fixed seed, so
-  every instance and render is identical), alternating pan; level `early`.
-- **Diffusion:** 4 series Schroeder allpasses per channel (1..12 ms scaled
-  by size, seeded), coefficient 0.7·diffusion/100, capped so diffuser RT60
-  stays below half the shortest requested band tail (stock-effects §7).
-- **FDN:** 16 lines, base lengths spaced geometrically over ≈ 25..95 ms with
-  seeded ±5 % jitter, all × a size factor 2^((size − 50)/50·1.5)
-  (≈ 0.35×..2.8×). Buffers sized in `prepare` for the largest size plus
-  modulation; size changes glide the fractional read positions (twelve-point
-  Lagrange FDN reads; cubic Hermite for early/diffuser reads). Mixing: the
-  normalized 16×16 Hadamard matrix as a fast
-  Walsh–Hadamard transform (×1/4). Input injection and the stereo output
-  taps use fixed orthogonal ± sign vectors (output scaled 1/√8).
-- **Decay:** per line, the attenuation per pass for an RT60 T is
-  g(T) = 10^(−3·L/(fs·T)) (L the line length in samples). Three regions:
-  T_low = decay·low_decay below `crossover`, T_mid = decay, T_high =
-  decay·high_decay above `damping_freq`; realize g(T_mid) × a second-order
-  Butterworth-Q low shelf at `crossover` (DC gain g(T_low)/g(T_mid)) × a
-  second-order Butterworth-Q high shelf at `damping_freq` (Nyquist gain
-  g(T_high)/g(T_mid)). Coefficients
-  recomputed only while decay/size/shelf parameters move (fixed 16-sample
-  grid, as the EQ).
-- **Modulation:** each line's read position moves by seeded slow sinusoids
-  (0.1..1.2 Hz, distinct rates and phases), depth up to ±0.5 ms at
-  `modulation` 100 %; 0 is exactly none.
-- **Width:** mid/side on the whole wet (early + late), S × width/100.
-- **`freeze`:** input to the FDN and early taps fades out over 10 ms; decay
-  gains glide to 1 and the shelves flat (lossless loop), modulation fades
-  out, size holds. Off restores the decay over 10 ms.
-- **`mix`/`output`:** linear dry/wet crossfade, output gain; smoothed.
-- **Tail:** the CLAP tail extension as the delay's: infinite while frozen,
-  otherwise predelay + 1.5 × the longest band RT60 + 100 ms.
-  `clap_host_tail::changed` runs from `process()` on the audio thread;
-  main-thread parameter/state edits set an atomic pending flag.
-- **CPU:** ≤ 2 % of a core per stereo instance at 48 kHz, 512-frame blocks,
-  -O2 (a bench executable as the EQ's, not a test); report the number.
-- Opt-in `reverb-engine.measure`: full RT60 per octave band (125 Hz … 8 kHz;
-  octave-band filtered impulse response, Schroeder backward integration, T30 fit)
-  within 10 % of the three-region target for bands at least an octave from
-  `crossover`/`damping_freq`, at decay 0.5/2/8 s and size 20/50/90;
-  normalized echo density (Abel & Huang) of the impulse response reaches
-  ≥ 0.8 within 150 ms at the defaults, and earlier with more diffusion
-  (report the measured times); a mono input gives a decorrelated tail
-  (interchannel correlation of the late tail < 0.3 at width 100, > 0.99 at
-  width 0); freeze holds the tail RMS within 1 dB over 10 s; `early` at its
-  minimum removes the early taps exactly; tail values; defaults bit-exact
-  across block sizes.
-- Routine CTest (beyond §1.7) uses representative 48 kHz RT60 cases: decay
-  0.5/2 s at size 50 and 0.5 s at size 90, bands 250 Hz / 1 kHz / 4 kHz
-  outside active transitions. Shortened IRs still reach the T30 fit floor;
-  density/stereo and modulated-decay checks use shorter representative tails.
-  Keep the ten-second freeze comparison and five-second automation stress;
-  aggregate per-sample predicates. No raised timeout: targets ≤10 s dev,
-  ≤120 s TSan, with the dense matrix retained in the opt-in runner.
-- GUI: the decay curve (RT60 against frequency, log axes, from the three
-  regions and the cut filters), size and decay large, predelay, diffusion,
-  early, modulation, low_decay/crossover, high_decay/damping_freq,
-  low_cut/high_cut, width, freeze, mix, output. Scenarios: `default`,
-  `hall` (size 85, decay 4500 ms, predelay 25 ms, high_decay 0.4).
+- **One model, two copies.** `Room` holds everything that follows from the
+  parameters (images, per-capsule tap delays and band gains, octave RT60s,
+  modes, levels, C80/D50). The audio code keeps one and rebuilds it in
+  `update()`; the editor keeps its own and rebuilds it every repaint, so
+  what is drawn is exactly what is heard.
+- **Energy, not taste.** Levels are physical: the tail's gain comes from
+  Sabine's reverberant energy for the distance less the reflections', over
+  the lines' impulse energy g²/16(1 − g²); the modes share the tail's
+  energy below the crossover by modal density. A change to the lines or
+  the injection that alters their energy needs the calibration re-measured
+  (an impulse, `late` alone, energy in the 500 Hz and 1 kHz octaves; a
+  single-sample impulse loses high-frequency energy at fractional reads,
+  which is why the injection and the allpasses read whole samples).
+- **Whole samples.** Settled reflections read whole samples (a fraction
+  would dull them, up to −4 dB at 16 kHz with linear reads); their targets
+  are whole samples, so a glide starts and ends on one.
+- **Glides.** The reflections glide 50 ms (and read between samples) for
+  0.4 s after a change; the lines' lengths and the allpasses' 150 ms; the
+  lines' loss filters step a quarter of the way every 32 samples (a TDF-II
+  biquad redesigned at once leaves a transient); freeze, mono and the
+  cuts' ends glide per sample, decided per frame, so renders do not depend
+  on block size.
+- **Tests.** The suite every stock plugin has, and
+  `plugin.canopy.response`: dry (mix 0) a −12 dBFS sine passes at
+  0.00 dB, −6.00 with output −6; `distance` reads 10.002 m for two places
+  10 m apart on the plan; `rt60` reads Eyring's 5276.2 ms for a 10 m
+  concrete cube. Measurements are in `stock-effects.md` §7. Release build,
+  one core, stereo 48 kHz, noise: 3.3 % (the same in a booth or a
+  cathedral; 2.6 % with `mono`).
 
 ## 6. Engine and benchmark use
 

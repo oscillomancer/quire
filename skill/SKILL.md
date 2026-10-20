@@ -45,7 +45,7 @@ their undo history and can be reviewed.
 | Writing melodies, chords, drums, bass lines, controller moves | `guides/notation.md` |
 | The sandbox loop: load a plugin, program it, render, analyze, iterate | `guides/sandbox-loop.md` |
 | EQ: rumble, masking, harshness, de-essing, dynamic and mid/side bands (Yarrow) | `guides/eq.md` |
-| Early reflections, room/hall tails, held ambience (Nave/reverb) | `guides/reverb.md` |
+| A real room or hall: its size, materials, where the sound and the listener stand, decay, clarity, held ambience (Canopy) | `guides/reverb.md` |
 | Designing a synth sound (Orrery) | `guides/sound-design.md`, then `plugin_describe` / `fx_describe` for exact fields |
 | Corrective mixing (levels, rumble, masking, loudness targets) and automation | `guides/mixing.md` |
 | Compressing (six characters, upward too), external-key ducking, catching peaks (Sundew/compressor) | `guides/comp.md` |

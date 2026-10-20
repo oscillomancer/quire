@@ -14,20 +14,11 @@ mapfile -t files < <(git ls-files --cached --others --exclude-standard -- \
   | grep -v '^plugins/template/' \
   | grep -Ev '^plugins/analyzer/(plugin/gui/(Gui|Widgets|Window|Telemetry|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/analyzer_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/((clap|linux)_host_probe\.cpp|wav\.h))$' \
   | grep -Ev '^plugins/stock/[^/]+/Catalog\.cpp$' \
-  | grep -v '^plugins/reverb/' \
   | grep -Ev '^plugins/orrery/(plugin/gui/(Gui|Widgets|Window|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/orrery_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/(clap|linux)_host_probe\.cpp)$' \
   || true)
 # Template infrastructure stays byte-identical to the source copy apart from
 # product naming. Check only product-owned code inside the copied plugin.
 files+=(
-  plugins/reverb/engine/include/reverb/{params,processor}.h
-  plugins/reverb/engine/src/{params,processor}.cpp
-  plugins/reverb/engine/tests/{measurements.h,test_reverb.cpp}
-  plugins/reverb/engine/bench/reverb_bench.cpp
-  plugins/reverb/plugin/src/{ReverbParams.h,reverb_clap.cpp}
-  plugins/reverb/plugin/gui/{Editor.h,Editor.cpp,Theme.h}
-  plugins/reverb/test/{test_core,editor_input,semantic_rt,tail_rt}.cpp
-  plugins/reverb/tools/{reverb_cli,gui_preview}.cpp
   plugins/probe-synth/dsp/include/probesynth/Processor.h
   plugins/probe-synth/plugin/src/ProbeSynthParams.h
   plugins/probe-synth/plugin/src/probesynth_clap.cpp

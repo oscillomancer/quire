@@ -191,9 +191,9 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
   the LLM evaluation harness (`tools/eval-harness`).
 - **Stock plugins** (ADR-0011, ADR-0047): Orrery, Yarrow, Sundew, Treeline,
-  Gorse, Hickory, Sorrel, Teasel, Bracken, Nave and Gauge, each passing clap-validator, a
-  reset determinism check and an unload test (all but Nave also pass the
-  headless REAPER check); JSON patches and the semantic-parameters extension.
+  Gorse, Hickory, Sorrel, Teasel, Bracken, Canopy and Gauge, each passing clap-validator, a
+  reset determinism check, an unload test and the headless REAPER check;
+  JSON patches and the semantic-parameters extension.
   Yarrow, the EQ, is the first written as a DSP script
   (`plugins/stock/yarrow`) and compiled natively from it, playing the same
   samples as the script in the player: eight matched zero-latency bands
@@ -275,7 +275,24 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   and how long the echoes take to fall 60 dB; its editor shows the echoes
   to come (dragged across for the time, up and down for the feedback) with
   a playhead from the last sound, each echo's tone, the medium and the
-  ducking. It replaced Echelon (`com.suppleaudio.delay`).
+  ducking. It replaced Echelon (`com.suppleaudio.delay`). Canopy, the
+  reverb (`plugins/stock/canopy`), is the ninth: a room built from its size
+  in metres, the materials of its walls, floor and ceiling, and where the
+  source and the listener stand. Its reflections are the room's mirror
+  images off up to three surfaces, each as late, weak and dark as its path
+  and heard through an ORTF or spaced pair, a head or one omni; its decay is
+  each octave's Eyring reverberation time, the air's absorption counted;
+  its tail is a sixteen-line network as long as the room's mean free path,
+  at the reverberant level for the listener's distance; below the
+  Schroeder frequency the room's modes ring at their own frequencies, as
+  loud as the two places sit on them. Decay, scatter, predelay, early and
+  late levels, cuts, width and a freeze. It reads out the RT60 at three
+  octaves, the distance, the critical distance, the first reflection,
+  clarity (C80) and definition (D50); its editor is the room to scale (the
+  source, the listener and the walls dragged), a section for the height,
+  the materials, every reflection on a time line (one hovered traces its
+  path through the room), and each octave's decay with the modes beneath.
+  It replaced Nave (`com.suppleaudio.reverb`).
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The
