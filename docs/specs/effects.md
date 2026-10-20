@@ -270,8 +270,10 @@ Notes for maintainers:
 - **Tests.** The template's suite, reset (also `--stepped`), unload,
   semantic conformance, clap-validator and the catalog check run as for
   every stock plugin; `plugin.treeline.response` drives a sine, a sweep,
-  noise and an impulse 12 dB into a −3 dB ceiling (each peaks at −3.0) and
-  checks a sine under the ceiling passes unchanged. During development, on
+  noise and an impulse 12 dB into a −3 dB ceiling at 44.1, 48 and 96 kHz
+  (each peaks at −3.0) and checks a sine under the ceiling passes
+  unchanged. At 88.2 and 192 kHz too the ceiling held; latency is 199,
+  215, 376, 407 and 791 samples at 44.1, 48, 88.2, 96 and 192 kHz. During development, on
   synthetic club, acoustic, dense and true-peak material driven 12 dB:
   the output's true peak, read offline with the same detector, stayed
   within 0.001 dB of the ceiling; against BS.1770's example meter within

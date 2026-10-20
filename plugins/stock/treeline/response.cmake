@@ -1,7 +1,7 @@
 # Treeline's ceiling, measured through the built plugin (dsp.test): driven
-# 12 dB into a -3 dB ceiling, a sine, a sweep, noise and an impulse each
-# peak at the ceiling and not above it; below the ceiling it changes
-# nothing. Required: SANDBOX (quire-sandbox), PLUGIN (Treeline.clap), WORK.
+# 12 dB into a -3 dB ceiling at 44.1, 48 and 96 kHz, a sine, a sweep, noise
+# and an impulse each peak at the ceiling and not above it; below the
+# ceiling it changes nothing. Required: SANDBOX (quire-sandbox), PLUGIN (Treeline.clap), WORK.
 foreach(var SANDBOX PLUGIN WORK)
     if(NOT DEFINED ${var} OR "${${var}}" STREQUAL "")
         message(FATAL_ERROR "response: -D${var}=... is required")
@@ -30,11 +30,11 @@ file(REMOVE_RECURSE "${WORK}")
 set(home "${WORK}/home")
 file(MAKE_DIRECTORY "${home}")
 
-function(measure params level out)
+function(measure params level rate out)
     execute_process(
         COMMAND ${CMAKE_COMMAND} -E env "HOME=${home}" "USERPROFILE=${home}" "APPDATA=${home}/config"
                 "LOCALAPPDATA=${home}/local" "XDG_DATA_HOME=${home}/data" "${SANDBOX}" exec
-                "{\"command\":\"dsp.test\",\"args\":{\"plugin\":\"${PLUGIN}\",\"seconds\":2,\"level_db\":${level},\"signals\":[\"sine\",\"sweep\",\"noise\",\"impulse\"],\"patch\":{\"params\":${params}}}}"
+                "{\"command\":\"dsp.test\",\"args\":{\"plugin\":\"${PLUGIN}\",\"seconds\":2,\"sample_rate\":${rate},\"level_db\":${level},\"signals\":[\"sine\",\"sweep\",\"noise\",\"impulse\"],\"patch\":{\"params\":${params}}}}"
                 --workdir "${WORK}/workdir"
         RESULT_VARIABLE result OUTPUT_VARIABLE json ERROR_VARIABLE err)
     if(NOT result EQUAL 0)
@@ -44,19 +44,21 @@ function(measure params level out)
 endfunction()
 
 # Driven into the ceiling: every signal reaches it (within 0.3 dB) and none passes it.
-measure("{\"gain\":12,\"ceiling\":-3}" -1 json)
-foreach(i RANGE 3)
-    string(JSON name GET "${json}" signals ${i} signal)
-    string(JSON peak GET "${json}" signals ${i} peak_dbfs)
-    milli("${peak}" got)
-    if(got GREATER -3000 OR got LESS -3300)
-        message(FATAL_ERROR "${name} driven 12 dB into a -3 dB ceiling peaks at ${peak} dBFS")
-    endif()
-    message(STATUS "${name} driven into a -3 dB ceiling peaks at ${peak} dBFS")
+foreach(rate 44100 48000 96000)
+    measure("{\"gain\":12,\"ceiling\":-3}" -1 ${rate} json)
+    foreach(i RANGE 3)
+        string(JSON name GET "${json}" signals ${i} signal)
+        string(JSON peak GET "${json}" signals ${i} peak_dbfs)
+        milli("${peak}" got)
+        if(got GREATER -3000 OR got LESS -3300)
+            message(FATAL_ERROR "${name} at ${rate} Hz driven 12 dB into a -3 dB ceiling peaks at ${peak} dBFS")
+        endif()
+        message(STATUS "${name} at ${rate} Hz driven into a -3 dB ceiling peaks at ${peak} dBFS")
+    endforeach()
 endforeach()
 
 # Below the ceiling: a sine passes at its own level and as pure as it came.
-measure("{\"gain\":0,\"ceiling\":-1}" -12 json)
+measure("{\"gain\":0,\"ceiling\":-1}" -12 48000 json)
 string(JSON gain GET "${json}" signals 0 gain_db)
 string(JSON thd GET "${json}" signals 0 thd_percent)
 milli("${gain}" got)
