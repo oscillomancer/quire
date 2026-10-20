@@ -124,8 +124,8 @@ include startup ramps.
 | `gorse` | Gorse | Output | 0 / −12 dB | −12 ±1 dB |
 | `hickory` | Hickory | Gain | 0 / −12 dB | −12 ±1 dB |
 | `sorrel` | Sorrel | Threshold | −80 / −6 dB | second half >3 dB quieter |
+| `teasel` | Teasel | Output | 0 / −12 dB | −12 ±1 dB |
 | `analyzer` | Analyzer / Gauge | Hold | false / true | envelope reload + unchanged audio |
-| `drive` | Kiln | Output | 0 / −12 dB | −12 ±1 dB |
 | `delay` | Echelon | Output | 0 / −12 dB | −12 ±1 dB |
 
 Continuous values use ADR-0010's normalized CLAP domain. The table keeps those

@@ -52,7 +52,7 @@ their undo history and can be reviewed.
 | Limiting the master to a true-peak ceiling, loudness targets (LUFS), level-matched comparison (Treeline/limiter) | `guides/limiter.md` |
 | Gain staging, polarity, channel checks, width, balance, bass mono, lining tracks up (Hickory/utility) | `guides/utility.md` |
 | Cleaning spill or noise with a gate or expander, finding its threshold (Sorrel/gate) | `guides/gate.md` |
-| Saturation: drive, asymmetry, wavefolding (Kiln/drive) | `guides/drive.md` |
+| Saturation and distortion, from subtle colour to folding, crushing and tuned feedback (Teasel) | `guides/drive.md` |
 | Onset punch, softer attacks, shorter or longer decays (Gorse, the transient shaper) | `guides/transient.md` |
 | Writing a Lua script (loops, conditionals, subscriptions, one transaction) | `guides/lua.md`, `generated/engine.lua` |
 | Writing a plugin of your own: an effect or an instrument as a DSP script (`dsp_write`, then `fx_add`) | `guides/dsp-workflow.md`, `guides/dsp-language.md`, `generated/dsp-examples.md` |

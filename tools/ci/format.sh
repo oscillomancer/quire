@@ -9,34 +9,18 @@ mode=(-i)
 mapfile -t files < <(git ls-files --cached --others --exclude-standard -- \
   'libs/*' 'host/*' 'plugins/*' 'daw/*' 'mcp/*' 'tools/*' 'tests/*' \
   | grep -E '\.(c|cc|cpp|h|hpp)$' | grep -v '/third_party/' \
-  | grep -Ev '^plugins/(analyzer|delay|drive|orrery|probe-synth)/test/vst3_unload_probe\.cpp$' \
+  | grep -Ev '^plugins/(analyzer|delay|orrery|probe-synth)/test/vst3_unload_probe\.cpp$' \
   | grep -v '^plugins/probe-synth/' \
   | grep -v '^plugins/template/' \
   | grep -Ev '^plugins/delay/(plugin/gui/(Gui|Widgets|Window|Telemetry|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/delay_entry\.(h|cpp)|test/(host_(smoke\.cpp|contract\.h)|vst3_unload_probe\.cpp)|tools/((clap|linux)_host_probe\.cpp|wav\.h))$' \
   | grep -Ev '^plugins/analyzer/(plugin/gui/(Gui|Widgets|Window|Telemetry|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/analyzer_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/((clap|linux)_host_probe\.cpp|wav\.h))$' \
   | grep -Ev '^plugins/stock/[^/]+/Catalog\.cpp$' \
-  | grep -v '^plugins/drive/' \
   | grep -v '^plugins/reverb/' \
   | grep -Ev '^plugins/orrery/(plugin/gui/(Gui|Widgets|Window|pugl_metal)\.h|plugin/gui/(Window\.cpp|NanoVGBackend\.c)|plugin/src/orrery_entry\.(h|cpp)|test/host_(smoke\.cpp|contract\.h)|tools/(clap|linux)_host_probe\.cpp)$' \
   || true)
 # Template infrastructure stays byte-identical to the source copy apart from
 # product naming. Check only product-owned code inside the copied plugin.
 files+=(
-  plugins/drive/engine/include/drive/params.h
-  plugins/drive/engine/include/drive/processor.h
-  plugins/drive/engine/src/params.cpp
-  plugins/drive/engine/src/processor.cpp
-  plugins/drive/engine/tests/test_drive.cpp
-  plugins/drive/engine/bench/drive_bench.cpp
-  plugins/drive/plugin/src/DriveParams.h
-  plugins/drive/plugin/src/drive_clap.cpp
-  plugins/drive/plugin/gui/Editor.cpp
-  plugins/drive/plugin/gui/Editor.h
-  plugins/drive/plugin/gui/Theme.h
-  plugins/drive/test/host_smoke.cpp
-  plugins/drive/test/semantic_rt.cpp
-  plugins/drive/test/editor_input.cpp
-  plugins/drive/tools/gui_preview.cpp
   plugins/reverb/engine/include/reverb/{params,processor}.h
   plugins/reverb/engine/src/{params,processor}.cpp
   plugins/reverb/engine/tests/{measurements.h,test_reverb.cpp}

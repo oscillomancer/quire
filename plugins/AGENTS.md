@@ -11,11 +11,11 @@ makes from it, built from `template/` with `suite/`. `stock/README.md` says
 how to change one. Yarrow (`stock/yarrow`, the EQ), Sundew
 (`stock/sundew`, the compressor), Treeline (`stock/treeline`, the
 limiter), Gorse (`stock/gorse`, the transient shaper), Hickory
-(`stock/hickory`, the stereo utility) and Sorrel (`stock/sorrel`, the gate)
-are written so far; the rest of this section is about the older,
+(`stock/hickory`, the stereo utility), Sorrel (`stock/sorrel`, the gate)
+and Teasel (`stock/teasel`, the saturation) are written so far; the rest of this section is about the older,
 hand-written plugins.
 
-Each plugin directory (`drive`, `delay`, `reverb`, `analyzer`, `orrery`,
+Each plugin directory (`delay`, `reverb`, `analyzer`, `orrery`,
 and the internal test instrument `probe-synth`) is an instance of Supple Audio's plugin template (ADR-0011):
 
 - `engine/`: the SDK-free DSP core and the parameter table (core-params

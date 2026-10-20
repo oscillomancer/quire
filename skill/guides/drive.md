@@ -1,59 +1,149 @@
-# Kiln [drive]: saturation
+# Teasel: saturation and distortion
 
-Use `com.suppleaudio.drive` for harmonic colour, asymmetric distortion and
-wavefolding. Patches use `supple.drive-patch/1.0`; merge changes under `params`.
-Render and compare loudness before deciding that added brightness is an improvement.
+Use `com.suppleaudio.teasel` for colour and grit, from a trace of warmth on a
+master to folding, crushing and ringing feedback. Patches use
+`supple.teasel-patch/1.0`, with physical values under `params`; a merge
+changes only the keys it names.
 
-| Key | Unit / choices | Range | Default |
+| Key | Unit and range | Default |
+|---|---|---|
+| `style` | the curve (below) | tape |
+| `drive` | dB, −12…48: gain into the curve | 6 |
+| `character` | %, 0…100: each curve's own (below) | 30 |
+| `bias` | %, −100…100: tilts the curve for even harmonics | 0 |
+| `auto_gain` | bool: holds the level of a −18 dBFS RMS signal whatever the drive | true |
+| `dynamics` | %, −100…100: + drives attacks harder, − the sustain and tails | 0 |
+| `motion` | %, 0…100: the LFO's depth | 0 |
+| `motion_rate` | Hz, 0.05…20 (when `motion_sync` is `free`) | 1 |
+| `motion_sync` | `free`, `bars4`, `bars2`, `bar1`, `n2`, `n4`, `n8`, `n16`, `n32`, `n4t`, `n8t`, `n16t`, `n4d`, `n8d` | free |
+| `motion_shape` | `sine`, `triangle`, `ramp_up`, `ramp_down`, `square`, `random`, `drift` | sine |
+| `motion_target` | `drive` (±24 dB), `character` (±50), `bias` (±100), `pitch` (±2 octaves) at 100% | drive |
+| `feedback` | %, −95…95: the curve's output back into it a period of the pitch later | 0 |
+| `feedback_pitch` | Hz, 30…4000: the note the feedback rings at | 220 |
+| `band_low` | Hz, 20…20000: below passes clean; 20 is off | 20 |
+| `band_high` | Hz, 20…20000: above passes clean; 20000 is off | 20000 |
+| `emphasis` | dB, −12…12: tilt about 1 kHz before the curve, undone after | 0 |
+| `low_cut` | Hz, 20…2000 on what the curve gives; 20 is off | 20 |
+| `high_cut` | Hz, 1000…20000 on what the curve gives; 20000 is off | 20000 |
+| `mix` | %, 0…100: dry and driven | 100 |
+| `output` | dB, −24…24 | 0 |
+| `channels` | `stereo`, `mid` (centre only), `side` (width only) | stereo |
+| `quality` | oversampling `x1`, `x2`, `x4`, `x8`, `x16` (at most 768 kHz inside); a restart | x4 |
+| `listen` | `off`, `band` (the driven band alone), `delta` (only what the drive changes) | off |
+| `thd` | %, readonly: harmonics and noise (share of RMS) of a 100 Hz sine at −18 dBFS RMS through the curve as set | |
+| `even` | %, readonly: the even harmonics' share of that sine's harmonic power | |
+| `distortion` | %, readonly: the same measure on the music, over the last 300 ms | |
+| `drive_now` | dB, readonly: the drive this moment, with dynamics and motion | |
+| `input_level`, `output_level` | dBFS, readonly: peaks, falling 20 dB/s | |
+
+## The curves
+
+| Style | Family | Character | Sound |
 |---|---|---|---|
-| `curve` | `tape`, `tube`, `transistor`, `diode`, `fold`, `hard` | enum | `tape` |
-| `drive` | dB | 0–36 | 6 |
-| `bias` | percent | −100–100 | 0 |
-| `tone` | dB/oct control (canonical dB) | −6–6 | 0 |
-| `oversampling` | `x1`, `x2`, `x4`, `x8` (display 1x/2x/4x/8x) | enum; restart required | `x4` |
-| `auto_gain` | bool | false/true | true |
-| `mix` | percent | 0–100 | 100 |
-| `output` | dB | −24–24 | 0 |
-| `input_level`, `output_level` | readonly dBFS sample peaks | −120–40 | −120 |
+| `soft` | warm | knee: 0 gentle from the start (third harmonic only), 100 clean longer, then turns | the most transparent; mastering |
+| `tape` | warm | wear: a hysteresis loop near saturation | soft, round, odd harmonics |
+| `tube` | warm | sag: loud peaks bias it colder for a while | second harmonic first; blocks when pushed |
+| `transformer` | warm | core 40…400 Hz: below it the bass saturates first | thick low end, clean highs |
+| `transistor` | bite | hardness: soft knee to near-hard | crunch, mostly odd |
+| `diode` | bite | asymmetry: a symmetric pair to a single diode | grit from the first dB |
+| `clip` | bite | knee: 0 hard clipping at the ceiling | clean until it clips; a clipper |
+| `fuzz` | bite | starve: a dead zone that sputters on decays | high gain, squared off |
+| `fold` | wild | edge: rounded (sine) to sharp (triangle) folds | metallic, rises then falls with drive |
+| `rectify` | wild | full-wave share: half-wave to full-wave (octave up) | even harmonics, never subtle |
+| `crush` | wild | bits: 16 down to 1 | quantised, gated quiet passages |
+| `alias` | wild | rate: held at 20 kHz down to 250 Hz | sample-rate reduction, aliasing |
 
-Drive precedes the static curve. Bias adds up to ±1 before shaping, then a 5 Hz
-DC blocker removes the offset. Tone is a first-order tilt centred on 1 kHz:
-DC/HF gains are −2·tone/+2·tone dB, with its exact inverse after the curve.
-The slope varies with frequency; this is not a broadband straight-line EQ.
-Positive tone drives high frequencies harder. Floats ramp over 20 ms; curve and
-auto-gain changes crossfade over 10 ms. Oversampling changes require reactivation;
-the current sound and latency remain until the host performs the restart.
-Latency: 1, 73, 81, 84 samples at 1x/2x/4x/8x, at every sample rate. Dry mix
-uses the same integer delay. 1x has intentional ADAA high-frequency attenuation.
+Bias adds an offset before the curve (removed after), so even harmonics
+appear on any curve; on `transformer` it is a standing flux.
 
-Three starting recipes (semantic merge patches):
+## Setting it by numbers
 
-- Gentle colour: `{"params":{"curve":"tape","drive":6,"bias":0,"tone":0,"oversampling":"x4","auto_gain":true,"mix":100,"output":0}}`.
-- Asymmetric tube: `{"params":{"curve":"tube","drive":12,"bias":30,"tone":1,"oversampling":"x4","auto_gain":true,"mix":60,"output":-1}}`.
-- Folded parallel texture: `{"params":{"curve":"fold","drive":24,"bias":30,"tone":0,"oversampling":"x8","auto_gain":true,"mix":25,"output":-2}}`.
+With `drive` 0 dB a −18 dBFS RMS signal sits well below every warm curve's
+knee. Render with the plugin in place and read `thd` and `even`; they do not
+depend on the music, so set them first:
 
-These are original static shapers, not physical tape/circuit simulations. Tape
-has a wide soft knee; tube starts gently and compresses more at large signals;
-transistor has a flatter low-level knee; diode is tanh's exponential knee.
-Fold combines a sine folder with a soft residual path and is naturally
-non-monotonic: more drive need not mean more THD. Hard is clipping at ±1.
+| Aim | `thd` | Typical setting |
+|---|---|---|
+| Master, barely there | 0.1–0.5% | `soft` or `tape`, `drive` 0–4 |
+| Bus colour | 0.5–2% | `tape` 4–8, or `tube` 4–6 with `bias` 10–20 |
+| Obvious warmth, second harmonic | 1–4%, `even` above 60% | `tube`, `bias` 20–40 |
+| Crunch | 5–15% | `transistor`, `diode` 12–18 |
+| Heavy | 20%+ | `fuzz`, `clip` 24+ |
 
-Auto gain compensates the *RMS* gain of Gaussian noise at −18 dBFS RMS, using a
-prepare-time table per curve at 0.25 dB drive steps and linear interpolation.
-It is not a programme loudness rider and does not compensate bias or tone.
-On deterministic 20 Hz–20 kHz pink noise at −18 dBFS RMS, drives 0/6/12/18/24/30/36,
-4x, bias/tone zero, the largest absolute LUFS difference was tape 0.323, tube
-0.327, transistor 0.320, diode 0.343, fold 0.906, hard 0.351 LU. At −30 dBFS RMS,
-differences across drive ranged approximately −0.12 to +13.89 LU; at −6 dBFS RMS,
-−14.45 to 0 LU. Set output by measured LUFS for material away from the reference.
+Then read `distortion` from a render of the real music: the share of what
+the curve gives that is not a scaled copy of what went in. It follows the
+music's level (a quiet passage barely touches the curve), so compare it
+with `thd` to see how hard the music is hitting it.
 
-Aliasing measurement: 5 kHz sine, **−18 dBFS RMS** (−14.9897 dBFS peak), drive
-24 dB, 48 kHz, bias/tone zero, auto gain off; coherent FFT after 1 s settling.
-Worst non-harmonic bins in **20 Hz–20 kHz** relative to the fundamental at
-4x: tape −155.71,
-tube −104.89, transistor −134.76, diode −154.26 dBc. Fold: −159.59/−158.53 dBc
-at 4x/8x; hard: −81.42/−91.86 dBc. These figures describe that input level,
-not a universal alias bound. Aliases above 20 kHz up to Nyquist are accepted.
-**Prefer 8x for hard/fold**, particularly when
-hitting them harder or adding tone/bias. Output can exceed 0 dBFS; Kiln is not
-a mastering limiter. Compare renders at matched loudness and check peaks.
+## Recipes
+
+Bus tape, transparent:
+
+```json
+{"params":{"style":"tape","drive":4,"character":25}}
+```
+
+Mid-only tube warmth on a master (the sides stay clean):
+
+```json
+{"params":{"style":"tube","drive":5,"bias":15,"character":20,"channels":"mid"}}
+```
+
+Bass grit that keeps the sub clean (drive only above 160 Hz):
+
+```json
+{"params":{"style":"tube","drive":18,"character":40,"bias":25,"band_low":160,"high_cut":7000}}
+```
+
+Drums: grit on the hits, tails clean, in parallel:
+
+```json
+{"params":{"style":"diode","drive":15,"character":50,"dynamics":50,"mix":50}}
+```
+
+Sustain thickened, attacks left clean:
+
+```json
+{"params":{"style":"fuzz","drive":18,"character":30,"dynamics":-70,"high_cut":6000}}
+```
+
+A clipper before a limiter (level rises with the drive):
+
+```json
+{"params":{"style":"clip","drive":3,"character":15,"auto_gain":false,"quality":"x8"}}
+```
+
+A ringing, tuned distortion (pitch is the note's frequency):
+
+```json
+{"params":{"style":"transistor","drive":20,"feedback":70,"feedback_pitch":220,"high_cut":8000}}
+```
+
+Folds pulsing in eighth notes:
+
+```json
+{"params":{"style":"fold","drive":16,"motion":60,"motion_sync":"n8","motion_shape":"triangle","quality":"x8"}}
+```
+
+## Measuring it
+
+`listen: "delta"` plays only what the drive changes; `"band"` the driven
+band alone. With `auto_gain` on, a −18 dBFS RMS signal leaves as loud as it
+came in at any drive (within about 0.5 dB on pink noise), so A/B renders
+compare fairly; material far louder or quieter than that shifts by a few
+dB, so compare loudness (`analyze`) before deciding more drive is better.
+Check `thd` after changing style, drive, character or bias.
+
+## Limits
+
+`transformer` holds the mids' level; bass that saturates loses level, as an
+iron core does (about 4 dB on pink noise at 24 dB of drive). `fold` and
+`clip` at high drive need `x8` or `x16`: at 4x a 5 kHz sine driven 24 dB
+into `clip` leaves aliases about 45 dB down, at 16x about 70. `rectify`
+and `alias` are never subtle. Feedback never sustains itself, and lets go
+a second after the input falls digitally silent; at high drive with
+`rectify` and strong feedback peaks can pass 0 dBFS: trim `output`.
+Changing `quality` restarts the plugin.
+
+See [mixing](mixing.md) and
+[stock spec §5](../../docs/specs/stock-effects.md#5-saturation--teasel-teasel).

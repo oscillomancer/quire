@@ -191,7 +191,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
   the LLM evaluation harness (`tools/eval-harness`).
 - **Stock plugins** (ADR-0011, ADR-0047): Orrery, Yarrow, Sundew, Treeline,
-  Gorse, Hickory, Sorrel, Kiln, Echelon, Nave and Gauge, each passing clap-validator, a
+  Gorse, Hickory, Sorrel, Teasel, Echelon, Nave and Gauge, each passing clap-validator, a
   reset determinism check and an unload test (all but Nave also pass the
   headless REAPER check); JSON patches and the semantic-parameters extension.
   Yarrow, the EQ, is the first written as a DSP script
@@ -246,7 +246,22 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   peaks), with the time open and the openings; its editor shows what came
   in, what goes out and what was taken, the histogram, the gain, a
   transfer plot with the hysteresis loop and a sketch of the timing. It
-  replaced Sluice (`com.suppleaudio.gate`).
+  replaced Sluice (`com.suppleaudio.gate`). Teasel, the saturation
+  (`plugins/stock/teasel`), is the seventh: twelve curves in three
+  families (soft, tape, tube, transformer; transistor, diode, clip, fuzz;
+  fold, rectify, crush, alias), four of them with memory (tape's
+  hysteresis, tube's sag, a transformer core that saturates the bass
+  first, a sample-and-hold), each with a character control and bias;
+  driving only a band, the mid or the side; emphasis, cuts, tuned feedback
+  through the curve, dynamics that drive the attacks or the sustain, and
+  an LFO free or in time on the drive, character, bias or pitch;
+  oversampling to 16x with the dry signal and the clean bands inside it,
+  and auto gain that holds a −18 dBFS RMS signal's level at any drive.
+  Its readouts give the THD and even share of a 100 Hz sine through the
+  curve as set and the distortion it adds to the music; its editor shows
+  the spectrum in and out with what the curve adds, the curve with where
+  the music sits on it, the harmonics, the dynamics and the LFO. It
+  replaced Kiln (`com.suppleaudio.drive`).
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The

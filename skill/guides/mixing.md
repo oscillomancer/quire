@@ -101,7 +101,7 @@ For track and bus compression, external-key ducking, upward compression and peak
 For a true-peak ceiling on the master and loudness against a LUFS target, see [Treeline, the limiter](limiter.md).
 Use [Yarrow, the stock EQ](eq.md) for measured rumble, masking and harshness cuts, de-essing and dynamic or mid/side bands.
 Use [Sorrel, the gate](gate.md) to reduce between-hit spill or noise between phrases; its `suggested_threshold`, `noise_floor` and `openings` readouts say where to set it and whether it chatters.
-Use [Kiln, the saturation](drive.md) for drive, asymmetry and wavefolding with reference level compensation.
+Use [Teasel, the saturation](drive.md) for colour and distortion; set it by its `thd` and `even` readouts, and drive only a band, the mid or the side when the rest should stay clean.
 For onset punch, softened attacks and shorter or longer decays, see [Gorse, the transient shaper](transient.md).
 For tempo-synced echoes, alternating stereo repeats and ducked throws, see [Echelon, the delay](delay.md).
 Use [Nave, the stock reverb](reverb.md) for room/hall ambience, predelay and frequency-dependent tails; use 100% wet on a send return.

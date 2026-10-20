@@ -15,6 +15,7 @@ player, and every check the other stock plugins have.
 | `gorse` | Gorse, the transient shaper | `com.suppleaudio.gorse` |
 | `hickory` | Hickory, the stereo utility | `com.suppleaudio.hickory` |
 | `sorrel` | Sorrel, the gate and expander | `com.suppleaudio.sorrel` |
+| `teasel` | Teasel, the saturation | `com.suppleaudio.teasel` |
 
 ## Files
 
