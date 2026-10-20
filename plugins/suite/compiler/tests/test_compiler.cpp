@@ -258,6 +258,10 @@ TEST_CASE("the first scripts' mistakes are refused with a hint") {
     CHECK(firstError(plugin("DelayLine d; void process(Block& io) { d.prepare(100); }")) ==
           "script.rt.allocation");
     CHECK(firstError(plugin("void process(Block& io) { double y = sin(1); }")) == "");
+    CHECK(firstError(plugin("Array<Oversampler, 2> o;\n"
+                            "void prepare() { o[0].prepare(1); o[1].prepare(4, "
+                            "Oversampler::Phase::Linear); }\n"
+                            "void process(Block& io) {}")) == "");
     CHECK(firstError(plugin("void process(Block& io) { double y = min(1, 0.5); }")) ==
           "script.call.ambiguous");
     CHECK(firstError(plugin("void process(Block& io) { double y = M_PI; }")) ==

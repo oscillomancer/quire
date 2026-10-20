@@ -529,6 +529,40 @@ TEST_CASE("Stft: a sine reads its amplitude, and a spectrum left alone is a dela
     CHECK(worst < 1e-12);
 }
 
+TEST_CASE("Oversampler: 1x passes through, and linear phase is a pure delay") {
+    script::detail::Instance instance;
+    script::detail::CurrentScope scope(&instance);
+    // A restart from 4x to 1x: the same object, prepared again.
+    script::Oversampler o;
+    o.prepare(4);
+    CHECK(o.factor() == 4);
+    CHECK(o.latency() > 0);
+    o.prepare(1);
+    CHECK(o.factor() == 1);
+    CHECK(o.latency() == 0);
+    o.up(0.25);
+    CHECK(o.sample(0) == 0.25);
+    CHECK(o.down() == 0.25);
+    // Linear phase: everything below the passband's edge comes out as it went
+    // in, latency() samples later.
+    script::Oversampler linear;
+    linear.prepare(4, script::Oversampler::Phase::Linear);
+    const int lag = linear.latency();
+    CHECK(lag > 0);
+    std::vector<double> in(4800), out(4800);
+    for (size_t n = 0; n < in.size(); ++n) {
+        const double t = static_cast<double>(n) / 48000.0;
+        in[n] = 0.4 * std::sin(6.283185307179586 * 100.0 * t) +
+                0.3 * std::sin(6.283185307179586 * 15000.0 * t);
+        linear.up(in[n]);
+        out[n] = linear.down();
+    }
+    double worst = 0.0;
+    for (size_t n = 1000; n < in.size(); ++n)
+        worst = std::max(worst, std::abs(out[n] - in[n - static_cast<size_t>(lag)]));
+    CHECK(worst < 1e-4);
+}
+
 TEST_CASE("a script compiled as C++ describes the plugin the compiler describes") {
     using script::ex_tilt::Tilt;
     sameDescription<Tilt>(

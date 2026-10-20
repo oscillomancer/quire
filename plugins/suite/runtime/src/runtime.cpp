@@ -565,9 +565,13 @@ Oversampler& Oversampler::operator=(const Oversampler& other) {
     return *this;
 }
 Oversampler::~Oversampler() { delete &over(state_); }
-void Oversampler::prepare(int factor) {
+void Oversampler::prepare(int factor) { prepare(factor, Phase::Minimum); }
+void Oversampler::prepare(int factor, Phase phase) {
     OversamplerState& o = over(state_);
-    o.over.prepare(1, 1, std::clamp(factor, 2, 16), dsp::ScriptRuntimeOversampler::Phase::Minimum);
+    // 1 passes samples through: a restart to 1x needs no code of its own.
+    o.over.prepare(1, 1, std::clamp(factor, 1, 16),
+                   phase == Phase::Linear ? dsp::ScriptRuntimeOversampler::Phase::Linear
+                                          : dsp::ScriptRuntimeOversampler::Phase::Minimum);
     o.prepared = true;
     o.hi = nullptr;
 }

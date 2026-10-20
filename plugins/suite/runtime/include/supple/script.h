@@ -796,16 +796,23 @@ class DelayLine {
 //   for (int k = 0; k < o.factor(); ++k) o.set(k, tanh(drive * o.sample(k)));
 //   y = o.down();
 //
-// prepare(factor) in prepare(): 2, 4, 8 or 16 (until then it passes samples
-// through, at 1). Its filters are minimum phase: latency() is a few samples
-// of delay, which setLatency() reports.
+// prepare(factor) in prepare(): 1, 2, 4, 8 or 16 (others round down; 1, and
+// until prepared, passes samples through). Its filters are minimum phase by
+// default: latency() is a few samples, which setLatency() reports, and the
+// top octave's phase turns a little. prepare(factor, Oversampler::Phase::Linear)
+// gives linear-phase filters instead: no phase change at all, so a mix with
+// the dry signal delayed by latency() is exact, at a latency of about 70
+// samples.
 class Oversampler {
   public:
+    enum class Phase { Minimum, Linear };
+
     Oversampler();
     Oversampler(const Oversampler& other);
     Oversampler& operator=(const Oversampler& other);
     ~Oversampler();
     void prepare(int factor);  // prepare() only: it allocates
+    void prepare(int factor, Phase phase);
     int factor() const;
     int latency() const;
     void up(double x);

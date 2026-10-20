@@ -603,12 +603,33 @@ void Builtins::addClasses() {
         +[](const S::DelayLine* d, double samples) { return d->read(samples); });
     r.method(delay, "void clear()", +[](S::DelayLine* d) { d->clear(); });
 
+    // Oversampler::Phase.
+    auto phase = std::make_unique<BuiltinEnum>();
+    {
+        auto t = std::make_unique<Type>();
+        t->kind = TypeKind::Enum;
+        t->name = "Oversampler::Phase";
+        t->size = 4;
+        t->align = 4;
+        phase->type = t.get();
+        types_.push_back(std::move(t));
+        phase->values = {{"Minimum", 0}, {"Linear", 1}};
+        static_assert(static_cast<int>(S::Oversampler::Phase::Linear) == 1);
+    }
     auto* over = addClass("Oversampler", sizeof(S::Oversampler), alignof(S::Oversampler));
     over->resource = true;
+    over->nestedTypes["Phase"] = phase->type;
     r.lifetime<S::Oversampler>(over);
     r.method(
         over, "void prepare(int factor)", +[](S::Oversampler* o, int f) { o->prepare(f); },
         Writes::Self, kInit);
+    r.method(
+        over, "void prepare(int factor, Phase phase)",
+        +[](S::Oversampler* o, int f, int p) {
+            o->prepare(f, static_cast<S::Oversampler::Phase>(p));
+        },
+        Writes::Self, kInit);
+    enums_.push_back(std::move(phase));
     r.method(over, "int factor() const", +[](const S::Oversampler* o) { return o->factor(); });
     r.method(over, "int latency() const", +[](const S::Oversampler* o) { return o->latency(); });
     r.method(over, "void up(double x)", +[](S::Oversampler* o, double x) { o->up(x); });
