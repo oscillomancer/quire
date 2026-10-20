@@ -916,8 +916,11 @@ at a dashed line beside the name):
   the ceiling; the target's slider.
 - **Limiter.** Gain, ceiling and release knobs; the listen choice.
 - **Engine.** The attack curve in use between the broad and the sharp one,
-  the bass it follows and the hold that spans it, the two-stage release
-  with the music's sustained share, and a gain-reduction bar in its two parts with a held peak.
+  the bass it follows and the hold that spans it, the release (the path
+  back to rest from the last peak's reduction, held half a second, if the
+  music let go there: quickly to the sustained part, in clay, then over
+  seconds; on a scale that grows with the reduction, and a faint example
+  at rest), and a gain-reduction bar in its two parts with a held peak.
 
 Knobs drag vertically (Shift fine), wheel, and reset on a double click.
 

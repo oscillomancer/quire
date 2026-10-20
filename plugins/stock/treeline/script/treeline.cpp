@@ -409,6 +409,8 @@ struct Treeline : Effect {
     bool unplayed = true;
     bool wasPlaying = false;
     int spanNow = 336;
+    double lastPeakGr = 0.0, kLastPeak = 0.0;
+    int lastPeakAge = 0, peakHoldSamples = 24000;
     // The editor's history: per column, the input's and output's true peaks,
     // the reduction and its sustained part, the momentary loudness, the beats.
     double colLength = 480.0, colAt = 0.0;
@@ -425,7 +427,7 @@ struct Treeline : Effect {
     Shared<double> inLeft, inRight, outLeft, outRight, grShown, plateauShown, sharpShown;
     Shared<double> guardShown, holdShown, bassShown, releaseShown, sustainShown;
     Shared<double> momentaryShown, shortShown, integratedShown, rangeShown, peakShown;
-    Shared<double> secondsShown, matchShown, plrPeakShown;
+    Shared<double> secondsShown, matchShown, plrPeakShown, grDeepShown;
 
     void prepare() {
         rate = sampleRate();
@@ -479,6 +481,10 @@ struct Treeline : Effect {
         deltaStep = 1.0 / (0.01 * rate);
         blockLength = max(1, roundToInt(0.1 * rate));
         overHold = roundToInt(5.0 * rate);
+        peakHoldSamples = roundToInt(0.5 * rate);
+        kLastPeak = stepFor(100.0, rate);
+        lastPeakGr = 0.0;
+        lastPeakAge = 0;
         accumulating = accumulate.on();
         setRelease(release);
         // A restart prepares an instance that has played: start it afresh.
@@ -647,6 +653,15 @@ struct Treeline : Effect {
             const double back = gainDb < plateau ? gainDb + kRelease * (plateau - gainDb)
                                                  : gainDb - kPlateauOut * gainDb;
             gainDb = min(held, back);
+            // The last peak's reduction, held half a second for the editor.
+            if (gainDb <= lastPeakGr) {
+                lastPeakGr = gainDb;
+                lastPeakAge = 0;
+            } else if (lastPeakAge < peakHoldSamples) {
+                lastPeakAge += 1;
+            } else {
+                lastPeakGr += kLastPeak * (gainDb - lastPeakGr);
+            }
 
             // The two attacks: the broad curve now, the sharp one over the
             // last of the same span; then their blend.
@@ -745,6 +760,7 @@ struct Treeline : Effect {
         outLeft.set(gainToDb(peakOut0));
         outRight.set(gainToDb(stereoNow ? peakOut1 : peakOut0));
         grShown.set(gainDb);
+        grDeepShown.set(lastPeakGr);
         plateauShown.set(max(plateau, gainDb));
         sharpShown.set(sharpness);
         guardShown.set(guard);
@@ -976,6 +992,7 @@ struct Treeline : Effect {
     int grAge = 0;
     bool drawn = false;
     double clockX = mx + mw - 60;  // the clock's centre, where the timer's text leaves it
+    double recoveryScale = 6.0;    // dB the release plot spans
 
     void editor(Editor& e) { e.size(kW, kH); }
 
@@ -1824,43 +1841,59 @@ struct Treeline : Effect {
         aside(g, "never rides the bass waveform", x, y + h + 48, TextAlign::Left);
     }
 
-    // The release: back from a peak quickly to what the music sustains, the rest slowly.
+    // The release: the way back from the last peak (the deepest reduction of
+    // the last half second) to rest, if the music let go there. The peaks'
+    // part recovers at the release time to what the music sustains (clay),
+    // and that over seconds; at rest, a faint example of the shape.
     void drawRecovery(Canvas& g, double x, double y, double w, double h) {
         plotTitle(g, "RELEASE", x, y);
         well(g, x, y, w, h);
         const double rel = releaseShown.get(), sus = sustainShown.get();
         const double total = 2.0 * sus;  // ms across
-        const double plat = plateauShown.get(), now = grShown.get();
-        // Illustrated with the music's own sustained share, or a third when idle.
-        const double share = now < -0.3 ? clamp(plat / now, 0.0, 1.0) : 0.35;
-        const double top = y + 10, depth = h - 24;
-        g.beginPath();
-        for (int k = 0; k <= 80; ++k) {
-            const double px = x + 6 + (w - 12) * k / 80.0;
-            const double ms = total * pow(k / 80.0, 1.8);
-            const double sustained = share * exp(-ms / sus);
-            const double v = sustained + (1.0 - share) * exp(-ms / rel);
-            const double py = top + depth * v;
-            if (k == 0)
-                g.moveTo(px, py);
-            else
-                g.lineTo(px, py);
+        const double p0 = plateauShown.get();
+        const double g0 = min(min(grDeepShown.get(), grShown.get()), p0);
+        // The scale grows at once with the reduction and shrinks slowly.
+        const double want = max(3.0, -1.15 * g0);
+        recoveryScale =
+            !drawn || want > recoveryScale ? want : recoveryScale + 0.03 * (want - recoveryScale);
+        const double top = y + 8, depth = h - 18;
+        // The reduction follows the sustained part at the release time
+        // while that decays: g' = (p - g) / rel, p = p0 e^(-t / sus).
+        const double b = p0 * sus / (sus - rel);
+        for (int pass = 0; pass < 3; ++pass) {
+            const bool example = pass == 0;
+            if (example && g0 < -0.5) continue;
+            const double start = example ? -0.75 * recoveryScale : g0;
+            const double body = example ? 0.35 * start : p0;
+            const double bb = example ? body * sus / (sus - rel) : b;
+            g.beginPath();
+            for (int k = 0; k <= 80; ++k) {
+                const double px = x + 6 + (w - 12) * k / 80.0;
+                const double ms = total * pow(k / 80.0, 1.8);
+                const double sustained = body * exp(-ms / sus);
+                const double v =
+                    pass == 1 ? sustained : bb * exp(-ms / sus) + (start - bb) * exp(-ms / rel);
+                const double py = top + depth * clamp(-v / recoveryScale, 0.0, 1.0);
+                if (k == 0)
+                    g.moveTo(px, py);
+                else
+                    g.lineTo(px, py);
+            }
+            if (pass == 1 && p0 > -0.05) continue;
+            g.strokeStyle(example ? Theme::textFaint : (pass == 1 ? kClay : kMoss));
+            g.globalAlpha(example ? 0.45 : (pass == 1 ? 0.7 : 1.0));
+            g.lineWidth(pass == 2 ? 2.0 : 1.0);
+            g.stroke();
+            g.globalAlpha(1.0);
         }
-        g.strokeStyle(kMoss);
-        g.lineWidth(2);
-        g.stroke();
-        g.strokeStyle(kClay);
-        g.globalAlpha(0.6);
-        g.lineWidth(1);
-        g.beginPath();
-        g.moveTo(x + 6, top + depth * share);
-        g.lineTo(x + w - 6, top + depth * share);
-        g.stroke();
-        g.globalAlpha(1.0);
+        g.fillStyle(Theme::textFaint);
+        g.monoFont(8);
+        g.textAlign(TextAlign::Right);
+        g.textBaseline(TextBaseline::Middle);
+        g.fillText(format("-%.0f dB", recoveryScale), x + w - 5, y + h - 7);
         g.fillStyle(Theme::text);
         g.boldFont(10);
         g.textAlign(TextAlign::Left);
-        g.textBaseline(TextBaseline::Middle);
         g.fillText("TWO STAGES", x, y + h + 16);
         g.fillStyle(Theme::textMuted);
         g.monoFont(9.5);
