@@ -54,8 +54,9 @@ CASES = {
     "com.suppleaudio.gorse": Case("Gorse", False, "Output", .5, .25, "gain", True),
     "com.suppleaudio.hickory": Case("Hickory", False, "Gain",
                                   normalized(0, -60, 24), normalized(-12, -60, 24), "gain", True),
+    "com.suppleaudio.sorrel": Case("Sorrel", False, "Threshold",
+                                 normalized(-80, -80, 0), normalized(-6, -80, 0), passthrough=True),
     "com.suppleaudio.analyzer": Case("Analyzer", False, "Hold", 0, 1, "transparent", True, "Gauge"),
-    "com.suppleaudio.gate": Case("Gate", False, "Threshold", 0, .925, display="Sluice"),
     "com.suppleaudio.drive": Case("Kiln", False, "Output", .5, .25, "gain"),
     "com.suppleaudio.delay": Case("Echelon", False, "Output", .5, .25, "gain"),
 }

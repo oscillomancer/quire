@@ -1,6 +1,5 @@
 add_subdirectory(common)
 add_subdirectory(suite)
-add_subdirectory(gate/engine)
 add_subdirectory(delay/engine)
 add_subdirectory(analyzer/engine)
 add_subdirectory(orrery/engine)
@@ -204,7 +203,6 @@ if(SUPPLE_BUILD_PLUGINS)
     set(${name}_clap "${staged}/${artifact}.clap" PARENT_SCOPE)
   endfunction()
 
-  supple_add_plugin(gate GATE)
   supple_add_plugin(probe-synth PROBESYNTH ProbeSynth)
   supple_add_plugin(orrery ORRERY Orrery)
   supple_add_plugin(analyzer ANALYZER)
@@ -329,6 +327,7 @@ if(SUPPLE_BUILD_PLUGINS)
   supple_add_stock_script(treeline Treeline com.suppleaudio.treeline)
   supple_add_stock_script(gorse Gorse com.suppleaudio.gorse)
   supple_add_stock_script(hickory Hickory com.suppleaudio.hickory)
+  supple_add_stock_script(sorrel Sorrel com.suppleaudio.sorrel)
 
   # A plugin taken out of the suite leaves its staged files behind, and the
   # app loads every plugin in plugins/clap: keep only what this build makes.

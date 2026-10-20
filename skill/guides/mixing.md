@@ -100,7 +100,7 @@ Use [Hickory, the stereo utility](utility.md) for gain staging, channel checks, 
 For track and bus compression, external-key ducking, upward compression and peak catching, see [Sundew, the compressor](comp.md).
 For a true-peak ceiling on the master and loudness against a LUFS target, see [Treeline, the limiter](limiter.md).
 Use [Yarrow, the stock EQ](eq.md) for measured rumble, masking and harshness cuts, de-essing and dynamic or mid/side bands.
-Use [the gate / expander guide](gate.md) to reduce between-hit spill or steady room noise with a filtered key, hysteresis and hold.
+Use [Sorrel, the gate](gate.md) to reduce between-hit spill or noise between phrases; its `suggested_threshold`, `noise_floor` and `openings` readouts say where to set it and whether it chatters.
 Use [Kiln, the saturation](drive.md) for drive, asymmetry and wavefolding with reference level compensation.
 For onset punch, softened attacks and shorter or longer decays, see [Gorse, the transient shaper](transient.md).
 For tempo-synced echoes, alternating stereo repeats and ducked throws, see [Echelon, the delay](delay.md).

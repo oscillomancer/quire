@@ -16,9 +16,9 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 | `treeline` (`plugins/stock/treeline`) | Treeline | `com.suppleaudio.treeline` | `tdOY` (the player's for the id) | `Trln` | audio-effect, limiter |
 | `gorse` (`plugins/stock/gorse`) | Gorse | `com.suppleaudio.gorse` | `dEQG` (the player's for the id) | `Gors` | audio-effect, transient-shaper |
 | `hickory` (`plugins/stock/hickory`) | Hickory | `com.suppleaudio.hickory` | `iEKh` (the player's for the id) | `Hkry` | audio-effect, utility |
+| `sorrel` (`plugins/stock/sorrel`) | Sorrel | `com.suppleaudio.sorrel` | `sTMn` (the player's for the id) | `Sorl` | audio-effect, gate |
 | `analyzer` | Gauge | `com.suppleaudio.analyzer` | `QAN1` | `QAna` | audio-effect, analyzer, stereo |
 | `drive` | Kiln | `com.suppleaudio.drive` | `QDR1` | `QDrv` | audio-effect, distortion, stereo |
-| `gate` | Sluice | `com.suppleaudio.gate` | `QGT1` | `QGat` | audio-effect, gate, expander, stereo |
 | `delay` | Echelon | `com.suppleaudio.delay` | `QDL1` | `QDly` | audio-effect, delay, stereo |
 | `reverb` | Nave | `com.suppleaudio.reverb` | `QRV1` | `QRvb` | audio-effect, reverb, stereo |
 
@@ -481,37 +481,55 @@ stereo. Everything in §1 applies.
 - Orrery keeps its own minimum-phase decimator (voices are generated at the
   oversampled rate); do not change Orrery.
 
-## 8. Second wave: gate / expander — Sluice [`gate`] (`stock-effects.md` §3)
+## 8. Gate / expander — Sorrel [`sorrel`] (`stock-effects.md` §3)
 
-Identity: display name Sluice, id `gate`, CLAP id `com.suppleaudio.gate`,
-state magic `QGT1`, AU subtype `QGat`, features audio-effect, gate,
-expander, stereo. Everything in §1 applies. Ports as the compressor (§3):
-main stereo plus a non-main "Sidechain" input.
+A DSP script (ADR-0047), `plugins/stock/sorrel/script/sorrel.cpp`. It
+replaced Sluice (`com.suppleaudio.gate`) with a new design. Notes for
+maintainers:
 
-- Detector as the compressor's (key filters `sc_highpass`/`sc_lowpass`,
-  peak, stereo link; `sc_listen` outputs the filtered key). Reuse nothing by
-  linking across plugins: copy the few lines you need into this engine.
-- **Gate:** a state machine per linked detector — opens when the level
-  rises above `threshold`, closes when it falls below `threshold −
-  hysteresis` and `hold` has elapsed since it last exceeded the close level.
-  The gain moves between 0 dB and `range` with `attack` (opening) and
-  `release` (closing) as one-pole ramps in the dB domain (the floor is
-  `range`, not silence, unless range is −80 → treat −80 as −inf: exact zero).
-- **Expander:** downward expansion below `threshold` by `ratio`
-  (gain = (ratio − 1)·(level − threshold) dB, floored at `range`), with the
-  same attack/release ballistics and hysteresis on the threshold.
-- `lookahead` (`off`/`1ms`/`5ms`, stepped): delays the audio so the gate is
-  open when a transient arrives; latency = lookahead samples.
-- Readonly `gr` (dB) and `open` (bool) update at most every 50 ms.
-- Tests: a burst above threshold opens within attack (±10 %) and closes
-  after hold + release; hysteresis prevents chatter on a signal oscillating
-  ±2 dB around the threshold (count transitions); range −40 dB floors the
-  closed gain at −40 ± 0.1 dB, range −80 gives exact zeros; external key
-  gating a silent-keyed input keeps it closed; lookahead: the transient's
-  first sample passes at full gain; expander static curve within 0.2 dB.
-- GUI: a level/threshold meter with the hysteresis band, open/closed
-  indicator and gain history, controls grouped as the compressor's.
-  Scenarios: `default`, `drums` (hold 50 ms, range −30, key high-pass).
+- **Two clocks.** The detector and the state run on the key as it
+  arrives, a lookahead ahead of the audio. Each sample's target gain goes
+  into a line (stored 200 dB up, so the line's first zeros read as closed);
+  the gain the audio now playing gets is the largest target of the next
+  `attack` + 1 ms (a monotonic-queue peak hold, at most the lookahead) for
+  rising, and the current one for falling. That is what lands the opening
+  a millisecond before the threshold crossing and starts the fall exactly
+  where the state closed.
+- **Shapes.** The gate opens along a raised cosine in amplitude (its
+  largest step at 1 ms is 0.033 of full scale per sample at 48 kHz);
+  Expand rises along a one-pole in amplitude; both fall at a steady rate
+  in dB, its speed eased in over 3 ms. A gain the closed range asks for is
+  never passed under, and −80 dB (the range's minimum) is −90 dB and then
+  zero.
+- **Follow** reads the detector's level once a millisecond from a ring of
+  2048. Measuring only up to the close crossing reads an abrupt stop as no
+  fall at all (the level is still high there), hence the 20 ms after it.
+- **Suggestion.** Tried on drum spill, a ringing tom, a sung line over
+  hiss, tone bursts and a bass note: splitting the histogram in two
+  (Otsu) split a soft passage from a loud one as readily as noise from
+  sound, and walking up from the noise's peak to where the counts fall
+  found no edge, since decays fill the levels above the noise. Measuring
+  the noise's spread from below did not fail on any of them (snare spill
+  −39.5, tom −35.5, vocal −34.5, bursts over −70 dBFS noise −48.5, bass
+  −43.5 dBFS, each 12 to 14 dB over its floor).
+- **Lookahead** is a choice (`off`, 1, 2, 5 ms) with `.restarts()`;
+  latency is the lookahead in samples at the running rate.
+- **Editor.** The history's out trace is what the gate passes, whatever
+  listen plays. The SET pill takes `suggested_threshold`; the gain lane
+  maps 0 to −80 dB and fills from the range up.
+- **Tests.** The suite every stock plugin has, and
+  `plugin.sorrel.response`: a −12 dBFS sine passes at 0.00 dB with and
+  without lookahead; under a −6 dB threshold it holds at −40 dB, and at
+  range −80 it is silent; Expand at 2:1 measures −6 dB; a 2 kHz key
+  high-pass keeps a 100 Hz sine from opening it. The reset check's
+  stimulus ends in a quiet quarter so that its S1 (threshold −60) and
+  defaults differ for a gate. During development, on the material above:
+  every hard onset passed bit-exact through its first 3 ms, and a ghost
+  note's rising noise burst no longer lost 4 dB at its onset; with the
+  default range the gaps were 40 dB down; the 40 Hz note, a tone wobbling
+  ±2 dB around the threshold and the vocal phrases each opened it once;
+  Follow closed a tom ringing at 30 dB/s at about 120 dB/s (the clamp) where
+  the fixed release fell at 400 dB/s; about 2 % of a core in the player.
 
 ## 10. Third wave: delay — Echelon [`delay`] (`stock-effects.md` §6)
 

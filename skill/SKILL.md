@@ -51,7 +51,7 @@ their undo history and can be reviewed.
 | Compressing (six characters, upward too), external-key ducking, catching peaks (Sundew/compressor) | `guides/comp.md` |
 | Limiting the master to a true-peak ceiling, loudness targets (LUFS), level-matched comparison (Treeline/limiter) | `guides/limiter.md` |
 | Gain staging, polarity, channel checks, width, balance, bass mono, lining tracks up (Hickory/utility) | `guides/utility.md` |
-| Cleaning spill or noise with a gate or expander (Sluice/gate) | `guides/gate.md` |
+| Cleaning spill or noise with a gate or expander, finding its threshold (Sorrel/gate) | `guides/gate.md` |
 | Saturation: drive, asymmetry, wavefolding (Kiln/drive) | `guides/drive.md` |
 | Onset punch, softer attacks, shorter or longer decays (Gorse, the transient shaper) | `guides/transient.md` |
 | Writing a Lua script (loops, conditionals, subscriptions, one transaction) | `guides/lua.md`, `generated/engine.lua` |

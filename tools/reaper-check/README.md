@@ -109,8 +109,9 @@ and finite decoded samples. The reader handles PCM 8/16/24/32 and IEEE float
 than asserting the plugin's internal floating-point safety.
 
 Default output must be non-silent. Instrument bypass must be silent. Hickory,
-Gauge, neutral Gorse, Yarrow (every band off) and Treeline (no gain, the
-signal under its ceiling) must match bypass sample-for-sample; other defaults must differ. Dynamics differences may
+Gauge, neutral Gorse, Yarrow (every band off), Treeline (no gain, the
+signal under its ceiling) and Sorrel (the fixture above its threshold) must
+match bypass sample-for-sample; other defaults must differ. Dynamics differences may
 include startup ramps.
 
 | CLAP id suffix | Artifact / host name | Automated parameter | Points at 0 / 2 seconds | Expectation |
@@ -122,8 +123,8 @@ include startup ramps.
 | `treeline` | Treeline | Ceiling | 0 / −24 dB | second half >3 dB quieter |
 | `gorse` | Gorse | Output | 0 / −12 dB | −12 ±1 dB |
 | `hickory` | Hickory | Gain | 0 / −12 dB | −12 ±1 dB |
+| `sorrel` | Sorrel | Threshold | −80 / −6 dB | second half >3 dB quieter |
 | `analyzer` | Analyzer / Gauge | Hold | false / true | envelope reload + unchanged audio |
-| `gate` | Gate / Sluice | Threshold | −80 / −6 dB | second half >3 dB quieter |
 | `drive` | Kiln | Output | 0 / −12 dB | −12 ±1 dB |
 | `delay` | Echelon | Output | 0 / −12 dB | −12 ±1 dB |
 

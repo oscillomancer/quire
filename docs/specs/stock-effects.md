@@ -47,7 +47,9 @@
   registered as `plugin.<id>.reset` for every stock plugin and Orrery) renders
   state S1, then S2 after `reset()`, and requires that S2 render to be
   bit-identical to a fresh instance holding S2 — at block 256 and again at 64.
-  Scripted stock plugins (ADR-0047) also run it with `--stepped`
+  Its stimulus is a 220 Hz tone with a noise burst, the last quarter 40 dB
+  down, so a gate or an expander has a quiet passage to act on. Scripted
+  stock plugins (ADR-0047) also run it with `--stepped`
   (`plugin.<name>.reset-stepped`): every switch and choice moved off its
   default in both states, so a plugin whose default is a passthrough still
   shows its processing state; a switch that silences the plugin by itself
@@ -292,57 +294,90 @@ Not a limiter: there is no ceiling and no true-peak detection. Clean at
 20:1 with lookahead holds sample peaks closely; a ceiling belongs to
 Treeline (§10).
 
-## 3. Gate / expander — "Sluice" [`gate`]
+## 3. Gate / expander — "Sorrel" [`sorrel`]
 
-Sidechain input as for the compressor. Keys: `mode` (`gate`, `expander`),
-`threshold` dB −80..0 (−40), `range` dB −80..0 (−80; attenuation floor),
-`ratio` 1..10 (expander, 2), `hysteresis` dB 0..12 (3), `attack` ms
-0.01..100 log (0.5), `hold` ms 0..1000 (20), `release` ms 5..5000 log (150),
-`lookahead` enum `off`/`1ms`/`5ms`, `sidechain`, `sc_highpass`,
-`sc_lowpass`, `sc_listen`, `stereo_link` %, `mix` %, `output` dB, readonly
-`gr` dB, readonly `open` bool.
+A gate that means to leave no trace on what it lets through, written as a
+DSP script (ADR-0047: `plugins/stock/sorrel/script/sorrel.cpp`), with a
+key input and readouts that say where its threshold belongs. Main stereo or
+mono in and out, a stereo "Sidechain" input; latency is the lookahead.
 
-### Implementation decisions (2026-09-29)
+| key | type | range | curve | default |
+|---|---|---|---|---|
+| `mode` | enum | `gate`, `expand` | | `gate` |
+| `threshold` | dBFS | −80..0: the key level above which it opens | linear | −40 |
+| `hysteresis` | dB | 0..24: how far under the threshold it closes (gate) | linear | 6 |
+| `range` | dB | −80..0: the gain while closed; −80 is silence (−inf) | linear | −40 |
+| `ratio` | ratio | 1.2..10 (expand) | log | 2 |
+| `attack` | ms | 0.05..50: the opening's length | log | 1 |
+| `hold` | ms | 0..1000: open after the level falls under the close level | cubic | 20 |
+| `release` | ms | 10..3000: the time to turn down 60 dB | log | 150 |
+| `follow` | bool | close at the sound's own rate of decay (gate) | | true |
+| `lookahead` | enum | `off`, `ms1`, `ms2`, `ms5`; a restart, not automatable | | `ms2` |
+| `key` | enum | `internal`, `external` (the sidechain, when connected) | | `internal` |
+| `key_hpf` | Hz | 20..2000 on the key; 20 is off | log | 20 |
+| `key_lpf` | Hz | 100..20000 on the key; 20000 is off | log | 20000 |
+| `listen` | enum | `off`, `key`, `delta` (what it takes away); not automatable | | `off` |
+| `gain` | dB | readonly, −80..0: the lowest gain of the last block | | |
+| `noise_floor` | dBFS | readonly: the commonest key level of the quietest 30 % of the last 10 s | | |
+| `loud_level` | dBFS | readonly: the key level exceeded 5 % of the last 10 s | | |
+| `suggested_threshold` | dBFS | readonly: see below | | |
+| `open_time` | % | readonly: the share of the last 10 s it was open | | |
+| `openings` | | readonly: how many times it opened in the last 10 s | | |
 
-- `mode` defaults to `gate`. Shared detector/output keys use the compressor's
-  ranges/defaults: `sidechain` internal/external (internal), `sc_highpass`
-  10..500 Hz log (10 = off), `sc_lowpass` 1000..20000 Hz log (20000 = off),
-  `sc_listen` false, `stereo_link` 0..100 % (100), `mix` 0..100 % (100),
-  `output` −24..24 dB (0). `ratio` and `hold` have linear host curves.
-  Lookahead machine keys are `off`/`ms1`/`ms5`, labels off/1 ms/5 ms,
-  following the lowercase-letter enum-key convention; default off.
-- The key uses 12 dB/oct Butterworth TPT high/low-pass sections. Corners
-  clamp to 0.45 fs internally. Linking blends each channel's absolute key
-  with the stereo maximum in amplitude, before converting to dB. A missing
-  external key is silence; the sidechain bus remains stereo in mono mode.
-- Gate state opens strictly above threshold, refreshes hold at or above
-  threshold minus hysteresis, and closes after that sample-counted hold.
-  `open` reports either channel's logical state, independent of gain ramp.
-  The expander uses the same state/hold: while latched open it has unity
-  target gain; while closed it uses `(ratio−1)·(level−threshold)`, capped
-  between range and 0 dB. Thus its hysteresis band is history-dependent.
-- Attack/release are one-pole time constants in the dB domain: 63.2 % of
-  the change after one time constant, not full settling. A −80 dB range is
-  exact mute initially closed and once within 0.0001 dB of the closing
-  floor; finite ranges retain their stated gain. Dry mix remains audible.
-- Lookahead is rounded to samples, delays both main and monitored key,
-  and aligns the dry path. Opening normalizes the one-pole ramp to the
-  available lookahead so it reaches unity before the delayed onset, even
-  if attack is longer. Hold is at least lookahead + one sample to preserve
-  short onsets. With lookahead off, the attack time constant is unmodified.
-  Active edits request a coalesced host restart; both processing delay and
-  reported latency remain the activated value until reactivation.
-- Continuous controls ramp over 20 ms (key frequency in log space); mode,
-  key source, listen and key-filter enable transitions ramp over 10 ms.
-  Filter/time coefficients update on a reset-counted 16-sample grid.
-  Restoration before processing snaps. Nonfinite input becomes zero and
-  input magnitudes above 1e8 are bounded before they enter recursive state.
-  Activation also supports the validator's 8 kHz case; lookahead alignment
-  is tested up to 768 kHz in addition to the required rate sweep.
-- Key listen replaces the wet signal with the filtered, delayed key; mix
-  and output still apply. Readonly `gr` is −80..0 dB, the deepest channel
-  gain before mix/output; `open` is bool. Both publish every 50 ms. Editor
-  key level is the current linked detector sample at that same cadence.
+- **Detector.** The louder channel of the key (12 dB/oct Butterworth
+  high- and low-pass when set; the low-pass clamps to 0.45 fs), held at its
+  peak over a sliding 10 ms, so no cycle of a 50 Hz note reads as a fall.
+  An external key that is not connected falls back to the input.
+- **State.** Opens when the level rises above `threshold`; closes once it
+  has stayed under `threshold − hysteresis` for `hold`. The state runs in
+  both modes: it gives `open_time` and `openings`.
+- **Gain.** `gate`: open is 0 dB, closed is `range`. `expand`: each dB
+  under the threshold becomes `ratio` dB, with a 6 dB knee, down to
+  `range`. Opening (gate) is a raised cosine in amplitude over `attack`;
+  in Expand the gain approaches the curve in amplitude, 95 % of the way in
+  `attack`. With lookahead the audio is delayed and the gain rises for
+  anything the key asks within the next `attack` + 1 ms (at most the
+  lookahead): the opening ends a millisecond before the level crosses the
+  threshold, so an onset passes whole with its rise, and the noise before
+  it stays down. Closing is a steady fall in dB at 60 dB per `release`,
+  its speed eased in over 3 ms, to the range; −80 fades to −90 dB, then
+  exact zeros. Expand holds a falling gain for `hold` before it falls.
+- **Follow** (gate): the fall takes the rate the key's level fell at from
+  50 ms before it went under the close level to 20 ms after (or the end of
+  a shorter hold), clamped to a quarter to four times the release's rate.
+  A sound that stops dead closes fast; a ringing tom fades as it rang.
+- **Listen.** `key` plays the filtered key, delayed with the audio;
+  `delta` plays input − output, what the gate takes away. A switch fades
+  over 10 ms.
+- **Readouts.** The detector's level each millisecond goes into a
+  histogram of 1 dB bins (−96..0 dBFS; digital silence is skipped), kept in
+  100 chunks of 100 ms. Every 100 ms: `noise_floor` is the commonest level
+  among the quietest 30 % (smoothed over ±2 dB); the noise's peaks reach
+  twice as far above it as the quietest 2 % lie below it, and at least
+  4 dB; `suggested_threshold` puts the close level 2 dB above those peaks
+  (`threshold − hysteresis` = peaks + 2), kept 3 dB under `loud_level`. The
+  levels between the noise and the sound are full of the sound's own
+  decays, so the suggestion is measured from below. All read −96 until
+  300 ms of sound have been heard. It assumes quiet stretches exist; on
+  material that never pauses it reads the quiet parts as the floor.
+- With every sample above the threshold the output is the input, delayed
+  by the lookahead, bit for bit.
+
+Editor (1000 × 720): four seconds of what came in, what goes out and, in
+rose, what was taken, with the key when it is filtered or external, and
+the threshold and close lines (drag either; a press elsewhere sets the
+threshold); the gain under it (drag for the range); the histogram of the
+key's last ten seconds on the same scale, coloured above the threshold,
+in the hysteresis band and under the close level, with the suggestion
+marked and SET to take it, and the readouts; a transfer plot with the
+gate's open and closed branches and the jumps between them (or Expand's
+curve) and a dot for now; a sketch of one sound's gain (the opening
+landing before the onset, the hold, the fade, and Follow's span); key and
+listen controls. The header's sprig of wood sorrel folds its leaves as the
+gate closes.
+
+Factory patches: Clean Start, Snare Spill, Kick Tight, Tom Ring, Vocal
+Pauses (expand), Amp Hiss, Full Silence, Keyed Chop (external key).
 
 ## 4. Transient shaper — "Gorse" [`gorse`]
 

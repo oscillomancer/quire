@@ -14,6 +14,7 @@ player, and every check the other stock plugins have.
 | `treeline` | Treeline, the limiter | `com.suppleaudio.treeline` |
 | `gorse` | Gorse, the transient shaper | `com.suppleaudio.gorse` |
 | `hickory` | Hickory, the stereo utility | `com.suppleaudio.hickory` |
+| `sorrel` | Sorrel, the gate and expander | `com.suppleaudio.sorrel` |
 
 ## Files
 
