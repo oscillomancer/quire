@@ -179,6 +179,7 @@ const char* baseUnitText(Unit unit) {
         case Unit::Samples: return "smp";
         case Unit::Octaves: return "oct";
         case Unit::Bpm: return "BPM";
+        case Unit::Meters: return "m";
         case Unit::Pan:
         case Unit::Note:
         case Unit::None: break;
@@ -449,6 +450,14 @@ ValueText describe(const ParamDef& p, double host) {
             copyText(t.unit, sizeof(t.unit), p.suffix ? p.suffix : baseUnitText(p.unit));
             return t;
         }
+        case Unit::Meters: {
+            // A tenth of a metre below a hundred: "2.4 m", "18.0 m", "120 m".
+            auto rule = [&](double x) { return p.precision >= 0 ? p.precision : x < 100.0 ? 1 : 0; };
+            const double rounded = settle(v, rule, d);
+            writeFixed(rounded, d, plus, t.number, sizeof(t.number));
+            copyText(t.unit, sizeof(t.unit), p.suffix ? p.suffix : "m");
+            return t;
+        }
         case Unit::Pan: {
             auto rule = [&](double) { return p.precision >= 0 ? p.precision : 0; };
             const double rounded = settle(std::fabs(v) * 100.0, rule, d);
@@ -590,6 +599,13 @@ bool parseValue(const ParamDef& p, const char* text, double& host) {
                  tokenIs(token, p.suffix);
             break;
         case Unit::Bpm: ok = bare || tokenIs(token, "bpm") || tokenIs(token, p.suffix); break;
+        case Unit::Meters:
+            if (bare || tokenIs(token, "m") || tokenIs(token, "meters") || tokenIs(token, "metres") ||
+                tokenIs(token, "meter") || tokenIs(token, "metre") || tokenIs(token, p.suffix))
+                ok = true;
+            else if (tokenIs(token, "cm")) { ok = true; scale = 0.01; }
+            else if (tokenIs(token, "ft") || tokenIs(token, "feet")) { ok = true; scale = 0.3048; }
+            break;
         case Unit::Pan:
         case Unit::Note:
         case Unit::None: ok = bare || tokenIs(token, p.suffix); break;

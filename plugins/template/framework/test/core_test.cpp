@@ -209,6 +209,10 @@ TEST(each_unit_writes_and_reads_its_own_text) {
     CHECK(text(tempo, 120.0) == "120.0 BPM");
     CHECK(parsed(tempo, "98.5 bpm") == 98.5);
     CHECK(text(cents(5, "Fine", -100.0, 100.0, 0.0), -12.0) == "-12 ct");
+    const ParamDef across = meters(9, "Width", 1.0, 200.0, 18.0);
+    CHECK(text(across, 18.0) == "18.0 m" && text(across, 2.44) == "2.4 m" && text(across, 120.0) == "120 m");
+    CHECK(parsed(across, "12 m") == 12.0 && parsed(across, "12.5 metres") == 12.5 && parsed(across, "7") == 7.0);
+    CHECK(parsed(across, "250 cm") == 2.5 && std::fabs(parsed(across, "10 ft") - 3.048) < 1e-12);
 
     const ParamDef balance = pan(6, "Pan");
     CHECK(text(balance, 0.0) == "C" && text(balance, -0.5) == "50L" && text(balance, 0.25) == "25R");

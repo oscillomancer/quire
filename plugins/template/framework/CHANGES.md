@@ -4,6 +4,15 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.26.0
+
+What a product must do: nothing.
+
+- **A distance unit: metres** (`core/Param.h`). `Unit::Meters` and its
+  factory `meters()`, for a room's size or a source's place: shown as
+  "2.4 m", "18.0 m" and "120 m", and read back from "12 m", "12.5 metres",
+  "250 cm" or "10 ft".
+
 ## 1.25.2
 
 What a product must do: nothing.
