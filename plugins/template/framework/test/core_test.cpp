@@ -846,6 +846,44 @@ TEST(each_split_sees_the_transport_where_it_starts) {
     }
 }
 
+namespace {
+
+// A delay's tail: one beat at the tempo it last heard.
+class TempoTail : public ProcessorBase<TempoTail> {
+  public:
+    void prepare(const ProcessSetup&, const ParamValues&) {}
+    void update(const ParamValues&) {}
+    void process(Block& b) {
+        if (b.transport) tail = static_cast<uint32_t>(48000.0 * 60.0 / b.transport->tempo);
+    }
+    uint32_t tailSamples() const { return tail; }
+    uint32_t tail = 0;
+};
+
+}  // namespace
+
+TEST(a_tail_that_changes_as_the_processor_plays_reaches_the_host) {
+    auto engine = std::make_unique<BasicEngine<TempoTail>>();
+    engine->activate(48000.0, 512, 2, 2);
+    CHECK(!engine->takeTailChange());
+    Transport t;
+    t.hasTempo = true;
+    t.tempo = 120.0;
+    std::vector<double> l(256), r(256);
+    double* io[] = {l.data(), r.data()};
+    NoEvents none;
+    engine->process<double>(io, io, 256, none, &t);
+    CHECK(engine->tail() == 24000);
+    CHECK(engine->takeTailChange());
+    CHECK(!engine->takeTailChange());
+    engine->process<double>(io, io, 256, none, &t);
+    CHECK(!engine->takeTailChange());  // told once, not every block
+    t.tempo = 60.0;
+    engine->process<double>(io, io, 256, none, &t);
+    CHECK(engine->tail() == 48000);
+    CHECK(engine->takeTailChange());
+}
+
 TEST(reset_preserves_parameters_and_clears_history) {
     // After reset, the engine behaves as a fresh one with the same values.
     test::RenderOptions o;

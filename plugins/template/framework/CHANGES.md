@@ -4,6 +4,16 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.25.2
+
+What a product must do: nothing.
+
+- **A tail that changes as the processor plays reaches the host**
+  (`core/Engine.h`). The engine read `tailSamples()` only after an update
+  or a file, so a tail that follows what the processor hears (a delay's,
+  the song's tempo) stayed as it was until a parameter moved. It is read
+  after every split now, and the host is told once per change.
+
 ## 1.25.1
 
 What a product must do: nothing.
