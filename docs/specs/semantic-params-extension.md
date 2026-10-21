@@ -59,10 +59,6 @@ typedef struct clap_plugin_supple_semantic_params {
     /* [main-thread] Writes a compact prose description of the current patch
      * (UTF-8 plain text, ≤ 600 characters for DETAIL_CHANGED). */
     bool(CLAP_ABI *describe)(const clap_plugin_t *plugin, uint32_t detail, const clap_ostream_t *out);
-    /* [main-thread] Optional compact live supple.analysis-report/1.0 JSON.
-     * NULL for plugins without telemetry; false when unavailable or the stream
-     * fails. Check struct_size through this member and its pointer first. */
-    bool(CLAP_ABI *get_telemetry)(const clap_plugin_t *plugin, const clap_ostream_t *out);
     /* [main-thread] Optional read-only supple.factory-patches/1.0 document.
      * Check struct_size through this member and a non-null pointer first. */
     bool(CLAP_ABI *get_factory_patches)(const clap_plugin_t *plugin, const clap_ostream_t *out);
@@ -129,22 +125,21 @@ Hosts read `struct_size` and must not call members beyond it. Plugins set it
 to `sizeof(clap_plugin_supple_semantic_params_t)` of the header they were
 built with. New members are only ever appended.
 
-The optional `get_telemetry` member was appended for the analyzer (2026-09-29).
-To call it, require `struct_size >= offsetof(type, get_telemetry) +
-sizeof(extension->get_telemetry)` and a non-null pointer. Original members
-remain usable when `struct_size >= offsetof(type, get_telemetry)`; hosts must
-not require the new full struct size just to call the old members. Existing
-plugins expose a null callback. A telemetry report does not change patch state.
-Gauge, the analyzer that used it, reported the existing analysis-report
-source/loudness/spectral/stereo fields it measured. Since Lichen replaced it
-(2026-10-20), no stock plugin implements the member; Lichen's measurements
-are read-only parameters, which the engine reads with `fx.meters`.
+The original members (through `describe`) are usable when `struct_size >=
+offsetof(type, get_factory_patches)`; a shorter struct is not used.
 
 `get_factory_patches` was appended on 2026-10-13. Calling it requires
 `struct_size >= offsetof(type, get_factory_patches) + sizeof(extension->get_factory_patches)`
 and a non-null pointer. A shorter struct or null callback offers no factory
-patches; its earlier methods remain usable. In particular, neither the
-original methods nor `get_telemetry` require the new full struct size.
+patches; its earlier methods remain usable: hosts must not require the full
+struct size just to call them.
+
+(2026-10-20) A `get_telemetry` member, appended for the analyzer Gauge on
+2026-09-29 between `describe` and `get_factory_patches`, was removed before
+any release, once Lichen replaced Gauge: nothing called it and no other
+plugin set it. Its removal is the one exception to append-only; a plugin
+built with it reads to a host as offering no factory patches until rebuilt.
+Measurements reach hosts and agents as read-only parameters (`fx.meters`).
 
 ## 5. Threading, real-time safety, parameter sync
 

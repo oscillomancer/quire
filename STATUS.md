@@ -431,9 +431,6 @@ Engine and hosting:
   state blob.
 - `fx.meters` reads a plugin's readouts live or as the last `render.mix`
   ended; other renders (stems, regions, A/B) keep none.
-- No plugin implements the semantic extension's `get_telemetry` member since
-  Gauge was replaced; `core-analysis`'s `LiveMeter`, written for it, has no
-  user.
 - FX containers are not implemented; parallel FX run in series on pinned
   stages and strips with auxiliary channels, and oversampling is not
   available to plug-ins with auxiliary outputs.

@@ -23,10 +23,7 @@ struct Signal {
 class LoudnessMeter {
   public:
     enum class Mode { Exact, Histogram };
-    void prepare(double sampleRate, Layout layout, Mode mode, double maxSeconds = 0,
-                 double windowSeconds = 0);
-    // windowSeconds > 0 retains only complete loudness blocks wholly inside
-    // that rolling horizon (100 ms hop); 0 integrates since reset.
+    void prepare(double sampleRate, Layout layout, Mode mode, double maxSeconds = 0);
     void reset() SUPPLE_RT;
     void process(std::span<const float* const> channels, int frames) SUPPLE_RT;
     double momentary() const { return momentary_; }
@@ -53,10 +50,6 @@ class LoudnessMeter {
     std::vector<double> exactBlocks_, exactShort_;
     std::array<std::uint32_t, kBins> blocksHist_{}, shortHist_{};
     std::array<double, kBins> blockEnergyHist_{}, shortEnergyHist_{};
-    bool rolling_ = false;
-    std::size_t blockHead_ = 0, shortHead_ = 0, peakHead_ = 0;
-    std::vector<double> rollingBlocks_, rollingShort_, rollingPeaks_, rollingSamplePeaks_;
-    double hopPeak_ = 0, hopSamplePeak_ = 0;
     std::size_t blockCount_ = 0, shortCount_ = 0;
     std::uint64_t samples_ = 0;
     double sum400_ = 0, sum3_ = 0;

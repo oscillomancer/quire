@@ -377,27 +377,10 @@ simple synthesis code) committed to `docs/specs/examples/analysis/`.
 - Example reports: `docs/specs/examples/analysis/{pluck,pad,drums}.json`,
   regenerated with `SUPPLE_UPDATE_EXAMPLES=1 core-analysis.tests`.
 
-## 9. Live measurement pieces (2026-09-29)
+## 9. Live measurement pieces (removed)
 
-`analysis/live.h` adds a consumer-thread `LiveMeter` for the stock analyzer
-(Gauge; since Lichen replaced it on 2026-10-20 it has no user).
-It uses `LoudnessMeter` plus Pearson stereo sums and a Hann FFT, all on a
-sample-counted 100 ms observation grid. `LoudnessMeter::prepare` accepts an
-optional `windowSeconds` after `maxSeconds`: zero keeps its original
-since-reset behavior; positive values (minimum effective horizon 3 s) expire
-complete 400 ms and 3 s blocks wholly inside the horizon. Both Exact and
-Histogram modes support expiry; peaks expire in 100 ms buckets.
-
-Live stereo sums use the same horizon/grid; width = side/(mid+side) energy,
-balance = right/left power in dB. The spectrum uses `(L+R)/2`, ~43 ms Hann
-frames, and 300 ms exponential power smoothing; its centroid and 31-band
-levels are current measurements, rather than full-window offline statistics.
-`LiveMeasurements` carries finite meter floors (−120 for unavailable levels,
-0 for unavailable LRA/centroid, +1 correlation for silence). `toJson` writes
-the measured subset of the existing analysis-report field names, with its
-rounding rules; current M/S are single-point series. Unsupported descriptors
-are omitted. This class is intended for a measurement consumer, not the
-plugin audio thread. Before `prepare`, input is ignored. The analyzer owns
-queue/overflow/hold/reset semantics. Live `observe` loudness results retain a
-minimum 3 s horizon even when its requested window is shorter; stereo and
-current spectrum retain their documented window and smoothing behavior.
+A consumer-thread `LiveMeter` (`analysis/live.h`, 2026-09-29) and a rolling
+horizon for `LoudnessMeter` (`prepare`'s `windowSeconds`) served the analyzer
+Gauge. Lichen, which replaced it, measures inside its own script, so both
+were removed on 2026-10-20; `LoudnessMeter` integrates since reset, as
+before them.

@@ -104,10 +104,6 @@ class FlatSemantic {
     bool setPatch(std::uint32_t mode, const char* json, std::uint32_t size,
                   const clap_ostream_t* errors);
     bool describe(std::uint32_t detail, const clap_ostream_t* out) const;
-    // Set before exposing extension<Resolver, true>(). Non-telemetry plugins
-    // expose a null member; changing the hook never changes RT state.
-    std::function<bool(const clap_ostream_t*)> telemetry;
-    bool getTelemetry(const clap_ostream_t* out) const { return telemetry && telemetry(out); }
 
     // CLAP state: framed canonical patch JSON; load is transactional (parse and
     // validate fully, then apply). `legacyLoad`, when set, is tried for a stream
@@ -132,7 +128,7 @@ class FlatSemantic {
     // FlatSemantic through `resolve(plugin)`. Keep the returned object alive
     // as long as the plugin (typically a static).
     using Resolver = FlatSemantic* (*)(const clap_plugin_t*);
-    template <Resolver R, bool HasTelemetry = false>
+    template <Resolver R>
     static const clap_plugin_supple_semantic_params_t* extension() {
         static const clap_plugin_supple_semantic_params_t ext = {
             sizeof(clap_plugin_supple_semantic_params_t),
@@ -145,9 +141,6 @@ class FlatSemantic {
             [](const clap_plugin_t* p, uint32_t d, const clap_ostream_t* o) {
                 return R(p)->describe(d, o);
             },
-            HasTelemetry ? +[](const clap_plugin_t* p,
-                               const clap_ostream_t* o) { return R(p)->getTelemetry(o); }
-                         : nullptr,
             nullptr};
         return &ext;
     }

@@ -47,7 +47,6 @@ const clap_plugin_supple_semantic_params_t kExtension = {
         const SemanticLayer* l = layerOf(p);
         return l && l->describe(detail, out);
     },
-    nullptr,  // no live telemetry
     [](const clap_plugin_t* p, const clap_ostream_t* out) {
         const SemanticLayer* l = layerOf(p);
         return l && l->getFactoryPatches(out);
