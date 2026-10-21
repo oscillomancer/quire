@@ -207,6 +207,7 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
         if (routes)
             files.add(property(kRoutesProperty, "Routes")
                           .maxBytes(16384)
+                          .hidden()
                           .help("The modulation routes, one a line: source>parameter amount, "
                                 "and the source it goes through if any. A patch sets them as "
                                 "its routes member."));

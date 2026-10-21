@@ -829,6 +829,7 @@ struct R : Instrument {
     const Meaning& m = d->meaning();
     CHECK(m.routes == 0);
     if (m.routes != 0) return;
+    CHECK(d->properties().at(0).isHidden());  // the automatic editor's to leave out
     CHECK(m.sources.front().key == "half");
     CHECK(m.sources[1].key == "velocity");  // an instrument's own, after the script's
     CHECK(m.params[0].routable == Routable::Voice);

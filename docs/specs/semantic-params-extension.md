@@ -344,5 +344,6 @@ patch as a chunk.
   ...`.
 - The routes live in a text property of the plugin's (a DSP script's:
   `routes`, one route a line), so state and presets carry them; a patch
-  never shows that property among its `properties`. Restoring a saved patch
+  never shows that property among its `properties`, nor the automatic
+  editor as a text field (framework 1.29.0's `.hidden()`). Restoring a saved patch
   keeps the routes whose source and parameter still exist.
