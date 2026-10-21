@@ -6050,7 +6050,7 @@ struct Marram : Instrument {
             .set(o2Wave, "sine")
             .set(o2Level, -2)
             .set(o2Retrigger, true)
-            .set(f1Cutoff, 220)
+            .set(f1Cutoff, 600)
             .set(f1Resonance, 30)
             .set(f1Env, 3.5)
             .set(f1Keytrack, 50)

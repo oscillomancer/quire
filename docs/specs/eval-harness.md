@@ -41,8 +41,8 @@ the agent; `--blind` withholds them (same tasks and scoring), so the agent works
 from the verbal description alone — the discriminating variant, since the
 published targets made the first full run trivially 30/30 (2026-10-01). The dry runner sets the **current guide recipe**, rather than a stale
 copied baseline; every recipe must pass its own profile. The recipes are
-Marram's factory sounds of the same names (the pluck bass's filter opened, the
-vowel lead's vowel moved by a slow LFO); the profiles were calibrated on
+Marram's factory sounds of the same names (the vowel lead's vowel also moved
+by a slow LFO); the profiles were calibrated on
 Orrery's recipes and still hold. Three prompts that asked for effects (chorus,
 delay, reverb) ask for the synth alone, since the final chain is the one
 instrument (2026-10-21).

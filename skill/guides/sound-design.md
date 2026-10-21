@@ -187,7 +187,6 @@ the line after it names the parameters worth optimizing.
 Optimize: `filter1.cutoff`, `env2.attack`, `env2.decay`, `amp.attack`.
 
 **Plucky bass with a filter snap** (Pluck Bass)
-The factory Pluck Bass, its filter opened from 220 Hz so the snap shows.
 ```json
 {"schema": "supple.marram-patch/1.0",
  "params": {
