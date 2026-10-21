@@ -40,6 +40,8 @@ or another client may determine the granted quantum. JSON records requested
 and actual settings. A different grant is retained as fixed-run data but is
 rejected by a requested-setting capacity search. Server loss, missing signal,
 processing errors, warnings or timing-storage overflow invalidate B1 data.
+Silence with anticipation misses is not a missing signal: the renderer fell so
+far behind that its ring never filled, and the run counts as a failure.
 B1 supplies silent monitored input, opens no physical capture ports, and
 silences physical outputs after observing the DSP peak. B2's private JACK
 configuration still monitors physical stereo input and plays output; use a
