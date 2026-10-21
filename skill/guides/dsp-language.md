@@ -100,11 +100,33 @@ positive, and integer parameter ranges must fit in `int`.
 | `.role({"level"})` | What it does, for agents: `level`, `time`, `brightness` ... |
 | `.keys({"db12", "db24"})` | A choice's patch keys, one per option, where its labels make poor ones (see below) |
 | `.curved(Curve::Log)`, `.curved(Curve::Pow, k)` | Knob travel |
+| `.activeWhen(on)`, `.activeWhen(mode, {"Bell", "Notch"})` | It applies only while the toggle `on` is on, or the choice `mode` is one of these options (see below) |
+| `.activeUnless(on)`, `.activeUnless(mode, {"Low Cut"})` | The other way about: while `on` is off, or `mode` is none of these |
 | `.withKey("key")`, `.withId(n)` | Override the patch key or the CLAP id (see below) |
 
 Reading: a `Param` reads as a `double` in its unit (`gain * 0.5`), with
 `.value()`, `.at(i)` (the glide at frame `i`), `.index()`, `.on()`,
 `.gain()` (dB as linear gain) and, in `update()`, `.changed()`.
+
+**When a parameter applies.** A setting that only matters sometimes says
+so: a band's controls while the band is on, a shelf's gain but not a cut's,
+a free rate unless synced.
+
+```cpp
+Param on = toggle("Band On", true);
+Param shape = choice("Shape", {"Bell", "Low Shelf", "Low Cut"}, 0).activeWhen(on);
+Param gain = decibels("Gain", -24, 24, 0).activeWhen(on).activeUnless(shape, {"Low Cut"});
+```
+
+Each call adds a condition and all must hold. A condition names a toggle or
+a choice declared above, its options by label or key, and the parameter it
+names must apply too: `gain` above needs no `.activeWhen(on)` of its own if
+`shape`'s already has one, but saying so does no harm. At most 4 per
+parameter. Hosts and agents see which parameters apply (the schema's
+`"active": false`, described in its `active_when`), descriptions leave the
+others out, and the editor dims their controls. The audio code is the
+script's: it still reads every value, and an inactive one keeps its value
+for when it applies again.
 
 **Factory patches** are declared in the plugin struct, in patch values (a
 percent as 30, though the audio code reads it as 0.3):

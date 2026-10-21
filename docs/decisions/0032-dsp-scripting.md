@@ -613,3 +613,19 @@ by silence detection or the cap) or a guess. The framework (1.25.2) now
 reads a processor's tail after every block as well as after updates, so a
 change made in `process()` reaches the host; a replacement's code starts
 from Info's tail, and the old code's fading blocks do not set it.
+
+### Parameters that apply only sometimes (2026-10-21)
+
+A parameter declares when it applies: `.activeWhen(on)` while a toggle is
+on, `.activeWhen(mode, {"Bell", "Notch"})` while a choice is one of those
+options, `.activeUnless(...)` the other way about. Conditions name a toggle
+or a choice declared above (so they cannot loop), all must hold, and the
+parameter each names must apply too. They are metadata the host reads, not
+something a script could do for itself, so they pass the built-ins rule
+above: the semantic layer marks such a parameter `"active": false` in its
+schema while its conditions fail, with an `active_when` that says what would
+make it apply, leaves it out of `describe`, and a script's editor dims its
+controls (`semantic-params-extension.md`, amendment of this date). The audio
+code still reads every value. Before, the flat stock plugins reported every
+parameter as live: an agent setting a cut band's gain was told nothing, and
+the optimizer's `"auto"` could search dimensions that change nothing.

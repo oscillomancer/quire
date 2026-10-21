@@ -60,6 +60,15 @@ struct ParamModel {
     bool polyModulatable = false;  // modulated per voice (an instrument's)
     bool restarts = false;         // a change restarts the plugin (.restarts())
     std::vector<std::string> roles;
+    // When it applies (.activeWhen(), .activeUnless()): while every
+    // condition holds and the parameter each names applies itself; always,
+    // without any.
+    struct Condition {
+        int param = -1;           // a parameter declared before this one (declaration order)
+        std::vector<int> values;  // its values that satisfy it: a toggle's 0 or 1, choice indices
+        bool operator==(const Condition&) const = default;
+    };
+    std::vector<Condition> activeWhen;
     int offset = 0;  // of the Param member in the plugin struct
 };
 

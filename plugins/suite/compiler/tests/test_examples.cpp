@@ -24,6 +24,9 @@ namespace supple::script {
 namespace ex_lvalues {
 #include "lvalues.h"
 }
+namespace ex_activity {
+#include "activity.h"
+}
 namespace ex_gain {
 #include "gain.cpp"
 }
@@ -436,6 +439,7 @@ void sameDescription(const char* file,
         CHECK(p.bypass == q.bypass);
         CHECK(p.hidden == q.hidden);
         CHECK(p.roles == q.roles);
+        CHECK(p.activeWhen == q.activeWhen);
     }
     REQUIRE(jit.shared().size() == native.shared().size());
     for (size_t i = 0; i < jit.shared().size(); ++i) {
@@ -599,5 +603,32 @@ TEST_CASE("lvalues preserve C++ sequencing and reference storage") {
         Audio actual(2, 12);
         run.process(actual);
         CHECK(actual == expected);
+    }
+}
+
+TEST_CASE("a script compiled as C++ says when its parameters apply as the compiler does") {
+    std::ifstream in(std::filesystem::path(__FILE__).parent_path() / "activity.h");
+    REQUIRE(in.good());
+    std::stringstream source;
+    source << in.rdbuf();
+    auto result = scriptc::compile(source.str());
+    REQUIRE_MESSAGE(result.program, scriptc::toText(result.diagnostics));
+    using Condition = script::detail::ParamModel::Condition;
+    using Conditions = std::vector<Condition>;
+    const std::vector<Conditions> expected = {
+        {},                                         // on
+        {Condition{0, {1}}},                        // shape: while on
+        {Condition{0, {1}}, Condition{1, {0, 1}}},  // gain: while on, unless a cut
+        {Condition{1, {0}}},                        // width: a bell's
+        {},                                         // freeze
+        {Condition{4, {0}}},                        // rate: unless frozen
+    };
+    const script::detail::NativeCode<script::ex_activity::Activity> native;
+    REQUIRE(result.program->params().size() == expected.size());
+    REQUIRE(native.params().size() == expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        CAPTURE(i);
+        CHECK(result.program->params()[i].activeWhen == expected[i]);
+        CHECK(native.params()[i].activeWhen == expected[i]);
     }
 }

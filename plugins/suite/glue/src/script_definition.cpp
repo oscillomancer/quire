@@ -146,6 +146,10 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
         for (const std::string& role : m.roles) pm.tags.push_back("role:" + role);
         for (size_t k = 0; k < m.choices.size(); ++k)
             pm.choiceKeys.push_back(script::detail::choiceKey(m, k));
+        for (const ParamModel::Condition& c : m.activeWhen)
+            pm.activeWhen.push_back({c.param < 0 ? meaning.params.size() + 1  // refused below
+                                                 : static_cast<size_t>(c.param),
+                                     c.values});
         meaning.params.push_back(std::move(pm));
     }
     // Each file member is a file property: its path, saved and set by patch.

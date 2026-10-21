@@ -1415,6 +1415,7 @@ void Sema::extractPlugin() {
                       std::to_string(pm.id),
                   "give one an explicit id: .withId(n)");
     }
+    resolveActivity();
     // Files.
     for (FieldDecl* f : s->fields)
         if (!f->isStatic && f->init && b_.isFile(f->qt.type)) evaluateFile(f);
@@ -1985,6 +1986,96 @@ void Sema::evaluateParam(FieldDecl* f) {
     f->paramIndex = static_cast<int>(out_.plugin.params.size());
     out_.plugin.params.push_back(std::move(p));
     out_.plugin.paramFields.push_back(f);
+    conditions_.push_back(value->conditions);
+}
+
+void Sema::resolveActivity() {
+    PluginModel& plugin = out_.plugin;
+    for (size_t i = 0; i < plugin.params.size(); ++i) {
+        ParamModel& p = plugin.params[i];
+        if (conditions_[i].size() > static_cast<size_t>(4))
+            error(plugin.paramFields[i]->init->loc, "script.param.active",
+                  p.name + ": a parameter has at most 4 conditions",
+                  "make one condition depend on another: the parameter a condition names "
+                  "must apply too");
+        for (const Constant::Condition& c : conditions_[i]) {
+            const std::string what = c.unless ? ".activeUnless()" : ".activeWhen()";
+            size_t j = 0;
+            while (j < plugin.params.size() && plugin.params[j].member != c.member) ++j;
+            if (j == plugin.params.size()) {
+                error(c.loc, "script.param.active", "'" + c.member + "' is not a parameter",
+                      what + " names a toggle or a choice Param member declared above");
+                continue;
+            }
+            const ParamModel& on = plugin.params[j];
+            if (j >= i) {
+                error(c.loc, "script.param.active",
+                      j == i ? "'" + c.member + "' cannot depend on itself"
+                             : "'" + c.member + "' is declared below '" + p.member + "'",
+                      j == i ? "name the toggle or choice that decides whether it applies"
+                             : "declare '" + c.member + "' above '" + p.member + "'");
+                continue;
+            }
+            if (on.output) {
+                error(c.loc, "script.param.active", "a meter cannot decide what applies",
+                      "name a toggle or a choice the user sets");
+                continue;
+            }
+            ParamModel::Condition resolved;
+            resolved.param = static_cast<int>(j);
+            if (on.kind == ParamModel::Kind::Toggle) {
+                if (c.listed) {
+                    error(c.loc, "script.param.active",
+                          "'" + c.member + "' is a toggle: its condition takes no options",
+                          what + ": ." + (c.unless ? "activeUnless" : "activeWhen") + "(" +
+                              c.member + ")");
+                    continue;
+                }
+                resolved.values = {c.unless ? 0 : 1};
+            } else if (on.kind == ParamModel::Kind::Choice) {
+                std::string all;
+                for (const auto& label : on.choices)
+                    all += (all.empty() ? "\"" : ", \"") + label + "\"";
+                if (!c.listed) {
+                    error(c.loc, "script.param.active",
+                          "'" + c.member + "' is a choice: name the options it applies with",
+                          what + " with a list of " + c.member + "'s options: " + all);
+                    continue;
+                }
+                std::vector<bool> named(on.choices.size(), false);
+                bool known = true;
+                for (const std::string& o : c.options) {
+                    size_t k = 0;
+                    while (k < on.choices.size() && on.choices[k] != o &&
+                           script::detail::choiceKey(on, k) != o)
+                        ++k;
+                    if (k == on.choices.size()) {
+                        error(c.loc, "script.param.active",
+                              "'" + c.member + "' has no option '" + o + "'",
+                              "use its labels (or keys): " + all);
+                        known = false;
+                        break;
+                    }
+                    named[k] = true;
+                }
+                if (!known) continue;
+                for (size_t k = 0; k < named.size(); ++k)
+                    if (named[k] != c.unless) resolved.values.push_back(static_cast<int>(k));
+                if (resolved.values.empty()) {
+                    error(c.loc, "script.param.active",
+                          "with every option excluded, '" + p.member + "' would never apply",
+                          "leave out at least one of " + c.member + "'s options");
+                    continue;
+                }
+            } else {
+                error(c.loc, "script.param.active",
+                      "'" + c.member + "' is neither a toggle nor a choice",
+                      "a condition names a toggle (on or off) or a choice (its options)");
+                continue;
+            }
+            p.activeWhen.push_back(std::move(resolved));
+        }
+    }
 }
 
 // Starting values for a value of `type` at `base`, from its initializer (or

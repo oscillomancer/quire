@@ -135,6 +135,22 @@ std::string meaningProblems(const Definition& d, const Meaning& m) {
         if (p.kind == ParamKind::Continuous && !p.hostTapered())
             add("parameter '" + std::string(p.name) +
                 "' reaches hosts as a plain value: mark it normalizedHostValue()");
+        // Each condition names a toggle or a choice above it, so whether
+        // anything applies is one pass down the table.
+        for (const ActiveCondition& c : pm.activeWhen) {
+            const ParamDef* on = c.param < i ? &d.params().at(c.param) : nullptr;
+            const int count = !on                             ? 0
+                              : on->isOutput()                ? 0
+                              : on->kind == ParamKind::Toggle ? 2
+                              : on->kind == ParamKind::Choice ? on->labelCount
+                                                              : 0;
+            bool valid = count > 0 && !c.values.empty();
+            for (int v : c.values) valid = valid && v >= 0 && v < count;
+            if (!valid)
+                add("parameter '" + std::string(p.name) +
+                    "' applies on a condition that does not name values of a toggle or a choice "
+                    "above it");
+        }
     }
     std::set<std::string> propertyKeys;
     for (const PropertyMeaning& pm : m.properties)
@@ -146,6 +162,22 @@ std::string meaningProblems(const Definition& d, const Meaning& m) {
         m.patchType.compare(slash - 6, 6, "-patch") != 0)
         add("the patch type must read supple.<plugin>-patch/<major>.<minor>");
     return out;
+}
+
+std::vector<bool> activity(const Definition& d, const Meaning& m,
+                           const std::function<double(size_t)>& host) {
+    std::vector<bool> applies(m.params.size(), true);
+    for (size_t i = 0; i < m.params.size(); ++i)
+        for (const ActiveCondition& c : m.params[i].activeWhen) {
+            if (c.param >= i) continue;  // meaningProblems() refuses it
+            const ParamDef& on = d.params().at(c.param);
+            const int value =
+                static_cast<int>(std::lround(toPlain(on, sanitizeHost(on, host(c.param)))));
+            if (!applies[c.param] ||
+                std::find(c.values.begin(), c.values.end(), value) == c.values.end())
+                applies[i] = false;
+        }
+    return applies;
 }
 
 // --- units --------------------------------------------------------------------------------
@@ -349,9 +381,15 @@ json::Value PatchCodec::valueJson(size_t index, double host) const {
     }
 }
 
-json::Value PatchCodec::paramsDescription() const {
+std::vector<bool> PatchCodec::activity(const state::Snapshot& s) const {
+    return suite::activity(definition_, meaning_, [&](size_t i) { return s.host[i]; });
+}
+
+json::Value PatchCodec::paramsDescription(const state::Snapshot* current) const {
     json::Value params = json::Value::object();
     const ParamTable& table = definition_.params();
+    const std::vector<bool> applies =
+        current ? activity(*current) : std::vector<bool>(table.count(), true);
     for (size_t i = 0; i < table.count(); ++i) {
         const ParamDef& p = table.at(i);
         const ParamMeaning& pm = meaning_.params[i];
@@ -395,6 +433,22 @@ json::Value PatchCodec::paramsDescription() const {
         if (p.is(pflag::kOffAtMin)) flags.push_back("off_at_min");
         if (p.is(pflag::kBypass)) flags.push_back("bypass");
         e["flags"] = std::move(flags);
+        // When it applies, in patch values: {"param": "band1.type", "in":
+        // ["bell", "notch"]} for each condition.
+        if (!pm.activeWhen.empty()) {
+            json::Value when = json::Value::array();
+            for (const ActiveCondition& c : pm.activeWhen) {
+                json::Value condition = json::Value::object();
+                condition["param"] = meaning_.params[c.param].key;
+                json::Value in = json::Value::array();
+                for (int v : c.values)
+                    in.push_back(valueJson(c.param, toHost(table.at(c.param), v)));
+                condition["in"] = std::move(in);
+                when.push_back(std::move(condition));
+            }
+            e["active_when"] = std::move(when);
+        }
+        if (!applies[i]) e["active"] = false;
         params[pm.key] = std::move(e);
     }
     return params;
@@ -469,14 +523,14 @@ json::Value PatchCodec::jsonSchema() const {
     return s;
 }
 
-json::Value PatchCodec::schemaDocument() const {
+json::Value PatchCodec::schemaDocument(const state::Snapshot* current) const {
     json::Value doc = json::Value::object();
     doc["schema"] = "supple.semantic-schema/1.0";
     doc["plugin"]["id"] = definition_.info().id;
     doc["plugin"]["name"] = definition_.info().name;
     doc["plugin"]["version"] = definition_.info().version;
     doc["patch_type"] = meaning_.patchType;
-    doc["params"] = paramsDescription();
+    doc["params"] = paramsDescription(current);
     doc["patch"] = jsonSchema();
     doc["docs"] = meaning_.docs;
     return doc;
@@ -907,9 +961,10 @@ std::string PatchCodec::describe(const state::Snapshot& s, bool changedOnly) con
     // parameters in table order.
     std::vector<std::pair<std::string, std::string>> groups;  // group, text
     const ParamTable& table = definition_.params();
+    const std::vector<bool> applies = activity(s);
     for (size_t i = 0; i < table.count(); ++i) {
         const ParamDef& p = table.at(i);
-        if (p.isOutput() || p.is(pflag::kHidden)) continue;
+        if (p.isOutput() || p.is(pflag::kHidden) || !applies[i]) continue;
         if (changedOnly && valueJson(i, s.host[i]) == valueJson(i, hostDefault(p))) continue;
         char value[64];
         formatValue(p, s.host[i], value, sizeof(value));

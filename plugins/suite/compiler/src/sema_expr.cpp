@@ -2153,6 +2153,41 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
             }
             Constant c = *base;
             ParamModel& p = c.spec;
+            if (m->member == "activeWhen" || m->member == "activeUnless") {
+                // The parameter it depends on is a member, not a constant.
+                const std::string example = "." + m->member + "(bandOn), or ." + m->member +
+                                            "(shape, {\"Bell\", \"Shelf\"})";
+                if (call->args.empty() || call->args.size() > 2 ||
+                    call->args[0]->kind != ExprKind::Name ||
+                    static_cast<NameExpr*>(call->args[0])->path.size() != 1) {
+                    error(call->loc, "script.param.active",
+                          "." + m->member + "() names a toggle or a choice of this plugin",
+                          example);
+                    return std::nullopt;
+                }
+                Constant::Condition condition;
+                condition.member = static_cast<NameExpr*>(call->args[0])->path[0];
+                condition.unless = m->member == "activeUnless";
+                condition.loc = call->args[0]->loc;
+                if (call->args.size() == 2) {
+                    auto options = evaluate(call->args[1], scope);
+                    if (!options) return std::nullopt;
+                    bool text = options->kind == Constant::Kind::List && !options->list.empty();
+                    for (const Constant& o : options->list)
+                        text = text && o.kind == Constant::Kind::String;
+                    if (!text) {
+                        error(call->args[1]->loc, "script.param.active",
+                              "." + m->member + "()'s options are a list of the choice's labels",
+                              example);
+                        return std::nullopt;
+                    }
+                    for (const Constant& o : options->list)
+                        condition.options.push_back(o.stringValue);
+                    condition.listed = true;
+                }
+                c.conditions.push_back(std::move(condition));
+                return c;
+            }
             std::vector<Constant> args;
             for (Expr* a : call->args) {
                 auto v = evaluate(a, scope);
@@ -2277,7 +2312,8 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                       "the modifiers are .in(group), .help(text), .smoothed(ms), .modulated(), "
                       ".polyModulated(), .offAtMin(), "
                       ".meter(), .notAutomatable(), .restarts(), .role({...}), .keys({...}), "
-                      ".curved(Curve::..., k), .withKey(key), .withId(n)");
+                      ".curved(Curve::..., k), .activeWhen(...), .activeUnless(...), "
+                      ".withKey(key), .withId(n)");
                 return std::nullopt;
             }
             return c;

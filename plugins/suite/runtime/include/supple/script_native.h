@@ -212,8 +212,39 @@ class NativeCode final : public Code {
         std::vector<std::pair<const void*, int>> shared;
         void declareShared(void* member, int bytes) override { shared.emplace_back(member, bytes); }
         void declare(Param& param, const ParamSpec& spec) override {
+            ParamModel m = model(spec);
+            for (int c = 0; c < spec.conditionCount && c < ParamSpec::kConditions; ++c)
+                m.activeWhen.push_back(condition(spec.conditions[c]));
             params.push_back(&param);
-            models.push_back(model(spec));
+            models.push_back(std::move(m));
+        }
+        // A condition on a parameter declared above, its options as indices
+        // (what the script compiler makes of it). One the definition must
+        // refuse -- on no parameter so far, an option unknown -- names no
+        // parameter or holds -1.
+        ParamModel::Condition condition(const ParamSpec::Condition& c) const {
+            ParamModel::Condition out;
+            for (size_t i = 0; i < params.size(); ++i)
+                if (params[i] == c.param) out.param = static_cast<int>(i);
+            if (out.param < 0) return out;
+            const ParamModel& on = models[static_cast<size_t>(out.param)];
+            const bool toggle = on.kind == ParamModel::Kind::Toggle;
+            std::vector<bool> named(toggle ? 2 : on.choices.size(), false);
+            if (toggle && c.options.size() == 0) named[1] = true;
+            for (const char* option : c.options) {
+                size_t k = 0;
+                while (k < on.choices.size() && on.choices[k] != option &&
+                       choiceKey(on, k) != option)
+                    ++k;
+                if (toggle || k == on.choices.size()) {
+                    out.values.push_back(-1);
+                    return out;
+                }
+                named[k] = true;
+            }
+            for (size_t k = 0; k < named.size(); ++k)
+                if (named[k] != c.unless) out.values.push_back(static_cast<int>(k));
+            return out;
         }
         void declareFile(void* member, const FileSpec& spec) override {
             files.push_back(member);

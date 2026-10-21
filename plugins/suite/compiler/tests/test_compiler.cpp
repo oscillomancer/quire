@@ -141,6 +141,43 @@ TEST_CASE("a choice's options may have keys of their own") {
     CHECK(firstError(source(slope + ".keys(\"db12\")")) == "script.param.modifier");
 }
 
+TEST_CASE("a parameter applies on conditions that name a toggle or a choice above it") {
+    const auto source = [](const std::string& declarations) {
+        std::string s = kGain;
+        s.insert(s.find("    double g = 1.0;"),
+                 "    Param on = toggle(\"On\", true);\n"
+                 "    Param shape = choice(\"Shape\", {\"Bell\", \"Low Cut\"}, 0);\n"
+                 "    Param peak = decibels(\"Peak\", -60, 0, -60).meter();\n" +
+                     declarations + "\n");
+        return s;
+    };
+    auto good = compileOk(
+        source("    Param q = continuous(\"Q\", 0.1, 10, 1).activeWhen(on).activeUnless(shape, "
+               "{\"low_cut\"});"));
+    using Condition = script::detail::ParamModel::Condition;
+    CHECK(good.program->params().back().activeWhen ==
+          std::vector<Condition>{Condition{1, {1}}, Condition{2, {0}}});
+    auto refused = [&](const std::string& modifiers) {
+        return firstError(source("    Param q = continuous(\"Q\", 0.1, 10, 1)" + modifiers + ";"));
+    };
+    CHECK(refused(".activeWhen(nothing)") == "script.param.active");
+    CHECK(refused(".activeWhen(g)") == "script.param.active");
+    CHECK(refused(".activeWhen(gain)") == "script.param.active");  // neither kind
+    CHECK(refused(".activeWhen(peak)") == "script.param.active");  // a meter
+    CHECK(refused(".activeWhen(q)") == "script.param.active");     // itself
+    CHECK(refused(".activeWhen(on, {\"On\"})") == "script.param.active");
+    CHECK(refused(".activeWhen(shape)") == "script.param.active");
+    CHECK(refused(".activeWhen(shape, {\"Notch\"})") == "script.param.active");
+    CHECK(refused(".activeUnless(shape, {\"Bell\", \"Low Cut\"})") == "script.param.active");
+    CHECK(refused(".activeWhen(shape, {1})") == "script.param.active");
+    CHECK(refused(".activeWhen(on).activeWhen(on).activeWhen(on).activeWhen(on).activeWhen(on)") ==
+          "script.param.active");
+    // A condition names a parameter declared above.
+    CHECK(firstError(source("    Param q = continuous(\"Q\", 0.1, 10, 1).activeWhen(later);\n"
+                            "    Param later = toggle(\"Later\", true);")) ==
+          "script.param.active");
+}
+
 TEST_CASE("a gain script compiles and applies its gain") {
     for (bool interpret : {false, true}) {
         CAPTURE(interpret);

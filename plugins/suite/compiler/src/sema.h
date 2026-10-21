@@ -29,7 +29,16 @@ struct Constant {
     std::vector<Constant> list;  // a braced list: elements, or designated fields
     std::vector<std::string> designators;
     ParamModel spec;  // a ParamSpec under construction
-    FileModel file;   // a FileSpec under construction
+    // Its .activeWhen()/.activeUnless() conditions, by member name: resolved
+    // once every parameter is known (Sema::resolveActivity).
+    struct Condition {
+        std::string member;
+        std::vector<std::string> options;
+        bool listed = false, unless = false;  // listed: options were given
+        Loc loc;
+    };
+    std::vector<Condition> conditions;
+    FileModel file;  // a FileSpec under construction
     const Type* enumType = nullptr;
     std::string builtinEnum;  // "Curve" or "Unit" for the runtime's enums (no enumType)
 
@@ -162,6 +171,8 @@ class Sema {
     void extractPlugin();
     void evaluateInfo(FieldDecl* f);
     void evaluateParam(FieldDecl* f);
+    void resolveActivity();
+    std::vector<std::vector<Constant::Condition>> conditions_;  // by parameter index
     void evaluateFile(FieldDecl* f);
     void evaluatePatches(FunctionDecl* f);
     void buildConstruction();

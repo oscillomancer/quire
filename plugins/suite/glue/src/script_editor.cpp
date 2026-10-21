@@ -19,6 +19,7 @@
 #include "gui/Widgets.h"
 #include "supple/script.h"
 #include "supple/script_runtime.h"
+#include "supple/suite/semantics.h"
 
 namespace supple::suite {
 namespace {
@@ -496,6 +497,28 @@ class ScriptEditor final : public gui::EditorBase {
             }
         }
         usePeakMeters(meters);
+        // A control is dimmed while a parameter of its does not apply.
+        if (const auto* semantic = dynamic_cast<const SemanticDefinition*>(&definition()))
+            for (int c = 0; c < ui().count(); ++c) {
+                // A file slot's is a property's ID.
+                if (ui().control(c).widget == gui::Widget::File) continue;
+                std::vector<size_t> conditional;
+                for (int k = 0; k < gui::Control::kSlots; ++k) {
+                    const int at = table.indexOf(ui().control(c).paramAt(k));
+                    if (at >= 0 &&
+                        !semantic->meaning().params[static_cast<size_t>(at)].activeWhen.empty())
+                        conditional.push_back(static_cast<size_t>(at));
+                }
+                if (conditional.empty()) continue;
+                ui().control(c).enabledWhen([this, semantic, conditional] {
+                    const ParamTable& params = paramTable();
+                    const std::vector<bool> applies =
+                        activity(definition(), semantic->meaning(),
+                                 [&](size_t k) { return this->host().value(params.at(k).id); });
+                    return std::all_of(conditional.begin(), conditional.end(),
+                                       [&](size_t k) { return applies[k]; });
+                });
+            }
         // Drawing that reads a meter() repaints as it moves.
         if (copy_->code().draw())
             for (size_t k = 0; k < table.count(); ++k)

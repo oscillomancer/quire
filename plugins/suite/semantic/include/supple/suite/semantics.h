@@ -33,10 +33,22 @@
 
 namespace supple::suite {
 
+// A condition on whether a parameter applies: parameter `param` (earlier in
+// the table, a toggle or a choice) holds one of `values` (plain: a toggle's
+// 0 or 1, a choice's index).
+struct ActiveCondition {
+    size_t param = 0;
+    std::vector<int> values;
+    bool operator==(const ActiveCondition&) const = default;
+};
+
 struct ParamMeaning {
     std::string key;                      // [a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*
     std::vector<std::string> tags;        // "role:level", "stage:filter", "macro"
     std::vector<std::string> choiceKeys;  // a choice's options, lower snake case
+    // It applies while each holds and the parameter each names applies;
+    // always, without any.
+    std::vector<ActiveCondition> activeWhen;
     bool operator==(const ParamMeaning&) const = default;
 };
 
@@ -73,8 +85,13 @@ std::string snakeCase(std::string_view text);
 // the plugin's name).
 Meaning meaningOf(const Definition& definition);
 // What is wrong with a meaning for this definition (keys malformed or not
-// unique, counts that do not match); empty when nothing is.
+// unique, counts that do not match, conditions on a later parameter or a
+// value it does not have); empty when nothing is.
 std::string meaningProblems(const Definition& definition, const Meaning& meaning);
+// Which parameters apply (ParamMeaning::activeWhen), from each one's host
+// value by table index. The meaning has no problems.
+std::vector<bool> activity(const Definition& definition, const Meaning& meaning,
+                           const std::function<double(size_t)>& host);
 
 // The patch envelope (core-patch §1): what a patch says about itself.
 struct Envelope {
@@ -90,10 +107,14 @@ class PatchCodec {
     const Meaning& meaning() const { return meaning_; }
 
     // The schema document (supple.semantic-schema/1.0), the "params" member
-    // alone (core-params' describeTable), and the patch's JSON Schema.
-    json::Value schemaDocument() const;
-    json::Value paramsDescription() const;
+    // alone (core-params' describeTable), and the patch's JSON Schema. With
+    // the current values, a parameter that does not apply now says
+    // "active": false.
+    json::Value schemaDocument(const state::Snapshot* current = nullptr) const;
+    json::Value paramsDescription(const state::Snapshot* current = nullptr) const;
     json::Value jsonSchema() const;
+    // Which parameters apply with these values (activity()).
+    std::vector<bool> activity(const state::Snapshot& snapshot) const;
 
     // The snapshot as a patch document; with `changedOnly`, only values that
     // differ from their defaults (still a complete patch: missing values
@@ -124,7 +145,8 @@ class PatchCodec {
     void setFileCheck(FileCheck check) { fileCheck_ = std::move(check); }
 
     // Compact prose: "Tilt: Tilt +3.0 dB; Pivot 1.20 kHz", or "default
-    // settings". With `changedOnly`, values that differ from their defaults.
+    // settings", of the parameters that apply. With `changedOnly`, values
+    // that differ from their defaults.
     std::string describe(const state::Snapshot& snapshot, bool changedOnly) const;
 
     // A parameter's physical value and back (percent in percent, seconds in

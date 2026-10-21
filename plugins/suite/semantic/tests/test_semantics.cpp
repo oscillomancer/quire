@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -24,27 +25,37 @@ namespace {
 const char* const kModes[] = {"Low Pass", "High Pass"};
 
 // A plugin with one of each kind of parameter, a meter and three properties
-// (one of them a file).
-std::shared_ptr<const Definition> fixture(bool normalized = true) {
+// (one of them a file); with `conditions`, a meaning of its own they change.
+std::shared_ptr<const Definition> fixture(bool normalized = true,
+                                          std::function<void(Meaning&)> conditions = {}) {
     PluginInfo info;
     info.id = "com.example.fixture";
     info.name = "Fixture";
     info.version = "1.0.0";
     info.description = "A filter, for tests.";
-    ParamTable::Builder b;
-    auto norm = [&](ParamDef p) { return normalized ? p.normalizedHostValue() : p; };
-    b.add(norm(decibels(1, "Gain", -24.0, 12.0, 0.0)).help("The level."));
-    b.add(frequency(2, "Cutoff", 20.0, 20000.0, 1000.0).in("Filter"));
-    b.add(choice(3, "Mode", kModes, 0).in("Filter"));
-    b.add(toggle(4, "On", true));
-    b.add(integer(5, "Steps", 1, 8, 4));
-    b.add(norm(percent(6, "Mix", 100.0)));
-    b.add(norm(decibels(7, "Meter", -60.0, 0.0, -60.0)).output());
-    PropertyList::Builder pb;
-    pb.add(property(1, "Label").perProject().maxBytes(16));
-    pb.add(property(2, "Text", "hello"));
-    pb.add(property(3, "Sample").audioFile().help("The sound it plays."));
-    return std::make_shared<Definition>(info, b.build(), pb.build());
+    auto params = [&] {
+        ParamTable::Builder b;
+        auto norm = [&](ParamDef p) { return normalized ? p.normalizedHostValue() : p; };
+        b.add(norm(decibels(1, "Gain", -24.0, 12.0, 0.0)).help("The level."));
+        b.add(frequency(2, "Cutoff", 20.0, 20000.0, 1000.0).in("Filter"));
+        b.add(choice(3, "Mode", kModes, 0).in("Filter"));
+        b.add(toggle(4, "On", true));
+        b.add(integer(5, "Steps", 1, 8, 4));
+        b.add(norm(percent(6, "Mix", 100.0)));
+        b.add(norm(decibels(7, "Meter", -60.0, 0.0, -60.0)).output());
+        return b.build();
+    };
+    auto properties = [] {
+        PropertyList::Builder pb;
+        pb.add(property(1, "Label").perProject().maxBytes(16));
+        pb.add(property(2, "Text", "hello"));
+        pb.add(property(3, "Sample").audioFile().help("The sound it plays."));
+        return pb.build();
+    };
+    if (!conditions) return std::make_shared<Definition>(info, params(), properties());
+    Meaning meaning = meaningOf(Definition(info, params(), properties()));
+    conditions(meaning);
+    return std::make_shared<SemanticDefinition>(info, params(), properties(), meaning);
 }
 
 json::Value parsed(std::string_view text) {
@@ -116,6 +127,54 @@ TEST_CASE("the schema lists every CLAP parameter the way core-params describes i
                                    ->find("description")
                                    ->asString();
     CHECK(sample.rfind("The sound it plays. The path of a file (wav ", 0) == 0);
+}
+
+TEST_CASE("the schema and the prose say which parameters apply now") {
+    // On applies in high-pass mode; the mix while On applies and is on.
+    const auto d = fixture(true, [](Meaning& m) {
+        m.params[3].activeWhen = {{2, {1}}};
+        m.params[5].activeWhen = {{3, {1}}};
+    });
+    REQUIRE(meaningProblems(*d, meaningOf(*d)).empty());
+    const PatchCodec codec(*d);
+    state::Snapshot s(*d);
+    s.defaultProperties();
+    const size_t mode = index(*d, 3);
+    auto active = [&](const char* key) {
+        const json::Value schema = codec.schemaDocument(&s);
+        const json::Value* a = schema.find("params")->find(key)->find("active");
+        return !a || a->asBool();
+    };
+    // Low-pass: neither applies, though On is on.
+    CHECK(codec.activity(s) == std::vector<bool>{true, true, true, false, true, false, true});
+    CHECK_FALSE(active("on"));
+    CHECK_FALSE(active("mix"));
+    CHECK(active("gain"));
+    CHECK(codec.describe(s, false).find("Mix") == std::string::npos);
+    s.host[mode] = toHost(d->params().at(mode), 1.0);
+    CHECK(active("on"));
+    CHECK(active("mix"));
+    CHECK(codec.describe(s, false).find("Mix 100") != std::string::npos);
+    // Without values the schema leaves activity out; the conditions it states.
+    const json::Value schema = codec.schemaDocument();
+    CHECK(schema.find("params")->find("mix")->find("active") == nullptr);
+    const json::Value& when = *schema.find("params")->find("on")->find("active_when");
+    REQUIRE(when.size() == 1);
+    CHECK(when.asArray()[0].find("param")->asString() == "filter.mode");
+    CHECK(when.asArray()[0].find("in")->asArray()[0].asString() == "high_pass");
+    const json::Value& mix = *schema.find("params")->find("mix");
+    CHECK(mix.find("active_when")->asArray()[0].find("in")->asArray()[0].asBool());
+}
+
+TEST_CASE("a condition names values of a toggle or a choice above its parameter") {
+    for (const ActiveCondition& bad :
+         {ActiveCondition{5, {1}}, ActiveCondition{4, {1}}, ActiveCondition{3, {2}},
+          ActiveCondition{2, {}}, ActiveCondition{0, {0}}}) {
+        CAPTURE(bad.param);
+        const auto d = fixture(true, [&](Meaning& m) { m.params[5].activeWhen = {bad}; });
+        CHECK(meaningProblems(*d, meaningOf(*d)).find("applies on a condition") !=
+              std::string::npos);
+    }
 }
 
 TEST_CASE("a patch says each value in physical units, and only what changed when asked") {

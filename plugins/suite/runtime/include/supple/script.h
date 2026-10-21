@@ -202,6 +202,8 @@ enum class Unit {
 // k, favouring the low end when k > 1).
 enum class Curve { Linear, Log, Pow };
 
+class Param;
+
 // A parameter's description, made by the factories below and refined by
 // chained modifiers: decibels("Gain", -24, 24, 0).smoothed(20).help("...").
 struct ParamSpec {
@@ -224,6 +226,16 @@ struct ParamSpec {
     bool restart = false;  // a change restarts the plugin: prepare() runs again
     std::initializer_list<const char*> roles = {};       // "level", "time", "brightness" ...
     std::initializer_list<const char*> choiceKeys = {};  // a choice's patch keys (.keys())
+    // When it applies (.activeWhen(), .activeUnless()), each condition on a
+    // toggle or a choice declared above.
+    struct Condition {
+        const Param* param = nullptr;
+        std::initializer_list<const char*> options = {};  // a choice's labels or keys
+        bool unless = false;
+    };
+    static constexpr int kConditions = 4;
+    Condition conditions[kConditions] = {};
+    int conditionCount = 0;
 
     // In a group, which the automatic editor and hosts show as a section.
     ParamSpec in(const char* g) const {
@@ -311,6 +323,34 @@ struct ParamSpec {
         p.curve = c;
         p.curveK = k;
         return p;
+    }
+    // It applies only while the toggle `on` is on, or while the choice
+    // `mode` is one of `options` (labels or keys); activeUnless() the other
+    // way about. Each adds a condition and all must hold, with the
+    // parameter each names applying itself. Hosts and agents see which
+    // parameters apply, and the editor dims the rest; the script still
+    // reads every value.
+    ParamSpec activeWhen(const Param& on) const { return condition(on, {}, false); }
+    ParamSpec activeWhen(const Param& mode, std::initializer_list<const char*> options) const {
+        return condition(mode, options, false);
+    }
+    ParamSpec activeUnless(const Param& on) const { return condition(on, {}, true); }
+    ParamSpec activeUnless(const Param& mode, std::initializer_list<const char*> options) const {
+        return condition(mode, options, true);
+    }
+
+  private:
+    ParamSpec condition(const Param& p, std::initializer_list<const char*> options,
+                        bool unless) const {
+        ParamSpec s = *this;
+        // One too many leaves a condition on no parameter, which the
+        // plugin's definition refuses (the script compiler says so first).
+        if (s.conditionCount < kConditions)
+            s.conditions[s.conditionCount] = {&p, options, unless};
+        else
+            s.conditions[kConditions - 1] = {};
+        if (s.conditionCount < kConditions) ++s.conditionCount;
+        return s;
     }
 };
 
