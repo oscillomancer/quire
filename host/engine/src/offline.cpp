@@ -19,6 +19,7 @@
 #include "supple/clap/semantic_params.h"
 #include "supple/dsp/dsp.h"
 #include "supple/model/numeric.h"
+#include "supple/params/params.h"
 #include "supple/time/timeline.h"
 
 namespace supple::engine {
@@ -574,6 +575,10 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     for (host::Instance* in : instances) {
         for (auto& line : in->takeLog()) r.log.push_back(in->info().name + ": " + line);
     }
+    for (const auto& fx : s.fx)
+        if (host::Instance* in = pool.find(fx.id); in && !in->failed())
+            if (auto readouts = instanceReadouts(*in); readouts && readouts->size() > 0)
+                r.meters[fx.id.str()] = std::move(*readouts);
     if (preparationError) return *preparationError;
     if (startFailed)
         return Error("engine.start_failed", "a plugin refused to start processing", {},
@@ -613,6 +618,35 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     r.audio.channels = {std::vector<float>(outL.begin() + skip, outL.end()),
                         std::vector<float>(outR.begin() + skip, outR.end())};
     return r;
+}
+
+Result<json::Value> instanceReadouts(host::Instance& in) {
+    json::Value out = json::Value::object();
+    if (in.info().semantic && !in.paramsNormalized()) {
+        auto schema = in.semanticSchema();
+        if (!schema) return std::move(schema).error();
+        const auto* entries = schema->find("params");
+        if (!entries || !entries->isObject()) return out;
+        for (const auto& m : entries->asObject()) {
+            auto described = params::fromDescription(m.key, m.value);
+            if (!described || !((*described)->spec.flags & params::kReadonly)) continue;
+            auto value = in.paramValue((*described)->spec.id);
+            if (!value) return std::move(value).error();
+            const auto& spec = (*described)->spec;
+            const double physical = params::fromClap(spec, *value);
+            out[m.key] = spec.type == params::Type::Float
+                             ? json::Value(std::round(physical * 1e4) / 1e4)
+                             : params::toJson(spec, physical);
+        }
+        return out;
+    }
+    for (const host::ParamInfo& p : in.params()) {
+        if (!(p.flags & CLAP_PARAM_IS_READONLY) || (p.flags & CLAP_PARAM_IS_HIDDEN)) continue;
+        auto value = in.paramValue(p.id);
+        if (!value) return std::move(value).error();
+        out[p.name] = *value;
+    }
+    return out;
 }
 
 }  // namespace supple::engine

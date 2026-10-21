@@ -412,6 +412,14 @@ q = nil
 ---@field param string
 ---@field control string
 
+---@class Quire.fx_meters_args
+---@field fx string
+---@field from? "live"|"render" live: the playing instance; render: the last render.mix (default: "live")
+
+---@class Quire.fx_meters_result
+---@field source string live, render, or none (nothing to read yet)
+---@field meters any Read-only values by patch key (physical) or name
+
 ---@class Quire.fx_move_args
 ---@field fx string
 ---@field track? string
@@ -1252,6 +1260,7 @@ q = nil
 ---@field add fun(args: Quire.fx_add_args): Quire.fx_add_result Insert a plugin into a track's (or a take's) FX chain and return its id.
 ---@field copy fun(args: Quire.fx_copy_args): Quire.fx_copy_result Copy a plugin and its current settings into a track's FX chain.
 ---@field describe fun(args: Quire.fx_describe_args): Quire.fx_describe_result Describe an instance and its live problems; full adds parameters and patch.
+---@field meters fun(args: Quire.fx_meters_args): Quire.fx_meters_result Read a plugin's meters and readouts, playing now or as a render ended.
 ---@field move fun(args: Quire.fx_move_args): table Move a plugin within a track chain or to another track.
 ---@field remove fun(args: Quire.fx_remove_args): table Remove a plugin instance (and its envelopes).
 ---@field restart fun(args: Quire.fx_restart_args): table Re-create a plugin instance from its saved patch/state (after a crash).

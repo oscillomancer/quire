@@ -4193,6 +4193,63 @@ Result:
 
 ```
 
+## `fx.meters@1`
+
+Read a plugin's meters and readouts, playing now or as a render ended.
+
+The read-only parameters of a plugin: a semantic plugin's by patch key in physical units (an analyzer's loudness, a reverb's RT60, a gate's suggested threshold), any other plugin's by name as CLAP values. from live (the default): the playing instance's, which move while it processes (playback, monitoring); source none while no instance runs (start the engine). from render: as the last render.mix ended, which renders through instances of its own; source none until a render.mix has included this plugin.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  |  |
+| `from` | string |  |  | "live" | live: the playing instance; render: the last render.mix |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_meters",
+  "properties": {
+    "source": {
+      "type": "string",
+      "description": "live, render, or none (nothing to read yet)"
+    },
+    "meters": {
+      "description": "Read-only values by patch key (physical) or name"
+    }
+  },
+  "required": ["source", "meters"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Read meters** (`song_with_fx`)
+
+```json
+{
+  "fx": "fx_2"
+}
+
+```
+
+Result:
+
+```json
+{
+  "source": "<any>",
+  "meters": "<any>"
+}
+
+```
+
 ## `fx.move@1`
 
 Move a plugin within a track chain or to another track.

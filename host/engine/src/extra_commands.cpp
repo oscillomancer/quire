@@ -284,6 +284,15 @@ struct FxParamGetArgs {
 struct FxParamResult {
     json::Value value;
 };
+enum class MetersFrom : std::uint8_t { Live, Render };
+struct FxMetersArgs {
+    std::string fx;
+    MetersFrom from = MetersFrom::Live;
+};
+struct FxMetersResult {
+    std::string source;
+    json::Value meters;
+};
 struct FxPatchSetArgs {
     std::string fx;
     std::optional<json::Value> patch;
@@ -2057,6 +2066,61 @@ void registerExtraCommands(cmd::Registry& registry) {
                 if (std::to_string(key) == a.param) return FxParamResult{json::Value(value)};
             return Error("fx.param", "no saved parameter " + a.param, "/param",
                          "use fx.describe {full:true} for parameter names");
+        };
+        addChecked(registry, std::move(c));
+    }
+    {
+        Command<FxMetersArgs, FxMetersResult> c;
+        c.name = "fx.meters";
+        c.kind = Kind::Query;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Read a plugin's meters and readouts, playing now or as a render ended.";
+        c.description =
+            "The read-only parameters of a plugin: a semantic plugin's by patch key in physical "
+            "units (an analyzer's loudness, a reverb's RT60, a gate's suggested threshold), any "
+            "other plugin's by name as CLAP values. from live (the default): the playing "
+            "instance's, which move while it processes (playback, monitoring); source none "
+            "while no instance runs (start the engine). from render: as the last render.mix "
+            "ended, which renders through instances of its own; source none until a render.mix "
+            "has included this plugin.";
+        c.tags = {"fx", "params"};
+        c.args = schema::object<FxMetersArgs>("fx_meters_args")
+                     .field("fx", &FxMetersArgs::fx, idSchema("fx"))
+                     .field("from", &FxMetersArgs::from,
+                            schema::enumeration<MetersFrom>(
+                                {{MetersFrom::Live, "live"}, {MetersFrom::Render, "render"}})
+                                .doc("live: the playing instance; render: the last render.mix"))
+                     .defaultValue(MetersFrom::Live)
+                     .build();
+        c.result = schema::object<FxMetersResult>("fx_meters")
+                       .field("source", &FxMetersResult::source,
+                              schema::string().doc("live, render, or none (nothing to read yet)"))
+                       .field("meters", &FxMetersResult::meters,
+                              schema::any().doc("Read-only values by patch key (physical) or name"))
+                       .build();
+        c.examples = {{"Read meters", j(R"({"fx":"fx_2"})"),
+                       j(R"({"source":"<any>","meters":"<any>"})"), "song_with_fx"}};
+        c.run = [](const FxMetersArgs& a, Context& ctx) -> Result<FxMetersResult> {
+            const auto s = app(ctx).view();
+            auto id = require<model::FxInstance>(s, a.fx, "/fx");
+            if (!id) return std::move(id).error();
+            FxMetersResult r;
+            r.source = "none";
+            r.meters = json::Value::object();
+            if (a.from == MetersFrom::Render) {
+                if (const json::Value* rendered = app(ctx).renderMeters(*id)) {
+                    r.source = "render";
+                    r.meters = *rendered;
+                }
+                return r;
+            }
+            host::Instance* live = app(ctx).instanceOf(*id);
+            if (!live || live->failed()) return r;
+            auto readouts = instanceReadouts(*live);
+            if (!readouts) return std::move(readouts).error();
+            r.source = "live";
+            r.meters = std::move(*readouts);
+            return r;
         };
         addChecked(registry, std::move(c));
     }

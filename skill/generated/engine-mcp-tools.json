@@ -3367,6 +3367,49 @@
     }
   },
   {
+    "name": "fx_meters",
+    "title": "Read a plugin's meters and readouts, playing now or as a render ended.",
+    "description": "Read a plugin's meters and readouts, playing now or as a render ended. The read-only parameters of a plugin: a semantic plugin's by patch key in physical units (an analyzer's loudness, a reverb's RT60, a gate's suggested threshold), any other plugin's by name as CLAP values. from live (the default): the playing instance's, which move while it processes (playback, monitoring); source none while no instance runs (start the engine). from render: as the last render.mix ended, which renders through instances of its own; source none until a render.mix has included this plugin. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "fx_meters_args",
+      "properties": {
+        "fx": {
+          "type": "string",
+          "pattern": "^fx_[0-9]+$"
+        },
+        "from": {
+          "type": "string",
+          "enum": ["live", "render"],
+          "description": "live: the playing instance; render: the last render.mix",
+          "default": "live"
+        }
+      },
+      "required": ["fx"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "fx_meters",
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "live, render, or none (nothing to read yet)"
+        },
+        "meters": {
+          "description": "Read-only values by patch key (physical) or name"
+        }
+      },
+      "required": ["source", "meters"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "fx_move",
     "title": "Move a plugin within a track chain or to another track.",
     "description": "Move a plugin within a track chain or to another track. Works on the track's chain, on its input chain (an input-chain effect stays on its track) and on a take's chain (take FX stay on their take: index only). See describe for errors and examples.",

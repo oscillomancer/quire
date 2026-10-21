@@ -541,7 +541,9 @@ and naming. All `edit` unless marked (q) query or (a) action.
 - **FX**: `fx.add {chain_owner, plugin, index, patch?}`, `fx.remove`,
   `fx.move`, `fx.copy {fx, track, index?, chain?}` (live settings), `fx.set {bypass, offline, wet, isolation, oversampling,
   parallel, pins, …}`, `fx.param.set {fx, values: {key|id: value}}`,
-  `fx.param.get` (q), `fx.patch.get` (q), `fx.patch.set`, `fx.patch.merge`,
+  `fx.param.get` (q), `fx.meters {fx, from: live|render}` (q: the read-only
+  values of the playing instance, or as the last `render.mix` ended),
+  `fx.patch.get` (q), `fx.patch.set`, `fx.patch.merge`,
   `fx.describe` (q), `fx.preset.save` (a), `fx.preset.load`, chain presets
   `fx.chain.save` (a), `fx.chain.load`, `fx.chain.list` (q),
   `fx.chain.delete` (a), MIDI learn `fx.learn.set {fx, param, midi, mode?,

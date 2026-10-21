@@ -299,6 +299,15 @@ class EngineApp : public cmd::Host {
     std::string rememberRender(const std::filesystem::path& path);
     std::string reserveRenderId();
     void publishRender(std::string id, const std::filesystem::path& path);
+    // Each plugin's readouts as the last mix render ended (render.mix), by FX
+    // id: what fx.meters {from: "render"} reads. Main thread.
+    void rememberRenderMeters(std::map<std::string, json::Value> meters) {
+        renderMeters_ = std::move(meters);
+    }
+    const json::Value* renderMeters(model::Id fx) const {
+        auto found = renderMeters_.find(fx.str());
+        return found == renderMeters_.end() ? nullptr : &found->second;
+    }
     // The render queue (gap log #33): renders set up now, each pinned to the
     // version it was queued at, run later in one go (render.queue.*).
     // Transport-like state: not versioned, not saved with the project.
@@ -556,6 +565,7 @@ class EngineApp : public cmd::Host {
     std::unique_ptr<InstancePool> pool_;
     MediaCache media_;
     std::map<std::string, std::filesystem::path> renders_;
+    std::map<std::string, json::Value> renderMeters_;
     std::vector<QueuedRender> renderQueue_;
     std::uint64_t queueCounter_ = 0;
     mutable std::mutex rendersMutex_;

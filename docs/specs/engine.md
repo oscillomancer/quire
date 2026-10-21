@@ -436,6 +436,10 @@ first use, and no plug-in code runs early to warm it.
 - Runs a **separate plan instance** with its **own plugin instances**
   (created from the version's state/patches), so rendering never disturbs
   playback and A/B renders of two branches can run side by side.
+- As a render ends, each plugin's read-only parameters (meters, readouts)
+  are read from its instance (`OfflineResult::meters`, by FX id); a
+  `render.mix` keeps them on the main thread for `fx.meters {from:
+  "render"}` until the next one. Other renders keep none.
 - Fixed block size (default 512; setting), no anticipative split, all nodes
   in topological order, optionally parallel across independent nodes —
   results must be **bit-identical for any worker count** (fixed summation

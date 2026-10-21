@@ -2761,8 +2761,10 @@ void registerEngineCommands(cmd::Registry& registry) {
                         if (report) result["analysis"] = std::move(*report);
                     }
                     completeRenderJob(app, dispatcher, jobs, id, target, std::move(result),
-                                      [&app, renderId, path, a, addFile] {
+                                      [&app, renderId, path, a, addFile,
+                                       meters = std::move(r->meters)]() mutable {
                                           app.publishRender(renderId, path);
+                                          app.rememberRenderMeters(std::move(meters));
                                           if (a.addToProject) addFile();
                                       });
                 });
@@ -2780,6 +2782,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 for (float v : ch) peak = std::max(peak, std::fabs(v));
             RenderMixResult out;
             out.render = app.rememberRender(path);
+            app.rememberRenderMeters(std::move(r->meters));
             out.path = path.string();
             if (*written) out.secondaryPath = (*written)->string();
             out.seconds = std::round(r->audio.seconds() * 1e4) / 1e4;
