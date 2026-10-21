@@ -24,6 +24,12 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 
 ## 1. The shape every effect shares
 
+(2026-10-20) No stock effect has this shape any more: each is a DSP script
+(ADR-0047; `plugins/stock/README.md` says how to change one). This section
+records the hand-written design they replaced. Orrery is the one plugin
+still built this way, through `SemanticAdapter` rather than `FlatSemantic`,
+which was removed with its last user.
+
 ### 1.1 Layout
 
 Each stock effect defines its display name only in

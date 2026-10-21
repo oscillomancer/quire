@@ -110,64 +110,6 @@ TEST_CASE("errorsToJson flattens schema.invalid into its details") {
     CHECK(one->size() == 1);
 }
 
-TEST_CASE("FlatSemantic brackets a validated patch assignment") {
-    patch::FlatPatchType type("hook-test", 1, 0, kT, false);
-    clapx::ParamStore store(kT);
-    clapx::FlatSemantic semantic(type, store, "com.suppleaudio.test.hook", "", "", 0x484f4f4b);
-    std::string calls;
-    semantic.onBeforeApply = [&](const patch::FlatBody& next) {
-        CHECK(store.get(0) == 1000);
-        CHECK(next.values[0] == 1200);
-        calls += 'B';
-    };
-    semantic.onApplied = [&](const patch::FlatBody& before, const patch::FlatBody& after) {
-        CHECK(before.values[0] == 1000);
-        CHECK(store.get(0) == 1200);
-        CHECK(after.values[0] == 1200);
-        calls += 'A';
-    };
-    const std::string doc = R"({"schema":"supple.hook-test-patch/1.0","params":{"freq":1200}})";
-    CHECK(semantic.setPatch(CLAP_SUPPLE_SET_VALIDATE_ONLY, doc.data(), doc.size(), nullptr));
-    CHECK(calls.empty());
-    CHECK(semantic.setPatch(CLAP_SUPPLE_SET_REPLACE, doc.data(), doc.size(), nullptr));
-    CHECK(calls == "BA");
-}
-
-TEST_CASE("FlatSemantic legacy load resets the envelope before publishing") {
-    patch::FlatPatchType type("legacy-test", 1, 0, kT, true);
-    clapx::ParamStore store(kT);
-    clapx::FlatSemantic semantic(type, store, "com.suppleaudio.test.legacy", "", "", 0x4c454731);
-    const std::string doc = R"({"schema":"supple.legacy-test-patch/1.0","seed":123,"params":{}})";
-    REQUIRE(semantic.setPatch(CLAP_SUPPLE_SET_REPLACE, doc.data(), doc.size(), nullptr));
-    REQUIRE(semantic.envelope().seed == 123);
-    semantic.legacyLoad = [](std::span<const std::uint8_t> bytes, clapx::ParamStore& scratch) {
-        if (bytes.size() != 1 || bytes[0] != 0x42) return false;
-        scratch.set(0, 1200);
-        return true;
-    };
-    std::uint8_t marker = 0x42;
-    struct Input {
-        std::uint8_t* data;
-        std::size_t offset = 0;
-    } input{&marker};
-    clap_istream_t stream{&input, [](const clap_istream_t* s, void* out, std::uint64_t count) {
-                              auto& source = *static_cast<Input*>(s->ctx);
-                              if (source.offset || count == 0) return std::int64_t{0};
-                              std::memcpy(out, source.data, 1);
-                              ++source.offset;
-                              return std::int64_t{1};
-                          }};
-    bool published = false;
-    semantic.onApplied = [&](const patch::FlatBody&, const patch::FlatBody& after) {
-        CHECK(semantic.envelope().seed == 0);
-        CHECK(after.values[0] == 1200);
-        published = true;
-    };
-    REQUIRE(semantic.loadState(&stream));
-    CHECK(published);
-    CHECK(semantic.current().meta.seed == 0);
-}
-
 TEST_CASE("ParamStore: readAll never observes half of an assign()" * doctest::description("rt")) {
     static constexpr params::ParamSpec kMany[] = {
         {.id = 0, .key = "a", .name = "A", .max = 1e6},
@@ -204,9 +146,6 @@ TEST_CASE("ParamStore: readAll never observes half of an assign()" * doctest::de
 }
 
 TEST_CASE("semantic helpers reject invalid stream counts, callbacks and null patch text") {
-    patch::FlatPatchType type("stream-test", 1, 0, kT, false);
-    clapx::ParamStore store(kT);
-    clapx::FlatSemantic flat(type, store, "com.suppleaudio.test.stream", "", "", 0x12345678);
     struct Model : clapx::SemanticModel {
         params::Table table() const override { return kT; }
         std::string patchTypeId() const override { return "supple.stream-test-patch/1.0"; }
@@ -226,23 +165,15 @@ TEST_CASE("semantic helpers reject invalid stream counts, callbacks and null pat
     clap_ostream_t out{nullptr, [](const clap_ostream_t*, const void*, std::uint64_t size) {
                            return static_cast<std::int64_t>(size + 1);
                        }};
-    CHECK_FALSE(flat.loadState(&in));
     CHECK_FALSE(adapter.loadState(&in));
-    CHECK_FALSE(flat.saveState(&out));
     CHECK_FALSE(adapter.saveState(&out));
-    CHECK_FALSE(flat.getSchema(&out));
     CHECK_FALSE(adapter.getSchema(&out));
-    CHECK_FALSE(flat.loadState(nullptr));
     CHECK_FALSE(adapter.loadState(nullptr));
-    CHECK_FALSE(flat.saveState(nullptr));
     CHECK_FALSE(adapter.saveState(nullptr));
     in.read = nullptr;
     out.write = nullptr;
-    CHECK_FALSE(flat.loadState(&in));
     CHECK_FALSE(adapter.loadState(&in));
-    CHECK_FALSE(flat.getSchema(&out));
     CHECK_FALSE(adapter.getSchema(&out));
-    CHECK_FALSE(flat.setPatch(CLAP_SUPPLE_SET_REPLACE, nullptr, 10, nullptr));
     CHECK_FALSE(adapter.setPatch(CLAP_SUPPLE_SET_REPLACE, nullptr, 10, nullptr));
 }
 TEST_CASE("parameter events reject missing or undersized records") {

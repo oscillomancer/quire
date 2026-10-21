@@ -4,7 +4,8 @@ target_include_directories(semantic-params-abi INTERFACE ${CMAKE_CURRENT_SOURCE_
 target_link_libraries(semantic-params-abi INTERFACE supple::clap)
 add_library(supple::semantic-params-abi ALIAS semantic-params-abi)
 
-# Plugin-side support for stock plugins (ParamStore, ClapParams, FlatSemantic).
+# Plugin-side support for template-derived plugins (ParamStore, ClapParams,
+# SemanticModel/SemanticAdapter).
 supple_add_library(plugin-support
   SOURCES src/plugin_support.cpp src/semantic_model.cpp
   DEPS supple::core-params supple::core-patch supple::semantic-params-abi)
@@ -29,13 +30,5 @@ if(SUPPLE_BUILD_TESTS)
   add_executable(clap-reset-check tools/clap_reset_check.cpp)
   target_link_libraries(clap-reset-check PRIVATE supple::clap-host)
   supple_target_defaults(clap-reset-check)
-
-  add_library(plugin-support-fixture MODULE tests/helper_fixture.cpp)
-  target_link_libraries(plugin-support-fixture PRIVATE supple::plugin-support)
-  set_target_properties(plugin-support-fixture PROPERTIES PREFIX "" SUFFIX ".clap" OUTPUT_NAME "tilt-fixture")
-  supple_target_defaults(plugin-support-fixture)
-
-  add_test(NAME plugin-support.conformance
-           COMMAND semantic-conformance $<TARGET_FILE:plugin-support-fixture> com.suppleaudio.test.tilt)
   endif()
 endif()

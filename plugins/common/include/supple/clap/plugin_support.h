@@ -1,20 +1,17 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Supple Audio
-// Plugin-side support for Quire's stock plugins (ADR-0010, ADR-0011):
-// everything a template-derived plugin needs to expose a core-params table
-// through CLAP params, a flat core-patch document through CLAP state, and the
-// com.suppleaudio.semantic-params/1 extension — so the plugin's own wrapper
-// code shrinks to one-line forwards.
+// Plugin-side support for a template-derived plugin with a core-params table
+// (ADR-0010, ADR-0011): its values and its CLAP params. The semantic
+// extension and the CLAP state are semantic_model.h's.
 //
 //   ParamStore     physical parameter values shared by the main and audio
 //                  threads (wait-free atomics + a change generation).
 //   ClapParams     clap_plugin_params_t helpers (info, text) over a table.
-//   FlatSemantic   the extension + JSON state for a FlatPatchType plugin.
 //
 // Threading: ParamStore reads/writes and generation() are RT-safe; everything
-// else is main-thread (CLAP's rules for params info/text, state and the
-// extension). Whole patches (set_patch, state load) reach the audio thread
-// atomically through readAll(): see ParamStore.
+// else is main-thread (CLAP's rules for params info/text). Whole patches
+// (set_patch, state load) reach the audio thread atomically through
+// readAll(): see ParamStore.
 #pragma once
 
 #include <clap/clap.h>
@@ -23,10 +20,8 @@
 #include <memory>
 #include <span>
 #include <string>
-#include <vector>
 
 #include "supple/base/rt.h"
-#include "supple/clap/semantic_params.h"
 #include "supple/params/params.h"
 #include "supple/patch/patch.h"
 
@@ -87,70 +82,6 @@ struct ClapParams {
     // Applies every CLAP_EVENT_PARAM_VALUE in `in` to the store (flush and
     // process); returns true if any value changed.
     static bool applyEvents(ParamStore& store, const clap_input_events_t* in) SUPPLE_RT;
-};
-
-// --- FlatSemantic -----------------------------------------------------------------
-
-class FlatSemantic {
-  public:
-    // `describePrefix` starts describe() output ("EQ: "). `stateMagic` is the
-    // plugin's permanent 4-byte state tag.
-    FlatSemantic(const patch::FlatPatchType& type, ParamStore& store, std::string pluginId,
-                 std::string docs, std::string describePrefix, std::uint32_t stateMagic);
-
-    // Extension entry points (main thread). Plugins forward to these.
-    bool getSchema(const clap_ostream_t* out) const;
-    bool getPatch(std::uint32_t detail, const clap_ostream_t* out) const;
-    bool setPatch(std::uint32_t mode, const char* json, std::uint32_t size,
-                  const clap_ostream_t* errors);
-    bool describe(std::uint32_t detail, const clap_ostream_t* out) const;
-
-    // CLAP state: framed canonical patch JSON; load is transactional (parse and
-    // validate fully, then apply). `legacyLoad`, when set, is tried for a stream
-    // that is not in the framed form (e.g. the template's binary state v1).
-    bool saveState(const clap_ostream_t* out) const;
-    bool loadState(const clap_istream_t* in);
-    std::function<bool(std::span<const std::uint8_t>, ParamStore&)> legacyLoad;
-
-    // The current patch (values from the store plus the stored envelope).
-    patch::Patch<patch::FlatBody> current() const;
-    const patch::Envelope& envelope() const { return envelope_; }
-
-    // Called after a successful set_patch or state load (e.g. to request a
-    // restart when a latency-changing parameter moved, or rescan values).
-    // onBeforeApply runs after validation and before ParamStore::assign. A
-    // plugin can defer RT adoption until its onApplied callback publishes an
-    // immutable companion snapshot (for example, the patch envelope seed).
-    std::function<void(const patch::FlatBody& next)> onBeforeApply;
-    std::function<void(const patch::FlatBody& before, const patch::FlatBody& after)> onApplied;
-
-    // Builds a clap_plugin_supple_semantic_params_t whose thunks find the
-    // FlatSemantic through `resolve(plugin)`. Keep the returned object alive
-    // as long as the plugin (typically a static).
-    using Resolver = FlatSemantic* (*)(const clap_plugin_t*);
-    template <Resolver R>
-    static const clap_plugin_supple_semantic_params_t* extension() {
-        static const clap_plugin_supple_semantic_params_t ext = {
-            sizeof(clap_plugin_supple_semantic_params_t),
-            [](const clap_plugin_t* p, const clap_ostream_t* o) { return R(p)->getSchema(o); },
-            [](const clap_plugin_t* p, uint32_t d, const clap_ostream_t* o) {
-                return R(p)->getPatch(d, o);
-            },
-            [](const clap_plugin_t* p, uint32_t m, const char* j, uint32_t n,
-               const clap_ostream_t* e) { return R(p)->setPatch(m, j, n, e); },
-            [](const clap_plugin_t* p, uint32_t d, const clap_ostream_t* o) {
-                return R(p)->describe(d, o);
-            },
-            nullptr};
-        return &ext;
-    }
-
-  private:
-    const patch::FlatPatchType& type_;
-    ParamStore& store_;
-    std::string pluginId_, docs_, describePrefix_;
-    std::uint32_t stateMagic_;
-    patch::Envelope envelope_;
 };
 
 // Serializes errors as the extension's JSON error array.

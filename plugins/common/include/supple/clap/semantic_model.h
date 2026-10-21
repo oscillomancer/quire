@@ -5,8 +5,8 @@
 //
 // The plugin implements SemanticModel over its own patch type; SemanticAdapter
 // turns it into the com.suppleaudio.semantic-params/1 extension and the CLAP
-// state stream, with the same wire formats as FlatSemantic (schema document,
-// canonical patch JSON, JSON error arrays, framed state). Main thread only.
+// state stream (schema document, canonical patch JSON, JSON error arrays,
+// framed state). Main thread only.
 #pragma once
 
 #include <clap/clap.h>

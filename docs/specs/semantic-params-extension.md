@@ -209,7 +209,11 @@ round trip; `describe` is non-empty and ≤ 600 chars.
   block). Single CLAP param events still update one value at a time.
 - Legacy state: `FlatSemantic::legacyLoad` is only offered streams that do not
   claim the framed form (`patch::isFramedState`); a malformed v2 frame is
-  rejected, never reinterpreted.
+  rejected, never reinterpreted. (2026-10-20: `FlatSemantic`, the flat-patch
+  implementation in `plugins/common`, was removed with its last user, the
+  probe synth. A plugin implements the extension through `SemanticAdapter`
+  below, or as a DSP script through the template framework's semantic
+  layer.)
 - The conformance tool's step 7 runs 200 merges against a thread that
   processes blocks continuously and checks for process errors and that the
   last patch is in effect; RT cleanliness is checked when the plugin and tool
