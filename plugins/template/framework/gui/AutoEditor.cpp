@@ -117,6 +117,7 @@ Plan plan(const Definition& definition) {
         groupNamed(p.group ? p.group : "").cells.push_back(cellFor(p));
     }
     for (size_t i = 0; i < properties.count(); ++i) {
+        if (properties.at(i).isHidden()) continue;
         Cell c;
         const bool file = properties.at(i).isFile();
         c.widget = file ? Widget::File : Widget::TextField;

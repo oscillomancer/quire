@@ -1798,6 +1798,25 @@ TEST(the_automatic_editor_dims_what_the_definition_says_does_not_apply) {
                                   hostDefault(params::at(moot.index)) * 0.5;
     CHECK(nudge(applying, tabs) == index);
 }
+
+TEST(the_automatic_editor_leaves_out_a_hidden_property) {
+    // A text field makes room for itself; a hidden property's makes none.
+    struct PropertyHost final : MockHost {
+        std::unique_ptr<Definition> definition;
+        const Definition& pluginDefinition() const override { return *definition; }
+    };
+    const Definition& product = *productDefinition();
+    auto size = [&](std::vector<PropertyDef> properties) {
+        PropertyHost host;
+        host.definition = std::make_unique<Definition>(
+            product.info(), ParamTable(product::kParams, params::kCount), PropertyList(std::move(properties)));
+        std::unique_ptr<EditorBase> editor = product::createEditor(host);
+        return std::pair(editor->width(), editor->height());
+    };
+    const auto none = size({});
+    CHECK(size({property(900, "Notes")}) != none);
+    CHECK(size({property(900, "Notes").hidden()}) == none);
+}
 #endif
 
 TEST(rebuilding_after_a_window_draw_keeps_the_displayed_editor_alive) {

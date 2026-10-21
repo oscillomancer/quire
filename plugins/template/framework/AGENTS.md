@@ -270,9 +270,11 @@ byte (`core/StateFormat.h`). There is nothing to write for it.
   otherwise). A value is bytes, normally UTF-8; a product keeping its own
   encoding in one versions it there. `.perProject()` marks one that belongs
   to the session, not the sound: presets leave it out, and loading one leaves
-  it alone. The editor edits one with `ui().textField(id, rect)` or reads and
-  writes it through `host().property(id)` / `setProperty(id, text)`; the
-  processor hears each in `property(id, value)` (see DSP). The chord example.
+  it alone. `.hidden()` marks one the automatic editor leaves out (text in a
+  format of the product's own). The editor edits one with
+  `ui().textField(id, rect)` or reads and writes it through
+  `host().property(id)` / `setProperty(id, text)`; the processor hears each
+  in `property(id, value)` (see DSP). The chord example.
 - **File references**: a property marked `.file("scl tun")` (or
   `.audioFile()`, for WAV, AIFF and FLAC) holds a path, and the framework
   minds the file (`core/Files.h`). Loading a session whose file has moved

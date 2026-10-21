@@ -4,6 +4,15 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.29.0
+
+What a product must do: nothing.
+
+- **Properties the automatic editor leaves out** (`core/Property.h`,
+  `gui/AutoEditor.cpp`). A property marked `.hidden()` gets no text field in
+  the automatic editor: text in the product's own format, that only its own
+  controls or its host edit. State and presets keep it as before.
+
 ## 1.28.0
 
 What a product must do: nothing. A run-time product whose settings can make
