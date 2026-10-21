@@ -312,3 +312,37 @@ patch as a chunk.
   marks such a value `"active": false`, and `patch.merge`, the engine's
   `fx.patch.merge` and `fx.param.set` name the `params` they set that do not
   apply under `inactive`.
+
+## Amendments (2026-10-21, modulation routes)
+
+- **`routes`**, a patch member beside `params`, for a plugin whose meaning
+  has sources: an object keyed `"<source>><parameter>"`, each value
+  `{"amount": ..., "via": "<source>"}` (`via` optional; a bare number or
+  string stands for `{"amount": ...}` on input). The amount is in the
+  parameter's physical unit at the source's full value, except a
+  frequency's, in octaves; text may carry a unit that converts (`"12 st"`,
+  `"+1.5 oct"`, `"-6 dB"`). `via` scales the amount by a second source. A
+  parameter's routes sum, and the result is kept to its route range (its
+  own range unless the plugin gives a wider one). At most 64 routes; a
+  route's amount at most the width of its parameter's route range.
+  Canonical form: sorted by source, then parameter, amounts as numbers.
+  Merge patches add, change (field by field) and remove (`null`) routes one
+  by one.
+- **Errors**: `routes.key` (not `source>parameter`), `routes.source` and
+  `routes.via` (no such source, with the closest and the list),
+  `routes.destination` (no such parameter, or one routes do not move, with
+  the list of those they do), `routes.unit` (the hint names the amount's
+  unit), `routes.amount` (missing, or more than the parameter can move),
+  `routes.voice` (a source with a value per voice, directly or through
+  `via`, routed to a parameter all voices share), `routes.count`,
+  `routes.type`, `routes.unknown_member`.
+- **The schema** gains `"sources"`: by key, `name`, `per_voice`, `range`
+  (`[-1, 1]` or `[0, 1]`) and `description`. A parameter routes move has
+  `"route": {"unit": "oct", "per_voice": true}` (and `min`/`max` when its
+  route range is wider than its own). The patch's JSON Schema has `routes`.
+- `describe` ends with `Routes: lfo1>filter1.cutoff +1.5 oct via modwheel,
+  ...`.
+- The routes live in a text property of the plugin's (a DSP script's:
+  `routes`, one route a line), so state and presets carry them; a patch
+  never shows that property among its `properties`. Restoring a saved patch
+  keeps the routes whose source and parameter still exist.

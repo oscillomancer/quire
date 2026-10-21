@@ -343,7 +343,16 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   `"active": false` and says when it applies, descriptions leave it out,
   `plugin.describe`, `patch.merge`, `fx.patch.merge` and `fx.param.set`
   name it under `inactive`, and the editor, its own or the automatic one,
-  dims its control. `dsp.export` makes a script a CLAP plugin for any host (a copy
+  dims its control. Scripts declare modulation sources (`Source` members,
+  per voice or global; instruments also get velocity, key, random,
+  pressure, slide and five MIDI controllers), and the patch's `routes`
+  member connects them to `.modulated()` and `.polyModulated()`
+  parameters with amounts in the parameter's unit (a frequency's in
+  octaves), through a second source when given; the schema lists the
+  sources and each parameter's amount unit, errors name the right unit,
+  state and presets keep the routes, and factory patches set them. An
+  instrument's `setVoiceLimit()` plays fewer of its voices. The automatic
+  editor cannot show or edit routes yet. `dsp.export` makes a script a CLAP plugin for any host (a copy
   of the player with the script appended, which offers that one plugin), or
   a C++ project of the plugin template that builds the same plugin, bit for
   bit, with the script compiled as C++ (every example's export is checked

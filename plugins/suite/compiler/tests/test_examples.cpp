@@ -28,6 +28,9 @@ namespace ex_lvalues {
 namespace ex_activity {
 #include "activity.h"
 }
+namespace ex_routes {
+#include "routes.h"
+}
 namespace ex_gain {
 #include "gain.cpp"
 }
@@ -605,6 +608,42 @@ TEST_CASE("lvalues preserve C++ sequencing and reference storage") {
         run.process(actual);
         CHECK(actual == expected);
     }
+}
+
+TEST_CASE("a script compiled as C++ has the sources and routes the compiler sees") {
+    std::ifstream in(std::filesystem::path(__FILE__).parent_path() / "routes.h");
+    REQUIRE(in.good());
+    std::stringstream source;
+    source << in.rdbuf();
+    auto result = scriptc::compile(source.str());
+    REQUIRE_MESSAGE(result.program, scriptc::toText(result.diagnostics));
+    using Routes = script::ex_routes::Routes;
+    const script::detail::NativeCode<Routes> native(
+        {}, {{&Routes::lfo, "lfo"}, {&Routes::env, "env"}, {&Routes::macro, "macro"}});
+    const auto& jit = *result.program;
+    REQUIRE(jit.sources().size() == 3);
+    REQUIRE(native.sources().size() == 3);
+    for (size_t i = 0; i < 3; ++i) {
+        const auto &a = jit.sources()[i], &b = native.sources()[i];
+        CAPTURE(i);
+        CHECK(a.key == b.key);
+        CHECK(a.name == b.name);
+        CHECK(a.description == b.description);
+        CHECK(a.perVoice == b.perVoice);
+        CHECK(a.bipolar == b.bipolar);
+        CHECK(a.offset == b.offset);
+    }
+    CHECK(jit.sources()[0].member == "lfo");
+    CHECK(jit.sources()[1].key == "env2");  // withKey() wins over the member's name
+    CHECK(jit.sources()[2].perVoice == false);
+    CHECK(jit.sources()[2].bipolar == false);
+    CHECK(jit.params()[1].routeMin == -1200);
+    CHECK(native.params()[1].routeMax == 1200);
+    CHECK(native.factoryPatches() == jit.factoryPatches());
+    REQUIRE(jit.factoryPatches().size() == 1);
+    using Route = script::detail::FactoryPatchModel::Route;
+    CHECK(jit.factoryPatches()[0].routes ==
+          std::vector<Route>{{"lfo>cutoff", "", 1.5}, {"env2>fine", "modwheel", 700}});
 }
 
 TEST_CASE("a script compiled as C++ says when its parameters apply as the compiler does") {

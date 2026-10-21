@@ -58,6 +58,14 @@ Patches& Patches::set(const Param& param, const char* choiceKey) {
     builder_->set(param, choiceKey);
     return *this;
 }
+Patches& Patches::route(const char* route, double amount) {
+    builder_->route(route, amount, "");
+    return *this;
+}
+Patches& Patches::route(const char* route, double amount, const char* via) {
+    builder_->route(route, amount, via ? via : "");
+    return *this;
+}
 
 namespace detail {
 
@@ -311,6 +319,11 @@ AudioFile::AudioFile(const FileSpec& spec) {
 Convolver::Convolver(const FileSpec& spec) {
     if (auto* r = detail::registrar()) r->declareFile(this, spec);
 }
+Source::Source(const SourceSpec& spec) {
+    low_ = spec.bipolar ? -1.0 : 0.0;
+    perVoice_ = spec.perVoice;
+    if (auto* r = detail::registrar()) r->declareSource(*this, spec);
+}
 
 Param::Param(const Param& other) { *this = other; }
 
@@ -410,6 +423,11 @@ double Param::forVoice(int v) const {
     const detail::VoiceBank* bank = bankFor(detail::current(), v);
     return bank && slot_ >= 0 ? bank->modulated(slot_, v, value_) : value_;
 }
+double Param::routed(int i) const {
+    const double base = at(i);
+    const detail::Instance* in = slot_ >= 0 ? detail::current() : nullptr;
+    return in && in->routes ? in->routes->routed(slot_, -1, base) : base;
+}
 void Instrument::voiceFinished(int v) {
     if (detail::VoiceBank* bank = bankFor(instance_, v)) bank->finished(v);
 }
@@ -423,6 +441,10 @@ void Instrument::setGlide(double ms) {
 void Instrument::setBendRange(double semitones) {
     if (detail::VoiceBank* bank = instance_ ? instance_->voices : nullptr)
         bank->setBendRange(std::isfinite(semitones) ? std::clamp(semitones, 0.0, 96.0) : 2.0);
+}
+void Instrument::setVoiceLimit(int voices) {
+    if (detail::VoiceBank* bank = instance_ ? instance_->voices : nullptr)
+        bank->setVoiceLimit(std::clamp(voices, 1, bank->count()));
 }
 
 // --- DSP -------------------------------------------------------------------------

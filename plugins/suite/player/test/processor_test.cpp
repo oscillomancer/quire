@@ -143,10 +143,10 @@ struct BlockNotes {
 // the keys of the notes it reported over.
 std::vector<double> playNotes(const DefinitionPtr& d,
                               const std::vector<std::tuple<int, int, bool>>& notes, int frames,
-                              std::vector<int>& ended, const std::string& file = {}) {
+                              std::vector<int>& ended, const std::string& property = {}) {
     Engine engine(d);
     engine.activate(48000.0, 64, 0, 2);
-    if (!file.empty()) engine.setProperty(0, file, true);
+    if (!property.empty()) engine.setProperty(0, property, true);  // a file, or the routes
     std::vector<double> left(static_cast<size_t>(frames)), right(static_cast<size_t>(frames));
     for (int start = 0; start < frames; start += 64) {
         const int n = std::min(64, frames - start);
@@ -594,8 +594,12 @@ TEST(an_instrument_plays_its_notes_the_same_compiled_either_way_and_ends_each) {
                 {&Native::attack, "attack"},
                 {&Native::release, "release"},
                 {&Native::cutoff, "cutoff"},
+                {&Native::rate, "rate"},
+                {&Native::voices, "voices"},
                 {&Native::glide, "glide"},
-                {&Native::level, "level"}}));
+                {&Native::level, "level"}},
+            std::vector<supple::script::detail::NativeCode<Native>::FileKey>{
+                {&Native::lfo, "lfo"}}));
     CHECK(jit != nullptr && native != nullptr);
     if (!jit || !native) return;
     CHECK(jit->info().instrument() && jit->info().takesNotes() && jit->info().voices == 8);
@@ -609,10 +613,16 @@ TEST(an_instrument_plays_its_notes_the_same_compiled_either_way_and_ends_each) {
         notes.push_back({3100 + k, 70 + k, false});
     }
     std::vector<int> jitEnded, nativeEnded;
-    const auto a = playNotes(jit, notes, 24000, jitEnded);
-    const auto b = playNotes(native, notes, 24000, nativeEnded);
+    // The LFO and the velocity moving the cutoff, as the Wah factory patch does.
+    const std::string wah = "lfo>cutoff 1.5\nvelocity>cutoff 1.0\n";
+    const auto a = playNotes(jit, notes, 24000, jitEnded, wah);
+    const auto b = playNotes(native, notes, 24000, nativeEnded, wah);
     CHECK(a == b);
     CHECK(jitEnded == nativeEnded);
+    std::vector<int> unrouted;
+    CHECK(playNotes(jit, notes, 24000, unrouted) != a);  // the routes are heard
+    CHECK(jit->presets().size() == 1 && jit->presets()[0].texts.size() == 1 &&
+          jit->presets()[0].texts[0].second == wah);
     double peak = 0.0;
     for (int i = 400; i < 2000; ++i) peak = std::max(peak, std::abs(a[static_cast<size_t>(i)]));
     CHECK(peak > 0.01);
@@ -792,6 +802,91 @@ struct E : Instrument {
     near(rms(right, 12000), sine * std::sqrt(17.0));
     const double down = std::pow(10.0, -6.0 / 20.0);
     near(rms(right, 16800), sine * std::sqrt(1.0 + 16.0 * down * down));
+}
+
+TEST(routes_move_a_parameter_by_their_sources_values_in_its_unit) {
+    // Each voice a constant at Level (dB): what the routes do to the level
+    // is what comes out.
+    const auto d = compileText(R"(#include <supple/script.h>
+struct R : Instrument {
+    static constexpr Info info = {.name = "R", .id = "com.example.routes", .voices = 4};
+    Param level = decibels("Level", -48, 6, -12).polyModulated();
+    Param voices = integer("Voices", 1, 4, 4);
+    Source half = voiceSource("Half");
+    void update() { setVoiceLimit(voices.index()); }
+    void startVoice(int v) { half.set(v, 0.5); }
+    void releaseVoice(int v) { voiceFinished(v); }
+    void process(Block& io) {
+        for (int v = 0; v < voiceCount(); ++v) {
+            if (!voicePlaying(v)) continue;
+            const double x = dbToGain(level.forVoice(v));
+            for (int i = 0; i < io.frames; ++i) io[0][i] += x;
+        }
+    }
+};
+)");
+    if (!d) return;
+    const Meaning& m = d->meaning();
+    CHECK(m.routes == 0);
+    if (m.routes != 0) return;
+    CHECK(m.sources.front().key == "half");
+    CHECK(m.sources[1].key == "velocity");  // an instrument's own, after the script's
+    CHECK(m.params[0].routable == Routable::Voice);
+    auto play = [&](const char* routes, int notes, int limit = 4) {
+        Engine engine(d);
+        engine.setProperty(0, routes);
+        setPlain(engine, d->params().at(1).id, limit);
+        engine.activate(48000.0, 64, 0, 2);
+        std::vector<std::pair<int, EngineEvent>> events;
+        for (int k = 0; k < notes; ++k) {
+            EngineEvent on;
+            on.type = EngineEvent::Type::Note;
+            on.note.key = static_cast<int16_t>(60 + k);
+            on.note.velocity = 0.5;
+            events.push_back({0, on});
+        }
+        std::vector<double> left(256), right(256);
+        for (int start = 0; start < 256; start += 64) {
+            double* out[] = {left.data() + start, right.data() + start};
+            BlockEvents block{&events, start, 64};
+            engine.process<double>(nullptr, out, 64, block);
+        }
+        return 20.0 * std::log10(left[200]);
+    };
+    CHECK_NEAR(play("", 1), -12.0, 1e-9);
+    CHECK_NEAR(play("half>level 12.0\n", 1), -6.0, 1e-9);                      // 12 dB at 0.5
+    CHECK_NEAR(play("half>level 12.0\nvelocity>level 2.0\n", 1), -5.0, 1e-9);  // they add
+    CHECK_NEAR(play("half>level 12.0 velocity\n", 1), -9.0, 1e-9);             // through a via
+    CHECK_NEAR(play("half>level 40.0\n", 1), 6.0, 1e-9);                       // kept in range
+    // Four notes on two voices: the limit steals the rest.
+    CHECK_NEAR(play("", 4), -12.0 + 20.0 * std::log10(4.0), 1e-9);
+    CHECK_NEAR(play("", 4, 2), -12.0 + 20.0 * std::log10(2.0), 1e-9);
+}
+
+TEST(an_effect_reads_its_global_routes_at_each_frame) {
+    const auto d = compileText(R"(#include <supple/script.h>
+struct G : Effect {
+    static constexpr Info info = {.name = "G", .id = "com.example.global-routes"};
+    Param mix = percent("Mix", 100).modulated();
+    Source ramp = source("Ramp").unipolar();
+    void process(Block& io) {
+        for (int i = 0; i < io.frames; ++i) {
+            ramp.set(i / 63.0);
+            for (int c = 0; c < io.channels; ++c) io[c][i] = mix.routed(i);
+        }
+    }
+};
+)");
+    if (!d) return;
+    Engine engine(d);
+    engine.setProperty(0, "ramp>mix -50.0\n");
+    engine.activate(48000.0, 64, 0, 2);
+    std::vector<double> left(64, 0.0), right(64, 0.0);
+    double* io[] = {left.data(), right.data()};
+    engine.process(io, io, 64);
+    CHECK_NEAR(left[0], 1.0, 1e-12);
+    CHECK_NEAR(left[63], 0.5, 1e-12);
+    CHECK_NEAR(left[21], 1.0 - 0.5 * 21.0 / 63.0, 1e-12);
 }
 
 TEST(a_script_reports_the_latency_it_sets_in_prepare) {

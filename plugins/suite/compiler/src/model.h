@@ -31,6 +31,12 @@ struct InitialValue {
     double value = 0.0;
 };
 
+// A source member's starting state: what kind of values it keeps.
+struct SourceSlot {
+    int offset = 0;
+    bool perVoice = false, bipolar = true;
+};
+
 // A parameter member's own starting state.
 struct ParamSlot {
     int offset = 0;
@@ -48,6 +54,8 @@ struct PluginModel {
     std::vector<FileModel> files;
     std::vector<FactoryPatchModel> factoryPatches;
     std::vector<FieldDecl*> fileFields;  // files[i]'s member
+    std::vector<SourceModel> sources;
+    std::vector<FieldDecl*> sourceFields;  // sources[i]'s member
     FunctionDecl* prepare = nullptr;
     FunctionDecl* update = nullptr;
     FunctionDecl* process = nullptr;
@@ -65,6 +73,7 @@ struct PluginModel {
     std::vector<ObjectSlot> objects;
     std::vector<InitialValue> initial;
     std::vector<ParamSlot> paramSlots;
+    std::vector<SourceSlot> sourceSlots;
 };
 
 // The result of semantic analysis.

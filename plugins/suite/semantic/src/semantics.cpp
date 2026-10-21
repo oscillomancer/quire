@@ -163,6 +163,23 @@ std::string meaningProblems(const Definition& d, const Meaning& m) {
         if (!keyValid(pm.key) || pm.key.find('.') != std::string::npos ||
             !propertyKeys.insert(pm.key).second)
             add("property key '" + pm.key + "' is malformed or repeated");
+    // Routes: a text property of their own, sources with keys of their own,
+    // and only numbers to move.
+    if (m.routes >= 0 && (static_cast<size_t>(m.routes) >= d.properties().count() ||
+                          d.properties().at(static_cast<size_t>(m.routes)).isFile()))
+        add("the routes are kept in a property that is not a text property of the plugin");
+    std::set<std::string> sourceKeys;
+    for (const SourceMeaning& s : m.sources)
+        if (!keyValid(s.key) || s.key.find('.') != std::string::npos ||
+            !sourceKeys.insert(s.key).second)
+            add("source key '" + s.key + "' is malformed or repeated");
+    for (size_t i = 0; i < m.params.size(); ++i) {
+        const ParamDef& p = d.params().at(i);
+        if (m.params[i].routable != Routable::No &&
+            (p.kind != ParamKind::Continuous || p.isOutput()))
+            add("parameter '" + std::string(p.name) +
+                "' is moved by routes, which move only numbers the plugin reads");
+    }
     const auto slash = m.patchType.rfind('/');
     if (m.patchType.rfind("supple.", 0) != 0 || slash == std::string::npos ||
         m.patchType.compare(slash - 6, 6, "-patch") != 0)
@@ -345,7 +362,95 @@ bool splitType(const std::string& type, std::string& plugin, int& major, int& mi
            b.ptr == type.data() + type.size() && !plugin.empty();
 }
 
+// --- routes ---------------------------------------------------------------------------------
+
+// The unit a route's amount for this parameter is in: a frequency's
+// octaves, any other's own (nullptr: a plain number).
+const char* amountUnit(const ParamDef& p) {
+    return p.unit == Unit::Hertz ? "oct" : physicalUnit(p).name;
+}
+
+// How far routes may move a parameter, in its amount's unit: the width of
+// its route range (in octaves for a frequency).
+double amountReach(const ParamDef& p, const ParamMeaning& pm) {
+    const double scale = physicalUnit(p).scale;
+    double lo = p.min * scale, hi = p.max * scale;
+    if (pm.routeMin < pm.routeMax) lo = pm.routeMin, hi = pm.routeMax;
+    if (p.unit == Unit::Hertz) return lo > 0.0 && hi > lo ? std::log2(hi / lo) : 0.0;
+    return hi - lo;
+}
+
+// An amount as a patch may write it: a number in the amount's unit, or
+// text with a unit that converts to it ("+1.5 oct", "-3 dB", "50 ct" for a
+// semitone amount). False, saying why, otherwise.
+bool readAmount(const json::Value& v, const char* unit, double& amount) {
+    if (v.isNumber()) {
+        amount = v.asDouble();
+        return std::isfinite(amount);
+    }
+    if (!v.isString()) return false;
+    const std::string text = lower(trim(v.asString()));
+    const char* first = text.data();
+    const char* last = text.data() + text.size();
+    if (first != last && *first == '+') ++first;
+    const auto r = ::supple::fromChars(first, last, amount);
+    if (r.ec != std::errc() || !std::isfinite(amount)) return false;
+    const std::string suffix = trim(std::string_view(r.ptr, static_cast<size_t>(last - r.ptr)));
+    if (suffix.empty()) return true;
+    const Alias* alias = nullptr;
+    for (const Alias& a : kAliases)
+        if (suffix == a.text) alias = &a;
+    if (!alias || !unit) return false;
+    // Pitch converts among octaves, semitones and cents.
+    auto pitch = [](const char* u) {
+        return std::strcmp(u, "oct") == 0  ? 1200.0
+               : std::strcmp(u, "st") == 0 ? 100.0
+               : std::strcmp(u, "ct") == 0 ? 1.0
+                                           : 0.0;
+    };
+    if (std::strcmp(alias->unit, unit) == 0) {
+        amount *= alias->scale;
+        return true;
+    }
+    if (pitch(alias->unit) > 0.0 && pitch(unit) > 0.0) {
+        amount *= alias->scale * pitch(alias->unit) / pitch(unit);
+        return true;
+    }
+    return false;
+}
+
+std::string amountText(double amount, const char* unit) {
+    std::string text = json::formatDouble(amount);
+    if (text.size() > 2 && text.compare(text.size() - 2, 2, ".0") == 0)
+        text.resize(text.size() - 2);
+    if (amount >= 0.0) text = "+" + text;
+    return unit ? text + " " + unit : text;
+}
+
 }  // namespace
+
+bool readRouteLine(std::string_view line, RouteLine& r) {
+    const size_t space = line.find(' ');
+    const size_t arrow = line.find('>');
+    if (space == std::string_view::npos || arrow == std::string_view::npos || arrow > space)
+        return false;
+    r.source = line.substr(0, arrow);
+    r.destination = line.substr(arrow + 1, space - arrow - 1);
+    std::string_view rest = line.substr(space + 1);
+    r.via = {};
+    if (const size_t gap = rest.find(' '); gap != std::string_view::npos) {
+        r.via = rest.substr(gap + 1);
+        rest = rest.substr(0, gap);
+    }
+    const auto parsed = ::supple::fromChars(rest.data(), rest.data() + rest.size(), r.amount);
+    return parsed.ec == std::errc() && parsed.ptr == rest.data() + rest.size() &&
+           !r.source.empty() && !r.destination.empty() && std::isfinite(r.amount);
+}
+
+bool routeInOctaves(const ParamDef& p) { return p.unit == Unit::Hertz; }
+double routeScale(const ParamDef& p) { return 1.0 / physicalUnit(p).scale; }
+
+namespace {}  // namespace
 
 // --- the codec ------------------------------------------------------------------------------
 
@@ -395,6 +500,182 @@ json::Value PatchCodec::valueJson(size_t index, double host) const {
 
 std::vector<bool> PatchCodec::activity(const state::Snapshot& s) const {
     return suite::activity(definition_, meaning_, [&](size_t i) { return s.host[i]; });
+}
+
+bool PatchCodec::routeText(const json::Value& routes, const std::string& path, std::string& text,
+                           std::vector<json::Error>& errors) const {
+    const size_t before = errors.size();
+    if (meaning_.routes < 0) {
+        errors.push_back(error("routes.none", "this plugin has no modulation routes", path,
+                               "remove the routes member"));
+        return false;
+    }
+    if (!routes.isObject()) {
+        errors.push_back(
+            error("routes.type", "\"routes\" must be an object of routes by \"source>parameter\"",
+                  path, "write \"routes\": {\"" + exampleRoute() + "\": {\"amount\": 1}}"));
+        return false;
+    }
+    const ParamTable& table = definition_.params();
+    std::vector<std::string> sourceKeys, destinationKeys;
+    for (const SourceMeaning& s : meaning_.sources) sourceKeys.push_back(s.key);
+    for (size_t i = 0; i < table.count(); ++i)
+        if (meaning_.params[i].routable != Routable::No)
+            destinationKeys.push_back(meaning_.params[i].key);
+    auto list = [](const std::vector<std::string>& keys) {
+        std::string all;
+        for (const std::string& k : keys) all += (all.empty() ? "" : ", ") + k;
+        return all;
+    };
+    auto source = [&](std::string_view key) -> const SourceMeaning* {
+        for (const SourceMeaning& s : meaning_.sources)
+            if (s.key == key) return &s;
+        return nullptr;
+    };
+    struct Line {
+        std::string source, destination, via;
+        double amount;
+    };
+    std::vector<Line> lines;
+    for (const json::Member& m : routes.asObject()) {
+        const std::string at = json::pointerJoin(path, m.first);
+        const size_t arrow = m.first.find('>');
+        if (arrow == std::string::npos || m.first.find('>', arrow + 1) != std::string::npos) {
+            errors.push_back(
+                error("routes.key", "'" + m.first + "' is not a route", at,
+                      "name a route \"source>parameter\", e.g. \"" + exampleRoute() + "\""));
+            continue;
+        }
+        Line line{m.first.substr(0, arrow), m.first.substr(arrow + 1), {}, 0.0};
+        const SourceMeaning* from = source(line.source);
+        if (!from) {
+            errors.push_back(error("routes.source",
+                                   "this plugin has no source '" + line.source + "'", at,
+                                   "did you mean '" + closest(line.source, sourceKeys) +
+                                       "'? Sources: " + list(sourceKeys)));
+            continue;
+        }
+        size_t d = table.count();
+        for (size_t i = 0; i < table.count(); ++i)
+            if (meaning_.params[i].key == line.destination) d = i;
+        if (d == table.count() || meaning_.params[d].routable == Routable::No) {
+            errors.push_back(error(
+                "routes.destination",
+                d == table.count() ? "this plugin has no parameter '" + line.destination + "'"
+                                   : "routes do not move '" + line.destination + "'",
+                at,
+                d == table.count() ? "did you mean '" + closest(line.destination, destinationKeys) +
+                                         "'? Routes move: " + list(destinationKeys)
+                                   : "routes move: " + list(destinationKeys)));
+            continue;
+        }
+        const ParamDef& p = table.at(d);
+        const ParamMeaning& pm = meaning_.params[d];
+        const char* unit = amountUnit(p);
+        const std::string example =
+            "e.g. {\"amount\": \"" + amountText(std::min(1.0, amountReach(p, pm)), unit) + "\"}";
+        const json::Value* amount = &m.second;
+        if (m.second.isObject()) {
+            amount = m.second.find("amount");
+            for (const json::Member& field : m.second.asObject())
+                if (field.first != "amount" && field.first != "via")
+                    errors.push_back(error("routes.unknown_member",
+                                           "a route has no \"" + field.first + "\"",
+                                           json::pointerJoin(at, field.first),
+                                           "a route has an amount and, optionally, a via source"));
+            if (const json::Value* via = m.second.find("via")) {
+                const SourceMeaning* through = via->isString() ? source(via->asString()) : nullptr;
+                if (!through) {
+                    errors.push_back(error(
+                        "routes.via",
+                        via->isString() ? "this plugin has no source '" + via->asString() + "'"
+                                        : "\"via\" names a source",
+                        json::pointerJoin(at, "via"),
+                        via->isString() ? "did you mean '" + closest(via->asString(), sourceKeys) +
+                                              "'? Sources: " + list(sourceKeys)
+                                        : "write \"via\": \"modwheel\", or leave it out"));
+                    continue;
+                }
+                line.via = through->key;
+                if (through->perVoice) from = through;  // per voice if either is
+            }
+        }
+        if (!amount) {
+            errors.push_back(error("routes.amount", "the route has no amount", at, example));
+            continue;
+        }
+        if (!readAmount(*amount, unit, line.amount)) {
+            errors.push_back(
+                error("routes.unit",
+                      amount->isString() ? "'" + amount->asString() + "' is not an amount '" +
+                                               line.destination + "' takes"
+                                         : "the amount must be a number or text with a unit",
+                      m.second.isObject() ? json::pointerJoin(at, "amount") : at,
+                      "the amount for " + line.destination + " is in " +
+                          (unit ? std::string(unit) : std::string("plain numbers")) +
+                          (p.unit == Unit::Hertz ? " (octaves)" : "") + ", " + example));
+            continue;
+        }
+        const double reach = amountReach(p, pm);
+        if (std::fabs(line.amount) > reach * (1.0 + 1e-9)) {
+            errors.push_back(error("routes.amount",
+                                   "an amount of " + amountText(line.amount, unit) +
+                                       " is more than '" + line.destination + "' can move",
+                                   m.second.isObject() ? json::pointerJoin(at, "amount") : at,
+                                   "use at most " + amountText(reach, unit) + " either way"));
+            continue;
+        }
+        if (from->perVoice && pm.routable != Routable::Voice) {
+            errors.push_back(error("routes.voice",
+                                   "'" + from->key + "' has a value for each voice, and '" +
+                                       line.destination + "' one for them all",
+                                   at,
+                                   "route a source shared by every voice to it, or choose a "
+                                   "parameter each voice has"));
+            continue;
+        }
+        lines.push_back(std::move(line));
+    }
+    if (lines.size() > kMaxRoutes)
+        errors.push_back(error("routes.count",
+                               "a patch has at most " + std::to_string(kMaxRoutes) + " routes",
+                               path, "remove some, or route one source to several in turn"));
+    if (errors.size() != before) return false;
+    std::sort(lines.begin(), lines.end(), [](const Line& a, const Line& b) {
+        return a.source != b.source ? a.source < b.source : a.destination < b.destination;
+    });
+    text.clear();
+    for (const Line& l : lines) {
+        text += l.source + ">" + l.destination + " " + json::formatDouble(l.amount);
+        if (!l.via.empty()) text += " " + l.via;
+        text += "\n";
+    }
+    return true;
+}
+
+std::string PatchCodec::exampleRoute() const {
+    std::string from = meaning_.sources.empty() ? "lfo1" : meaning_.sources.front().key;
+    for (size_t i = 0; i < meaning_.params.size(); ++i)
+        if (meaning_.params[i].routable != Routable::No) return from + ">" + meaning_.params[i].key;
+    return from + ">cutoff";
+}
+
+json::Value PatchCodec::routesJson(const std::string& text) const {
+    json::Value out = json::Value::object();
+    forEachRoute(text, [&](const RouteLine& r) {
+        json::Value route = json::Value::object();
+        route["amount"] = r.amount;
+        if (!r.via.empty()) route["via"] = std::string(r.via);
+        out[std::string(r.source) + ">" + std::string(r.destination)] = std::move(route);
+    });
+    return out;
+}
+
+const std::string& PatchCodec::routesOf(const state::Snapshot& s) const {
+    static const std::string none;
+    if (meaning_.routes < 0) return none;
+    const size_t i = static_cast<size_t>(meaning_.routes);
+    return s.hasProperty[i] ? s.property[i] : none;
 }
 
 json::Value PatchCodec::paramsDescription(const state::Snapshot* current) const {
@@ -472,6 +753,18 @@ json::Value PatchCodec::paramsDescription(const state::Snapshot* current) const 
             }
             e["active_when"] = std::move(when);
         }
+        // What routes do to it: the amount's unit, which sources may move it,
+        // and how far.
+        if (pm.routable != Routable::No && meaning_.routes >= 0) {
+            json::Value route = json::Value::object();
+            if (const char* unit = amountUnit(p)) route["unit"] = unit;
+            route["per_voice"] = pm.routable == Routable::Voice;
+            if (pm.routeMin < pm.routeMax) {
+                route["min"] = pm.routeMin;
+                route["max"] = pm.routeMax;
+            }
+            e["route"] = std::move(route);
+        }
         if (!applies[i]) e["active"] = false;
         params[pm.key] = std::move(e);
     }
@@ -519,13 +812,31 @@ json::Value PatchCodec::jsonSchema() const {
         if (p.description && *p.description) v["description"] = std::string(p.description);
         each[meaning_.params[i].key] = std::move(v);
     }
-    if (definition_.properties().count() > 0) {
+    if (meaning_.routes >= 0) {
+        json::Value& routes = props["routes"];
+        routes["type"] = "object";
+        routes["description"] =
+            "Modulation routes by \"source>parameter\": {\"amount\": in the parameter's unit, a "
+            "frequency's in octaves; \"via\": a source that scales it}.";
+        routes["propertyNames"]["pattern"] = "^[a-z][a-z0-9_]*>[a-z][a-z0-9_.]*$";
+        json::Value& route = routes["additionalProperties"];
+        route["type"] = "object";
+        route["required"] = json::Value::array();
+        route["required"].push_back("amount");
+        route["properties"]["amount"]["type"] = json::Value::array();
+        route["properties"]["amount"]["type"].push_back("number");
+        route["properties"]["amount"]["type"].push_back("string");
+        route["properties"]["via"]["type"] = "string";
+        route["additionalProperties"] = false;
+    }
+    if (hasProperties()) {
         json::Value& properties = props["properties"];
         properties["type"] = "object";
         properties["additionalProperties"] = false;
         json::Value& byKey = properties["properties"];
         byKey = json::Value::object();
         for (size_t i = 0; i < definition_.properties().count(); ++i) {
+            if (static_cast<int>(i) == meaning_.routes) continue;
             const PropertyDef& def = definition_.properties().at(i);
             json::Value v = json::Value::object();
             v["type"] = "string";
@@ -555,6 +866,22 @@ json::Value PatchCodec::schemaDocument(const state::Snapshot* current) const {
     doc["plugin"]["version"] = definition_.info().version;
     doc["patch_type"] = meaning_.patchType;
     doc["params"] = paramsDescription(current);
+    // The sources the routes may name.
+    if (meaning_.routes >= 0) {
+        json::Value sources = json::Value::object();
+        for (const SourceMeaning& s : meaning_.sources) {
+            json::Value e = json::Value::object();
+            e["name"] = s.name;
+            e["per_voice"] = s.perVoice;
+            json::Value range = json::Value::array();
+            range.push_back(s.bipolar ? -1 : 0);
+            range.push_back(1);
+            e["range"] = std::move(range);
+            if (!s.description.empty()) e["description"] = s.description;
+            sources[s.key] = std::move(e);
+        }
+        doc["sources"] = std::move(sources);
+    }
     doc["patch"] = jsonSchema();
     doc["docs"] = meaning_.docs;
     return doc;
@@ -582,10 +909,15 @@ json::Value PatchCodec::patch(const state::Snapshot& s, const Envelope& envelope
         params[meaning_.params[i].key] = v;
     }
     doc["params"] = std::move(params);
+    if (meaning_.routes >= 0) {
+        json::Value routes = routesJson(routesOf(s));
+        if (!changedOnly || routes.size() > 0) doc["routes"] = std::move(routes);
+    }
     const PropertyList& properties = definition_.properties();
-    if (properties.count() > 0) {
+    if (hasProperties()) {
         json::Value texts = json::Value::object();
         for (size_t i = 0; i < properties.count(); ++i) {
+            if (static_cast<int>(i) == meaning_.routes) continue;
             const std::string value = s.hasProperty[i] ? s.property[i] : properties.at(i).def;
             if (changedOnly && value == properties.at(i).def) continue;
             texts[meaning_.properties[i].key] = value;
@@ -827,12 +1159,17 @@ bool PatchCodec::apply(const json::Value& document, bool merge, state::Snapshot&
         }
     }
     if (strict) {
-        static const std::array<const char*, 7> kMembers = {"schema", "name",   "author",    "tags",
-                                                            "notes",  "params", "properties"};
+        static const std::array<const char*, 8> kMembers = {
+            "schema", "name", "author", "tags", "notes", "params", "routes", "properties"};
         for (const json::Member& m : doc.asObject()) {
-            if (m.first == "properties" && definition_.properties().count() == 0) {
+            if (m.first == "properties" && !hasProperties()) {
                 errors.push_back(error("patch.unknown_member", "this plugin has no properties",
                                        "/properties", "remove the properties member"));
+                continue;
+            }
+            if (m.first == "routes" && meaning_.routes < 0) {
+                errors.push_back(error("patch.unknown_member", "this plugin has no routes",
+                                       "/routes", "remove the routes member"));
                 continue;
             }
             if (std::find_if(kMembers.begin(), kMembers.end(),
@@ -841,7 +1178,8 @@ bool PatchCodec::apply(const json::Value& document, bool merge, state::Snapshot&
             errors.push_back(
                 error("patch.unknown_member", "\"" + m.first + "\" is not part of this patch",
                       json::pointerJoin("", m.first),
-                      "a patch has schema, name, author, tags, notes, params and properties"));
+                      "a patch has schema, name, author, tags, notes, params, routes and "
+                      "properties"));
         }
     }
 
@@ -892,19 +1230,25 @@ bool PatchCodec::apply(const json::Value& document, bool merge, state::Snapshot&
     const PropertyList& properties = definition_.properties();
     std::vector<std::string> texts(properties.count());
     for (size_t i = 0; i < properties.count(); ++i) texts[i] = properties.at(i).def;
-    if (const json::Value* given = doc.find("properties"); given && properties.count() > 0) {
+    if (const json::Value* routes = doc.find("routes"); routes && meaning_.routes >= 0)
+        routeText(*routes, "/routes", texts[static_cast<size_t>(meaning_.routes)], errors);
+    if (const json::Value* given = doc.find("properties"); given && hasProperties()) {
         if (!given->isObject()) {
             errors.push_back(error(
                 "patch.type", "\"properties\" must be an object of text by key", "/properties",
                 "write \"properties\": {\"" + meaning_.properties[0].key + "\": \"...\"}"));
         } else {
             std::vector<std::string> keys;
-            for (const PropertyMeaning& pm : meaning_.properties) keys.push_back(pm.key);
+            for (size_t i = 0; i < meaning_.properties.size(); ++i)
+                if (static_cast<int>(i) != meaning_.routes)
+                    keys.push_back(meaning_.properties[i].key);
             for (const json::Member& m : given->asObject()) {
                 const std::string path = json::pointerJoin("/properties", m.first);
                 size_t index = properties.count();
                 for (size_t i = 0; i < meaning_.properties.size(); ++i)
-                    if (meaning_.properties[i].key == m.first) index = i;
+                    if (meaning_.properties[i].key == m.first &&
+                        static_cast<int>(i) != meaning_.routes)
+                        index = i;
                 if (index == properties.count()) {
                     errors.push_back(error("properties.unknown_key",
                                            "this plugin has no property '" + m.first + "'", path,
@@ -967,9 +1311,28 @@ void PatchCodec::restore(const json::Value& doc, state::Snapshot& snapshot,
         }
     }
     const PropertyList& properties = definition_.properties();
+    // Routes that still name what the plugin has; any other is dropped.
+    if (meaning_.routes >= 0) {
+        const size_t i = static_cast<size_t>(meaning_.routes);
+        std::string text;
+        if (const json::Value* routes = doc.find("routes"); routes && routes->isObject()) {
+            json::Value kept = json::Value::object();
+            for (const json::Member& m : routes->asObject()) {
+                json::Value one = json::Value::object();
+                one[m.first] = m.second;
+                std::string single;
+                std::vector<json::Error> refused;
+                if (routeText(one, "", single, refused)) kept[m.first] = m.second;
+            }
+            routeText(kept, "", text, ignored);
+        }
+        snapshot.property[i] = text;
+        snapshot.hasProperty[i] = true;
+    }
     if (const json::Value* given = doc.find("properties"); given && given->isObject()) {
         for (const json::Member& m : given->asObject()) {
             for (size_t i = 0; i < meaning_.properties.size(); ++i) {
+                if (static_cast<int>(i) == meaning_.routes) continue;
                 if (meaning_.properties[i].key != m.first || !m.second.isString() ||
                     !properties.accepts(i, m.second.asString()))
                     continue;
@@ -1017,8 +1380,20 @@ std::string PatchCodec::describe(const state::Snapshot& s, bool changedOnly) con
         if (!out.empty()) out += "; ";
         out += group.empty() ? text : group + ": " + text;
     }
+    // Routes: "Routes: lfo1>pitch +0.2 st via modwheel, ...".
+    std::string routes;
+    forEachRoute(routesOf(s), [&](const RouteLine& r) {
+        size_t d = 0;
+        while (d < meaning_.params.size() && meaning_.params[d].key != r.destination) ++d;
+        const char* unit = d < table.count() ? amountUnit(table.at(d)) : nullptr;
+        routes += (routes.empty() ? "" : ", ") + std::string(r.source) + ">" +
+                  std::string(r.destination) + " " + amountText(r.amount, unit) +
+                  (r.via.empty() ? "" : " via " + std::string(r.via));
+    });
+    if (!routes.empty()) out += (out.empty() ? "Routes: " : "; Routes: ") + routes;
     const PropertyList& properties = definition_.properties();
     for (size_t i = 0; i < properties.count(); ++i) {
+        if (static_cast<int>(i) == meaning_.routes) continue;
         const std::string value = s.hasProperty[i] ? s.property[i] : properties.at(i).def;
         if (changedOnly && value == properties.at(i).def) continue;
         if (!out.empty()) out += "; ";

@@ -42,7 +42,16 @@
 //     releaseVoice, stopVoice -- and which Instrument's methods read and
 //     drive (detail::VoiceBank). Its output arrives silent. A replacement
 //     picks up the voices sounding: each starts again in the new code, and
-//     a released one is released again.
+//     a released one is released again. setVoiceLimit() plays fewer of the
+//     voices, which CLAP's voice-info reports.
+//   - Routes (script_definition.h's): the routes property, read into a
+//     fixed table on the audio thread as it arrives, without allocating.
+//     Param::routed() and forVoice() ask it (detail::RouteHost) for a
+//     parameter's routes, from the values the sources have then: the
+//     script's Source members, in the generation whose hook is running, and
+//     an instrument's own -- its notes' velocity, key, pressure and slide, a
+//     random value drawn for each note from a sequence that starts again at
+//     every reset, and the controllers last received on any channel.
 #pragma once
 
 #include <algorithm>
@@ -54,6 +63,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "core/Notes.h"
@@ -137,6 +147,7 @@ class Generation {
         int mode = -1;
         double glideMs = std::numeric_limits<double>::quiet_NaN();
         double bendRange = std::numeric_limits<double>::quiet_NaN();
+        int limit = -1;
     };
     VoiceSettings preparedVoices;
 
@@ -172,6 +183,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         instrument_ = definition_->code()->kind() == D::PluginKind::Instrument;
         voiceCount_ = std::clamp(info.voices > 0 ? info.voices : kDefaultVoices, 1, kMaxVoices);
         if (instrument_) instance_.voices = &bank_;
+        setUpRoutes();
         polySlot_.assign(table_->count(), -1);
         for (size_t i = 0; i < table_->count(); ++i)
             if (instrument_ && table_->at(i).is(pflag::kPolyMod)) {
@@ -208,7 +220,10 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         }
         load(*current_, v, true);
         bindFiles(*current_);
+        resetControllers();
+        running_ = current_.get();
         current_->prepare(&instance_);
+        applyVoiceLimit();
         stopped_ = false;
         const size_t channels = static_cast<size_t>(std::max(setup.channels, 0));
         const size_t frames = static_cast<size_t>(std::max(setup.maxBlockSize, 1));
@@ -231,12 +246,14 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         run(*current_, v, false);
         checkBudget();
         applyVoiceMode();
+        applyVoiceLimit();
     }
 
     void reset() {
         instance_.status.clear();
         budgetSeen_ = 0;
         if (instrument_) voices_.reset(*this);
+        resetControllers();
         current_->reset();  // which restores the files prepare() saw
         bindFiles(*current_);
         for (D::FileContents* f : files_)
@@ -284,13 +301,27 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         return line;
     }
 
-    // An instrument's notes and controllers (pitch bend, the sustain pedal).
+    // An instrument's notes and controllers (pitch bend, the sustain pedal,
+    // and those the routes' sources follow).
     void note(const NoteEvent& e) {
         if (instrument_) voices_.note(e, *this);
     }
     void midi(const MidiMessage& m) {
-        if (instrument_) voices_.midi(m, *this);
+        if (!instrument_) return;
+        voices_.midi(m, *this);
+        if (m.isPitchBend()) pitchBend_ = m.pitchBend();
+        if (m.isChannelPressure()) aftertouch_ = m.pressure();
+        if (m.isController() && m.controller() >= 0 && m.controller() < 128)
+            controllers_[static_cast<size_t>(m.controller())] = m.value() / 127.0;
     }
+
+    // Properties: the routes, into the table the audio thread reads.
+    void property(uint32_t id, std::string_view value) {
+        if (id == kRoutesProperty && definition_->meaning().routes >= 0) loadRoutes(value);
+    }
+
+    // CLAP voice-info: the voices the mode and the limit let play.
+    int voiceCount() const { return instrument_ ? voices_.voiceCount() : 0; }
     // To the voices whose notes they address.
     void noteExpression(const NoteExpression& x) {
         if (!instrument_) return;
@@ -465,6 +496,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
 
     void run(Generation& g, const ParamValues& v, bool all) {
         load(g, v, all);
+        running_ = &g;
         D::CurrentScope scope(&instance_);
         instance_.budget = kBudgetPerHook;
         if (auto hook = g.program().update()) hook(&instance_, g.self());
@@ -496,9 +528,11 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
             if (S::Param* p = g.param(i))
                 D::ParamBinding::setGlide(*p, block.smoothed(table_->at(i).id), block.frames);
         {
+            running_ = &g;
             D::CurrentScope scope(&instance_);
             instance_.budget = kBudgetPerFrame * std::max(block.frames, 1);
             if (auto hook = g.program().process()) hook(&instance_, g.self(), &io);
+            running_ = current_.get();
         }
         for (uint16_t i : table_->smoothed())
             if (S::Param* p = g.param(i)) D::ParamBinding::setGlide(*p, nullptr, 0);
@@ -537,6 +571,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
             if (S::Param* p = next->param(i); p && current_->param(i))
                 D::ParamBinding::setValue(*p, current_->param(i)->value(), true);
         {
+            running_ = next;
             D::CurrentScope scope(&instance_);
             instance_.budget = kBudgetPerHook;
             if (auto hook = next->program().update()) hook(&instance_, next->self());
@@ -550,6 +585,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
             if (v.mode >= 0) pendingMode_ = v.mode;
             if (!std::isnan(v.glideMs)) voices_.setGlide(v.glideMs);
             if (!std::isnan(v.bendRange)) voices_.setBendRange(v.bendRange);
+            if (v.limit > 0) pendingLimit_ = v.limit;
         }
         // The files are the new code's now; the old lets go of them.
         bindFiles(*current_);
@@ -557,6 +593,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
             for (size_t i = 0; i < files_.size(); ++i) fading_->bindFile(i, nullptr);
         fadeDone_ = 0;
         stopped_ = false;
+        running_ = current_.get();
         checkBudget();
         // The voices sounding carry on in the new code: each starts again,
         // and a released one is released again.
@@ -568,10 +605,17 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
                 }
     }
 
-    // A new note on voice v: its expressions neutral, its modulation none.
+    // A new note on voice v: its expressions neutral, its modulation none,
+    // its random value drawn.
     void noteBegins(int v) {
         expression_[static_cast<size_t>(v)] = {1.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0};
         for (auto& amounts : polyAmount_) amounts[static_cast<size_t>(v)] = 0.0;
+        // PCG32's step, as the script's Random takes it.
+        random_ = random_ * 6364136223846793005ULL + 1442695040888963407ULL;
+        const auto bits = static_cast<uint32_t>(((random_ >> 18u) ^ random_) >> 27u);
+        const auto turn = static_cast<uint32_t>(random_ >> 59u);
+        const uint32_t word = (bits >> turn) | (bits << ((32u - turn) & 31u));
+        noteRandom_[static_cast<size_t>(v)] = word / 2147483648.0 - 1.0;
     }
 
     void bindFiles(Generation& g) {
@@ -583,6 +627,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     void callVoice(Call&& call) {
         if (stopped_) return;
         {
+            running_ = current_.get();
             D::CurrentScope scope(&instance_);
             instance_.budget = kBudgetPerHook;
             call();
@@ -597,6 +642,13 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         const auto mode = static_cast<Voices::Mode>(pendingMode_);
         pendingMode_ = -1;
         voices_.setMode(mode, *this);
+    }
+    // And a limit: lowering it stops the voices above it.
+    void applyVoiceLimit() {
+        if (pendingLimit_ < 0 || !instrument_) return;
+        const int limit = std::clamp(pendingLimit_, 1, voiceCount_);
+        pendingLimit_ = -1;
+        if (limit != voices_.count()) voices_.setCount(limit, *this);
     }
 
     // Instrument's methods, through the instance (script_runtime.h).
@@ -620,8 +672,10 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
             if (slot < 0 || static_cast<size_t>(slot) >= p_.polySlot_.size()) return value;
             const int k = p_.polySlot_[static_cast<size_t>(slot)];
             if (k < 0) return value;
-            return modulatedPlain(p_.table_->at(static_cast<size_t>(slot)), value,
-                                  p_.polyAmount_[static_cast<size_t>(k)][static_cast<size_t>(v)]);
+            const double hosts =
+                modulatedPlain(p_.table_->at(static_cast<size_t>(slot)), value,
+                               p_.polyAmount_[static_cast<size_t>(k)][static_cast<size_t>(v)]);
+            return p_.routes_.routed(slot, v, hosts);
         }
         void finished(int v) override {
             if (!p_.fadingNow_) p_.voices_.finished(v, p_);
@@ -629,6 +683,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         void setMode(S::VoiceMode mode) override { p_.pendingMode_ = static_cast<int>(mode); }
         void setGlide(double ms) override { p_.voices_.setGlide(ms); }
         void setBendRange(double semitones) override { p_.voices_.setBendRange(semitones); }
+        void setVoiceLimit(int voices) override { p_.pendingLimit_ = voices; }
 
       private:
         ScriptProcessor& p_;
@@ -655,11 +710,165 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         void setMode(S::VoiceMode mode) override { settings_.mode = static_cast<int>(mode); }
         void setGlide(double ms) override { settings_.glideMs = ms; }
         void setBendRange(double semitones) override { settings_.bendRange = semitones; }
+        void setVoiceLimit(int voices) override { settings_.limit = voices; }
 
       private:
         int count_;
         Generation::VoiceSettings& settings_;
     };
+
+    // The patch's routes, as Param::routed() and forVoice() read them.
+    class Routes final : public D::RouteHost {
+      public:
+        explicit Routes(ScriptProcessor& p) : p_(p) {}
+
+        double routed(int slot, int v, double value) const override {
+            if (slot < 0 || static_cast<size_t>(slot) >= count_.size()) return value;
+            const int n = count_[static_cast<size_t>(slot)];
+            if (n == 0) return value;
+            double sum = 0.0;
+            for (int k = first_[static_cast<size_t>(slot)], end = k + n; k < end; ++k) {
+                const Route& r = table_[static_cast<size_t>(k)];
+                double x = p_.sourceValue(r.source, v);
+                if (r.via >= 0) x *= p_.sourceValue(r.via, v);
+                sum += r.amount * x;
+            }
+            const Reach& reach = reach_[static_cast<size_t>(slot)];
+            const double moved = reach.octaves ? value * std::exp2(sum) : value + sum * reach.scale;
+            return std::isfinite(moved) ? std::clamp(moved, reach.low, reach.high) : value;
+        }
+
+        // Main thread, once: each parameter's reach, room for its routes.
+        void setUp(const ParamTable& table, const Meaning& meaning) {
+            count_.assign(table.count(), 0);
+            first_.assign(table.count(), 0);
+            reach_.assign(table.count(), Reach{});
+            for (size_t i = 0; i < table.count(); ++i) {
+                const ParamDef& p = table.at(i);
+                const ParamMeaning& pm = meaning.params[i];
+                Reach& r = reach_[i];
+                r.octaves = routeInOctaves(p);
+                r.scale = routeScale(p);
+                r.low = p.min;
+                r.high = p.max;
+                if (pm.routeMin < pm.routeMax) {
+                    r.low = pm.routeMin * r.scale;
+                    r.high = pm.routeMax * r.scale;
+                }
+            }
+        }
+
+        // Audio thread: the property's routes, in place of the table's.
+        // A route naming what the plugin lacks is left out (the codec wrote
+        // the text, so there are none).
+        void load(std::string_view text, const Meaning& meaning) {
+            std::fill(count_.begin(), count_.end(), 0);
+            size_t used = 0;
+            auto source = [&](std::string_view key) {
+                for (size_t s = 0; s < meaning.sources.size(); ++s)
+                    if (meaning.sources[s].key == key) return static_cast<int>(s);
+                return -1;
+            };
+            forEachRoute(text, [&](const RouteLine& line) {
+                if (used == table_.size()) return;
+                int dest = -1;
+                for (size_t i = 0; i < meaning.params.size(); ++i)
+                    if (meaning.params[i].routable != Routable::No &&
+                        meaning.params[i].key == line.destination)
+                        dest = static_cast<int>(i);
+                const int from = source(line.source);
+                const int via = line.via.empty() ? -1 : source(line.via);
+                if (dest < 0 || from < 0 || (!line.via.empty() && via < 0)) return;
+                table_[used++] = Route{from, via, dest, line.amount};
+            });
+            // By destination, in the order they came (a stable insertion
+            // sort: at most kMaxRoutes).
+            for (size_t i = 1; i < used; ++i)
+                for (size_t j = i; j > 0 && table_[j - 1].dest > table_[j].dest; --j)
+                    std::swap(table_[j - 1], table_[j]);
+            for (size_t k = 0; k < used; ++k) {
+                const auto d = static_cast<size_t>(table_[k].dest);
+                if (count_[d]++ == 0) first_[d] = static_cast<int>(k);
+            }
+        }
+
+      private:
+        struct Route {
+            int source = 0, via = -1, dest = 0;
+            double amount = 0.0;
+        };
+        // How the routes move a parameter's plain value, and how far.
+        struct Reach {
+            bool octaves = false;
+            double scale = 1.0, low = 0.0, high = 1.0;
+        };
+        ScriptProcessor& p_;
+        std::array<Route, kMaxRoutes> table_{};
+        std::vector<int> count_, first_;  // by parameter table index
+        std::vector<Reach> reach_;
+    };
+
+    void setUpRoutes() {
+        const Meaning& meaning = definition_->meaning();
+        if (meaning.routes < 0) return;
+        routes_.setUp(*table_, meaning);
+        instance_.routes = &routes_;
+        const auto& own = definition_->code()->sources();
+        scriptSources_ = static_cast<int>(own.size());
+        for (const D::SourceModel& s : own) sourceOffsets_.push_back(s.offset);
+        resetControllers();
+    }
+    void loadRoutes(std::string_view text) { routes_.load(text, definition_->meaning()); }
+
+    // Source `k` (the meaning's order: the script's, then an instrument's
+    // own) for voice v; -1 asks for the value shared by every voice, which a
+    // per-voice source does not have.
+    double sourceValue(int k, int v) const {
+        if (k < scriptSources_) {
+            const Generation* g = running_ ? running_ : current_.get();
+            const auto* s =
+                reinterpret_cast<const S::Source*>(static_cast<const unsigned char*>(g->self()) +
+                                                   sourceOffsets_[static_cast<size_t>(k)]);
+            if (v < 0)
+                return definition_->meaning().sources[static_cast<size_t>(k)].perVoice ? 0.0
+                                                                                       : s->get(0);
+            return s->get(v);
+        }
+        const bool voice = v >= 0 && v < voiceCount_;
+        const auto at = static_cast<size_t>(voice ? v : 0);
+        switch (k - scriptSources_) {  // script::detail::kInstrumentSources' order
+            case 0:                    // velocity
+                return voice ? voices_[v].velocity : 0.0;
+            case 1:  // key
+                return voice ? std::clamp((voices_[v].note.key - 60) / 60.0, -1.0, 1.0) : 0.0;
+            case 2:  // random
+                return voice ? noteRandom_[at] : 0.0;
+            case 3:  // pressure
+                return voice ? expression_[at][6] : 0.0;
+            case 4:  // slide
+                return voice ? expression_[at][5] : 0.0;
+            case 5:  // modwheel
+                return controllers_[1];
+            case 6:  // breath
+                return controllers_[2];
+            case 7:  // expression
+                return controllers_[11];
+            case 8:
+                return aftertouch_;
+            case 9:
+                return pitchBend_;
+            default:
+                return 0.0;
+        }
+    }
+
+    // The controllers at rest, and the notes' random values from the start.
+    void resetControllers() {
+        controllers_.fill(0.0);
+        aftertouch_ = pitchBend_ = 0.0;
+        random_ = 0x853c49e6748fea9bULL;
+        noteRandom_.fill(0.0);
+    }
 
     void retire(std::unique_ptr<Generation> g) {
         // A full queue keeps it: freeing here would be the audio thread's to do.
@@ -727,8 +936,19 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     int voiceCount_ = kDefaultVoices;
     Voices voices_;
     Bank bank_{*this};
-    int pendingMode_ = -1;
+    int pendingMode_ = -1, pendingLimit_ = -1;
     int endFrame_ = 0;
+    // Routes, and what their sources read: which generation's hook is
+    // running, where its Source members are, the controllers last received
+    // and each note's random value.
+    Routes routes_{*this};
+    const Generation* running_ = nullptr;
+    int scriptSources_ = 0;
+    std::vector<int> sourceOffsets_;
+    std::array<double, 128> controllers_{};
+    double aftertouch_ = 0.0, pitchBend_ = 0.0;
+    uint64_t random_ = 0;
+    std::array<double, kMaxVoices> noteRandom_{};
     // Each voice's note expressions (CLAP's order), and per poly-modulated
     // parameter (polySlot_, by table index) each voice's modulation.
     std::array<std::array<double, 7>, kMaxVoices> expression_{};

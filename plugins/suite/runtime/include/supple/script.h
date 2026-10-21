@@ -238,6 +238,9 @@ struct ParamSpec {
     static constexpr int kConditions = 4;
     Condition conditions[kConditions] = {};
     int conditionCount = 0;
+    // How far routes may move it (.routeRange()), physical; its own range
+    // when routeMin > routeMax.
+    double routeMin = 1.0, routeMax = 0.0;
 
     // In a group, which the automatic editor and hosts show as a section.
     ParamSpec in(const char* g) const {
@@ -257,17 +260,29 @@ struct ParamSpec {
         p.smoothingMs = ms;
         return p;
     }
+    // The host may modulate it, and so may routes from the plugin's global
+    // sources (Source): read it with routed(i).
     ParamSpec modulated() const {
         ParamSpec p = *this;
         p.modulatable = true;
         return p;
     }
     // An instrument's: the host may modulate it per note (CLAP polyphonic
-    // modulation); each voice reads its own value with forVoice(v).
+    // modulation), and routes from any source, a voice's own included; each
+    // voice reads its own value with forVoice(v).
     ParamSpec polyModulated() const {
         ParamSpec p = *this;
         p.modulatable = true;
         p.polyModulatable = true;
+        return p;
+    }
+    // How far routes may take it, physical, beyond its own range: a fine
+    // tuning of +-100 ct that a pitch envelope sweeps by octaves,
+    // cents("Fine", -100, 100, 0).polyModulated().routeRange(-4800, 4800).
+    ParamSpec routeRange(double lowest, double highest) const {
+        ParamSpec p = *this;
+        p.routeMin = lowest;
+        p.routeMax = highest;
         return p;
     }
     // Its minimum means off ("-inf dB" for a level).
@@ -466,9 +481,13 @@ class Param {
     // In update(): whether this parameter changed since the last update.
     bool changed() const { return changed_; }
     // An instrument's polyModulated() parameter for voice v: the block's
-    // value with the host's modulation of that voice's note, kept in range.
-    // value() for any other.
+    // value with the host's modulation of that voice's note and the routes
+    // to it, from the sources' values now, kept in range. value() for any
+    // other.
     double forVoice(int v) const;
+    // A modulated() parameter at frame i: at(i) with the routes from global
+    // sources, from their values now, kept in range. at(i) for any other.
+    double routed(int i) const;
     // A meter() parameter: what the plugin reports.
     void set(double value) { reported_ = value; }
     // In editor code: the value as the host shows it ("-3.0 dB",
@@ -585,6 +604,97 @@ class Convolver {
   private:
     friend struct detail::FileBinding;
     detail::FileContents* contents_ = nullptr;
+};
+
+// --- modulation ------------------------------------------------------------------
+
+// A modulation source as the script declares it: source("Macro 1") for one
+// value the whole plugin shares, voiceSource("LFO 1") for an instrument's
+// value per voice. Bipolar (-1 to 1) unless .unipolar() (0 to 1); .help()
+// and .withKey() as a parameter has.
+struct SourceSpec {
+    const char* name = "";
+    const char* description = "";
+    const char* key = "";  // the patch key; the member's name when empty
+    bool perVoice = false;
+    bool bipolar = true;
+
+    SourceSpec help(const char* text) const {
+        SourceSpec s = *this;
+        s.description = text;
+        return s;
+    }
+    SourceSpec withKey(const char* k) const {
+        SourceSpec s = *this;
+        s.key = k;
+        return s;
+    }
+    SourceSpec unipolar() const {
+        SourceSpec s = *this;
+        s.bipolar = false;
+        return s;
+    }
+};
+inline SourceSpec source(const char* name) {
+    SourceSpec s;
+    s.name = name;
+    return s;
+}
+inline SourceSpec voiceSource(const char* name) {
+    SourceSpec s = source(name);
+    s.perVoice = true;
+    return s;
+}
+
+// A modulation source: a member of the plugin struct, Source lfo =
+// voiceSource("LFO 1"), whose value the script computes and set()s. The
+// patch's routes connect sources to parameters, each with an amount in the
+// parameter's unit (a frequency's in octaves) at the source's full value:
+// "lfo>cutoff": {"amount": 1} swings the cutoff an octave each way. A
+// parameter that routes may move is modulated() (global sources) or, an
+// instrument's, polyModulated() (any source); the script reads it with
+// routed(i) or forVoice(v), after setting the sources it hears. Values are
+// kept to -1..1, or 0..1 for a unipolar() source. An instrument also has
+// these, the runtime's own: velocity, key (-1 at key 0, 0 at middle C, 1 at
+// key 120), random (new for each note) and the note's pressure and slide
+// (CLAP brightness) per voice; modwheel, breath, expression (CC 11),
+// aftertouch and pitchbend for all.
+class Source {
+  public:
+    static constexpr int kVoices = 64;  // the most voices an instrument has
+
+    Source(const SourceSpec& spec);  // registers it with the plugin under construction
+    // A per-voice source: every voice's value, or voice v's. A global
+    // source has one value, which both set.
+    void set(double value) {
+        const double x = kept(value);
+        if (!perVoice_)
+            values_[0] = x;
+        else
+            for (int v = 0; v < kVoices; ++v) values_[v] = x;
+    }
+    void set(int v, double value) {
+        if (!perVoice_)
+            set(value);
+        else if (static_cast<unsigned>(v) < static_cast<unsigned>(kVoices))
+            values_[v] = kept(value);
+        else
+            detail::outOfRange(0);
+    }
+    // Voice v's value (a global source's one).
+    double get(int v) const {
+        if (!perVoice_) return values_[0];
+        if (static_cast<unsigned>(v) < static_cast<unsigned>(kVoices)) return values_[v];
+        detail::outOfRange(0);
+        return 0.0;
+    }
+
+  private:
+    friend struct detail::Layout;
+    double kept(double x) const { return x < low_ ? low_ : (x > 1.0 ? 1.0 : (x == x ? x : 0.0)); }
+    double values_[kVoices] = {};
+    double low_ = -1.0;
+    bool perVoice_ = false;
 };
 
 // --- the plugin ----------------------------------------------------------------
@@ -765,6 +875,10 @@ class Instrument : public Plugin {
     void setVoiceMode(VoiceMode mode);
     void setGlide(double ms);
     void setBendRange(double semitones);
+    // Usually in update(): how many voices Poly mode plays at once, 1 to
+    // voiceCount() (all of them unless set); a note past them steals one.
+    // Lowering it stops the voices above it, through stopVoice().
+    void setVoiceLimit(int voices);
 };
 
 // Notes in, notes out. Not available to scripts yet, and the compiler says
@@ -1218,7 +1332,10 @@ class Pointer {
 };
 
 // Metadata only: factoryPatches(Patches& p) declares read-only patches.
-// Values are patch values in physical units: percent is 30, not 0.3.
+// Values are patch values in physical units: percent is 30, not 0.3. A
+// route is as a patch writes it, its amount in the destination's unit (a
+// frequency's in octaves), and through a second source when one is given:
+// p.route("lfo1>pitch", 0.2, "modwheel").
 class Patches {
   public:
     explicit Patches(detail::PatchBuilder& builder) : builder_(&builder) {}
@@ -1228,6 +1345,8 @@ class Patches {
         return set(param, static_cast<double>(physical));
     }
     Patches& set(const Param& param, const char* choiceKey);
+    Patches& route(const char* route, double amount);
+    Patches& route(const char* route, double amount, const char* via);
 
   private:
     detail::PatchBuilder* builder_;

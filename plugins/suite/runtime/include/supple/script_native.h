@@ -16,9 +16,9 @@
 // see is a member's name, which a parameter's patch key is made from: the
 // keys come with the code, by member (what the script compiler worked out).
 // A Param with no key there takes the one withKey() gives, or else its
-// name's in snake_case; file members (AudioFile, Convolver) the same, from
-// a second list. Shared members report where they are as they are
-// constructed, as Params do. Scripts never see this header.
+// name's in snake_case; file members (AudioFile, Convolver) and Source
+// members the same, from a second list. Shared members report where they
+// are as they are constructed, as Params do. Scripts never see this header.
 #pragma once
 
 #include <cctype>
@@ -41,8 +41,8 @@ template <class T>
 class NativeCode final : public Code {
   public:
     using Key = std::pair<Param T::*, const char*>;
-    // A file member's key: {&Sampler::sample, "sample"} (an AudioFile or a
-    // Convolver).
+    // A file or source member's key: {&Sampler::sample, "sample"} (an
+    // AudioFile, a Convolver or a Source).
     struct FileKey {
         template <class M>
         FileKey(M T::* m, const char* k)
@@ -83,6 +83,15 @@ class NativeCode final : public Code {
             m.id = keyId(m.key);
             files_.push_back(std::move(m));
         }
+        for (size_t i = 0; i < collector.sources.size(); ++i) {
+            SourceModel& m = collector.sourceModels[i];
+            const void* member = collector.sources[i];
+            m.offset = static_cast<int>(static_cast<const unsigned char*>(member) - base);
+            for (const FileKey& k : fileKeys)
+                if (k.of(*probe) == member && m.key.empty()) m.key = k.key;
+            if (m.key.empty()) m.key = snakeCase(m.name);
+            sources_.push_back(std::move(m));
+        }
         for (const auto& [member, bytes] : collector.shared)
             shared_.push_back(SharedModel{
                 {}, static_cast<int>(static_cast<const unsigned char*>(member) - base), bytes});
@@ -97,6 +106,7 @@ class NativeCode final : public Code {
     PluginKind kind() const override { return kind_; }
     const std::vector<ParamModel>& params() const override { return params_; }
     const std::vector<FileModel>& files() const override { return files_; }
+    const std::vector<SourceModel>& sources() const override { return sources_; }
     const std::vector<FactoryPatchModel>& factoryPatches() const override {
         return factoryPatches_;
     }
@@ -183,7 +193,7 @@ class NativeCode final : public Code {
         FactoryCollector(const std::vector<ParamModel>& p, const std::vector<const Param*>& m,
                          std::vector<FactoryPatchModel>& out)
             : params(p), members(m), patches(out) {}
-        void add(const char* name) override { patches.push_back({name ? name : "", {}}); }
+        void add(const char* name) override { patches.push_back({name ? name : "", {}, {}}); }
         size_t index(const Param& p) const {
             for (size_t i = 0; i < members.size(); ++i)
                 if (members[i] == &p) return i;
@@ -201,6 +211,10 @@ class NativeCode final : public Code {
                 for (size_t j = 0; j < params[i].choices.size(); ++j)
                     if (choiceKey(params[i], j) == key) value = static_cast<double>(j);
             set(param, value);
+        }
+        void route(const char* route, double amount, const char* via) override {
+            if (patches.empty()) add("");
+            patches.back().routes.push_back({route ? route : "", via ? via : "", amount});
         }
     };
 
@@ -252,6 +266,18 @@ class NativeCode final : public Code {
                 if (named[k] != unless) out.values.push_back(static_cast<int>(k));
             return out;
         }
+        std::vector<const void*> sources;
+        std::vector<SourceModel> sourceModels;
+        void declareSource(Source& source, const SourceSpec& spec) override {
+            sources.push_back(&source);
+            SourceModel m;
+            m.key = spec.key;
+            m.name = spec.name;
+            m.description = spec.description;
+            m.perVoice = spec.perVoice;
+            m.bipolar = spec.bipolar;
+            sourceModels.push_back(std::move(m));
+        }
         void declareFile(void* member, const FileSpec& spec) override {
             files.push_back(member);
             FileModel m;
@@ -298,6 +324,8 @@ class NativeCode final : public Code {
         m.bypass = s.bypass;
         m.hidden = s.hidden;
         for (const char* r : s.roles) m.roles.emplace_back(r);
+        m.routeMin = s.routeMin;
+        m.routeMax = s.routeMax;
         return m;
     }
 
@@ -340,6 +368,7 @@ class NativeCode final : public Code {
     PluginKind kind_ = PluginKind::Effect;
     std::vector<ParamModel> params_;
     std::vector<FileModel> files_;
+    std::vector<SourceModel> sources_;
     std::vector<FactoryPatchModel> factoryPatches_;
     std::vector<SharedModel> shared_;
 };

@@ -419,6 +419,54 @@ TEST_CASE("the first scripts' mistakes are refused with a hint") {
           "script.plugin.instrument");
 }
 
+TEST_CASE("sources are members of the plugin, and factory patches route them by key") {
+    const std::string head = "#include <supple/script.h>\n";
+    const std::string hooks =
+        "void startVoice(int v) {}\nvoid releaseVoice(int v) {}\n"
+        "void process(Block& io) {}\n";
+    auto instrument = [&](const std::string& body) {
+        return head + "struct T : Instrument {\n" +
+               "static constexpr Info info = {.name = \"T\", .id = \"com.example.t\"};\n" +
+               "Param cutoff = frequency(\"Cutoff\", 20, 20000, 1000).polyModulated();\n" + body +
+               "\n" + hooks + "};\n";
+    };
+    auto effect = [&](const std::string& body) {
+        return head + "struct T : Effect {\n" +
+               "static constexpr Info info = {.name = \"T\", .id = \"com.example.t\"};\n" +
+               "Param mix = percent(\"Mix\", 50).modulated();\n" + body +
+               "\nvoid process(Block& io) {}\n};\n";
+    };
+    CHECK(firstError(
+              instrument("Source lfo = voiceSource(\"LFO\");\n"
+                         "void factoryPatches(Patches& p) { p.add(\"A\").route(\"lfo>cutoff\", "
+                         "2).route(\"velocity>cutoff\", 1, \"modwheel\"); }")) == "");
+    CHECK(firstError(effect("Source macro = source(\"Macro\").unipolar();")) == "");
+    CHECK(firstError(effect("Source lfo = voiceSource(\"LFO\");")) == "script.source.voice");
+    CHECK(firstError(instrument("Source velocity = voiceSource(\"Velocity\");")) ==
+          "script.source.key");
+    CHECK(firstError(instrument("Source a = source(\"A\").withKey(\"x\");\n"
+                                "Source b = source(\"B\").withKey(\"x\");")) ==
+          "script.source.key");
+    CHECK(firstError(instrument("Array<Source, 2> lfos;")) == "script.source.array");
+    CHECK(firstError(instrument("Source lfo;")) == "script.source.declaration");
+    CHECK(firstError(instrument("Source lfo = voiceSource(\"LFO\").smoothed(2);")) ==
+          "script.source.modifier");
+    CHECK(firstError(instrument("Source lfo = voiceSource(\"LFO\");\n"
+                                "void f() { auto copy = lfo; }")) == "script.local.source");
+    CHECK(firstError(instrument("Param fine = cents(\"Fine\", -100, 100, 0).routeRange(5, 1);")) ==
+          "script.param.modifier");
+    CHECK(firstError(
+              instrument("void factoryPatches(Patches& p) { p.add(\"A\").route(\"nothing>cutoff\", "
+                         "2); }")) == "script.patch.route");
+    CHECK(firstError(effect("Source m = source(\"M\");\n"
+                            "void factoryPatches(Patches& p) { p.add(\"A\").route(\"m>gain\", 2); "
+                            "}")) == "script.patch.route");
+    // An effect has no sources of its own.
+    CHECK(
+        firstError(effect("void factoryPatches(Patches& p) { p.add(\"A\").route(\"modwheel>mix\", "
+                          "2); }")) == "script.patch.route");
+}
+
 TEST_CASE("editor code reads parameters and Shared members, and keeps the rest apart") {
     const std::string head = "#include <supple/script.h>\n";
     auto plugin = [&](const std::string& body) {

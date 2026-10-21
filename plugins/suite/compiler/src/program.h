@@ -20,12 +20,14 @@ struct ProgramData {
     PluginKind kind = PluginKind::None;
     std::vector<ParamModel> params;
     std::vector<FileModel> files;
+    std::vector<SourceModel> sources;
     std::vector<FactoryPatchModel> factoryPatches;
     std::vector<SharedModel> shared;
     int size = 0, align = 8;
     std::vector<ObjectSlot> objects;
     std::vector<InitialValue> initial;
     std::vector<ParamSlot> paramSlots;
+    std::vector<SourceSlot> sourceSlots;
     Program::Hook prepare = nullptr, update = nullptr;
     Program::ProcessHook process = nullptr;
     Program::VoiceHook startVoice = nullptr, releaseVoice = nullptr, stopVoice = nullptr;

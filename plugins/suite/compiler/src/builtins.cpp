@@ -313,9 +313,9 @@ std::vector<const BuiltinFunction*> Builtins::functions(const std::string& name)
 bool Builtins::reserved(const std::string& name) const {
     // The parameter factories, which Sema::evaluate knows by name.
     static const std::set<std::string> factories = {
-        "continuous", "decibels",  "frequency", "milliseconds", "percent",
-        "ratio",      "semitones", "cents",     "octaves",      "degrees",
-        "integer",    "choice",    "toggle",    "audioFile",    "impulseResponse"};
+        "continuous", "decibels",  "frequency",       "milliseconds", "percent",    "ratio",
+        "semitones",  "cents",     "octaves",         "degrees",      "integer",    "choice",
+        "toggle",     "audioFile", "impulseResponse", "source",       "voiceSource"};
     return byName_.count(name) || classByName_.count(name) || enumByName_.count(name) ||
            constants_.count(name) || factories.count(name) || name == "pi" || name == "twoPi" ||
            name == "Array" || name == "Buffer" || name == "Unit" || name == "Curve" ||
@@ -393,6 +393,9 @@ void Builtins::addClasses() {
     r.method(
         param, "double forVoice(int v) const",
         +[](const S::Param* p, int v) { return p->forVoice(v); });
+    r.method(
+        param, "double routed(int i) const",
+        +[](const S::Param* p, int i) { return p->routed(i); });
     r.inlineMethod(param, "void set(double value)", Intrinsic::ParamSet, Writes::Self);
     r.method(param, "double gain() const", +[](const S::Param* p) { return p->gain(); });
     // The editor's.
@@ -498,6 +501,9 @@ void Builtins::addClasses() {
     r.method(
         plugin, "void setBendRange(double semitones)",
         +[](S::Instrument* p, double st) { p->setBendRange(st); });
+    r.method(
+        plugin, "void setVoiceLimit(int voices)",
+        +[](S::Instrument* p, int n) { p->setVoiceLimit(n); });
     // The voices are the audio code's: the editor's copy of the plugin has none.
     for (BuiltinMethod& m : plugin->methods) {
         m.instrument = m.intrinsic == Intrinsic::None;
@@ -594,6 +600,22 @@ void Builtins::addClasses() {
     r.method(
         convolver, "double process(int channel, double x)",
         +[](S::Convolver* f, int c, double x) { return f->process(c, x); });
+
+    // Source members: values the audio code sets for the patch's routes to
+    // read (the glue reads them where they are; constructed by Program).
+    auto* source = addClass("Source", sizeof(S::Source), alignof(S::Source));
+    source_ = source;
+    r.method(
+        source, "void set(double value)", +[](S::Source* s, double x) { s->set(x); }, Writes::Self,
+        kInit | kAudio);
+    r.method(
+        source, "void set(int v, double value)",
+        +[](S::Source* s, int v, double x) { s->set(v, x); }, Writes::Self, kInit | kAudio);
+    r.method(
+        source, "double get(int v) const", +[](const S::Source* s, int v) { return s->get(v); },
+        Writes::Nothing, kInit | kAudio);
+    auto* sourceSpec = addClass("SourceSpec", sizeof(S::SourceSpec), alignof(S::SourceSpec));
+    sourceSpec->declarable = false;
 
     auto* delay = addClass("DelayLine", sizeof(S::DelayLine), alignof(S::DelayLine));
     delay->resource = true;

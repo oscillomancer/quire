@@ -11,7 +11,8 @@
 //     other Definition gets one derived from its names.
 //   - PatchCodec: a state snapshot (core/StateFormat.h) as a patch document
 //     and back -- values by key in physical units, choices by key, toggles
-//     as booleans, properties as text -- with merge (RFC 7396), validation
+//     as booleans, properties as text, modulation routes by source and
+//     destination -- with merge (RFC 7396), validation
 //     whose errors carry a JSON Pointer and a hint, the semantic schema
 //     document, the patch's JSON Schema, and a description in prose.
 //
@@ -21,11 +22,13 @@
 // Main thread only.
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <limits>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "core/Definition.h"
@@ -46,6 +49,10 @@ struct ActiveCondition {
     bool operator==(const ActiveCondition&) const = default;
 };
 
+// Whether the patch's routes may move a parameter: from the global sources
+// only, or from any (an instrument's, per voice).
+enum class Routable : uint8_t { No, Global, Voice };
+
 struct ParamMeaning {
     std::string key;                      // [a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*
     std::vector<std::string> tags;        // "role:level", "stage:filter", "macro"
@@ -53,7 +60,21 @@ struct ParamMeaning {
     // It applies while each holds and the parameter each names applies;
     // always, without any.
     std::vector<ActiveCondition> activeWhen;
+    // A continuous parameter's: routes may move it, as far as routeMin to
+    // routeMax (physical; its own range when routeMin > routeMax).
+    Routable routable = Routable::No;
+    double routeMin = 1.0, routeMax = 0.0;
     bool operator==(const ParamMeaning&) const = default;
+};
+
+// A modulation source the patch's routes name: a DSP script's Source
+// member, or one an instrument has of its own (velocity, modwheel ...).
+struct SourceMeaning {
+    std::string key;  // [a-z][a-z0-9_]*
+    std::string name, description;
+    bool perVoice = false;  // a value per voice (an instrument's)
+    bool bipolar = true;    // -1..1, or 0..1
+    bool operator==(const SourceMeaning&) const = default;
 };
 
 struct PropertyMeaning {
@@ -66,8 +87,59 @@ struct Meaning {
     std::string docs;                         // what the plugin is and how its patch is organised
     std::vector<ParamMeaning> params;         // by parameter table index
     std::vector<PropertyMeaning> properties;  // by property index
+    // The sources routes name, and the property that keeps the routes (as
+    // routeText describes); -1 for a plugin without routes. The patch says
+    // them as its "routes" member, never among its properties.
+    std::vector<SourceMeaning> sources;
+    int routes = -1;
     bool operator==(const Meaning&) const = default;
 };
+
+// --- routes ---------------------------------------------------------------------------------
+//
+// A route moves a parameter by a source's value times its amount: in the
+// parameter's physical unit (a percent in percent, a level in dB), except a
+// frequency's, in octaves; through a second source (`via`) it is scaled by
+// that one's value too. The sum of a parameter's routes is kept to its
+// route range. The routes property keeps them one to a line, sorted, as
+//
+//   source>destination amount
+//   source>destination amount via
+//
+// with the amount as JSON writes a number. At most kMaxRoutes.
+inline constexpr size_t kMaxRoutes = 64;
+
+struct RouteLine {
+    std::string_view source, destination, via;  // via empty: none
+    double amount = 0.0;
+};
+
+// One line of a routes property; false when it is malformed. Allocates
+// nothing.
+bool readRouteLine(std::string_view line, RouteLine& route);
+
+// Each line of a routes property in turn; false, stopping there, at one
+// that is malformed. Allocates nothing: the audio thread reads the
+// property with it.
+template <class Fn>
+bool forEachRoute(std::string_view text, Fn&& fn) {
+    while (!text.empty()) {
+        const size_t end = std::min(text.find('\n'), text.size());
+        const std::string_view line = text.substr(0, end);
+        text.remove_prefix(std::min(end + 1, text.size()));
+        if (line.empty()) continue;
+        RouteLine r;
+        if (!readRouteLine(line, r)) return false;
+        fn(r);
+    }
+    return true;
+}
+
+// How a route's amount moves a parameter's plain value: by octaves (a
+// frequency's), or added after multiplying by routeScale() (a percent's
+// plain value is a fraction: 0.01).
+bool routeInOctaves(const ParamDef& p);
+double routeScale(const ParamDef& p);
 
 // A Definition that says what it means.
 class SemanticDefinition : public Definition {
@@ -122,6 +194,11 @@ class PatchCodec {
     // Which parameters apply with these values (activity()).
     std::vector<bool> activity(const state::Snapshot& snapshot) const;
 
+    // A "routes" member (an object of routes by "source>destination") as
+    // the routes property's text; false with errors (paths under `path`).
+    bool routeText(const json::Value& routes, const std::string& path, std::string& text,
+                   std::vector<json::Error>& errors) const;
+
     // The snapshot as a patch document; with `changedOnly`, only values that
     // differ from their defaults (still a complete patch: missing values
     // read as defaults).
@@ -162,6 +239,15 @@ class PatchCodec {
     json::Value valueJson(size_t index, double host) const;
 
   private:
+    // Whether it has properties a patch shows (any but the routes').
+    bool hasProperties() const {
+        return definition_.properties().count() > (meaning_.routes >= 0 ? 1u : 0u);
+    }
+    std::string exampleRoute() const;
+    // The routes property's text as the patch's "routes" member, and the
+    // text a snapshot holds.
+    json::Value routesJson(const std::string& text) const;
+    const std::string& routesOf(const state::Snapshot& snapshot) const;
     bool readValue(size_t index, const json::Value& v, const std::string& path, double& host,
                    std::vector<json::Error>& errors) const;
     bool fileUsable(size_t index, const std::string& path, const state::Snapshot& current,

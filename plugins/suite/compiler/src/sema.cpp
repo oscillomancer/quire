@@ -372,6 +372,11 @@ const Type* Sema::resolve(TypeSpec* spec, StructDecl* scope, bool allowVoid) {
                           "Param band1Gain = decibels(...); Param band2Gain = ...;");
                     return nullptr;
                 }
+                if (b_.isSource(element)) {
+                    error(spec->loc, "script.source.array", "sources are declared one by one",
+                          "Source lfo1 = voiceSource(\"LFO 1\"); Source lfo2 = ...;");
+                    return nullptr;
+                }
                 if (b_.isFile(element)) {
                     error(spec->loc, "script.file.array", "files are declared one by one",
                           element->name + " kick = audioFile(\"Kick\"); " + element->name +
@@ -495,7 +500,7 @@ bool Sema::declarable(const Type* t) const {
     switch (t->kind) {
         case TypeKind::Object:
             return t->builtin->declarable && !t->builtin->resource && t->builtin != b_.param() &&
-                   !b_.isFile(t);
+                   !b_.isFile(t) && !b_.isSource(t);
         case TypeKind::Buffer:
             return false;
         case TypeKind::Array:
@@ -598,6 +603,12 @@ void Sema::layout(StructDecl* s) {
         if (b_.isFile(ft) && s->base == PluginKind::None) {
             error(f->loc, "script.file.location", "files are members of the plugin struct itself",
                   "move '" + f->name + "' into the struct that derives from Effect");
+            continue;
+        }
+        if (b_.isSource(ft) && s->base == PluginKind::None) {
+            error(f->loc, "script.source.location",
+                  "sources are members of the plugin struct itself",
+                  "move '" + f->name + "' into the struct that derives from Instrument or Effect");
             continue;
         }
         if (ft->kind == TypeKind::Object && !ft->builtin->declarable && ft->builtin != b_.param()) {
@@ -709,6 +720,12 @@ void Sema::checkStructs() {
                       "text lasts only while the editor draws, so it is not a member",
                       "keep the number, and format it in draw(): format(\"%.1f\", x)");
                 continue;
+            }
+            if (b_.isSource(t)) {
+                if (!f->init)
+                    error(f->loc, "script.source.declaration", "a source is declared with its name",
+                          "Source " + f->name + " = voiceSource(\"LFO 1\");");
+                continue;  // evaluated with the plugin
             }
             if (b_.isFile(t)) {
                 if (!f->init)
@@ -886,8 +903,9 @@ void Sema::checkLocalDecl(VarDecl* v) {
                   "write double " + v->name + " = " + "...; to read its value");
             return;
         }
-        if (!spec->isRef && b_.isFile(t)) {
-            error(v->loc, "script.local.file", "auto would copy the " + t->name + " member",
+        if (!spec->isRef && (b_.isFile(t) || b_.isSource(t))) {
+            error(v->loc, b_.isFile(t) ? "script.local.file" : "script.local.source",
+                  "auto would copy the " + t->name + " member",
                   "refer to it: auto& " + v->name + " = ...;");
             return;
         }
@@ -954,6 +972,12 @@ void Sema::checkLocalDecl(VarDecl* v) {
         if (t->kind == TypeKind::Object && t->builtin == b_.param()) {
             error(v->loc, "script.param.location", "parameters are members of the plugin struct",
                   "declare it as a member of the plugin struct: Param gain = decibels(...);");
+            return;
+        }
+        if (b_.isSource(t)) {
+            error(v->loc, "script.source.location", "sources are members of the plugin struct",
+                  "refer to one (Source& " + v->name +
+                      " = ...;), or declare it as a member: Source lfo = voiceSource(\"LFO\");");
             return;
         }
         if (b_.isFile(t)) {
@@ -1425,6 +1449,31 @@ void Sema::extractPlugin() {
             error(p.fileFields[i]->loc, "script.file.key",
                   "two files have the key '" + p.files[i].key + "'",
                   "rename one, or give it a key of its own: .withKey(\"other_key\")");
+    // Modulation sources: keys of their own, apart from an instrument's
+    // built-in ones.
+    for (FieldDecl* f : s->fields)
+        if (!f->isStatic && f->init && b_.isSource(f->qt.type)) evaluateSource(f);
+    std::set<std::string> sourceKeys;
+    for (size_t i = 0; i < p.sources.size(); ++i) {
+        const SourceModel& sm = p.sources[i];
+        const Loc at = p.sourceFields[i]->loc;
+        if (!sourceKeys.insert(sm.key).second)
+            error(at, "script.source.key", "two sources have the key '" + sm.key + "'",
+                  "rename one, or give it a key of its own: .withKey(\"other_key\")");
+        if (p.kind == PluginKind::Instrument)
+            for (const auto& builtin : script::detail::kInstrumentSources)
+                if (sm.key == builtin.key)
+                    error(at, "script.source.key",
+                          "'" + sm.key + "' is one of an instrument's own sources",
+                          "an instrument already has it; name yours differently, or use the "
+                          "runtime's");
+        if (sm.perVoice && p.kind != PluginKind::Instrument)
+            error(at, "script.source.voice", "only an instrument's sources have a value per voice",
+                  "declare it with source(\"" + sm.name + "\"), or derive from Instrument");
+    }
+    if (p.sources.size() > 32)
+        error(p.sourceFields[32]->loc, "script.source.count", "a plugin has at most 32 sources",
+              "share one source between uses");
     // State the editor sees.
     for (FieldDecl* f : s->fields)
         if (!f->isStatic && Builtins::isShared(f->qt.type))
@@ -1609,8 +1658,13 @@ void Sema::evaluatePatches(FunctionDecl* f) {
                   "factory patch names must be unique, nonempty and at most 64 bytes",
                   "give each patch a distinct short name");
         std::set<uint32_t> assigned;
+        std::set<std::string> routed;
         for (size_t i = 1; i < chain.size(); ++i) {
             auto* set = chain[i];
+            if (static_cast<MemberExpr*>(set->callee)->member == "route") {
+                evaluateRoute(set, patch, routed);
+                continue;
+            }
             if (static_cast<MemberExpr*>(set->callee)->member != "set" || set->args.size() != 2 ||
                 set->args[0]->kind != ExprKind::Name) {
                 syntax(set->loc);
@@ -1671,6 +1725,75 @@ void Sema::evaluatePatches(FunctionDecl* f) {
     scopes_ = std::move(savedScopes);
     fn_ = savedFn;
     self_ = savedSelf;
+}
+
+// p.route("lfo1>cutoff", 1.5) or p.route("lfo1>cutoff", 1.5, "modwheel"):
+// names a source (the script's, or an instrument's own) and a parameter
+// routes may move. The plugin's definition checks the rest as a patch's
+// routes are checked.
+void Sema::evaluateRoute(CallExpr* call, FactoryPatchModel& patch, std::set<std::string>& routed) {
+    const PluginModel& p = out_.plugin;
+    const std::string example = "p.add(\"Name\").route(\"lfo1>cutoff\", 1.5, \"modwheel\")";
+    if (call->args.size() != 2 && call->args.size() != 3) {
+        error(call->loc, "script.patch.route",
+              ".route() takes the route, its amount and, optionally, a source it goes through",
+              example);
+        return;
+    }
+    auto route = evaluate(call->args[0], p.decl);
+    auto amount = evaluate(call->args[1], p.decl);
+    std::optional<Constant> via;
+    if (call->args.size() == 3) via = evaluate(call->args[2], p.decl);
+    if (!route || route->kind != Constant::Kind::String || !amount || !amount->numeric() ||
+        (call->args.size() == 3 && (!via || via->kind != Constant::Kind::String))) {
+        error(call->loc, "script.patch.route",
+              ".route() takes text in quotes, a constant number and optionally text", example);
+        return;
+    }
+    const auto isSource = [&](const std::string& key) {
+        for (const SourceModel& s : p.sources)
+            if (s.key == key) return true;
+        if (p.kind == PluginKind::Instrument)
+            for (const auto& b : script::detail::kInstrumentSources)
+                if (key == b.key) return true;
+        return false;
+    };
+    const std::string& text = route->stringValue;
+    const size_t arrow = text.find('>');
+    const std::string from = arrow == std::string::npos ? text : text.substr(0, arrow);
+    const std::string to = arrow == std::string::npos ? std::string() : text.substr(arrow + 1);
+    bool ok = true;
+    if (!isSource(from)) {
+        error(call->args[0]->loc, "script.patch.route",
+              "'" + from + "' is not one of this plugin's sources",
+              "a route is \"source>parameter\", the source a Source member's key" +
+                  std::string(p.kind == PluginKind::Instrument
+                                  ? " or one of an instrument's own (velocity, modwheel ...)"
+                                  : ""));
+        ok = false;
+    }
+    const auto dest = std::find_if(p.params.begin(), p.params.end(),
+                                   [&](const ParamModel& m) { return m.key == to; });
+    if (dest == p.params.end() || !dest->modulatable || dest->output ||
+        dest->kind != ParamModel::Kind::Continuous) {
+        error(call->args[0]->loc, "script.patch.route",
+              "'" + to + "' is not a parameter routes may move",
+              "name a continuous parameter marked .modulated() or .polyModulated(), by its key");
+        ok = false;
+    }
+    if (via && !isSource(via->stringValue)) {
+        error(call->args[2]->loc, "script.patch.route",
+              "'" + via->stringValue + "' is not one of this plugin's sources",
+              "the third argument names a source the route goes through, or leave it out");
+        ok = false;
+    }
+    if (ok && !routed.insert(text).second) {
+        error(call->loc, "script.patch.route", "a factory patch has the route '" + text + "' twice",
+              "keep one .route() for each source and parameter");
+        ok = false;
+    }
+    if (ok)
+        patch.routes.push_back({text, via ? via->stringValue : std::string(), amount->asDouble()});
 }
 
 void Sema::evaluateInfo(FieldDecl* f) {
@@ -1842,6 +1965,31 @@ void Sema::evaluateInfo(FieldDecl* f) {
               ".tail = 0 (it stops with its input), the tail in samples, or -1 (it rings forever)");
 }
 
+void Sema::evaluateSource(FieldDecl* f) {
+    const std::string want = "Source " + f->name + " = voiceSource(\"LFO 1\");";
+    auto value = evaluate(f->init, out_.plugin.decl);
+    if (!value) return;
+    if (value->kind != Constant::Kind::Source) {
+        error(f->init->loc, "script.source.declaration", "a source is declared with its name",
+              want);
+        return;
+    }
+    SourceModel m = value->source;
+    m.member = f->name;
+    if (m.key.empty()) m.key = snakeCase(f->name);
+    if (!validKey(m.key) || m.key.find('.') != std::string::npos)
+        error(f->loc, "script.source.key", "'" + m.key + "' is not a usable route name",
+              "keys are lowercase letters, digits and _: rename the member, or give "
+              ".withKey(\"lfo1\")");
+    m.offset = f->offset;
+    if (m.name.empty() || m.name.size() > 63)
+        error(f->init->loc, "script.source.declaration",
+              "a source's name is from 1 to 63 characters", want);
+    f->sourceIndex = static_cast<int>(out_.plugin.sources.size());
+    out_.plugin.sources.push_back(std::move(m));
+    out_.plugin.sourceFields.push_back(f);
+}
+
 void Sema::evaluateFile(FieldDecl* f) {
     const bool convolver = f->qt.type->builtin == b_.convolver();
     const std::string want = convolver ? "Convolver " + f->name + " = impulseResponse(\"Room\");"
@@ -1867,6 +2015,9 @@ void Sema::evaluateFile(FieldDecl* f) {
         error(f->loc, "script.file.key", "'" + m.key + "' is not a usable patch key",
               "keys are lowercase letters, digits and _: rename the member, or give "
               ".withKey(\"sample\")");
+    else if (m.key == "routes")
+        error(f->loc, "script.file.key", "'routes' is the patch's own member, not a file's key",
+              "rename the member, or give .withKey(\"sample\")");
     m.id = script::detail::keyId(m.key);
     m.offset = f->offset;
     if (m.name.empty() || m.name.size() > 63)
@@ -2146,6 +2297,13 @@ void Sema::initialValues(const Type* type, int base, Expr* init, StructDecl* sco
             if (f->isStatic || !f->qt.type) continue;
             auto it = given.find(f->name);
             Expr* value = it != given.end() ? it->second : f->init;
+            if (b_.isSource(f->qt.type)) {
+                if (f->sourceIndex >= 0) {
+                    const SourceModel& sm = p.sources[static_cast<size_t>(f->sourceIndex)];
+                    p.sourceSlots.push_back({base + f->offset, sm.perVoice, sm.bipolar});
+                }
+                continue;
+            }
             if (f->qt.type->kind == TypeKind::Object && f->qt.type->builtin == b_.param()) {
                 if (f->paramIndex >= 0) {
                     const ParamModel& pm = p.params[static_cast<size_t>(f->paramIndex)];
@@ -2176,6 +2334,7 @@ void Sema::buildConstruction() {
     p.initial.clear();
     p.objects.clear();
     p.paramSlots.clear();
+    p.sourceSlots.clear();
     initialValues(p.decl->type, 0, nullptr, p.decl);
     collectObjects(p.decl->type, 0, p.objects);
 }

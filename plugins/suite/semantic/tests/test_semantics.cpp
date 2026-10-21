@@ -450,3 +450,146 @@ TEST_CASE("a plugin without properties rejects property edits transactionally") 
     CHECK(errors[0].path == "/properties");
     CHECK_FALSE(errors[0].hint.empty());
 }
+
+namespace {
+
+// A synth's view of routes: an LFO per voice and a macro for all, a cutoff
+// and a level each voice has, a mix for all, and a mode routes cannot move.
+std::shared_ptr<const Definition> routed() {
+    PluginInfo info;
+    info.id = "com.example.routed";
+    info.name = "Routed";
+    info.version = "1.0.0";
+    auto params = [] {
+        ParamTable::Builder b;
+        b.add(frequency(1, "Cutoff", 20.0, 20000.0, 1000.0));
+        b.add(decibels(2, "Level", -48.0, 6.0, 0.0).normalizedHostValue());
+        b.add(percent(3, "Mix", 100.0).normalizedHostValue());
+        b.add(choice(4, "Mode", kModes, 0));
+        return b.build();
+    };
+    auto properties = [] {
+        PropertyList::Builder pb;
+        pb.add(property(9, "Routes").maxBytes(16384));
+        return pb.build();
+    };
+    Meaning m = meaningOf(Definition(info, params(), properties()));
+    m.params[0].routable = Routable::Voice;
+    m.params[1].routable = Routable::Voice;
+    m.params[1].routeMin = -60.0;
+    m.params[1].routeMax = 12.0;
+    m.params[2].routable = Routable::Global;
+    m.sources = {{"lfo", "LFO", "A wobble.", true, true}, {"macro", "Macro", "", false, false}};
+    m.routes = 0;
+    return std::make_shared<SemanticDefinition>(info, params(), properties(), m);
+}
+
+}  // namespace
+
+TEST_CASE("routes are a patch member by source and parameter, in the parameter's unit") {
+    const auto d = routed();
+    REQUIRE(meaningProblems(*d, meaningOf(*d)).empty());
+    const PatchCodec codec(*d);
+    state::Snapshot s(*d);
+    s.defaultProperties();
+    Envelope envelope;
+    std::vector<json::Error> errors;
+    REQUIRE(codec.apply(parsed(R"({"schema": "supple.routed-patch/1.0", "routes": {
+        "macro>mix": {"amount": "-20 %"},
+        "lfo>cutoff": {"amount": "+1.5 oct", "via": "macro"},
+        "lfo>level": "-6 dB"}})"),
+                        false, s, envelope, errors));
+    // Kept sorted, one a line; said back as objects with plain amounts.
+    CHECK(s.property[0] == "lfo>cutoff 1.5 macro\nlfo>level -6.0\nmacro>mix -20.0\n");
+    const json::Value patch = codec.patch(s, envelope, false);
+    CHECK(json::writeCompact(*patch.find("routes")) ==
+          R"({"lfo>cutoff":{"amount":1.5,"via":"macro"},"lfo>level":{"amount":-6.0},)"
+          R"("macro>mix":{"amount":-20.0}})");
+    CHECK(patch.find("properties") == nullptr);  // the routes' property is not one a patch shows
+    CHECK(codec.describe(s, true).find("Routes: lfo>cutoff +1.5 oct via macro, lfo>level -6 dB") !=
+          std::string::npos);
+    // A merge adds, changes and removes routes one by one.
+    REQUIRE(
+        codec.apply(parsed(R"({"routes": {"lfo>level": null, "lfo>cutoff": {"amount": "12 st"}}})"),
+                    true, s, envelope, errors));
+    CHECK(s.property[0] == "lfo>cutoff 1.0 macro\nmacro>mix -20.0\n");
+    // Pitch units convert; an amount past what the parameter can move does not.
+    CHECK(codec.apply(parsed(R"({"routes": {"lfo>level": {"amount": 60}}})"), true, s, envelope,
+                      errors));
+    CHECK_FALSE(codec.apply(parsed(R"({"routes": {"lfo>level": {"amount": 80}}})"), true, s,
+                            envelope, errors));
+    CHECK(errors.front().code == "routes.amount");
+}
+
+TEST_CASE("a route that cannot be says which part is wrong and what would do") {
+    const auto d = routed();
+    const PatchCodec codec(*d);
+    state::Snapshot s(*d);
+    s.defaultProperties();
+    Envelope envelope;
+    auto refused = [&](const char* routes) {
+        std::vector<json::Error> errors;
+        const std::string doc = std::string(R"({"routes": )") + routes + "}";
+        const std::string before = s.property[0];
+        CHECK_FALSE(codec.apply(parsed(doc), true, s, envelope, errors));
+        CHECK(s.property[0] == before);
+        REQUIRE(!errors.empty());
+        CHECK(!errors.front().hint.empty());
+        return errors.front().code + " " + errors.front().path;
+    };
+    CHECK(refused(R"({"lfo": 1})") == "routes.key /routes/lfo");
+    CHECK(refused(R"({"lfx>cutoff": 1})") == "routes.source /routes/lfx>cutoff");
+    CHECK(refused(R"({"lfo>cutof": 1})") == "routes.destination /routes/lfo>cutof");
+    CHECK(refused(R"({"lfo>mode": 1})") == "routes.destination /routes/lfo>mode");
+    CHECK(refused(R"({"lfo>cutoff": "+2 dB"})") == "routes.unit /routes/lfo>cutoff");
+    CHECK(refused(R"({"lfo>cutoff": {"via": "macro"}})") == "routes.amount /routes/lfo>cutoff");
+    CHECK(refused(R"({"lfo>cutoff": {"amount": 1, "via": "wheel"}})") ==
+          "routes.via /routes/lfo>cutoff/via");
+    CHECK(refused(R"({"lfo>cutoff": {"amount": 1, "curve": 3}})") ==
+          "routes.unknown_member /routes/lfo>cutoff/curve");
+    // A value per voice cannot move what all voices share, even through a via.
+    CHECK(refused(R"({"lfo>mix": 10})") == "routes.voice /routes/lfo>mix");
+    CHECK(refused(R"({"macro>mix": {"amount": 10, "via": "lfo"}})") ==
+          "routes.voice /routes/macro>mix");
+    CHECK(refused("[]") == "routes.type /routes");
+}
+
+TEST_CASE("the schema names the sources and what routes do to each parameter") {
+    const auto d = routed();
+    const PatchCodec codec(*d);
+    const json::Value schema = codec.schemaDocument();
+    const json::Value& lfo = *schema.find("sources")->find("lfo");
+    CHECK(lfo.find("per_voice")->asBool());
+    CHECK(lfo.find("range")->asArray()[0].asInt() == -1);
+    CHECK(schema.find("sources")->find("macro")->find("range")->asArray()[0].asInt() == 0);
+    const json::Value& params = *schema.find("params");
+    CHECK(params.find("cutoff")->find("route")->find("unit")->asString() == "oct");
+    CHECK(params.find("level")->find("route")->find("max")->asDouble() == 12.0);
+    CHECK_FALSE(params.find("mix")->find("route")->find("per_voice")->asBool());
+    CHECK(params.find("mode")->find("route") == nullptr);
+    CHECK(schema.find("patch")->find("properties")->find("routes") != nullptr);
+    CHECK(schema.find("patch")->find("properties")->find("properties") == nullptr);
+}
+
+TEST_CASE("a saved patch's routes restore as far as the plugin still has their parts") {
+    const auto d = routed();
+    const PatchCodec codec(*d);
+    state::Snapshot s(*d);
+    s.defaultProperties();
+    Envelope envelope;
+    codec.restore(parsed(R"({"routes": {"lfo>cutoff": {"amount": 2}, "gone>cutoff": {"amount": 1},
+                                        "lfo>mix": {"amount": 5}}})"),
+                  s, envelope);
+    CHECK(s.property[0] == "lfo>cutoff 2.0\n");
+}
+
+TEST_CASE("the routes' text reads back without allocating, and malformed lines stop it") {
+    std::vector<std::string> seen;
+    CHECK(forEachRoute("a>b 1.5\nc>d.e -2.0 f\n", [&](const RouteLine& r) {
+        seen.push_back(std::string(r.source) + "|" + std::string(r.destination) + "|" +
+                       std::string(r.via) + "|" + json::formatDouble(r.amount));
+    }));
+    CHECK(seen == std::vector<std::string>{"a|b||1.5", "c|d.e|f|-2.0"});
+    CHECK_FALSE(forEachRoute("a>b x\n", [](const RouteLine&) {}));
+    CHECK_FALSE(forEachRoute("ab 1\n", [](const RouteLine&) {}));
+}

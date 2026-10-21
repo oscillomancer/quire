@@ -221,6 +221,8 @@ inline Status writeSource(const fs::path& kit, const fs::path& dest, const std::
     std::string fileKeys;
     for (const scriptc::FileModel& f : program.files())
         fileKeys += "                {&Script::" + f.member + ", \"" + f.key + "\"},\n";
+    for (const scriptc::SourceModel& s : program.sources())
+        fileKeys += "                {&Script::" + s.member + ", \"" + s.key + "\"},\n";
     if (!fileKeys.empty()) fileKeys.pop_back();
     std::string code;
     for (const char c : name)

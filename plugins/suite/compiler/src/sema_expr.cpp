@@ -1971,21 +1971,39 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                 {"toggle", {ParamModel::Unit::None, 2}}};
             auto it = factories.find(name);
             const bool fileFactory = name == "audioFile" || name == "impulseResponse";
+            const bool sourceFactory = name == "source" || name == "voiceSource";
             // As in C++, a member of that name hides the factory (in a member
             // initializer, every member is in scope).
-            if (it != factories.end() || fileFactory)
+            if (it != factories.end() || fileFactory || sourceFactory)
                 for (StructDecl* s = self_; s; s = s->outer)
                     if (findField(s, name) || findMethod(s, name)) {
                         error(call->callee->loc, "script.name.hidden",
                               "the member '" + name + "' hides the factory " + name +
                                   "() here, as in C++",
                               "rename the member and keep its key: " +
-                                  std::string(fileFactory ? name == "audioFile" ? "AudioFile "
-                                                                                : "Convolver "
-                                                          : "Param ") +
+                                  std::string(fileFactory     ? name == "audioFile" ? "AudioFile "
+                                                                                    : "Convolver "
+                                              : sourceFactory ? "Source "
+                                                              : "Param ") +
                                   name + "Member = " + name + "(...).withKey(\"" + name + "\")");
                         return std::nullopt;
                     }
+            // A source member's: source("Macro 1"), voiceSource("LFO 1").
+            if (sourceFactory) {
+                std::optional<Constant> label;
+                if (call->args.size() == 1) label = evaluate(call->args[0], scope);
+                if (!label || label->kind != Constant::Kind::String) {
+                    error(call->loc, "script.source.declaration",
+                          name + "() takes the name people see, in quotes",
+                          name + "(\"" + (name == "source" ? "Macro 1" : "LFO 1") + "\")");
+                    return std::nullopt;
+                }
+                Constant c;
+                c.kind = Constant::Kind::Source;
+                c.source.name = label->stringValue;
+                c.source.perVoice = name == "voiceSource";
+                return c;
+            }
             // A file member's: audioFile("Sample"), impulseResponse("Room").
             if (fileFactory) {
                 std::optional<Constant> label;
@@ -2144,6 +2162,35 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                 (m->member == "help" ? c.file.description : c.file.key) = arg->stringValue;
                 return c;
             }
+            if (base->kind == Constant::Kind::Source) {
+                Constant c = *base;
+                if (m->member == "unipolar") {
+                    if (!call->args.empty()) {
+                        error(call->loc, "script.source.modifier", ".unipolar() takes nothing",
+                              "voiceSource(\"Env 2\").unipolar()");
+                        return std::nullopt;
+                    }
+                    c.source.bipolar = false;
+                    return c;
+                }
+                std::optional<Constant> arg;
+                if (call->args.size() == 1) arg = evaluate(call->args[0], scope);
+                if (m->member != "help" && m->member != "withKey") {
+                    error(call->loc, "script.source.modifier",
+                          "a source has no modifier '." + m->member +
+                              "()': it takes .unipolar(), .help() and .withKey()",
+                          "voiceSource(\"LFO 1\").help(\"...\")");
+                    return std::nullopt;
+                }
+                if (!arg || arg->kind != Constant::Kind::String) {
+                    error(call->loc, "script.source.modifier",
+                          "." + m->member + "() takes text in quotes",
+                          "." + m->member + "(\"...\")");
+                    return std::nullopt;
+                }
+                (m->member == "help" ? c.source.description : c.source.key) = arg->stringValue;
+                return c;
+            }
             if (base->kind != Constant::Kind::Spec) {
                 error(call->loc, "script.param.modifier",
                       "'." + m->member + "()' applies to a parameter's description",
@@ -2244,12 +2291,14 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                                 mod == "withId" || mod == "smoothed" || mod == "role" ||
                                 mod == "keys";
             if ((flag && !args.empty()) || (single && args.size() != 1) ||
-                (mod == "curved" && (args.empty() || args.size() > 2))) {
+                (mod == "curved" && (args.empty() || args.size() > 2)) ||
+                (mod == "routeRange" && args.size() != 2)) {
                 error(call->loc, "script.param.modifier",
                       "." + mod + "() has the wrong number of arguments",
-                      flag              ? "write ." + mod + "() without arguments"
-                      : mod == "curved" ? ".curved(Curve::Log), or .curved(Curve::Pow, 3)"
-                                        : "give ." + mod + "() exactly one argument");
+                      flag                  ? "write ." + mod + "() without arguments"
+                      : mod == "curved"     ? ".curved(Curve::Log), or .curved(Curve::Pow, 3)"
+                      : mod == "routeRange" ? ".routeRange(-4800, 4800)"
+                                            : "give ." + mod + "() exactly one argument");
                 return std::nullopt;
             }
             if (mod == "in") {
@@ -2321,6 +2370,19 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                     }
                     p.choiceKeys.push_back(k.stringValue);
                 }
+            } else if (mod == "routeRange") {
+                auto lo = number(0);
+                auto hi = number(1);
+                if (!lo || !hi) return std::nullopt;
+                if (!(*lo < *hi)) {
+                    error(call->loc, "script.param.modifier",
+                          ".routeRange() takes the lowest value routes may reach, then the "
+                          "highest",
+                          ".routeRange(-4800, 4800)");
+                    return std::nullopt;
+                }
+                p.routeMin = *lo;
+                p.routeMax = *hi;
             } else if (mod == "curved") {
                 if (args.empty() || args[0].builtinEnum != "Curve") {
                     error(call->loc, "script.param.modifier",
@@ -2342,7 +2404,8 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                       ".polyModulated(), .offAtMin(), "
                       ".meter(), .notAutomatable(), .restarts(), .role({...}), .keys({...}), "
                       ".curved(Curve::..., k), .activeWhen(...), .activeUnless(...), "
-                      ".activeAbove(...), .activeBelow(...), .withKey(key), .withId(n)");
+                      ".activeAbove(...), .activeBelow(...), .routeRange(min, max), "
+                      ".withKey(key), .withId(n)");
                 return std::nullopt;
             }
             return c;

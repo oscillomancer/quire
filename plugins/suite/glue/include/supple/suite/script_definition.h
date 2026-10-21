@@ -15,6 +15,12 @@
 //     fraction), so the framework hands it over as it is.
 //   - The meaning: each parameter's key (the member's name in snake case,
 //     or withKey()), its roles as "role:<name>" tags, choices by key.
+//   - Modulation: the script's Source members and, for an instrument, the
+//     runtime's own sources (velocity, modwheel ...); its modulated()
+//     parameters move by routes from global sources, an instrument's
+//     polyModulated() ones by any. With sources and parameters to move, the
+//     routes are a property of their own (kRoutesProperty), the patch's
+//     "routes" member, which factory patches set too.
 #pragma once
 
 #include <filesystem>
@@ -54,6 +60,10 @@ class ScriptDefinition final : public SemanticDefinition {
 std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
     std::shared_ptr<const script::detail::Code> code, std::filesystem::path file = {},
     std::string source = {}, std::string* problems = nullptr);
+
+// The routes property's ID (Meaning::routes): one no file member's key
+// gives, since "routes" is the patch's own member.
+inline constexpr uint32_t kRoutesProperty = script::detail::keyId("routes");
 
 // Whether two plugins are the same to a host and to an agent: identity,
 // parameters, files, factory patches, meaning, buses, declared latency and

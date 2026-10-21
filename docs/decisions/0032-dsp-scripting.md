@@ -630,3 +630,39 @@ too (framework 1.28.0's `Definition::applies()`), dims its controls (`semantic-p
 code still reads every value. Before, the flat stock plugins reported every
 parameter as live: an agent setting a cut band's gain was told nothing, and
 the optimizer's `"auto"` could search dimensions that change nothing.
+
+### Modulation sources and routes (2026-10-21)
+
+A script declares its modulators' outputs as `Source` members
+(`voiceSource("LFO 1")` for a value per voice, `source("Macro 1")` for one
+the plugin shares, `.unipolar()` for 0..1) and sets their values; the
+patch's `routes` member (`"lfo1>filter1.cutoff": {"amount": "+1.5 oct",
+"via": "modwheel"}`) says where they go. Routes move a parameter marked
+`.modulated()` (global sources) or an instrument's `.polyModulated()` (any
+source), as far as its range or its `.routeRange()`. The script reads a
+moved value where it uses it, `p.routed(i)` or `p.forVoice(v)`, computed
+then from the sources' current values: there is no modulation rate of the
+framework's, so renders stay block-size invariant as long as the script's
+own ticks are. Instruments have ten sources of their own: velocity, key,
+random, pressure and slide per voice; modwheel, breath, expression,
+aftertouch and pitch bend for all.
+
+This is what scripts could not do for themselves, so it passes the
+built-ins rule: a script can compute an LFO but not give a patch a member
+of its own, have its amounts validated in the destination's unit (octaves
+for a frequency, dB for a level) with errors that name the unit, carry them
+in state and presets, or read controllers (CC 1, 2, 11, channel pressure)
+at all. A script-made matrix of parameters (`mod3.source`,
+`mod3.destination`, `mod3.amount`) was the alternative; its amounts could
+only be percentages of whatever range the chosen destination had, and
+agents edit routes keyed by what they do far more reliably than numbered
+rows. The routes are kept in a text property of their own (one route a
+line, sorted), which the framework already saves, presets carry and the
+audio thread receives without a lock; the glue reads it into a fixed
+table there without allocating. The semantic layer shows it as the patch's
+`routes` member, never among its properties (`semantic-params-extension.md`,
+amendment of this date).
+
+`setVoiceLimit(n)` lets an instrument play fewer voices than its pool, a
+Voices parameter; the framework's voice manager already allowed it, and
+CLAP's voice-info now reports the voices a script's mode and limit allow.

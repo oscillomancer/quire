@@ -19,6 +19,7 @@ namespace supple::scriptc {
 using PluginKind = script::detail::PluginKind;
 using ParamModel = script::detail::ParamModel;
 using FileModel = script::detail::FileModel;
+using SourceModel = script::detail::SourceModel;
 using SharedModel = script::detail::SharedModel;
 using InfoModel = script::detail::InfoModel;
 using FactoryPatchModel = script::detail::FactoryPatchModel;
@@ -35,6 +36,7 @@ class Program final : public script::detail::Code {
     PluginKind kind() const override;
     const std::vector<ParamModel>& params() const override;
     const std::vector<FileModel>& files() const override;
+    const std::vector<SourceModel>& sources() const override;
     const std::vector<FactoryPatchModel>& factoryPatches() const override;
     const std::vector<SharedModel>& shared() const override;
     // The plugin struct's name, as the script declares it.

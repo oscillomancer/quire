@@ -94,9 +94,11 @@ positive, and integer parameter ranges must fit in `int`.
 | `.smoothed(ms)` | The framework glides it per sample; read `p.at(i)` in `process` |
 | `.offAtMin()` | Its minimum means off ("-inf dB"); `.gain()` is exactly 0 there |
 | `.meter()` | An output the plugin reports with `p.set(v)`: read-only, never saved |
-| `.modulated()`, `.notAutomatable()` | As named |
+| `.modulated()` | The host may modulate it, and so may the patch's routes from global sources: read `p.routed(i)` (see Modulation) |
+| `.notAutomatable()` | As named |
 | `.restarts()` | Changing it restarts the plugin (the host stops and starts it), so `prepare()` runs again with the new value and may `setLatency()` for it: a lookahead. Not automatable |
-| `.polyModulated()` | An instrument's: modulated per note by the host; each voice reads `p.forVoice(v)` |
+| `.polyModulated()` | An instrument's: modulated per note by the host and by routes from any source; each voice reads `p.forVoice(v)` |
+| `.routeRange(min, max)` | How far routes may move it, past its own range: a fine tune of ±100 ct that an envelope sweeps by octaves, `.routeRange(-4800, 4800)` |
 | `.role({"level"})` | What it does, for agents: `level`, `time`, `brightness` ... |
 | `.keys({"db12", "db24"})` | A choice's patch keys, one per option, where its labels make poor ones (see below) |
 | `.curved(Curve::Log)`, `.curved(Curve::Pow, k)` | Knob travel |
@@ -145,8 +147,9 @@ void factoryPatches(Patches& p) {
 ```
 
 Each patch is `p.add("Name")` and `.set(member, value)` calls with a
-constant, a bool or a choice's key (`.set(shape, "soft")`); a parameter left
-out takes its default. Nothing else belongs here (no loops or locals), and
+constant, a bool or a choice's key (`.set(shape, "soft")`), and `.route()`
+calls for its routes (see Modulation); a parameter left out takes its
+default. Nothing else belongs here (no loops or locals), and
 the compiler checks names, ranges and choices.
 
 **Keys and IDs.** A parameter's patch key is its member's name in
@@ -221,42 +224,58 @@ script keeps each voice's sound in its own array, indexed the same way:
 #include <supple/script.h>
 
 // A polyphonic synth: a saw per voice through a low-pass filter and an
-// envelope. With Glide above 0 it plays one note at a time, sliding.
+// envelope, and an LFO for the patch's routes to move the filter with. With
+// Glide above 0 it plays one note at a time, sliding.
 struct Synth : Instrument {
     static constexpr Info info = {.name = "Synth", .id = "com.example.synth", .voices = 8};
 
     Param attack = milliseconds("Attack", 1, 2000, 5).help("How fast a note rises.");
-    Param release = milliseconds("Release", 5, 5000, 300)
-                        .help("How long a note fades once its key is up.");
-    Param cutoff = frequency("Cutoff", 200, 16000, 3000).help("The low-pass filter's corner.");
+    Param release =
+        milliseconds("Release", 5, 5000, 300).help("How long a note fades once its key is up.");
+    Param cutoff = frequency("Cutoff", 200, 16000, 3000)
+                       .polyModulated()
+                       .help("The low-pass filter's corner, which routes move for each voice.");
+    Param rate = frequency("LFO Rate", 0.1, 20, 4).help("How fast the LFO swings.");
+    Param voices = integer("Voices", 1, 8, 8).help("How many notes sound at once.");
     Param glide = milliseconds("Glide", 0, 1000, 0)
                       .help("The slide from note to note; above 0, one note at a time.");
     Param level = decibels("Level", -48, 0, -12).smoothed(20).help("The output level.");
+
+    // A sine for each note, from its start: "lfo>cutoff" in the patch's
+    // routes makes a wah of it, "velocity>cutoff" opens harder notes.
+    Source lfo = voiceSource("LFO").help("A sine for each note, from its start.");
 
     struct Voice {
         Oscillator osc;
         Adsr env;
         Biquad filter;
+        double phase = 0.0;  // the LFO's
+        int tick = 0;        // frames until the filter follows its routes again
     };
     Array<Voice, 8> voice;
+
+    void factoryPatches(Patches& p) {
+        p.add("Wah").set(cutoff, 900).route("lfo>cutoff", 1.5).route("velocity>cutoff", 1);
+    }
 
     void prepare() {
         for (Voice& v : voice) v.osc.setShape(Oscillator::Shape::Saw);
     }
 
     void update() {
-        for (Voice& v : voice) {
-            v.env.set(attack, 200, 0.7, release);
-            v.filter.lowpass(cutoff, 0.707);
-        }
+        for (Voice& v : voice) v.env.set(attack, 200, 0.7, release);
         setVoiceMode(glide > 0 ? VoiceMode::Legato : VoiceMode::Poly);
         setGlide(glide);
+        setVoiceLimit(voices.index());
     }
 
     // Voice v starts a note. retrigger is false when it glides on from the
-    // note before (Legato): its envelope keeps going.
+    // note before (Legato): its envelope and LFO keep going.
     void startVoice(int v, bool retrigger) {
-        if (retrigger) voice[v].env.gate(true);
+        if (!retrigger) return;
+        voice[v].env.gate(true);
+        voice[v].phase = 0.0;
+        voice[v].tick = 0;
     }
     void releaseVoice(int v) { voice[v].env.gate(false); }
     void stopVoice(int v) { voice[v].env.kill(); }
@@ -267,6 +286,14 @@ struct Synth : Instrument {
             Voice& s = voice[v];
             const double velocity = voiceVelocity(v);
             for (int i = 0; i < io.frames; ++i) {
+                // Every 16 frames of the note: the LFO on, then the cutoff
+                // with its routes from the sources as they are now.
+                if (s.tick == 0) {
+                    lfo.set(v, sin(twoPi * s.phase));
+                    s.filter.lowpass(cutoff.forVoice(v), 0.707);
+                    s.phase = fmod(s.phase + rate * 16 / sampleRate(), 1.0);
+                }
+                s.tick = (s.tick + 1) % 16;
                 s.osc.setFrequency(voiceHz(v, i));
                 const double tone = s.filter.process(s.osc.next());
                 const double x = tone * s.env.next() * velocity * dbToGain(level.at(i));
@@ -290,7 +317,7 @@ host that note is over: a voice never finished keeps its note open forever.
 
 | Method | Gives |
 |---|---|
-| `voiceCount()` | Info's `.voices` |
+| `voiceCount()` | Info's `.voices` (every voice there is; a limit plays fewer of them) |
 | `voicePlaying(v)` | From `startVoice` until `voiceFinished` |
 | `voiceKey(v)`, `voiceChannel(v)`, `voiceVelocity(v)` | The note: MIDI key, channel, velocity 0..1 |
 | `voicePitch(v, i)`, `voiceHz(v, i)` | At frame `i`: semitones (key, glide and pitch bend), and Hz |
@@ -298,6 +325,65 @@ host that note is over: a voice never finished keeps its note open forever.
 | `voiceVibrato(v)`, `voiceExpression(v)`, `voiceBrightness(v)`, `voicePressure(v)` | 0..1, 0 until sent (MPE arrives as these; a tuning expression is in `voicePitch`) |
 | `setVoiceMode(VoiceMode::Poly)` | Or `Mono` (the newest key held, returning to the last), `Legato` (Mono, gliding without restarting) |
 | `setGlide(ms)`, `setBendRange(semitones)` | The slide between notes (Mono, Legato); the bend's reach (2) |
+| `setVoiceLimit(n)` | Poly mode plays at most `n` voices at once, 1 to `voiceCount()`: a Voices parameter. Lowering it stops the voices above it (through `stopVoice`) |
+
+## Modulation: sources and routes
+
+A plugin's modulators are its own code; where their values go is the
+patch's. A **source** is a member the script sets, and the patch's
+**routes** connect sources to parameters, each with an amount:
+
+```cpp
+Param cutoff = frequency("Cutoff", 200, 16000, 3000).polyModulated();
+Source lfo = voiceSource("LFO").help("A sine for each note, from its start.");
+// in process(), every 16 frames of a voice:
+lfo.set(v, sin(twoPi * phase));
+filter.lowpass(cutoff.forVoice(v), 0.707);  // the cutoff with its routes, now
+```
+
+```json
+"routes": {"lfo>cutoff": {"amount": "+1.5 oct"}, "velocity>cutoff": {"amount": 1}}
+```
+
+| Declaration | A source |
+|---|---|
+| `Source s = source("Macro 1")` | One value for the whole plugin; `s.set(x)` |
+| `Source s = voiceSource("LFO 1")` | An instrument's: a value per voice, `s.set(v, x)` (or `s.set(x)` for every voice) |
+| `.unipolar()` | Its values are 0..1 (an envelope); otherwise -1..1 (an LFO). Values are kept to the range |
+| `.help("...")`, `.withKey("lfo1")` | As a parameter's; the routes name a source by its key (the member's name in snake_case) |
+
+At most 32. `s.get(v)` reads one back. An instrument also has these sources
+of its own, which the script never sets: `velocity`, `key` (-1 at key 0, 0 at
+middle C, 1 at key 120: an amount of 5 oct tracks a cutoff an octave per
+octave), `random` (new for each note), `pressure` and `slide` (the note's
+pressure and brightness expressions) per voice, and `modwheel`, `breath`,
+`expression` (CC 11), `aftertouch` and `pitchbend` for all voices.
+
+Routes move a parameter marked `.modulated()` (from global sources) or, in
+an instrument, `.polyModulated()` (from any source). The audio code reads
+the moved value where it uses it: `p.forVoice(v)` for a voice, `p.routed(i)`
+at frame `i` otherwise. Each is the parameter's value plus each route's
+amount times its source's value (and its `via` source's), from the values
+the sources hold at that moment, kept to the parameter's range (or its
+`.routeRange()`). So set a source before reading what it moves, and read
+moved values as often as they should move: per frame, or every few frames
+of a voice. Nothing is read at a fixed rate for you, and `value()` and
+`at(i)` never include routes.
+
+An amount is in the parameter's unit at the source's full value: dB for a
+level, semitones or cents for a pitch, percent for a percent; a frequency's
+is in octaves. A patch may write it with a unit that converts (`"12 st"` for
+an octave, `"50 ct"`). A route through a second source, `{"amount": 0.2,
+"via": "modwheel"}`, scales by that source too: vibrato under the mod wheel.
+A source with a value per voice cannot move a global parameter. At most 64
+routes. Factory patches route too, by key:
+`p.add("Wah").set(cutoff, 900).route("lfo>cutoff", 1.5).route("velocity>cutoff", 1)`,
+and `.route("lfo>pitch", 0.2, "modwheel")` through a second source.
+
+The schema lists the sources (`"sources"`) and, for each parameter routes
+move, the unit of its amounts and whether a voice's sources reach it
+(`"route"`); routes are saved with the plugin and its presets, and a
+plugin's description in prose ends with them.
 
 ## Files
 
@@ -588,6 +674,7 @@ tilt.cpp:12:9: error: integer division needs a positive constant divisor [script
 Fix the first error first: later ones often follow from it. The codes group
 by area: `script.parse.*` (syntax), `script.unsupported.*` (outside the
 subset), `script.type.*`, `script.name.*`, `script.call.*`,
-`script.plugin.*` and `script.param.*` (the plugin's shape), `script.ub.*`
+`script.plugin.*`, `script.param.*` and `script.source.*` (the plugin's
+shape), `script.ub.*`
 (undefined in C++), `script.rt.*` (real-time rules), `script.editor.*`,
 `script.shared.*` and `script.format.*` (the editor's rules).
