@@ -399,8 +399,9 @@ Render render(const clap_plugin_factory_t* factory, const char* id, const char* 
     if (!params) return result;
     InputEvents events;
     bool configured = false;
-    // Non-unity gain/drive catches a path which just returns the input. Pin
-    // every instrument seed so two fresh instances receive the same randomness.
+    // The plain parameter moves off its default, so the renders run a setting
+    // the product chose to exercise. Pin every instrument seed so two fresh
+    // instances receive the same randomness.
     for (uint32_t i = 0; i < params->count(plug); ++i) {
         clap_param_info_t info{};
         if (!params->get_info(plug, i, &info)) return result;
@@ -509,7 +510,8 @@ inline double difference(const Render& a, const Render& b) {
 }
 
 // A transparent effect (a meter, an analyser) must give back its input
-// exactly, on both precision paths; any other effect must change it.
+// exactly, on both precision paths. Whether any other effect changes its
+// input is reported, not checked: an effect may pass it through.
 inline void processing(const clap_plugin_factory_t* factory, const char* id,
                        const char* plainParam, uint32_t channels, double sampleRate,
                        bool effect, bool notes, Check check, bool transparent = false) {
@@ -529,12 +531,11 @@ inline void processing(const clap_plugin_factory_t* factory, const char* id,
     std::printf("     float/double max error: %.9g; peaks: %.6g / %.6g\n",
                 precisionError, f.peak, d.peak);
     if (!effect) return; // No input port means no in-place promise.
+    std::printf("     largest difference from the input float/double: %.9g / %.9g\n",
+                f.inputDifference, d.inputDifference);
     if (transparent)
         check(f.inputDifference == 0.0 && d.inputDifference == 0.0,
               "both effect precision paths pass the input through exactly");
-    else
-        check(f.inputDifference > 1e-4 && d.inputDifference > 1e-4,
-              "both effect precision paths reach non-identity DSP");
     const auto fi = render<float>(factory, id, plainParam, channels, sampleRate, true, notes);
     const auto di = render<double>(factory, id, plainParam, channels, sampleRate, true, notes);
     const double floatError = difference(f, fi), doubleError = difference(d, di);

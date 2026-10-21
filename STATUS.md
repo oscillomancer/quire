@@ -431,9 +431,6 @@ Engine and hosting:
   state blob.
 - `fx.meters` reads a plugin's readouts live or as the last `render.mix`
   ended; other renders (stems, regions, A/B) keep none.
-- A DSP script that never changes its input (an analyser of one's own)
-  exports a source project whose host-smoke fails: the export does not set
-  `PRODUCT_TRANSPARENT`; set it by hand in the exported `product.cmake`.
 - No plugin implements the semantic extension's `get_telemetry` member since
   Gauge was replaced; `core-analysis`'s `LiveMeter`, written for it, has no
   user.

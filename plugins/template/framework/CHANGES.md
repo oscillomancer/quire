@@ -4,6 +4,17 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.27.1
+
+What a product must do: nothing.
+
+- **host-smoke no longer requires an effect to change its input**
+  (`test/host_contract.h`). The requirement guarded the float/double and
+  in-place comparisons against a render that never reached the DSP, which
+  other checks catch, and it failed any effect that rightly passes its
+  input through. The difference is printed instead. `PRODUCT_TRANSPARENT`
+  still demands output equal to input exactly.
+
 ## 1.27.0
 
 What a product must do: nothing. A product that passes its input through
