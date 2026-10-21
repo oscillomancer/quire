@@ -1,9 +1,9 @@
 # Spec: Marram — the stock synthesizer
 
-**Status:** In progress. The voice (this document) is implemented;
-modulation routes, the editor, the agent guide and the evaluation tasks
-follow, and Orrery (`synth.md`) stays the documented synthesizer until
-they are done.
+**Status:** In progress. The voice and its modulation (this document) are
+implemented; the editor, the agent guide and the evaluation tasks follow,
+and Orrery (`synth.md`) stays the documented synthesizer until they are
+done.
 **Plugin:** `plugins/stock/marram`, CLAP id `com.suppleaudio.marram`,
 instrument. A DSP script compiled natively (ADR-0047),
 `plugins/stock/marram/script/marram.cpp`.
@@ -25,6 +25,8 @@ chorus, delay, reverb and EQ are the stock effects after it in a chain.
           filter 1 ─┬─ serial: into filter 2 ─┬─ drive ── amp (env, velocity, pan) ── voices summed
           filter 2 ─┘  parallel: summed       ┘
  env2 (the mod envelope): cutoffs, pitch and FM depth, by fixed amounts
+ routes (§3): amp, env2, env3, lfo1..3, macro1..4 and an instrument's own sources,
+              to the numbers each voice reads
 ```
 
 Every voice runs at the oversampled rate (`voice.quality`: eco 1x,
@@ -33,8 +35,8 @@ normal 2x, high 4x); the voices are summed and brought down once
 is computed every 16 samples of a voice's life and glided between, so
 renders do not depend on the block size; every random choice (free-running
 phases, unison and drift, noise) is seeded by the order of the notes, so a
-render is the same every time. Sixteen voices; a stolen voice fades out
-over a few milliseconds. A safety limit leaves the output untouched below
+render is the same every time. Sixteen voices (`voice.polyphony` plays
+fewer); a stolen voice fades out over a few milliseconds. A safety limit leaves the output untouched below
 −1 dBFS and bends it toward full scale above.
 
 ## 2. Parameters
@@ -48,8 +50,10 @@ parameter keeps its value and is left out of descriptions.
 | key | unit / options | range | default | applies |
 |---|---|---|---|---|
 | `voice.mode` | `poly`, `mono`, `legato` | | **poly** | |
+| `voice.polyphony` | voices at once; a note past them takes the oldest's | 1..16 | **16** | mode poly |
 | `voice.glide` | ms | 0..5000 | **0** | |
 | `voice.bend_range` | st | 0..48 | **2** | |
+| `voice.tune` | ct, every oscillator; routes reach ±4800 | −100..100 | **0** | |
 | `voice.unison` | copies of each pitched oscillator | 1..8 | **1** | |
 | `voice.unison_detune` | ct, the outer copies each way | 0..100 | **12** | unison > 1 |
 | `voice.unison_spread` | % across the stereo field | 0..100 | **60** | unison > 1 |
@@ -136,7 +140,7 @@ into filter 2; oscillators sent to filter 2 join after filter 1) or
   bandwidths 80/90/120 Hz widened to a Q of at most 6, keytrack moving
   them with the note.
 
-### 2.4 `drive`, `amp`, `env2`, `output`
+### 2.4 `drive`, `amp`, `env2`, `env3`, `output`
 
 | key | unit / options | range | default | applies |
 |---|---|---|---|---|
@@ -149,10 +153,12 @@ into filter 2; oscillators sent to filter 2 join after filter 1) or
 | `amp.sustain` | % | 0..100 | **80** | |
 | `amp.release` | ms | 1..30000 | **250** | |
 | `amp.velocity` | % (100: the softest note 40 dB down) | 0..100 | **50** | |
+| `amp.level` | dB, each voice after the envelope | −48..12 | **0** | |
 | `amp.pan` | % | −100..100 | **0** | |
 | `env2.attack`, `env2.decay`, `env2.sustain`, `env2.release` | as the amp's | | **1**, **400**, **20**, **300** | |
 | `env2.pitch` | st at the peak, every oscillator | −48..48 | **0** | |
 | `env2.fm` | % of each FM depth that follows env2 | 0..100 | **0** | |
+| `env3.attack`, `env3.decay`, `env3.sustain`, `env3.release` | as the amp's; a source for routes only | | **10**, **800**, **0**, **300** | |
 | `output` | dB, smoothed | −36..12 | **0** | |
 
 Envelope segments last exactly their time: the attack straight, decay and
@@ -161,26 +167,79 @@ retrigger never clicks; Legato keeps both going between overlapping notes.
 A note's level is env × velocity × the note's volume expression; its pan
 adds the note's pan expression.
 
-## 3. Factory patches
+### 2.5 `lfo1`..`lfo3`, `macro1`..`macro4`
 
-Dune Pad, Pluck Bass, Acid Line, Supersaw, Sub Bass, Tine Piano (FM),
-Glass Bell (FM), Vowel Lead (formant), Strings, Noise Snare, Drawbar Organ
-(wavetable). Each measures −15.8 to −18.1 LUFS on `dsp.test`'s notes
-signal (a note, then a chord, velocity 0.8).
+| key | unit / options | range | default | applies |
+|---|---|---|---|---|
+| `lfoN.shape` | `sine`, `triangle`, `saw_up`, `saw_down`, `square`, `random` (a new value each cycle), `drift` (gliding between them) | | **sine** | |
+| `lfoN.sync` | follow the song's tempo | | **off** | |
+| `lfoN.rate` | Hz, log | 0.01..50 | **2** | not synced |
+| `lfoN.division` | `n1_32`, `n1_16`, `n1_8t`, `n1_8`, `n1_8d`, `n1_4t`, `n1_4`, `n1_4d`, `n1_2`, `bar1`, `bar2`, `bar4` | | **n1_4** | synced |
+| `lfoN.mode` | `note` (each note's own, from its start), `free` (one for every voice, running on; synced to a playing song, from its position) | | **note** | |
+| `lfoN.phase` | deg: where a note's starts, or how far a free one is moved | 0..360 | **0** | |
+| `lfoN.delay` | ms: the fade-in from each note's start | 0..10000 | **0** | |
+| `macroN` | %: a knob for routes (the source `macroN`) | 0..100 | **0** | |
 
-## 4. Not yet (each a later step)
+An LFO's value is −1..1. Routes move a note LFO's rate per voice; a free
+one runs at the parameter's own rate. Random and drift draw from a hash of
+the cycle's number, so they are the same in every render.
 
-- **Modulation**: LFOs, more envelopes, macros, the mod wheel, aftertouch
-  and the other sources, and a route table with amounts in the
-  destination's unit (a framework feature, so that every script can use
-  it). Until then the fixed amounts above are the modulation.
-- **Polyphony** below 16 voices (the runtime's voice count is fixed).
+## 3. Modulation
+
+The patch's `routes` member (`semantic-params-extension.md`, amendment of
+2026-10-21) connects sources to parameters, each with an amount in the
+parameter's unit at the source's full value (a frequency's in octaves),
+optionally through a second source:
+
+```json
+"routes": {
+  "lfo1>voice.tune":     {"amount": "20 ct", "via": "modwheel"},
+  "env3>osc2.fine":      {"amount": "+24 st"},
+  "velocity>filter1.cutoff": {"amount": "+1 oct"},
+  "macro1>drive.amount": {"amount": "12 dB"}
+}
+```
+
+**Sources.** Per voice: `amp`, `env2`, `env3` (0..1), `lfo1`..`lfo3`
+(−1..1), and an instrument's own `velocity`, `key`, `random`, `pressure` and
+`slide`. For all voices: `macro1`..`macro4` (the knobs, 0..1) and
+`modwheel`, `breath`, `expression`, `aftertouch`, `pitchbend`.
+
+**Destinations** (every one per voice): `voice.tune`; each oscillator's
+`level`, `pan`, `fine` (reaching ±4800 ct), `width`, `position`, `ratio`,
+`feedback` and `fm`; each filter's `cutoff`, `resonance`, `feedback`,
+`damping`, `vowel`, `shift` and `drive`; `drive.amount`, `drive.bias`,
+`drive.mix`; `amp.level`, `amp.pan`, and the attack, decay and release of
+the amp, Env 2 and Env 3; each LFO's `rate`. Choices, switches, unison,
+glide and the output are not routed.
+
+Every 16 samples of a voice (§1) the envelopes and LFOs move on, the
+sources take their values, and the voice reads its destinations with their
+routes, gliding to them; a destination's routes are kept within its range.
+The fixed amounts of §2 (Env 2's, key tracking, velocity) still apply, and
+add to the routes.
+
+## 4. Factory patches
+
+Dune Pad (a slow free LFO on the cutoff; the mod wheel opens it), Pluck
+Bass, Acid Line, Supersaw (the mod wheel opens it), Sub Bass, Tine Piano
+(FM; velocity deepens the bark, the mod wheel brings in an autopan), Glass
+Bell (FM), Vowel Lead (formant; a delayed vibrato, the mod wheel changes the
+vowel), Strings (a delayed vibrato), Noise Snare, Drawbar Organ (wavetable,
+a rotary shimmer), Wobble Bass (an LFO in eighths of the song), Sync Lead
+(Env 3 sweeps a synced oscillator; vibrato under the mod wheel), Pulse Pad
+(two LFOs on the pulse widths) and Table Sweep (Env 3 and a drifting LFO
+through a wavetable; Macro 1 darkens it). Each measures −15.1 to −18.1 LUFS
+on `dsp.test`'s notes signal (a note, then a chord, velocity 0.8).
+
+## 5. Not yet (each a later step)
+
 - **Its own editor**: the automatic one shows every group and dims what
-  does not apply.
+  does not apply, but has no way to show or edit routes.
 - **The agent guide and evaluation tasks**, then Orrery's removal.
 
-## 5. Performance
+## 6. Performance
 
 Release build, one core, 48 kHz: 8 notes of a pad with two saws and a sub,
-3 unison copies, a 24 dB ladder and tape drive at normal quality, 3.9 %
-(Orrery's equivalent: 3.1 %).
+3 unison copies, a 24 dB ladder and tape drive at normal quality, 4.1 %
+with or without routes (Orrery's equivalent: 3.1 %).

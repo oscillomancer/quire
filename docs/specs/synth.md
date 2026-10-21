@@ -2,7 +2,7 @@
 
 **Status:** Implemented; amendments are recorded at the end. (2026-10-21)
 Marram (`marram.md`), a DSP script, is being built to replace it; this
-document stays the reference until Marram's modulation, editor, guide and
+document stays the reference until Marram's editor, guide and
 evaluation tasks are done.
 **Plugin:** `plugins/orrery`, CLAP id `com.suppleaudio.orrery`, instrument.
 Built from the template per ADR-0011. An orrery is a clockwork model of

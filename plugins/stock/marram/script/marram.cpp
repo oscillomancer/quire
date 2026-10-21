@@ -26,6 +26,13 @@
 // Drift wanders each voice's pitch and cutoff a little, the way old
 // circuits do.
 //
+// Modulation goes where the patch's routes say: from the amp envelope, Env 2,
+// Env 3, three LFOs (each a note's own or one running free, at a rate or in
+// time with the song), four macro knobs, and what every instrument has
+// (velocity, key, a random value per note, pressure, slide, the mod wheel,
+// breath, expression, aftertouch, pitch bend), to almost any number a voice
+// reads: "lfo1>voice.tune": {"amount": "20 ct", "via": "modwheel"}.
+//
 // Everything a voice does runs oversampled (2x at Normal quality, 4x at
 // High), summed, and brought down once. Modulation is worked out every 16
 // samples of a voice's life and glided in between, so a render is the same
@@ -132,6 +139,45 @@ double driveCurve(int type, double u, double bias) {
     if (type == 2) return tapeCurve(u + bias) - tapeCurve(bias);
     if (type == 3) return sin(0.5 * pi * (u + bias)) - sin(0.5 * pi * bias);
     return clamp(u + bias, -1.0, 1.0) - clamp(bias, -1.0, 1.0);
+}
+
+// A value from -1 to 1 for each whole number n and seed, the same everywhere:
+// a random LFO's for its cycle n.
+double scatter(int n, int seed) {
+    int h = n * 374761393 + seed * 668265263;
+    h = (h ^ (h >> 13)) * 1274126177;
+    h = h ^ (h >> 16);
+    return (h & 0xFFFFFF) / 8388608.0 - 1.0;
+}
+
+// An LFO's wave at phase t (0..1) of cycle n: sine, triangle, saw up, saw
+// down, square, random (a new value each cycle) and drift (gliding from one
+// to the next).
+double lfoWave(int shape, double t, int n, int seed) {
+    if (shape == 0) return sin(twoPi * t);
+    if (shape == 1) return t < 0.25 ? 4.0 * t : t < 0.75 ? 2.0 - 4.0 * t : 4.0 * t - 4.0;
+    if (shape == 2) return 2.0 * t - 1.0;
+    if (shape == 3) return 1.0 - 2.0 * t;
+    if (shape == 4) return t < 0.5 ? 1.0 : -1.0;
+    if (shape == 5) return scatter(n, seed);
+    const double e = t * t * (3.0 - 2.0 * t);
+    return lerp(scatter(n, seed), scatter(n + 1, seed), e);
+}
+
+// A synced LFO's cycle in quarter notes, by its division's index.
+double divisionBeats(int d) {
+    if (d == 0) return 0.125;
+    if (d == 1) return 0.25;
+    if (d == 2) return 1.0 / 3.0;
+    if (d == 3) return 0.5;
+    if (d == 4) return 0.75;
+    if (d == 5) return 2.0 / 3.0;
+    if (d == 6) return 1.0;
+    if (d == 7) return 1.5;
+    if (d == 8) return 2.0;
+    if (d == 9) return 4.0;
+    if (d == 10) return 8.0;
+    return 16.0;
 }
 
 // --- the voice ---------------------------------------------------------------------------
@@ -349,6 +395,20 @@ struct Voice {
 
     Env amp;
     Env mod;
+    Env env3;
+    // The LFOs a note has of its own: phase (in cycles), whole cycles, and a
+    // seed for random; and how long the note has played, for their delay.
+    Array<double, 3> lfoPhase;
+    Array<int, 3> lfoCycle;
+    int lfoSeed = 0;
+    double age = 0.0;
+    // As the routes leave them at the last tick: each oscillator's pulse
+    // width and FM feedback, and the drive.
+    Array<double, 4> width;
+    Array<double, 4> feedback;
+    double driveGain = 1.0;
+    double driveBias = 0.0;
+    double driveMix = 1.0;
     double ampL = 0.0;
     double ampLStep = 0.0;
     double ampR = 0.0;
@@ -377,6 +437,7 @@ struct OscSet {
     double gain = 0.0;
     double pan = 0.0;
     double tune = 0.0;  // semitones
+    int coarse = 0;
     int wave = 0;
     double width = 0.5;
     bool sync = false;
@@ -393,6 +454,29 @@ struct OscSet {
     bool toB = false;
     bool direct = false;
     bool retrigger = false;
+};
+
+// An oscillator's settings as a voice hears them, with their routes.
+struct OscNow {
+    double gain = 0.0;
+    double pan = 0.0;
+    double tune = 0.0;
+    double width = 0.5;
+    double position = 0.0;
+    double ratio = 1.0;
+    double feedback = 0.0;
+    double fm = 0.0;
+};
+
+// And a filter's.
+struct FilterRead {
+    double cutoff = 1000.0;
+    double resonance = 0.0;
+    double feedback = 0.0;
+    double damping = 0.0;
+    double vowel = 0.0;
+    double shift = 0.0;
+    double drive = 1.0;
 };
 
 struct FilterSet {
@@ -418,7 +502,8 @@ struct Marram : Instrument {
         .vendor = "Supple Audio",
         .description =
             "Synthesizer: four oscillators (analog, wavetable, FM, noise, sub) with unison, two "
-            "filters (ladder, state-variable, comb, formant), drive and two envelopes.",
+            "filters (ladder, state-variable, comb, formant), drive, three envelopes, three LFOs "
+            "and four macros, connected by modulation routes.",
         .voices = kVoices};
 
     // --- Voice ----------------------------------------------------------------------------
@@ -429,6 +514,12 @@ struct Marram : Instrument {
                      .help(
                          "Poly plays chords; Mono one note at a time, each restarting the "
                          "envelopes; Legato one at a time, gliding without restarting them.");
+    Param polyphony =
+        integer("Polyphony", 1, kVoices, kVoices)
+            .withKey("voice.polyphony")
+            .in("Voice")
+            .activeWhen(mode, {"poly"})
+            .help("How many notes sound at once; a note past them takes the oldest's voice.");
     Param glide = milliseconds("Glide", 0, 5000, 0)
                       .withKey("voice.glide")
                       .in("Voice")
@@ -437,6 +528,14 @@ struct Marram : Instrument {
                           .withKey("voice.bend_range")
                           .in("Voice")
                           .help("How far the pitch wheel bends, each way.");
+    Param tune = cents("Tune", -100, 100, 0)
+                     .withKey("voice.tune")
+                     .polyModulated()
+                     .routeRange(-4800, 4800)
+                     .in("Voice")
+                     .help(
+                         "Fine tuning of every oscillator. Routes move the whole voice's pitch "
+                         "through it: an LFO's vibrato, an envelope's sweep.");
     Param unison =
         integer("Unison", 1, kUnison, 1)
             .withKey("voice.unison")
@@ -477,6 +576,7 @@ struct Marram : Instrument {
     Param o1Level = decibels("Osc 1 Level", -60, 6, -6)
                         .offAtMin()
                         .withKey("osc1.level")
+                        .polyModulated()
                         .in("Osc 1")
                         .activeUnless(o1Type, {"off"})
                         .help(
@@ -484,6 +584,7 @@ struct Marram : Instrument {
                             "modulate another oscillator.");
     Param o1Pan = percent("Osc 1 Pan", 0, -100, 100)
                       .withKey("osc1.pan")
+                      .polyModulated()
                       .in("Osc 1")
                       .activeUnless(o1Type, {"off"})
                       .help("Where it sits, left (-100 %) to right (+100 %).");
@@ -495,6 +596,8 @@ struct Marram : Instrument {
     Param o1Fine =
         cents("Osc 1 Fine", -100, 100, 0)
             .withKey("osc1.fine")
+            .polyModulated()
+            .routeRange(-4800, 4800)
             .in("Osc 1")
             .activeUnless(o1Type, {"off", "noise", "sub"})
             .help("Its pitch from the note, in cents: a few apart thicken two oscillators.");
@@ -506,6 +609,7 @@ struct Marram : Instrument {
     Param o1Width =
         percent("Osc 1 Width", 25, 1, 99)
             .withKey("osc1.width")
+            .polyModulated()
             .in("Osc 1")
             .activeWhen(o1Wave, {"pulse"})
             .help("The pulse's width: 50 % is a square, narrower is thinner and nasal.");
@@ -520,12 +624,14 @@ struct Marram : Instrument {
                 "organ drawbars, a coarsening digital ramp, or a comb through the harmonics.");
     Param o1Position = percent("Osc 1 Position", 0)
                            .withKey("osc1.position")
+                           .polyModulated()
                            .in("Osc 1")
                            .activeWhen(o1Type, {"wavetable"})
                            .help("Where in the table it plays, start to end.");
     Param o1Ratio = continuous("Osc 1 Ratio", 0.25, 16, 1)
                         .curved(Curve::Log)
                         .withKey("osc1.ratio")
+                        .polyModulated()
                         .in("Osc 1")
                         .activeWhen(o1Type, {"fm"})
                         .help(
@@ -534,6 +640,7 @@ struct Marram : Instrument {
     Param o1Feedback =
         percent("Osc 1 Feedback", 0)
             .withKey("osc1.feedback")
+            .polyModulated()
             .in("Osc 1")
             .activeWhen(o1Type, {"fm"})
             .help("The operator modulating itself: a sine turns toward a saw, then noise.");
@@ -550,6 +657,7 @@ struct Marram : Instrument {
                          .help("How many octaves under the note the sub plays.");
     Param o1Fm = continuous("Osc 1 FM", 0, 10, 0)
                      .withKey("osc1.fm")
+                     .polyModulated()
                      .in("Osc 1")
                      .activeWhen(o1Type, {"analog", "wavetable", "fm"})
                      .help(
@@ -588,6 +696,7 @@ struct Marram : Instrument {
     Param o2Level = decibels("Osc 2 Level", -60, 6, -6)
                         .offAtMin()
                         .withKey("osc2.level")
+                        .polyModulated()
                         .in("Osc 2")
                         .activeUnless(o2Type, {"off"})
                         .help(
@@ -595,6 +704,7 @@ struct Marram : Instrument {
                             "modulate another oscillator.");
     Param o2Pan = percent("Osc 2 Pan", 0, -100, 100)
                       .withKey("osc2.pan")
+                      .polyModulated()
                       .in("Osc 2")
                       .activeUnless(o2Type, {"off"})
                       .help("Where it sits, left (-100 %) to right (+100 %).");
@@ -606,6 +716,8 @@ struct Marram : Instrument {
     Param o2Fine =
         cents("Osc 2 Fine", -100, 100, 0)
             .withKey("osc2.fine")
+            .polyModulated()
+            .routeRange(-4800, 4800)
             .in("Osc 2")
             .activeUnless(o2Type, {"off", "noise", "sub"})
             .help("Its pitch from the note, in cents: a few apart thicken two oscillators.");
@@ -617,6 +729,7 @@ struct Marram : Instrument {
     Param o2Width =
         percent("Osc 2 Width", 25, 1, 99)
             .withKey("osc2.width")
+            .polyModulated()
             .in("Osc 2")
             .activeWhen(o2Wave, {"pulse"})
             .help("The pulse's width: 50 % is a square, narrower is thinner and nasal.");
@@ -638,12 +751,14 @@ struct Marram : Instrument {
                 "organ drawbars, a coarsening digital ramp, or a comb through the harmonics.");
     Param o2Position = percent("Osc 2 Position", 0)
                            .withKey("osc2.position")
+                           .polyModulated()
                            .in("Osc 2")
                            .activeWhen(o2Type, {"wavetable"})
                            .help("Where in the table it plays, start to end.");
     Param o2Ratio = continuous("Osc 2 Ratio", 0.25, 16, 1)
                         .curved(Curve::Log)
                         .withKey("osc2.ratio")
+                        .polyModulated()
                         .in("Osc 2")
                         .activeWhen(o2Type, {"fm"})
                         .help(
@@ -652,6 +767,7 @@ struct Marram : Instrument {
     Param o2Feedback =
         percent("Osc 2 Feedback", 0)
             .withKey("osc2.feedback")
+            .polyModulated()
             .in("Osc 2")
             .activeWhen(o2Type, {"fm"})
             .help("The operator modulating itself: a sine turns toward a saw, then noise.");
@@ -668,6 +784,7 @@ struct Marram : Instrument {
                          .help("How many octaves under the note the sub plays.");
     Param o2Fm = continuous("Osc 2 FM", 0, 10, 0)
                      .withKey("osc2.fm")
+                     .polyModulated()
                      .in("Osc 2")
                      .activeWhen(o2Type, {"analog", "wavetable", "fm"})
                      .help(
@@ -706,6 +823,7 @@ struct Marram : Instrument {
     Param o3Level = decibels("Osc 3 Level", -60, 6, -6)
                         .offAtMin()
                         .withKey("osc3.level")
+                        .polyModulated()
                         .in("Osc 3")
                         .activeUnless(o3Type, {"off"})
                         .help(
@@ -713,6 +831,7 @@ struct Marram : Instrument {
                             "modulate another oscillator.");
     Param o3Pan = percent("Osc 3 Pan", 0, -100, 100)
                       .withKey("osc3.pan")
+                      .polyModulated()
                       .in("Osc 3")
                       .activeUnless(o3Type, {"off"})
                       .help("Where it sits, left (-100 %) to right (+100 %).");
@@ -724,6 +843,8 @@ struct Marram : Instrument {
     Param o3Fine =
         cents("Osc 3 Fine", -100, 100, 0)
             .withKey("osc3.fine")
+            .polyModulated()
+            .routeRange(-4800, 4800)
             .in("Osc 3")
             .activeUnless(o3Type, {"off", "noise", "sub"})
             .help("Its pitch from the note, in cents: a few apart thicken two oscillators.");
@@ -735,6 +856,7 @@ struct Marram : Instrument {
     Param o3Width =
         percent("Osc 3 Width", 25, 1, 99)
             .withKey("osc3.width")
+            .polyModulated()
             .in("Osc 3")
             .activeWhen(o3Wave, {"pulse"})
             .help("The pulse's width: 50 % is a square, narrower is thinner and nasal.");
@@ -756,12 +878,14 @@ struct Marram : Instrument {
                 "organ drawbars, a coarsening digital ramp, or a comb through the harmonics.");
     Param o3Position = percent("Osc 3 Position", 0)
                            .withKey("osc3.position")
+                           .polyModulated()
                            .in("Osc 3")
                            .activeWhen(o3Type, {"wavetable"})
                            .help("Where in the table it plays, start to end.");
     Param o3Ratio = continuous("Osc 3 Ratio", 0.25, 16, 1)
                         .curved(Curve::Log)
                         .withKey("osc3.ratio")
+                        .polyModulated()
                         .in("Osc 3")
                         .activeWhen(o3Type, {"fm"})
                         .help(
@@ -770,6 +894,7 @@ struct Marram : Instrument {
     Param o3Feedback =
         percent("Osc 3 Feedback", 0)
             .withKey("osc3.feedback")
+            .polyModulated()
             .in("Osc 3")
             .activeWhen(o3Type, {"fm"})
             .help("The operator modulating itself: a sine turns toward a saw, then noise.");
@@ -786,6 +911,7 @@ struct Marram : Instrument {
                          .help("How many octaves under the note the sub plays.");
     Param o3Fm = continuous("Osc 3 FM", 0, 10, 0)
                      .withKey("osc3.fm")
+                     .polyModulated()
                      .in("Osc 3")
                      .activeWhen(o3Type, {"analog", "wavetable", "fm"})
                      .help(
@@ -824,6 +950,7 @@ struct Marram : Instrument {
     Param o4Level = decibels("Osc 4 Level", -60, 6, -6)
                         .offAtMin()
                         .withKey("osc4.level")
+                        .polyModulated()
                         .in("Osc 4")
                         .activeUnless(o4Type, {"off"})
                         .help(
@@ -831,6 +958,7 @@ struct Marram : Instrument {
                             "modulate another oscillator.");
     Param o4Pan = percent("Osc 4 Pan", 0, -100, 100)
                       .withKey("osc4.pan")
+                      .polyModulated()
                       .in("Osc 4")
                       .activeUnless(o4Type, {"off"})
                       .help("Where it sits, left (-100 %) to right (+100 %).");
@@ -842,6 +970,8 @@ struct Marram : Instrument {
     Param o4Fine =
         cents("Osc 4 Fine", -100, 100, 0)
             .withKey("osc4.fine")
+            .polyModulated()
+            .routeRange(-4800, 4800)
             .in("Osc 4")
             .activeUnless(o4Type, {"off", "noise", "sub"})
             .help("Its pitch from the note, in cents: a few apart thicken two oscillators.");
@@ -853,6 +983,7 @@ struct Marram : Instrument {
     Param o4Width =
         percent("Osc 4 Width", 25, 1, 99)
             .withKey("osc4.width")
+            .polyModulated()
             .in("Osc 4")
             .activeWhen(o4Wave, {"pulse"})
             .help("The pulse's width: 50 % is a square, narrower is thinner and nasal.");
@@ -874,12 +1005,14 @@ struct Marram : Instrument {
                 "organ drawbars, a coarsening digital ramp, or a comb through the harmonics.");
     Param o4Position = percent("Osc 4 Position", 0)
                            .withKey("osc4.position")
+                           .polyModulated()
                            .in("Osc 4")
                            .activeWhen(o4Type, {"wavetable"})
                            .help("Where in the table it plays, start to end.");
     Param o4Ratio = continuous("Osc 4 Ratio", 0.25, 16, 1)
                         .curved(Curve::Log)
                         .withKey("osc4.ratio")
+                        .polyModulated()
                         .in("Osc 4")
                         .activeWhen(o4Type, {"fm"})
                         .help(
@@ -888,6 +1021,7 @@ struct Marram : Instrument {
     Param o4Feedback =
         percent("Osc 4 Feedback", 0)
             .withKey("osc4.feedback")
+            .polyModulated()
             .in("Osc 4")
             .activeWhen(o4Type, {"fm"})
             .help("The operator modulating itself: a sine turns toward a saw, then noise.");
@@ -904,6 +1038,7 @@ struct Marram : Instrument {
                          .help("How many octaves under the note the sub plays.");
     Param o4Fm = continuous("Osc 4 FM", 0, 10, 0)
                      .withKey("osc4.fm")
+                     .polyModulated()
                      .in("Osc 4")
                      .activeWhen(o4Type, {"analog", "wavetable", "fm"})
                      .help(
@@ -943,6 +1078,7 @@ struct Marram : Instrument {
                            "or a bank of vowel formants.");
     Param f1Cutoff = frequency("Filter 1 Cutoff", 20, 20000, 2000)
                          .withKey("filter1.cutoff")
+                         .polyModulated()
                          .in("Filter 1")
                          .activeWhen(f1Type, {"ladder", "svf", "comb"})
                          .help(
@@ -950,6 +1086,7 @@ struct Marram : Instrument {
                              "and velocity move it from here.");
     Param f1Resonance = percent("Filter 1 Resonance", 10)
                             .withKey("filter1.resonance")
+                            .polyModulated()
                             .in("Filter 1")
                             .activeWhen(f1Type, {"ladder", "svf"})
                             .help(
@@ -969,6 +1106,7 @@ struct Marram : Instrument {
                        .help("What the state-variable filter keeps.");
     Param f1Feedback = percent("Filter 1 Feedback", 50, -99, 99)
                            .withKey("filter1.feedback")
+                           .polyModulated()
                            .in("Filter 1")
                            .activeWhen(f1Type, {"comb"})
                            .help(
@@ -976,17 +1114,20 @@ struct Marram : Instrument {
                                "harmonics, an octave down and hollow.");
     Param f1Damping = percent("Filter 1 Damping", 20)
                           .withKey("filter1.damping")
+                          .polyModulated()
                           .in("Filter 1")
                           .activeWhen(f1Type, {"comb"})
                           .help("How much the comb darkens as it rings, like a plucked string.");
     Param f1Vowel =
         continuous("Filter 1 Vowel", 0, 4, 0)
             .withKey("filter1.vowel")
+            .polyModulated()
             .in("Filter 1")
             .activeWhen(f1Type, {"formant"})
             .help("The vowel, from a (0) through e, i and o to u (4), blending between.");
     Param f1Shift = semitones("Filter 1 Shift", -12, 12, 0)
                         .withKey("filter1.shift")
+                        .polyModulated()
                         .in("Filter 1")
                         .activeWhen(f1Type, {"formant"})
                         .help("Moves the formants up or down: a smaller or larger throat.");
@@ -1011,6 +1152,7 @@ struct Marram : Instrument {
             .help("How far the hardest notes open the cutoff, in octaves; softer ones less.");
     Param f1Drive = decibels("Filter 1 Drive", 0, 24, 0)
                         .withKey("filter1.drive")
+                        .polyModulated()
                         .in("Filter 1")
                         .activeUnless(f1Type, {"off"})
                         .help(
@@ -1025,6 +1167,7 @@ struct Marram : Instrument {
                            "or a bank of vowel formants.");
     Param f2Cutoff = frequency("Filter 2 Cutoff", 20, 20000, 1000)
                          .withKey("filter2.cutoff")
+                         .polyModulated()
                          .in("Filter 2")
                          .activeWhen(f2Type, {"ladder", "svf", "comb"})
                          .help(
@@ -1032,6 +1175,7 @@ struct Marram : Instrument {
                              "and velocity move it from here.");
     Param f2Resonance = percent("Filter 2 Resonance", 10)
                             .withKey("filter2.resonance")
+                            .polyModulated()
                             .in("Filter 2")
                             .activeWhen(f2Type, {"ladder", "svf"})
                             .help(
@@ -1051,6 +1195,7 @@ struct Marram : Instrument {
                        .help("What the state-variable filter keeps.");
     Param f2Feedback = percent("Filter 2 Feedback", 50, -99, 99)
                            .withKey("filter2.feedback")
+                           .polyModulated()
                            .in("Filter 2")
                            .activeWhen(f2Type, {"comb"})
                            .help(
@@ -1058,17 +1203,20 @@ struct Marram : Instrument {
                                "harmonics, an octave down and hollow.");
     Param f2Damping = percent("Filter 2 Damping", 20)
                           .withKey("filter2.damping")
+                          .polyModulated()
                           .in("Filter 2")
                           .activeWhen(f2Type, {"comb"})
                           .help("How much the comb darkens as it rings, like a plucked string.");
     Param f2Vowel =
         continuous("Filter 2 Vowel", 0, 4, 0)
             .withKey("filter2.vowel")
+            .polyModulated()
             .in("Filter 2")
             .activeWhen(f2Type, {"formant"})
             .help("The vowel, from a (0) through e, i and o to u (4), blending between.");
     Param f2Shift = semitones("Filter 2 Shift", -12, 12, 0)
                         .withKey("filter2.shift")
+                        .polyModulated()
                         .in("Filter 2")
                         .activeWhen(f2Type, {"formant"})
                         .help("Moves the formants up or down: a smaller or larger throat.");
@@ -1093,6 +1241,7 @@ struct Marram : Instrument {
             .help("How far the hardest notes open the cutoff, in octaves; softer ones less.");
     Param f2Drive = decibels("Filter 2 Drive", 0, 24, 0)
                         .withKey("filter2.drive")
+                        .polyModulated()
                         .in("Filter 2")
                         .activeUnless(f2Type, {"off"})
                         .help(
@@ -1118,26 +1267,31 @@ struct Marram : Instrument {
                               "the wave back on itself, hard clips.");
     Param driveAmount = decibels("Drive Amount", 0, 36, 6)
                             .withKey("drive.amount")
+                            .polyModulated()
                             .in("Drive")
                             .activeUnless(driveType, {"off"})
                             .help("Gain into the curve; the level out is held about even.");
     Param driveBias = percent("Drive Bias", 0, -100, 100)
                           .withKey("drive.bias")
+                          .polyModulated()
                           .in("Drive")
                           .activeUnless(driveType, {"off"})
                           .help("Leans the curve to one side, for even harmonics.");
     Param driveMix = percent("Drive Mix", 100)
                          .withKey("drive.mix")
+                         .polyModulated()
                          .in("Drive")
                          .activeUnless(driveType, {"off"})
                          .help("How much of the driven sound is heard against the clean.");
 
     Param ampAttack = milliseconds("Amp Attack", 0, 30000, 2)
                           .withKey("amp.attack")
+                          .polyModulated()
                           .in("Amp")
                           .help("How long a note takes to rise.");
     Param ampDecay = milliseconds("Amp Decay", 1, 30000, 600)
                          .withKey("amp.decay")
+                         .polyModulated()
                          .in("Amp")
                          .help("How long it then takes to fall to the sustain level.");
     Param ampSustain = percent("Amp Sustain", 80)
@@ -1146,6 +1300,7 @@ struct Marram : Instrument {
                            .help("The level held while the key is down.");
     Param ampRelease = milliseconds("Amp Release", 1, 30000, 250)
                            .withKey("amp.release")
+                           .polyModulated()
                            .in("Amp")
                            .help("How long the note takes to die away once the key is up.");
     Param ampVelocity =
@@ -1153,19 +1308,28 @@ struct Marram : Instrument {
             .withKey("amp.velocity")
             .in("Amp")
             .help("How much softer quiet notes play: at 100 % the softest is 40 dB down.");
+    Param ampLevel =
+        decibels("Amp Level", -48, 12, 0)
+            .withKey("amp.level")
+            .polyModulated()
+            .in("Amp")
+            .help("Each voice's level after the envelope; routes make a tremolo of it.");
     Param ampPan = percent("Pan", 0, -100, 100)
                        .withKey("amp.pan")
+                       .polyModulated()
                        .in("Amp")
                        .help("Where the whole sound sits, left to right.");
 
     Param envAttack = milliseconds("Env 2 Attack", 0, 30000, 1)
                           .withKey("env2.attack")
+                          .polyModulated()
                           .in("Env 2")
                           .help(
                               "The mod envelope's rise. It moves the cutoffs, the pitch and FM by "
                               "the amounts set for each.");
     Param envDecay = milliseconds("Env 2 Decay", 1, 30000, 400)
                          .withKey("env2.decay")
+                         .polyModulated()
                          .in("Env 2")
                          .help("Its fall to the sustain level.");
     Param envSustain = percent("Env 2 Sustain", 20)
@@ -1174,6 +1338,7 @@ struct Marram : Instrument {
                            .help("Its level while the key is down.");
     Param envRelease = milliseconds("Env 2 Release", 1, 30000, 300)
                            .withKey("env2.release")
+                           .polyModulated()
                            .in("Env 2")
                            .help("Its fall once the key is up.");
     Param envPitch = semitones("Env 2 Pitch", -48, 48, 0)
@@ -1188,6 +1353,189 @@ struct Marram : Instrument {
                       .help(
                           "How much of each oscillator's FM depth follows it: at 100 % the depth "
                           "rises and falls with the envelope, as an electric piano's bark does.");
+
+    Param env3Attack = milliseconds("Env 3 Attack", 0, 30000, 10)
+                           .withKey("env3.attack")
+                           .polyModulated()
+                           .in("Env 3")
+                           .help("A third envelope, for routes only: its rise.");
+    Param env3Decay = milliseconds("Env 3 Decay", 1, 30000, 800)
+                          .withKey("env3.decay")
+                          .polyModulated()
+                          .in("Env 3")
+                          .help("Its fall to the sustain level.");
+    Param env3Sustain = percent("Env 3 Sustain", 0)
+                            .withKey("env3.sustain")
+                            .in("Env 3")
+                            .help("Its level while the key is down.");
+    Param env3Release = milliseconds("Env 3 Release", 1, 30000, 300)
+                            .withKey("env3.release")
+                            .polyModulated()
+                            .in("Env 3")
+                            .help("Its fall once the key is up.");
+
+    Param l1Shape =
+        choice("LFO 1 Shape",
+               {"Sine", "Triangle", "Saw Up", "Saw Down", "Square", "Random", "Drift"}, 0)
+            .keys({"sine", "triangle", "saw_up", "saw_down", "square", "random", "drift"})
+            .withKey("lfo1.shape")
+            .in("LFO 1")
+            .help("Its wave: random holds a new value each cycle, drift glides between them.");
+    Param l1Sync = toggle("LFO 1 Sync", false)
+                       .withKey("lfo1.sync")
+                       .in("LFO 1")
+                       .help("Follow the song's tempo: a cycle per note value.");
+    Param l1Rate =
+        frequency("LFO 1 Rate", 0.01, 50, 2)
+            .withKey("lfo1.rate")
+            .polyModulated()
+            .in("LFO 1")
+            .activeUnless(l1Sync)
+            .help("Cycles a second. Routes move it for each note's LFO, not a free one's.");
+    Param l1Division = choice("LFO 1 Division",
+                              {"1/32", "1/16", "1/8T", "1/8", "1/8.", "1/4T", "1/4", "1/4.", "1/2",
+                               "1 Bar", "2 Bars", "4 Bars"},
+                              6)
+                           .keys({"n1_32", "n1_16", "n1_8t", "n1_8", "n1_8d", "n1_4t", "n1_4",
+                                  "n1_4d", "n1_2", "bar1", "bar2", "bar4"})
+                           .withKey("lfo1.division")
+                           .in("LFO 1")
+                           .activeWhen(l1Sync)
+                           .help("How long a cycle lasts, in notes of the song's tempo.");
+    Param l1Mode = choice("LFO 1 Mode", {"Note", "Free"}, 0)
+                       .withKey("lfo1.mode")
+                       .in("LFO 1")
+                       .help(
+                           "Note: each note's own, from its start. Free: one for every voice, "
+                           "running on (synced, it follows the song's position).");
+    Param l1Phase =
+        degrees("LFO 1 Phase", 0, 360, 0)
+            .withKey("lfo1.phase")
+            .in("LFO 1")
+            .help("Where in its cycle it starts (Note), or how far it is moved (Free).");
+    Param l1Delay = milliseconds("LFO 1 Delay", 0, 10000, 0)
+                        .withKey("lfo1.delay")
+                        .in("LFO 1")
+                        .help("How long it takes to fade in after a note starts: a late vibrato.");
+
+    Param l2Shape =
+        choice("LFO 2 Shape",
+               {"Sine", "Triangle", "Saw Up", "Saw Down", "Square", "Random", "Drift"}, 0)
+            .keys({"sine", "triangle", "saw_up", "saw_down", "square", "random", "drift"})
+            .withKey("lfo2.shape")
+            .in("LFO 2")
+            .help("Its wave: random holds a new value each cycle, drift glides between them.");
+    Param l2Sync = toggle("LFO 2 Sync", false)
+                       .withKey("lfo2.sync")
+                       .in("LFO 2")
+                       .help("Follow the song's tempo: a cycle per note value.");
+    Param l2Rate =
+        frequency("LFO 2 Rate", 0.01, 50, 2)
+            .withKey("lfo2.rate")
+            .polyModulated()
+            .in("LFO 2")
+            .activeUnless(l2Sync)
+            .help("Cycles a second. Routes move it for each note's LFO, not a free one's.");
+    Param l2Division = choice("LFO 2 Division",
+                              {"1/32", "1/16", "1/8T", "1/8", "1/8.", "1/4T", "1/4", "1/4.", "1/2",
+                               "1 Bar", "2 Bars", "4 Bars"},
+                              6)
+                           .keys({"n1_32", "n1_16", "n1_8t", "n1_8", "n1_8d", "n1_4t", "n1_4",
+                                  "n1_4d", "n1_2", "bar1", "bar2", "bar4"})
+                           .withKey("lfo2.division")
+                           .in("LFO 2")
+                           .activeWhen(l2Sync)
+                           .help("How long a cycle lasts, in notes of the song's tempo.");
+    Param l2Mode = choice("LFO 2 Mode", {"Note", "Free"}, 0)
+                       .withKey("lfo2.mode")
+                       .in("LFO 2")
+                       .help(
+                           "Note: each note's own, from its start. Free: one for every voice, "
+                           "running on (synced, it follows the song's position).");
+    Param l2Phase =
+        degrees("LFO 2 Phase", 0, 360, 0)
+            .withKey("lfo2.phase")
+            .in("LFO 2")
+            .help("Where in its cycle it starts (Note), or how far it is moved (Free).");
+    Param l2Delay = milliseconds("LFO 2 Delay", 0, 10000, 0)
+                        .withKey("lfo2.delay")
+                        .in("LFO 2")
+                        .help("How long it takes to fade in after a note starts: a late vibrato.");
+
+    Param l3Shape =
+        choice("LFO 3 Shape",
+               {"Sine", "Triangle", "Saw Up", "Saw Down", "Square", "Random", "Drift"}, 0)
+            .keys({"sine", "triangle", "saw_up", "saw_down", "square", "random", "drift"})
+            .withKey("lfo3.shape")
+            .in("LFO 3")
+            .help("Its wave: random holds a new value each cycle, drift glides between them.");
+    Param l3Sync = toggle("LFO 3 Sync", false)
+                       .withKey("lfo3.sync")
+                       .in("LFO 3")
+                       .help("Follow the song's tempo: a cycle per note value.");
+    Param l3Rate =
+        frequency("LFO 3 Rate", 0.01, 50, 2)
+            .withKey("lfo3.rate")
+            .polyModulated()
+            .in("LFO 3")
+            .activeUnless(l3Sync)
+            .help("Cycles a second. Routes move it for each note's LFO, not a free one's.");
+    Param l3Division = choice("LFO 3 Division",
+                              {"1/32", "1/16", "1/8T", "1/8", "1/8.", "1/4T", "1/4", "1/4.", "1/2",
+                               "1 Bar", "2 Bars", "4 Bars"},
+                              6)
+                           .keys({"n1_32", "n1_16", "n1_8t", "n1_8", "n1_8d", "n1_4t", "n1_4",
+                                  "n1_4d", "n1_2", "bar1", "bar2", "bar4"})
+                           .withKey("lfo3.division")
+                           .in("LFO 3")
+                           .activeWhen(l3Sync)
+                           .help("How long a cycle lasts, in notes of the song's tempo.");
+    Param l3Mode = choice("LFO 3 Mode", {"Note", "Free"}, 0)
+                       .withKey("lfo3.mode")
+                       .in("LFO 3")
+                       .help(
+                           "Note: each note's own, from its start. Free: one for every voice, "
+                           "running on (synced, it follows the song's position).");
+    Param l3Phase =
+        degrees("LFO 3 Phase", 0, 360, 0)
+            .withKey("lfo3.phase")
+            .in("LFO 3")
+            .help("Where in its cycle it starts (Note), or how far it is moved (Free).");
+    Param l3Delay = milliseconds("LFO 3 Delay", 0, 10000, 0)
+                        .withKey("lfo3.delay")
+                        .in("LFO 3")
+                        .help("How long it takes to fade in after a note starts: a late vibrato.");
+
+    Param m1 = percent("Macro 1", 0)
+                   .withKey("macro1")
+                   .in("Macros")
+                   .help("A knob for routes to follow (source macro1): one move, many changes.");
+    Param m2 = percent("Macro 2", 0)
+                   .withKey("macro2")
+                   .in("Macros")
+                   .help("A knob for routes to follow (source macro2): one move, many changes.");
+    Param m3 = percent("Macro 3", 0)
+                   .withKey("macro3")
+                   .in("Macros")
+                   .help("A knob for routes to follow (source macro3): one move, many changes.");
+    Param m4 = percent("Macro 4", 0)
+                   .withKey("macro4")
+                   .in("Macros")
+                   .help("A knob for routes to follow (source macro4): one move, many changes.");
+
+    // --- Sources: what the routes may name ------------------------------------------------
+
+    Source ampSource = voiceSource("Amp").unipolar().withKey("amp").help("The amp envelope.");
+    Source env2Source =
+        voiceSource("Env 2").unipolar().withKey("env2").help("The mod envelope, Env 2.");
+    Source env3Source = voiceSource("Env 3").unipolar().withKey("env3").help("Env 3.");
+    Source lfo1 = voiceSource("LFO 1").help("LFO 1, -1 to 1.");
+    Source lfo2 = voiceSource("LFO 2").help("LFO 2, -1 to 1.");
+    Source lfo3 = voiceSource("LFO 3").help("LFO 3, -1 to 1.");
+    Source macro1 = source("Macro 1").unipolar().help("The Macro 1 knob.");
+    Source macro2 = source("Macro 2").unipolar().help("The Macro 2 knob.");
+    Source macro3 = source("Macro 3").unipolar().help("The Macro 3 knob.");
+    Source macro4 = source("Macro 4").unipolar().help("The Macro 4 knob.");
 
     Param output =
         decibels("Output", -36, 12, 0)
@@ -1218,6 +1566,12 @@ struct Marram : Instrument {
     int notes = 0;
     int quiet = 0;
     bool tablesMade = false;
+    // The free LFOs, at the block's start, and the song as the block began.
+    Array<double, 3> freePhase;
+    Array<int, 3> freeCycle;
+    double tempo = 120.0;
+    double beats = 0.0;
+    bool playing = false;
 
     // The wavetables, and what makes them.
     Buffer<float> tables;
@@ -1254,6 +1608,8 @@ struct Marram : Instrument {
         restFade = exp(-1.0 / (0.003 * rate));
         notes = 0;
         quiet = 0;
+        freePhase.fill(0.0);
+        freeCycle.fill(0);
         if (!tablesMade) makeTables();
         tablesMade = true;
     }
@@ -1308,6 +1664,7 @@ struct Marram : Instrument {
                                          : VoiceMode::Legato);
         setGlide(glide);
         setBendRange(bendRange);
+        setVoiceLimit(polyphony.index());
     }
 
     void loadOsc(OscSet& c, int self, const Param& type, const Param& level, const Param& pan,
@@ -1319,6 +1676,7 @@ struct Marram : Instrument {
         c.gain = level.gain();
         c.pan = pan;
         c.tune = coarse.index() + fine / 100.0;
+        c.coarse = coarse.index();
         c.wave = wave.index();
         c.width = width;
         c.table = table.index();
@@ -1383,6 +1741,7 @@ struct Marram : Instrument {
             s.wrapped.fill(-1.0);
             s.amp.kill();
             s.mod.kill();
+            s.env3.kill();
             s.ampL = 0.0;
             s.ampR = 0.0;
             s.ampLStep = 0.0;
@@ -1401,6 +1760,13 @@ struct Marram : Instrument {
         if (retrigger || !s.sounding) {
             s.amp.gate();
             s.mod.gate();
+            s.env3.gate();
+            s.lfoPhase[0] = l1Phase / 360.0;
+            s.lfoPhase[1] = l2Phase / 360.0;
+            s.lfoPhase[2] = l3Phase / 360.0;
+            s.lfoCycle.fill(0);
+            s.lfoSeed = dice.below(1000000);
+            s.age = 0.0;
         }
         s.sounding = true;
         s.done = false;
@@ -1409,6 +1775,7 @@ struct Marram : Instrument {
     void releaseVoice(int v) {
         voice[v].amp.release();
         voice[v].mod.release();
+        voice[v].env3.release();
     }
 
     // Stolen or choked: it stops now, and what it was playing fades out over
@@ -1427,6 +1794,7 @@ struct Marram : Instrument {
         s.done = false;
         s.amp.kill();
         s.mod.kill();
+        s.env3.kill();
         s.ampL = 0.0;
         s.ampR = 0.0;
         s.ampLStep = 0.0;
@@ -1448,14 +1816,28 @@ struct Marram : Instrument {
         const bool snap = s.fresh;
         s.fresh = false;
 
+        // The envelopes, and then the sources the routes read: the
+        // envelopes and LFOs as they are now.
         const double ampEnv =
-            s.amp.advance(kTick, ms(ampAttack), ms(ampDecay), ampSustain, ms(ampRelease));
+            s.amp.advance(kTick, ms(ampAttack.forVoice(v)), ms(ampDecay.forVoice(v)), ampSustain,
+                          ms(ampRelease.forVoice(v)));
         const double modEnv =
-            s.mod.advance(kTick, ms(envAttack), ms(envDecay), envSustain, ms(envRelease));
+            s.mod.advance(kTick, ms(envAttack.forVoice(v)), ms(envDecay.forVoice(v)), envSustain,
+                          ms(envRelease.forVoice(v)));
+        const double thirdEnv =
+            s.env3.advance(kTick, ms(env3Attack.forVoice(v)), ms(env3Decay.forVoice(v)),
+                           env3Sustain, ms(env3Release.forVoice(v)));
         if (s.ending && s.amp.stage == 0 && !snap) {
             s.done = true;
             return;
         }
+        ampSource.set(v, ampEnv);
+        env2Source.set(v, modEnv);
+        env3Source.set(v, thirdEnv);
+        lfo1.set(v, lfo(s, v, 0, i, l1Shape, l1Sync, l1Rate, l1Division, l1Mode, l1Phase, l1Delay));
+        lfo2.set(v, lfo(s, v, 1, i, l2Shape, l2Sync, l2Rate, l2Division, l2Mode, l2Phase, l2Delay));
+        lfo3.set(v, lfo(s, v, 2, i, l3Shape, l3Sync, l3Rate, l3Division, l3Mode, l3Phase, l3Delay));
+        s.age += kTick;
 
         // Drift: a new random target about every 3 seconds, eased toward.
         s.driftAt += kTick / sampleRate() * 0.3;
@@ -1470,13 +1852,16 @@ struct Marram : Instrument {
         const double driftPitch = drift * 0.05 * lerp(s.pitchFrom, s.pitchTo, ease);  // semitones
         const double driftCut = drift * 0.043 * lerp(s.cutFrom, s.cutTo, ease);       // octaves
 
-        const double pitch = voicePitch(v, i) + driftPitch + envPitch * modEnv;
+        const double pitch =
+            voicePitch(v, i) + driftPitch + envPitch * modEnv + tune.forVoice(v) / 100.0;
         const double fmFollow = 1.0 - envFm + envFm * modEnv;
         bool centred = true;
+        OscNow m;
         for (int o = 0; o < 4; ++o) {
             const OscSet& c = osc[o];
             s.type[o] = c.type;
             if (c.type == kOff) continue;
+            oscAt(o, v, c, m);
             const bool stacked = c.type == kAnalog || c.type == kWavetable || c.type == kFm;
             const int n = stacked ? copies : 1;
             s.copies[o] = n;
@@ -1484,9 +1869,9 @@ struct Marram : Instrument {
             if (c.type == kSub)
                 hz = mtof(pitch + 12.0 * c.octave);
             else if (c.type == kFm)
-                hz = mtof(pitch + c.tune) * c.ratio;
+                hz = mtof(pitch + m.tune) * m.ratio;
             else
-                hz = mtof(pitch + c.tune);
+                hz = mtof(pitch + m.tune);
             s.mult[o] = 1.0;
             if (c.type == kWavetable) s.mult[o] = c.table == 3 ? 8.0 : c.table == 4 ? 2.0 : 1.0;
             for (int u = 0; u < n; ++u) {
@@ -1500,13 +1885,13 @@ struct Marram : Instrument {
                 } else {
                     s.incStep[x] = (target - s.inc[x]) / steps;
                 }
-                const double p = clamp(c.pan + (stacked ? spreadAt[u] : 0.0), -1.0, 1.0);
+                const double p = clamp(m.pan + (stacked ? spreadAt[u] : 0.0), -1.0, 1.0);
                 if (p != 0.0) centred = false;
                 const double a = (p + 1.0) * 0.25 * pi;
                 s.panL[x] = cos(a) * sqrt(2.0);
                 s.panR[x] = sin(a) * sqrt(2.0);
             }
-            const double g = c.gain * (stacked ? copyGain : 1.0);
+            const double g = m.gain * (stacked ? copyGain : 1.0);
             if (snap) {
                 s.gain[o] = g;
                 s.gainStep[o] = 0.0;
@@ -1515,24 +1900,33 @@ struct Marram : Instrument {
             }
             s.fm[o] = c.type == kNoise || c.type == kSub || osc[c.from].type == kOff
                           ? 0.0
-                          : c.fm * fmFollow / twoPi;
+                          : m.fm * fmFollow / twoPi;
             s.from[o] = c.from;
-            if (c.type == kWavetable) table(s, o, c, s.inc[o * 8]);
+            s.width[o] = m.width;
+            s.feedback[o] = m.feedback;
+            if (c.type == kWavetable) table(s, o, c.table, m.position, s.inc[o * 8]);
         }
 
         // Filters.
         const double keyOct = (pitch - 60.0) / 12.0;
+        FilterRead r;
         for (int f = 0; f < 2; ++f) {
             const FilterSet& c = filt[f];
             if (c.type == kOff) continue;
+            if (f == 0)
+                readFilter(v, c, r, f1Cutoff, f1Resonance, f1Feedback, f1Damping, f1Vowel, f1Shift,
+                           f1Drive);
+            else
+                readFilter(v, c, r, f2Cutoff, f2Resonance, f2Feedback, f2Damping, f2Vowel, f2Shift,
+                           f2Drive);
             FilterNow& n = s.now[f];
             const double octs =
                 c.keytrack * keyOct + c.env * modEnv + c.velocity * s.velocity + driftCut;
-            const double hz = clamp(c.cutoff * exp2(octs), 10.0, min(22000.0, 0.45 * rate));
+            const double hz = clamp(r.cutoff * exp2(octs), 10.0, min(22000.0, 0.45 * rate));
             const double g = tan(pi * hz / rate);
             const double k = c.type == kLadder
-                                 ? 4.0 * c.resonance
-                                 : max(0.005, 2.0 * (1.0 - c.resonance) * (1.0 - c.resonance));
+                                 ? 4.0 * r.resonance
+                                 : max(0.005, 2.0 * (1.0 - r.resonance) * (1.0 - r.resonance));
             const double delay = clamp(rate / max(hz, 25.0), 2.0, rate / 25.0);
             if (snap) {
                 n.g = g;
@@ -1546,10 +1940,15 @@ struct Marram : Instrument {
                 n.kStep = (k - n.k) / steps;
                 n.delayStep = (delay - n.delay) / steps;
             }
-            n.drive = c.drive;
-            n.feedback = c.feedback;
-            n.damping = c.damping;
-            if (c.type == kFormant) formants(n, c.vowel, c.shift + 12.0 * keyOct * c.keytrack);
+            n.drive = r.drive;
+            n.feedback = r.feedback;
+            n.damping = r.damping;
+            if (c.type == kFormant) formants(n, r.vowel, r.shift + 12.0 * keyOct * c.keytrack);
+        }
+        if (driveType.index() != 0) {
+            s.driveGain = dbToGain(driveAmount.forVoice(v));
+            s.driveBias = driveBias.forVoice(v);
+            s.driveMix = driveMix.forVoice(v);
         }
 
         // Stereo: a voice whose oscillators all sit in the centre filters one
@@ -1562,34 +1961,130 @@ struct Marram : Instrument {
         s.narrow = narrow;
         s.wasCentred = centred;
 
-        // Amp: the envelope, velocity, the note's own volume and pan.
+        // Amp: the envelope, velocity, its level, the note's own volume and pan.
         const double velDb = -(1.0 - s.velocity) * 40.0 * ampVelocity;
-        const double level = ampEnv * dbToGain(velDb) * voiceVolume(v) * kVoiceGain;
-        const double p = clamp(ampPan + (voicePan(v) - 0.5) * 2.0, -1.0, 1.0);
+        const double level =
+            ampEnv * dbToGain(velDb + ampLevel.forVoice(v)) * voiceVolume(v) * kVoiceGain;
+        const double p = clamp(ampPan.forVoice(v) + (voicePan(v) - 0.5) * 2.0, -1.0, 1.0);
         const double a = (p + 1.0) * 0.25 * pi;
         const double l = level * cos(a) * sqrt(2.0);
-        const double r = level * sin(a) * sqrt(2.0);
+        const double rr = level * sin(a) * sqrt(2.0);
         if (snap) {
             s.ampL = 0.0;
             s.ampR = 0.0;
         }
         s.ampLStep = (l - s.ampL) / steps;
-        s.ampRStep = (r - s.ampR) / steps;
+        s.ampRStep = (rr - s.ampR) / steps;
         s.ending = level == 0.0;
+    }
+
+    // LFO n's value for voice v at frame i of the block, faded in over its
+    // delay from the note's start. A note's own moves on by a tick.
+    double lfo(Voice& s, int v, int n, int i, const Param& shape, const Param& sync,
+               const Param& rate, const Param& division, const Param& mode, const Param& phase,
+               const Param& delay) {
+        const double fade = delay > 0.0 ? min(1.0, s.age / ms(delay)) : 1.0;
+        const double beatHz = tempo / 60.0 / divisionBeats(division.index());
+        double t = 0.0;
+        int cycle = 0;
+        int seed = n + 1;
+        if (mode.index() == 1) {
+            // Free: one for every voice, from where it was at the block's
+            // start, or synced to a playing song, from the song's position.
+            double total = 0.0;
+            if (sync.on() && playing) {
+                total =
+                    (beats + i * tempo / 60.0 / sampleRate()) / divisionBeats(division.index()) +
+                    phase / 360.0;
+            } else {
+                total = freePhase[n] + (sync.on() ? beatHz : rate.value()) * i / sampleRate() +
+                        phase / 360.0;
+                cycle = freeCycle[n];
+            }
+            const double whole = floor(total);
+            t = total - whole;
+            cycle += toInt(whole);
+        } else {
+            t = s.lfoPhase[n];
+            cycle = s.lfoCycle[n];
+            seed = s.lfoSeed + n * 7919;
+            const double hz = sync.on() ? beatHz : rate.forVoice(v);
+            const double next = t + hz * kTick / sampleRate();
+            const double whole = floor(next);
+            s.lfoPhase[n] = next - whole;
+            s.lfoCycle[n] = cycle + toInt(whole);
+        }
+        return lfoWave(shape.index(), t, cycle, seed) * fade;
+    }
+
+    // A free LFO's phase, a block on.
+    void freeOn(int n, int frames, const Param& sync, const Param& rate, const Param& division) {
+        const double hz = sync.on() ? tempo / 60.0 / divisionBeats(division.index()) : rate.value();
+        const double total = freePhase[n] + hz * frames / sampleRate();
+        const double whole = floor(total);
+        freePhase[n] = total - whole;
+        freeCycle[n] += toInt(whole);
+    }
+
+    // An oscillator's settings for voice v, with their routes: only those
+    // its type uses.
+    void oscAt(int o, int v, const OscSet& c, OscNow& m) {
+        if (o == 0)
+            readOsc(v, c, m, o1Level, o1Pan, o1Fine, o1Width, o1Position, o1Ratio, o1Feedback,
+                    o1Fm);
+        else if (o == 1)
+            readOsc(v, c, m, o2Level, o2Pan, o2Fine, o2Width, o2Position, o2Ratio, o2Feedback,
+                    o2Fm);
+        else if (o == 2)
+            readOsc(v, c, m, o3Level, o3Pan, o3Fine, o3Width, o3Position, o3Ratio, o3Feedback,
+                    o3Fm);
+        else
+            readOsc(v, c, m, o4Level, o4Pan, o4Fine, o4Width, o4Position, o4Ratio, o4Feedback,
+                    o4Fm);
+    }
+    void readOsc(int v, const OscSet& c, OscNow& m, const Param& level, const Param& pan,
+                 const Param& fine, const Param& width, const Param& position, const Param& ratio,
+                 const Param& feedback, const Param& fm) {
+        const double db = level.forVoice(v);
+        m.gain = db <= -60.0 ? 0.0 : dbToGain(db);
+        m.pan = pan.forVoice(v);
+        const bool pitched = c.type == kAnalog || c.type == kWavetable || c.type == kFm;
+        m.tune = pitched ? c.coarse + fine.forVoice(v) / 100.0 : 0.0;
+        m.width =
+            (c.type == kAnalog || c.type == kSub) && c.wave == 2 ? width.forVoice(v) : c.width;
+        m.position = c.type == kWavetable ? position.forVoice(v) : c.position;
+        m.ratio = c.type == kFm ? ratio.forVoice(v) : c.ratio;
+        m.feedback = c.type == kFm ? feedback.forVoice(v) : c.feedback;
+        m.fm = pitched ? fm.forVoice(v) : 0.0;
+    }
+
+    // A filter's settings for voice v, with their routes: only those its
+    // type uses.
+    void readFilter(int v, const FilterSet& c, FilterRead& r, const Param& cutoff,
+                    const Param& resonance, const Param& feedback, const Param& damping,
+                    const Param& vowel, const Param& shift, const Param& drive) {
+        const bool tuned = c.type == kLadder || c.type == kSvf;
+        r.cutoff = c.type == kFormant ? c.cutoff : cutoff.forVoice(v);
+        r.resonance = tuned ? resonance.forVoice(v) : c.resonance;
+        r.feedback = c.type == kComb ? feedback.forVoice(v) : c.feedback;
+        r.damping = c.type == kComb ? damping.forVoice(v) : c.damping;
+        r.vowel = c.type == kFormant ? vowel.forVoice(v) : c.vowel;
+        r.shift = c.type == kFormant ? shift.forVoice(v) : c.shift;
+        r.drive = dbToGain(drive.forVoice(v));
     }
 
     // A wavetable oscillator's band level (the most harmonics that stay
     // under the limit at this pitch) and its two frames either side of the
     // position.
-    void table(Voice& s, int o, const OscSet& c, double inc) {
+    void table(Voice& s, int o, int which, double position, double inc) {
         const double x = kTop * inc / limit;
         int level = x <= 1.0 ? 0 : ceilToInt(log2(x));
         level = clamp(level, 0, kLevels - 1);
-        const double at = clamp(c.position, 0.0, 1.0) * (kFrames - 1);
+        const double at = clamp(position, 0.0, 1.0) * (kFrames - 1);
         const int f0 = min(floorToInt(at), kFrames - 2);
         s.blend[o] = at - f0;
         s.size[o] = levelSize[level];
-        s.base0[o] = (c.table * kFrames + f0) * kPerFrame + levelAt[level];
+        s.base0[o] = (which * kFrames + f0) * kPerFrame + levelAt[level];
         s.base1[o] = s.base0[o] + kPerFrame;
     }
 
@@ -1649,9 +2144,6 @@ struct Marram : Instrument {
     void play(int v, int frames) {
         Voice& s = voice[v];
         const int dtype = driveType.index();
-        const double dgain = dbToGain(driveAmount);
-        const double dbias = driveBias;
-        const double dmix = driveMix;
         for (int i = 0; i < frames; ++i) {
             if (s.tickLeft == 0) {
                 control(v, i);
@@ -1709,12 +2201,13 @@ struct Marram : Instrument {
                             depth == 0.0 ? 0.0 : depth * s.out[src + min(u, srcCopies - 1)];
                         double y = 0.0;
                         if (type == kAnalog || type == kSub) {
-                            y = analogWave(c.wave, pm == 0.0 ? ph : wrap01(ph + pm), dt, c.width);
+                            y = analogWave(c.wave, pm == 0.0 ? ph : wrap01(ph + pm), dt,
+                                           s.width[o]);
                         } else if (type == kWavetable) {
                             const double tp = pm == 0.0 ? ph : wrap01(ph + pm / s.mult[o]);
                             y = wave(s, o, tp);
                         } else if (type == kFm) {
-                            const double self = c.feedback * 0.5 * pi * (s.fb1[x] + s.fb2[x]);
+                            const double self = s.feedback[o] * 0.5 * pi * (s.fb1[x] + s.fb2[x]);
                             y = sin(twoPi * (ph + pm) + self);
                             s.fb2[x] = s.fb1[x];
                             s.fb1[x] = y;
@@ -1760,8 +2253,8 @@ struct Marram : Instrument {
                     n.delay += n.delayStep;
                 }
                 if (dtype != 0) {
-                    yL = shape(yL, dtype, dgain, dbias, dmix);
-                    yR = s.narrow ? yL : shape(yR, dtype, dgain, dbias, dmix);
+                    yL = shape(yL, dtype, s.driveGain, s.driveBias, s.driveMix);
+                    yR = s.narrow ? yL : shape(yR, dtype, s.driveGain, s.driveBias, s.driveMix);
                 }
                 s.ampL += s.ampLStep;
                 s.ampR += s.ampRStep;
@@ -1791,6 +2284,13 @@ struct Marram : Instrument {
     }
 
     void process(Block& io) {
+        tempo = io.transport.tempo;
+        beats = io.transport.beats;
+        playing = io.transport.playing;
+        macro1.set(m1);
+        macro2.set(m2);
+        macro3.set(m3);
+        macro4.set(m4);
         const int n = io.frames * factor;
         for (int k = 0; k < n; ++k) {
             mixL[k] = 0.0;
@@ -1850,6 +2350,9 @@ struct Marram : Instrument {
                 io[1][i] = safety(r * g);
             }
         }
+        freeOn(0, io.frames, l1Sync, l1Rate, l1Division);
+        freeOn(1, io.frames, l2Sync, l2Rate, l2Division);
+        freeOn(2, io.frames, l3Sync, l3Rate, l3Division);
     }
 
     // Untouched below -1 dBFS, then bent smoothly toward full scale.
@@ -2132,7 +2635,11 @@ struct Marram : Instrument {
             .set(ampAttack, 600)
             .set(ampDecay, 1200)
             .set(ampSustain, 80)
-            .set(ampRelease, 1500);
+            .set(ampRelease, 1500)
+            .set(l1Rate, 0.12)
+            .set(l1Mode, "free")
+            .route("lfo1>filter1.cutoff", 0.6)
+            .route("modwheel>filter1.cutoff", 1.5);
         p.add("Pluck Bass")
             .set(o1Retrigger, true)
             .set(o2Type, "sub")
@@ -2182,7 +2689,8 @@ struct Marram : Instrument {
             .set(ampAttack, 5)
             .set(ampDecay, 500)
             .set(ampSustain, 85)
-            .set(ampRelease, 400);
+            .set(ampRelease, 400)
+            .route("modwheel>filter1.cutoff", 2);
         p.add("Sub Bass")
             .set(o1Wave, "sine")
             .set(o1Level, -10)
@@ -2217,7 +2725,11 @@ struct Marram : Instrument {
             .set(ampDecay, 4500)
             .set(ampSustain, 0)
             .set(ampRelease, 450)
-            .set(ampVelocity, 70);
+            .set(ampVelocity, 70)
+            .set(l1Rate, 3.5)
+            .set(l1Mode, "free")
+            .route("velocity>osc1.fm", 1.5)
+            .route("lfo1>amp.pan", 35, "modwheel");
         p.add("Glass Bell")
             .set(o1Type, "fm")
             .set(o1Level, -7)
@@ -2251,7 +2763,11 @@ struct Marram : Instrument {
             .set(ampDecay, 400)
             .set(ampSustain, 85)
             .set(ampRelease, 250)
-            .set(o1Level, -2);
+            .set(o1Level, -2)
+            .set(l1Rate, 5.5)
+            .set(l1Delay, 350)
+            .route("lfo1>voice.tune", 25)
+            .route("modwheel>filter1.vowel", 2);
         p.add("Strings")
             .set(unison, 5)
             .set(detune, 18)
@@ -2270,7 +2786,11 @@ struct Marram : Instrument {
             .set(ampDecay, 1)
             .set(ampSustain, 100)
             .set(ampRelease, 900)
-            .set(o1Level, -9);
+            .set(o1Level, -9)
+            .set(l1Rate, 5.2)
+            .set(l1Delay, 600)
+            .route("lfo1>voice.tune", 10)
+            .route("modwheel>filter1.cutoff", 1);
         p.add("Noise Snare")
             .set(o1Type, "noise")
             .set(o1Level, 0)
@@ -2310,6 +2830,101 @@ struct Marram : Instrument {
             .set(ampDecay, 1)
             .set(ampSustain, 100)
             .set(ampRelease, 60)
-            .set(ampVelocity, 0);
+            .set(ampVelocity, 0)
+            .set(l1Rate, 6.5)
+            .set(l1Mode, "free")
+            .route("lfo1>amp.pan", 25)
+            .route("lfo1>voice.tune", 4);
+        p.add("Wobble Bass")
+            .set(mode, "legato")
+            .set(glide, 30)
+            .set(o1Retrigger, true)
+            .set(o2Type, "sub")
+            .set(o2Wave, "sine")
+            .set(o2Level, -1)
+            .set(o1Level, -3)
+            .set(f1Cutoff, 180)
+            .set(f1Resonance, 45)
+            .set(f1Env, 0)
+            .set(driveType, "soft")
+            .set(driveAmount, 8)
+            .set(ampDecay, 1)
+            .set(ampSustain, 100)
+            .set(ampRelease, 80)
+            .set(l1Sync, true)
+            .set(l1Division, "n1_8")
+            .set(l1Mode, "free")
+            .set(l1Shape, "triangle")
+            .set(l1Phase, 270)
+            .route("lfo1>filter1.cutoff", 2.5)
+            .route("modwheel>lfo1.rate", 4);
+        p.add("Sync Lead")
+            .set(o1Level, -60)
+            .set(o2Type, "analog")
+            .set(o2Sync, true)
+            .set(o2Coarse, 7)
+            .set(o2Level, -4)
+            .set(f1Cutoff, 5000)
+            .set(f1Resonance, 15)
+            .set(f1Env, 0)
+            .set(env3Attack, 0)
+            .set(env3Decay, 700)
+            .set(env3Sustain, 25)
+            .set(env3Release, 300)
+            .set(l1Rate, 5.5)
+            .set(l1Delay, 250)
+            .set(ampAttack, 3)
+            .set(ampDecay, 400)
+            .set(ampSustain, 85)
+            .set(ampRelease, 220)
+            .route("env3>osc2.fine", 2400)
+            .route("lfo1>voice.tune", 30, "modwheel");
+        p.add("Pulse Pad")
+            .set(o1Wave, "pulse")
+            .set(o1Width, 50)
+            .set(o1Level, -9)
+            .set(o2Type, "analog")
+            .set(o2Wave, "pulse")
+            .set(o2Width, 50)
+            .set(o2Fine, 6)
+            .set(o2Level, -9)
+            .set(f1Cutoff, 2400)
+            .set(f1Resonance, 15)
+            .set(f1Env, 0.5)
+            .set(envAttack, 1200)
+            .set(envDecay, 2000)
+            .set(envSustain, 50)
+            .set(ampAttack, 450)
+            .set(ampDecay, 1000)
+            .set(ampSustain, 85)
+            .set(ampRelease, 1400)
+            .set(l1Rate, 0.4)
+            .set(l2Rate, 0.53)
+            .set(l2Phase, 90)
+            .route("lfo1>osc1.width", 38)
+            .route("lfo2>osc2.width", 38)
+            .route("velocity>filter1.cutoff", 1);
+        p.add("Table Sweep")
+            .set(o1Type, "wavetable")
+            .set(o1Table, "spectral_comb")
+            .set(o1Level, -3)
+            .set(unison, 3)
+            .set(detune, 10)
+            .set(spread, 70)
+            .set(f1Cutoff, 6000)
+            .set(f1Env, 0)
+            .set(env3Attack, 2500)
+            .set(env3Decay, 3000)
+            .set(env3Sustain, 40)
+            .set(env3Release, 1500)
+            .set(l1Rate, 0.25)
+            .set(l1Shape, "drift")
+            .set(ampAttack, 200)
+            .set(ampDecay, 1000)
+            .set(ampSustain, 85)
+            .set(ampRelease, 1500)
+            .route("env3>osc1.position", 80)
+            .route("lfo1>osc1.position", 15)
+            .route("macro1>filter1.cutoff", -3);
     }
 };

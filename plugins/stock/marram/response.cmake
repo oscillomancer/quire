@@ -1,7 +1,9 @@
 # Marram, measured through the built plugin (dsp.test's A4 note and silence):
 # every pitched oscillator type, a unison stack and every quality play the
-# note in tune (a sub an octave down), and nothing is wrong with the sound
-# or with the silence after it (no clipping, DC, sound that never ends).
+# note in tune (a sub an octave down), routes from a global source (a macro)
+# and a voice's own (velocity) move it as far as their amounts say, and
+# nothing is wrong with the sound or with the silence after it (no clipping,
+# DC, sound that never ends).
 # Required: SANDBOX (quire-sandbox), PLUGIN (Marram.clap), WORK.
 foreach(var SANDBOX PLUGIN WORK)
     if(NOT DEFINED ${var} OR "${${var}}" STREQUAL "")
@@ -13,13 +15,17 @@ file(REMOVE_RECURSE "${WORK}")
 set(home "${WORK}/home")
 file(MAKE_DIRECTORY "${home}")
 
-# The note's pitch with these settings, which must be within 5 cents of
-# `hz` (CMake's math has no decimals: 0.3 % is 5 cents).
+# The note's pitch with these settings (and routes, when given), which must
+# be within 5 cents of `hz` (CMake's math has no decimals: 0.3 % is 5 cents).
 function(expect params hz)
+    set(routes "")
+    if(ARGC GREATER 2)
+        set(routes ",\"routes\":${ARGV2}")
+    endif()
     execute_process(
         COMMAND ${CMAKE_COMMAND} -E env "HOME=${home}" "USERPROFILE=${home}" "APPDATA=${home}/config"
                 "LOCALAPPDATA=${home}/local" "XDG_DATA_HOME=${home}/data" "${SANDBOX}" exec
-                "{\"command\":\"dsp.test\",\"args\":{\"plugin\":\"${PLUGIN}\",\"seconds\":2,\"signals\":[\"note\",\"silence\"],\"patch\":{\"params\":${params}}}}"
+                "{\"command\":\"dsp.test\",\"args\":{\"plugin\":\"${PLUGIN}\",\"seconds\":2,\"signals\":[\"note\",\"silence\"],\"patch\":{\"params\":${params}${routes}}}}"
                 --workdir "${WORK}/workdir"
         RESULT_VARIABLE result OUTPUT_VARIABLE json ERROR_VARIABLE err)
     if(NOT result EQUAL 0)
@@ -49,3 +55,6 @@ expect("{\"osc1.type\":\"sub\",\"osc1.wave\":\"sine\",\"filter1.type\":\"off\"}"
 expect("{\"voice.unison\":3,\"voice.unison_detune\":10}" 440)
 expect("{\"voice.quality\":\"eco\"}" 440)
 expect("{\"voice.quality\":\"high\",\"drive.type\":\"fold\",\"drive.amount\":12}" 440)
+# A semitone up by Macro 1 at full; 80 cents up by dsp.test's velocity, 0.8.
+expect("{\"macro1\":100}" 466 "{\"macro1>voice.tune\":{\"amount\":\"1 st\"}}")
+expect("{}" 460 "{\"velocity>voice.tune\":{\"amount\":100}}")

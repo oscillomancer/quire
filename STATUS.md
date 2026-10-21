@@ -307,15 +307,18 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   the circle of fifths, and a health list. It replaced Gauge
   (`com.suppleaudio.analyzer`).
   Marram, the synthesizer (`plugins/stock/marram`, `docs/specs/marram.md`),
-  is being built to replace Orrery; its voice is done: four oscillators
-  (analog with sync, wavetables from Orrery's recipes, FM operators, noise,
-  sub; FM between any two), unison up to 8 copies, two filters (ladder,
-  state-variable, comb, formant; serial or parallel), drive, amp and mod
-  envelopes with fixed amounts (cutoff, pitch, FM depth), velocity and key
-  tracking, drift, glide and Poly/Mono/Legato, oversampled 1x/2x/4x, and
-  eleven factory sounds. Its parameters say when they apply, so an agent
-  sees only the oscillators and filters a patch uses. It passes the stock
-  checks and the REAPER check.
+  is being built to replace Orrery; its voice and modulation are done: four
+  oscillators (analog with sync, wavetables from Orrery's recipes, FM
+  operators, noise, sub; FM between any two), unison up to 8 copies, two
+  filters (ladder, state-variable, comb, formant; serial or parallel),
+  drive, amp and mod envelopes with fixed amounts (cutoff, pitch, FM depth),
+  velocity and key tracking, drift, glide, Poly/Mono/Legato with a
+  polyphony limit, oversampled 1x/2x/4x; modulation routes from a third
+  envelope, three LFOs (per note or free, synced or not, seven shapes),
+  four macros and the MIDI sources to some sixty per-voice destinations;
+  and fifteen factory sounds. Its parameters say when they apply, so an
+  agent sees only the oscillators and filters a patch uses. It passes the
+  stock checks and the REAPER check.
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The
@@ -554,8 +557,6 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
 - Track groups, stretch markers, MIDI outputs, a background media cache.
 - Lua ergonomics (a script library path, hot reload).
 - Orrery's structural performance pass.
-- Marram's modulation (LFOs, more envelopes, macros, MIDI controllers and
-  a route table in the framework), its editor (the automatic one for
-  now), its agent guide and evaluation tasks; then Orrery goes. Its
-  polyphony is fixed at 16 voices.
+- Marram's editor (the automatic one for now, which cannot show routes),
+  its agent guide and evaluation tasks; then Orrery goes.
 - Hardening and ports beyond Linux.
