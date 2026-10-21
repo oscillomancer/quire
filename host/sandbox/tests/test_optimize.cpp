@@ -345,6 +345,13 @@ TEST_CASE("plugin.describe reports parameter activity from the current patch") {
     CHECK(refused.error().code == "optimize.not_tunable");
 }
 
+TEST_CASE("auto search leaves out placement and the output level, whatever its key") {
+    for (const char* k : {"output", "output.level", "voice.glide", "amp.pan", "amp.velocity"})
+        CHECK(detail::autoExcluded(k));
+    for (const char* k : {"filter1.cutoff", "amp.level", "osc1.level", "env2.decay"})
+        CHECK_FALSE(detail::autoExcluded(k));
+}
+
 TEST_CASE("auto search windows follow the parameter's shape") {
     params::ParamSpec cutoff;  // 20 Hz .. 20 kHz, log
     cutoff.unit = params::Unit::Hz;

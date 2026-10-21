@@ -179,7 +179,8 @@ evaluations. A profile-only test hits `spectral.centroid_hz.median`
   run inside a batch (a job cannot be rolled back); call it on its own.
 - `"auto"` selects continuous, modulatable parameters marked active in the
   schema, excluding performance/placement parameters: `voice.*`, `*.pan`,
-  `*_curve`, `*.delay`, `*.hold`, `*.velocity`, `*.fade`, `output.level`.
+  `*_curve`, `*.delay`, `*.hold`, `*.velocity`, `*.fade`, and the output
+  level (`output` or `output.level`).
 - Evaluation is single-threaded on one worker thread that owns a clone of the
   instance (cloned through its state). The best candidate's render is written
   by the worker under a render id reserved at start and joins the session's
