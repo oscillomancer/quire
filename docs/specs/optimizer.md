@@ -157,13 +157,13 @@ the reason).
 
 ## 6. Tests
 
-A synthetic end-to-end test with the probe synth: render a hidden target
-patch (cutoff 2.4 kHz, resonance 40 %, decay 180 ms), start from defaults,
-optimize those three params with the reference target, and require the
+A synthetic end-to-end test with `orrery-headless.clap` (a saw through an
+SVF with an envelope on its cutoff): render a hidden target patch (cutoff
+2.4 kHz, resonance 60 %, decay 180 ms), go back to the defaults, optimize
+those three params against the render with a fixed seed, and require the
 result within 10 % of each hidden value (normalized domain) within 300
-evaluations — deterministic under a fixed seed, and identical on 1 and 8
-threads. A profile-only test (hit `spectral.centroid_hz.median` 1500 ± 50 and
-`envelope.attack_ms` 5 ± 2).
+evaluations. A profile-only test hits `spectral.centroid_hz.median`
+1500 ± 50 with the cutoff alone.
 
 ## Amendments (2026-09-26, implementation)
 

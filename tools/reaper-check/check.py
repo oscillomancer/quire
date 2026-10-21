@@ -34,7 +34,6 @@ class Case:
     second: float
     expectation: str = "quieter"
     passthrough: bool = False
-    display: str | None = None
 
 
 def normalized(db, low, high):
@@ -43,9 +42,6 @@ def normalized(db, low, high):
 
 # Continuous CLAP values are normalized curve positions (ADR-0010).
 CASES = {
-    "com.suppleaudio.probe-synth": Case("ProbeSynth", True, "Output Gain",
-                                      normalized(-12, -60, 12), normalized(-24, -60, 12),
-                                      "gain", display="Probe Synth"),
     "com.suppleaudio.orrery": Case("Orrery", True, "Output Level",
                                  normalized(0, -60, 12), normalized(-12, -60, 12), "gain"),
     "com.suppleaudio.yarrow": Case("Yarrow", False, "Output", .5, .25, "gain", True),
@@ -253,7 +249,7 @@ def setup_script(case, plugin_id, folder, cfg, media):
     """REAPER writes the plugin chunk, opaque state and envelope addressing."""
     prefix = f"""local folder = {lua_string(folder)} .. '/'
 local expected_resource = {lua_string(cfg)}
-local fx_name = {lua_string(case.display or case.artifact)}
+local fx_name = {lua_string(case.artifact)}
 local parameter_name = {lua_string(case.parameter)}
 local first, second = {case.first:.17g}, {case.second:.17g}
 local log = assert(io.open(folder .. 'metadata.tsv', 'w'))

@@ -151,8 +151,8 @@ Registered by the library, `Kind::Edit`, `McpTool`.
 {
   "label": "Bass patch: darker, shorter release",
   "steps": [
-    { "command": "plugin.load", "args": { "plugin": "com.suppleaudio.probe-synth" }, "as": "synth" },
-    { "command": "patch.merge", "args": { "instance": "${synth.instance}", "patch": { "params": { "filter.cutoff": "800 Hz" } } } },
+    { "command": "plugin.load", "args": { "plugin": "com.suppleaudio.orrery" }, "as": "synth" },
+    { "command": "patch.merge", "args": { "instance": "${synth.instance}", "patch": { "params": { "filter1.cutoff": "800 Hz" } } } },
     { "command": "render", "args": { "notation": "1: C2:q r:q C2:q r:q", "analyze": "summary" }, "as": "r1" }
   ]
 }

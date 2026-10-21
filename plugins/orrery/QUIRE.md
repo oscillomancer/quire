@@ -1,10 +1,28 @@
 # Quire integration notes (Orrery)
 
-Orrery is built from the Supple Audio plugin template (via the Probe Synth
-copy, which already carries the monorepo integration). The template
+Orrery is built from the Supple Audio plugin template. The template
 infrastructure — window, renderer, widgets, host contract, probes, wrapper
 patches and fonts — is kept byte-identical apart from product naming, except
 where listed below. `tools/ci/format.sh` leaves those files alone.
+
+## Monorepo integration
+
+- The build is C++20 and uses the vendored CLAP SDK, clap-wrapper, Pugl and
+  NanoVG with downloads disabled. It checks that the vendored wrapper
+  already carries the template's three VST3 patches instead of applying
+  them.
+- `plugins/CMakeLists.txt` builds it as an isolated ExternalProject
+  (`supple_add_plugin`) and stages `Orrery.clap` under the monorepo
+  build's `plugins/clap/`. CLAP is built by default; VST3 needs
+  `SUPPLE_PLUGIN_VST3=ON` (`ORRERY_VST3` inside the plugin build).
+- `supple_plugin_add_monorepo_libraries()`
+  (`plugins/common/cmake/LinkMonorepo.cmake`) builds the monorepo's core
+  libraries and `plugin-support` inside that isolated build, so the plugin
+  links `supple::plugin-support` and the core targets with the monorepo's
+  definitions. The parent passes `SUPPLE_ROOT` and `SUPPLE_SANITIZE`.
+- `tools/ci/format.sh` checks only the product-owned files; the unchanged
+  template infrastructure keeps its bytes. The license checker treats the
+  local ExternalProject as first-party code, not a download.
 
 ## Product-specific
 

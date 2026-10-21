@@ -49,12 +49,12 @@ Like Orrery (`plugins/orrery`):
     GUI and tests use (e.g. the EQ's magnitude response);
   - `describe()` — the compact prose (§1.6);
   - `tests/` — the monorepo tests of §1.7.
-- `plugins/<id>/` — a copy of the template made exactly as
-  `plugins/probe-synth` was (read its `QUIRE.md`: identity renames, vendored
-  dependency paths, `supple_plugin_add_monorepo_libraries()`, format-gate and
-  license-check handling, `supple_add_plugin(<id> <PREFIX>)` in
-  `plugins/CMakeLists.txt`). The template is an effect already: keep its
-  audio-port and process structure. Its `*_clap.cpp` product sections forward
+- `plugins/<id>/` — a copy of the template made as `plugins/orrery` is
+  (read its `QUIRE.md`: identity renames, vendored dependency paths,
+  `supple_plugin_add_monorepo_libraries()`, format-gate and license-check
+  handling, `supple_add_plugin(<id> <PREFIX>)` in `plugins/CMakeLists.txt`).
+  The template is an effect already: keep its audio-port and process
+  structure. Its `*_clap.cpp` product sections forward
   to `supple::clapx::ParamStore` / `ClapParams` / `FlatSemantic`
   (`plugins/common`) and to the engine; `QUIRE.md` lists every deviation.
   The shared template infrastructure stays byte-identical apart from names.
@@ -71,10 +71,9 @@ example), with their tests.
   bands); groups follow the spec's grouping. Units are canonical (`Hz`, `dB`, `ms`, `percent`,
   `ratio`); curves per ADR-0010 (log for frequencies and times). Every float
   gets a `smoothingMs` (20 unless stated) and tags from the role vocabulary.
-- Read-only meters are `kReadonly` output parameters (as ProbeSynth's
-  `output.level`), updated from the audio thread through the `ParamStore`
-  and reported to the host with `CLAP_EVENT_PARAM_VALUE` output events at most
-  every 50 ms.
+- Read-only meters are `kReadonly` output parameters, updated from the
+  audio thread through the `ParamStore` and reported to the host with
+  `CLAP_EVENT_PARAM_VALUE` output events at most every 50 ms.
 - Patch and state: `FlatSemantic` (framed canonical JSON, transactional
   load); the extension's `describe` returns §1.6's prose.
 - The table passes `params::validateTable` in a test; ids are dense from 0 in
@@ -148,8 +147,7 @@ In the engine library (monorepo, all presets):
   output;
 - the per-plugin behaviour tests below, each with a measured tolerance.
 
-In the plugin copy (as ProbeSynth): `host_smoke`, `semantic_rt`,
-`editor_input`, the template's host contract, and the clap-validator run
+In the plugin copy (as Orrery): `host_smoke`, `editor_input`, the template's host contract, and the clap-validator run
 (`plugin.<id>.validator`, label `slow`).
 
 ### 1.8 Skill and docs

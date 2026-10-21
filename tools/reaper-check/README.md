@@ -116,7 +116,6 @@ include startup ramps.
 
 | CLAP id suffix | Artifact / host name | Automated parameter | Points at 0 / 2 seconds | Expectation |
 |---|---|---|---|---|
-| `probe-synth` | ProbeSynth / Probe Synth | Output Gain | −12 / −24 dB | −12 ±1 dB |
 | `orrery` | Orrery | Output Level | 0 / −12 dB | −12 ±1 dB |
 | `yarrow` | Yarrow | Output | 0 / −12 dB | −12 ±1 dB |
 | `sundew` | Sundew | Threshold | 0 / −36 dB | second half >3 dB quieter |
@@ -131,7 +130,7 @@ include startup ramps.
 
 Continuous values use ADR-0010's normalized CLAP domain. The table keeps those
 values explicit. Add a plugin in a few lines in `CASES`
-(id, artifact/display name, instrument/effect, parameter, endpoints and
+(id, artifact name, instrument/effect, parameter, endpoints and
 expectation). No plugin C++ or REAPER installation changes are required.
 
 Automation is a square step at 2 seconds, with a terminal point at 4 seconds.

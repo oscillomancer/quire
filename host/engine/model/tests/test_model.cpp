@@ -54,9 +54,9 @@ Session richSession() {
     item.fadeIn = {0.01, FadeShape::Cos, 0};
     t.create(item);
     FxInstance synth;
-    synth.plugin = {"clap", "com.suppleaudio.probe-synth", "Probe Synth", "Supple Audio", "0.1.0"};
+    synth.plugin = {"clap", "org.example.synth", "Example Synth", "Example", "0.1.0"};
     synth.patch =
-        json::parse(R"({"schema": "supple.probe-synth-patch/1.0", "params": {"cutoff": 800}})")
+        json::parse(R"({"schema": "org.example.synth-patch/1.0", "params": {"cutoff": 800}})")
             .value();
     const Id fx = t.create(synth);
     FxInstance third;

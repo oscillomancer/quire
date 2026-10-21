@@ -199,7 +199,6 @@ if(SUPPLE_BUILD_PLUGINS)
     set(${name}_clap "${staged}/${artifact}.clap" PARENT_SCOPE)
   endfunction()
 
-  supple_add_plugin(probe-synth PROBESYNTH ProbeSynth)
   supple_add_plugin(orrery ORRERY Orrery)
 
   # The player runs DSP scripts (ADR-0032): its plugins are the scripts in

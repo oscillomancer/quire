@@ -14,25 +14,24 @@ limiter), Gorse (`stock/gorse`, the transient shaper), Hickory
 (`stock/hickory`, the stereo utility), Sorrel (`stock/sorrel`, the gate),
 Teasel (`stock/teasel`, the saturation), Bracken (`stock/bracken`, the
 delay), Canopy (`stock/canopy`, the reverb) and Lichen (`stock/lichen`, the
-analyzer) are written so far; the rest of this section is about the older,
-hand-written plugins.
+analyzer) are written so far; the rest of this section is about Orrery,
+the last hand-written plugin.
 
-Each plugin directory (`orrery`
-and the internal test instrument `probe-synth`) is an instance of Supple Audio's plugin template (ADR-0011):
+Orrery (`orrery`) is an instance of Supple Audio's plugin template (ADR-0011):
 
 - `engine/`: the SDK-free DSP core and the parameter table (core-params
   `ParamSpec`s), with its own tests. It builds as part of the monorepo and
   runs in every sanitizer preset.
-- `plugin/`: the CLAP wrapper layer and the editor (`plugin/gui/`).
-- `test/`: host smoke tests, semantic-parameter conformance, editor input,
-  export and wrapper checks.
-- `cmake/Identity.cmake`: the display name, the only place it is written.
-- `QUIRE.md`: how this plugin departs from the template and what it does
-  that is not obvious from the code. Read it before changing the plugin.
+- `clap/`: the CLAP core every build shares (parameters, state, ports, the
+  semantic extension, the editor bridge), also built as
+  `orrery-headless.clap` for tests, the sandbox and the engine.
+- `plugin/`: the template copy's entry points and the editor (`plugin/gui/`).
+- `test/`: host smoke tests, editor input, export and wrapper checks.
+- `QUIRE.md`: how Orrery departs from the template and what it does that
+  is not obvious from the code. Read it before changing it.
 - `README.md`, `BUILDING.md` (building the plugin on its own),
   `CONVENTIONS.md` (the template's coding, DSP and GUI conventions),
-  `VERIFICATION.md` (where present: measurements behind the plugin's
-  claims), `NOTICES.txt` and `LICENSE` (staged beside the built plugin).
+  `NOTICES.txt` and `LICENSE` (staged beside the built plugin).
 
 `common/` holds the shared semantic-parameters extension
 (`com.suppleaudio.semantic-params`, spec in
