@@ -16,7 +16,9 @@
 //   B: fresh instance, activate, state S2, render 1 s
 //
 // A's second render and B's render must match exactly, at block 256 and again
-// at block 64. Every stock plugin registers this as plugin.<id>.reset.
+// at block 64, and so must the read-only values each reports at its end (its
+// meters and readouts, which a reset must clear of the render before). Every
+// stock plugin registers this as plugin.<id>.reset.
 //
 // --stepped also moves every writable stepped parameter (switches, choices)
 // off its default, the same way in S1 and S2, for a plugin whose default
@@ -109,6 +111,7 @@ std::vector<Timed> makeNotes() {
 
 struct Capture {
     std::vector<float> left, right;
+    std::vector<double> readouts;  // every read-only parameter, as the render ends
     bool ok = false;
 };
 
@@ -173,6 +176,9 @@ Capture renderSecond(host::Instance& in, const Stimulus& stimulus, std::uint32_t
         }
     }
     in.stopProcessing();
+    for (const auto& p : in.params())
+        if (p.flags & CLAP_PARAM_IS_READONLY)
+            out.readouts.push_back(in.paramValue(p.id).valueOr(0.0));
     out.ok = processed;
     return out;
 }
@@ -190,6 +196,14 @@ std::int64_t firstDifference(const Capture& a, const Capture& b) {
     for (std::size_t i = 0; i < a.left.size(); ++i) {
         if (a.left[i] != b.left[i] || a.right[i] != b.right[i]) return static_cast<std::int64_t>(i);
     }
+    return -1;
+}
+
+// The first read-only value the two captures report differently, or -1.
+int firstReadoutDifference(const Capture& a, const Capture& b) {
+    if (a.readouts.size() != b.readouts.size()) return 0;
+    for (std::size_t i = 0; i < a.readouts.size(); ++i)
+        if (a.readouts[i] != b.readouts[i]) return static_cast<int>(i);
     return -1;
 }
 
@@ -320,12 +334,14 @@ bool compareAtBlock(const host::PluginInfo& info, std::uint32_t block, int pass,
 
     // Guard against a comparison that proves nothing: the reference has to
     // carry signal, and moving every parameter off its default has to be
-    // audible somewhere in the render.
+    // audible somewhere in the render. A plugin that only listens (an
+    // analyser) sounds the same in any state; its readouts, which keep what
+    // the render before heard unless a reset clears it, are the comparison.
     if (peakOf(fresh) <= 0.0) {
         detail += "; the reference render is silent";
         return false;
     }
-    if (differ && firstDifference(before, fresh) < 0) {
+    if (differ && firstDifference(before, fresh) < 0 && fresh.readouts.empty()) {
         detail += "; the S1 and S2 renders are identical, so the comparison proves nothing";
         return false;
     }
@@ -333,6 +349,12 @@ bool compareAtBlock(const host::PluginInfo& info, std::uint32_t block, int pass,
     const auto differing = firstDifference(afterReset, fresh);
     if (differing >= 0) {
         detail += "; the S2 renders differ from sample " + std::to_string(differing);
+        return false;
+    }
+    const int readout = firstReadoutDifference(afterReset, fresh);
+    if (readout >= 0) {
+        detail +=
+            "; the S2 renders end with read-only value " + std::to_string(readout) + " different";
         return false;
     }
     return true;
