@@ -1543,6 +1543,15 @@ struct Marram : Instrument {
             .in("Amp")
             .help("The level out. A gentle limit above -1 dBFS keeps chords from clipping.");
 
+    // --- What the editor shows, sent by the audio code ---------------------------------------
+
+    Shared<double> outLeft;  // the output's peak, dB, falling back
+    Shared<double> outRight;
+    Shared<int> soundingNow;          // voices playing
+    SharedArray<double, 3> envShown;  // the newest note's amp, Env 2 and Env 3: their level,
+    SharedArray<int, 3> stageShown;   // and stage (0 idle, 1 attack ... 4 release)
+    SharedArray<double, 3> lfoShown;  // each LFO's phase (0..1); -1 for a note's with none
+
     // --- State ------------------------------------------------------------------------------
 
     Array<Voice, kVoices> voice;
@@ -1560,6 +1569,9 @@ struct Marram : Instrument {
     Buffer<double> mixL;
     Buffer<double> mixR;
     Array<Oversampler, 2> over;
+    int newest = -1;     // the voice of the latest note
+    double peakL = 0.0;  // the output's peaks, falling back
+    double peakR = 0.0;
     double restL = 0.0;  // what stolen voices were playing, fading out
     double restR = 0.0;
     double restFade = 0.99;
@@ -1595,6 +1607,9 @@ struct Marram : Instrument {
             over[c].clear();
         }
         setLatency(over[0].latency());
+        newest = -1;
+        peakL = 0.0;
+        peakR = 0.0;
         mixL.resize(maxBlockSize() * 4);
         mixR.resize(maxBlockSize() * 4);
         const int longest = ceilToInt(rate / 25.0) + 4;
@@ -1717,6 +1732,7 @@ struct Marram : Instrument {
         Voice& s = voice[v];
         Random& dice = random[v];
         ++notes;
+        newest = v;
         dice.seed(notes * 7919 + 17);
         s.velocity = voiceVelocity(v);
         if (!s.sounding) {
@@ -2349,10 +2365,40 @@ struct Marram : Instrument {
                 io[0][i] = safety(l * g);
                 io[1][i] = safety(r * g);
             }
+            peakL = max(abs(io[0][i]), peakL * 0.99985);
+            peakR = max(abs(io[io.channels - 1][i]), peakR * 0.99985);
         }
+        show();
         freeOn(0, io.frames, l1Sync, l1Rate, l1Division);
         freeOn(1, io.frames, l2Sync, l2Rate, l2Division);
         freeOn(2, io.frames, l3Sync, l3Rate, l3Division);
+    }
+
+    // What the editor shows: the level, the voices, and the newest note's
+    // envelopes and LFOs.
+    void show() {
+        outLeft.set(gainToDb(peakL));
+        outRight.set(gainToDb(peakR));
+        int count = 0;
+        for (int v = 0; v < voiceCount(); ++v)
+            if (voice[v].sounding && voicePlaying(v)) ++count;
+        soundingNow.set(count);
+        const bool on = newest >= 0 && voice[newest].sounding && voicePlaying(newest);
+        envShown[0] = on ? voice[newest].amp.level : 0.0;
+        envShown[1] = on ? voice[newest].mod.level : 0.0;
+        envShown[2] = on ? voice[newest].env3.level : 0.0;
+        stageShown[0] = on ? voice[newest].amp.stage : 0;
+        stageShown[1] = on ? voice[newest].mod.stage : 0;
+        stageShown[2] = on ? voice[newest].env3.stage : 0;
+        lfoShown[0] = l1Mode.index() == 1 ? wrap01(freePhase[0] + l1Phase / 360.0)
+                      : on                ? voice[newest].lfoPhase[0]
+                                          : -1.0;
+        lfoShown[1] = l2Mode.index() == 1 ? wrap01(freePhase[1] + l2Phase / 360.0)
+                      : on                ? voice[newest].lfoPhase[1]
+                                          : -1.0;
+        lfoShown[2] = l3Mode.index() == 1 ? wrap01(freePhase[2] + l3Phase / 360.0)
+                      : on                ? voice[newest].lfoPhase[2]
+                                          : -1.0;
     }
 
     // Untouched below -1 dBFS, then bent smoothly toward full scale.
@@ -2474,22 +2520,55 @@ struct Marram : Instrument {
 
     // Table t at position p (0..1): its harmonics into amp and phs.
     void recipe(int t, double p) {
+        if (t != 5) {
+            harmonics(t, p, amp, phs, kTop);
+            return;
+        }
+        // Digital: a ramp through a sample-and-hold and a quantizer that
+        // coarsen along the table (5 to 3 bits, 16 to 6 steps a cycle).
         amp.fill(0.0);
         phs.fill(0.0);
+        const double levels = exp2(4.0 - 2.0 * p);
+        const int steps = roundToInt(exp2(4.0 - 1.415 * p));
+        const int hold = idiv(kFft, max(1, steps));
+        double mean = 0.0;
+        for (int i = 0; i < kFft; ++i) {
+            const double x = 2.0 * (idiv(i, hold) * hold) / kFft - 1.0;
+            re[i] = round(x * levels) / levels;
+            im[i] = 0.0;
+            mean += re[i];
+        }
+        for (int i = 0; i < kFft; ++i) re[i] -= mean / kFft;
+        // The forward transform is the inverse's conjugate.
+        transform(kFft);
+        for (int k = 1; k <= kTop; ++k) {
+            const double cr = re[k] * 2.0 / kFft;
+            const double ci = -im[k] * 2.0 / kFft;
+            amp[k] = sqrt(cr * cr + ci * ci);
+            phs[k] = atan2(ci, cr) + pi / 2.0;
+        }
+    }
+
+    // The harmonics 1 .. top of table t (not the digital one, which recipe()
+    // makes in time) at position p, into a and ph: the tables' and the
+    // editor's picture of them.
+    void harmonics(int t, double p, Array<double, 257>& a, Array<double, 257>& ph, int top) {
+        a.fill(0.0);
+        ph.fill(0.0);
         if (t == 0) {
             // Harmonic ramp: a saw (1/k) rolling off to a sine.
             const double e = 1.0 + 8.0 * p * p;
-            for (int k = 1; k <= kTop; ++k) {
-                amp[k] = pow(k, -e);
-                phs[k] = pi;
+            for (int k = 1; k <= top; ++k) {
+                a[k] = pow(k, -e);
+                ph[k] = pi;
             }
         } else if (t == 1) {
             // PWM: a pulse narrowing from 50 % to 5 %.
             const double w = 0.5 - 0.45 * p;
-            for (int k = 1; k <= kTop; ++k) {
-                const double a = 4.0 / (pi * k) * sin(pi * k * w);
-                amp[k] = abs(a);
-                phs[k] = -pi * k * w + pi / 2.0 + (a < 0.0 ? pi : 0.0);
+            for (int k = 1; k <= top; ++k) {
+                const double v = 4.0 / (pi * k) * sin(pi * k * w);
+                a[k] = abs(v);
+                ph[k] = -pi * k * w + pi / 2.0 + (v < 0.0 ? pi : 0.0);
             }
         } else if (t == 2) {
             // Formant: a bright source through vowel formants a to u, for a
@@ -2497,7 +2576,7 @@ struct Marram : Instrument {
             const double x = p * 4.0;
             const int v = min(floorToInt(x), 3);
             const double fr = x - v;
-            for (int k = 1; k <= kTop; ++k) {
+            for (int k = 1; k <= top; ++k) {
                 const double hz = k * 110.0;
                 double env = 0.03;
                 for (int b = 0; b < 3; ++b) {
@@ -2506,7 +2585,7 @@ struct Marram : Instrument {
                     const double d = (hz - f) / width;
                     env += (b == 0 ? 1.0 : b == 1 ? 0.5 : 0.3) / (1.0 + d * d);
                 }
-                amp[k] = env / sqrt(k);
+                a[k] = env / sqrt(k);
             }
         } else if (t == 3) {
             // Bell: hum, prime, tierce, quint, nominal and above, in eighths
@@ -2516,7 +2595,7 @@ struct Marram : Instrument {
                 const double r = bellRatio(i) * (1.0 + 0.04 * p * (bellRatio(i) - 1.0));
                 const int k = roundToInt(r * 8.0);
                 const double dark = exp(-i * (1.0 - p) * 0.35);
-                if (k >= 1 && k <= kTop) amp[k] += bellLevel(i) * dark;
+                if (k >= 1 && k <= top) a[k] += bellLevel(i) * dark;
             }
         } else if (t == 4) {
             // Organ: nine drawbars (16' to 1') on harmonics of half the note,
@@ -2527,29 +2606,7 @@ struct Marram : Instrument {
             for (int d = 0; d < 9; ++d) {
                 const double level = lerp(drawbar(r, d), drawbar(r + 1, d), fr);
                 if (level <= 0.0) continue;
-                amp[drawbarHarmonic(d)] += pow(10.0, -(8.0 - level) * 3.0 / 20.0);
-            }
-        } else if (t == 5) {
-            // Digital: a ramp through a sample-and-hold and a quantizer that
-            // coarsen along the table (5 to 3 bits, 16 to 6 steps a cycle).
-            const double levels = exp2(4.0 - 2.0 * p);
-            const int steps = roundToInt(exp2(4.0 - 1.415 * p));
-            const int hold = idiv(kFft, max(1, steps));
-            double mean = 0.0;
-            for (int i = 0; i < kFft; ++i) {
-                const double x = 2.0 * (idiv(i, hold) * hold) / kFft - 1.0;
-                re[i] = round(x * levels) / levels;
-                im[i] = 0.0;
-                mean += re[i];
-            }
-            for (int i = 0; i < kFft; ++i) re[i] -= mean / kFft;
-            // The forward transform is the inverse's conjugate.
-            transform(kFft);
-            for (int k = 1; k <= kTop; ++k) {
-                const double cr = re[k] * 2.0 / kFft;
-                const double ci = -im[k] * 2.0 / kFft;
-                amp[k] = sqrt(cr * cr + ci * ci);
-                phs[k] = atan2(ci, cr) + pi / 2.0;
+                a[drawbarHarmonic(d)] += pow(10.0, -(8.0 - level) * 3.0 / 20.0);
             }
         } else {
             // Spectral comb: a 1/sqrt-ish series through a comb whose teeth
@@ -2557,10 +2614,10 @@ struct Marram : Instrument {
             // Schroeder's (pi k^2 / n), which keep the wave from piling into
             // one spike.
             const double period = 16.0 - 13.0 * p;
-            for (int k = 1; k <= kTop; ++k) {
+            for (int k = 1; k <= top; ++k) {
                 const double c = 0.5 + 0.5 * cos(twoPi * (k - 1) / period);
-                amp[k] = c * c / pow(k, 0.6);
-                phs[k] = pi * k * k / kTop;
+                a[k] = c * c / pow(k, 0.6);
+                ph[k] = pi * k * k / kTop;
             }
         }
     }
@@ -2611,6 +2668,3329 @@ struct Marram : Instrument {
                                      8, 8, 8, 0, 0, 0, 0, 0, 0, 8, 8, 8, 8, 0, 0, 0, 0, 4,
                                      8, 6, 8, 8, 6, 8, 0, 4, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8};
         return regs[r * 9 + d];
+    }
+
+    // --- The editor ---------------------------------------------------------------------------
+    //
+    // A header with the macros, the voices and the level; the oscillators
+    // and the filters, a tab each; the envelopes, the LFOs and the drive;
+    // the routes (e.routes) and the voice. Every control is drawn here and
+    // answers in pointer(): a dial drags up and down (Shift finely), turns
+    // with the wheel and goes back to its default on a double click; a
+    // button sets its choice; the filter's curve and the envelope's shape
+    // drag as well. Each panel shows the controls the settings use.
+
+    static constexpr double kW = 1240;
+    static constexpr double kH = 880;
+    static constexpr double oscX = 16;  // the panels
+    static constexpr double oscY = 76;
+    static constexpr double oscW = 604;
+    static constexpr double oscH = 336;
+    static constexpr double filX = 632;
+    static constexpr double filY = 76;
+    static constexpr double filW = 592;
+    static constexpr double filH = 336;
+    static constexpr double envX = 16;
+    static constexpr double envY = 424;
+    static constexpr double envW = 470;
+    static constexpr double envH = 216;
+    static constexpr double lfoX = 498;
+    static constexpr double lfoY = 424;
+    static constexpr double lfoW = 380;
+    static constexpr double lfoH = 216;
+    static constexpr double drvX = 890;
+    static constexpr double drvY = 424;
+    static constexpr double drvW = 334;
+    static constexpr double drvH = 216;
+    static constexpr double modX = 16;
+    static constexpr double modY = 652;
+    static constexpr double modW = 760;
+    static constexpr double modH = 212;
+    static constexpr double voiX = 788;
+    static constexpr double voiY = 652;
+    static constexpr double voiW = 436;
+    static constexpr double voiH = 212;
+    static constexpr double waveX = oscX + 16;  // the oscillator's picture
+    static constexpr double waveY = oscY + 124;
+    static constexpr double waveW = 244;
+    static constexpr double waveH = 118;
+    static constexpr double curveX = filX + 16;  // the filter's response
+    static constexpr double curveY = filY + 124;
+    static constexpr double curveW = 316;
+    static constexpr double curveH = 134;
+    static constexpr double shapeX = envX + 16;  // the envelope
+    static constexpr double shapeY = envY + 44;
+    static constexpr double shapeW = 300;
+    static constexpr double shapeH = 98;
+    static constexpr double cycleX = lfoX + 16;  // the LFO
+    static constexpr double cycleY = lfoY + 78;
+    static constexpr double cycleW = 200;
+    static constexpr double cycleH = 74;
+    static constexpr double bendX = drvX + 16;  // the drive's curve
+    static constexpr double bendY = drvY + 76;
+    static constexpr double bendW = 124;
+    static constexpr double bendH = 124;
+
+    // The palette: the theme's, and the dune's.
+    static constexpr int kInk = 0x1A1411;
+    static constexpr int kGroundBottom = 0x201914;
+    static constexpr int kGraphTop = 0x1D1713;
+    static constexpr int kGraphBottom = 0x130F0C;
+    static constexpr int kKnobLight = 0x54463B;
+    static constexpr int kKnobDark = 0x2A221C;
+    static constexpr int kKnobHot = 0x5E4E41;
+    static constexpr int kLinen = 0xE3D5BE;
+    static constexpr int kMeterLow = 0x6E7A4B;
+    static constexpr int kMeterHigh = 0xD8CE9C;
+    static constexpr int kGrass = 0xA9BC72;     // the oscillators: marram's blades
+    static constexpr int kSand = 0xDDBA80;      // the filters: the dune
+    static constexpr int kSeaGlass = 0x8FB3AC;  // the drive and the voice
+    static constexpr int kStem = 0x8C7553;
+
+    // Parameter codes: what a dial or a button edits. The oscillators' are
+    // 100 + 20 o + field, the filters' 200 + 20 f + field, the LFOs'
+    // 50 + 10 l + field (the fields in the order the struct declares them);
+    // a negative code is the editor's own (a tab, a step through the
+    // tables).
+    static constexpr int cMode = 1;
+    static constexpr int cPolyphony = 2;
+    static constexpr int cGlide = 3;
+    static constexpr int cBend = 4;
+    static constexpr int cTune = 5;
+    static constexpr int cUnison = 6;
+    static constexpr int cDetune = 7;
+    static constexpr int cSpread = 8;
+    static constexpr int cDrift = 9;
+    static constexpr int cQuality = 10;
+    static constexpr int cRouting = 11;
+    static constexpr int cDriveType = 12;
+    static constexpr int cDriveAmount = 13;
+    static constexpr int cDriveBias = 14;
+    static constexpr int cDriveMix = 15;
+    static constexpr int cAmp = 20;   // attack, decay, sustain, release, velocity, level, pan
+    static constexpr int cEnv2 = 30;  // attack, decay, sustain, release, pitch, fm
+    static constexpr int cEnv3 = 40;  // attack, decay, sustain, release
+    static constexpr int cMacro = 80;
+    static constexpr int cOutput = 84;
+    static constexpr int oType = 0;  // an oscillator's fields
+    static constexpr int oLevel = 1;
+    static constexpr int oPan = 2;
+    static constexpr int oCoarse = 3;
+    static constexpr int oFine = 4;
+    static constexpr int oWave = 5;
+    static constexpr int oWidth = 6;
+    static constexpr int oSync = 7;
+    static constexpr int oTable = 8;
+    static constexpr int oPosition = 9;
+    static constexpr int oRatio = 10;
+    static constexpr int oFeedback = 11;
+    static constexpr int oColor = 12;
+    static constexpr int oOctave = 13;
+    static constexpr int oFm = 14;
+    static constexpr int oFmFrom = 15;
+    static constexpr int oTo = 16;
+    static constexpr int oRetrigger = 17;
+    static constexpr int fType = 0;  // a filter's
+    static constexpr int fCutoff = 1;
+    static constexpr int fResonance = 2;
+    static constexpr int fSlope = 3;
+    static constexpr int fMode = 4;
+    static constexpr int fFeedback = 5;
+    static constexpr int fDamping = 6;
+    static constexpr int fVowel = 7;
+    static constexpr int fShift = 8;
+    static constexpr int fKeytrack = 9;
+    static constexpr int fEnv = 10;
+    static constexpr int fVelocity = 11;
+    static constexpr int fDrive = 12;
+    static constexpr int lShape = 0;  // an LFO's
+    static constexpr int lSync = 1;
+    static constexpr int lRate = 2;
+    static constexpr int lDivision = 3;
+    static constexpr int lMode = 4;
+    static constexpr int lPhase = 5;
+    static constexpr int lDelay = 6;
+    static constexpr int eOscTab = -1;  // the editor's own
+    static constexpr int eFilterTab = -2;
+    static constexpr int eEnvTab = -3;
+    static constexpr int eLfoTab = -4;
+    static constexpr int eTableStep = -5;
+    // A button's look.
+    static constexpr int bChoice = 0;  // lit while its parameter holds its value
+    static constexpr int bToggle = 1;  // lit while its parameter is on
+    static constexpr int bTab = 2;     // an oscillator's or a filter's tab, drawn by its panel
+    static constexpr int bSmallTab = 3;
+    static constexpr int bStep = 4;   // an arrow
+    static constexpr int bShape = 5;  // an LFO shape's icon
+
+    // The editor's own.
+    int oscTab = 0;
+    int filterTab = 0;
+    int envTab = 0;
+    int lfoTab = 0;
+    double hoverX = -1.0, hoverY = -1.0;
+    int dragging = 0;  // 1 a dial, 2 the filter's curve, 3 the envelope
+    int dragDial = -1;
+    double dialPos = 0.0;
+    int handle = -1;  // the envelope's: 0 attack, 1 decay and sustain, 2 release
+    double pressX = 0.0, pressY = 0.0, pressA = 0.0, pressB = 0.0;
+    int hotDial = -1;
+    int hotButton = -1;
+    // What the editor shows now, laid out by place(): the dials and the
+    // buttons, where they are and what they edit.
+    Array<int, 64> dialCode;
+    Array<double, 64> dialX, dialY, dialR;
+    Array<int, 64> dialColour;
+    Array<bool, 64> dialLive;  // false: dimmed, as its setting does not apply
+    int dials = 0;
+    Array<int, 96> buttonCode, buttonValue, buttonStyle, buttonColour;
+    Array<double, 96> buttonX, buttonY, buttonW, buttonH;
+    int buttons = 0;
+    // A wavetable frame's harmonics, for its picture.
+    Array<double, 257> frameAmp;
+    Array<double, 257> framePhase;
+
+    void editor(Editor& e) {
+        e.size(kW, kH);
+        e.routes(modX + 16, modY + 36, modW - 32, modH - 46);
+    }
+
+    // --- parameters by code -------------------------------------------------------------------
+
+    double readOn(const Param& p, int how) const {
+        if (how == 0) return p.normalized();
+        if (how == 1) return p.value();
+        return p.index();
+    }
+    void editOn(const Param& p, int how, double v) {
+        if (how == 0)
+            p.edit(v);
+        else if (how == 1)
+            p.editNormalized(v);
+        else
+            p.reset();
+    }
+
+    int oc(int o, int field) const { return 100 + 20 * o + field; }
+    int fc(int f, int field) const { return 200 + 20 * f + field; }
+    int lc(int l, int field) const { return 50 + 10 * l + field; }
+    int choiceOf(int code) const { return roundToInt(readParam(code, 2)); }
+    double valueOf(int code) const { return readParam(code, 1); }
+
+    // Parameter `code`'s position on its dial (how 0), value in its unit
+    // (1), or choice (2).
+    double readParam(int code, int how) const {
+        switch (code) {
+            case 1:
+                return readOn(mode, how);
+            case 2:
+                return readOn(polyphony, how);
+            case 3:
+                return readOn(glide, how);
+            case 4:
+                return readOn(bendRange, how);
+            case 5:
+                return readOn(tune, how);
+            case 6:
+                return readOn(unison, how);
+            case 7:
+                return readOn(detune, how);
+            case 8:
+                return readOn(spread, how);
+            case 9:
+                return readOn(drift, how);
+            case 10:
+                return readOn(quality, how);
+            case 11:
+                return readOn(routing, how);
+            case 12:
+                return readOn(driveType, how);
+            case 13:
+                return readOn(driveAmount, how);
+            case 14:
+                return readOn(driveBias, how);
+            case 15:
+                return readOn(driveMix, how);
+            case 20:
+                return readOn(ampAttack, how);
+            case 21:
+                return readOn(ampDecay, how);
+            case 22:
+                return readOn(ampSustain, how);
+            case 23:
+                return readOn(ampRelease, how);
+            case 24:
+                return readOn(ampVelocity, how);
+            case 25:
+                return readOn(ampLevel, how);
+            case 26:
+                return readOn(ampPan, how);
+            case 30:
+                return readOn(envAttack, how);
+            case 31:
+                return readOn(envDecay, how);
+            case 32:
+                return readOn(envSustain, how);
+            case 33:
+                return readOn(envRelease, how);
+            case 34:
+                return readOn(envPitch, how);
+            case 35:
+                return readOn(envFm, how);
+            case 40:
+                return readOn(env3Attack, how);
+            case 41:
+                return readOn(env3Decay, how);
+            case 42:
+                return readOn(env3Sustain, how);
+            case 43:
+                return readOn(env3Release, how);
+            case 50:
+                return readOn(l1Shape, how);
+            case 51:
+                return readOn(l1Sync, how);
+            case 52:
+                return readOn(l1Rate, how);
+            case 53:
+                return readOn(l1Division, how);
+            case 54:
+                return readOn(l1Mode, how);
+            case 55:
+                return readOn(l1Phase, how);
+            case 56:
+                return readOn(l1Delay, how);
+            case 60:
+                return readOn(l2Shape, how);
+            case 61:
+                return readOn(l2Sync, how);
+            case 62:
+                return readOn(l2Rate, how);
+            case 63:
+                return readOn(l2Division, how);
+            case 64:
+                return readOn(l2Mode, how);
+            case 65:
+                return readOn(l2Phase, how);
+            case 66:
+                return readOn(l2Delay, how);
+            case 70:
+                return readOn(l3Shape, how);
+            case 71:
+                return readOn(l3Sync, how);
+            case 72:
+                return readOn(l3Rate, how);
+            case 73:
+                return readOn(l3Division, how);
+            case 74:
+                return readOn(l3Mode, how);
+            case 75:
+                return readOn(l3Phase, how);
+            case 76:
+                return readOn(l3Delay, how);
+            case 80:
+                return readOn(m1, how);
+            case 81:
+                return readOn(m2, how);
+            case 82:
+                return readOn(m3, how);
+            case 83:
+                return readOn(m4, how);
+            case 84:
+                return readOn(output, how);
+            case 100:
+                return readOn(o1Type, how);
+            case 101:
+                return readOn(o1Level, how);
+            case 102:
+                return readOn(o1Pan, how);
+            case 103:
+                return readOn(o1Coarse, how);
+            case 104:
+                return readOn(o1Fine, how);
+            case 105:
+                return readOn(o1Wave, how);
+            case 106:
+                return readOn(o1Width, how);
+            case 108:
+                return readOn(o1Table, how);
+            case 109:
+                return readOn(o1Position, how);
+            case 110:
+                return readOn(o1Ratio, how);
+            case 111:
+                return readOn(o1Feedback, how);
+            case 112:
+                return readOn(o1Color, how);
+            case 113:
+                return readOn(o1Octave, how);
+            case 114:
+                return readOn(o1Fm, how);
+            case 115:
+                return readOn(o1FmFrom, how);
+            case 116:
+                return readOn(o1To, how);
+            case 117:
+                return readOn(o1Retrigger, how);
+            case 120:
+                return readOn(o2Type, how);
+            case 121:
+                return readOn(o2Level, how);
+            case 122:
+                return readOn(o2Pan, how);
+            case 123:
+                return readOn(o2Coarse, how);
+            case 124:
+                return readOn(o2Fine, how);
+            case 125:
+                return readOn(o2Wave, how);
+            case 126:
+                return readOn(o2Width, how);
+            case 127:
+                return readOn(o2Sync, how);
+            case 128:
+                return readOn(o2Table, how);
+            case 129:
+                return readOn(o2Position, how);
+            case 130:
+                return readOn(o2Ratio, how);
+            case 131:
+                return readOn(o2Feedback, how);
+            case 132:
+                return readOn(o2Color, how);
+            case 133:
+                return readOn(o2Octave, how);
+            case 134:
+                return readOn(o2Fm, how);
+            case 135:
+                return readOn(o2FmFrom, how);
+            case 136:
+                return readOn(o2To, how);
+            case 137:
+                return readOn(o2Retrigger, how);
+            case 140:
+                return readOn(o3Type, how);
+            case 141:
+                return readOn(o3Level, how);
+            case 142:
+                return readOn(o3Pan, how);
+            case 143:
+                return readOn(o3Coarse, how);
+            case 144:
+                return readOn(o3Fine, how);
+            case 145:
+                return readOn(o3Wave, how);
+            case 146:
+                return readOn(o3Width, how);
+            case 147:
+                return readOn(o3Sync, how);
+            case 148:
+                return readOn(o3Table, how);
+            case 149:
+                return readOn(o3Position, how);
+            case 150:
+                return readOn(o3Ratio, how);
+            case 151:
+                return readOn(o3Feedback, how);
+            case 152:
+                return readOn(o3Color, how);
+            case 153:
+                return readOn(o3Octave, how);
+            case 154:
+                return readOn(o3Fm, how);
+            case 155:
+                return readOn(o3FmFrom, how);
+            case 156:
+                return readOn(o3To, how);
+            case 157:
+                return readOn(o3Retrigger, how);
+            case 160:
+                return readOn(o4Type, how);
+            case 161:
+                return readOn(o4Level, how);
+            case 162:
+                return readOn(o4Pan, how);
+            case 163:
+                return readOn(o4Coarse, how);
+            case 164:
+                return readOn(o4Fine, how);
+            case 165:
+                return readOn(o4Wave, how);
+            case 166:
+                return readOn(o4Width, how);
+            case 167:
+                return readOn(o4Sync, how);
+            case 168:
+                return readOn(o4Table, how);
+            case 169:
+                return readOn(o4Position, how);
+            case 170:
+                return readOn(o4Ratio, how);
+            case 171:
+                return readOn(o4Feedback, how);
+            case 172:
+                return readOn(o4Color, how);
+            case 173:
+                return readOn(o4Octave, how);
+            case 174:
+                return readOn(o4Fm, how);
+            case 175:
+                return readOn(o4FmFrom, how);
+            case 176:
+                return readOn(o4To, how);
+            case 177:
+                return readOn(o4Retrigger, how);
+            case 200:
+                return readOn(f1Type, how);
+            case 201:
+                return readOn(f1Cutoff, how);
+            case 202:
+                return readOn(f1Resonance, how);
+            case 203:
+                return readOn(f1Slope, how);
+            case 204:
+                return readOn(f1Mode, how);
+            case 205:
+                return readOn(f1Feedback, how);
+            case 206:
+                return readOn(f1Damping, how);
+            case 207:
+                return readOn(f1Vowel, how);
+            case 208:
+                return readOn(f1Shift, how);
+            case 209:
+                return readOn(f1Keytrack, how);
+            case 210:
+                return readOn(f1Env, how);
+            case 211:
+                return readOn(f1Velocity, how);
+            case 212:
+                return readOn(f1Drive, how);
+            case 220:
+                return readOn(f2Type, how);
+            case 221:
+                return readOn(f2Cutoff, how);
+            case 222:
+                return readOn(f2Resonance, how);
+            case 223:
+                return readOn(f2Slope, how);
+            case 224:
+                return readOn(f2Mode, how);
+            case 225:
+                return readOn(f2Feedback, how);
+            case 226:
+                return readOn(f2Damping, how);
+            case 227:
+                return readOn(f2Vowel, how);
+            case 228:
+                return readOn(f2Shift, how);
+            case 229:
+                return readOn(f2Keytrack, how);
+            case 230:
+                return readOn(f2Env, how);
+            case 231:
+                return readOn(f2Velocity, how);
+            case 232:
+                return readOn(f2Drive, how);
+            default:
+                return 0.0;
+        }
+    }
+
+    // Parameter `code` set as a user would: to a value in its unit (how 0),
+    // a position on its dial (1), or its default (2).
+    void editParam(int code, int how, double v) {
+        switch (code) {
+            case 1:
+                editOn(mode, how, v);
+                return;
+            case 2:
+                editOn(polyphony, how, v);
+                return;
+            case 3:
+                editOn(glide, how, v);
+                return;
+            case 4:
+                editOn(bendRange, how, v);
+                return;
+            case 5:
+                editOn(tune, how, v);
+                return;
+            case 6:
+                editOn(unison, how, v);
+                return;
+            case 7:
+                editOn(detune, how, v);
+                return;
+            case 8:
+                editOn(spread, how, v);
+                return;
+            case 9:
+                editOn(drift, how, v);
+                return;
+            case 10:
+                editOn(quality, how, v);
+                return;
+            case 11:
+                editOn(routing, how, v);
+                return;
+            case 12:
+                editOn(driveType, how, v);
+                return;
+            case 13:
+                editOn(driveAmount, how, v);
+                return;
+            case 14:
+                editOn(driveBias, how, v);
+                return;
+            case 15:
+                editOn(driveMix, how, v);
+                return;
+            case 20:
+                editOn(ampAttack, how, v);
+                return;
+            case 21:
+                editOn(ampDecay, how, v);
+                return;
+            case 22:
+                editOn(ampSustain, how, v);
+                return;
+            case 23:
+                editOn(ampRelease, how, v);
+                return;
+            case 24:
+                editOn(ampVelocity, how, v);
+                return;
+            case 25:
+                editOn(ampLevel, how, v);
+                return;
+            case 26:
+                editOn(ampPan, how, v);
+                return;
+            case 30:
+                editOn(envAttack, how, v);
+                return;
+            case 31:
+                editOn(envDecay, how, v);
+                return;
+            case 32:
+                editOn(envSustain, how, v);
+                return;
+            case 33:
+                editOn(envRelease, how, v);
+                return;
+            case 34:
+                editOn(envPitch, how, v);
+                return;
+            case 35:
+                editOn(envFm, how, v);
+                return;
+            case 40:
+                editOn(env3Attack, how, v);
+                return;
+            case 41:
+                editOn(env3Decay, how, v);
+                return;
+            case 42:
+                editOn(env3Sustain, how, v);
+                return;
+            case 43:
+                editOn(env3Release, how, v);
+                return;
+            case 50:
+                editOn(l1Shape, how, v);
+                return;
+            case 51:
+                editOn(l1Sync, how, v);
+                return;
+            case 52:
+                editOn(l1Rate, how, v);
+                return;
+            case 53:
+                editOn(l1Division, how, v);
+                return;
+            case 54:
+                editOn(l1Mode, how, v);
+                return;
+            case 55:
+                editOn(l1Phase, how, v);
+                return;
+            case 56:
+                editOn(l1Delay, how, v);
+                return;
+            case 60:
+                editOn(l2Shape, how, v);
+                return;
+            case 61:
+                editOn(l2Sync, how, v);
+                return;
+            case 62:
+                editOn(l2Rate, how, v);
+                return;
+            case 63:
+                editOn(l2Division, how, v);
+                return;
+            case 64:
+                editOn(l2Mode, how, v);
+                return;
+            case 65:
+                editOn(l2Phase, how, v);
+                return;
+            case 66:
+                editOn(l2Delay, how, v);
+                return;
+            case 70:
+                editOn(l3Shape, how, v);
+                return;
+            case 71:
+                editOn(l3Sync, how, v);
+                return;
+            case 72:
+                editOn(l3Rate, how, v);
+                return;
+            case 73:
+                editOn(l3Division, how, v);
+                return;
+            case 74:
+                editOn(l3Mode, how, v);
+                return;
+            case 75:
+                editOn(l3Phase, how, v);
+                return;
+            case 76:
+                editOn(l3Delay, how, v);
+                return;
+            case 80:
+                editOn(m1, how, v);
+                return;
+            case 81:
+                editOn(m2, how, v);
+                return;
+            case 82:
+                editOn(m3, how, v);
+                return;
+            case 83:
+                editOn(m4, how, v);
+                return;
+            case 84:
+                editOn(output, how, v);
+                return;
+            case 100:
+                editOn(o1Type, how, v);
+                return;
+            case 101:
+                editOn(o1Level, how, v);
+                return;
+            case 102:
+                editOn(o1Pan, how, v);
+                return;
+            case 103:
+                editOn(o1Coarse, how, v);
+                return;
+            case 104:
+                editOn(o1Fine, how, v);
+                return;
+            case 105:
+                editOn(o1Wave, how, v);
+                return;
+            case 106:
+                editOn(o1Width, how, v);
+                return;
+            case 108:
+                editOn(o1Table, how, v);
+                return;
+            case 109:
+                editOn(o1Position, how, v);
+                return;
+            case 110:
+                editOn(o1Ratio, how, v);
+                return;
+            case 111:
+                editOn(o1Feedback, how, v);
+                return;
+            case 112:
+                editOn(o1Color, how, v);
+                return;
+            case 113:
+                editOn(o1Octave, how, v);
+                return;
+            case 114:
+                editOn(o1Fm, how, v);
+                return;
+            case 115:
+                editOn(o1FmFrom, how, v);
+                return;
+            case 116:
+                editOn(o1To, how, v);
+                return;
+            case 117:
+                editOn(o1Retrigger, how, v);
+                return;
+            case 120:
+                editOn(o2Type, how, v);
+                return;
+            case 121:
+                editOn(o2Level, how, v);
+                return;
+            case 122:
+                editOn(o2Pan, how, v);
+                return;
+            case 123:
+                editOn(o2Coarse, how, v);
+                return;
+            case 124:
+                editOn(o2Fine, how, v);
+                return;
+            case 125:
+                editOn(o2Wave, how, v);
+                return;
+            case 126:
+                editOn(o2Width, how, v);
+                return;
+            case 127:
+                editOn(o2Sync, how, v);
+                return;
+            case 128:
+                editOn(o2Table, how, v);
+                return;
+            case 129:
+                editOn(o2Position, how, v);
+                return;
+            case 130:
+                editOn(o2Ratio, how, v);
+                return;
+            case 131:
+                editOn(o2Feedback, how, v);
+                return;
+            case 132:
+                editOn(o2Color, how, v);
+                return;
+            case 133:
+                editOn(o2Octave, how, v);
+                return;
+            case 134:
+                editOn(o2Fm, how, v);
+                return;
+            case 135:
+                editOn(o2FmFrom, how, v);
+                return;
+            case 136:
+                editOn(o2To, how, v);
+                return;
+            case 137:
+                editOn(o2Retrigger, how, v);
+                return;
+            case 140:
+                editOn(o3Type, how, v);
+                return;
+            case 141:
+                editOn(o3Level, how, v);
+                return;
+            case 142:
+                editOn(o3Pan, how, v);
+                return;
+            case 143:
+                editOn(o3Coarse, how, v);
+                return;
+            case 144:
+                editOn(o3Fine, how, v);
+                return;
+            case 145:
+                editOn(o3Wave, how, v);
+                return;
+            case 146:
+                editOn(o3Width, how, v);
+                return;
+            case 147:
+                editOn(o3Sync, how, v);
+                return;
+            case 148:
+                editOn(o3Table, how, v);
+                return;
+            case 149:
+                editOn(o3Position, how, v);
+                return;
+            case 150:
+                editOn(o3Ratio, how, v);
+                return;
+            case 151:
+                editOn(o3Feedback, how, v);
+                return;
+            case 152:
+                editOn(o3Color, how, v);
+                return;
+            case 153:
+                editOn(o3Octave, how, v);
+                return;
+            case 154:
+                editOn(o3Fm, how, v);
+                return;
+            case 155:
+                editOn(o3FmFrom, how, v);
+                return;
+            case 156:
+                editOn(o3To, how, v);
+                return;
+            case 157:
+                editOn(o3Retrigger, how, v);
+                return;
+            case 160:
+                editOn(o4Type, how, v);
+                return;
+            case 161:
+                editOn(o4Level, how, v);
+                return;
+            case 162:
+                editOn(o4Pan, how, v);
+                return;
+            case 163:
+                editOn(o4Coarse, how, v);
+                return;
+            case 164:
+                editOn(o4Fine, how, v);
+                return;
+            case 165:
+                editOn(o4Wave, how, v);
+                return;
+            case 166:
+                editOn(o4Width, how, v);
+                return;
+            case 167:
+                editOn(o4Sync, how, v);
+                return;
+            case 168:
+                editOn(o4Table, how, v);
+                return;
+            case 169:
+                editOn(o4Position, how, v);
+                return;
+            case 170:
+                editOn(o4Ratio, how, v);
+                return;
+            case 171:
+                editOn(o4Feedback, how, v);
+                return;
+            case 172:
+                editOn(o4Color, how, v);
+                return;
+            case 173:
+                editOn(o4Octave, how, v);
+                return;
+            case 174:
+                editOn(o4Fm, how, v);
+                return;
+            case 175:
+                editOn(o4FmFrom, how, v);
+                return;
+            case 176:
+                editOn(o4To, how, v);
+                return;
+            case 177:
+                editOn(o4Retrigger, how, v);
+                return;
+            case 200:
+                editOn(f1Type, how, v);
+                return;
+            case 201:
+                editOn(f1Cutoff, how, v);
+                return;
+            case 202:
+                editOn(f1Resonance, how, v);
+                return;
+            case 203:
+                editOn(f1Slope, how, v);
+                return;
+            case 204:
+                editOn(f1Mode, how, v);
+                return;
+            case 205:
+                editOn(f1Feedback, how, v);
+                return;
+            case 206:
+                editOn(f1Damping, how, v);
+                return;
+            case 207:
+                editOn(f1Vowel, how, v);
+                return;
+            case 208:
+                editOn(f1Shift, how, v);
+                return;
+            case 209:
+                editOn(f1Keytrack, how, v);
+                return;
+            case 210:
+                editOn(f1Env, how, v);
+                return;
+            case 211:
+                editOn(f1Velocity, how, v);
+                return;
+            case 212:
+                editOn(f1Drive, how, v);
+                return;
+            case 220:
+                editOn(f2Type, how, v);
+                return;
+            case 221:
+                editOn(f2Cutoff, how, v);
+                return;
+            case 222:
+                editOn(f2Resonance, how, v);
+                return;
+            case 223:
+                editOn(f2Slope, how, v);
+                return;
+            case 224:
+                editOn(f2Mode, how, v);
+                return;
+            case 225:
+                editOn(f2Feedback, how, v);
+                return;
+            case 226:
+                editOn(f2Damping, how, v);
+                return;
+            case 227:
+                editOn(f2Vowel, how, v);
+                return;
+            case 228:
+                editOn(f2Shift, how, v);
+                return;
+            case 229:
+                editOn(f2Keytrack, how, v);
+                return;
+            case 230:
+                editOn(f2Env, how, v);
+                return;
+            case 231:
+                editOn(f2Velocity, how, v);
+                return;
+            case 232:
+                editOn(f2Drive, how, v);
+                return;
+            default:
+                return;
+        }
+    }
+
+    // Parameter `code`'s value as hosts show it.
+    void fillParam(Canvas& g, int code, double x, double y) const {
+        switch (code) {
+            case 1:
+                g.fillText(mode.text(), x, y);
+                return;
+            case 2:
+                g.fillText(polyphony.text(), x, y);
+                return;
+            case 3:
+                g.fillText(glide.text(), x, y);
+                return;
+            case 4:
+                g.fillText(bendRange.text(), x, y);
+                return;
+            case 5:
+                g.fillText(tune.text(), x, y);
+                return;
+            case 6:
+                g.fillText(unison.text(), x, y);
+                return;
+            case 7:
+                g.fillText(detune.text(), x, y);
+                return;
+            case 8:
+                g.fillText(spread.text(), x, y);
+                return;
+            case 9:
+                g.fillText(drift.text(), x, y);
+                return;
+            case 10:
+                g.fillText(quality.text(), x, y);
+                return;
+            case 11:
+                g.fillText(routing.text(), x, y);
+                return;
+            case 12:
+                g.fillText(driveType.text(), x, y);
+                return;
+            case 13:
+                g.fillText(driveAmount.text(), x, y);
+                return;
+            case 14:
+                g.fillText(driveBias.text(), x, y);
+                return;
+            case 15:
+                g.fillText(driveMix.text(), x, y);
+                return;
+            case 20:
+                g.fillText(ampAttack.text(), x, y);
+                return;
+            case 21:
+                g.fillText(ampDecay.text(), x, y);
+                return;
+            case 22:
+                g.fillText(ampSustain.text(), x, y);
+                return;
+            case 23:
+                g.fillText(ampRelease.text(), x, y);
+                return;
+            case 24:
+                g.fillText(ampVelocity.text(), x, y);
+                return;
+            case 25:
+                g.fillText(ampLevel.text(), x, y);
+                return;
+            case 26:
+                g.fillText(ampPan.text(), x, y);
+                return;
+            case 30:
+                g.fillText(envAttack.text(), x, y);
+                return;
+            case 31:
+                g.fillText(envDecay.text(), x, y);
+                return;
+            case 32:
+                g.fillText(envSustain.text(), x, y);
+                return;
+            case 33:
+                g.fillText(envRelease.text(), x, y);
+                return;
+            case 34:
+                g.fillText(envPitch.text(), x, y);
+                return;
+            case 35:
+                g.fillText(envFm.text(), x, y);
+                return;
+            case 40:
+                g.fillText(env3Attack.text(), x, y);
+                return;
+            case 41:
+                g.fillText(env3Decay.text(), x, y);
+                return;
+            case 42:
+                g.fillText(env3Sustain.text(), x, y);
+                return;
+            case 43:
+                g.fillText(env3Release.text(), x, y);
+                return;
+            case 50:
+                g.fillText(l1Shape.text(), x, y);
+                return;
+            case 51:
+                g.fillText(l1Sync.text(), x, y);
+                return;
+            case 52:
+                g.fillText(l1Rate.text(), x, y);
+                return;
+            case 53:
+                g.fillText(l1Division.text(), x, y);
+                return;
+            case 54:
+                g.fillText(l1Mode.text(), x, y);
+                return;
+            case 55:
+                g.fillText(l1Phase.text(), x, y);
+                return;
+            case 56:
+                g.fillText(l1Delay.text(), x, y);
+                return;
+            case 60:
+                g.fillText(l2Shape.text(), x, y);
+                return;
+            case 61:
+                g.fillText(l2Sync.text(), x, y);
+                return;
+            case 62:
+                g.fillText(l2Rate.text(), x, y);
+                return;
+            case 63:
+                g.fillText(l2Division.text(), x, y);
+                return;
+            case 64:
+                g.fillText(l2Mode.text(), x, y);
+                return;
+            case 65:
+                g.fillText(l2Phase.text(), x, y);
+                return;
+            case 66:
+                g.fillText(l2Delay.text(), x, y);
+                return;
+            case 70:
+                g.fillText(l3Shape.text(), x, y);
+                return;
+            case 71:
+                g.fillText(l3Sync.text(), x, y);
+                return;
+            case 72:
+                g.fillText(l3Rate.text(), x, y);
+                return;
+            case 73:
+                g.fillText(l3Division.text(), x, y);
+                return;
+            case 74:
+                g.fillText(l3Mode.text(), x, y);
+                return;
+            case 75:
+                g.fillText(l3Phase.text(), x, y);
+                return;
+            case 76:
+                g.fillText(l3Delay.text(), x, y);
+                return;
+            case 80:
+                g.fillText(m1.text(), x, y);
+                return;
+            case 81:
+                g.fillText(m2.text(), x, y);
+                return;
+            case 82:
+                g.fillText(m3.text(), x, y);
+                return;
+            case 83:
+                g.fillText(m4.text(), x, y);
+                return;
+            case 84:
+                g.fillText(output.text(), x, y);
+                return;
+            case 100:
+                g.fillText(o1Type.text(), x, y);
+                return;
+            case 101:
+                g.fillText(o1Level.text(), x, y);
+                return;
+            case 102:
+                g.fillText(o1Pan.text(), x, y);
+                return;
+            case 103:
+                g.fillText(o1Coarse.text(), x, y);
+                return;
+            case 104:
+                g.fillText(o1Fine.text(), x, y);
+                return;
+            case 105:
+                g.fillText(o1Wave.text(), x, y);
+                return;
+            case 106:
+                g.fillText(o1Width.text(), x, y);
+                return;
+            case 108:
+                g.fillText(o1Table.text(), x, y);
+                return;
+            case 109:
+                g.fillText(o1Position.text(), x, y);
+                return;
+            case 110:
+                g.fillText(o1Ratio.text(), x, y);
+                return;
+            case 111:
+                g.fillText(o1Feedback.text(), x, y);
+                return;
+            case 112:
+                g.fillText(o1Color.text(), x, y);
+                return;
+            case 113:
+                g.fillText(o1Octave.text(), x, y);
+                return;
+            case 114:
+                g.fillText(o1Fm.text(), x, y);
+                return;
+            case 115:
+                g.fillText(o1FmFrom.text(), x, y);
+                return;
+            case 116:
+                g.fillText(o1To.text(), x, y);
+                return;
+            case 117:
+                g.fillText(o1Retrigger.text(), x, y);
+                return;
+            case 120:
+                g.fillText(o2Type.text(), x, y);
+                return;
+            case 121:
+                g.fillText(o2Level.text(), x, y);
+                return;
+            case 122:
+                g.fillText(o2Pan.text(), x, y);
+                return;
+            case 123:
+                g.fillText(o2Coarse.text(), x, y);
+                return;
+            case 124:
+                g.fillText(o2Fine.text(), x, y);
+                return;
+            case 125:
+                g.fillText(o2Wave.text(), x, y);
+                return;
+            case 126:
+                g.fillText(o2Width.text(), x, y);
+                return;
+            case 127:
+                g.fillText(o2Sync.text(), x, y);
+                return;
+            case 128:
+                g.fillText(o2Table.text(), x, y);
+                return;
+            case 129:
+                g.fillText(o2Position.text(), x, y);
+                return;
+            case 130:
+                g.fillText(o2Ratio.text(), x, y);
+                return;
+            case 131:
+                g.fillText(o2Feedback.text(), x, y);
+                return;
+            case 132:
+                g.fillText(o2Color.text(), x, y);
+                return;
+            case 133:
+                g.fillText(o2Octave.text(), x, y);
+                return;
+            case 134:
+                g.fillText(o2Fm.text(), x, y);
+                return;
+            case 135:
+                g.fillText(o2FmFrom.text(), x, y);
+                return;
+            case 136:
+                g.fillText(o2To.text(), x, y);
+                return;
+            case 137:
+                g.fillText(o2Retrigger.text(), x, y);
+                return;
+            case 140:
+                g.fillText(o3Type.text(), x, y);
+                return;
+            case 141:
+                g.fillText(o3Level.text(), x, y);
+                return;
+            case 142:
+                g.fillText(o3Pan.text(), x, y);
+                return;
+            case 143:
+                g.fillText(o3Coarse.text(), x, y);
+                return;
+            case 144:
+                g.fillText(o3Fine.text(), x, y);
+                return;
+            case 145:
+                g.fillText(o3Wave.text(), x, y);
+                return;
+            case 146:
+                g.fillText(o3Width.text(), x, y);
+                return;
+            case 147:
+                g.fillText(o3Sync.text(), x, y);
+                return;
+            case 148:
+                g.fillText(o3Table.text(), x, y);
+                return;
+            case 149:
+                g.fillText(o3Position.text(), x, y);
+                return;
+            case 150:
+                g.fillText(o3Ratio.text(), x, y);
+                return;
+            case 151:
+                g.fillText(o3Feedback.text(), x, y);
+                return;
+            case 152:
+                g.fillText(o3Color.text(), x, y);
+                return;
+            case 153:
+                g.fillText(o3Octave.text(), x, y);
+                return;
+            case 154:
+                g.fillText(o3Fm.text(), x, y);
+                return;
+            case 155:
+                g.fillText(o3FmFrom.text(), x, y);
+                return;
+            case 156:
+                g.fillText(o3To.text(), x, y);
+                return;
+            case 157:
+                g.fillText(o3Retrigger.text(), x, y);
+                return;
+            case 160:
+                g.fillText(o4Type.text(), x, y);
+                return;
+            case 161:
+                g.fillText(o4Level.text(), x, y);
+                return;
+            case 162:
+                g.fillText(o4Pan.text(), x, y);
+                return;
+            case 163:
+                g.fillText(o4Coarse.text(), x, y);
+                return;
+            case 164:
+                g.fillText(o4Fine.text(), x, y);
+                return;
+            case 165:
+                g.fillText(o4Wave.text(), x, y);
+                return;
+            case 166:
+                g.fillText(o4Width.text(), x, y);
+                return;
+            case 167:
+                g.fillText(o4Sync.text(), x, y);
+                return;
+            case 168:
+                g.fillText(o4Table.text(), x, y);
+                return;
+            case 169:
+                g.fillText(o4Position.text(), x, y);
+                return;
+            case 170:
+                g.fillText(o4Ratio.text(), x, y);
+                return;
+            case 171:
+                g.fillText(o4Feedback.text(), x, y);
+                return;
+            case 172:
+                g.fillText(o4Color.text(), x, y);
+                return;
+            case 173:
+                g.fillText(o4Octave.text(), x, y);
+                return;
+            case 174:
+                g.fillText(o4Fm.text(), x, y);
+                return;
+            case 175:
+                g.fillText(o4FmFrom.text(), x, y);
+                return;
+            case 176:
+                g.fillText(o4To.text(), x, y);
+                return;
+            case 177:
+                g.fillText(o4Retrigger.text(), x, y);
+                return;
+            case 200:
+                g.fillText(f1Type.text(), x, y);
+                return;
+            case 201:
+                g.fillText(f1Cutoff.text(), x, y);
+                return;
+            case 202:
+                g.fillText(f1Resonance.text(), x, y);
+                return;
+            case 203:
+                g.fillText(f1Slope.text(), x, y);
+                return;
+            case 204:
+                g.fillText(f1Mode.text(), x, y);
+                return;
+            case 205:
+                g.fillText(f1Feedback.text(), x, y);
+                return;
+            case 206:
+                g.fillText(f1Damping.text(), x, y);
+                return;
+            case 207:
+                g.fillText(f1Vowel.text(), x, y);
+                return;
+            case 208:
+                g.fillText(f1Shift.text(), x, y);
+                return;
+            case 209:
+                g.fillText(f1Keytrack.text(), x, y);
+                return;
+            case 210:
+                g.fillText(f1Env.text(), x, y);
+                return;
+            case 211:
+                g.fillText(f1Velocity.text(), x, y);
+                return;
+            case 212:
+                g.fillText(f1Drive.text(), x, y);
+                return;
+            case 220:
+                g.fillText(f2Type.text(), x, y);
+                return;
+            case 221:
+                g.fillText(f2Cutoff.text(), x, y);
+                return;
+            case 222:
+                g.fillText(f2Resonance.text(), x, y);
+                return;
+            case 223:
+                g.fillText(f2Slope.text(), x, y);
+                return;
+            case 224:
+                g.fillText(f2Mode.text(), x, y);
+                return;
+            case 225:
+                g.fillText(f2Feedback.text(), x, y);
+                return;
+            case 226:
+                g.fillText(f2Damping.text(), x, y);
+                return;
+            case 227:
+                g.fillText(f2Vowel.text(), x, y);
+                return;
+            case 228:
+                g.fillText(f2Shift.text(), x, y);
+                return;
+            case 229:
+                g.fillText(f2Keytrack.text(), x, y);
+                return;
+            case 230:
+                g.fillText(f2Env.text(), x, y);
+                return;
+            case 231:
+                g.fillText(f2Velocity.text(), x, y);
+                return;
+            case 232:
+                g.fillText(f2Drive.text(), x, y);
+                return;
+            default:
+                g.fillText("", x, y);
+                return;
+        }
+    }
+
+    // --- layout -------------------------------------------------------------------------------
+
+    void dial(int code, double x, double y, double r, int colour, bool live) {
+        if (dials >= 64) return;
+        dialCode[dials] = code;
+        dialX[dials] = x;
+        dialY[dials] = y;
+        dialR[dials] = r;
+        dialColour[dials] = colour;
+        dialLive[dials] = live;
+        ++dials;
+    }
+
+    void button(int code, int value, double x, double y, double w, double h, int style,
+                int colour) {
+        if (buttons >= 96) return;
+        buttonCode[buttons] = code;
+        buttonValue[buttons] = value;
+        buttonX[buttons] = x;
+        buttonY[buttons] = y;
+        buttonW[buttons] = w;
+        buttonH[buttons] = h;
+        buttonStyle[buttons] = style;
+        buttonColour[buttons] = colour;
+        ++buttons;
+    }
+
+    // n buttons for `code`'s values first .. first + n - 1, across w.
+    void row(int code, int first, int n, double x, double y, double w, double h, int colour) {
+        const double gap = 5.0;
+        const double each = (w - gap * (n - 1)) / n;
+        for (int k = 0; k < n; ++k)
+            button(code, first + k, x + k * (each + gap), y, each, h, bChoice, colour);
+    }
+
+    // Everything the editor shows for the settings now.
+    void place() {
+        dials = 0;
+        buttons = 0;
+        // The header: the macros and the output.
+        for (int k = 0; k < 4; ++k) dial(cMacro + k, 604 + 62 * k, 36, 14, Theme::modulation, true);
+        dial(cOutput, 960, 36, 14, kLinen, true);
+        layoutOsc();
+        layoutFilter();
+        layoutEnv();
+        layoutLfo();
+        layoutDrive();
+        layoutVoice();
+    }
+
+    void layoutOsc() {
+        const int o = oscTab;
+        for (int k = 0; k < 4; ++k)
+            button(eOscTab, k, oscX + 16 + k * 145, oscY + 42, 137, 38, bTab, kGrass);
+        row(oc(o, oType), 0, 6, oscX + 16, oscY + 92, oscW - 32, 22, kGrass);
+        const int type = choiceOf(oc(o, oType));
+        if (type == kOff) return;
+        const double c0 = oscX + 312, step = 78, r1 = oscY + 162, r2 = oscY + 240;
+        const double r = 21;
+        dial(oc(o, oLevel), c0, r1, r, kGrass, true);
+        dial(oc(o, oPan), c0 + step, r1, r, kGrass, true);
+        const bool pitched = type == kAnalog || type == kWavetable || type == kFm;
+        if (pitched) {
+            dial(oc(o, oCoarse), c0 + 2 * step, r1, r, kGrass, true);
+            dial(oc(o, oFine), c0 + 3 * step, r1, r, kGrass, true);
+            dial(oc(o, oFm), c0 + 3 * step, r2, r, kGrass, true);
+        }
+        const double sx = waveX, sy = waveY + waveH + 8, sw = waveW, sh = 22;
+        if (type == kAnalog || type == kSub) row(oc(o, oWave), 0, 5, sx, sy, sw, sh, kGrass);
+        if (type == kAnalog) dial(oc(o, oWidth), c0, r2, r, kGrass, choiceOf(oc(o, oWave)) == 2);
+        if (type == kWavetable) {
+            button(eTableStep, -1, sx, sy, 24, sh, bStep, kGrass);
+            button(eTableStep, 1, sx + sw - 24, sy, 24, sh, bStep, kGrass);
+            dial(oc(o, oPosition), c0, r2, r, kGrass, true);
+        }
+        if (type == kFm) {
+            dial(oc(o, oRatio), c0, r2, r, kGrass, true);
+            dial(oc(o, oFeedback), c0 + step, r2, r, kGrass, true);
+        }
+        if (type == kNoise) row(oc(o, oColor), 0, 4, sx, sy, sw, sh, kGrass);
+        if (type == kSub) {
+            button(oc(o, oOctave), -1, c0 - 34, r2 - 11, 68, 22, bChoice, kGrass);
+            button(oc(o, oOctave), -2, c0 + step - 34, r2 - 11, 68, 22, bChoice, kGrass);
+        }
+        // The bottom row: where it goes, what modulates it, sync, retrigger.
+        const double by = oscY + oscH - 38;
+        row(oc(o, oTo), 0, 4, oscX + 40, by, 228, 22, kGrass);
+        if (pitched) row(oc(o, oFmFrom), 0, 3, oscX + 336, by, 132, 22, kGrass);
+        if (type != kNoise)
+            button(oc(o, oRetrigger), 0, oscX + oscW - 70, by, 54, 22, bToggle, kGrass);
+        if (o > 0 && type == kAnalog)
+            button(oc(o, oSync), 0, oscX + oscW - 124, by, 48, 22, bToggle, kGrass);
+    }
+
+    void layoutFilter() {
+        const int f = filterTab;
+        button(cRouting, 0, filX + filW - 146, filY + 13, 62, 22, bChoice, kSand);
+        button(cRouting, 1, filX + filW - 80, filY + 13, 62, 22, bChoice, kSand);
+        for (int k = 0; k < 2; ++k)
+            button(eFilterTab, k, filX + 16 + k * 188, filY + 42, 180, 38, bTab, kSand);
+        row(fc(f, fType), 0, 5, filX + 16, filY + 92, filW - 32, 22, kSand);
+        const int type = choiceOf(fc(f, fType));
+        if (type == kOff) return;
+        const double sx = curveX, sy = curveY + curveH + 24;
+        if (type == kLadder) row(fc(f, fSlope), 0, 2, sx, sy, 150, 22, kSand);
+        if (type == kSvf) row(fc(f, fMode), 0, 4, sx, sy, curveW, 22, kSand);
+        if (type == kFormant) row(fc(f, fVowel), 0, 5, sx, sy, curveW, 22, kSand);
+        const double c0 = filX + 384, step = 76, r1 = filY + 150, r2 = filY + 222;
+        const double r = 19;
+        if (type == kFormant) {
+            dial(fc(f, fVowel), c0, r1, r, kSand, true);
+            dial(fc(f, fShift), c0 + step, r1, r, kSand, true);
+        } else {
+            dial(fc(f, fCutoff), c0, r1, r, kSand, true);
+            dial(fc(f, type == kComb ? fFeedback : fResonance), c0 + step, r1, r, kSand, true);
+        }
+        dial(fc(f, type == kComb ? fDamping : fDrive), c0 + 2 * step, r1, r, kSand, true);
+        dial(fc(f, fKeytrack), c0, r2, r, kSand, true);
+        dial(fc(f, fEnv), c0 + step, r2, r, kSand, true);
+        dial(fc(f, fVelocity), c0 + 2 * step, r2, r, kSand, true);
+        if (type == kComb) dial(fc(f, fDrive), c0, filY + 294, r, kSand, true);
+    }
+
+    int envColour(int k) const {
+        return k == 0 ? Theme::accent : k == 1 ? kSand : Theme::modulation;
+    }
+    int envBase(int k) const { return k == 0 ? cAmp : k == 1 ? cEnv2 : cEnv3; }
+
+    void layoutEnv() {
+        for (int k = 0; k < 3; ++k)
+            button(eEnvTab, k, envX + envW - 214 + k * 66, envY + 13, 62, 22, bSmallTab,
+                   envColour(k));
+        const int base = envBase(envTab);
+        const int colour = envColour(envTab);
+        for (int k = 0; k < 4; ++k)
+            dial(base + k, envX + 53 + 75 * k, envY + 180, 16, colour, true);
+        const double a = envX + 360, b = envX + 428;
+        if (envTab == 0) {
+            dial(cAmp + 4, a, envY + 80, 17, colour, true);
+            dial(cAmp + 5, b, envY + 80, 17, colour, true);
+            dial(cAmp + 6, a, envY + 160, 17, colour, true);
+        } else if (envTab == 1) {
+            dial(cEnv2 + 4, a, envY + 80, 17, colour, true);
+            dial(cEnv2 + 5, b, envY + 80, 17, colour, true);
+        }
+    }
+
+    void layoutLfo() {
+        const int l = lfoTab;
+        for (int k = 0; k < 3; ++k)
+            button(eLfoTab, k, lfoX + lfoW - 112 + k * 32, lfoY + 13, 28, 22, bSmallTab,
+                   Theme::modulation);
+        for (int k = 0; k < 7; ++k)
+            button(lc(l, lShape), k, lfoX + 16 + k * 50, lfoY + 44, 46, 26, bShape,
+                   Theme::modulation);
+        const double by = cycleY + cycleH + 10;
+        row(lc(l, lMode), 0, 2, cycleX, by, 118, 22, Theme::modulation);
+        button(lc(l, lSync), 0, cycleX + 126, by, 74, 22, bToggle, Theme::modulation);
+        const bool synced = valueOf(lc(l, lSync)) > 0.5;
+        const double a = lfoX + 266, b = lfoX + 336;
+        dial(lc(l, synced ? lDivision : lRate), a, lfoY + 112, 18, Theme::modulation, true);
+        dial(lc(l, lPhase), b, lfoY + 112, 18, Theme::modulation, true);
+        dial(lc(l, lDelay), a, lfoY + 182, 18, Theme::modulation, true);
+    }
+
+    void layoutDrive() {
+        row(cDriveType, 0, 5, drvX + 16, drvY + 44, drvW - 32, 22, kSeaGlass);
+        if (choiceOf(cDriveType) == 0) return;
+        dial(cDriveAmount, drvX + 204, drvY + 116, 24, kSeaGlass, true);
+        dial(cDriveBias, drvX + 286, drvY + 116, 18, kSeaGlass, true);
+        dial(cDriveMix, drvX + 245, drvY + 186, 18, kSeaGlass, true);
+    }
+
+    void layoutVoice() {
+        row(cMode, 0, 3, voiX + 16, voiY + 52, 210, 22, kSeaGlass);
+        row(cQuality, 0, 3, voiX + voiW - 196, voiY + 13, 180, 22, kSeaGlass);
+        const int many = roundToInt(valueOf(cUnison));
+        for (int k = 0; k < 8; ++k) {
+            const int code = k == 0   ? cPolyphony
+                             : k == 1 ? cGlide
+                             : k == 2 ? cBend
+                             : k == 3 ? cTune
+                             : k == 4 ? cUnison
+                             : k == 5 ? cDetune
+                             : k == 6 ? cSpread
+                                      : cDrift;
+            const bool live = (k != 0 || choiceOf(cMode) == 0) && ((k != 5 && k != 6) || many > 1);
+            dial(code, voiX + 36 + 52 * k, voiY + 150, 16, kSeaGlass, live);
+        }
+    }
+
+    int dialAt(double x, double y) const {
+        for (int k = 0; k < dials; ++k) {
+            const double dx = x - dialX[k], dy = y - dialY[k], r = dialR[k] + 6;
+            if (dialLive[k] && dx * dx + dy * dy <= r * r) return k;
+        }
+        return -1;
+    }
+    int buttonAt(double x, double y) const {
+        for (int k = 0; k < buttons; ++k)
+            if (x >= buttonX[k] && x < buttonX[k] + buttonW[k] && y >= buttonY[k] &&
+                y < buttonY[k] + buttonH[k])
+                return k;
+        return -1;
+    }
+
+    // --- names --------------------------------------------------------------------------------
+
+    void fillType(Canvas& g, int t, double x, double y) const {
+        if (t == 1) {
+            g.fillText("Analog", x, y);
+            return;
+        }
+        if (t == 2) {
+            g.fillText("Wavetable", x, y);
+            return;
+        }
+        if (t == 3) {
+            g.fillText("FM", x, y);
+            return;
+        }
+        if (t == 4) {
+            g.fillText("Noise", x, y);
+            return;
+        }
+        if (t == 5) {
+            g.fillText("Sub", x, y);
+            return;
+        }
+        g.fillText("Off", x, y);
+        return;
+    }
+    void fillFilter(Canvas& g, int t, double x, double y) const {
+        if (t == 1) {
+            g.fillText("Ladder", x, y);
+            return;
+        }
+        if (t == 2) {
+            g.fillText("SVF", x, y);
+            return;
+        }
+        if (t == 3) {
+            g.fillText("Comb", x, y);
+            return;
+        }
+        if (t == 4) {
+            g.fillText("Formant", x, y);
+            return;
+        }
+        g.fillText("Off", x, y);
+        return;
+    }
+    void fillTable(Canvas& g, int t, double x, double y) const {
+        if (t == 0) {
+            g.fillText("Harmonic ramp", x, y);
+            return;
+        }
+        if (t == 1) {
+            g.fillText("PWM", x, y);
+            return;
+        }
+        if (t == 2) {
+            g.fillText("Formant", x, y);
+            return;
+        }
+        if (t == 3) {
+            g.fillText("Bell", x, y);
+            return;
+        }
+        if (t == 4) {
+            g.fillText("Organ", x, y);
+            return;
+        }
+        if (t == 5) {
+            g.fillText("Digital", x, y);
+            return;
+        }
+        g.fillText("Spectral comb", x, y);
+        return;
+    }
+    void fillOsc(Canvas& g, int o, double x, double y) const {
+        if (o == 0) {
+            g.fillText("Osc 1", x, y);
+            return;
+        }
+        if (o == 1) {
+            g.fillText("Osc 2", x, y);
+            return;
+        }
+        if (o == 2) {
+            g.fillText("Osc 3", x, y);
+            return;
+        }
+        g.fillText("Osc 4", x, y);
+        return;
+    }
+
+    // What a button says.
+    void fillButton(Canvas& g, int code, int value, double x, double y) const {
+        if (code == eEnvTab) {
+            g.fillText(value == 0 ? "AMP" : value == 1 ? "ENV 2" : "ENV 3", x, y);
+            return;
+        }
+        if (code == eLfoTab) {
+            g.fillText(value == 0 ? "1" : value == 1 ? "2" : "3", x, y);
+            return;
+        }
+        if (code == eTableStep) return;
+        if (code == cMode) {
+            g.fillText(value == 0 ? "POLY" : value == 1 ? "MONO" : "LEGATO", x, y);
+            return;
+        }
+        if (code == cQuality) {
+            g.fillText(value == 0 ? "ECO" : value == 1 ? "NORMAL" : "HIGH", x, y);
+            return;
+        }
+        if (code == cRouting) {
+            g.fillText(value == 0 ? "SERIAL" : "PARALLEL", x, y);
+            return;
+        }
+        if (code == cDriveType) {
+            if (value == 1) {
+                g.fillText("SOFT", x, y);
+                return;
+            }
+            if (value == 2) {
+                g.fillText("TAPE", x, y);
+                return;
+            }
+            if (value == 3) {
+                g.fillText("FOLD", x, y);
+                return;
+            }
+            if (value == 4) {
+                g.fillText("HARD", x, y);
+                return;
+            }
+            g.fillText("OFF", x, y);
+            return;
+        }
+        if (code >= 200) {
+            const int field = imod(code - 200, 20);
+            if (field == fType) {
+                if (value == 1) {
+                    g.fillText("LADDER", x, y);
+                    return;
+                }
+                if (value == 2) {
+                    g.fillText("SVF", x, y);
+                    return;
+                }
+                if (value == 3) {
+                    g.fillText("COMB", x, y);
+                    return;
+                }
+                if (value == 4) {
+                    g.fillText("FORMANT", x, y);
+                    return;
+                }
+                g.fillText("OFF", x, y);
+                return;
+            }
+            if (field == fSlope) {
+                g.fillText(value == 0 ? "12 dB" : "24 dB", x, y);
+                return;
+            }
+            if (field == fMode) {
+                if (value == 1) {
+                    g.fillText("BAND", x, y);
+                    return;
+                }
+                if (value == 2) {
+                    g.fillText("HIGH", x, y);
+                    return;
+                }
+                if (value == 3) {
+                    g.fillText("NOTCH", x, y);
+                    return;
+                }
+                g.fillText("LOW", x, y);
+                return;
+            }
+            if (field == fVowel) {
+                if (value == 1) {
+                    g.fillText("E", x, y);
+                    return;
+                }
+                if (value == 2) {
+                    g.fillText("I", x, y);
+                    return;
+                }
+                if (value == 3) {
+                    g.fillText("O", x, y);
+                    return;
+                }
+                if (value == 4) {
+                    g.fillText("U", x, y);
+                    return;
+                }
+                g.fillText("A", x, y);
+                return;
+            }
+            g.fillText("", x, y);
+            return;
+        }
+        if (code >= 100) {
+            const int o = idiv(code - 100, 20);
+            const int field = imod(code - 100, 20);
+            if (field == oType) {
+                if (value == 1) {
+                    g.fillText("ANALOG", x, y);
+                    return;
+                }
+                if (value == 2) {
+                    g.fillText("WAVETABLE", x, y);
+                    return;
+                }
+                if (value == 3) {
+                    g.fillText("FM", x, y);
+                    return;
+                }
+                if (value == 4) {
+                    g.fillText("NOISE", x, y);
+                    return;
+                }
+                if (value == 5) {
+                    g.fillText("SUB", x, y);
+                    return;
+                }
+                g.fillText("OFF", x, y);
+                return;
+            }
+            if (field == oWave) {
+                if (value == 1) {
+                    g.fillText("SQR", x, y);
+                    return;
+                }
+                if (value == 2) {
+                    g.fillText("PULSE", x, y);
+                    return;
+                }
+                if (value == 3) {
+                    g.fillText("TRI", x, y);
+                    return;
+                }
+                if (value == 4) {
+                    g.fillText("SINE", x, y);
+                    return;
+                }
+                g.fillText("SAW", x, y);
+                return;
+            }
+            if (field == oColor) {
+                if (value == 1) {
+                    g.fillText("PINK", x, y);
+                    return;
+                }
+                if (value == 2) {
+                    g.fillText("BROWN", x, y);
+                    return;
+                }
+                if (value == 3) {
+                    g.fillText("BLUE", x, y);
+                    return;
+                }
+                g.fillText("WHITE", x, y);
+                return;
+            }
+            if (field == oOctave) {
+                g.fillText(value == -1 ? "−1 OCT" : "−2 OCT", x, y);
+                return;
+            }
+            if (field == oTo) {
+                if (value == 1) {
+                    g.fillText("FILTER 2", x, y);
+                    return;
+                }
+                if (value == 2) {
+                    g.fillText("BOTH", x, y);
+                    return;
+                }
+                if (value == 3) {
+                    g.fillText("DIRECT", x, y);
+                    return;
+                }
+                g.fillText("FILTER 1", x, y);
+                return;
+            }
+            if (field == oFmFrom) {
+                // The other oscillators, in order.
+                const int other = value < o ? value : value + 1;
+                g.fillText(other == 0 ? "1" : other == 1 ? "2" : other == 2 ? "3" : "4", x, y);
+                return;
+            }
+            if (field == oSync) {
+                g.fillText("SYNC", x, y);
+                return;
+            }
+            if (field == oRetrigger) {
+                g.fillText("RETRIG", x, y);
+                return;
+            }
+            g.fillText("", x, y);
+            return;
+        }
+        if (code >= 50 && code < 80) {
+            const int field = imod(code - 50, 10);
+            if (field == lMode) {
+                g.fillText(value == 0 ? "NOTE" : "FREE", x, y);
+                return;
+            }
+            if (field == lSync) {
+                g.fillText("SYNC", x, y);
+                return;
+            }
+        }
+        g.fillText("", x, y);
+        return;
+    }
+
+    // A dial's name.
+    void fillDialName(Canvas& g, int code, double x, double y) const {
+        if (code >= cMacro && code < cMacro + 4) {
+            if (code == cMacro) {
+                g.fillText("MACRO 1", x, y);
+                return;
+            }
+            if (code == cMacro + 1) {
+                g.fillText("MACRO 2", x, y);
+                return;
+            }
+            if (code == cMacro + 2) {
+                g.fillText("MACRO 3", x, y);
+                return;
+            }
+            g.fillText("MACRO 4", x, y);
+            return;
+        }
+        if (code == cOutput) {
+            g.fillText("OUTPUT", x, y);
+            return;
+        }
+        if (code == cPolyphony) {
+            g.fillText("VOICES", x, y);
+            return;
+        }
+        if (code == cGlide) {
+            g.fillText("GLIDE", x, y);
+            return;
+        }
+        if (code == cBend) {
+            g.fillText("BEND", x, y);
+            return;
+        }
+        if (code == cTune) {
+            g.fillText("TUNE", x, y);
+            return;
+        }
+        if (code == cUnison) {
+            g.fillText("UNISON", x, y);
+            return;
+        }
+        if (code == cDetune) {
+            g.fillText("DETUNE", x, y);
+            return;
+        }
+        if (code == cSpread) {
+            g.fillText("SPREAD", x, y);
+            return;
+        }
+        if (code == cDrift) {
+            g.fillText("DRIFT", x, y);
+            return;
+        }
+        if (code == cDriveAmount) {
+            g.fillText("AMOUNT", x, y);
+            return;
+        }
+        if (code == cDriveBias) {
+            g.fillText("BIAS", x, y);
+            return;
+        }
+        if (code == cDriveMix) {
+            g.fillText("MIX", x, y);
+            return;
+        }
+        if (code >= cAmp && code < cEnv3 + 4) {
+            const int k = imod(code - cAmp, 10);
+            if (k == 0) {
+                g.fillText("ATTACK", x, y);
+                return;
+            }
+            if (k == 1) {
+                g.fillText("DECAY", x, y);
+                return;
+            }
+            if (k == 2) {
+                g.fillText("SUSTAIN", x, y);
+                return;
+            }
+            if (k == 3) {
+                g.fillText("RELEASE", x, y);
+                return;
+            }
+            if (code == cAmp + 4) {
+                g.fillText("VELOCITY", x, y);
+                return;
+            }
+            if (code == cAmp + 5) {
+                g.fillText("LEVEL", x, y);
+                return;
+            }
+            if (code == cAmp + 6) {
+                g.fillText("PAN", x, y);
+                return;
+            }
+            if (code == cEnv2 + 4) {
+                g.fillText("PITCH", x, y);
+                return;
+            }
+            if (code == cEnv2 + 5) {
+                g.fillText("FM DEPTH", x, y);
+                return;
+            }
+            g.fillText("", x, y);
+            return;
+        }
+        if (code >= 50 && code < 80) {
+            const int field = imod(code - 50, 10);
+            if (field == lRate) {
+                g.fillText("RATE", x, y);
+                return;
+            }
+            if (field == lDivision) {
+                g.fillText("DIVISION", x, y);
+                return;
+            }
+            if (field == lPhase) {
+                g.fillText("PHASE", x, y);
+                return;
+            }
+            if (field == lDelay) {
+                g.fillText("DELAY", x, y);
+                return;
+            }
+            g.fillText("", x, y);
+            return;
+        }
+        if (code >= 200) {
+            const int field = imod(code - 200, 20);
+            const int type = choiceOf(code - field);
+            if (field == fCutoff) {
+                g.fillText(type == kComb ? "PITCH" : "CUTOFF", x, y);
+                return;
+            }
+            if (field == fResonance) {
+                g.fillText("RESONANCE", x, y);
+                return;
+            }
+            if (field == fFeedback) {
+                g.fillText("FEEDBACK", x, y);
+                return;
+            }
+            if (field == fDamping) {
+                g.fillText("DAMPING", x, y);
+                return;
+            }
+            if (field == fVowel) {
+                g.fillText("VOWEL", x, y);
+                return;
+            }
+            if (field == fShift) {
+                g.fillText("SHIFT", x, y);
+                return;
+            }
+            if (field == fKeytrack) {
+                g.fillText("KEYTRACK", x, y);
+                return;
+            }
+            if (field == fEnv) {
+                g.fillText("ENV 2", x, y);
+                return;
+            }
+            if (field == fVelocity) {
+                g.fillText("VELOCITY", x, y);
+                return;
+            }
+            if (field == fDrive) {
+                g.fillText("DRIVE", x, y);
+                return;
+            }
+            g.fillText("", x, y);
+            return;
+        }
+        if (code >= 100) {
+            const int field = imod(code - 100, 20);
+            if (field == oLevel) {
+                g.fillText("LEVEL", x, y);
+                return;
+            }
+            if (field == oPan) {
+                g.fillText("PAN", x, y);
+                return;
+            }
+            if (field == oCoarse) {
+                g.fillText("COARSE", x, y);
+                return;
+            }
+            if (field == oFine) {
+                g.fillText("FINE", x, y);
+                return;
+            }
+            if (field == oWidth) {
+                g.fillText("WIDTH", x, y);
+                return;
+            }
+            if (field == oPosition) {
+                g.fillText("POSITION", x, y);
+                return;
+            }
+            if (field == oRatio) {
+                g.fillText("RATIO", x, y);
+                return;
+            }
+            if (field == oFeedback) {
+                g.fillText("FEEDBACK", x, y);
+                return;
+            }
+            if (field == oFm) {
+                g.fillText("FM", x, y);
+                return;
+            }
+            g.fillText("", x, y);
+            return;
+        }
+        g.fillText("", x, y);
+        return;
+    }
+
+    // Whether a dial lights from its middle.
+    bool bipolar(int code) const {
+        if (code == cTune || code == cDriveBias || code == cAmp + 6 || code == cEnv2 + 4)
+            return true;
+        if (code >= 200) {
+            const int field = imod(code - 200, 20);
+            return field == fFeedback || field == fShift || field == fEnv;
+        }
+        if (code >= 100) {
+            const int field = imod(code - 100, 20);
+            return field == oPan || field == oCoarse || field == oFine;
+        }
+        return false;
+    }
+
+    // --- drawing helpers ----------------------------------------------------------------------
+
+    void panel(Canvas& g, double x, double y, double w, double h) {
+        g.linearGradient(0, y, 0, y + h, Theme::surface, kGroundBottom);
+        g.beginPath();
+        g.roundRect(x, y, w, h, 10);
+        g.fill();
+        g.strokeStyle(Theme::line);
+        g.lineWidth(1);
+        g.stroke();
+        g.strokeStyle(Theme::lineLit);
+        g.globalAlpha(0.5);
+        g.beginPath();
+        g.moveTo(x + 10, y + 0.5);
+        g.lineTo(x + w - 10, y + 0.5);
+        g.stroke();
+        g.globalAlpha(1.0);
+    }
+
+    void well(Canvas& g, double x, double y, double w, double h) {
+        g.linearGradient(0, y, 0, y + h, kGraphTop, kGraphBottom);
+        g.beginPath();
+        g.roundRect(x, y, w, h, 6);
+        g.fill();
+        g.strokeStyle(Theme::line);
+        g.lineWidth(1);
+        g.stroke();
+    }
+
+    void heading(Canvas& g, const char* text, double x, double y) {
+        g.fillStyle(Theme::text);
+        g.serifFont(15);
+        g.textAlign(TextAlign::Left);
+        g.textBaseline(TextBaseline::Middle);
+        g.fillText(text, x, y);
+    }
+
+    void aside(Canvas& g, const char* text, double x, double y, TextAlign align) {
+        g.fillStyle(Theme::textFaint);
+        g.serifItalicFont(10.5);
+        g.textAlign(align);
+        g.textBaseline(TextBaseline::Middle);
+        g.fillText(text, x, y);
+    }
+
+    void label(Canvas& g, const char* text, double x, double y, TextAlign align) {
+        g.fillStyle(Theme::textFaint);
+        g.boldFont(8.5);
+        g.textAlign(align);
+        g.textBaseline(TextBaseline::Middle);
+        g.fillText(text, x, y);
+    }
+
+    bool hovered(double x, double y, double w, double h) const {
+        return dragging == 0 && hoverX >= x && hoverX < x + w && hoverY >= y && hoverY < y + h;
+    }
+
+    // A dial: an arc from 7 to 5 o'clock, lit to the value (a bipolar one
+    // from the top), its name over it and its value under it.
+    void drawDial(Canvas& g, int k) {
+        const int code = dialCode[k];
+        const double x = dialX[k], y = dialY[k], r = dialR[k];
+        const bool hot = k == hotDial || (dragging == 1 && k == dragDial);
+        if (!dialLive[k]) g.globalAlpha(0.35);
+        const double start = 0.75 * pi, sweep = 1.5 * pi;
+        g.lineCap(LineCap::Round);
+        g.strokeStyle(kInk);
+        g.lineWidth(r > 20 ? 5.5 : 4.5);
+        g.beginPath();
+        g.arc(x, y, r, start, start + sweep);
+        g.stroke();
+        const double at = start + sweep * clamp(readParam(code, 0), 0.0, 1.0);
+        const double from = bipolar(code) ? start + 0.5 * sweep : start;
+        g.strokeStyle(dialColour[k]);
+        g.lineWidth(r > 20 ? 4.0 : 3.2);
+        if (abs(at - from) > 0.001) {
+            g.beginPath();
+            if (at >= from)
+                g.arc(x, y, r, from, at);
+            else
+                g.arc(x, y, r, at, from);
+            g.stroke();
+        }
+        g.radialGradient(x, y - r * 0.25, 2, r - 3, hot ? kKnobHot : kKnobLight, kKnobDark);
+        g.beginPath();
+        g.circle(x, y, r - 6);
+        g.fill();
+        g.strokeStyle(Theme::text);
+        g.lineWidth(1.8);
+        g.beginPath();
+        g.moveTo(x + cos(at) * (r - 13), y + sin(at) * (r - 13));
+        g.lineTo(x + cos(at) * (r - 7.5), y + sin(at) * (r - 7.5));
+        g.stroke();
+        g.fillStyle(Theme::textFaint);
+        g.boldFont(8.5);
+        g.textAlign(TextAlign::Center);
+        g.textBaseline(TextBaseline::Middle);
+        fillDialName(g, code, x, y - r - 9);
+        g.fillStyle(hot ? Theme::text : Theme::textMuted);
+        g.monoFont(9.5);
+        g.textAlign(TextAlign::Center);
+        g.textBaseline(TextBaseline::Middle);
+        fillParam(g, code, x, y + r + 9);
+        g.globalAlpha(1.0);
+    }
+
+    bool buttonLit(int k) const {
+        const int code = buttonCode[k], value = buttonValue[k];
+        if (code == eOscTab) return value == oscTab;
+        if (code == eFilterTab) return value == filterTab;
+        if (code == eEnvTab) return value == envTab;
+        if (code == eLfoTab) return value == lfoTab;
+        if (code < 0) return false;
+        if (buttonStyle[k] == bToggle) return valueOf(code) > 0.5;
+        if (code >= 200 && imod(code - 200, 20) == fVowel) return abs(valueOf(code) - value) < 0.5;
+        if (code >= 100 && code < 200 && imod(code - 100, 20) == oOctave)
+            return roundToInt(valueOf(code)) == value;
+        return choiceOf(code) == value;
+    }
+
+    // A button's face, and the style its text takes.
+    void pill(Canvas& g, double x, double y, double w, double h, bool lit, int colour, bool hot) {
+        g.fillStyle(lit ? colour : (hot ? 0x3A2F27 : Theme::raised));
+        g.beginPath();
+        g.roundRect(x, y, w, h, min(h * 0.5, 11.0));
+        g.fill();
+        if (!lit) {
+            g.strokeStyle(Theme::line);
+            g.lineWidth(1);
+            g.stroke();
+        }
+        g.fillStyle(lit ? kInk : (hot ? Theme::text : Theme::textMuted));
+        g.boldFont(9);
+        g.textAlign(TextAlign::Center);
+        g.textBaseline(TextBaseline::Middle);
+    }
+
+    // An LFO shape's icon: a cycle of it.
+    void shapeIcon(Canvas& g, int shape, double x, double y, double w, double h, int colour) {
+        g.strokeStyle(colour);
+        g.lineWidth(1.4);
+        g.lineJoin(LineJoin::Round);
+        g.beginPath();
+        for (int i = 0; i <= 24; ++i) {
+            const double t = i / 24.0;
+            const double v = lfoWave(shape, t * 0.999, shape >= 5 ? floorToInt(t * 3.0) : 0, 3);
+            const double vy = shape == 5 ? lfoWave(5, 0.0, floorToInt(t * 3.0), 3) : v;
+            if (i == 0)
+                g.moveTo(x + t * w, y + h * 0.5 - vy * h * 0.4);
+            else
+                g.lineTo(x + t * w, y + h * 0.5 - vy * h * 0.4);
+        }
+        g.stroke();
+    }
+
+    void drawButton(Canvas& g, int k) {
+        const int style = buttonStyle[k];
+        if (style == bTab) return;  // its panel draws it
+        const double x = buttonX[k], y = buttonY[k], w = buttonW[k], h = buttonH[k];
+        const bool hot = k == hotButton;
+        const bool lit = buttonLit(k);
+        if (style == bStep) {
+            g.strokeStyle(hot ? Theme::text : Theme::textMuted);
+            g.lineWidth(1.6);
+            g.lineCap(LineCap::Round);
+            const double cx = x + w * 0.5, cy = y + h * 0.5, d = buttonValue[k] < 0 ? 1.0 : -1.0;
+            g.beginPath();
+            g.moveTo(cx + 3 * d, cy - 5);
+            g.lineTo(cx - 3 * d, cy);
+            g.lineTo(cx + 3 * d, cy + 5);
+            g.stroke();
+            return;
+        }
+        if (style == bShape) {
+            g.fillStyle(lit ? 0x3A2F3F : (hot ? 0x3A2F27 : Theme::raised));
+            g.beginPath();
+            g.roundRect(x, y, w, h, 6);
+            g.fill();
+            g.strokeStyle(lit ? buttonColour[k] : Theme::line);
+            g.lineWidth(1);
+            g.stroke();
+            shapeIcon(g, buttonValue[k], x + 8, y + 4, w - 16, h - 8,
+                      lit ? buttonColour[k] : (hot ? Theme::text : Theme::textFaint));
+            return;
+        }
+        pill(g, x, y, w, h, lit, buttonColour[k], hot);
+        fillButton(g, buttonCode[k], buttonValue[k], x + w * 0.5, y + h * 0.5 + 0.5);
+    }
+
+    // A tab of the oscillators or the filters: its name, its type, a dot
+    // lit while it plays.
+    void drawTab(Canvas& g, int k, int type, bool on) {
+        const bool osc = buttonCode[k] == eOscTab;
+        const double x = buttonX[k], y = buttonY[k], w = buttonW[k], h = buttonH[k];
+        const bool lit = buttonLit(k);
+        const bool hot = k == hotButton;
+        g.fillStyle(lit ? Theme::raised : (hot ? 0x2E251E : kInk));
+        g.beginPath();
+        g.roundRect(x, y, w, h, 7);
+        g.fill();
+        g.strokeStyle(lit ? Theme::lineLit : Theme::line);
+        g.lineWidth(1);
+        g.stroke();
+        if (lit) {
+            g.strokeStyle(buttonColour[k]);
+            g.lineWidth(2);
+            g.beginPath();
+            g.moveTo(x + 10, y + h - 1.5);
+            g.lineTo(x + w - 10, y + h - 1.5);
+            g.stroke();
+        }
+        g.fillStyle(lit ? Theme::text : Theme::textMuted);
+        g.boldFont(10.5);
+        g.textAlign(TextAlign::Left);
+        g.textBaseline(TextBaseline::Middle);
+        if (osc)
+            fillOsc(g, buttonValue[k], x + 12, y + 13);
+        else
+            g.fillText(buttonValue[k] == 0 ? "Filter 1" : "Filter 2", x + 12, y + 13);
+        g.fillStyle(on ? (lit ? buttonColour[k] : Theme::textMuted) : Theme::textFaint);
+        g.serifItalicFont(11);
+        if (osc)
+            fillType(g, type, x + 12, y + 27);
+        else
+            fillFilter(g, type, x + 12, y + 27);
+        g.fillStyle(on ? buttonColour[k] : kInk);
+        g.beginPath();
+        g.circle(x + w - 14, y + h * 0.5, 3.5);
+        g.fill();
+        if (!on) {
+            g.strokeStyle(Theme::lineLit);
+            g.lineWidth(1);
+            g.stroke();
+        }
+    }
+
+    void drawLevel(Canvas& g, double x, double y, double w, double left, double right) {
+        for (int c = 0; c < 2; ++c) {
+            const double db = c == 0 ? left : right;
+            const double y0 = y + c * 6;
+            g.fillStyle(kInk);
+            g.beginPath();
+            g.roundRect(x, y0, w, 4, 2);
+            g.fill();
+            const double t = clamp((db + 60.0) / 60.0, 0.0, 1.0);
+            if (t > 0.0) {
+                g.linearGradient(x, 0, x + w, 0, kMeterLow, db > -0.1 ? Theme::alert : kMeterHigh);
+                g.beginPath();
+                g.roundRect(x, y0, w * t, 4, 2);
+                g.fill();
+            }
+        }
+    }
+
+    // --- the mark and the header --------------------------------------------------------------
+
+    // Marram on a dune: a swell of sand and a tuft of blades leaning with
+    // the wind; a blade lights for each voice playing.
+    void drawMark(Canvas& g, double x, double y) {
+        g.linearGradient(0, y + 8, 0, y + 22, kSand, 0x9C7A4C);
+        g.beginPath();
+        g.moveTo(x - 20, y + 22);
+        g.bezierCurveTo(x - 10, y + 8, x + 8, y + 6, x + 22, y + 22);
+        g.closePath();
+        g.fill();
+        const int playing = soundingNow.get();
+        g.lineCap(LineCap::Round);
+        for (int k = 0; k < 7; ++k) {
+            const double base = x - 9 + k * 3.2;
+            const double tall = 22 + 6 * sin(k * 1.7);
+            const double lean = 5 + k * 1.3;
+            g.strokeStyle(k < playing ? kLinen : (imod(k, 2) == 0 ? kGrass : 0x8A9A57));
+            g.lineWidth(1.5);
+            g.beginPath();
+            g.moveTo(base, y + 12);
+            g.quadraticCurveTo(base + lean * 0.2, y + 12 - tall * 0.6, base + lean, y + 12 - tall);
+            g.stroke();
+        }
+    }
+
+    // The patch in a phrase: its oscillators, and the filters they go
+    // through.
+    void drawSummary(Canvas& g, double x, double y) {
+        g.fillStyle(Theme::textMuted);
+        g.serifItalicFont(13);
+        g.textAlign(TextAlign::Left);
+        g.textBaseline(TextBaseline::Alphabetic);
+        int any = 0;
+        for (int o = 0; o < 4; ++o) {
+            const int t = choiceOf(oc(o, oType));
+            if (t == kOff) continue;
+            if (any > 0) {
+                g.fillText("+", x, y);
+                x += g.measureText("+") + 5;
+            }
+            const char* name = t == kAnalog      ? "analog"
+                               : t == kWavetable ? "wavetable"
+                               : t == kFm        ? "fm"
+                               : t == kNoise     ? "noise"
+                                                 : "sub";
+            g.fillText(name, x, y);
+            x += g.measureText(name) + 5;
+            ++any;
+        }
+        if (any == 0) {
+            g.fillText("silent: every oscillator is off", x, y);
+            return;
+        }
+        const int a = choiceOf(fc(0, fType)), b = choiceOf(fc(1, fType));
+        if (a == kOff && b == kOff) return;
+        g.fillText("through", x, y);
+        x += g.measureText("through") + 5;
+        const char* first = a == kLadder ? "a ladder"
+                            : a == kSvf  ? "an svf"
+                            : a == kComb ? "a comb"
+                                         : "formants";
+        const char* second = b == kLadder ? "a ladder"
+                             : b == kSvf  ? "an svf"
+                             : b == kComb ? "a comb"
+                                          : "formants";
+        if (a != kOff) {
+            g.fillText(first, x, y);
+            x += g.measureText(first) + 5;
+        }
+        if (a != kOff && b != kOff) {
+            const char* join = choiceOf(cRouting) == 0 ? "into" : "and";
+            g.fillText(join, x, y);
+            x += g.measureText(join) + 5;
+        }
+        if (b != kOff) g.fillText(second, x, y);
+    }
+
+    void drawHeader(Canvas& g) {
+        drawMark(g, 32, 30);
+        g.fillStyle(Theme::text);
+        g.serifFont(25);
+        g.textAlign(TextAlign::Left);
+        g.textBaseline(TextBaseline::Alphabetic);
+        g.fillText("Marram", 62, 41);
+        drawSummary(g, 70 + g.measureText("Marram"), 41);
+        // The voices playing, of how many.
+        label(g, "VOICES", 880, 24, TextAlign::Center);
+        g.fillStyle(Theme::text);
+        g.monoFont(13);
+        g.textAlign(TextAlign::Center);
+        g.textBaseline(TextBaseline::Middle);
+        const int most = choiceOf(cMode) == 0 ? roundToInt(valueOf(cPolyphony)) : 1;
+        g.fillText(format("%d / %d", soundingNow.get(), most), 880, 42);
+        label(g, "OUT", 1004, 30, TextAlign::Right);
+        drawLevel(g, 1012, 25, 200, outLeft.get(), outRight.get());
+    }
+
+    // --- the oscillators ----------------------------------------------------------------------
+
+    // One cycle's point t (0..1) of oscillator o's wave, as its picture
+    // shows it.
+    double wavePoint(int o, int type, double t, int at) {
+        if (type == kAnalog || type == kSub) {
+            const int wave = choiceOf(oc(o, oWave));
+            return analogWave(wave, wrap01(t), 1.0 / 512.0, valueOf(oc(o, oWidth)));
+        }
+        if (type == kWavetable) {
+            const int table = choiceOf(oc(o, oTable));
+            if (table == 5) {
+                // Digital: the stepped ramp itself.
+                const double p = valueOf(oc(o, oPosition));
+                const double levels = exp2(4.0 - 2.0 * p);
+                const int steps = roundToInt(exp2(4.0 - 1.415 * p));
+                const double x = 2.0 * floor(wrap01(t) * steps) / steps - 1.0;
+                return round(x * levels) / levels;
+            }
+            double y = 0.0;
+            for (int k = 1; k <= 48; ++k) y += frameAmp[k] * sin(twoPi * k * t + framePhase[k]);
+            return y;
+        }
+        if (type == kFm) {
+            const double ratio = valueOf(oc(o, oRatio));
+            return sin(twoPi * ratio * t +
+                       valueOf(oc(o, oFeedback)) * 1.6 * sin(twoPi * ratio * t));
+        }
+        // Noise: a fixed stretch of it, rougher or smoother by its colour.
+        const int colour = choiceOf(oc(o, oColor));
+        const double a = scatter(at, 11), b = scatter(at + 1, 11), c = scatter(idiv(at, 6), 5);
+        if (colour == 0) return a;
+        if (colour == 1) return 0.55 * (a + b) * 0.8 + 0.3 * c;
+        if (colour == 2) return 0.85 * c + 0.12 * a;
+        return 0.9 * (a - b);
+    }
+
+    void drawWave(Canvas& g) {
+        const double x = waveX, y = waveY, w = waveW, h = waveH;
+        well(g, x, y, w, h);
+        const int o = oscTab;
+        const int type = choiceOf(oc(o, oType));
+        g.strokeStyle(Theme::line);
+        g.lineWidth(1);
+        g.beginPath();
+        g.moveTo(x + 8, y + h * 0.5);
+        g.lineTo(x + w - 8, y + h * 0.5);
+        g.stroke();
+        if (type == kOff) {
+            aside(g, "off: choose what it is above", x + w * 0.5, y + h * 0.5 - 14,
+                  TextAlign::Center);
+            return;
+        }
+        // Two cycles, as tall as its level.
+        const double gain = 0.42 * h * min(1.0, sqrt(dbToGain(valueOf(oc(o, oLevel))) * 2.0));
+        const double cycles = 2.0;
+        double peak = 1.0;
+        if (type == kWavetable && choiceOf(oc(o, oTable)) != 5) {
+            // The other frames faintly behind this one.
+            g.save();
+            g.clip(x + 2, y + 2, w - 4, h - 4);
+            for (int f = 0; f <= 4; ++f) {
+                harmonics(choiceOf(oc(o, oTable)), f / 4.0, frameAmp, framePhase, 48);
+                double most = 0.0;
+                for (int i = 0; i <= 60; ++i)
+                    most = max(most, abs(wavePoint(o, type, i / 60.0, i)));
+                g.strokeStyle(kGrass);
+                g.globalAlpha(0.12);
+                g.lineWidth(1);
+                g.beginPath();
+                for (int i = 0; i <= 120; ++i) {
+                    const double t = i / 120.0;
+                    const double v = wavePoint(o, type, t * cycles, i) / max(most, 1e-6);
+                    if (i == 0)
+                        g.moveTo(x + 8 + t * (w - 16), y + h * 0.5 - v * gain);
+                    else
+                        g.lineTo(x + 8 + t * (w - 16), y + h * 0.5 - v * gain);
+                }
+                g.stroke();
+            }
+            g.globalAlpha(1.0);
+            g.restore();
+            harmonics(choiceOf(oc(o, oTable)), valueOf(oc(o, oPosition)), frameAmp, framePhase, 48);
+            peak = 0.0;
+            for (int i = 0; i <= 120; ++i) peak = max(peak, abs(wavePoint(o, type, i / 120.0, i)));
+            peak = max(peak, 1e-6);
+        }
+        g.strokeStyle(kGrass);
+        g.lineWidth(1.8);
+        g.lineJoin(LineJoin::Round);
+        g.beginPath();
+        for (int i = 0; i <= 240; ++i) {
+            const double t = i / 240.0;
+            const double v = clamp(wavePoint(o, type, t * cycles, i) / peak, -1.1, 1.1);
+            if (i == 0)
+                g.moveTo(x + 8 + t * (w - 16), y + h * 0.5 - v * gain);
+            else
+                g.lineTo(x + 8 + t * (w - 16), y + h * 0.5 - v * gain);
+        }
+        g.stroke();
+        // The table's name, between its arrows.
+        if (type == kWavetable) {
+            g.fillStyle(Theme::text);
+            g.boldFont(9.5);
+            g.textAlign(TextAlign::Center);
+            g.textBaseline(TextBaseline::Middle);
+            fillTable(g, choiceOf(oc(o, oTable)), x + w * 0.5, y + h + 19);
+        }
+    }
+
+    void drawOscPanel(Canvas& g) {
+        panel(g, oscX, oscY, oscW, oscH);
+        heading(g, "Oscillators", oscX + 18, oscY + 24);
+        aside(g, "what each note is made of", oscX + oscW - 18, oscY + 24, TextAlign::Right);
+        for (int k = 0; k < buttons; ++k)
+            if (buttonCode[k] == eOscTab) {
+                const int o = buttonValue[k];
+                const int t = choiceOf(oc(o, oType));
+                drawTab(g, k, t, t != kOff);
+            }
+        drawWave(g);
+        const int type = choiceOf(oc(oscTab, oType));
+        if (type == kOff) return;
+        const double by = oscY + oscH - 38;
+        label(g, "TO", oscX + 18, by + 11, TextAlign::Left);
+        if (type == kAnalog || type == kWavetable || type == kFm)
+            label(g, "FM FROM", oscX + 330, by + 11, TextAlign::Right);
+        if (type == kSub) label(g, "OCTAVE", oscX + 312 + 39, oscY + 214, TextAlign::Center);
+    }
+
+    // --- the filters --------------------------------------------------------------------------
+
+    // Filter f's response at hz, in dB, as its settings make it (the key at
+    // middle C, the envelope at rest).
+    double responseDb(int f, double hz) {
+        const int type = choiceOf(fc(f, fType));
+        const double drive = dbToGain(valueOf(fc(f, fDrive)));
+        double re = 1.0, im = 0.0;
+        if (type == kLadder || type == kSvf) {
+            const double w = hz / valueOf(fc(f, fCutoff));
+            const double res = valueOf(fc(f, fResonance));
+            if (type == kLadder) {
+                // G = 1 / (1 + jw); the ladder's G^4 / (1 + k G^4), or G^2
+                // over the same for 12 dB.
+                const double k = 4.0 * res;
+                const double d = 1.0 + w * w;
+                const double gr = 1.0 / d, gi = -w / d;
+                const double g2r = gr * gr - gi * gi, g2i = 2.0 * gr * gi;
+                const double g4r = g2r * g2r - g2i * g2i, g4i = 2.0 * g2r * g2i;
+                const double nr = choiceOf(fc(f, fSlope)) == 1 ? g4r : g2r;
+                const double ni = choiceOf(fc(f, fSlope)) == 1 ? g4i : g2i;
+                const double dr = 1.0 + k * g4r, di = k * g4i;
+                const double m = dr * dr + di * di;
+                const double scale = (1.0 + 0.5 * k) * drive / max(1.0, drive * 0.5 + 0.5);
+                re = (nr * dr + ni * di) / m * scale;
+                im = (ni * dr - nr * di) / m * scale;
+            } else {
+                const double k = max(0.005, 2.0 * (1.0 - res) * (1.0 - res));
+                const double dr = 1.0 - w * w, di = k * w;
+                const int mode = choiceOf(fc(f, fMode));
+                double nr = 1.0, ni = 0.0;
+                if (mode == 1) {
+                    nr = 0.0;
+                    ni = w;
+                } else if (mode == 2) {
+                    nr = -w * w;
+                } else if (mode == 3) {
+                    nr = 1.0 - w * w;
+                }
+                const double m = dr * dr + di * di;
+                re = (nr * dr + ni * di) / m * drive;
+                im = (ni * dr - nr * di) / m * drive;
+            }
+        } else if (type == kComb) {
+            // 1 / (1 - fb LP(z) z^-D), D a period of the comb's pitch.
+            const double fb = valueOf(fc(f, fFeedback));
+            const double a = 1.0 - valueOf(fc(f, fDamping)) * 0.95;
+            const double rate = 96000.0;
+            const double wz = twoPi * hz / rate;
+            const double lr = 1.0 - (1.0 - a) * cos(wz), li = (1.0 - a) * sin(wz);
+            const double lm = lr * lr + li * li;
+            const double pr = a * lr / lm, pi2 = -a * li / lm;
+            const double turn = -twoPi * hz / max(valueOf(fc(f, fCutoff)), 25.0);
+            const double zr = cos(turn), zi = sin(turn);
+            const double tr = fb * (pr * zr - pi2 * zi), ti = fb * (pr * zi + pi2 * zr);
+            const double dr = 1.0 - tr, di = -ti;
+            const double m = dr * dr + di * di;
+            const double scale = (1.0 - abs(fb) * 0.5) * drive;
+            re = dr / m * scale;
+            im = -di / m * scale;
+        } else if (type == kFormant) {
+            const double v = clamp(valueOf(fc(f, fVowel)), 0.0, 4.0);
+            const int i = min(floorToInt(v), 3);
+            const double t = v - i;
+            const double up = exp2(valueOf(fc(f, fShift)) / 12.0);
+            re = 0.0;
+            for (int b = 0; b < 3; ++b) {
+                const double centre = lerp(formantHz(i, b), formantHz(i + 1, b), t) * up;
+                const double k = max(b == 0 ? 80.0 : b == 1 ? 90.0 : 120.0, centre / 6.0) / centre;
+                const double w = hz / centre;
+                const double dr = 1.0 - w * w, di = k * w;
+                const double m = dr * dr + di * di;
+                const double weight = (b == 0 ? 1.0 : b == 1 ? 0.6 : 0.35) * 2.5 * drive;
+                re += k * w * di / m * weight;
+                im += k * w * dr / m * weight;
+            }
+        }
+        return gainToDb(sqrt(re * re + im * im));
+    }
+
+    double hzAt(double x) const { return 20.0 * exp2((x - curveX) / curveW * log2(1000.0)); }
+    double xAt(double hz) const {
+        return curveX + curveW * log2(max(hz, 20.0) / 20.0) / log2(1000.0);
+    }
+    double dbY(double db) const {
+        return curveY + 10 + (curveH - 20) * (18.0 - clamp(db, -42.0, 18.0)) / 60.0;
+    }
+
+    void drawCurve(Canvas& g, int f, int colour, double alpha, bool fill) {
+        g.beginPath();
+        for (int i = 0; i <= 160; ++i) {
+            const double x = curveX + curveW * i / 160.0;
+            const double y = dbY(responseDb(f, hzAt(x)));
+            if (i == 0)
+                g.moveTo(x, y);
+            else
+                g.lineTo(x, y);
+        }
+        if (fill) {
+            g.lineTo(curveX + curveW, curveY + curveH);
+            g.lineTo(curveX, curveY + curveH);
+            g.closePath();
+            g.fillStyle(colour);
+            g.globalAlpha(0.08);
+            g.fill();
+            g.beginPath();
+            for (int i = 0; i <= 160; ++i) {
+                const double x = curveX + curveW * i / 160.0;
+                const double y = dbY(responseDb(f, hzAt(x)));
+                if (i == 0)
+                    g.moveTo(x, y);
+                else
+                    g.lineTo(x, y);
+            }
+        }
+        g.globalAlpha(alpha);
+        g.strokeStyle(colour);
+        g.lineWidth(fill ? 1.8 : 1.2);
+        g.lineJoin(LineJoin::Round);
+        g.stroke();
+        g.globalAlpha(1.0);
+    }
+
+    // Where the curve's handle is: the cutoff across, the resonance (or the
+    // comb's feedback, the formants' shift) up.
+    double nodeX(int f) const {
+        if (choiceOf(fc(f, fType)) == kFormant)
+            return curveX + 12 + (curveW - 24) * clamp(valueOf(fc(f, fVowel)) / 4.0, 0.0, 1.0);
+        return clamp(xAt(valueOf(fc(f, fCutoff))), curveX + 6, curveX + curveW - 6);
+    }
+    double nodeY(int f) const {
+        const int type = choiceOf(fc(f, fType));
+        double t = valueOf(fc(f, fResonance));
+        if (type == kComb) t = 0.5 + 0.5 * valueOf(fc(f, fFeedback)) / 0.99;
+        if (type == kFormant) t = 0.5 + valueOf(fc(f, fShift)) / 24.0;
+        return curveY + curveH - 12 - (curveH - 24) * clamp(t, 0.0, 1.0);
+    }
+
+    void drawFilterPanel(Canvas& g) {
+        panel(g, filX, filY, filW, filH);
+        heading(g, "Filters", filX + 18, filY + 24);
+        for (int k = 0; k < buttons; ++k)
+            if (buttonCode[k] == eFilterTab) {
+                const int f = buttonValue[k];
+                const int t = choiceOf(fc(f, fType));
+                drawTab(g, k, t, t != kOff);
+            }
+        // How the two are joined.
+        const double rx = filX + 400, ry = filY + 61;
+        const bool both = choiceOf(fc(0, fType)) != kOff && choiceOf(fc(1, fType)) != kOff;
+        const bool serial = choiceOf(cRouting) == 0;
+        g.strokeStyle(both ? kSand : Theme::lineLit);
+        g.lineWidth(1.2);
+        g.globalAlpha(both ? 0.9 : 0.5);
+        if (serial) {
+            g.beginPath();
+            g.moveTo(rx, ry);
+            g.lineTo(rx + 160, ry);
+            g.stroke();
+            for (int k = 0; k < 2; ++k) {
+                g.fillStyle(Theme::raised);
+                g.beginPath();
+                g.roundRect(rx + 30 + k * 70, ry - 9, 34, 18, 4);
+                g.fill();
+                g.stroke();
+            }
+        } else {
+            g.beginPath();
+            g.moveTo(rx, ry);
+            g.lineTo(rx + 20, ry);
+            g.moveTo(rx + 20, ry - 10);
+            g.lineTo(rx + 20, ry + 10);
+            g.moveTo(rx + 20, ry - 10);
+            g.lineTo(rx + 140, ry - 10);
+            g.moveTo(rx + 20, ry + 10);
+            g.lineTo(rx + 140, ry + 10);
+            g.moveTo(rx + 140, ry - 10);
+            g.lineTo(rx + 140, ry + 10);
+            g.moveTo(rx + 140, ry);
+            g.lineTo(rx + 160, ry);
+            g.stroke();
+            for (int k = 0; k < 2; ++k) {
+                g.fillStyle(Theme::raised);
+                g.beginPath();
+                g.roundRect(rx + 63, ry - 18 + k * 20, 34, 16, 4);
+                g.fill();
+                g.stroke();
+            }
+        }
+        g.globalAlpha(1.0);
+        g.fillStyle(Theme::textMuted);
+        g.boldFont(8.5);
+        g.textAlign(TextAlign::Center);
+        g.textBaseline(TextBaseline::Middle);
+        g.fillText("1", serial ? rx + 47 : rx + 80, serial ? ry : ry - 10);
+        g.fillText("2", serial ? rx + 117 : rx + 80, serial ? ry : ry + 10);
+
+        // The response.
+        well(g, curveX, curveY, curveW, curveH);
+        g.frequencyGrid(curveX, curveY, curveW, curveH, 20, 20000);
+        g.strokeStyle(Theme::line);
+        g.lineWidth(1);
+        g.beginPath();
+        g.moveTo(curveX + 4, dbY(0.0));
+        g.lineTo(curveX + curveW - 4, dbY(0.0));
+        g.stroke();
+        const int f = filterTab;
+        const int type = choiceOf(fc(f, fType));
+        g.save();
+        g.clip(curveX + 1, curveY + 1, curveW - 2, curveH - 2);
+        const int other = 1 - f;
+        if (choiceOf(fc(other, fType)) != kOff) drawCurve(g, other, Theme::textFaint, 0.5, false);
+        if (type != kOff) drawCurve(g, f, kSand, 1.0, true);
+        g.restore();
+        if (type == kOff) {
+            aside(g, "off: the oscillators sent here pass through", curveX + curveW * 0.5,
+                  curveY + curveH * 0.5 - 16, TextAlign::Center);
+            return;
+        }
+        const double nx = nodeX(f), ny = nodeY(f);
+        const bool hot = dragging == 2 || hovered(nx - 10, ny - 10, 20, 20);
+        g.fillStyle(kInk);
+        g.beginPath();
+        g.circle(nx, ny, hot ? 7.5 : 6.5);
+        g.fill();
+        g.strokeStyle(kSand);
+        g.lineWidth(2);
+        g.stroke();
+        if (type == kComb)
+            aside(g, "a comb tuned to its pitch: keytrack 100 % plays the note",
+                  curveX + curveW * 0.5, curveY + curveH + 35, TextAlign::Center);
+    }
+
+    // --- the envelopes ------------------------------------------------------------------------
+
+    // How wide a stage of `ms` is drawn, before fitting.
+    double stageWidth(double ms) const { return 10.0 + 22.0 * log2(1.0 + ms / 5.0); }
+
+    // The envelope's corners: where attack, decay and release end.
+    double envScale(int base) const {
+        const double hold = shapeW * 0.16;
+        const double total = stageWidth(valueOf(base)) + stageWidth(valueOf(base + 1)) +
+                             stageWidth(valueOf(base + 3));
+        return min(1.0, (shapeW - 16 - hold) / total);
+    }
+    double cornerX(int base, int k) const {
+        const double s = envScale(base);
+        double x = shapeX + 8 + stageWidth(valueOf(base)) * s;
+        if (k == 0) return x;
+        x += stageWidth(valueOf(base + 1)) * s;
+        if (k == 1) return x;
+        return x + shapeW * 0.16 + stageWidth(valueOf(base + 3)) * s;
+    }
+    double levelY(double level) const { return shapeY + shapeH - 10 - (shapeH - 22) * level; }
+
+    void drawEnvPanel(Canvas& g) {
+        panel(g, envX, envY, envW, envH);
+        heading(g, "Envelopes", envX + 18, envY + 24);
+        well(g, shapeX, shapeY, shapeW, shapeH);
+        const int base = envBase(envTab);
+        const int colour = envColour(envTab);
+        const double s = valueOf(base + 2);
+        const double x0 = shapeX + 8, xa = cornerX(base, 0), xd = cornerX(base, 1);
+        const double xs = xd + shapeW * 0.16, xr = cornerX(base, 2);
+        const double bottom = levelY(0.0), top = levelY(1.0), sy = levelY(s);
+        g.beginPath();
+        g.moveTo(x0, bottom);
+        g.lineTo(xa, top);
+        for (int i = 1; i <= 24; ++i) {
+            const double t = i / 24.0;
+            g.lineTo(xa + (xd - xa) * t, levelY(s + (1.0 - s) * (1.0 - t) * (1.0 - t) * (1.0 - t)));
+        }
+        g.lineTo(xs, sy);
+        for (int i = 1; i <= 24; ++i) {
+            const double t = i / 24.0;
+            g.lineTo(xs + (xr - xs) * t, levelY(s * (1.0 - t) * (1.0 - t) * (1.0 - t)));
+        }
+        g.lineTo(x0, bottom);
+        g.closePath();
+        g.fillStyle(colour);
+        g.globalAlpha(0.12);
+        g.fill();
+        g.globalAlpha(1.0);
+        g.strokeStyle(colour);
+        g.lineWidth(1.8);
+        g.lineJoin(LineJoin::Round);
+        g.stroke();
+        // The handles: the attack's peak, the decay's end, the release's.
+        for (int k = 0; k < 3; ++k) {
+            const double hx = k == 0 ? xa : k == 1 ? xd : xr;
+            const double hy = k == 0 ? top : k == 1 ? sy : bottom;
+            const bool hot = (dragging == 3 && handle == k) || hovered(hx - 9, hy - 9, 18, 18);
+            g.fillStyle(kInk);
+            g.beginPath();
+            g.circle(hx, hy, hot ? 6 : 5);
+            g.fill();
+            g.strokeStyle(colour);
+            g.lineWidth(1.8);
+            g.stroke();
+        }
+        // Where the newest note is.
+        const int stage = stageShown[envTab];
+        if (stage > 0) {
+            const double level = clamp(envShown[envTab], 0.0, 1.0);
+            double x = xd;
+            if (stage == 1) x = x0 + (xa - x0) * level;
+            if (stage == 2)
+                x = xa + (xd - xa) * clamp(1.0 - cbrt((level - s) / max(1.0 - s, 1e-6)), 0.0, 1.0);
+            if (stage == 3) x = xd + 0.5 * (xs - xd);
+            if (stage == 4) x = xs + (xr - xs) * clamp(1.0 - cbrt(level / max(s, 1e-6)), 0.0, 1.0);
+            g.fillStyle(kLinen);
+            g.beginPath();
+            g.circle(x, levelY(level), 3.5);
+            g.fill();
+        }
+        if (envTab == 1) {
+            aside(g, "it moves each cutoff", envX + 393, envY + 152, TextAlign::Center);
+            aside(g, "by its filter's Env 2", envX + 393, envY + 168, TextAlign::Center);
+        }
+        if (envTab == 2) {
+            aside(g, "a source for routes alone:", envX + 393, envY + 80, TextAlign::Center);
+            aside(g, "route env3 to anything", envX + 393, envY + 96, TextAlign::Center);
+        }
+    }
+
+    // --- the LFOs -----------------------------------------------------------------------------
+
+    void drawLfoPanel(Canvas& g) {
+        panel(g, lfoX, lfoY, lfoW, lfoH);
+        heading(g, "LFOs", lfoX + 18, lfoY + 24);
+        well(g, cycleX, cycleY, cycleW, cycleH);
+        const int l = lfoTab;
+        const int shape = choiceOf(lc(l, lShape));
+        const double mid = cycleY + cycleH * 0.5, half = cycleH * 0.38;
+        g.strokeStyle(Theme::line);
+        g.lineWidth(1);
+        g.beginPath();
+        g.moveTo(cycleX + 6, mid);
+        g.lineTo(cycleX + cycleW - 6, mid);
+        g.stroke();
+        // Two cycles from a note's start, fading in over the delay.
+        const bool synced = valueOf(lc(l, lSync)) > 0.5;
+        const double hz =
+            synced ? 2.0 / divisionBeats(choiceOf(lc(l, lDivision))) : valueOf(lc(l, lRate));
+        const double seconds = 2.0 / max(hz, 0.001);
+        const double delay = valueOf(lc(l, lDelay)) * 0.001;
+        const double start = valueOf(lc(l, lPhase)) / 360.0;
+        const bool note = choiceOf(lc(l, lMode)) == 0;
+        for (int pass = 0; pass < 2; ++pass) {
+            g.beginPath();
+            for (int i = 0; i <= 160; ++i) {
+                const double t = i / 160.0;
+                const double total = start + 2.0 * t;
+                const double fade =
+                    pass == 0 || !note || delay <= 0.0 ? 1.0 : min(1.0, t * seconds / delay);
+                const double v = lfoWave(shape, total - floor(total), floorToInt(total), 7) * fade;
+                const double x = cycleX + 8 + t * (cycleW - 16);
+                if (i == 0)
+                    g.moveTo(x, mid - v * half);
+                else
+                    g.lineTo(x, mid - v * half);
+            }
+            g.strokeStyle(Theme::modulation);
+            g.globalAlpha(pass == 0 ? 0.25 : 1.0);
+            g.lineWidth(pass == 0 ? 1.0 : 1.8);
+            g.stroke();
+        }
+        g.globalAlpha(1.0);
+        // Where it is now.
+        const double at = lfoShown[l];
+        if (at >= 0.0) {
+            const double t = wrap01(at - start) * 0.5;
+            const double total = start + 2.0 * t;
+            const double v = lfoWave(shape, total - floor(total), floorToInt(total), 7);
+            g.fillStyle(kLinen);
+            g.beginPath();
+            g.circle(cycleX + 8 + t * (cycleW - 16), mid - v * half, 3.5);
+            g.fill();
+        }
+    }
+
+    // --- the drive ----------------------------------------------------------------------------
+
+    void drawDrivePanel(Canvas& g) {
+        panel(g, drvX, drvY, drvW, drvH);
+        heading(g, "Drive", drvX + 18, drvY + 24);
+        aside(g, "after the filters", drvX + drvW - 18, drvY + 24, TextAlign::Right);
+        well(g, bendX, bendY, bendW, bendH);
+        const double cx = bendX + bendW * 0.5, cy = bendY + bendH * 0.5, half = bendW * 0.5 - 10;
+        g.strokeStyle(Theme::line);
+        g.lineWidth(1);
+        g.beginPath();
+        g.moveTo(bendX + 10, cy);
+        g.lineTo(bendX + bendW - 10, cy);
+        g.moveTo(cx, bendY + 10);
+        g.lineTo(cx, bendY + bendH - 10);
+        g.moveTo(bendX + 10, bendY + bendH - 10);
+        g.lineTo(bendX + bendW - 10, bendY + 10);
+        g.stroke();
+        const int type = choiceOf(cDriveType);
+        if (type == 0) {
+            aside(g, "off: the filters go", drvX + 245, drvY + 120, TextAlign::Center);
+            aside(g, "straight to the amp", drvX + 245, drvY + 136, TextAlign::Center);
+            return;
+        }
+        const double gain = dbToGain(valueOf(cDriveAmount));
+        const double bias = valueOf(cDriveBias);
+        const double mix = valueOf(cDriveMix);
+        g.beginPath();
+        for (int i = 0; i <= 80; ++i) {
+            const double x = -1.0 + 2.0 * i / 80.0;
+            const double wet = driveCurve(type, x * gain, bias) / sqrt(max(1.0, gain));
+            const double y = clamp(x + (wet - x) * mix, -1.2, 1.2);
+            if (i == 0)
+                g.moveTo(cx + x * half, cy - y * half);
+            else
+                g.lineTo(cx + x * half, cy - y * half);
+        }
+        g.strokeStyle(kSeaGlass);
+        g.lineWidth(1.8);
+        g.lineJoin(LineJoin::Round);
+        g.stroke();
+    }
+
+    // --- the routes and the voice -------------------------------------------------------------
+
+    void drawModPanel(Canvas& g) {
+        panel(g, modX, modY, modW, modH);
+        heading(g, "Modulation", modX + 18, modY + 22);
+        aside(g, "a source moves a setting by an amount in the setting's own unit",
+              modX + modW - 18, modY + 22, TextAlign::Right);
+    }
+
+    void drawVoicePanel(Canvas& g) {
+        panel(g, voiX, voiY, voiW, voiH);
+        heading(g, "Voice", voiX + 18, voiY + 24);
+    }
+
+    void draw(Canvas& g) {
+        place();
+        g.linearGradient(0, 0, 0, kH, Theme::ground, kGroundBottom);
+        g.fillRect(0, 0, kW, kH);
+        drawHeader(g);
+        drawOscPanel(g);
+        drawFilterPanel(g);
+        drawEnvPanel(g);
+        drawLfoPanel(g);
+        drawDrivePanel(g);
+        drawModPanel(g);
+        drawVoicePanel(g);
+        for (int k = 0; k < buttons; ++k) drawButton(g, k);
+        for (int k = 0; k < dials; ++k) drawDial(g, k);
+    }
+
+    // --- the pointer --------------------------------------------------------------------------
+
+    void pointer(const Pointer& p) {
+        place();
+        const PointerAction a = p.action();
+        const double fine = p.shift() ? 0.2 : 1.0;
+        if (a == PointerAction::Leave) {
+            hoverX = -1.0;
+            hoverY = -1.0;
+            hotDial = -1;
+            hotButton = -1;
+            return;
+        }
+        hoverX = p.x();
+        hoverY = p.y();
+        if (a == PointerAction::Move) {
+            hotDial = dialAt(p.x(), p.y());
+            hotButton = buttonAt(p.x(), p.y());
+            return;
+        }
+        if (a == PointerAction::Press) {
+            pressed(p);
+            return;
+        }
+        if (a == PointerAction::Drag) {
+            if (dragging == 1) {
+                dialPos = clamp(dialPos - p.dy() * fine / 200.0, 0.0, 1.0);
+                editParam(dialCode[dragDial], 1, dialPos);
+            } else if (dragging == 2) {
+                dragCurve(p.x() - pressX, p.y() - pressY, fine);
+            } else if (dragging == 3) {
+                dragEnvelope(p.x() - pressX, p.y() - pressY, fine);
+            }
+            return;
+        }
+        if (a == PointerAction::Release) {
+            dragging = 0;
+            hotDial = dialAt(p.x(), p.y());
+            return;
+        }
+        if (a == PointerAction::Wheel) {
+            const double notches = p.wheel();
+            const int k = dialAt(p.x(), p.y());
+            if (k >= 0) {
+                const int code = dialCode[k];
+                editParam(code, 1, clamp(readParam(code, 0) + notches * 0.02 * fine, 0.0, 1.0));
+                return;
+            }
+            if (p.over(curveX, curveY, curveW, curveH)) {
+                const int f = filterTab;
+                const int type = choiceOf(fc(f, fType));
+                const int field = type == kComb      ? fFeedback
+                                  : type == kFormant ? fShift
+                                                     : fResonance;
+                if (type != kOff)
+                    editParam(fc(f, field), 1,
+                              clamp(readParam(fc(f, field), 0) + notches * 0.02 * fine, 0.0, 1.0));
+            }
+        }
+    }
+
+    void pressed(const Pointer& p) {
+        const double x = p.x(), y = p.y();
+        const int k = dialAt(x, y);
+        if (k >= 0) {
+            if (p.doubleClick()) {
+                editParam(dialCode[k], 2, 0.0);
+                return;
+            }
+            dragging = 1;
+            dragDial = k;
+            dialPos = readParam(dialCode[k], 0);
+            return;
+        }
+        const int b = buttonAt(x, y);
+        if (b >= 0) {
+            press(b);
+            return;
+        }
+        const int f = filterTab;
+        const int type = choiceOf(fc(f, fType));
+        if (type != kOff && p.over(curveX, curveY, curveW, curveH)) {
+            dragging = 2;
+            pressX = x;
+            pressY = y;
+            pressA = valueOf(fc(f, type == kFormant ? fVowel : fCutoff));
+            pressB = valueOf(fc(f, type == kComb      ? fFeedback
+                                   : type == kFormant ? fShift
+                                                      : fResonance));
+            return;
+        }
+        if (p.over(shapeX, shapeY, shapeW, shapeH)) {
+            const int base = envBase(envTab);
+            const double s = valueOf(base + 2);
+            int best = -1;
+            double closest = 400.0;
+            for (int h = 0; h < 3; ++h) {
+                const double hx = cornerX(base, h);
+                const double hy = h == 0 ? levelY(1.0) : h == 1 ? levelY(s) : levelY(0.0);
+                const double d = (x - hx) * (x - hx) + (y - hy) * (y - hy);
+                if (d < closest) {
+                    closest = d;
+                    best = h;
+                }
+            }
+            if (best < 0) return;
+            dragging = 3;
+            handle = best;
+            pressX = x;
+            pressY = y;
+            pressA = valueOf(base + (best == 0 ? 0 : best == 1 ? 1 : 3));
+            pressB = s;
+        }
+    }
+
+    void press(int b) {
+        const int code = buttonCode[b], value = buttonValue[b];
+        if (code == eOscTab) oscTab = value;
+        if (code == eFilterTab) filterTab = value;
+        if (code == eEnvTab) envTab = value;
+        if (code == eLfoTab) lfoTab = value;
+        if (code == eTableStep) {
+            const int table = oc(oscTab, oTable);
+            editParam(table, 0, clamp(choiceOf(table) + value, 0, 6));
+        }
+        if (code < 0) return;
+        if (buttonStyle[b] == bToggle) {
+            editParam(code, 0, valueOf(code) > 0.5 ? 0.0 : 1.0);
+            return;
+        }
+        editParam(code, 0, value);
+    }
+
+    // The filter's curve: across moves the cutoff (the vowel), up and down
+    // the resonance (the comb's feedback, the formants' shift).
+    void dragCurve(double dx, double dy, double fine) {
+        const int f = filterTab;
+        const int type = choiceOf(fc(f, fType));
+        const double across = dx * fine / curveW, up = -dy * fine / (curveH - 24);
+        if (type == kFormant) {
+            editParam(fc(f, fVowel), 0, pressA + across * 4.0);
+            editParam(fc(f, fShift), 0, pressB + up * 24.0);
+            return;
+        }
+        editParam(fc(f, fCutoff), 0, pressA * exp2(across * log2(1000.0)));
+        if (type == kComb)
+            editParam(fc(f, fFeedback), 0, pressB + up * 1.98);
+        else
+            editParam(fc(f, fResonance), 0, pressB + up);
+    }
+
+    // The envelope: a stage's time across, the sustain up and down.
+    void dragEnvelope(double dx, double dy, double fine) {
+        const int base = envBase(envTab);
+        const int time = base + (handle == 0 ? 0 : handle == 1 ? 1 : 3);
+        editParam(time, 0, max(pressA, 1.0) * exp2(dx * fine / 40.0));
+        if (handle == 1) editParam(base + 2, 0, pressB - dy * fine / (shapeH - 22));
     }
 
     // --- Factory sounds ---------------------------------------------------------------------

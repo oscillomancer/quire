@@ -1,8 +1,8 @@
 # Spec: Marram — the stock synthesizer
 
 **Status:** In progress. The voice and its modulation (this document) are
-implemented; the editor, the agent guide and the evaluation tasks follow,
-and Orrery (`synth.md`) stays the documented synthesizer until they are
+implemented, and so is its editor; the agent guide and the evaluation
+tasks follow, and Orrery (`synth.md`) stays the documented synthesizer until they are
 done.
 **Plugin:** `plugins/stock/marram`, CLAP id `com.suppleaudio.marram`,
 instrument. A DSP script compiled natively (ADR-0047),
@@ -232,13 +232,40 @@ a rotary shimmer), Wobble Bass (an LFO in eighths of the song), Sync Lead
 through a wavetable; Macro 1 darkens it). Each measures −15.1 to −18.1 LUFS
 on `dsp.test`'s notes signal (a note, then a chord, velocity 0.8).
 
-## 5. Not yet (each a later step)
+## 5. The editor
 
-- **Its own editor**: the automatic one shows every group and dims what
-  does not apply, but has no way to show or edit routes.
+The script's own, 1240 by 880 design units, drawn and edited in the
+script (`editor()`, `draw()`, `pointer()`); the audio code sends the
+output peaks, the voices sounding and the newest note's envelope and LFO
+places as `Shared` members.
+
+- **Header**: the name and a dune of grass, a blade a voice, lit while it
+  sounds; the four macros; voices sounding of the limit; the output level
+  and its meter.
+- **Oscillators** (a tab each, with its type): its wave, two cycles drawn
+  from the same code that makes it (a wavetable's frame at its position,
+  an FM operator's ratio and depth, sync), and its controls. Controls that
+  do not apply are dimmed, as the parameters' activity says.
+- **Filters**: the two filters' combined response, computed from their
+  parameters, with a node per filter to drag (cutoff across, resonance
+  up); their routing; each filter's controls.
+- **Envelopes** (amp, Env 2, Env 3): the shape with a handle per stage to
+  drag, and where the newest note is in it.
+- **LFOs**: the shape with its delay's fade and the newest note's phase.
+- **Drive**: the type's transfer curve at the current drive.
+- **Modulation**: the route list (`e.routes()`), the same as the automatic
+  editor's for any script with routes.
+- **Voice**: quality, mode, polyphony, glide, bend range, tuning, unison
+  and drift.
+
+Every dial drags (Shift: finely), turns by the wheel and resets on a
+double click.
+
+## 6. Not yet (each a later step)
+
 - **The agent guide and evaluation tasks**, then Orrery's removal.
 
-## 6. Performance
+## 7. Performance
 
 Release build, one core, 48 kHz: 8 notes of a pad with two saws and a sub,
 3 unison copies, a 24 dB ladder and tape drive at normal quality, 4.1 %

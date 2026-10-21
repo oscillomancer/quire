@@ -317,8 +317,11 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   envelope, three LFOs (per note or free, synced or not, seven shapes),
   four macros and the MIDI sources to some sixty per-voice destinations;
   and fifteen factory sounds. Its parameters say when they apply, so an
-  agent sees only the oscillators and filters a patch uses. It passes the
-  stock checks and the REAPER check.
+  agent sees only the oscillators and filters a patch uses. Its editor
+  draws each oscillator's wave (the wavetables' own frames), the filters'
+  response with a node to drag, the envelopes and LFOs with handles and
+  the newest note's place, the drive curve, the voices playing and the
+  route list. It passes the stock checks and the REAPER check.
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The
@@ -559,6 +562,5 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
 - Track groups, stretch markers, MIDI outputs, a background media cache.
 - Lua ergonomics (a script library path, hot reload).
 - Orrery's structural performance pass.
-- Marram's editor (the automatic one for now, which cannot show routes),
-  its agent guide and evaluation tasks; then Orrery goes.
+- Marram's agent guide and evaluation tasks; then Orrery goes.
 - Hardening and ports beyond Linux.
