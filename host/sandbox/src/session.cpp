@@ -36,6 +36,13 @@ struct Session::Txn {
 
 namespace {
 
+// Whether a schema entry's parameter applies with the current values: unless
+// it says "active": false.
+bool applies(const json::Value* entry) {
+    const json::Value* active = entry ? entry->find("active") : nullptr;
+    return !(active && active->isBool() && !active->asBool());
+}
+
 bool iequals(std::string_view a, std::string_view b) {
     return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
                return std::tolower(static_cast<unsigned char>(x)) ==
@@ -549,7 +556,13 @@ Result<json::Value> Session::paramSet(std::string_view id, const json::Value& va
         merge["params"] = values;
         auto st = l.instance->setPatch(json::writeCompact(merge), CLAP_SUPPLE_SET_MERGE);
         if (!st) return rebase(std::move(st).error(), "/params", "/values");
-        return paramGet(id, keys);
+        auto set = paramGet(id, keys);
+        if (!set) return set;
+        // A value that does nothing now says so.
+        const json::Value* entries = schema(id).find("params");
+        for (const std::string& key : keys)
+            if (!applies(entries ? entries->find(key) : nullptr)) (*set)[key]["active"] = false;
+        return set;
     }
     // Third-party: resolve and validate everything first, then apply.
     const auto infos = l.instance->params();
@@ -629,6 +642,11 @@ Result<Session::MergeResult> Session::patchMerge(std::string_view id,
     auto d = in.describe(true);
     if (!d) return std::move(d).error();
     r.description = std::move(*d);
+    if (const json::Value* set = mergePatch.find("params"); set && set->isObject()) {
+        const json::Value* entries = schema(id).find("params");
+        for (const auto& m : set->asObject())
+            if (!applies(entries ? entries->find(m.key) : nullptr)) r.inactive.push_back(m.key);
+    }
     return r;
 }
 

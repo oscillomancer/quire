@@ -147,6 +147,9 @@ class Session {
     struct MergeResult {
         json::Value changed;  // the effective change as a minimal merge patch ({} if none)
         std::string description;
+        // Keys its "params" set whose parameter does not apply now (the schema's
+        // "active": false): kept, and heard once their conditions hold.
+        std::vector<std::string> inactive;
     };
     Result<MergeResult> patchMerge(std::string_view instance, const json::Value& mergePatch);
     Result<std::string> describe(std::string_view instance, bool changedOnly);

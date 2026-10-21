@@ -100,6 +100,33 @@ TEST_CASE("DSP render commands locate invalid patch values inside the patch argu
     }
 }
 
+TEST_CASE("results name the parameters that do not apply with the values they leave") {
+    Harness h;
+    h.write("sometimes", script("Sometimes", "com.example.sometimes",
+                                "    Param on = toggle(\"On\", true);\n"
+                                "    Param gain = decibels(\"Gain\", -24, 24, 0).activeWhen(on);\n"
+                                "    void process(Block& io) {}"));
+    auto run = [&](const char* command, const std::string& args) {
+        auto result = h.bus->execute({command, json::parse(args).value(), kTest});
+        REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
+        return *result;
+    };
+    const std::string instance =
+        run("plugin.load", R"({"plugin":"com.example.sometimes"})")["instance"].asString();
+    const std::string at = R"({"instance":")" + instance + R"(")";
+    CHECK(run("plugin.describe", at + "}").find("inactive") == nullptr);
+    auto merged = run("patch.merge", at + R"(,"patch":{"params":{"on":false,"gain":-6}}})");
+    REQUIRE(merged.find("inactive"));
+    CHECK(json::writeCompact(merged["inactive"]) == R"(["gain"])");
+    auto summary = run("plugin.describe", at + "}");
+    CHECK(json::writeCompact(summary["inactive"]) == R"(["gain"])");
+    CHECK(json::writeCompact(summary["params"]).find("gain") == std::string::npos);
+    auto set = run("param.set", at + R"(,"values":{"gain":-3}})");
+    CHECK_FALSE(set["values"]["gain"]["active"].asBool());
+    CHECK(run("param.set", at + R"(,"values":{"on":true}})")["values"]["on"].find("active") ==
+          nullptr);
+}
+
 TEST_CASE("two scripts with one id are refused: the player would play only one") {
     Harness h;
     const std::string body = "    void process(Block& io) {}";

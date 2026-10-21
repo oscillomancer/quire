@@ -1762,7 +1762,7 @@ Result:
 
 Set parameters in physical units; returns the values as applied.
 
-values: {key: number | "unit string" | enum key | bool}, e.g. {"filter.cutoff": "1.2 kHz", "filter.mode": "lowpass"}. All values are validated first; nothing changes if any is invalid. Third-party plugins: CLAP id or name keys with CLAP values or {"text": "..."}. Use patch.merge to change several sections at once.
+values: {key: number | "unit string" | enum key | bool}, e.g. {"filter.cutoff": "1.2 kHz", "filter.mode": "lowpass"}. All values are validated first; nothing changes if any is invalid. Third-party plugins: CLAP id or name keys with CLAP values or {"text": "..."}. A value that does not apply with the new values says "active": false (plugin.describe detail full says what makes it apply). Use patch.merge to change several sections at once.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -1880,7 +1880,7 @@ Result:
 
 Merge a partial patch (RFC 7396) into an instance.
 
-patch: only the values to change, e.g. {"params": {"filter.cutoff": "800 Hz"}}; null removes a value (back to its default). Returns the effective change (a minimal merge patch; {} if nothing changed) and a description of the new sound.
+patch: only the values to change, e.g. {"params": {"filter.cutoff": "800 Hz"}}; null removes a value (back to its default). Returns the effective change (a minimal merge patch; {} if nothing changed) and a description of the new sound. inactive names the params it set that do not apply with the new values: they are kept, and heard once what their active_when names allows it (plugin.describe detail full).
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -1901,6 +1901,13 @@ Kind: `edit`. Exposure: `mcp-tool`.
     "changed": {},
     "description": {
       "type": "string"
+    },
+    "inactive": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Params set that do not apply now"
     }
   },
   "required": ["changed", "description"],
@@ -2008,7 +2015,7 @@ Result:
 
 Describe an instance: parameters, patch format, and current problems.
 
-detail summary: parameters grouped as compact 'key = value (range)' lines plus a prose description of the current sound. detail full: every parameter's schema entry with current value and text, and the patch JSON Schema. An entry whose module is not in the patch carries "active": false (add the module with patch.merge to use it). Semantic plugins are programmed with param.set (physical units) or patch.merge.
+detail summary: parameters grouped as compact 'key = value (range)' lines plus a prose description of the current sound. detail full: every parameter's schema entry with current value and text, and the patch JSON Schema. inactive lists the parameters that do not apply with the current values (summary leaves them out): their entries carry "active": false, and active_when says what makes them apply (another parameter's values), or their module is not in the patch (add it with patch.merge). Semantic plugins are programmed with param.set (physical units) or patch.merge.
 
 Kind: `query`. Exposure: `mcp-tool`.
 
@@ -2049,6 +2056,13 @@ Kind: `query`. Exposure: `mcp-tool`.
     },
     "problems": {
       "description": "Current plugin problems: code, message, scope, line when known, hint, silent; scope host when unreadable"
+    },
+    "inactive": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Parameters that do not apply now"
     }
   },
   "required": ["plugin", "name", "params", "description", "status_available"],

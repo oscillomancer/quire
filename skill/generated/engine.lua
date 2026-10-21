@@ -439,6 +439,7 @@ q = nil
 ---@class Quire.fx_param_set_result
 ---@field changed any
 ---@field description string
+---@field inactive? string[] Params set that do not apply with the new values: kept, and heard once what fx.describe full's active_when names allows it
 
 ---@class Quire.fx_patch_get_args
 ---@field fx string
@@ -460,6 +461,7 @@ q = nil
 ---@class Quire.fx_patch_merge_result
 ---@field changed any
 ---@field description string
+---@field inactive? string[] Params set that do not apply with the new values: kept, and heard once what fx.describe full's active_when names allows it
 
 ---@class Quire.fx_patch_set_args
 ---@field fx string

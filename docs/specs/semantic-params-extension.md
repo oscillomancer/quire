@@ -301,3 +301,8 @@ patch as a chunk.
   `describe` leaves it out. The DSP scripts' `.activeWhen()` and
   `.activeUnless()` declare these conditions (`skill/guides/dsp-language.md`);
   the suite's `SemanticDefinition` carries them as `ParamMeaning::activeWhen`.
+- Hosts report them back: the sandbox's `plugin.describe` lists the keys
+  under `inactive` and leaves them out of its summary, its `param.set`
+  marks such a value `"active": false`, and `patch.merge`, the engine's
+  `fx.patch.merge` and `fx.param.set` name the `params` they set that do not
+  apply under `inactive`.

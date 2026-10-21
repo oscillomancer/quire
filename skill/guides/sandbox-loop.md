@@ -9,9 +9,13 @@ differences you measure are differences you made.
 
 1. **Load and read.** `plugin_list` → `plugin_load {plugin}` →
    `plugin_describe {instance, detail: "summary"}`. The description lists
-   parameter keys, units and ranges, and the patch's current prose summary. With
-   `detail: "full"` a parameter whose module is not in the patch carries
-   `"active": false` — add the module with `patch_merge` before using it.
+   parameter keys, units and ranges, and the patch's current prose summary.
+   Parameters that do not apply with the current values are listed apart, under
+   `inactive`. With `detail: "full"` each carries `"active": false`: its module
+   is not in the patch (add it with `patch_merge` first), or its `active_when`
+   says what makes it apply (a band switched on, a shape that uses it). A
+   `patch_merge` that sets one says so in its `inactive`: the value is kept but
+   does nothing yet.
 2. **Decide the structure first** (which modules, which routes), then set a
    first guess in one `patch_merge`. For Orrery read `guides/sound-design.md`.
 3. **Render a phrase that exercises the sound** — a held note for pads and

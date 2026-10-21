@@ -185,6 +185,7 @@ q = nil
 ---@class Quire.patch_merge_result
 ---@field changed any
 ---@field description string
+---@field inactive? string[] Params set that do not apply now
 
 ---@class Quire.patch_set_args
 ---@field instance string Instance id from plugin.load, e.g. "in_1".
@@ -207,6 +208,7 @@ q = nil
 ---@field docs? string
 ---@field status_available boolean The instance supplied its current problems
 ---@field problems? any Current plugin problems: code, message, scope, line when known, hint, silent; scope host when unreadable
+---@field inactive? string[] Parameters that do not apply now
 
 ---@class Quire.plugin_list_args
 ---@field filter? string Text to match in the id or name.

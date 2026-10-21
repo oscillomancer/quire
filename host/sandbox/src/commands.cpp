@@ -144,6 +144,7 @@ struct DescribeResult {
     std::optional<std::string> docs;
     bool statusAvailable = false;
     std::optional<json::Value> problems;
+    std::optional<std::vector<std::string>> inactive;
 };
 
 struct ParamGetArgs {
@@ -176,6 +177,7 @@ struct DescriptionResult {
 struct MergeResult {
     json::Value changed;
     std::string description;
+    std::optional<std::vector<std::string>> inactive;
 };
 
 struct PresetSaveArgs {
@@ -289,8 +291,12 @@ Result<DescribeResult> describePlugin(Session& s, const DescribeArgs& a) {
         if (!values) return std::move(values).error();
         const json::Value& schema = s.schema(a.instance);
         json::Value params = json::Value::object();
+        std::vector<std::string> inactive;
         if (const json::Value* entries = schema.find("params"); entries && entries->isObject()) {
             for (const auto& m : entries->asObject()) {
+                const json::Value* active = m.value.find("active");
+                const bool applies = !(active && active->isBool() && !active->asBool());
+                if (!applies) inactive.push_back(m.key);
                 const json::Value* cur = values->find(m.key);
                 if (!cur || !cur->find("value"))
                     return Error(
@@ -305,7 +311,7 @@ Result<DescribeResult> describePlugin(Session& s, const DescribeArgs& a) {
                         if (const auto* t = cur->find("text")) e["text"] = *t;
                     }
                     params[m.key] = std::move(e);
-                } else {
+                } else if (applies) {
                     const std::string group =
                         m.value.find("group") ? m.value.find("group")->asString() : "main";
                     std::string line = m.key + " = " +
@@ -318,6 +324,7 @@ Result<DescribeResult> describePlugin(Session& s, const DescribeArgs& a) {
             }
         }
         r.params = std::move(params);
+        if (!inactive.empty()) r.inactive = std::move(inactive);
         if (const auto* t = schema.find("patch_type"); t && t->isString())
             r.patchType = t->asString();
         if (full && schema.find("patch")) r.patchSchema = *schema.find("patch");
@@ -582,9 +589,12 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
         c.description =
             "detail summary: parameters grouped as compact 'key = value (range)' lines plus a "
             "prose description of the current sound. detail full: every parameter's schema entry "
-            "with current value and text, and the patch JSON Schema. An entry whose module is not "
-            "in the patch carries \"active\": false (add the module with patch.merge to use it). "
-            "Semantic plugins are programmed with param.set (physical units) or patch.merge.";
+            "with current value and text, and the patch JSON Schema. inactive lists the "
+            "parameters that do not apply with the current values (summary leaves them out): "
+            "their entries carry \"active\": false, and active_when says what makes them apply "
+            "(another parameter's values), or their module is not in the patch (add it with "
+            "patch.merge). Semantic plugins are programmed with param.set (physical units) or "
+            "patch.merge.";
         c.tags = {"plugin", "params"};
         c.args = schema::object<DescribeArgs>("plugin_describe_args")
                      .field("instance", &DescribeArgs::instance, instanceField())
@@ -607,6 +617,8 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
                               schema::any().doc("Current plugin problems: code, message, scope, "
                                                 "line when known, hint, silent; scope host when "
                                                 "unreadable"))
+                       .field("inactive", &DescribeResult::inactive,
+                              stringList().doc("Parameters that do not apply now"))
                        .build();
         c.examples = {
             {"Summarize the effect", obj(R"({"instance": "in_2"})"),
@@ -660,7 +672,9 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
             "values: {key: number | \"unit string\" | enum key | bool}, e.g. {\"filter.cutoff\": "
             "\"1.2 kHz\", \"filter.mode\": \"lowpass\"}. All values are validated first; nothing "
             "changes if any is invalid. Third-party plugins: CLAP id or name keys with CLAP values "
-            "or {\"text\": \"...\"}. Use patch.merge to change several sections at once.";
+            "or {\"text\": \"...\"}. A value that does not apply with the new values says "
+            "\"active\": false (plugin.describe detail full says what makes it apply). Use "
+            "patch.merge to change several sections at once.";
         c.tags = {"params"};
         c.args = schema::object<ParamSetArgs>("param_set_args")
                      .field("instance", &ParamSetArgs::instance, instanceField())
@@ -764,7 +778,9 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
         c.description =
             "patch: only the values to change, e.g. {\"params\": {\"filter.cutoff\": \"800 Hz\"}}; "
             "null removes a value (back to its default). Returns the effective change (a minimal "
-            "merge patch; {} if nothing changed) and a description of the new sound.";
+            "merge patch; {} if nothing changed) and a description of the new sound. inactive "
+            "names the params it set that do not apply with the new values: they are kept, and "
+            "heard once what their active_when names allows it (plugin.describe detail full).";
         c.tags = {"patch"};
         c.args = schema::object<PatchArgs>("patch_merge_args")
                      .field("instance", &PatchArgs::instance, instanceField())
@@ -773,6 +789,8 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
         c.result = schema::object<MergeResult>("patch_merge")
                        .field("changed", &MergeResult::changed, schema::any())
                        .field("description", &MergeResult::description, schema::string())
+                       .field("inactive", &MergeResult::inactive,
+                              stringList().doc("Params set that do not apply now"))
                        .build();
         c.errors = {{"sandbox.not_semantic", "the plugin has no semantic patch", "use param.set"},
                     {"params.out_of_range", "a value is outside its range",
@@ -784,7 +802,9 @@ void registerCommands(cmd::Registry& registry, const ExamplePlugins& ex) {
         c.run = [](const PatchArgs& a, Context& ctx) -> Result<MergeResult> {
             auto m = S(ctx).patchMerge(a.instance, a.patch);
             if (!m) return std::move(m).error();
-            return MergeResult{std::move(m->changed), std::move(m->description)};
+            MergeResult r{std::move(m->changed), std::move(m->description), std::nullopt};
+            if (!m->inactive.empty()) r.inactive = std::move(m->inactive);
+            return r;
         };
         registry.add(std::move(c));
     }

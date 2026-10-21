@@ -386,12 +386,12 @@ within −120 dBFS for the stock test synth).
 | `plugin.list` | query | `filter?` (text), `rescan?` | `plugins: [{id, name, instrument, semantic, features}]` |
 | `plugin.load` | edit | `plugin` (id or path), `position?` (chain index, default: instrument first else end) | `instance`, `name`, `semantic`, `chain` |
 | `plugin.remove` | edit | `instance` | `chain` |
-| `plugin.describe` | query | `instance`, `detail` (`summary`/`full`) | `params` (key/unit/range/current, summary: grouped compact list; `active: false` while the parameter's module is not in the patch), `patch_type`, `patch_schema` (full only), `description` (prose), `docs`, `status_available`, `problems` when available (one `host`-scoped entry when the query fails) |
+| `plugin.describe` | query | `instance`, `detail` (`summary`/`full`) | `params` (key/unit/range/current, summary: grouped compact list of the parameters that apply; full: each schema entry, with `active: false` while the parameter does not apply — its module is not in the patch, or its `active_when` conditions do not hold), `inactive` (keys of those that do not apply, when any), `patch_type`, `patch_schema` (full only), `description` (prose, of what applies), `docs`, `status_available`, `problems` when available (one `host`-scoped entry when the query fails) |
 | `param.get` | query | `instance`, `keys?` | `values: {key: {value, text}}` |
-| `param.set` | edit | `instance`, `values: {key: number \| "unit string" \| enum key \| bool}` (third-party: CLAP id or name, `{"text": "…"}` allowed) | `values` as applied with text |
+| `param.set` | edit | `instance`, `values: {key: number \| "unit string" \| enum key \| bool}` (third-party: CLAP id or name, `{"text": "…"}` allowed) | `values` as applied with text; `active: false` on a value that does not apply with the new values |
 | `patch.get` | query | `instance`, `detail` (`changed`/`full`) | `patch` |
 | `patch.set` | edit | `instance`, `patch` (complete) | `description` |
-| `patch.merge` | edit | `instance`, `patch` (RFC 7396 merge patch) | `changed` (the effective diff), `description` |
+| `patch.merge` | edit | `instance`, `patch` (RFC 7396 merge patch) | `changed` (the effective diff), `description`, `inactive` (keys its `params` set that do not apply with the new values, when any) |
 | `preset.save` | action | `instance`, `name`, `tags?`, `notes?` | `path` |
 | `preset.load` | edit | `instance`, `name`, `source?` (`user` default / `factory`) | `description` |
 | `preset.list` | query | `plugin?`, `source?` (`user` default / `factory`) | `presets: [{plugin, name, tags, read_only?}]` |

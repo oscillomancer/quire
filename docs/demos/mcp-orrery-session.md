@@ -139,7 +139,7 @@ that exactly duplicates structuredContent is shown once.
       "kind": "edit",
       "exposure": "mcp-tool",
       "summary": "Merge a partial patch (RFC 7396) into an instance.",
-      "description": "patch: only the values to change, e.g. {\"params\": {\"filter.cutoff\": \"800 Hz\"}}; null removes a value (back to its default). Returns the effective change (a minimal merge patch; {} if nothing changed) and a description of the new sound.",
+      "description": "patch: only the values to change, e.g. {\"params\": {\"filter.cutoff\": \"800 Hz\"}}; null removes a value (back to its default). Returns the effective change (a minimal merge patch; {} if nothing changed) and a description of the new sound. inactive names the params it set that do not apply with the new values: they are kept, and heard once what their active_when names allows it (plugin.describe detail full).",
       "tags": [
         "patch"
       ],
@@ -167,6 +167,13 @@ that exactly duplicates structuredContent is shown once.
           "changed": {},
           "description": {
             "type": "string"
+          },
+          "inactive": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Params set that do not apply now"
           }
         },
         "required": [
@@ -301,51 +308,16 @@ that exactly duplicates structuredContent is shown once.
           "voice.mpe = off  (on|off)",
           "voice.drift = 0.0 %  (0.0..100.0 %)"
         ],
-        "Oscillator 1": {
-          "_elided_array_count": 19
-        },
-        "Oscillator 2": {
-          "_elided_array_count": 19
-        },
-        "Oscillator 3": {
-          "_elided_array_count": 19
-        },
-        "Oscillator 4": {
-          "_elided_array_count": 19
-        },
-        "Filters": [
-          "filters.balance = 0.0 %  (-100.0..100.0 %)"
-        ],
-        "Filter 1": [
-          "filter1.cutoff = 1.00 kHz  (20.0..20000.0 Hz, log)",
-          "filter1.resonance = 0.0 %  (0.0..100.0 %)",
-          "filter1.keytrack = 0.0 %  (0.0..200.0 %)",
-          "filter1.drive = 0.0 dB  (0.0..24.0 dB)",
-          "filter1.level = 0.0 dB  (-60.0..12.0 dB)",
-          "filter1.slope = 24 dB  (db12|db24)",
-          "filter1.mode = Low-pass  (lowpass|bandpass|highpass|notch|peak|allpass)",
-          "filter1.feedback = +50.0 %  (-99.0..99.0 %)",
-          "filter1.damping = 20.0 %  (0.0..100.0 %)",
-          "filter1.vowel = 0.0  (0.0..4.0)",
-          "filter1.shift = 0.0 st  (-12.0..12.0 st)"
-        ],
-        "Filter 2": [
-          "filter2.cutoff = 1.00 kHz  (20.0..20000.0 Hz, log)",
-          "filter2.resonance = 0.0 %  (0.0..100.0 %)",
-          "filter2.keytrack = 0.0 %  (0.0..200.0 %)",
-          "filter2.drive = 0.0 dB  (0.0..24.0 dB)",
-          "filter2.level = 0.0 dB  (-60.0..12.0 dB)",
-          "filter2.slope = 24 dB  (db12|db24)",
-          "filter2.mode = Low-pass  (lowpass|bandpass|highpass|notch|peak|allpass)",
-          "filter2.feedback = +50.0 %  (-99.0..99.0 %)",
-          "filter2.damping = 20.0 %  (0.0..100.0 %)",
-          "filter2.vowel = 0.0  (0.0..4.0)",
-          "filter2.shift = 0.0 st  (-12.0..12.0 st)"
-        ],
-        "Drive": [
-          "drive.amount = 0.0 dB  (0.0..36.0 dB)",
-          "drive.bias = 0.0 %  (-100.0..100.0 %)",
-          "drive.mix = 100 %  (0.0..100.0 %)"
+        "Oscillator 1": [
+          "osc1.level = -6.00 dB  (-60.0..6.0 dB)",
+          "osc1.pan = 0.0 %  (-100.0..100.0 %)",
+          "osc1.coarse = 0 st  (-48..48 st)",
+          "osc1.fine = 0.0 ct  (-100.0..100.0 ct)",
+          "osc1.phase_mode = Free  (free|reset)",
+          "osc1.phase = 0.0 deg  (0.0..360.0 deg)",
+          "osc1.wave = Saw  (saw|square|pulse|triangle|sine|half_sine|abs_sine|square_sine)",
+          "osc1.width = 50.0 %  (1.0..99.0 %)",
+          "osc1.shape = 0.0 %  (0.0..100.0 %)"
         ],
         "Amp": [
           "amp.level = 0.0 dB  (-60.0..12.0 dB)",
@@ -364,130 +336,6 @@ that exactly duplicates structuredContent is shown once.
           "amp.release_curve = +50.0 %  (-100.0..100.0 %)",
           "amp.retrigger = Always  (always|legato)"
         ],
-        "Envelope 2": [
-          "env2.delay = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "env2.attack = 5.00 ms  (0.0..30000.0 ms, pow:3)",
-          "env2.hold = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "env2.decay = 300 ms  (1.0..30000.0 ms, pow:3)",
-          "env2.sustain = 70.0 %  (0.0..100.0 %)",
-          "env2.release = 300 ms  (1.0..30000.0 ms, pow:3)",
-          "env2.attack_curve = 0.0 %  (-100.0..100.0 %)",
-          "env2.decay_curve = +50.0 %  (-100.0..100.0 %)",
-          "env2.release_curve = +50.0 %  (-100.0..100.0 %)",
-          "env2.retrigger = Always  (always|legato)"
-        ],
-        "Envelope 3": [
-          "env3.delay = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "env3.attack = 5.00 ms  (0.0..30000.0 ms, pow:3)",
-          "env3.hold = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "env3.decay = 300 ms  (1.0..30000.0 ms, pow:3)",
-          "env3.sustain = 70.0 %  (0.0..100.0 %)",
-          "env3.release = 300 ms  (1.0..30000.0 ms, pow:3)",
-          "env3.attack_curve = 0.0 %  (-100.0..100.0 %)",
-          "env3.decay_curve = +50.0 %  (-100.0..100.0 %)",
-          "env3.release_curve = +50.0 %  (-100.0..100.0 %)",
-          "env3.retrigger = Always  (always|legato)"
-        ],
-        "Envelope 4": [
-          "env4.delay = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "env4.attack = 5.00 ms  (0.0..30000.0 ms, pow:3)",
-          "env4.hold = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "env4.decay = 300 ms  (1.0..30000.0 ms, pow:3)",
-          "env4.sustain = 70.0 %  (0.0..100.0 %)",
-          "env4.release = 300 ms  (1.0..30000.0 ms, pow:3)",
-          "env4.attack_curve = 0.0 %  (-100.0..100.0 %)",
-          "env4.decay_curve = +50.0 %  (-100.0..100.0 %)",
-          "env4.release_curve = +50.0 %  (-100.0..100.0 %)",
-          "env4.retrigger = Always  (always|legato)"
-        ],
-        "LFO 1": [
-          "lfo1.wave = Sine  (sine|triangle|saw_up|saw_down|square|sample_hold|smooth_random)",
-          "lfo1.rate = 1.00 Hz  (0.01..50.0 Hz, log)",
-          "lfo1.sync = off  (off|n8_1|n4_1|n2_1|n1_1|n1_2|n1_2d|n1_2t|n1_4|n1_4d|n1_4t|n1_8|n1_8d|n1_8t|n1_16|n1_16d|n1_16t|n1_32)",
-          "lfo1.phase = 0.0 deg  (0.0..360.0 deg)",
-          "lfo1.fade = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "lfo1.polarity = Bipolar  (bipolar|unipolar)"
-        ],
-        "LFO 2": [
-          "lfo2.wave = Sine  (sine|triangle|saw_up|saw_down|square|sample_hold|smooth_random)",
-          "lfo2.rate = 1.00 Hz  (0.01..50.0 Hz, log)",
-          "lfo2.sync = off  (off|n8_1|n4_1|n2_1|n1_1|n1_2|n1_2d|n1_2t|n1_4|n1_4d|n1_4t|n1_8|n1_8d|n1_8t|n1_16|n1_16d|n1_16t|n1_32)",
-          "lfo2.phase = 0.0 deg  (0.0..360.0 deg)",
-          "lfo2.fade = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "lfo2.polarity = Bipolar  (bipolar|unipolar)"
-        ],
-        "LFO 3": [
-          "lfo3.wave = Sine  (sine|triangle|saw_up|saw_down|square|sample_hold|smooth_random)",
-          "lfo3.rate = 1.00 Hz  (0.01..50.0 Hz, log)",
-          "lfo3.sync = off  (off|n8_1|n4_1|n2_1|n1_1|n1_2|n1_2d|n1_2t|n1_4|n1_4d|n1_4t|n1_8|n1_8d|n1_8t|n1_16|n1_16d|n1_16t|n1_32)",
-          "lfo3.phase = 0.0 deg  (0.0..360.0 deg)",
-          "lfo3.fade = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "lfo3.polarity = Bipolar  (bipolar|unipolar)"
-        ],
-        "LFO 4": [
-          "lfo4.wave = Sine  (sine|triangle|saw_up|saw_down|square|sample_hold|smooth_random)",
-          "lfo4.rate = 1.00 Hz  (0.01..50.0 Hz, log)",
-          "lfo4.sync = off  (off|n8_1|n4_1|n2_1|n1_1|n1_2|n1_2d|n1_2t|n1_4|n1_4d|n1_4t|n1_8|n1_8d|n1_8t|n1_16|n1_16d|n1_16t|n1_32)",
-          "lfo4.phase = 0.0 deg  (0.0..360.0 deg)",
-          "lfo4.fade = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "lfo4.polarity = Bipolar  (bipolar|unipolar)"
-        ],
-        "Step 1": [
-          "step1.length = 16  (1..16)",
-          "step1.sync = 1/16  (n8_1|n4_1|n2_1|n1_1|n1_2|n1_2d|n1_2t|n1_4|n1_4d|n1_4t|n1_8|n1_8d|n1_8t|n1_16|n1_16d|n1_16t|n1_32)",
-          "step1.glide = 0.0 %  (0.0..100.0 %)"
-        ],
-        "Step 2": [
-          "step2.length = 16  (1..16)",
-          "step2.sync = 1/16  (n8_1|n4_1|n2_1|n1_1|n1_2|n1_2d|n1_2t|n1_4|n1_4d|n1_4t|n1_8|n1_8d|n1_8t|n1_16|n1_16d|n1_16t|n1_32)",
-          "step2.glide = 0.0 %  (0.0..100.0 %)"
-        ],
-        "Macros": [
-          "macro1 = 0.0 %  (0.0..100.0 %)",
-          "macro2 = 0.0 %  (0.0..100.0 %)",
-          "macro3 = 0.0 %  (0.0..100.0 %)",
-          "macro4 = 0.0 %  (0.0..100.0 %)",
-          "macro5 = 0.0 %  (0.0..100.0 %)",
-          "macro6 = 0.0 %  (0.0..100.0 %)",
-          "macro7 = 0.0 %  (0.0..100.0 %)",
-          "macro8 = 0.0 %  (0.0..100.0 %)"
-        ],
-        "FX/Chorus": [
-          "fx.chorus.rate = 0.500 Hz  (0.05..10.0 Hz, log)",
-          "fx.chorus.depth = 30.0 %  (0.0..100.0 %)",
-          "fx.chorus.voices = 2  (2..4)",
-          "fx.chorus.mix = 50.0 %  (0.0..100.0 %)"
-        ],
-        "FX/Phaser": [
-          "fx.phaser.rate = 0.300 Hz  (0.02..10.0 Hz, log)",
-          "fx.phaser.depth = 50.0 %  (0.0..100.0 %)",
-          "fx.phaser.stages = 6  (2..12)",
-          "fx.phaser.feedback = +30.0 %  (-90.0..90.0 %)",
-          "fx.phaser.mix = 50.0 %  (0.0..100.0 %)"
-        ],
-        "FX/Delay": [
-          "fx.delay.sync = 1/8.  (off|n8_1|n4_1|n2_1|n1_1|n1_2|n1_2d|n1_2t|n1_4|n1_4d|n1_4t|n1_8|n1_8d|n1_8t|n1_16|n1_16d|n1_16t|n1_32)",
-          "fx.delay.time = 375 ms  (1.0..4000.0 ms, log)",
-          "fx.delay.feedback = 35.0 %  (0.0..110.0 %)",
-          "fx.delay.ping_pong = off  (on|off)",
-          "fx.delay.damping = 30.0 %  (0.0..100.0 %)",
-          "fx.delay.mix = 25.0 %  (0.0..100.0 %)"
-        ],
-        "FX/Reverb": [
-          "fx.reverb.size = 50.0 %  (0.0..100.0 %)",
-          "fx.reverb.decay = 2.00 s  (100.0..30000.0 ms, log)",
-          "fx.reverb.predelay = 10.0 ms  (0.0..250.0 ms)",
-          "fx.reverb.damping = 40.0 %  (0.0..100.0 %)",
-          "fx.reverb.width = 100 %  (0.0..100.0 %)",
-          "fx.reverb.mix = 20.0 %  (0.0..100.0 %)"
-        ],
-        "FX/EQ": [
-          "fx.eq.low_gain = 0.0 dB  (-18.0..18.0 dB)",
-          "fx.eq.mid_freq = 1.00 kHz  (200.0..8000.0 Hz, log)",
-          "fx.eq.mid_gain = 0.0 dB  (-18.0..18.0 dB)",
-          "fx.eq.mid_q = 0.700  (0.3..8.0, log)",
-          "fx.eq.high_gain = 0.0 dB  (-18.0..18.0 dB)"
-        ],
         "Output": [
           "output.level = 0.0 dB  (-60.0..12.0 dB)"
         ]
@@ -495,7 +343,10 @@ that exactly duplicates structuredContent is shown once.
       "patch_type": "supple.orrery-patch/1.0",
       "description": "Poly. osc1 va saw. Amp A 5.00 ms D 300 ms S 70.0 % R 300 ms.",
       "docs": "Orrery is a constrained-modular synthesizer. A patch (supple.orrery-patch/1.0) chooses which slots exist — oscillators osc1..osc4 (va, wavetable, fm, noise, sub), filters filter1/filter2 (ladder, svf, comb, formant; serial or parallel), drive, envelopes amp/env2..env4, lfos lfo1..lfo4, steps step1/step2, eight macros and up to five post-FX in fx.chain — and routes modulation as \"<source>><destination>\": {\"amount\": ...} in the destination's unit (oct for frequencies, st for pitch, dB for levels, x for oscN.fm, % otherwise). Values are CLAP parameters keyed by patch path (osc1.level, filter1.cutoff, amp.attack); structure lives only in the patch. Macros are the automation surface for modulation.",
-      "status_available": false
+      "status_available": false,
+      "inactive": {
+        "_elided_array_count": 187
+      }
     }
   }
 }
@@ -1659,7 +1510,7 @@ that exactly duplicates structuredContent is shown once.
       "kind": "edit",
       "exposure": "mcp-tool",
       "summary": "Merge a partial patch (RFC 7396) into an instance.",
-      "description": "patch: only the values to change, e.g. {\"params\": {\"filter.cutoff\": \"800 Hz\"}}; null removes a value (back to its default). Returns the effective change (a minimal merge patch; {} if nothing changed) and a description of the new sound.",
+      "description": "patch: only the values to change, e.g. {\"params\": {\"filter.cutoff\": \"800 Hz\"}}; null removes a value (back to its default). Returns the effective change (a minimal merge patch; {} if nothing changed) and a description of the new sound. inactive names the params it set that do not apply with the new values: they are kept, and heard once what their active_when names allows it (plugin.describe detail full).",
       "tags": [
         "patch"
       ],
@@ -1687,6 +1538,13 @@ that exactly duplicates structuredContent is shown once.
           "changed": {},
           "description": {
             "type": "string"
+          },
+          "inactive": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Params set that do not apply now"
           }
         },
         "required": [
@@ -1821,51 +1679,16 @@ that exactly duplicates structuredContent is shown once.
           "voice.mpe = off  (on|off)",
           "voice.drift = 0.0 %  (0.0..100.0 %)"
         ],
-        "Oscillator 1": {
-          "_elided_array_count": 19
-        },
-        "Oscillator 2": {
-          "_elided_array_count": 19
-        },
-        "Oscillator 3": {
-          "_elided_array_count": 19
-        },
-        "Oscillator 4": {
-          "_elided_array_count": 19
-        },
-        "Filters": [
-          "filters.balance = 0.0 %  (-100.0..100.0 %)"
-        ],
-        "Filter 1": [
-          "filter1.cutoff = 1.00 kHz  (20.0..20000.0 Hz, log)",
-          "filter1.resonance = 0.0 %  (0.0..100.0 %)",
-          "filter1.keytrack = 0.0 %  (0.0..200.0 %)",
-          "filter1.drive = 0.0 dB  (0.0..24.0 dB)",
-          "filter1.level = 0.0 dB  (-60.0..12.0 dB)",
-          "filter1.slope = 24 dB  (db12|db24)",
-          "filter1.mode = Low-pass  (lowpass|bandpass|highpass|notch|peak|allpass)",
-          "filter1.feedback = +50.0 %  (-99.0..99.0 %)",
-          "filter1.damping = 20.0 %  (0.0..100.0 %)",
-          "filter1.vowel = 0.0  (0.0..4.0)",
-          "filter1.shift = 0.0 st  (-12.0..12.0 st)"
-        ],
-        "Filter 2": [
-          "filter2.cutoff = 1.00 kHz  (20.0..20000.0 Hz, log)",
-          "filter2.resonance = 0.0 %  (0.0..100.0 %)",
-          "filter2.keytrack = 0.0 %  (0.0..200.0 %)",
-          "filter2.drive = 0.0 dB  (0.0..24.0 dB)",
-          "filter2.level = 0.0 dB  (-60.0..12.0 dB)",
-          "filter2.slope = 24 dB  (db12|db24)",
-          "filter2.mode = Low-pass  (lowpass|bandpass|highpass|notch|peak|allpass)",
-          "filter2.feedback = +50.0 %  (-99.0..99.0 %)",
-          "filter2.damping = 20.0 %  (0.0..100.0 %)",
-          "filter2.vowel = 0.0  (0.0..4.0)",
-          "filter2.shift = 0.0 st  (-12.0..12.0 st)"
-        ],
-        "Drive": [
-          "drive.amount = 0.0 dB  (0.0..36.0 dB)",
-          "drive.bias = 0.0 %  (-100.0..100.0 %)",
-          "drive.mix = 100 %  (0.0..100.0 %)"
+        "Oscillator 1": [
+          "osc1.level = -6.00 dB  (-60.0..6.0 dB)",
+          "osc1.pan = 0.0 %  (-100.0..100.0 %)",
+          "osc1.coarse = 0 st  (-48..48 st)",
+          "osc1.fine = 0.0 ct  (-100.0..100.0 ct)",
+          "osc1.phase_mode = Free  (free|reset)",
+          "osc1.phase = 0.0 deg  (0.0..360.0 deg)",
+          "osc1.wave = Saw  (saw|square|pulse|triangle|sine|half_sine|abs_sine|square_sine)",
+          "osc1.width = 50.0 %  (1.0..99.0 %)",
+          "osc1.shape = 0.0 %  (0.0..100.0 %)"
         ],
         "Amp": [
           "amp.level = 0.0 dB  (-60.0..12.0 dB)",
@@ -1884,130 +1707,6 @@ that exactly duplicates structuredContent is shown once.
           "amp.release_curve = +50.0 %  (-100.0..100.0 %)",
           "amp.retrigger = Always  (always|legato)"
         ],
-        "Envelope 2": [
-          "env2.delay = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "env2.attack = 5.00 ms  (0.0..30000.0 ms, pow:3)",
-          "env2.hold = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "env2.decay = 300 ms  (1.0..30000.0 ms, pow:3)",
-          "env2.sustain = 70.0 %  (0.0..100.0 %)",
-          "env2.release = 300 ms  (1.0..30000.0 ms, pow:3)",
-          "env2.attack_curve = 0.0 %  (-100.0..100.0 %)",
-          "env2.decay_curve = +50.0 %  (-100.0..100.0 %)",
-          "env2.release_curve = +50.0 %  (-100.0..100.0 %)",
-          "env2.retrigger = Always  (always|legato)"
-        ],
-        "Envelope 3": [
-          "env3.delay = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "env3.attack = 5.00 ms  (0.0..30000.0 ms, pow:3)",
-          "env3.hold = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "env3.decay = 300 ms  (1.0..30000.0 ms, pow:3)",
-          "env3.sustain = 70.0 %  (0.0..100.0 %)",
-          "env3.release = 300 ms  (1.0..30000.0 ms, pow:3)",
-          "env3.attack_curve = 0.0 %  (-100.0..100.0 %)",
-          "env3.decay_curve = +50.0 %  (-100.0..100.0 %)",
-          "env3.release_curve = +50.0 %  (-100.0..100.0 %)",
-          "env3.retrigger = Always  (always|legato)"
-        ],
-        "Envelope 4": [
-          "env4.delay = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "env4.attack = 5.00 ms  (0.0..30000.0 ms, pow:3)",
-          "env4.hold = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "env4.decay = 300 ms  (1.0..30000.0 ms, pow:3)",
-          "env4.sustain = 70.0 %  (0.0..100.0 %)",
-          "env4.release = 300 ms  (1.0..30000.0 ms, pow:3)",
-          "env4.attack_curve = 0.0 %  (-100.0..100.0 %)",
-          "env4.decay_curve = +50.0 %  (-100.0..100.0 %)",
-          "env4.release_curve = +50.0 %  (-100.0..100.0 %)",
-          "env4.retrigger = Always  (always|legato)"
-        ],
-        "LFO 1": [
-          "lfo1.wave = Sine  (sine|triangle|saw_up|saw_down|square|sample_hold|smooth_random)",
-          "lfo1.rate = 1.00 Hz  (0.01..50.0 Hz, log)",
-          "lfo1.sync = off  (off|n8_1|n4_1|n2_1|n1_1|n1_2|n1_2d|n1_2t|n1_4|n1_4d|n1_4t|n1_8|n1_8d|n1_8t|n1_16|n1_16d|n1_16t|n1_32)",
-          "lfo1.phase = 0.0 deg  (0.0..360.0 deg)",
-          "lfo1.fade = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "lfo1.polarity = Bipolar  (bipolar|unipolar)"
-        ],
-        "LFO 2": [
-          "lfo2.wave = Sine  (sine|triangle|saw_up|saw_down|square|sample_hold|smooth_random)",
-          "lfo2.rate = 1.00 Hz  (0.01..50.0 Hz, log)",
-          "lfo2.sync = off  (off|n8_1|n4_1|n2_1|n1_1|n1_2|n1_2d|n1_2t|n1_4|n1_4d|n1_4t|n1_8|n1_8d|n1_8t|n1_16|n1_16d|n1_16t|n1_32)",
-          "lfo2.phase = 0.0 deg  (0.0..360.0 deg)",
-          "lfo2.fade = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "lfo2.polarity = Bipolar  (bipolar|unipolar)"
-        ],
-        "LFO 3": [
-          "lfo3.wave = Sine  (sine|triangle|saw_up|saw_down|square|sample_hold|smooth_random)",
-          "lfo3.rate = 1.00 Hz  (0.01..50.0 Hz, log)",
-          "lfo3.sync = off  (off|n8_1|n4_1|n2_1|n1_1|n1_2|n1_2d|n1_2t|n1_4|n1_4d|n1_4t|n1_8|n1_8d|n1_8t|n1_16|n1_16d|n1_16t|n1_32)",
-          "lfo3.phase = 0.0 deg  (0.0..360.0 deg)",
-          "lfo3.fade = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "lfo3.polarity = Bipolar  (bipolar|unipolar)"
-        ],
-        "LFO 4": [
-          "lfo4.wave = Sine  (sine|triangle|saw_up|saw_down|square|sample_hold|smooth_random)",
-          "lfo4.rate = 1.00 Hz  (0.01..50.0 Hz, log)",
-          "lfo4.sync = off  (off|n8_1|n4_1|n2_1|n1_1|n1_2|n1_2d|n1_2t|n1_4|n1_4d|n1_4t|n1_8|n1_8d|n1_8t|n1_16|n1_16d|n1_16t|n1_32)",
-          "lfo4.phase = 0.0 deg  (0.0..360.0 deg)",
-          "lfo4.fade = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "lfo4.polarity = Bipolar  (bipolar|unipolar)"
-        ],
-        "Step 1": [
-          "step1.length = 16  (1..16)",
-          "step1.sync = 1/16  (n8_1|n4_1|n2_1|n1_1|n1_2|n1_2d|n1_2t|n1_4|n1_4d|n1_4t|n1_8|n1_8d|n1_8t|n1_16|n1_16d|n1_16t|n1_32)",
-          "step1.glide = 0.0 %  (0.0..100.0 %)"
-        ],
-        "Step 2": [
-          "step2.length = 16  (1..16)",
-          "step2.sync = 1/16  (n8_1|n4_1|n2_1|n1_1|n1_2|n1_2d|n1_2t|n1_4|n1_4d|n1_4t|n1_8|n1_8d|n1_8t|n1_16|n1_16d|n1_16t|n1_32)",
-          "step2.glide = 0.0 %  (0.0..100.0 %)"
-        ],
-        "Macros": [
-          "macro1 = 0.0 %  (0.0..100.0 %)",
-          "macro2 = 0.0 %  (0.0..100.0 %)",
-          "macro3 = 0.0 %  (0.0..100.0 %)",
-          "macro4 = 0.0 %  (0.0..100.0 %)",
-          "macro5 = 0.0 %  (0.0..100.0 %)",
-          "macro6 = 0.0 %  (0.0..100.0 %)",
-          "macro7 = 0.0 %  (0.0..100.0 %)",
-          "macro8 = 0.0 %  (0.0..100.0 %)"
-        ],
-        "FX/Chorus": [
-          "fx.chorus.rate = 0.500 Hz  (0.05..10.0 Hz, log)",
-          "fx.chorus.depth = 30.0 %  (0.0..100.0 %)",
-          "fx.chorus.voices = 2  (2..4)",
-          "fx.chorus.mix = 50.0 %  (0.0..100.0 %)"
-        ],
-        "FX/Phaser": [
-          "fx.phaser.rate = 0.300 Hz  (0.02..10.0 Hz, log)",
-          "fx.phaser.depth = 50.0 %  (0.0..100.0 %)",
-          "fx.phaser.stages = 6  (2..12)",
-          "fx.phaser.feedback = +30.0 %  (-90.0..90.0 %)",
-          "fx.phaser.mix = 50.0 %  (0.0..100.0 %)"
-        ],
-        "FX/Delay": [
-          "fx.delay.sync = 1/8.  (off|n8_1|n4_1|n2_1|n1_1|n1_2|n1_2d|n1_2t|n1_4|n1_4d|n1_4t|n1_8|n1_8d|n1_8t|n1_16|n1_16d|n1_16t|n1_32)",
-          "fx.delay.time = 375 ms  (1.0..4000.0 ms, log)",
-          "fx.delay.feedback = 35.0 %  (0.0..110.0 %)",
-          "fx.delay.ping_pong = off  (on|off)",
-          "fx.delay.damping = 30.0 %  (0.0..100.0 %)",
-          "fx.delay.mix = 25.0 %  (0.0..100.0 %)"
-        ],
-        "FX/Reverb": [
-          "fx.reverb.size = 50.0 %  (0.0..100.0 %)",
-          "fx.reverb.decay = 2.00 s  (100.0..30000.0 ms, log)",
-          "fx.reverb.predelay = 10.0 ms  (0.0..250.0 ms)",
-          "fx.reverb.damping = 40.0 %  (0.0..100.0 %)",
-          "fx.reverb.width = 100 %  (0.0..100.0 %)",
-          "fx.reverb.mix = 20.0 %  (0.0..100.0 %)"
-        ],
-        "FX/EQ": [
-          "fx.eq.low_gain = 0.0 dB  (-18.0..18.0 dB)",
-          "fx.eq.mid_freq = 1.00 kHz  (200.0..8000.0 Hz, log)",
-          "fx.eq.mid_gain = 0.0 dB  (-18.0..18.0 dB)",
-          "fx.eq.mid_q = 0.700  (0.3..8.0, log)",
-          "fx.eq.high_gain = 0.0 dB  (-18.0..18.0 dB)"
-        ],
         "Output": [
           "output.level = 0.0 dB  (-60.0..12.0 dB)"
         ]
@@ -2015,7 +1714,10 @@ that exactly duplicates structuredContent is shown once.
       "patch_type": "supple.orrery-patch/1.0",
       "description": "Poly. osc1 va saw. Amp A 5.00 ms D 300 ms S 70.0 % R 300 ms.",
       "docs": "Orrery is a constrained-modular synthesizer. A patch (supple.orrery-patch/1.0) chooses which slots exist — oscillators osc1..osc4 (va, wavetable, fm, noise, sub), filters filter1/filter2 (ladder, svf, comb, formant; serial or parallel), drive, envelopes amp/env2..env4, lfos lfo1..lfo4, steps step1/step2, eight macros and up to five post-FX in fx.chain — and routes modulation as \"<source>><destination>\": {\"amount\": ...} in the destination's unit (oct for frequencies, st for pitch, dB for levels, x for oscN.fm, % otherwise). Values are CLAP parameters keyed by patch path (osc1.level, filter1.cutoff, amp.attack); structure lives only in the patch. Macros are the automation surface for modulation.",
-      "status_available": false
+      "status_available": false,
+      "inactive": {
+        "_elided_array_count": 187
+      }
     }
   }
 }

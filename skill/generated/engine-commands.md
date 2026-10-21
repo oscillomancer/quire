@@ -4373,6 +4373,13 @@ Kind: `edit`. Exposure: `mcp-tool`.
     "changed": {},
     "description": {
       "type": "string"
+    },
+    "inactive": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Params set that do not apply with the new values: kept, and heard once what fx.describe full's active_when names allows it"
     }
   },
   "required": ["changed", "description"],
@@ -4529,6 +4536,13 @@ Kind: `edit`. Exposure: `mcp-tool`.
     "changed": {},
     "description": {
       "type": "string"
+    },
+    "inactive": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Params set that do not apply with the new values: kept, and heard once what fx.describe full's active_when names allows it"
     }
   },
   "required": ["changed", "description"],

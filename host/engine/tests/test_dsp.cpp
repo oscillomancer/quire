@@ -213,6 +213,51 @@ TEST_CASE("a DSP script written over the bus is a plugin an agent sets through i
           broken);
 }
 
+TEST_CASE("a merge names the values it set that do not apply with the patch it leaves") {
+    if (!fs::exists(kStock / "Script Player.clap")) {
+        MESSAGE("skipped: no script player in " << kStock.string());
+        return;
+    }
+    Root root;
+    AppOptions o;
+    o.workdir = root.path;
+    o.chainDir = root.path / "chains";
+    o.pluginPath = {kStock / "Script Player.clap"};
+    auto app = EngineApp::create(o, {.console9 = false});
+    REQUIRE(app);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, **app);
+    auto call = [&](std::string name, const std::string& args) {
+        auto r = bus.execute({std::move(name), json::parse(args).value(), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    json::Value write = json::Value::object();
+    write["name"] = "sometimes";
+    write["source"] = R"(#include <supple/script.h>
+struct Sometimes : Effect {
+    static constexpr Info info = {.name = "Sometimes", .id = "com.example.sometimes"};
+    Param on = toggle("On", true);
+    Param gain = decibels("Gain", -24, 24, 0).activeWhen(on);
+    void process(Block& io) {}
+};
+)";
+    auto written = bus.execute({"dsp.write", std::move(write), kTest});
+    REQUIRE((written && (*written)["ok"].asBool()));
+    call("track.add", R"({"name": "Vocal"})");
+    const std::string fx =
+        call("fx.add", R"({"track": "tr_1", "plugin": "com.example.sometimes"})")["fx"].asString();
+    auto set =
+        call("fx.param.set", R"({"fx": ")" + fx + R"(", "values": {"on": false, "gain": -6}})");
+    CHECK(json::writeCompact(set["inactive"]) == R"(["gain"])");
+    auto described = call("fx.describe", R"({"fx": ")" + fx + R"(", "full": true})");
+    CHECK_FALSE(described["params"]["gain"]["active"].asBool());
+    auto merged =
+        call("fx.patch.merge", R"({"fx": ")" + fx + R"(", "patch": {"params": {"on": true}}})");
+    CHECK(merged.find("inactive") == nullptr);
+}
+
 TEST_CASE("a scripted instrument plays a track's notes in the mix") {
     if (!fs::exists(kStock / "Script Player.clap")) {
         MESSAGE("skipped: no script player in " << kStock.string());
