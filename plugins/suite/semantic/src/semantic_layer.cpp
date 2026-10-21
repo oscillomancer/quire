@@ -206,7 +206,8 @@ bool SemanticLayer::setPatch(uint32_t mode, const char* text, uint32_t size,
     // preset it came from and the editor's size stay as they were.
     instance_.applyValues(snapshot);
     instance_.markDirty();
-    changed(CLAP_SUPPLE_CHANGED_PATCH | (schema ? CLAP_SUPPLE_CHANGED_SCHEMA : 0u));
+    changed(CLAP_SUPPLE_CHANGED_PATCH |
+            (schema ? static_cast<uint32_t>(CLAP_SUPPLE_CHANGED_SCHEMA) : 0u));
     return true;
 }
 
