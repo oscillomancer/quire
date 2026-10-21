@@ -14,8 +14,9 @@ limiter), Gorse (`stock/gorse`, the transient shaper), Hickory
 (`stock/hickory`, the stereo utility), Sorrel (`stock/sorrel`, the gate),
 Teasel (`stock/teasel`, the saturation), Bracken (`stock/bracken`, the
 delay), Canopy (`stock/canopy`, the reverb) and Lichen (`stock/lichen`, the
-analyzer) are written so far; the rest of this section is about Orrery,
-the last hand-written plugin.
+analyzer) are written so far, and Marram (`stock/marram`, the synthesizer)
+is on its way to replacing Orrery (`docs/specs/marram.md`); the rest of
+this section is about Orrery, the last hand-written plugin.
 
 Orrery (`orrery`) is an instance of Supple Audio's plugin template (ADR-0011):
 

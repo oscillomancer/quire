@@ -61,12 +61,17 @@ plugins ship as CLAP (and VST3, AU) files of their own that other hosts load.
    Bracken, the delay, replacing Echelon (`com.suppleaudio.delay`); the
    ninth Canopy, the reverb, replacing Nave (`com.suppleaudio.reverb`); the
    tenth Lichen, the analyzer, replacing Gauge (`com.suppleaudio.analyzer`).
+   (2026-10-21) The eleventh is Marram, the synthesizer, which will replace
+   Orrery (`com.suppleaudio.orrery`) in stages (`docs/specs/marram.md`):
+   agents, the evaluation tasks and the optimizer's tests use Orrery's
+   patch format, so Orrery stays until Marram has its modulation, editor,
+   guide and evaluation tasks, and goes in that last change.
 6. **Names and look.** A stock plugin is named after a plant or something
    else of the natural world, not after its effect type (Yarrow, the EQ;
    Sundew, the compressor; Treeline, the limiter; Gorse, the transient
    shaper; Hickory, the stereo utility; Sorrel, the gate; Teasel, the
    saturation; Bracken, the delay; Canopy, the reverb; Lichen, the
-   analyzer).
+   analyzer; Marram, the synthesizer).
    Every stock script draws with the scripts' palette (`kScriptTheme` in
    `plugins/suite/glue`): warm and earthy, set apart from the host's
    graphite (walnut panels, a soil-dark floor under graphs, parchment

@@ -52,6 +52,8 @@ machine, but file formats and commands can still change.
   CLAP extension. Newer ones, starting with Yarrow, Sundew, Treeline,
   Gorse, Hickory, Sorrel, Teasel, Bracken, Canopy and Lichen, are written
   as DSP scripts and compiled into plugins of their own (`plugins/stock`).
+  Marram, a synthesizer written the same way, is on its way to replacing
+  Orrery.
 - **Text formats.** Projects, patches and FX chains are canonical JSON; MIDI
   can be written in a compact text notation.
 

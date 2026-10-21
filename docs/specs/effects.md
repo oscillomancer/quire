@@ -21,6 +21,10 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 | `bracken` (`plugins/stock/bracken`) | Bracken | `com.suppleaudio.bracken` | `PzKJ` (the player's for the id) | `Brkn` | audio-effect, delay |
 | `canopy` (`plugins/stock/canopy`) | Canopy | `com.suppleaudio.canopy` | `TtYY` (the player's for the id) | `Cnpy` | audio-effect, reverb |
 | `lichen` (`plugins/stock/lichen`) | Lichen | `com.suppleaudio.lichen` | `cwHJ` (the player's for the id) | `Lchn` | audio-effect, analyzer |
+| `marram` (`plugins/stock/marram`) | Marram | `com.suppleaudio.marram` | `XZXx` (the player's for the id) | `Mrrm` | instrument, synthesizer |
+
+Marram is an instrument; its spec, implementation notes included, is
+`docs/specs/marram.md`.
 
 ## 1. The shape every effect shares
 
