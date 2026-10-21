@@ -434,6 +434,7 @@ struct Teasel : Effect {
             .keys({"free", "bars4", "bars2", "bar1", "n2", "n4", "n8", "n16", "n32", "n4t", "n8t",
                    "n16t", "n4d", "n8d"})
             .in("Movement")
+            .activeAbove(motion, 0)
             .help("The LFO's cycle in note values, locked to the song while it plays.");
     Param motionRate = frequency("Motion Rate", 0.05, 20, 1)
                            .in("Movement")
@@ -443,9 +444,11 @@ struct Teasel : Effect {
         choice("Motion Shape",
                {"Sine", "Triangle", "Ramp Up", "Ramp Down", "Square", "Random", "Drift"}, 0)
             .in("Movement")
+            .activeAbove(motion, 0)
             .help("The LFO's wave; random holds a value each cycle, drift glides between them.");
     Param motionTarget = choice("Motion Target", {"Drive", "Character", "Bias", "Pitch"}, 0)
                              .in("Movement")
+                             .activeAbove(motion, 0)
                              .help("What the LFO moves; pitch is the feedback's.");
     Param feedback =
         percent("Feedback", 0, -95, 95)
