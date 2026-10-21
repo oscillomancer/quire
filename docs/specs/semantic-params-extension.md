@@ -235,7 +235,11 @@ round trip; `describe` is non-empty and ≤ 600 chars.
 - Structured plugins implement the extension through
   `plugins/common`'s `SemanticModel` / `SemanticAdapter` (same wire formats as
   `FlatSemantic`); `semantic-conformance` exercises them with whole-document
-  replaces during processing.
+  replaces during processing. (2026-10-21: `plugins/common`'s plugin support,
+  `ParamStore`, `ClapParams` and `SemanticModel` / `SemanticAdapter`, was
+  removed with its last user, Orrery. Every stock plugin implements the
+  extension as a DSP script through the framework's semantic layer, whose
+  patches are flat `params` plus `routes`.)
 
 ## Amendments (2026-10-13, the patch as a state chunk)
 

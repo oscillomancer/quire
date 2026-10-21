@@ -1,6 +1,6 @@
-# Orrery over MCP
+# The stock synth over MCP
 
-This is a scripted sound-design session with the real Orrery CLAP module. The
+This is a scripted sound-design session with Marram, the stock synth. The
 same commands run directly in the sandbox and through its Unix socket proxy.
 The client checks every step's structured result before recording the exchange.
 Arrays longer than 12 entries show their count and names; temporary paths,
@@ -20,7 +20,7 @@ that exactly duplicates structuredContent is shown once.
     "protocolVersion": "2025-06-18",
     "capabilities": {},
     "clientInfo": {
-      "name": "orrery-demo",
+      "name": "synth-demo",
       "version": "1.0"
     }
   }
@@ -231,7 +231,7 @@ that exactly duplicates structuredContent is shown once.
   "params": {
     "name": "plugin_load",
     "arguments": {
-      "plugin": "<orrery.clap>"
+      "plugin": "<synth.clap>"
     }
   }
 }
@@ -252,7 +252,7 @@ that exactly duplicates structuredContent is shown once.
     ],
     "structuredContent": {
       "instance": "in_1",
-      "name": "Orrery",
+      "name": "Marram",
       "semantic": true,
       "chain": [
         "in_1"
@@ -293,59 +293,117 @@ that exactly duplicates structuredContent is shown once.
       }
     ],
     "structuredContent": {
-      "plugin": "com.suppleaudio.orrery",
-      "name": "Orrery",
+      "plugin": "com.suppleaudio.marram",
+      "name": "Marram",
       "params": {
         "Voice": [
           "voice.mode = Poly  (poly|mono|legato)",
-          "voice.polyphony = 8  (1..32)",
+          "voice.polyphony = 16  (1..16)",
+          "voice.glide = 0.00 ms  (0.0..5000.0 ms, pow:3)",
+          "voice.bend_range = 2.0 st  (0.0..48.0 st)",
+          "voice.tune = 0 ct  (-100.0..100.0 ct)",
           "voice.unison = 1  (1..8)",
-          "voice.unison_detune = 10.0 ct  (0.0..100.0 ct)",
-          "voice.unison_spread = 50.0 %  (0.0..100.0 %)",
-          "voice.glide = 0.0 ms  (0.0..5000.0 ms, pow:3)",
-          "voice.glide_mode = Legato  (always|legato)",
-          "voice.bend_range = 2 st  (0..48 st)",
-          "voice.mpe = off  (on|off)",
-          "voice.drift = 0.0 %  (0.0..100.0 %)"
+          "voice.drift = 0 %  (0.0..100.0 %)",
+          "voice.quality = Normal  (eco|normal|high)"
         ],
-        "Oscillator 1": [
-          "osc1.level = -6.00 dB  (-60.0..6.0 dB)",
-          "osc1.pan = 0.0 %  (-100.0..100.0 %)",
-          "osc1.coarse = 0 st  (-48..48 st)",
-          "osc1.fine = 0.0 ct  (-100.0..100.0 ct)",
-          "osc1.phase_mode = Free  (free|reset)",
-          "osc1.phase = 0.0 deg  (0.0..360.0 deg)",
-          "osc1.wave = Saw  (saw|square|pulse|triangle|sine|half_sine|abs_sine|square_sine)",
-          "osc1.width = 50.0 %  (1.0..99.0 %)",
-          "osc1.shape = 0.0 %  (0.0..100.0 %)"
+        "Osc 1": [
+          "osc1.type = Analog  (off|analog|wavetable|fm|noise|sub)",
+          "osc1.level = -6.0 dB  (-60.0..6.0 dB)",
+          "osc1.pan = 0 %  (-100.0..100.0 %)",
+          "osc1.coarse = 0  (-48..48)",
+          "osc1.fine = 0 ct  (-100.0..100.0 ct)",
+          "osc1.wave = Saw  (saw|square|pulse|triangle|sine)",
+          "osc1.fm = 0.00  (0.0..10.0)",
+          "osc1.to = Filter 1  (filter1|filter2|both|direct)",
+          "osc1.retrigger = Off  (on|off)"
+        ],
+        "Osc 2": [
+          "osc2.type = Off  (off|analog|wavetable|fm|noise|sub)"
+        ],
+        "Osc 3": [
+          "osc3.type = Off  (off|analog|wavetable|fm|noise|sub)"
+        ],
+        "Osc 4": [
+          "osc4.type = Off  (off|analog|wavetable|fm|noise|sub)"
+        ],
+        "Filter 1": [
+          "filter1.type = Ladder  (off|ladder|svf|comb|formant)",
+          "filter1.cutoff = 2.00 kHz  (20.0..20000.0 Hz, log)",
+          "filter1.resonance = 10 %  (0.0..100.0 %)",
+          "filter1.slope = 24 dB/oct  (db12|db24)",
+          "filter1.keytrack = 0 %  (0.0..200.0 %)",
+          "filter1.env = +2.00 oct  (-8.0..8.0 oct)",
+          "filter1.velocity = 0.00 oct  (0.0..4.0 oct)",
+          "filter1.drive = 0.0 dB  (0.0..24.0 dB)"
+        ],
+        "Filter 2": [
+          "filter2.type = Off  (off|ladder|svf|comb|formant)"
+        ],
+        "Drive": [
+          "drive.type = Off  (off|soft|tape|fold|hard)"
         ],
         "Amp": [
-          "amp.level = 0.0 dB  (-60.0..12.0 dB)",
-          "amp.velocity = 50.0 %  (0.0..100.0 %)",
-          "amp.pan = 0.0 %  (-100.0..100.0 %)"
+          "amp.attack = 2.00 ms  (0.0..30000.0 ms, pow:3)",
+          "amp.decay = 600 ms  (1.0..30000.0 ms, log)",
+          "amp.sustain = 80 %  (0.0..100.0 %)",
+          "amp.release = 250 ms  (1.0..30000.0 ms, log)",
+          "amp.velocity = 50 %  (0.0..100.0 %)",
+          "amp.level = 0.0 dB  (-48.0..12.0 dB)",
+          "amp.pan = 0 %  (-100.0..100.0 %)",
+          "output = 0.0 dB  (-36.0..12.0 dB)"
         ],
-        "Amp envelope": [
-          "amp.delay = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "amp.attack = 5.00 ms  (0.0..30000.0 ms, pow:3)",
-          "amp.hold = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "amp.decay = 300 ms  (1.0..30000.0 ms, pow:3)",
-          "amp.sustain = 70.0 %  (0.0..100.0 %)",
-          "amp.release = 300 ms  (1.0..30000.0 ms, pow:3)",
-          "amp.attack_curve = 0.0 %  (-100.0..100.0 %)",
-          "amp.decay_curve = +50.0 %  (-100.0..100.0 %)",
-          "amp.release_curve = +50.0 %  (-100.0..100.0 %)",
-          "amp.retrigger = Always  (always|legato)"
+        "Env 2": [
+          "env2.attack = 1.00 ms  (0.0..30000.0 ms, pow:3)",
+          "env2.decay = 400 ms  (1.0..30000.0 ms, log)",
+          "env2.sustain = 20 %  (0.0..100.0 %)",
+          "env2.release = 300 ms  (1.0..30000.0 ms, log)",
+          "env2.pitch = 0.0 st  (-48.0..48.0 st)",
+          "env2.fm = 0 %  (0.0..100.0 %)"
         ],
-        "Output": [
-          "output.level = 0.0 dB  (-60.0..12.0 dB)"
+        "Env 3": [
+          "env3.attack = 10.0 ms  (0.0..30000.0 ms, pow:3)",
+          "env3.decay = 800 ms  (1.0..30000.0 ms, log)",
+          "env3.sustain = 0 %  (0.0..100.0 %)",
+          "env3.release = 300 ms  (1.0..30000.0 ms, log)"
+        ],
+        "LFO 1": [
+          "lfo1.shape = Sine  (sine|triangle|saw_up|saw_down|square|random|drift)",
+          "lfo1.sync = Off  (on|off)",
+          "lfo1.rate = 2.0 Hz  (0.01..50.0 Hz, log)",
+          "lfo1.mode = Note  (note|free)",
+          "lfo1.phase = 0.0 deg  (0.0..360.0 deg)",
+          "lfo1.delay = 0.00 ms  (0.0..10000.0 ms, pow:3)"
+        ],
+        "LFO 2": [
+          "lfo2.shape = Sine  (sine|triangle|saw_up|saw_down|square|random|drift)",
+          "lfo2.sync = Off  (on|off)",
+          "lfo2.rate = 2.0 Hz  (0.01..50.0 Hz, log)",
+          "lfo2.mode = Note  (note|free)",
+          "lfo2.phase = 0.0 deg  (0.0..360.0 deg)",
+          "lfo2.delay = 0.00 ms  (0.0..10000.0 ms, pow:3)"
+        ],
+        "LFO 3": [
+          "lfo3.shape = Sine  (sine|triangle|saw_up|saw_down|square|random|drift)",
+          "lfo3.sync = Off  (on|off)",
+          "lfo3.rate = 2.0 Hz  (0.01..50.0 Hz, log)",
+          "lfo3.mode = Note  (note|free)",
+          "lfo3.phase = 0.0 deg  (0.0..360.0 deg)",
+          "lfo3.delay = 0.00 ms  (0.0..10000.0 ms, pow:3)"
+        ],
+        "Macros": [
+          "macro1 = 0 %  (0.0..100.0 %)",
+          "macro2 = 0 %  (0.0..100.0 %)",
+          "macro3 = 0 %  (0.0..100.0 %)",
+          "macro4 = 0 %  (0.0..100.0 %)"
         ]
       },
-      "patch_type": "supple.orrery-patch/1.0",
-      "description": "Poly. osc1 va saw. Amp A 5.00 ms D 300 ms S 70.0 % R 300 ms.",
-      "docs": "Orrery is a constrained-modular synthesizer. A patch (supple.orrery-patch/1.0) chooses which slots exist — oscillators osc1..osc4 (va, wavetable, fm, noise, sub), filters filter1/filter2 (ladder, svf, comb, formant; serial or parallel), drive, envelopes amp/env2..env4, lfos lfo1..lfo4, steps step1/step2, eight macros and up to five post-FX in fx.chain — and routes modulation as \"<source>><destination>\": {\"amount\": ...} in the destination's unit (oct for frequencies, st for pitch, dB for levels, x for oscN.fm, % otherwise). Values are CLAP parameters keyed by patch path (osc1.level, filter1.cutoff, amp.attack); structure lives only in the patch. Macros are the automation surface for modulation.",
-      "status_available": false,
+      "patch_type": "supple.marram-patch/1.0",
+      "description": "Marram: default settings",
+      "docs": "Synthesizer: four oscillators (analog, wavetable, FM, noise, sub) with unison, two filters (ladder, state-variable, comb, formant), drive, three envelopes, three LFOs and four macros, connected by modulation routes.",
+      "status_available": true,
+      "problems": [],
       "inactive": {
-        "_elided_array_count": 187
+        "_elided_array_count": 85
       }
     }
   }
@@ -364,31 +422,17 @@ that exactly duplicates structuredContent is shown once.
     "arguments": {
       "instance": "in_1",
       "patch": {
-        "schema": "supple.orrery-patch/1.0",
+        "schema": "supple.marram-patch/1.0",
         "name": "MCP demo pad",
-        "seed": 1234,
-        "oscillators": {
-          "osc1": {
-            "type": "va",
-            "wave": "saw"
-          }
-        },
-        "filters": {
-          "filter1": {
-            "type": "svf",
-            "cutoff": "900 Hz"
-          }
-        },
-        "envelopes": {
-          "amp": {
-            "attack": "80 ms",
-            "release": "200 ms"
-          },
-          "env2": {
-            "attack": "100 ms",
-            "decay": "400 ms",
-            "sustain": "0 %"
-          }
+        "params": {
+          "filter1.type": "svf",
+          "filter1.cutoff": "900 Hz",
+          "filter1.env": "+0 oct",
+          "amp.attack": "80 ms",
+          "amp.release": "200 ms",
+          "env2.attack": "100 ms",
+          "env2.decay": "400 ms",
+          "env2.sustain": "0 %"
         }
       }
     }
@@ -410,7 +454,7 @@ that exactly duplicates structuredContent is shown once.
       }
     ],
     "structuredContent": {
-      "description": "Poly. osc1 va saw → svf lowpass 900 Hz. env2 (A 100 ms D 400 ms S 0.0 % R 300 ms). Amp A 80.0 ms D 300 ms S 70.0 % R 200 ms."
+      "description": "Marram: Filter 1: Type SVF, Cutoff 900 Hz, Env 0.00 oct; Amp: Attack 80.0 ms, Release 200 ms; Env 2: Attack 100 ms, Sustain 0 %"
     }
   }
 }
@@ -452,70 +496,70 @@ that exactly duplicates structuredContent is shown once.
     "structuredContent": {
       "render": "<render-1>",
       "path": "<workdir>/renders/<render-1>.wav",
-      "seconds": 2.3000000000000003,
-      "peak_dbfs": -17.09,
-      "tail_s": 0.3,
-      "tail_capped": true,
-      "latency_samples": 0,
+      "seconds": 2.22,
+      "peak_dbfs": -16.45,
+      "tail_s": 0.22,
+      "tail_capped": false,
+      "latency_samples": 3,
       "analysis": {
         "schema": "supple.analysis-report/1.0",
         "source": {
-          "seconds": 2.3,
+          "seconds": 2.22,
           "sample_rate": 48000.0,
           "channels": 2,
           "layout": "stereo"
         },
         "loudness": {
-          "integrated_lufs": -23.8,
+          "integrated_lufs": -22.1,
           "lra_lu": null,
-          "max_momentary_lufs": -23.0,
+          "max_momentary_lufs": -21.5,
           "max_short_term_lufs": null,
-          "true_peak_dbtp": -17.1,
-          "sample_peak_dbfs": -17.1,
-          "plr_lu": 6.7
+          "true_peak_dbtp": -16.4,
+          "sample_peak_dbfs": -16.4,
+          "plr_lu": 5.7
         },
         "spectral": {
-          "centroid_hz": 560.0,
-          "rolloff_hz": 328.0,
+          "centroid_hz": 571.0,
+          "rolloff_hz": 352.0,
           "flatness": 0.0,
           "flux": 0.005,
           "tilt_db_per_oct": -9.5,
           "bands": {
-            "sub": -46.6,
-            "low": -1.2,
-            "low_mid": -7.5,
-            "mid": -12.2,
-            "high_mid": -34.8,
-            "presence": -49.2,
-            "air": -57.4
+            "sub": -46.8,
+            "low": -1.4,
+            "low_mid": -7.1,
+            "mid": -11.0,
+            "high_mid": -34.4,
+            "presence": -49.4,
+            "air": -57.7
           }
         },
         "harmonic": {
           "pitched": true,
           "voiced_pct": 97.2,
-          "f0_hz": 165.0,
-          "note": "E3-1c",
-          "stability_cents": 460.7,
+          "f0_hz": 148.0,
+          "note": "D3+10c",
+          "stability_cents": 510.5,
           "harmonics_db": [
             0.0,
-            -6.6,
-            -11.1,
-            -15.2,
-            -18.5,
-            -22.0,
-            -24.8,
-            -27.5
+            -6.2,
+            -10.3,
+            -13.2,
+            -16.7,
+            -19.6,
+            -22.3,
+            -24.7
           ],
           "inharmonicity": 0.0,
-          "hnr_db": 50.6
+          "hnr_db": 50.1
         },
         "envelope": {
-          "attack_ms": 68.0,
-          "decay20_ms": 1020.0,
-          "release_ms": 199.0,
-          "sustain_db": -4.7,
-          "crest_db": 8.9,
-          "onsets_per_s": 0.4
+          "attack_ms": 69.0,
+          "decay20_ms": 1010.0,
+          "release_ms": 198.0,
+          "sustain_db": -3.5,
+          "crest_db": 7.9,
+          "onsets_per_s": 0.5
         },
         "stereo": {
           "correlation": 1.0,
@@ -523,7 +567,7 @@ that exactly duplicates structuredContent is shown once.
           "balance_db": 0.0,
           "mono_loss_lu": 0.0
         },
-        "summary": "-23.8 LUFS, true peak -17.1 dBTP. Pitched E3-1c (165 Hz), 2nd/3rd harmonics -6.6/-11.1 dB. Centroid 560 Hz, tilt -9.5 dB/oct, most energy in low. Attack 68 ms, -20 dB after 1020 ms. Width 0.00, correlation 1.00."
+        "summary": "-22.1 LUFS, true peak -16.4 dBTP. Pitched D3+10c (148 Hz), 2nd/3rd harmonics -6.2/-10.3 dB. Centroid 571 Hz, tilt -9.5 dB/oct, most energy in low. Attack 69 ms, -20 dB after 1014 ms. Width 0.00, correlation 1.00."
       }
     }
   }
@@ -564,30 +608,30 @@ that exactly duplicates structuredContent is shown once.
       "report": {
         "schema": "supple.analysis-report/1.0",
         "source": {
-          "seconds": 2.3,
+          "seconds": 2.22,
           "sample_rate": 48000.0,
           "channels": 2,
           "layout": "stereo"
         },
         "loudness": {
-          "integrated_lufs": -23.8,
+          "integrated_lufs": -22.1,
           "lra_lu": null,
-          "max_momentary_lufs": -23.0,
+          "max_momentary_lufs": -21.5,
           "max_short_term_lufs": null,
-          "true_peak_dbtp": -17.1,
-          "sample_peak_dbfs": -17.1,
-          "plr_lu": 6.7
+          "true_peak_dbtp": -16.4,
+          "sample_peak_dbfs": -16.4,
+          "plr_lu": 5.7
         },
         "spectral": {
           "centroid_hz": {
-            "mean": 553.0,
-            "median": 560.0,
-            "p10": 515.0,
-            "p90": 599.0
+            "mean": 566.0,
+            "median": 571.0,
+            "p10": 531.0,
+            "p90": 611.0
           },
           "rolloff_hz": {
-            "mean": 328.0,
-            "median": 328.0,
+            "mean": 334.0,
+            "median": 352.0,
             "p10": 281.0,
             "p90": 398.0
           },
@@ -598,45 +642,45 @@ that exactly duplicates structuredContent is shown once.
             "p90": 0.0
           },
           "flux": {
-            "mean": 0.025,
+            "mean": 0.023,
             "median": 0.005,
             "p10": 0.0,
-            "p90": 0.058
+            "p90": 0.071
           },
           "tilt_db_per_oct": -9.5,
           "bands": {
             "sub": {
-              "level_db": -46.6,
+              "level_db": -46.8,
               "share_pct": 0.0,
               "width": 0.0
             },
             "low": {
-              "level_db": -1.2,
-              "share_pct": 76.0,
+              "level_db": -1.4,
+              "share_pct": 72.6,
               "width": 0.0
             },
             "low_mid": {
-              "level_db": -7.5,
-              "share_pct": 18.0,
+              "level_db": -7.1,
+              "share_pct": 19.4,
               "width": 0.0
             },
             "mid": {
-              "level_db": -12.2,
-              "share_pct": 6.0,
+              "level_db": -11.0,
+              "share_pct": 7.9,
               "width": 0.0
             },
             "high_mid": {
-              "level_db": -34.8,
+              "level_db": -34.4,
               "share_pct": 0.0,
               "width": 0.0
             },
             "presence": {
-              "level_db": -49.2,
+              "level_db": -49.4,
               "share_pct": 0.0,
               "width": 0.0
             },
             "air": {
-              "level_db": -57.4,
+              "level_db": -57.7,
               "share_pct": 0.0,
               "width": 0.0
             }
@@ -648,29 +692,29 @@ that exactly duplicates structuredContent is shown once.
         "harmonic": {
           "pitched": true,
           "voiced_pct": 97.2,
-          "f0_hz": 165.0,
-          "note": "E3-1c",
-          "stability_cents": 460.7,
+          "f0_hz": 148.0,
+          "note": "D3+10c",
+          "stability_cents": 510.5,
           "harmonics_db": [
             0.0,
-            -6.6,
-            -11.1,
-            -15.2,
-            -18.5,
-            -22.0,
-            -24.8,
-            -27.5
+            -6.2,
+            -10.3,
+            -13.2,
+            -16.7,
+            -19.6,
+            -22.3,
+            -24.7
           ],
           "inharmonicity": 0.0,
-          "hnr_db": 50.6
+          "hnr_db": 50.1
         },
         "envelope": {
-          "attack_ms": 68.0,
-          "decay20_ms": 1020.0,
-          "release_ms": 199.0,
-          "sustain_db": -4.7,
-          "crest_db": 8.9,
-          "onsets_per_s": 0.4
+          "attack_ms": 69.0,
+          "decay20_ms": 1010.0,
+          "release_ms": 198.0,
+          "sustain_db": -3.5,
+          "crest_db": 7.9,
+          "onsets_per_s": 0.5
         },
         "stereo": {
           "correlation": 1.0,
@@ -681,7 +725,7 @@ that exactly duplicates structuredContent is shown once.
           "correlation_p5": 1.0
         }
       },
-      "summary": "-23.8 LUFS, true peak -17.1 dBTP. Pitched E3-1c (165 Hz), 2nd/3rd harmonics -6.6/-11.1 dB. Centroid 560 Hz, tilt -9.5 dB/oct, most energy in low. Attack 68 ms, -20 dB after 1020 ms. Width 0.00, correlation 1.00."
+      "summary": "-22.1 LUFS, true peak -16.4 dBTP. Pitched D3+10c (148 Hz), 2nd/3rd harmonics -6.2/-10.3 dB. Centroid 571 Hz, tilt -9.5 dB/oct, most energy in low. Attack 69 ms, -20 dB after 1014 ms. Width 0.00, correlation 1.00."
     }
   }
 }
@@ -699,14 +743,13 @@ that exactly duplicates structuredContent is shown once.
     "arguments": {
       "instance": "in_1",
       "patch": {
-        "filters": {
-          "filter1": {
-            "cutoff": "1.4 kHz"
-          }
+        "params": {
+          "filter1.cutoff": "1.4 kHz",
+          "filter1.env": "+2 oct"
         },
         "routes": {
-          "env2>filter1.cutoff": {
-            "amount": "+2 oct"
+          "velocity>filter1.cutoff": {
+            "amount": "+1 oct"
           }
         }
       }
@@ -730,18 +773,17 @@ that exactly duplicates structuredContent is shown once.
     ],
     "structuredContent": {
       "changed": {
-        "filters": {
-          "filter1": {
-            "cutoff": 1400.0
-          }
+        "params": {
+          "filter1.cutoff": 1400.0,
+          "filter1.env": 2.0
         },
         "routes": {
-          "env2>filter1.cutoff": {
-            "amount": 2.0
+          "velocity>filter1.cutoff": {
+            "amount": 1.0
           }
         }
       },
-      "description": "Poly. osc1 va saw → svf lowpass 1.40 kHz. env2 (A 100 ms D 400 ms S 0.0 % R 300 ms). env2 → filter1.cutoff +2.00 oct. Amp A 80.0 ms D 300 ms S 70.0 % R 200 ms."
+      "description": "Marram: Filter 1: Type SVF, Cutoff 1.40 kHz; Amp: Attack 80.0 ms, Release 200 ms; Env 2: Attack 100 ms, Sustain 0 %; Routes: velocity>filter1.cutoff +1 oct"
     }
   }
 }
@@ -783,70 +825,70 @@ that exactly duplicates structuredContent is shown once.
     "structuredContent": {
       "render": "<render-2>",
       "path": "<workdir>/renders/<render-2>.wav",
-      "seconds": 2.3000000000000003,
-      "peak_dbfs": -16.330000000000002,
-      "tail_s": 0.3,
-      "tail_capped": true,
-      "latency_samples": 0,
+      "seconds": 2.22,
+      "peak_dbfs": -15.610000000000001,
+      "tail_s": 0.22,
+      "tail_capped": false,
+      "latency_samples": 3,
       "analysis": {
         "schema": "supple.analysis-report/1.0",
         "source": {
-          "seconds": 2.3,
+          "seconds": 2.22,
           "sample_rate": 48000.0,
           "channels": 2,
           "layout": "stereo"
         },
         "loudness": {
-          "integrated_lufs": -23.1,
+          "integrated_lufs": -21.3,
           "lra_lu": null,
-          "max_momentary_lufs": -22.1,
+          "max_momentary_lufs": -20.5,
           "max_short_term_lufs": null,
-          "true_peak_dbtp": -16.3,
-          "sample_peak_dbfs": -16.3,
-          "plr_lu": 6.8
+          "true_peak_dbtp": -15.6,
+          "sample_peak_dbfs": -15.6,
+          "plr_lu": 5.7
         },
         "spectral": {
-          "centroid_hz": 791.0,
-          "rolloff_hz": 398.0,
+          "centroid_hz": 1150.0,
+          "rolloff_hz": 492.0,
           "flatness": 0.0,
           "flux": 0.006,
-          "tilt_db_per_oct": -5.8,
+          "tilt_db_per_oct": -4.6,
           "bands": {
-            "sub": -47.1,
-            "low": -1.6,
+            "sub": -47.3,
+            "low": -1.9,
             "low_mid": -7.2,
-            "mid": -9.4,
-            "high_mid": -23.0,
-            "presence": -32.7,
-            "air": -38.5
+            "mid": -8.4,
+            "high_mid": -19.1,
+            "presence": -27.3,
+            "air": -31.5
           }
         },
         "harmonic": {
           "pitched": true,
           "voiced_pct": 97.2,
-          "f0_hz": 165.0,
-          "note": "E3-1c",
-          "stability_cents": 460.6,
+          "f0_hz": 148.0,
+          "note": "D3+12c",
+          "stability_cents": 510.4,
           "harmonics_db": [
             0.0,
-            -6.2,
-            -10.1,
-            -13.1,
-            -15.6,
-            -17.8,
-            -19.9,
-            -21.8
+            -6.0,
+            -9.6,
+            -12.2,
+            -14.2,
+            -15.9,
+            -17.4,
+            -18.7
           ],
           "inharmonicity": 0.0,
-          "hnr_db": 47.0
+          "hnr_db": 47.9
         },
         "envelope": {
-          "attack_ms": 63.0,
-          "decay20_ms": 1020.0,
-          "release_ms": 199.0,
-          "sustain_db": -4.9,
-          "crest_db": 9.0,
-          "onsets_per_s": 0.4
+          "attack_ms": 69.0,
+          "decay20_ms": 1010.0,
+          "release_ms": 198.0,
+          "sustain_db": -3.5,
+          "crest_db": 8.2,
+          "onsets_per_s": 0.5
         },
         "stereo": {
           "correlation": 1.0,
@@ -854,7 +896,7 @@ that exactly duplicates structuredContent is shown once.
           "balance_db": 0.0,
           "mono_loss_lu": 0.0
         },
-        "summary": "-23.1 LUFS, true peak -16.3 dBTP. Pitched E3-1c (165 Hz), 2nd/3rd harmonics -6.2/-10.1 dB. Centroid 791 Hz, tilt -5.8 dB/oct, most energy in low. Attack 63 ms, -20 dB after 1020 ms. Width 0.00, correlation 1.00."
+        "summary": "-21.3 LUFS, true peak -15.6 dBTP. Pitched D3+12c (148 Hz), 2nd/3rd harmonics -6.0/-9.6 dB. Centroid 1151 Hz, tilt -4.6 dB/oct, most energy in low. Attack 69 ms, -20 dB after 1014 ms. Width 0.00, correlation 1.00."
       }
     }
   }
@@ -895,27 +937,27 @@ that exactly duplicates structuredContent is shown once.
       "notable": {
         "_elided_array_count": 18
       },
-      "ltas_rms_db": 7.8,
-      "summary": "spectral.bands.air.level_db +19.0 dB; spectral.centroid_hz.p90 +739.4 Hz; spectral.bands.presence.level_db +16.5 dB; spectral.bands.high_mid.level_db +11.8 dB; spectral.centroid_hz.mean +352.6 Hz. Timbre difference 7.8 dB (LTAS RMS, level removed).",
+      "ltas_rms_db": 11.1,
+      "summary": "spectral.centroid_hz.p90 +1376.2 Hz; spectral.bands.air.level_db +26.2 dB; spectral.bands.presence.level_db +22.1 dB; spectral.centroid_hz.mean +760.9 Hz; spectral.bands.high_mid.level_db +15.3 dB. Timbre difference 11.1 dB (LTAS RMS, level removed).",
       "loss": {
-        "total": 80.36952957891427,
+        "total": 200.52640192935294,
         "terms": {
-          "bands": 13.927822043692457,
-          "centroid": 1.9728050065375413,
-          "envelope.attack": 0.04940556564455911,
+          "bands": 25.30695901593283,
+          "centroid": 8.178795239746554,
+          "envelope.attack": 0.0,
           "envelope.decay20": 0.0,
           "envelope.release": 0.0,
-          "flatness": 1.7709094722703791e-09,
-          "flux": 0.0003809826034800333,
-          "harmonics": 0.4600659303701549,
-          "inharmonicity": 4.935881297447454e-09,
-          "ltas": 6.748821628183759,
+          "flatness": 9.806669564121113e-08,
+          "flux": 0.0002457959127256162,
+          "harmonics": 0.4161591075361295,
+          "inharmonicity": 8.78902875305832e-07,
+          "ltas": 13.710254964084388,
           "stereo": 0.0,
-          "trajectory": 57.210228415175536
+          "trajectory": 152.91398682917077
         },
         "note_off_s": {
-          "reference": 1.9999999999999998,
-          "test": 1.9999999999999998
+          "reference": 2.0,
+          "test": 2.0
         }
       }
     }
@@ -1021,17 +1063,17 @@ that exactly duplicates structuredContent is shown once.
       "job": "jb_1",
       "status": "done",
       "progress": {
-        "best_loss": 0.2505,
+        "best_loss": 0.48,
         "evaluations": 17,
         "fraction": 1.0,
         "message": "generation 4"
       },
       "result": {
         "loss": {
-          "initial": 50.3315,
-          "best": 0.2505,
+          "initial": 12.1453,
+          "best": 0.48,
           "terms": {
-            "profile.spectral.centroid_hz.median": 0.2505
+            "profile.spectral.centroid_hz.median": 0.48
           }
         },
         "evaluations": 17,
@@ -1040,14 +1082,14 @@ that exactly duplicates structuredContent is shown once.
         "stopped": "evaluations",
         "patch": {
           "params": {
-            "filter1.cutoff": 3723.071911
+            "filter1.cutoff": 1959.411
           }
         },
         "changes": [
           {
             "key": "filter1.cutoff",
             "from": 1400.0,
-            "to": 3723.0719,
+            "to": 1959.411,
             "unit": "Hz"
           }
         ],
@@ -1072,7 +1114,7 @@ that exactly duplicates structuredContent is shown once.
       "instance": "in_1",
       "patch": {
         "params": {
-          "filter1.cutoff": 3723.071911
+          "filter1.cutoff": 1959.411
         }
       }
     }
@@ -1095,13 +1137,11 @@ that exactly duplicates structuredContent is shown once.
     ],
     "structuredContent": {
       "changed": {
-        "filters": {
-          "filter1": {
-            "cutoff": 3723.071911
-          }
+        "params": {
+          "filter1.cutoff": 1959.411
         }
       },
-      "description": "Poly. osc1 va saw → svf lowpass 3.72 kHz. env2 (A 100 ms D 400 ms S 0.0 % R 300 ms). env2 → filter1.cutoff +2.00 oct. Amp A 80.0 ms D 300 ms S 70.0 % R 200 ms."
+      "description": "Marram: Filter 1: Type SVF, Cutoff 1.96 kHz; Amp: Attack 80.0 ms, Release 200 ms; Env 2: Attack 100 ms, Sustain 0 %; Routes: velocity>filter1.cutoff +1 oct"
     }
   }
 }
@@ -1143,70 +1183,70 @@ that exactly duplicates structuredContent is shown once.
     "structuredContent": {
       "render": "<render-4>",
       "path": "<workdir>/renders/<render-4>.wav",
-      "seconds": 2.3000000000000003,
-      "peak_dbfs": -15.83,
-      "tail_s": 0.3,
-      "tail_capped": true,
-      "latency_samples": 0,
+      "seconds": 2.22,
+      "peak_dbfs": -15.33,
+      "tail_s": 0.22,
+      "tail_capped": false,
+      "latency_samples": 3,
       "analysis": {
         "schema": "supple.analysis-report/1.0",
         "source": {
-          "seconds": 2.3,
+          "seconds": 2.22,
           "sample_rate": 48000.0,
           "channels": 2,
           "layout": "stereo"
         },
         "loudness": {
-          "integrated_lufs": -22.6,
+          "integrated_lufs": -21.2,
           "lra_lu": null,
-          "max_momentary_lufs": -21.6,
+          "max_momentary_lufs": -20.4,
           "max_short_term_lufs": null,
-          "true_peak_dbtp": -15.8,
-          "sample_peak_dbfs": -15.8,
-          "plr_lu": 6.8
+          "true_peak_dbtp": -15.3,
+          "sample_peak_dbfs": -15.3,
+          "plr_lu": 5.9
         },
         "spectral": {
-          "centroid_hz": 1450.0,
-          "rolloff_hz": 492.0,
+          "centroid_hz": 1430.0,
+          "rolloff_hz": 516.0,
           "flatness": 0.0,
           "flux": 0.006,
-          "tilt_db_per_oct": -4.2,
+          "tilt_db_per_oct": -4.1,
           "bands": {
             "sub": -47.4,
             "low": -1.9,
             "low_mid": -7.3,
-            "mid": -8.4,
-            "high_mid": -18.3,
-            "presence": -25.4,
+            "mid": -8.3,
+            "high_mid": -17.8,
+            "presence": -25.1,
             "air": -28.4
           }
         },
         "harmonic": {
           "pitched": true,
           "voiced_pct": 97.2,
-          "f0_hz": 165.0,
-          "note": "E3",
-          "stability_cents": 460.9,
+          "f0_hz": 148.0,
+          "note": "D3+12c",
+          "stability_cents": 510.4,
           "harmonics_db": [
             0.0,
-            -6.1,
+            -6.0,
             -9.6,
-            -12.2,
-            -14.2,
-            -15.9,
-            -17.4,
-            -18.7
+            -12.1,
+            -14.1,
+            -15.7,
+            -17.1,
+            -18.4
           ],
           "inharmonicity": 0.0,
           "hnr_db": 46.3
         },
         "envelope": {
-          "attack_ms": 68.0,
-          "decay20_ms": 1020.0,
-          "release_ms": 199.0,
-          "sustain_db": -4.5,
-          "crest_db": 9.2,
-          "onsets_per_s": 0.4
+          "attack_ms": 69.0,
+          "decay20_ms": 1010.0,
+          "release_ms": 198.0,
+          "sustain_db": -3.5,
+          "crest_db": 8.4,
+          "onsets_per_s": 0.5
         },
         "stereo": {
           "correlation": 1.0,
@@ -1214,7 +1254,7 @@ that exactly duplicates structuredContent is shown once.
           "balance_db": 0.0,
           "mono_loss_lu": 0.0
         },
-        "summary": "-22.6 LUFS, true peak -15.8 dBTP. Pitched E3 (165 Hz), 2nd/3rd harmonics -6.1/-9.6 dB. Centroid 1450 Hz, tilt -4.2 dB/oct, most energy in low. Attack 68 ms, -20 dB after 1024 ms. Width 0.00, correlation 1.00."
+        "summary": "-21.2 LUFS, true peak -15.3 dBTP. Pitched D3+12c (148 Hz), 2nd/3rd harmonics -6.0/-9.6 dB. Centroid 1431 Hz, tilt -4.1 dB/oct, most energy in low. Attack 69 ms, -20 dB after 1014 ms. Width 0.00, correlation 1.00."
       }
     }
   }
@@ -1255,32 +1295,32 @@ that exactly duplicates structuredContent is shown once.
       "report": {
         "schema": "supple.analysis-report/1.0",
         "source": {
-          "seconds": 2.3,
+          "seconds": 2.22,
           "sample_rate": 48000.0,
           "channels": 2,
           "layout": "stereo"
         },
         "loudness": {
-          "integrated_lufs": -22.6,
+          "integrated_lufs": -21.2,
           "lra_lu": null,
-          "max_momentary_lufs": -21.6,
+          "max_momentary_lufs": -20.4,
           "max_short_term_lufs": null,
-          "true_peak_dbtp": -15.8,
-          "sample_peak_dbfs": -15.8,
-          "plr_lu": 6.8
+          "true_peak_dbtp": -15.3,
+          "sample_peak_dbfs": -15.3,
+          "plr_lu": 5.9
         },
         "spectral": {
           "centroid_hz": {
-            "mean": 1650.0,
-            "median": 1450.0,
-            "p10": 1280.0,
-            "p90": 2370.0
+            "mean": 1640.0,
+            "median": 1430.0,
+            "p10": 1260.0,
+            "p90": 2410.0
           },
           "rolloff_hz": {
-            "mean": 501.0,
-            "median": 492.0,
+            "mean": 518.0,
+            "median": 516.0,
             "p10": 398.0,
-            "p90": 609.0
+            "p90": 647.0
           },
           "flatness": {
             "mean": 0.0,
@@ -1289,12 +1329,12 @@ that exactly duplicates structuredContent is shown once.
             "p90": 0.001
           },
           "flux": {
-            "mean": 0.025,
+            "mean": 0.024,
             "median": 0.006,
             "p10": 0.001,
-            "p90": 0.061
+            "p90": 0.071
           },
-          "tilt_db_per_oct": -4.2,
+          "tilt_db_per_oct": -4.1,
           "bands": {
             "sub": {
               "level_db": -47.4,
@@ -1303,26 +1343,26 @@ that exactly duplicates structuredContent is shown once.
             },
             "low": {
               "level_db": -1.9,
-              "share_pct": 64.9,
+              "share_pct": 64.4,
               "width": 0.0
             },
             "low_mid": {
               "level_db": -7.3,
-              "share_pct": 18.8,
+              "share_pct": 18.7,
               "width": 0.0
             },
             "mid": {
-              "level_db": -8.4,
-              "share_pct": 14.3,
+              "level_db": -8.3,
+              "share_pct": 14.8,
               "width": 0.0
             },
             "high_mid": {
-              "level_db": -18.3,
-              "share_pct": 1.5,
+              "level_db": -17.8,
+              "share_pct": 1.6,
               "width": 0.0
             },
             "presence": {
-              "level_db": -25.4,
+              "level_db": -25.1,
               "share_pct": 0.3,
               "width": 0.0
             },
@@ -1339,29 +1379,29 @@ that exactly duplicates structuredContent is shown once.
         "harmonic": {
           "pitched": true,
           "voiced_pct": 97.2,
-          "f0_hz": 165.0,
-          "note": "E3",
-          "stability_cents": 460.9,
+          "f0_hz": 148.0,
+          "note": "D3+12c",
+          "stability_cents": 510.4,
           "harmonics_db": [
             0.0,
-            -6.1,
+            -6.0,
             -9.6,
-            -12.2,
-            -14.2,
-            -15.9,
-            -17.4,
-            -18.7
+            -12.1,
+            -14.1,
+            -15.7,
+            -17.1,
+            -18.4
           ],
           "inharmonicity": 0.0,
           "hnr_db": 46.3
         },
         "envelope": {
-          "attack_ms": 68.0,
-          "decay20_ms": 1020.0,
-          "release_ms": 199.0,
-          "sustain_db": -4.5,
-          "crest_db": 9.2,
-          "onsets_per_s": 0.4
+          "attack_ms": 69.0,
+          "decay20_ms": 1010.0,
+          "release_ms": 198.0,
+          "sustain_db": -3.5,
+          "crest_db": 8.4,
+          "onsets_per_s": 0.5
         },
         "stereo": {
           "correlation": 1.0,
@@ -1372,7 +1412,7 @@ that exactly duplicates structuredContent is shown once.
           "correlation_p5": 1.0
         }
       },
-      "summary": "-22.6 LUFS, true peak -15.8 dBTP. Pitched E3 (165 Hz), 2nd/3rd harmonics -6.1/-9.6 dB. Centroid 1450 Hz, tilt -4.2 dB/oct, most energy in low. Attack 68 ms, -20 dB after 1024 ms. Width 0.00, correlation 1.00."
+      "summary": "-21.2 LUFS, true peak -15.3 dBTP. Pitched D3+12c (148 Hz), 2nd/3rd harmonics -6.0/-9.6 dB. Centroid 1431 Hz, tilt -4.1 dB/oct, most energy in low. Attack 69 ms, -20 dB after 1014 ms. Width 0.00, correlation 1.00."
     }
   }
 }
@@ -1391,7 +1431,7 @@ that exactly duplicates structuredContent is shown once.
     "protocolVersion": "2025-06-18",
     "capabilities": {},
     "clientInfo": {
-      "name": "orrery-demo",
+      "name": "synth-demo",
       "version": "1.0"
     }
   }
@@ -1602,7 +1642,7 @@ that exactly duplicates structuredContent is shown once.
   "params": {
     "name": "plugin_load",
     "arguments": {
-      "plugin": "<orrery.clap>"
+      "plugin": "<synth.clap>"
     }
   }
 }
@@ -1623,7 +1663,7 @@ that exactly duplicates structuredContent is shown once.
     ],
     "structuredContent": {
       "instance": "in_1",
-      "name": "Orrery",
+      "name": "Marram",
       "semantic": true,
       "chain": [
         "in_1"
@@ -1664,59 +1704,117 @@ that exactly duplicates structuredContent is shown once.
       }
     ],
     "structuredContent": {
-      "plugin": "com.suppleaudio.orrery",
-      "name": "Orrery",
+      "plugin": "com.suppleaudio.marram",
+      "name": "Marram",
       "params": {
         "Voice": [
           "voice.mode = Poly  (poly|mono|legato)",
-          "voice.polyphony = 8  (1..32)",
+          "voice.polyphony = 16  (1..16)",
+          "voice.glide = 0.00 ms  (0.0..5000.0 ms, pow:3)",
+          "voice.bend_range = 2.0 st  (0.0..48.0 st)",
+          "voice.tune = 0 ct  (-100.0..100.0 ct)",
           "voice.unison = 1  (1..8)",
-          "voice.unison_detune = 10.0 ct  (0.0..100.0 ct)",
-          "voice.unison_spread = 50.0 %  (0.0..100.0 %)",
-          "voice.glide = 0.0 ms  (0.0..5000.0 ms, pow:3)",
-          "voice.glide_mode = Legato  (always|legato)",
-          "voice.bend_range = 2 st  (0..48 st)",
-          "voice.mpe = off  (on|off)",
-          "voice.drift = 0.0 %  (0.0..100.0 %)"
+          "voice.drift = 0 %  (0.0..100.0 %)",
+          "voice.quality = Normal  (eco|normal|high)"
         ],
-        "Oscillator 1": [
-          "osc1.level = -6.00 dB  (-60.0..6.0 dB)",
-          "osc1.pan = 0.0 %  (-100.0..100.0 %)",
-          "osc1.coarse = 0 st  (-48..48 st)",
-          "osc1.fine = 0.0 ct  (-100.0..100.0 ct)",
-          "osc1.phase_mode = Free  (free|reset)",
-          "osc1.phase = 0.0 deg  (0.0..360.0 deg)",
-          "osc1.wave = Saw  (saw|square|pulse|triangle|sine|half_sine|abs_sine|square_sine)",
-          "osc1.width = 50.0 %  (1.0..99.0 %)",
-          "osc1.shape = 0.0 %  (0.0..100.0 %)"
+        "Osc 1": [
+          "osc1.type = Analog  (off|analog|wavetable|fm|noise|sub)",
+          "osc1.level = -6.0 dB  (-60.0..6.0 dB)",
+          "osc1.pan = 0 %  (-100.0..100.0 %)",
+          "osc1.coarse = 0  (-48..48)",
+          "osc1.fine = 0 ct  (-100.0..100.0 ct)",
+          "osc1.wave = Saw  (saw|square|pulse|triangle|sine)",
+          "osc1.fm = 0.00  (0.0..10.0)",
+          "osc1.to = Filter 1  (filter1|filter2|both|direct)",
+          "osc1.retrigger = Off  (on|off)"
+        ],
+        "Osc 2": [
+          "osc2.type = Off  (off|analog|wavetable|fm|noise|sub)"
+        ],
+        "Osc 3": [
+          "osc3.type = Off  (off|analog|wavetable|fm|noise|sub)"
+        ],
+        "Osc 4": [
+          "osc4.type = Off  (off|analog|wavetable|fm|noise|sub)"
+        ],
+        "Filter 1": [
+          "filter1.type = Ladder  (off|ladder|svf|comb|formant)",
+          "filter1.cutoff = 2.00 kHz  (20.0..20000.0 Hz, log)",
+          "filter1.resonance = 10 %  (0.0..100.0 %)",
+          "filter1.slope = 24 dB/oct  (db12|db24)",
+          "filter1.keytrack = 0 %  (0.0..200.0 %)",
+          "filter1.env = +2.00 oct  (-8.0..8.0 oct)",
+          "filter1.velocity = 0.00 oct  (0.0..4.0 oct)",
+          "filter1.drive = 0.0 dB  (0.0..24.0 dB)"
+        ],
+        "Filter 2": [
+          "filter2.type = Off  (off|ladder|svf|comb|formant)"
+        ],
+        "Drive": [
+          "drive.type = Off  (off|soft|tape|fold|hard)"
         ],
         "Amp": [
-          "amp.level = 0.0 dB  (-60.0..12.0 dB)",
-          "amp.velocity = 50.0 %  (0.0..100.0 %)",
-          "amp.pan = 0.0 %  (-100.0..100.0 %)"
+          "amp.attack = 2.00 ms  (0.0..30000.0 ms, pow:3)",
+          "amp.decay = 600 ms  (1.0..30000.0 ms, log)",
+          "amp.sustain = 80 %  (0.0..100.0 %)",
+          "amp.release = 250 ms  (1.0..30000.0 ms, log)",
+          "amp.velocity = 50 %  (0.0..100.0 %)",
+          "amp.level = 0.0 dB  (-48.0..12.0 dB)",
+          "amp.pan = 0 %  (-100.0..100.0 %)",
+          "output = 0.0 dB  (-36.0..12.0 dB)"
         ],
-        "Amp envelope": [
-          "amp.delay = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "amp.attack = 5.00 ms  (0.0..30000.0 ms, pow:3)",
-          "amp.hold = 0.0 ms  (0.0..10000.0 ms, pow:3)",
-          "amp.decay = 300 ms  (1.0..30000.0 ms, pow:3)",
-          "amp.sustain = 70.0 %  (0.0..100.0 %)",
-          "amp.release = 300 ms  (1.0..30000.0 ms, pow:3)",
-          "amp.attack_curve = 0.0 %  (-100.0..100.0 %)",
-          "amp.decay_curve = +50.0 %  (-100.0..100.0 %)",
-          "amp.release_curve = +50.0 %  (-100.0..100.0 %)",
-          "amp.retrigger = Always  (always|legato)"
+        "Env 2": [
+          "env2.attack = 1.00 ms  (0.0..30000.0 ms, pow:3)",
+          "env2.decay = 400 ms  (1.0..30000.0 ms, log)",
+          "env2.sustain = 20 %  (0.0..100.0 %)",
+          "env2.release = 300 ms  (1.0..30000.0 ms, log)",
+          "env2.pitch = 0.0 st  (-48.0..48.0 st)",
+          "env2.fm = 0 %  (0.0..100.0 %)"
         ],
-        "Output": [
-          "output.level = 0.0 dB  (-60.0..12.0 dB)"
+        "Env 3": [
+          "env3.attack = 10.0 ms  (0.0..30000.0 ms, pow:3)",
+          "env3.decay = 800 ms  (1.0..30000.0 ms, log)",
+          "env3.sustain = 0 %  (0.0..100.0 %)",
+          "env3.release = 300 ms  (1.0..30000.0 ms, log)"
+        ],
+        "LFO 1": [
+          "lfo1.shape = Sine  (sine|triangle|saw_up|saw_down|square|random|drift)",
+          "lfo1.sync = Off  (on|off)",
+          "lfo1.rate = 2.0 Hz  (0.01..50.0 Hz, log)",
+          "lfo1.mode = Note  (note|free)",
+          "lfo1.phase = 0.0 deg  (0.0..360.0 deg)",
+          "lfo1.delay = 0.00 ms  (0.0..10000.0 ms, pow:3)"
+        ],
+        "LFO 2": [
+          "lfo2.shape = Sine  (sine|triangle|saw_up|saw_down|square|random|drift)",
+          "lfo2.sync = Off  (on|off)",
+          "lfo2.rate = 2.0 Hz  (0.01..50.0 Hz, log)",
+          "lfo2.mode = Note  (note|free)",
+          "lfo2.phase = 0.0 deg  (0.0..360.0 deg)",
+          "lfo2.delay = 0.00 ms  (0.0..10000.0 ms, pow:3)"
+        ],
+        "LFO 3": [
+          "lfo3.shape = Sine  (sine|triangle|saw_up|saw_down|square|random|drift)",
+          "lfo3.sync = Off  (on|off)",
+          "lfo3.rate = 2.0 Hz  (0.01..50.0 Hz, log)",
+          "lfo3.mode = Note  (note|free)",
+          "lfo3.phase = 0.0 deg  (0.0..360.0 deg)",
+          "lfo3.delay = 0.00 ms  (0.0..10000.0 ms, pow:3)"
+        ],
+        "Macros": [
+          "macro1 = 0 %  (0.0..100.0 %)",
+          "macro2 = 0 %  (0.0..100.0 %)",
+          "macro3 = 0 %  (0.0..100.0 %)",
+          "macro4 = 0 %  (0.0..100.0 %)"
         ]
       },
-      "patch_type": "supple.orrery-patch/1.0",
-      "description": "Poly. osc1 va saw. Amp A 5.00 ms D 300 ms S 70.0 % R 300 ms.",
-      "docs": "Orrery is a constrained-modular synthesizer. A patch (supple.orrery-patch/1.0) chooses which slots exist — oscillators osc1..osc4 (va, wavetable, fm, noise, sub), filters filter1/filter2 (ladder, svf, comb, formant; serial or parallel), drive, envelopes amp/env2..env4, lfos lfo1..lfo4, steps step1/step2, eight macros and up to five post-FX in fx.chain — and routes modulation as \"<source>><destination>\": {\"amount\": ...} in the destination's unit (oct for frequencies, st for pitch, dB for levels, x for oscN.fm, % otherwise). Values are CLAP parameters keyed by patch path (osc1.level, filter1.cutoff, amp.attack); structure lives only in the patch. Macros are the automation surface for modulation.",
-      "status_available": false,
+      "patch_type": "supple.marram-patch/1.0",
+      "description": "Marram: default settings",
+      "docs": "Synthesizer: four oscillators (analog, wavetable, FM, noise, sub) with unison, two filters (ladder, state-variable, comb, formant), drive, three envelopes, three LFOs and four macros, connected by modulation routes.",
+      "status_available": true,
+      "problems": [],
       "inactive": {
-        "_elided_array_count": 187
+        "_elided_array_count": 85
       }
     }
   }
@@ -1735,31 +1833,17 @@ that exactly duplicates structuredContent is shown once.
     "arguments": {
       "instance": "in_1",
       "patch": {
-        "schema": "supple.orrery-patch/1.0",
+        "schema": "supple.marram-patch/1.0",
         "name": "MCP demo pad",
-        "seed": 1234,
-        "oscillators": {
-          "osc1": {
-            "type": "va",
-            "wave": "saw"
-          }
-        },
-        "filters": {
-          "filter1": {
-            "type": "svf",
-            "cutoff": "900 Hz"
-          }
-        },
-        "envelopes": {
-          "amp": {
-            "attack": "80 ms",
-            "release": "200 ms"
-          },
-          "env2": {
-            "attack": "100 ms",
-            "decay": "400 ms",
-            "sustain": "0 %"
-          }
+        "params": {
+          "filter1.type": "svf",
+          "filter1.cutoff": "900 Hz",
+          "filter1.env": "+0 oct",
+          "amp.attack": "80 ms",
+          "amp.release": "200 ms",
+          "env2.attack": "100 ms",
+          "env2.decay": "400 ms",
+          "env2.sustain": "0 %"
         }
       }
     }
@@ -1781,7 +1865,7 @@ that exactly duplicates structuredContent is shown once.
       }
     ],
     "structuredContent": {
-      "description": "Poly. osc1 va saw → svf lowpass 900 Hz. env2 (A 100 ms D 400 ms S 0.0 % R 300 ms). Amp A 80.0 ms D 300 ms S 70.0 % R 200 ms."
+      "description": "Marram: Filter 1: Type SVF, Cutoff 900 Hz, Env 0.00 oct; Amp: Attack 80.0 ms, Release 200 ms; Env 2: Attack 100 ms, Sustain 0 %"
     }
   }
 }
@@ -1823,70 +1907,70 @@ that exactly duplicates structuredContent is shown once.
     "structuredContent": {
       "render": "<render-1>",
       "path": "<workdir>/renders/<render-1>.wav",
-      "seconds": 2.3000000000000003,
-      "peak_dbfs": -17.09,
-      "tail_s": 0.3,
-      "tail_capped": true,
-      "latency_samples": 0,
+      "seconds": 2.22,
+      "peak_dbfs": -16.45,
+      "tail_s": 0.22,
+      "tail_capped": false,
+      "latency_samples": 3,
       "analysis": {
         "schema": "supple.analysis-report/1.0",
         "source": {
-          "seconds": 2.3,
+          "seconds": 2.22,
           "sample_rate": 48000.0,
           "channels": 2,
           "layout": "stereo"
         },
         "loudness": {
-          "integrated_lufs": -23.8,
+          "integrated_lufs": -22.1,
           "lra_lu": null,
-          "max_momentary_lufs": -23.0,
+          "max_momentary_lufs": -21.5,
           "max_short_term_lufs": null,
-          "true_peak_dbtp": -17.1,
-          "sample_peak_dbfs": -17.1,
-          "plr_lu": 6.7
+          "true_peak_dbtp": -16.4,
+          "sample_peak_dbfs": -16.4,
+          "plr_lu": 5.7
         },
         "spectral": {
-          "centroid_hz": 560.0,
-          "rolloff_hz": 328.0,
+          "centroid_hz": 571.0,
+          "rolloff_hz": 352.0,
           "flatness": 0.0,
           "flux": 0.005,
           "tilt_db_per_oct": -9.5,
           "bands": {
-            "sub": -46.6,
-            "low": -1.2,
-            "low_mid": -7.5,
-            "mid": -12.2,
-            "high_mid": -34.8,
-            "presence": -49.2,
-            "air": -57.4
+            "sub": -46.8,
+            "low": -1.4,
+            "low_mid": -7.1,
+            "mid": -11.0,
+            "high_mid": -34.4,
+            "presence": -49.4,
+            "air": -57.7
           }
         },
         "harmonic": {
           "pitched": true,
           "voiced_pct": 97.2,
-          "f0_hz": 165.0,
-          "note": "E3-1c",
-          "stability_cents": 460.7,
+          "f0_hz": 148.0,
+          "note": "D3+10c",
+          "stability_cents": 510.5,
           "harmonics_db": [
             0.0,
-            -6.6,
-            -11.1,
-            -15.2,
-            -18.5,
-            -22.0,
-            -24.8,
-            -27.5
+            -6.2,
+            -10.3,
+            -13.2,
+            -16.7,
+            -19.6,
+            -22.3,
+            -24.7
           ],
           "inharmonicity": 0.0,
-          "hnr_db": 50.6
+          "hnr_db": 50.1
         },
         "envelope": {
-          "attack_ms": 68.0,
-          "decay20_ms": 1020.0,
-          "release_ms": 199.0,
-          "sustain_db": -4.7,
-          "crest_db": 8.9,
-          "onsets_per_s": 0.4
+          "attack_ms": 69.0,
+          "decay20_ms": 1010.0,
+          "release_ms": 198.0,
+          "sustain_db": -3.5,
+          "crest_db": 7.9,
+          "onsets_per_s": 0.5
         },
         "stereo": {
           "correlation": 1.0,
@@ -1894,7 +1978,7 @@ that exactly duplicates structuredContent is shown once.
           "balance_db": 0.0,
           "mono_loss_lu": 0.0
         },
-        "summary": "-23.8 LUFS, true peak -17.1 dBTP. Pitched E3-1c (165 Hz), 2nd/3rd harmonics -6.6/-11.1 dB. Centroid 560 Hz, tilt -9.5 dB/oct, most energy in low. Attack 68 ms, -20 dB after 1020 ms. Width 0.00, correlation 1.00."
+        "summary": "-22.1 LUFS, true peak -16.4 dBTP. Pitched D3+10c (148 Hz), 2nd/3rd harmonics -6.2/-10.3 dB. Centroid 571 Hz, tilt -9.5 dB/oct, most energy in low. Attack 69 ms, -20 dB after 1014 ms. Width 0.00, correlation 1.00."
       }
     }
   }
@@ -1935,30 +2019,30 @@ that exactly duplicates structuredContent is shown once.
       "report": {
         "schema": "supple.analysis-report/1.0",
         "source": {
-          "seconds": 2.3,
+          "seconds": 2.22,
           "sample_rate": 48000.0,
           "channels": 2,
           "layout": "stereo"
         },
         "loudness": {
-          "integrated_lufs": -23.8,
+          "integrated_lufs": -22.1,
           "lra_lu": null,
-          "max_momentary_lufs": -23.0,
+          "max_momentary_lufs": -21.5,
           "max_short_term_lufs": null,
-          "true_peak_dbtp": -17.1,
-          "sample_peak_dbfs": -17.1,
-          "plr_lu": 6.7
+          "true_peak_dbtp": -16.4,
+          "sample_peak_dbfs": -16.4,
+          "plr_lu": 5.7
         },
         "spectral": {
           "centroid_hz": {
-            "mean": 553.0,
-            "median": 560.0,
-            "p10": 515.0,
-            "p90": 599.0
+            "mean": 566.0,
+            "median": 571.0,
+            "p10": 531.0,
+            "p90": 611.0
           },
           "rolloff_hz": {
-            "mean": 328.0,
-            "median": 328.0,
+            "mean": 334.0,
+            "median": 352.0,
             "p10": 281.0,
             "p90": 398.0
           },
@@ -1969,45 +2053,45 @@ that exactly duplicates structuredContent is shown once.
             "p90": 0.0
           },
           "flux": {
-            "mean": 0.025,
+            "mean": 0.023,
             "median": 0.005,
             "p10": 0.0,
-            "p90": 0.058
+            "p90": 0.071
           },
           "tilt_db_per_oct": -9.5,
           "bands": {
             "sub": {
-              "level_db": -46.6,
+              "level_db": -46.8,
               "share_pct": 0.0,
               "width": 0.0
             },
             "low": {
-              "level_db": -1.2,
-              "share_pct": 76.0,
+              "level_db": -1.4,
+              "share_pct": 72.6,
               "width": 0.0
             },
             "low_mid": {
-              "level_db": -7.5,
-              "share_pct": 18.0,
+              "level_db": -7.1,
+              "share_pct": 19.4,
               "width": 0.0
             },
             "mid": {
-              "level_db": -12.2,
-              "share_pct": 6.0,
+              "level_db": -11.0,
+              "share_pct": 7.9,
               "width": 0.0
             },
             "high_mid": {
-              "level_db": -34.8,
+              "level_db": -34.4,
               "share_pct": 0.0,
               "width": 0.0
             },
             "presence": {
-              "level_db": -49.2,
+              "level_db": -49.4,
               "share_pct": 0.0,
               "width": 0.0
             },
             "air": {
-              "level_db": -57.4,
+              "level_db": -57.7,
               "share_pct": 0.0,
               "width": 0.0
             }
@@ -2019,29 +2103,29 @@ that exactly duplicates structuredContent is shown once.
         "harmonic": {
           "pitched": true,
           "voiced_pct": 97.2,
-          "f0_hz": 165.0,
-          "note": "E3-1c",
-          "stability_cents": 460.7,
+          "f0_hz": 148.0,
+          "note": "D3+10c",
+          "stability_cents": 510.5,
           "harmonics_db": [
             0.0,
-            -6.6,
-            -11.1,
-            -15.2,
-            -18.5,
-            -22.0,
-            -24.8,
-            -27.5
+            -6.2,
+            -10.3,
+            -13.2,
+            -16.7,
+            -19.6,
+            -22.3,
+            -24.7
           ],
           "inharmonicity": 0.0,
-          "hnr_db": 50.6
+          "hnr_db": 50.1
         },
         "envelope": {
-          "attack_ms": 68.0,
-          "decay20_ms": 1020.0,
-          "release_ms": 199.0,
-          "sustain_db": -4.7,
-          "crest_db": 8.9,
-          "onsets_per_s": 0.4
+          "attack_ms": 69.0,
+          "decay20_ms": 1010.0,
+          "release_ms": 198.0,
+          "sustain_db": -3.5,
+          "crest_db": 7.9,
+          "onsets_per_s": 0.5
         },
         "stereo": {
           "correlation": 1.0,
@@ -2052,7 +2136,7 @@ that exactly duplicates structuredContent is shown once.
           "correlation_p5": 1.0
         }
       },
-      "summary": "-23.8 LUFS, true peak -17.1 dBTP. Pitched E3-1c (165 Hz), 2nd/3rd harmonics -6.6/-11.1 dB. Centroid 560 Hz, tilt -9.5 dB/oct, most energy in low. Attack 68 ms, -20 dB after 1020 ms. Width 0.00, correlation 1.00."
+      "summary": "-22.1 LUFS, true peak -16.4 dBTP. Pitched D3+10c (148 Hz), 2nd/3rd harmonics -6.2/-10.3 dB. Centroid 571 Hz, tilt -9.5 dB/oct, most energy in low. Attack 69 ms, -20 dB after 1014 ms. Width 0.00, correlation 1.00."
     }
   }
 }
@@ -2070,14 +2154,13 @@ that exactly duplicates structuredContent is shown once.
     "arguments": {
       "instance": "in_1",
       "patch": {
-        "filters": {
-          "filter1": {
-            "cutoff": "1.4 kHz"
-          }
+        "params": {
+          "filter1.cutoff": "1.4 kHz",
+          "filter1.env": "+2 oct"
         },
         "routes": {
-          "env2>filter1.cutoff": {
-            "amount": "+2 oct"
+          "velocity>filter1.cutoff": {
+            "amount": "+1 oct"
           }
         }
       }
@@ -2101,18 +2184,17 @@ that exactly duplicates structuredContent is shown once.
     ],
     "structuredContent": {
       "changed": {
-        "filters": {
-          "filter1": {
-            "cutoff": 1400.0
-          }
+        "params": {
+          "filter1.cutoff": 1400.0,
+          "filter1.env": 2.0
         },
         "routes": {
-          "env2>filter1.cutoff": {
-            "amount": 2.0
+          "velocity>filter1.cutoff": {
+            "amount": 1.0
           }
         }
       },
-      "description": "Poly. osc1 va saw → svf lowpass 1.40 kHz. env2 (A 100 ms D 400 ms S 0.0 % R 300 ms). env2 → filter1.cutoff +2.00 oct. Amp A 80.0 ms D 300 ms S 70.0 % R 200 ms."
+      "description": "Marram: Filter 1: Type SVF, Cutoff 1.40 kHz; Amp: Attack 80.0 ms, Release 200 ms; Env 2: Attack 100 ms, Sustain 0 %; Routes: velocity>filter1.cutoff +1 oct"
     }
   }
 }
@@ -2154,70 +2236,70 @@ that exactly duplicates structuredContent is shown once.
     "structuredContent": {
       "render": "<render-2>",
       "path": "<workdir>/renders/<render-2>.wav",
-      "seconds": 2.3000000000000003,
-      "peak_dbfs": -16.330000000000002,
-      "tail_s": 0.3,
-      "tail_capped": true,
-      "latency_samples": 0,
+      "seconds": 2.22,
+      "peak_dbfs": -15.610000000000001,
+      "tail_s": 0.22,
+      "tail_capped": false,
+      "latency_samples": 3,
       "analysis": {
         "schema": "supple.analysis-report/1.0",
         "source": {
-          "seconds": 2.3,
+          "seconds": 2.22,
           "sample_rate": 48000.0,
           "channels": 2,
           "layout": "stereo"
         },
         "loudness": {
-          "integrated_lufs": -23.1,
+          "integrated_lufs": -21.3,
           "lra_lu": null,
-          "max_momentary_lufs": -22.1,
+          "max_momentary_lufs": -20.5,
           "max_short_term_lufs": null,
-          "true_peak_dbtp": -16.3,
-          "sample_peak_dbfs": -16.3,
-          "plr_lu": 6.8
+          "true_peak_dbtp": -15.6,
+          "sample_peak_dbfs": -15.6,
+          "plr_lu": 5.7
         },
         "spectral": {
-          "centroid_hz": 791.0,
-          "rolloff_hz": 398.0,
+          "centroid_hz": 1150.0,
+          "rolloff_hz": 492.0,
           "flatness": 0.0,
           "flux": 0.006,
-          "tilt_db_per_oct": -5.8,
+          "tilt_db_per_oct": -4.6,
           "bands": {
-            "sub": -47.1,
-            "low": -1.6,
+            "sub": -47.3,
+            "low": -1.9,
             "low_mid": -7.2,
-            "mid": -9.4,
-            "high_mid": -23.0,
-            "presence": -32.7,
-            "air": -38.5
+            "mid": -8.4,
+            "high_mid": -19.1,
+            "presence": -27.3,
+            "air": -31.5
           }
         },
         "harmonic": {
           "pitched": true,
           "voiced_pct": 97.2,
-          "f0_hz": 165.0,
-          "note": "E3-1c",
-          "stability_cents": 460.6,
+          "f0_hz": 148.0,
+          "note": "D3+12c",
+          "stability_cents": 510.4,
           "harmonics_db": [
             0.0,
-            -6.2,
-            -10.1,
-            -13.1,
-            -15.6,
-            -17.8,
-            -19.9,
-            -21.8
+            -6.0,
+            -9.6,
+            -12.2,
+            -14.2,
+            -15.9,
+            -17.4,
+            -18.7
           ],
           "inharmonicity": 0.0,
-          "hnr_db": 47.0
+          "hnr_db": 47.9
         },
         "envelope": {
-          "attack_ms": 63.0,
-          "decay20_ms": 1020.0,
-          "release_ms": 199.0,
-          "sustain_db": -4.9,
-          "crest_db": 9.0,
-          "onsets_per_s": 0.4
+          "attack_ms": 69.0,
+          "decay20_ms": 1010.0,
+          "release_ms": 198.0,
+          "sustain_db": -3.5,
+          "crest_db": 8.2,
+          "onsets_per_s": 0.5
         },
         "stereo": {
           "correlation": 1.0,
@@ -2225,7 +2307,7 @@ that exactly duplicates structuredContent is shown once.
           "balance_db": 0.0,
           "mono_loss_lu": 0.0
         },
-        "summary": "-23.1 LUFS, true peak -16.3 dBTP. Pitched E3-1c (165 Hz), 2nd/3rd harmonics -6.2/-10.1 dB. Centroid 791 Hz, tilt -5.8 dB/oct, most energy in low. Attack 63 ms, -20 dB after 1020 ms. Width 0.00, correlation 1.00."
+        "summary": "-21.3 LUFS, true peak -15.6 dBTP. Pitched D3+12c (148 Hz), 2nd/3rd harmonics -6.0/-9.6 dB. Centroid 1151 Hz, tilt -4.6 dB/oct, most energy in low. Attack 69 ms, -20 dB after 1014 ms. Width 0.00, correlation 1.00."
       }
     }
   }
@@ -2266,27 +2348,27 @@ that exactly duplicates structuredContent is shown once.
       "notable": {
         "_elided_array_count": 18
       },
-      "ltas_rms_db": 7.8,
-      "summary": "spectral.bands.air.level_db +19.0 dB; spectral.centroid_hz.p90 +739.4 Hz; spectral.bands.presence.level_db +16.5 dB; spectral.bands.high_mid.level_db +11.8 dB; spectral.centroid_hz.mean +352.6 Hz. Timbre difference 7.8 dB (LTAS RMS, level removed).",
+      "ltas_rms_db": 11.1,
+      "summary": "spectral.centroid_hz.p90 +1376.2 Hz; spectral.bands.air.level_db +26.2 dB; spectral.bands.presence.level_db +22.1 dB; spectral.centroid_hz.mean +760.9 Hz; spectral.bands.high_mid.level_db +15.3 dB. Timbre difference 11.1 dB (LTAS RMS, level removed).",
       "loss": {
-        "total": 80.36952957891427,
+        "total": 200.52640192935294,
         "terms": {
-          "bands": 13.927822043692457,
-          "centroid": 1.9728050065375413,
-          "envelope.attack": 0.04940556564455911,
+          "bands": 25.30695901593283,
+          "centroid": 8.178795239746554,
+          "envelope.attack": 0.0,
           "envelope.decay20": 0.0,
           "envelope.release": 0.0,
-          "flatness": 1.7709094722703791e-09,
-          "flux": 0.0003809826034800333,
-          "harmonics": 0.4600659303701549,
-          "inharmonicity": 4.935881297447454e-09,
-          "ltas": 6.748821628183759,
+          "flatness": 9.806669564121113e-08,
+          "flux": 0.0002457959127256162,
+          "harmonics": 0.4161591075361295,
+          "inharmonicity": 8.78902875305832e-07,
+          "ltas": 13.710254964084388,
           "stereo": 0.0,
-          "trajectory": 57.210228415175536
+          "trajectory": 152.91398682917077
         },
         "note_off_s": {
-          "reference": 1.9999999999999998,
-          "test": 1.9999999999999998
+          "reference": 2.0,
+          "test": 2.0
         }
       }
     }
@@ -2392,17 +2474,17 @@ that exactly duplicates structuredContent is shown once.
       "job": "jb_1",
       "status": "done",
       "progress": {
-        "best_loss": 0.2505,
+        "best_loss": 0.48,
         "evaluations": 17,
         "fraction": 1.0,
         "message": "generation 4"
       },
       "result": {
         "loss": {
-          "initial": 50.3315,
-          "best": 0.2505,
+          "initial": 12.1453,
+          "best": 0.48,
           "terms": {
-            "profile.spectral.centroid_hz.median": 0.2505
+            "profile.spectral.centroid_hz.median": 0.48
           }
         },
         "evaluations": 17,
@@ -2411,14 +2493,14 @@ that exactly duplicates structuredContent is shown once.
         "stopped": "evaluations",
         "patch": {
           "params": {
-            "filter1.cutoff": 3723.071911
+            "filter1.cutoff": 1959.411
           }
         },
         "changes": [
           {
             "key": "filter1.cutoff",
             "from": 1400.0,
-            "to": 3723.0719,
+            "to": 1959.411,
             "unit": "Hz"
           }
         ],
@@ -2443,7 +2525,7 @@ that exactly duplicates structuredContent is shown once.
       "instance": "in_1",
       "patch": {
         "params": {
-          "filter1.cutoff": 3723.071911
+          "filter1.cutoff": 1959.411
         }
       }
     }
@@ -2466,13 +2548,11 @@ that exactly duplicates structuredContent is shown once.
     ],
     "structuredContent": {
       "changed": {
-        "filters": {
-          "filter1": {
-            "cutoff": 3723.071911
-          }
+        "params": {
+          "filter1.cutoff": 1959.411
         }
       },
-      "description": "Poly. osc1 va saw → svf lowpass 3.72 kHz. env2 (A 100 ms D 400 ms S 0.0 % R 300 ms). env2 → filter1.cutoff +2.00 oct. Amp A 80.0 ms D 300 ms S 70.0 % R 200 ms."
+      "description": "Marram: Filter 1: Type SVF, Cutoff 1.96 kHz; Amp: Attack 80.0 ms, Release 200 ms; Env 2: Attack 100 ms, Sustain 0 %; Routes: velocity>filter1.cutoff +1 oct"
     }
   }
 }
@@ -2514,70 +2594,70 @@ that exactly duplicates structuredContent is shown once.
     "structuredContent": {
       "render": "<render-4>",
       "path": "<workdir>/renders/<render-4>.wav",
-      "seconds": 2.3000000000000003,
-      "peak_dbfs": -15.83,
-      "tail_s": 0.3,
-      "tail_capped": true,
-      "latency_samples": 0,
+      "seconds": 2.22,
+      "peak_dbfs": -15.33,
+      "tail_s": 0.22,
+      "tail_capped": false,
+      "latency_samples": 3,
       "analysis": {
         "schema": "supple.analysis-report/1.0",
         "source": {
-          "seconds": 2.3,
+          "seconds": 2.22,
           "sample_rate": 48000.0,
           "channels": 2,
           "layout": "stereo"
         },
         "loudness": {
-          "integrated_lufs": -22.6,
+          "integrated_lufs": -21.2,
           "lra_lu": null,
-          "max_momentary_lufs": -21.6,
+          "max_momentary_lufs": -20.4,
           "max_short_term_lufs": null,
-          "true_peak_dbtp": -15.8,
-          "sample_peak_dbfs": -15.8,
-          "plr_lu": 6.8
+          "true_peak_dbtp": -15.3,
+          "sample_peak_dbfs": -15.3,
+          "plr_lu": 5.9
         },
         "spectral": {
-          "centroid_hz": 1450.0,
-          "rolloff_hz": 492.0,
+          "centroid_hz": 1430.0,
+          "rolloff_hz": 516.0,
           "flatness": 0.0,
           "flux": 0.006,
-          "tilt_db_per_oct": -4.2,
+          "tilt_db_per_oct": -4.1,
           "bands": {
             "sub": -47.4,
             "low": -1.9,
             "low_mid": -7.3,
-            "mid": -8.4,
-            "high_mid": -18.3,
-            "presence": -25.4,
+            "mid": -8.3,
+            "high_mid": -17.8,
+            "presence": -25.1,
             "air": -28.4
           }
         },
         "harmonic": {
           "pitched": true,
           "voiced_pct": 97.2,
-          "f0_hz": 165.0,
-          "note": "E3",
-          "stability_cents": 460.9,
+          "f0_hz": 148.0,
+          "note": "D3+12c",
+          "stability_cents": 510.4,
           "harmonics_db": [
             0.0,
-            -6.1,
+            -6.0,
             -9.6,
-            -12.2,
-            -14.2,
-            -15.9,
-            -17.4,
-            -18.7
+            -12.1,
+            -14.1,
+            -15.7,
+            -17.1,
+            -18.4
           ],
           "inharmonicity": 0.0,
           "hnr_db": 46.3
         },
         "envelope": {
-          "attack_ms": 68.0,
-          "decay20_ms": 1020.0,
-          "release_ms": 199.0,
-          "sustain_db": -4.5,
-          "crest_db": 9.2,
-          "onsets_per_s": 0.4
+          "attack_ms": 69.0,
+          "decay20_ms": 1010.0,
+          "release_ms": 198.0,
+          "sustain_db": -3.5,
+          "crest_db": 8.4,
+          "onsets_per_s": 0.5
         },
         "stereo": {
           "correlation": 1.0,
@@ -2585,7 +2665,7 @@ that exactly duplicates structuredContent is shown once.
           "balance_db": 0.0,
           "mono_loss_lu": 0.0
         },
-        "summary": "-22.6 LUFS, true peak -15.8 dBTP. Pitched E3 (165 Hz), 2nd/3rd harmonics -6.1/-9.6 dB. Centroid 1450 Hz, tilt -4.2 dB/oct, most energy in low. Attack 68 ms, -20 dB after 1024 ms. Width 0.00, correlation 1.00."
+        "summary": "-21.2 LUFS, true peak -15.3 dBTP. Pitched D3+12c (148 Hz), 2nd/3rd harmonics -6.0/-9.6 dB. Centroid 1431 Hz, tilt -4.1 dB/oct, most energy in low. Attack 69 ms, -20 dB after 1014 ms. Width 0.00, correlation 1.00."
       }
     }
   }
@@ -2626,32 +2706,32 @@ that exactly duplicates structuredContent is shown once.
       "report": {
         "schema": "supple.analysis-report/1.0",
         "source": {
-          "seconds": 2.3,
+          "seconds": 2.22,
           "sample_rate": 48000.0,
           "channels": 2,
           "layout": "stereo"
         },
         "loudness": {
-          "integrated_lufs": -22.6,
+          "integrated_lufs": -21.2,
           "lra_lu": null,
-          "max_momentary_lufs": -21.6,
+          "max_momentary_lufs": -20.4,
           "max_short_term_lufs": null,
-          "true_peak_dbtp": -15.8,
-          "sample_peak_dbfs": -15.8,
-          "plr_lu": 6.8
+          "true_peak_dbtp": -15.3,
+          "sample_peak_dbfs": -15.3,
+          "plr_lu": 5.9
         },
         "spectral": {
           "centroid_hz": {
-            "mean": 1650.0,
-            "median": 1450.0,
-            "p10": 1280.0,
-            "p90": 2370.0
+            "mean": 1640.0,
+            "median": 1430.0,
+            "p10": 1260.0,
+            "p90": 2410.0
           },
           "rolloff_hz": {
-            "mean": 501.0,
-            "median": 492.0,
+            "mean": 518.0,
+            "median": 516.0,
             "p10": 398.0,
-            "p90": 609.0
+            "p90": 647.0
           },
           "flatness": {
             "mean": 0.0,
@@ -2660,12 +2740,12 @@ that exactly duplicates structuredContent is shown once.
             "p90": 0.001
           },
           "flux": {
-            "mean": 0.025,
+            "mean": 0.024,
             "median": 0.006,
             "p10": 0.001,
-            "p90": 0.061
+            "p90": 0.071
           },
-          "tilt_db_per_oct": -4.2,
+          "tilt_db_per_oct": -4.1,
           "bands": {
             "sub": {
               "level_db": -47.4,
@@ -2674,26 +2754,26 @@ that exactly duplicates structuredContent is shown once.
             },
             "low": {
               "level_db": -1.9,
-              "share_pct": 64.9,
+              "share_pct": 64.4,
               "width": 0.0
             },
             "low_mid": {
               "level_db": -7.3,
-              "share_pct": 18.8,
+              "share_pct": 18.7,
               "width": 0.0
             },
             "mid": {
-              "level_db": -8.4,
-              "share_pct": 14.3,
+              "level_db": -8.3,
+              "share_pct": 14.8,
               "width": 0.0
             },
             "high_mid": {
-              "level_db": -18.3,
-              "share_pct": 1.5,
+              "level_db": -17.8,
+              "share_pct": 1.6,
               "width": 0.0
             },
             "presence": {
-              "level_db": -25.4,
+              "level_db": -25.1,
               "share_pct": 0.3,
               "width": 0.0
             },
@@ -2710,29 +2790,29 @@ that exactly duplicates structuredContent is shown once.
         "harmonic": {
           "pitched": true,
           "voiced_pct": 97.2,
-          "f0_hz": 165.0,
-          "note": "E3",
-          "stability_cents": 460.9,
+          "f0_hz": 148.0,
+          "note": "D3+12c",
+          "stability_cents": 510.4,
           "harmonics_db": [
             0.0,
-            -6.1,
+            -6.0,
             -9.6,
-            -12.2,
-            -14.2,
-            -15.9,
-            -17.4,
-            -18.7
+            -12.1,
+            -14.1,
+            -15.7,
+            -17.1,
+            -18.4
           ],
           "inharmonicity": 0.0,
           "hnr_db": 46.3
         },
         "envelope": {
-          "attack_ms": 68.0,
-          "decay20_ms": 1020.0,
-          "release_ms": 199.0,
-          "sustain_db": -4.5,
-          "crest_db": 9.2,
-          "onsets_per_s": 0.4
+          "attack_ms": 69.0,
+          "decay20_ms": 1010.0,
+          "release_ms": 198.0,
+          "sustain_db": -3.5,
+          "crest_db": 8.4,
+          "onsets_per_s": 0.5
         },
         "stereo": {
           "correlation": 1.0,
@@ -2743,7 +2823,7 @@ that exactly duplicates structuredContent is shown once.
           "correlation_p5": 1.0
         }
       },
-      "summary": "-22.6 LUFS, true peak -15.8 dBTP. Pitched E3 (165 Hz), 2nd/3rd harmonics -6.1/-9.6 dB. Centroid 1450 Hz, tilt -4.2 dB/oct, most energy in low. Attack 68 ms, -20 dB after 1024 ms. Width 0.00, correlation 1.00."
+      "summary": "-21.2 LUFS, true peak -15.3 dBTP. Pitched D3+12c (148 Hz), 2nd/3rd harmonics -6.0/-9.6 dB. Centroid 1431 Hz, tilt -4.1 dB/oct, most energy in low. Attack 69 ms, -20 dB after 1014 ms. Width 0.00, correlation 1.00."
     }
   }
 }

@@ -6,8 +6,8 @@ while a one-parameter search from a fresh session found the answer.
 
 For every `synth-reference` task the benchmark
 
-1. loads Orrery and sets the task's `starting_patch` (as the evaluation harness
-   does, patch seed 42),
+1. loads the task's synth (Marram) and sets its `starting_patch`, as the
+   evaluation harness does,
 2. renders the task's `hidden_patch` as the reference (`rd_1`),
 3. runs `optimize.start` against that reference with a fixed evaluation budget,
    for each mode and search seed,
@@ -19,10 +19,10 @@ For every `synth-reference` task the benchmark
 
 - `auto` — every tunable parameter of the patch's present modules, exactly the
   optimizer's own `"auto"` (continuous, modulatable, active, minus `voice.*`,
-  `output.level`, pans, envelope curves/delay/hold, velocity, LFO fades).
+  the output level, pans, envelope curves/delay/hold, velocity, LFO fades).
 - `module` — the subset of that list belonging to the modules the task lists in
-  `changed_modules`, passed as explicit keys. `envelopes.amp` means the `amp.*`
-  parameters: the semantic key is the patch path without its module container.
+  `changed_modules`, passed as explicit keys: `amp` means the `amp.*`
+  parameters.
   Explicit keys keep the full parameter range (only `"auto"` narrows ranges), so
   this mode isolates the search algorithm from the range choice.
 
@@ -63,10 +63,10 @@ everything lands under `build/` except the JSON/Markdown it is asked to write.
 
 - **The optimizer is the authority on which parameters are tunable.** The
   benchmark reads the `"auto"` key list back from a one-generation probe run
-  instead of deriving it from `plugin.describe`: describe's `active` flags are
-  the schema captured at *load* and do not follow a patch that adds a module
-  (`filter1.cutoff` still reads `active: false` after `filters.filter1` is set,
-  while the optimizer, which reads the instance's live schema, accepts it).
+  instead of deriving it from `plugin.describe`: describe's `active` flags were
+  then the schema captured at *load* and did not follow a patch that added a
+  module, while the optimizer read the instance's live schema (describe has
+  followed the patch since).
 - **Runs are deterministic, their trajectory is order-sensitive.** The same
   configuration and seed give bit-identical losses (verified three times), but
   the CMA stream is drawn per coordinate, so reordering the `params` list changes

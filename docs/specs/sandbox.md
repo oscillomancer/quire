@@ -572,8 +572,10 @@ Tests take the smallest instrument that proves their point:
   host test needs;
 - the script player's test instruments (Pluck) and the example scripts
   (`plugins/suite/examples`) for DSP scripts;
-- `orrery-headless.clap`, Orrery without its editor, where a real synth is
-  needed: the MCP demo and the optimizer tests.
+- the stock synth, Marram (`plugins/clap/Marram.clap` in the build), where a
+  real synth is needed: the MCP demo, the optimizer tests and the evaluation
+  tasks. (Orrery's headless build served until Orrery was removed,
+  2026-10-21.)
 
 (Until 2026-10-20 an internal template-derived instrument,
 `plugins/probe-synth`, also existed to exercise the template, the extension
@@ -583,10 +585,10 @@ removed.)
 ## 7. Acceptance
 
 A scripted end-to-end test drives the sandbox over MCP stdio: list plugins
-→ load Orrery → describe → set params with unit strings → merge a
+→ load the stock synth → describe → set params with unit strings → merge a
 patch → render a notation phrase with summary analysis → change the patch →
-render again → compare → save preset. Its transcript is committed as `docs/demos/mcp-orrery-session.md`
-(the `mcp.demo` test, with Orrery). A second test runs the same flow with an
+render again → compare → optimize. Its transcript is committed as
+`docs/demos/mcp-synth-session.md` (the `mcp.demo` test). A second test runs the same flow with an
 invalid patch and an invalid notation string and asserts the errors carry
 paths, locations and hints.
 

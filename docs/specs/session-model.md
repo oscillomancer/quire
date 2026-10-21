@@ -345,7 +345,7 @@ tr_1 Drums [buss] → master
   tr_2 Kick   vol −3.0 dB · fx: fx_2 EQ (4 bands), fx_3 Comp (−4 dB GR@1:1…)
               it_4 bars 1–17 "kick loop" (audio md_1, 1.00×)
   tr_3 Snare  it_5 bars 1–17 (MIDI mi_2, 64 notes)
-tr_6 Bass → master · fx: fx_7 Orrery "Round Sub", fx_8 EQ
+tr_6 Bass → master · fx: fx_7 Marram "Round Sub", fx_8 EQ
 routes: sd_1 tr_2 → tr_6 ch 1/2→3/4 pre-fader −6 dB (sidechain)
 markers: mk_1 "Verse" bar 1 · regions: rg_1 "Chorus" bars 9–17
 ```

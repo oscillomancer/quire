@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Render every Orrery recipe in skill/guides/sound-design.md to a WAV for a
+"""Render every synth recipe in skill/guides/sound-design.md to a WAV for a
 human listening check, through the sandbox's MCP server (the same path an
 agent uses). Usage:
-  tools/listening/render_orrery_recipes.py [--sandbox PATH] [--plugin PATH] [--out DIR]
-Defaults: build/release binaries, renders/listening/orrery-recipes/.
+  tools/listening/render_synth_recipes.py [--sandbox PATH] [--plugin PATH] [--out DIR]
+Defaults: build/release binaries and the stock synth, renders/listening/synth-recipes/.
 """
 import argparse, json, os, re, shutil, subprocess, sys
 
@@ -14,13 +14,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 PHRASES = {
     "Warm pad": ("voice keys\n1: [C3 E3 G3 B3]:w | [A2 C3 E3 G3]:w", 3.0),
     "Plucky bass with a filter snap": ("voice bass\n1: C2:e r:e C2:e r:e Eb2:e r:e G1:e Bb1:e | C2:e r:e C2:e r:e F2:e r:e Eb2:q", 1.0),
-    "Acid bass": ("voice bass\n1: C2:s C2:s C3:s C2:s Eb2:s C2:s G2:s C2:s C2:s Bb1:s C2:s C3:s Eb2:s F2:s G2:s C2:s\n2 = 1", 0.5),
-    "Sub bass": ("voice bass\n1: C1:h G1:h | F1:h C1:h", 0.5),
+    "Acid bass (legato, glide, resonant snap)": ("voice bass\n1: C2:s C2:s C3:s C2:s Eb2:s C2:s G2:s C2:s C2:s Bb1:s C2:s C3:s Eb2:s F2:s G2:s C2:s\n2 = 1", 0.5),
+    "Sub bass (a clean fundamental)": ("voice bass\n1: C1:h G1:h | F1:h C1:h", 0.5),
     "Supersaw lead": ("voice lead\n1: C4:q E4:q G4:q C5:q | B4:h G4:h", 1.5),
-    "Metallic bell": ("voice bell\n1: C4:h G4:h | E5:w", 4.0),
+    "Metallic bell (inharmonic partials)": ("voice bell\n1: C4:h G4:h | E5:w", 4.0),
     "FM electric piano": ("voice keys\n1: [C4 E4 G4]:h [D4 F4 A4]:h | [E4 G4 B4]:w", 2.0),
     "Noise snare": ("voice drum\n1: r:q D3:q r:q D3:q | r:q D3:q r:e D3:e D3:q", 0.5),
-    "Vowel lead": ("voice lead\n1: G4:h A4:h | C5:w", 1.5),
+    "Vowel lead (a formant filter that moves)": ("voice lead\n1: G4:h A4:h | C5:w", 1.5),
     "String ensemble": ("voice strings\n1: [C3 G3 E4]:w | [F3 A3 C4]:w", 3.0),
 }
 
@@ -60,7 +60,9 @@ class Mcp:
 
 def recipes():
     text = open(os.path.join(ROOT, "skill/guides/sound-design.md")).read()
-    for m in re.finditer(r"^\*\*([^*\n]+)\*\*[^\n]*\n```json\n(.*?)```", text, re.S | re.M):
+    # A bold title, perhaps a line of notes, then the patch.
+    for m in re.finditer(r"^\*\*([^*\n]+)\*\*[^\n]*\n(?:[^`\n][^\n]*\n)*```json\n(.*?)```", text,
+                         re.S | re.M):
         title = m.group(1).strip()
         if title in PHRASES:
             yield title, json.loads(m.group(2))
@@ -69,8 +71,8 @@ def recipes():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sandbox", default=os.path.join(ROOT, "build/release/host/sandbox/quire-sandbox"))
-    ap.add_argument("--plugin", default=os.path.join(ROOT, "build/release/plugins/clap/Orrery.clap"))
-    ap.add_argument("--out", default=os.path.join(ROOT, "renders/listening/orrery-recipes"))
+    ap.add_argument("--plugin", default=os.path.join(ROOT, "build/release/plugins/clap/Marram.clap"))
+    ap.add_argument("--out", default=os.path.join(ROOT, "renders/listening/synth-recipes"))
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     work = os.path.join(a.out, ".work")

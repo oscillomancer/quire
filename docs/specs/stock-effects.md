@@ -44,7 +44,7 @@
   smoothers snap to their targets on the first block after `reset()`,
   delay/time lines start at their value, and nothing of the previous render
   survives. `clap-reset-check` (`plugins/common/tools/clap_reset_check.cpp`,
-  registered as `plugin.<id>.reset` for every stock plugin and Orrery) renders
+  registered as `plugin.<id>.reset` for every stock plugin) renders
   state S1, then S2 after `reset()`, and requires that S2 render to be
   bit-identical to a fresh instance holding S2 — at block 256 and again at 64.
   Its stimulus is a 220 Hz tone with a noise burst, the last quarter 40 dB

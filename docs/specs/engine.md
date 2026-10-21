@@ -743,8 +743,9 @@ controls); `moveParam` moves any parameter the way a binding does, for the
 
 ## 7. Benchmarks (acceptance, `docs/benchmarks/`)
 
-- **B1 capacity:** generated session: N tracks, each an Orrery instance
-  (standard patch from `docs/specs/synth.md` §9) + stock EQ + stock
+- **B1 capacity:** generated session: N tracks, each a stock synth
+  (Marram's pad in `host/engine/bench/session.json`; Orrery's reference
+  patch until 2026-10-21) + stock EQ + stock
   compressor playing a 4-bar notation loop, one armed audio track with the
   same chain monitoring input; at 48 kHz / 64 frames on this machine: find
   the largest N with zero xruns over 5 minutes, with and without

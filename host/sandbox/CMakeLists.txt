@@ -66,7 +66,7 @@ if(SUPPLE_BUILD_TESTS)
   add_test(NAME sandbox.mcp-proxy
     COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_proxy.py
             $<TARGET_FILE:${PRODUCT_SLUG}-sandbox> $<TARGET_FILE:${PRODUCT_SLUG}-mcp>
-            $<TARGET_FILE:orrery-headless>)
+            ${CMAKE_BINARY_DIR}/plugins/clap/Marram.clap)
   # Keep the Linux documentation golden; native DSP numbers may differ.
   # Both deployments still run every structured-result assertion.
   if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT SUPPLE_SANITIZE)
@@ -77,9 +77,8 @@ if(SUPPLE_BUILD_TESTS)
     add_test(NAME mcp.demo
       COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_demo.py
               $<TARGET_FILE:${PRODUCT_SLUG}-sandbox> $<TARGET_FILE:${PRODUCT_SLUG}-mcp>
-              $<TARGET_FILE:orrery-headless>
-              ${PROJECT_SOURCE_DIR}/docs/demos/mcp-orrery-session.md ${_mcp_demo_args})
+              ${CMAKE_BINARY_DIR}/plugins/clap/Marram.clap
+              ${PROJECT_SOURCE_DIR}/docs/demos/mcp-synth-session.md ${_mcp_demo_args})
     set_tests_properties(mcp.demo PROPERTIES LABELS "sandbox;slow")
   endif()
-  add_dependencies(${PRODUCT_SLUG}-sandbox orrery-headless)
 endif()

@@ -1,9 +1,9 @@
 # Spec: Marram — the stock synthesizer
 
-**Status:** In progress. The voice and its modulation (this document) are
-implemented, and so is its editor; the agent guide and the evaluation
-tasks follow, and Orrery (`synth.md`) stays the documented synthesizer until they are
-done.
+**Status:** Implemented: the voice, its modulation and its editor. The
+synth guide (`skill/guides/sound-design.md`) and the evaluation tasks use
+it; Orrery, the hand-written synthesizer it replaced, was removed on
+2026-10-21.
 **Plugin:** `plugins/stock/marram`, CLAP id `com.suppleaudio.marram`,
 instrument. A DSP script compiled natively (ADR-0047),
 `plugins/stock/marram/script/marram.cpp`.
@@ -14,7 +14,8 @@ parameters, so Marram gives every slot a type with an `off` and says which
 parameters apply with the script's activity conditions (amendment of
 2026-10-21 to `semantic-params-extension.md`): an agent's description and
 the editor show only what the patch uses. Effects are not part of it:
-chorus, delay, reverb and EQ are the stock effects after it in a chain.
+delay, reverb and EQ are the stock effects after it in a chain (a chorus is
+planned).
 
 ## 1. Signal flow (per voice)
 
@@ -263,11 +264,7 @@ places as `Shared` members.
 Every dial drags (Shift: finely), turns by the wheel and resets on a
 double click.
 
-## 6. Not yet (each a later step)
-
-- **The agent guide and evaluation tasks**, then Orrery's removal.
-
-## 7. Performance
+## 6. Performance
 
 Release build, one core, 48 kHz: 8 notes of a pad with two saws and a sub,
 3 unison copies, a 24 dB ladder and tape drive at normal quality, 4.1 %

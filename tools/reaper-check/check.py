@@ -42,8 +42,6 @@ def normalized(db, low, high):
 
 # Continuous CLAP values are normalized curve positions (ADR-0010).
 CASES = {
-    "com.suppleaudio.orrery": Case("Orrery", True, "Output Level",
-                                 normalized(0, -60, 12), normalized(-12, -60, 12), "gain"),
     "com.suppleaudio.yarrow": Case("Yarrow", False, "Output", .5, .25, "gain", True),
     "com.suppleaudio.sundew": Case("Sundew", False, "Threshold", 1, .4),
     "com.suppleaudio.treeline": Case("Treeline", False, "Ceiling", 1, 0, passthrough=True),

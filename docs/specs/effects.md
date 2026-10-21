@@ -30,9 +30,10 @@ Marram is an instrument; its spec, implementation notes included, is
 
 (2026-10-20) No stock effect has this shape any more: each is a DSP script
 (ADR-0047; `plugins/stock/README.md` says how to change one). This section
-records the hand-written design they replaced. Orrery is the one plugin
-still built this way, through `SemanticAdapter` rather than `FlatSemantic`,
-which was removed with its last user.
+records the hand-written design they replaced. Orrery, the synthesizer,
+was the last plugin built this way (through `SemanticAdapter`, after
+`FlatSemantic` went with its last user); it and `plugins/common`'s plugin
+support were removed on 2026-10-21, when Marram replaced it.
 
 ### 1.1 Layout
 

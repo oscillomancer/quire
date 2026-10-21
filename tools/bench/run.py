@@ -55,7 +55,7 @@ def machine_facts(plugin_dir, plugin_file=None):
             "engine_build": {},
             "dirty": bool(command_output(["git", "-C", str(ROOT), "status", "--porcelain"])),
             "plugins": {name: hashlib.sha256((plugin_dir / name).read_bytes()).hexdigest()
-                        for name in ("Orrery.clap", "Yarrow.clap", "Sundew.clap")} if plugin_file is None else
+                        for name in ("Marram.clap", "Yarrow.clap", "Sundew.clap")} if plugin_file is None else
                        {str(plugin_file): hashlib.sha256(plugin_file.read_bytes()).hexdigest()}}
 
 

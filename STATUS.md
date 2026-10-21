@@ -190,8 +190,8 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   validated against EBU Tech 3341/3342, spectral, pitch, envelope, stereo,
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
   the LLM evaluation harness (`tools/eval-harness`).
-- **Stock plugins** (ADR-0011, ADR-0047): Orrery, Yarrow, Sundew, Treeline,
-  Gorse, Hickory, Sorrel, Teasel, Bracken, Canopy, Lichen and Marram, each passing clap-validator, a
+- **Stock plugins** (ADR-0011, ADR-0047): Marram, Yarrow, Sundew, Treeline,
+  Gorse, Hickory, Sorrel, Teasel, Bracken, Canopy and Lichen, each passing clap-validator, a
   reset determinism check, an unload test and the headless REAPER check;
   JSON patches and the semantic-parameters extension.
   Yarrow, the EQ, is the first written as a DSP script
@@ -307,8 +307,9 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   the circle of fifths, and a health list. It replaced Gauge
   (`com.suppleaudio.analyzer`).
   Marram, the synthesizer (`plugins/stock/marram`, `docs/specs/marram.md`),
-  replaces Orrery, which goes next; the synth guide
-  (`skill/guides/sound-design.md`) and the evaluation tasks use it. Four
+  replaced Orrery (`com.suppleaudio.orrery`, removed); the synth guide
+  (`skill/guides/sound-design.md`), the evaluation tasks, the optimizer's
+  tests, the MCP demos and the B1 recipe use it. Four
   oscillators (analog with sync, wavetables from Orrery's recipes, FM
   operators, noise, sub; FM between any two), unison up to 8 copies, two
   filters (ladder, state-variable, comb, formant; serial or parallel),
@@ -380,11 +381,11 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   given, and says what they edited. Plugin-file exports run on Linux,
   macOS and Windows.
 
-Benchmarks are in `docs/benchmarks/`: B1, 30 Orrery tracks with EQ and
+Benchmarks are in `docs/benchmarks/`: B1, 30 synth tracks with EQ and
 compression at 48 kHz and 64 frames without xruns using anticipation
-(`b1.md`); the comparison with REAPER (`b2.md`); GUI cold start and frame
-costs (`gui.md`); Console 9 strip cost (`console9-strips.md`). The benchmark
-harness also supports 64/128-frame requests, installed third-party effects,
+(`b1.md`, measured with Orrery; not yet rerun with Marram); the comparison
+with REAPER (`b2.md`); GUI cold start and frame costs (`gui.md`); Console 9
+strip cost (`console9-strips.md`). The benchmark harness also supports 64/128-frame requests, installed third-party effects,
 whole-callback/render-job tails and an observed ring low-water mark. Timing is
 bench-only; synthetic deadline counts and server xruns are separate. Historical
 capacity reports retain their original revision/settings.
@@ -409,8 +410,9 @@ Engine and hosting:
   latency preferences report unsupported on other platforms. Windows MCP is
   intended for piped/file input; cancelling an interactive console read can
   await a keypress during shutdown.
-- Without anticipation, a single Orrery chain can miss deadlines at 64
-  frames although average load is low (per-block bursts at chord changes);
+- Without anticipation, a single synth chain could miss deadlines at 64
+  frames although average load was low (per-block bursts at chord changes;
+  measured with Orrery);
   the harness now exposes callback tails for further profiling.
 - Live multiprocessing requires at least two usable CPUs and successful
   helper scheduling; otherwise the engine reports a warning and runs serially.
@@ -419,7 +421,7 @@ Engine and hosting:
   there is no adaptive cost threshold.
 - The shared DSP guard implements x86 FTZ/DAZ and arm64 FPCR FZ; macOS arm64 CI
   verifies FPCR restoration and subnormal handling. Plug-in lifecycle calls run
-  in the thread's own floating-point environment. Orrery now uses this same shared guard on all architectures.
+  in the thread's own floating-point environment.
 - On Linux, real-time background threads need `RLIMIT_RTPRIO` ≥ 1, an unlimited
   `RLIMIT_RTTIME` and a pool that leaves two allowed CPUs free; without them
   the renderer and pool run at normal priority (with a warning) and compete
@@ -545,8 +547,6 @@ Plugins:
   memory (MIR's interpreter is a test backend, not real-time safe).
 - A script save that redefines the plugin while an editor drag is under way
   can leave that gesture open in the host until it rescans.
-- Orrery's reference patch uses about 9 % of a core at 48 kHz / 256 frames;
-  reaching 3 % needs a structure-of-arrays voice bank.
 - Stock CLAP builds and product/conformance/reset checks run on Linux, macOS
   and Windows. Existing macOS AUv2 targets compile in CI but are not host-tested
   here. Stock VST3 builds remain opt-in; native VST3 hosting is tested with an
@@ -562,6 +562,5 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
 - Profile the 64-frame worst case; a pipelined bridge mode.
 - Track groups, stretch markers, MIDI outputs, a background media cache.
 - Lua ergonomics (a script library path, hot reload).
-- Orrery's structural performance pass.
-- Orrery's removal, now that Marram has replaced it.
+- B1 and B2 rerun with Marram as the synth.
 - Hardening and ports beyond Linux.

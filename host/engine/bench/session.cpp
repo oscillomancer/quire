@@ -42,7 +42,7 @@ Status buildSession(EngineApp& app, json::Value recipe, int tracks) {
     };
     for (int i = 0; i <= tracks; ++i) {
         auto args = json::Value::object();
-        args["name"] = i == tracks ? "Monitored input" : "Orrery " + std::to_string(i + 1);
+        args["name"] = i == tracks ? "Monitored input" : "Synth " + std::to_string(i + 1);
         auto added = run("track.add", args);
         if (!added) return added.error();
         const std::string track = (*added)["track"].asString();

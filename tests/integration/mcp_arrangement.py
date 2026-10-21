@@ -4,13 +4,13 @@
 and renders it.
 
 A scripted MCP client drives the engine's stdio MCP server: tempo, three
-tracks with Orrery patches (bass, pad, lead), notation-generated MIDI items,
+tracks with the stock synth's patches (bass, pad, lead), notation-generated MIDI items,
 a basic mix, a render, analysis of the render, and a save/reopen that
 renders bit-identically. Every step's structured result is checked. With
 --transcript, the exchange is written as a readable document (not a drift
 test: plugin text formatting may change without the behaviour changing).
 
-  mcp_arrangement.py <engine> <orrery.clap> [--transcript FILE]
+  mcp_arrangement.py <engine> <synth.clap> [--transcript FILE]
 """
 
 import argparse
@@ -22,24 +22,18 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-BASS = {"schema": "supple.orrery-patch/1.0", "name": "Round bass", "seed": 1,
-        "voice": {"polyphony": 1, "glide": "30 ms"},
-        "oscillators": {"osc1": {"type": "va", "wave": "saw", "to": "filter1"},
-                        "osc3": {"type": "sub", "wave": "sine", "octave": -1,
-                                 "level": "-6 dB", "to": "filter1"}},
-        "filters": {"filter1": {"type": "ladder", "cutoff": "400 Hz", "resonance": "20 %"}},
-        "envelopes": {"amp": {"attack": "3 ms", "sustain": "90 %", "release": "80 ms"}}}
-PAD = {"schema": "supple.orrery-patch/1.0", "name": "Warm pad", "seed": 2,
-       "voice": {"polyphony": 8, "unison": 3, "unison_detune": "10 ct"},
-       "oscillators": {"osc1": {"type": "va", "wave": "saw", "to": "filter1"}},
-       "filters": {"filter1": {"type": "svf", "cutoff": "1.5 kHz"}},
-       "envelopes": {"amp": {"attack": "300 ms", "sustain": "80 %", "release": "600 ms"}},
-       "fx": {"chain": ["chorus", "reverb"]}}
-LEAD = {"schema": "supple.orrery-patch/1.0", "name": "Bright lead", "seed": 3,
-        "oscillators": {"osc1": {"type": "va", "wave": "square", "to": "filter1"}},
-        "filters": {"filter1": {"type": "svf", "cutoff": "3 kHz"}},
-        "envelopes": {"amp": {"attack": "5 ms", "sustain": "70 %", "release": "150 ms"}},
-        "fx": {"chain": ["delay"]}}
+BASS = {"schema": "supple.marram-patch/1.0", "name": "Round bass",
+        "params": {"voice.mode": "mono", "voice.glide": "30 ms",
+                   "osc2.type": "sub", "osc2.wave": "sine", "osc2.level": "-6 dB",
+                   "filter1.cutoff": "400 Hz", "filter1.resonance": "20 %",
+                   "amp.attack": "3 ms", "amp.sustain": "90 %", "amp.release": "80 ms"}}
+PAD = {"schema": "supple.marram-patch/1.0", "name": "Warm pad",
+       "params": {"voice.unison": 3, "voice.unison_detune": "10 ct",
+                  "filter1.type": "svf", "filter1.cutoff": "1.5 kHz",
+                  "amp.attack": "300 ms", "amp.sustain": "80 %", "amp.release": "600 ms"}}
+LEAD = {"schema": "supple.marram-patch/1.0", "name": "Bright lead",
+        "params": {"osc1.wave": "square", "filter1.type": "svf", "filter1.cutoff": "3 kHz",
+                   "amp.attack": "5 ms", "amp.sustain": "70 %", "amp.release": "150 ms"}}
 
 BASS_LINE = "voice bass; 1: A1:q A1:q A1:e C2:e E2:q | F1:q F1:q F1:e A1:e C2:q | " \
             "G1:q G1:q G1:e B1:e D2:q | E1:q E1:q E1:h"
@@ -106,14 +100,14 @@ def build(client):
         steps += [
             {"command": "track.add", "args": {"name": name}, "as": key},
             {"command": "fx.add", "args": {"track": "${%s.track}" % key,
-                                           "plugin": "com.suppleaudio.orrery", "patch": patch}},
+                                           "plugin": "com.suppleaudio.marram", "patch": patch}},
             {"command": "item.add", "args": {"track": "${%s.track}" % key, "bar": 1,
                                              "notation": notation}},
             {"command": "track.set", "args": {"track": "${%s.track}" % key,
                                               "volume_db": volume, "pan": pan}},
         ]
     result = client.call("batch", {"label": "Build a four-bar arrangement", "steps": steps},
-                         "Three tracks with Orrery patches, notation MIDI and a basic mix, "
+                         "Three tracks with synth patches, notation MIDI and a basic mix, "
                          "as one undo step.")
     assert len(result["results"]) == len(steps), result
     described = client.call("session_describe", {}, "Look at the session.")
@@ -133,12 +127,12 @@ def render(client, name):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("engine")
-    parser.add_argument("orrery")
+    parser.add_argument("synth")
     parser.add_argument("--transcript", type=Path)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="supple-mcp-arrangement-") as workdir:
         client = Client([args.engine, "--mcp", "--workdir", workdir,
-                         "--plugin-path", args.orrery])
+                         "--plugin-path", args.synth])
         try:
             init = client.send("initialize", {"protocolVersion": "2025-06-18",
                                               "capabilities": {},
@@ -168,7 +162,7 @@ def main():
                 client.process.wait(timeout=5)
         if args.transcript:
             lines = ["# An arrangement over MCP", "",
-                     "A scripted MCP client builds four bars with three Orrery tracks, "
+                     "A scripted MCP client builds four bars with three synth tracks, "
                      "renders, saves, reopens and renders again (bit-identical). Paths "
                      "point into a temporary work directory.", ""]
             for note, tool, arguments, structured in client.transcript:

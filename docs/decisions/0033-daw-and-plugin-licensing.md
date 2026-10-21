@@ -20,6 +20,8 @@ needs Steinberg's ASIO SDK; stock plugin binaries must remain free of GPL code.
   `plugins/common/cmake/LinkMonorepo.cmake`; patch/schema/JSON and DSP/base
   dependencies are transitive. Analyzer links core-analysis, and EQ's GUI
   links it too. No other first-party library enters a stock plugin binary.
+  (2026-10-21: `LinkMonorepo.cmake` was removed with Orrery, the last plugin
+  built against the monorepo's libraries this way.)
 - `cmake/product.h.in` remains MIT: plugin builds generate and include it
   through core-base's product-info dependency.
 - `daw/`, `host/`, `mcp/`, remaining `libs/`, `tools/`, `tests/`, `skill/`,

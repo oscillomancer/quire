@@ -151,7 +151,7 @@ Registered by the library, `Kind::Edit`, `McpTool`.
 {
   "label": "Bass patch: darker, shorter release",
   "steps": [
-    { "command": "plugin.load", "args": { "plugin": "com.suppleaudio.orrery" }, "as": "synth" },
+    { "command": "plugin.load", "args": { "plugin": "com.suppleaudio.marram" }, "as": "synth" },
     { "command": "patch.merge", "args": { "instance": "${synth.instance}", "patch": { "params": { "filter1.cutoff": "800 Hz" } } } },
     { "command": "render", "args": { "notation": "1: C2:q r:q C2:q r:q", "analyze": "summary" }, "as": "r1" }
   ]
@@ -348,7 +348,7 @@ per MCP.
 A scripted MCP client (C++ test or Python tooling in `tests/integration/`)
 runs initialize → tools/list → a sequence of calls against the sandbox, and
 checks results; its transcript (requests/responses, pretty-printed) is
-committed as `docs/demos/mcp-orrery-session.md` and drift-tested on Linux
+committed as `docs/demos/mcp-synth-session.md` and drift-tested on Linux
 (`mcp.demo`). Native runs retain every structured-result assertion and record
 an informational Linux-reference diff; DSP values are deterministic per platform.
 

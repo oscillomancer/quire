@@ -116,7 +116,6 @@ include startup ramps.
 
 | CLAP id suffix | Artifact / host name | Automated parameter | Points at 0 / 2 seconds | Expectation |
 |---|---|---|---|---|
-| `orrery` | Orrery | Output Level | 0 / −12 dB | −12 ±1 dB |
 | `yarrow` | Yarrow | Output | 0 / −12 dB | −12 ±1 dB |
 | `sundew` | Sundew | Threshold | 0 / −36 dB | second half >3 dB quieter |
 | `treeline` | Treeline | Ceiling | 0 / −24 dB | second half >3 dB quieter |
@@ -127,6 +126,7 @@ include startup ramps.
 | `bracken` | Bracken | Output | 0 / −12 dB | −12 ±1 dB |
 | `canopy` | Canopy | Output | 0 / −12 dB | −12 ±1 dB |
 | `lichen` | Lichen | Target | −30 / −5 LUFS | envelope reload + unchanged audio |
+| `marram` | Marram | Output | 0 / −12 dB | −12 ±1 dB |
 
 Continuous values use ADR-0010's normalized CLAP domain. The table keeps those
 values explicit. Add a plugin in a few lines in `CASES`
@@ -154,8 +154,8 @@ or copied.
 fx,index,true)` takes the **zero-based REAPER parameter index**, not the CLAP
 id. REAPER saves `<PARMENV index:CLAP-id min max default`, e.g. Plumb (the
 utility Hickory replaced) Gain `0:0`, Facet (the EQ Yarrow replaced) Band 3
-Gain `17:17`, and Orrery Output Level **`219:2500`**.
-The Orrery observation distinguishes index from id. Indices may change with
+Gain `17:17`, and Orrery (the synth Marram replaced) Output Level **`219:2500`**.
+That observation distinguishes index from id. Indices may change with
 parameter enumeration; runtime discovery avoids assuming index equals id.
 The script reopens the saved automation RPP and checks all three envelope
 points at the resolved parameter before reporting success. The actual headers,

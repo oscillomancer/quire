@@ -4,15 +4,7 @@ target_include_directories(semantic-params-abi INTERFACE ${CMAKE_CURRENT_SOURCE_
 target_link_libraries(semantic-params-abi INTERFACE supple::clap)
 add_library(supple::semantic-params-abi ALIAS semantic-params-abi)
 
-# Plugin-side support for template-derived plugins (ParamStore, ClapParams,
-# SemanticModel/SemanticAdapter).
-supple_add_library(plugin-support
-  SOURCES src/plugin_support.cpp src/semantic_model.cpp
-  DEPS supple::core-params supple::core-patch supple::semantic-params-abi)
-
 if(SUPPLE_BUILD_TESTS)
-  supple_add_tests(plugin-support SOURCES tests/test_plugin_support.cpp LABELS rt)
-
   if(UNIX AND NOT APPLE)
     add_executable(clap-unload-probe tools/clap_unload_probe.cpp)
     target_link_libraries(clap-unload-probe PRIVATE supple::clap ${CMAKE_DL_LIBS})

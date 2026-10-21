@@ -119,7 +119,7 @@ TEST_CASE("the stock plugins offer embeddable native editors (no display needed)
         CHECK((*instance)->nextTimerMs() >= -1);
     }
     MESSAGE(withEditor << " of " << plugins->size() << " plugins have editors");
-    CHECK(withEditor >= 8);  // the stock effects and Orrery ship editors
+    CHECK(withEditor >= 8);  // the stock plugins ship editors
 }
 
 TEST_CASE("an editor opens in its window, services its timers and closes") {

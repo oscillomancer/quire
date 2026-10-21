@@ -3,7 +3,7 @@
 """Identity mockups (P5.16): the real GUI, rendered offscreen in each theme.
 
 Builds a demo session over the engine's MCP server (tempo ramp, markers and a
-region, Orrery parts in a synth buss, a reverb return with sends, EQ and
+region, synth parts in a synth buss, a reverb return with sends, EQ and
 compressor on the bass, automation, a bounced audio item), saves it, then
 snapshots the app in several layouts per theme:
 
@@ -26,10 +26,10 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests" / "integration"))
 from mcp_arrangement import BASS, LEAD, PAD  # noqa: E402
 
-ARP = {"schema": "supple.orrery-patch/1.0", "name": "Glass arp", "seed": 4,
-       "oscillators": {"osc1": {"type": "va", "wave": "triangle", "to": "filter1"}},
-       "filters": {"filter1": {"type": "svf", "cutoff": "2.4 kHz"}},
-       "envelopes": {"amp": {"attack": "2 ms", "sustain": "20 %", "release": "120 ms"}}}
+SYNTH = "com.suppleaudio.marram"
+ARP = {"schema": "supple.marram-patch/1.0", "name": "Glass arp",
+       "params": {"osc1.wave": "triangle", "filter1.type": "svf", "filter1.cutoff": "2.4 kHz",
+                  "amp.attack": "2 ms", "amp.sustain": "20 %", "amp.release": "120 ms"}}
 
 BASS_LINE = ("voice bass; 1: A1:q A1:q A1:e C2:e E2:q | F1:q F1:q F1:e A1:e C2:q | "
              "G1:q G1:q G1:e B1:e D2:q | E1:q E1:q E1:h")
@@ -116,7 +116,7 @@ def build_session(engine, plugin_dir, workdir):
                                           {"beat": 64, "bpm": 100}]})
         steps = [
             step("track.add", {"name": "Bass"}, "bass"),
-            step("fx.add", {"track": "${bass.track}", "plugin": "com.suppleaudio.orrery", "patch": BASS}),
+            step("fx.add", {"track": "${bass.track}", "plugin": SYNTH, "patch": BASS}),
             step("fx.add", {"track": "${bass.track}", "plugin": "com.suppleaudio.yarrow"}),
             step("fx.add", {"track": "${bass.track}", "plugin": "com.suppleaudio.sundew"}),
             step("track.add", {"name": "Synths", "type": "buss"}, "synths"),
@@ -125,7 +125,7 @@ def build_session(engine, plugin_dir, workdir):
             key = name.lower()
             steps += [step("track.add", {"name": name, "parent": "${synths.track}"}, key),
                       step("fx.add", {"track": "${%s.track}" % key,
-                                      "plugin": "com.suppleaudio.orrery", "patch": patch})]
+                                      "plugin": SYNTH, "patch": patch})]
         steps += [step("track.add", {"name": "Verb", "type": "buss"}, "verb"),
                   step("fx.add", {"track": "${verb.track}", "plugin": "com.suppleaudio.canopy"}),
                   step("route.add", {"from": "${pad.track}", "to": "${verb.track}", "volume_db": -8}),
