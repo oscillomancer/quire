@@ -484,6 +484,7 @@ struct Bracken : Effect {
                      .help("The time between echoes in note values at the song's tempo, or free.");
     Param time = milliseconds("Time", 1, 5000, 400)
                      .in("Time")
+                     .activeWhen(sync, {"Free"})
                      .help("The time between echoes when sync is free.");
     Param groove =
         percent("Groove", 0, -50, 50)

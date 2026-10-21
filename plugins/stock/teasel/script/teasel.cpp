@@ -426,9 +426,6 @@ struct Teasel : Effect {
                        .help(
                            "The LFO's depth: at 100%, 24 dB of drive, half the character, all "
                            "the bias or two octaves of pitch.");
-    Param motionRate = frequency("Motion Rate", 0.05, 20, 1)
-                           .in("Movement")
-                           .help("The LFO's rate in Hz, when its sync is free.");
     Param motionSync =
         choice("Motion Sync",
                {"Free", "4 Bars", "2 Bars", "1 Bar", "1/2", "1/4", "1/8", "1/16", "1/32", "1/4 T",
@@ -438,6 +435,10 @@ struct Teasel : Effect {
                    "n16t", "n4d", "n8d"})
             .in("Movement")
             .help("The LFO's cycle in note values, locked to the song while it plays.");
+    Param motionRate = frequency("Motion Rate", 0.05, 20, 1)
+                           .in("Movement")
+                           .activeWhen(motionSync, {"Free"})
+                           .help("The LFO's rate in Hz, when its sync is free.");
     Param motionShape =
         choice("Motion Shape",
                {"Sine", "Triangle", "Ramp Up", "Ramp Down", "Square", "Random", "Drift"}, 0)
@@ -498,6 +499,7 @@ struct Teasel : Effect {
     Param phase = choice("Phase", {"Minimum", "Linear"}, 0)
                       .restarts()
                       .in("Output")
+                      .activeUnless(quality, {"1x"})
                       .help(
                           "The oversampling filters: minimum adds 3 to 5 samples of latency and "
                           "turns the top octave's phase a little; linear turns no phase at all, "

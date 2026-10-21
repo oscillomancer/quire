@@ -468,20 +468,24 @@ struct Yarrow : Effect {
         choice("Band 1 Type",
                {"Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut", "Notch", "Tilt"}, 3)
             .in("Band 1")
+            .activeWhen(b1On)
             .withKey("band1.type")
             .help("Its shape: a bell, a shelf, a cut, a notch, or a tilt about its frequency.");
     Param b1Freq = frequency("Band 1 Frequency", 20, 20000, 30)
                        .in("Band 1")
+                       .activeWhen(b1On)
                        .withKey("band1.freq")
                        .help("Its centre, corner or pivot.");
     Param b1Gain =
         decibels("Band 1 Gain", -30, 30, 0)
             .in("Band 1")
+            .activeUnless(b1Type, {"Low Cut", "High Cut", "Notch"})
             .withKey("band1.gain")
             .help("Boost or cut, for bells, shelves and tilts (cuts and notches ignore it).");
     Param b1Q = continuous("Band 1 Q", 0.1, 30, 0.71, Unit::None)
                     .curved(Curve::Log)
                     .in("Band 1")
+                    .activeWhen(b1On)
                     .withKey("band1.q")
                     .help("Width: higher is narrower; resonance for shelves (up to 2) and cuts.");
     Param b1Slope =
@@ -489,16 +493,19 @@ struct Yarrow : Effect {
                {"6 dB/oct", "12 dB/oct", "18 dB/oct", "24 dB/oct", "36 dB/oct", "48 dB/oct"}, 3)
             .keys({"db6", "db12", "db18", "db24", "db36", "db48"})
             .in("Band 1")
+            .activeWhen(b1Type, {"Low Cut", "High Cut"})
             .withKey("band1.slope")
             .help("How steeply a cut falls away.");
     Param b1Channel = choice("Band 1 Channel", {"Stereo", "Mid", "Side", "Left", "Right"}, 0)
                           .in("Band 1")
+                          .activeWhen(b1On)
                           .withKey("band1.channel")
                           .help(
                               "What it works on: both channels, the mid (centre), the side "
                               "(width), or one channel.");
     Param b1Dynamic = toggle("Band 1 Dynamic", false)
                           .in("Band 1")
+                          .activeWhen(b1Type, {"Bell", "Low Shelf", "High Shelf"})
                           .withKey("band1.dynamic")
                           .help(
                               "A bell or shelf that moves toward its gain only while its region is "
@@ -506,6 +513,7 @@ struct Yarrow : Effect {
     Param b1Threshold =
         decibels("Band 1 Threshold", -60, 0, -30)
             .in("Band 1")
+            .activeWhen(b1Dynamic)
             .withKey("band1.threshold")
             .help("For a dynamic band: the level of its region above which it starts to act.");
     Param b2On = toggle("Band 2 On", false)
@@ -516,20 +524,24 @@ struct Yarrow : Effect {
         choice("Band 2 Type",
                {"Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut", "Notch", "Tilt"}, 1)
             .in("Band 2")
+            .activeWhen(b2On)
             .withKey("band2.type")
             .help("Its shape: a bell, a shelf, a cut, a notch, or a tilt about its frequency.");
     Param b2Freq = frequency("Band 2 Frequency", 20, 20000, 100)
                        .in("Band 2")
+                       .activeWhen(b2On)
                        .withKey("band2.freq")
                        .help("Its centre, corner or pivot.");
     Param b2Gain =
         decibels("Band 2 Gain", -30, 30, 0)
             .in("Band 2")
+            .activeUnless(b2Type, {"Low Cut", "High Cut", "Notch"})
             .withKey("band2.gain")
             .help("Boost or cut, for bells, shelves and tilts (cuts and notches ignore it).");
     Param b2Q = continuous("Band 2 Q", 0.1, 30, 0.71, Unit::None)
                     .curved(Curve::Log)
                     .in("Band 2")
+                    .activeWhen(b2On)
                     .withKey("band2.q")
                     .help("Width: higher is narrower; resonance for shelves (up to 2) and cuts.");
     Param b2Slope =
@@ -537,16 +549,19 @@ struct Yarrow : Effect {
                {"6 dB/oct", "12 dB/oct", "18 dB/oct", "24 dB/oct", "36 dB/oct", "48 dB/oct"}, 3)
             .keys({"db6", "db12", "db18", "db24", "db36", "db48"})
             .in("Band 2")
+            .activeWhen(b2Type, {"Low Cut", "High Cut"})
             .withKey("band2.slope")
             .help("How steeply a cut falls away.");
     Param b2Channel = choice("Band 2 Channel", {"Stereo", "Mid", "Side", "Left", "Right"}, 0)
                           .in("Band 2")
+                          .activeWhen(b2On)
                           .withKey("band2.channel")
                           .help(
                               "What it works on: both channels, the mid (centre), the side "
                               "(width), or one channel.");
     Param b2Dynamic = toggle("Band 2 Dynamic", false)
                           .in("Band 2")
+                          .activeWhen(b2Type, {"Bell", "Low Shelf", "High Shelf"})
                           .withKey("band2.dynamic")
                           .help(
                               "A bell or shelf that moves toward its gain only while its region is "
@@ -554,6 +569,7 @@ struct Yarrow : Effect {
     Param b2Threshold =
         decibels("Band 2 Threshold", -60, 0, -30)
             .in("Band 2")
+            .activeWhen(b2Dynamic)
             .withKey("band2.threshold")
             .help("For a dynamic band: the level of its region above which it starts to act.");
     Param b3On = toggle("Band 3 On", false)
@@ -564,20 +580,24 @@ struct Yarrow : Effect {
         choice("Band 3 Type",
                {"Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut", "Notch", "Tilt"}, 0)
             .in("Band 3")
+            .activeWhen(b3On)
             .withKey("band3.type")
             .help("Its shape: a bell, a shelf, a cut, a notch, or a tilt about its frequency.");
     Param b3Freq = frequency("Band 3 Frequency", 20, 20000, 250)
                        .in("Band 3")
+                       .activeWhen(b3On)
                        .withKey("band3.freq")
                        .help("Its centre, corner or pivot.");
     Param b3Gain =
         decibels("Band 3 Gain", -30, 30, 0)
             .in("Band 3")
+            .activeUnless(b3Type, {"Low Cut", "High Cut", "Notch"})
             .withKey("band3.gain")
             .help("Boost or cut, for bells, shelves and tilts (cuts and notches ignore it).");
     Param b3Q = continuous("Band 3 Q", 0.1, 30, 1.0, Unit::None)
                     .curved(Curve::Log)
                     .in("Band 3")
+                    .activeWhen(b3On)
                     .withKey("band3.q")
                     .help("Width: higher is narrower; resonance for shelves (up to 2) and cuts.");
     Param b3Slope =
@@ -585,16 +605,19 @@ struct Yarrow : Effect {
                {"6 dB/oct", "12 dB/oct", "18 dB/oct", "24 dB/oct", "36 dB/oct", "48 dB/oct"}, 3)
             .keys({"db6", "db12", "db18", "db24", "db36", "db48"})
             .in("Band 3")
+            .activeWhen(b3Type, {"Low Cut", "High Cut"})
             .withKey("band3.slope")
             .help("How steeply a cut falls away.");
     Param b3Channel = choice("Band 3 Channel", {"Stereo", "Mid", "Side", "Left", "Right"}, 0)
                           .in("Band 3")
+                          .activeWhen(b3On)
                           .withKey("band3.channel")
                           .help(
                               "What it works on: both channels, the mid (centre), the side "
                               "(width), or one channel.");
     Param b3Dynamic = toggle("Band 3 Dynamic", false)
                           .in("Band 3")
+                          .activeWhen(b3Type, {"Bell", "Low Shelf", "High Shelf"})
                           .withKey("band3.dynamic")
                           .help(
                               "A bell or shelf that moves toward its gain only while its region is "
@@ -602,6 +625,7 @@ struct Yarrow : Effect {
     Param b3Threshold =
         decibels("Band 3 Threshold", -60, 0, -30)
             .in("Band 3")
+            .activeWhen(b3Dynamic)
             .withKey("band3.threshold")
             .help("For a dynamic band: the level of its region above which it starts to act.");
     Param b4On = toggle("Band 4 On", false)
@@ -612,20 +636,24 @@ struct Yarrow : Effect {
         choice("Band 4 Type",
                {"Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut", "Notch", "Tilt"}, 0)
             .in("Band 4")
+            .activeWhen(b4On)
             .withKey("band4.type")
             .help("Its shape: a bell, a shelf, a cut, a notch, or a tilt about its frequency.");
     Param b4Freq = frequency("Band 4 Frequency", 20, 20000, 800)
                        .in("Band 4")
+                       .activeWhen(b4On)
                        .withKey("band4.freq")
                        .help("Its centre, corner or pivot.");
     Param b4Gain =
         decibels("Band 4 Gain", -30, 30, 0)
             .in("Band 4")
+            .activeUnless(b4Type, {"Low Cut", "High Cut", "Notch"})
             .withKey("band4.gain")
             .help("Boost or cut, for bells, shelves and tilts (cuts and notches ignore it).");
     Param b4Q = continuous("Band 4 Q", 0.1, 30, 1.0, Unit::None)
                     .curved(Curve::Log)
                     .in("Band 4")
+                    .activeWhen(b4On)
                     .withKey("band4.q")
                     .help("Width: higher is narrower; resonance for shelves (up to 2) and cuts.");
     Param b4Slope =
@@ -633,16 +661,19 @@ struct Yarrow : Effect {
                {"6 dB/oct", "12 dB/oct", "18 dB/oct", "24 dB/oct", "36 dB/oct", "48 dB/oct"}, 3)
             .keys({"db6", "db12", "db18", "db24", "db36", "db48"})
             .in("Band 4")
+            .activeWhen(b4Type, {"Low Cut", "High Cut"})
             .withKey("band4.slope")
             .help("How steeply a cut falls away.");
     Param b4Channel = choice("Band 4 Channel", {"Stereo", "Mid", "Side", "Left", "Right"}, 0)
                           .in("Band 4")
+                          .activeWhen(b4On)
                           .withKey("band4.channel")
                           .help(
                               "What it works on: both channels, the mid (centre), the side "
                               "(width), or one channel.");
     Param b4Dynamic = toggle("Band 4 Dynamic", false)
                           .in("Band 4")
+                          .activeWhen(b4Type, {"Bell", "Low Shelf", "High Shelf"})
                           .withKey("band4.dynamic")
                           .help(
                               "A bell or shelf that moves toward its gain only while its region is "
@@ -650,6 +681,7 @@ struct Yarrow : Effect {
     Param b4Threshold =
         decibels("Band 4 Threshold", -60, 0, -30)
             .in("Band 4")
+            .activeWhen(b4Dynamic)
             .withKey("band4.threshold")
             .help("For a dynamic band: the level of its region above which it starts to act.");
     Param b5On = toggle("Band 5 On", false)
@@ -660,20 +692,24 @@ struct Yarrow : Effect {
         choice("Band 5 Type",
                {"Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut", "Notch", "Tilt"}, 0)
             .in("Band 5")
+            .activeWhen(b5On)
             .withKey("band5.type")
             .help("Its shape: a bell, a shelf, a cut, a notch, or a tilt about its frequency.");
     Param b5Freq = frequency("Band 5 Frequency", 20, 20000, 2500)
                        .in("Band 5")
+                       .activeWhen(b5On)
                        .withKey("band5.freq")
                        .help("Its centre, corner or pivot.");
     Param b5Gain =
         decibels("Band 5 Gain", -30, 30, 0)
             .in("Band 5")
+            .activeUnless(b5Type, {"Low Cut", "High Cut", "Notch"})
             .withKey("band5.gain")
             .help("Boost or cut, for bells, shelves and tilts (cuts and notches ignore it).");
     Param b5Q = continuous("Band 5 Q", 0.1, 30, 1.0, Unit::None)
                     .curved(Curve::Log)
                     .in("Band 5")
+                    .activeWhen(b5On)
                     .withKey("band5.q")
                     .help("Width: higher is narrower; resonance for shelves (up to 2) and cuts.");
     Param b5Slope =
@@ -681,16 +717,19 @@ struct Yarrow : Effect {
                {"6 dB/oct", "12 dB/oct", "18 dB/oct", "24 dB/oct", "36 dB/oct", "48 dB/oct"}, 3)
             .keys({"db6", "db12", "db18", "db24", "db36", "db48"})
             .in("Band 5")
+            .activeWhen(b5Type, {"Low Cut", "High Cut"})
             .withKey("band5.slope")
             .help("How steeply a cut falls away.");
     Param b5Channel = choice("Band 5 Channel", {"Stereo", "Mid", "Side", "Left", "Right"}, 0)
                           .in("Band 5")
+                          .activeWhen(b5On)
                           .withKey("band5.channel")
                           .help(
                               "What it works on: both channels, the mid (centre), the side "
                               "(width), or one channel.");
     Param b5Dynamic = toggle("Band 5 Dynamic", false)
                           .in("Band 5")
+                          .activeWhen(b5Type, {"Bell", "Low Shelf", "High Shelf"})
                           .withKey("band5.dynamic")
                           .help(
                               "A bell or shelf that moves toward its gain only while its region is "
@@ -698,6 +737,7 @@ struct Yarrow : Effect {
     Param b5Threshold =
         decibels("Band 5 Threshold", -60, 0, -30)
             .in("Band 5")
+            .activeWhen(b5Dynamic)
             .withKey("band5.threshold")
             .help("For a dynamic band: the level of its region above which it starts to act.");
     Param b6On = toggle("Band 6 On", false)
@@ -708,20 +748,24 @@ struct Yarrow : Effect {
         choice("Band 6 Type",
                {"Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut", "Notch", "Tilt"}, 0)
             .in("Band 6")
+            .activeWhen(b6On)
             .withKey("band6.type")
             .help("Its shape: a bell, a shelf, a cut, a notch, or a tilt about its frequency.");
     Param b6Freq = frequency("Band 6 Frequency", 20, 20000, 6000)
                        .in("Band 6")
+                       .activeWhen(b6On)
                        .withKey("band6.freq")
                        .help("Its centre, corner or pivot.");
     Param b6Gain =
         decibels("Band 6 Gain", -30, 30, 0)
             .in("Band 6")
+            .activeUnless(b6Type, {"Low Cut", "High Cut", "Notch"})
             .withKey("band6.gain")
             .help("Boost or cut, for bells, shelves and tilts (cuts and notches ignore it).");
     Param b6Q = continuous("Band 6 Q", 0.1, 30, 1.0, Unit::None)
                     .curved(Curve::Log)
                     .in("Band 6")
+                    .activeWhen(b6On)
                     .withKey("band6.q")
                     .help("Width: higher is narrower; resonance for shelves (up to 2) and cuts.");
     Param b6Slope =
@@ -729,16 +773,19 @@ struct Yarrow : Effect {
                {"6 dB/oct", "12 dB/oct", "18 dB/oct", "24 dB/oct", "36 dB/oct", "48 dB/oct"}, 3)
             .keys({"db6", "db12", "db18", "db24", "db36", "db48"})
             .in("Band 6")
+            .activeWhen(b6Type, {"Low Cut", "High Cut"})
             .withKey("band6.slope")
             .help("How steeply a cut falls away.");
     Param b6Channel = choice("Band 6 Channel", {"Stereo", "Mid", "Side", "Left", "Right"}, 0)
                           .in("Band 6")
+                          .activeWhen(b6On)
                           .withKey("band6.channel")
                           .help(
                               "What it works on: both channels, the mid (centre), the side "
                               "(width), or one channel.");
     Param b6Dynamic = toggle("Band 6 Dynamic", false)
                           .in("Band 6")
+                          .activeWhen(b6Type, {"Bell", "Low Shelf", "High Shelf"})
                           .withKey("band6.dynamic")
                           .help(
                               "A bell or shelf that moves toward its gain only while its region is "
@@ -746,6 +793,7 @@ struct Yarrow : Effect {
     Param b6Threshold =
         decibels("Band 6 Threshold", -60, 0, -30)
             .in("Band 6")
+            .activeWhen(b6Dynamic)
             .withKey("band6.threshold")
             .help("For a dynamic band: the level of its region above which it starts to act.");
     Param b7On = toggle("Band 7 On", false)
@@ -756,20 +804,24 @@ struct Yarrow : Effect {
         choice("Band 7 Type",
                {"Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut", "Notch", "Tilt"}, 2)
             .in("Band 7")
+            .activeWhen(b7On)
             .withKey("band7.type")
             .help("Its shape: a bell, a shelf, a cut, a notch, or a tilt about its frequency.");
     Param b7Freq = frequency("Band 7 Frequency", 20, 20000, 10000)
                        .in("Band 7")
+                       .activeWhen(b7On)
                        .withKey("band7.freq")
                        .help("Its centre, corner or pivot.");
     Param b7Gain =
         decibels("Band 7 Gain", -30, 30, 0)
             .in("Band 7")
+            .activeUnless(b7Type, {"Low Cut", "High Cut", "Notch"})
             .withKey("band7.gain")
             .help("Boost or cut, for bells, shelves and tilts (cuts and notches ignore it).");
     Param b7Q = continuous("Band 7 Q", 0.1, 30, 0.71, Unit::None)
                     .curved(Curve::Log)
                     .in("Band 7")
+                    .activeWhen(b7On)
                     .withKey("band7.q")
                     .help("Width: higher is narrower; resonance for shelves (up to 2) and cuts.");
     Param b7Slope =
@@ -777,16 +829,19 @@ struct Yarrow : Effect {
                {"6 dB/oct", "12 dB/oct", "18 dB/oct", "24 dB/oct", "36 dB/oct", "48 dB/oct"}, 3)
             .keys({"db6", "db12", "db18", "db24", "db36", "db48"})
             .in("Band 7")
+            .activeWhen(b7Type, {"Low Cut", "High Cut"})
             .withKey("band7.slope")
             .help("How steeply a cut falls away.");
     Param b7Channel = choice("Band 7 Channel", {"Stereo", "Mid", "Side", "Left", "Right"}, 0)
                           .in("Band 7")
+                          .activeWhen(b7On)
                           .withKey("band7.channel")
                           .help(
                               "What it works on: both channels, the mid (centre), the side "
                               "(width), or one channel.");
     Param b7Dynamic = toggle("Band 7 Dynamic", false)
                           .in("Band 7")
+                          .activeWhen(b7Type, {"Bell", "Low Shelf", "High Shelf"})
                           .withKey("band7.dynamic")
                           .help(
                               "A bell or shelf that moves toward its gain only while its region is "
@@ -794,6 +849,7 @@ struct Yarrow : Effect {
     Param b7Threshold =
         decibels("Band 7 Threshold", -60, 0, -30)
             .in("Band 7")
+            .activeWhen(b7Dynamic)
             .withKey("band7.threshold")
             .help("For a dynamic band: the level of its region above which it starts to act.");
     Param b8On = toggle("Band 8 On", false)
@@ -804,20 +860,24 @@ struct Yarrow : Effect {
         choice("Band 8 Type",
                {"Bell", "Low Shelf", "High Shelf", "Low Cut", "High Cut", "Notch", "Tilt"}, 4)
             .in("Band 8")
+            .activeWhen(b8On)
             .withKey("band8.type")
             .help("Its shape: a bell, a shelf, a cut, a notch, or a tilt about its frequency.");
     Param b8Freq = frequency("Band 8 Frequency", 20, 20000, 18000)
                        .in("Band 8")
+                       .activeWhen(b8On)
                        .withKey("band8.freq")
                        .help("Its centre, corner or pivot.");
     Param b8Gain =
         decibels("Band 8 Gain", -30, 30, 0)
             .in("Band 8")
+            .activeUnless(b8Type, {"Low Cut", "High Cut", "Notch"})
             .withKey("band8.gain")
             .help("Boost or cut, for bells, shelves and tilts (cuts and notches ignore it).");
     Param b8Q = continuous("Band 8 Q", 0.1, 30, 0.71, Unit::None)
                     .curved(Curve::Log)
                     .in("Band 8")
+                    .activeWhen(b8On)
                     .withKey("band8.q")
                     .help("Width: higher is narrower; resonance for shelves (up to 2) and cuts.");
     Param b8Slope =
@@ -825,16 +885,19 @@ struct Yarrow : Effect {
                {"6 dB/oct", "12 dB/oct", "18 dB/oct", "24 dB/oct", "36 dB/oct", "48 dB/oct"}, 3)
             .keys({"db6", "db12", "db18", "db24", "db36", "db48"})
             .in("Band 8")
+            .activeWhen(b8Type, {"Low Cut", "High Cut"})
             .withKey("band8.slope")
             .help("How steeply a cut falls away.");
     Param b8Channel = choice("Band 8 Channel", {"Stereo", "Mid", "Side", "Left", "Right"}, 0)
                           .in("Band 8")
+                          .activeWhen(b8On)
                           .withKey("band8.channel")
                           .help(
                               "What it works on: both channels, the mid (centre), the side "
                               "(width), or one channel.");
     Param b8Dynamic = toggle("Band 8 Dynamic", false)
                           .in("Band 8")
+                          .activeWhen(b8Type, {"Bell", "Low Shelf", "High Shelf"})
                           .withKey("band8.dynamic")
                           .help(
                               "A bell or shelf that moves toward its gain only while its region is "
@@ -842,6 +905,7 @@ struct Yarrow : Effect {
     Param b8Threshold =
         decibels("Band 8 Threshold", -60, 0, -30)
             .in("Band 8")
+            .activeWhen(b8Dynamic)
             .withKey("band8.threshold")
             .help("For a dynamic band: the level of its region above which it starts to act.");
 

@@ -134,6 +134,7 @@ struct Hickory : Effect {
     Param monoBelow =
         frequency("Mono Below", 30, 500, 120)
             .in("Low End")
+            .activeWhen(bassMono)
             .help("Bass Mono's crossover: a 24 dB/oct Linkwitz-Riley high-pass on the side.");
     Param dcBlock = toggle("DC Block", false)
                         .in("Low End")

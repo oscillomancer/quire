@@ -315,14 +315,15 @@ struct Sundew : Effect {
     Param attack = milliseconds("Attack", 0.05, 250, 10)
                        .in("Compressor")
                        .help("How fast it reacts to a louder sound.");
-    Param release =
-        milliseconds("Release", 5, 3000, 150)
-            .in("Compressor")
-            .help("How fast it lets go once the sound falls (ignored while Sync is on).");
     Param sync = choice("Sync", {"Off", "1/32", "1/16", "1/8", "1/4", "1/2", "1 Bar"}, 0)
                      .keys({"off", "n32", "n16", "n8", "n4", "n2", "bar"})
                      .in("Compressor")
                      .help("Locks the release to the tempo: it recovers within that note value.");
+    Param release =
+        milliseconds("Release", 5, 3000, 150)
+            .in("Compressor")
+            .activeWhen(sync, {"Off"})
+            .help("How fast it lets go once the sound falls (ignored while Sync is on).");
     Param knee =
         decibels("Knee", 0, 24, 6)
             .in("Compressor")
@@ -364,6 +365,7 @@ struct Sundew : Effect {
     Param colour =
         percent("Colour", 0)
             .in("Output")
+            .activeUnless(character, {"Clean", "Bloom"})
             .help(
                 "The character's harmonics, rising as it works harder (Clean and Bloom add none).");
     Param output = decibels("Output", -24, 24, 0)

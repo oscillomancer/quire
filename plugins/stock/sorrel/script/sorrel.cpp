@@ -118,6 +118,7 @@ struct Sorrel : Effect {
     Param hysteresis =
         decibels("Hysteresis", 0, 24, 6)
             .in("Gate")
+            .activeWhen(mode, {"Gate"})
             .help("How far under the threshold the level must fall before it closes (Gate).");
     Param range = decibels("Range", -80, 0, -40)
                       .offAtMin()
@@ -126,6 +127,7 @@ struct Sorrel : Effect {
     Param ratioSet = ratio("Ratio", 1.2, 10, 2)
                          .withKey("ratio")
                          .in("Gate")
+                         .activeWhen(mode, {"Expand"})
                          .help(
                              "Expand: each dB under the threshold becomes this many; 2 turns a "
                              "level 10 dB under it down 10 dB more.");
@@ -134,15 +136,18 @@ struct Sorrel : Effect {
                        .help(
                            "How long it takes to open; with lookahead the opening ends as the "
                            "sound arrives.");
-    Param hold = milliseconds("Hold", 0, 1000, 20)
-                     .in("Timing")
-                     .help("How long it stays open after the level falls under the close level.");
+    Param hold =
+        milliseconds("Hold", 0, 1000, 20)
+            .in("Timing")
+            .activeWhen(mode, {"Gate"})
+            .help("How long it stays open after the level falls under the close level (Gate).");
     Param release = milliseconds("Release", 10, 3000, 150)
                         .in("Timing")
                         .help("How fast it closes: the time it takes to turn down by 60 dB.");
     Param follow =
         toggle("Follow", true)
             .in("Timing")
+            .activeWhen(mode, {"Gate"})
             .help(
                 "Closes at the rate the sound was decaying at, within a factor of four of the "
                 "release (Gate).");
