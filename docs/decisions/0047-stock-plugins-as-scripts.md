@@ -59,12 +59,14 @@ plugins ship as CLAP (and VST3, AU) files of their own that other hosts load.
    replacing Sluice (`com.suppleaudio.gate`); the seventh Teasel, the
    saturation, replacing Kiln (`com.suppleaudio.drive`); the eighth
    Bracken, the delay, replacing Echelon (`com.suppleaudio.delay`); the
-   ninth Canopy, the reverb, replacing Nave (`com.suppleaudio.reverb`).
+   ninth Canopy, the reverb, replacing Nave (`com.suppleaudio.reverb`); the
+   tenth Lichen, the analyzer, replacing Gauge (`com.suppleaudio.analyzer`).
 6. **Names and look.** A stock plugin is named after a plant or something
    else of the natural world, not after its effect type (Yarrow, the EQ;
    Sundew, the compressor; Treeline, the limiter; Gorse, the transient
    shaper; Hickory, the stereo utility; Sorrel, the gate; Teasel, the
-   saturation; Bracken, the delay; Canopy, the reverb).
+   saturation; Bracken, the delay; Canopy, the reverb; Lichen, the
+   analyzer).
    Every stock script draws with the scripts' palette (`kScriptTheme` in
    `plugins/suite/glue`): warm and earthy, set apart from the host's
    graphite (walnut panels, a soil-dark floor under graphs, parchment

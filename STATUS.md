@@ -191,7 +191,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
   the LLM evaluation harness (`tools/eval-harness`).
 - **Stock plugins** (ADR-0011, ADR-0047): Orrery, Yarrow, Sundew, Treeline,
-  Gorse, Hickory, Sorrel, Teasel, Bracken, Canopy and Gauge, each passing clap-validator, a
+  Gorse, Hickory, Sorrel, Teasel, Bracken, Canopy and Lichen, each passing clap-validator, a
   reset determinism check, an unload test and the headless REAPER check;
   JSON patches and the semantic-parameters extension.
   Yarrow, the EQ, is the first written as a DSP script
@@ -292,7 +292,20 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   source, the listener and the walls dragged), a section for the height,
   the materials, every reflection on a time line (one hovered traces its
   path through the room), and each octave's decay with the modes beneath.
-  It replaced Nave (`com.suppleaudio.reverb`).
+  It replaced Nave (`com.suppleaudio.reverb`). Lichen, the analyzer
+  (`plugins/stock/lichen`), is the tenth: it never writes its output (host-
+  smoke holds it to a bit-exact pass-through) and reports as read-only
+  parameters BS.1770 loudness (momentary, short-term, integrated, range,
+  their highest), true and sample peak, PLR, crest, overs, clipped runs,
+  DC, correlation, width, the width below 250 Hz, balance, mono loss, the
+  seven named bands, tilt and centroid (as the offline analysis defines
+  them) and the key with its strength, over the last play (or render).
+  Agents read them with `fx.meters`. Its editor shows the loudness against
+  a target, the last minute and the play's distribution, the spectrum now
+  (mid and side), its peak and the play's average with the named bands, a
+  vectorscope with correlation by third octave, the pitch classes round
+  the circle of fifths, and a health list. It replaced Gauge
+  (`com.suppleaudio.analyzer`).
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The
@@ -416,8 +429,14 @@ Engine and hosting:
   and there are no per-output meters.
 - Overlapping gestures on a plugin without semantic parameters share one
   state blob.
-- The engine does not read plugin telemetry (Gauge's measurements reach its
-  own editor and agents through the extension only).
+- `fx.meters` reads a plugin's readouts live or as the last `render.mix`
+  ended; other renders (stems, regions, A/B) keep none.
+- A DSP script that never changes its input (an analyser of one's own)
+  exports a source project whose host-smoke fails: the export does not set
+  `PRODUCT_TRANSPARENT`; set it by hand in the exported `product.cmake`.
+- No plugin implements the semantic extension's `get_telemetry` member since
+  Gauge was replaced; `core-analysis`'s `LiveMeter`, written for it, has no
+  user.
 - FX containers are not implemented; parallel FX run in series on pinned
   stages and strips with auxiliary channels, and oversampling is not
   available to plug-ins with auxiliary outputs.

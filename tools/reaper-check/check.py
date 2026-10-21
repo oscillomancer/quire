@@ -59,7 +59,7 @@ CASES = {
     "com.suppleaudio.teasel": Case("Teasel", False, "Output", .5, .25, "gain"),
     "com.suppleaudio.bracken": Case("Bracken", False, "Output", .5, .25, "gain"),
     "com.suppleaudio.canopy": Case("Canopy", False, "Output", .5, .25, "gain"),
-    "com.suppleaudio.analyzer": Case("Analyzer", False, "Hold", 0, 1, "transparent", True, "Gauge"),
+    "com.suppleaudio.lichen": Case("Lichen", False, "Target", 0, 1, "transparent", True),
 }
 
 
@@ -585,7 +585,7 @@ def check_plugin(plugin_id, case, runner, folder, cfg, media, editor=False):
         row["metrics"]["automation_delta_db"] = delta
         if case.expectation == "transparent":
             correct = automated == bypass
-            row["reason"] = "Hold envelope/save/reload and audio transparency checked; meter freeze not measured"
+            row["reason"] = f"{case.parameter} envelope/save/reload and audio transparency checked; readouts not measured"
         else:
             correct = -13 <= delta <= -11 if case.expectation == "gain" else delta < -3
         row["automation"] = "pass" if correct else "fail"

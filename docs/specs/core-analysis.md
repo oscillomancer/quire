@@ -379,7 +379,8 @@ simple synthesis code) committed to `docs/specs/examples/analysis/`.
 
 ## 9. Live measurement pieces (2026-09-29)
 
-`analysis/live.h` adds a consumer-thread `LiveMeter` for the stock analyzer.
+`analysis/live.h` adds a consumer-thread `LiveMeter` for the stock analyzer
+(Gauge; since Lichen replaced it on 2026-10-20 it has no user).
 It uses `LoudnessMeter` plus Pearson stereo sums and a Hann FFT, all on a
 sample-counted 100 ms observation grid. `LoudnessMeter::prepare` accepts an
 optional `windowSeconds` after `maxSeconds`: zero keeps its original

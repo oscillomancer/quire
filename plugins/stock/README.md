@@ -18,6 +18,7 @@ player, and every check the other stock plugins have.
 | `teasel` | Teasel, the saturation | `com.suppleaudio.teasel` |
 | `bracken` | Bracken, the delay | `com.suppleaudio.bracken` |
 | `canopy` | Canopy, the reverb | `com.suppleaudio.canopy` |
+| `lichen` | Lichen, the analyzer | `com.suppleaudio.lichen` |
 
 ## Files
 

@@ -20,11 +20,7 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 | `teasel` (`plugins/stock/teasel`) | Teasel | `com.suppleaudio.teasel` | `BLWw` (the player's for the id) | `Tesl` | audio-effect, distortion |
 | `bracken` (`plugins/stock/bracken`) | Bracken | `com.suppleaudio.bracken` | `PzKJ` (the player's for the id) | `Brkn` | audio-effect, delay |
 | `canopy` (`plugins/stock/canopy`) | Canopy | `com.suppleaudio.canopy` | `TtYY` (the player's for the id) | `Cnpy` | audio-effect, reverb |
-| `analyzer` | Gauge | `com.suppleaudio.analyzer` | `QAN1` | `QAna` | audio-effect, analyzer, stereo |
-
-In the template's identity checklist the code name is the id
-(`Analyzer`/`analyzer`/`ANALYZER`); only the user-visible name string is the
-working name, defined once per plugin.
+| `lichen` (`plugins/stock/lichen`) | Lichen | `com.suppleaudio.lichen` | `cwHJ` (the player's for the id) | `Lchn` | audio-effect, analyzer |
 
 ## 1. The shape every effect shares
 
@@ -392,38 +388,41 @@ the rest. Notes for maintainers:
   correlation −0.71 on a flipped pair, a −6.02 dB balance where the right
   was 6 dB down, and −60 dB of side at width 0.
 
-## 5. Analyzer — Gauge [`analyzer`] (`stock-effects.md` §9)
+## 5. Analyzer — Lichen [`lichen`] (`stock-effects.md` §9)
 
-- Passes audio bit-exactly (tested at every block size and rate).
-- Measures with `core-analysis` streaming pieces (the `LoudnessMeter` for
-  M/S/I, LRA, true peak; correlation, width, balance; a smoothed 1/3-octave
-  spectrum and the spectral centroid) on a worker path that never blocks the
-  audio thread: the audio thread only copies blocks into a preallocated
-  SPSC ring; measurement runs on the main thread's timer (or, if a
-  measurement is RT-safe and cheap per sample, on the audio thread itself —
-  justify in the report). If `core-analysis` lacks a streaming piece you
-  need, add it there in the same style with tests (this plugin may touch
-  `libs/core-analysis`; no other worker does).
-- Readonly CLAP parameters for the scalar values (integrated, short-term,
-  momentary LUFS, LRA, true peak, correlation, width, balance, centroid);
-  `window`, `reset` (momentary: a host write of 1 resets and the parameter
-  returns to 0), `hold`.
-- **The extension addition** `get_telemetry(plugin, out)`: appended to
-  `clap_plugin_supple_semantic_params_t` per the extension's versioning rule
-  (`docs/specs/semantic-params-extension.md`), writing
-  `supple.analysis-report/1.0`-shaped JSON of the current window. Update that
-  spec, `plugins/common` (the struct and a `FlatSemantic` hook), and keep
-  every existing plugin building (a null member for plugins without
-  telemetry). This plugin may touch `plugins/common` and that spec; no other
-  worker does.
-- Tests: bit-exact pass-through; on a −23 LUFS EBU test signal (generate a
-  1 kHz sine at the level core-analysis's own tests use) the reported
-  integrated loudness is within 0.1 LU of core-analysis's offline result for
-  the same audio; true peak and correlation likewise; the telemetry JSON
-  validates against the analysis-report shape.
-- GUI: loudness numbers large (M/S/I, LRA, TP), a short-term history graph,
-  the 1/3-octave spectrum, correlation and balance meters. Scenarios:
-  `idle`, `music` (a synthetic mix fed through the telemetry path).
+A DSP script (ADR-0047), `plugins/stock/lichen/script/lichen.cpp`. It
+replaced Gauge (`com.suppleaudio.analyzer`, a template plugin with a
+measurement worker and the `get_telemetry` extension member) with a new
+design. Notes for maintainers:
+
+- **It never writes the block.** Every measurement reads `io` into locals
+  (non-finite samples become 0 there only). `product.cmake` sets
+  `PRODUCT_TRANSPARENT` (template framework 1.27.0), so host-smoke demands
+  output equal to input, float and double, in place and not; nothing that
+  makes the plugin write its output can pass.
+- **Readouts are the interface.** Every measurement an agent can use is a
+  `.meter()` parameter, read in the DAW with `fx.meters` (live, or as the
+  last `render.mix` ended), in the sandbox with `param.get` or `dsp.test`'s
+  `meters`. Gauge's JSON telemetry needed its own extension member and was
+  never read by the engine; read-only parameters reach every host.
+- **The audio thread does the analysis**, all of it cheap per sample: the
+  true peak's interpolation only near the highest peaks (§9 of the spec),
+  K-weighting, sums; two 16k transforms a frame every 85 ms (the runtime's
+  `Stft`, whose output is pulled and dropped) and a 2k one for the
+  centroid. Histograms replace stored history (loudness in tenths of a LU,
+  the centroid in 300 log steps), so a play of any length costs the same.
+- **Readouts as the offline analysis defines them.** The named bands, the
+  tilt, the centroid, width, balance, correlation and mono loss follow
+  `core-analysis.md`, so a live reading and an analysis report of the same
+  audio agree (a 16 s test mix: bands within 0.7 dB, tilt −4.5 against
+  −4.8 dB/oct, PLR 16.8 against 16.9, LRA 1.6 against 1.5).
+- **Tests.** The suite every stock plugin has (the reset check compares
+  readouts as well as audio, which is what it checks here), and
+  `plugin.lichen.response`: a −12 dBFS 1 kHz sine in both channels passes
+  at 0.000 dB and reads −11.99 LUFS, −12.00 dBTP, crest 3.01 dB,
+  correlation 1, width 0, mono loss 0, the mid band 0 dB of the whole, 2 s
+  measured and no key. Release build, one core, stereo 48 kHz, dense noise:
+  2.0 %.
 
 ## 7. Saturation — Teasel [`teasel`] (`stock-effects.md` §5)
 

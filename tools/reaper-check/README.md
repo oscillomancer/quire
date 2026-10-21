@@ -109,7 +109,7 @@ and finite decoded samples. The reader handles PCM 8/16/24/32 and IEEE float
 than asserting the plugin's internal floating-point safety.
 
 Default output must be non-silent. Instrument bypass must be silent. Hickory,
-Gauge, neutral Gorse, Yarrow (every band off), Treeline (no gain, the
+Lichen, neutral Gorse, Yarrow (every band off), Treeline (no gain, the
 signal under its ceiling) and Sorrel (the fixture above its threshold) must
 match bypass sample-for-sample; other defaults must differ. Dynamics differences may
 include startup ramps.
@@ -127,19 +127,19 @@ include startup ramps.
 | `teasel` | Teasel | Output | 0 / −12 dB | −12 ±1 dB |
 | `bracken` | Bracken | Output | 0 / −12 dB | −12 ±1 dB |
 | `canopy` | Canopy | Output | 0 / −12 dB | −12 ±1 dB |
-| `analyzer` | Analyzer / Gauge | Hold | false / true | envelope reload + unchanged audio |
+| `lichen` | Lichen | Target | −30 / −5 LUFS | envelope reload + unchanged audio |
 
 Continuous values use ADR-0010's normalized CLAP domain. The table keeps those
-values explicit; stepped Hold uses 0/1. Add a plugin in a few lines in `CASES`
+values explicit. Add a plugin in a few lines in `CASES`
 (id, artifact/display name, instrument/effect, parameter, endpoints and
 expectation). No plugin C++ or REAPER installation changes are required.
 
 Automation is a square step at 2 seconds, with a terminal point at 4 seconds.
 RMS is measured in 0.35–1.8 and 2.35–3.8 second windows; each is divided by the
 same window of the unautomated render before taking their ratio. This cancels
-phrase/tail/detector differences without assuming stationary input. Gauge's
-Hold envelope is saved and reloaded and its audio transparency is measured;
-**meter freeze behavior is not measured** by this offline audio check.
+phrase/tail/detector differences without assuming stationary input. Lichen's
+Target envelope is saved and reloaded and its audio transparency is measured;
+**its readouts are not measured** by this offline audio check.
 
 ## Parameter addressing and saved state: observed in REAPER
 

@@ -54,8 +54,12 @@
   default in both states, so a plugin whose default is a passthrough still
   shows its processing state; a switch that silences the plugin by itself
   (a mute) stays at its default, since the reference must carry signal.
-- **Readonly telemetry parameters** (gain reduction, levels) exist for
-  generic hosts; the GUI uses the telemetry ring.
+- **Readonly telemetry parameters** (gain reduction, levels, readouts) exist
+  for generic hosts and agents (`fx.meters`). `clap-reset-check` compares
+  them too: after `reset()` a plugin's read-only values at the end of a
+  render must equal a fresh instance's, and for a plugin that only listens
+  (Lichen, whose audio is the same in any state) that comparison is the
+  check.
 - **Tests beyond the template's:** frequency/phase response against analytic
   targets, THD/aliasing measurements where nonlinear, envelope timing
   against spec, sidechain behaviour, parameter-sweep automation stress, and
@@ -974,46 +978,103 @@ Factory patches: Unity, Headroom (−6 dB), Mono Check, Side Solo, Bass Mono
 (120 Hz), Wider, Mono Bass (140 %, 150 Hz), Narrower (60 %), Flip Right,
 DC Clean.
 
-## 9. Analyzer — "Gauge" [`analyzer`]
+## 9. Analyzer — "Lichen" [`lichen`]
 
-Passes audio unchanged (bit-exact; tested). Publishes live analysis:
-streaming `LoudnessMeter` (M/S/I, LRA, TP), correlation/width/balance,
-a smoothed 1/3-octave spectrum and spectral centroid — through (a) readonly
-CLAP params for the scalar values (generic hosts can record them), (b) the
-GUI telemetry ring, and (c) a semantic-params extension addition
-`get_telemetry(plugin, out)` (appended member, §4 versioning rule) that
-writes a compact `supple.analysis-report/1.0`-shaped JSON of the last N
-seconds (`window` param: 3 s, 10 s, 30 s, since reset) so the DAW and agents
-can read live measurements of any point in the graph. Keys: `window` enum,
-`reset` (momentary bool), `hold` bool.
+An analyser for people and agents, written as a DSP script (ADR-0047:
+`plugins/stock/lichen/script/lichen.cpp`). The audio code reads the block
+and never writes it, so every sample leaves as it came (host-smoke checks it
+bit for bit as a transparent product, float and double, in place and not).
+Main stereo or mono; no latency, no tail. Its measurements are read-only
+parameters, so a host, the editor and an agent (`fx.meters`, `dsp.test`'s
+`meters`, the sandbox's `param.get`) all read the same values.
 
-### Implementation decisions (2026-09-29)
+| key | type | range | curve | default |
+|---|---|---|---|---|
+| `target` | dB (LUFS) | −30..−5: the editor's reference | linear | −14 |
+| `restart_on_play` | bool | the readings since play restart when play starts | | true |
+| `reset` | bool | any change starts every reading afresh | | false |
+| `slope` | enum | `flat`, `db3`, `db4_5`: the tilt the spectrum is drawn with | | `db4_5` |
+| `integrated`, `short_term`, `momentary` | LUFS | readonly, −70..10 (−70: nothing) | | |
+| `lra` | LU | readonly, 0..40 | | |
+| `short_term_max`, `momentary_max` | LUFS | readonly | | |
+| `true_peak` | dBTP | readonly, −70..20 | | |
+| `sample_peak` | dBFS | readonly | | |
+| `plr`, `crest` | dB | readonly, 0..70 | | |
+| `overs`, `clipped` | int | readonly counts | | |
+| `dc_offset` | dBFS | readonly, −120..0 | | |
+| `correlation` | | readonly, −1..1 | | |
+| `width`, `low_width` | % | readonly | | |
+| `balance` | dB | readonly, −30..30 | | |
+| `mono_loss` | LU | readonly, −10..40 | | |
+| `centroid` | Hz | readonly | | |
+| `tilt` | dB/oct | readonly, −24..24 | | |
+| `sub`, `low`, `low_mid`, `mid`, `high_mid`, `presence`, `air` | dB | readonly, −80..0, of the whole | | |
+| `key` | enum | readonly: `none`, `c_major` … `b_major`, `c_minor` … `b_minor` (flats `d_flat_major`, sharps `f_sharp_minor`) | | |
+| `key_strength` | % | readonly | | |
+| `measured` | ms | readonly: the audio the readings since play cover | | |
 
-- `window` choices are `s3` (default), `s10`, `s30`, `since_reset`; changing
-  it clears history. Hold freezes measurement time and excludes new audio;
-  reset is a momentary trigger, returns to false, and clears even while held.
-- Scalar keys: `integrated`, `short_term`, `momentary` (LUFS −120..40),
-  `lra` (LU 0..120), `true_peak` (dBTP −120..40), `correlation` (−1..1),
-  `width` (percent 0..100), `balance` (dB −120..120, right/left power ratio),
-  `centroid` (Hz 0..20000). All readonly; unavailable loudness/peak = −120,
-  LRA = 0, silence correlation = 1. Width is side/(mid+side) energy × 100.
-- Measurements run on a joined consumer worker, never the audio callback.
-  The preallocated SPSC queue holds at least two seconds; it drops new
-  packets under overload and restarts history after a gap. Output stays
-  bit-exact even for nonfinite samples; only measurement copies are sanitized.
-- Rolling loudness/stereo/peaks use a sample-counted 100 ms grid. Integrated
-  and LRA retain complete 400 ms/3 s blocks wholly inside the selected horizon;
-  since-reset uses bounded histograms (LRA resolution 0.01 LU). True peak
-  reuses core-analysis's 4× at ≤48 kHz, 2× at ≤96 kHz, 1× above policy.
-- Spectrum is the mid signal's 31 ISO third-octave bands (20 Hz–20 kHz),
-  Hann FFT (~43 ms) on the 100 ms grid, smoothed in power with a 300 ms
-  time constant. The current spectral centroid uses that same power spectrum.
-  This is a live spectrum rather than a full-window offline LTAS.
-- Telemetry JSON contains only measured descriptors, follows the existing
-  analysis-report field names and adds `live: {window, hold, dropped_frames}`.
-  Current M/S are single-element series; spectrum is `spectral.ltas_db`.
-  Silence/unavailable values use finite meter floors. Generic-host scalar
-  events are no more frequent than 50 ms; GUI frames exist only when visible.
+- **The play.** `momentary` and `short_term` follow the audio now. Every
+  other reading covers "the play": from when play starts (when
+  `restart_on_play`, otherwise added to the last) to when it stops, after
+  which they hold. With the transport never started (a live input, the
+  sandbox's `dsp.test`) they keep gathering until `reset` changes. Offline
+  renders play the transport, so a render's readings cover the render.
+- **Loudness** is BS.1770-5 / EBU R128 as Treeline measures it: K-weighting
+  from the analogue prototypes at any rate, 100 ms energy blocks, momentary
+  400 ms, short-term 3 s, integrated gated at −70 LUFS and −10 LU over
+  histograms of tenths of a LU, LRA from short-term values gated at −70 and
+  −20 LU between the 10th and 95th percentiles. `mono_loss` is the
+  integrated loudness less that of the mono fold-down fed to both channels
+  (that fold-down's own gated measure, against −70 when it cancels), as the
+  offline analysis defines it.
+- **Peaks.** The true peak is the signal interpolated at three points between
+  each pair of samples (32-tap Kaiser-windowed sinc per phase, β 8) with
+  each top refined by a parabola: within 0.003 dB of a sine's peak to
+  19.5 kHz at 48 kHz. The interpolation runs only where a sample near it is
+  within 6 dB of the highest peak so far or of full scale (an inter-sample
+  peak of real audio rises at most about 3 dB above its neighbours).
+  `overs` counts each run above 0 dBTP once; `clipped` counts runs of three
+  or more samples at |x| ≥ 0.999 on a channel. `crest` is the sample peak
+  against the RMS of both channels; `plr` the true peak less integrated.
+  `dc_offset` is the larger channel's mean.
+- **Stereo** over the play: Pearson's correlation (1 for silence), width as
+  side ÷ (mid + side) energy, balance as 10 log10(E_R / E_L): the offline
+  analysis's definitions. `low_width` is the same width from the transform's
+  mid and side power below 250 Hz.
+- **The spectrum.** Two transforms of about a third of a second (16384 at
+  44.1 and 48 kHz, 32768 at 96 kHz and above), Hann windowed, a frame every
+  quarter of one, give each bin's left, right and cross power, hence mid
+  and side. The named bands (sub 20–60 Hz, low 60–250, low mid 250–500, mid
+  500–2 k, high mid 2–4 k, presence 4–6 k, air 6–20 k) and the tilt (the
+  least-squares slope of the 31 ISO third-octave levels against octaves,
+  100 Hz–10 kHz) are the offline analysis's, from the mid's power summed
+  over the play's non-silent frames (bins as intervals, fractional at the
+  band edges). The centroid is the offline one too: the median over the
+  play of each non-silent ~43 ms frame's magnitude centroid (a transform of
+  its own on the mid, 2048 at 48 kHz). A frame is silent below −70 dB mean
+  square.
+- **Harmony.** Each bin from 80 Hz to 2.5 kHz adds its mid magnitude to its
+  nearest pitch class, weighted 1 at the semitone's centre falling to 0
+  halfway; each non-silent frame's twelve shares count alike. The key is the
+  one of 24 whose Albrecht–Shanahan (2013) profile correlates best with the
+  play's shares, reported when it correlates at least 0.5, at least five
+  pitch classes hold 5 % of the whole and two seconds have played
+  (otherwise `none`); `key_strength` is that correlation. On test
+  progressions in all 24 keys it named 22; the two misses were a close
+  relative (E minor read as C major, G minor as C minor).
+- **The editor** (1080 × 800): loudness against the target (four usual
+  targets as chips, the value dragged or wheeled); the last minute of
+  short-term and momentary loudness and true peak with the target and the
+  loudness range shaded, beside the play's short-term distribution with the
+  range bracketed; the spectrum now (mid, filled, and side), its peak and the
+  play's average, tilted as `slope` says, with the named bands under their
+  stretch and the centroid marked, a hover giving the frequency, note and
+  levels; a vectorscope, correlation and balance now (bars) and over the
+  play (ticks), width, low width, mono loss and the correlation of each
+  third octave; the pitch classes round the circle of fifths with the key
+  and the next likeliest two; and a health list (true peak, overs, clipping,
+  DC, phase, mono fold-down, bass width) lit by how much each matters.
+- **Cost:** about 2 % of a core at 48 kHz on dense material (release build).
 
 ## 10. Limiter — "Treeline" [`treeline`]
 

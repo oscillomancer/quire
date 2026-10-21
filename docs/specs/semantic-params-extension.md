@@ -135,9 +135,10 @@ sizeof(extension->get_telemetry)` and a non-null pointer. Original members
 remain usable when `struct_size >= offsetof(type, get_telemetry)`; hosts must
 not require the new full struct size just to call the old members. Existing
 plugins expose a null callback. A telemetry report does not change patch state.
-Gauge reports the existing analysis-report source/loudness/spectral/stereo
-fields it measures, single-point current M/S series, the 31-band live spectrum,
-and additive `live` window/hold/dropped-frame metadata. See stock-effects §9.
+Gauge, the analyzer that used it, reported the existing analysis-report
+source/loudness/spectral/stereo fields it measured. Since Lichen replaced it
+(2026-10-20), no stock plugin implements the member; Lichen's measurements
+are read-only parameters, which the engine reads with `fx.meters`.
 
 `get_factory_patches` was appended on 2026-10-13. Calling it requires
 `struct_size >= offsetof(type, get_factory_patches) + sizeof(extension->get_factory_patches)`

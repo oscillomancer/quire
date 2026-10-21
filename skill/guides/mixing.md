@@ -6,7 +6,11 @@ development; until they ship, this guide covers what the engine does today —
 levels, panning, muting/soloing, rendering, and measuring loudness and
 masking.
 
-For live monitoring at a point in an FX chain, see [the analyzer guide](analyzer.md).
+To measure a point in an FX chain (loudness, peaks, tonal balance, stereo,
+key), put Lichen there and read it with `fx.meters`; see [the analyzer
+guide](analyzer.md). `fx.meters` reads any plugin's readouts the same way
+(a reverb's RT60, a gate's suggested threshold): `from: "render"` after a
+`render.mix`, live while playing.
 
 ## The loop
 

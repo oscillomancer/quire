@@ -13,10 +13,11 @@ how to change one. Yarrow (`stock/yarrow`, the EQ), Sundew
 limiter), Gorse (`stock/gorse`, the transient shaper), Hickory
 (`stock/hickory`, the stereo utility), Sorrel (`stock/sorrel`, the gate),
 Teasel (`stock/teasel`, the saturation), Bracken (`stock/bracken`, the
-delay) and Canopy (`stock/canopy`, the reverb) are written so far; the rest of this section is about the older,
+delay), Canopy (`stock/canopy`, the reverb) and Lichen (`stock/lichen`, the
+analyzer) are written so far; the rest of this section is about the older,
 hand-written plugins.
 
-Each plugin directory (`analyzer`, `orrery`,
+Each plugin directory (`orrery`
 and the internal test instrument `probe-synth`) is an instance of Supple Audio's plugin template (ADR-0011):
 
 - `engine/`: the SDK-free DSP core and the parameter table (core-params
