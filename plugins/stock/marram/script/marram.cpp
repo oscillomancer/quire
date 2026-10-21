@@ -6170,8 +6170,12 @@ struct Marram : Instrument {
             .set(o1Level, -2)
             .set(l1Rate, 5.5)
             .set(l1Delay, 350)
+            .set(l2Rate, 0.3)
+            .set(l2Mode, "free")
+            .set(l2Phase, 90)
             .route("lfo1>voice.tune", 25)
-            .route("modwheel>filter1.vowel", 2);
+            .route("modwheel>filter1.vowel", 2)
+            .route("lfo2>filter1.vowel", 0.5);
         p.add("Strings")
             .set(unison, 5)
             .set(detune, 18)

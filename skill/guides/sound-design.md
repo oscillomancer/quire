@@ -107,7 +107,7 @@ to scale it by a second source (vibrato under the mod wheel).
 | Sub Bass | one retriggered sine, no filter |
 | Tine Piano | FM: a −60 dB modulator at 1× and a quiet one at 14×; `env2.fm` decays the bark; velocity deepens it |
 | Glass Bell | FM at ratio 3.5 (inharmonic), long decays |
-| Vowel Lead | formant filter; a delayed vibrato on `voice.tune`; mod wheel moves the vowel |
+| Vowel Lead | formant filter; a delayed vibrato on `voice.tune`; a slow LFO and the mod wheel move the vowel |
 | Strings | unison 5 with drift, saw and pulse through an SVF, delayed vibrato |
 | Noise Snare | noise through two SVFs and a triangle body whose pitch Env 2 drops |
 | Drawbar Organ | the organ wavetable, tape drive, a free LFO on pan and tune (rotary shimmer) |
@@ -280,8 +280,8 @@ Optimize: `osc1.fm`, `osc3.level`, `env2.decay`, `amp.decay`.
 Optimize: `filter1.cutoff`, `amp.decay`, `osc2.level`.
 
 **Vowel lead (a formant filter that moves)** (Vowel Lead)
-The factory Vowel Lead, with a slow free LFO moving the vowel between e and i
-(each vowel has a loudness of its own, so a wide sweep swells and fades).
+A slow free LFO moves the vowel between e and i (each vowel has a loudness of
+its own, so a wider sweep swells and fades).
 ```json
 {"schema": "supple.marram-patch/1.0",
  "params": {

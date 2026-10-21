@@ -227,8 +227,8 @@ add to the routes.
 Dune Pad (a slow free LFO on the cutoff; the mod wheel opens it), Pluck
 Bass, Acid Line, Supersaw (the mod wheel opens it), Sub Bass, Tine Piano
 (FM; velocity deepens the bark, the mod wheel brings in an autopan), Glass
-Bell (FM), Vowel Lead (formant; a delayed vibrato, the mod wheel changes the
-vowel), Strings (a delayed vibrato), Noise Snare, Drawbar Organ (wavetable,
+Bell (FM), Vowel Lead (formant; a delayed vibrato, a slow LFO between e
+and i, the mod wheel changes the vowel), Strings (a delayed vibrato), Noise Snare, Drawbar Organ (wavetable,
 a rotary shimmer), Wobble Bass (an LFO in eighths of the song), Sync Lead
 (Env 3 sweeps a synced oscillator; vibrato under the mod wheel), Pulse Pad
 (two LFOs on the pulse widths) and Table Sweep (Env 3 and a drifting LFO
