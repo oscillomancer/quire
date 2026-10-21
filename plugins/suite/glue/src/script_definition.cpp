@@ -146,10 +146,22 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
         for (const std::string& role : m.roles) pm.tags.push_back("role:" + role);
         for (size_t k = 0; k < m.choices.size(); ++k)
             pm.choiceKeys.push_back(script::detail::choiceKey(m, k));
-        for (const ParamModel::Condition& c : m.activeWhen)
-            pm.activeWhen.push_back({c.param < 0 ? meaning.params.size() + 1  // refused below
-                                                 : static_cast<size_t>(c.param),
-                                     c.values});
+        for (const ParamModel::Condition& c : m.activeWhen) {
+            ActiveCondition a;
+            a.param = c.param < 0 ? meaning.params.size() + 1  // refused below
+                                  : static_cast<size_t>(c.param);
+            a.values = c.values;
+            // A number's range in plain units, as the script reads it (a
+            // percent as a fraction).
+            const double scale =
+                c.param >= 0 && code->params()[static_cast<size_t>(c.param)].unit ==
+                                    ParamModel::Unit::Percent
+                    ? 0.01
+                    : 1.0;
+            a.above = c.above * scale;
+            a.below = c.below * scale;
+            pm.activeWhen.push_back(std::move(a));
+        }
         meaning.params.push_back(std::move(pm));
     }
     // Each file member is a file property: its path, saved and set by patch.

@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -166,10 +167,39 @@ TEST_CASE("the schema and the prose say which parameters apply now") {
     CHECK(mix.find("active_when")->asArray()[0].find("in")->asArray()[0].asBool());
 }
 
-TEST_CASE("a condition names values of a toggle or a choice above its parameter") {
+TEST_CASE("a number's range decides what applies, said in its unit") {
+    const double inf = std::numeric_limits<double>::infinity();
+    // The mix applies above 4 steps; the meter while the mix is above 50 %.
+    const auto d = fixture(true, [&](Meaning& m) {
+        m.params[5].activeWhen = {{4, {}, 4.0, inf}};
+        m.params[6].activeWhen = {{5, {}, 0.5, inf}};
+    });
+    REQUIRE(meaningProblems(*d, meaningOf(*d)).empty());
+    const PatchCodec codec(*d);
+    state::Snapshot s(*d);
+    s.defaultProperties();
+    const size_t steps = index(*d, 5);
+    CHECK_FALSE(codec.activity(s)[5]);  // 4 steps: not above 4
+    CHECK_FALSE(codec.activity(s)[6]);  // nor what follows the mix
+    s.host[steps] = toHost(d->params().at(steps), 5.0);
+    CHECK(codec.activity(s)[5]);
+    CHECK(codec.activity(s)[6]);  // the mix's 100 % is above 50 %
+    CHECK(d->applies(6, [&](size_t i) { return s.host[i]; }));
+    const json::Value schema = codec.schemaDocument();
+    const json::Value& mix = *schema.find("params")->find("mix")->find("active_when");
+    CHECK(json::writeCompact(mix) == R"([{"param":"steps","above":4}])");
+    const json::Value& meter = *schema.find("params")->find("meter")->find("active_when");
+    CHECK(json::writeCompact(meter) == R"([{"param":"mix","above":50.0}])");
+}
+
+TEST_CASE("a condition names values of a toggle or a choice, or a number's range, above it") {
+    const double inf = std::numeric_limits<double>::infinity();
     for (const ActiveCondition& bad :
-         {ActiveCondition{5, {1}}, ActiveCondition{4, {1}}, ActiveCondition{3, {2}},
-          ActiveCondition{2, {}}, ActiveCondition{0, {0}}}) {
+         {ActiveCondition{5, {1}, -inf, inf}, ActiveCondition{4, {1}, -inf, inf},
+          ActiveCondition{3, {2}, -inf, inf}, ActiveCondition{2, {}, -inf, inf},
+          ActiveCondition{0, {0}, -inf, inf}, ActiveCondition{3, {}, 0.0, inf},
+          ActiveCondition{4, {}, -inf, inf}, ActiveCondition{4, {}, 5.0, 3.0},
+          ActiveCondition{2, {0}, 1.0, inf}}) {
         CAPTURE(bad.param);
         const auto d = fixture(true, [&](Meaning& m) { m.params[5].activeWhen = {bad}; });
         CHECK(meaningProblems(*d, meaningOf(*d)).find("applies on a condition") !=

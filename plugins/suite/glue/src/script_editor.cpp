@@ -510,13 +510,11 @@ class ScriptEditor final : public gui::EditorBase {
                         conditional.push_back(static_cast<size_t>(at));
                 }
                 if (conditional.empty()) continue;
-                ui().control(c).enabledWhen([this, semantic, conditional] {
+                ui().control(c).enabledWhen([this, conditional] {
                     const ParamTable& params = paramTable();
-                    const std::vector<bool> applies =
-                        activity(definition(), semantic->meaning(),
-                                 [&](size_t k) { return this->host().value(params.at(k).id); });
+                    auto value = [&](size_t k) { return this->host().value(params.at(k).id); };
                     return std::all_of(conditional.begin(), conditional.end(),
-                                       [&](size_t k) { return applies[k]; });
+                                       [&](size_t k) { return definition().applies(k, value); });
                 });
             }
         // Drawing that reads a meter() repaints as it moves.

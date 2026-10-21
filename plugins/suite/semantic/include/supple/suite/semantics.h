@@ -23,6 +23,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -33,12 +34,15 @@
 
 namespace supple::suite {
 
-// A condition on whether a parameter applies: parameter `param` (earlier in
-// the table, a toggle or a choice) holds one of `values` (plain: a toggle's
-// 0 or 1, a choice's index).
+// A condition on whether a parameter applies, on parameter `param` (earlier
+// in the table): a toggle or a choice holds one of `values` (plain: a
+// toggle's 0 or 1, a choice's index), or a number -- continuous or integer,
+// `values` empty -- lies strictly between `above` and `below` (plain).
 struct ActiveCondition {
     size_t param = 0;
     std::vector<int> values;
+    double above = -std::numeric_limits<double>::infinity();
+    double below = std::numeric_limits<double>::infinity();
     bool operator==(const ActiveCondition&) const = default;
 };
 
@@ -73,6 +77,8 @@ class SemanticDefinition : public Definition {
         : Definition(std::move(info), std::move(params), std::move(properties), std::move(presets)),
           meaning_(std::move(meaning)) {}
     const Meaning& meaning() const { return meaning_; }
+    // By its meaning's conditions (activity()).
+    bool applies(size_t index, const std::function<double(size_t)>& host) const override;
 
   private:
     Meaning meaning_;

@@ -29,12 +29,15 @@ struct Constant {
     std::vector<Constant> list;  // a braced list: elements, or designated fields
     std::vector<std::string> designators;
     ParamModel spec;  // a ParamSpec under construction
-    // Its .activeWhen()/.activeUnless() conditions, by member name: resolved
-    // once every parameter is known (Sema::resolveActivity).
+    // Its .activeWhen()/.activeUnless()/.activeAbove()/.activeBelow()
+    // conditions, by member name: resolved once every parameter is known
+    // (Sema::resolveActivity).
     struct Condition {
         std::string member;
         std::vector<std::string> options;
         bool listed = false, unless = false;  // listed: options were given
+        bool numeric = false, below = false;  // activeAbove (or Below) bound
+        double bound = 0.0;
         Loc loc;
     };
     std::vector<Condition> conditions;

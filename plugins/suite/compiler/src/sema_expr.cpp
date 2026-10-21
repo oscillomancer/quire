@@ -2153,6 +2153,35 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
             }
             Constant c = *base;
             ParamModel& p = c.spec;
+            if (m->member == "activeAbove" || m->member == "activeBelow") {
+                // The number it depends on is a member, not a constant.
+                const std::string example = "." + m->member + "(voices, 1)";
+                std::optional<Constant> bound;
+                if (call->args.size() == 2) bound = evaluate(call->args[1], scope);
+                if (call->args.size() != 2 || call->args[0]->kind != ExprKind::Name ||
+                    static_cast<NameExpr*>(call->args[0])->path.size() != 1) {
+                    error(call->loc, "script.param.active",
+                          "." + m->member + "() names a number of this plugin and a value",
+                          example);
+                    return std::nullopt;
+                }
+                if (!bound) return std::nullopt;
+                if (!bound->numeric() || bound->kind == Constant::Kind::Bool ||
+                    !std::isfinite(bound->asDouble())) {
+                    error(call->args[1]->loc, "script.param.active",
+                          "." + m->member + "() takes a finite constant number",
+                          example + ", in the parameter's unit (a percent as 30)");
+                    return std::nullopt;
+                }
+                Constant::Condition condition;
+                condition.member = static_cast<NameExpr*>(call->args[0])->path[0];
+                condition.numeric = true;
+                condition.below = m->member == "activeBelow";
+                condition.bound = bound->asDouble();
+                condition.loc = call->args[0]->loc;
+                c.conditions.push_back(std::move(condition));
+                return c;
+            }
             if (m->member == "activeWhen" || m->member == "activeUnless") {
                 // The parameter it depends on is a member, not a constant.
                 const std::string example = "." + m->member + "(bandOn), or ." + m->member +
@@ -2313,7 +2342,7 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                       ".polyModulated(), .offAtMin(), "
                       ".meter(), .notAutomatable(), .restarts(), .role({...}), .keys({...}), "
                       ".curved(Curve::..., k), .activeWhen(...), .activeUnless(...), "
-                      ".withKey(key), .withId(n)");
+                      ".activeAbove(...), .activeBelow(...), .withKey(key), .withId(n)");
                 return std::nullopt;
             }
             return c;

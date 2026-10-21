@@ -286,10 +286,13 @@ patch as a chunk.
 - **`active_when`** on a schema `params` entry says when the parameter
   applies: an array of conditions that must all hold,
   `[{"param": "band1.enabled", "in": [true]}, {"param": "band1.type", "in":
-  ["bell", "low_shelf"]}]`. Each names a toggle or a choice that comes
-  before the entry in `params`, and the values (patch values: booleans,
-  choice keys) that satisfy it; the parameter it names must apply too. An
-  entry without `active_when` applies whenever its module is present.
+  ["bell", "low_shelf"]}]`. Each names a parameter that comes before the
+  entry in `params`: a toggle or a choice with the values (patch values:
+  booleans, choice keys) that satisfy it, or a number (`float` or `int`)
+  with `above` and/or `below`, in its unit, that its value lies strictly
+  between (`{"param": "voices", "above": 1}`). The parameter it names must
+  apply too. An entry without `active_when` applies whenever its module is
+  present.
 - **`"active": false`** now also marks a flat plugin's parameter whose
   conditions do not hold with the current values, so `get_schema` follows
   the values. Hosts read the schema when they need activity; a plugin calls
@@ -299,8 +302,11 @@ patch as a chunk.
 - An inactive parameter keeps its value, saves it in the patch and state,
   and accepts writes; it only does nothing until its conditions hold.
   `describe` leaves it out. The DSP scripts' `.activeWhen()` and
-  `.activeUnless()` declare these conditions (`skill/guides/dsp-language.md`);
-  the suite's `SemanticDefinition` carries them as `ParamMeaning::activeWhen`.
+  `.activeUnless()`, `.activeAbove()` and `.activeBelow()` declare these
+  conditions (`skill/guides/dsp-language.md`); the suite's
+  `SemanticDefinition` carries them as `ParamMeaning::activeWhen` and answers
+  the framework's `Definition::applies()` (1.28.0) from them, so the
+  automatic editor dims what does not apply, as a script's own editor does.
 - Hosts report them back: the sandbox's `plugin.describe` lists the keys
   under `inactive` and leaves them out of its summary, its `param.set`
   marks such a value `"active": false`, and `patch.merge`, the engine's

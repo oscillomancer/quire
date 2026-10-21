@@ -327,12 +327,13 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   (`factoryPatches(Patches&)`), listed and applied with `fx.patch.list` and
   `fx.patch.set {name}` or the sandbox's `preset.list/load {source:
   "factory"}`, and offered by exports' preset bar and hosts' preset
-  browsers. A parameter may apply only while a toggle or a choice declared
-  above allows it (`.activeWhen()`, `.activeUnless()`): the schema marks it
+  browsers. A parameter may apply only while a toggle, a choice or a number's
+  range declared above allows it (`.activeWhen()`, `.activeUnless()`,
+  `.activeAbove()`, `.activeBelow()`): the schema marks it
   `"active": false` and says when it applies, descriptions leave it out,
   `plugin.describe`, `patch.merge`, `fx.patch.merge` and `fx.param.set`
-  name it under `inactive`, and a script's own editor dims its control (the
-  automatic editor does not yet). `dsp.export` makes a script a CLAP plugin for any host (a copy
+  name it under `inactive`, and the editor, its own or the automatic one,
+  dims its control. `dsp.export` makes a script a CLAP plugin for any host (a copy
   of the player with the script appended, which offers that one plugin), or
   a C++ project of the plugin template that builds the same plugin, bit for
   bit, with the script compiled as C++ (every example's export is checked

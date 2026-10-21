@@ -226,12 +226,14 @@ struct ParamSpec {
     bool restart = false;  // a change restarts the plugin: prepare() runs again
     std::initializer_list<const char*> roles = {};       // "level", "time", "brightness" ...
     std::initializer_list<const char*> choiceKeys = {};  // a choice's patch keys (.keys())
-    // When it applies (.activeWhen(), .activeUnless()), each condition on a
-    // toggle or a choice declared above.
+    // When it applies (.activeWhen(), .activeUnless(), .activeAbove(),
+    // .activeBelow()), each condition on a parameter declared above.
     struct Condition {
+        enum class Kind { When, Unless, Above, Below };
         const Param* param = nullptr;
         std::initializer_list<const char*> options = {};  // a choice's labels or keys
-        bool unless = false;
+        Kind kind = Kind::When;
+        double bound = 0.0;  // Above's or Below's, in the parameter's physical unit
     };
     static constexpr int kConditions = 4;
     Condition conditions[kConditions] = {};
@@ -326,27 +328,37 @@ struct ParamSpec {
     }
     // It applies only while the toggle `on` is on, or while the choice
     // `mode` is one of `options` (labels or keys); activeUnless() the other
-    // way about. Each adds a condition and all must hold, with the
-    // parameter each names applying itself. Hosts and agents see which
-    // parameters apply, and the editor dims the rest; the script still
-    // reads every value.
-    ParamSpec activeWhen(const Param& on) const { return condition(on, {}, false); }
+    // way about (activeAbove() and activeBelow(), below, for a number). Each
+    // adds a condition and all must hold, with the parameter each names
+    // applying itself. Hosts and agents see which parameters apply, and the
+    // editor dims the rest; the script still reads every value.
+    ParamSpec activeWhen(const Param& on) const { return condition({&on}); }
     ParamSpec activeWhen(const Param& mode, std::initializer_list<const char*> options) const {
-        return condition(mode, options, false);
+        return condition({&mode, options});
     }
-    ParamSpec activeUnless(const Param& on) const { return condition(on, {}, true); }
+    ParamSpec activeUnless(const Param& on) const {
+        return condition({&on, {}, Condition::Kind::Unless});
+    }
     ParamSpec activeUnless(const Param& mode, std::initializer_list<const char*> options) const {
-        return condition(mode, options, true);
+        return condition({&mode, options, Condition::Kind::Unless});
+    }
+    // It applies only while the number `amount` (continuous or integer) is
+    // above `value`, or below it: in its physical unit, as a patch says it
+    // (a percent as 30). .activeAbove(voices, 1) for what unison needs.
+    ParamSpec activeAbove(const Param& amount, double value) const {
+        return condition({&amount, {}, Condition::Kind::Above, value});
+    }
+    ParamSpec activeBelow(const Param& amount, double value) const {
+        return condition({&amount, {}, Condition::Kind::Below, value});
     }
 
   private:
-    ParamSpec condition(const Param& p, std::initializer_list<const char*> options,
-                        bool unless) const {
+    ParamSpec condition(const Condition& c) const {
         ParamSpec s = *this;
         // One too many leaves a condition on no parameter, which the
         // plugin's definition refuses (the script compiler says so first).
         if (s.conditionCount < kConditions)
-            s.conditions[s.conditionCount] = {&p, options, unless};
+            s.conditions[s.conditionCount] = c;
         else
             s.conditions[kConditions - 1] = {};
         if (s.conditionCount < kConditions) ++s.conditionCount;

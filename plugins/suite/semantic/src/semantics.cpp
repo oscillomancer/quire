@@ -135,21 +135,27 @@ std::string meaningProblems(const Definition& d, const Meaning& m) {
         if (p.kind == ParamKind::Continuous && !p.hostTapered())
             add("parameter '" + std::string(p.name) +
                 "' reaches hosts as a plain value: mark it normalizedHostValue()");
-        // Each condition names a toggle or a choice above it, so whether
-        // anything applies is one pass down the table.
+        // Each condition names a parameter above it, so whether anything
+        // applies is one pass down the table: a toggle's or a choice's
+        // values, or a range of a number's.
         for (const ActiveCondition& c : pm.activeWhen) {
             const ParamDef* on = c.param < i ? &d.params().at(c.param) : nullptr;
-            const int count = !on                             ? 0
-                              : on->isOutput()                ? 0
+            const bool numeric =
+                on && (on->kind == ParamKind::Continuous || on->kind == ParamKind::Integer);
+            const int count = !on || on->isOutput()           ? 0
                               : on->kind == ParamKind::Toggle ? 2
                               : on->kind == ParamKind::Choice ? on->labelCount
                                                               : 0;
-            bool valid = count > 0 && !c.values.empty();
+            const bool bounded = std::isfinite(c.above) || std::isfinite(c.below);
+            bool valid = c.values.empty()
+                             ? numeric && !on->isOutput() && bounded && !std::isnan(c.above) &&
+                                   !std::isnan(c.below) && c.above < c.below
+                             : count > 0 && !bounded;
             for (int v : c.values) valid = valid && v >= 0 && v < count;
             if (!valid)
                 add("parameter '" + std::string(p.name) +
-                    "' applies on a condition that does not name values of a toggle or a choice "
-                    "above it");
+                    "' applies on a condition that names neither values of a toggle or a "
+                    "choice nor a range of a number above it");
         }
     }
     std::set<std::string> propertyKeys;
@@ -164,6 +170,11 @@ std::string meaningProblems(const Definition& d, const Meaning& m) {
     return out;
 }
 
+bool SemanticDefinition::applies(size_t index, const std::function<double(size_t)>& host) const {
+    return index >= meaning_.params.size() || meaning_.params[index].activeWhen.empty() ||
+           activity(*this, meaning_, host)[index];
+}
+
 std::vector<bool> activity(const Definition& d, const Meaning& m,
                            const std::function<double(size_t)>& host) {
     std::vector<bool> applies(m.params.size(), true);
@@ -171,11 +182,12 @@ std::vector<bool> activity(const Definition& d, const Meaning& m,
         for (const ActiveCondition& c : m.params[i].activeWhen) {
             if (c.param >= i) continue;  // meaningProblems() refuses it
             const ParamDef& on = d.params().at(c.param);
-            const int value =
-                static_cast<int>(std::lround(toPlain(on, sanitizeHost(on, host(c.param)))));
-            if (!applies[c.param] ||
-                std::find(c.values.begin(), c.values.end(), value) == c.values.end())
-                applies[i] = false;
+            const double value = toPlain(on, sanitizeHost(on, host(c.param)));
+            const bool holds = c.values.empty() ? value > c.above && value < c.below
+                                                : std::find(c.values.begin(), c.values.end(),
+                                                            static_cast<int>(std::lround(value))) !=
+                                                      c.values.end();
+            if (!applies[c.param] || !holds) applies[i] = false;
         }
     return applies;
 }
@@ -440,10 +452,22 @@ json::Value PatchCodec::paramsDescription(const state::Snapshot* current) const 
             for (const ActiveCondition& c : pm.activeWhen) {
                 json::Value condition = json::Value::object();
                 condition["param"] = meaning_.params[c.param].key;
-                json::Value in = json::Value::array();
-                for (int v : c.values)
-                    in.push_back(valueJson(c.param, toHost(table.at(c.param), v)));
-                condition["in"] = std::move(in);
+                if (c.values.empty()) {
+                    // A number's range, in its unit.
+                    const bool whole = table.at(c.param).kind == ParamKind::Integer;
+                    auto bound = [&](double plain) {
+                        const double v = physical(c.param, plain);
+                        return whole ? json::Value(static_cast<long long>(std::llround(v)))
+                                     : json::Value(reported(v));
+                    };
+                    if (std::isfinite(c.above)) condition["above"] = bound(c.above);
+                    if (std::isfinite(c.below)) condition["below"] = bound(c.below);
+                } else {
+                    json::Value in = json::Value::array();
+                    for (int v : c.values)
+                        in.push_back(valueJson(c.param, toHost(table.at(c.param), v)));
+                    condition["in"] = std::move(in);
+                }
                 when.push_back(std::move(condition));
             }
             e["active_when"] = std::move(when);

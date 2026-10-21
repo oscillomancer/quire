@@ -147,16 +147,18 @@ TEST_CASE("a parameter applies on conditions that name a toggle or a choice abov
         s.insert(s.find("    double g = 1.0;"),
                  "    Param on = toggle(\"On\", true);\n"
                  "    Param shape = choice(\"Shape\", {\"Bell\", \"Low Cut\"}, 0);\n"
-                 "    Param peak = decibels(\"Peak\", -60, 0, -60).meter();\n" +
+                 "    Param peak = decibels(\"Peak\", -60, 0, -60).meter();\n"
+                 "    Param level = decibels(\"Level\", -60, 0, -12);\n" +
                      declarations + "\n");
         return s;
     };
     auto good = compileOk(
         source("    Param q = continuous(\"Q\", 0.1, 10, 1).activeWhen(on).activeUnless(shape, "
                "{\"low_cut\"});"));
-    using Condition = script::detail::ParamModel::Condition;
-    CHECK(good.program->params().back().activeWhen ==
-          std::vector<Condition>{Condition{1, {1}}, Condition{2, {0}}});
+    const auto& conditions = good.program->params().back().activeWhen;
+    REQUIRE(conditions.size() == 2);
+    CHECK((conditions[0].param == 1 && conditions[0].values == std::vector<int>{1}));
+    CHECK((conditions[1].param == 2 && conditions[1].values == std::vector<int>{0}));
     auto refused = [&](const std::string& modifiers) {
         return firstError(source("    Param q = continuous(\"Q\", 0.1, 10, 1)" + modifiers + ";"));
     };
@@ -172,6 +174,16 @@ TEST_CASE("a parameter applies on conditions that name a toggle or a choice abov
     CHECK(refused(".activeWhen(shape, {1})") == "script.param.active");
     CHECK(refused(".activeWhen(on).activeWhen(on).activeWhen(on).activeWhen(on).activeWhen(on)") ==
           "script.param.active");
+    // A number's: above or below a value inside its range.
+    CHECK(refused(".activeAbove(on, 0)") == "script.param.active");     // not a number
+    CHECK(refused(".activeWhen(level)") == "script.param.active");      // not a toggle
+    CHECK(refused(".activeAbove(level, 0)") == "script.param.active");  // never above 0
+    CHECK(refused(".activeBelow(level, -60)") == "script.param.active");
+    CHECK(refused(".activeAbove(level, \"x\")") == "script.param.active");
+    CHECK(refused(".activeAbove(level)") == "script.param.active");
+    auto ranged =
+        compileOk(source("    Param q = continuous(\"Q\", 0.1, 10, 1).activeAbove(level, -30);"));
+    CHECK(ranged.program->params().back().activeWhen.at(0).above == -30.0);
     // A condition names a parameter declared above.
     CHECK(firstError(source("    Param q = continuous(\"Q\", 0.1, 10, 1).activeWhen(later);\n"
                             "    Param later = toggle(\"Later\", true);")) ==

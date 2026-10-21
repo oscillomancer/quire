@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -60,12 +61,18 @@ struct ParamModel {
     bool polyModulatable = false;  // modulated per voice (an instrument's)
     bool restarts = false;         // a change restarts the plugin (.restarts())
     std::vector<std::string> roles;
-    // When it applies (.activeWhen(), .activeUnless()): while every
-    // condition holds and the parameter each names applies itself; always,
-    // without any.
+    // When it applies (.activeWhen(), .activeUnless(), .activeAbove(),
+    // .activeBelow()): while every condition holds and the parameter each
+    // names applies itself; always, without any.
     struct Condition {
-        int param = -1;           // a parameter declared before this one (declaration order)
-        std::vector<int> values;  // its values that satisfy it: a toggle's 0 or 1, choice indices
+        int param = -1;  // a parameter declared before this one (declaration order)
+        // A toggle's or a choice's: its values that satisfy it (a toggle's 0
+        // or 1, choice indices). Empty for a number's.
+        std::vector<int> values;
+        // A number's (continuous or integer): above < value < below, in its
+        // physical unit (a percent in percent).
+        double above = -std::numeric_limits<double>::infinity();
+        double below = std::numeric_limits<double>::infinity();
         bool operator==(const Condition&) const = default;
     };
     std::vector<Condition> activeWhen;

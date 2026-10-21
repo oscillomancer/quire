@@ -1999,7 +1999,9 @@ void Sema::resolveActivity() {
                   "make one condition depend on another: the parameter a condition names "
                   "must apply too");
         for (const Constant::Condition& c : conditions_[i]) {
-            const std::string what = c.unless ? ".activeUnless()" : ".activeWhen()";
+            const std::string what = c.numeric  ? (c.below ? ".activeBelow()" : ".activeAbove()")
+                                     : c.unless ? ".activeUnless()"
+                                                : ".activeWhen()";
             size_t j = 0;
             while (j < plugin.params.size() && plugin.params[j].member != c.member) ++j;
             if (j == plugin.params.size()) {
@@ -2023,6 +2025,35 @@ void Sema::resolveActivity() {
             }
             ParamModel::Condition resolved;
             resolved.param = static_cast<int>(j);
+            const bool number =
+                on.kind == ParamModel::Kind::Continuous || on.kind == ParamModel::Kind::Integer;
+            if (c.numeric != number) {
+                error(c.loc, "script.param.active",
+                      c.numeric ? "'" + c.member + "' is not a number: " + what +
+                                      " names a continuous or integer parameter"
+                                : "'" + c.member + "' is a number: " + what +
+                                      " names a toggle or a choice",
+                      c.numeric ? ".activeWhen(" + c.member + ") for a toggle, or .activeWhen(" +
+                                      c.member + ", {\"...\"}) for a choice"
+                                : ".activeAbove(" + c.member + ", value) or .activeBelow(" +
+                                      c.member + ", value)");
+                continue;
+            }
+            if (c.numeric) {
+                // Strictly above (below) the bound: a bound at or past the
+                // far end of the range leaves nothing.
+                if (c.below ? c.bound <= on.min : c.bound >= on.max) {
+                    error(c.loc, "script.param.active",
+                          "'" + c.member + "' is never " + (c.below ? "below " : "above ") +
+                              std::to_string(c.bound) + ", so '" + p.member + "' would never apply",
+                          "give a value inside " + c.member + "'s range, " +
+                              std::to_string(on.min) + " to " + std::to_string(on.max));
+                    continue;
+                }
+                (c.below ? resolved.below : resolved.above) = c.bound;
+                p.activeWhen.push_back(std::move(resolved));
+                continue;
+            }
             if (on.kind == ParamModel::Kind::Toggle) {
                 if (c.listed) {
                     error(c.loc, "script.param.active",
@@ -2067,11 +2098,6 @@ void Sema::resolveActivity() {
                           "leave out at least one of " + c.member + "'s options");
                     continue;
                 }
-            } else {
-                error(c.loc, "script.param.active",
-                      "'" + c.member + "' is neither a toggle nor a choice",
-                      "a condition names a toggle (on or off) or a choice (its options)");
-                continue;
             }
             p.activeWhen.push_back(std::move(resolved));
         }

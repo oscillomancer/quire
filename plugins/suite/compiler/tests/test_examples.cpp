@@ -13,6 +13,7 @@
 #include <deque>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 
 #include "runner.h"
@@ -615,13 +616,31 @@ TEST_CASE("a script compiled as C++ says when its parameters apply as the compil
     REQUIRE_MESSAGE(result.program, scriptc::toText(result.diagnostics));
     using Condition = script::detail::ParamModel::Condition;
     using Conditions = std::vector<Condition>;
+    auto of = [](int param, std::vector<int> values) {
+        Condition c;
+        c.param = param;
+        c.values = std::move(values);
+        return c;
+    };
+    auto range = [](int param, double above, double below) {
+        Condition c;
+        c.param = param;
+        c.above = above;
+        c.below = below;
+        return c;
+    };
+    const double inf = std::numeric_limits<double>::infinity();
     const std::vector<Conditions> expected = {
-        {},                                         // on
-        {Condition{0, {1}}},                        // shape: while on
-        {Condition{0, {1}}, Condition{1, {0, 1}}},  // gain: while on, unless a cut
-        {Condition{1, {0}}},                        // width: a bell's
-        {},                                         // freeze
-        {Condition{4, {0}}},                        // rate: unless frozen
+        {},                                      // on
+        {of(0, {1})},                            // shape: while on
+        {of(0, {1}), of(1, {0, 1})},             // gain: while on, unless a cut
+        {of(1, {0})},                            // width: a bell's
+        {},                                      // freeze
+        {of(4, {0})},                            // rate: unless frozen
+        {},                                      // voices
+        {range(6, 1, inf)},                      // detune: above one voice
+        {},                                      // depth
+        {range(8, 0, inf), range(8, -inf, 90)},  // speed: between 0 and 90 %
     };
     const script::detail::NativeCode<script::ex_activity::Activity> native;
     REQUIRE(result.program->params().size() == expected.size());
