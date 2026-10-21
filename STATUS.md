@@ -354,8 +354,10 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   octaves), through a second source when given; the schema lists the
   sources and each parameter's amount unit, errors name the right unit,
   state and presets keep the routes, and factory patches set them. An
-  instrument's `setVoiceLimit()` plays fewer of its voices. The automatic
-  editor cannot show or edit routes yet. `dsp.export` makes a script a CLAP plugin for any host (a copy
+  instrument's `setVoiceLimit()` plays fewer of its voices. The editor
+  shows the routes as a list to edit (the automatic editor's, or
+  `e.routes()` in a script's own), written through the patch's checks.
+  `dsp.export` makes a script a CLAP plugin for any host (a copy
   of the player with the script appended, which offers that one plugin), or
   a C++ project of the plugin template that builds the same plugin, bit for
   bit, with the script compiled as C++ (every example's export is checked

@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -19,6 +20,7 @@
 #include "gui/Widgets.h"
 #include "supple/script.h"
 #include "supple/script_runtime.h"
+#include "supple/suite/route_list.h"
 #include "supple/suite/semantics.h"
 
 namespace supple::suite {
@@ -149,7 +151,15 @@ class Copy final : public D::EditorServices {
 class Recorder final : public D::EditorBuilder {
   public:
     struct Item {
-        enum class Kind { Control, XyPad, Envelope, File, Keyboard, Meters } kind = Kind::Control;
+        enum class Kind {
+            Control,
+            XyPad,
+            Envelope,
+            File,
+            Keyboard,
+            Meters,
+            Routes
+        } kind = Kind::Control;
         Control control = Control::Knob;
         int slots[4] = {-1, -1, -1, -1};
         const void* member = nullptr;
@@ -204,6 +214,11 @@ class Recorder final : public D::EditorBuilder {
     void meters(double x, double y, double w, double h) override {
         Item i;
         i.kind = Item::Kind::Meters;
+        add(i, x, y, w, h);
+    }
+    void routes(double x, double y, double w, double h) override {
+        Item i;
+        i.kind = Item::Kind::Routes;
         add(i, x, y, w, h);
     }
 
@@ -494,6 +509,13 @@ class ScriptEditor final : public gui::EditorBase {
                     meters_.push_back(i.at);
                     meters = true;
                     break;
+                case Kind::Routes:
+                    if (RouteList::shows(definition())) {
+                        routes_.push_back(
+                            std::make_unique<RouteList>(definition(), i.at.w, i.at.h));
+                        routes_.back()->open(host, ui(), i.at);
+                    }
+                    break;
             }
         }
         usePeakMeters(meters);
@@ -539,17 +561,33 @@ class ScriptEditor final : public gui::EditorBase {
     // script; a press it gets holds the pointer until its release.
 
     bool onPointerDown(float x, float y, int button, uint32_t mods, bool doubleClick) override {
+        if (RouteList* list = routesAt(x, y)) {
+            if (!list->pointerDown(x, y, button, mods, doubleClick)) return false;
+            heldRoutes_ = list;
+            return true;
+        }
         if (!copy_->code().pointer() || stopped_ || button != 0 || overControl(x, y)) return false;
         pressed_ = true;
         point(S::PointerAction::Press, x, y, mods, 0.0, doubleClick);
         return true;
     }
     bool onPointerMove(float x, float y, uint32_t mods) override {
+        pointerX_ = x;
+        pointerY_ = y;
+        if (heldRoutes_) return heldRoutes_->pointerMove(x, y, mods);
+        RouteList* list = pressed_ ? nullptr : routesAt(x, y);
+        if (hoverRoutes_ && hoverRoutes_ != list) hoverRoutes_->pointerLeave();
+        hoverRoutes_ = list;
+        if (list) return list->pointerMove(x, y, mods);
         if (!copy_->code().pointer() || stopped_) return false;
         point(pressed_ ? S::PointerAction::Drag : S::PointerAction::Move, x, y, mods, 0.0, false);
         return pressed_;  // a hover is the controls' too
     }
     bool onPointerUp(float x, float y, int button, uint32_t mods) override {
+        if (heldRoutes_) {
+            std::exchange(heldRoutes_, nullptr)->pointerUp(x, y, button, mods);
+            return true;
+        }
         if (button != 0 || !pressed_) return true;
         pressed_ = false;
         point(S::PointerAction::Release, x, y, mods, 0.0, false);
@@ -561,12 +599,15 @@ class ScriptEditor final : public gui::EditorBase {
         return true;
     }
     bool onWheel(float x, float y, float dx, float dy, uint32_t mods) override {
-        (void)dx;
+        if (RouteList* list = routesAt(x, y)) return list->wheel(x, y, dx, dy, mods);
         if (!copy_->code().pointer() || stopped_ || overControl(x, y)) return false;
         point(S::PointerAction::Wheel, x, y, mods, dy, false);
         return true;
     }
     void onPointerLeave() override {
+        if (hoverRoutes_) hoverRoutes_->pointerLeave();
+        hoverRoutes_ = nullptr;
+        pointerX_ = pointerY_ = -1.0f;
         if (pressed_)
             left_ = true;  // told after the release
         else if (copy_->code().pointer() && !stopped_)
@@ -575,13 +616,22 @@ class ScriptEditor final : public gui::EditorBase {
     // Focus lost mid-press: the script hears a release (its edits ignored),
     // and Ui ends the gesture.
     void onCancel() override {
+        heldRoutes_ = nullptr;
+        for (auto& list : routes_) list->cancel();
         if (!pressed_) return;
         pressed_ = left_ = false;
         point(S::PointerAction::Release, lastX_, lastY_, 0, 0.0, false, false);
     }
 
+    gui::Cursor cursor() const override {
+        const RouteList* list = heldRoutes_ ? heldRoutes_ : routesAt(pointerX_, pointerY_);
+        return list ? list->cursor(pointerX_, pointerY_) : EditorBase::cursor();
+    }
+
     void animate(double seconds) override {
         (void)seconds;
+        for (auto& list : routes_)
+            if (list->idle()) markDirty();
         if (channel_ && channel_->take(arrived_) && arrived_ != shown_) {
             shown_ = arrived_;
             channel_->scatter(shown_, copy_->self());
@@ -616,10 +666,22 @@ class ScriptEditor final : public gui::EditorBase {
             gui::widgets::meter(vg, t, {r.right() - half, r.y, half, r.h}, outputMeters(),
                                 meterChannels());
         }
+        for (auto& list : routes_) {
+            nvgSave(vg);
+            list->paint(vg, t);
+            nvgRestore(vg);
+        }
         drawControls(vg);
     }
 
   private:
+    // The route list at (x, y), or null.
+    RouteList* routesAt(float x, float y) const {
+        for (const auto& list : routes_)
+            if (list->bounds().contains(x, y)) return list.get();
+        return nullptr;
+    }
+
     bool overControl(float x, float y) const {
         for (int i = 0; i < ui().count(); ++i)
             if (ui().interactive(i) && ui().control(i).bounds.contains(x, y)) return true;
@@ -702,8 +764,12 @@ class ScriptEditor final : public gui::EditorBase {
     std::vector<unsigned char> arrived_, shown_;
     std::vector<gui::Rect> meters_;
     std::vector<int> hidden_;  // each parameter's hidden control, by table index
-    bool pressed_ = false;     // a press pointer() got, until its release
-    bool left_ = false;        // the pointer left during that press
+    std::vector<std::unique_ptr<RouteList>> routes_;  // e.routes()'s
+    RouteList* heldRoutes_ = nullptr;                 // the one that took the press being held
+    RouteList* hoverRoutes_ = nullptr;                // the one the pointer is over
+    float pointerX_ = -1.0f, pointerY_ = -1.0f;
+    bool pressed_ = false;  // a press pointer() got, until its release
+    bool left_ = false;     // the pointer left during that press
     float lastX_ = 0.0f, lastY_ = 0.0f;
     bool stopped_ = false;
     std::uint32_t budgetReported_ = 0, rangeReported_ = 0;

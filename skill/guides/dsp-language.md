@@ -383,7 +383,10 @@ and `.route("lfo>pitch", 0.2, "modwheel")` through a second source.
 The schema lists the sources (`"sources"`) and, for each parameter routes
 move, the unit of its amounts and whether a voice's sources reach it
 (`"route"`); routes are saved with the plugin and its presets, and a
-plugin's description in prose ends with them.
+plugin's description in prose ends with them. In the editor they are a list
+(the automatic editor's, or `e.routes(...)` in a script's own): a menu for
+a route's source, parameter and via source, and its amount a bar to drag,
+turn with the wheel or type into after a double click.
 
 ## Files
 
@@ -415,7 +418,7 @@ own.
 ## The editor
 
 With no editor code a plugin gets the automatic editor: every parameter, by
-group (`.in()`), with meters. To draw its own, it adds `editor()`, `draw()`
+group (`.in()`), with meters, and a plugin with routes their list. To draw its own, it adds `editor()`, `draw()`
 or both, and `pointer()` to make its drawing respond to the mouse:
 
 | Hook | When | What goes there |
@@ -481,8 +484,10 @@ window scales everything): `knob`, `slider` (along its longer side),
 `envelope(attack, decay, sustain, release, ...)`, `file(member, ...)` (an
 `AudioFile` or `Convolver`: its name; a click chooses, a dropped file is
 taken), `keyboard(lowKey, highKey, ...)` (an instrument's) and
-`meters(...)` (the input and output peak meters). `e.size(w, h)`: 480 by
-320 unless given.
+`meters(...)` (the input and output peak meters), and `routes(...)` (a
+plugin with routes: the list of them, each with its source, the parameter it
+moves, its amount and its via source, to change and add to; 29 units a
+row under a 22-unit header, scrolling when they do not fit). `e.size(w, h)`: 480 by 320 unless given.
 
 `Canvas` is HTML canvas's 2D context, as methods:
 

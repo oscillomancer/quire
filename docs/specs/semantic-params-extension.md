@@ -347,3 +347,12 @@ patch as a chunk.
   never shows that property among its `properties`, nor the automatic
   editor as a text field (framework 1.29.0's `.hidden()`). Restoring a saved patch
   keeps the routes whose source and parameter still exist.
+- The editor shows them as a list, `RouteList` (`supple/suite/route_list.h`):
+  a panel of the automatic editor (framework 1.30.0's `AutoPanel`) for a
+  script with routes and no editor of its own, and `e.routes(x, y, w, h)` in
+  a script's own. A row a route, with menus for its source, parameter and
+  via source (what a patch would refuse is shown but cannot be chosen) and
+  its amount as a bar, in the parameter's unit. Every change is written
+  through `PatchCodec::routeText`, the patch member's own checks and
+  canonical text, so the list makes only what a patch can and the host
+  records it as one property edit.

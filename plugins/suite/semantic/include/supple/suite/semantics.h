@@ -140,6 +140,11 @@ bool forEachRoute(std::string_view text, Fn&& fn) {
 // plain value is a fraction: 0.01).
 bool routeInOctaves(const ParamDef& p);
 double routeScale(const ParamDef& p);
+// The unit a route's amount for this parameter is in: a frequency's "oct",
+// any other's own (nullptr: a plain number). How far routes may move it,
+// in that unit: the width of its route range.
+const char* routeAmountUnit(const ParamDef& p);
+double routeReach(const ParamDef& p, const ParamMeaning& meaning);
 
 // A Definition that says what it means.
 class SemanticDefinition : public Definition {

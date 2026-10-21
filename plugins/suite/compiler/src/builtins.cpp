@@ -1083,6 +1083,10 @@ void Builtins::addEditor() {
         e, "void meters(double x, double y, double w, double h)",
         +[](E* d, double x, double y, double w, double h) { d->meters(x, y, w, h); }, Writes::Self,
         ui);
+    r.method(
+        e, "void routes(double x, double y, double w, double h)",
+        +[](E* d, double x, double y, double w, double h) { d->routes(x, y, w, h); }, Writes::Self,
+        ui);
 }
 
 void Builtins::addFunctions() {

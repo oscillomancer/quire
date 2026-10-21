@@ -1377,6 +1377,10 @@ class Editor {
     void keyboard(int lowKey, int highKey, double x, double y, double w, double h);
     // The input and output peak meters the framework keeps.
     void meters(double x, double y, double w, double h);
+    // The modulation routes, as a list to edit: a row a route (its source,
+    // what it moves, by how much, through what) and a row to add one.
+    // Nothing for a plugin without routes.
+    void routes(double x, double y, double w, double h);
 
   private:
     friend struct detail::Layout;

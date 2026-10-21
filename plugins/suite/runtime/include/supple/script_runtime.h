@@ -163,6 +163,7 @@ class EditorBuilder {
     virtual void file(const void* member, double x, double y, double w, double h) = 0;
     virtual void keyboard(int lowKey, int highKey, double x, double y, double w, double h) = 0;
     virtual void meters(double x, double y, double w, double h) = 0;
+    virtual void routes(double x, double y, double w, double h) = 0;
 
   protected:
     ~EditorBuilder() = default;

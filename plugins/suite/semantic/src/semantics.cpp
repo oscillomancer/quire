@@ -364,22 +364,6 @@ bool splitType(const std::string& type, std::string& plugin, int& major, int& mi
 
 // --- routes ---------------------------------------------------------------------------------
 
-// The unit a route's amount for this parameter is in: a frequency's
-// octaves, any other's own (nullptr: a plain number).
-const char* amountUnit(const ParamDef& p) {
-    return p.unit == Unit::Hertz ? "oct" : physicalUnit(p).name;
-}
-
-// How far routes may move a parameter, in its amount's unit: the width of
-// its route range (in octaves for a frequency).
-double amountReach(const ParamDef& p, const ParamMeaning& pm) {
-    const double scale = physicalUnit(p).scale;
-    double lo = p.min * scale, hi = p.max * scale;
-    if (pm.routeMin < pm.routeMax) lo = pm.routeMin, hi = pm.routeMax;
-    if (p.unit == Unit::Hertz) return lo > 0.0 && hi > lo ? std::log2(hi / lo) : 0.0;
-    return hi - lo;
-}
-
 // An amount as a patch may write it: a number in the amount's unit, or
 // text with a unit that converts to it ("+1.5 oct", "-3 dB", "50 ct" for a
 // semitone amount). False, saying why, otherwise.
@@ -448,6 +432,18 @@ bool readRouteLine(std::string_view line, RouteLine& r) {
 }
 
 bool routeInOctaves(const ParamDef& p) { return p.unit == Unit::Hertz; }
+
+const char* routeAmountUnit(const ParamDef& p) {
+    return p.unit == Unit::Hertz ? "oct" : physicalUnit(p).name;
+}
+
+double routeReach(const ParamDef& p, const ParamMeaning& pm) {
+    const double scale = physicalUnit(p).scale;
+    double lo = p.min * scale, hi = p.max * scale;
+    if (pm.routeMin < pm.routeMax) lo = pm.routeMin, hi = pm.routeMax;
+    if (p.unit == Unit::Hertz) return lo > 0.0 && hi > lo ? std::log2(hi / lo) : 0.0;
+    return hi - lo;
+}
 double routeScale(const ParamDef& p) { return 1.0 / physicalUnit(p).scale; }
 
 namespace {}  // namespace
@@ -571,9 +567,9 @@ bool PatchCodec::routeText(const json::Value& routes, const std::string& path, s
         }
         const ParamDef& p = table.at(d);
         const ParamMeaning& pm = meaning_.params[d];
-        const char* unit = amountUnit(p);
+        const char* unit = routeAmountUnit(p);
         const std::string example =
-            "e.g. {\"amount\": \"" + amountText(std::min(1.0, amountReach(p, pm)), unit) + "\"}";
+            "e.g. {\"amount\": \"" + amountText(std::min(1.0, routeReach(p, pm)), unit) + "\"}";
         const json::Value* amount = &m.second;
         if (m.second.isObject()) {
             amount = m.second.find("amount");
@@ -616,7 +612,7 @@ bool PatchCodec::routeText(const json::Value& routes, const std::string& path, s
                           (p.unit == Unit::Hertz ? " (octaves)" : "") + ", " + example));
             continue;
         }
-        const double reach = amountReach(p, pm);
+        const double reach = routeReach(p, pm);
         if (std::fabs(line.amount) > reach * (1.0 + 1e-9)) {
             errors.push_back(error("routes.amount",
                                    "an amount of " + amountText(line.amount, unit) +
@@ -757,7 +753,7 @@ json::Value PatchCodec::paramsDescription(const state::Snapshot* current) const 
         // and how far.
         if (pm.routable != Routable::No && meaning_.routes >= 0) {
             json::Value route = json::Value::object();
-            if (const char* unit = amountUnit(p)) route["unit"] = unit;
+            if (const char* unit = routeAmountUnit(p)) route["unit"] = unit;
             route["per_voice"] = pm.routable == Routable::Voice;
             if (pm.routeMin < pm.routeMax) {
                 route["min"] = pm.routeMin;
@@ -1385,7 +1381,7 @@ std::string PatchCodec::describe(const state::Snapshot& s, bool changedOnly) con
     forEachRoute(routesOf(s), [&](const RouteLine& r) {
         size_t d = 0;
         while (d < meaning_.params.size() && meaning_.params[d].key != r.destination) ++d;
-        const char* unit = d < table.count() ? amountUnit(table.at(d)) : nullptr;
+        const char* unit = d < table.count() ? routeAmountUnit(table.at(d)) : nullptr;
         routes += (routes.empty() ? "" : ", ") + std::string(r.source) + ">" +
                   std::string(r.destination) + " " + amountText(r.amount, unit) +
                   (r.via.empty() ? "" : " via " + std::string(r.via));

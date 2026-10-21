@@ -100,6 +100,38 @@ TEST_CASE("DSP render commands locate invalid patch values inside the patch argu
     }
 }
 
+#if SUPPLE_EDITORS
+TEST_CASE("the automatic editor lists a script's routes and edits them as a patch would") {
+    Harness h;
+    h.write("routed", R"(#include <supple/script.h>
+struct Routed : Instrument {
+    static constexpr Info info = {.name = "Routed", .id = "com.example.routed", .voices = 2};
+    Param level = decibels("Level", -48, 0, -12).modulated();
+    void startVoice(int v) {}
+    void releaseVoice(int v) { voiceFinished(v); }
+    void process(Block& io) {}
+};
+)");
+    auto preview = [&](const std::string& pointer) {
+        auto args = json::parse(R"({"script":"routed","seconds":0,)"
+                                R"("patch":{"routes":{"modwheel>level":{"amount":"+6 dB"}}},)"
+                                R"("pointer":)" +
+                                pointer + "}")
+                        .value();
+        auto result = h.bus->execute({"dsp.preview", args, kTest});
+        REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
+        return *result;
+    };
+    // The route's amount bar, dragged right; its remove button, clicked.
+    auto dragged = preview(R"([{"action":"drag","x":470,"y":302,"to_x":520,"to_y":302}])");
+    CHECK(dragged["problems"].size() == 0);
+    INFO(json::writeCompact(dragged["edits"]));
+    CHECK(dragged["edits"]["routes"]["modwheel>level"]["amount"].asDouble() > 6.0);
+    auto removed = preview(R"([{"action":"click","x":668,"y":302}])");
+    CHECK(json::writeCompact(removed["edits"]) == R"({"routes":{"modwheel>level":null}})");
+}
+#endif
+
 TEST_CASE("results name the parameters that do not apply with the values they leave") {
     Harness h;
     h.write("sometimes", script("Sometimes", "com.example.sometimes",

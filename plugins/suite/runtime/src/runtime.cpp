@@ -1171,4 +1171,8 @@ void Editor::meters(double x, double y, double w, double h) {
     if (builder_) builder_->meters(x, y, w, h);
 }
 
+void Editor::routes(double x, double y, double w, double h) {
+    if (builder_) builder_->routes(x, y, w, h);
+}
+
 }  // namespace supple::script

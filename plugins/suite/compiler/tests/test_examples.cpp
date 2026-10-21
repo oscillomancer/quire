@@ -326,6 +326,7 @@ class Recorder final : public script::detail::Painter,
         add("keyboard", {double(lo), double(hi), x, y, w, h});
     }
     void meters(double x, double y, double w, double h) override { add("meters", {x, y, w, h}); }
+    void routes(double x, double y, double w, double h) override { add("routes", {x, y, w, h}); }
 
   private:
     static std::string number(double v) {

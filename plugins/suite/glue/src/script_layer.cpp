@@ -4,16 +4,25 @@
 
 #include <atomic>
 #include <cstring>
+#include <memory>
 #include <string>
+#include <vector>
 
 #include "dsp/AudioFile.h"
 #if SUPPLE_WITH_GUI
+#include "gui/AutoEditor.h"
+#include "supple/suite/route_list.h"
 #include "supple/suite/script_editor.h"
 #endif
 
 namespace supple::suite {
 
 namespace {
+#if SUPPLE_WITH_GUI
+// The route list in the automatic editor: five rows.
+constexpr float kRouteListWidth = 640.0f, kRouteListHeight = 170.0f;
+#endif
+
 json::Value problem(const char* code, std::string message, const char* scope, std::string hint,
                     uint32_t line, bool silent) {
     json::Value p = json::Value::object();
@@ -89,8 +98,15 @@ std::unique_ptr<gui::EditorBase> ScriptLayer::createEditor(gui::EditorHost& host
         editorProblemsCode_ = processor().editorCode();
         editorProblems_ = std::make_shared<json::Value>(json::Value::array());
     }
-    return makeScriptEditor(host, processor().editorCode(), processor().editorChannel(),
-                            editorProblems_);
+    if (auto own = makeScriptEditor(host, processor().editorCode(), processor().editorChannel(),
+                                    editorProblems_))
+        return own;
+    // The automatic editor, with the routes when there are any.
+    if (!RouteList::shows(host.pluginDefinition())) return nullptr;
+    std::vector<std::unique_ptr<gui::AutoPanel>> panels;
+    panels.push_back(
+        std::make_unique<RouteList>(host.pluginDefinition(), kRouteListWidth, kRouteListHeight));
+    return gui::automaticEditor(host, std::move(panels));
 }
 #endif
 

@@ -666,3 +666,17 @@ amendment of this date).
 `setVoiceLimit(n)` lets an instrument play fewer voices than its pool, a
 Voices parameter; the framework's voice manager already allowed it, and
 CLAP's voice-info now reports the voices a script's mode and limit allow.
+
+### The route list (2026-10-21)
+
+Routes are edited in the editor as a list, a row a route: the automatic
+editor shows it for a script with routes, and `e.routes(x, y, w, h)` places
+it in a script's own. The routes' text property is hidden from the automatic
+editor (framework 1.29.0), since a raw text field skipped every check a
+patch's routes member makes. A list drawn by the script itself was the
+alternative, but a script can neither read the routes nor write them, and
+giving it both would have meant re-validating whatever it wrote; the list
+writes through the patch codec, so it makes only what a patch can. The
+automatic editor takes it through a generic hook of the template's,
+`AutoPanel` (framework 1.30.0), a panel a layer draws after the parameters;
+a plugin with no routes has no panel, so having routes is the switch.

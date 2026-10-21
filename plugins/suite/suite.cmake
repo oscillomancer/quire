@@ -35,8 +35,9 @@ if (TARGET product-impl)
     target_sources(product-impl PRIVATE
         ${SUPPLE_SUITE}/semantic/src/semantic_layer.cpp
         ${SUPPLE_SUITE}/glue/src/script_layer.cpp)
-    # A script's own editor, where there is a GUI.
+    # A script's own editor, and the route list, where there is a GUI.
     if (TARGET product-gui)
-        target_sources(product-impl PRIVATE ${SUPPLE_SUITE}/glue/src/script_editor.cpp)
+        target_sources(product-impl PRIVATE ${SUPPLE_SUITE}/glue/src/script_editor.cpp
+                                            ${SUPPLE_SUITE}/glue/src/route_list.cpp)
     endif()
 endif()
