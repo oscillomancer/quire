@@ -17,7 +17,7 @@ differences you measure are differences you made.
    `patch_merge` that sets one says so in its `inactive`: the value is kept but
    does nothing yet.
 2. **Decide the structure first** (which modules, which routes), then set a
-   first guess in one `patch_merge`. For Orrery read `guides/sound-design.md`.
+   first guess in one `patch_merge`. For Marram read `guides/sound-design.md`.
 3. **Render a phrase that exercises the sound** — a held note for pads and
    bells, repeated short notes for plucks and basses, the real riff if you
    have one:

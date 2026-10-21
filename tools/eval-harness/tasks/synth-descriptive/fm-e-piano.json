@@ -6,7 +6,7 @@
   },
   "listening": "Does the attack have FM character while the body stays mellow?",
   "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C4:q r:*",
-  "prompt": "Program Orrery as a mellow FM electric piano with a brief brighter attack, velocity sensitivity and chorus.",
+  "prompt": "Program Marram as a mellow FM electric piano with a brief brighter attack and velocity sensitivity.",
   "recipe_index": 7,
   "render": {
     "tail_s": 2
@@ -42,7 +42,7 @@
   "setup": [
     {
       "args": {
-        "plugin": "com.suppleaudio.orrery"
+        "plugin": "com.suppleaudio.marram"
       },
       "command": "plugin.load"
     }

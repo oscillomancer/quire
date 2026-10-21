@@ -6,7 +6,7 @@
   },
   "listening": "Does it swell warmly and stay wide without sounding harsh?",
   "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: [C3 E3 G3]:w",
-  "prompt": "Program Orrery as a warm, wide pad with a slow swell, gentle filter movement and a soft tail.",
+  "prompt": "Program Marram as a warm, wide pad with a slow swell, gentle filter movement and a soft tail.",
   "recipe_index": 1,
   "render": {
     "tail_s": 2
@@ -42,7 +42,7 @@
   "setup": [
     {
       "args": {
-        "plugin": "com.suppleaudio.orrery"
+        "plugin": "com.suppleaudio.marram"
       },
       "command": "plugin.load"
     }

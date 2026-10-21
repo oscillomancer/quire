@@ -6,7 +6,7 @@
   },
   "listening": "Is the body audible under the fizz, and does the hit end cleanly?",
   "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C2:e r:*",
-  "prompt": "Program Orrery as a short noise snare with a pitched body, band-limited fizz and a punchy fast attack.",
+  "prompt": "Program Marram as a short noise snare with a pitched body, band-limited fizz and a punchy fast attack.",
   "recipe_index": 8,
   "render": {
     "tail_s": 2
@@ -42,7 +42,7 @@
   "setup": [
     {
       "args": {
-        "plugin": "com.suppleaudio.orrery"
+        "plugin": "com.suppleaudio.marram"
       },
       "command": "plugin.load"
     }

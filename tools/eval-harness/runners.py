@@ -10,12 +10,12 @@ import sys
 import threading
 import time
 
-from common import HERE, ROOT, Mcp, capture, check_plugin_provenance, evaluation_profile, recipe_patch, sandbox_command, setup, stop_group, write_json
+from common import HERE, ROOT, SYNTH_NAME, Mcp, capture, check_plugin_provenance, evaluation_profile, recipe_patch, sandbox_command, setup, stop_group, write_json
 from relay import Recorder
 from process_tree import spawn_group
 
 
-def preamble(task, reference=None, seed=42, blind=False):
+def preamble(task, reference=None, blind=False):
     files = ["SKILL.md", "guides/sandbox-loop.md", "guides/analysis.md", "guides/notation.md"]
     if task["suite"] != "notation":
         files.append("guides/sound-design.md")
@@ -23,7 +23,7 @@ def preamble(task, reference=None, seed=42, blind=False):
     prompt = ("You are being evaluated using only the sandbox MCP tools. The following is the "
               "bundled product skill (guides are supplied here because file tools are disabled).\n\n"
               + skill + "\n\nTASK\n" + task["prompt"] +
-              "\nOrrery is already loaded as in_1. Leave your final patch in that instance. "
+              "\n" + SYNTH_NAME + " is already loaded as in_1. Leave your final patch in that instance. "
               "Do not remove it or load other plugins. You may inspect its full schema with "
               "plugin_describe. Finish after measuring the result; no listening approval is needed.\n")
     if task["suite"] == "notation":
@@ -40,14 +40,13 @@ def preamble(task, reference=None, seed=42, blind=False):
                    "compare's loss.total against that reference (lower is better); it passes at "
                    f"or below the task's max_loss of {task['score']['max_loss']}.\n")
     prompt += f"Budget: {task['limits']['tool_calls']} MCP calls, {task['limits']['minutes']} minutes.\n"
-    prompt += f"Use patch seed {seed}; the scorer restores this same seed for reproducibility.\n"
     return prompt
 
 
-def dry(task, directory, seed, binary=None):
+def dry(task, directory, binary=None):
     directory = Path(directory)
     with Mcp(sandbox_command(directory, binary), directory) as client:
-        setup(client, task, seed)
+        setup(client, task)
         check_plugin_provenance(client, what="the scripted attempt")
         recorder = Recorder(client, directory, task["limits"]["tool_calls"])
         serial = 0
@@ -59,8 +58,7 @@ def dry(task, directory, seed, binary=None):
                                     "params": {"name": name, "arguments": arguments}})
 
         patch = task.get("hidden_patch", recipe_patch(task))
-        call("patch_set", {"instance": "in_1", "patch": dict(patch, seed=seed)})
-        call("patch_merge", {"instance": "in_1", "patch": {"seed": seed}})
+        call("patch_set", {"instance": "in_1", "patch": patch})
         call("render", dict(task["render"], notation=task["phrase"]))
         capture(client, directory / "final.json")
         recorder.close()
@@ -104,7 +102,7 @@ def default_model(source):
     return result
 
 
-def isolated_config(task, directory, seed, model, credentials, binary=None, starting_patch=None):
+def isolated_config(task, directory, model, credentials, binary=None, starting_patch=None):
     directory = Path(directory).resolve()
     home = directory / "hermes"
     home.mkdir(parents=True, exist_ok=False, mode=0o700)
@@ -120,7 +118,7 @@ def isolated_config(task, directory, seed, model, credentials, binary=None, star
             # Different volumes fail explicitly; credentials are never copied.
             os.link(source, home / ".env")
     relay_config = {"workdir": str(directory), "sandbox_command": sandbox_command(directory, binary),
-                    "limit": task["limits"]["tool_calls"], "seed": seed,
+                    "limit": task["limits"]["tool_calls"],
                     "task": {key: task[key] for key in ("settings", "setup")}}
     if starting_patch:
         relay_config["starting_patch"] = starting_patch
@@ -180,17 +178,17 @@ def preflight(options, directory):
                            "pass --hermes-python with the install's existing venv interpreter")
 
 
-def hermes(task, directory, seed, options, reference=None):
+def hermes(task, directory, options, reference=None):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     source = Path(options.model_config or evaluation_profile() / "config.yaml")
     model = default_model(source)
-    _, env = isolated_config(task, directory, seed, model, options.credentials, options.sandbox,
+    _, env = isolated_config(task, directory, model, options.credentials, options.sandbox,
                              task.get("starting_patch"))
     command = hermes_command(options)
     version = subprocess.run(command + ["--version"], env=env, cwd=directory,
                              capture_output=True, text=True, timeout=30, check=True).stdout.strip()
-    prompt = preamble(task, reference, seed, getattr(options, "blind", False))
+    prompt = preamble(task, reference, getattr(options, "blind", False))
     (directory / "prompt.txt").write_text(prompt, encoding="utf-8")
     started = time.monotonic()
     timed_out = False

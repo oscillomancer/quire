@@ -6,7 +6,7 @@
   },
   "listening": "Is the sub clean and solid, free of clicks or harsh upper harmonics?",
   "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C2:q r:*",
-  "prompt": "Program Orrery as a clean mono sub bass: smooth sine fundamental, fast start and short release.",
+  "prompt": "Program Marram as a clean mono sub bass: smooth sine fundamental, fast start and short release.",
   "recipe_index": 4,
   "render": {
     "tail_s": 2
@@ -42,7 +42,7 @@
   "setup": [
     {
       "args": {
-        "plugin": "com.suppleaudio.orrery"
+        "plugin": "com.suppleaudio.marram"
       },
       "command": "plugin.load"
     }

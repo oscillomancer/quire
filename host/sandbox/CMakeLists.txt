@@ -24,6 +24,7 @@ if(SUPPLE_BUILD_TESTS)
                              FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>"
                              STOCK_CLAP_DIR="${CMAKE_BINARY_DIR}/plugins/clap"
                              SUPPLE_SCRIPT_EXAMPLES="${PROJECT_SOURCE_DIR}/plugins/suite/examples"
+                             SUPPLE_SKILL_GUIDES="${PROJECT_SOURCE_DIR}/skill/guides"
                              SUPPLE_EDITORS=$<BOOL:${SUPPLE_BUILD_GUI}>)
   # The optimizer end to end with the real synth (slow-ish; single-threaded).
   add_executable(sandbox-optimize.tests tests/test_optimize.cpp)

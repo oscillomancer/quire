@@ -1,53 +1,28 @@
 {
   "changed_modules": [
-    "filters.filter1"
+    "filter1"
   ],
   "hidden_patch": {
-    "envelopes": {
-      "amp": {
-        "attack": "2 ms",
-        "decay": "400 ms",
-        "release": "80 ms",
-        "sustain": "40 %"
-      },
-      "env2": {
-        "attack": "0 ms",
-        "decay": "180 ms",
-        "sustain": 0
-      }
+    "params": {
+      "amp.decay": "450 ms",
+      "amp.release": "120 ms",
+      "amp.sustain": "50 %",
+      "amp.velocity": "60 %",
+      "env2.decay": "250 ms",
+      "env2.release": "200 ms",
+      "env2.sustain": "0 %",
+      "filter1.cutoff": "900 Hz",
+      "filter1.env": "+3.5 oct",
+      "filter1.keytrack": "50 %",
+      "filter1.resonance": "30 %",
+      "osc1.level": "1 dB",
+      "osc1.retrigger": true,
+      "osc2.level": "-2 dB",
+      "osc2.retrigger": true,
+      "osc2.type": "sub",
+      "osc2.wave": "sine"
     },
-    "filters": {
-      "filter1": {
-        "cutoff": "450 Hz",
-        "resonance": "35 %",
-        "slope": "24 dB",
-        "type": "ladder"
-      }
-    },
-    "oscillators": {
-      "osc1": {
-        "type": "va",
-        "wave": "saw"
-      },
-      "osc2": {
-        "level": "-6 dB",
-        "octave": -1,
-        "type": "sub",
-        "wave": "sine"
-      }
-    },
-    "routes": {
-      "env2>filter1.cutoff": {
-        "amount": "+3 oct"
-      },
-      "velocity>filter1.cutoff": {
-        "amount": "+1 oct"
-      }
-    },
-    "schema": "supple.orrery-patch/1.0",
-    "voice": {
-      "mode": "mono"
-    }
+    "schema": "supple.marram-patch/1.0"
   },
   "id": "reference.pluck-bass",
   "limits": {
@@ -56,7 +31,7 @@
   },
   "listening": "Is the filter snap short and audible, with convincing bass weight?",
   "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C2:q r:*",
-  "prompt": "Match the reference render with Orrery. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
+  "prompt": "Match the reference render with Marram. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
   "recipe_index": 2,
   "render": {
     "tail_s": 2
@@ -75,57 +50,32 @@
   "setup": [
     {
       "args": {
-        "plugin": "com.suppleaudio.orrery"
+        "plugin": "com.suppleaudio.marram"
       },
       "command": "plugin.load"
     }
   ],
   "starting_patch": {
-    "envelopes": {
-      "amp": {
-        "attack": "2 ms",
-        "decay": "400 ms",
-        "release": "80 ms",
-        "sustain": "40 %"
-      },
-      "env2": {
-        "attack": "0 ms",
-        "decay": "180 ms",
-        "sustain": 0
-      }
+    "params": {
+      "amp.decay": "450 ms",
+      "amp.release": "120 ms",
+      "amp.sustain": "50 %",
+      "amp.velocity": "60 %",
+      "env2.decay": "250 ms",
+      "env2.release": "200 ms",
+      "env2.sustain": "0 %",
+      "filter1.cutoff": "600 Hz",
+      "filter1.env": "+3.5 oct",
+      "filter1.keytrack": "50 %",
+      "filter1.resonance": "30 %",
+      "osc1.level": "1 dB",
+      "osc1.retrigger": true,
+      "osc2.level": "-2 dB",
+      "osc2.retrigger": true,
+      "osc2.type": "sub",
+      "osc2.wave": "sine"
     },
-    "filters": {
-      "filter1": {
-        "cutoff": "300 Hz",
-        "resonance": "35 %",
-        "slope": "24 dB",
-        "type": "ladder"
-      }
-    },
-    "oscillators": {
-      "osc1": {
-        "type": "va",
-        "wave": "saw"
-      },
-      "osc2": {
-        "level": "-6 dB",
-        "octave": -1,
-        "type": "sub",
-        "wave": "sine"
-      }
-    },
-    "routes": {
-      "env2>filter1.cutoff": {
-        "amount": "+3 oct"
-      },
-      "velocity>filter1.cutoff": {
-        "amount": "+1 oct"
-      }
-    },
-    "schema": "supple.orrery-patch/1.0",
-    "voice": {
-      "mode": "mono"
-    }
+    "schema": "supple.marram-patch/1.0"
   },
   "suite": "synth-reference",
   "tier": 1

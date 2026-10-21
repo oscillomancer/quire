@@ -11,7 +11,7 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import HERE, ROOT, Mcp, PluginProvenanceError, capture, check_plugin_provenance, evaluation_profile, load_tasks, read_json, sandbox_command, setup, slug, validate_task, write_json
+from common import HERE, ROOT, SYNTH, Mcp, PluginProvenanceError, capture, check_plugin_provenance, evaluation_profile, load_tasks, read_json, sandbox_command, setup, slug, validate_task, write_json
 from relay import Recorder, invocations
 from runners import default_model, dry, isolated_config, preamble, preflight
 from run import render_patch, score_final, unpublishable
@@ -133,7 +133,7 @@ class Isolation(unittest.TestCase):
             credential.write_text("OPENROUTER_API_KEY=FAKE-UNIT-TEST\n", encoding="utf-8")
             task = load_tasks("synth-descriptive", ["sub-bass"])[0]
             with mock.patch.dict(os.environ, {"HERMES_INFERENCE_MODEL": "must-not-inherit"}):
-                home, env = isolated_config(task, root / "run", 42,
+                home, env = isolated_config(task, root / "run",
                                              {"default": "test", "provider": "test"}, credential,
                                              binary=sys.executable)
             config = read_json(home / "config.yaml")
@@ -217,23 +217,22 @@ class PluginProvenance(unittest.TestCase):
             raise AssertionError(name)
 
     def client(self, path, shadowed=None):
-        entries = [{"id": "com.suppleaudio.orrery", "path": path, "version": "0.1.0"}]
+        entries = [{"id": SYNTH, "path": path, "version": "0.1.0"}]
         for stale in shadowed or []:
-            entries.append({"id": "com.suppleaudio.orrery", "path": stale, "version": "0.1.0",
-                            "shadowed": True})
-        session = {"chain": ["in_1"], "instances": {"in_1": {"plugin": "com.suppleaudio.orrery"}}}
+            entries.append({"id": SYNTH, "path": stale, "version": "0.1.0", "shadowed": True})
+        session = {"chain": ["in_1"], "instances": {"in_1": {"plugin": SYNTH}}}
         return self.Stub(session, {"plugins": entries})
 
     def test_the_build_passes_and_a_stale_copy_fails(self):
         build = ROOT / "build/dev/plugins/clap"
-        fresh = self.client(str(build / "Orrery.clap"), [str(Path.home() / ".clap/Orrery.clap")])
+        fresh = self.client(str(build / "Marram.clap"), [str(Path.home() / ".clap/Marram.clap")])
         provenance = check_plugin_provenance(fresh, build, what="a test session")
-        self.assertEqual(provenance["in_1"]["path"], str(build / "Orrery.clap"))
-        self.assertEqual(provenance["in_1"]["shadowed"], [str(Path.home() / ".clap/Orrery.clap")])
+        self.assertEqual(provenance["in_1"]["path"], str(build / "Marram.clap"))
+        self.assertEqual(provenance["in_1"]["shadowed"], [str(Path.home() / ".clap/Marram.clap")])
         # The path the sandbox prints may be relative to the harness's cwd.
-        relative = check_plugin_provenance(self.client("build/dev/plugins/clap/Orrery.clap"), build)
-        self.assertEqual(relative["in_1"]["path"], "build/dev/plugins/clap/Orrery.clap")
-        for bad in (str(Path.home() / ".clap/Orrery.clap"), "/tmp/Orrery.clap", None):
+        relative = check_plugin_provenance(self.client("build/dev/plugins/clap/Marram.clap"), build)
+        self.assertEqual(relative["in_1"]["path"], "build/dev/plugins/clap/Marram.clap")
+        for bad in (str(Path.home() / ".clap/Marram.clap"), "/tmp/Marram.clap", None):
             with self.subTest(path=bad):
                 with self.assertRaises(PluginProvenanceError):
                     check_plugin_provenance(self.client(bad), build)
@@ -260,10 +259,10 @@ class Integration(unittest.TestCase):
                 task = load_tasks(suite, [task_id])[0]
                 reference = None
                 if suite == "synth-reference":
-                    reference, _ = render_patch(task, task["hidden_patch"], root / "hidden", 42)
+                    reference, _ = render_patch(task, task["hidden_patch"], root / "hidden")
                 run_dir = root / suite
-                dry(task, run_dir, 42)
-                scored = score_final(task, run_dir, 42, reference=reference)
+                dry(task, run_dir)
+                scored = score_final(task, run_dir, reference=reference)
                 self.assertTrue(scored["score"]["pass"], scored)
                 self.assertTrue(scored["valid_patch"])
                 if reference:
@@ -285,24 +284,24 @@ class Integration(unittest.TestCase):
                     self.assertLess(json.loads(result.stdout)["loss"], 1e-6)
                 if suite == "synth-descriptive":
                     task["score"]["profile"]["targets"]["spectral.centroid_hz.median"] = {"min": 10000, "max": 11000}
-                    self.assertFalse(score_final(task, run_dir, 42)["score"]["pass"])
+                    self.assertFalse(score_final(task, run_dir)["score"]["pass"])
 
     def test_compare_reports_the_same_loss_as_the_scorer(self):
         with tempfile.TemporaryDirectory(dir=ROOT / "build") as directory:
             root = Path(directory)
             task = load_tasks("synth-reference", ["sub-bass"])[0]
-            reference, _ = render_patch(task, task["hidden_patch"], root / "hidden", 42)
+            reference, _ = render_patch(task, task["hidden_patch"], root / "hidden")
             reference_end = read_json(root / "hidden/reference.json")["input_end_s"]
             run_dir = root / "attempt"
-            dry(task, run_dir, 42)
+            dry(task, run_dir)
             with Mcp(sandbox_command(run_dir), run_dir) as client:
-                setup(client, task, 42)
+                setup(client, task)
                 patch = read_json(run_dir / "final.json")["patches"]["in_1"]
-                client.call("patch.set", {"instance": "in_1", "patch": dict(patch, seed=42)})
+                client.call("patch.set", {"instance": "in_1", "patch": patch})
                 # A release the recipe does not have: a non-zero loss both paths
                 # must report identically.
                 client.call("patch.merge", {"instance": "in_1",
-                                            "patch": {"envelopes": {"amp": {"release": "240 ms"}}}})
+                                            "patch": {"params": {"amp.release": "400 ms"}}})
                 rendered = client.call("render", dict(task["render"], notation=task["phrase"]))
                 test_end = rendered["seconds"] - rendered["tail_s"]
                 compared = client.call("compare", {"reference": str(reference),
@@ -323,22 +322,23 @@ class Integration(unittest.TestCase):
             root = Path(directory)
             task = load_tasks("synth-descriptive", ["sub-bass"])[0]
             with Mcp(sandbox_command(root), root) as client:
-                setup(client, task, 42)
+                setup(client, task)
                 recorder = Recorder(client, root, 1)
                 message = {"jsonrpc": "2.0", "id": 100, "method": "tools/call", "params": {
                     "name": "batch", "arguments": {"steps": [
-                        {"command": "patch.merge", "args": {"instance": "in_1", "patch": {"seed": 91}}},
-                        {"command": "param.set", "args": {"instance": "in_1", "values": {"output.level": -9}}}]}}}
+                        {"command": "patch.merge", "args": {"instance": "in_1",
+                                                            "patch": {"params": {"amp.level": -3}}}},
+                        {"command": "param.set", "args": {"instance": "in_1", "values": {"output": -9}}}]}}}
                 self.assertFalse(recorder.handle(message)["result"].get("isError", False))
                 final = read_json(root / "final.json")
-                self.assertEqual(final["patches"]["in_1"]["seed"], 91)
+                self.assertEqual(final["patches"]["in_1"]["params"]["amp.level"], -3)
                 message["id"] = 101
                 self.assertTrue(recorder.handle(message)["result"]["isError"])
                 recorder.close()
                 client.call("plugin.remove", {"instance": "in_1"})
                 capture(client, root / "final.json")
             with self.assertRaisesRegex(ValueError, "Final chain"):
-                score_final(task, root, 42)
+                score_final(task, root)
 
 
 if __name__ == "__main__":

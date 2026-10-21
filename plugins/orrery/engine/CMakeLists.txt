@@ -9,12 +9,8 @@ supple_add_library(orrery-engine
        supple::core-dsp)
 
 supple_add_tests(orrery-engine
-  SOURCES tests/test_params.cpp tests/test_patch.cpp tests/test_engine.cpp tests/test_wavetables.cpp tests/test_guide.cpp
+  SOURCES tests/test_params.cpp tests/test_patch.cpp tests/test_engine.cpp tests/test_wavetables.cpp
   LABELS rt)
-
-if(TARGET orrery-engine.tests)
-  target_compile_definitions(orrery-engine.tests PRIVATE SUPPLE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-endif()
 
 # CPU benchmark (synth.md §9); meaningful in the release preset. A monorepo
 # developer tool: not built inside template-derived plugin projects.

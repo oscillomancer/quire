@@ -6,7 +6,7 @@
   },
   "listening": "Is the resonant snap recognizably acid-like and controlled?",
   "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C2:q r:*",
-  "prompt": "Program Orrery as a mono acid bass with glide, a resonant filter snap and mild soft drive.",
+  "prompt": "Program Marram as a mono acid bass with glide, a resonant filter snap and mild soft drive.",
   "recipe_index": 3,
   "render": {
     "tail_s": 2
@@ -42,7 +42,7 @@
   "setup": [
     {
       "args": {
-        "plugin": "com.suppleaudio.orrery"
+        "plugin": "com.suppleaudio.marram"
       },
       "command": "plugin.load"
     }

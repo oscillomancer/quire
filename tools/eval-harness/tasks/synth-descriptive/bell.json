@@ -6,7 +6,7 @@
   },
   "listening": "Does the strike sound metallic, with a smooth ringing decay?",
   "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C4:q r:*",
-  "prompt": "Program Orrery as a metallic bell with inharmonic partials, a fast strike and a long decay.",
+  "prompt": "Program Marram as a metallic bell with inharmonic partials, a fast strike and a long decay.",
   "recipe_index": 6,
   "render": {
     "tail_s": 2
@@ -42,7 +42,7 @@
   "setup": [
     {
       "args": {
-        "plugin": "com.suppleaudio.orrery"
+        "plugin": "com.suppleaudio.marram"
       },
       "command": "plugin.load"
     }

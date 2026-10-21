@@ -397,6 +397,46 @@ TEST_CASE("dsp.test reports meters as they stood when the signal ended") {
     CHECK(meters->find("level")->asDouble() == doctest::Approx(-12.0).epsilon(0.01));
 }
 
+TEST_CASE("every patch in the synth guide plays on Marram") {
+    if (!fs::exists(kStock / "Marram.clap")) {
+        MESSAGE("skipped: no Marram in " << kStock.string());
+        return;
+    }
+    std::ifstream in(fs::path(SUPPLE_SKILL_GUIDES) / "sound-design.md");
+    REQUIRE(in);
+    std::stringstream guide;
+    guide << in.rdbuf();
+    const std::string text = guide.str();
+    Root root;
+    SessionOptions o;
+    o.workdir = root.path;
+    o.pluginPath = {kStock};
+    auto session = Session::open(o);
+    REQUIRE(session);
+    SandboxHost host(std::move(*session), {});
+    cmd::Registry registry;
+    registerCommands(registry);
+    cmd::Dispatcher bus(registry, host);
+    auto call = [&](std::string name, std::string_view args) {
+        auto r = bus.execute({std::move(name), json::parse(args).value(), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    call("plugin.load", R"({"plugin":"com.suppleaudio.marram"})");
+    int patches = 0;
+    for (size_t at = text.find("```json\n"); at != std::string::npos;
+         at = text.find("```json\n", at)) {
+        at += 8;
+        const std::string patch = text.substr(at, text.find("\n```", at) - at);
+        INFO(patch.substr(0, 120));
+        call("patch.set", R"({"instance":"in_1","patch":)" + patch + "}");
+        CHECK(call("render", R"({"notation":"1: C3:q r:*","tail_s":0})")["peak_dbfs"].asDouble() >
+              -40);
+        ++patches;
+    }
+    CHECK(patches == 11);  // the anatomy and ten recipes (the evaluation tasks' answers)
+}
+
 TEST_CASE("dsp.test measures a script through the player and names what goes wrong") {
     if (!fs::exists(kStock / "Script Player.clap")) {
         MESSAGE("skipped: no script player in " << kStock.string());

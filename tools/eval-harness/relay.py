@@ -76,10 +76,9 @@ def main():
             if message.get("method") == "initialize" and not initialized:
                 response = client.request(message)
                 client.request({"jsonrpc": "2.0", "method": "notifications/initialized"})
-                setup(client, config["task"], config["seed"])
+                setup(client, config["task"])
                 if config.get("starting_patch"):
-                    patch = dict(config["starting_patch"], seed=config["seed"])
-                    client.call("patch.set", {"instance": "in_1", "patch": patch})
+                    client.call("patch.set", {"instance": "in_1", "patch": config["starting_patch"]})
                 capture(client, workdir / "final.json")
                 write_json(workdir / "exposed-tools.json", client.rpc("tools/list"))
                 # Record which plugin files this attempt runs, and refuse to go on
