@@ -467,8 +467,11 @@ contract is at the top of `core/ProcessorBase.h`. In short:
 ""` and no `Editor.*` -- gets the automatic one: every parameter by group, a
 panel each, with the bypass, presets and meters (`gui/AutoEditor.cpp`; the
 drive example), each control dimmed while `Definition::applies()` says its
-parameter does not matter. Write your own once the product is past its
-sketch.
+parameter does not matter. A layer whose definitions carry state the
+parameters do not show adds panels of its own to it: its `createEditor()`
+returns `gui::automaticEditor(host, panels)`, each panel a `gui::AutoPanel`
+that draws its body and takes the pointer there (`gui/AutoEditor.h`). Write
+your own once the product is past its sketch.
 
 - In the constructor, add controls in Tab order. Rects are in design units
   (`kEditorWidth` x `kEditorHeight`); the window scales the whole panel.

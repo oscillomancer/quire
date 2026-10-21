@@ -7,8 +7,9 @@
 // each control chosen from the parameter -- a knob for a value, a toggle, a
 // segmented switch for up to four choices and a dropdown for more, a
 // readout for an output -- and the bypass, the presets and the meters in
-// the header. Properties get text fields, file properties file slots. Help
-// text is each tooltip.
+// the header. Properties get text fields, file properties file slots, but
+// for hidden() ones. Help text is each tooltip. A layer's panels
+// (gui/AutoEditor.h) follow the parameters' panels.
 //
 // It is a start, not a design: a product past its first sketch writes its
 // own Editor.cpp and lists it in product.cmake, which drops this file.
@@ -16,9 +17,11 @@
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "core/Definition.h"
+#include "gui/AutoEditor.h"
 #include "gui/EditorBase.h"
 #include "gui/Widgets.h"
 
@@ -62,6 +65,7 @@ struct Group {
     std::vector<Cell> cells;
     bool meters = false;
     Rect panel;
+    int own = -1;  // a layer's panel: its index
 };
 
 Cell cellFor(const ParamDef& p) {
@@ -101,14 +105,14 @@ struct Plan {
     float width = 0.0f, height = 0.0f;
 };
 
-Plan plan(const Definition& definition) {
+Plan plan(const Definition& definition, const std::vector<std::unique_ptr<AutoPanel>>& own) {
     const ParamTable& params = definition.params();
     const PropertyList& properties = definition.properties();
     Plan out;
     auto groupNamed = [&](const std::string& title) -> Group& {
         for (Group& g : out.groups)
             if (g.title == title && !g.meters) return g;
-        out.groups.push_back({title, {}, false, {}});
+        out.groups.push_back({title, {}, false, {}, -1});
         return out.groups.back();
     };
     for (size_t i = 0; i < params.count(); ++i) {
@@ -127,7 +131,9 @@ Plan plan(const Definition& definition) {
         c.caption = true;
         groupNamed("").cells.push_back(c);
     }
-    if (definition.info().audioOutput()) out.groups.push_back({"Level", {}, true, {}});
+    for (size_t k = 0; k < own.size(); ++k)
+        out.groups.push_back({own[k]->title(), {}, false, {}, static_cast<int>(k)});
+    if (definition.info().audioOutput()) out.groups.push_back({"Level", {}, true, {}, -1});
 
     // Inside each panel: rows of cells, as wide as kMaxInner allows.
     for (Group& g : out.groups) {
@@ -155,6 +161,12 @@ Plan plan(const Definition& definition) {
             widest = 92.0f;
             y = 0.0f;
             rowHeight = 0.0f;
+        }
+        if (g.own >= 0) {  // the layer's own, as big as it asks
+            const AutoPanel& panel = *own[static_cast<size_t>(g.own)];
+            widest = std::clamp(panel.width(), 0.0f, kMaxWidth - 2.0f * (kMargin + kPad));
+            y = 0.0f;
+            rowHeight = std::max(panel.height(), 0.0f);
         }
         g.panel = {0.0f, 0.0f, std::max(widest, 120.0f) + 2.0f * kPad, top + y + rowHeight + kPad};
     }
@@ -201,8 +213,10 @@ Plan plan(const Definition& definition) {
 
 class AutoEditor : public EditorBase {
   public:
-    AutoEditor(EditorHost& host, Plan layout)
-        : EditorBase(host, autoTheme(), layout.width, layout.height), plan_(std::move(layout)) {
+    AutoEditor(EditorHost& host, Plan layout, std::vector<std::unique_ptr<AutoPanel>> panels)
+        : EditorBase(host, autoTheme(), layout.width, layout.height),
+          plan_(std::move(layout)),
+          panels_(std::move(panels)) {
         float right = width() - kMargin;
         const ParamTable& params = paramTable();
         if (params.bypassIndex() >= 0) {
@@ -229,6 +243,8 @@ class AutoEditor : public EditorBase {
                     });
             }
         }
+        for (const Group& g : plan_.groups)
+            if (g.own >= 0) panels_[static_cast<size_t>(g.own)]->open(host, ui(), inner(g));
         usePeakMeters(definition().info().audioOutput());
     }
 
@@ -278,11 +294,70 @@ class AutoEditor : public EditorBase {
                                        : paramTable().find(c.id)->displayLabel();
                 widgets::caption(vg, r.x + 1.0f, r.y + 6.0f, text, rgb(t.textMuted), widgets::Align::Left, 9.5f);
             }
+            if (g.own >= 0) {
+                nvgSave(vg);
+                panels_[static_cast<size_t>(g.own)]->paint(vg, t);
+                nvgRestore(vg);
+            }
         }
         drawControls(vg);
     }
 
+    void animate(double seconds) override {
+        (void)seconds;
+        for (auto& p : panels_)
+            if (p->idle()) markDirty();
+    }
+
+    // --- the layer's panels' pointer ------------------------------------------
+
+    bool onPointerDown(float x, float y, int button, uint32_t mods, bool doubleClick) override {
+        AutoPanel* p = panelAt(x, y);
+        if (!p || !p->pointerDown(x, y, button, mods, doubleClick)) return false;
+        held_ = p;
+        return true;
+    }
+    bool onPointerMove(float x, float y, uint32_t mods) override {
+        pointerX_ = x;
+        pointerY_ = y;
+        if (held_) return held_->pointerMove(x, y, mods);
+        AutoPanel* p = panelAt(x, y);
+        if (hover_ && hover_ != p) hover_->pointerLeave();
+        hover_ = p;
+        return p && p->pointerMove(x, y, mods);
+    }
+    bool onPointerUp(float x, float y, int button, uint32_t mods) override {
+        if (!held_) return false;
+        AutoPanel* p = std::exchange(held_, nullptr);
+        p->pointerUp(x, y, button, mods);
+        return true;
+    }
+    bool onWheel(float x, float y, float dx, float dy, uint32_t mods) override {
+        AutoPanel* p = panelAt(x, y);
+        return p && p->wheel(x, y, dx, dy, mods);
+    }
+    void onPointerLeave() override {
+        if (hover_) hover_->pointerLeave();
+        hover_ = nullptr;
+        pointerX_ = pointerY_ = -1.0f;
+    }
+    void onCancel() override {
+        held_ = nullptr;
+        for (auto& p : panels_) p->cancel();
+    }
+    Cursor cursor() const override {
+        const AutoPanel* p = held_ ? held_ : panelAt(pointerX_, pointerY_);
+        return p ? p->cursor(pointerX_, pointerY_) : EditorBase::cursor();
+    }
+
   private:
+    // The layer's panel whose body is at (x, y), or null.
+    AutoPanel* panelAt(float x, float y) const {
+        for (const Group& g : plan_.groups)
+            if (g.own >= 0 && inner(g).contains(x, y)) return panels_[static_cast<size_t>(g.own)].get();
+        return nullptr;
+    }
+
     const char* propertyName(uint32_t id) const {
         const PropertyList& properties = definition().properties();
         const int k = properties.indexOf(id);
@@ -296,13 +371,24 @@ class AutoEditor : public EditorBase {
     }
 
     Plan plan_;
+    std::vector<std::unique_ptr<AutoPanel>> panels_;
+    AutoPanel* held_ = nullptr;   // the panel that took the press being held
+    AutoPanel* hover_ = nullptr;  // the panel the pointer is over
+    float pointerX_ = -1.0f, pointerY_ = -1.0f;
 };
 
 }  // namespace
 }  // namespace supple::gui
 
+namespace supple::gui {
+std::unique_ptr<EditorBase> automaticEditor(EditorHost& host, std::vector<std::unique_ptr<AutoPanel>> panels) {
+    Plan layout = plan(host.pluginDefinition(), panels);
+    return std::make_unique<AutoEditor>(host, std::move(layout), std::move(panels));
+}
+}  // namespace supple::gui
+
 namespace product {
 std::unique_ptr<supple::gui::EditorBase> createEditor(supple::gui::EditorHost& host) {
-    return std::make_unique<supple::gui::AutoEditor>(host, supple::gui::plan(host.pluginDefinition()));
+    return supple::gui::automaticEditor(host);
 }
 }  // namespace product

@@ -32,7 +32,9 @@
 //     defaults.
 //   - The editor: createEditor() may make every editor the instance opens,
 //     in place of product::createEditor (a family's editors, made from what
-//     only the layer knows); null leaves it to the product.
+//     only the layer knows); null leaves it to the product. In a product
+//     with the automatic editor, gui::automaticEditor() makes that one with
+//     panels of the layer's own (gui/AutoEditor.h).
 //     Instance::rebuildEditor() makes an open one again, and
 //     Instance::drawEditor() draws one without a window (gui/Offscreen.h),
 //     after Instance::watch(true) and some audio has filled its meters.

@@ -28,6 +28,7 @@
 #include "core/Files.h"
 #include "core/PresetLibrary.h"
 #include "core/PropertyTable.h"
+#include "gui/AutoEditor.h"
 #include "gui/EditorBase.h"
 #include "gui/Fonts.h"
 #include "gui/Gui.h"
@@ -1816,6 +1817,56 @@ TEST(the_automatic_editor_leaves_out_a_hidden_property) {
     const auto none = size({});
     CHECK(size({property(900, "Notes")}) != none);
     CHECK(size({property(900, "Notes").hidden()}) == none);
+}
+
+TEST(the_automatic_editor_gives_a_layers_panel_its_room_and_its_pointer) {
+    struct Panel final : AutoPanel {
+        Rect body;
+        std::vector<std::string> heard;
+        int painted = 0;
+        const char* title() const override { return "Own"; }
+        float width() const override { return 300.0f; }
+        float height() const override { return 120.0f; }
+        void open(EditorHost&, Ui&, Rect at) override { body = at; }
+        void paint(NVGcontext*, const Theme&) override { ++painted; }
+        bool pointerDown(float, float, int, uint32_t, bool) override {
+            heard.push_back("down");
+            return true;
+        }
+        bool pointerMove(float, float, uint32_t) override {
+            heard.push_back("move");
+            return true;
+        }
+        void pointerUp(float, float, int, uint32_t) override { heard.push_back("up"); }
+    };
+    MockHost host;
+    const std::unique_ptr<EditorBase> plain = product::createEditor(host);
+    auto own = std::make_unique<Panel>();
+    Panel& panel = *own;
+    std::vector<std::unique_ptr<AutoPanel>> panels;
+    panels.push_back(std::move(own));
+    const std::unique_ptr<EditorBase> editor = automaticEditor(host, std::move(panels));
+    CHECK(editor->width() * editor->height() > plain->width() * plain->height());
+    CHECK(panel.body.w == 300.0f && panel.body.h >= 120.0f);  // as tall as its row
+    CHECK(panel.body.right() <= editor->width() && panel.body.bottom() <= editor->height());
+    // A press in its body is the panel's until the release, wherever it goes.
+    CHECK(editor->pointerDown(panel.body.cx(), panel.body.cy(), 0, 0, false));
+    editor->pointerMove(1.0f, 1.0f, 0);
+    editor->pointerUp(1.0f, 1.0f, 0, 0);
+    CHECK((panel.heard == std::vector<std::string>{"down", "move", "up"}));
+    // Outside it, the editor's own.
+    panel.heard.clear();
+    editor->pointerDown(1.0f, 1.0f, 0, 0, false);
+    editor->pointerUp(1.0f, 1.0f, 0, 0);
+    CHECK(panel.heard.empty());
+    NVGcontext* vg = test::createHeadlessCanvas();
+    editor->attach(vg);
+    nvgBeginFrame(vg, editor->width(), editor->height(), 1.0f);
+    editor->render(vg);
+    nvgEndFrame(vg);
+    editor->detach();
+    nvgDeleteInternal(vg);
+    CHECK(panel.painted == 1);
 }
 #endif
 

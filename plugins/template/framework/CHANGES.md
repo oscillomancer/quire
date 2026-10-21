@@ -4,6 +4,19 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.30.0
+
+What a product must do: nothing.
+
+- **A layer's panels in the automatic editor** (`gui/AutoEditor.h`,
+  `gui/AutoEditor.cpp`). `gui::automaticEditor(host, panels)` makes the
+  automatic editor with panels of a layer's own after the parameters'
+  panels: state the parameters do not show, which the layer draws and
+  edits itself. Each `gui::AutoPanel` says its title and size, draws its
+  body, and takes the pointer there with the rules of `EditorBase`'s own
+  hooks; `Ui::popup()` and `Ui::prompt()` give it menus and text fields.
+  `product::createEditor()` is the same editor with none.
+
 ## 1.29.0
 
 What a product must do: nothing.
