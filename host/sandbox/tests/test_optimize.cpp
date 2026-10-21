@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
-// The optimizer end to end with Orrery (docs/specs/optimizer.md §6): recover a
-// hidden patch from its render, and hit a descriptor profile.
+// The optimizer end to end with the stock synth, Marram (docs/specs/optimizer.md
+// §6): recover a hidden patch from its render, and hit a descriptor profile.
 #include <doctest/doctest.h>
 #include "../../../plugins/common/include/supple/plugin/test_module.h"
 #include "../../../tests/file_platform.h"
@@ -25,7 +25,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
-const fs::path kOrrery = ORRERY_CLAP_PATH;
+const fs::path kSynth = fs::path(STOCK_CLAP_DIR) / "Marram.clap";
 const fs::path kFixture = FIXTURE_CLAP_PATH;
 std::atomic<unsigned> gRootNumber{0};
 
@@ -40,12 +40,12 @@ struct Root {
 json::Value j(std::string_view text) { return json::parse(text).value(); }
 const cmd::Origin kTest{cmd::Origin::Type::Test, "unit", ""};
 
+// A saw through a state-variable low-pass that Env 2 opens two octaves;
+// otherwise the defaults (cutoff 2 kHz, resonance 10 %, Env 2 decay 400 ms).
 constexpr std::string_view kPatch =
-    R"({"instance": "in_1", "patch": {"schema": "supple.orrery-patch/1.0",
-    "oscillators": {"osc1": {"type": "va", "wave": "saw"}},
-    "filters": {"filter1": {"type": "svf"}},
-    "envelopes": {"env2": {"attack": 1, "sustain": 0}},
-    "routes": {"env2>filter1.cutoff": {"amount": "+2 oct"}}}})";
+    R"({"instance": "in_1", "patch": {"schema": "supple.marram-patch/1.0",
+    "params": {"filter1.type": "svf", "filter1.env": "+2 oct", "env2.attack": 1,
+               "env2.sustain": 0}}})";
 
 struct Harness {
     Root root;
@@ -56,7 +56,8 @@ struct Harness {
         registerCommands(registry);
         SessionOptions o;
         o.workdir = root.path;
-        o.pluginPath = {kOrrery, kFixture};
+        REQUIRE_MESSAGE(fs::exists(kSynth), "build the stock plugins: " << kSynth.string());
+        o.pluginPath = {kSynth, kFixture};
         o.referencePreparationHook = std::move(referenceHook);
         auto s = Session::open(o);
         REQUIRE(s);
@@ -87,7 +88,7 @@ double normalizedLog(double v, double lo, double hi) {
 
 TEST_CASE("optimizer boundary errors include paths and repair hints") {
     Harness h;
-    h.call("plugin.load", R"({"plugin": ")" + kOrrery.generic_string() + R"("})");
+    h.call("plugin.load", R"({"plugin": ")" + kSynth.generic_string() + R"("})");
     auto bound = h.d->execute({"optimize.start",
                                j(R"({"instance":"in_1", "params":[{"key":"osc1.level","min":{}}],
                "target":{"reference":42}})"),
@@ -107,15 +108,15 @@ TEST_CASE("optimizer boundary errors include paths and repair hints") {
 
 TEST_CASE("optimize recovers a hidden patch from its render") {
     Harness h;
-    h.call("plugin.load", R"({"plugin": ")" + kOrrery.generic_string() + R"("})");
+    h.call("plugin.load", R"({"plugin": ")" + kSynth.generic_string() + R"("})");
     h.call("patch.set", kPatch);
     h.call(
         "param.set",
-        R"({"instance": "in_1", "values": {"filter1.cutoff": 2400, "filter1.resonance": 60, "env2.decay": 180}})");
+        R"({"instance": "in_1", "values": {"filter1.cutoff": 900, "filter1.resonance": 60, "env2.decay": 180}})");
     json::Value ref =
         h.call("render", R"({"notation": "1: C3:h r:h", "seconds": 1.0, "tail_s": 0.3})");
     CHECK(ref["render"].asString() == "rd_1");
-    h.call("patch.set", kPatch);  // back to defaults: 1 kHz, 0 %, 300 ms
+    h.call("patch.set", kPatch);                                // back to the defaults
     json::Value started = h.call("optimize.start", R"({"instance": "in_1",
         "params": ["filter1.cutoff", "filter1.resonance", "env2.decay"],
         "target": {"reference": "rd_1"}, "phrase": "1: C3:h r:h", "seconds": 1.0, "tail_s": 0.3,
@@ -130,10 +131,10 @@ TEST_CASE("optimize recovers a hidden patch from its render") {
     json::Value p = result["patch"]["params"];
     // Within 10 % of each hidden value in the normalized domain.
     CHECK(std::fabs(normalizedLog(p["filter1.cutoff"].asDouble(), 20, 20000) -
-                    normalizedLog(2400, 20, 20000)) < 0.1);
+                    normalizedLog(900, 20, 20000)) < 0.1);
     CHECK(std::fabs(p["filter1.resonance"].asDouble() - 60.0) / 100.0 < 0.1);
-    CHECK(std::fabs(std::cbrt((p["env2.decay"].asDouble() - 1) / 29999) -
-                    std::cbrt((180.0 - 1) / 29999)) < 0.1);
+    CHECK(std::fabs(normalizedLog(p["env2.decay"].asDouble(), 1, 30000) -
+                    normalizedLog(180, 1, 30000)) < 0.1);
     // The best candidate is a render the session knows (adopted on the next command).
     const std::string best = result["render"].asString();
     json::Value cmp = h.call("compare", R"({"reference": "rd_1", "test": ")" + best + R"("})");
@@ -143,7 +144,7 @@ TEST_CASE("optimize recovers a hidden patch from its render") {
     CHECK((*saved)->tailSeconds > 0.0);
     CHECK((*saved)->tailSeconds <= 0.3);
     CHECK((*saved)->chain == std::vector<std::string>{"in_1"});
-    CHECK((*saved)->latency == 0);
+    CHECK((*saved)->latency == ref["latency_samples"].asInt());
     json::Value again =
         h.call("optimize.start", R"({"instance":"in_1",
         "params":["filter1.cutoff"],"target":{"reference":")" +
@@ -158,7 +159,7 @@ TEST_CASE("optimize recovers a hidden patch from its render") {
 
 TEST_CASE("optimize hits a descriptor profile; cancellation stops a job") {
     Harness h;
-    h.call("plugin.load", R"({"plugin": ")" + kOrrery.generic_string() + R"("})");
+    h.call("plugin.load", R"({"plugin": ")" + kSynth.generic_string() + R"("})");
     h.call("patch.set", kPatch);
     json::Value started =
         h.call("optimize.start", R"({"instance": "in_1", "params": ["filter1.cutoff"],
@@ -206,7 +207,7 @@ TEST_CASE("curve metadata rejects invalid exponents without throwing") {
 
 TEST_CASE("compare reports the scored loss the optimizer minimizes") {
     Harness h;
-    h.call("plugin.load", R"({"plugin": ")" + kOrrery.generic_string() + R"("})");
+    h.call("plugin.load", R"({"plugin": ")" + kSynth.generic_string() + R"("})");
     h.call("patch.set", kPatch);
     const std::string render = R"({"notation": "1: C3:h r:h", "seconds": 1.0, "tail_s": 0.3})";
     json::Value first = h.call("render", render);
@@ -261,20 +262,19 @@ TEST_CASE("compare reports the scored loss the optimizer minimizes") {
 TEST_CASE("a render depends only on the patch, not on the session's history") {
     // The sandbox's promise: a render of a given patch is the same audio
     // whether the session rendered before or not. A change to a *smoothed*
-    // parameter (here the amp level) must not glide in from the previous
+    // parameter (here the output level) must not glide in from the previous
     // render's value.
     Harness h;
-    h.call("plugin.load", R"({"plugin": ")" + kOrrery.generic_string() + R"("})");
+    h.call("plugin.load", R"({"plugin": ")" + kSynth.generic_string() + R"("})");
     const std::string render = R"({"notation": "1: C3:h r:h", "seconds": 1.0, "tail_s": 0.3})";
-    const std::string start = R"({"instance": "in_1", "patch": {"schema": "supple.orrery-patch/1.0",
-        "seed": 42, "voice": {"mode": "mono", "glide": "20 ms"},
-        "oscillators": {"osc1": {"type": "va", "wave": "sine", "to": "direct"}},
-        "envelopes": {"amp": {"attack": "3 ms", "sustain": "100 %", "release": "80 ms"}}}})";
-    const std::string level = R"({"instance": "in_1", "patch": {"schema": "supple.orrery-patch/1.0",
-        "seed": 42, "voice": {"mode": "mono", "glide": "20 ms"},
-        "oscillators": {"osc1": {"type": "va", "wave": "sine", "to": "direct"}},
-        "envelopes": {"amp": {"attack": "3 ms", "sustain": "100 %", "release": "80 ms"}},
-        "amp": {"level": "0.825 dB"}}})";
+    const std::string start = R"({"instance": "in_1", "patch": {"schema": "supple.marram-patch/1.0",
+        "params": {"voice.mode": "mono", "voice.glide": "20 ms", "osc1.wave": "sine",
+                   "osc1.to": "direct", "amp.attack": "3 ms", "amp.sustain": "100 %",
+                   "amp.release": "80 ms"}}})";
+    const std::string level = R"({"instance": "in_1", "patch": {"schema": "supple.marram-patch/1.0",
+        "params": {"voice.mode": "mono", "voice.glide": "20 ms", "osc1.wave": "sine",
+                   "osc1.to": "direct", "amp.attack": "3 ms", "amp.sustain": "100 %",
+                   "amp.release": "80 ms", "output": "0.825 dB"}}})";
 
     // (a) fresh: the target patch is the session's first render.
     h.call("patch.set", level);
@@ -284,7 +284,7 @@ TEST_CASE("a render depends only on the patch, not on the session's history") {
     // separate command (a flat params merge, as an agent or the optimizer does).
     h.call("patch.set", start);
     h.call("render", render);
-    h.call("patch.merge", R"({"instance": "in_1", "patch": {"amp": {"level": "0.825 dB"}}})");
+    h.call("patch.merge", R"({"instance": "in_1", "patch": {"params": {"output": "0.825 dB"}}})");
     json::Value after = h.call("render", render);
 
     auto audio = [](const std::string& path) {
@@ -309,11 +309,14 @@ TEST_CASE("a render depends only on the patch, not on the session's history") {
 
 TEST_CASE("plugin.describe reports parameter activity from the current patch") {
     Harness h;
-    h.call("plugin.load", R"({"plugin": ")" + kOrrery.generic_string() + R"("})");
-    // At load the patch has no filter, so the *load-time* schema marks filter1's
-    // parameters inactive; kPatch adds filters.filter1, and from then on the
-    // plugin reports them active. describe must follow the patch, not the copy
-    // taken at load (this check fails on the old behavior).
+    h.call("plugin.load", R"({"plugin": ")" + kSynth.generic_string() + R"("})");
+    // With filter 1 off its parameters are inactive; kPatch switches it on,
+    // and from then on the plugin reports them active. describe must follow
+    // the patch, not the schema as it was at load.
+    h.call("patch.set", R"({"instance": "in_1", "patch": {"schema": "supple.marram-patch/1.0",
+        "params": {"filter1.type": "off"}}})");
+    json::Value off = h.call("plugin.describe", R"({"instance": "in_1", "detail": "full"})");
+    CHECK(off["params"]["filter1.cutoff"]["active"].asBool() == false);
     h.call("patch.set", kPatch);
     json::Value after = h.call("plugin.describe", R"({"instance": "in_1", "detail": "full"})");
     REQUIRE(after["params"].find("filter1.cutoff") != nullptr);
@@ -329,9 +332,10 @@ TEST_CASE("plugin.describe reports parameter activity from the current patch") {
     CHECK(probe["params"].size() == 1);
     h.call("job.cancel", R"({"job": ")" + probe["job"].asString() + R"("})");
     h.call("job.wait", R"({"job": ")" + probe["job"].asString() + R"(", "timeout_s": 30})");
-    // Drop the module again: describe reports inactive and the optimizer
+    // Switch it off again: describe reports inactive and the optimizer
     // refuses the key, the same way round.
-    h.call("patch.set", R"({"instance": "in_1", "patch": {"schema": "supple.orrery-patch/1.0"}})");
+    h.call("patch.set", R"({"instance": "in_1", "patch": {"schema": "supple.marram-patch/1.0",
+        "params": {"filter1.type": "off"}}})");
     json::Value dropped = h.call("plugin.describe", R"({"instance": "in_1", "detail": "full"})");
     REQUIRE(dropped["params"]["filter1.cutoff"].find("active") != nullptr);
     CHECK(dropped["params"]["filter1.cutoff"]["active"].asBool() == false);
@@ -472,7 +476,7 @@ TEST_CASE("reference read and analysis run on the job worker after optimize.star
             analyzed.notify_one();
         }
     });
-    h.call("plugin.load", R"({"plugin": ")" + kOrrery.generic_string() + R"("})");
+    h.call("plugin.load", R"({"plugin": ")" + kSynth.generic_string() + R"("})");
     h.call("patch.set", kPatch);
     audio::AudioData audio;
     audio.sampleRate = 48000.0;
@@ -504,7 +508,7 @@ TEST_CASE("reference read and analysis run on the job worker after optimize.star
 
 TEST_CASE("invalid profiles and universally rejected patches fail jobs") {
     Harness h;
-    h.call("plugin.load", R"({"plugin": ")" + kOrrery.generic_string() + R"("})");
+    h.call("plugin.load", R"({"plugin": ")" + kSynth.generic_string() + R"("})");
     h.call("patch.set", kPatch);
     auto bad = h.call("optimize.start", R"({"instance":"in_1","params":["filter1.cutoff"],
         "target":{"profile":{"schema":"wrong","targets":{}}},"evaluations":10})");
@@ -525,7 +529,7 @@ TEST_CASE("invalid profiles and universally rejected patches fail jobs") {
 
 TEST_CASE("profile weights scale candidate loss") {
     Harness h;
-    h.call("plugin.load", R"({"plugin": ")" + kOrrery.generic_string() + R"("})");
+    h.call("plugin.load", R"({"plugin": ")" + kSynth.generic_string() + R"("})");
     h.call("patch.set", kPatch);
     auto runWeight = [&](int weight) {
         const std::string args =
@@ -609,13 +613,13 @@ TEST_CASE("job.cancel stops a generation after the current candidate") {
 TEST_CASE("a flat params merge renders the same whether or not the session rendered before") {
     // The eval harness's sequence (reference.sub-bass), from an MCP origin: the
     // starting patch, optionally a render, then one flat merge of the amp
-    // envelope + level. (What the harness saw was a stale Orrery in ~/.clap
+    // envelope + level. (What the harness saw was a stale synth in ~/.clap
     // shadowing the built one — fixed in the catalogue order, see clap-host's
     // test; this pins the sandbox side.)
-    const std::string start = R"({"instance": "in_1", "patch": {"schema": "supple.orrery-patch/1.0",
-        "seed": 42, "voice": {"mode": "mono", "glide": "20 ms"},
-        "oscillators": {"osc1": {"type": "va", "wave": "sine", "to": "direct"}},
-        "envelopes": {"amp": {"attack": "3 ms", "sustain": "100 %", "release": "80 ms"}}}})";
+    const std::string start = R"({"instance": "in_1", "patch": {"schema": "supple.marram-patch/1.0",
+        "params": {"voice.mode": "mono", "voice.glide": "20 ms", "osc1.wave": "sine",
+                   "osc1.to": "direct", "amp.attack": "3 ms", "amp.sustain": "100 %",
+                   "amp.release": "80 ms"}}})";
     const std::string merge = R"({"instance": "in_1", "patch": {"params": {"amp.attack": 0.001042,
         "amp.decay": 256.198095, "amp.sustain": 99.997281, "amp.release": 198.32985, "amp.level": 0.82515}}})";
     const std::string render =
@@ -631,8 +635,7 @@ TEST_CASE("a flat params merge renders the same whether or not the session rende
         call(
             "session.set",
             R"({"block_size": 256, "meter": "4/4", "sample_rate": 48000, "tail_limit_s": 2, "tempo": 120})");
-        call("plugin.load", R"({"plugin": ")" + kOrrery.generic_string() + R"("})");
-        call("patch.merge", R"({"instance": "in_1", "patch": {"seed": 42}})");
+        call("plugin.load", R"({"plugin": ")" + kSynth.generic_string() + R"("})");
         call("patch.set", start);
         if (pre) call("render", render);
         call("patch.merge", merge);

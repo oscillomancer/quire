@@ -157,9 +157,10 @@ the reason).
 
 ## 6. Tests
 
-A synthetic end-to-end test with `orrery-headless.clap` (a saw through an
-SVF with an envelope on its cutoff): render a hidden target patch (cutoff
-2.4 kHz, resonance 60 %, decay 180 ms), go back to the defaults, optimize
+A synthetic end-to-end test with the stock synth, Marram (a saw through an
+SVF that Env 2 opens; Orrery's headless build until 2026-10-21): render a
+hidden target patch (cutoff 900 Hz, resonance 60 %, Env 2 decay 180 ms), go
+back to the defaults, optimize
 those three params against the render with a fixed seed, and require the
 result within 10 % of each hidden value (normalized domain) within 300
 evaluations. A profile-only test hits `spectral.centroid_hz.median`

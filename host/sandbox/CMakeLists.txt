@@ -32,9 +32,10 @@ if(SUPPLE_BUILD_TESTS)
   supple_target_defaults(sandbox-optimize.tests)
   add_test(NAME sandbox-optimize.tests COMMAND sandbox-optimize.tests)
   set_tests_properties(sandbox-optimize.tests PROPERTIES LABELS "sandbox;slow;tsan-skip")
-  add_dependencies(sandbox-optimize.tests orrery-headless clap-host-fixtures)
+  # Marram comes from the stock plugins' build (plugins/clap).
+  add_dependencies(sandbox-optimize.tests clap-host-fixtures)
   target_compile_definitions(sandbox-optimize.tests PRIVATE
-    ORRERY_CLAP_PATH="$<TARGET_FILE:orrery-headless>"
+    STOCK_CLAP_DIR="${CMAKE_BINARY_DIR}/plugins/clap"
     FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>")
 endif()
 
