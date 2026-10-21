@@ -4,6 +4,17 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.27.0
+
+What a product must do: nothing. A product that passes its input through
+unchanged (a meter, an analyser) sets `PRODUCT_TRANSPARENT ON`.
+
+- **A transparent effect** (`test/host_smoke.cpp`, `test/host_contract.h`,
+  `cmake/Tests.cmake`). host-smoke demanded that every effect change its
+  input, which an analyser must never do. With `PRODUCT_TRANSPARENT` it
+  demands the opposite: float and double renders that equal the input
+  exactly.
+
 ## 1.26.0
 
 What a product must do: nothing.

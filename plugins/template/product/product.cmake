@@ -53,6 +53,8 @@ set(PRODUCT_TEST_SOURCES    product/test/processor_test.cpp)
 
 # host-smoke: a parameter whose automation must never change latency, and,
 # if the product has one, a parameter that does (the test then checks the
-# restart protocol around it).
+# restart protocol around it). An effect that passes its input through
+# unchanged (a meter, an analyser) sets PRODUCT_TRANSPARENT ON: host-smoke
+# then demands its output equal its input exactly.
 set(PRODUCT_SMOKE_PLAIN_PARAM   "Input Gain")
 set(PRODUCT_SMOKE_LATENCY_PARAM "")

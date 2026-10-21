@@ -508,9 +508,11 @@ inline double difference(const Render& a, const Render& b) {
     return error;
 }
 
+// A transparent effect (a meter, an analyser) must give back its input
+// exactly, on both precision paths; any other effect must change it.
 inline void processing(const clap_plugin_factory_t* factory, const char* id,
                        const char* plainParam, uint32_t channels, double sampleRate,
-                       bool effect, bool notes, Check check) {
+                       bool effect, bool notes, Check check, bool transparent = false) {
     // Each render starts with a fresh, identically configured instance. Comparing
     // successive calls on one live processor compares different DSP histories.
     const auto f = render<float>(factory, id, plainParam, channels, sampleRate, false, notes);
@@ -527,8 +529,12 @@ inline void processing(const clap_plugin_factory_t* factory, const char* id,
     std::printf("     float/double max error: %.9g; peaks: %.6g / %.6g\n",
                 precisionError, f.peak, d.peak);
     if (!effect) return; // No input port means no in-place promise.
-    check(f.inputDifference > 1e-4 && d.inputDifference > 1e-4,
-          "both effect precision paths reach non-identity DSP");
+    if (transparent)
+        check(f.inputDifference == 0.0 && d.inputDifference == 0.0,
+              "both effect precision paths pass the input through exactly");
+    else
+        check(f.inputDifference > 1e-4 && d.inputDifference > 1e-4,
+              "both effect precision paths reach non-identity DSP");
     const auto fi = render<float>(factory, id, plainParam, channels, sampleRate, true, notes);
     const auto di = render<double>(factory, id, plainParam, channels, sampleRate, true, notes);
     const double floatError = difference(f, fi), doubleError = difference(d, di);

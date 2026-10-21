@@ -183,6 +183,9 @@ if (SUPPLE_BUILD_PLUGIN)
     if (PRODUCT_SMOKE_LATENCY_PARAM)
         target_compile_definitions(host-smoke PRIVATE HOST_SMOKE_LATENCY_PARAM="${PRODUCT_SMOKE_LATENCY_PARAM}")
     endif()
+    if (PRODUCT_TRANSPARENT)
+        target_compile_definitions(host-smoke PRIVATE HOST_SMOKE_TRANSPARENT=1)
+    endif()
     supple_defaults(host-smoke)
     # Once per layout (cmake/Capabilities.cmake): host-smoke-2ch, -5.1, -ambi1,
     # or -notes for a note effect.

@@ -250,6 +250,9 @@ Further modifiers:
   once: ignore it there and keep running the topology `prepare()` built, so
   the real delay always matches the latency the host was told. Set
   `PRODUCT_SMOKE_LATENCY_PARAM` so host-smoke checks the protocol.
+- An effect that only listens (a meter, an analyser) never writes its
+  output and sets `PRODUCT_TRANSPARENT ON` in `product.cmake`: host-smoke
+  checks that its output is its input, bit for bit, in float and double.
 
 ## State and presets
 
