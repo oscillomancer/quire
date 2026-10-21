@@ -464,7 +464,9 @@ contract is at the top of `core/ProcessorBase.h`. In short:
 `gui/EditorBase.h`). A product with no editor code -- `PRODUCT_EDITOR_SOURCES
 ""` and no `Editor.*` -- gets the automatic one: every parameter by group, a
 panel each, with the bypass, presets and meters (`gui/AutoEditor.cpp`; the
-drive example). Write your own once the product is past its sketch.
+drive example), each control dimmed while `Definition::applies()` says its
+parameter does not matter. Write your own once the product is past its
+sketch.
 
 - In the constructor, add controls in Tab order. Rects are in design units
   (`kEditorWidth` x `kEditorHeight`); the window scales the whole panel.

@@ -4,6 +4,19 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.28.0
+
+What a product must do: nothing. A run-time product whose settings can make
+others moot overrides `Definition::applies()`.
+
+- **Parameters that do not always apply** (`core/Definition.h`,
+  `gui/AutoEditor.cpp`). `Definition::applies(index, host)` says whether a
+  parameter matters with the current values: a band's controls while the
+  band is off, a free rate while synced. It is always true unless a
+  run-time product's definition overrides it. The automatic editor dims a
+  control while its parameter does not apply (`Control::enabledWhen`), so it
+  takes no input until it does.
+
 ## 1.27.1
 
 What a product must do: nothing.

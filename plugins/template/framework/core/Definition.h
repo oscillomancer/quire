@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <string>
@@ -223,6 +224,16 @@ class Definition {
     // What is wrong with it, or empty: by the rules a C++ product's tables
     // are checked against when it compiles, and the identity's.
     std::string problems() const;
+
+    // Whether parameter `index` matters with these values (`host(i)`: each
+    // parameter's host value, by index): not when another setting makes it
+    // moot, as a band's controls while the band is off. The automatic
+    // editor dims what does not apply. Always, unless a run-time product
+    // says otherwise. Main thread.
+    virtual bool applies(size_t index, const std::function<double(size_t)>& host) const {
+        (void)index, (void)host;
+        return true;
+    }
 
   private:
     PluginInfo info_;

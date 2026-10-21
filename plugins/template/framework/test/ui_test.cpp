@@ -1740,6 +1740,66 @@ struct ProductEditor {
 };
 }  // namespace
 
+#if SUPPLE_AUTO_EDITOR
+TEST(the_automatic_editor_dims_what_the_definition_says_does_not_apply) {
+    // The parameter the first focused control edits applies only away from
+    // its default, by the host's values; a dimmed control takes no keys.
+    struct Moot final : Definition {
+        using Definition::Definition;
+        size_t index = 0;
+        bool applies(size_t i, const std::function<double(size_t)>& host) const override {
+            return i != index || host(i) != hostDefault(params().at(i));
+        }
+    };
+    struct MootHost final : MockHost {
+        const Definition* definition = nullptr;
+        const Definition& pluginDefinition() const override { return *definition; }
+    };
+    const Definition& product = *productDefinition();
+    Moot moot(product.info(), ParamTable(product::kParams, params::kCount));
+    // Tab `tabs` times, then Up: the parameter that moved when only one did
+    // (Up on the preset bar loads a preset), or -1.
+    auto nudge = [](MockHost& host, int tabs) {
+        double before[params::kCount];
+        std::copy(std::begin(host.values), std::end(host.values), before);
+        std::unique_ptr<EditorBase> editor = product::createEditor(host);
+        editor->idle(0.0);
+        for (int t = 0; t < tabs; ++t) editor->key(key::kTab, 0);
+        editor->key(key::kUp, 0);
+        int moved = -1;
+        for (size_t i = 0; i < params::kCount; ++i)
+            if (host.values[i] != before[i]) {
+                if (moved >= 0) return -1;
+                moved = static_cast<int>(i);
+            }
+        return moved;
+    };
+    // The first continuous parameter Tab reaches.
+    int tabs = 0, index = -1;
+    for (int t = 1; t <= 16 && index < 0; ++t) {
+        MockHost probe;
+        const int moved = nudge(probe, t);
+        if (moved >= 0 && params::at(static_cast<size_t>(moved)).kind == ParamKind::Continuous) {
+            tabs = t;
+            index = moved;
+        }
+    }
+    if (index < 0) {
+        std::printf("    (no continuous control takes arrow keys: skipped)\n");
+        return;
+    }
+    moot.index = static_cast<size_t>(index);
+    MootHost dimmed;  // at its default: dimmed, so Tab passes it by
+    dimmed.definition = &moot;
+    CHECK(nudge(dimmed, tabs) != index);
+    MootHost applying;  // away from it: it takes the key
+    applying.definition = &moot;
+    applying.values[moot.index] = toHost(params::at(moot.index), params::at(moot.index).max) * 0.5 +
+                                  hostDefault(params::at(moot.index)) * 0.5;
+    CHECK(nudge(applying, tabs) == index);
+}
+#endif
+
 TEST(rebuilding_after_a_window_draw_keeps_the_displayed_editor_alive) {
     MockHost host;
     const Theme theme{};

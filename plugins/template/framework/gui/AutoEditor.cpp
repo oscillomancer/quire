@@ -216,6 +216,16 @@ class AutoEditor : public EditorBase {
                 if (c.caption) r.cutTop(kCaption);
                 Control& control = ui().add(c.id, c.widget, r);
                 if (c.widget == Widget::TextField) control.label = propertyName(c.id);
+                // Dimmed while the definition says it does not apply.
+                const bool property = c.widget == Widget::TextField || c.widget == Widget::File;
+                const int index = property ? -1 : params.indexOf(c.id);
+                if (index >= 0)
+                    control.enabledWhen([this, index] {
+                        const ParamTable& table = paramTable();
+                        return definition().applies(static_cast<size_t>(index), [&](size_t k) {
+                            return this->host().value(table.at(k).id);
+                        });
+                    });
             }
         }
         usePeakMeters(definition().info().audioOutput());
