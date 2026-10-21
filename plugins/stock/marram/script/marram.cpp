@@ -1577,6 +1577,7 @@ struct Marram : Instrument {
     double restFade = 0.99;
     int notes = 0;
     int quiet = 0;
+    int tail = 0;  // the tail last reported, in samples
     bool tablesMade = false;
     // The free LFOs, at the block's start, and the song as the block began.
     Array<double, 3> freePhase;
@@ -1623,6 +1624,8 @@ struct Marram : Instrument {
         restFade = exp(-1.0 / (0.003 * rate));
         notes = 0;
         quiet = 0;
+        tail = 0;
+        reportTail(false);
         freePhase.fill(0.0);
         freeCycle.fill(0);
         if (!tablesMade) makeTables();
@@ -2369,9 +2372,30 @@ struct Marram : Instrument {
             peakR = max(abs(io[io.channels - 1][i]), peakR * 0.99985);
         }
         show();
+        bool sounding = false;
+        for (int v = 0; v < voiceCount(); ++v)
+            if (voice[v].sounding && voicePlaying(v)) sounding = true;
+        reportTail(sounding);
         freeOn(0, io.frames, l1Sync, l1Rate, l1Division);
         freeOn(1, io.frames, l2Sync, l2Rate, l2Division);
         freeOn(2, io.frames, l3Sync, l3Rate, l3Division);
+    }
+
+    // How long the output goes on once the keys are up: the longest amp
+    // release (a route may lengthen a voice's), and 20 ms for a stolen
+    // voice's fade and the downsampler. Raised whenever a voice needs more,
+    // lowered only with no voice sounding, so the host is not told of every
+    // wobble of a routed release.
+    void reportTail(bool sounding) {
+        double longest = ampRelease;
+        for (int v = 0; v < voiceCount(); ++v)
+            if (voice[v].sounding && voicePlaying(v))
+                longest = max(longest, ampRelease.forVoice(v));
+        const int want = ceilToInt((longest + 20.0) * 0.001 * sampleRate());
+        if (want > tail || (!sounding && want != tail)) {
+            tail = want;
+            setTail(tail);
+        }
     }
 
     // What the editor shows: the level, the voices, and the newest note's

@@ -58,3 +58,21 @@ expect("{\"voice.quality\":\"high\",\"drive.type\":\"fold\",\"drive.amount\":12}
 # A semitone up by Macro 1 at full; 80 cents up by dsp.test's velocity, 0.8.
 expect("{\"macro1\":100}" 466 "{\"macro1>voice.tune\":{\"amount\":\"1 st\"}}")
 expect("{}" 460 "{\"velocity>voice.tune\":{\"amount\":100}}")
+
+# The tail it reports is its release, so a host that ends a render on it
+# keeps the whole release: a 1 s release renders past its key's release
+# (a half note, ending at 1 s) for 1 s and its 20 ms margin.
+execute_process(
+    COMMAND ${CMAKE_COMMAND} -E env "HOME=${home}" "USERPROFILE=${home}" "APPDATA=${home}/config"
+            "LOCALAPPDATA=${home}/local" "XDG_DATA_HOME=${home}/data" "${SANDBOX}" exec
+            "{\"command\":\"batch\",\"args\":{\"steps\":[{\"command\":\"plugin.load\",\"args\":{\"plugin\":\"${PLUGIN}\"}},{\"command\":\"patch.merge\",\"args\":{\"instance\":\"in_1\",\"patch\":{\"params\":{\"amp.release\":1000}}}},{\"command\":\"render\",\"args\":{\"notation\":\"1: A4:h r:h\",\"seconds\":1,\"tail_s\":5}}]}}"
+            --workdir "${WORK}/workdir"
+    RESULT_VARIABLE result OUTPUT_VARIABLE json ERROR_VARIABLE err)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "the tail render failed (${result}):\n${json}\n${err}")
+endif()
+string(JSON tail GET "${json}" results 2 tail_s)
+if(NOT tail STREQUAL "1.02")
+    message(FATAL_ERROR "a 1 s release renders a ${tail} s tail, want 1.02")
+endif()
+message(STATUS "a 1 s release: a ${tail} s tail")

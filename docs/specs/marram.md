@@ -36,7 +36,9 @@ is computed every 16 samples of a voice's life and glided between, so
 renders do not depend on the block size; every random choice (free-running
 phases, unison and drift, noise) is seeded by the order of the notes, so a
 render is the same every time. Sixteen voices (`voice.polyphony` plays
-fewer); a stolen voice fades out over a few milliseconds. A safety limit leaves the output untouched below
+fewer); a stolen voice fades out over a few milliseconds. Its tail (CLAP's
+`tail`, what a host waits for after the last key is up) is the longest amp
+release, a voice's routes included, plus 20 ms. A safety limit leaves the output untouched below
 −1 dBFS and bends it toward full scale above.
 
 ## 2. Parameters

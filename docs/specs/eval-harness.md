@@ -51,16 +51,16 @@ Profiles are simple, intentionally forgiving ranges over three descriptors:
 
 | Family | Descriptor ranges | Recipe measurements |
 |---|---|---|
-| Pad | centroid 200–2200 Hz; attack 400–2400 ms; width .05–.48 | 1227 Hz; 659 ms; .177 |
+| Pad | centroid 200–2200 Hz; attack 400–2400 ms; width .05–.48 | 995 Hz; 659 ms; .180 |
 | Pluck bass | centroid 100–1200 Hz; attack 0–60 ms; decay20 150–1600 ms | 123 Hz; 8 ms; 532 ms |
-| Bell | centroid 400–5000 Hz; attack 0–50 ms; decay20 400–3500 ms | 1241 Hz; 0 ms; 1934 ms |
-| Supersaw | centroid 700–6500 Hz; voiced 30–100%; width .03–.50 | 3428 Hz; 100%; .198 |
+| Bell | centroid 400–5000 Hz; attack 0–50 ms; decay20 400–3500 ms | 1038 Hz; 0 ms; 1934 ms |
+| Supersaw | centroid 700–6500 Hz; voiced 30–100%; width .03–.50 | 3356 Hz; 100%; .197 |
 | Sub bass | centroid 40–220 Hz; low-band level −8–0 dB; width 0–.015 | 67 Hz; −1.718 dB; 0 |
 | FM e-piano | centroid 250–4000 Hz; attack 0–80 ms; decay20 300–2200 ms | 655 Hz; 0 ms; 719 ms |
 | Noise snare | centroid 500–6000 Hz; attack 0–30 ms; decay20 30–600 ms | 5733 Hz; 0 ms; 118 ms |
-| Formant lead | centroid 700–6000 Hz; attack 0–150 ms; median flux .001–.20 | 2182 Hz; 22 ms; .104 |
+| Formant lead | centroid 700–6000 Hz; attack 0–150 ms; median flux .001–.20 | 2184 Hz; 22 ms; .106 |
 | Acid bass | centroid 200–4500 Hz; attack 0–60 ms; flatness 0–.15 | 423 Hz; 11 ms; 0 |
-| Strings | centroid 300–3500 Hz; attack 100–1000 ms; width .03–.50 | 1121 Hz; 230 ms; .080 |
+| Strings | centroid 300–3500 Hz; attack 100–1000 ms; width .03–.50 | 1121 Hz; 230 ms; .081 |
 
 The pad's RMS attack includes its slow filter swell. Supersaw beating made the
 global-envelope 10–90% attack read far longer than its 5 ms amp attack; that
