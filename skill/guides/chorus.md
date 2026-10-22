@@ -22,7 +22,7 @@ changes only the keys it names.
 | `medium` | `clean` or `bbd` (an analog bucket brigade: darker the longer the delay, a slight lean and hiss) | clean |
 | `age` | %, 0…100: the bucket brigade's wear: darker, more lean, more hiss | 30 |
 | `high_cut` | Hz, 1000…20000 on the voices; 20000 is off | 20000 |
-| `low_keep` | Hz, 20…1000: below this the sound stays dry and centred; 20 is off | 20 |
+| `low_keep` | Hz, 20…1000: below this the sound stays dry; 20 is off | 20 |
 | `feedback` | %, −80…80: a ringing, flanged edge (negative is hollow); the level is held | 0 |
 | `mix` | %, 0…100: 50 is the classic even blend, at the dry's loudness; not with `vibrato` | 50 |
 | `output` | dB, −24…24 | 0 |
@@ -73,7 +73,7 @@ A thick double for a lead vocal or a pad (bass kept solid):
 {"params":{"style":"multi","voices":6,"delay":20,"rate":0.3,"depth":5,"shape":"sine","drift":60,"low_keep":150,"mix":45}}
 ```
 
-Chorus on bass, the low end dry and centred:
+Chorus on bass, the low end dry:
 
 ```json
 {"params":{"delay":6,"rate":0.5,"depth":7,"low_keep":180,"mix":50}}
