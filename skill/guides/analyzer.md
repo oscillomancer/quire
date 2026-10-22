@@ -10,7 +10,7 @@ measure; read it with `fx.meters`.
 
 | Where | How |
 |---|---|
-| DAW, after a render | `render.mix`, then `fx.meters {"fx": "fx_3", "from": "render"}`: the readings as that render ended. Offline renders use plugin instances of their own, so this is the way to measure without playing in real time |
+| DAW, after a render | `render.mix`, then `fx.meters {"fx": "fx_3", "from": "render"}`: the last refreshed readings from that render. Offline renders use plugin instances of their own, so this is the way to measure without playing in real time |
 | DAW, while playing or monitoring | `fx.meters {"fx": "fx_3"}` (`from` defaults to `live`): the playing instance as it stands. `source` says what you got: `live`, `render`, or `none` (nothing has run yet) |
 | Sandbox | `dsp.test` with `plugin: "com.suppleaudio.lichen"` reports them as `meters`; or `plugin.load`, `render`, then `param.get` |
 
@@ -18,11 +18,21 @@ The readings come in two kinds:
 
 - **Now:** `momentary` (400 ms) and `short_term` (3 s) loudness.
 - **The play:** everything else, from when play starts until it stops, after
-  which they hold. A render plays, so it covers exactly the render. A play
+  which they hold. A render plays, so these summarize its audio. A play
   starts them afresh unless `restart_on_play` is false; any change to
   `reset` starts them afresh too. With the transport never started (a live
   input, `dsp.test`) they gather until reset. `measured` says how much audio
   they cover: check it before trusting them.
+
+Readings refresh every 100 ms, so the last reading can miss up to the final
+100 ms of a render, plus the host's meter cadence. This includes `measured`;
+the readings are periodic snapshots, not an exact snapshot at the render's
+final sample.
+
+On a restart or reset, rolling readings keep their history. A window enters
+the new play's accumulated readings only once all of it lies after the
+restart: 400 ms for the integrated gate and momentary maximum, 3 s for the
+range and short-term maximum, and a full transform window for tone and key.
 
 ## Readings
 

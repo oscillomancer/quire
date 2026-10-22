@@ -415,7 +415,7 @@ struct Lichen : Effect {
 
     Array<Array<double, 32>, 4> fir;
     Array<TruePeak, 2> detect;
-    Array<KWeighting, 2> kw;
+    Array<KWeighting, 2> kw, playKw;
     Array<Stft, 2> stft;
     Stft brief;  // the mid in short frames, for the centroid
     double rate = 48000.0;
@@ -436,11 +436,15 @@ struct Lichen : Effect {
     bool wasPlaying = false;
     bool holding = false;
     bool stereoNow = true;
+    bool unplayed = true;
+    bool requireCleanWindows = false;
 
     // Loudness: hundred-millisecond energies (stereo, and the mono fold-down).
     Array<double, 30> blockE, blockMono;
+    Array<double, 30> playE, playMono;
     int blockAt = 0, blocksFilled = 0, blockLength = 4800, blockCount = 0;
     double sumE = 0.0, sumMono = 0.0, blockPeak = 0.0;
+    double sumPlayE = 0.0, sumPlayMono = 0.0;
     Array<double, kBins> gatedEnergy, monoEnergy;
     Array<int, kBins> gatedCount, monoCount, rangeCount;
     double gatedTotal = 0.0, monoTotal = 0.0, rangeTotal = 0.0;
@@ -449,7 +453,7 @@ struct Lichen : Effect {
     double monoIntegrated = -120.0, rangeNow = 0.0, rangeLow = -120.0, rangeHigh = -120.0;
     double momentaryTop = -120.0, shortTop = -120.0;
     // Peaks, problems and the stereo sums, since play started.
-    double peakTrue = 0.0, peakSample = 0.0;
+    double peakTrue = 0.0, peakSample = 0.0, peakReference = 0.0;
     int overCount = 0, clipCount = 0;
     bool inOver = false;
     Array<int, 2> flatRun;
@@ -578,6 +582,7 @@ struct Lichen : Effect {
         // A restart prepares an instance that has played: start it afresh.
         wasPlaying = false;
         holding = false;
+        unplayed = true;
         restartAll();
         blockE.fill(0.0);
         blockMono.fill(0.0);
@@ -616,6 +621,21 @@ struct Lichen : Effect {
 
     // Every reading since play: on a start of play, a reset, a prepare.
     void restartAll() {
+        // Initial zero padding is clean. After a restart the rolling filters
+        // and transforms stay live, but their old windows must not enter the
+        // new play's accumulated readings.
+        requireCleanWindows = !unplayed;
+        // A clean window alone cannot remove a prior play's IIR filter tail.
+        // Keep the rolling filters for "now" and start this play's weighting
+        // from silence. The extra path is needed only after a restart.
+        for (int c = 0; c < 2; ++c) {
+            playKw[c] = kw[c];
+            playKw[c].clear();
+        }
+        playE.fill(0.0);
+        playMono.fill(0.0);
+        sumPlayE = 0.0;
+        sumPlayMono = 0.0;
         gatedEnergy.fill(0.0);
         monoEnergy.fill(0.0);
         gatedCount.fill(0);
@@ -636,6 +656,7 @@ struct Lichen : Effect {
         shortTop = -120.0;
         peakTrue = 0.0;
         peakSample = 0.0;
+        peakReference = 0.0;
         overCount = 0;
         clipCount = 0;
         inOver = false;
@@ -688,6 +709,7 @@ struct Lichen : Effect {
         wasPlaying = playing;
         stereoNow = io.channels > 1;
         const bool measuring = !holding;
+        if (io.frames > 0) unplayed = false;
         // The audio code reads the block and never writes it: what comes in
         // goes out as it came.
         for (int i = 0; i < io.frames; ++i) {
@@ -696,21 +718,28 @@ struct Lichen : Effect {
             if (!isFinite(l)) l = 0.0;
             if (!isFinite(r)) r = 0.0;
 
-            const double gate = 0.5 * min(peakTrue, 1.0);
+            // Keep the interpolator's existing gate (and rolling peak history)
+            // independent of which windows the since-play reading may count.
+            const double gate = 0.5 * min(peakReference, 1.0);
             const double tl = detect[0].push(l, fir, gate);
             const double tr = stereoNow ? detect[1].push(r, fir, gate) : tl;
             const double tp = max(tl, tr);
             const double al = abs(l), ar = abs(r);
             blockPeak = max(blockPeak, tp);
             if (measuring) {
-                peakTrue = max(peakTrue, tp);
-                peakSample = max(peakSample, max(al, ar));
-                if (tp > 1.0) {
-                    if (!inOver) overCount += 1;
-                    inOver = true;
-                } else {
-                    inOver = false;
+                peakReference = max(peakReference, tp);
+                // The interpolator uses 32 inputs and two preceding peak
+                // points. Wait until those also belong to the new play.
+                if (!requireCleanWindows || frames >= kTaps + 1.0) {
+                    peakTrue = max(peakTrue, tp);
+                    if (tp > 1.0) {
+                        if (!inOver) overCount += 1;
+                        inOver = true;
+                    } else {
+                        inOver = false;
+                    }
                 }
+                peakSample = max(peakSample, max(al, ar));
                 for (int c = 0; c < 2; ++c) {
                     if (c == 1 && !stereoNow) continue;
                     const double a = c == 0 ? al : ar;
@@ -740,6 +769,17 @@ struct Lichen : Effect {
                 sumE += kl * kl;
                 sumMono += kl * kl;
             }
+            if (requireCleanWindows) {
+                const double pl = playKw[0].process(l);
+                if (stereoNow) {
+                    const double pr = playKw[1].process(r);
+                    sumPlayE += pl * pl + pr * pr;
+                    sumPlayMono += 0.5 * (pl + pr) * (pl + pr);
+                } else {
+                    sumPlayE += pl * pl;
+                    sumPlayMono += pl * pl;
+                }
+            }
             blockCount += 1;
             if (blockCount >= blockLength) closeBlock(measuring);
 
@@ -759,7 +799,9 @@ struct Lichen : Effect {
             if (ready) frame(measuring);
             stft[0].pull();
             if (stereoNow) stft[1].pull();
-            if (brief.push(0.5 * (l + r)) && measuring) centroidFrame();
+            if (brief.push(0.5 * (l + r)) && measuring &&
+                (!requireCleanWindows || frames >= brief.size()))
+                centroidFrame();
             brief.pull();
         }
         scopeHead.set(scopeAt);
@@ -796,10 +838,16 @@ struct Lichen : Effect {
     void closeBlock(bool measuring) {
         blockE[blockAt] = sumE / blockCount;
         blockMono[blockAt] = sumMono / blockCount;
+        if (requireCleanWindows) {
+            playE[blockAt] = sumPlayE / blockCount;
+            playMono[blockAt] = sumPlayMono / blockCount;
+        }
         blockAt = blockAt == 29 ? 0 : blockAt + 1;
         blocksFilled = min(blocksFilled + 1, 30);
         sumE = 0.0;
         sumMono = 0.0;
+        sumPlayE = 0.0;
+        sumPlayMono = 0.0;
         blockCount = 0;
         double m = 0.0, mm = 0.0, s = 0.0;
         for (int k = 0; k < blocksFilled; ++k) {
@@ -812,35 +860,52 @@ struct Lichen : Effect {
         }
         momentaryNow = lufs(m / min(4, blocksFilled));
         shortNow = lufs(s / blocksFilled);
-        const double monoMomentary = lufs(mm / min(4, blocksFilled));
-        if (measuring && blocksFilled >= 4) {
-            momentaryTop = max(momentaryTop, momentaryNow);
-            if (momentaryNow > -70.0) {
-                const int bin = clamp(floorToInt((momentaryNow + 70.0) * 10.0), 0, kBins - 1);
-                gatedEnergy[bin] += m / 4.0;
+        double pm = m, pmm = mm, ps = s;
+        if (requireCleanWindows) {
+            pm = 0.0;
+            pmm = 0.0;
+            ps = 0.0;
+            for (int k = 0; k < blocksFilled; ++k) {
+                const int b = wrap(blockAt - 1 - k, 30);
+                if (k < 4) {
+                    pm += playE[b];
+                    pmm += playMono[b];
+                }
+                ps += playE[b];
+            }
+        }
+        const double playMomentary =
+            requireCleanWindows ? lufs(pm / min(4, blocksFilled)) : momentaryNow;
+        const double playShort = requireCleanWindows ? lufs(ps / blocksFilled) : shortNow;
+        const double monoMomentary = lufs(pmm / min(4, blocksFilled));
+        if (measuring && blocksFilled >= 4 && frames >= 4.0 * blockLength) {
+            momentaryTop = max(momentaryTop, playMomentary);
+            if (playMomentary > -70.0) {
+                const int bin = clamp(floorToInt((playMomentary + 70.0) * 10.0), 0, kBins - 1);
+                gatedEnergy[bin] += pm / 4.0;
                 gatedCount[bin] += 1;
-                gatedTotal += m / 4.0;
+                gatedTotal += pm / 4.0;
                 gatedBlocks += 1;
                 integratedNow = gatedMean(gatedEnergy, gatedCount, gatedTotal, gatedBlocks);
             }
             if (monoMomentary > -70.0) {
                 const int bin = clamp(floorToInt((monoMomentary + 70.0) * 10.0), 0, kBins - 1);
-                monoEnergy[bin] += mm / 4.0;
+                monoEnergy[bin] += pmm / 4.0;
                 monoCount[bin] += 1;
-                monoTotal += mm / 4.0;
+                monoTotal += pmm / 4.0;
                 monoBlocks += 1;
                 monoIntegrated = gatedMean(monoEnergy, monoCount, monoTotal, monoBlocks);
             }
         }
-        if (measuring && blocksFilled >= 30) {
-            shortTop = max(shortTop, shortNow);
-            if (shortNow > -70.0) {
-                const int bin = clamp(floorToInt((shortNow + 70.0) * 10.0), 0, kBins - 1);
+        if (measuring && blocksFilled >= 30 && frames >= 30.0 * blockLength) {
+            shortTop = max(shortTop, playShort);
+            if (playShort > -70.0) {
+                const int bin = clamp(floorToInt((playShort + 70.0) * 10.0), 0, kBins - 1);
                 rangeCount[bin] += 1;
-                rangeTotal += s / 30.0;
+                rangeTotal += ps / 30.0;
                 rangeBlocks += 1;
                 loudnessRange();
-                const int lu = floorToInt(shortNow + 60.0);
+                const int lu = floorToInt(playShort + 60.0);
                 if (lu >= 0 && lu < kSpread) spreadShown[lu] += 1.0f;
             }
         }
@@ -971,7 +1036,8 @@ struct Lichen : Effect {
         // A sine of amplitude a sums to 1.5 a^2 over its bins: a frame's mean
         // square is the total over three.
         const bool silent = total / 3.0 < 1e-7;
-        const bool counted = measuring && !silent;
+        const bool counted =
+            measuring && !silent && (!requireCleanWindows || frames >= stft[0].size());
 
         // The drawn spectrum, now and since play.
         for (int i = 0; i < kPoints; ++i) {
