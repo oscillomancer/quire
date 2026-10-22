@@ -82,11 +82,18 @@ struct TruePeak {
         Array<double, 6> s;
         s[0] = lastPoint;
         s[1] = abs(hist[at + kHalf]);
-        for (int k = 1; k < kPhases; ++k) {
-            double y = 0.0;
-            for (int j = 0; j < kTaps; ++j) y += h[k][j] * hist[at + j];
-            s[k + 1] = abs(y);
+        // All three phases read the same history. Keep each phase's sum in
+        // tap order while sharing that read and its bounds check.
+        double y1 = 0.0, y2 = 0.0, y3 = 0.0;
+        for (int j = 0; j < kTaps; ++j) {
+            const double v = hist[at + j];
+            y1 += h[1][j] * v;
+            y2 += h[2][j] * v;
+            y3 += h[3][j] * v;
         }
+        s[2] = abs(y1);
+        s[3] = abs(y2);
+        s[4] = abs(y3);
         s[5] = abs(hist[at + kHalf - 1]);
         double top = 0.0;
         for (int k = 1; k <= 4; ++k)
@@ -250,6 +257,20 @@ double lufs(double meanSquare) {
     return meanSquare > 1e-12 ? -0.691 + 10.0 * log10(meanSquare) : -120.0;
 }
 
+// A level can stay still for many samples, including after a glide lands.
+// Reuse exactly the same conversion until its dB value changes.
+struct LevelGain {
+    double db = 0.0, linear = 1.0;
+
+    double get(double value) {
+        if (value != db) {
+            db = value;
+            linear = dbToGain(value);
+        }
+        return linear;
+    }
+};
+
 // --- the look --------------------------------------------------------------------------
 
 constexpr int kInk = 0x1A1411;
@@ -389,7 +410,7 @@ struct Treeline : Effect {
     Array<double, 30> blockOut, blockIn;
     int blockAt = 0, blocksFilled = 0, blockLength = 4800, blockCount = 0;
     double sumOut = 0.0, sumIn = 0.0;
-    Array<double, kBins> gatedEnergy, rangeEnergy;
+    Array<double, kBins> gatedEnergy;
     Array<int, kBins> gatedCount, rangeCount;
     double gatedTotal = 0.0, rangeTotal = 0.0;
     int gatedBlocks = 0, rangeBlocks = 0;
@@ -406,6 +427,7 @@ struct Treeline : Effect {
     int recentOvers = 0, overAge = 0, overHold = 240000;
     // Listening.
     int listenMode = 0;
+    LevelGain driveGain, overGain, matchGain;
     double matchDb = 0.0, kMatch = 0.0, kMatchOff = 0.0, deltaMix = 0.0, deltaStep = 0.001;
     bool unplayed = true;
     bool wasPlaying = false;
@@ -536,7 +558,6 @@ struct Treeline : Effect {
     // Everything accumulated: on a start of play, and when accumulating is switched.
     void restartTotals() {
         gatedEnergy.fill(0.0);
-        rangeEnergy.fill(0.0);
         gatedCount.fill(0);
         rangeCount.fill(0);
         gatedTotal = 0.0;
@@ -633,7 +654,7 @@ struct Treeline : Effect {
             double r = stereoNow ? io[1][i] : l;
             if (!isFinite(l)) l = 0.0;
             if (!isFinite(r)) r = 0.0;
-            const double drive = dbToGain(gain.at(i));
+            const double drive = driveGain.get(gain.at(i));
             const double xl = l * drive, xr = r * drive;
 
             // The peak to hold, and the reduction that holds it.
@@ -689,7 +710,7 @@ struct Treeline : Effect {
             const double tp = max(tl, tr);
             peakHeld = max(peakHeld, tp);
             blockPeak = max(blockPeak, tp);
-            if (tp > dbToGain(ceiling.at(i) + 0.05)) {
+            if (tp > overGain.get(ceiling.at(i) + 0.05)) {
                 overs += 1;
                 recentOvers += 1;
                 overAge = 0;
@@ -715,7 +736,7 @@ struct Treeline : Effect {
             const bool matched = listenMode == 1 && shortIn > -70.0 && shortNow > -70.0;
             matchDb += (listenMode == 1 ? kMatch : kMatchOff) *
                        ((matched ? clamp(shortIn - shortNow, -30.0, 6.0) : 0.0) - matchDb);
-            const double m = dbToGain(matchDb);
+            const double m = matchGain.get(matchDb);
             deltaMix = clamp(deltaMix + (listenMode == 2 ? deltaStep : -deltaStep), 0.0, 1.0);
             // Delta: what it took, at the level it came in.
             const double undo = 1.0 / drive;
@@ -866,7 +887,6 @@ struct Treeline : Effect {
         }
         if (blocksFilled >= 30 && shortNow > -70.0) {
             const int bin = clamp(floorToInt((shortNow + 70.0) * 10.0), 0, kBins - 1);
-            rangeEnergy[bin] += s / 30.0;
             rangeCount[bin] += 1;
             rangeTotal += s / 30.0;
             rangeBlocks += 1;
@@ -909,7 +929,8 @@ struct Treeline : Effect {
         }
         integratedNow = -120.0;
         if (n > 0) {
-            const double gate = lufs(e / n) - 10.0;
+            // The relative gate must not admit blocks the absolute gate rejected.
+            const double gate = max(-70.0, lufs(e / n) - 10.0);
             double passed = 0.0;
             int m = 0;
             for (int k = 0; k < recentFilled; ++k) {
