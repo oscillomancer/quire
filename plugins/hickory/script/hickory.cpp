@@ -186,6 +186,7 @@ struct Hickory : Effect {
     double delayMix = 1.0, delayStep = 0.001;
     double gainDb = 0.0, gainLinear = 1.0;
     bool unplayed = true;
+    bool stereoBus = true;  // conservative until the first block supplies its layout
 
     // The meters: 3 s in chunks of 100 ms.
     int chunkLength = 4800, chunkAt = 0, chunkHead = 0, chunksFilled = 0;
@@ -226,6 +227,8 @@ struct Hickory : Effect {
             bandR[k].bandpass(hz, 1.414);
         }
         unplayed = true;
+        delayWant = clamp(roundToInt(delay * 0.001 * rate), 0, roundToInt(0.05 * rate));
+        reportTail();
     }
 
     void update() {
@@ -254,6 +257,20 @@ struct Hickory : Effect {
             delayOld = delayWant;
             delayMix = 1.0;
         }
+        reportTail();
+    }
+
+    void reportTail() {
+        // Keep both audible delay taps, and a pending change during a crossfade.
+        int samples = max(delayWant, delayNow);
+        if (delayMix < 1.0) samples = max(samples, delayOld);
+        // At maximum gain and width, a full-scale impulse is below -100 dBFS
+        // by 438 ms (5 Hz DC block) / 102 ms (30 Hz bass mono) at 8 kHz.
+        // These bounds also leave margin for sustained input and filter cascades.
+        double seconds = dcBlock.on() || dcMix.value != 0.0 ? 0.75 : 0.0;
+        if (stereoBus && (bassMono.on() || monoMix.value != 0.0))
+            seconds += 5.0 / min(monoBelow.value(), 0.45 * rate);
+        setTail(samples + ceilToInt(seconds * rate));
     }
 
     // The chunk just ended joins the window, and the meters read the window.
@@ -296,6 +313,7 @@ struct Hickory : Effect {
     void process(Block& io) {
         if (unplayed) unplayed = false;
         const bool stereo = io.channels > 1;
+        stereoBus = stereo;
         for (int i = 0; i < io.frames; ++i) {
             const double inL = io[0][i];
             const double inR = stereo ? io[1][i] : inL;
@@ -420,6 +438,7 @@ struct Hickory : Effect {
             }
         }
 
+        reportTail();
         outputPeak.set(mPeak);
         correlation.set(mCorrelation);
         levelBalance.set(mBalance);

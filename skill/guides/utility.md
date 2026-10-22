@@ -10,6 +10,12 @@ At rest it changes nothing (the output is the input, bit for bit), and it
 adds no latency. Every switch fades over 10 ms, so all of it can be
 automated.
 
+Offline renders keep the delay's tail, including both taps while its time
+crossfades. Enabled or fading-out filters add a conservative ring-out:
+750 ms for the DC block, and five crossover periods for bass mono (167 ms
+at 30 Hz). These add when both filters apply; at neutral settings the
+reported tail is zero.
+
 | Key | Unit and range | Default |
 |---|---|---|
 | `gain` | dB, −60…24; −60 is silence | 0 |
