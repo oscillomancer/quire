@@ -134,11 +134,14 @@ double fall(double x, double c) { return 1.0 - rise(1.0 - x, c); }
 // The drive's curves (soft, tape, fold, hard), each with its resting point
 // taken off so a bias adds no offset.
 double tapeCurve(double v) { return v >= 0.0 ? fastTanh(v * 1.2) / 1.2 : fastTanh(v * 0.8) / 0.8; }
+double driveTransfer(int type, double u) {
+    if (type == 1) return fastTanh(u);
+    if (type == 2) return tapeCurve(u);
+    if (type == 3) return sin(0.5 * pi * u);
+    return clamp(u, -1.0, 1.0);
+}
 double driveCurve(int type, double u, double bias) {
-    if (type == 1) return fastTanh(u + bias) - fastTanh(bias);
-    if (type == 2) return tapeCurve(u + bias) - tapeCurve(bias);
-    if (type == 3) return sin(0.5 * pi * (u + bias)) - sin(0.5 * pi * bias);
-    return clamp(u + bias, -1.0, 1.0) - clamp(bias, -1.0, 1.0);
+    return driveTransfer(type, u + bias) - driveTransfer(type, bias);
 }
 
 // A value from -1 to 1 for each whole number n and seed, the same everywhere:
@@ -321,10 +324,7 @@ struct Filter {
     }
 
     // Band b of the formant bank, a band pass with 0 dB at its peak.
-    double formantBand(int b, double x, double g, double k) {
-        const double a1 = 1.0 / (1.0 + g * (g + k));
-        const double a2 = g * a1;
-        const double a3 = g * a2;
+    double formantBand(int b, double x, double a1, double a2, double a3, double k) {
         const double s1 = band[b * 2];
         const double s2 = band[b * 2 + 1];
         const double v3 = x - s2;
@@ -356,7 +356,10 @@ struct FilterNow {
     double drive = 1.0;
     double feedback = 0.0;
     double damping = 0.0;
-    Array<double, 3> fg;  // the formant bands' gains and widths
+    // The formant coefficients stay fixed until the next control tick.
+    Array<double, 3> fa1;
+    Array<double, 3> fa2;
+    Array<double, 3> fa3;
     Array<double, 3> fk;
 };
 
@@ -382,8 +385,7 @@ struct Voice {
     Array<int, 4> from;
     Array<double, 4> noise;  // this frame's noise sample
     Array<double, 4> lastPink;
-    Array<int, 4> level;  // a wavetable's band level
-    Array<int, 4> base0;  // and where its frames start
+    Array<int, 4> base0;  // where a wavetable's frames start
     Array<int, 4> base1;
     Array<int, 4> size;
     Array<double, 4> blend;
@@ -409,6 +411,8 @@ struct Voice {
     double driveGain = 1.0;
     double driveBias = 0.0;
     double driveMix = 1.0;
+    double driveZero = 0.0;
+    double driveScale = 1.0;
     double ampL = 0.0;
     double ampLStep = 0.0;
     double ampR = 0.0;
@@ -434,9 +438,6 @@ struct Voice {
 // An oscillator's settings, from its parameters.
 struct OscSet {
     int type = 0;
-    double gain = 0.0;
-    double pan = 0.0;
-    double tune = 0.0;  // semitones
     int coarse = 0;
     int wave = 0;
     double width = 0.5;
@@ -447,7 +448,6 @@ struct OscSet {
     double feedback = 0.0;
     int color = 0;
     int octave = -1;
-    double fm = 0.0;
     int from = 0;
     int to = 0;       // filter 1, filter 2, both, direct
     bool toA = true;  // and so: into filter 1's input, filter 2's, or past them
@@ -492,7 +492,6 @@ struct FilterSet {
     double keytrack = 0.0;
     double env = 0.0;
     double velocity = 0.0;
-    double drive = 1.0;
 };
 
 struct Marram : Instrument {
@@ -1559,6 +1558,7 @@ struct Marram : Instrument {
     Array<Random, kVoices> random;  // each voice's, seeded by the note it plays
     Array<OscSet, 4> osc;
     Array<FilterSet, 2> filt;
+    bool parallel = false;
     Array<int, 2> combWas;  // each filter's type, as update() last saw it
     Array<double, kUnison> detuneRatio;
     Array<double, kUnison> spreadAt;
@@ -1634,25 +1634,21 @@ struct Marram : Instrument {
     }
 
     void update() {
-        loadOsc(osc[0], 0, o1Type, o1Level, o1Pan, o1Coarse, o1Fine, o1Wave, o1Width, o1Table,
-                o1Position, o1Ratio, o1Feedback, o1Color, o1Octave, o1Fm, o1FmFrom, o1To,
-                o1Retrigger);
-        loadOsc(osc[1], 1, o2Type, o2Level, o2Pan, o2Coarse, o2Fine, o2Wave, o2Width, o2Table,
-                o2Position, o2Ratio, o2Feedback, o2Color, o2Octave, o2Fm, o2FmFrom, o2To,
-                o2Retrigger);
-        loadOsc(osc[2], 2, o3Type, o3Level, o3Pan, o3Coarse, o3Fine, o3Wave, o3Width, o3Table,
-                o3Position, o3Ratio, o3Feedback, o3Color, o3Octave, o3Fm, o3FmFrom, o3To,
-                o3Retrigger);
-        loadOsc(osc[3], 3, o4Type, o4Level, o4Pan, o4Coarse, o4Fine, o4Wave, o4Width, o4Table,
-                o4Position, o4Ratio, o4Feedback, o4Color, o4Octave, o4Fm, o4FmFrom, o4To,
-                o4Retrigger);
+        loadOsc(osc[0], 0, o1Type, o1Coarse, o1Wave, o1Width, o1Table, o1Position, o1Ratio,
+                o1Feedback, o1Color, o1Octave, o1FmFrom, o1To, o1Retrigger);
+        loadOsc(osc[1], 1, o2Type, o2Coarse, o2Wave, o2Width, o2Table, o2Position, o2Ratio,
+                o2Feedback, o2Color, o2Octave, o2FmFrom, o2To, o2Retrigger);
+        loadOsc(osc[2], 2, o3Type, o3Coarse, o3Wave, o3Width, o3Table, o3Position, o3Ratio,
+                o3Feedback, o3Color, o3Octave, o3FmFrom, o3To, o3Retrigger);
+        loadOsc(osc[3], 3, o4Type, o4Coarse, o4Wave, o4Width, o4Table, o4Position, o4Ratio,
+                o4Feedback, o4Color, o4Octave, o4FmFrom, o4To, o4Retrigger);
         osc[1].sync = o2Sync.on();
         osc[2].sync = o3Sync.on();
         osc[3].sync = o4Sync.on();
         loadFilter(filt[0], f1Type, f1Cutoff, f1Resonance, f1Slope, f1Mode, f1Feedback, f1Damping,
-                   f1Vowel, f1Shift, f1Keytrack, f1Env, f1Velocity, f1Drive);
+                   f1Vowel, f1Shift, f1Keytrack, f1Env, f1Velocity);
         loadFilter(filt[1], f2Type, f2Cutoff, f2Resonance, f2Slope, f2Mode, f2Feedback, f2Damping,
-                   f2Vowel, f2Shift, f2Keytrack, f2Env, f2Velocity, f2Drive);
+                   f2Vowel, f2Shift, f2Keytrack, f2Env, f2Velocity);
         // A filter that becomes a comb starts from an empty line, not from
         // what a note long gone left in it.
         for (int f = 0; f < 2; ++f) {
@@ -1664,7 +1660,7 @@ struct Marram : Instrument {
             combWas[f] = filt[f].type;
         }
         // Routing: in series an oscillator sent to both enters filter 1.
-        const bool parallel = routing.index() == 1;
+        parallel = routing.index() == 1;
         for (int o = 0; o < 4; ++o) {
             OscSet& c = osc[o];
             c.toA = c.to == 0 || c.to == 2;
@@ -1673,7 +1669,7 @@ struct Marram : Instrument {
         }
         copies = unison.index();
         copyGain = 1.0 / sqrt(copies);
-        for (int u = 0; u < kUnison; ++u) {
+        for (int u = 0; u < copies; ++u) {
             const double at = copies > 1 ? 2.0 * u / (copies - 1) - 1.0 : 0.0;
             detuneRatio[u] = exp2(detune * at / 1200.0);
             spreadAt[u] = spread * at;
@@ -1686,15 +1682,11 @@ struct Marram : Instrument {
         setVoiceLimit(polyphony.index());
     }
 
-    void loadOsc(OscSet& c, int self, const Param& type, const Param& level, const Param& pan,
-                 const Param& coarse, const Param& fine, const Param& wave, const Param& width,
-                 const Param& table, const Param& position, const Param& ratio,
-                 const Param& feedback, const Param& color, const Param& octave, const Param& fm,
+    void loadOsc(OscSet& c, int self, const Param& type, const Param& coarse, const Param& wave,
+                 const Param& width, const Param& table, const Param& position, const Param& ratio,
+                 const Param& feedback, const Param& color, const Param& octave,
                  const Param& fmFrom, const Param& to, const Param& retrigger) {
         c.type = type.index();
-        c.gain = level.gain();
-        c.pan = pan;
-        c.tune = coarse.index() + fine / 100.0;
         c.coarse = coarse.index();
         c.wave = wave.index();
         c.width = width;
@@ -1704,7 +1696,6 @@ struct Marram : Instrument {
         c.feedback = feedback;
         c.color = color.index();
         c.octave = octave.index();
-        c.fm = fm;
         c.from = fmFrom.index() < self ? fmFrom.index() : fmFrom.index() + 1;
         c.to = to.index();
         c.retrigger = retrigger.on();
@@ -1713,8 +1704,7 @@ struct Marram : Instrument {
     void loadFilter(FilterSet& f, const Param& type, const Param& cutoff, const Param& resonance,
                     const Param& slope, const Param& svfMode, const Param& feedback,
                     const Param& damping, const Param& vowel, const Param& shift,
-                    const Param& keytrack, const Param& env, const Param& velocity,
-                    const Param& drive) {
+                    const Param& keytrack, const Param& env, const Param& velocity) {
         f.type = type.index();
         f.cutoff = cutoff;
         f.resonance = resonance;
@@ -1727,7 +1717,6 @@ struct Marram : Instrument {
         f.keytrack = keytrack;
         f.env = env;
         f.velocity = velocity;
-        f.drive = dbToGain(drive);
     }
 
     // --- Notes ------------------------------------------------------------------------------
@@ -2118,11 +2107,14 @@ struct Marram : Instrument {
         for (int b = 0; b < 3; ++b) {
             const double hz = lerp(formantHz(i, b), formantHz(i + 1, b), t) * up;
             const double h = min(hz, 0.45 * rate);
-            n.fg[b] = tan(pi * h / rate);
+            const double g = tan(pi * h / rate);
             // Speech's bandwidths, widened to a Q of at most 6 so the
             // harmonics of a low note still find the peaks.
             const double width = max(b == 0 ? 80.0 : b == 1 ? 90.0 : 120.0, h / 6.0);
             n.fk[b] = width / h;
+            n.fa1[b] = 1.0 / (1.0 + g * (g + n.fk[b]));
+            n.fa2[b] = g * n.fa1[b];
+            n.fa3[b] = g * n.fa2[b];
         }
     }
     double formantHz(int vowel, int band) {
@@ -2139,16 +2131,15 @@ struct Marram : Instrument {
         if (c.type == kLadder) return f.ladder(x, n.g, n.k, n.drive, c.steep);
         if (c.type == kSvf) return f.svf(x * n.drive, n.g, n.k, c.mode);
         if (c.type == kComb) return f.combFilter(x * n.drive, n.delay, n.feedback, n.damping);
-        const double one = f.formantBand(0, x, n.fg[0], n.fk[0]);
-        const double two = f.formantBand(1, x, n.fg[1], n.fk[1]);
-        const double three = f.formantBand(2, x, n.fg[2], n.fk[2]);
+        const double one = f.formantBand(0, x, n.fa1[0], n.fa2[0], n.fa3[0], n.fk[0]);
+        const double two = f.formantBand(1, x, n.fa1[1], n.fa2[1], n.fa3[1], n.fk[1]);
+        const double three = f.formantBand(2, x, n.fa1[2], n.fa2[2], n.fa3[2], n.fk[2]);
         return (one + 0.6 * two + 0.35 * three) * 2.5 * n.drive;
     }
 
     // One channel through the filters as routed: a into filter 1, b into
     // filter 2, d past both.
     double filters(Voice& s, int c, double a, double b, double d) {
-        const bool parallel = routing.index() == 1;
         double one = a;
         if (filt[0].type != kOff) one = filterOne(s.filter[c], filt[0], s.now[0], a);
         if (filt[1].type == kOff) return one + b + d;
@@ -2156,19 +2147,30 @@ struct Marram : Instrument {
         return filterOne(s.filter[2 + c], filt[1], s.now[1], one + b) + d;
     }
 
-    double shape(double x, int type, double gain, double bias, double mixed) {
-        const double y = driveCurve(type, x * gain, bias) / sqrt(max(1.0, gain));
-        return x + (y - x) * mixed;
+    // The bias offset and gain compensation are fixed between control ticks.
+    void driveAt(Voice& s, int type) {
+        s.driveZero = driveTransfer(type, s.driveBias);
+        s.driveScale = sqrt(max(1.0, s.driveGain));
+    }
+
+    double shape(double x, int type, const Voice& s) {
+        const double y =
+            (driveTransfer(type, x * s.driveGain + s.driveBias) - s.driveZero) / s.driveScale;
+        return x + (y - x) * s.driveMix;
     }
 
     void play(int v, int frames) {
         Voice& s = voice[v];
         const int dtype = driveType.index();
+        // A type change may split a block inside a tick. Refresh for that
+        // type here as well as when control() reads new routed settings.
+        if (dtype != 0 && s.tickLeft != 0) driveAt(s, dtype);
         for (int i = 0; i < frames; ++i) {
             if (s.tickLeft == 0) {
                 control(v, i);
                 s.tickLeft = kTick;
                 if (s.done) return;
+                if (dtype != 0) driveAt(s, dtype);
             }
             --s.tickLeft;
             // Noise is made at the plugin's rate and held across the
@@ -2273,8 +2275,8 @@ struct Marram : Instrument {
                     n.delay += n.delayStep;
                 }
                 if (dtype != 0) {
-                    yL = shape(yL, dtype, s.driveGain, s.driveBias, s.driveMix);
-                    yR = s.narrow ? yL : shape(yR, dtype, s.driveGain, s.driveBias, s.driveMix);
+                    yL = shape(yL, dtype, s);
+                    yR = s.narrow ? yL : shape(yR, dtype, s);
                 }
                 s.ampL += s.ampLStep;
                 s.ampR += s.ampRStep;
