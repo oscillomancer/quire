@@ -806,6 +806,7 @@ struct Bracken : Effect {
     int sinceHit = 1000000000, hitHold = 4800;
 
     double tempoNow = 120.0, baseSeconds = 0.5;
+    double tailAt = -1.0, decaySeconds = 0.0;
     double peakIn0 = 0.0, peakIn1 = 0.0, peakOut0 = 0.0, peakOut1 = 0.0, peakEcho = 0.0,
            fall = 0.999;
     double trailIn = 0.0, trailEcho = 0.0, trailDuck = 0.0;
@@ -880,6 +881,7 @@ struct Bracken : Effect {
         slowEnv = 0.0;
         sinceHit = 1000000000;
         tempoNow = 120.0;
+        tailAt = -1.0;
         peakIn0 = 0.0;
         peakIn1 = 0.0;
         peakOut0 = 0.0;
@@ -1003,6 +1005,8 @@ struct Bracken : Effect {
     // few frequencies, the last slice reversed, and the diffusers' ring.
     void reportTail() {
         const double s = baseSeconds;
+        tailAt = s;
+        decaySeconds = fallSeconds(1000.0, s, 60.0, rate);
         double longest = 0.0;
         bool forever = false;
         for (int k = 0; k < 4; ++k) {
@@ -1057,7 +1061,9 @@ struct Bracken : Effect {
         const int chans = io.channels;
         tempoNow = io.transport.tempo > 0.0 ? io.transport.tempo : 120.0;
         baseSeconds = baseTime(io);
-        reportTail();
+        // update() handles every control change; between updates only the
+        // transport can change the time used by these analytic estimates.
+        if (baseSeconds != tailAt) reportTail();
         const bool bend = timeChanges.index() == 0;
         const bool frozenNow = freeze.on();
         const int routeWant = chans < 2 ? 2 : routing.index();
@@ -1307,7 +1313,7 @@ struct Bracken : Effect {
         outputLevel.set(gainToDb(peakOut0 > peakOut1 ? peakOut0 : peakOut1));
         echoLevel.set(gainToDb(peakEcho));
         echoTime.set(baseSeconds * 1000.0);
-        const double d = fallSeconds(1000.0, baseSeconds, 60.0, rate);
+        const double d = decaySeconds;
         decay.set(d < 0.0 ? 600000.0 : min(d * 1000.0, 600000.0));
         duckNow.set(gainToDb(duckGain));
         inLeft.set(gainToDb(peakIn0));
