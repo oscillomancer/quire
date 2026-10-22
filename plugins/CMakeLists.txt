@@ -210,7 +210,7 @@ if(SUPPLE_BUILD_PLUGINS)
   supple_add_stock_script(sorrel Sorrel com.suppleaudio.sorrel)
   supple_add_stock_script(teasel Teasel com.suppleaudio.teasel)
   supple_add_stock_script(bracken Bracken com.suppleaudio.bracken)
-  supple_add_stock_script(canopy Canopy com.suppleaudio.canopy)
+  supple_add_stock_script(ghyll Ghyll com.suppleaudio.ghyll)
   supple_add_stock_script(lichen Lichen com.suppleaudio.lichen)
   supple_add_stock_script(marram Marram com.suppleaudio.marram)
 

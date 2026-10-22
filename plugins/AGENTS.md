@@ -12,7 +12,7 @@ one. Yarrow (`stock/yarrow`, the EQ), Sundew (`stock/sundew`, the
 compressor), Treeline (`stock/treeline`, the limiter), Gorse
 (`stock/gorse`, the transient shaper), Hickory (`stock/hickory`, the stereo
 utility), Sorrel (`stock/sorrel`, the gate), Teasel (`stock/teasel`, the
-saturation), Bracken (`stock/bracken`, the delay), Canopy (`stock/canopy`,
+saturation), Bracken (`stock/bracken`, the delay), Ghyll (`stock/ghyll`,
 the reverb), Lichen (`stock/lichen`, the analyzer) and Marram
 (`stock/marram`, the synthesizer). Orrery, the hand-written synthesizer
 Marram replaced, was removed on 2026-10-21; git history has it.

@@ -127,7 +127,7 @@ def build_session(engine, plugin_dir, workdir):
                       step("fx.add", {"track": "${%s.track}" % key,
                                       "plugin": SYNTH, "patch": patch})]
         steps += [step("track.add", {"name": "Verb", "type": "buss"}, "verb"),
-                  step("fx.add", {"track": "${verb.track}", "plugin": "com.suppleaudio.canopy"}),
+                  step("fx.add", {"track": "${verb.track}", "plugin": "com.suppleaudio.ghyll"}),
                   step("route.add", {"from": "${pad.track}", "to": "${verb.track}", "volume_db": -8}),
                   step("route.add", {"from": "${lead.track}", "to": "${verb.track}", "volume_db": -12})]
         items = []

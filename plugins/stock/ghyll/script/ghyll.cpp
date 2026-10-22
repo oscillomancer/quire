@@ -2,13 +2,14 @@
 // Copyright (c) 2026 Supple Audio
 #include <supple/script.h>
 
-// Canopy: a room to stand in, built from its walls.
+// Ghyll: a room to stand in, built from its walls.
 //
-// Under a forest canopy sound comes back from every trunk and from the
-// leaves overhead; in a hall it comes back from the walls, the floor and
-// the ceiling. Canopy is a room you build: its size in metres, what each
-// surface is made of, where the sound stands and where you listen. Each
-// part follows from the physics of a real room:
+// In a ghyll, a narrow ravine with a stream at its foot, sound comes back
+// from both rock walls and the water's own noise hangs between them; in a
+// hall it comes back from the walls, the floor and the ceiling. Ghyll is a
+// room you build: its size in metres, what each surface is made of, where
+// the sound stands and where you listen. Each part follows from the physics
+// of a real room:
 //
 //   Reflections  the room's mirror images (every path off up to three
 //                surfaces): each arrives as late as its path is long, as
@@ -706,7 +707,7 @@ constexpr int kKnobLight = 0x4F4A3B;
 constexpr int kKnobDark = 0x26241C;
 constexpr int kMeterLow = 0x6B7A4A;
 constexpr int kMeterHigh = 0xD6CF9E;
-constexpr int kLeaf = 0x9DB86A;   // the canopy: second-order paths, the decay
+constexpr int kLeaf = 0x9DB86A;   // fern: second-order paths, the decay
 constexpr int kMoss = 0x5F7448;   // third-order paths, scatter
 constexpr int kSun = 0xE8B65C;    // the source, the direct path
 constexpr int kBark = 0xA0714A;   // the lows
@@ -723,10 +724,10 @@ int blend(int a, int b, double t) {
     return r * 65536 + g * 256 + bl;
 }
 
-struct Canopy : Effect {
+struct Ghyll : Effect {
     static constexpr Info info = {
-        .name = "Canopy",
-        .id = "com.suppleaudio.canopy",
+        .name = "Ghyll",
+        .id = "com.suppleaudio.ghyll",
         .vendor = "Supple Audio",
         .version = "1.0.0",
         .description =
@@ -1950,33 +1951,53 @@ struct Canopy : Effect {
 
     // --- the mark -----------------------------------------------------------------------------
 
-    // A tree's canopy: a trunk and a broad crown of leaf clusters, which
-    // brighten as the room sounds.
+    // A ghyll: two rock walls with moss on their rims and a stream falling
+    // between them, which brightens as the room sounds.
     void drawMark(Canvas& g, double x, double y) {
         const double glow = clamp((max(roomLeft.get(), roomRight.get()) + 48.0) / 48.0, 0.0, 1.0);
-        g.strokeStyle(kBark);
+        g.lineJoin(LineJoin::Round);
+        for (int side = -1; side <= 1; side += 2) {
+            const double s = side;
+            g.linearGradient(x, y - 12, x, y + 20, kBark, kGroundBottom);
+            g.beginPath();
+            g.moveTo(x + 19 * s, y + 20);
+            g.lineTo(x + 17 * s, y - 4);
+            g.quadraticCurveTo(x + 16 * s, y - 11 - s, x + 9 * s, y - 11 - s);
+            g.lineTo(x + 6 * s, y - 3);
+            g.lineTo(x + 7 * s, y + 6);
+            g.lineTo(x + 3 * s, y + 20);
+            g.closePath();
+            g.fill();
+            for (int k = 0; k < 3; ++k) {
+                g.fillStyle(blend(imod(k, 2) == 0 ? kMoss : kLeaf, kSun, 0.3 * glow));
+                g.beginPath();
+                g.circle(x + (10.5 + 3 * k) * s, y - 11.5 - s, 2.4 - 0.3 * k);
+                g.fill();
+            }
+        }
+        const int water = blend(kSky, kFrost, glow);
         g.lineCap(LineCap::Round);
+        g.globalAlpha(0.7 + 0.3 * glow);
+        g.strokeStyle(water);
         g.lineWidth(2.4);
         g.beginPath();
-        g.moveTo(x, y + 20);
-        g.lineTo(x, y + 4);
+        g.moveTo(x - 1, y - 9);
+        g.bezierCurveTo(x + 3, y - 3, x - 3, y + 5, x + 0.5, y + 16);
         g.stroke();
-        g.lineWidth(1.4);
+        g.strokeStyle(kFrost);
+        g.globalAlpha(0.35 + 0.5 * glow);
+        g.lineWidth(0.8);
         g.beginPath();
-        g.moveTo(x, y + 8);
-        g.lineTo(x - 6, y + 1);
-        g.moveTo(x, y + 6);
-        g.lineTo(x + 7, y - 1);
+        g.moveTo(x - 0.5, y - 7);
+        g.bezierCurveTo(x + 2.5, y - 2, x - 2, y + 5, x + 1, y + 14);
         g.stroke();
-        for (int k = 0; k < 7; ++k) {
-            const double a = pi + (k + 0.5) * pi / 7.0;
-            const double cx0 = x + 14.0 * cos(a), cy0 = y + 2.0 + 10.0 * sin(a);
-            g.fillStyle(blend(imod(k, 2) == 0 ? kLeaf : kMoss, kSun, 0.45 * glow));
-            g.globalAlpha(0.9);
-            g.beginPath();
-            g.circle(cx0, cy0, 6.5 - 0.5 * abs(k - 3));
-            g.fill();
-        }
+        g.globalAlpha(0.7 + 0.3 * glow);
+        g.strokeStyle(water);
+        g.lineWidth(1.6);
+        g.beginPath();
+        g.moveTo(x - 3.5, y + 18.5);
+        g.lineTo(x + 4.5, y + 18.5);
+        g.stroke();
         g.globalAlpha(1.0);
     }
 
@@ -1986,8 +2007,8 @@ struct Canopy : Effect {
         g.serifFont(23);
         g.textAlign(TextAlign::Left);
         g.textBaseline(TextBaseline::Alphabetic);
-        g.fillText("Canopy", 56, 37);
-        const double nameWidth = g.measureText("Canopy");
+        g.fillText("Ghyll", 56, 37);
+        const double nameWidth = g.measureText("Ghyll");
         g.fillStyle(Theme::textMuted);
         g.serifItalicFont(13);
         const double v = shown.volume;

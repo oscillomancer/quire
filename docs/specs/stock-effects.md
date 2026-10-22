@@ -784,10 +784,10 @@ Swung Ping-Pong, Wide Double, Tape Echo, Bucket Brigade, Dub Spiral,
 Shimmer, Falling Steps, Reverse Swell, Ambient Smear, Early Digital,
 Centre Echo.
 
-## 7. Reverb — "Canopy" [`canopy`]
+## 7. Reverb — "Ghyll" [`ghyll`]
 
 A real room built from its walls, written as a DSP script (ADR-0047:
-`plugins/stock/canopy/script/canopy.cpp`). The reflections, the decay of
+`plugins/stock/ghyll/script/ghyll.cpp`). The reflections, the decay of
 each octave, the room's modes and the level all follow from the room's
 size, its surfaces and the two places in it. Main stereo or mono in and
 out; no latency. The dry signal is the direct sound: at `mix` 50 % the room

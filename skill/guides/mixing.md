@@ -108,7 +108,7 @@ Use [Sorrel, the gate](gate.md) to reduce between-hit spill or noise between phr
 Use [Teasel, the saturation](drive.md) for colour and distortion; set it by its `thd` and `even` readouts, and drive only a band, the mid or the side when the rest should stay clean.
 For onset punch, softened attacks and shorter or longer decays, see [Gorse, the transient shaper](transient.md).
 For echoes, in time or free, ping-pong and ducked throws, see [Bracken, the delay](delay.md); its `echo_time` and `decay` readouts say when the echoes come and how long they last.
-Use [Canopy, the reverb](reverb.md) for a room or hall built from its size, materials and the places of the source and listener; its `rt60` and `clarity` readouts say how long and how clear it is. Use 100% mix on a send return.
+Use [Ghyll, the reverb](reverb.md) for a room or hall built from its size, materials and the places of the source and listener; its `rt60` and `clarity` readouts say how long and how clear it is. Use 100% mix on a send return.
 
 ## Strip types and Console 9 gain staging
 

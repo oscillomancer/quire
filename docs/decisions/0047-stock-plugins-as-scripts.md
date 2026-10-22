@@ -66,7 +66,9 @@ plugins ship as CLAP (and VST3, AU) files of their own that other hosts load.
    agents, the evaluation tasks and the optimizer's tests use Orrery's
    patch format, so Orrery stays until Marram has its modulation, editor,
    guide and evaluation tasks, and goes in that last change. (2026-10-21)
-   Done: Orrery is removed.
+   Done: Orrery is removed. (2026-10-21) Canopy is renamed Ghyll
+   (`com.suppleaudio.ghyll`, `plugins/stock/ghyll`) before it shipped, so
+   no session or patch needs migrating; a ghyll is a narrow ravine.
 6. **Names and look.** A stock plugin is named after a plant or something
    else of the natural world, not after its effect type (Yarrow, the EQ;
    Sundew, the compressor; Treeline, the limiter; Gorse, the transient

@@ -17,7 +17,7 @@ player, and every check the other stock plugins have.
 | `sorrel` | Sorrel, the gate and expander | `com.suppleaudio.sorrel` |
 | `teasel` | Teasel, the saturation | `com.suppleaudio.teasel` |
 | `bracken` | Bracken, the delay | `com.suppleaudio.bracken` |
-| `canopy` | Canopy, the reverb | `com.suppleaudio.canopy` |
+| `ghyll` | Ghyll, the reverb | `com.suppleaudio.ghyll` |
 | `lichen` | Lichen, the analyzer | `com.suppleaudio.lichen` |
 | `marram` | Marram, the synthesizer (in progress: `docs/specs/marram.md`) | `com.suppleaudio.marram` |
 

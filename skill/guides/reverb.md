@@ -1,11 +1,11 @@
-# Canopy: rooms
+# Ghyll: rooms
 
-Use `com.suppleaudio.canopy` for any acoustic space: a vocal booth, a
+Use `com.suppleaudio.ghyll` for any acoustic space: a vocal booth, a
 drum room, a hall, a church, a stairwell, a courtyard. You build the room:
 its size in metres, what its walls, floor and ceiling are made of, where
 the sound stands and where you listen. Reflections, decay, bass and level
 follow from the physics, so set it the way you would describe a real
-place. Patches use `supple.canopy-patch/1.0`, with physical values under
+place. Patches use `supple.ghyll-patch/1.0`, with physical values under
 `params`; a merge changes only the keys it names.
 
 | Key | Unit and range | Default |
@@ -107,9 +107,9 @@ room's level then still follows the listener's distance.
 The room is a box: no balconies, pillars or curved walls. Reflections are
 modelled up to three bounces; beyond that the tail takes over. `clarity`
 and `definition` are an omni's at 1 kHz. Freeze holds the tail exactly;
-new sound is shut out until it is released. The tail Canopy reports
+new sound is shut out until it is released. The tail Ghyll reports
 follows the room, so renders end when it has died (never while frozen).
 Latency is zero.
 
 See [mixing](mixing.md) and
-[stock spec §7](../../docs/specs/stock-effects.md#7-reverb--canopy-canopy).
+[stock spec §7](../../docs/specs/stock-effects.md#7-reverb--ghyll-ghyll).

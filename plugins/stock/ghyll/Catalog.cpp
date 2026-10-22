@@ -20,12 +20,12 @@
 #include "supple/suite/script_definition.h"
 
 namespace supple::script::user {
-#include "script/canopy.cpp"
+#include "script/ghyll.cpp"
 }  // namespace supple::script::user
 
 namespace {
 
-using Script = supple::script::user::Canopy;
+using Script = supple::script::user::Ghyll;
 using Code = supple::script::detail::NativeCode<Script>;
 
 class OneScript final : public supple::Catalog {
@@ -72,7 +72,7 @@ class OneScript final : public supple::Catalog {
             });
             std::string problems;
             definition_ = supple::suite::makeScriptDefinition(std::move(code), {}, {}, &problems);
-            if (!definition_) std::fprintf(stderr, "Canopy: %s\n", problems.c_str());
+            if (!definition_) std::fprintf(stderr, "Ghyll: %s\n", problems.c_str());
         }
         if (!definition_) return {};
         return {definition_};

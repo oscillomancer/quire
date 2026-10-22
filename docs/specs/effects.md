@@ -19,7 +19,7 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 | `sorrel` (`plugins/stock/sorrel`) | Sorrel | `com.suppleaudio.sorrel` | `sTMn` (the player's for the id) | `Sorl` | audio-effect, gate |
 | `teasel` (`plugins/stock/teasel`) | Teasel | `com.suppleaudio.teasel` | `BLWw` (the player's for the id) | `Tesl` | audio-effect, distortion |
 | `bracken` (`plugins/stock/bracken`) | Bracken | `com.suppleaudio.bracken` | `PzKJ` (the player's for the id) | `Brkn` | audio-effect, delay |
-| `canopy` (`plugins/stock/canopy`) | Canopy | `com.suppleaudio.canopy` | `TtYY` (the player's for the id) | `Cnpy` | audio-effect, reverb |
+| `ghyll` (`plugins/stock/ghyll`) | Ghyll | `com.suppleaudio.ghyll` | `DIow` (the player's for the id) | `Ghyl` | audio-effect, reverb |
 | `lichen` (`plugins/stock/lichen`) | Lichen | `com.suppleaudio.lichen` | `cwHJ` (the player's for the id) | `Lchn` | audio-effect, analyzer |
 | `marram` (`plugins/stock/marram`) | Marram | `com.suppleaudio.marram` | `XZXx` (the player's for the id) | `Mrrm` | instrument, synthesizer |
 
@@ -575,9 +575,9 @@ maintainers:
   2.0 % reversed; 2.9 % with reverse, shift, diffusion, analog, drive,
   modulation and fades at once.
 
-## 11. Reverb — Canopy [`canopy`] (`stock-effects.md` §7)
+## 11. Reverb — Ghyll [`ghyll`] (`stock-effects.md` §7)
 
-A DSP script (ADR-0047), `plugins/stock/canopy/script/canopy.cpp`. It
+A DSP script (ADR-0047), `plugins/stock/ghyll/script/ghyll.cpp`. It
 replaced Nave (`com.suppleaudio.reverb`) with a new design. Notes for
 maintainers:
 
@@ -604,7 +604,7 @@ maintainers:
   cuts' ends glide per sample, decided per frame, so renders do not depend
   on block size.
 - **Tests.** The suite every stock plugin has, and
-  `plugin.canopy.response`: dry (mix 0) a −12 dBFS sine passes at
+  `plugin.ghyll.response`: dry (mix 0) a −12 dBFS sine passes at
   0.00 dB, −6.00 with output −6; `distance` reads 10.002 m for two places
   10 m apart on the plan; `rt60` reads Eyring's 5276.2 ms for a 10 m
   concrete cube. Measurements are in `stock-effects.md` §7. Release build,

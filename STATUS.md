@@ -191,7 +191,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
   the LLM evaluation harness (`tools/eval-harness`).
 - **Stock plugins** (ADR-0011, ADR-0047): Marram, Yarrow, Sundew, Treeline,
-  Gorse, Hickory, Sorrel, Teasel, Bracken, Canopy and Lichen, each passing clap-validator, a
+  Gorse, Hickory, Sorrel, Teasel, Bracken, Ghyll and Lichen, each passing clap-validator, a
   reset determinism check, an unload test and the headless REAPER check;
   JSON patches and the semantic-parameters extension.
   Yarrow, the EQ, is the first written as a DSP script
@@ -275,8 +275,8 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   and how long the echoes take to fall 60 dB; its editor shows the echoes
   to come (dragged across for the time, up and down for the feedback) with
   a playhead from the last sound, each echo's tone, the medium and the
-  ducking. It replaced Echelon (`com.suppleaudio.delay`). Canopy, the
-  reverb (`plugins/stock/canopy`), is the ninth: a room built from its size
+  ducking. It replaced Echelon (`com.suppleaudio.delay`). Ghyll, the
+  reverb (`plugins/stock/ghyll`), is the ninth: a room built from its size
   in metres, the materials of its walls, floor and ceiling, and where the
   source and the listener stand. Its reflections are the room's mirror
   images off up to three surfaces, each as late, weak and dark as its path

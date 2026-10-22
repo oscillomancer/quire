@@ -124,7 +124,7 @@ include startup ramps.
 | `sorrel` | Sorrel | Threshold | −80 / −6 dB | second half >3 dB quieter |
 | `teasel` | Teasel | Output | 0 / −12 dB | −12 ±1 dB |
 | `bracken` | Bracken | Output | 0 / −12 dB | −12 ±1 dB |
-| `canopy` | Canopy | Output | 0 / −12 dB | −12 ±1 dB |
+| `ghyll` | Ghyll | Output | 0 / −12 dB | −12 ±1 dB |
 | `lichen` | Lichen | Target | −30 / −5 LUFS | envelope reload + unchanged audio |
 | `marram` | Marram | Output | 0 / −12 dB | −12 ±1 dB |
 

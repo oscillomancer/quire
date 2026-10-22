@@ -46,7 +46,7 @@ machine, but file formats and commands can still change.
   matched.
 - **Stock plugins.** Marram (synth), Yarrow (EQ), Sundew (compressor),
   Treeline (limiter), Gorse (transient shaper), Hickory (stereo utility),
-  Sorrel (gate and expander), Teasel (saturation), Bracken (delay), Canopy
+  Sorrel (gate and expander), Teasel (saturation), Bracken (delay), Ghyll
   (reverb) and Lichen (analyzer), as CLAP plugins usable in any host. Each
   has JSON patches and exposes its parameters in physical units through a
   CLAP extension. All are written as DSP scripts and compiled into plugins
