@@ -223,6 +223,10 @@ int main(int argc, char** argv) {
     entry->init(argv[1]);
 
     auto* factory = (const clap_plugin_factory_t*)entry->get_factory(CLAP_PLUGIN_FACTORY_ID);
+    if (!factory || !factory->get_plugin_count(factory)) {
+        std::fprintf(stderr, "no plugin in the factory\n");
+        return 1;
+    }
     const clap_plugin_descriptor_t* desc = factory->get_plugin_descriptor(factory, 0);
     std::printf("plugin: %s %s\n", desc->name, desc->version);
 
