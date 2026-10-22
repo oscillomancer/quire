@@ -74,6 +74,29 @@ struct PeakHold {
     }
 };
 
+// All Sorrel's delays are whole samples: no interpolation is needed.
+struct SampleDelay {
+    Buffer<double> samples;
+    int size = 1, at = 0;
+
+    void prepare(int n) {
+        size = max(1, n + 1);
+        samples.resize(size);
+        at = 0;
+    }
+    void clear() { samples.fill(0.0); }
+    void push(double x) {
+        at = at + 1 == size ? 0 : at + 1;
+        samples[at] = x;
+    }
+    double read(int delay) const {
+        const int i = at - delay;
+        // Match the interpolated line's addition at an integer position,
+        // including its handling of signed zero.
+        return 0.0 + samples[i < 0 ? i + size : i];
+    }
+};
+
 // --- the look --------------------------------------------------------------------------
 
 constexpr int kInk = 0x1A1411;
@@ -260,10 +283,11 @@ struct Sorrel : Effect {
     int ahead = 0;  // the lookahead, samples
     int envLength = 480;
     PeakHold env, up;
+    double heldPeak = -1.0, heldLevel = -120.0;
     Array<Biquad, 2> hpf, lpf;
     bool hpOn = false, lpOn = false;
-    Array<DelayLine, 2> delay, keyDelay;
-    DelayLine targets;
+    Array<SampleDelay, 2> delay, keyDelay;
+    SampleDelay targets;
     bool expand = false;
     double closedDb = -40.0;
     int attackSamples = 48, window = 48, holdSamples = 960;
@@ -313,6 +337,8 @@ struct Sorrel : Effect {
         setLatency(ahead);
         envLength = max(1, roundToInt(0.01 * rate));
         env.prepare(envLength + 2);
+        heldPeak = -1.0;
+        heldLevel = -120.0;
         up.prepare(ahead + 4);
         const int room = ahead + 8;
         for (int c = 0; c < 2; ++c) {
@@ -458,7 +484,12 @@ struct Sorrel : Effect {
             keyDelay[0].push(kl);
             keyDelay[1].push(kr);
             const double peak = env.push(min(max(abs(kl), abs(kr)), 1e4), envLength);
-            const double level = gainToDb(peak);
+            // A held peak usually stays unchanged for many samples.
+            if (peak != heldPeak) {
+                heldPeak = peak;
+                heldLevel = gainToDb(peak);
+            }
+            const double level = heldLevel;
             lastLevel = level;
 
             // The state, as the detector hears it (a lookahead early).
