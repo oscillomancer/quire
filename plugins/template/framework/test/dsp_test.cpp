@@ -885,13 +885,14 @@ TEST(glide_a_block_at_a_time_follows_the_ticks) {
         v->note(on(60), log);
         v->note(on(72), log);
     }
-    for (int block = 0; block < 6; ++block) {
-        for (int i = 0; i < 100; ++i) {
-            CHECK_NEAR(blocked.pitchAt(1, i), ticked.pitch(1), 1e-9);
+    // To the bit, in uneven blocks: a host's block size must not change a note.
+    for (int frames : {1, 7, 64, 13, 100, 2, 200, 300}) {
+        for (int i = 0; i < frames; ++i) {
+            CHECK(blocked.pitchAt(1, i) == ticked.pitch(1));
             ticked.tick();
         }
-        CHECK_NEAR(blocked.pitchAt(1, 100), ticked.pitch(1), 1e-9);
-        blocked.advance(100);
+        CHECK(blocked.pitchAt(1, frames) == ticked.pitch(1));
+        blocked.advance(frames);
     }
     CHECK(blocked.pitch(1) == 72.0 && blocked.pitchAt(1, 50) == 72.0);
 }

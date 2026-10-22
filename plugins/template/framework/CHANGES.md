@@ -4,6 +4,18 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.30.1
+
+What a product must do: nothing. A product that glides with `pitchAt()`
+and `advance()` may sound different in the last bits.
+
+- **A glide is the same in any host blocks** (`dsp/Voices.h`). A voice's
+  glide was summed step by step, so one advanced in blocks of different
+  sizes rounded differently, and a render was not bit-identical across
+  host block sizes. Its pitch is now worked out from where it started, so
+  `tick()`, `pitchAt()` and `advance()` agree to the bit however the
+  blocks fall.
+
 ## 1.30.0
 
 What a product must do: nothing.
