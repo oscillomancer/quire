@@ -109,6 +109,7 @@ Use [Teasel, the saturation](drive.md) for colour and distortion; set it by its 
 For onset punch, softened attacks and shorter or longer decays, see [Gorse, the transient shaper](transient.md).
 For echoes, in time or free, ping-pong and ducked throws, see [Bracken, the delay](delay.md); its `echo_time` and `decay` readouts say when the echoes come and how long they last.
 Use [Ghyll, the reverb](reverb.md) for a room or hall built from its size, materials and the places of the source and listener; its `rt60` and `clarity` readouts say how long and how clear it is. Use 100% mix on a send return.
+For chorus, doubling, width or vibrato, see [Withy, the chorus](chorus.md); its `detune` and `mono_loss` readouts say how far the voices swing and what folding to mono costs.
 For phasing, a swirl, a resonant or tempo-locked sweep, a photocell throb or an endless barber pole, see [Pollia, the phaser](phaser.md); its `centre_now` readout says where the stages sit, and `keep_below` keeps a bass's or a mix's lows whole.
 
 ## Strip types and Console 9 gain staging

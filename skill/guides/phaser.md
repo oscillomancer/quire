@@ -133,4 +133,4 @@ shifted, as in an analog frequency shifter), and the wet sound is shifted
 by `rate` Hz. The loop rounds over above −4 dBFS. Latency is zero; the
 tail Pollia reports follows the feedback and the lowest stage.
 
-See [stock spec §11](../../docs/specs/stock-effects.md#11-phaser--pollia-pollia).
+See [stock spec §12](../../docs/specs/stock-effects.md#12-phaser--pollia-pollia).
