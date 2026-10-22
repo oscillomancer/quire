@@ -24,13 +24,16 @@ changes only the keys it names.
 | `gain` | dB, readonly: the gain now (0 open, the range closed) | |
 | `noise_floor` | dBFS, readonly: the commonest quiet key level of the last 10 s | |
 | `loud_level` | dBFS, readonly: the key level exceeded 5 % of the last 10 s | |
-| `suggested_threshold` | dBFS, readonly: a threshold that clears the noise | |
+| `suggested` | dBFS, readonly: a threshold that clears the noise | |
 | `open_time` | %, readonly: how much of the last 10 s it was open | |
 | `openings` | readonly: how many times it opened in the last 10 s | |
 
 Levels are the key's peak over 10 ms, in dBFS: compare them with the
 readouts, not with an RMS loudness. With lookahead the opening ends a
 millisecond before the level crosses the threshold, so onsets pass whole.
+`open_time` includes digital silence in its time window, and counts it as
+open while the hold keeps the gate open. The level histogram skips digital
+silence.
 
 ## Finding the threshold
 
@@ -40,7 +43,7 @@ then read the readouts with `param_get`:
 1. `noise_floor` is the noise or spill; `loud_level` the sound. Less than
    about 15 dB between them and a gate will not separate them: use Expand,
    or leave it.
-2. `suggested_threshold` puts the close level (threshold − hysteresis)
+2. `suggested` puts the close level (threshold − hysteresis)
    2 dB above the noise's peaks. Set `threshold` to it.
 3. Render again and read `openings`: about one per hit or phrase is right.
    Many more is chatter: raise `hysteresis` or `hold`. Fewer means quiet

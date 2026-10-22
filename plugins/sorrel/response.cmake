@@ -74,3 +74,22 @@ expect("{\"threshold\":-6}" 1000 -40)
 expect("{\"threshold\":-6,\"range\":-80}" 1000 silence)
 expect("{\"mode\":\"expand\",\"threshold\":-6,\"ratio\":2}" 1000 -6)
 expect("{\"threshold\":-20,\"key_hpf\":2000}" 100 -40)
+
+# One impulse keeps the detector high for 10 ms, then the default hold
+# keeps the gate open for 20 ms more. Digital silence still counts toward
+# elapsed time, and toward open time while the hold keeps the gate open.
+execute_process(
+    COMMAND ${CMAKE_COMMAND} -E env "HOME=${home}" "USERPROFILE=${home}" "APPDATA=${home}/config"
+            "LOCALAPPDATA=${home}/local" "XDG_DATA_HOME=${home}/data" "${SANDBOX}" exec
+            "{\"command\":\"dsp.test\",\"args\":{\"plugin\":\"${PLUGIN}\",\"seconds\":1,\"signals\":[\"impulse\"]}}"
+            --workdir "${WORK}/workdir"
+    RESULT_VARIABLE result OUTPUT_VARIABLE json ERROR_VARIABLE err)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "impulse readouts failed (${result}):\n${json}\n${err}")
+endif()
+string(JSON open_time GET "${json}" signals 0 meters open_time)
+milli("${open_time}" open_milli)
+if(open_milli LESS 2900 OR open_milli GREATER 3100)
+    message(FATAL_ERROR "one impulse: open time is ${open_time}%, want 3% (30 ms of 1 s)")
+endif()
+message(STATUS "one impulse: open time ${open_time}% (30 ms of 1 s)")

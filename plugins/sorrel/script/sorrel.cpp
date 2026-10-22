@@ -309,9 +309,9 @@ struct Sorrel : Effect {
     Array<double, 2048> msLevel;
     int msHead = 0, msFilled = 0;
     Buffer<int> chunkBins;
-    Array<int, 100> chunkCount, chunkOpen, chunkOpenings;
+    Array<int, 100> chunkCount, chunkTime, chunkOpen, chunkOpenings;
     Array<int, 96> total;
-    int totalCount = 0, totalOpen = 0, totalOpenings = 0;
+    int totalCount = 0, totalTime = 0, totalOpen = 0, totalOpenings = 0;
     int chunk = 0, msInChunk = 0;
     double floorNow = -96.0, loudNow = -96.0, suggestNow = -96.0;
 
@@ -361,10 +361,12 @@ struct Sorrel : Effect {
         // A restart prepares an instance that has played: start it afresh.
         chunkBins.fill(0);
         chunkCount.fill(0);
+        chunkTime.fill(0);
         chunkOpen.fill(0);
         chunkOpenings.fill(0);
         total.fill(0);
         totalCount = 0;
+        totalTime = 0;
         totalOpen = 0;
         totalOpenings = 0;
         chunk = 0;
@@ -644,10 +646,12 @@ struct Sorrel : Effect {
             total[b] += 1;
             chunkCount[chunk] += 1;
             totalCount += 1;
-            if (open) {
-                chunkOpen[chunk] += 1;
-                totalOpen += 1;
-            }
+        }
+        chunkTime[chunk] += 1;
+        totalTime += 1;
+        if (open) {
+            chunkOpen[chunk] += 1;
+            totalOpen += 1;
         }
         msInChunk += 1;
         if (msInChunk >= 100) closeChunk();
@@ -664,9 +668,11 @@ struct Sorrel : Effect {
             chunkBins[chunk * kBins + b] = 0;
         }
         totalCount -= chunkCount[chunk];
+        totalTime -= chunkTime[chunk];
         totalOpen -= chunkOpen[chunk];
         totalOpenings -= chunkOpenings[chunk];
         chunkCount[chunk] = 0;
+        chunkTime[chunk] = 0;
         chunkOpen[chunk] = 0;
         chunkOpenings[chunk] = 0;
     }
@@ -728,7 +734,7 @@ struct Sorrel : Effect {
         floorShown.set(floorNow);
         loudShown.set(loudNow);
         suggestShown.set(suggestNow);
-        openTime.set(totalCount > 0 ? static_cast<double>(totalOpen) / totalCount : 0.0);
+        openTime.set(totalTime > 0 ? static_cast<double>(totalOpen) / totalTime : 0.0);
         openings.set(totalOpenings);
     }
 
