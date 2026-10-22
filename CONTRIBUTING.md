@@ -144,10 +144,10 @@ stock plugin builds and their conformance/reset checks on macOS/Windows.
 ADR-0037 enables the native bridge executable and shared/dedicated isolation
 tests. Linux `/proc`, raw descriptor/subreaper and shell-script probes remain
 Linux-only. Native tests cover fixture loading, state/audio, crash/hang
-isolation, cache and process capture/deadlines. Windows external validator
-shell tests are omitted; native product host-smoke tests still run. The macOS
-external validator entries skip when the optional validator is absent; the
-product, semantic and host checks still execute.
+isolation, cache and process capture/deadlines. The pinned clap-validator is
+built in every job and checks each stock plugin and the player (on Windows,
+through Git's bash); its tests skip where it is absent, and the product,
+semantic and host checks still execute.
 
 Windows stock builds enable the CRT math constants with _USE_MATH_DEFINES in
 platform build glue. Product-owned semantic stress tests use a native loader;

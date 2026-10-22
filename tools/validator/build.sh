@@ -7,7 +7,9 @@ set -euo pipefail
 tag=0.4.1
 cache_base="${XDG_CACHE_HOME:-${HOME}/.cache}/quire-tools/clap-validator/${tag}"
 source_dir="${cache_base}/source"
-binary="${cache_base}/target/release/clap-validator"
+exe=""
+case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) exe=.exe ;; esac
+binary="${cache_base}/target/release/clap-validator${exe}"
 
 if [[ -x "${binary}" ]]; then
   printf '%s\n' "${binary}"
