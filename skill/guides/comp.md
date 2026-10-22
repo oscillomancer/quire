@@ -75,12 +75,16 @@ as compression rises; loudness falls unless `match` or `output` makes it up.
 decide whether the result is better, not merely louder. `loudness_change`
 says how much quieter the compression made it.
 
+Every change of `listen` crossfades over 10 ms between the audible signals,
+including Key to Delta and either one back to Off. Switching again during
+a fade starts a new 10 ms crossfade from the mixture currently heard.
+
 ## Limits
 
 Sundew is not a limiter: there is no ceiling and no true-peak detection.
 Clean at 20:1 with `lookahead` `ms1` holds sample peaks closely; for a
-true-peak ceiling use [Treeline, the limiter](limiter.md). A feedback
-character (Opto, FET) with an external key detects the key, feedforward.
+true-peak ceiling use [Treeline, the limiter](limiter.md). With an external
+key, Opto and FET detect the key's level and keep their feedback gain law.
 Lookahead delays the audio, not the detector, and the latency changes only
 after the host restarts the plugin. Match is a slow gain (about a second);
 it follows the song's loudness, so turn it off before printing if the level

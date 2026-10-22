@@ -499,7 +499,11 @@ struct Sundew : Effect {
     double colourAmount = 0.0, even = 0.0, odd = 0.0;
     bool midSide = false;
     int listenMode = 0;
-    double listenMix = 0.0, listenStep = 0.001;
+    // Key and delta shares; the normal output supplies the remaining share.
+    // A new selection fades from the mixture last heard, even mid-fade.
+    double listenKey = 0.0, listenDelta = 0.0;
+    double listenFromKey = 0.0, listenFromDelta = 0.0;
+    int listenLength = 480, listenAt = 480;
     bool unplayed = true;
     // Match: the input's and output's power over about a second, and the gain between.
     double powerIn = 0.0, powerOut = 0.0, matchDb = 0.0, matchNow = 0.0;
@@ -536,7 +540,12 @@ struct Sundew : Effect {
         kMatch = stepFor(1000.0, rate);
         kMatchOff = stepFor(40.0, rate);
         kDc = stepFor(1000.0 / (twoPi * 8.0), rate);
-        listenStep = 1.0 / (0.01 * rate);
+        listenLength = max(1, roundToInt(0.01 * rate));
+        listenAt = listenLength;
+        listenKey = 0.0;
+        listenDelta = 0.0;
+        listenFromKey = 0.0;
+        listenFromDelta = 0.0;
         colLength = rate * 0.01;
         fall = exp(-1.0 / (0.3 * rate));
         // A restart prepares an instance that has played: start it afresh.
@@ -580,7 +589,13 @@ struct Sundew : Effect {
         even = evenFor(ch);
         odd = oddFor(ch);
         midSide = stereo.index() == 1;
-        listenMode = listen.index();
+        const int wantedListen = listen.index();
+        if (wantedListen != listenMode) {
+            listenMode = wantedListen;
+            listenFromKey = listenKey;
+            listenFromDelta = listenDelta;
+            listenAt = 0;
+        }
         // A new character takes over where the last one left the gain: a
         // cell going the same way starts from its amount; between cutting
         // and lifting (Bloom), the new cell starts at rest and the gain
@@ -593,7 +608,11 @@ struct Sundew : Effect {
                 bridge[c] = unplayed ? 0.0 : before - (ch == kBloom ? 1.0 : -1.0) * cell[c].gain;
             }
         }
-        if (unplayed) listenMix = listenMode > 0 ? 1.0 : 0.0;
+        if (unplayed) {
+            listenKey = listenMode == 1 ? 1.0 : 0.0;
+            listenDelta = listenMode == 2 ? 1.0 : 0.0;
+            listenAt = listenLength;
+        }
     }
 
     double syncMs(double tempo, double barBeats) {
@@ -635,18 +654,25 @@ struct Sundew : Effect {
                 if (!isFinite(kr)) kr = 0.0;
             }
             // The audio, delayed by the lookahead; the key is not.
-            delay[0].push(l);
-            delay[1].push(r);
-            const double dl = ahead > 0 ? delay[0].read(ahead) : l;
-            const double dr = ahead > 0 ? delay[1].read(ahead) : r;
+            // Lookahead changes restart and prepare the buffers, so there
+            // is no history to retain while it is off.
+            double dl = l, dr = r;
+            if (ahead > 0) {
+                delay[0].push(l);
+                delay[1].push(r);
+                dl = delay[0].read(ahead);
+                dr = delay[1].read(ahead);
+            }
             double k0 = midSide ? 0.5 * (kl + kr) : kl;
             double k1 = midSide ? 0.5 * (kl - kr) : kr;
             if (filterOn) {
                 k0 = keyFilter[0].process(k0);
                 k1 = keyFilter[1].process(k1);
             }
-            keyDelay[0].push(midSide ? k0 + k1 : k0);
-            keyDelay[1].push(midSide ? k0 - k1 : k1);
+            if (ahead > 0) {
+                keyDelay[0].push(midSide ? k0 + k1 : k0);
+                keyDelay[1].push(midSide ? k0 - k1 : k1);
+            }
             keyPeak = max(max(abs(k0), abs(k1)), keyPeak * fall);
 
             // The detector: each channel's level in dB, then linked.
@@ -664,8 +690,21 @@ struct Sundew : Effect {
             const double loud = max(lev0, lev1);
             lev0 += linkAmount * (loud - lev0);
             lev1 += linkAmount * (loud - lev1);
+            // Identical cells hearing the same level take the same step.
+            // Compare the state too: linking after independent processing
+            // must let each channel recover from its own history.
+            const bool sharedCell = stereoIn && lev0 == lev1 && cell[0].fast == cell[1].fast &&
+                                    cell[0].slow == cell[1].slow &&
+                                    cell[0].second == cell[1].second &&
+                                    cell[0].gain == cell[1].gain;
             const double e0 = cell[0].step(lev0, law);
-            const double e1 = stereoIn ? cell[1].step(lev1, law) : e0;
+            double e1 = e0;
+            if (stereoIn) {
+                if (sharedCell)
+                    cell[1] = cell[0];
+                else
+                    e1 = cell[1].step(lev1, law);
+            }
             const double c0 = (bloom ? e0 : -e0) + bridge[0];
             const double c1 = (bloom ? e1 : -e1) + bridge[1];
             bridge[0] -= kBridge * bridge[0];
@@ -701,18 +740,24 @@ struct Sundew : Effect {
             const double g = dbToGain(output.at(i) + matchNow);
             ol *= g;
             orr *= g;
-            listenMix = clamp(listenMix + (listenMode > 0 ? listenStep : -listenStep), 0.0, 1.0);
-            if (listenMix > 0.0) {
-                double hl = 0.0, hr = 0.0;
-                if (listenMode == 1) {
-                    hl = ahead > 0 ? keyDelay[0].read(ahead) : (midSide ? k0 + k1 : k0);
-                    hr = ahead > 0 ? keyDelay[1].read(ahead) : (midSide ? k0 - k1 : k1);
-                } else if (listenMode == 2) {
-                    hl = dl - wl;
-                    hr = dr - wr;
-                }
-                ol += listenMix * (hl - ol);
-                orr += listenMix * (hr - orr);
+            if (listenAt < listenLength) {
+                listenAt += 1;
+                const double progress = listenAt / (1.0 * listenLength);
+                listenKey =
+                    listenFromKey + progress * ((listenMode == 1 ? 1.0 : 0.0) - listenFromKey);
+                listenDelta =
+                    listenFromDelta + progress * ((listenMode == 2 ? 1.0 : 0.0) - listenFromDelta);
+            }
+            const double normalL = ol, normalR = orr;
+            if (listenKey > 0.0) {
+                const double hl = ahead > 0 ? keyDelay[0].read(ahead) : (midSide ? k0 + k1 : k0);
+                const double hr = ahead > 0 ? keyDelay[1].read(ahead) : (midSide ? k0 - k1 : k1);
+                ol += listenKey * (hl - normalL);
+                orr += listenKey * (hr - normalR);
+            }
+            if (listenDelta > 0.0) {
+                ol += listenDelta * (dl - wl - normalL);
+                orr += listenDelta * (dr - wr - normalR);
             }
             io[0][i] = ol;
             if (stereoIn) io[1][i] = orr;
