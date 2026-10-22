@@ -711,7 +711,9 @@ struct Teasel : Effect {
     int quiet = 0, quietLimit = 48000;
     int modeNow = 0;
     double duck = 1.0, duckStep = 0.01;
-    double listenMix = 0.0, listenStep = 0.001;
+    int listenLength = 480, listenAt = 480;
+    double listenBand = 0.0, listenDelta = 0.0;
+    double listenFromBand = 0.0, listenFromDelta = 0.0;
     bool unplayed = true;
 
     // Meters, the spectra's rings and the transfer plot's samples.
@@ -759,7 +761,9 @@ struct Teasel : Effect {
         stepSin = sin(twoPi * probeStep);
         fadeStep = 1.0 / (0.02 * rate);
         compStep = 1.0 - exp(-1.0 / (0.01 * rate));
-        listenStep = 1.0 / (0.01 * rate);
+        listenLength = max(1, roundToInt(0.01 * rate));
+        listenMode = listen.index();
+        snapListen();
         duckStep = 1.0 / (0.003 * rate);
         duck = 1.0;
         loopOpen = 1.0;
@@ -938,8 +942,22 @@ struct Teasel : Effect {
         }
     }
 
+    void snapListen() {
+        listenBand = listenMode == 1 ? 1.0 : 0.0;
+        listenDelta = listenMode == 2 ? 1.0 : 0.0;
+        listenFromBand = listenBand;
+        listenFromDelta = listenDelta;
+        listenAt = listenLength;
+    }
+
     void update() {
-        listenMode = listen.index();
+        const int nextListen = listen.index();
+        if (nextListen != listenMode) {
+            listenFromBand = listenBand;
+            listenFromDelta = listenDelta;
+            listenAt = 0;
+            listenMode = nextListen;
+        }
         probeGain = dbToGain(drive.value());
         const int st = style.index();
         if (st != styleNow) {
@@ -968,7 +986,7 @@ struct Teasel : Effect {
             loopScale = 1.0 / max(1.0, steepest(styleNow));
         }
         if (!unplayed) return;
-        listenMix = listenMode > 0 ? 1.0 : 0.0;
+        snapListen();
         tune(true);
     }
 
@@ -1002,7 +1020,10 @@ struct Teasel : Effect {
         const bool first = unplayed;
         const bool stereo = io.channels > 1;
         const int wantMode = stereo ? channelMode.index() : 0;
-        if (first) modeNow = wantMode;
+        if (first) {
+            modeNow = wantMode;
+            snapListen();
+        }
         const int target = motionTarget.index();
         double lastDriveDb = drive.value();
         unplayed = false;
@@ -1074,7 +1095,16 @@ struct Teasel : Effect {
                 t = 0.5 - 0.5 * cos(pi * fade);
             }
             const double wet = mix.at(i);
-            listenMix = clamp(listenMix + (listenMode > 0 ? listenStep : -listenStep), 0.0, 1.0);
+            if (listenAt < listenLength) {
+                listenAt += 1;
+                const double progress = static_cast<double>(listenAt) / listenLength;
+                const double toBand = listenMode == 1 ? 1.0 : 0.0;
+                const double toDelta = listenMode == 2 ? 1.0 : 0.0;
+                listenBand =
+                    listenAt == listenLength ? toBand : lerp(listenFromBand, toBand, progress);
+                listenDelta =
+                    listenAt == listenLength ? toDelta : lerp(listenFromDelta, toDelta, progress);
+            }
 
             // Into the channels: left and right, or mid and side. A change
             // between them dips the output for 3 ms each way.
@@ -1152,11 +1182,10 @@ struct Teasel : Effect {
                             if (cutHigh) y = cut;
                         }
                     }
-                    double out = low + band + high + wet * (y - band);
-                    if (listenMix > 0.0) {
-                        const double heard = listenMode == 1 ? y : wet * (y - band);
-                        out += listenMix * (heard - out);
-                    }
+                    const double normal = low + band + high + wet * (y - band);
+                    double out = normal;
+                    if (listenBand > 0.0) out += listenBand * (y - normal);
+                    if (listenDelta > 0.0) out += listenDelta * (wet * (y - band) - normal);
                     o.set(k, out);
                 }
                 const double d = o.down();
