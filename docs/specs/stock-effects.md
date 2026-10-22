@@ -1181,6 +1181,8 @@ modes:
 
 The recent window keeps rolling in either mode; switching the mode
 restarts the accumulated totals, and starting the transport restarts both.
+The totals hold only audio after their restart: their own 100 ms blocks,
+K-weighting and true-peak history start from silence there.
 
 Listen: `matched` turns the output down by the dry input's short-term
 loudness against the output's (−30..+6 dB, gliding over 400 ms, back over
