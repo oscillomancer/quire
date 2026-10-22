@@ -663,8 +663,21 @@ struct Sundew : Effect {
             const double loud = max(lev0, lev1);
             lev0 += linkAmount * (loud - lev0);
             lev1 += linkAmount * (loud - lev1);
+            // Identical cells hearing the same level take the same step.
+            // Compare the state too: linking after independent processing
+            // must let each channel recover from its own history.
+            const bool sharedCell = stereoIn && lev0 == lev1 && cell[0].fast == cell[1].fast &&
+                                    cell[0].slow == cell[1].slow &&
+                                    cell[0].second == cell[1].second &&
+                                    cell[0].gain == cell[1].gain;
             const double e0 = cell[0].step(lev0, law);
-            const double e1 = stereoIn ? cell[1].step(lev1, law) : e0;
+            double e1 = e0;
+            if (stereoIn) {
+                if (sharedCell)
+                    cell[1] = cell[0];
+                else
+                    e1 = cell[1].step(lev1, law);
+            }
             const double c0 = (bloom ? e0 : -e0) + bridge[0];
             const double c1 = (bloom ? e1 : -e1) + bridge[1];
             bridge[0] -= kBridge * bridge[0];
