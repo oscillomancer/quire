@@ -95,7 +95,7 @@ class Bench(unittest.TestCase):
             self.assertEqual(json.loads((path / "report.json").read_text())["error"]["message"], "failed")
 
     def test_rpp_setup_uses_exported_midi_and_opaque_states_for_every_fx(self):
-        entry = {"name": "Orrery", "plugin": "com.suppleaudio.orrery", "state": base64.b64encode(b"opaque\0state").decode()}
+        entry = {"name": "Marram", "plugin": "com.suppleaudio.marram", "state": base64.b64encode(b"opaque\0state").decode()}
         session = {"pan_law": .70794578, "loop_seconds": 8, "tracks": [
             {"name": "playback", "volume": .1, "armed": False, "fx": [entry]*3,
              "notes": [{"start": 0, "end": 4, "key": 48, "velocity": 90}]},

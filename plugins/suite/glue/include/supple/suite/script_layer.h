@@ -7,7 +7,8 @@
 // host's log -- once per occurrence, with the line it was on: a loop that
 // spent its budget and was stopped, an index outside an array -- and the
 // editor of a script that draws its own (script_editor.h; the product's,
-// the automatic one, otherwise). The player's layer derives from it to
+// the automatic one, otherwise, with a list of the modulation routes when
+// the script has any: route_list.h). The player's layer derives from it to
 // follow the script's file. Main thread only.
 #pragma once
 

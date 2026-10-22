@@ -34,7 +34,6 @@ class Case:
     second: float
     expectation: str = "quieter"
     passthrough: bool = False
-    display: str | None = None
 
 
 def normalized(db, low, high):
@@ -43,20 +42,22 @@ def normalized(db, low, high):
 
 # Continuous CLAP values are normalized curve positions (ADR-0010).
 CASES = {
-    "com.suppleaudio.probe-synth": Case("ProbeSynth", True, "Output Gain",
-                                      normalized(-12, -60, 12), normalized(-24, -60, 12),
-                                      "gain", display="Probe Synth"),
-    "com.suppleaudio.orrery": Case("Orrery", True, "Output Level",
-                                 normalized(0, -60, 12), normalized(-12, -60, 12), "gain"),
-    "com.suppleaudio.utility": Case("Plumb", False, "Gain",
-                                  normalized(0, -120, 24), normalized(-12, -120, 24), "gain", True),
     "com.suppleaudio.yarrow": Case("Yarrow", False, "Output", .5, .25, "gain", True),
     "com.suppleaudio.sundew": Case("Sundew", False, "Threshold", 1, .4),
-    "com.suppleaudio.analyzer": Case("Analyzer", False, "Hold", 0, 1, "transparent", True, "Gauge"),
-    "com.suppleaudio.gate": Case("Gate", False, "Threshold", 0, .925, display="Sluice"),
-    "com.suppleaudio.drive": Case("Kiln", False, "Output", .5, .25, "gain"),
-    "com.suppleaudio.transient": Case("Flint", False, "Output", .5, .25, "gain", True),
-    "com.suppleaudio.delay": Case("Echelon", False, "Output", .5, .25, "gain"),
+    "com.suppleaudio.treeline": Case("Treeline", False, "Ceiling", 1, 0, passthrough=True),
+    "com.suppleaudio.gorse": Case("Gorse", False, "Output", .5, .25, "gain", True),
+    "com.suppleaudio.hickory": Case("Hickory", False, "Gain",
+                                  normalized(0, -60, 24), normalized(-12, -60, 24), "gain", True),
+    "com.suppleaudio.sorrel": Case("Sorrel", False, "Threshold",
+                                 normalized(-80, -80, 0), normalized(-6, -80, 0), passthrough=True),
+    "com.suppleaudio.teasel": Case("Teasel", False, "Output", .5, .25, "gain"),
+    "com.suppleaudio.bracken": Case("Bracken", False, "Output", .5, .25, "gain"),
+    "com.suppleaudio.ghyll": Case("Ghyll", False, "Output", .5, .25, "gain"),
+    "com.suppleaudio.pollia": Case("Pollia", False, "Output", .5, .25, "gain"),
+    "com.suppleaudio.lichen": Case("Lichen", False, "Target", 0, 1, "transparent", True),
+    "com.suppleaudio.marram": Case("Marram", True, "Output",
+                                 normalized(0, -36, 12), normalized(-12, -36, 12), "gain"),
+    "com.suppleaudio.withy": Case("Withy", False, "Output", .5, .25, "gain"),
 }
 
 
@@ -250,7 +251,7 @@ def setup_script(case, plugin_id, folder, cfg, media):
     """REAPER writes the plugin chunk, opaque state and envelope addressing."""
     prefix = f"""local folder = {lua_string(folder)} .. '/'
 local expected_resource = {lua_string(cfg)}
-local fx_name = {lua_string(case.display or case.artifact)}
+local fx_name = {lua_string(case.artifact)}
 local parameter_name = {lua_string(case.parameter)}
 local first, second = {case.first:.17g}, {case.second:.17g}
 local log = assert(io.open(folder .. 'metadata.tsv', 'w'))
@@ -582,7 +583,7 @@ def check_plugin(plugin_id, case, runner, folder, cfg, media, editor=False):
         row["metrics"]["automation_delta_db"] = delta
         if case.expectation == "transparent":
             correct = automated == bypass
-            row["reason"] = "Hold envelope/save/reload and audio transparency checked; meter freeze not measured"
+            row["reason"] = f"{case.parameter} envelope/save/reload and audio transparency checked; readouts not measured"
         else:
             correct = -13 <= delta <= -11 if case.expectation == "gain" else delta < -3
         row["automation"] = "pass" if correct else "fail"

@@ -1,62 +1,103 @@
-# Flint (`transient`) — transient shaping
+# Gorse: transient shaper
 
-Find the instance id in `project.get`, then use `fx.describe` to read its
-physical schema. Apply the flat parameter keys below with `fx.patch.merge`
-(`{"fx":"fx_1","patch":{"params":{"attack":60}}}`).
-`fx.patch.get` captures a reproducible setting. Render, analyze and compare
-before keeping a change; increase onset or tail by sound, not by peak alone.
-Plugin id: `com.suppleaudio.transient`; patch schema:
-`supple.transient-patch/1.0`. There is no random seed or sidechain.
+Use `com.suppleaudio.gorse` to change the shape of hits: more or less
+onset (punch, snap, pick) and more or less tail (ring, room, sustain).
+Patches use `supple.gorse-patch/1.0`, with physical values under `params`;
+a merge changes only the keys it names.
 
-| Key | Physical unit / type | Range | Default | Meaning |
-|---|---|---|---|---|
-| `attack` | % | -100..100 | 0 | Onset boost/cut, up to +/-12 dB |
-| `sustain` | % | -100..100 | 0 | Decay boost/cut, up to +/-12 dB |
-| `speed` | ms, log | 1..50 | 10 | Fast release and slow attack |
-| `sensitivity` | % | 0..100 | 50 | Scale envelope difference; zero stops shaping |
-| `clip` | bool | false / true | false | 2x tanh soft clip; restart, not automatable |
-| `mix` | % | 0..100 | 100 | Aligned dry/wet blend |
-| `output` | dB | -24..24 | 0 | Final gain after clip and mix |
-| `input_level` | readonly dBFS | -120..40 | -120 | Input sample peak every 50 ms |
-| `output_level` | readonly dBFS | -120..40 | -120 | Output sample peak every 50 ms |
-| `gain` | readonly dB | -12..12 | 0 | Mean shaping gain every 50 ms |
+It works the same at any level: the detector compares two followers in
+decibels, so a hit 20 dB quieter is shaped the same, and a steady sound
+(a held note, a bass line, a voice) is left alone. There is no threshold
+to set.
 
-Recipes (the JSON is the `patch` argument for `fx.patch.merge`):
+- **Onset.** While the level is rising faster than it has been, the hit is
+  starting: `attack` applies, in full once the rise leads by 10 dB at 50 %
+  sensitivity.
+- **Tail.** While the level falls faster than it has been, the hit is
+  decaying: `sustain` applies, in full once the fall leads by a third of
+  that. Fast decays (drums) get it in full; slow ones (a piano) need more
+  `length` or `sensitivity`.
+- **Lookahead.** The gain lands exactly on each onset, from its first
+  sample (1 ms of latency, 1.1 ms with the clip's filters: 52 samples at
+  48 kHz). A cut softens the click itself.
 
-- **Punch with a shorter tail:**
-  `{"params":{"attack":60,"sustain":-30,"speed":10,"sensitivity":50,"clip":false,"mix":100,"output":-3}}`.
-  Compare the first 5 ms and decay separately; output trim preserves headroom.
-- **Soften a sharp pick:**
-  `{"params":{"attack":-40,"sustain":0,"speed":5,"sensitivity":50,"clip":false,"mix":75,"output":0}}`.
-  Short speed follows brief onsets; mix restores some dry definition.
-- **Bring out room/decay:**
-  `{"params":{"attack":0,"sustain":45,"speed":20,"sensitivity":65,"clip":false,"mix":70,"output":-3}}`.
-  Listen for unwanted bleed and room noise as well as the useful sustain.
+| Key | Unit and range | Default |
+|---|---|---|
+| `attack` | dB, −12…12: the change at a clear onset; negative softens | 0 |
+| `sustain` | dB, −12…12: the change through a clear decay; negative shortens | 0 |
+| `length` | ms, 1…100, logarithmic: how long an onset lasts (about 1 to 3.5 × this) and how slow a decay still counts | 10 |
+| `sensitivity` | %, 0…100: how small a rise or fall counts in full; 0 shapes nothing | 50 |
+| `focus` | full, low, mid, high: what the detector hears (below 150 Hz; 250 Hz to 4 kHz; above 5 kHz). The whole signal is shaped | full |
+| `clip` | bool: a soft clip last of all; nothing under −6 dBFS changes and nothing passes 0 dBFS | false |
+| `mix` | %, 0…100: shaped against dry, in time | 100 |
+| `output` | dB, −24…24: level before the clip | 0 |
+| `gain_change` | dB, readonly: the largest change in the last block | |
+| `onset_change` | dB, readonly: how much the recent hits' onsets changed, at the most | |
+| `tail_change` | dB, readonly: how much the recent hits' tails changed, on average | |
 
-The stereo maximum detector drives one gain, preserving stereo balance.
-A peak hold tracks carrier maxima (1..50 ms, up to roughly half a cycle);
-fast and slow dB followers separate rises from falls. Attack is not an
-attack time, sustain is not a release time, and speed controls both detector
-branches. The dB difference makes the shaping level-independent, including
-its initial onset. One part acts at a time, with total gain bounded to
-+/-12 dB and a 1 ms gain pole. Neutral defaults pass bit-exactly. Continuous
-changes smooth for 20 ms; setting a patch before playback snaps its values.
+After a render, `onset_change` and `tail_change` say what the settings did
+to the hits that played (an average that favours the latest few). If
+`onset_change` is far under `attack`, the hits are not clear enough to the
+detector: raise `sensitivity`, or `focus` on the instrument.
 
-Clip off is zero latency. Clip on adds exactly 72 samples, aligned with
-the dry path, through the shared 2x `dsp::Oversampler`. Toggle it while stopped
-or let the host service the requested restart. Clip is a soft tone change;
-it does not guarantee a sample or true-peak ceiling, and output gain can
-raise peaks afterwards. For a mastering ceiling use render normalization's
-true-peak limiter.
+## Recipes
 
-This is a linked broadband effect: it cannot isolate a snare from bass or
-cymbals in a full mix, and it has no external key or frequency selectors.
-Slow low-frequency carriers can delay decay recognition through peak hold.
-The relative detector floor is 120 dB below the largest level since reset;
-material below that floor is treated as silence. Tanh is anti-aliased by 2x
-filtering but is not claimed alias-free at arbitrary drive/frequency.
-GUI histories and readonly meters describe the signal, not loudness targets.
+Punchier drums, a little tighter:
 
-See [mixing](mixing.md), [compression](comp.md),
-[stock spec §4](../../docs/specs/stock-effects.md#4-transient-shaper--flint-transient)
-and [implementation §9](../../docs/specs/effects.md#9-second-wave-transient-shaper--flint-transient-stock-effectsmd-4).
+```json
+{"params":{"attack":6,"sustain":-2}}
+```
+
+Kick body on a drum bus, ignoring snare and hats (a loud bass under the
+kick hides part of its rise: more sensitivity):
+
+```json
+{"params":{"attack":6,"length":15,"focus":"low","sensitivity":70}}
+```
+
+Snare crack, shorter ring:
+
+```json
+{"params":{"attack":7,"sustain":-3,"length":6,"focus":"mid"}}
+```
+
+Dry up a roomy kit:
+
+```json
+{"params":{"sustain":-9,"length":12,"sensitivity":60}}
+```
+
+Soften a sharp pick or a clicky kick:
+
+```json
+{"params":{"attack":-6,"length":5}}
+```
+
+Bring out room and decay:
+
+```json
+{"params":{"attack":-2,"sustain":6,"length":30,"sensitivity":70}}
+```
+
+Raised onsets add peak level: turn `output` down by about the attack, or
+turn `clip` on to catch what passes 0 dBFS.
+
+## Measuring it
+
+Render and `compare` the first 10 ms of hits and their decay separately;
+peak level rises with attack while loudness barely moves, so compare at
+matched loudness. Listen for the cost: a sustain boost lifts room noise
+and bleed with the tails, and a large attack on a full mix lifts whatever
+plays at each hit.
+
+## Limits
+
+One stereo-linked gain; no mid/side or per-band shaping (`focus` chooses
+what is heard, not what is shaped). `low` focus hears the kick through a
+filter about 2 ms late, so its gain shapes the body more than the click.
+A chord's beating is real movement and moves the gain a little at
+extreme settings. The clip guarantees sample peaks, not true peaks; for a
+mastering ceiling use [Treeline, the limiter](limiter.md).
+
+See [mixing](mixing.md), [compression](comp.md) and
+[stock spec §4](../../docs/specs/stock-effects.md#4-transient-shaper--gorse-gorse).

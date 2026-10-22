@@ -1,47 +1,30 @@
 {
   "changed_modules": [
-    "filters.filter1"
+    "filter1"
   ],
   "hidden_patch": {
-    "envelopes": {
-      "amp": {
-        "attack": "5 ms",
-        "release": "250 ms",
-        "sustain": "90 %"
+    "params": {
+      "amp.attack": "5 ms",
+      "amp.decay": "500 ms",
+      "amp.release": "400 ms",
+      "amp.sustain": "85 %",
+      "env2.decay": "800 ms",
+      "env2.sustain": "40 %",
+      "filter1.cutoff": "4 kHz",
+      "filter1.env": "+1 oct",
+      "filter1.resonance": "5 %",
+      "filter1.slope": "db12",
+      "osc1.level": "-4.5 dB",
+      "voice.unison": 7,
+      "voice.unison_detune": "28 ct",
+      "voice.unison_spread": "90 %"
+    },
+    "routes": {
+      "modwheel>filter1.cutoff": {
+        "amount": "+2 oct"
       }
     },
-    "filters": {
-      "filter1": {
-        "cutoff": "4 kHz",
-        "mode": "lowpass",
-        "resonance": "10 %",
-        "type": "svf"
-      }
-    },
-    "fx": {
-      "chain": [
-        "delay",
-        "reverb"
-      ],
-      "delay": {
-        "mix": "20 %"
-      },
-      "reverb": {
-        "mix": "15 %"
-      }
-    },
-    "oscillators": {
-      "osc1": {
-        "type": "va",
-        "wave": "saw"
-      }
-    },
-    "schema": "supple.orrery-patch/1.0",
-    "voice": {
-      "unison": 7,
-      "unison_detune": "25 ct",
-      "unison_spread": "80 %"
-    }
+    "schema": "supple.marram-patch/1.0"
   },
   "id": "reference.supersaw-lead",
   "limits": {
@@ -50,7 +33,7 @@
   },
   "listening": "Is this a bright, playable lead with a stable wide image?",
   "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C4:w",
-  "prompt": "Match the reference render with Orrery. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
+  "prompt": "Match the reference render with Marram. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
   "recipe_index": 5,
   "render": {
     "tail_s": 2
@@ -69,51 +52,34 @@
   "setup": [
     {
       "args": {
-        "plugin": "com.suppleaudio.orrery"
+        "plugin": "com.suppleaudio.marram"
       },
       "command": "plugin.load"
     }
   ],
   "starting_patch": {
-    "envelopes": {
-      "amp": {
-        "attack": "5 ms",
-        "release": "250 ms",
-        "sustain": "90 %"
+    "params": {
+      "amp.attack": "5 ms",
+      "amp.decay": "500 ms",
+      "amp.release": "400 ms",
+      "amp.sustain": "85 %",
+      "env2.decay": "800 ms",
+      "env2.sustain": "40 %",
+      "filter1.cutoff": "6 kHz",
+      "filter1.env": "+1 oct",
+      "filter1.resonance": "5 %",
+      "filter1.slope": "db12",
+      "osc1.level": "-4.5 dB",
+      "voice.unison": 7,
+      "voice.unison_detune": "28 ct",
+      "voice.unison_spread": "90 %"
+    },
+    "routes": {
+      "modwheel>filter1.cutoff": {
+        "amount": "+2 oct"
       }
     },
-    "filters": {
-      "filter1": {
-        "cutoff": "6 kHz",
-        "mode": "lowpass",
-        "resonance": "10 %",
-        "type": "svf"
-      }
-    },
-    "fx": {
-      "chain": [
-        "delay",
-        "reverb"
-      ],
-      "delay": {
-        "mix": "20 %"
-      },
-      "reverb": {
-        "mix": "15 %"
-      }
-    },
-    "oscillators": {
-      "osc1": {
-        "type": "va",
-        "wave": "saw"
-      }
-    },
-    "schema": "supple.orrery-patch/1.0",
-    "voice": {
-      "unison": 7,
-      "unison_detune": "25 ct",
-      "unison_spread": "80 %"
-    }
+    "schema": "supple.marram-patch/1.0"
   },
   "suite": "synth-reference",
   "tier": 1

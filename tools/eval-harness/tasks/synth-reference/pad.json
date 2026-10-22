@@ -1,75 +1,36 @@
 {
   "changed_modules": [
-    "filters.filter1"
+    "filter1"
   ],
   "hidden_patch": {
-    "envelopes": {
-      "amp": {
-        "attack": "600 ms",
-        "decay": "1.2 s",
-        "release": "1.5 s",
-        "sustain": "80 %"
-      },
-      "env2": {
-        "attack": "1.5 s",
-        "decay": "3 s",
-        "release": "2 s",
-        "sustain": "30 %"
-      }
-    },
-    "filters": {
-      "filter1": {
-        "cutoff": "1.8 kHz",
-        "resonance": "25 %",
-        "slope": "24 dB",
-        "type": "ladder"
-      }
-    },
-    "fx": {
-      "chain": [
-        "chorus",
-        "reverb"
-      ],
-      "reverb": {
-        "mix": "25 %",
-        "size": "70 %"
-      }
-    },
-    "lfos": {
-      "lfo1": {
-        "rate": "0.2 Hz",
-        "retrigger": "free"
-      }
-    },
-    "oscillators": {
-      "osc1": {
-        "fine": "-7 ct",
-        "level": "-6 dB",
-        "type": "va",
-        "wave": "saw"
-      },
-      "osc2": {
-        "fine": "+7 ct",
-        "level": "-6 dB",
-        "type": "va",
-        "wave": "saw"
-      }
+    "params": {
+      "amp.attack": "600 ms",
+      "amp.decay": "1.2 s",
+      "amp.release": "1.5 s",
+      "env2.attack": "1.5 s",
+      "env2.decay": "3 s",
+      "env2.release": "2 s",
+      "env2.sustain": "30 %",
+      "filter1.cutoff": "1.8 kHz",
+      "filter1.resonance": "25 %",
+      "lfo1.mode": "free",
+      "lfo1.rate": "0.12 Hz",
+      "osc1.fine": "-7 ct",
+      "osc2.fine": "+7 ct",
+      "osc2.type": "analog",
+      "voice.drift": "25 %",
+      "voice.unison": 3,
+      "voice.unison_spread": "70 %"
     },
     "routes": {
-      "env2>filter1.cutoff": {
-        "amount": "+2 oct"
+      "lfo1>filter1.cutoff": {
+        "amount": "+0.6 oct"
       },
-      "lfo1>osc1.fine": {
-        "amount": "0.08 st"
+      "modwheel>filter1.cutoff": {
+        "amount": "+1.5 oct"
       }
     },
-    "schema": "supple.orrery-patch/1.0",
-    "voice": {
-      "polyphony": 8,
-      "unison": 3,
-      "unison_detune": "12 ct",
-      "unison_spread": "70 %"
-    }
+    "schema": "supple.marram-patch/1.0"
   },
   "id": "reference.pad",
   "limits": {
@@ -78,7 +39,7 @@
   },
   "listening": "Does it swell warmly and stay wide without sounding harsh?",
   "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: [C3 E3 G3]:w",
-  "prompt": "Match the reference render with Orrery. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
+  "prompt": "Match the reference render with Marram. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
   "recipe_index": 1,
   "render": {
     "tail_s": 2
@@ -97,79 +58,40 @@
   "setup": [
     {
       "args": {
-        "plugin": "com.suppleaudio.orrery"
+        "plugin": "com.suppleaudio.marram"
       },
       "command": "plugin.load"
     }
   ],
   "starting_patch": {
-    "envelopes": {
-      "amp": {
-        "attack": "600 ms",
-        "decay": "1.2 s",
-        "release": "1.5 s",
-        "sustain": "80 %"
-      },
-      "env2": {
-        "attack": "1.5 s",
-        "decay": "3 s",
-        "release": "2 s",
-        "sustain": "30 %"
-      }
-    },
-    "filters": {
-      "filter1": {
-        "cutoff": "1.2 kHz",
-        "resonance": "25 %",
-        "slope": "24 dB",
-        "type": "ladder"
-      }
-    },
-    "fx": {
-      "chain": [
-        "chorus",
-        "reverb"
-      ],
-      "reverb": {
-        "mix": "25 %",
-        "size": "70 %"
-      }
-    },
-    "lfos": {
-      "lfo1": {
-        "rate": "0.2 Hz",
-        "retrigger": "free"
-      }
-    },
-    "oscillators": {
-      "osc1": {
-        "fine": "-7 ct",
-        "level": "-6 dB",
-        "type": "va",
-        "wave": "saw"
-      },
-      "osc2": {
-        "fine": "+7 ct",
-        "level": "-6 dB",
-        "type": "va",
-        "wave": "saw"
-      }
+    "params": {
+      "amp.attack": "600 ms",
+      "amp.decay": "1.2 s",
+      "amp.release": "1.5 s",
+      "env2.attack": "1.5 s",
+      "env2.decay": "3 s",
+      "env2.release": "2 s",
+      "env2.sustain": "30 %",
+      "filter1.cutoff": "1.2 kHz",
+      "filter1.resonance": "25 %",
+      "lfo1.mode": "free",
+      "lfo1.rate": "0.12 Hz",
+      "osc1.fine": "-7 ct",
+      "osc2.fine": "+7 ct",
+      "osc2.type": "analog",
+      "voice.drift": "25 %",
+      "voice.unison": 3,
+      "voice.unison_spread": "70 %"
     },
     "routes": {
-      "env2>filter1.cutoff": {
-        "amount": "+2 oct"
+      "lfo1>filter1.cutoff": {
+        "amount": "+0.6 oct"
       },
-      "lfo1>osc1.fine": {
-        "amount": "0.08 st"
+      "modwheel>filter1.cutoff": {
+        "amount": "+1.5 oct"
       }
     },
-    "schema": "supple.orrery-patch/1.0",
-    "voice": {
-      "polyphony": 8,
-      "unison": 3,
-      "unison_detune": "12 ct",
-      "unison_spread": "70 %"
-    }
+    "schema": "supple.marram-patch/1.0"
   },
   "suite": "synth-reference",
   "tier": 1

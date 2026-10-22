@@ -35,6 +35,10 @@
 // "Missing" when it is. A product whose files are of several kinds -- a
 // sample and an impulse response -- labels each, .ofKind(n), and its
 // loadFile() reads the label from the request (FileRequest::kind).
+//
+// A property marked hidden() is one the automatic editor (gui/AutoEditor.cpp)
+// leaves out: text in a format of the product's own, that only its own
+// controls or its host edit. State and presets keep it as any other.
 #pragma once
 
 #include <cstdint>
@@ -44,6 +48,7 @@ namespace supple {
 namespace propflag {
 inline constexpr uint32_t kPerProject = 1u << 0;
 inline constexpr uint32_t kFile = 1u << 1;
+inline constexpr uint32_t kHidden = 1u << 2;
 }  // namespace propflag
 
 // What audioFile() accepts: what dsp/AudioFile.h decodes.
@@ -62,6 +67,7 @@ struct PropertyDef {
     constexpr bool is(uint32_t flag) const { return (flags & flag) != 0; }
     constexpr bool perProjectOnly() const { return is(propflag::kPerProject); }
     constexpr bool isFile() const { return is(propflag::kFile); }
+    constexpr bool isHidden() const { return is(propflag::kHidden); }
 
     // Kept with the session, left out of presets.
     constexpr PropertyDef perProject() const {
@@ -74,6 +80,12 @@ struct PropertyDef {
         PropertyDef d = *this;
         d.flags |= propflag::kFile;
         d.extensions = types;
+        return d;
+    }
+    // Left out of the automatic editor (see above).
+    constexpr PropertyDef hidden() const {
+        PropertyDef d = *this;
+        d.flags |= propflag::kHidden;
         return d;
     }
     // A file of audio, as the default loadFile() decodes it.

@@ -51,8 +51,9 @@ struct Job {
     const float* keyPtr[2] = {nullptr, nullptr};
     std::vector<float> outL, outR;  // sized to the maximum render length
     std::int64_t length = 0, latency = 0, maxTotal = 0, rendered = 0;
-    std::int64_t tailEnd = -1;   // musical end + the chain's reported tail, or -1 (unknown)
-    bool tailsReported = false;  // every stage reports its tail (clap.tail)
+    std::int64_t tailEnd = -1;          // musical end + the chain's reported tail, or -1 (unknown)
+    bool tailsReported = false;         // every stage reports its tail (clap.tail)
+    std::vector<ReportedValue> meters;  // sized before the render
     std::int64_t silenceHold = 0;
     double silenceLinear = 0;
     bool capped = false, error = false, startFailed = false;
@@ -132,7 +133,8 @@ void renderLoop(Job& j) SUPPLE_RT {
         }
         const host::Transport transport = transportAt(s, pos);
         const float* const* chainIn = j.inPtr;
-        for (auto& st : j.stages) {
+        for (std::size_t index = 0; index < j.stages.size(); ++index) {
+            Stage& st = j.stages[index];
             host::ProcessBlock b;
             b.inputs = st.instance->audioInputChannels() ? chainIn : nullptr;
             b.inputChannels = st.instance->audioInputChannels() ? 2 : 0;
@@ -152,6 +154,14 @@ void renderLoop(Job& j) SUPPLE_RT {
                 j.rendered = pos;
                 return;
             }
+            // Meters as they stand at the musical end; the tail leaves them.
+            if (pos < musicalEnd)
+                for (std::size_t e = 0; e < st.outEvents.count; ++e) {
+                    const host::OutputEvent& out = st.outEvents.storage[e];
+                    if (out.kind != host::OutputEvent::Kind::ParamValue) continue;
+                    for (ReportedValue& m : j.meters)
+                        if (m.stage == index && m.paramId == out.paramId) m.value = out.value;
+                }
             chainIn = st.out;
         }
         // Collect the chain output; watch for the silent tail.
@@ -341,6 +351,9 @@ Result<RenderResult> render(std::span<host::Instance* const> chain, const Render
         st.blockEvents.reserve(perTarget[i] + 1);
         st.outStorage.resize(512);
         st.outEvents.storage = st.outStorage;
+        for (const host::ParamInfo& p : chain[i]->params())
+            if (p.flags & CLAP_PARAM_IS_READONLY)
+                j.meters.push_back({i, p.id, chain[i]->paramValue(p.id).valueOr(p.def)});
     }
 
     std::thread audio([&] {
@@ -371,6 +384,7 @@ Result<RenderResult> render(std::span<host::Instance* const> chain, const Render
         return Error("render.process_error",
                      "a plugin reported a processing error at sample " + std::to_string(j.rendered),
                      {}, "check the plugin log (render result log) and its settings");
+    r.meters = std::move(j.meters);
     r.latency = static_cast<std::uint32_t>(j.latency);
     r.tailCapped = j.capped;
     const std::int64_t keep = std::max<std::int64_t>(0, j.rendered - j.latency);

@@ -113,6 +113,8 @@ inline const char* unitName(scriptc::ParamModel::Unit u) {
             return "bpm";
         case U::Samples:
             return "samples";
+        case U::Meters:
+            return "m";
         default:
             return nullptr;
     }

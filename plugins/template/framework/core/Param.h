@@ -78,6 +78,7 @@ enum class Unit : uint8_t {
     Bpm,
     Pan,      // -1 (left) to +1 (right): "50L", "C", "50R"
     Note,     // a MIDI note number, by name: 60 is "C4", 69 is "A4"
+    Meters,   // a distance: a room's size, a source's place
 };
 
 namespace pflag {
@@ -336,6 +337,10 @@ constexpr ParamDef octaves(uint32_t id, const char* name, double min, double max
 
 constexpr ParamDef bpm(uint32_t id, const char* name, double min, double max, double def) {
     return continuous(id, name, min, max, def, Unit::Bpm);
+}
+
+constexpr ParamDef meters(uint32_t id, const char* name, double min, double max, double def) {
+    return continuous(id, name, min, max, def, Unit::Meters);
 }
 
 // Left to right, -1 to +1; shown as "50L", "C", "50R".

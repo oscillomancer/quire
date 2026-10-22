@@ -24,6 +24,7 @@ if(SUPPLE_BUILD_TESTS)
                              FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>"
                              STOCK_CLAP_DIR="${CMAKE_BINARY_DIR}/plugins/clap"
                              SUPPLE_SCRIPT_EXAMPLES="${PROJECT_SOURCE_DIR}/plugins/suite/examples"
+                             SUPPLE_SKILL_GUIDES="${PROJECT_SOURCE_DIR}/skill/guides"
                              SUPPLE_EDITORS=$<BOOL:${SUPPLE_BUILD_GUI}>)
   # The optimizer end to end with the real synth (slow-ish; single-threaded).
   add_executable(sandbox-optimize.tests tests/test_optimize.cpp)
@@ -31,9 +32,10 @@ if(SUPPLE_BUILD_TESTS)
   supple_target_defaults(sandbox-optimize.tests)
   add_test(NAME sandbox-optimize.tests COMMAND sandbox-optimize.tests)
   set_tests_properties(sandbox-optimize.tests PROPERTIES LABELS "sandbox;slow;tsan-skip")
-  add_dependencies(sandbox-optimize.tests orrery-headless clap-host-fixtures)
+  # Marram comes from the stock plugins' build (plugins/clap).
+  add_dependencies(sandbox-optimize.tests clap-host-fixtures)
   target_compile_definitions(sandbox-optimize.tests PRIVATE
-    ORRERY_CLAP_PATH="$<TARGET_FILE:orrery-headless>"
+    STOCK_CLAP_DIR="${CMAKE_BINARY_DIR}/plugins/clap"
     FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>")
 endif()
 
@@ -64,7 +66,7 @@ if(SUPPLE_BUILD_TESTS)
   add_test(NAME sandbox.mcp-proxy
     COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_proxy.py
             $<TARGET_FILE:${PRODUCT_SLUG}-sandbox> $<TARGET_FILE:${PRODUCT_SLUG}-mcp>
-            $<TARGET_FILE:orrery-headless>)
+            ${CMAKE_BINARY_DIR}/plugins/clap/Marram.clap)
   # Keep the Linux documentation golden; native DSP numbers may differ.
   # Both deployments still run every structured-result assertion.
   if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT SUPPLE_SANITIZE)
@@ -75,9 +77,8 @@ if(SUPPLE_BUILD_TESTS)
     add_test(NAME mcp.demo
       COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_demo.py
               $<TARGET_FILE:${PRODUCT_SLUG}-sandbox> $<TARGET_FILE:${PRODUCT_SLUG}-mcp>
-              $<TARGET_FILE:orrery-headless>
-              ${PROJECT_SOURCE_DIR}/docs/demos/mcp-orrery-session.md ${_mcp_demo_args})
+              ${CMAKE_BINARY_DIR}/plugins/clap/Marram.clap
+              ${PROJECT_SOURCE_DIR}/docs/demos/mcp-synth-session.md ${_mcp_demo_args})
     set_tests_properties(mcp.demo PROPERTIES LABELS "sandbox;slow")
   endif()
-  add_dependencies(${PRODUCT_SLUG}-sandbox orrery-headless)
 endif()

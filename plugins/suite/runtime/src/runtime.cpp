@@ -58,6 +58,14 @@ Patches& Patches::set(const Param& param, const char* choiceKey) {
     builder_->set(param, choiceKey);
     return *this;
 }
+Patches& Patches::route(const char* route, double amount) {
+    builder_->route(route, amount, "");
+    return *this;
+}
+Patches& Patches::route(const char* route, double amount, const char* via) {
+    builder_->route(route, amount, via ? via : "");
+    return *this;
+}
 
 namespace detail {
 
@@ -234,8 +242,13 @@ int saturate(double x) {
 }
 }  // namespace
 
-int toInt(double x) { return saturate(std::trunc(x)); }
-int floorToInt(double x) { return saturate(std::floor(x)); }
+int toInt(double x) { return saturate(x); }
+int floorToInt(double x) {
+    // A normal positive value truncates to its floor without a libm call.
+    // Keep libm for the other cases, including subnormals under FTZ/DAZ.
+    if (x >= 1.0 && x <= 2147483647.0) return static_cast<int>(x);
+    return saturate(std::floor(x));
+}
 int ceilToInt(double x) { return saturate(std::ceil(x)); }
 int roundToInt(double x) { return saturate(std::round(x)); }
 int idiv(int a, int b) {
@@ -311,6 +324,11 @@ AudioFile::AudioFile(const FileSpec& spec) {
 Convolver::Convolver(const FileSpec& spec) {
     if (auto* r = detail::registrar()) r->declareFile(this, spec);
 }
+Source::Source(const SourceSpec& spec) {
+    low_ = spec.bipolar ? -1.0 : 0.0;
+    perVoice_ = spec.perVoice;
+    if (auto* r = detail::registrar()) r->declareSource(*this, spec);
+}
 
 Param::Param(const Param& other) { *this = other; }
 
@@ -346,6 +364,9 @@ int Plugin::channels() const { return instanceOf(instance_).channels; }
 bool Plugin::offline() const { return instanceOf(instance_).offline; }
 void Plugin::setLatency(int samples) {
     if (instance_) instance_->latency = samples < 0 ? 0 : samples;
+}
+void Plugin::setTail(int samples) {
+    if (instance_) instance_->tail = samples < 0 ? -1 : samples;
 }
 
 // --- instruments -----------------------------------------------------------------
@@ -407,6 +428,11 @@ double Param::forVoice(int v) const {
     const detail::VoiceBank* bank = bankFor(detail::current(), v);
     return bank && slot_ >= 0 ? bank->modulated(slot_, v, value_) : value_;
 }
+double Param::routed(int i) const {
+    const double base = at(i);
+    const detail::Instance* in = slot_ >= 0 ? detail::current() : nullptr;
+    return in && in->routes ? in->routes->routed(slot_, -1, base) : base;
+}
 void Instrument::voiceFinished(int v) {
     if (detail::VoiceBank* bank = bankFor(instance_, v)) bank->finished(v);
 }
@@ -420,6 +446,10 @@ void Instrument::setGlide(double ms) {
 void Instrument::setBendRange(double semitones) {
     if (detail::VoiceBank* bank = instance_ ? instance_->voices : nullptr)
         bank->setBendRange(std::isfinite(semitones) ? std::clamp(semitones, 0.0, 96.0) : 2.0);
+}
+void Instrument::setVoiceLimit(int voices) {
+    if (detail::VoiceBank* bank = instance_ ? instance_->voices : nullptr)
+        bank->setVoiceLimit(std::clamp(voices, 1, bank->count()));
 }
 
 // --- DSP -------------------------------------------------------------------------
@@ -565,9 +595,13 @@ Oversampler& Oversampler::operator=(const Oversampler& other) {
     return *this;
 }
 Oversampler::~Oversampler() { delete &over(state_); }
-void Oversampler::prepare(int factor) {
+void Oversampler::prepare(int factor) { prepare(factor, Phase::Minimum); }
+void Oversampler::prepare(int factor, Phase phase) {
     OversamplerState& o = over(state_);
-    o.over.prepare(1, 1, std::clamp(factor, 2, 16), dsp::ScriptRuntimeOversampler::Phase::Minimum);
+    // 1 passes samples through: a restart to 1x needs no code of its own.
+    o.over.prepare(1, 1, std::clamp(factor, 1, 16),
+                   phase == Phase::Linear ? dsp::ScriptRuntimeOversampler::Phase::Linear
+                                          : dsp::ScriptRuntimeOversampler::Phase::Minimum);
     o.prepared = true;
     o.hi = nullptr;
 }
@@ -655,6 +689,12 @@ void Stft::prepare(int size, int overlap) {
     s.prepared = true;
     s.ready = false;
 }
+void Stft::prepareAnalysis(int size, int overlap) {
+    StftState& s = stft(state_);
+    s.stft.prepare(1, std::clamp(size, 16, 32768), overlap, dsp::Stft::Mode::Analyse);
+    s.prepared = true;
+    s.ready = false;
+}
 int Stft::size() const { return stft(state_).prepared ? stft(state_).stft.size() : 0; }
 int Stft::bins() const { return stft(state_).prepared ? stft(state_).stft.bins() : 0; }
 int Stft::hop() const { return stft(state_).prepared ? stft(state_).stft.hop() : 0; }
@@ -675,6 +715,8 @@ bool Stft::push(double x) {
 }
 double Stft::pull() {
     StftState& s = stft(state_);
+    // Analysing, the bins stay readable until the next push().
+    if (s.prepared && s.stft.mode() == dsp::Stft::Mode::Analyse) return s.stft.pull(0);
     s.ready = false;
     if (!s.prepared) {
         const double y = s.one;
@@ -1140,6 +1182,10 @@ void Editor::keyboard(int lowKey, int highKey, double x, double y, double w, dou
 }
 void Editor::meters(double x, double y, double w, double h) {
     if (builder_) builder_->meters(x, y, w, h);
+}
+
+void Editor::routes(double x, double y, double w, double h) {
+    if (builder_) builder_->routes(x, y, w, h);
 }
 
 }  // namespace supple::script

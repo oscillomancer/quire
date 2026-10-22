@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -37,7 +38,8 @@ struct ParamModel {
         Octaves,
         Degrees,
         Bpm,
-        Samples
+        Samples,
+        Meters
     };
     enum class Curve { Linear, Log, Pow };
 
@@ -59,7 +61,59 @@ struct ParamModel {
     bool polyModulatable = false;  // modulated per voice (an instrument's)
     bool restarts = false;         // a change restarts the plugin (.restarts())
     std::vector<std::string> roles;
+    // When it applies (.activeWhen(), .activeUnless(), .activeAbove(),
+    // .activeBelow()): while every condition holds and the parameter each
+    // names applies itself; always, without any.
+    struct Condition {
+        int param = -1;  // a parameter declared before this one (declaration order)
+        // A toggle's or a choice's: its values that satisfy it (a toggle's 0
+        // or 1, choice indices). Empty for a number's.
+        std::vector<int> values;
+        // A number's (continuous or integer): above < value < below, in its
+        // physical unit (a percent in percent).
+        double above = -std::numeric_limits<double>::infinity();
+        double below = std::numeric_limits<double>::infinity();
+        bool operator==(const Condition&) const = default;
+    };
+    std::vector<Condition> activeWhen;
+    // How far routes may move it (.routeRange()), physical; its own range
+    // when routeMin > routeMax.
+    double routeMin = 1.0, routeMax = 0.0;
     int offset = 0;  // of the Param member in the plugin struct
+};
+
+// A Source member as the script declares it: a modulation source the
+// patch's routes name.
+struct SourceModel {
+    std::string member;  // the member's name
+    std::string key;     // the routes' name for it (the member's name in snake_case unless given)
+    std::string name, description;
+    bool perVoice = false;  // voiceSource(): a value per voice
+    bool bipolar = true;    // -1..1, or 0..1
+    int offset = 0;         // of the member in the plugin struct
+    bool operator==(const SourceModel&) const = default;
+};
+
+// The sources every instrument has, the runtime's own, after the script's.
+struct BuiltinSource {
+    const char* key;
+    const char* name;
+    bool perVoice, bipolar;
+    const char* description;
+};
+inline constexpr BuiltinSource kInstrumentSources[] = {
+    {"velocity", "Velocity", true, false, "The note's velocity."},
+    {"key", "Key", true, true,
+     "The note's key: -1 at key 0, 0 at middle C (60), 1 at key 120; an amount of 5 oct moves a "
+     "cutoff an octave per octave."},
+    {"random", "Random", true, true, "A random value for each note, new at each note."},
+    {"pressure", "Pressure", true, false, "The note's pressure (poly aftertouch, MPE pressure)."},
+    {"slide", "Slide", true, false, "The note's slide (CLAP brightness, MPE timbre)."},
+    {"modwheel", "Mod Wheel", false, false, "The mod wheel (CC 1)."},
+    {"breath", "Breath", false, false, "The breath controller (CC 2)."},
+    {"expression", "Expression", false, false, "The expression pedal (CC 11)."},
+    {"aftertouch", "Aftertouch", false, false, "Channel pressure."},
+    {"pitchbend", "Pitch Bend", false, true, "The pitch bend, -1 to 1."},
 };
 
 // A file member (AudioFile, Convolver) as the script declares it: a file
@@ -84,6 +138,7 @@ struct SharedModel {
 
 struct InfoModel {
     std::string name, id, vendor, version = "1.0.0", description, url;
+    std::vector<std::string> features;  // after the main category, what the plugin is first
     std::vector<int> channels;  // main bus widths, the default first; empty: the kind's default
     bool sidechain = false;
     std::vector<std::string> outputs;
@@ -95,6 +150,13 @@ struct InfoModel {
 struct FactoryPatchModel {
     std::string name;
     std::vector<std::pair<std::uint32_t, double>> values;
+    // Its routes, as Patches::route() gives them.
+    struct Route {
+        std::string route, via;  // "lfo1>pitch"; "" for none
+        double amount = 0.0;
+        bool operator==(const Route&) const = default;
+    };
+    std::vector<Route> routes;
     bool operator==(const FactoryPatchModel&) const = default;
 };
 
@@ -106,7 +168,7 @@ std::string choiceKey(const ParamModel& param, size_t k);
 
 // A parameter's CLAP id from its key (FNV-1a), stable however the members
 // are ordered; never CLAP's invalid id, never 0.
-inline std::uint32_t keyId(std::string_view key) {
+constexpr std::uint32_t keyId(std::string_view key) {
     std::uint32_t h = 2166136261u;
     for (unsigned char c : key) {
         h ^= c;
@@ -142,6 +204,8 @@ class Code {
     // In declaration order.
     virtual const std::vector<ParamModel>& params() const = 0;
     virtual const std::vector<FileModel>& files() const = 0;
+    // In declaration order.
+    virtual const std::vector<SourceModel>& sources() const = 0;
     virtual const std::vector<FactoryPatchModel>& factoryPatches() const = 0;
     // In declaration order.
     virtual const std::vector<SharedModel>& shared() const = 0;

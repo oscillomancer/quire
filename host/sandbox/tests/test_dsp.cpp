@@ -100,6 +100,65 @@ TEST_CASE("DSP render commands locate invalid patch values inside the patch argu
     }
 }
 
+#if SUPPLE_EDITORS
+TEST_CASE("the automatic editor lists a script's routes and edits them as a patch would") {
+    Harness h;
+    h.write("routed", R"(#include <supple/script.h>
+struct Routed : Instrument {
+    static constexpr Info info = {.name = "Routed", .id = "com.example.routed", .voices = 2};
+    Param level = decibels("Level", -48, 0, -12).modulated();
+    void startVoice(int v) {}
+    void releaseVoice(int v) { voiceFinished(v); }
+    void process(Block& io) {}
+};
+)");
+    auto preview = [&](const std::string& pointer) {
+        auto args = json::parse(R"({"script":"routed","seconds":0,)"
+                                R"("patch":{"routes":{"modwheel>level":{"amount":"+6 dB"}}},)"
+                                R"("pointer":)" +
+                                pointer + "}")
+                        .value();
+        auto result = h.bus->execute({"dsp.preview", args, kTest});
+        REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
+        return *result;
+    };
+    // The route's amount bar, dragged right; its remove button, clicked.
+    auto dragged = preview(R"([{"action":"drag","x":470,"y":302,"to_x":520,"to_y":302}])");
+    CHECK(dragged["problems"].size() == 0);
+    INFO(json::writeCompact(dragged["edits"]));
+    CHECK(dragged["edits"]["routes"]["modwheel>level"]["amount"].asDouble() > 6.0);
+    auto removed = preview(R"([{"action":"click","x":668,"y":302}])");
+    CHECK(json::writeCompact(removed["edits"]) == R"({"routes":{"modwheel>level":null}})");
+}
+#endif
+
+TEST_CASE("results name the parameters that do not apply with the values they leave") {
+    Harness h;
+    h.write("sometimes", script("Sometimes", "com.example.sometimes",
+                                "    Param on = toggle(\"On\", true);\n"
+                                "    Param gain = decibels(\"Gain\", -24, 24, 0).activeWhen(on);\n"
+                                "    void process(Block& io) {}"));
+    auto run = [&](const char* command, const std::string& args) {
+        auto result = h.bus->execute({command, json::parse(args).value(), kTest});
+        REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
+        return *result;
+    };
+    const std::string instance =
+        run("plugin.load", R"({"plugin":"com.example.sometimes"})")["instance"].asString();
+    const std::string at = R"({"instance":")" + instance + R"(")";
+    CHECK(run("plugin.describe", at + "}").find("inactive") == nullptr);
+    auto merged = run("patch.merge", at + R"(,"patch":{"params":{"on":false,"gain":-6}}})");
+    REQUIRE(merged.find("inactive"));
+    CHECK(json::writeCompact(merged["inactive"]) == R"(["gain"])");
+    auto summary = run("plugin.describe", at + "}");
+    CHECK(json::writeCompact(summary["inactive"]) == R"(["gain"])");
+    CHECK(json::writeCompact(summary["params"]).find("gain") == std::string::npos);
+    auto set = run("param.set", at + R"(,"values":{"gain":-3}})");
+    CHECK_FALSE(set["values"]["gain"]["active"].asBool());
+    CHECK(run("param.set", at + R"(,"values":{"on":true}})")["values"]["on"].find("active") ==
+          nullptr);
+}
+
 TEST_CASE("two scripts with one id are refused: the player would play only one") {
     Harness h;
     const std::string body = "    void process(Block& io) {}";
@@ -299,6 +358,83 @@ TEST_CASE("dsp.test rejects invalid automation, key and custom-note arguments at
     check(
         R"({"plugin":"com.suppleaudio.test.gain","notes":[{"key":60,"start_s":0,"length_s":0.1}]})",
         "/notes");
+}
+
+TEST_CASE("dsp.test renders at the sample rate it is given") {
+    Harness h;
+    h.write("rate", script("Rate", "com.example.rate",
+                           "    void prepare() { setLatency(roundToInt(sampleRate() / 1000)); }\n"
+                           "    void process(Block& io) {}"));
+    auto session = h.measured(R"({"script":"rate","signals":["sine"],"seconds":0.1})");
+    CHECK(session["sample_rate"].asDouble() == 48000.0);
+    CHECK(session["latency"].asInt() == 48);
+    auto given =
+        h.measured(R"({"script":"rate","signals":["sine"],"seconds":0.1,"sample_rate":96000})");
+    CHECK(given["sample_rate"].asDouble() == 96000.0);
+    CHECK(given["latency"].asInt() == 96);
+    CHECK(std::abs(given["signals"].at(0).find("gain_db")->asDouble()) < 0.01);
+    auto aliased =
+        h.test(R"({"script":"rate","signals":["sine"],"frequency_hz":5000,"sample_rate":8000})");
+    REQUIRE_FALSE(aliased);
+    CHECK(aliased.error().code == "dsp.frequency");
+    CHECK(aliased.error().path == "/args/frequency_hz");
+}
+
+TEST_CASE("dsp.test reports meters as they stood when the signal ended") {
+    Harness h;
+    // Each block's peak: the sine's while it plays, -60 once the tail is silent.
+    h.write("peak", script("Peak", "com.example.peak",
+                           "    Param level = decibels(\"Level\", -60, 0, -60).meter();\n"
+                           "    void process(Block& io) {\n"
+                           "        double peak = 0.0;\n"
+                           "        for (int i = 0; i < io.frames; ++i) peak = max(peak, "
+                           "abs(io[0][i]));\n"
+                           "        level.set(max(-60.0, gainToDb(peak)));\n"
+                           "    }"));
+    auto result = h.measured(R"({"script":"peak","signals":["sine"],"level_db":-12})");
+    const json::Value* meters = result["signals"].at(0).find("meters");
+    REQUIRE(meters);
+    CHECK(meters->find("level")->asDouble() == doctest::Approx(-12.0).epsilon(0.01));
+}
+
+TEST_CASE("every patch in the synth guide plays on Marram") {
+    if (!fs::exists(kStock / "Marram.clap")) {
+        MESSAGE("skipped: no Marram in " << kStock.string());
+        return;
+    }
+    std::ifstream in(fs::path(SUPPLE_SKILL_GUIDES) / "sound-design.md");
+    REQUIRE(in);
+    std::stringstream guide;
+    guide << in.rdbuf();
+    const std::string text = guide.str();
+    Root root;
+    SessionOptions o;
+    o.workdir = root.path;
+    o.pluginPath = {kStock};
+    auto session = Session::open(o);
+    REQUIRE(session);
+    SandboxHost host(std::move(*session), {});
+    cmd::Registry registry;
+    registerCommands(registry);
+    cmd::Dispatcher bus(registry, host);
+    auto call = [&](std::string name, std::string_view args) {
+        auto r = bus.execute({std::move(name), json::parse(args).value(), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    call("plugin.load", R"({"plugin":"com.suppleaudio.marram"})");
+    int patches = 0;
+    for (size_t at = text.find("```json\n"); at != std::string::npos;
+         at = text.find("```json\n", at)) {
+        at += 8;
+        const std::string patch = text.substr(at, text.find("\n```", at) - at);
+        INFO(patch.substr(0, 120));
+        call("patch.set", R"({"instance":"in_1","patch":)" + patch + "}");
+        CHECK(call("render", R"({"notation":"1: C3:q r:*","tail_s":0})")["peak_dbfs"].asDouble() >
+              -40);
+        ++patches;
+    }
+    CHECK(patches == 11);  // the anatomy and ten recipes (the evaluation tasks' answers)
 }
 
 TEST_CASE("dsp.test measures a script through the player and names what goes wrong") {

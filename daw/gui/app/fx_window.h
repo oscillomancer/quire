@@ -121,6 +121,12 @@ class FxWindow {
     void saveChain();
     void loadChainMenu(bool replace);
     void choosePresetChain(bool input);
+    // A plugin's presets (fx.preset.*): the row's "presets" menu, and the name
+    // field its "Save preset…" shows.
+    void presetMenu(model::Id fx);
+    void promptSavePreset(model::Id fx);
+    void hidePresetPrompt();
+    void savePreset();
     void checkFailures();  // engine.status failed_fx, at most twice a second
 
     engine::EngineApp& app_;
@@ -152,6 +158,11 @@ class FxWindow {
     ui::Button* presetChainButton_ = nullptr;
     ui::Node* savePrompt_ = nullptr;
     ui::TextField* saveName_ = nullptr;
+    bool presetMenuOpen_ = false;
+    model::Id presetFx_;         // the effect the preset name field saves
+    std::string presetReplace_;  // a name that exists: saving it again replaces it
+    ui::Node* presetPrompt_ = nullptr;
+    ui::TextField* presetName_ = nullptr;
     ui::Node* page_ = nullptr;
     ui::Node* body_ = nullptr;
     ui::Node* tabsRow_ = nullptr;

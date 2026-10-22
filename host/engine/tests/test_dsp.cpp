@@ -138,6 +138,7 @@ TEST_CASE("a DSP script written over the bus is a plugin an agent sets through i
     AppOptions o;
     o.workdir = root.path;
     o.chainDir = root.path / "chains";
+    o.presetDir = root.path / "presets";
     o.pluginPath = {kStock};
     auto app = EngineApp::create(o, {.console9 = false});
     REQUIRE(app);
@@ -186,6 +187,22 @@ TEST_CASE("a DSP script written over the bus is a plugin an agent sets through i
     call("history.undo", json::Value::object());
     CHECK(patch()["params"]["gain"].asDouble() == doctest::Approx(-6));
     CHECK(patch()["params"]["mix"].asDouble() == doctest::Approx(25));
+    // The FX window's preset menu: the factory patch first, read-only.
+    const json::Value fxArgs = json::parse(R"({"fx": ")" + fx + R"("})").value();
+    auto presets = call("fx.preset.list", fxArgs);
+    REQUIRE(presets["presets"].size() == 1);
+    CHECK(presets["presets"].at(0).find("name")->asString() == "Quiet");
+    CHECK(presets["presets"].at(0).find("source")->asString() == "factory");
+    auto named = fxArgs;
+    named["name"] = "Quiet";
+    for (const char* command : {"fx.preset.save", "fx.preset.delete"}) {
+        auto refused = bus.execute({command, named, kTest});
+        REQUIRE_FALSE(refused);
+        CHECK(refused.error().code == "fx.preset_factory");
+    }
+    call("fx.preset.load", named);
+    CHECK(patch()["params"]["gain"].asDouble() == doctest::Approx(-9));
+    call("history.undo", json::Value::object());
 
     // The harness, through the player: -6 dB fully wet halves the sine.
     json::Value measured = call("dsp.test", json::parse(R"({"script": "agent_gain",
@@ -211,6 +228,51 @@ TEST_CASE("a DSP script written over the bus is a plugin an agent sets through i
     CHECK_FALSE(listed["scripts"].at(0).find("ok")->asBool());
     CHECK(call("dsp.get", json::parse(R"({"name": "agent_gain"})").value())["source"].asString() ==
           broken);
+}
+
+TEST_CASE("a merge names the values it set that do not apply with the patch it leaves") {
+    if (!fs::exists(kStock / "Script Player.clap")) {
+        MESSAGE("skipped: no script player in " << kStock.string());
+        return;
+    }
+    Root root;
+    AppOptions o;
+    o.workdir = root.path;
+    o.chainDir = root.path / "chains";
+    o.pluginPath = {kStock / "Script Player.clap"};
+    auto app = EngineApp::create(o, {.console9 = false});
+    REQUIRE(app);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, **app);
+    auto call = [&](std::string name, const std::string& args) {
+        auto r = bus.execute({std::move(name), json::parse(args).value(), kTest});
+        REQUIRE_MESSAGE(r, (r ? std::string() : r.error().toString()));
+        return *r;
+    };
+    json::Value write = json::Value::object();
+    write["name"] = "sometimes";
+    write["source"] = R"(#include <supple/script.h>
+struct Sometimes : Effect {
+    static constexpr Info info = {.name = "Sometimes", .id = "com.example.sometimes"};
+    Param on = toggle("On", true);
+    Param gain = decibels("Gain", -24, 24, 0).activeWhen(on);
+    void process(Block& io) {}
+};
+)";
+    auto written = bus.execute({"dsp.write", std::move(write), kTest});
+    REQUIRE((written && (*written)["ok"].asBool()));
+    call("track.add", R"({"name": "Vocal"})");
+    const std::string fx =
+        call("fx.add", R"({"track": "tr_1", "plugin": "com.example.sometimes"})")["fx"].asString();
+    auto set =
+        call("fx.param.set", R"({"fx": ")" + fx + R"(", "values": {"on": false, "gain": -6}})");
+    CHECK(json::writeCompact(set["inactive"]) == R"(["gain"])");
+    auto described = call("fx.describe", R"({"fx": ")" + fx + R"(", "full": true})");
+    CHECK_FALSE(described["params"]["gain"]["active"].asBool());
+    auto merged =
+        call("fx.patch.merge", R"({"fx": ")" + fx + R"(", "patch": {"params": {"on": true}}})");
+    CHECK(merged.find("inactive") == nullptr);
 }
 
 TEST_CASE("a scripted instrument plays a track's notes in the mix") {
@@ -251,4 +313,91 @@ TEST_CASE("a scripted instrument plays a track's notes in the mix") {
                          .value());
     json::Value mix = call("render.mix", json::parse(R"({"name": "keys"})").value());
     CHECK(mix["peak_dbfs"].asDouble() > -40.0);
+}
+
+TEST_CASE("fx.meters reads a live plugin's readouts in process and through the bridge") {
+    host::setBridgeExecutable(BRIDGE_PATH);
+    for (const bool isolated : {false, true}) {
+        Root root;
+        AppOptions o;
+        o.workdir = root.path;
+        o.chainDir = root.path / "chains";
+        o.pluginPath = {kStock / "Script Player.clap"};
+        DummyBackend backend({.mode = DummyBackend::Mode::Manual});
+        auto made = EngineApp::create(o, {.console9 = false});
+        REQUIRE(made);
+        auto app = std::move(*made);
+        cmd::Registry registry;
+        registerEngineCommands(registry);
+        cmd::Dispatcher bus(registry, *app);
+        auto call = [&](std::string name, json::Value args) {
+            auto r = bus.execute({std::move(name), std::move(args), kTest});
+            REQUIRE_MESSAGE(r, (r ? "" : r.error().toString()));
+            return *r;
+        };
+        json::Value write = json::Value::object();
+        write["name"] = "listen";
+        write["source"] = R"(#include <supple/script.h>
+struct Listen : Effect {
+    static constexpr Info info = {.name = "Listen", .id = "com.example.listen"};
+    Param trim = decibels("Trim", -12, 12, 0).help("Unused.");
+    Param level = decibels("Level", -120, 0, -120).meter().help("The block's peak.");
+    Param state = choice("State", {"Quiet", "Loud"}, 0).meter().help("Above -6 dB.");
+    void process(Block& io) {
+        double peak = 0.0;
+        for (int i = 0; i < io.frames; ++i) peak = max(peak, abs(io[0][i]));
+        level.set(gainToDb(peak));
+        state.set(peak > 0.5 ? 1 : 0);
+    }
+};
+)";
+        REQUIRE(call("dsp.write", std::move(write))["ok"].asBool());
+        call("track.add", json::parse(R"({"name":"Live"})").value());
+        auto added = call("fx.add",
+                          json::parse(R"({"track":"tr_1","plugin":"com.example.listen"})").value());
+        json::Value args = json::Value::object();
+        args["fx"] = added["fx"].asString();
+        auto before = call("fx.meters", args);
+        CHECK(before["source"].asString() == "none");
+        CHECK(before["meters"].size() == 0);
+        if (isolated) {
+            auto set = args;
+            set["isolation"] = "dedicated";
+            call("fx.set", std::move(set));
+        }
+        REQUIRE(app->startEngine(backend, {.sampleRate = 48000, .blockSize = 64},
+                                 {.anticipative = false}));
+        auto* live = app->instanceOf(*model::Id::parse(added["fx"].asString()));
+        REQUIRE(live);
+        float left[64], right[64];
+        std::fill(std::begin(left), std::end(left), 0.75f);
+        std::fill(std::begin(right), std::end(right), 0.75f);
+        float* channels[]{left, right};
+        // A plugin reports its readouts as output events a few dozen times
+        // a second, as the engine's blocks give it room to: a tenth of a
+        // second of blocks, each with a queue.
+        std::vector<host::OutputEvent> storage(64);
+        host::OutputEvents events;
+        events.storage = storage;
+        REQUIRE(live->startProcessing());
+        for (int block = 0; block < 75; ++block) {
+            std::fill(std::begin(left), std::end(left), 0.75f);
+            std::fill(std::begin(right), std::end(right), 0.75f);
+            events.clear();
+            REQUIRE(live->process({.inputs = channels,
+                                   .inputChannels = 2,
+                                   .outputs = channels,
+                                   .outputChannels = 2,
+                                   .frames = 64},
+                                  &events));
+        }
+        live->stopProcessing();
+        auto read = call("fx.meters", args);
+        CHECK(read["source"].asString() == "live");
+        const auto& meters = read["meters"];
+        CHECK(meters.size() == 2);  // the readouts only, not the trim
+        CHECK(meters.find("level")->asDouble() == doctest::Approx(-2.4988).epsilon(1e-3));
+        CHECK(meters.find("state")->asString() == "loud");
+        app->stopEngine();
+    }
 }

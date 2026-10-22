@@ -1746,12 +1746,14 @@ std::shared_ptr<const Program> Codegen::run() {
     d.params = model.params;
     d.factoryPatches = model.factoryPatches;
     d.files = model.files;
+    d.sources = model.sources;
     d.shared = model.shared;
     d.size = model.size;
     d.align = model.align;
     d.objects = model.objects;
     d.initial = model.initial;
     d.paramSlots = model.paramSlots;
+    d.sourceSlots = model.sourceSlots;
     d.interpreted = options_.interpret;
 
     std::jmp_buf jump;
@@ -1885,6 +1887,7 @@ PluginKind Program::kind() const { return d_->kind; }
 const std::vector<ParamModel>& Program::params() const { return d_->params; }
 const std::vector<FactoryPatchModel>& Program::factoryPatches() const { return d_->factoryPatches; }
 const std::vector<FileModel>& Program::files() const { return d_->files; }
+const std::vector<SourceModel>& Program::sources() const { return d_->sources; }
 const std::vector<SharedModel>& Program::shared() const { return d_->shared; }
 bool Program::interpreted() const { return d_->interpreted; }
 const std::string& Program::listing() const { return d_->listing; }
@@ -1935,6 +1938,12 @@ void* Program::create() const {
         spec.offAtMinimum = p.offAtMinimum;
         auto* param = new (base + p.offset) S::Param(spec);
         D::ParamBinding::setSlot(*param, p.index);
+    }
+    for (const SourceSlot& s : d_->sourceSlots) {
+        S::SourceSpec spec;
+        spec.perVoice = s.perVoice;
+        spec.bipolar = s.bipolar;
+        new (base + s.offset) S::Source(spec);
     }
     return self;
 }

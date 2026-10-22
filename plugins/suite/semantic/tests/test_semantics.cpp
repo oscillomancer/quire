@@ -4,6 +4,8 @@
 
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -24,27 +26,37 @@ namespace {
 const char* const kModes[] = {"Low Pass", "High Pass"};
 
 // A plugin with one of each kind of parameter, a meter and three properties
-// (one of them a file).
-std::shared_ptr<const Definition> fixture(bool normalized = true) {
+// (one of them a file); with `conditions`, a meaning of its own they change.
+std::shared_ptr<const Definition> fixture(bool normalized = true,
+                                          std::function<void(Meaning&)> conditions = {}) {
     PluginInfo info;
     info.id = "com.example.fixture";
     info.name = "Fixture";
     info.version = "1.0.0";
     info.description = "A filter, for tests.";
-    ParamTable::Builder b;
-    auto norm = [&](ParamDef p) { return normalized ? p.normalizedHostValue() : p; };
-    b.add(norm(decibels(1, "Gain", -24.0, 12.0, 0.0)).help("The level."));
-    b.add(frequency(2, "Cutoff", 20.0, 20000.0, 1000.0).in("Filter"));
-    b.add(choice(3, "Mode", kModes, 0).in("Filter"));
-    b.add(toggle(4, "On", true));
-    b.add(integer(5, "Steps", 1, 8, 4));
-    b.add(norm(percent(6, "Mix", 100.0)));
-    b.add(norm(decibels(7, "Meter", -60.0, 0.0, -60.0)).output());
-    PropertyList::Builder pb;
-    pb.add(property(1, "Label").perProject().maxBytes(16));
-    pb.add(property(2, "Text", "hello"));
-    pb.add(property(3, "Sample").audioFile().help("The sound it plays."));
-    return std::make_shared<Definition>(info, b.build(), pb.build());
+    auto params = [&] {
+        ParamTable::Builder b;
+        auto norm = [&](ParamDef p) { return normalized ? p.normalizedHostValue() : p; };
+        b.add(norm(decibels(1, "Gain", -24.0, 12.0, 0.0)).help("The level."));
+        b.add(frequency(2, "Cutoff", 20.0, 20000.0, 1000.0).in("Filter"));
+        b.add(choice(3, "Mode", kModes, 0).in("Filter"));
+        b.add(toggle(4, "On", true));
+        b.add(integer(5, "Steps", 1, 8, 4));
+        b.add(norm(percent(6, "Mix", 100.0)));
+        b.add(norm(decibels(7, "Meter", -60.0, 0.0, -60.0)).output());
+        return b.build();
+    };
+    auto properties = [] {
+        PropertyList::Builder pb;
+        pb.add(property(1, "Label").perProject().maxBytes(16));
+        pb.add(property(2, "Text", "hello"));
+        pb.add(property(3, "Sample").audioFile().help("The sound it plays."));
+        return pb.build();
+    };
+    if (!conditions) return std::make_shared<Definition>(info, params(), properties());
+    Meaning meaning = meaningOf(Definition(info, params(), properties()));
+    conditions(meaning);
+    return std::make_shared<SemanticDefinition>(info, params(), properties(), meaning);
 }
 
 json::Value parsed(std::string_view text) {
@@ -116,6 +128,83 @@ TEST_CASE("the schema lists every CLAP parameter the way core-params describes i
                                    ->find("description")
                                    ->asString();
     CHECK(sample.rfind("The sound it plays. The path of a file (wav ", 0) == 0);
+}
+
+TEST_CASE("the schema and the prose say which parameters apply now") {
+    // On applies in high-pass mode; the mix while On applies and is on.
+    const auto d = fixture(true, [](Meaning& m) {
+        m.params[3].activeWhen = {{2, {1}}};
+        m.params[5].activeWhen = {{3, {1}}};
+    });
+    REQUIRE(meaningProblems(*d, meaningOf(*d)).empty());
+    const PatchCodec codec(*d);
+    state::Snapshot s(*d);
+    s.defaultProperties();
+    const size_t mode = index(*d, 3);
+    auto active = [&](const char* key) {
+        const json::Value schema = codec.schemaDocument(&s);
+        const json::Value* a = schema.find("params")->find(key)->find("active");
+        return !a || a->asBool();
+    };
+    // Low-pass: neither applies, though On is on.
+    CHECK(codec.activity(s) == std::vector<bool>{true, true, true, false, true, false, true});
+    CHECK_FALSE(active("on"));
+    CHECK_FALSE(active("mix"));
+    CHECK(active("gain"));
+    CHECK(codec.describe(s, false).find("Mix") == std::string::npos);
+    s.host[mode] = toHost(d->params().at(mode), 1.0);
+    CHECK(active("on"));
+    CHECK(active("mix"));
+    CHECK(codec.describe(s, false).find("Mix 100") != std::string::npos);
+    // Without values the schema leaves activity out; the conditions it states.
+    const json::Value schema = codec.schemaDocument();
+    CHECK(schema.find("params")->find("mix")->find("active") == nullptr);
+    const json::Value& when = *schema.find("params")->find("on")->find("active_when");
+    REQUIRE(when.size() == 1);
+    CHECK(when.asArray()[0].find("param")->asString() == "filter.mode");
+    CHECK(when.asArray()[0].find("in")->asArray()[0].asString() == "high_pass");
+    const json::Value& mix = *schema.find("params")->find("mix");
+    CHECK(mix.find("active_when")->asArray()[0].find("in")->asArray()[0].asBool());
+}
+
+TEST_CASE("a number's range decides what applies, said in its unit") {
+    const double inf = std::numeric_limits<double>::infinity();
+    // The mix applies above 4 steps; the meter while the mix is above 50 %.
+    const auto d = fixture(true, [&](Meaning& m) {
+        m.params[5].activeWhen = {{4, {}, 4.0, inf}};
+        m.params[6].activeWhen = {{5, {}, 0.5, inf}};
+    });
+    REQUIRE(meaningProblems(*d, meaningOf(*d)).empty());
+    const PatchCodec codec(*d);
+    state::Snapshot s(*d);
+    s.defaultProperties();
+    const size_t steps = index(*d, 5);
+    CHECK_FALSE(codec.activity(s)[5]);  // 4 steps: not above 4
+    CHECK_FALSE(codec.activity(s)[6]);  // nor what follows the mix
+    s.host[steps] = toHost(d->params().at(steps), 5.0);
+    CHECK(codec.activity(s)[5]);
+    CHECK(codec.activity(s)[6]);  // the mix's 100 % is above 50 %
+    CHECK(d->applies(6, [&](size_t i) { return s.host[i]; }));
+    const json::Value schema = codec.schemaDocument();
+    const json::Value& mix = *schema.find("params")->find("mix")->find("active_when");
+    CHECK(json::writeCompact(mix) == R"([{"param":"steps","above":4}])");
+    const json::Value& meter = *schema.find("params")->find("meter")->find("active_when");
+    CHECK(json::writeCompact(meter) == R"([{"param":"mix","above":50.0}])");
+}
+
+TEST_CASE("a condition names values of a toggle or a choice, or a number's range, above it") {
+    const double inf = std::numeric_limits<double>::infinity();
+    for (const ActiveCondition& bad :
+         {ActiveCondition{5, {1}, -inf, inf}, ActiveCondition{4, {1}, -inf, inf},
+          ActiveCondition{3, {2}, -inf, inf}, ActiveCondition{2, {}, -inf, inf},
+          ActiveCondition{0, {0}, -inf, inf}, ActiveCondition{3, {}, 0.0, inf},
+          ActiveCondition{4, {}, -inf, inf}, ActiveCondition{4, {}, 5.0, 3.0},
+          ActiveCondition{2, {0}, 1.0, inf}}) {
+        CAPTURE(bad.param);
+        const auto d = fixture(true, [&](Meaning& m) { m.params[5].activeWhen = {bad}; });
+        CHECK(meaningProblems(*d, meaningOf(*d)).find("applies on a condition") !=
+              std::string::npos);
+    }
 }
 
 TEST_CASE("a patch says each value in physical units, and only what changed when asked") {
@@ -360,4 +449,147 @@ TEST_CASE("a plugin without properties rejects property edits transactionally") 
     CHECK(errors[0].code == "patch.unknown_member");
     CHECK(errors[0].path == "/properties");
     CHECK_FALSE(errors[0].hint.empty());
+}
+
+namespace {
+
+// A synth's view of routes: an LFO per voice and a macro for all, a cutoff
+// and a level each voice has, a mix for all, and a mode routes cannot move.
+std::shared_ptr<const Definition> routed() {
+    PluginInfo info;
+    info.id = "com.example.routed";
+    info.name = "Routed";
+    info.version = "1.0.0";
+    auto params = [] {
+        ParamTable::Builder b;
+        b.add(frequency(1, "Cutoff", 20.0, 20000.0, 1000.0));
+        b.add(decibels(2, "Level", -48.0, 6.0, 0.0).normalizedHostValue());
+        b.add(percent(3, "Mix", 100.0).normalizedHostValue());
+        b.add(choice(4, "Mode", kModes, 0));
+        return b.build();
+    };
+    auto properties = [] {
+        PropertyList::Builder pb;
+        pb.add(property(9, "Routes").maxBytes(16384));
+        return pb.build();
+    };
+    Meaning m = meaningOf(Definition(info, params(), properties()));
+    m.params[0].routable = Routable::Voice;
+    m.params[1].routable = Routable::Voice;
+    m.params[1].routeMin = -60.0;
+    m.params[1].routeMax = 12.0;
+    m.params[2].routable = Routable::Global;
+    m.sources = {{"lfo", "LFO", "A wobble.", true, true}, {"macro", "Macro", "", false, false}};
+    m.routes = 0;
+    return std::make_shared<SemanticDefinition>(info, params(), properties(), m);
+}
+
+}  // namespace
+
+TEST_CASE("routes are a patch member by source and parameter, in the parameter's unit") {
+    const auto d = routed();
+    REQUIRE(meaningProblems(*d, meaningOf(*d)).empty());
+    const PatchCodec codec(*d);
+    state::Snapshot s(*d);
+    s.defaultProperties();
+    Envelope envelope;
+    std::vector<json::Error> errors;
+    REQUIRE(codec.apply(parsed(R"({"schema": "supple.routed-patch/1.0", "routes": {
+        "macro>mix": {"amount": "-20 %"},
+        "lfo>cutoff": {"amount": "+1.5 oct", "via": "macro"},
+        "lfo>level": "-6 dB"}})"),
+                        false, s, envelope, errors));
+    // Kept sorted, one a line; said back as objects with plain amounts.
+    CHECK(s.property[0] == "lfo>cutoff 1.5 macro\nlfo>level -6.0\nmacro>mix -20.0\n");
+    const json::Value patch = codec.patch(s, envelope, false);
+    CHECK(json::writeCompact(*patch.find("routes")) ==
+          R"({"lfo>cutoff":{"amount":1.5,"via":"macro"},"lfo>level":{"amount":-6.0},)"
+          R"("macro>mix":{"amount":-20.0}})");
+    CHECK(patch.find("properties") == nullptr);  // the routes' property is not one a patch shows
+    CHECK(codec.describe(s, true).find("Routes: lfo>cutoff +1.5 oct via macro, lfo>level -6 dB") !=
+          std::string::npos);
+    // A merge adds, changes and removes routes one by one.
+    REQUIRE(
+        codec.apply(parsed(R"({"routes": {"lfo>level": null, "lfo>cutoff": {"amount": "12 st"}}})"),
+                    true, s, envelope, errors));
+    CHECK(s.property[0] == "lfo>cutoff 1.0 macro\nmacro>mix -20.0\n");
+    // Pitch units convert; an amount past what the parameter can move does not.
+    CHECK(codec.apply(parsed(R"({"routes": {"lfo>level": {"amount": 60}}})"), true, s, envelope,
+                      errors));
+    CHECK_FALSE(codec.apply(parsed(R"({"routes": {"lfo>level": {"amount": 80}}})"), true, s,
+                            envelope, errors));
+    CHECK(errors.front().code == "routes.amount");
+}
+
+TEST_CASE("a route that cannot be says which part is wrong and what would do") {
+    const auto d = routed();
+    const PatchCodec codec(*d);
+    state::Snapshot s(*d);
+    s.defaultProperties();
+    Envelope envelope;
+    auto refused = [&](const char* routes) {
+        std::vector<json::Error> errors;
+        const std::string doc = std::string(R"({"routes": )") + routes + "}";
+        const std::string before = s.property[0];
+        CHECK_FALSE(codec.apply(parsed(doc), true, s, envelope, errors));
+        CHECK(s.property[0] == before);
+        REQUIRE(!errors.empty());
+        CHECK(!errors.front().hint.empty());
+        return errors.front().code + " " + errors.front().path;
+    };
+    CHECK(refused(R"({"lfo": 1})") == "routes.key /routes/lfo");
+    CHECK(refused(R"({"lfx>cutoff": 1})") == "routes.source /routes/lfx>cutoff");
+    CHECK(refused(R"({"lfo>cutof": 1})") == "routes.destination /routes/lfo>cutof");
+    CHECK(refused(R"({"lfo>mode": 1})") == "routes.destination /routes/lfo>mode");
+    CHECK(refused(R"({"lfo>cutoff": "+2 dB"})") == "routes.unit /routes/lfo>cutoff");
+    CHECK(refused(R"({"lfo>cutoff": {"via": "macro"}})") == "routes.amount /routes/lfo>cutoff");
+    CHECK(refused(R"({"lfo>cutoff": {"amount": 1, "via": "wheel"}})") ==
+          "routes.via /routes/lfo>cutoff/via");
+    CHECK(refused(R"({"lfo>cutoff": {"amount": 1, "curve": 3}})") ==
+          "routes.unknown_member /routes/lfo>cutoff/curve");
+    // A value per voice cannot move what all voices share, even through a via.
+    CHECK(refused(R"({"lfo>mix": 10})") == "routes.voice /routes/lfo>mix");
+    CHECK(refused(R"({"macro>mix": {"amount": 10, "via": "lfo"}})") ==
+          "routes.voice /routes/macro>mix");
+    CHECK(refused("[]") == "routes.type /routes");
+}
+
+TEST_CASE("the schema names the sources and what routes do to each parameter") {
+    const auto d = routed();
+    const PatchCodec codec(*d);
+    const json::Value schema = codec.schemaDocument();
+    const json::Value& lfo = *schema.find("sources")->find("lfo");
+    CHECK(lfo.find("per_voice")->asBool());
+    CHECK(lfo.find("range")->asArray()[0].asInt() == -1);
+    CHECK(schema.find("sources")->find("macro")->find("range")->asArray()[0].asInt() == 0);
+    const json::Value& params = *schema.find("params");
+    CHECK(params.find("cutoff")->find("route")->find("unit")->asString() == "oct");
+    CHECK(params.find("level")->find("route")->find("max")->asDouble() == 12.0);
+    CHECK_FALSE(params.find("mix")->find("route")->find("per_voice")->asBool());
+    CHECK(params.find("mode")->find("route") == nullptr);
+    CHECK(schema.find("patch")->find("properties")->find("routes") != nullptr);
+    CHECK(schema.find("patch")->find("properties")->find("properties") == nullptr);
+}
+
+TEST_CASE("a saved patch's routes restore as far as the plugin still has their parts") {
+    const auto d = routed();
+    const PatchCodec codec(*d);
+    state::Snapshot s(*d);
+    s.defaultProperties();
+    Envelope envelope;
+    codec.restore(parsed(R"({"routes": {"lfo>cutoff": {"amount": 2}, "gone>cutoff": {"amount": 1},
+                                        "lfo>mix": {"amount": 5}}})"),
+                  s, envelope);
+    CHECK(s.property[0] == "lfo>cutoff 2.0\n");
+}
+
+TEST_CASE("the routes' text reads back without allocating, and malformed lines stop it") {
+    std::vector<std::string> seen;
+    CHECK(forEachRoute("a>b 1.5\nc>d.e -2.0 f\n", [&](const RouteLine& r) {
+        seen.push_back(std::string(r.source) + "|" + std::string(r.destination) + "|" +
+                       std::string(r.via) + "|" + json::formatDouble(r.amount));
+    }));
+    CHECK(seen == std::vector<std::string>{"a|b||1.5", "c|d.e|f|-2.0"});
+    CHECK_FALSE(forEachRoute("a>b x\n", [](const RouteLine&) {}));
+    CHECK_FALSE(forEachRoute("ab 1\n", [](const RouteLine&) {}));
 }

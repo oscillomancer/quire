@@ -699,6 +699,12 @@ class BasicEngine {
         const int latency = std::max(0, processor_.latencySamples());
         dryLatency_ = std::min(latency, delayCapacity_);
         if (latency != activeLatency_) restartWanted_.store(true, std::memory_order_release);
+        rereadTail();
+    }
+
+    // The tail, after an update and after every split: it may follow what
+    // the processor hears as it plays (a delay's, the song's tempo).
+    void rereadTail() {
         const uint32_t tail = processor_.tailSamples();
         if (tail != tail_.load(std::memory_order_relaxed)) {
             tail_.store(tail, std::memory_order_relaxed);
@@ -826,6 +832,7 @@ class BasicEngine {
         }
         noteOutput_.setOffset(static_cast<uint32_t>(offset));
         processor_.process(block);
+        rereadTail();
 
         // x * 0 is 0 for every finite x and NaN otherwise: one branch per block.
         double probe = 0.0;

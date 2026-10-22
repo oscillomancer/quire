@@ -446,12 +446,11 @@ bool CLAP_ABI semDescribe(const clap_plugin_t* pl, uint32_t detail, const clap_o
                                                           : patch::Detail::Full));
 }
 const clap_plugin_supple_semantic_params_t kGainSemantic = {
-    offsetof(clap_plugin_supple_semantic_params_t, get_telemetry),
+    offsetof(clap_plugin_supple_semantic_params_t, get_factory_patches),
     semSchema,
     semGetPatch,
     semSetPatch,
     semDescribe,
-    nullptr,
     nullptr};
 
 struct GainControl {

@@ -4,7 +4,9 @@ B1 builds the session through the engine command bus. B2 exports that model's
 compiled notation MIDI and the plugins' own CLAP-saved states, then uses public
 ReaScript APIs to generate and save an RPP. The recipe lives once in
 `host/engine/bench/session.json`: 120 BPM, a four-bar eight-note chord loop,
-Orrery's synth.md §9 reference patch → non-flat four-band Yarrow → Sundew on
+a Marram pad (two oscillators and a sub, unison 3, a ladder, tape drive;
+until 2026-10-21 Orrery's synth.md §9 patch, with its chorus and reverb) →
+non-flat four-band Yarrow → Sundew on
 N playback tracks; an additional armed stereo-input track with the same
 chain, monitoring on; Sundew catching peaks (Clean, 20:1) on the master. N excludes the
 monitored track. Playback tracks use −18 dB faders. The export includes the
@@ -16,7 +18,7 @@ Build an optimized tool and the three stock artifacts before capacity runs:
 
 ```sh
 cmake --preset release
-cmake --build --preset release -j6 --target engine-bench plugin-orrery plugin-yarrow plugin-sundew
+cmake --build --preset release -j6 --target engine-bench plugin-marram plugin-yarrow plugin-sundew
 ```
 
 On the otherwise idle workstation, each command searches and independently
@@ -38,6 +40,8 @@ or another client may determine the granted quantum. JSON records requested
 and actual settings. A different grant is retained as fixed-run data but is
 rejected by a requested-setting capacity search. Server loss, missing signal,
 processing errors, warnings or timing-storage overflow invalidate B1 data.
+Silence with anticipation misses is not a missing signal: the renderer fell so
+far behind that its ring never filled, and the run counts as a failure.
 B1 supplies silent monitored input, opens no physical capture ports, and
 silences physical outputs after observing the DSP peak. B2's private JACK
 configuration still monitors physical stereo input and plays output; use a
@@ -58,8 +62,7 @@ python3 -m unittest discover -s tools/reaper-check -p 'test_*.py' -v
 the block deadline, and `synthetic_late_wakes` counts scheduler catch-up resets; anticipation misses
 also fail a trial, including when the monitored/master path is live. B1 and
 B2 exclude activation and a one-second preroll from the measured interval.
-Short dry runs prove operation, **not** five-minute capacity or B1's ≥3×
-target. Debug builds can have no passing N; the search records N=0 and exits
+Short dry runs prove operation, **not** five-minute capacity. Debug builds can have no passing N; the search records N=0 and exits
 nonzero. The report marks the device, build facts and exact durations.
 
 For short tail measurements and an optional installed effect module:

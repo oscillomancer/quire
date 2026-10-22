@@ -28,6 +28,9 @@ plugins ship as CLAP (and VST3, AU) files of their own that other hosts load.
    one `.help()` sentence per parameter, groups, neutral defaults, factory
    patches, smoothed levels, and choice keys with a unit before a number
    (`.keys({"db12", ...})`, added to the language for this).
+   (2026-10-22) Defaults need not be neutral: a plugin may open doing what
+   it is for (Bracken echoing, Withy chorusing, Pollia phasing), with a
+   neutral setting still within reach.
 2. **Build.** `plugins/stock/<name>/` is the product folder a source export
    makes from the script (`product.cmake`, `Catalog.cpp`, `Layer.cpp`,
    `Processor.h`, `Theme.h`, `targets.cmake`, `NOTICES.txt`), built from
@@ -51,10 +54,38 @@ plugins ship as CLAP (and VST3, AU) files of their own that other hosts load.
    The old plugin's folder, build entries and documents go in the same
    change, with no conversion of old sessions (none exist outside tests).
    The first is Yarrow, replacing Facet (`com.suppleaudio.eq`); the second
-   Sundew, replacing Ballast (`com.suppleaudio.comp`).
+   Sundew, replacing Ballast (`com.suppleaudio.comp`). A stock plugin with
+   no predecessor is added the same way: Treeline, the limiter, the third.
+   The fourth is Gorse, the transient shaper, replacing Flint
+   (`com.suppleaudio.transient`); the fifth Hickory, the stereo utility,
+   replacing Plumb (`com.suppleaudio.utility`); the sixth Sorrel, the gate,
+   replacing Sluice (`com.suppleaudio.gate`); the seventh Teasel, the
+   saturation, replacing Kiln (`com.suppleaudio.drive`); the eighth
+   Bracken, the delay, replacing Echelon (`com.suppleaudio.delay`); the
+   ninth Canopy, the reverb, replacing Nave (`com.suppleaudio.reverb`); the
+   tenth Lichen, the analyzer, replacing Gauge (`com.suppleaudio.analyzer`).
+   (2026-10-21) The eleventh is Marram, the synthesizer, which will replace
+   Orrery (`com.suppleaudio.orrery`) in stages (`docs/specs/marram.md`):
+   agents, the evaluation tasks and the optimizer's tests use Orrery's
+   patch format, so Orrery stays until Marram has its modulation, editor,
+   guide and evaluation tasks, and goes in that last change. (2026-10-21)
+   Done: Orrery is removed. (2026-10-21) Canopy is renamed Ghyll
+   (`com.suppleaudio.ghyll`, `plugins/stock/ghyll`) before it shipped, so
+   no session or patch needs migrating; a ghyll is a narrow ravine.
+   (2026-10-22) The twelfth is Withy, the chorus (`com.suppleaudio.withy`),
+   and the thirteenth Pollia, the phaser (`com.suppleaudio.pollia`), stock
+   plugins with no predecessor; a withy is a willow rod woven into baskets,
+   and the marble berry Pollia condensata is blue by interference, as a
+   phaser's notches are. (2026-10-22) The folders moved up a level, from
+   `plugins/stock/<name>/` to `plugins/<name>/`, beside `common`, `suite`
+   and `template`, once the template-built stock plugins were all gone.
 6. **Names and look.** A stock plugin is named after a plant or something
    else of the natural world, not after its effect type (Yarrow, the EQ;
-   Sundew, the compressor).
+   Sundew, the compressor; Treeline, the limiter; Gorse, the transient
+   shaper; Hickory, the stereo utility; Sorrel, the gate; Teasel, the
+   saturation; Bracken, the delay; Canopy, the reverb; Lichen, the
+   analyzer; Marram, the synthesizer; (2026-10-22) Withy, the chorus;
+   Pollia, the phaser).
    Every stock script draws with the scripts' palette (`kScriptTheme` in
    `plugins/suite/glue`): warm and earthy, set apart from the host's
    graphite (walnut panels, a soil-dark floor under graphs, parchment

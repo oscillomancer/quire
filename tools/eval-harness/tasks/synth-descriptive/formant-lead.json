@@ -6,7 +6,7 @@
   },
   "listening": "Can you hear vowel-like movement without losing the pitched lead?",
   "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C4:w",
-  "prompt": "Program Orrery as a vowel-like lead whose timbre moves slowly through a formant wavetable, with light delay.",
+  "prompt": "Program Marram as a vowel-like lead whose timbre moves slowly from vowel to vowel.",
   "recipe_index": 9,
   "render": {
     "tail_s": 2
@@ -42,7 +42,7 @@
   "setup": [
     {
       "args": {
-        "plugin": "com.suppleaudio.orrery"
+        "plugin": "com.suppleaudio.marram"
       },
       "command": "plugin.load"
     }

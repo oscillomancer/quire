@@ -1,52 +1,46 @@
 {
   "changed_modules": [
-    "envelopes.amp",
-    "envelopes.env2",
-    "oscillators.osc2"
+    "amp",
+    "env2",
+    "osc3"
   ],
   "hidden_patch": {
-    "envelopes": {
-      "amp": {
-        "attack": "1 ms",
-        "decay": "1.5 s",
-        "release": "500 ms",
-        "sustain": "20 %"
-      },
-      "env2": {
-        "attack": "0 ms",
-        "decay": "650 ms",
-        "sustain": 0
-      }
-    },
-    "fx": {
-      "chain": [
-        "chorus"
-      ]
-    },
-    "oscillators": {
-      "osc1": {
-        "ratio": 1,
-        "type": "fm"
-      },
-      "osc2": {
-        "level": "-15 dB",
-        "ratio": 14,
-        "to": "none",
-        "type": "fm"
-      }
+    "params": {
+      "amp.attack": "1 ms",
+      "amp.decay": "4.5 s",
+      "amp.release": "750 ms",
+      "amp.sustain": "0 %",
+      "amp.velocity": "70 %",
+      "env2.attack": "0 ms",
+      "env2.decay": "650 ms",
+      "env2.fm": 100.0,
+      "env2.release": "400 ms",
+      "env2.sustain": "15 %",
+      "filter1.type": "off",
+      "lfo1.mode": "free",
+      "lfo1.rate": "3.5 Hz",
+      "osc1.fm": 2.5,
+      "osc1.level": "-1 dB",
+      "osc1.retrigger": true,
+      "osc1.type": "fm",
+      "osc2.level": "-60 dB",
+      "osc2.retrigger": true,
+      "osc2.type": "fm",
+      "osc3.level": "-22 dB",
+      "osc3.ratio": 14.0,
+      "osc3.retrigger": true,
+      "osc3.type": "fm"
     },
     "routes": {
-      "env2>osc2.level": {
-        "amount": "+24 dB"
+      "lfo1>amp.pan": {
+        "amount": "+35 %",
+        "via": "modwheel"
       },
-      "osc2>osc1.fm": {
+      "velocity>osc1.fm": {
         "amount": 1.5
-      },
-      "velocity>osc2.level": {
-        "amount": "+6 dB"
       }
     },
-    "schema": "supple.orrery-patch/1.0"
+    "schema": "supple.marram-patch/1.0"
   },
   "id": "reference.fm-e-piano",
   "limits": {
@@ -55,7 +49,7 @@
   },
   "listening": "Does the attack have FM character while the body stays mellow?",
   "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C4:q r:*",
-  "prompt": "Match the reference render with Orrery. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
+  "prompt": "Match the reference render with Marram. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
   "recipe_index": 7,
   "render": {
     "tail_s": 2
@@ -74,54 +68,48 @@
   "setup": [
     {
       "args": {
-        "plugin": "com.suppleaudio.orrery"
+        "plugin": "com.suppleaudio.marram"
       },
       "command": "plugin.load"
     }
   ],
   "starting_patch": {
-    "envelopes": {
-      "amp": {
-        "attack": "1 ms",
-        "decay": "1.5 s",
-        "release": "300 ms",
-        "sustain": "20 %"
-      },
-      "env2": {
-        "attack": "0 ms",
-        "decay": "400 ms",
-        "sustain": 0
-      }
-    },
-    "fx": {
-      "chain": [
-        "chorus"
-      ]
-    },
-    "oscillators": {
-      "osc1": {
-        "ratio": 1,
-        "type": "fm"
-      },
-      "osc2": {
-        "level": "-30 dB",
-        "ratio": 14,
-        "to": "none",
-        "type": "fm"
-      }
+    "params": {
+      "amp.attack": "1 ms",
+      "amp.decay": "4.5 s",
+      "amp.release": "450 ms",
+      "amp.sustain": "0 %",
+      "amp.velocity": "70 %",
+      "env2.attack": "0 ms",
+      "env2.decay": "1.6 s",
+      "env2.fm": 100.0,
+      "env2.release": "400 ms",
+      "env2.sustain": "15 %",
+      "filter1.type": "off",
+      "lfo1.mode": "free",
+      "lfo1.rate": "3.5 Hz",
+      "osc1.fm": 2.5,
+      "osc1.level": "-1 dB",
+      "osc1.retrigger": true,
+      "osc1.type": "fm",
+      "osc2.level": "-60 dB",
+      "osc2.retrigger": true,
+      "osc2.type": "fm",
+      "osc3.level": "-34 dB",
+      "osc3.ratio": 14.0,
+      "osc3.retrigger": true,
+      "osc3.type": "fm"
     },
     "routes": {
-      "env2>osc2.level": {
-        "amount": "+24 dB"
+      "lfo1>amp.pan": {
+        "amount": "+35 %",
+        "via": "modwheel"
       },
-      "osc2>osc1.fm": {
+      "velocity>osc1.fm": {
         "amount": 1.5
-      },
-      "velocity>osc2.level": {
-        "amount": "+6 dB"
       }
     },
-    "schema": "supple.orrery-patch/1.0"
+    "schema": "supple.marram-patch/1.0"
   },
   "suite": "synth-reference",
   "tier": 2

@@ -20,7 +20,7 @@ namespace supple::scriptc {
 
 // A value known at compile time.
 struct Constant {
-    enum class Kind { None, Bool, Int, Double, String, List, Spec, File, Enum };
+    enum class Kind { None, Bool, Int, Double, String, List, Spec, File, Source, Enum };
     Kind kind = Kind::None;
     bool boolValue = false;
     std::int64_t intValue = 0;
@@ -29,7 +29,20 @@ struct Constant {
     std::vector<Constant> list;  // a braced list: elements, or designated fields
     std::vector<std::string> designators;
     ParamModel spec;  // a ParamSpec under construction
-    FileModel file;   // a FileSpec under construction
+    // Its .activeWhen()/.activeUnless()/.activeAbove()/.activeBelow()
+    // conditions, by member name: resolved once every parameter is known
+    // (Sema::resolveActivity).
+    struct Condition {
+        std::string member;
+        std::vector<std::string> options;
+        bool listed = false, unless = false;  // listed: options were given
+        bool numeric = false, below = false;  // activeAbove (or Below) bound
+        double bound = 0.0;
+        Loc loc;
+    };
+    std::vector<Condition> conditions;
+    FileModel file;      // a FileSpec under construction
+    SourceModel source;  // a SourceSpec under construction
     const Type* enumType = nullptr;
     std::string builtinEnum;  // "Curve" or "Unit" for the runtime's enums (no enumType)
 
@@ -162,7 +175,11 @@ class Sema {
     void extractPlugin();
     void evaluateInfo(FieldDecl* f);
     void evaluateParam(FieldDecl* f);
+    void resolveActivity();
+    std::vector<std::vector<Constant::Condition>> conditions_;  // by parameter index
     void evaluateFile(FieldDecl* f);
+    void evaluateSource(FieldDecl* f);
+    void evaluateRoute(CallExpr* call, FactoryPatchModel& patch, std::set<std::string>& routed);
     void evaluatePatches(FunctionDecl* f);
     void buildConstruction();
     void initialValues(const Type* type, int base, Expr* init, StructDecl* scope);

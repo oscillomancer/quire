@@ -436,6 +436,10 @@ first use, and no plug-in code runs early to warm it.
 - Runs a **separate plan instance** with its **own plugin instances**
   (created from the version's state/patches), so rendering never disturbs
   playback and A/B renders of two branches can run side by side.
+- As a render ends, each plugin's read-only parameters (meters, readouts)
+  are read from its instance (`OfflineResult::meters`, by FX id); a
+  `render.mix` keeps them on the main thread for `fx.meters {from:
+  "render"}` until the next one. Other renders keep none.
 - Fixed block size (default 512; setting), no anticipative split, all nodes
   in topological order, optionally parallel across independent nodes —
   results must be **bit-identical for any worker count** (fixed summation
@@ -580,6 +584,31 @@ case-sensitive; unknown names fail with `fx.unknown_factory_patch` at
 `/name` and a hint listing available names; missing/both inputs fail with
 `fx.patch_args`. Listing uses the live instance when present, otherwise a
 scratch instance. It never changes the plugin or writes preset files.
+
+A plugin's presets, for the FX window's preset menu and for agents:
+`fx.preset.list {fx}` returns `presets`, the factory patches first (`source:
+"factory"`, the plugin's order, the names of `fx.patch.list`) and then the
+user's for that plugin id (`source: "user"`, sorted by name, with `path`).
+User presets are `supple.preset/1.0` documents (sandbox.md) in
+`AppOptions::presetDir`, by default `<config>/<slug>/presets`, one folder per
+plugin id (characters other than letters, digits, `.`, `-` and `_` become
+`_`); a file for another plugin id, or that does not decode, is skipped with
+a `fx.preset_invalid` warning. `fx.preset.load {fx, name, source?}` is one
+undo step: a factory preset goes through `fx.patch.set {name}`, a semantic
+plugin's user preset replaces the patch (validated by the plugin), and a
+plain plugin's user preset is its base64 state, checked on a scratch
+instance before the model takes it (the instance's `params` are cleared).
+`source` is needed only when a factory and a user preset share the name
+(`fx.preset_ambiguous`); an unknown name fails with `fx.unknown_preset`.
+`fx.preset.save {fx, name, replace?}` writes what the running instance has
+(editor edits included; else the model's patch or state) and creates no
+history; a factory preset's name is refused (`fx.preset_factory`) and an
+existing user preset needs `replace: true` (`fx.preset_exists`). Names are
+1 to 200 characters without `/ \ : * ? " < > |` or control characters and
+do not start or end with a space or a dot (`fx.preset_name`).
+`fx.preset.delete {fx, name}` removes a user preset's file; a factory name
+fails with `fx.preset_factory`. Wet, bypass and other instance options are
+not part of a preset.
 
 `fx.describe` returns `status_available` in both summary and full modes.
 When a live instance supports the extension it also returns `problems`,
@@ -739,13 +768,16 @@ controls); `moveParam` moves any parameter the way a binding does, for the
 
 ## 7. Benchmarks (acceptance, `docs/benchmarks/`)
 
-- **B1 capacity:** generated session: N tracks, each an Orrery instance
-  (standard patch from `docs/specs/synth.md` §9) + stock EQ + stock
+- **B1 capacity:** generated session: N tracks, each a stock synth
+  (Marram's pad in `host/engine/bench/session.json`; Orrery's reference
+  patch until 2026-10-21) + stock EQ + stock
   compressor playing a 4-bar notation loop, one armed audio track with the
   same chain monitoring input; at 48 kHz / 64 frames on this machine: find
   the largest N with zero xruns over 5 minutes, with and without
-  anticipative processing. Target: anticipative on ≥ 3× the tracks of
-  anticipative off.
+  anticipative processing. What matters is the capacity itself, above all
+  with anticipation, and how it compares with REAPER's (B2); there is no
+  required ratio between the two modes (2026-10-21: the earlier target,
+  anticipative on ≥ 3× off, is dropped).
 - **B2 REAPER comparison:** the same structure in REAPER 7 (the stock synth
   loaded as CLAP in REAPER, ReaEQ/ReaComp substituted where needed and
   noted), same device settings, anticipative FX at its default; report N for

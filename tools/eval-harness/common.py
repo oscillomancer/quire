@@ -13,6 +13,9 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
+# The instrument every task plays.
+SYNTH = "com.suppleaudio.marram"
+SYNTH_NAME = "Marram"
 sys.path.insert(0, str(ROOT / "tests/integration"))
 from pipe_ready import wait_pipe
 from process_tree import spawn_group, stop_group
@@ -227,11 +230,10 @@ def capture(client, path):
     return result
 
 
-def setup(client, task, seed):
+def setup(client, task):
     client.call("session.set", task["settings"])
     for step in task["setup"]:
         client.call(step["command"], step.get("args", {}))
-    client.call("patch.merge", {"instance": "in_1", "patch": {"seed": seed}})
 
 
 def recipe_patch(task):
@@ -250,7 +252,7 @@ def validate_task(task):
     for field in ("prompt", "listening", "phrase"):
         require(isinstance(task.get(field), str) and bool(task[field]), f"missing {field}")
     require(isinstance(task.get("setup"), list) and bool(task["setup"]), "missing setup")
-    require(task["setup"][0]["args"]["plugin"] == "com.suppleaudio.orrery", "expected Orrery")
+    require(task["setup"][0]["args"]["plugin"] == SYNTH, "expected " + SYNTH_NAME)
     limits = task.get("limits", {})
     require(type(limits.get("tool_calls")) is int and 1 <= limits["tool_calls"] <= 200, "bad call limit")
     require(isinstance(limits.get("minutes"), (int, float)) and 0 < limits["minutes"] <= 30, "bad time limit")

@@ -13,6 +13,7 @@
 #include <deque>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 
 #include "runner.h"
@@ -23,6 +24,12 @@
 namespace supple::script {
 namespace ex_lvalues {
 #include "lvalues.h"
+}
+namespace ex_activity {
+#include "activity.h"
+}
+namespace ex_routes {
+#include "routes.h"
 }
 namespace ex_gain {
 #include "gain.cpp"
@@ -319,6 +326,7 @@ class Recorder final : public script::detail::Painter,
         add("keyboard", {double(lo), double(hi), x, y, w, h});
     }
     void meters(double x, double y, double w, double h) override { add("meters", {x, y, w, h}); }
+    void routes(double x, double y, double w, double h) override { add("routes", {x, y, w, h}); }
 
   private:
     static std::string number(double v) {
@@ -404,6 +412,7 @@ void sameDescription(const char* file,
     CHECK(a.channels == b.channels);
     CHECK(a.sidechain == b.sidechain);
     CHECK(a.outputs == b.outputs);
+    CHECK(a.features == b.features);
     CHECK(a.voices == b.voices);
     CHECK(a.latency == b.latency);
     CHECK(a.tail == b.tail);
@@ -436,6 +445,7 @@ void sameDescription(const char* file,
         CHECK(p.bypass == q.bypass);
         CHECK(p.hidden == q.hidden);
         CHECK(p.roles == q.roles);
+        CHECK(p.activeWhen == q.activeWhen);
     }
     REQUIRE(jit.shared().size() == native.shared().size());
     for (size_t i = 0; i < jit.shared().size(); ++i) {
@@ -529,6 +539,89 @@ TEST_CASE("Stft: a sine reads its amplitude, and a spectrum left alone is a dela
     CHECK(worst < 1e-12);
 }
 
+TEST_CASE("Stft: one prepared for analysis reads the same bins with push() alone") {
+    script::detail::Instance instance;
+    script::detail::CurrentScope scope(&instance);
+    script::Stft full, look;
+    full.prepare(1024, 4);
+    look.prepareAnalysis(1024, 4);
+    CHECK(look.bins() == full.bins());
+    CHECK(look.hop() == full.hop());
+    bool same = true;
+    int frames = 0;
+    for (int n = 0; n < 8192; ++n) {
+        const double x = 0.5 * std::sin(0.37 * n) + 0.25 * std::sin(0.05 * n);
+        const bool ready = full.push(x);
+        CHECK(look.push(x) == ready);
+        if (ready) {
+            ++frames;
+            for (int k = 0; k < full.bins(); ++k)
+                same = same && look.real(k) == full.real(k) && look.imag(k) == full.imag(k);
+        }
+        full.pull();
+        // Still readable after a pull(), which gives nothing back.
+        if (ready) {
+            CHECK(look.pull() == 0.0);
+            same = same && look.magnitude(5) != 0.0;
+        }
+    }
+    CHECK(frames == 8192 / 256);
+    CHECK(same);
+}
+
+TEST_CASE("whole-number conversions match the saturating libm results at boundaries") {
+    const auto saturate = [](double x) {
+        if (!(x == x)) return 0;
+        if (x >= 2147483647.0) return std::numeric_limits<int>::max();
+        if (x <= -2147483648.0) return std::numeric_limits<int>::min();
+        return static_cast<int>(x);
+    };
+    const double tiny = std::numeric_limits<double>::denorm_min();
+    const double largestSubnormal = std::nextafter(std::numeric_limits<double>::min(), 0.0);
+    const double inf = std::numeric_limits<double>::infinity();
+    for (double x : {1.0, 1.5, 2147483646.5, 2147483647.0, 2147483647.5, 0.5, 0.0, -0.0, -0.5, -1.5,
+                     tiny, -tiny, largestSubnormal, -largestSubnormal,
+                     std::numeric_limits<double>::quiet_NaN(), inf, -inf, -2147483648.5}) {
+        CAPTURE(x);
+        CHECK(script::toInt(x) == saturate(std::trunc(x)));
+        CHECK(script::floorToInt(x) == saturate(std::floor(x)));
+    }
+}
+
+TEST_CASE("Oversampler: 1x passes through, and linear phase is a pure delay") {
+    script::detail::Instance instance;
+    script::detail::CurrentScope scope(&instance);
+    // A restart from 4x to 1x: the same object, prepared again.
+    script::Oversampler o;
+    o.prepare(4);
+    CHECK(o.factor() == 4);
+    CHECK(o.latency() > 0);
+    o.prepare(1);
+    CHECK(o.factor() == 1);
+    CHECK(o.latency() == 0);
+    o.up(0.25);
+    CHECK(o.sample(0) == 0.25);
+    CHECK(o.down() == 0.25);
+    // Linear phase: everything below the passband's edge comes out as it went
+    // in, latency() samples later.
+    script::Oversampler linear;
+    linear.prepare(4, script::Oversampler::Phase::Linear);
+    const int lag = linear.latency();
+    CHECK(lag > 0);
+    std::vector<double> in(4800), out(4800);
+    for (size_t n = 0; n < in.size(); ++n) {
+        const double t = static_cast<double>(n) / 48000.0;
+        in[n] = 0.4 * std::sin(6.283185307179586 * 100.0 * t) +
+                0.3 * std::sin(6.283185307179586 * 15000.0 * t);
+        linear.up(in[n]);
+        out[n] = linear.down();
+    }
+    double worst = 0.0;
+    for (size_t n = 1000; n < in.size(); ++n)
+        worst = std::max(worst, std::abs(out[n] - in[n - static_cast<size_t>(lag)]));
+    CHECK(worst < 1e-4);
+}
+
 TEST_CASE("a script compiled as C++ describes the plugin the compiler describes") {
     using script::ex_tilt::Tilt;
     sameDescription<Tilt>(
@@ -565,5 +658,86 @@ TEST_CASE("lvalues preserve C++ sequencing and reference storage") {
         Audio actual(2, 12);
         run.process(actual);
         CHECK(actual == expected);
+    }
+}
+
+TEST_CASE("a script compiled as C++ has the sources and routes the compiler sees") {
+    std::ifstream in(std::filesystem::path(__FILE__).parent_path() / "routes.h");
+    REQUIRE(in.good());
+    std::stringstream source;
+    source << in.rdbuf();
+    auto result = scriptc::compile(source.str());
+    REQUIRE_MESSAGE(result.program, scriptc::toText(result.diagnostics));
+    using Routes = script::ex_routes::Routes;
+    const script::detail::NativeCode<Routes> native(
+        {}, {{&Routes::lfo, "lfo"}, {&Routes::env, "env"}, {&Routes::macro, "macro"}});
+    const auto& jit = *result.program;
+    REQUIRE(jit.sources().size() == 3);
+    REQUIRE(native.sources().size() == 3);
+    for (size_t i = 0; i < 3; ++i) {
+        const auto &a = jit.sources()[i], &b = native.sources()[i];
+        CAPTURE(i);
+        CHECK(a.key == b.key);
+        CHECK(a.name == b.name);
+        CHECK(a.description == b.description);
+        CHECK(a.perVoice == b.perVoice);
+        CHECK(a.bipolar == b.bipolar);
+        CHECK(a.offset == b.offset);
+    }
+    CHECK(jit.sources()[0].member == "lfo");
+    CHECK(jit.sources()[1].key == "env2");  // withKey() wins over the member's name
+    CHECK(jit.sources()[2].perVoice == false);
+    CHECK(jit.sources()[2].bipolar == false);
+    CHECK(jit.params()[1].routeMin == -1200);
+    CHECK(native.params()[1].routeMax == 1200);
+    CHECK(native.factoryPatches() == jit.factoryPatches());
+    REQUIRE(jit.factoryPatches().size() == 1);
+    using Route = script::detail::FactoryPatchModel::Route;
+    CHECK(jit.factoryPatches()[0].routes ==
+          std::vector<Route>{{"lfo>cutoff", "", 1.5}, {"env2>fine", "modwheel", 700}});
+}
+
+TEST_CASE("a script compiled as C++ says when its parameters apply as the compiler does") {
+    std::ifstream in(std::filesystem::path(__FILE__).parent_path() / "activity.h");
+    REQUIRE(in.good());
+    std::stringstream source;
+    source << in.rdbuf();
+    auto result = scriptc::compile(source.str());
+    REQUIRE_MESSAGE(result.program, scriptc::toText(result.diagnostics));
+    using Condition = script::detail::ParamModel::Condition;
+    using Conditions = std::vector<Condition>;
+    auto of = [](int param, std::vector<int> values) {
+        Condition c;
+        c.param = param;
+        c.values = std::move(values);
+        return c;
+    };
+    auto range = [](int param, double above, double below) {
+        Condition c;
+        c.param = param;
+        c.above = above;
+        c.below = below;
+        return c;
+    };
+    const double inf = std::numeric_limits<double>::infinity();
+    const std::vector<Conditions> expected = {
+        {},                                      // on
+        {of(0, {1})},                            // shape: while on
+        {of(0, {1}), of(1, {0, 1})},             // gain: while on, unless a cut
+        {of(1, {0})},                            // width: a bell's
+        {},                                      // freeze
+        {of(4, {0})},                            // rate: unless frozen
+        {},                                      // voices
+        {range(6, 1, inf)},                      // detune: above one voice
+        {},                                      // depth
+        {range(8, 0, inf), range(8, -inf, 90)},  // speed: between 0 and 90 %
+    };
+    const script::detail::NativeCode<script::ex_activity::Activity> native;
+    REQUIRE(result.program->params().size() == expected.size());
+    REQUIRE(native.params().size() == expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        CAPTURE(i);
+        CHECK(result.program->params()[i].activeWhen == expected[i]);
+        CHECK(native.params()[i].activeWhen == expected[i]);
     }
 }

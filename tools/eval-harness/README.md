@@ -1,6 +1,6 @@
 # LLM usability evaluation
 
-Python 3, standard library only. Build the dev sandbox and Orrery first:
+Python 3, standard library only. Build the dev sandbox and Marram first:
 
 ```sh
 cmake --preset dev
@@ -12,7 +12,7 @@ python3 -m unittest discover -s tools/eval-harness -v
 SUPPLE_EVAL_INTEGRATION=1 python3 -m unittest discover -s tools/eval-harness -v
 ```
 
-The default runner is `dry`, with one repeat and seed 42. It submits a known
+The default runner is `dry`, with one repeat. It submits a known
 recipe/hidden patch or phrase through the real sandbox and runs the same scorer
 as Hermes. A dry validation exits nonzero if any scripted answer fails. It
 writes its report into ignored `build/eval/`; add `--publish` to retain a
@@ -73,7 +73,7 @@ children. The last completed capture survives interruption. The harness exports
 Hermes sessions with `--redact`, records usage (including auxiliaries), and
 scores captured patches independently of the final prose.
 
-A fresh sandbox restores the fixed settings/seed and renders the fixed phrase.
+A fresh sandbox restores the fixed settings and renders the fixed phrase.
 Descriptive scores use production `profile.evaluate`, with pass fraction,
 weighted normalized profile distance, and a squared-distance loss. Reference
 scores use the production C++ optimizer loss directly through the sandbox's

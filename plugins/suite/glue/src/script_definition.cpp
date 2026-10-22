@@ -38,6 +38,8 @@ Unit unitOf(ParamModel::Unit u) {
             return Unit::Bpm;
         case ParamModel::Unit::Samples:
             return Unit::Samples;
+        case ParamModel::Unit::Meters:
+            return Unit::Meters;
         default:
             return Unit::None;
     }
@@ -107,6 +109,7 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
     info.features = {info.instrument()   ? "instrument"
                      : info.noteEffect() ? "note-effect"
                                          : "audio-effect"};
+    info.features.insert(info.features.end(), i.features.begin(), i.features.end());
     info.layouts.clear();
     if (!info.noteEffect()) {
         std::vector<int> widths = i.channels;
@@ -130,7 +133,6 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
     // Every CLAP note expression reaches an instrument's voices.
     if (info.instrument()) info.noteExpressions = 0x7F;
 
-    ParamTable::Builder b;
     Meaning meaning;
     std::string slug = snakeCase(i.name.empty() ? i.id : i.name);
     for (char& c : slug)
@@ -138,22 +140,110 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
     meaning.patchType = "supple." + slug + "-patch/1.0";
     meaning.docs = i.description;
     for (const ParamModel& m : code->params()) {
-        b.add(paramOf(m, b));
         ParamMeaning pm;
         pm.key = m.key;
         for (const std::string& role : m.roles) pm.tags.push_back("role:" + role);
         for (size_t k = 0; k < m.choices.size(); ++k)
             pm.choiceKeys.push_back(script::detail::choiceKey(m, k));
+        for (const ParamModel::Condition& c : m.activeWhen) {
+            ActiveCondition a;
+            a.param = c.param < 0 ? meaning.params.size() + 1  // refused below
+                                  : static_cast<size_t>(c.param);
+            a.values = c.values;
+            // A number's range in plain units, as the script reads it (a
+            // percent as a fraction).
+            const double scale =
+                c.param >= 0 && code->params()[static_cast<size_t>(c.param)].unit ==
+                                    ParamModel::Unit::Percent
+                    ? 0.01
+                    : 1.0;
+            a.above = c.above * scale;
+            a.below = c.below * scale;
+            pm.activeWhen.push_back(std::move(a));
+        }
+        // Routes move a continuous parameter the host may modulate: per
+        // voice when the host may modulate it per note.
+        if (m.kind == ParamModel::Kind::Continuous && !m.output && m.modulatable)
+            pm.routable =
+                m.polyModulatable && info.instrument() ? Routable::Voice : Routable::Global;
+        pm.routeMin = m.routeMin;
+        pm.routeMax = m.routeMax;
         meaning.params.push_back(std::move(pm));
     }
-    // Each file member is a file property: its path, saved and set by patch.
-    PropertyList::Builder files;
-    for (const script::detail::FileModel& m : code->files()) {
-        PropertyDef p =
-            property(m.id, files.text(m.name)).audioFile().ofKind(static_cast<uint32_t>(m.kind));
-        if (!m.description.empty()) p = p.help(files.text(m.description));
-        files.add(p);
-        meaning.properties.push_back({m.key});
+    // The sources: the script's, then an instrument's own.
+    for (const script::detail::SourceModel& s : code->sources())
+        meaning.sources.push_back({s.key, s.name, s.description, s.perVoice, s.bipolar});
+    if (info.instrument())
+        for (const script::detail::BuiltinSource& s : script::detail::kInstrumentSources)
+            meaning.sources.push_back({s.key, s.name, s.description, s.perVoice, s.bipolar});
+    for (const script::detail::FileModel& m : code->files()) meaning.properties.push_back({m.key});
+    // With sources and something for them to move, the routes: a property
+    // of their own, after the files.
+    const bool routes =
+        !meaning.sources.empty() &&
+        std::any_of(meaning.params.begin(), meaning.params.end(),
+                    [](const ParamMeaning& p) { return p.routable != Routable::No; });
+    if (routes) {
+        meaning.routes = static_cast<int>(meaning.properties.size());
+        meaning.properties.push_back({"routes"});
+    } else {
+        meaning.sources.clear();
+    }
+    // The tables, made afresh for each definition that holds them.
+    auto params = [&] {
+        ParamTable::Builder b;
+        for (const ParamModel& m : code->params()) b.add(paramOf(m, b));
+        return b.build();
+    };
+    auto properties = [&] {
+        // Each file member is a file property: its path, saved and set by patch.
+        PropertyList::Builder files;
+        for (const script::detail::FileModel& m : code->files()) {
+            PropertyDef p = property(m.id, files.text(m.name))
+                                .audioFile()
+                                .ofKind(static_cast<uint32_t>(m.kind));
+            if (!m.description.empty()) p = p.help(files.text(m.description));
+            files.add(p);
+        }
+        if (routes)
+            files.add(property(kRoutesProperty, "Routes")
+                          .maxBytes(16384)
+                          .hidden()
+                          .help("The modulation routes, one a line: source>parameter amount, "
+                                "and the source it goes through if any. A patch sets them as "
+                                "its routes member."));
+        return files.build();
+    };
+    // Factory patches' routes, as a patch's would be checked and written.
+    std::vector<std::string> factoryRoutes(code->factoryPatches().size());
+    if (routes) {
+        const SemanticDefinition plain(info, params(), properties(), meaning);
+        const PatchCodec codec(plain);
+        for (size_t k = 0; k < factoryRoutes.size(); ++k) {
+            const auto& patch = code->factoryPatches()[k];
+            json::Value given = json::Value::object();
+            for (const auto& r : patch.routes) {
+                json::Value route = json::Value::object();
+                route["amount"] = r.amount;
+                if (!r.via.empty()) route["via"] = r.via;
+                given[r.route] = std::move(route);
+            }
+            std::vector<json::Error> errors;
+            if (!codec.routeText(given, "/routes", factoryRoutes[k], errors)) {
+                if (problems)
+                    *problems = "factory patch '" + patch.name + "': " + errors.front().message +
+                                " (" + errors.front().hint + ")";
+                return nullptr;
+            }
+        }
+    } else {
+        for (const auto& patch : code->factoryPatches())
+            if (!patch.routes.empty()) {
+                if (problems)
+                    *problems = "factory patch '" + patch.name +
+                                "' has routes, and the plugin has no sources or nothing they move";
+                return nullptr;
+            }
     }
     std::vector<FactoryPreset> presets;
     for (const auto& patch : code->factoryPatches()) {
@@ -165,10 +255,11 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
             preset.values.emplace_back(
                 id, physical * (p->unit == ParamModel::Unit::Percent ? 0.01 : 1.0));
         }
+        if (routes) preset.texts.emplace_back(kRoutesProperty, factoryRoutes[presets.size()]);
         presets.push_back(std::move(preset));
     }
     auto definition = std::make_shared<const ScriptDefinition>(
-        std::move(info), b.build(), files.build(), std::move(meaning), std::move(code),
+        std::move(info), params(), properties(), std::move(meaning), std::move(code),
         std::move(file), std::move(source), std::move(presets));
     std::string found = definition->problems();
     if (found.empty()) found = meaningProblems(*definition, definition->meaning());

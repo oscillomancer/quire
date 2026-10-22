@@ -155,6 +155,11 @@ class Builtins {
     const BuiltinClass* pointer() const { return pointer_; }
     // An AudioFile or Convolver: a file member, declared from a FileSpec.
     bool isFile(const Type* t) const;
+    // A Source: a modulation source member, declared from a SourceSpec.
+    const BuiltinClass* source() const { return source_; }
+    bool isSource(const Type* t) const {
+        return t && t->kind == TypeKind::Object && t->builtin == source_;
+    }
     // Shared<T> for T (double, float, int, bool), or null.
     const BuiltinClass* shared(const Type* value) const;
     // A Shared<T> or a SharedArray<T, N>: state the audio code sends the editor.
@@ -191,7 +196,7 @@ class Builtins {
                        *inputChannel_ = nullptr, *transport_ = nullptr, *paramSpec_ = nullptr,
                        *info_ = nullptr, *plugin_ = nullptr, *audioFile_ = nullptr,
                        *convolver_ = nullptr, *canvas_ = nullptr, *editor_ = nullptr,
-                       *pointer_ = nullptr;
+                       *pointer_ = nullptr, *source_ = nullptr;
 
     friend struct Registrar;
 };

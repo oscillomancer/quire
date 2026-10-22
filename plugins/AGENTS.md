@@ -5,39 +5,30 @@ specific to `plugins/`.
 
 ## Layout
 
-Stock plugins written as DSP scripts live in `stock/` (ADR-0047): one
-folder each, holding the script and the product folder a source export
-makes from it, built from `template/` with `suite/`. `stock/README.md` says
-how to change one. Yarrow (`stock/yarrow`, the EQ) and Sundew
-(`stock/sundew`, the compressor) are written so far; the rest of this
-section is about the older, hand-written plugins.
-
-Each plugin directory (`gate`, `transient`, `drive`, `delay`,
-`reverb`, `utility`, `analyzer`, `orrery`, and the internal test instrument
-`probe-synth`) is an instance of Supple Audio's plugin template (ADR-0011):
-
-- `engine/`: the SDK-free DSP core and the parameter table (core-params
-  `ParamSpec`s), with its own tests. It builds as part of the monorepo and
-  runs in every sanitizer preset.
-- `plugin/`: the CLAP wrapper layer and the editor (`plugin/gui/`).
-- `test/`: host smoke tests, semantic-parameter conformance, editor input,
-  export and wrapper checks.
-- `cmake/Identity.cmake`: the display name, the only place it is written.
-- `QUIRE.md`: how this plugin departs from the template and what it does
-  that is not obvious from the code. Read it before changing the plugin.
-- `README.md`, `BUILDING.md` (building the plugin on its own),
-  `CONVENTIONS.md` (the template's coding, DSP and GUI conventions),
-  `VERIFICATION.md` (where present: measurements behind the plugin's
-  claims), `NOTICES.txt` and `LICENSE` (staged beside the built plugin).
+Every stock plugin is a DSP script (ADR-0047) in a folder of its own here,
+holding the script and the product folder a source export makes from it,
+built from `template/` with `suite/`. `README.md` says how to change one.
+Yarrow (`yarrow`, the EQ), Sundew (`sundew`, the compressor), Treeline
+(`treeline`, the limiter), Gorse (`gorse`, the transient shaper), Hickory
+(`hickory`, the stereo utility), Sorrel (`sorrel`, the gate), Teasel
+(`teasel`, the saturation), Bracken (`bracken`, the delay), Ghyll
+(`ghyll`, the reverb), Lichen (`lichen`, the analyzer), Marram (`marram`,
+the synthesizer), Withy (`withy`, the chorus) and Pollia (`pollia`, the
+phaser). Orrery, the hand-written synthesizer
+Marram replaced, was removed on 2026-10-21; git history has it.
 
 `common/` holds the shared semantic-parameters extension
 (`com.suppleaudio.semantic-params`, spec in
-`docs/specs/semantic-params-extension.md`) and the CMake glue that links
-plugins against the monorepo's libraries.
+`docs/specs/semantic-params-extension.md`), the plugin test tools
+(`clap-reset-check`, `clap-block-check`, `clap-unload-probe`,
+`semantic-conformance`), `clap-bench` (run by hand: a plugin's cost per
+setup and factory patch, and whether its output is bit-identical to a saved
+run) and the CMake glue that links plugins against the monorepo's libraries.
 
 The monorepo builds each plugin as an isolated ExternalProject
-(`plugins/CMakeLists.txt`); its own test suite runs as
-`plugin.<dir>.ctest`. Built plugins land in `build/<preset>/plugins/clap/`.
+(`plugins/CMakeLists.txt`, `supple_add_template_product` and
+`supple_add_stock_script`); its own test suite runs as
+`plugin.<name>.ctest`. Built plugins land in `build/<preset>/plugins/clap/`.
 
 `template/` is the plugin template at a released framework version, a
 byte-identical copy (`git archive` of the template's commit): change the
@@ -46,69 +37,30 @@ scripting (ADR-0032): the script compiler and runtime, the semantic layer
 (the extension as a framework layer), and the player, a run-time product
 that `plugins/CMakeLists.txt` builds from `template/` with
 `-DSUPPLE_PRODUCT_DIR=suite/player` and this repository's `third_party`
-copies (`supple_add_template_product`).
+copies.
 
 ## Rules
 
-- **Shared stack.** Files that come from the template's shared stack stay
-  byte-identical to the template apart from the product namespace and
-  license header: the window, renderer backends and Pugl/NanoVG
-  integration (`Window.*`, `Gui.h`), `Telemetry.h`, `test/host_contract.h`,
-  the clap-wrapper patches and the probes. `tools/ci/format.sh` keeps them
-  out of formatting. A fix that belongs there is made in the template and
-  then carried to every plugin that has the file, so the copies never
-  drift.
-- **Product-owned code** is the parameter table, the DSP core, the wrapper's
-  params/state/extension sections, `Theme.h`, `Widgets.h`, the editor and
-  the identity. Change it freely, with tests. `Theme.h` must keep the token
-  set the widgets rely on (`ink`, `panel`, `well`, `edge`, `edgeHi`, `dim`,
-  `dust`, `bone`, `accent`, `alert`, `knobWell`, `knobTop`, `knobBot`,
-  `knobRim`): give them values, never delete one, and never hard-code a
-  colour in `Widgets.h` instead of adding a token (`CONVENTIONS.md`).
+- **Shared stack.** The template's shared stack (the window, renderer
+  backends, Pugl/NanoVG integration, `Telemetry.h`, the host contract, the
+  clap-wrapper patches and the probes) is the template's own: a fix that
+  belongs there is made in the template and copied here, so no copy drifts.
 - **Permanent identifiers.** The CLAP id (`com.suppleaudio.<id>`), the AU
-  subtype, the state magic and every parameter's stable id and key identify
-  saved sessions and patches. Never change or reuse them; append new
-  parameters with new ids.
-- **One parameter table.** Names, ranges, defaults, units, curves and value
-  text come from the engine's table only; the wrapper and the editor read
-  it. Values in patches and on the bus are physical units (ADR-0010).
+  subtype, the state tag and every parameter's key identify saved sessions
+  and patches. Never change or reuse them; add new parameters with new keys.
+- **One parameter table.** Names, ranges, defaults, units and value text
+  come from the script's parameters only. Values in patches and on the bus
+  are physical units (ADR-0010).
 - **Determinism.** A render depends only on the plugin's state and input:
   seeded randomness, identical output across block sizes, and nothing left
   over after `reset()` (each plugin's reset test checks this).
 - **Real time.** `process` and everything it calls follow the root rule:
-  no allocation, locks or I/O. State and patch loads are transactional:
-  parse and validate fully, then apply.
-
-## Implementation rules from the template
-
-- Size scratch storage in activation/prepare. A re-prepare forced by a real
-  bus-layout change is an explicit, exceptional path.
-- `prepare -> setParams` snaps restored values into the smoothers; later
-  updates smooth normally. Re-prepare is idempotent.
-- Automation is processed at event sample offsets, never reduced to one
-  value per host block.
-- Parameters that change latency or topology need an explicit restart
-  policy (and `HOST_SMOKE_LATENCY_PARAM` set in the plugin's
-  `CMakeLists.txt` so `host-smoke` exercises it).
-- Editor-to-audio and audio-to-editor channels are bounded SPSC queues
-  that drop the new item on overflow. Telemetry is produced only while an
-  editor exists, at control rate, and never changes the audio.
-- A mouse-wheel edit is one host gesture, closed after 250 ms of
-  inactivity. Drag, keyboard and focus-loss paths always balance begin and
-  end.
-- Animation and meter decay use elapsed seconds from `Window`, not a
-  presumed frame rate.
-- Editor code includes no Metal, OpenGL or platform headers; `Window.cpp`
-  calls the small backend seam, and one renderer translation unit supplies
-  it. Check the font's glyph coverage before adding a symbol.
-- A change is finished when its behaviour is measured, tests cover
-  lifecycle and block boundaries, every built format comes from the same
-  source, and the real editor opens, resizes, reopens and tears down.
+  no allocation, locks or I/O; the script compiler enforces it for scripts.
 
 ## Specs and guides
 
-DSP and patch contracts: `docs/specs/effects.md`,
-`docs/specs/stock-effects.md`, `docs/specs/synth.md` (Orrery). The agent
+DSP and patch contracts: `docs/specs/stock-effects.md` (the effects) and
+`docs/specs/marram.md` (the synthesizer). The agent
 guides in `skill/guides/<id>.md` describe each plugin's patches for agents;
 update them when a patch format or a parameter's meaning changes.
 

@@ -20,16 +20,18 @@ Task files are `tools/eval-harness/tasks/<suite>/<task>.json`, schema
 `setup` (typed command/args pairs), `settings`, `render`, `score`, `limits`,
 `listening`, and `recipe_index` (one-based JSON recipe number in
 `skill/guides/sound-design.md`; the introductory anatomy example is number 0).
+Every task plays Marram (`com.suppleaudio.marram`), loaded by its `setup`
+as `in_1`.
 A task's complete JSON is hashed into the report. Unknown selectors, malformed
 ranges, empty profiles, and invalid limits fail before inference.
 
-Fixed defaults: 48 kHz, 256-frame stereo rendering, 120 BPM, seed 42. Descriptive
+Fixed defaults: 48 kHz, 256-frame stereo rendering, 120 BPM. Descriptive
 and reference phrases use one 4/4 bar (held note/chord or a short note plus rests),
 with a 2-second tail cap. Notation tasks use their specified meters, no audio tail,
-and one to four bars. Each repeat starts fresh, with the same evaluation seed;
-repeats measure model variability, not audio randomness. The scorer restores the
-seed even if the agent omitted it in `patch.set`. The raw captured final patch is
-also retained in the report.
+and one to four bars. Each repeat starts fresh; Marram's random choices are
+seeded by the order of the notes, so a patch renders the same every time and
+repeats measure model variability, not audio randomness. The raw captured final
+patch is also retained in the report.
 
 ### 1.1 Descriptive tasks (10)
 
@@ -38,28 +40,32 @@ formant lead, acid bass and strings. A task publishes its descriptor targets to
 the agent; `--blind` withholds them (same tasks and scoring), so the agent works
 from the verbal description alone — the discriminating variant, since the
 published targets made the first full run trivially 30/30 (2026-10-01). The dry runner sets the **current guide recipe**, rather than a stale
-copied baseline; every recipe must pass its own profile. Calibration used the
-508a229 engine with post-level FM/AM modulators, so the revised bell/e-piano
-brightness is reflected in these numbers.
+copied baseline; every recipe must pass its own profile. The recipes are
+Marram's factory sounds of the same names; the profiles were calibrated on
+Orrery's recipes and still hold. Three prompts that asked for effects (chorus,
+delay, reverb) ask for the synth alone, since the final chain is the one
+instrument (2026-10-21).
 
 Profiles are simple, intentionally forgiving ranges over three descriptors:
 
-| Family | Descriptor ranges | Recipe measurements at seed 42 |
+| Family | Descriptor ranges | Recipe measurements |
 |---|---|---|
-| Pad | centroid 200–2200 Hz; attack 400–2400 ms; width .05–.48 | 752 Hz; 1790 ms; .216 |
-| Pluck bass | centroid 100–1200 Hz; attack 0–60 ms; decay20 150–1600 ms | 184 Hz; 10 ms; 504 ms |
-| Bell | centroid 400–5000 Hz; attack 0–50 ms; decay20 400–3500 ms | 1918 Hz; 0 ms; 1594 ms |
-| Supersaw | centroid 700–6500 Hz; voiced 30–100%; width .03–.50 | 2694 Hz; 100%; .148 |
-| Sub bass | centroid 40–220 Hz; low-band level −8–0 dB; width 0–.015 | 67 Hz; −1.719 dB; 0 |
-| FM e-piano | centroid 250–4000 Hz; attack 0–80 ms; decay20 300–2200 ms | 3827 Hz; 8 ms; 577 ms |
-| Noise snare | centroid 500–6000 Hz; attack 0–30 ms; decay20 30–600 ms | 5220 Hz; 0 ms; 61 ms |
-| Formant lead | centroid 700–6000 Hz; attack 0–150 ms; median flux .001–.20 | 3119 Hz; 88 ms; .058 |
-| Acid bass | centroid 200–4500 Hz; attack 0–60 ms; flatness 0–.15 | 282 Hz; 0 ms; 0 |
-| Strings | centroid 300–3500 Hz; attack 100–1000 ms; width .03–.50 | 1225 Hz; 310 ms; .353 |
+| Pad | centroid 200–2200 Hz; attack 400–2400 ms; width .05–.48 | 995 Hz; 659 ms; .180 |
+| Pluck bass | centroid 100–1200 Hz; attack 0–60 ms; decay20 150–1600 ms | 123 Hz; 8 ms; 532 ms |
+| Bell | centroid 400–5000 Hz; attack 0–50 ms; decay20 400–3500 ms | 1038 Hz; 0 ms; 1934 ms |
+| Supersaw | centroid 700–6500 Hz; voiced 30–100%; width .03–.50 | 3356 Hz; 100%; .197 |
+| Sub bass | centroid 40–220 Hz; low-band level −8–0 dB; width 0–.015 | 67 Hz; −1.718 dB; 0 |
+| FM e-piano | centroid 250–4000 Hz; attack 0–80 ms; decay20 300–2200 ms | 655 Hz; 0 ms; 719 ms |
+| Noise snare | centroid 500–6000 Hz; attack 0–30 ms; decay20 30–600 ms | 5733 Hz; 0 ms; 118 ms |
+| Formant lead | centroid 700–6000 Hz; attack 0–150 ms; median flux .001–.20 | 2184 Hz; 22 ms; .106 |
+| Acid bass | centroid 200–4500 Hz; attack 0–60 ms; flatness 0–.15 | 423 Hz; 11 ms; 0 |
+| Strings | centroid 300–3500 Hz; attack 100–1000 ms; width .03–.50 | 1121 Hz; 230 ms; .081 |
 
-The pad's RMS attack includes its slow filter swell. Supersaw beating and delay
-make the global-envelope 10–90% attack read 643 ms despite its 5 ms amp attack;
-that descriptor is therefore excluded from the lead profile. The listening
+The pad's RMS attack includes its slow filter swell. Supersaw beating made the
+global-envelope 10–90% attack read far longer than its 5 ms amp attack; that
+descriptor is therefore excluded from the lead profile. A vowel's level differs
+from vowel to vowel, so a wide vowel sweep moves the loudest moment, and the
+measured attack, away from the onset. The listening
 question checks the perceived start. Timbre numbers do not establish that a
 snare is convincing, a vowel is recognizable, or a piano is pleasant. Profiles
 are initial fixtures, not psychoacoustic classifiers; listening may revise them.
@@ -68,11 +74,12 @@ are initial fixtures, not psychoacoustic classifiers; listening may revise them.
 
 Tier 1: four recipe starting patches with one module changed (pad/pluck/supersaw
 filter cutoff, sub-bass amp release). Tier 2: bell, e-piano and acid bass with
-three changed modules (oscillator and two envelopes). Tier 3: noise snare,
+three changed modules (an oscillator and two envelopes). Tier 3: noise snare,
 formant lead and strings, from a fresh default patch, with no starting patch
-provided. The hidden tier-3 patches add comb filtering/drive and formant
-filtering/steps/macros, so the suite exercises VA, sub, FM, noise, wavetable,
-ladder/SVF/comb/formant, envelopes, LFOs, steps, routes, macros, unison and FX.
+provided; their hidden patches change the recipe's filter, envelope and voice
+or drive settings, so the suite exercises analog, sub, FM, noise, the
+ladder/SVF/formant filters, drive, envelopes, LFOs, routes and unison.
+`changed_modules` names the groups changed (`filter1`, `amp`).
 
 The harness renders the hidden patch before inference in a separate directory.
 Only the WAV path is given to the agent; a tier-1/2 starting patch is applied by
@@ -105,7 +112,7 @@ success.
 
 CLI: `run.py --suite <suite> --runner hermes|dry [--tasks ...] [--repeat N]`.
 Default runner: dry; default repeat: 1. `--dry-run` forces dry regardless of
-runner selection. `--seed`, `--sandbox`, credential/model identity sources and
+runner selection. `--sandbox`, credential/model identity sources and
 Hermes executable/venv overrides are documented in the tooling README.
 
 Hermes: one isolated `HERMES_HOME` per attempt under ignored `build/eval/`;
@@ -135,7 +142,7 @@ Launch `hermes -z <prompt> --usage-file <attempt>/usage.json --toolsets sandbox
 CLI through an already installed venv, without modifying the default install or
 profile. Export the isolated sessions using `hermes sessions export ... --redact`.
 Record version, actual model/provider from usage, git hash and dirty flag, task
-and skill hashes, seeds, tool calls/results, wall time, tokens and estimated cost
+and skill hashes, tool calls/results, wall time, tokens and estimated cost
 (including auxiliary usage). Unknown cost stays explicitly unknown, never zero.
 
 Limits: per-task MCP calls and minutes. The relay rejects the first excess call
@@ -165,8 +172,8 @@ parse a model's final prose or require the model to save a preset. Atomic captur
 and a separate tool transcript preserve the last completed state after a kill.
 Background jobs unfinished at the deadline are not applied after capture.
 
-The final chain must contain exactly the task's Orrery instrument, with a valid
-semantic patch. A fresh scoring sandbox restores task settings and seed and
+The final chain must contain exactly the task's Marram instrument, with a valid
+semantic patch. A fresh scoring sandbox restores task settings and
 renders the task phrase; synth agents cannot choose an easier scoring phrase.
 Descriptive pass/fraction comes from production `profile.evaluate`. Also report
 its normalized profile loss and a weighted sum of squared target distances

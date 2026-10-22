@@ -16,7 +16,7 @@ import subprocess
 import sys
 import time
 
-from common import HERE, ROOT, Mcp, PluginProvenanceError, check_plugin_provenance, evaluation_profile, load_tasks, read_json, recipe_patch, sandbox_command, setup, skill_hash, write_json
+from common import HERE, ROOT, SYNTH, SYNTH_NAME, Mcp, PluginProvenanceError, check_plugin_provenance, evaluation_profile, load_tasks, read_json, recipe_patch, sandbox_command, setup, skill_hash, write_json
 import runners
 from scoring import notation_score, transcript_metrics
 
@@ -35,19 +35,19 @@ def unpublishable(runner, report):
     return None
 
 
-def render_patch(task, patch, directory, seed, binary=None):
+def render_patch(task, patch, directory, binary=None):
     with Mcp(sandbox_command(directory, binary), directory) as client:
-        setup(client, task, seed)
+        setup(client, task)
         # A reference render is only comparable if it comes from this build.
         check_plugin_provenance(client, what="the reference render")
-        client.call("patch.set", {"instance": "in_1", "patch": dict(patch, seed=seed)})
+        client.call("patch.set", {"instance": "in_1", "patch": patch})
         rendered = client.call("render", dict(task["render"], notation=task["phrase"]))
         report = client.call("analyze", {"source": rendered["render"], "detail": "full"})["report"]
         write_json(Path(directory) / "reference.json", {"input_end_s": rendered["seconds"] - rendered["tail_s"]})
         return Path(rendered["path"]), report
 
 
-def score_final(task, directory, seed, binary=None, reference=None):
+def score_final(task, directory, binary=None, reference=None):
     directory = Path(directory)
     entries = [json.loads(line) for line in (directory / "tools.jsonl").read_text(encoding="utf-8").splitlines()]
     metrics = transcript_metrics(entries)
@@ -55,8 +55,8 @@ def score_final(task, directory, seed, binary=None, reference=None):
     session = final["session"]
     # Added effects, missing instances and unsupported state are invalid, not
     # silently discarded: the task evaluates the one fixed instrument.
-    if len(session["chain"]) != 1 or session["instances"][session["chain"][0]]["plugin"] != "com.suppleaudio.orrery":
-        raise ValueError("Final chain must contain only the task's Orrery instance")
+    if len(session["chain"]) != 1 or session["instances"][session["chain"][0]]["plugin"] != SYNTH:
+        raise ValueError(f"Final chain must contain only the task's {SYNTH_NAME} instance")
     patch = final["patches"][session["chain"][0]]
     if task["suite"] == "notation":
         attempts = metrics["notation_attempts"]
@@ -67,11 +67,11 @@ def score_final(task, directory, seed, binary=None, reference=None):
         phrase = task["phrase"]
     scorer_dir = directory.parent / (directory.name + "-score")
     with Mcp(sandbox_command(scorer_dir, binary), scorer_dir) as client:
-        setup(client, task, seed)
+        setup(client, task)
         # The scorer must run the same plugin build as the attempt (a stale
         # install used to shadow the built one and silently change the numbers).
         provenance = check_plugin_provenance(client, what="the scorer")
-        client.call("patch.set", {"instance": "in_1", "patch": dict(patch, seed=seed)})
+        client.call("patch.set", {"instance": "in_1", "patch": patch})
         rendered = client.call("render", dict(task["render"], notation=phrase))
         report = client.call("analyze", {"source": rendered["render"], "detail": "full"})["report"]
         path = Path(rendered["path"])
@@ -167,7 +167,6 @@ def main(argv=None):
     parser.add_argument("--blind", action="store_true",
                         help="Hide descriptor targets from the agent: it works from the description alone; scoring is unchanged")
     parser.add_argument("--jobs", type=int, default=1, help="Attempts run concurrently (each fully isolated); 1..16")
-    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--sandbox", type=Path)
     parser.add_argument("--hermes-bin", default="hermes")
     parser.add_argument("--hermes-python", help="Existing Hermes venv Python; invokes the same CLI without managing the user's install")
@@ -177,8 +176,8 @@ def main(argv=None):
                         help="Dedicated evaluation profile credential .env to reference; never copied")
     parser.add_argument("--publish", action="store_true", help="Write the report, its listening list and the history row; default for real Hermes runs")
     options = parser.parse_args(argv)
-    if not 1 <= options.repeat <= 100 or not 0 <= options.seed <= 1000000000 or not 1 <= options.jobs <= 16:
-        parser.error("repeat must be 1..100, jobs 1..16 and seed 0..1e9")
+    if not 1 <= options.repeat <= 100 or not 1 <= options.jobs <= 16:
+        parser.error("repeat must be 1..100 and jobs 1..16")
     runner = "dry" if options.dry_run else options.runner
     selected = [part for arg in (options.tasks or []) for part in arg.split(",")]
     tasks = load_tasks(options.suite, selected)
@@ -187,7 +186,7 @@ def main(argv=None):
     run_dir = ROOT / "build/eval" / run_id
     run_dir.mkdir(parents=True)
     report = {"schema": "supple.eval-report/1.0", "run_id": run_id, "started_utc": start.isoformat(),
-              "suite": options.suite, "runner": runner, "seed": options.seed, "blind": options.blind,
+              "suite": options.suite, "runner": runner, "blind": options.blind,
               "git_hash": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
               "working_tree_dirty": bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT)),
               "skill_hash": skill_hash(), "task_hashes": {}, "tasks": [], "run_directory": str(run_dir.relative_to(ROOT))}
@@ -205,18 +204,18 @@ def main(argv=None):
         report["task_hashes"][task["id"]] = hashlib.sha256(json.dumps(task, sort_keys=True).encode()).hexdigest()
         if task["suite"] == "synth-reference":
             references[task["id"]], _ = render_patch(task, task["hidden_patch"], run_dir / (task["id"] + "-hidden"),
-                                                     options.seed, options.sandbox)
+                                                     options.sandbox)
 
     def attempt(task, repeat):
         directory = run_dir / (task["id"] + f"-{repeat + 1}")
         directory.mkdir()
         reference = references.get(task["id"])
         begin = time.monotonic()
-        record = {"task": task["id"], "repeat": repeat + 1, "seed": options.seed,
+        record = {"task": task["id"], "repeat": repeat + 1,
                   "listening": task["listening"], "transcript": str((directory / "transcript.jsonl").relative_to(ROOT))}
         try:
-            record["runner"] = (runners.dry(task, directory, options.seed, options.sandbox)
-                                if runner == "dry" else runners.hermes(task, directory, options.seed, options, reference))
+            record["runner"] = (runners.dry(task, directory, options.sandbox)
+                                if runner == "dry" else runners.hermes(task, directory, options, reference))
             # What the attempt actually ran: the relay records it at initialize.
             plugins = directory / "plugins.json"
             if plugins.exists():
@@ -228,7 +227,7 @@ def main(argv=None):
             elif runner == "hermes":
                 raise PluginProvenanceError(
                     f"{task['id']} repeat {repeat + 1}: the attempt recorded no plugin provenance")
-            record.update(score_final(task, directory, options.seed, options.sandbox, reference))
+            record.update(score_final(task, directory, options.sandbox, reference))
             record["limits_exceeded"] = record["efficiency"]["tool_calls"] > task["limits"]["tool_calls"]
             if record["runner"]["exit_code"] or record["runner"]["timed_out"] or record["limits_exceeded"]:
                 record["score"]["pass"] = False

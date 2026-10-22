@@ -704,6 +704,7 @@ struct FxParamSetArgs {
 struct MergeResult {
     json::Value changed;
     std::string description;
+    std::optional<std::vector<std::string>> inactive;
 };
 struct FxDescribeArgs {
     std::string fx;
@@ -2394,6 +2395,18 @@ void registerEngineCommands(cmd::Registry& registry) {
         next.patch = std::move(*merged);
         auto d = app.describeFx(next, true);
         r.description = d ? *d : "";
+        // The scratch instance holds the merged patch now: its schema says
+        // which of the values set do not apply with it.
+        if (const json::Value* set = patch.find("params"); set && set->isObject())
+            if (auto schema = app.fxSchema(next); schema && schema->find("params")) {
+                std::vector<std::string> inactive;
+                for (const auto& m : set->asObject()) {
+                    const json::Value* e = schema->find("params")->find(m.key);
+                    const json::Value* active = e ? e->find("active") : nullptr;
+                    if (active && active->isBool() && !active->asBool()) inactive.push_back(m.key);
+                }
+                if (!inactive.empty()) r.inactive = std::move(inactive);
+            }
         app.txn().put<model::FxInstance>(*id, std::move(next));
         return r;
     };
@@ -2401,6 +2414,10 @@ void registerEngineCommands(cmd::Registry& registry) {
         return schema::object<MergeResult>("merge_result")
             .field("changed", &MergeResult::changed, schema::any())
             .field("description", &MergeResult::description, schema::string())
+            .field("inactive", &MergeResult::inactive,
+                   schema::arrayOf(schema::string())
+                       .doc("Params set that do not apply with the new values: kept, and heard "
+                            "once what fx.describe full's active_when names allows it"))
             .build();
     };
     {
@@ -2464,7 +2481,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                                     A(ctx).touchParam(*id, std::to_string(p.id));
                                     break;
                                 }
-                return MergeResult{std::move(*changed), "Plugin parameters updated"};
+                return MergeResult{std::move(*changed), "Plugin parameters updated", std::nullopt};
             }
             json::Value patch = json::Value::object();
             patch["params"] = a.values;
@@ -2761,8 +2778,10 @@ void registerEngineCommands(cmd::Registry& registry) {
                         if (report) result["analysis"] = std::move(*report);
                     }
                     completeRenderJob(app, dispatcher, jobs, id, target, std::move(result),
-                                      [&app, renderId, path, a, addFile] {
+                                      [&app, renderId, path, a, addFile,
+                                       meters = std::move(r->meters)]() mutable {
                                           app.publishRender(renderId, path);
+                                          app.rememberRenderMeters(std::move(meters));
                                           if (a.addToProject) addFile();
                                       });
                 });
@@ -2780,6 +2799,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                 for (float v : ch) peak = std::max(peak, std::fabs(v));
             RenderMixResult out;
             out.render = app.rememberRender(path);
+            app.rememberRenderMeters(std::move(r->meters));
             out.path = path.string();
             if (*written) out.secondaryPath = (*written)->string();
             out.seconds = std::round(r->audio.seconds() * 1e4) / 1e4;

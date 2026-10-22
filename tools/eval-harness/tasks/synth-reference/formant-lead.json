@@ -1,69 +1,36 @@
 {
-  "changed_modules": [],
   "hidden_patch": {
-    "envelopes": {
-      "amp": {
-        "attack": "20 ms",
-        "release": "200 ms",
-        "sustain": "90 %"
-      }
-    },
-    "filters": {
-      "filter1": {
-        "type": "formant",
-        "vowel": 1.8
-      }
-    },
-    "fx": {
-      "chain": [
-        "delay"
-      ]
-    },
-    "lfos": {
-      "lfo1": {
-        "rate": "0.8 Hz"
-      }
-    },
-    "macros": {
-      "macro1": {
-        "name": "Vowel colour",
-        "value": "25 %"
-      }
-    },
-    "oscillators": {
-      "osc1": {
-        "position": "65 %",
-        "table": "formant",
-        "type": "wavetable"
-      }
+    "params": {
+      "amp.attack": "60 ms",
+      "amp.decay": "400 ms",
+      "amp.sustain": "85 %",
+      "filter1.keytrack": "30 %",
+      "filter1.type": "formant",
+      "filter1.vowel": 2.5,
+      "lfo1.delay": "350 ms",
+      "lfo1.rate": "5.5 Hz",
+      "lfo2.mode": "free",
+      "lfo2.phase": "90 deg",
+      "lfo2.rate": "0.8 Hz",
+      "osc1.level": "-2 dB",
+      "voice.glide": "40 ms",
+      "voice.mode": "legato",
+      "voice.unison": 2,
+      "voice.unison_detune": "8 ct",
+      "voice.unison_spread": "30 %"
     },
     "routes": {
-      "lfo1>osc1.position": {
-        "amount": "40 %"
+      "lfo1>voice.tune": {
+        "amount": "+25 ct"
       },
-      "macro1>filter1.vowel": {
-        "amount": 0.6
+      "lfo2>filter1.vowel": {
+        "amount": 0.5
       },
-      "step1>filter1.vowel": {
-        "amount": 0.8
+      "modwheel>filter1.vowel": {
+        "amount": 2.0
       }
     },
-    "schema": "supple.orrery-patch/1.0",
-    "steps": {
-      "step1": {
-        "sync": "1/4",
-        "values": [
-          0,
-          0.2,
-          0.6,
-          0.3
-        ]
-      }
-    },
-    "voice": {
-      "glide": "40 ms",
-      "mode": "legato"
-    }
+    "schema": "supple.marram-patch/1.0"
   },
   "id": "reference.formant-lead",
   "limits": {
@@ -72,7 +39,7 @@
   },
   "listening": "Can you hear vowel-like movement without losing the pitched lead?",
   "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C4:w",
-  "prompt": "Match the reference render with Orrery. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
+  "prompt": "Match the reference render with Marram. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
   "recipe_index": 9,
   "render": {
     "tail_s": 2
@@ -91,7 +58,7 @@
   "setup": [
     {
       "args": {
-        "plugin": "com.suppleaudio.orrery"
+        "plugin": "com.suppleaudio.marram"
       },
       "command": "plugin.load"
     }

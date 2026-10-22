@@ -45,20 +45,23 @@ their undo history and can be reviewed.
 | Writing melodies, chords, drums, bass lines, controller moves | `guides/notation.md` |
 | The sandbox loop: load a plugin, program it, render, analyze, iterate | `guides/sandbox-loop.md` |
 | EQ: rumble, masking, harshness, de-essing, dynamic and mid/side bands (Yarrow) | `guides/eq.md` |
-| Early reflections, room/hall tails, held ambience (Nave/reverb) | `guides/reverb.md` |
-| Designing a synth sound (Orrery) | `guides/sound-design.md`, then `plugin_describe` / `fx_describe` for exact fields |
+| A real room or hall: its size, materials, where the sound and the listener stand, decay, clarity, held ambience (Ghyll) | `guides/reverb.md` |
+| Designing a synth sound: oscillators, filters, envelopes, LFOs, routes, factory starting points (Marram) | `guides/sound-design.md`, then `plugin_describe` / `fx_describe` for exact fields |
 | Corrective mixing (levels, rumble, masking, loudness targets) and automation | `guides/mixing.md` |
 | Compressing (six characters, upward too), external-key ducking, catching peaks (Sundew/compressor) | `guides/comp.md` |
-| Gain staging, balance, width, polarity, bass mono (Plumb/utility) | `guides/utility.md` |
-| Cleaning spill or noise with a gate or expander (Sluice/gate) | `guides/gate.md` |
-| Saturation: drive, asymmetry, wavefolding (Kiln/drive) | `guides/drive.md` |
-| Onset punch, softer attacks, shorter or longer decays (Flint/transient) | `guides/transient.md` |
+| Limiting the master to a true-peak ceiling, loudness targets (LUFS), level-matched comparison (Treeline/limiter) | `guides/limiter.md` |
+| Gain staging, polarity, channel checks, width, balance, bass mono, lining tracks up (Hickory/utility) | `guides/utility.md` |
+| Cleaning spill or noise with a gate or expander, finding its threshold (Sorrel/gate) | `guides/gate.md` |
+| Saturation and distortion, from subtle colour to folding, crushing and tuned feedback (Teasel) | `guides/drive.md` |
+| Onset punch, softer attacks, shorter or longer decays (Gorse, the transient shaper) | `guides/transient.md` |
 | Writing a Lua script (loops, conditionals, subscriptions, one transaction) | `guides/lua.md`, `generated/engine.lua` |
 | Writing a plugin of your own: an effect or an instrument as a DSP script (`dsp_write`, then `fx_add`) | `guides/dsp-workflow.md`, `guides/dsp-language.md`, `generated/dsp-examples.md` |
 | Exact command arguments and results | `generated/sandbox-commands.md` (sandbox), `generated/engine-commands.md` (DAW), or the `describe` tool |
 | A stock plugin's parameters and patch format | its guide, and `plugin_describe` (sandbox) or `fx_describe` (DAW) for every field, unit and range |
-| Tempo-synced echoes, ping-pong, freeze and wet ducking (Echelon/delay) | `guides/delay.md` |
-| Live loudness, spectrum and stereo monitoring (Gauge/analyzer) | `guides/analyzer.md` |
+| Echoes: in time or free, ping-pong, groove, tape and analog, pitch-shifted, reversed or smeared, ducked or frozen (Bracken) | `guides/delay.md` |
+| Chorus, stereo widening, string ensemble, multi-voice doubling and vibrato, with lows kept dry (Withy) | `guides/chorus.md` |
+| Phasing: swirls, resonant sweeps, a photocell vibe's throb, envelope and tempo sweeps, an endless barber pole (Pollia) | `guides/phaser.md` |
+| Measuring loudness, peaks, tonal balance, stereo and key at any point in a chain, and reading any plugin's meters (Lichen, `fx.meters`) | `guides/analyzer.md` |
 | What the analysis numbers mean | `guides/analysis.md` |
 
 Files under `generated/` are produced from the code and always match the

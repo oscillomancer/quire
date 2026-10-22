@@ -6,7 +6,7 @@
   },
   "listening": "Is the filter snap short and audible, with convincing bass weight?",
   "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C2:q r:*",
-  "prompt": "Program Orrery as a plucky bass with a short resonant filter snap and a solid low end.",
+  "prompt": "Program Marram as a plucky bass with a short resonant filter snap and a solid low end.",
   "recipe_index": 2,
   "render": {
     "tail_s": 2
@@ -42,7 +42,7 @@
   "setup": [
     {
       "args": {
-        "plugin": "com.suppleaudio.orrery"
+        "plugin": "com.suppleaudio.marram"
       },
       "command": "plugin.load"
     }

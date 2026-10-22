@@ -465,6 +465,9 @@ Where the work stands, and where it departs from the text above:
   takes its kind and bus layouts from the script, and its host tests move
   a level in decibels when it has one (a neutral bell's frequency changes
   nothing).
+- 2026-10-19: `dsp.test` takes `sample_rate` (8 to 384 kHz), rendering at
+  that rate instead of the session's or project's, and reports the rate it
+  used; a sine at or above half of it is refused (`dsp.frequency`).
 
 ### Review clarifications (2026-10-13)
 
@@ -574,3 +577,106 @@ before return. CI runs the editor examples and PNG/pointer regressions on every
 platform and requires drawing to succeed; Windows gets only Mesa's WGL DLLs,
 not its Direct3D replacements. The picture/spec contracts are in
 `specs/editor-picture-extension.md` and `specs/sandbox.md`.
+
+### What earns a built-in; Oversampler phase; dsp.test meters (2026-10-20)
+
+A new built-in is added for what a script cannot do in the language: reach
+the host, the editor, files or the framework's own machinery, or do work the
+loop budget forbids. One that only saves a script some code, however
+convenient, is not added. The built-ins already here stay as they are. An
+analyser (`Spectrum`) and a Linkwitz-Riley `Crossover` were written under
+this amendment and withdrawn by that rule: the stock scripts Yarrow, Teasel
+and Hickory already do both in script.
+
+`Oversampler` reaches the framework's oversampler more fully.
+`prepare(factor)` takes 1, which passes samples through: before, a used
+instance could not go back to 1x, so a restart from 4x to 1x went on at 4x
+unless the script passed it by. `prepare(factor, Oversampler::Phase::Linear)`
+gives the framework's linear-phase half-bands (65 to 75 samples of latency,
+against 3 to 5 for the minimum-phase default), which scripts could not
+reach. Teasel offers both as its `phase` parameter.
+
+`dsp.test` reports a semantic plugin's read-only parameters per signal
+(`meters`, by patch key, in physical units) as they stood at the musical
+end; the renderer records each stage's reported outputs until then. Before,
+a script's readouts could be read only through a sandbox batch, after the
+tail had moved them.
+
+### A tail that follows the plugin (2026-10-20)
+
+`setTail(samples)` (`-1` forever), from `prepare()`, `update()` or
+`process()`, reports how long the output goes on after the input stops when
+that follows the settings or the song: a delay's tail is its time, synced to
+the tempo, times the repeats its feedback lets through. Before, a script had
+only Info's fixed `.tail`, so a delay could say "forever" (renders then end
+by silence detection or the cap) or a guess. The framework (1.25.2) now
+reads a processor's tail after every block as well as after updates, so a
+change made in `process()` reaches the host; a replacement's code starts
+from Info's tail, and the old code's fading blocks do not set it.
+
+### Parameters that apply only sometimes (2026-10-21)
+
+A parameter declares when it applies: `.activeWhen(on)` while a toggle is
+on, `.activeWhen(mode, {"Bell", "Notch"})` while a choice is one of those
+options, `.activeUnless(...)` the other way about, `.activeAbove(voices, 1)`
+or `.activeBelow(...)` while a number lies past a value. Conditions name a
+parameter declared above (so they cannot loop), all must hold, and the
+parameter each names must apply too. They are metadata the host reads, not
+something a script could do for itself, so they pass the built-ins rule
+above: the semantic layer marks such a parameter `"active": false` in its
+schema while its conditions fail, with an `active_when` that says what would
+make it apply, leaves it out of `describe`, and an editor, the automatic one
+too (framework 1.28.0's `Definition::applies()`), dims its controls (`semantic-params-extension.md`, amendment of this date). The audio
+code still reads every value. Before, the flat stock plugins reported every
+parameter as live: an agent setting a cut band's gain was told nothing, and
+the optimizer's `"auto"` could search dimensions that change nothing.
+
+### Modulation sources and routes (2026-10-21)
+
+A script declares its modulators' outputs as `Source` members
+(`voiceSource("LFO 1")` for a value per voice, `source("Macro 1")` for one
+the plugin shares, `.unipolar()` for 0..1) and sets their values; the
+patch's `routes` member (`"lfo1>filter1.cutoff": {"amount": "+1.5 oct",
+"via": "modwheel"}`) says where they go. Routes move a parameter marked
+`.modulated()` (global sources) or an instrument's `.polyModulated()` (any
+source), as far as its range or its `.routeRange()`. The script reads a
+moved value where it uses it, `p.routed(i)` or `p.forVoice(v)`, computed
+then from the sources' current values: there is no modulation rate of the
+framework's, so renders stay block-size invariant as long as the script's
+own ticks are. Instruments have ten sources of their own: velocity, key,
+random, pressure and slide per voice; modwheel, breath, expression,
+aftertouch and pitch bend for all.
+
+This is what scripts could not do for themselves, so it passes the
+built-ins rule: a script can compute an LFO but not give a patch a member
+of its own, have its amounts validated in the destination's unit (octaves
+for a frequency, dB for a level) with errors that name the unit, carry them
+in state and presets, or read controllers (CC 1, 2, 11, channel pressure)
+at all. A script-made matrix of parameters (`mod3.source`,
+`mod3.destination`, `mod3.amount`) was the alternative; its amounts could
+only be percentages of whatever range the chosen destination had, and
+agents edit routes keyed by what they do far more reliably than numbered
+rows. The routes are kept in a text property of their own (one route a
+line, sorted), which the framework already saves, presets carry and the
+audio thread receives without a lock; the glue reads it into a fixed
+table there without allocating. The semantic layer shows it as the patch's
+`routes` member, never among its properties (`semantic-params-extension.md`,
+amendment of this date).
+
+`setVoiceLimit(n)` lets an instrument play fewer voices than its pool, a
+Voices parameter; the framework's voice manager already allowed it, and
+CLAP's voice-info now reports the voices a script's mode and limit allow.
+
+### The route list (2026-10-21)
+
+Routes are edited in the editor as a list, a row a route: the automatic
+editor shows it for a script with routes, and `e.routes(x, y, w, h)` places
+it in a script's own. The routes' text property is hidden from the automatic
+editor (framework 1.29.0), since a raw text field skipped every check a
+patch's routes member makes. A list drawn by the script itself was the
+alternative, but a script can neither read the routes nor write them, and
+giving it both would have meant re-validating whatever it wrote; the list
+writes through the patch codec, so it makes only what a patch can. The
+automatic editor takes it through a generic hook of the template's,
+`AutoPanel` (framework 1.30.0), a panel a layer draws after the parameters;
+a plugin with no routes has no panel, so having routes is the switch.

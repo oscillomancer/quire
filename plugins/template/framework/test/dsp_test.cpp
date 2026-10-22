@@ -100,8 +100,9 @@ void runPrepared(F&& run) SUPPLE_REALTIME {
 TEST(prepared_primitives_run_inside_a_realtime_context) {
     Fft fft(64);
     std::complex<double> bins[64] = {};
-    Stft stft;
+    Stft stft, looking;
     stft.prepare(1, 64);
+    looking.prepare(1, 64, 4, Stft::Mode::Analyse);
     Convolution convolution;
     const double impulse[65] = {1.0};
     const double* ir[] = {impulse};
@@ -142,6 +143,7 @@ TEST(prepared_primitives_run_inside_a_realtime_context) {
                 over.down(0, audio, 64);
                 convolution.process(0, audio, 64);
                 stft.process(0, audio, 64, [](std::complex<double>*, int) {});
+                looking.process(0, audio, 64, [](std::complex<double>*, int) {});
                 bins[0] = audio[0];
                 fft.forward(bins);
                 fft.inverse(bins);
@@ -150,6 +152,7 @@ TEST(prepared_primitives_run_inside_a_realtime_context) {
             over.reset();
             convolution.reset();
             stft.reset();
+            looking.reset();
             delay.clear();
             allpass.clear();
             loudness.reset();
@@ -497,6 +500,35 @@ TEST(stft_a_sample_at_a_time_is_the_callback_form) {
         v = b.pull(0);
     }
     CHECK(x == y);
+}
+
+TEST(stft_analysing_sees_the_same_frames_and_leaves_the_audio) {
+    for (int overlap : {4, 8}) {
+        Stft full, look;
+        full.prepare(1, 256, overlap);
+        look.prepare(1, 256, overlap, Stft::Mode::Analyse);
+        CHECK(look.mode() == Stft::Mode::Analyse);
+        const std::vector<double> x = noise(3000);
+        int frames = 0;
+        bool same = true;
+        for (double v : x) {
+            const bool ready = full.push(0, v);
+            // push() alone: an analyser needs no pull().
+            CHECK(look.push(0, v) == ready);
+            if (ready) {
+                ++frames;
+                for (int k = 0; k < full.bins(); ++k) same = same && full.spectrum(0)[k] == look.spectrum(0)[k];
+            }
+            full.pull(0);
+        }
+        CHECK(frames == static_cast<int>(x.size()) / look.hop());
+        CHECK_MSG(same, "overlap %d", overlap);
+        std::vector<double> y = x;
+        look.reset();
+        look.process(0, y.data(), static_cast<int>(y.size()), [](std::complex<double>*, int) {});
+        CHECK(y == x);
+        CHECK(look.pull(0) == 0.0);
+    }
 }
 
 // --- sources ------------------------------------------------------------------------
@@ -885,13 +917,14 @@ TEST(glide_a_block_at_a_time_follows_the_ticks) {
         v->note(on(60), log);
         v->note(on(72), log);
     }
-    for (int block = 0; block < 6; ++block) {
-        for (int i = 0; i < 100; ++i) {
-            CHECK_NEAR(blocked.pitchAt(1, i), ticked.pitch(1), 1e-9);
+    // To the bit, in uneven blocks: a host's block size must not change a note.
+    for (int frames : {1, 7, 64, 13, 100, 2, 200, 300}) {
+        for (int i = 0; i < frames; ++i) {
+            CHECK(blocked.pitchAt(1, i) == ticked.pitch(1));
             ticked.tick();
         }
-        CHECK_NEAR(blocked.pitchAt(1, 100), ticked.pitch(1), 1e-9);
-        blocked.advance(100);
+        CHECK(blocked.pitchAt(1, frames) == ticked.pitch(1));
+        blocked.advance(frames);
     }
     CHECK(blocked.pitch(1) == 72.0 && blocked.pitchAt(1, 50) == 72.0);
 }

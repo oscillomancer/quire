@@ -47,7 +47,6 @@ const clap_plugin_supple_semantic_params_t kExtension = {
         const SemanticLayer* l = layerOf(p);
         return l && l->describe(detail, out);
     },
-    nullptr,  // no live telemetry
     [](const clap_plugin_t* p, const clap_ostream_t* out) {
         const SemanticLayer* l = layerOf(p);
         return l && l->getFactoryPatches(out);
@@ -159,7 +158,9 @@ void SemanticLayer::redefined() {
 }
 
 bool SemanticLayer::getSchema(const clap_ostream_t* out) const {
-    return codec_ && writeAll(out, json::writeCompact(codec_->schemaDocument()));
+    if (!codec_) return false;
+    const state::Snapshot current = instance_.snapshot();
+    return writeAll(out, json::writeCompact(codec_->schemaDocument(&current)));
 }
 
 bool SemanticLayer::getPatch(uint32_t detail, const clap_ostream_t* out) const {
@@ -199,11 +200,14 @@ bool SemanticLayer::setPatch(uint32_t mode, const char* text, uint32_t size,
         return fail();
     if (mode == CLAP_SUPPLE_SET_VALIDATE_ONLY) return true;
     envelope_ = std::move(envelope);
+    // The schema says which parameters apply: a patch can change that.
+    const bool schema = codec_->activity(instance_.snapshot()) != codec_->activity(snapshot);
     // Everything the patch holds, its session properties included; the
     // preset it came from and the editor's size stay as they were.
     instance_.applyValues(snapshot);
     instance_.markDirty();
-    changed(CLAP_SUPPLE_CHANGED_PATCH);
+    changed(CLAP_SUPPLE_CHANGED_PATCH |
+            (schema ? static_cast<uint32_t>(CLAP_SUPPLE_CHANGED_SCHEMA) : 0u));
     return true;
 }
 

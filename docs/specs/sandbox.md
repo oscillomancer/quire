@@ -386,12 +386,12 @@ within −120 dBFS for the stock test synth).
 | `plugin.list` | query | `filter?` (text), `rescan?` | `plugins: [{id, name, instrument, semantic, features}]` |
 | `plugin.load` | edit | `plugin` (id or path), `position?` (chain index, default: instrument first else end) | `instance`, `name`, `semantic`, `chain` |
 | `plugin.remove` | edit | `instance` | `chain` |
-| `plugin.describe` | query | `instance`, `detail` (`summary`/`full`) | `params` (key/unit/range/current, summary: grouped compact list; `active: false` while the parameter's module is not in the patch), `patch_type`, `patch_schema` (full only), `description` (prose), `docs`, `status_available`, `problems` when available (one `host`-scoped entry when the query fails) |
+| `plugin.describe` | query | `instance`, `detail` (`summary`/`full`) | `params` (key/unit/range/current, summary: grouped compact list of the parameters that apply; full: each schema entry, with `active: false` while the parameter does not apply — its module is not in the patch, or its `active_when` conditions do not hold), `inactive` (keys of those that do not apply, when any), `patch_type`, `patch_schema` (full only), `description` (prose, of what applies), `docs`, `status_available`, `problems` when available (one `host`-scoped entry when the query fails) |
 | `param.get` | query | `instance`, `keys?` | `values: {key: {value, text}}` |
-| `param.set` | edit | `instance`, `values: {key: number \| "unit string" \| enum key \| bool}` (third-party: CLAP id or name, `{"text": "…"}` allowed) | `values` as applied with text |
+| `param.set` | edit | `instance`, `values: {key: number \| "unit string" \| enum key \| bool}` (third-party: CLAP id or name, `{"text": "…"}` allowed) | `values` as applied with text; `active: false` on a value that does not apply with the new values |
 | `patch.get` | query | `instance`, `detail` (`changed`/`full`) | `patch` |
 | `patch.set` | edit | `instance`, `patch` (complete) | `description` |
-| `patch.merge` | edit | `instance`, `patch` (RFC 7396 merge patch) | `changed` (the effective diff), `description` |
+| `patch.merge` | edit | `instance`, `patch` (RFC 7396 merge patch) | `changed` (the effective diff), `description`, `inactive` (keys its `params` set that do not apply with the new values, when any) |
 | `preset.save` | action | `instance`, `name`, `tags?`, `notes?` | `path` |
 | `preset.load` | edit | `instance`, `name`, `source?` (`user` default / `factory`) | `description` |
 | `preset.list` | query | `plugin?`, `source?` (`user` default / `factory`) | `presets: [{plugin, name, tags, read_only?}]` |
@@ -406,7 +406,7 @@ within −120 dBFS for the stock test synth).
 | `dsp.write`, `dsp.check`, `dsp.get`, `dsp.list` | action, queries | as in the engine (ADR-0032): the session's script library, `SessionOptions::scriptDir` (`<workdir>/scripts`; the CLI without `--workdir` uses the app's, `<data>/<slug>/scripts`) | diagnostics with hints, the plugin's id, parameters and files (keys for a patch's `properties`) |
 | `dsp.export` | action | `script` (name); `format?` (`clap`, the default, or `source`); `folder?` (absolute; default `<library>/<script>/export`, for source `export/<script>-source`, which must be new or empty); `license?` (source: `MIT`, the default, or `GPL-3.0-or-later`) | `path`, `id`, `name`, `format`. clap: `path` is `<folder>/<plugin name>.clap`, the platform player copied with the script embedded (a Linux/Windows file trailer or macOS bundle resource; it offers that one plugin), `player` (the module copied), `bytes`, `notices` (the player's licenses, written beside it). source: `path` is a project of the plugin template (the framework, the suite without its compiler, the script under `product/script/`, the product's files) that builds the same plugin |
 | `dsp.preview` | action | `plugin` (id) or `script` (name); `patch?` (merge); `signal?` (an effect's `sine`, the default, `sweep`, `impulse`, `noise`, `silence`; an instrument's `notes`, the default, `note`, `silence`); `level_db` (-12); `frequency_hz` (1000); `seconds` (1; 0 plays nothing); `scale` (1, 0.5 to 3); `pointer?` (up to 64 steps before the picture, in its pixels at scale 1: `{action, x, y}` with `action` `move`, `press`, `release`, `click`, `double_click`, `drag` (with `to_x`, `to_y`) or `wheel` (`steps`, 1; up positive), and `shift`, `ctrl`, `alt`) | `path` (a PNG of the editor, drawn without a window after the signal played through a fresh instance and the pointer acted, in the renders folder), `width` and `height` in pixels, `plugin`, `edits` (a merge patch: what the pointer changed), `problems` (the editor code's loop budget or out-of-range index, with the line), `log`. Needs the plugin's `com.suppleaudio.editor-picture/1` (`docs/specs/editor-picture-extension.md`), which the script player has |
-| `dsp.test` | action | `plugin` (id) or `script` (name); `patch?` (merge); `signals?` (an effect's `sine`, `sweep`, `impulse`, `noise`, `silence`, all by default; an instrument's `notes`, `note`, `silence`, all by default); `level_db` (each audio signal's peak, -12); `frequency_hz` (1000); `seconds` (1); `save`; `automation?`, `sidechain?`, `notes?` (below) | per signal: `peak_dbfs`, `rms_dbfs`, `dc`, `clipped`, `denormals`, sine `gain_db` and `thd_percent`, impulse `response_db` at octave centres, note `pitch_hz`, an instrument's `release_ms`, `path` when saved, optional `automation` and `sidechain` measurements (below); `latency`, `cpu_percent` (measured), `problems` (prose), `log` |
+| `dsp.test` | action | `plugin` (id) or `script` (name); `patch?` (merge); `signals?` (an effect's `sine`, `sweep`, `impulse`, `noise`, `silence`, all by default; an instrument's `notes`, `note`, `silence`, all by default); `level_db` (each audio signal's peak, -12); `frequency_hz` (1000); `seconds` (1); `sample_rate?` (Hz, 8000 to 384000; the session's by default); `save`; `automation?`, `sidechain?`, `notes?` (below) | per signal: `peak_dbfs`, `rms_dbfs`, `dc`, `clipped`, `denormals`, sine `gain_db` and `thd_percent`, impulse `response_db` at octave centres, note `pitch_hz`, an instrument's `release_ms`, `path` when saved, optional `automation` and `sidechain` measurements (below), a semantic plugin's `meters` (below); `sample_rate` (the rate rendered at), `latency` (samples at that rate), `cpu_percent` (measured), `problems` (prose), `log` |
 
 Source exports carry the MIT core-base floating-point parser and the pinned
 fast_float headers/license used by the suite's semantic layer. They build
@@ -490,6 +490,12 @@ Per-signal additions:
   intended timbre/level changes can increase it; small values do not prove
   inaudibility. Existing clipping/DC/nonfinite/loop/tail diagnostics also
   run on reference outputs, labeled by pass.
+- `meters: {key: value}`: a semantic plugin's read-only parameters (its
+  meters and readouts) by patch key, in physical units (floats to four
+  decimals), each as the plugin last reported it in a block that started
+  before the musical end: the tail after the signal leaves them as they
+  were. A meter never reported keeps its value from before the render.
+  Omitted for plugins without the semantic-params extension.
 - `sidechain: {rms_dbfs, reference_rms_dbfs, gain_change_db}`: compare
   output RMS in the middle half of the active key span against the same
   samples with a connected silent key, keeping automation and notes.
@@ -559,22 +565,30 @@ before writing plug-in state.
 
 ## 6. Test instrument
 
-`plugins/probe-synth` — an internal test instrument instantiated from the
-template per ADR-0011 (not a stock product): one oscillator (saw/square/
-sine/noise), a 12/24 dB low-pass SVF with resonance and envelope amount, an
-ADSR amp envelope, a filter envelope, 8-voice polyphony, output gain; ~15
-semantic parameters; flat patch type `supple.probe-synth-patch/1.0`;
-semantic-params extension; deterministic and block-size invariant. It
-exists to exercise the template instantiation, the extension, the sandbox and
-the MCP loop before the flagship synth.
+Tests take the smallest instrument that proves their point:
+
+- the fixture plugins in `host/clap-host/tests/fixture_plugins.cpp`
+  (`com.suppleaudio.test.sine` and others), each made for the behaviour a
+  host test needs;
+- the script player's test instruments (Pluck) and the example scripts
+  (`plugins/suite/examples`) for DSP scripts;
+- the stock synth, Marram (`plugins/clap/Marram.clap` in the build), where a
+  real synth is needed: the MCP demo, the optimizer tests and the evaluation
+  tasks. (Orrery's headless build served until Orrery was removed,
+  2026-10-21.)
+
+(Until 2026-10-20 an internal template-derived instrument,
+`plugins/probe-synth`, also existed to exercise the template, the extension
+and the MCP loop before Orrery; nothing loaded it by then and it was
+removed.)
 
 ## 7. Acceptance
 
 A scripted end-to-end test drives the sandbox over MCP stdio: list plugins
-→ load the probe synth → describe → set params with unit strings → merge a
+→ load the stock synth → describe → set params with unit strings → merge a
 patch → render a notation phrase with summary analysis → change the patch →
-render again → compare → save preset. Its transcript is committed as `docs/demos/mcp-orrery-session.md`
-(the `mcp.demo` test, with Orrery). A second test runs the same flow with an
+render again → compare → optimize. Its transcript is committed as
+`docs/demos/mcp-synth-session.md` (the `mcp.demo` test). A second test runs the same flow with an
 invalid patch and an invalid notation string and asserts the errors carry
 paths, locations and hints.
 

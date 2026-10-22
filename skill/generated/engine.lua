@@ -181,10 +181,12 @@ q = nil
 ---@field level_db? number|string Quantity strings are range-checked by the server. (default: -12.0)
 ---@field frequency_hz? number|string Quantity strings are range-checked by the server. (default: 1000.0)
 ---@field seconds? number (default: 1.0)
+---@field sample_rate? number|string default: the session's or project's rate Quantity strings are range-checked by the server.
 ---@field save? boolean (default: false)
 
 ---@class Quire.dsp_test_result
 ---@field plugin string
+---@field sample_rate number|string the rate rendered at Quantity strings are range-checked by the server.
 ---@field latency integer samples
 ---@field signals table[]
 ---@field cpu_percent number of real time, measured
@@ -410,6 +412,14 @@ q = nil
 ---@field param string
 ---@field control string
 
+---@class Quire.fx_meters_args
+---@field fx string
+---@field from? "live"|"render" live: the playing instance; render: the last render.mix (default: "live")
+
+---@class Quire.fx_meters_result
+---@field source string live, render, or none (nothing to read yet)
+---@field meters any Read-only values by patch key (physical) or name
+
 ---@class Quire.fx_move_args
 ---@field fx string
 ---@field track? string
@@ -429,6 +439,7 @@ q = nil
 ---@class Quire.fx_param_set_result
 ---@field changed any
 ---@field description string
+---@field inactive? string[] Params set that do not apply with the new values: kept, and heard once what fx.describe full's active_when names allows it
 
 ---@class Quire.fx_patch_get_args
 ---@field fx string
@@ -450,6 +461,7 @@ q = nil
 ---@class Quire.fx_patch_merge_result
 ---@field changed any
 ---@field description string
+---@field inactive? string[] Params set that do not apply with the new values: kept, and heard once what fx.describe full's active_when names allows it
 
 ---@class Quire.fx_patch_set_args
 ---@field fx string
@@ -458,6 +470,36 @@ q = nil
 
 ---@class Quire.fx_patch_set_result
 ---@field patch any
+
+---@class Quire.fx_preset_delete_args
+---@field fx string
+---@field name string
+
+---@class Quire.fx_preset_delete_result
+---@field path string
+
+---@class Quire.fx_preset_list_args
+---@field fx string
+
+---@class Quire.fx_preset_list_result
+---@field presets table[]
+
+---@class Quire.fx_preset_load_args
+---@field fx string
+---@field name string
+---@field source? string
+
+---@class Quire.fx_preset_load_result
+---@field name string
+---@field source string
+
+---@class Quire.fx_preset_save_args
+---@field fx string
+---@field name string
+---@field replace? boolean (default: false)
+
+---@class Quire.fx_preset_save_result
+---@field path string
 
 ---@class Quire.fx_remove_args
 ---@field fx string Plugin instance id, e.g. "fx_1".
@@ -1250,6 +1292,7 @@ q = nil
 ---@field add fun(args: Quire.fx_add_args): Quire.fx_add_result Insert a plugin into a track's (or a take's) FX chain and return its id.
 ---@field copy fun(args: Quire.fx_copy_args): Quire.fx_copy_result Copy a plugin and its current settings into a track's FX chain.
 ---@field describe fun(args: Quire.fx_describe_args): Quire.fx_describe_result Describe an instance and its live problems; full adds parameters and patch.
+---@field meters fun(args: Quire.fx_meters_args): Quire.fx_meters_result Read a plugin's meters and readouts, playing now or as a render ended.
 ---@field move fun(args: Quire.fx_move_args): table Move a plugin within a track chain or to another track.
 ---@field remove fun(args: Quire.fx_remove_args): table Remove a plugin instance (and its envelopes).
 ---@field restart fun(args: Quire.fx_restart_args): table Re-create a plugin instance from its saved patch/state (after a crash).
@@ -1275,6 +1318,12 @@ q = nil
 ---@field list fun(args: Quire.fx_patch_list_args): Quire.fx_patch_list_result List an instance's read-only factory patches, by name.
 ---@field merge fun(args: Quire.fx_patch_merge_args): Quire.fx_patch_merge_result Merge a partial patch into a plugin instance; returns the effective change.
 ---@field set fun(args: Quire.fx_patch_set_args): Quire.fx_patch_set_result Replace a semantic patch, or apply a factory patch by name.
+
+---@class Quire.fx.preset
+---@field delete fun(args: Quire.fx_preset_delete_args): Quire.fx_preset_delete_result Delete one of the user's presets for a plugin; factory presets stay.
+---@field list fun(args: Quire.fx_preset_list_args): Quire.fx_preset_list_result List a plugin's presets: its factory ones, then the user's.
+---@field load fun(args: Quire.fx_preset_load_args): Quire.fx_preset_load_result Apply a factory or user preset to a plugin instance in one undo step.
+---@field save fun(args: Quire.fx_preset_save_args): Quire.fx_preset_save_result Save a plugin instance's current settings as a named user preset.
 
 ---@class Quire.history
 ---@field list fun(): Quire.history_list_result List the current branch's recent versions (newest first).

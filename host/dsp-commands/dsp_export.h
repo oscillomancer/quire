@@ -221,6 +221,8 @@ inline Status writeSource(const fs::path& kit, const fs::path& dest, const std::
     std::string fileKeys;
     for (const scriptc::FileModel& f : program.files())
         fileKeys += "                {&Script::" + f.member + ", \"" + f.key + "\"},\n";
+    for (const scriptc::SourceModel& s : program.sources())
+        fileKeys += "                {&Script::" + s.member + ", \"" + s.key + "\"},\n";
     if (!fileKeys.empty()) fileKeys.pop_back();
     std::string code;
     for (const char c : name)
@@ -232,6 +234,8 @@ inline Status writeSource(const fs::path& kit, const fs::path& dest, const std::
     const auto today = std::chrono::year_month_day(
         std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now()));
     const std::string year = std::to_string(static_cast<int>(today.year()));
+    std::string features;  // a CMake list
+    for (const auto& f : info.features) features += (features.empty() ? "" : ";") + f;
     const bool gpl = license == License::Gpl3;
     const std::string holder = cmakeText(vendor);
     const std::map<std::string, std::string> values = {
@@ -250,6 +254,7 @@ inline Status writeSource(const fs::path& kit, const fs::path& dest, const std::
                  : noteEffect ? "note-effect"
                               : "effect"},
         {"CHANNELS", channels},
+        {"FEATURES", features},
         {"MANUFACTURER", manufacturerCode(vendor)},
         {"TAG", script::detail::stateTag(info.id)},
         {"SMOKE_PARAM", smoke},

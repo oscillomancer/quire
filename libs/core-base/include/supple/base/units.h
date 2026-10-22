@@ -20,6 +20,7 @@ enum class Unit {
     bpm,
     beats,
     samples,
+    m,
     none
 };
 std::string_view unitName(Unit unit);

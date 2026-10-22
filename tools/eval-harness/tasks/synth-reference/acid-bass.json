@@ -1,51 +1,28 @@
 {
   "changed_modules": [
-    "envelopes.amp",
-    "envelopes.env2",
-    "oscillators.osc1"
+    "amp",
+    "env2",
+    "osc1"
   ],
   "hidden_patch": {
-    "drive": {
-      "amount": "6 dB",
-      "type": "soft"
+    "params": {
+      "amp.decay": "300 ms",
+      "amp.release": "500 ms",
+      "amp.sustain": "70 %",
+      "drive.amount": "9 dB",
+      "drive.type": "soft",
+      "env2.decay": "650 ms",
+      "env2.sustain": "0 %",
+      "filter1.cutoff": "320 Hz",
+      "filter1.env": "+3 oct",
+      "filter1.resonance": "80 %",
+      "filter1.velocity": "+1 oct",
+      "osc1.level": "-15 dB",
+      "osc1.retrigger": true,
+      "voice.glide": "70 ms",
+      "voice.mode": "legato"
     },
-    "envelopes": {
-      "amp": {
-        "attack": "1 ms",
-        "release": "500 ms",
-        "sustain": "80 %"
-      },
-      "env2": {
-        "attack": "0 ms",
-        "decay": "650 ms",
-        "sustain": 0
-      }
-    },
-    "filters": {
-      "filter1": {
-        "cutoff": "400 Hz",
-        "resonance": "80 %",
-        "slope": "24 dB",
-        "type": "ladder"
-      }
-    },
-    "oscillators": {
-      "osc1": {
-        "level": "-15 dB",
-        "type": "va",
-        "wave": "saw"
-      }
-    },
-    "routes": {
-      "env2>filter1.cutoff": {
-        "amount": "+3 oct"
-      }
-    },
-    "schema": "supple.orrery-patch/1.0",
-    "voice": {
-      "glide": "60 ms",
-      "mode": "legato"
-    }
+    "schema": "supple.marram-patch/1.0"
   },
   "id": "reference.acid-bass",
   "limits": {
@@ -54,7 +31,7 @@
   },
   "listening": "Is the resonant snap recognizably acid-like and controlled?",
   "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C2:q r:*",
-  "prompt": "Match the reference render with Orrery. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
+  "prompt": "Match the reference render with Marram. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
   "recipe_index": 3,
   "render": {
     "tail_s": 2
@@ -73,52 +50,30 @@
   "setup": [
     {
       "args": {
-        "plugin": "com.suppleaudio.orrery"
+        "plugin": "com.suppleaudio.marram"
       },
       "command": "plugin.load"
     }
   ],
   "starting_patch": {
-    "drive": {
-      "amount": "6 dB",
-      "type": "soft"
+    "params": {
+      "amp.decay": "300 ms",
+      "amp.release": "60 ms",
+      "amp.sustain": "70 %",
+      "drive.amount": "9 dB",
+      "drive.type": "soft",
+      "env2.decay": "220 ms",
+      "env2.sustain": "0 %",
+      "filter1.cutoff": "320 Hz",
+      "filter1.env": "+3 oct",
+      "filter1.resonance": "80 %",
+      "filter1.velocity": "+1 oct",
+      "osc1.level": "0 dB",
+      "osc1.retrigger": true,
+      "voice.glide": "70 ms",
+      "voice.mode": "legato"
     },
-    "envelopes": {
-      "amp": {
-        "attack": "1 ms",
-        "release": "60 ms",
-        "sustain": "80 %"
-      },
-      "env2": {
-        "attack": "0 ms",
-        "decay": "200 ms",
-        "sustain": 0
-      }
-    },
-    "filters": {
-      "filter1": {
-        "cutoff": "400 Hz",
-        "resonance": "80 %",
-        "slope": "24 dB",
-        "type": "ladder"
-      }
-    },
-    "oscillators": {
-      "osc1": {
-        "type": "va",
-        "wave": "saw"
-      }
-    },
-    "routes": {
-      "env2>filter1.cutoff": {
-        "amount": "+3 oct"
-      }
-    },
-    "schema": "supple.orrery-patch/1.0",
-    "voice": {
-      "glide": "60 ms",
-      "mode": "legato"
-    }
+    "schema": "supple.marram-patch/1.0"
   },
   "suite": "synth-reference",
   "tier": 2

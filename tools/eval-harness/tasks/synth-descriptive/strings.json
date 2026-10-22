@@ -6,7 +6,7 @@
   },
   "listening": "Does it feel like a cohesive sustained ensemble with a natural swell?",
   "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: [C3 E3 G3]:w",
-  "prompt": "Program Orrery as a wide string ensemble with a gradual bow-like attack, gentle vibrato, chorus and reverb.",
+  "prompt": "Program Marram as a wide string ensemble with a gradual bow-like attack and gentle vibrato.",
   "recipe_index": 10,
   "render": {
     "tail_s": 2
@@ -42,7 +42,7 @@
   "setup": [
     {
       "args": {
-        "plugin": "com.suppleaudio.orrery"
+        "plugin": "com.suppleaudio.marram"
       },
       "command": "plugin.load"
     }

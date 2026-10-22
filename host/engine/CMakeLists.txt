@@ -126,11 +126,11 @@ if(SUPPLE_BUILD_TESTS)
     COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_proxy.py
             $<TARGET_FILE:${PRODUCT_SLUG}-engine> $<TARGET_FILE:${PRODUCT_SLUG}-mcp> --engine)
   # Phase 4 acceptance: an arrangement built and rendered over MCP with the
-  # real Orrery (dev and GCC debug presets only: a full synth render).
-  if(TARGET orrery-headless AND CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT SUPPLE_SANITIZE)
+  # stock synth (dev and GCC debug presets only: a full synth render).
+  if(SUPPLE_BUILD_PLUGINS AND CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT SUPPLE_SANITIZE)
     add_test(NAME engine.mcp-arrangement
       COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_arrangement.py
-              $<TARGET_FILE:${PRODUCT_SLUG}-engine> $<TARGET_FILE:orrery-headless>)
+              $<TARGET_FILE:${PRODUCT_SLUG}-engine> ${CMAKE_BINARY_DIR}/plugins/clap/Marram.clap)
     set_tests_properties(engine.mcp-arrangement PROPERTIES LABELS "engine;slow")
   endif()
 endif()

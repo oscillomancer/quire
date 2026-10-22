@@ -6,7 +6,11 @@ development; until they ship, this guide covers what the engine does today —
 levels, panning, muting/soloing, rendering, and measuring loudness and
 masking.
 
-For live monitoring at a point in an FX chain, see [the analyzer guide](analyzer.md).
+To measure a point in an FX chain (loudness, peaks, tonal balance, stereo,
+key), put Lichen there and read it with `fx.meters`; see [the analyzer
+guide](analyzer.md). `fx.meters` reads any plugin's readouts the same way
+(a reverb's RT60, a gate's suggested threshold): `from: "render"` after a
+`render.mix`, live while playing.
 
 ## The loop
 
@@ -96,14 +100,17 @@ pitch), or a CLAP id/name for other plugins. `env.points.set` replaces
 points (or a beat range of them); `env.set {active: false}` bypasses an
 envelope; render and `compare` to hear what it did.
 
-Use [Plumb, the utility](utility.md) for gain staging, channel checks and bass mono. Render and compare after width or polarity changes.
+Use [Hickory, the stereo utility](utility.md) for gain staging, channel checks, bass mono and lining up multi-miked tracks; its `correlation` and `side_level` readouts say what the stereo image is doing. Render and compare after width or polarity changes.
 For track and bus compression, external-key ducking, upward compression and peak catching, see [Sundew, the compressor](comp.md).
+For a true-peak ceiling on the master and loudness against a LUFS target, see [Treeline, the limiter](limiter.md).
 Use [Yarrow, the stock EQ](eq.md) for measured rumble, masking and harshness cuts, de-essing and dynamic or mid/side bands.
-Use [the gate / expander guide](gate.md) to reduce between-hit spill or steady room noise with a filtered key, hysteresis and hold.
-Use [Kiln, the saturation](drive.md) for drive, asymmetry and wavefolding with reference level compensation.
-For onset punch, softened attacks and shorter or longer decays, see [Flint, the transient shaper](transient.md).
-For tempo-synced echoes, alternating stereo repeats and ducked throws, see [Echelon, the delay](delay.md).
-Use [Nave, the stock reverb](reverb.md) for room/hall ambience, predelay and frequency-dependent tails; use 100% wet on a send return.
+Use [Sorrel, the gate](gate.md) to reduce between-hit spill or noise between phrases; its `suggested_threshold`, `noise_floor` and `openings` readouts say where to set it and whether it chatters.
+Use [Teasel, the saturation](drive.md) for colour and distortion; set it by its `thd` and `even` readouts, and drive only a band, the mid or the side when the rest should stay clean.
+For onset punch, softened attacks and shorter or longer decays, see [Gorse, the transient shaper](transient.md).
+For echoes, in time or free, ping-pong and ducked throws, see [Bracken, the delay](delay.md); its `echo_time` and `decay` readouts say when the echoes come and how long they last.
+Use [Ghyll, the reverb](reverb.md) for a room or hall built from its size, materials and the places of the source and listener; its `rt60` and `clarity` readouts say how long and how clear it is. Use 100% mix on a send return.
+For chorus, doubling, width or vibrato, see [Withy, the chorus](chorus.md); its `detune` and `mono_loss` readouts say how far the voices swing and what folding to mono costs.
+For phasing, a swirl, a resonant or tempo-locked sweep, a photocell throb or an endless barber pole, see [Pollia, the phaser](phaser.md); its `centre_now` readout says where the stages sit, and `keep_below` keeps a bass's or a mix's lows whole.
 
 ## Strip types and Console 9 gain staging
 

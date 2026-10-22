@@ -1526,7 +1526,7 @@ Result:
 
 Play test signals or notes through a plugin and measure it: levels, THD, pitch.
 
-Give plugin (an id: a script's, or any effect's or instrument's) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays each signal. An effect: sine (frequency_hz; gain_db and thd_percent), sweep (20 Hz to 20 kHz), impulse (response_db at octave centres), pink noise and silence, each peaking at level_db. An instrument, at velocity 0.8: notes (a note, then a chord), note (A4; pitch_hz, the pitch heard), and silence (no notes); release_ms is how long the sound lasts after the last release. Each reports peak and RMS in dBFS, DC, samples beyond 0 dBFS and denormals; problems says in words what looks wrong (clipping, DC, sound from silence, no output, a note out of tune, sound that never dies away, non-finite samples the framework silenced, a script stopped by its loop budget or indexing outside an array). cpu_percent is measured, so it varies between runs. save: true keeps each output as a WAV (path) for analyze and compare. automation is a list of {param, at_s, value}: semantic patch keys and physical values, as discrete sample-accurate changes applied to every signal (no implicit ramps). automation.max_step is the largest adjacent-sample change in full-scale amplitude; baseline_max_step uses the same render without automation; excess_step is their positive difference. A step above both four times baseline and 0.05 suggests clicks or zipper noise: a screening heuristic, not proof of an artifact or of inaudibility. sidechain supplies a timed key; its middle half is measured against a connected silent key with identical automation: gain_change_db is negative for ducking, null if either output is below -120 dBFS. Slow attack may not settle in that window. Each pass has a fresh instance and initial patch. THD and impulse response are omitted during automation or a non-silent key; gain_db then describes the changing render, not static gain. notes supplies an instrument's sequence ({key, velocity, start_s, length_s}), replacing the notes signal; defaults become notes and silence. Do not combine it with the A4 note signal or select only silence. release_ms starts at its last note-off. Times round to samples at the render rate; spans must fit within seconds.
+Give plugin (an id: a script's, or any effect's or instrument's) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays each signal. An effect: sine (frequency_hz; gain_db and thd_percent), sweep (20 Hz to 20 kHz), impulse (response_db at octave centres), pink noise and silence, each peaking at level_db. An instrument, at velocity 0.8: notes (a note, then a chord), note (A4; pitch_hz, the pitch heard), and silence (no notes); release_ms is how long the sound lasts after the last release. Each reports peak and RMS in dBFS, DC, samples beyond 0 dBFS and denormals; problems says in words what looks wrong (clipping, DC, sound from silence, no output, a note out of tune, sound that never dies away, non-finite samples the framework silenced, a script stopped by its loop budget or indexing outside an array). cpu_percent is measured, so it varies between runs. save: true keeps each output as a WAV (path) for analyze and compare. automation is a list of {param, at_s, value}: semantic patch keys and physical values, as discrete sample-accurate changes applied to every signal (no implicit ramps). automation.max_step is the largest adjacent-sample change in full-scale amplitude; baseline_max_step uses the same render without automation; excess_step is their positive difference. A step above both four times baseline and 0.05 suggests clicks or zipper noise: a screening heuristic, not proof of an artifact or of inaudibility. sidechain supplies a timed key; its middle half is measured against a connected silent key with identical automation: gain_change_db is negative for ducking, null if either output is below -120 dBFS. Slow attack may not settle in that window. Each pass has a fresh instance and initial patch. THD and impulse response are omitted during automation or a non-silent key; gain_db then describes the changing render, not static gain. notes supplies an instrument's sequence ({key, velocity, start_s, length_s}), replacing the notes signal; defaults become notes and silence. Do not combine it with the A4 note signal or select only silence. release_ms starts at its last note-off. Times round to samples at the render rate; spans must fit within seconds. sample_rate renders at that rate instead of the session's (sandbox) or the project's (DAW); latency is in samples at the rate used, which sample_rate in the result reports. meters gives a semantic plugin's read-only parameters (its meters and readouts) by patch key in physical units, as they stood when the signal ended (the tail after it does not move them).
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -1544,6 +1544,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `level_db` | value | dB | -60.0..0.0 | -12.0 | Quantity strings are range-checked by the server. |
 | `frequency_hz` | value | Hz | 10.0..20000.0 | 1000.0 | Quantity strings are range-checked by the server. |
 | `seconds` | number |  | 0.1..10.0 | 1.0 |  |
+| `sample_rate` | value | Hz | 8000.0..384000.0 |  | default: the session's or project's rate Quantity strings are range-checked by the server. |
 | `save` | boolean |  |  | false |  |
 
 ### Result
@@ -1555,6 +1556,20 @@ Kind: `action`. Exposure: `mcp-tool`.
   "properties": {
     "plugin": {
       "type": "string"
+    },
+    "sample_rate": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "string",
+          "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:[hH][zZ]|[kK][hH][zZ]|[kK]))?\\s*$"
+        }
+      ],
+      "x-unit": "Hz",
+      "x-unit-strings": true,
+      "description": "the rate rendered at Quantity strings are range-checked by the server."
     },
     "latency": {
       "type": "integer",
@@ -1654,6 +1669,9 @@ Kind: `action`. Exposure: `mcp-tool`.
             },
             "required": ["rms_dbfs", "reference_rms_dbfs", "gain_change_db"],
             "additionalProperties": false
+          },
+          "meters": {
+            "description": "read-only parameters (meters) by patch key, physical, as of the signal's end"
           }
         },
         "required": ["signal", "peak_dbfs", "rms_dbfs", "dc", "clipped", "denormals"],
@@ -1677,7 +1695,7 @@ Kind: `action`. Exposure: `mcp-tool`.
       }
     }
   },
-  "required": ["plugin", "latency", "signals", "cpu_percent", "problems", "log"],
+  "required": ["plugin", "sample_rate", "latency", "signals", "cpu_percent", "problems", "log"],
   "additionalProperties": false
 }
 
@@ -1693,6 +1711,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 - `dsp.automation`: unavailable parameter or automation time outside the render Hint: choose a writable semantic parameter and a time before seconds
 - `dsp.sidechain`: no key input or invalid key timing Hint: choose a plugin with a key and a nonempty span within seconds
 - `dsp.notes`: invalid custom sequence or signal selection Hint: use an instrument, notes or notes and silence, and spans within seconds
+- `dsp.frequency`: a sine at or above half the sample rate Hint: lower frequency_hz or raise sample_rate
 
 ### Examples
 
@@ -1711,6 +1730,7 @@ Result:
 ```json
 {
   "plugin": "<any>",
+  "sample_rate": "<any>",
   "latency": "<any>",
   "signals": "<any>",
   "cpu_percent": "<any>",
@@ -1747,6 +1767,7 @@ Result:
 ```json
 {
   "plugin": "<any>",
+  "sample_rate": "<any>",
   "latency": "<any>",
   "signals": "<any>",
   "cpu_percent": "<any>",
@@ -1774,6 +1795,33 @@ Result:
 ```json
 {
   "plugin": "<any>",
+  "sample_rate": "<any>",
+  "latency": "<any>",
+  "signals": "<any>",
+  "cpu_percent": "<any>",
+  "problems": "<any>",
+  "log": "<any>"
+}
+
+```
+
+**Measure an effect at 96 kHz** (`empty`)
+
+```json
+{
+  "plugin": "com.suppleaudio.test.gain",
+  "signals": ["sine"],
+  "sample_rate": 96000
+}
+
+```
+
+Result:
+
+```json
+{
+  "plugin": "<any>",
+  "sample_rate": "<any>",
   "latency": "<any>",
   "signals": "<any>",
   "cpu_percent": "<any>",
@@ -1810,6 +1858,7 @@ Result:
 ```json
 {
   "plugin": "<any>",
+  "sample_rate": "<any>",
   "latency": "<any>",
   "signals": "<any>",
   "cpu_percent": "<any>",
@@ -4144,6 +4193,63 @@ Result:
 
 ```
 
+## `fx.meters@1`
+
+Read a plugin's meters and readouts, playing now or as a render ended.
+
+The read-only parameters of a plugin: a semantic plugin's by patch key in physical units (an analyzer's loudness, a reverb's RT60, a gate's suggested threshold), any other plugin's by name as CLAP values. from live (the default): the playing instance's, which move while it processes (playback, monitoring); source none while no instance runs (start the engine). from render: as the last render.mix ended, which renders through instances of its own; source none until a render.mix has included this plugin.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  |  |
+| `from` | string |  |  | "live" | live: the playing instance; render: the last render.mix |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_meters",
+  "properties": {
+    "source": {
+      "type": "string",
+      "description": "live, render, or none (nothing to read yet)"
+    },
+    "meters": {
+      "description": "Read-only values by patch key (physical) or name"
+    }
+  },
+  "required": ["source", "meters"],
+  "additionalProperties": false
+}
+
+```
+
+### Examples
+
+**Read meters** (`song_with_fx`)
+
+```json
+{
+  "fx": "fx_2"
+}
+
+```
+
+Result:
+
+```json
+{
+  "source": "<any>",
+  "meters": "<any>"
+}
+
+```
+
 ## `fx.move@1`
 
 Move a plugin within a track chain or to another track.
@@ -4267,6 +4373,13 @@ Kind: `edit`. Exposure: `mcp-tool`.
     "changed": {},
     "description": {
       "type": "string"
+    },
+    "inactive": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Params set that do not apply with the new values: kept, and heard once what fx.describe full's active_when names allows it"
     }
   },
   "required": ["changed", "description"],
@@ -4423,6 +4536,13 @@ Kind: `edit`. Exposure: `mcp-tool`.
     "changed": {},
     "description": {
       "type": "string"
+    },
+    "inactive": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Params set that do not apply with the new values: kept, and heard once what fx.describe full's active_when names allows it"
     }
   },
   "required": ["changed", "description"],
@@ -4510,6 +4630,260 @@ Result:
 ```json
 {
   "patch": "<any>"
+}
+
+```
+
+## `fx.preset.delete@1`
+
+Delete one of the user's presets for a plugin; factory presets stay.
+
+Removes the user preset's file. Factory presets belong to the plugin and cannot be deleted. Instances that loaded the preset keep their settings.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  |  |
+| `name` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_preset_delete_result",
+  "properties": {
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `fx.unknown_preset`: no user preset has that name Hint: choose a user preset from fx.preset.list
+- `fx.preset_factory`: factory presets cannot be deleted Hint: delete only presets whose source is user
+
+### Examples
+
+**Delete a saved preset** (`song_with_preset`)
+
+```json
+{
+  "fx": "fx_2",
+  "name": "Quiet"
+}
+
+```
+
+Result:
+
+```json
+{
+  "path": "<any>"
+}
+
+```
+
+## `fx.preset.list@1`
+
+List a plugin's presets: its factory ones, then the user's.
+
+source factory: the plugin's own patches in its order (read-only; the same as fx.patch.list's names). source user: the user's saved presets for this plugin, sorted by name, with their file path. See fx.preset.load and fx.preset.save.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_preset_list_result",
+  "properties": {
+    "presets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "fx_preset_entry",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": ["name", "source"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["presets"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `fx.unknown`: no such plugin instance Hint: use an fx id from fx.add
+
+### Examples
+
+**List presets** (`song_with_fx`)
+
+```json
+{
+  "fx": "fx_2"
+}
+
+```
+
+Result:
+
+```json
+{
+  "presets": []
+}
+
+```
+
+## `fx.preset.load@1`
+
+Apply a factory or user preset to a plugin instance in one undo step.
+
+name from fx.preset.list. source (factory or user) is needed only when both have the name. A factory preset or a semantic plugin's user preset replaces the whole patch (omitted parameters take defaults); a plain plugin's user preset is its saved state. Options such as wet and bypass are not part of a preset.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  |  |
+| `name` | string |  |  |  |  |
+| `source` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_preset_load_result",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    }
+  },
+  "required": ["name", "source"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `fx.unknown_preset`: no preset has that name Hint: choose a name from fx.preset.list
+- `fx.preset_ambiguous`: a factory and a user preset share the name Hint: add source: factory or source: user
+- `fx.preset_invalid`: the preset file is not valid for this plugin Hint: save the preset again
+
+### Examples
+
+**Load a saved preset** (`song_with_preset`)
+
+```json
+{
+  "fx": "fx_2",
+  "name": "Quiet"
+}
+
+```
+
+Result:
+
+```json
+{
+  "name": "Quiet",
+  "source": "user"
+}
+
+```
+
+## `fx.preset.save@1`
+
+Save a plugin instance's current settings as a named user preset.
+
+Saves what the running plugin has now (editor edits included): the patch of a semantic plugin, else its state. The preset is the user's, for every instance of this plugin in any project. A factory preset's name cannot be taken; replace: true overwrites a user preset of that name.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  |  |
+| `name` | string |  |  |  |  |
+| `replace` | boolean |  |  | false |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_preset_save_result",
+  "properties": {
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `fx.preset_name`: invalid preset name Hint: use a name without path separators
+- `fx.preset_factory`: a factory preset has the name Hint: choose another name; factory presets are read-only
+- `fx.preset_exists`: a user preset has the name Hint: choose another name or set replace: true
+
+### Examples
+
+**Save the gain's settings** (`song_with_fx`)
+
+```json
+{
+  "fx": "fx_2",
+  "name": "Quiet"
+}
+
+```
+
+Result:
+
+```json
+{
+  "path": "<any>"
 }
 
 ```
@@ -6177,6 +6551,13 @@ Kind: `query`. Exposure: `mcp-tool`.
           "semantic": {
             "type": "boolean"
           },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "CLAP features (a VST3's subcategories): the main category first, then the kind of plugin, such as reverb"
+          },
           "path": {
             "type": "string"
           },
@@ -6185,7 +6566,7 @@ Kind: `query`. Exposure: `mcp-tool`.
             "description": "Another location earlier on the plugin path has the same id; fx.add by id uses that one"
           }
         },
-        "required": ["id", "name", "vendor", "format", "instrument", "semantic", "path"],
+        "required": ["id", "name", "vendor", "format", "instrument", "semantic", "features", "path"],
         "additionalProperties": false
       }
     },
@@ -6342,6 +6723,13 @@ Kind: `action`. Exposure: `mcp-tool`.
           "semantic": {
             "type": "boolean"
           },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "CLAP features (a VST3's subcategories): the main category first, then the kind of plugin, such as reverb"
+          },
           "path": {
             "type": "string"
           },
@@ -6349,7 +6737,7 @@ Kind: `action`. Exposure: `mcp-tool`.
             "type": "boolean"
           }
         },
-        "required": ["id", "name", "vendor", "format", "instrument", "semantic", "path"],
+        "required": ["id", "name", "vendor", "format", "instrument", "semantic", "features", "path"],
         "additionalProperties": false
       }
     },

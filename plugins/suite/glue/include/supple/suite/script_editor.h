@@ -19,6 +19,8 @@
 //     leaving. Its edits (Param::edit) go to the host through Ui, on hidden
 //     controls, so they keep Ui's gesture rules: a press's are one gesture
 //     until its release, a wheel's one per burst.
+//   - e.routes() places a list of the modulation routes (route_list.h),
+//     drawn over draw()'s and taking the pointer before pointer() does.
 //   - It repaints when a parameter moves, when new Shared values differ from
 //     those drawn, and as the controls ask; an idle editor draws nothing.
 //   - A hook that loops past its budget is stopped, and the editor shows

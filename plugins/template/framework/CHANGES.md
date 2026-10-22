@@ -4,6 +4,106 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.31.0
+
+What a product must do: nothing.
+
+- **An STFT for analysis only** (`dsp/Stft.h`). `prepare(channels, size,
+  overlap, Stft::Mode::Analyse)` gives the same frames and bins with no
+  inverse transform and no overlap-add, about half the cost, for an
+  analyser or meter that only reads the spectrum. `push()` alone is enough
+  each sample, the spectrum stays readable until the next `push()`,
+  `process()` leaves the audio as it is and `pull()` gives 0. The default,
+  `Mode::Resynthesise`, is unchanged.
+
+## 1.30.1
+
+What a product must do: nothing. A product that glides with `pitchAt()`
+and `advance()` may sound different in the last bits.
+
+- **A glide is the same in any host blocks** (`dsp/Voices.h`). A voice's
+  glide was summed step by step, so one advanced in blocks of different
+  sizes rounded differently, and a render was not bit-identical across
+  host block sizes. Its pitch is now worked out from where it started, so
+  `tick()`, `pitchAt()` and `advance()` agree to the bit however the
+  blocks fall.
+
+## 1.30.0
+
+What a product must do: nothing.
+
+- **A layer's panels in the automatic editor** (`gui/AutoEditor.h`,
+  `gui/AutoEditor.cpp`). `gui::automaticEditor(host, panels)` makes the
+  automatic editor with panels of a layer's own after the parameters'
+  panels: state the parameters do not show, which the layer draws and
+  edits itself. Each `gui::AutoPanel` says its title and size, draws its
+  body, and takes the pointer there with the rules of `EditorBase`'s own
+  hooks; `Ui::popup()` and `Ui::prompt()` give it menus and text fields.
+  `product::createEditor()` is the same editor with none.
+
+## 1.29.0
+
+What a product must do: nothing.
+
+- **Properties the automatic editor leaves out** (`core/Property.h`,
+  `gui/AutoEditor.cpp`). A property marked `.hidden()` gets no text field in
+  the automatic editor: text in the product's own format, that only its own
+  controls or its host edit. State and presets keep it as before.
+
+## 1.28.0
+
+What a product must do: nothing. A run-time product whose settings can make
+others moot overrides `Definition::applies()`.
+
+- **Parameters that do not always apply** (`core/Definition.h`,
+  `gui/AutoEditor.cpp`). `Definition::applies(index, host)` says whether a
+  parameter matters with the current values: a band's controls while the
+  band is off, a free rate while synced. It is always true unless a
+  run-time product's definition overrides it. The automatic editor dims a
+  control while its parameter does not apply (`Control::enabledWhen`), so it
+  takes no input until it does.
+
+## 1.27.1
+
+What a product must do: nothing.
+
+- **host-smoke no longer requires an effect to change its input**
+  (`test/host_contract.h`). The requirement guarded the float/double and
+  in-place comparisons against a render that never reached the DSP, which
+  other checks catch, and it failed any effect that rightly passes its
+  input through. The difference is printed instead. `PRODUCT_TRANSPARENT`
+  still demands output equal to input exactly.
+
+## 1.27.0
+
+What a product must do: nothing. A product that passes its input through
+unchanged (a meter, an analyser) sets `PRODUCT_TRANSPARENT ON`.
+
+- **A transparent effect** (`test/host_smoke.cpp`, `test/host_contract.h`,
+  `cmake/Tests.cmake`). host-smoke demanded that every effect change its
+  input, which an analyser must never do. With `PRODUCT_TRANSPARENT` it
+  demands the opposite: float and double renders that equal the input
+  exactly.
+
+## 1.26.0
+
+What a product must do: nothing.
+
+- **A distance unit: metres** (`core/Param.h`). `Unit::Meters` and its
+  factory `meters()`, for a room's size or a source's place: shown as
+  "2.4 m", "18.0 m" and "120 m", and read back from "12 m", "12.5 metres",
+  "250 cm" or "10 ft".
+
+## 1.25.2
+
+What a product must do: nothing.
+
+- **A tail that changes as the processor plays reaches the host**
+  (`core/Engine.h`). The engine read `tailSamples()` only after an update
+  or a file, so a tail that follows what the processor hears (a delay's,
+  the song's tempo) stayed as it was until a parameter moved. It is read
+  after every split now, and the host is told once per change.
+
 ## 1.25.1
 
 What a product must do: nothing.

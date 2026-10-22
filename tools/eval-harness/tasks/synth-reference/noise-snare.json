@@ -1,57 +1,33 @@
 {
-  "changed_modules": [],
   "hidden_patch": {
-    "drive": {
-      "amount": "3 dB",
-      "type": "soft"
+    "params": {
+      "amp.attack": "0 ms",
+      "amp.decay": "260 ms",
+      "amp.release": "120 ms",
+      "amp.sustain": "0 %",
+      "amp.velocity": "60 %",
+      "drive.amount": "6 dB",
+      "drive.type": "soft",
+      "env2.attack": "0 ms",
+      "env2.decay": "45 ms",
+      "env2.pitch": "+12 st",
+      "env2.sustain": "0 %",
+      "filter1.cutoff": "4 kHz",
+      "filter1.env": "+0 oct",
+      "filter1.type": "svf",
+      "filter2.cutoff": "350 Hz",
+      "filter2.mode": "highpass",
+      "filter2.type": "svf",
+      "osc1.level": "0 dB",
+      "osc1.type": "noise",
+      "osc2.coarse": -5,
+      "osc2.level": "-3 dB",
+      "osc2.retrigger": true,
+      "osc2.to": "direct",
+      "osc2.type": "analog",
+      "osc2.wave": "triangle"
     },
-    "envelopes": {
-      "amp": {
-        "attack": "0 ms",
-        "decay": "220 ms",
-        "release": "100 ms",
-        "sustain": 0
-      },
-      "env2": {
-        "attack": "0 ms",
-        "decay": "40 ms",
-        "sustain": 0
-      }
-    },
-    "filters": {
-      "filter1": {
-        "cutoff": "2.6 kHz",
-        "mode": "bandpass",
-        "resonance": "20 %",
-        "type": "svf"
-      },
-      "filter2": {
-        "cutoff": "220 Hz",
-        "damping": "65 %",
-        "feedback": "35 %",
-        "type": "comb"
-      },
-      "routing": "serial"
-    },
-    "oscillators": {
-      "osc1": {
-        "color": "white",
-        "type": "noise"
-      },
-      "osc2": {
-        "coarse": -12,
-        "level": "-6 dB",
-        "to": "direct",
-        "type": "va",
-        "wave": "triangle"
-      }
-    },
-    "routes": {
-      "env2>osc2.pitch": {
-        "amount": "+12 st"
-      }
-    },
-    "schema": "supple.orrery-patch/1.0"
+    "schema": "supple.marram-patch/1.0"
   },
   "id": "reference.noise-snare",
   "limits": {
@@ -60,7 +36,7 @@
   },
   "listening": "Is the body audible under the fizz, and does the hit end cleanly?",
   "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C2:e r:*",
-  "prompt": "Match the reference render with Orrery. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
+  "prompt": "Match the reference render with Marram. Preserve the fixed evaluation phrase. Use the optimizer for continuous parameters after choosing the structure.",
   "recipe_index": 8,
   "render": {
     "tail_s": 2
@@ -79,7 +55,7 @@
   "setup": [
     {
       "args": {
-        "plugin": "com.suppleaudio.orrery"
+        "plugin": "com.suppleaudio.marram"
       },
       "command": "plugin.load"
     }

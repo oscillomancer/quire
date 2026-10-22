@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Run the real Orrery sound-design loop over both MCP deployments.
+"""Run the stock synth's sound-design loop over both MCP deployments.
 
 The committed Linux transcript is also a drift test. Only temporary paths,
 render IDs, wall-clock timings, and long arrays are normalized in its display.
@@ -23,24 +23,23 @@ from processes import stop
 
 
 PHRASE = "1: C3:h E3:q G3:q"
+PATCH_TYPE = "supple.marram-patch/1.0"
 PAD = {
-    "schema": "supple.orrery-patch/1.0",
+    "schema": PATCH_TYPE,
     "name": "MCP demo pad",
-    "seed": 1234,
-    "oscillators": {"osc1": {"type": "va", "wave": "saw"}},
-    "filters": {"filter1": {"type": "svf", "cutoff": "900 Hz"}},
-    "envelopes": {
-        "amp": {"attack": "80 ms", "release": "200 ms"},
-        "env2": {"attack": "100 ms", "decay": "400 ms", "sustain": "0 %"},
+    "params": {
+        "filter1.type": "svf", "filter1.cutoff": "900 Hz", "filter1.env": "+0 oct",
+        "amp.attack": "80 ms", "amp.release": "200 ms",
+        "env2.attack": "100 ms", "env2.decay": "400 ms", "env2.sustain": "0 %",
     },
 }
 PROFILE = {
     "schema": "supple.analysis-profile/1.0",
     "targets": {"spectral.centroid_hz.median": {"target": 1500, "tolerance": 100}},
 }
-HEADER = """# Orrery over MCP
+HEADER = """# The stock synth over MCP
 
-This is a scripted sound-design session with the real Orrery CLAP module. The
+This is a scripted sound-design session with Marram, the stock synth. The
 same commands run directly in the sandbox and through its Unix socket proxy.
 The client checks every step's structured result before recording the exchange.
 Arrays longer than 12 entries show their count and names; temporary paths,
@@ -50,7 +49,7 @@ that exactly duplicates structuredContent is shown once.
 """
 
 
-def displayed(value, workdir, orrery, render_ids):
+def displayed(value, workdir, synth, render_ids):
     """Normalize the documented volatile fields, preserving all other data."""
     if isinstance(value, dict):
         result = {}
@@ -62,7 +61,7 @@ def displayed(value, workdir, orrery, render_ids):
             elif key == "content" and "structuredContent" in value:
                 result[key] = [{"type": "text", "text": "<same as structuredContent>"}]
             else:
-                result[key] = displayed(item, workdir, orrery, render_ids)
+                result[key] = displayed(item, workdir, synth, render_ids)
         return result
     if isinstance(value, list):
         if len(value) > 12:
@@ -72,9 +71,9 @@ def displayed(value, workdir, orrery, render_ids):
             if names:
                 summary["names"] = names
             return summary
-        return [displayed(item, workdir, orrery, render_ids) for item in value]
+        return [displayed(item, workdir, synth, render_ids) for item in value]
     if isinstance(value, str):
-        stable = value.replace(str(workdir), "<workdir>").replace(str(orrery), "<orrery.clap>")
+        stable = value.replace(str(workdir), "<workdir>").replace(str(synth), "<synth.clap>")
         def render_label(match):
             identifier = match.group()
             return render_ids.setdefault(identifier, f"<render-{len(render_ids) + 1}>")
@@ -122,10 +121,10 @@ class Client:
         return structured
 
 
-def session(client, orrery):
+def session(client, synth):
     init = client.send("initialize", {
         "protocolVersion": "2025-06-18", "capabilities": {},
-        "clientInfo": {"name": "orrery-demo", "version": "1.0"},
+        "clientInfo": {"name": "synth-demo", "version": "1.0"},
     })
     assert init["result"]["protocolVersion"] == "2025-06-18", init
     assert "tools" in init["result"]["capabilities"], init
@@ -137,11 +136,11 @@ def session(client, orrery):
 
     described = client.tool("describe", {"command": "patch.merge"})
     assert "patch.merge" in json.dumps(described), described
-    loaded = client.tool("plugin_load", {"plugin": str(orrery)})
+    loaded = client.tool("plugin_load", {"plugin": str(synth)})
     instance = loaded["instance"]
     assert instance.startswith("in_") and loaded["semantic"], loaded
     details = client.tool("plugin_describe", {"instance": instance, "detail": "summary"})
-    assert details["patch_type"] == "supple.orrery-patch/1.0", details
+    assert details["patch_type"] == PATCH_TYPE, details
     assert "filter1.cutoff" in json.dumps(details), details
 
     set_result = client.tool("patch_set", {"instance": instance, "patch": PAD})
@@ -155,8 +154,8 @@ def session(client, orrery):
     assert "spectral" in first_report["report"], first_report
 
     changed = client.tool("patch_merge", {"instance": instance, "patch": {
-        "filters": {"filter1": {"cutoff": "1.4 kHz"}},
-        "routes": {"env2>filter1.cutoff": {"amount": "+2 oct"}},
+        "params": {"filter1.cutoff": "1.4 kHz", "filter1.env": "+2 oct"},
+        "routes": {"velocity>filter1.cutoff": {"amount": "+1 oct"}},
     }})
     assert changed["changed"], changed
     second = client.tool("render", {**render_args, "name": "opened pad"})
@@ -193,7 +192,7 @@ def session(client, orrery):
     assert len({first["render"], second["render"], final["render"]}) == 3
 
 
-def run_mode(mode, sandbox, proxy_binary, orrery, root):
+def run_mode(mode, sandbox, proxy_binary, synth, root):
     workdir = root / mode
     workdir.mkdir()
     socket = workdir / "control.sock"
@@ -202,11 +201,11 @@ def run_mode(mode, sandbox, proxy_binary, orrery, root):
     try:
         if mode == "stdio":
             command = [str(sandbox), "--mcp", "--workdir", str(workdir),
-                       "--plugin-path", str(orrery.parent)]
+                       "--plugin-path", str(synth.parent)]
         else:
             server = subprocess.Popen(
                 [str(sandbox), "serve", "--socket", str(socket), "--workdir", str(workdir),
-                 "--plugin-path", str(orrery.parent)],
+                 "--plugin-path", str(synth.parent)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
             )
             for _ in range(400):
@@ -218,7 +217,7 @@ def run_mode(mode, sandbox, proxy_binary, orrery, root):
             command = [str(proxy_binary), "--socket", str(socket)]
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, bufsize=0)
-        session(Client(process, transcript), orrery)
+        session(Client(process, transcript), synth)
         process.stdin.close()
         assert process.wait(timeout=10) == 0, process.stderr.read().decode()
     finally:
@@ -237,24 +236,25 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("sandbox", type=Path)
     parser.add_argument("proxy", type=Path)
-    parser.add_argument("orrery", type=Path)
+    parser.add_argument("synth", type=Path)
     parser.add_argument("transcript", type=Path)
     parser.add_argument("--write", action="store_true", help="regenerate the committed transcript")
     parser.add_argument("--portable", action="store_true",
                         help="check raw MCP contracts; print the Linux transcript diff for review")
     args = parser.parse_args()
-    for path in (args.sandbox, args.proxy, args.orrery):
+    for path in (args.sandbox, args.proxy):
         assert path.is_file(), path
+    assert args.synth.exists(), args.synth  # a macOS .clap is a bundle directory
     started = time.monotonic()
     sections = [HEADER]
-    with tempfile.TemporaryDirectory(prefix="supple-orrery-demo-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="supple-synth-demo-") as temporary:
         root = Path(temporary)
         for mode in ("stdio", "proxy"):
-            transcript, workdir = run_mode(mode, args.sandbox, args.proxy, args.orrery, root)
+            transcript, workdir = run_mode(mode, args.sandbox, args.proxy, args.synth, root)
             sections.append(f"## {mode}\n\n")
             render_ids = {}
             for direction, value in transcript:
-                shown = displayed(value, workdir, args.orrery, render_ids)
+                shown = displayed(value, workdir, args.synth, render_ids)
                 sections.append(f"### {direction}\n\n```json\n"
                                 f"{json.dumps(shown, indent=2, ensure_ascii=False)}\n```\n\n")
     content = "".join(sections)
@@ -273,7 +273,7 @@ def main():
             else:
                 raise AssertionError("MCP transcript drift; regenerate with --write and review diff\n"
                                      + difference)
-    print(f"Orrery MCP demo passed in {time.monotonic() - started:.2f}s")
+    print(f"Synth MCP demo passed in {time.monotonic() - started:.2f}s")
 
 
 if __name__ == "__main__":

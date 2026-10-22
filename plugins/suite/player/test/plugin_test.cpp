@@ -278,6 +278,10 @@ TEST(each_script_in_the_library_is_a_plugin) {
     CHECK(tilt.plugin != nullptr && tilt.semantic != nullptr);
     CHECK(tilt.params->count(tilt.plugin) == 3);
     CHECK(std::string(tilt.plugin->desc->name) == "Tilt");
+    // The main category, then the script's own features.
+    CHECK(std::string(tilt.plugin->desc->features[0]) == "audio-effect");
+    CHECK(std::string(tilt.plugin->desc->features[1]) == "equalizer");
+    CHECK(tilt.plugin->desc->features[2] == nullptr);
     Instance pluck("com.example.pluck");
     CHECK(pluck.plugin != nullptr && std::string(pluck.plugin->desc->features[0]) == "instrument");
 }

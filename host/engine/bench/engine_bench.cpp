@@ -470,8 +470,10 @@ int main(int argc, char** argv) {
     result["process_cpu_cores"] = (cpu(ru1) - cpu(ru0)) / measured;
     result["minor_faults"] = ru1.ru_minflt - ru0.ru_minflt;
     result["major_faults"] = ru1.ru_majflt - ru0.ru_majflt;
-    const bool valid =
-        healthy && backend.peak > 1e-5 && !probe.callback.dropped && !probe.renderJob.dropped;
+    // Silence means a missing signal unless the anticipative renderer fell
+    // behind: then its starved ring explains it and the run is a failure.
+    const bool signal = backend.peak > 1e-5 || result["anticipation_misses"].asInt() > 0;
+    const bool valid = healthy && signal && !probe.callback.dropped && !probe.renderJob.dropped;
     result["valid"] = valid;
     const auto serialized = json::writeCanonical(result) + "\n";
     if (!output.empty()) {

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Reference-search benchmark for `optimize.start` (see README.md).
 
-For every synth-reference task: load Orrery, set the task's starting patch,
+For every synth-reference task: load the synth, set the task's starting patch,
 render the hidden patch as the reference, then ask the optimizer to find it —
 in two modes (`auto`: every tunable parameter of the patch's present modules;
 `module`: only the tunable parameters of the modules the task changed) with a
@@ -25,17 +25,15 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 sys.path.insert(0, str(ROOT / "tools/eval-harness"))
 
-from common import Mcp, load_tasks, sandbox_command, setup, write_json  # noqa: E402
+from common import SYNTH_NAME, Mcp, load_tasks, sandbox_command, setup, write_json  # noqa: E402
 
 DEFAULT_MODES = ("auto", "module")
 
 
 def module_prefixes(changed_modules):
-    """The parameter key prefix of each changed patch module.
-
-    `envelopes.amp` -> `amp` (the semantic key is the patch path without its
-    module container), which is Orrery's own convention: `envelopes.amp.release`
-    is the parameter `amp.release`.
+    """The parameter key prefix of each changed module: `amp` for the
+    `amp.*` parameters (`envelopes.amp`, an older task's patch path, gives
+    `amp` too).
     """
     return {module.split(".")[-1] for module in changed_modules}
 
@@ -63,8 +61,7 @@ def wait_job(client, job, poll_seconds=30.0):
 
 def run_one(client, task, starting_patch, params, seed, options, mode):
     """One optimize.start, from the task's starting patch, until it stops."""
-    client.call("patch.set", {"instance": "in_1",
-                              "patch": dict(starting_patch, seed=options.patch_seed)})
+    client.call("patch.set", {"instance": "in_1", "patch": starting_patch})
     args = {"instance": "in_1", "params": params, "target": {"reference": "rd_1"},
             "phrase": task["phrase"], "evaluations": options.evaluations,
             "max_seconds": options.max_seconds, "seed": seed}
@@ -105,18 +102,15 @@ def run_task(task, options):
         return record
     workdir = ROOT / "build/optimize-bench" / f"{options.label}-{task['id']}"
     with Mcp(sandbox_command(workdir, options.sandbox), workdir) as client:
-        setup(client, task, options.patch_seed)
+        setup(client, task)
         # The starting patch first: whether a parameter is tunable depends on the
         # modules the patch has (a filter-only task has no filter1 before this).
-        client.call("patch.set", {"instance": "in_1",
-                                  "patch": dict(starting_patch, seed=options.patch_seed)})
-        client.call("patch.set", {"instance": "in_1",
-                                  "patch": dict(task["hidden_patch"], seed=options.patch_seed)})
+        client.call("patch.set", {"instance": "in_1", "patch": starting_patch})
+        client.call("patch.set", {"instance": "in_1", "patch": task["hidden_patch"]})
         render = client.call("render", dict(task["render"], notation=task["phrase"]))
         record["reference"] = {"render": render["render"], "seconds": render["seconds"],
                                "tail_s": render.get("tail_s")}
-        client.call("patch.set", {"instance": "in_1",
-                                  "patch": dict(starting_patch, seed=options.patch_seed)})
+        client.call("patch.set", {"instance": "in_1", "patch": starting_patch})
         # The optimizer's own list of tunable parameters (see module_keys).
         probe = {"instance": "in_1", "params": "auto", "target": {"reference": render["render"]},
                  "phrase": task["phrase"], "evaluations": 10, "max_seconds": 30, "seed": 0}
@@ -173,9 +167,8 @@ def summarize(records, options):
 def markdown(records, summary, options):
     """One table per mode, then the per-task detail."""
     lines = [f"# Optimizer reference-search benchmark — {options.label}", "",
-             f"Orrery, {options.evaluations} evaluations per run, seeds "
-             f"{', '.join(str(s) for s in options.seeds)}, patch seed "
-             f"{options.patch_seed}, {len(summary['modes'])} modes.", ""]
+             f"{SYNTH_NAME}, {options.evaluations} evaluations per run, seeds "
+             f"{', '.join(str(s) for s in options.seeds)}, {len(summary['modes'])} modes.", ""]
     if summary["not_applicable"]:
         lines += [f"Not applicable: {', '.join(summary['not_applicable'])} "
                   f"(tier 3 starts from an empty patch — a structure task).", ""]
@@ -220,7 +213,6 @@ def main(argv=None):
     parser.add_argument("--seeds", nargs="+", type=int, default=[1, 2, 3])
     parser.add_argument("--evaluations", type=int, default=300)
     parser.add_argument("--max-seconds", type=float, default=600.0)
-    parser.add_argument("--patch-seed", type=int, default=42)
     parser.add_argument("--jobs", type=int, default=4, help="Tasks in parallel; keep total CPU ≤ 6.")
     parser.add_argument("--sandbox", type=Path, help="Sandbox binary; default build/dev.")
     parser.add_argument("--out-dir", type=Path, default=ROOT / "docs/benchmarks/optimizer")

@@ -250,6 +250,9 @@ Further modifiers:
   once: ignore it there and keep running the topology `prepare()` built, so
   the real delay always matches the latency the host was told. Set
   `PRODUCT_SMOKE_LATENCY_PARAM` so host-smoke checks the protocol.
+- An effect that only listens (a meter, an analyser) never writes its
+  output and sets `PRODUCT_TRANSPARENT ON` in `product.cmake`: host-smoke
+  checks that its output is its input, bit for bit, in float and double.
 
 ## State and presets
 
@@ -267,9 +270,11 @@ byte (`core/StateFormat.h`). There is nothing to write for it.
   otherwise). A value is bytes, normally UTF-8; a product keeping its own
   encoding in one versions it there. `.perProject()` marks one that belongs
   to the session, not the sound: presets leave it out, and loading one leaves
-  it alone. The editor edits one with `ui().textField(id, rect)` or reads and
-  writes it through `host().property(id)` / `setProperty(id, text)`; the
-  processor hears each in `property(id, value)` (see DSP). The chord example.
+  it alone. `.hidden()` marks one the automatic editor leaves out (text in a
+  format of the product's own). The editor edits one with
+  `ui().textField(id, rect)` or reads and writes it through
+  `host().property(id)` / `setProperty(id, text)`; the processor hears each
+  in `property(id, value)` (see DSP). The chord example.
 - **File references**: a property marked `.file("scl tun")` (or
   `.audioFile()`, for WAV, AIFF and FLAC) holds a path, and the framework
   minds the file (`core/Files.h`). Loading a session whose file has moved
@@ -461,7 +466,12 @@ contract is at the top of `core/ProcessorBase.h`. In short:
 `gui/EditorBase.h`). A product with no editor code -- `PRODUCT_EDITOR_SOURCES
 ""` and no `Editor.*` -- gets the automatic one: every parameter by group, a
 panel each, with the bypass, presets and meters (`gui/AutoEditor.cpp`; the
-drive example). Write your own once the product is past its sketch.
+drive example), each control dimmed while `Definition::applies()` says its
+parameter does not matter. A layer whose definitions carry state the
+parameters do not show adds panels of its own to it: its `createEditor()`
+returns `gui::automaticEditor(host, panels)`, each panel a `gui::AutoPanel`
+that draws its body and takes the pointer there (`gui/AutoEditor.h`). Write
+your own once the product is past its sketch.
 
 - In the constructor, add controls in Tab order. Rects are in design units
   (`kEditorWidth` x `kEditorHeight`); the window scales the whole panel.

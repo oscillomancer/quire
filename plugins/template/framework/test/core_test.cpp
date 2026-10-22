@@ -209,6 +209,10 @@ TEST(each_unit_writes_and_reads_its_own_text) {
     CHECK(text(tempo, 120.0) == "120.0 BPM");
     CHECK(parsed(tempo, "98.5 bpm") == 98.5);
     CHECK(text(cents(5, "Fine", -100.0, 100.0, 0.0), -12.0) == "-12 ct");
+    const ParamDef across = meters(9, "Width", 1.0, 200.0, 18.0);
+    CHECK(text(across, 18.0) == "18.0 m" && text(across, 2.44) == "2.4 m" && text(across, 120.0) == "120 m");
+    CHECK(parsed(across, "12 m") == 12.0 && parsed(across, "12.5 metres") == 12.5 && parsed(across, "7") == 7.0);
+    CHECK(parsed(across, "250 cm") == 2.5 && std::fabs(parsed(across, "10 ft") - 3.048) < 1e-12);
 
     const ParamDef balance = pan(6, "Pan");
     CHECK(text(balance, 0.0) == "C" && text(balance, -0.5) == "50L" && text(balance, 0.25) == "25R");
@@ -844,6 +848,44 @@ TEST(each_split_sees_the_transport_where_it_starts) {
         CHECK_NEAR(p.seen[i].beats, 4.0 + offset / 48000.0 * 2.0, 1e-12);
         offset += p.seen[i].frames;
     }
+}
+
+namespace {
+
+// A delay's tail: one beat at the tempo it last heard.
+class TempoTail : public ProcessorBase<TempoTail> {
+  public:
+    void prepare(const ProcessSetup&, const ParamValues&) {}
+    void update(const ParamValues&) {}
+    void process(Block& b) {
+        if (b.transport) tail = static_cast<uint32_t>(48000.0 * 60.0 / b.transport->tempo);
+    }
+    uint32_t tailSamples() const { return tail; }
+    uint32_t tail = 0;
+};
+
+}  // namespace
+
+TEST(a_tail_that_changes_as_the_processor_plays_reaches_the_host) {
+    auto engine = std::make_unique<BasicEngine<TempoTail>>();
+    engine->activate(48000.0, 512, 2, 2);
+    CHECK(!engine->takeTailChange());
+    Transport t;
+    t.hasTempo = true;
+    t.tempo = 120.0;
+    std::vector<double> l(256), r(256);
+    double* io[] = {l.data(), r.data()};
+    NoEvents none;
+    engine->process<double>(io, io, 256, none, &t);
+    CHECK(engine->tail() == 24000);
+    CHECK(engine->takeTailChange());
+    CHECK(!engine->takeTailChange());
+    engine->process<double>(io, io, 256, none, &t);
+    CHECK(!engine->takeTailChange());  // told once, not every block
+    t.tempo = 60.0;
+    engine->process<double>(io, io, 256, none, &t);
+    CHECK(engine->tail() == 48000);
+    CHECK(engine->takeTailChange());
 }
 
 TEST(reset_preserves_parameters_and_clears_history) {

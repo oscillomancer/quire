@@ -44,13 +44,13 @@ machine, but file formats and commands can still change.
 - **Console 9 summing.** Channels and busses use a port of Airwindows'
   Console 9 encode/decode; it can be switched off per project with levels
   matched.
-- **Stock plugins.** Orrery (synth), Yarrow (EQ), Sundew (compressor),
-  Sluice (gate and expander), Flint (transient shaper), Kiln (saturation),
-  Echelon (delay), Nave (reverb), Plumb (utility) and Gauge (analyzer), as
+- **Stock plugins.** Marram (synth), Yarrow (EQ), Sundew (compressor),
+  Treeline (limiter), Gorse (transient shaper), Hickory (stereo utility),
+  Sorrel (gate and expander), Teasel (saturation), Bracken (delay), Ghyll
+  (reverb), Withy (chorus), Pollia (phaser) and Lichen (analyzer), as
   CLAP plugins usable in any host. Each has JSON patches and exposes its
-  parameters in physical units through a CLAP extension. Newer ones,
-  starting with Yarrow and Sundew, are written as DSP scripts and compiled
-  into plugins of their own (`plugins/stock`).
+  parameters in physical units through a CLAP extension. All are written as
+  DSP scripts and compiled into plugins of their own (`plugins/<name>`).
 - **Text formats.** Projects, patches and FX chains are canonical JSON; MIDI
   can be written in a compact text notation.
 

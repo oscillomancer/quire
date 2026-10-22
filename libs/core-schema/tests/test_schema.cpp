@@ -130,7 +130,7 @@ TEST_CASE("unit aliases") {
         {"50 cents", Unit::ct, 50},    {"2 octaves", Unit::oct, 2}, {"50%", Unit::percent, 50},
         {"4:1", Unit::ratio, 4},       {"2×", Unit::x, 2},          {"90°", Unit::deg, 90},
         {"120 bpm", Unit::bpm, 120},   {"4 qn", Unit::beats, 4},    {"512 smp", Unit::samples, 512},
-        {"3", Unit::none, 3}};
+        {"12.5 m", Unit::m, 12.5},     {"250 cm", Unit::m, 2.5},    {"3", Unit::none, 3}};
     for (const auto& a : aliases) {
         auto r = parseQuantity(a.text, a.unit);
         INFO(a.text);

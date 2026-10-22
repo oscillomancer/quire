@@ -2805,6 +2805,10 @@ struct Gain : Effect {
     if (fixture == "song_with_autoitem")  // + ai_1 on en_1: beats 4-8, a two-beat ramp, looped
         run("autoitem.add",
             R"({"env": "en_1", "position": 4, "length": 4, "source_length": 2, "points": [{"beat": 0, "value": -6}, {"beat": 2, "value": 0}]})");
+    if (fixture == "song_with_preset") {  // + the user preset "Quiet" for the gain, at -12 dB
+        run("fx.patch.merge", R"({"fx": "fx_2", "patch": {"params": {"gain": -12}}})");
+        run("fx.preset.save", R"({"fx": "fx_2", "name": "Quiet"})");
+    }
     if (fixture == "song_with_render") run("render.mix", R"({"name":"example"})");
     if (fixture == "render_queued")  // + q1: the mix of the first beat
         run("render.queue.add",

@@ -6,7 +6,7 @@
   },
   "listening": "Is this a bright, playable lead with a stable wide image?",
   "phrase": "notation 1\nmeter 4/4\nvoice v ch 1 vel 96\n1: C4:w",
-  "prompt": "Program Orrery as a bright, wide supersaw lead with seven detuned voices and a quick attack.",
+  "prompt": "Program Marram as a bright, wide supersaw lead with seven detuned voices and a quick attack.",
   "recipe_index": 5,
   "render": {
     "tail_s": 2
@@ -42,7 +42,7 @@
   "setup": [
     {
       "args": {
-        "plugin": "com.suppleaudio.orrery"
+        "plugin": "com.suppleaudio.marram"
       },
       "command": "plugin.load"
     }

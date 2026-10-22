@@ -59,10 +59,6 @@ typedef struct clap_plugin_supple_semantic_params {
     /* [main-thread] Writes a compact prose description of the current patch
      * (UTF-8 plain text, ≤ 600 characters for DETAIL_CHANGED). */
     bool(CLAP_ABI *describe)(const clap_plugin_t *plugin, uint32_t detail, const clap_ostream_t *out);
-    /* [main-thread] Optional compact live supple.analysis-report/1.0 JSON.
-     * NULL for plugins without telemetry; false when unavailable or the stream
-     * fails. Check struct_size through this member and its pointer first. */
-    bool(CLAP_ABI *get_telemetry)(const clap_plugin_t *plugin, const clap_ostream_t *out);
     /* [main-thread] Optional read-only supple.factory-patches/1.0 document.
      * Check struct_size through this member and a non-null pointer first. */
     bool(CLAP_ABI *get_factory_patches)(const clap_plugin_t *plugin, const clap_ostream_t *out);
@@ -129,21 +125,21 @@ Hosts read `struct_size` and must not call members beyond it. Plugins set it
 to `sizeof(clap_plugin_supple_semantic_params_t)` of the header they were
 built with. New members are only ever appended.
 
-The optional `get_telemetry` member was appended for the analyzer (2026-09-29).
-To call it, require `struct_size >= offsetof(type, get_telemetry) +
-sizeof(extension->get_telemetry)` and a non-null pointer. Original members
-remain usable when `struct_size >= offsetof(type, get_telemetry)`; hosts must
-not require the new full struct size just to call the old members. Existing
-plugins expose a null callback. A telemetry report does not change patch state.
-Gauge reports the existing analysis-report source/loudness/spectral/stereo
-fields it measures, single-point current M/S series, the 31-band live spectrum,
-and additive `live` window/hold/dropped-frame metadata. See stock-effects §9.
+The original members (through `describe`) are usable when `struct_size >=
+offsetof(type, get_factory_patches)`; a shorter struct is not used.
 
 `get_factory_patches` was appended on 2026-10-13. Calling it requires
 `struct_size >= offsetof(type, get_factory_patches) + sizeof(extension->get_factory_patches)`
 and a non-null pointer. A shorter struct or null callback offers no factory
-patches; its earlier methods remain usable. In particular, neither the
-original methods nor `get_telemetry` require the new full struct size.
+patches; its earlier methods remain usable: hosts must not require the full
+struct size just to call them.
+
+(2026-10-20) A `get_telemetry` member, appended for the analyzer Gauge on
+2026-09-29 between `describe` and `get_factory_patches`, was removed before
+any release, once Lichen replaced Gauge: nothing called it and no other
+plugin set it. Its removal is the one exception to append-only; a plugin
+built with it reads to a host as offering no factory patches until rebuilt.
+Measurements reach hosts and agents as read-only parameters (`fx.meters`).
 
 ## 5. Threading, real-time safety, parameter sync
 
@@ -213,7 +209,11 @@ round trip; `describe` is non-empty and ≤ 600 chars.
   block). Single CLAP param events still update one value at a time.
 - Legacy state: `FlatSemantic::legacyLoad` is only offered streams that do not
   claim the framed form (`patch::isFramedState`); a malformed v2 frame is
-  rejected, never reinterpreted.
+  rejected, never reinterpreted. (2026-10-20: `FlatSemantic`, the flat-patch
+  implementation in `plugins/common`, was removed with its last user, the
+  probe synth. A plugin implements the extension through `SemanticAdapter`
+  below, or as a DSP script through the template framework's semantic
+  layer.)
 - The conformance tool's step 7 runs 200 merges against a thread that
   processes blocks continuously and checks for process errors and that the
   last patch is in effect; RT cleanliness is checked when the plugin and tool
@@ -235,7 +235,11 @@ round trip; `describe` is non-empty and ≤ 600 chars.
 - Structured plugins implement the extension through
   `plugins/common`'s `SemanticModel` / `SemanticAdapter` (same wire formats as
   `FlatSemantic`); `semantic-conformance` exercises them with whole-document
-  replaces during processing.
+  replaces during processing. (2026-10-21: `plugins/common`'s plugin support,
+  `ParamStore`, `ClapParams` and `SemanticModel` / `SemanticAdapter`, was
+  removed with its last user, Orrery. Every stock plugin implements the
+  extension as a DSP script through the framework's semantic layer, whose
+  patches are flat `params` plus `routes`.)
 
 ## Amendments (2026-10-13, the patch as a state chunk)
 
@@ -280,3 +284,79 @@ patch as a chunk.
   file (the framework relocates a moved one, or reports it missing).
   `set_patch` returns once the file is loaded, so the next block, offline
   renders included, plays it.
+
+## Amendments (2026-10-21, parameters that apply only sometimes)
+
+- **`active_when`** on a schema `params` entry says when the parameter
+  applies: an array of conditions that must all hold,
+  `[{"param": "band1.enabled", "in": [true]}, {"param": "band1.type", "in":
+  ["bell", "low_shelf"]}]`. Each names a parameter that comes before the
+  entry in `params`: a toggle or a choice with the values (patch values:
+  booleans, choice keys) that satisfy it, or a number (`float` or `int`)
+  with `above` and/or `below`, in its unit, that its value lies strictly
+  between (`{"param": "voices", "above": 1}`). The parameter it names must
+  apply too. An entry without `active_when` applies whenever its module is
+  present.
+- **`"active": false`** now also marks a flat plugin's parameter whose
+  conditions do not hold with the current values, so `get_schema` follows
+  the values. Hosts read the schema when they need activity; a plugin calls
+  `changed(PATCH | SCHEMA)` after a `set_patch` that changes it, and does
+  not report changes that arrive through `clap.params` (automation, the
+  editor).
+- An inactive parameter keeps its value, saves it in the patch and state,
+  and accepts writes; it only does nothing until its conditions hold.
+  `describe` leaves it out. The DSP scripts' `.activeWhen()` and
+  `.activeUnless()`, `.activeAbove()` and `.activeBelow()` declare these
+  conditions (`skill/guides/dsp-language.md`); the suite's
+  `SemanticDefinition` carries them as `ParamMeaning::activeWhen` and answers
+  the framework's `Definition::applies()` (1.28.0) from them, so the
+  automatic editor dims what does not apply, as a script's own editor does.
+- Hosts report them back: the sandbox's `plugin.describe` lists the keys
+  under `inactive` and leaves them out of its summary, its `param.set`
+  marks such a value `"active": false`, and `patch.merge`, the engine's
+  `fx.patch.merge` and `fx.param.set` name the `params` they set that do not
+  apply under `inactive`.
+
+## Amendments (2026-10-21, modulation routes)
+
+- **`routes`**, a patch member beside `params`, for a plugin whose meaning
+  has sources: an object keyed `"<source>><parameter>"`, each value
+  `{"amount": ..., "via": "<source>"}` (`via` optional; a bare number or
+  string stands for `{"amount": ...}` on input). The amount is in the
+  parameter's physical unit at the source's full value, except a
+  frequency's, in octaves; text may carry a unit that converts (`"12 st"`,
+  `"+1.5 oct"`, `"-6 dB"`). `via` scales the amount by a second source. A
+  parameter's routes sum, and the result is kept to its route range (its
+  own range unless the plugin gives a wider one). At most 64 routes; a
+  route's amount at most the width of its parameter's route range.
+  Canonical form: sorted by source, then parameter, amounts as numbers.
+  Merge patches add, change (field by field) and remove (`null`) routes one
+  by one.
+- **Errors**: `routes.key` (not `source>parameter`), `routes.source` and
+  `routes.via` (no such source, with the closest and the list),
+  `routes.destination` (no such parameter, or one routes do not move, with
+  the list of those they do), `routes.unit` (the hint names the amount's
+  unit), `routes.amount` (missing, or more than the parameter can move),
+  `routes.voice` (a source with a value per voice, directly or through
+  `via`, routed to a parameter all voices share), `routes.count`,
+  `routes.type`, `routes.unknown_member`.
+- **The schema** gains `"sources"`: by key, `name`, `per_voice`, `range`
+  (`[-1, 1]` or `[0, 1]`) and `description`. A parameter routes move has
+  `"route": {"unit": "oct", "per_voice": true}` (and `min`/`max` when its
+  route range is wider than its own). The patch's JSON Schema has `routes`.
+- `describe` ends with `Routes: lfo1>filter1.cutoff +1.5 oct via modwheel,
+  ...`.
+- The routes live in a text property of the plugin's (a DSP script's:
+  `routes`, one route a line), so state and presets carry them; a patch
+  never shows that property among its `properties`, nor the automatic
+  editor as a text field (framework 1.29.0's `.hidden()`). Restoring a saved patch
+  keeps the routes whose source and parameter still exist.
+- The editor shows them as a list, `RouteList` (`supple/suite/route_list.h`):
+  a panel of the automatic editor (framework 1.30.0's `AutoPanel`) for a
+  script with routes and no editor of its own, and `e.routes(x, y, w, h)` in
+  a script's own. A row a route, with menus for its source, parameter and
+  via source (what a patch would refuse is shown but cannot be chosen) and
+  its amount as a bar, in the parameter's unit. Every change is written
+  through `PatchCodec::routeText`, the patch member's own checks and
+  canonical text, so the list makes only what a patch can and the host
+  records it as one property edit.

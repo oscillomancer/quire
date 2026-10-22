@@ -53,9 +53,22 @@ class VoiceBank {
     virtual void setMode(VoiceMode mode) = 0;
     virtual void setGlide(double ms) = 0;
     virtual void setBendRange(double semitones) = 0;
+    virtual void setVoiceLimit(int voices) = 0;
 
   protected:
     ~VoiceBank() = default;
+};
+
+// The patch's routes as the glue keeps them: what Param::routed() and, for
+// an instrument, forVoice() add to a parameter.
+class RouteHost {
+  public:
+    // Parameter table index `slot`'s plain `value` with the routes to it at
+    // voice v (-1: global sources only), kept in its route range.
+    virtual double routed(int slot, int v, double value) const = 0;
+
+  protected:
+    ~RouteHost() = default;
 };
 
 // What editor code reaches through its instance: the glue's script editor
@@ -150,6 +163,7 @@ class EditorBuilder {
     virtual void file(const void* member, double x, double y, double w, double h) = 0;
     virtual void keyboard(int lowKey, int highKey, double x, double y, double w, double h) = 0;
     virtual void meters(double x, double y, double w, double h) = 0;
+    virtual void routes(double x, double y, double w, double h) = 0;
 
   protected:
     ~EditorBuilder() = default;
@@ -161,6 +175,9 @@ class PatchBuilder {
     virtual void add(const char* name) = 0;
     virtual void set(const Param& param, double physical) = 0;
     virtual void set(const Param& param, const char* choiceKey) = 0;
+    // A route ("lfo1>pitch"), its amount in the destination's unit, and the
+    // source it goes through ("" for none).
+    virtual void route(const char* route, double amount, const char* via) = 0;
     virtual ~PatchBuilder() = default;
 };
 
@@ -174,8 +191,11 @@ struct Instance {
     // Back-edges a hook may take before it is stopped (audio hooks only).
     std::int64_t budget = std::int64_t{1} << 31;
     Status status;
-    VoiceBank* voices = nullptr;       // an instrument's
-    int latency = -1;                  // setLatency()'s, or -1: Info's
+    VoiceBank* voices = nullptr;  // an instrument's
+    RouteHost* routes = nullptr;  // a plugin with routes'
+    int latency = -1;             // setLatency()'s, or -1: Info's
+    int tail = kInfoTail;         // setTail()'s: samples, -1 forever
+    static constexpr int kInfoTail = -2;
     EditorServices* editor = nullptr;  // the editor's copy of the plugin: text, names
 
     static void bind(Plugin& plugin, Instance* instance) { plugin.instance_ = instance; }
@@ -208,6 +228,9 @@ struct Layout {
     static constexpr int paramGlideFrames = offsetof(Param, glideFrames_);
     static constexpr int paramChanged = offsetof(Param, changed_);
     static constexpr int paramReported = offsetof(Param, reported_);
+    static constexpr int sourceValues = offsetof(Source, values_);
+    static constexpr int sourceLow = offsetof(Source, low_);
+    static constexpr int sourcePerVoice = offsetof(Source, perVoice_);
     static constexpr int pluginInstance = offsetof(Plugin, instance_);
     // The glue's: a Canvas, Editor or Pointer made for a hook.
     static void bind(Canvas& canvas, Painter* painter) { canvas.painter_ = painter; }
@@ -283,6 +306,8 @@ class ParamRegistrar {
     virtual void declareFile(void* member, const FileSpec& spec) { (void)member, (void)spec; }
     // A Shared or SharedArray member, `bytes` long.
     virtual void declareShared(void* member, int bytes) { (void)member, (void)bytes; }
+    // A Source member.
+    virtual void declareSource(Source& source, const SourceSpec& spec) { (void)source, (void)spec; }
 };
 ParamRegistrar* registrar();
 void setRegistrar(ParamRegistrar* registrar);

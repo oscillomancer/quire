@@ -22,6 +22,11 @@
 // callback sees bins 0 to size / 2 of a real signal's spectrum; the rest is
 // their mirror image, which the inverse rebuilds. prepare() allocates;
 // process() does not.
+//
+// An analyser that only reads the spectrum prepares with Mode::Analyse:
+// the same frames and bins, no inverse transform and no audio back, at
+// about half the cost. Its push() is all a sample needs; process() leaves
+// the audio as it is, and pull() gives 0.
 #pragma once
 
 #include <algorithm>
@@ -36,12 +41,17 @@ namespace supple::dsp {
 
 class Stft {
   public:
+    // Resynthesise: frames to read and change, and the audio rebuilt from
+    // them. Analyse: frames to read only.
+    enum class Mode { Resynthesise, Analyse };
+
     // size: a power of two (rounded down); overlap: 4 or 8 frames over each
     // sample.
-    void prepare(int channels, int size = 2048, int overlap = 4) {
+    void prepare(int channels, int size = 2048, int overlap = 4, Mode mode = Mode::Resynthesise) {
         fft_.resize(static_cast<size_t>(std::max(16, size)));
         size_ = static_cast<int>(fft_.size());
         overlap_ = overlap >= 8 ? 8 : 4;
+        mode_ = mode;
         hop_ = size_ / overlap_;
         window_.resize(static_cast<size_t>(size_));
         for (int n = 0; n < size_; ++n) window_[static_cast<size_t>(n)] = 0.5 - 0.5 * std::cos(2.0 * kPi * n / size_);
@@ -50,7 +60,7 @@ class Stft {
         lanes_.assign(static_cast<size_t>(std::max(0, channels)), Lane{});
         for (Lane& lane : lanes_) {
             lane.input.assign(static_cast<size_t>(size_), 0.0);
-            lane.output.assign(static_cast<size_t>(size_), 0.0);
+            lane.output.assign(mode_ == Mode::Analyse ? 0 : static_cast<size_t>(size_), 0.0);
             lane.frame.assign(static_cast<size_t>(size_), {});
         }
         reset();
@@ -66,6 +76,7 @@ class Stft {
         }
     }
 
+    Mode mode() const { return mode_; }
     int size() const { return size_; }
     int hop() const { return hop_; }
     int bins() const { return size_ / 2 + 1; }
@@ -78,7 +89,8 @@ class Stft {
     void process(int channel, double* x, int frames, Fn&& spectrum) {
         for (int i = 0; i < frames; ++i) {
             if (push(channel, x[i])) spectrum(this->spectrum(channel), bins());
-            x[i] = pull(channel);
+            const double y = pull(channel);
+            if (mode_ == Mode::Resynthesise) x[i] = y;
         }
     }
 
@@ -86,7 +98,8 @@ class Stft {
     // spectrum is ready in spectrum(channel), bins 0 to bins() - 1, to read
     // and change before pull() gives the output sample. One push() and one
     // pull() per sample: a push() without a pull() drops that sample's
-    // output, and a pull() without a push() pushes silence.
+    // output, and a pull() without a push() pushes silence. Analysing, the
+    // spectrum stays readable until the next push().
     bool push(int channel, double x) {
         Lane& lane = lanes_[static_cast<size_t>(channel)];
         if (lane.pushed) pull(channel);
@@ -103,6 +116,12 @@ class Stft {
     double pull(int channel) {
         Lane& lane = lanes_[static_cast<size_t>(channel)];
         if (!lane.pushed) push(channel, 0.0);
+        if (mode_ == Mode::Analyse) {
+            lane.pending = false;
+            lane.position = (lane.position + 1) % lane.input.size();
+            lane.pushed = false;
+            return 0.0;
+        }
         if (lane.pending) {
             synthesise(lane);
             lane.pending = false;
@@ -118,7 +137,7 @@ class Stft {
 
   private:
     struct Lane {
-        std::vector<double> input, output;  // rings, both at `position`
+        std::vector<double> input, output;  // rings, both at `position`; no output analysing
         std::vector<std::complex<double>> frame;
         size_t position = 0;
         int untilFrame = 1;
@@ -150,6 +169,7 @@ class Stft {
     std::vector<double> window_;
     std::vector<Lane> lanes_;
     int size_ = 16, overlap_ = 4, hop_ = 4;
+    Mode mode_ = Mode::Resynthesise;
     double scale_ = 1.0;
 };
 

@@ -160,6 +160,11 @@ void setParamEvent(clap_id id, double value) {
 #ifndef HOST_SMOKE_PLAIN_PARAM
 #  error "HOST_SMOKE_PLAIN_PARAM must be defined by the build"
 #endif
+// 1 for an effect that passes its input through unchanged (a meter, an
+// analyser): its renders must equal the input exactly instead of differing.
+#ifndef HOST_SMOKE_TRANSPARENT
+#  define HOST_SMOKE_TRANSPARENT 0
+#endif
 
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);  // a crash keeps every line before it
@@ -275,7 +280,7 @@ int main(int argc, char** argv) {
     host_contract::ports(plug, layout, check);
     host_contract::parameterText(plug, check);
     host_contract::processing(fac, desc->id, HOST_SMOKE_PLAIN_PARAM, channels,
-                              48000.0, isEffect, takesNotes, check);
+                              48000.0, isEffect, takesNotes, check, HOST_SMOKE_TRANSPARENT != 0);
 
     const uint32_t block = 512;
     check(plug->activate(plug, 48000.0, 32, block), "activate at 48 kHz");

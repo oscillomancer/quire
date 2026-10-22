@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string_view>
 #include <utility>
 
 #include "supple/params/params.h"
@@ -26,6 +27,18 @@ namespace supple::sandbox::detail {
 inline bool ratioPerceived(params::Unit unit) {
     return unit == params::Unit::Hz || unit == params::Unit::ms || unit == params::Unit::st ||
            unit == params::Unit::ct || unit == params::Unit::oct;
+}
+
+// Whether "auto" leaves a key out: performance and placement parameters
+// (voice.*, pans, envelope curves, delays and holds, velocity sensitivity,
+// LFO fades) and the output level, as `output` or `output.level` (loudness is
+// matched, not optimized).
+inline bool autoExcluded(std::string_view k) {
+    auto ends = [&](std::string_view suffix) {
+        return k.size() >= suffix.size() && k.substr(k.size() - suffix.size()) == suffix;
+    };
+    return k.starts_with("voice.") || k == "output" || k == "output.level" || ends(".pan") ||
+           ends("_curve") || ends(".delay") || ends(".hold") || ends(".velocity") || ends(".fade");
 }
 
 inline constexpr double kRatioWindow = 4.0;   // ±2 octaves (×4 / ÷4)

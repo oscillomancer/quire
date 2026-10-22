@@ -1,8 +1,0 @@
-/* Linux CLAP export list: the entry point and nothing else. See
- * exports-vst3.map for why the rest must not leak. */
-{
-  global:
-    clap_entry;
-  local:
-    *;
-};

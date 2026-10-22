@@ -691,8 +691,11 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
         static_cast<const clap_plugin_posix_fd_support_t*>(ext(CLAP_EXT_POSIX_FD_SUPPORT));
     self->extSemantic_ = static_cast<const clap_plugin_supple_semantic_params_t*>(
         ext(CLAP_EXT_SUPPLE_SEMANTIC_PARAMS));
-    if (self->extSemantic_ && self->extSemantic_->struct_size <
-                                  offsetof(clap_plugin_supple_semantic_params_t, get_telemetry))
+    // The five original members (schema, patch get and set, describe) are
+    // what every plugin with the extension has; anything shorter is unusable.
+    if (self->extSemantic_ &&
+        self->extSemantic_->struct_size <
+            offsetof(clap_plugin_supple_semantic_params_t, get_factory_patches))
         self->extSemantic_ = nullptr;  // too old to call safely
     self->info_.semantic = self->extSemantic_ != nullptr;
     self->extStatus_ = static_cast<const clap_plugin_supple_plugin_status_t*>(

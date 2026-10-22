@@ -98,19 +98,9 @@ Result<std::vector<Tuned>> resolveParams(Session& s, const std::string& instance
     bool windowed = false;  // "auto": narrow each range around the current value
     if (request.isString() && request.asString() == "auto") {
         windowed = true;
-        // "auto" leaves out performance and placement parameters: voice.*,
-        // pans, envelope curves/delay/hold, velocity sensitivity, LFO fades
-        // and the output level (loudness is matched, not optimized).
-        auto excluded = [](std::string_view k) {
-            auto ends = [&](std::string_view suffix) {
-                return k.size() >= suffix.size() && k.substr(k.size() - suffix.size()) == suffix;
-            };
-            return k.rfind("voice.", 0) == 0 || k == "output.level" || ends(".pan") ||
-                   ends("_curve") || ends(".delay") || ends(".hold") || ends(".velocity") ||
-                   ends(".fade");
-        };
+        // "auto" leaves out what detail::autoExcluded() names.
         for (const auto& m : table->asObject())
-            if (tunable(m.value) && !excluded(m.key))
+            if (tunable(m.value) && !detail::autoExcluded(m.key))
                 wanted.emplace_back(m.key, json::Value::object());
     } else if (request.isArray()) {
         for (std::size_t i = 0; i < request.size(); ++i) {

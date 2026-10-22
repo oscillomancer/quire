@@ -425,6 +425,7 @@ may use any alias of a compatible unit.
 | `bpm` | tempo | `bpm` | — |
 | `beats` | musical time | `beats`, `qn` | — |
 | `samples` | sample count | `samples`, `smp` | — |
+| `m` | distance | `m`, `meters`, `metres`, `cm`, `ft` | cm ÷100, ft ×0.3048 |
 | `none` | dimensionless | — | — |
 
 Time uses **ms** as the canonical unit everywhere (`s` is only a string

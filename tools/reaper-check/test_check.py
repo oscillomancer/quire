@@ -113,7 +113,7 @@ class Helpers(unittest.TestCase):
 class EditorChecks(unittest.TestCase):
     def test_host_confirmation_requires_both_shown_and_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp) / "Plumb"
+            folder = Path(tmp) / "Hickory"
             folder.mkdir()
             class Runner:
                 def run(self, args, label):
@@ -121,18 +121,18 @@ class EditorChecks(unittest.TestCase):
             runner = Runner()
             metadata = folder / "editor.tsv"
             metadata.write_text("shown\t1\nclosed\t1\ncomplete\t1\n")
-            result = check.check_editor("com.suppleaudio.utility", runner, folder, Path(tmp) / "config")
+            result = check.check_editor("com.suppleaudio.hickory", runner, folder, Path(tmp) / "config")
             self.assertEqual(result["closed"], "1")
-            self.assertEqual(runner.invocation, ([str(folder / "editor.lua")], "Plumb-editor"))
+            self.assertEqual(runner.invocation, ([str(folder / "editor.lua")], "Hickory-editor"))
             # A successful exit or complete marker alone cannot pass the check.
             for content in ("complete\t1\n", "shown\t1\ncomplete\t1\n",
                             "shown\t1\nclosed\t1\n", "error\tUI failed\n"):
                 metadata.write_text(content)
                 with self.assertRaises(check.CheckError):
-                    check.check_editor("com.suppleaudio.utility", runner, folder, Path(tmp) / "config")
+                    check.check_editor("com.suppleaudio.hickory", runner, folder, Path(tmp) / "config")
             metadata.unlink()
             with self.assertRaisesRegex(check.CheckError, "editor did not produce metadata"):
-                check.check_editor("com.suppleaudio.utility", runner, folder, Path(tmp) / "config")
+                check.check_editor("com.suppleaudio.hickory", runner, folder, Path(tmp) / "config")
 
     def test_editor_is_checked_after_signal_failure_but_not_when_disabled(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -146,19 +146,19 @@ class EditorChecks(unittest.TestCase):
                     patch.object(check, "rms", return_value=0), \
                     patch.object(check, "difference", return_value=0), \
                     patch.object(check, "check_editor", return_value={"shown": "1", "closed": "1"}) as editor:
-                row = check.check_plugin("com.suppleaudio.utility", check.CASES["com.suppleaudio.utility"],
+                row = check.check_plugin("com.suppleaudio.hickory", check.CASES["com.suppleaudio.hickory"],
                                          Runner(), root / "enabled", root / "config", root / "source", True)
                 self.assertEqual((row["load"], row["signal"], row["editor"]), ("pass", "fail", "pass"))
                 editor.assert_called_once()
                 editor.reset_mock()
                 editor.side_effect = check.CheckError("editor failed")
-                row = check.check_plugin("com.suppleaudio.utility", check.CASES["com.suppleaudio.utility"],
+                row = check.check_plugin("com.suppleaudio.hickory", check.CASES["com.suppleaudio.hickory"],
                                          Runner(), root / "failed", root / "config", root / "source", True)
                 self.assertEqual((row["signal"], row["editor"]), ("fail", "fail"))
                 self.assertEqual(row["editor_reason"], "editor failed")
                 self.assertEqual(row["editor_error"]["code"], "check.failed")
                 editor.reset_mock()
-                row = check.check_plugin("com.suppleaudio.utility", check.CASES["com.suppleaudio.utility"],
+                row = check.check_plugin("com.suppleaudio.hickory", check.CASES["com.suppleaudio.hickory"],
                                          Runner(), root / "disabled", root / "config", root / "source")
                 self.assertEqual(row["editor"], "skipped")
                 self.assertEqual(row["editor_reason"], "--editor not requested")
@@ -169,8 +169,8 @@ class EditorChecks(unittest.TestCase):
             root = Path(tmp)
             plugins = root / "build/dev/plugins/clap"
             plugins.mkdir(parents=True)
-            (plugins / "Plumb.clap").write_bytes(b"test artifact")
-            row = {"plugin": "com.suppleaudio.utility", "load": "pass", "signal": "pass",
+            (plugins / "Hickory.clap").write_bytes(b"test artifact")
+            row = {"plugin": "com.suppleaudio.hickory", "load": "pass", "signal": "pass",
                    "automation": "pass", "state": "pass", "editor": "fail", "reason": "UI failed"}
             with patch.object(check, "ROOT", root), patch.object(check.Path, "home", return_value=root), \
                     patch.object(check, "test_signal"), patch.object(check, "check_plugin", return_value=row) as plugin, \

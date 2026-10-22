@@ -1,62 +1,111 @@
-# Gate / expander
+# Sorrel: gate and expander
 
-Sluice (`com.suppleaudio.gate`) reduces spill between drum hits and pauses,
-or gently expands quiet material downward. It exposes the flat
-`supple.gate-patch/1.0` patch. Use physical units in semantic merge patches;
-ordinary CLAP float values are normalized curve positions. The editor and
-host value text use the same parameter table.
+Use `com.suppleaudio.sorrel` to turn down what plays between the sounds you
+want: spill between drum hits, hiss or room noise between phrases. Patches
+use `supple.sorrel-patch/1.0`, with physical values under `params`; a merge
+changes only the keys it names.
 
-| key | unit / values | range | default |
-|---|---|---|---|
-| `mode` | enum gate, expander | | gate |
-| `threshold` | dB | −80..0 | −40 |
-| `range` | dB attenuation floor | −80..0 | −80 (exact mute) |
-| `ratio` | ratio, expander only | 1..10 | 2 |
-| `hysteresis` | dB | 0..12 | 3 |
-| `attack` | ms, log | 0.01..100 | 0.5 |
-| `hold` | ms | 0..1000 | 20 |
-| `release` | ms, log | 5..5000 | 150 |
-| `lookahead` | enum off, ms1, ms5 | requires restart; not automatable | off |
-| `sidechain` | enum internal, external | | internal |
-| `sc_highpass` | Hz, log | 10..500, 10 off | 10 |
-| `sc_lowpass` | Hz, log | 1000..20000, 20000 off | 20000 |
-| `sc_listen` | bool | | false |
-| `stereo_link` | percent | 0..100 | 100 |
-| `mix` | percent wet | 0..100 | 100 |
-| `output` | dB | −24..24 | 0 |
-| `gr` | readonly dB | −80..0 | −80 |
-| `open` | readonly bool | logical state of either channel | false |
+| Key | Unit and range | Default |
+|---|---|---|
+| `mode` | `gate` (open or closed), `expand` (quieter sound turned down by `ratio`) | gate |
+| `threshold` | dBFS, −80…0: the key level above which it opens | −40 |
+| `hysteresis` | dB, 0…24: it closes once the level is this far under the threshold (gate) | 6 |
+| `range` | dB, −80…0: the gain while closed; −80 is silence | −40 |
+| `ratio` | 1.2…10 (expand): each dB under the threshold becomes this many | 2 |
+| `attack` | ms, 0.05…50: how long the opening takes | 1 |
+| `hold` | ms, 0…1000: how long Gate stays open below the close level, or Expand holds gain before it falls | 20 |
+| `release` | ms, 10…3000: how fast it closes, as the time to turn down 60 dB | 150 |
+| `follow` | bool: close at the rate the sound was already decaying at, within ¼ to 4 × the release (gate) | true |
+| `lookahead` | `off`, `ms1`, `ms2`, `ms5`; adds that latency; a restart, not automatable | ms2 |
+| `key` | `internal`, `external` (the sidechain input, when something is routed to it) | internal |
+| `key_hpf` | Hz, 20…2000 on what it listens to; 20 is off | 20 |
+| `key_lpf` | Hz, 100…20000 on what it listens to; 20000 is off | 20000 |
+| `listen` | `off`, `key` (what it listens to), `delta` (what it takes away) | off |
+| `gain` | dB, readonly: the gain now (0 open, the range closed) | |
+| `noise_floor` | dBFS, readonly: the commonest quiet key level of the last 10 s | |
+| `loud_level` | dBFS, readonly: the key level exceeded 5 % of the last 10 s | |
+| `suggested` | dBFS, readonly: a threshold that clears the noise | |
+| `open_time` | %, readonly: how much of the last 10 s it was open | |
+| `openings` | readonly: how many times it opened in the last 10 s | |
 
-The main input/output can be mono or stereo. Input port 1 is a stereo key.
-Route a key to it before selecting external: missing or silent external keys
-keep the gate closed. Full stereo linking uses the louder key for both main
-channels; unlinked operation gates each independently. Key listen outputs
-the filtered key through the same delay, mix and output controls.
+Levels are the key's peak over 10 ms, in dBFS: compare them with the
+readouts, not with an RMS loudness. With lookahead the opening ends a
+millisecond before the level crosses the threshold, so onsets pass whole.
+`open_time` includes digital silence in its time window, and counts it as
+open while the hold keeps the gate open. The level histogram skips digital
+silence.
+Changing `listen` crossfades over 10 ms between the signals being heard,
+including Key to Delta and either one back to Off. Another change during a
+fade starts from the current blend.
 
-Attack and release describe 63.2 % settling in the dB domain. Hysteresis puts
-the closing level below threshold; hold counts from the last sample meeting
-that closing level. The expander remains at unity target while latched open;
-when closed, its target is `(ratio−1) × (level−threshold)`, limited by range.
-That makes the hysteresis band history-dependent. `open` measures the state,
-and `gr` measures gain before dry mix/output, so they need not agree visually
-through an attack/release or when ratio is 1.
+## Finding the threshold
 
-Three starting recipes (merge only the shown fields; listen and adjust):
+Render at least 10 s of the track with the gate in place (any settings),
+then read the readouts with `param_get`:
 
-1. **Drum spill:** `{"params":{"mode":"gate","threshold":-35,"range":-30,"attack":0.5,"hold":50,"release":120,"sc_highpass":160}}`.
-   A finite range keeps the room audible between hits. Use key listen to
-   check that cymbal bleed is not opening the gate.
-2. **Quiet room expansion:** `{"params":{"mode":"expander","threshold":-50,"ratio":2,"range":-18,"hysteresis":3,"hold":40,"release":300}}`.
-   Preserve low-level tails; raise threshold only after checking the source.
-3. **External rhythmic key:** `{"params":{"mode":"gate","sidechain":"external","lookahead":"ms5","threshold":-30,"range":-80,"hold":30,"release":80}}`.
-   Route the key first. Lookahead pre-opens for transients and needs a host
-   restart. Main and dry paths remain aligned to the reported latency.
+1. `noise_floor` is the noise or spill; `loud_level` the sound. Less than
+   about 15 dB between them and a gate will not separate them: use Expand,
+   or leave it.
+2. `suggested` puts the close level (threshold − hysteresis)
+   2 dB above the noise's peaks. Set `threshold` to it.
+3. Render again and read `openings`: about one per hit or phrase is right.
+   Many more is chatter: raise `hysteresis` or `hold`. Fewer means quiet
+   hits stay closed: lower `threshold`, or filter the key.
 
-Lookahead normalizes the opening ramp to finish within the preview interval,
-even for a longer attack setting; hold is at least preview + one sample.
-Without lookahead, sharp transients are attenuated during attack. −80 range
-settles to exact zero, but partial dry mix still passes audio. Gate/expander
-processing cannot remove spill underneath wanted notes. Key filters are
-12 dB/oct, clamped to 0.45 fs. The editor samples key level/gain every 50 ms
-and can miss short peaks; use offline analysis or rendered audio for final
-checks. These recipes are starting points, not an automatic noise classifier.
+Spill that is as loud as quiet wanted notes (a kick in the snare mic) is not
+noise to the histogram: filter the key so only the wanted sound reaches it,
+then read the readouts again (they measure the filtered key).
+
+## Recipes
+
+Snare mic, kick and hats spilling (the high-pass keeps the kick out of the
+key, a finite range keeps some room):
+
+```json
+{"params":{"threshold":-30,"range":-30,"hold":30,"release":120,"key_hpf":180}}
+```
+
+Kick mic, closed tight between hits (the low-pass keeps the snare and hats
+out of the key):
+
+```json
+{"params":{"threshold":-28,"range":-80,"hold":30,"release":90,"key_lpf":180}}
+```
+
+A tom left to ring (Follow fades it at the rate it rings):
+
+```json
+{"params":{"threshold":-32,"range":-24,"hold":60,"release":400,"key_hpf":60,"key_lpf":2000}}
+```
+
+Hiss between sung phrases, gently (Expand keeps soft onsets and endings):
+
+```json
+{"params":{"mode":"expand","threshold":-48,"ratio":2,"range":-18,"hold":120,"release":300,"key_hpf":100}}
+```
+
+A pad chopped by a rhythm on another track: route that track to the
+sidechain input first.
+
+```json
+{"params":{"key":"external","threshold":-30,"range":-80,"attack":0.5,"hold":10,"release":40,"follow":false,"lookahead":"ms5"}}
+```
+
+## Measuring it
+
+`listen: "delta"` plays only what the gate removes: render it and check
+that it holds no wanted sound (its level during hits should be near the
+noise floor). Compare the onsets of a gated and an ungated render: with
+lookahead they should match. `open_time` and `openings` change with the
+threshold, so read them after each change.
+
+## Limits
+
+A gate cannot remove noise under the sound it lets through; only between
+sounds. Soft onsets below the threshold are turned down until the level
+crosses it (use Expand, or a lower threshold). The suggestion assumes the
+material has quiet stretches. An external key that is not connected falls
+back to the input. Lookahead changes restart the plugin.
+
+See [mixing](mixing.md) and
+[stock spec §3](../../docs/specs/stock-effects.md#3-gate--expander--sorrel-sorrel).

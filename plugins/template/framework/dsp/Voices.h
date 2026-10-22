@@ -62,8 +62,10 @@ class Voices {
         double key = 60.0;    // glided toward note.key
         double pressure = 0.0, timbre = 0.0;  // MPE, 0..1
         uint64_t age = 0;
-        double glideStep = 0.0;
-        int glideLeft = 0;
+        // A glide's pitch is worked out from where it started, never summed
+        // step by step, so it is the same in any blocks.
+        double glideFrom = 0.0, glideStep = 0.0;
+        int glideLeft = 0, glided = 0;
     };
 
     void prepare(double sampleRate) {
@@ -176,8 +178,8 @@ class Voices {
     void tick() {
         for (Voice& v : voices_) {
             if (v.glideLeft <= 0) continue;
-            v.key += v.glideStep;
-            if (--v.glideLeft == 0) v.key = v.note.key;
+            ++v.glided;
+            v.key = --v.glideLeft == 0 ? v.note.key : v.glideFrom + v.glideStep * v.glided;
         }
     }
     // For a block at a time: the voice's pitch `frame` samples on, and the
@@ -187,7 +189,9 @@ class Voices {
     double pitchAt(int v, int frame) const {
         const Voice& x = voices_[v];
         const int steps = std::clamp(frame, 0, std::max(x.glideLeft, 0));
-        const double key = x.glideLeft > 0 && steps == x.glideLeft ? x.note.key : x.key + x.glideStep * steps;
+        const double key = x.glideLeft <= 0       ? x.key
+                           : steps == x.glideLeft ? x.note.key
+                                                  : x.glideFrom + x.glideStep * (x.glided + steps);
         return key + bend(x.note.channel);
     }
     void advance(int frames) {
@@ -195,7 +199,8 @@ class Voices {
             if (v.glideLeft <= 0 || frames <= 0) continue;
             const int steps = std::min(frames, v.glideLeft);
             v.glideLeft -= steps;
-            v.key = v.glideLeft == 0 ? v.note.key : v.key + v.glideStep * steps;
+            v.glided += steps;
+            v.key = v.glideLeft == 0 ? v.note.key : v.glideFrom + v.glideStep * v.glided;
         }
     }
 
@@ -258,7 +263,8 @@ class Voices {
     }
     void glideTo(Voice& v, double from) {
         if (glideSamples_ > 0 && from >= 0.0 && from != v.note.key) {
-            v.key = from;
+            v.key = v.glideFrom = from;
+            v.glided = 0;
             v.glideLeft = glideSamples_;
             v.glideStep = (v.note.key - from) / glideSamples_;
         } else {

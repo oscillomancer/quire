@@ -13,8 +13,9 @@ struct Spectral : Effect {
         .name = "Spectral", .id = "com.example.spectral", .vendor = "Example"};
 
     Param mode = choice("Mode", {"Gate", "Robot", "Whisper"}, 0);
-    Param threshold =
-        decibels("Threshold", -100, 0, -60).help("Gate: frequencies quieter than this go.");
+    Param threshold = decibels("Threshold", -100, 0, -60)
+                          .activeWhen(mode, {"Gate"})
+                          .help("Gate: frequencies quieter than this go.");
     Param mix = percent("Mix", 100).smoothed(20);
 
     Array<Stft, 2> stft;

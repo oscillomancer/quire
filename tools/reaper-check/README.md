@@ -12,7 +12,7 @@ python3 tools/reaper-check/check.py --build-dir build/dev
 # Open, confirm and close floating editors (requires a desktop display):
 python3 tools/reaper-check/check.py --build-dir build/dev --editor
 # A focused run, another preset or an explicit executable:
-python3 tools/reaper-check/check.py --build-dir build/release --plugin com.suppleaudio.utility
+python3 tools/reaper-check/check.py --build-dir build/release --plugin com.suppleaudio.hickory
 python3 tools/reaper-check/check.py --reaper /usr/lib/REAPER/reaper --timeout 30
 # Pure helper/process tests: no REAPER or audio device required.
 python3 -m unittest discover -s tools/reaper-check -p 'test_*.py' -v
@@ -108,35 +108,39 @@ and finite decoded samples. The reader handles PCM 8/16/24/32 and IEEE float
 24-bit PCM, normalization/dither/tail off. This checks the output file rather
 than asserting the plugin's internal floating-point safety.
 
-Default output must be non-silent. Instrument bypass must be silent. Plumb,
-Gauge, neutral Flint and Yarrow (every band off) must match bypass
-sample-for-sample; other defaults must differ. Dynamics differences may
+Default output must be non-silent. Instrument bypass must be silent. Hickory,
+Lichen, neutral Gorse, Yarrow (every band off), Treeline (no gain, the
+signal under its ceiling) and Sorrel (the fixture above its threshold) must
+match bypass sample-for-sample; other defaults must differ. Dynamics differences may
 include startup ramps.
 
 | CLAP id suffix | Artifact / host name | Automated parameter | Points at 0 / 2 seconds | Expectation |
 |---|---|---|---|---|
-| `probe-synth` | ProbeSynth / Probe Synth | Output Gain | −12 / −24 dB | −12 ±1 dB |
-| `orrery` | Orrery | Output Level | 0 / −12 dB | −12 ±1 dB |
-| `utility` | Plumb | Gain | 0 / −12 dB | −12 ±1 dB |
 | `yarrow` | Yarrow | Output | 0 / −12 dB | −12 ±1 dB |
 | `sundew` | Sundew | Threshold | 0 / −36 dB | second half >3 dB quieter |
-| `analyzer` | Analyzer / Gauge | Hold | false / true | envelope reload + unchanged audio |
-| `gate` | Gate / Sluice | Threshold | −80 / −6 dB | second half >3 dB quieter |
-| `drive` | Kiln | Output | 0 / −12 dB | −12 ±1 dB |
-| `transient` | Flint | Output | 0 / −12 dB | −12 ±1 dB |
-| `delay` | Echelon | Output | 0 / −12 dB | −12 ±1 dB |
+| `treeline` | Treeline | Ceiling | 0 / −24 dB | second half >3 dB quieter |
+| `gorse` | Gorse | Output | 0 / −12 dB | −12 ±1 dB |
+| `hickory` | Hickory | Gain | 0 / −12 dB | −12 ±1 dB |
+| `sorrel` | Sorrel | Threshold | −80 / −6 dB | second half >3 dB quieter |
+| `teasel` | Teasel | Output | 0 / −12 dB | −12 ±1 dB |
+| `bracken` | Bracken | Output | 0 / −12 dB | −12 ±1 dB |
+| `ghyll` | Ghyll | Output | 0 / −12 dB | −12 ±1 dB |
+| `pollia` | Pollia | Output | 0 / −12 dB | −12 ±1 dB |
+| `lichen` | Lichen | Target | −30 / −5 LUFS | envelope reload + unchanged audio |
+| `marram` | Marram | Output | 0 / −12 dB | −12 ±1 dB |
+| `withy` | Withy | Output | 0 / −12 dB | −12 ±1 dB |
 
 Continuous values use ADR-0010's normalized CLAP domain. The table keeps those
-values explicit; stepped Hold uses 0/1. Add a plugin in a few lines in `CASES`
-(id, artifact/display name, instrument/effect, parameter, endpoints and
+values explicit. Add a plugin in a few lines in `CASES`
+(id, artifact name, instrument/effect, parameter, endpoints and
 expectation). No plugin C++ or REAPER installation changes are required.
 
 Automation is a square step at 2 seconds, with a terminal point at 4 seconds.
 RMS is measured in 0.35–1.8 and 2.35–3.8 second windows; each is divided by the
 same window of the unautomated render before taking their ratio. This cancels
-phrase/tail/detector differences without assuming stationary input. Gauge's
-Hold envelope is saved and reloaded and its audio transparency is measured;
-**meter freeze behavior is not measured** by this offline audio check.
+phrase/tail/detector differences without assuming stationary input. Lichen's
+Target envelope is saved and reloaded and its audio transparency is measured;
+**its readouts are not measured** by this offline audio check.
 
 ## Parameter addressing and saved state: observed in REAPER
 
@@ -150,10 +154,10 @@ or copied.
 `TrackFX_GetParamName()` finds the table's unique display name;
 `TrackFX_GetParamIdent()` records its host identifier. `GetFXEnvelope(track,
 fx,index,true)` takes the **zero-based REAPER parameter index**, not the CLAP
-id. REAPER saves `<PARMENV index:CLAP-id min max default`, e.g. Plumb Gain
-`0:0`, Facet (the EQ Yarrow replaced) Band 3 Gain `17:17`, and Orrery Output
-Level **`219:2500`**.
-The Orrery observation distinguishes index from id. Indices may change with
+id. REAPER saves `<PARMENV index:CLAP-id min max default`, e.g. Plumb (the
+utility Hickory replaced) Gain `0:0`, Facet (the EQ Yarrow replaced) Band 3
+Gain `17:17`, and Orrery (the synth Marram replaced) Output Level **`219:2500`**.
+That observation distinguishes index from id. Indices may change with
 parameter enumeration; runtime discovery avoids assuming index equals id.
 The script reopens the saved automation RPP and checks all three envelope
 points at the resolved parameter before reporting success. The actual headers,

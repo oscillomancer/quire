@@ -11,22 +11,31 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 
 | id (dir, code, CLAP id suffix) | display name | CLAP id | State magic | AU subtype | Features |
 |---|---|---|---|---|---|
-| `yarrow` (`plugins/stock/yarrow`) | Yarrow | `com.suppleaudio.yarrow` | `LzjE` (the player's for the id) | `Yarw` | audio-effect, equalizer |
-| `sundew` (`plugins/stock/sundew`) | Sundew | `com.suppleaudio.sundew` | `pqwP` (the player's for the id) | `Sndw` | audio-effect, compressor |
-| `utility` | Plumb | `com.suppleaudio.utility` | `QUT1` | `QUtl` | audio-effect, utility, stereo |
-| `analyzer` | Gauge | `com.suppleaudio.analyzer` | `QAN1` | `QAna` | audio-effect, analyzer, stereo |
-| `drive` | Kiln | `com.suppleaudio.drive` | `QDR1` | `QDrv` | audio-effect, distortion, stereo |
-| `gate` | Sluice | `com.suppleaudio.gate` | `QGT1` | `QGat` | audio-effect, gate, expander, stereo |
-| `transient` | Flint | `com.suppleaudio.transient` | `QTS1` | `QTrn` | audio-effect, transient-shaper, stereo |
-| `delay` | Echelon | `com.suppleaudio.delay` | `QDL1` | `QDly` | audio-effect, delay, stereo |
-| `reverb` | Nave | `com.suppleaudio.reverb` | `QRV1` | `QRvb` | audio-effect, reverb, stereo |
+| `yarrow` (`plugins/yarrow`) | Yarrow | `com.suppleaudio.yarrow` | `LzjE` (the player's for the id) | `Yarw` | audio-effect, equalizer |
+| `sundew` (`plugins/sundew`) | Sundew | `com.suppleaudio.sundew` | `pqwP` (the player's for the id) | `Sndw` | audio-effect, compressor |
+| `treeline` (`plugins/treeline`) | Treeline | `com.suppleaudio.treeline` | `tdOY` (the player's for the id) | `Trln` | audio-effect, limiter |
+| `gorse` (`plugins/gorse`) | Gorse | `com.suppleaudio.gorse` | `dEQG` (the player's for the id) | `Gors` | audio-effect, transient-shaper |
+| `hickory` (`plugins/hickory`) | Hickory | `com.suppleaudio.hickory` | `iEKh` (the player's for the id) | `Hkry` | audio-effect, utility |
+| `sorrel` (`plugins/sorrel`) | Sorrel | `com.suppleaudio.sorrel` | `sTMn` (the player's for the id) | `Sorl` | audio-effect, gate |
+| `teasel` (`plugins/teasel`) | Teasel | `com.suppleaudio.teasel` | `BLWw` (the player's for the id) | `Tesl` | audio-effect, distortion |
+| `bracken` (`plugins/bracken`) | Bracken | `com.suppleaudio.bracken` | `PzKJ` (the player's for the id) | `Brkn` | audio-effect, delay |
+| `ghyll` (`plugins/ghyll`) | Ghyll | `com.suppleaudio.ghyll` | `DIow` (the player's for the id) | `Ghyl` | audio-effect, reverb |
+| `lichen` (`plugins/lichen`) | Lichen | `com.suppleaudio.lichen` | `cwHJ` (the player's for the id) | `Lchn` | audio-effect, analyzer |
+| `marram` (`plugins/marram`) | Marram | `com.suppleaudio.marram` | `XZXx` (the player's for the id) | `Mrrm` | instrument, synthesizer |
+| `withy` (`plugins/withy`) | Withy | `com.suppleaudio.withy` | `aSho` (the player's for the id) | `Wthy` | audio-effect, chorus |
+| `pollia` (`plugins/pollia`) | Pollia | `com.suppleaudio.pollia` | `EGJQ` (the player's for the id) | `Poll` | audio-effect, phaser |
 
-In the template's identity checklist the code name is the id
-(`Utility`/`utility`/`UTILITY`,
-`Analyzer`/`analyzer`/`ANALYZER`); only the user-visible name string is the
-working name, defined once per plugin.
+Marram is an instrument; its spec, implementation notes included, is
+`docs/specs/marram.md`.
 
 ## 1. The shape every effect shares
+
+(2026-10-20) No stock effect has this shape any more: each is a DSP script
+(ADR-0047; `plugins/README.md` says how to change one). This section
+records the hand-written design they replaced. Orrery, the synthesizer,
+was the last plugin built this way (through `SemanticAdapter`, after
+`FlatSemantic` went with its last user); it and `plugins/common`'s plugin
+support were removed on 2026-10-21, when Marram replaced it.
 
 ### 1.1 Layout
 
@@ -53,12 +62,12 @@ Like Orrery (`plugins/orrery`):
     GUI and tests use (e.g. the EQ's magnitude response);
   - `describe()` — the compact prose (§1.6);
   - `tests/` — the monorepo tests of §1.7.
-- `plugins/<id>/` — a copy of the template made exactly as
-  `plugins/probe-synth` was (read its `QUIRE.md`: identity renames, vendored
-  dependency paths, `supple_plugin_add_monorepo_libraries()`, format-gate and
-  license-check handling, `supple_add_plugin(<id> <PREFIX>)` in
-  `plugins/CMakeLists.txt`). The template is an effect already: keep its
-  audio-port and process structure. Its `*_clap.cpp` product sections forward
+- `plugins/<id>/` — a copy of the template made as `plugins/orrery` is
+  (read its `QUIRE.md`: identity renames, vendored dependency paths,
+  `supple_plugin_add_monorepo_libraries()`, format-gate and license-check
+  handling, `supple_add_plugin(<id> <PREFIX>)` in `plugins/CMakeLists.txt`).
+  The template is an effect already: keep its audio-port and process
+  structure. Its `*_clap.cpp` product sections forward
   to `supple::clapx::ParamStore` / `ClapParams` / `FlatSemantic`
   (`plugins/common`) and to the engine; `QUIRE.md` lists every deviation.
   The shared template infrastructure stays byte-identical apart from names.
@@ -75,10 +84,9 @@ example), with their tests.
   bands); groups follow the spec's grouping. Units are canonical (`Hz`, `dB`, `ms`, `percent`,
   `ratio`); curves per ADR-0010 (log for frequencies and times). Every float
   gets a `smoothingMs` (20 unless stated) and tags from the role vocabulary.
-- Read-only meters are `kReadonly` output parameters (as ProbeSynth's
-  `output.level`), updated from the audio thread through the `ParamStore`
-  and reported to the host with `CLAP_EVENT_PARAM_VALUE` output events at most
-  every 50 ms.
+- Read-only meters are `kReadonly` output parameters, updated from the
+  audio thread through the `ParamStore` and reported to the host with
+  `CLAP_EVENT_PARAM_VALUE` output events at most every 50 ms.
 - Patch and state: `FlatSemantic` (framed canonical JSON, transactional
   load); the extension's `describe` returns §1.6's prose.
 - The table passes `params::validateTable` in a test; ids are dense from 0 in
@@ -96,8 +104,8 @@ example), with their tests.
 - Any sample rate 22 050–384 000 Hz; frequencies above 0.45·fs are clamped
   internally (the parameter keeps its value).
 - EQ replaces non-finite input samples with zero before recursive/FIR state.
-  Utility sanitizes its working inputs before DC/side-filter state updates,
-  while its exact unity output copy preserves the original sample bits.
+  Hickory (the utility) makes its working values finite before any filter
+  or delay state, while at rest its output keeps the input's bits.
 - Denormals: `dsp::DenormalGuard` around processing; recursive states are
   also flushed to zero below 1e-30 when the input has been silent.
 - Parameter changes are smoothed (no zipper noise); a switch that cannot be
@@ -118,8 +126,7 @@ runs, processes and sample-rate-independent block partitions (§1.3).
 Product-owned `Editor.cpp`/`Theme.h`/`Widgets.h` usage (the template's widgets
 and window stay as shipped). Each plugin's layout is in its section below;
 all read names, units and formatted values from the table, and every edit is
-a gesture-bracketed parameter change. Utility's discrete arrow-key edits step
-one physical value, independent of fine mode; floats retain normalized steps.
+a gesture-bracketed parameter change.
 `tools/gui_preview` renders at least two scenarios per plugin to PNG for review.
 Design size ≤ 900 × 560. The look follows the product theme used by Orrery
 (`plugins/orrery/plugin/gui/Theme.h`): same palette and type, so the stock
@@ -153,8 +160,7 @@ In the engine library (monorepo, all presets):
   output;
 - the per-plugin behaviour tests below, each with a measured tolerance.
 
-In the plugin copy (as ProbeSynth): `host_smoke`, `semantic_rt`,
-`editor_input`, the template's host contract, and the clap-validator run
+In the plugin copy (as Orrery): `host_smoke`, `editor_input`, the template's host contract, and the clap-validator run
 (`plugin.<id>.validator`, label `slow`).
 
 ### 1.8 Skill and docs
@@ -167,7 +173,7 @@ In the plugin copy (as ProbeSynth): `host_smoke`, `semantic_rt`,
 
 ## 2. EQ — Yarrow [`yarrow`] (`stock-effects.md` §1)
 
-A DSP script (ADR-0047), `plugins/stock/yarrow/script/yarrow.cpp`; the
+A DSP script (ADR-0047), `plugins/yarrow/script/yarrow.cpp`; the
 spec section holds the designs and measured accuracy. Notes for maintainers:
 
 - **Audio.** `update()` reads the parameters into eight `Setting`s and, when
@@ -197,7 +203,7 @@ spec section holds the designs and measured accuracy. Notes for maintainers:
 
 ## 3. Compressor — Sundew [`sundew`] (`stock-effects.md` §2)
 
-A DSP script (ADR-0047), `plugins/stock/sundew/script/sundew.cpp`; the
+A DSP script (ADR-0047), `plugins/sundew/script/sundew.cpp`; the
 spec section holds the laws and ballistics. Notes for maintainers:
 
 - **Audio.** `Law` holds a character's static law and its one-pole steps at
@@ -234,325 +240,467 @@ spec section holds the laws and ballistics. Notes for maintainers:
   key filter, match, colour and sync; `dsp.preview` with `pointer` steps
   covered every gesture.
 
-## 4. Utility — Plumb [`utility`] (`stock-effects.md` §8)
+## 12. Limiter — Treeline [`treeline`] (`stock-effects.md` §10)
 
-- Order: channels/swap → polarity → dc block → width and mono-below (M/S)
-  → pan → gain → mute (10 ms ramps for mute and channel changes).
-- `pan` is a balance: the opposite side falls, 0 dB at centre (document
-  the law).
-- **Change to the spec:** `mono_below` removes the side below the crossover
-  with a 4th-order Linkwitz–Riley high-pass on S only — zero latency and M
-  untouched, so the mono sum is exact and nothing needs a linear-phase pair
-  or a stepped parameter (it stays automatable). Write this into
-  `stock-effects.md` §8.
-- Tests: defaults bit-exact; −inf gain is silence, +6 dB doubles; width 0 =
-  (L+R)/2 on both, width 200 doubles S; pan +100: left silent, right
-  unchanged; mono_below 150 Hz: side of a 50 Hz tone below −40 dB, of a
-  1 kHz tone within 0.1 dB, and the output's mono sum equals the input's.
-- GUI: one compact panel (≤ 520 × 300): gain and pan, width, channel mode,
-  swap, polarity and mute toggles, mono-below, dc block, a small
-  correlation/level meter from telemetry. Scenarios: `default`, `wide`.
+A DSP script (ADR-0047), `plugins/treeline/script/treeline.cpp`; the
+spec section holds the detector, the gain path and the loudness meters.
+Notes for maintainers:
 
-## 5. Analyzer — Gauge [`analyzer`] (`stock-effects.md` §9)
+- **Audio.** `TruePeak` is one channel's detector (the phases are designed
+  in `prepare()`); `Hold` the monotonic queue; `Box` a running sum that is
+  summed afresh every 65536 samples so rounding never builds up; `Bell`
+  three boxes in a row. `process()` per sample: drive → detector →
+  requirement → `listenTo()` (sharpness and the bass guard) → hold →
+  two-stage release → both bells and their blend → the delayed audio →
+  the output's own detector and K-weighting → listen. The guarantee rests
+  on each bell's span being no longer than the hold and on the delay
+  matching the broad bell's span: keep them together when tuning.
+- **No second stage.** A gain moving within a millisecond widens the
+  signal's spectrum, so in principle the product can pass the ceiling
+  between samples. A second, 0.5 ms stage on the output was tried: it
+  never took more than 0.001 dB on any test material, while costing a third
+  of the CPU and a millisecond of latency, so it went. What decided the
+  accuracy was the interpolator's length (32 taps per phase read up to
+  0.5 dB low on noise-like hits; 48 do not).
+- **Loudness.** `closeBlock()` every 100 ms: the 30-block ring and the
+  300-block recent rings (momentary energies, short-term values, true
+  peaks), then either the recent readings (two passes over the ring for
+  the integrated gate; the LRA's gated values insertion-sorted, at most
+  300) or, while accumulating, the integrated histogram (gate recomputed
+  from bin sums: no block list grows) and the LRA histogram.
+  `restartLoudness()` on the transport's start; `restartTotals()` when
+  `accumulate` changes (in `update()`).
+- **Editor.** Its own members only: eased values for the engine plots (the
+  first frame starts where the audio is, so a preview shows the moment),
+  the gain bar's held peak and the pointer's state. The audio code shares
+  the history (1024 columns of 10 ms: input and output envelopes, the
+  reduction and its sustained part, the momentary loudness, bar or beat) and
+  the engine's and meters' values. The gain-to-target button edits `gain`
+  as a click on a knob would.
+- **Tests.** The template's suite, reset (also `--stepped`), unload,
+  semantic conformance, clap-validator and the catalog check run as for
+  every stock plugin; `plugin.treeline.response` drives a sine, a sweep,
+  noise and an impulse 12 dB into a −3 dB ceiling at 44.1, 48 and 96 kHz
+  (each peaks at −3.0) and checks a sine under the ceiling passes
+  unchanged. At 88.2 and 192 kHz too the ceiling held; latency is 199,
+  215, 376, 407 and 791 samples at 44.1, 48, 88.2, 96 and 192 kHz. During development, on
+  synthetic club, acoustic, dense and true-peak material driven 12 dB:
+  the output's true peak, read offline with the same detector, stayed
+  within 0.001 dB of the ceiling; against BS.1770's example meter within
+  that meter's own +0.17 dB passband ripple; an ideal (24 kHz brickwall)
+  reconstruction reads up to 0.5 dB higher only on material with strong
+  content above 21 kHz (clipped noise). A 50 Hz sine under 7 dB of
+  reduction at a 20 ms release had 0.0003 % THD with the bass guard and
+  0.0055 % without. CPU: about 2 % of a core in a release build at 48 kHz
+  stereo (four interpolators).
 
-- Passes audio bit-exactly (tested at every block size and rate).
-- Measures with `core-analysis` streaming pieces (the `LoudnessMeter` for
-  M/S/I, LRA, true peak; correlation, width, balance; a smoothed 1/3-octave
-  spectrum and the spectral centroid) on a worker path that never blocks the
-  audio thread: the audio thread only copies blocks into a preallocated
-  SPSC ring; measurement runs on the main thread's timer (or, if a
-  measurement is RT-safe and cheap per sample, on the audio thread itself —
-  justify in the report). If `core-analysis` lacks a streaming piece you
-  need, add it there in the same style with tests (this plugin may touch
-  `libs/core-analysis`; no other worker does).
-- Readonly CLAP parameters for the scalar values (integrated, short-term,
-  momentary LUFS, LRA, true peak, correlation, width, balance, centroid);
-  `window`, `reset` (momentary: a host write of 1 resets and the parameter
-  returns to 0), `hold`.
-- **The extension addition** `get_telemetry(plugin, out)`: appended to
-  `clap_plugin_supple_semantic_params_t` per the extension's versioning rule
-  (`docs/specs/semantic-params-extension.md`), writing
-  `supple.analysis-report/1.0`-shaped JSON of the current window. Update that
-  spec, `plugins/common` (the struct and a `FlatSemantic` hook), and keep
-  every existing plugin building (a null member for plugins without
-  telemetry). This plugin may touch `plugins/common` and that spec; no other
-  worker does.
-- Tests: bit-exact pass-through; on a −23 LUFS EBU test signal (generate a
-  1 kHz sine at the level core-analysis's own tests use) the reported
-  integrated loudness is within 0.1 LU of core-analysis's offline result for
-  the same audio; true peak and correlation likewise; the telemetry JSON
-  validates against the analysis-report shape.
-- GUI: loudness numbers large (M/S/I, LRA, TP), a short-term history graph,
-  the 1/3-octave spectrum, correlation and balance meters. Scenarios:
-  `idle`, `music` (a synthetic mix fed through the telemetry path).
+## 9. Transient shaper — Gorse [`gorse`] (`stock-effects.md` §4)
 
-## 7. Second wave: saturation — Kiln [`drive`] (`stock-effects.md` §5)
+A DSP script (ADR-0047), `plugins/gorse/script/gorse.cpp`; the spec
+section holds the detector, the law and the hit view. It keeps Flint's
+design (a held peak, fast and slow followers in dB, one part at a time) and
+changes what Flint got wrong in use. Notes for maintainers:
 
-Identity: display name Kiln, id `drive`, CLAP id `com.suppleaudio.drive`,
-state magic `QDR1`, AU subtype `QDrv`, features audio-effect, distortion,
-stereo. Everything in §1 applies.
+- **The hold.** Flint measured a cycle between any two local maxima. On
+  real material, noise or a quantized waveform's ripple near its crest
+  makes maxima every few samples, so its hold sat at 1 ms and a bass line
+  or a kick's body rode through the detector as onsets: on 16-bit drums a
+  kick's tail read as onsets every cycle (sustain −6 dB gave −0.5 dB). The
+  hold now counts crests only across a real dip, follows a leading low band
+  for a whole cycle (`listenLow()`), and is never shorter than `length`
+  (a voice-like 180 Hz pulse took +11.9 dB of attack at +12 before that,
+  0.0 after).
+- **The law.** A fall counts three times as readily as a rise (`kTail`),
+  since a decay's lead is a few dB where an onset's is tens: on a kick
+  decaying 78 dB/s, sustain −6 dB now gives about −4 dB at default
+  settings. The slow follower stays within 30 dB of the fast one
+  (`kSpread`). To watch the law at work, have a scratch copy
+  (`plugins/README.md`) write o and fast − slow to its output in
+  place of the audio, and render material through it.
+- **Lookahead.** Flint's 1 ms one-pole let the first millisecond through:
+  an attack cut missed the click it was meant to soften. Two boxes ramp the
+  gain over the 1 ms lookahead and land on the onset. `low` focus hears
+  through about 2 ms of filter delay, so its gain lands about a millisecond
+  after the onset; it is for the kick's body, not its click.
+- **The clip** moved to the end (after mix and output), where its
+  minimum-phase oversampler cannot comb against the dry path, and runs only
+  while it is on or fading. Its output is clamped to ±1: on a snare driven
+  24 dB over, the decimator rang to +7.5 dBFS.
+- **Hits.** `startHit()` on a trigger (closing the hit being captured),
+  `captureStep()` per sample on the delayed input and the mixed output,
+  `closeBin()` per point (a point shorter than a sample repeats the last),
+  `finishHit()` into the average (a capture under 10 ms is a double
+  trigger and is dropped), `measureHits()` for the meters. The arrays reach
+  the editor only when a hit finished.
+- **Editor.** Its own: the model hit (`refreshModel()`, recomputed when
+  attack, sustain, length or sensitivity change; 16 kHz steps for 501 ms),
+  the eased points it draws, and the pointer's state. The colour of a
+  point is the sign of the mean o over it.
+- **Tests.** The suite every stock plugin has (reset, also `--stepped`;
+  unload; semantic conformance; clap-validator; catalog), and
+  `plugin.gorse.response`: a sine starting from silence is a hit with no
+  tail; with attack +6 its onset peaks exactly 6 dB higher at −12 dBFS
+  (44.1, 48, 96 kHz) and at −32 dBFS, its steady part passes at 0.0 dB and
+  0.0 % THD; driven 24 dB into the clip, a sine, a sweep, noise and an
+  impulse peak at 0.0 dBFS. During development on synthetic drums (kick,
+  snare, hats at 120 BPM), attack ±6 changed every hit's first 2 ms by
+  ±6.00 dB, at −6 and at −26 dBFS alike, and defaults passed bit-exactly.
 
-- **Oversampling** (`1x`, `2x`, `4x`, `8x`; stepped, latency): a shared
-  primitive this plugin adds to `libs/core-dsp` (the only worker touching
-  it): `dsp::Oversampler` — cascaded linear-phase half-band FIR stages
-  (design documented in the header: stopband ≥ 100 dB, passband to 0.45 of
-  the base rate within ±0.01 dB; the stage next to the base rate stops from
-  0.55·fs, later stages only from their input rate − 0.45·fs, so they stay
-  short — corrected 2026-09-30 after a 1025-tap first stage cost 12 ms of
-  latency), up and down per channel, preallocated for
-  the maximum block, `latency()` exact in base-rate samples (an integer:
-  pad the stage delays so it is). Tests in `libs/core-dsp`: passband,
-  stopband (images and aliases), exact latency, block-size invariance.
-- **Curves** with first-order antiderivative anti-aliasing (ADAA): for
-  f(x) with antiderivative F, y[n] = (F(x[n]) − F(x[n−1])) / (x[n] − x[n−1]),
-  falling back to f((x[n] + x[n−1]) / 2) when |x[n] − x[n−1]| < 1e-5; this
-  adds half a sample of delay at the oversampled rate, which the dry path and
-  the reported latency include (round the total to whole base-rate samples
-  by adding delay). Curves (all odd-symmetric before `bias`, unity small-
-  signal slope, bounded): `tape` (tanh-like soft curve with a slightly
-  wider knee), `tube` (a gentler onset than tape and stronger compression when
-  driven; like every curve it is odd-symmetric, and its even harmonics come
-  from `bias`), `transistor` (harder knee, x/(1+|x|ⁿ)
-  family), `diode` (exponential knee), `fold` (smooth sine-based wavefolder;
-  its antiderivative is closed-form), `hard` (clip at ±1). Write each curve
-  and its antiderivative in `stock-effects.md` §5.
-- **Drive/bias/tone:** input × drive (dB); `bias` adds a DC offset before
-  the curve (asymmetry → even harmonics) and a DC blocker (5 Hz) after it;
-  `tone` is a first-order tilt before the curve and its inverse after
-  (so the dry tone is kept at low drive).
-- **`auto_gain`:** divide by the curve's small-signal gain model at the
-  current drive (analytic per curve, documented), verified to hold loudness
-  within 1 LU on pink noise across the drive range (core-analysis LUFS).
-- **`mix`/`output`:** dry path delayed by the full latency; mix and output
-  smoothed.
-- Tests (beyond §1.7): THD rises monotonically with drive for each curve;
-  aliasing of a 5 kHz sine at 24 dB drive, `4x`, 48 kHz: every non-harmonic
-  component in 20 Hz–20 kHz below −90 dB relative to the fundamental
-  (aliases between 20 kHz and Nyquist are accepted); `bias` 0 gives no
-  even harmonics above −100 dB for odd curves, `bias` 50 % gives a 2nd
-  harmonic above −40 dB; DC-free output (mean below 1e-5 after 1 s); latency
-  reported equals the measured delay for every factor at 44.1/48/96 kHz;
-  `mix` 50 % on a sine at drive 0 dB and `tape` equals the input within
-  0.01 dB (alignment check).
-- GUI: the transfer curve (input vs output, with a moving dot) and a
-  harmonic spectrum bar display of the current setting (computed from a
-  test sine on the main thread), drive large, curve selector, bias, tone,
-  oversampling, auto gain, mix, output. Scenarios: `default`, `hot` (fold,
-  24 dB, bias 30 %).
-- Orrery keeps its own minimum-phase decimator (voices are generated at the
-  oversampled rate); do not change Orrery.
+## 4. Utility — Hickory [`hickory`] (`stock-effects.md` §8)
 
-## 8. Second wave: gate / expander — Sluice [`gate`] (`stock-effects.md` §3)
+A DSP script (ADR-0047), `plugins/hickory/script/hickory.cpp`. It
+keeps Plumb's controls and laws (the linear balance, bass mono as a
+Linkwitz–Riley high-pass on the side only, bit-exact at rest) and changes
+the rest. Notes for maintainers:
 
-Identity: display name Sluice, id `gate`, CLAP id `com.suppleaudio.gate`,
-state magic `QGT1`, AU subtype `QGat`, features audio-effect, gate,
-expander, stereo. Everything in §1 applies. Ports as the compressor (§3):
-main stereo plus a non-main "Sidechain" input.
+- **Order.** Polarity → channels → DC block → delay → width and bass mono
+  (M/S) → balance → gain and mute. Polarity comes first (Plumb flipped
+  after the routing), so `mono` with `invert_right` sums a flipped pair
+  correctly. Swap is a `channels` option rather than a switch of its own,
+  which removes Plumb's redundant combinations (swap with left-to-both).
+- **At rest.** Each stage that is at rest leaves the sample alone, and a
+  sample no stage touched is not written back: the output is the input's
+  bits, non-finite values included. Working values are made finite before
+  any filter or the delay line sees them, and those filters run all the
+  time, so switching the DC block or bass mono on fades in settled state.
+- **Ramps.** The routing matrix, polarity, the DC block, bass mono and
+  mute crossfade over 10 ms (`Ramp`, which jumps while unplayed); gain,
+  width and balance glide over 20 ms (`.smoothed()`). A new delay time
+  crossfades from the old tap over 20 ms, and a change that arrives during
+  a crossfade waits for it to end, so automation never jumps.
+- **Delay** is whole samples (`roundToInt`), so a delayed signal is an
+  exact copy; it is not reported as latency, since lining a track up
+  against another is the point.
+- **DC block** is a 12 dB/oct Butterworth high-pass at 5 Hz (Plumb's was a
+  one-pole): 0.02 dB down at 20 Hz.
+- **Readouts.** 100 ms chunks of LL, RR, LR, MM, SS and the peak, summed
+  over the last 30 (`closeChunk()`): `output_peak`, `correlation` (0 in
+  silence), `level_balance` (R over L) and `side_level` (S over M, −60 when
+  mono).
+- **Editor.** The image is 1024 points of (M, S), one every 1/12000 s,
+  scaled so their spread fills a third of the circle (and their peaks no
+  more than twice it). Width by frequency is ten octave band-passes
+  (Q 1.414, 31 Hz to 16 kHz) on each output channel, their correlation
+  over 250 ms; an octave fades with its level. A press there moves the
+  crossover and turns bass mono on; a horizontal drag across the image
+  changes the width. The warning under the image shows while the 300 ms
+  correlation is below −0.3.
+- **Tests.** The suite every stock plugin has (reset, also `--stepped`,
+  which leaves alone a switch that silences the plugin by itself, here
+  `mute`; unload; semantic conformance; clap-validator; catalog), and
+  `plugin.hickory.response`: a sine passes at 0.00 dB, gain −6 and +12.5
+  measure exactly, gain −60 (−inf), mute and `side` of identical channels
+  are silent, mono with width 0 and bass mono leaves identical channels at
+  0.00 dB, and the DC block takes 0.02 dB at 20 Hz. During development on
+  stereo test tones, bass mono at 150 Hz lowered the side at 50 Hz by
+  38.3 dB and left it at 1 kHz unchanged, with the mono sum unchanged to
+  float rounding; width 0 and 200, every routing, the flips and a 10 ms
+  delay (an exact shift) measured as specified, and the readouts read
+  correlation −0.71 on a flipped pair, a −6.02 dB balance where the right
+  was 6 dB down, and −60 dB of side at width 0.
 
-- Detector as the compressor's (key filters `sc_highpass`/`sc_lowpass`,
-  peak, stereo link; `sc_listen` outputs the filtered key). Reuse nothing by
-  linking across plugins: copy the few lines you need into this engine.
-- **Gate:** a state machine per linked detector — opens when the level
-  rises above `threshold`, closes when it falls below `threshold −
-  hysteresis` and `hold` has elapsed since it last exceeded the close level.
-  The gain moves between 0 dB and `range` with `attack` (opening) and
-  `release` (closing) as one-pole ramps in the dB domain (the floor is
-  `range`, not silence, unless range is −80 → treat −80 as −inf: exact zero).
-- **Expander:** downward expansion below `threshold` by `ratio`
-  (gain = (ratio − 1)·(level − threshold) dB, floored at `range`), with the
-  same attack/release ballistics and hysteresis on the threshold.
-- `lookahead` (`off`/`1ms`/`5ms`, stepped): delays the audio so the gate is
-  open when a transient arrives; latency = lookahead samples.
-- Readonly `gr` (dB) and `open` (bool) update at most every 50 ms.
-- Tests: a burst above threshold opens within attack (±10 %) and closes
-  after hold + release; hysteresis prevents chatter on a signal oscillating
-  ±2 dB around the threshold (count transitions); range −40 dB floors the
-  closed gain at −40 ± 0.1 dB, range −80 gives exact zeros; external key
-  gating a silent-keyed input keeps it closed; lookahead: the transient's
-  first sample passes at full gain; expander static curve within 0.2 dB.
-- GUI: a level/threshold meter with the hysteresis band, open/closed
-  indicator and gain history, controls grouped as the compressor's.
-  Scenarios: `default`, `drums` (hold 50 ms, range −30, key high-pass).
+## 5. Analyzer — Lichen [`lichen`] (`stock-effects.md` §9)
 
-## 9. Second wave: transient shaper — Flint [`transient`] (`stock-effects.md` §4)
+A DSP script (ADR-0047), `plugins/lichen/script/lichen.cpp`. It
+replaced Gauge (`com.suppleaudio.analyzer`, a template plugin with a
+measurement worker and the `get_telemetry` extension member) with a new
+design. Notes for maintainers:
 
-Identity: display name Flint, id `transient`, CLAP id
-`com.suppleaudio.transient`, state magic `QTS1`, AU subtype `QTrn`,
-features audio-effect, transient-shaper (plus `utility` if CLAP has no
-closer feature), stereo. Everything in §1 applies; no sidechain port.
+- **It never writes the block.** Every measurement reads `io` into locals
+  (non-finite samples become 0 there only). `product.cmake` sets
+  `PRODUCT_TRANSPARENT` (template framework 1.27.0), so host-smoke demands
+  output equal to input, float and double, in place and not; nothing that
+  makes the plugin write its output can pass.
+- **Readouts are the interface.** Every measurement an agent can use is a
+  `.meter()` parameter, read in the DAW with `fx.meters` (live, or as the
+  last `render.mix` ended), in the sandbox with `param.get` or `dsp.test`'s
+  `meters`. Gauge's JSON telemetry needed its own extension member and was
+  never read by the engine; read-only parameters reach every host.
+- **The audio thread does the analysis**, all of it cheap per sample: the
+  true peak's interpolation only near the highest peaks (§9 of the spec),
+  K-weighting, sums; two 16k transforms a frame every 85 ms (the runtime's
+  `Stft`, prepared for analysis only, so no inverse transform runs) and a
+  2k one for the centroid. Histograms replace stored history (loudness in tenths of a LU,
+  the centroid in 300 log steps), so a play of any length costs the same.
+- **Readouts as the offline analysis defines them.** The named bands, the
+  tilt, the centroid, width, balance, correlation and mono loss follow
+  `core-analysis.md`, so a live reading and an analysis report of the same
+  audio agree (a 16 s test mix: bands within 0.7 dB, tilt −4.5 against
+  −4.8 dB/oct, PLR 16.8 against 16.9, LRA 1.6 against 1.5).
+- **Tests.** The suite every stock plugin has (the reset check compares
+  readouts as well as audio, which is what it checks here), and
+  `plugin.lichen.response`: a −12 dBFS 1 kHz sine in both channels passes
+  at 0.000 dB and reads −11.99 LUFS, −12.00 dBTP, crest 3.01 dB,
+  correlation 1, width 0, mono loss 0, the mid band 0 dB of the whole, 2 s
+  measured and no key. Release build, one core, stereo 48 kHz, dense noise:
+  2.0 %.
 
-- Detector: the stereo-linked rectified signal (max |L|, |R|) of the input.
-  Two envelope followers in the dB domain: fast (attack 0.1 ms scaled by
-  `speed`/10, release `speed`) and slow (attack `speed`, release 4·`speed`).
-  Their difference d = fast − slow (dB) is positive at onsets, negative in
-  decays.
-- Gain (dB): onset part = (attack/100)·12·clamp(d/10·(sensitivity/50), 0, 1),
-  sustain part = (sustain/100)·12·clamp(−d/10·(sensitivity/50), 0, 1),
-  total = onset + sustain, smoothed with a 1 ms one-pole. This keeps the
-  shaping level-independent (the detector works on dB differences) and
-  bounds it to ±12 dB per part as the spec says; document the final formula
-  in `stock-effects.md` §4 if you refine it.
-- `clip`: a soft clip (tanh-style, unity small-signal slope) after the gain,
-  with 2× oversampling of the clip stage only (latency reported; 2× via the
-  shared `dsp::Oversampler`, 72 samples round-trip delay).
-- `mix` (dry aligned with any latency) and `output`.
-- Tests: attack +100 on a synthetic drum hit (a 5 ms 1 kHz burst on a decay)
-  raises the first 5 ms by ≥ 6 dB and leaves the tail within 1 dB; sustain
-  −100 lowers the tail by ≥ 6 dB and leaves the onset within 1 dB;
-  level independence: the same hit 10 dB louder gets the same gain curve
-  within 0.5 dB; a steady sine gets no gain change after settling (< 0.1 dB);
-  defaults are bit-exact.
-- GUI: the input and output envelopes of the last ~2 s with the gain curve,
-  attack and sustain large (bipolar arcs from the centre), speed,
-  sensitivity, clip, mix, output. Scenarios: `default`, `punch`
-  (attack +60, sustain −30).
+## 7. Saturation — Teasel [`teasel`] (`stock-effects.md` §5)
 
-## 10. Third wave: delay — Echelon [`delay`] (`stock-effects.md` §6)
+A DSP script (ADR-0047), `plugins/teasel/script/teasel.cpp`. It
+replaced Kiln (`com.suppleaudio.drive`) with a new design. Notes for
+maintainers:
 
-Identity: display name Echelon, id `delay`, CLAP id `com.suppleaudio.delay`,
-state magic `QDL1`, AU subtype `QDly`, features audio-effect, delay,
-stereo. Everything in §1 applies; no sidechain port; latency 0.
+- **Everything oversampled.** The band split, the dry signal and the clean
+  bands run at the high rate with the curve, so mixing and splitting
+  never comb against the oversampling filters. `phase` picks the script
+  runtime's minimum-phase half-bands or its linear-phase ones (a restart);
+  at 1x the oversampler is prepared at a factor of 1 and passes samples
+  through (before the runtime took 1, a restart from 4x to 1x went on at
+  4x). Oversampling stops at 768 kHz inside.
+- **Filters about to come in run beforehand.** A low-pass switched in
+  from a cold state (the high cut, the band's upper crossover) outputs
+  nothing at first, a click; each runs while its parameter's target is
+  inside its range. Whether they run is decided each frame, never each
+  block, so renders do not depend on block size (the feedback loop's too).
+- **Rest offset.** Each curve's output less f(bias) (its value with no
+  signal), at once: a bias otherwise steps from 0 on the first sample and
+  rings for seconds in the feedback loop. Tape seeds its direction memory
+  from the first sample for the same reason.
+- **Feedback** is scaled by 1 / the curve's steepest slope over ±1 about
+  the bias (fuzz has a gain of 4; crush's steps count as tanh's), so the
+  loop's gain stays under 1, and lets go over 200 ms once the input has
+  been digitally silent for a second: without it, fuzz held a ring at
+  −13 dB and crush a quantisation limit cycle at −62 dB forever.
+- **Auto gain** is a table over drive, rebuilt in `update()` when style,
+  character or bias change, read per sample at the modulated drive; it
+  holds the reference level, not the program's (no level riding).
+- **Readouts.** `thd` and `even` come from a probe (a 100 Hz sine through
+  a curve of its own at the base rate, harmonics by correlation over 20
+  cycles); `distortion` from running moments of the curve's input and
+  output. Both are meters, never audio.
+- **Tests.** The suite every stock plugin has, and
+  `plugin.teasel.response`: dry (mix 0) a −12 dBFS sine passes at
+  0.00 dB, and −6.00 with output −6; `soft` at −12 dB with auto gain
+  keeps 0.00; `clip` without auto gain below its ceiling is the drive
+  (+6.00); driving only the side leaves a centred sine at 0.00, and a band
+  above 2 kHz leaves 100 Hz at 0.00 under 24 dB of drive; dry at 8x with
+  linear phase a 10 kHz sine passes at 0.00; and the `thd` readout is
+  within 0.1 % of `dsp.test`'s own THD (its `meters`) for tape at 6 dB and
+  tube at 12 dB with bias. Host-smoke's
+  latency check (quality) caught the 1x restart above. Measurements are in
+  `stock-effects.md` §5. Release build, one core, stereo 48 kHz, pink
+  noise: 1.9 % at the defaults (4x), 0.9 % at 1x, 3.0 % at 8x, 5.0 % at
+  16x; 4.4 % with band, feedback, dynamics, motion, emphasis and a cut on,
+  13.8 % with all of that at 16x.
 
-- **`sync`** keys and labels exactly as Orrery's note values
-  (`plugins/orrery/engine/src/params.cpp` `kNotes`: `off`, `n8_1` … `n1_32`,
-  labels `8/1` … `1/32`; default `n1_8d` = "1/8."). Copy the table, do not
-  link Orrery. Tempo comes from the CLAP process transport
-  (`CLAP_TRANSPORT_HAS_TEMPO`), 120 BPM without one. A synced time is the
-  note length at the current tempo; every line time (synced or `time`, and
-  the offset right time `time·(1 + offset/100)`) is clamped to 1..5000 ms —
-  document the clamp.
-- **Lines:** one circular buffer per line (float storage), sized in
-  `prepare` for 5000 ms + the maximum modulation + interpolation margin at
-  the prepared rate. Fractional reads with 4-point cubic Hermite
-  interpolation.
-- **Glide:** each line's delay (in samples) follows its target through a
-  critically damped two-pole smoother (time constant 100 ms), so time and
-  tempo changes move the read head continuously (tape-like pitch bend, no
-  clicks, no crossfades). The same smoother serves sync and free time.
-- **Wow (`mod_rate`, `mod_depth`):** delay offset = depth·3 ms·(0.8·sin +
-  0.2·seeded smooth random), right line's sine at +90°; capped at 45 % of
-  the line's current delay; `mod_depth` 0 is exactly no modulation. The
-  random part is seeded at `reset()` (deterministic renders).
-- **Loop, per line:** y = read → high-pass then low-pass (12 dB/oct TPT
-  SVFs, Butterworth Q; `highpass`/`lowpass` smoothed) → `drive` (at 0 dB
-  bypassed exactly; above, tanh(g·y)/g with g from `drive`, i.e. level-
-  preserving for small signals) → safety limiter → this is the echo (wet)
-  and, × `feedback`, what is written back with the input. The safety
-  limiter is linear below 0.5 and soft-saturates to ±1.0 above (document
-  the curve), so feedback > 100 % self-oscillates up to ≈ 0 dBFS and never
-  beyond, and nothing below −6 dBFS is touched.
-- **Modes:** `stereo` — two independent lines; `ping_pong` — the mono sum
-  (L+R)/2 enters the left line only; left line input = in + fb·R_echo,
-  right line input = fb·L_echo (first echo left, then alternating);
-  `mono` — the mono sum through the left line, echo to both outputs.
-- **`width`:** mid/side on the echo only (S × width/100); `mono` ignores it.
-- **`duck`:** detector = input peak max(|L|,|R|) with 1 ms attack, 250 ms
-  release, in dB; echo attenuation = `duck`·clamp((level + 60)/30, 0, 1) dB
-  (none at −60 dBFS and below, the full `duck` at −30 dBFS and above).
-- **`freeze`:** input to the lines fades out over 10 ms; the loop moves
-  (10 ms crossfade) to exact recirculation (gain 1, filters, drive and
-  limiter out of the loop), modulation fades to 0, line times hold their
-  current values until unfrozen. Off returns to the normal loop over 10 ms.
-- **`mix`/`output`:** linear dry/wet crossfade (as the other stock
-  effects), then output gain; both smoothed.
-- **Tail:** add the CLAP tail extension to this plugin (the template has
-  none; the host already queries it): infinite while `freeze` is on or
-  `feedback` ≥ 100 %, otherwise the longest line time ×
-  ceil(ln(1e-4)/ln(feedback)) + 50 ms (at least one repeat). Tell the host
-  (`clap_host_tail::changed`, from the main thread via `request_callback`)
-  when it changes.
-- Tests (beyond §1.7): impulse → first echo at the line time (fractional,
-  within one sample, measured by cross-correlation) and each repeat × fb
-  (within 0.2 dB at filters wide open); sync at 120 BPM, 1/8. = 375 ms, and a
-  transport tempo change moves the echo with the glide; a time jump
-  (375 → 200 ms) on a sine gives no click (the second difference of the
-  output stays within 4× its steady-state peak); ping-pong alternates left
-  and right with the offset spacing; feedback 110 % after a noise burst
-  stays ≤ 0 dBFS peak for 30 s, keeps oscillating (last-second RMS above
-  −30 dBFS) and never produces NaN/Inf; freeze holds the loop RMS within
-  0.2 dB over 20 s and ignores new input; duck 12 dB with a steady −20 dBFS
-  input attenuates the echo by 12 ± 0.5 dB and recovers after the input
-  stops; `mono` gives L = R; width 0 gives echo L = R; tail values.
-- GUI: the echo pattern (left and right tap positions and levels for the
-  first repeats, drawn from the parameters and tempo), time/sync and
-  feedback large, filters as a small loop-response curve, mod, drive, duck,
-  width, freeze, mode, mix, output. Scenarios: `default`, `pingpong` (1/4,
-  `ping_pong`, feedback 55, mod_depth 30).
+## 8. Gate / expander — Sorrel [`sorrel`] (`stock-effects.md` §3)
 
-## 11. Third wave: reverb — Nave [`reverb`] (`stock-effects.md` §7)
+A DSP script (ADR-0047), `plugins/sorrel/script/sorrel.cpp`. It
+replaced Sluice (`com.suppleaudio.gate`) with a new design. Notes for
+maintainers:
 
-Identity: display name Nave, id `reverb`, CLAP id `com.suppleaudio.reverb`,
-state magic `QRV1`, AU subtype `QRvb`, features audio-effect, reverb,
-stereo. Everything in §1 applies; no sidechain port; latency 0.
+- **Two clocks.** The detector and the state run on the key as it
+  arrives, a lookahead ahead of the audio. Each sample's target gain goes
+  into a line (stored 200 dB up, so the line's first zeros read as closed);
+  the gain the audio now playing gets is the largest target of the next
+  `attack` + 1 ms (a monotonic-queue peak hold, at most the lookahead) for
+  rising, and the current one for falling. That is what lands the opening
+  a millisecond before the threshold crossing and starts the fall exactly
+  where the state closed.
+- **Shapes.** The gate opens along a raised cosine in amplitude (its
+  largest step at 1 ms is 0.033 of full scale per sample at 48 kHz);
+  Expand rises along a one-pole in amplitude; both fall at a steady rate
+  in dB, its speed eased in over 3 ms. A gain the closed range asks for is
+  never passed under, and −80 dB (the range's minimum) is −90 dB and then
+  zero.
+- **Follow** reads the detector's level once a millisecond from a ring of
+  2048. Measuring only up to the close crossing reads an abrupt stop as no
+  fall at all (the level is still high there), hence the 20 ms after it.
+- **Suggestion.** Tried on drum spill, a ringing tom, a sung line over
+  hiss, tone bursts and a bass note: splitting the histogram in two
+  (Otsu) split a soft passage from a loud one as readily as noise from
+  sound, and walking up from the noise's peak to where the counts fall
+  found no edge, since decays fill the levels above the noise. Measuring
+  the noise's spread from below did not fail on any of them (snare spill
+  −39.5, tom −35.5, vocal −34.5, bursts over −70 dBFS noise −48.5, bass
+  −43.5 dBFS, each 12 to 14 dB over its floor).
+- **Lookahead** is a choice (`off`, 1, 2, 5 ms) with `.restarts()`;
+  latency is the lookahead in samples at the running rate.
+- **Editor.** The history's out trace is what the gate passes, whatever
+  listen plays. The SET pill takes `suggested_threshold`; the gain lane
+  maps 0 to −80 dB and fills from the range up.
+- **Tests.** The suite every stock plugin has, and
+  `plugin.sorrel.response`: a −12 dBFS sine passes at 0.00 dB with and
+  without lookahead; under a −6 dB threshold it holds at −40 dB, and at
+  range −80 it is silent; Expand at 2:1 measures −6 dB; a 2 kHz key
+  high-pass keeps a 100 Hz sine from opening it. The reset check's
+  stimulus ends in a quiet quarter so that its S1 (threshold −60) and
+  defaults differ for a gate. During development, on the material above:
+  every hard onset passed bit-exact through its first 3 ms, and a ghost
+  note's rising noise burst no longer lost 4 dB at its onset; with the
+  default range the gaps were 40 dB down; the 40 Hz note, a tone wobbling
+  ±2 dB around the threshold and the vocal phrases each opened it once;
+  Follow closed a tom ringing at 30 dB/s at about 120 dB/s (the clamp) where
+  the fixed release fell at 400 dB/s; about 2 % of a core in the player.
 
-An original design; write its structure and constants into
-`stock-effects.md` §7 as you settle them.
+## 10. Delay — Bracken [`bracken`] (`stock-effects.md` §6)
 
-- **`early`** dB uses the utility's convention: a finite −60 dB endpoint
-  with `kOffAtMin` (exactly off, displayed −inf), up to +6.
-- **Input:** the stereo input → `low_cut`/`high_cut` (12 dB/oct) →
-  `predelay` (fractional, glides with a 50 ms two-pole smoother like the
-  delay's) → early reflections and the diffuser.
-- **Early reflections:** a tapped delay per channel, 12 taps in 5..80 ms
-  scaled by size, gains falling with time, seeded tap times (fixed seed, so
-  every instance and render is identical), alternating pan; level `early`.
-- **Diffusion:** 4 series Schroeder allpasses per channel (1..12 ms scaled
-  by size, seeded), coefficient 0.7·diffusion/100, capped so diffuser RT60
-  stays below half the shortest requested band tail (stock-effects §7).
-- **FDN:** 16 lines, base lengths spaced geometrically over ≈ 25..95 ms with
-  seeded ±5 % jitter, all × a size factor 2^((size − 50)/50·1.5)
-  (≈ 0.35×..2.8×). Buffers sized in `prepare` for the largest size plus
-  modulation; size changes glide the fractional read positions (twelve-point
-  Lagrange FDN reads; cubic Hermite for early/diffuser reads). Mixing: the
-  normalized 16×16 Hadamard matrix as a fast
-  Walsh–Hadamard transform (×1/4). Input injection and the stereo output
-  taps use fixed orthogonal ± sign vectors (output scaled 1/√8).
-- **Decay:** per line, the attenuation per pass for an RT60 T is
-  g(T) = 10^(−3·L/(fs·T)) (L the line length in samples). Three regions:
-  T_low = decay·low_decay below `crossover`, T_mid = decay, T_high =
-  decay·high_decay above `damping_freq`; realize g(T_mid) × a second-order
-  Butterworth-Q low shelf at `crossover` (DC gain g(T_low)/g(T_mid)) × a
-  second-order Butterworth-Q high shelf at `damping_freq` (Nyquist gain
-  g(T_high)/g(T_mid)). Coefficients
-  recomputed only while decay/size/shelf parameters move (fixed 16-sample
-  grid, as the EQ).
-- **Modulation:** each line's read position moves by seeded slow sinusoids
-  (0.1..1.2 Hz, distinct rates and phases), depth up to ±0.5 ms at
-  `modulation` 100 %; 0 is exactly none.
-- **Width:** mid/side on the whole wet (early + late), S × width/100.
-- **`freeze`:** input to the FDN and early taps fades out over 10 ms; decay
-  gains glide to 1 and the shelves flat (lossless loop), modulation fades
-  out, size holds. Off restores the decay over 10 ms.
-- **`mix`/`output`:** linear dry/wet crossfade, output gain; smoothed.
-- **Tail:** the CLAP tail extension as the delay's: infinite while frozen,
-  otherwise predelay + 1.5 × the longest band RT60 + 100 ms.
-  `clap_host_tail::changed` runs from `process()` on the audio thread;
-  main-thread parameter/state edits set an atomic pending flag.
-- **CPU:** ≤ 2 % of a core per stereo instance at 48 kHz, 512-frame blocks,
-  -O2 (a bench executable as the EQ's, not a test); report the number.
-- Opt-in `reverb-engine.measure`: full RT60 per octave band (125 Hz … 8 kHz;
-  octave-band filtered impulse response, Schroeder backward integration, T30 fit)
-  within 10 % of the three-region target for bands at least an octave from
-  `crossover`/`damping_freq`, at decay 0.5/2/8 s and size 20/50/90;
-  normalized echo density (Abel & Huang) of the impulse response reaches
-  ≥ 0.8 within 150 ms at the defaults, and earlier with more diffusion
-  (report the measured times); a mono input gives a decorrelated tail
-  (interchannel correlation of the late tail < 0.3 at width 100, > 0.99 at
-  width 0); freeze holds the tail RMS within 1 dB over 10 s; `early` at its
-  minimum removes the early taps exactly; tail values; defaults bit-exact
-  across block sizes.
-- Routine CTest (beyond §1.7) uses representative 48 kHz RT60 cases: decay
-  0.5/2 s at size 50 and 0.5 s at size 90, bands 250 Hz / 1 kHz / 4 kHz
-  outside active transitions. Shortened IRs still reach the T30 fit floor;
-  density/stereo and modulated-decay checks use shorter representative tails.
-  Keep the ten-second freeze comparison and five-second automation stress;
-  aggregate per-sample predicates. No raised timeout: targets ≤10 s dev,
-  ≤120 s TSan, with the dense matrix retained in the opt-in runner.
-- GUI: the decay curve (RT60 against frequency, log axes, from the three
-  regions and the cut filters), size and decay large, predelay, diffusion,
-  early, modulation, low_decay/crossover, high_decay/damping_freq,
-  low_cut/high_cut, width, freeze, mix, output. Scenarios: `default`,
-  `hall` (size 85, decay 4500 ms, predelay 25 ms, high_decay 0.4).
+A DSP script (ADR-0047), `plugins/bracken/script/bracken.cpp`. It
+replaced Echelon (`com.suppleaudio.delay`) with a new design. Notes for
+maintainers:
+
+- **Two halves a loop.** Groove needs every second echo moved while the
+  pair stays on the beat, which one line cannot do; two lines in a ring,
+  each with its own pass, can, and each echo still gets exactly one pass
+  of the tone and medium. Linear behaviour is a single line's; only the
+  guards differ, so a runaway's two halves can each sit near full scale,
+  and the echoes leave through a ceiling.
+- **Reads before writes.** Each half reads before the loop writes this
+  sample, so a time of T samples reads T back (`Ring::read`, at least 2
+  for the cubic); freeze reads whole samples and hands them on untouched,
+  which is why a held loop never dulls (float storage, no interpolation,
+  no pass).
+- **Heads.** One pair of crossfading heads does three things: a pitch
+  shift (each sweeps its window), a fade to a new time (each takes it at
+  its window's start) and plain reading (both at one place: one read).
+  Reversed playback cannot use them: two overlapping backward heads play
+  each slice twice, at different times. It has its own heads, one slice
+  at a time with a 10 ms crossfade at the joins (`Slices`).
+- **The diffusers' delay** (20.2 ms together) is taken off the read, so
+  diffusion moves nothing in time and 0 % is the direct read to float
+  rounding; under 23.2 ms they cannot fit and the read goes direct.
+- **Switches** (medium, cuts at their range ends, freeze, reverse, routing,
+  the diffusers' path) glide per sample, decided per frame, so renders do
+  not depend on block size; a medium or a reversed pass that falls silent
+  is cleared, so it comes back the same however long it was away.
+- **The tail** is `setTail()`'s (the language gained it for this plugin,
+  with framework 1.25.2): it follows the tempo in `process()`, the time and
+  feedback in `update()`.
+- **Tests.** The suite every stock plugin has, and
+  `plugin.bracken.response`: dry (mix 0) a −12 dBFS sine passes at
+  0.00 dB, −6.00 with output −6; one echo 1 ms late, alone, is the sine at
+  0.00 dB, and −12.00 ducked by 12 dB while it plays; `echo_time` reads
+  375 ms for 1/8 D at 120 BPM and `decay` 2491.4 ms for 250 ms at 50 %.
+  Measurements are in `stock-effects.md` §6. Release build, one core,
+  stereo 48 kHz, noise: 1.4 % at the defaults; 2.2 % tape with modulation;
+  2.0 % reversed; 2.9 % with reverse, shift, diffusion, analog, drive,
+  modulation and fades at once.
+
+## 11. Reverb — Ghyll [`ghyll`] (`stock-effects.md` §7)
+
+A DSP script (ADR-0047), `plugins/ghyll/script/ghyll.cpp`. It
+replaced Nave (`com.suppleaudio.reverb`) with a new design. Notes for
+maintainers:
+
+- **One model, two copies.** `Room` holds everything that follows from the
+  parameters (images, per-capsule tap delays and band gains, octave RT60s,
+  modes, levels, C80/D50). The audio code keeps one and rebuilds it in
+  `update()`; the editor keeps its own and rebuilds it every repaint, so
+  what is drawn is exactly what is heard.
+- **Energy, not taste.** Levels are physical: the tail's gain comes from
+  Sabine's reverberant energy for the distance less the reflections', over
+  the lines' impulse energy g²/16(1 − g²); the modes share the tail's
+  energy below the crossover by modal density. A change to the lines or
+  the injection that alters their energy needs the calibration re-measured
+  (an impulse, `late` alone, energy in the 500 Hz and 1 kHz octaves; a
+  single-sample impulse loses high-frequency energy at fractional reads,
+  which is why the injection and the allpasses read whole samples).
+- **Whole samples.** Settled reflections read whole samples (a fraction
+  would dull them, up to −4 dB at 16 kHz with linear reads); their targets
+  are whole samples, so a glide starts and ends on one.
+- **Glides.** The reflections glide 50 ms (and read between samples) for
+  0.4 s after a change; the lines' lengths and the allpasses' 150 ms; the
+  lines' loss filters step a quarter of the way every 32 samples (a TDF-II
+  biquad redesigned at once leaves a transient); freeze, mono and the
+  cuts' ends glide per sample, decided per frame, so renders do not depend
+  on block size.
+- **Tests.** The suite every stock plugin has, and
+  `plugin.ghyll.response`: dry (mix 0) a −12 dBFS sine passes at
+  0.00 dB, −6.00 with output −6; `distance` reads 10.002 m for two places
+  10 m apart on the plan; `rt60` reads Eyring's 5276.2 ms for a 10 m
+  concrete cube. Measurements are in `stock-effects.md` §7. Release build,
+  one core, stereo 48 kHz, noise: 3.3 % (the same in a booth or a
+  cathedral; 2.6 % with `mono`).
+
+## 13. Chorus — Withy [`withy`] (`stock-effects.md` §11)
+
+A DSP script (ADR-0047), `plugins/withy/script/withy.cpp`, with no
+predecessor. Notes for maintainers:
+
+- **The interpolator is the sound.** A modulated read crosses samples
+  hundreds of times a second, so any interpolator whose level depends on
+  where it reads between samples (linear, cubic) amplitude-modulates the
+  highs at that rate. The sinc table is built in `prepare()` (no built-in
+  needed; ADR-0032's 2026-10-20 rule) and checked in two ways: a fixed
+  fractional delay and a delay moving at constant speed, both flat to
+  0.005 dB at 12 kHz. Keep the rows summing to 1 (the lows' level).
+- **Glides that sit at their target.** Every switch weight steps toward
+  its target with `approach()`, which never passes it. An earlier version
+  stepped down when it sat at 1, so the weight flipped between 1 and
+  1 − step every sample: a ±0.3 dB ripple at 12 kHz with the triangle,
+  found only by measuring the highs' envelope.
+- **Depth in cents.** The swings are worked out from the depth and the
+  rate every 16 frames (continuous, so block size does not matter) and
+  glided per sample; the readouts are computed from what the voices do,
+  after the 25 ms cap and bloom's speed, not from the knob.
+- **Levels.** The voices' normalisation and the style trims were measured
+  on pink noise limited to 30 Hz–18 kHz and on notes: pink noise down to
+  1 Hz has a third of its power where the voices and the dry are the same
+  signal and misleads both the trims and the mix law.
+- **The editor's response** is computed from what the audio code sends
+  (each voice's delay and side gains, normalisation included) and the
+  parameters, with the same mix law and feedback scaling, averaging power
+  over each drawn point's band so dense combs read as their depth.
+- **Tests.** The suite every stock plugin has, and `plugin.withy.response`:
+  dry (mix 0) a −12 dBFS 1 kHz sine passes at 0.00 dB, −6.00 with output
+  −6; one voice held still (vibrato, depth 0) at 0.00 dB; a 60 Hz sine
+  under a full vibrato with low keep at 1 kHz at 0.00 dB; `detune` reads
+  the depth, `sweep` 1.107 ms (sine) and 1.636 ms (triangle) for 12 ct at
+  1 Hz, `rate_now` 2 Hz for a quarter note at 120 BPM. Measurements are in
+  `stock-effects.md` §11. In the player (release sandbox), stereo 48 kHz,
+  noise: 1.5 % at the defaults, 3.9 % with eight voices, 5.0 % with eight
+  voices, the bucket brigade, shimmer, drift, low keep and high cut.
+
+## 14. Phaser — Pollia [`pollia`] (`stock-effects.md` §12)
+
+A DSP script (ADR-0047), `plugins/pollia/script/pollia.cpp`. A new
+stock plugin with no predecessor. Notes for maintainers:
+
+- **Trapezoidal stages.** Each all-pass is 2·lp − x of a one-pole
+  integrator (g = tan(πf/fs)), which keeps its state meaningful while the
+  corner moves, so a sweep at 20 Hz or a `steps` jump does not zipper or
+  ring. Corners are computed every 8 frames (a `tan` per stage) and each G
+  steps linearly between, on a frame counter that only `prepare()` resets,
+  so the ticks fall on the same frames at any block size. Stages that
+  start (a larger count) are set at once, off the tick; the lamp and the
+  stages' glides move on only at ticks.
+- **The barber pole is a turn, not a crossfade.** The usual barber pole
+  crossfades several sweeping chains, which thins the notches mid-fade.
+  Pollia keeps the chain still and turns the wet's phase against the dry's
+  through a 90-degree pair, which slides every notch continuously at full
+  depth. The pair's corners (`pairCorner`) are a minimax design in the
+  warped domain u = tan(πf/fs), scaled to the geometric centre of 10 Hz
+  and 20 kHz (or 0.45 fs) at the running rate, so one table serves every
+  sample rate; seven sections a path hold 90° ± 0.34°, a −50 dB notch. The
+  dry passes the pair's in-phase path too: only the turn may differ
+  between the two. The feedback loop stays around the chain, before the
+  turn, so `feedback` sounds the same in every motion.
+- **Photocell.** The lamp and cell run at the corner ticks: brightness is
+  linear in the motion and the conductance's octaves are its log, which
+  is what makes the sweep lopsided; the darkening time grows as the cell
+  darkens. In rise and fall the motion's depth fades to 0 and the lamp
+  rests at the brightness of the centre (2^−range/2), so the stages sit at
+  the centre in either response.
+- **Feedback's level**: 80 % of the dB the loop adds to white noise
+  ((P₀/P)^0.4 in amplitude) is taken back, computed per frame from the smoothed `feedback` and
+  `mix`; the editor's response uses the same formula.
+- **The editor's history** is rows of 1/24 s (96: 4 s) the audio code
+  writes into shared arrays (each side's centre offset, the turn, the barber share,
+  the envelope); the editor finds each row's notches once (200 log-spaced
+  points, the response computed from the same formulas, minima below
+  −8 dB refined by a parabola) and again, 24 rows a paint, newest first,
+  when a setting that shapes the response moves.
+- **Tests.** The suite every stock plugin has, and
+  `plugin.pollia.response`: dry 0.00 dB, −6.00 with output −6; two stages
+  at 1 kHz cancel a 1 kHz sine (−188 dB), leave −16.08 dB with feedback 50%
+  (the loop's analytic response) and −6.02 with keep below at 1 kHz; the
+  wet alone 0.00 dB held still, and the sine's level kept (−12.03 dBFS)
+  while the phase turns; `centre_now` 1000 Hz with range 0. Measurements
+  are in `stock-effects.md` §12. In the player (JIT), stereo 48 kHz: 1.2 %
+  at 4 stages, 1.3 % at the defaults, 3.1 % at 24 stages with spread and
+  feedback, 3.6 % with the barber pole, photocell, envelope and keep below
+  on top.
 
 ## 6. Engine and benchmark use
 

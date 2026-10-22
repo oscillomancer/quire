@@ -191,7 +191,15 @@ struct OfflineResult {
     // The compiled graph, one line per track in processing order:
     // "tr_3 in=[tr_2 pre_fader d0 g0.707/0.707] lat_in=0 lat_chain=0" (engine.graph).
     std::vector<std::string> graph;
+    // Each plugin's read-only values (meters, readouts) as the render ended,
+    // by FX id, for the plugins that have any (instanceReadouts).
+    std::map<std::string, json::Value> meters;
 };
+
+// An instance's read-only parameters as they stand: a semantic plugin's by
+// patch key in physical units (a choice by its key), any other's by name as
+// CLAP values. Main thread.
+Result<json::Value> instanceReadouts(host::Instance& in);
 
 Result<OfflineResult> renderOffline(const model::Session& session, InstancePool& pool,
                                     const OfflineSettings& settings);

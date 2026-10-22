@@ -313,9 +313,9 @@ std::vector<const BuiltinFunction*> Builtins::functions(const std::string& name)
 bool Builtins::reserved(const std::string& name) const {
     // The parameter factories, which Sema::evaluate knows by name.
     static const std::set<std::string> factories = {
-        "continuous", "decibels",  "frequency", "milliseconds", "percent",
-        "ratio",      "semitones", "cents",     "octaves",      "degrees",
-        "integer",    "choice",    "toggle",    "audioFile",    "impulseResponse"};
+        "continuous", "decibels",  "frequency",       "milliseconds", "percent",    "ratio",
+        "semitones",  "cents",     "octaves",         "degrees",      "integer",    "choice",
+        "toggle",     "audioFile", "impulseResponse", "source",       "voiceSource"};
     return byName_.count(name) || classByName_.count(name) || enumByName_.count(name) ||
            constants_.count(name) || factories.count(name) || name == "pi" || name == "twoPi" ||
            name == "Array" || name == "Buffer" || name == "Unit" || name == "Curve" ||
@@ -393,6 +393,9 @@ void Builtins::addClasses() {
     r.method(
         param, "double forVoice(int v) const",
         +[](const S::Param* p, int v) { return p->forVoice(v); });
+    r.method(
+        param, "double routed(int i) const",
+        +[](const S::Param* p, int i) { return p->routed(i); });
     r.inlineMethod(param, "void set(double value)", Intrinsic::ParamSet, Writes::Self);
     r.method(param, "double gain() const", +[](const S::Param* p) { return p->gain(); });
     // The editor's.
@@ -498,6 +501,9 @@ void Builtins::addClasses() {
     r.method(
         plugin, "void setBendRange(double semitones)",
         +[](S::Instrument* p, double st) { p->setBendRange(st); });
+    r.method(
+        plugin, "void setVoiceLimit(int voices)",
+        +[](S::Instrument* p, int n) { p->setVoiceLimit(n); });
     // The voices are the audio code's: the editor's copy of the plugin has none.
     for (BuiltinMethod& m : plugin->methods) {
         m.instrument = m.intrinsic == Intrinsic::None;
@@ -507,6 +513,10 @@ void Builtins::addClasses() {
     r.method(
         plugin, "void setLatency(int samples)", +[](S::Plugin* p, int n) { p->setLatency(n); },
         Writes::Self, kInit);
+    // And in the audio hooks too: a tail may follow the tempo.
+    r.method(
+        plugin, "void setTail(int samples)", +[](S::Plugin* p, int n) { p->setTail(n); },
+        Writes::Self, kInit | kAudio);
     plugin_ = plugin;
 
     // DSP objects.
@@ -591,6 +601,22 @@ void Builtins::addClasses() {
         convolver, "double process(int channel, double x)",
         +[](S::Convolver* f, int c, double x) { return f->process(c, x); });
 
+    // Source members: values the audio code sets for the patch's routes to
+    // read (the glue reads them where they are; constructed by Program).
+    auto* source = addClass("Source", sizeof(S::Source), alignof(S::Source));
+    source_ = source;
+    r.method(
+        source, "void set(double value)", +[](S::Source* s, double x) { s->set(x); }, Writes::Self,
+        kInit | kAudio);
+    r.method(
+        source, "void set(int v, double value)",
+        +[](S::Source* s, int v, double x) { s->set(v, x); }, Writes::Self, kInit | kAudio);
+    r.method(
+        source, "double get(int v) const", +[](const S::Source* s, int v) { return s->get(v); },
+        Writes::Nothing, kInit | kAudio);
+    auto* sourceSpec = addClass("SourceSpec", sizeof(S::SourceSpec), alignof(S::SourceSpec));
+    sourceSpec->declarable = false;
+
     auto* delay = addClass("DelayLine", sizeof(S::DelayLine), alignof(S::DelayLine));
     delay->resource = true;
     r.lifetime<S::DelayLine>(delay);
@@ -603,12 +629,33 @@ void Builtins::addClasses() {
         +[](const S::DelayLine* d, double samples) { return d->read(samples); });
     r.method(delay, "void clear()", +[](S::DelayLine* d) { d->clear(); });
 
+    // Oversampler::Phase.
+    auto phase = std::make_unique<BuiltinEnum>();
+    {
+        auto t = std::make_unique<Type>();
+        t->kind = TypeKind::Enum;
+        t->name = "Oversampler::Phase";
+        t->size = 4;
+        t->align = 4;
+        phase->type = t.get();
+        types_.push_back(std::move(t));
+        phase->values = {{"Minimum", 0}, {"Linear", 1}};
+        static_assert(static_cast<int>(S::Oversampler::Phase::Linear) == 1);
+    }
     auto* over = addClass("Oversampler", sizeof(S::Oversampler), alignof(S::Oversampler));
     over->resource = true;
+    over->nestedTypes["Phase"] = phase->type;
     r.lifetime<S::Oversampler>(over);
     r.method(
         over, "void prepare(int factor)", +[](S::Oversampler* o, int f) { o->prepare(f); },
         Writes::Self, kInit);
+    r.method(
+        over, "void prepare(int factor, Phase phase)",
+        +[](S::Oversampler* o, int f, int p) {
+            o->prepare(f, static_cast<S::Oversampler::Phase>(p));
+        },
+        Writes::Self, kInit);
+    enums_.push_back(std::move(phase));
     r.method(over, "int factor() const", +[](const S::Oversampler* o) { return o->factor(); });
     r.method(over, "int latency() const", +[](const S::Oversampler* o) { return o->latency(); });
     r.method(over, "void up(double x)", +[](S::Oversampler* o, double x) { o->up(x); });
@@ -627,6 +674,10 @@ void Builtins::addClasses() {
     r.method(
         stft, "void prepare(int size, int overlap)",
         +[](S::Stft* s, int size, int overlap) { s->prepare(size, overlap); }, Writes::Self, kInit);
+    r.method(
+        stft, "void prepareAnalysis(int size, int overlap)",
+        +[](S::Stft* s, int size, int overlap) { s->prepareAnalysis(size, overlap); }, Writes::Self,
+        kInit);
     r.method(stft, "int size() const", +[](const S::Stft* s) { return s->size(); });
     r.method(stft, "int bins() const", +[](const S::Stft* s) { return s->bins(); });
     r.method(stft, "int hop() const", +[](const S::Stft* s) { return s->hop(); });
@@ -1035,6 +1086,10 @@ void Builtins::addEditor() {
     r.method(
         e, "void meters(double x, double y, double w, double h)",
         +[](E* d, double x, double y, double w, double h) { d->meters(x, y, w, h); }, Writes::Self,
+        ui);
+    r.method(
+        e, "void routes(double x, double y, double w, double h)",
+        +[](E* d, double x, double y, double w, double h) { d->routes(x, y, w, h); }, Writes::Self,
         ui);
 }
 

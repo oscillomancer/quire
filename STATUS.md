@@ -156,7 +156,10 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   in a folder of its own with its own media; imports are copied into the
   project by default, and Save as into another folder copies the media. FX
   chain presets and project templates (with a copy of their audio) are
-  saved, loaded and deleted in the app. Takes: show all takes in lanes,
+  saved, loaded and deleted in the app. Each effect's row in the FX chain
+  has a presets menu: the plugin's factory presets, read-only, and the
+  user's own, saved and deleted there (`fx.preset.*`, the sandbox's preset
+  format, kept per plugin in the configuration folder). Takes: show all takes in lanes,
   explode onto tracks or along the track, delete one, Ctrl-drag one out, and
   render an item through its FX (MIDI to audio) in place or as a new take.
   The FX chain selects several effects (Ctrl/Shift+click) to bypass, offline
@@ -190,27 +193,174 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   validated against EBU Tech 3341/3342, spectral, pitch, envelope, stereo,
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
   the LLM evaluation harness (`tools/eval-harness`).
-- **Stock plugins** (ADR-0011, ADR-0047): Orrery, Yarrow, Sundew, Sluice,
-  Flint, Kiln, Echelon, Nave, Plumb and Gauge, each passing clap-validator, a
-  reset determinism check and an unload test (all but Nave also pass the
-  headless REAPER check); JSON patches and the semantic-parameters extension.
+- **Stock plugins** (ADR-0011, ADR-0047): Marram, Yarrow, Sundew, Treeline,
+  Gorse, Hickory, Sorrel, Teasel, Bracken, Ghyll, Lichen, Withy and
+  Pollia, each passing clap-validator, a reset determinism check, an unload
+  test and the headless REAPER check;
+  JSON patches and the semantic-parameters extension.
   Yarrow, the EQ, is the first written as a DSP script
-  (`plugins/stock/yarrow`) and compiled natively from it, playing the same
+  (`plugins/yarrow`) and compiled natively from it, playing the same
   samples as the script in the player: eight matched zero-latency bands
   (bells, shelves, cuts to 48 dB/oct, notch, tilt) on stereo, mid, side or
   one channel, dynamic bells and shelves, band listening, gain scale, auto
   gain, and an editor of its own with a 32768-point spectrum line. It
   replaced Facet (`com.suppleaudio.eq`). Sundew, the compressor
-  (`plugins/stock/sundew`), is the second: six characters (Clean, Glue,
+  (`plugins/sundew`), is the second: six characters (Clean, Glue,
   Opto, FET, Vari-Mu and the upward Bloom), the feedback ones solved sample
   by sample; an external key, a key high-pass, link, mid/side, lookahead
   (a restart), tempo-locked release, colour, mix and loudness matching; an
   editor with a scrolling history with bars and beats, a transfer curve, a
   gain-change needle and a plot of each character's ballistics. It replaced
-  Ballast (`com.suppleaudio.comp`), and with it the stock set's only peak
-  limiter: until a limiter of its own is written, master peaks are held by
-  Sundew's Clean character with lookahead (sample peaks only) or by render
-  normalization's true-peak limiter.
+  Ballast (`com.suppleaudio.comp`). Treeline, the limiter
+  (`plugins/treeline`), is the third: a true-peak ceiling (a 4×
+  interpolating detector, within 0.01 dB to 20 kHz), attack along two
+  overshoot-free curves blended by how sudden the music is, a hold that
+  spans a cycle of a leading bass line, a two-stage release, 4.5 ms of
+  latency at 48 kHz; BS.1770/R128 loudness of the output (momentary,
+  short-term, integrated and LRA over the last 30 s or accumulated since
+  play, true peak) against a target,
+  level-matched and delta listening, and an editor with a history of what
+  was held down, the loudness and the reduction in its sustained and peak
+  parts, and plots of what the engine is doing. Gorse, the transient
+  shaper (`plugins/gorse`), is the fourth: attack and sustain the
+  same at any level, a detector whose hold spans a cycle of what plays (so
+  held tones, bass lines and voices get no gain), a focus on the lows,
+  mids or highs, a 1 ms lookahead that lands the gain on each onset, and a
+  soft clip that keeps sample peaks under 0 dBFS; an editor that lays the
+  recent hits over each other at their onsets and shows what each part
+  changed, and a history with each hit it found. It replaced Flint
+  (`com.suppleaudio.transient`). Hickory, the stereo utility
+  (`plugins/hickory`), is the fifth: gain, mute, polarity, channel
+  routing (swap, left, right, mono, side), width, balance, bass mono on
+  the side only, a DC block and a delay of up to 50 ms to line tracks up,
+  every switch crossfaded and the output the input bit for bit at rest;
+  readouts of the last 3 s (peak, correlation, balance, side level) and an
+  editor with an image of where the sound sits and the correlation an
+  octave at a time, where bass mono's crossover is dragged. It replaced
+  Plumb (`com.suppleaudio.utility`). Sorrel, the gate and expander
+  (`plugins/sorrel`), is the sixth: with lookahead (a restart, 2 ms
+  by default) its raised-cosine opening ends a millisecond before the
+  level crosses the threshold, so onsets pass whole; it closes at a steady
+  rate in dB, eased in, and with Follow at the rate the sound was already
+  decaying at (within a factor of four of the release); hysteresis, hold,
+  range to exact silence, Expand with a ratio, an external key with high-
+  and low-pass, and key and delta listening. It keeps the key's levels of
+  the last 10 s as a histogram and reads from it a noise floor, a loud
+  level and a suggested threshold (the close level 2 dB above the noise's
+  peaks), with the time open and the openings; its editor shows what came
+  in, what goes out and what was taken, the histogram, the gain, a
+  transfer plot with the hysteresis loop and a sketch of the timing. It
+  replaced Sluice (`com.suppleaudio.gate`). Teasel, the saturation
+  (`plugins/teasel`), is the seventh: twelve curves in three
+  families (soft, tape, tube, transformer; transistor, diode, clip, fuzz;
+  fold, rectify, crush, alias), four of them with memory (tape's
+  hysteresis, tube's sag, a transformer core that saturates the bass
+  first, a sample-and-hold), each with a character control and bias;
+  driving only a band, the mid or the side; emphasis, cuts, tuned feedback
+  through the curve, dynamics that drive the attacks or the sustain, and
+  an LFO free or in time on the drive, character, bias or pitch;
+  oversampling to 16x, minimum or linear phase, with the dry signal and
+  the clean bands inside it,
+  and auto gain that holds a −18 dBFS RMS signal's level at any drive.
+  Its readouts give the THD and even share of a 100 Hz sine through the
+  curve as set and the distortion it adds to the music; its editor shows
+  the spectrum in and out with what the curve adds, the curve with where
+  the music sits on it, the harmonics, the dynamics and the LFO. It
+  replaced Kiln (`com.suppleaudio.drive`). Bracken, the delay
+  (`plugins/bracken`), is the eighth: each side's loop in two halves,
+  so every second echo can come early or late with each pair still on the
+  beat (groove); stereo, ping-pong or mono; time free or in note values,
+  bent like tape or faded to when it changes; tone, diffusion and a pitch
+  shift in the loop; echoes forward or reversed; clean, tape or a bucket
+  brigade (darker the longer the time) worn by age, with drive into the
+  medium's curve; modulation, ducking, an input to throw sounds in by,
+  width, and a freeze that holds the loop exactly. It tells the host its
+  tail as the time, feedback and tempo change, and reads out the echo time
+  and how long the echoes take to fall 60 dB; its editor shows the echoes
+  to come (dragged across for the time, up and down for the feedback) with
+  a playhead from the last sound, each echo's tone, the medium and the
+  ducking. It replaced Echelon (`com.suppleaudio.delay`). Ghyll, the
+  reverb (`plugins/ghyll`), is the ninth: a room built from its size
+  in metres, the materials of its walls, floor and ceiling, and where the
+  source and the listener stand. Its reflections are the room's mirror
+  images off up to three surfaces, each as late, weak and dark as its path
+  and heard through an ORTF or spaced pair, a head or one omni; its decay is
+  each octave's Eyring reverberation time, the air's absorption counted;
+  its tail is a sixteen-line network as long as the room's mean free path,
+  at the reverberant level for the listener's distance; below the
+  Schroeder frequency the room's modes ring at their own frequencies, as
+  loud as the two places sit on them. Decay, scatter, predelay, early and
+  late levels, cuts, width and a freeze. It reads out the RT60 at three
+  octaves, the distance, the critical distance, the first reflection,
+  clarity (C80) and definition (D50); its editor is the room to scale (the
+  source, the listener and the walls dragged), a section for the height,
+  the materials, every reflection on a time line (one hovered traces its
+  path through the room), and each octave's decay with the modes beneath.
+  It replaced Nave (`com.suppleaudio.reverb`). Lichen, the analyzer
+  (`plugins/lichen`), is the tenth: it never writes its output (host-
+  smoke holds it to a bit-exact pass-through) and reports as read-only
+  parameters BS.1770 loudness (momentary, short-term, integrated, range,
+  their highest), true and sample peak, PLR, crest, overs, clipped runs,
+  DC, correlation, width, the width below 250 Hz, balance, mono loss, the
+  seven named bands, tilt and centroid (as the offline analysis defines
+  them) and the key with its strength, over the last 60 s of the play (or
+  render), or all of it with `accumulate` (the editor's clock, as in
+  Treeline). Agents read them with `fx.meters`. Its editor shows the loudness against
+  a target, the last minute and the play's distribution, the spectrum now
+  (mid and side), its peak and the play's average with the named bands, a
+  vectorscope with correlation by third octave, the pitch classes round
+  the circle of fifths, and a health list. It replaced Gauge
+  (`com.suppleaudio.analyzer`).
+  Marram, the synthesizer (`plugins/marram`, `docs/specs/marram.md`),
+  replaced Orrery (`com.suppleaudio.orrery`, removed); the synth guide
+  (`skill/guides/sound-design.md`), the evaluation tasks, the optimizer's
+  tests, the MCP demos and the B1 recipe use it. Four
+  oscillators (analog with sync, wavetables from Orrery's recipes, FM
+  operators, noise, sub; FM between any two), unison up to 8 copies, two
+  filters (ladder, state-variable, comb, formant; serial or parallel),
+  drive, amp and mod envelopes with fixed amounts (cutoff, pitch, FM depth),
+  velocity and key tracking, drift, glide, Poly/Mono/Legato with a
+  polyphony limit, oversampled 1x/2x/4x; modulation routes from a third
+  envelope, three LFOs (per note or free, synced or not, seven shapes),
+  four macros and the MIDI sources to some sixty per-voice destinations;
+  and fifteen factory sounds. Its parameters say when they apply, so an
+  agent sees only the oscillators and filters a patch uses. Its editor
+  draws each oscillator's wave (the wavetables' own frames), the filters'
+  response with a node to drag, the envelopes and LFOs with handles and
+  the newest note's place, the drive curve, the voices playing and the
+  route list. It passes the stock checks and the REAPER check.
+  Withy, the chorus (`plugins/withy`), is a stock plugin with no
+  predecessor. Five styles lay out its voices: classic (two in anti-phase,
+  left and right), dimension (two cross-mixed: the widest, with the
+  shallowest combs), ensemble (three a third of a cycle apart), multi (two
+  to eight at their own delays, rates and places) and vibrato (one voice, no
+  dry). The depth is the pitch each voice swings in cents, the same at any
+  rate, free or in note values locked to the song; sine or rounded
+  triangle, a fast shimmer, a slow random drift, and bloom, which holds the
+  voices still at each new note and lets them sway again (a singer's late
+  vibrato). Voices read through a 16-tap windowed sinc, flat within
+  0.01 dB to 16 kHz however fast they sweep; clean, or a bucket brigade
+  whose band follows its clock, with its lean and compander hiss. Low keep
+  leaves the lows dry and centred; high cut, feedback with its level held,
+  width and an equal-power mix. It reads out the detune, the sweep, the
+  rate and the mono loss; its editor weaves each voice's delay over the
+  last 3 s, shows each voice's pitch now, where the voices sit around the
+  listener, and the response now in stereo and folded to mono.
+  Pollia, the phaser (`plugins/pollia`), has no predecessor
+  either: 1 to 24 trapezoidal all-pass stages, stacked or spread over
+  up to six octaves, with feedback either way (its added level mostly
+  taken back); a sweep by an LFO free or in time (six shapes, a phase, a
+  stereo offset) or by the playing's envelope, measured against its own
+  recent peak so it needs no threshold, either direct or through a
+  photocell (a lamp the cell follows, quick up and slow down); and rise
+  and fall, a barber pole that turns the wet's phase through a 90-degree
+  pair so the notches climb or sink forever at full depth. Keep below
+  leaves the lows whole; mix runs from dry through the deepest notches to
+  a vibrato. It reads out the stages' centre and the envelope now. Its
+  editor draws the response with its notches, where the notches went
+  over about a cycle and a half of the motion, and the path a photocell
+  takes the sweep on; dragging the response moves the centre (across)
+  and the range (up and down). Twelve factory patches.
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The
@@ -221,8 +371,10 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   script when its file changes. `dsp.write`, `dsp.check`, `dsp.get` and
   `dsp.list` write and compile scripts (the app's library is
   `<data>/<slug>/scripts`, shared with the sandbox), `dsp.test` measures
-  one with standard signals (and, when asked, parameter automation, a timed
-  sidechain key or a note sequence), and a script that compiles is loaded
+  one with standard signals at any sample rate (and, when asked, parameter
+  automation, a timed sidechain key or a note sequence) and reports its
+  meters as of each signal's end; a script tells the host a tail that
+  follows its settings and the tempo (`setTail`), and a script that compiles is loaded
   and set like a stock plugin (`skill/guides/dsp-workflow.md`).
   `fx.describe` and the sandbox's `plugin.describe` report a live
   instance's loop-budget stops, out-of-range indices and failed reloads as
@@ -230,7 +382,24 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   (`factoryPatches(Patches&)`), listed and applied with `fx.patch.list` and
   `fx.patch.set {name}` or the sandbox's `preset.list/load {source:
   "factory"}`, and offered by exports' preset bar and hosts' preset
-  browsers. `dsp.export` makes a script a CLAP plugin for any host (a copy
+  browsers. A parameter may apply only while a toggle, a choice or a number's
+  range declared above allows it (`.activeWhen()`, `.activeUnless()`,
+  `.activeAbove()`, `.activeBelow()`): the schema marks it
+  `"active": false` and says when it applies, descriptions leave it out,
+  `plugin.describe`, `patch.merge`, `fx.patch.merge` and `fx.param.set`
+  name it under `inactive`, and the editor, its own or the automatic one,
+  dims its control. Scripts declare modulation sources (`Source` members,
+  per voice or global; instruments also get velocity, key, random,
+  pressure, slide and five MIDI controllers), and the patch's `routes`
+  member connects them to `.modulated()` and `.polyModulated()`
+  parameters with amounts in the parameter's unit (a frequency's in
+  octaves), through a second source when given; the schema lists the
+  sources and each parameter's amount unit, errors name the right unit,
+  state and presets keep the routes, and factory patches set them. An
+  instrument's `setVoiceLimit()` plays fewer of its voices. The editor
+  shows the routes as a list to edit (the automatic editor's, or
+  `e.routes()` in a script's own), written through the patch's checks.
+  `dsp.export` makes a script a CLAP plugin for any host (a copy
   of the player with the script appended, which offers that one plugin), or
   a C++ project of the plugin template that builds the same plugin, bit for
   bit, with the script compiled as C++ (every example's export is checked
@@ -249,11 +418,11 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   given, and says what they edited. Plugin-file exports run on Linux,
   macOS and Windows.
 
-Benchmarks are in `docs/benchmarks/`: B1, 30 Orrery tracks with EQ and
-compression at 48 kHz and 64 frames without xruns using anticipation
-(`b1.md`); the comparison with REAPER (`b2.md`); GUI cold start and frame
-costs (`gui.md`); Console 9 strip cost (`console9-strips.md`). The benchmark
-harness also supports 64/128-frame requests, installed third-party effects,
+Benchmarks are in `docs/benchmarks/`: B1, 75 Marram tracks with EQ and
+compression at 48 kHz and 64 frames without xruns using anticipation, 28 to 29
+without (`b1.md`); the comparison with REAPER, which sustains 82 to 83
+(`b2.md`); GUI cold start and frame costs (`gui.md`); Console 9
+strip cost (`console9-strips.md`). The benchmark harness also supports 64/128-frame requests, installed third-party effects,
 whole-callback/render-job tails and an observed ring low-water mark. Timing is
 bench-only; synthetic deadline counts and server xruns are separate. Historical
 capacity reports retain their original revision/settings.
@@ -278,9 +447,10 @@ Engine and hosting:
   latency preferences report unsupported on other platforms. Windows MCP is
   intended for piped/file input; cancelling an interactive console read can
   await a keypress during shutdown.
-- Without anticipation, a single Orrery chain can miss deadlines at 64
-  frames although average load is low (per-block bursts at chord changes);
-  the harness now exposes callback tails for further profiling.
+- REAPER's default anticipative FX sustains about 10 % more tracks than
+  Quire with anticipation on B1's session (82 to 83 against 75, B2). The
+  anticipative renderer is the limit: it ran at 78 % of real time at 64
+  tracks while the callback stayed under 5 %.
 - Live multiprocessing requires at least two usable CPUs and successful
   helper scheduling; otherwise the engine reports a warning and runs serially.
   A serial plug-in chain cannot benefit, and a stalled helper that has claimed
@@ -288,7 +458,7 @@ Engine and hosting:
   there is no adaptive cost threshold.
 - The shared DSP guard implements x86 FTZ/DAZ and arm64 FPCR FZ; macOS arm64 CI
   verifies FPCR restoration and subnormal handling. Plug-in lifecycle calls run
-  in the thread's own floating-point environment. Orrery now uses this same shared guard on all architectures.
+  in the thread's own floating-point environment.
 - On Linux, real-time background threads need `RLIMIT_RTPRIO` ≥ 1, an unlimited
   `RLIMIT_RTTIME` and a pool that leaves two allowed CPUs free; without them
   the renderer and pool run at normal priority (with a warning) and compete
@@ -328,12 +498,16 @@ Engine and hosting:
 - Stopped-transport audio from tracks that are not live (a plugin's own
   preview button, for example) is not heard in anticipative mode unless the
   track is armed and monitored.
+- A plugin's factory presets are the semantic extension's factory patches:
+  a third-party plugin's own presets (CLAP preset discovery, VST3 program
+  lists) are not listed in the presets menu, and the menu does not mark the
+  preset last loaded.
 - Multi-output plugins: main output ports wider than stereo are not used,
   and there are no per-output meters.
 - Overlapping gestures on a plugin without semantic parameters share one
   state blob.
-- The engine does not read plugin telemetry (Gauge's measurements reach its
-  own editor and agents through the extension only).
+- `fx.meters` reads a plugin's readouts live or as the last `render.mix`
+  ended; other renders (stems, regions, A/B) keep none.
 - FX containers are not implemented; parallel FX run in series on pinned
   stages and strips with auxiliary channels, and oversampling is not
   available to plug-ins with auxiliary outputs.
@@ -410,12 +584,15 @@ Plugins:
   analysis costs about 0.3 ms per transform in a standalone -O2 copy (at
   most 25 a second at 48 kHz, under 1% of a core, on the editor thread);
   the plugin itself has not been profiled.
+- Lichen's readouts refresh every 100 ms and reach a host as meter events
+  at 30 Hz, so a render's last reading can miss its final 100 ms or more.
+- clang-cl builds the suite runtime and stock scripts with
+  `/clang:-ffp-contract=off` and `/clang:-fwrapv` (they had neither); native
+  Windows CI has not run since.
 - Scripts need a JIT: there is no fallback for hosts that forbid executable
   memory (MIR's interpreter is a test backend, not real-time safe).
 - A script save that redefines the plugin while an editor drag is under way
   can leave that gesture open in the host until it rescans.
-- Orrery's reference patch uses about 9 % of a core at 48 kHz / 256 frames;
-  reaching 3 % needs a structure-of-arrays voice bank.
 - Stock CLAP builds and product/conformance/reset checks run on Linux, macOS
   and Windows. Existing macOS AUv2 targets compile in CI but are not host-tested
   here. Stock VST3 builds remain opt-in; native VST3 hosting is tested with an
@@ -429,7 +606,8 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
 ## Planned
 
 - Profile the 64-frame worst case; a pipelined bridge mode.
+- Close the capacity gap with REAPER (B2) by making the anticipative
+  renderer cheaper, then keep refining capacity in both modes.
 - Track groups, stretch markers, MIDI outputs, a background media cache.
 - Lua ergonomics (a script library path, hot reload).
-- Orrery's structural performance pass.
 - Hardening and ports beyond Linux.

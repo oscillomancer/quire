@@ -4,14 +4,7 @@ target_include_directories(semantic-params-abi INTERFACE ${CMAKE_CURRENT_SOURCE_
 target_link_libraries(semantic-params-abi INTERFACE supple::clap)
 add_library(supple::semantic-params-abi ALIAS semantic-params-abi)
 
-# Plugin-side support for stock plugins (ParamStore, ClapParams, FlatSemantic).
-supple_add_library(plugin-support
-  SOURCES src/plugin_support.cpp src/semantic_model.cpp
-  DEPS supple::core-params supple::core-patch supple::semantic-params-abi)
-
 if(SUPPLE_BUILD_TESTS)
-  supple_add_tests(plugin-support SOURCES tests/test_plugin_support.cpp LABELS rt)
-
   if(UNIX AND NOT APPLE)
     add_executable(clap-unload-probe tools/clap_unload_probe.cpp)
     target_link_libraries(clap-unload-probe PRIVATE supple::clap ${CMAKE_DL_LIBS})
@@ -30,12 +23,16 @@ if(SUPPLE_BUILD_TESTS)
   target_link_libraries(clap-reset-check PRIVATE supple::clap-host)
   supple_target_defaults(clap-reset-check)
 
-  add_library(plugin-support-fixture MODULE tests/helper_fixture.cpp)
-  target_link_libraries(plugin-support-fixture PRIVATE supple::plugin-support)
-  set_target_properties(plugin-support-fixture PROPERTIES PREFIX "" SUFFIX ".clap" OUTPUT_NAME "tilt-fixture")
-  supple_target_defaults(plugin-support-fixture)
+  # Checks that output does not depend on the host's block size under
+  # sample-accurate automation (the engine's real-time/offline match).
+  add_executable(clap-block-check tools/clap_block_check.cpp)
+  target_link_libraries(clap-block-check PRIVATE supple::clap-host)
+  supple_target_defaults(clap-block-check)
 
-  add_test(NAME plugin-support.conformance
-           COMMAND semantic-conformance $<TARGET_FILE:plugin-support-fixture> com.suppleaudio.test.tilt)
+  # A plugin's cost and its output per setup, to keep a change's sound
+  # (plugins/AGENTS.md); run by hand, not a test.
+  add_executable(clap-bench tools/clap_bench.cpp)
+  target_link_libraries(clap-bench PRIVATE supple::clap-host supple::core-json)
+  supple_target_defaults(clap-bench)
   endif()
 endif()

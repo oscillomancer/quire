@@ -127,7 +127,7 @@ Fields:
 | `locked`, `hidden_tcp`, `hidden_mixer`, `folder_compact` | bool / enum | UI state kept in the model because it is user intent, but tagged `ui: true` so diffs/merges can ignore it |
 
 `volume`, `pan` and `mute` are automatable (§1.9). Width and trim are not
-strip fields: insert a utility (Plumb) for them.
+strip fields: insert a utility (Hickory) for them.
 
 Track templates (`supple.track-template/1.0`) persist the strip's `channels`
 in their `track` object and pass it to `track.add` when loaded. The optional
@@ -135,8 +135,10 @@ field defaults to stereo (2) for older templates. Its strip-type bounds match
 `track.add`; FX pins retain their saved channel assignments.
 
 Presets and templates live in the user's configuration folder: FX chain
-presets (`supple.fx-chain/1.0`) in `<config>/<slug>/chains`, track templates
-in `track-templates`, and project templates in `templates`. A project
+presets (`supple.fx-chain/1.0`) in `<config>/<slug>/chains`, a plugin's own
+presets in `presets/<plugin id>/<name>.json` (`supple.preset/1.0`, the
+sandbox's preset document, sandbox.md), track templates in
+`track-templates`, and project templates in `templates`. A project
 template is a folder, `templates/<name>/`, holding `project.json` (an
 ordinary project file, §5, of the head without history) and `media/` with a
 copy of every audio file the head uses, named relative to it; a missing file
@@ -345,7 +347,7 @@ tr_1 Drums [buss] → master
   tr_2 Kick   vol −3.0 dB · fx: fx_2 EQ (4 bands), fx_3 Comp (−4 dB GR@1:1…)
               it_4 bars 1–17 "kick loop" (audio md_1, 1.00×)
   tr_3 Snare  it_5 bars 1–17 (MIDI mi_2, 64 notes)
-tr_6 Bass → master · fx: fx_7 Orrery "Round Sub", fx_8 EQ
+tr_6 Bass → master · fx: fx_7 Marram "Round Sub", fx_8 EQ
 routes: sd_1 tr_2 → tr_6 ch 1/2→3/4 pre-fader −6 dB (sidechain)
 markers: mk_1 "Verse" bar 1 · regions: rg_1 "Chorus" bars 9–17
 ```
@@ -541,8 +543,11 @@ and naming. All `edit` unless marked (q) query or (a) action.
 - **FX**: `fx.add {chain_owner, plugin, index, patch?}`, `fx.remove`,
   `fx.move`, `fx.copy {fx, track, index?, chain?}` (live settings), `fx.set {bypass, offline, wet, isolation, oversampling,
   parallel, pins, …}`, `fx.param.set {fx, values: {key|id: value}}`,
-  `fx.param.get` (q), `fx.patch.get` (q), `fx.patch.set`, `fx.patch.merge`,
-  `fx.describe` (q), `fx.preset.save` (a), `fx.preset.load`, chain presets
+  `fx.param.get` (q), `fx.meters {fx, from: live|render}` (q: the read-only
+  values of the playing instance, or as the last `render.mix` ended),
+  `fx.patch.get` (q), `fx.patch.set`, `fx.patch.merge`,
+  `fx.describe` (q), a plugin's presets `fx.preset.list` (q),
+  `fx.preset.load`, `fx.preset.save` (a), `fx.preset.delete` (a), chain presets
   `fx.chain.save` (a), `fx.chain.load`, `fx.chain.list` (q),
   `fx.chain.delete` (a), MIDI learn `fx.learn.set {fx, param, midi, mode?,
   soft_takeover?, when_selected?, when_focused?, when_visible?}` (one per

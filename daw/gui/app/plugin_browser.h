@@ -57,8 +57,9 @@ class PluginBrowser {
     // The action the browser adds through (set by open()).
     const std::function<void(const std::string&)>& onAdd() const { return onAdd_; }
     // The composed text of a row — exactly what paintRow draws, so tests can
-    // read a row without pixels. `vendor` is "stock", the vendor, or
-    // "shadowed" for a copy an earlier path entry wins over.
+    // read a row without pixels. `name` follows a stock plugin's with what it
+    // is ("Ghyll (reverb)"); `vendor` is "stock", the vendor, or "shadowed"
+    // for a copy an earlier path entry wins over.
     struct RowText {
         std::string name, vendor, id;
     };
@@ -70,6 +71,7 @@ class PluginBrowser {
   private:
     struct Entry {
         std::string id, name, vendor, format, path;
+        std::string kind;  // a stock plugin's: "reverb", from its CLAP features; else empty
         bool instrument = false, semantic = false, shadowed = false;
     };
     struct Row {

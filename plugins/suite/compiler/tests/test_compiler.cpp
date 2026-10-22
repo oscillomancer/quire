@@ -141,6 +141,55 @@ TEST_CASE("a choice's options may have keys of their own") {
     CHECK(firstError(source(slope + ".keys(\"db12\")")) == "script.param.modifier");
 }
 
+TEST_CASE("a parameter applies on conditions that name a toggle or a choice above it") {
+    const auto source = [](const std::string& declarations) {
+        std::string s = kGain;
+        s.insert(s.find("    double g = 1.0;"),
+                 "    Param on = toggle(\"On\", true);\n"
+                 "    Param shape = choice(\"Shape\", {\"Bell\", \"Low Cut\"}, 0);\n"
+                 "    Param peak = decibels(\"Peak\", -60, 0, -60).meter();\n"
+                 "    Param level = decibels(\"Level\", -60, 0, -12);\n" +
+                     declarations + "\n");
+        return s;
+    };
+    auto good = compileOk(
+        source("    Param q = continuous(\"Q\", 0.1, 10, 1).activeWhen(on).activeUnless(shape, "
+               "{\"low_cut\"});"));
+    const auto& conditions = good.program->params().back().activeWhen;
+    REQUIRE(conditions.size() == 2);
+    CHECK((conditions[0].param == 1 && conditions[0].values == std::vector<int>{1}));
+    CHECK((conditions[1].param == 2 && conditions[1].values == std::vector<int>{0}));
+    auto refused = [&](const std::string& modifiers) {
+        return firstError(source("    Param q = continuous(\"Q\", 0.1, 10, 1)" + modifiers + ";"));
+    };
+    CHECK(refused(".activeWhen(nothing)") == "script.param.active");
+    CHECK(refused(".activeWhen(g)") == "script.param.active");
+    CHECK(refused(".activeWhen(gain)") == "script.param.active");  // neither kind
+    CHECK(refused(".activeWhen(peak)") == "script.param.active");  // a meter
+    CHECK(refused(".activeWhen(q)") == "script.param.active");     // itself
+    CHECK(refused(".activeWhen(on, {\"On\"})") == "script.param.active");
+    CHECK(refused(".activeWhen(shape)") == "script.param.active");
+    CHECK(refused(".activeWhen(shape, {\"Notch\"})") == "script.param.active");
+    CHECK(refused(".activeUnless(shape, {\"Bell\", \"Low Cut\"})") == "script.param.active");
+    CHECK(refused(".activeWhen(shape, {1})") == "script.param.active");
+    CHECK(refused(".activeWhen(on).activeWhen(on).activeWhen(on).activeWhen(on).activeWhen(on)") ==
+          "script.param.active");
+    // A number's: above or below a value inside its range.
+    CHECK(refused(".activeAbove(on, 0)") == "script.param.active");     // not a number
+    CHECK(refused(".activeWhen(level)") == "script.param.active");      // not a toggle
+    CHECK(refused(".activeAbove(level, 0)") == "script.param.active");  // never above 0
+    CHECK(refused(".activeBelow(level, -60)") == "script.param.active");
+    CHECK(refused(".activeAbove(level, \"x\")") == "script.param.active");
+    CHECK(refused(".activeAbove(level)") == "script.param.active");
+    auto ranged =
+        compileOk(source("    Param q = continuous(\"Q\", 0.1, 10, 1).activeAbove(level, -30);"));
+    CHECK(ranged.program->params().back().activeWhen.at(0).above == -30.0);
+    // A condition names a parameter declared above.
+    CHECK(firstError(source("    Param q = continuous(\"Q\", 0.1, 10, 1).activeWhen(later);\n"
+                            "    Param later = toggle(\"Later\", true);")) ==
+          "script.param.active");
+}
+
 TEST_CASE("a gain script compiles and applies its gain") {
     for (bool interpret : {false, true}) {
         CAPTURE(interpret);
@@ -258,6 +307,14 @@ TEST_CASE("the first scripts' mistakes are refused with a hint") {
     CHECK(firstError(plugin("DelayLine d; void process(Block& io) { d.prepare(100); }")) ==
           "script.rt.allocation");
     CHECK(firstError(plugin("void process(Block& io) { double y = sin(1); }")) == "");
+    CHECK(firstError(plugin("Array<Oversampler, 2> o;\n"
+                            "void prepare() { o[0].prepare(1); o[1].prepare(4, "
+                            "Oversampler::Phase::Linear); }\n"
+                            "void process(Block& io) {}")) == "");
+    CHECK(firstError(plugin("void update() { setTail(4800); }\n"
+                            "void process(Block& io) { setTail(-1); }")) == "");
+    CHECK(firstError(plugin("void process(Block& io) {}\n"
+                            "void draw(Canvas& g) { setTail(0); }")) == "script.editor.call");
     CHECK(firstError(plugin("void process(Block& io) { double y = min(1, 0.5); }")) ==
           "script.call.ambiguous");
     CHECK(firstError(plugin("void process(Block& io) { double y = M_PI; }")) ==
@@ -334,6 +391,17 @@ TEST_CASE("the first scripts' mistakes are refused with a hint") {
     CHECK(firstError(withInfo(".id = \"com.example.t\", .version = \"1.2\"")) ==
           "script.plugin.info");
     CHECK(firstError(withInfo(".id = \"com.example.t\", .version = \"1.2.10\"")) == "");
+    // CLAP features after the main category, which the kind gives.
+    CHECK(firstError(withInfo(".id = \"com.example.t\", .features = {\"reverb\", \"stereo\"}")) ==
+          "");
+    CHECK(firstError(withInfo(".id = \"com.example.t\", .features = {\"Reverb\"}")) ==
+          "script.plugin.info");
+    CHECK(firstError(withInfo(".id = \"com.example.t\", .features = {\"audio-effect\"}")) ==
+          "script.plugin.info");
+    CHECK(firstError(withInfo(".id = \"com.example.t\", .features = \"reverb\"")) ==
+          "script.plugin.info");
+    CHECK(firstError(withInfo(".id = \"com.example.t\", .tail = 1, .features = {\"reverb\"}")) ==
+          "script.type.designator_order");
     // Instruments: notes reach voices through the voice hooks, which only an
     // instrument has; scripts send no notes, so no note effects.
     auto instrument = [&](const std::string& body) {
@@ -360,6 +428,54 @@ TEST_CASE("the first scripts' mistakes are refused with a hint") {
                           "void process(Block& io) {}")) == "script.param.poly");
     CHECK(firstError(plugin("void process(Block& io) { double p = voicePressure(0); }")) ==
           "script.plugin.instrument");
+}
+
+TEST_CASE("sources are members of the plugin, and factory patches route them by key") {
+    const std::string head = "#include <supple/script.h>\n";
+    const std::string hooks =
+        "void startVoice(int v) {}\nvoid releaseVoice(int v) {}\n"
+        "void process(Block& io) {}\n";
+    auto instrument = [&](const std::string& body) {
+        return head + "struct T : Instrument {\n" +
+               "static constexpr Info info = {.name = \"T\", .id = \"com.example.t\"};\n" +
+               "Param cutoff = frequency(\"Cutoff\", 20, 20000, 1000).polyModulated();\n" + body +
+               "\n" + hooks + "};\n";
+    };
+    auto effect = [&](const std::string& body) {
+        return head + "struct T : Effect {\n" +
+               "static constexpr Info info = {.name = \"T\", .id = \"com.example.t\"};\n" +
+               "Param mix = percent(\"Mix\", 50).modulated();\n" + body +
+               "\nvoid process(Block& io) {}\n};\n";
+    };
+    CHECK(firstError(
+              instrument("Source lfo = voiceSource(\"LFO\");\n"
+                         "void factoryPatches(Patches& p) { p.add(\"A\").route(\"lfo>cutoff\", "
+                         "2).route(\"velocity>cutoff\", 1, \"modwheel\"); }")) == "");
+    CHECK(firstError(effect("Source macro = source(\"Macro\").unipolar();")) == "");
+    CHECK(firstError(effect("Source lfo = voiceSource(\"LFO\");")) == "script.source.voice");
+    CHECK(firstError(instrument("Source velocity = voiceSource(\"Velocity\");")) ==
+          "script.source.key");
+    CHECK(firstError(instrument("Source a = source(\"A\").withKey(\"x\");\n"
+                                "Source b = source(\"B\").withKey(\"x\");")) ==
+          "script.source.key");
+    CHECK(firstError(instrument("Array<Source, 2> lfos;")) == "script.source.array");
+    CHECK(firstError(instrument("Source lfo;")) == "script.source.declaration");
+    CHECK(firstError(instrument("Source lfo = voiceSource(\"LFO\").smoothed(2);")) ==
+          "script.source.modifier");
+    CHECK(firstError(instrument("Source lfo = voiceSource(\"LFO\");\n"
+                                "void f() { auto copy = lfo; }")) == "script.local.source");
+    CHECK(firstError(instrument("Param fine = cents(\"Fine\", -100, 100, 0).routeRange(5, 1);")) ==
+          "script.param.modifier");
+    CHECK(firstError(
+              instrument("void factoryPatches(Patches& p) { p.add(\"A\").route(\"nothing>cutoff\", "
+                         "2); }")) == "script.patch.route");
+    CHECK(firstError(effect("Source m = source(\"M\");\n"
+                            "void factoryPatches(Patches& p) { p.add(\"A\").route(\"m>gain\", 2); "
+                            "}")) == "script.patch.route");
+    // An effect has no sources of its own.
+    CHECK(
+        firstError(effect("void factoryPatches(Patches& p) { p.add(\"A\").route(\"modwheel>mix\", "
+                          "2); }")) == "script.patch.route");
 }
 
 TEST_CASE("editor code reads parameters and Shared members, and keeps the rest apart") {
@@ -465,13 +581,15 @@ struct T : Effect {
     static constexpr Info info = {.name = "T", .id = "com.example.t"};
     Param tempo = continuous("Tempo", 40, 240, 120, Unit::Bpm);
     Param plain = continuous("Amount", 0, 1, 0.5);
+    Param across = continuous("Width", 1, 60, 18, Unit::Meters);
     void process(Block& io) {}
 };
 )";
     auto r = compileOk(source);
-    REQUIRE(r.program->params().size() == 2);
+    REQUIRE(r.program->params().size() == 3);
     CHECK(r.program->params()[0].unit == scriptc::ParamModel::Unit::Bpm);
     CHECK(r.program->params()[1].unit == scriptc::ParamModel::Unit::None);
+    CHECK(r.program->params()[2].unit == scriptc::ParamModel::Unit::Meters);
 }
 
 TEST_CASE("an instrument takes its notes through voice hooks") {

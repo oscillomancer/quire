@@ -157,13 +157,14 @@ the reason).
 
 ## 6. Tests
 
-A synthetic end-to-end test with the probe synth: render a hidden target
-patch (cutoff 2.4 kHz, resonance 40 %, decay 180 ms), start from defaults,
-optimize those three params with the reference target, and require the
+A synthetic end-to-end test with the stock synth, Marram (a saw through an
+SVF that Env 2 opens; Orrery's headless build until 2026-10-21): render a
+hidden target patch (cutoff 900 Hz, resonance 60 %, Env 2 decay 180 ms), go
+back to the defaults, optimize
+those three params against the render with a fixed seed, and require the
 result within 10 % of each hidden value (normalized domain) within 300
-evaluations — deterministic under a fixed seed, and identical on 1 and 8
-threads. A profile-only test (hit `spectral.centroid_hz.median` 1500 ± 50 and
-`envelope.attack_ms` 5 ± 2).
+evaluations. A profile-only test hits `spectral.centroid_hz.median`
+1500 ± 50 with the cutoff alone.
 
 ## Amendments (2026-09-26, implementation)
 
@@ -179,7 +180,8 @@ threads. A profile-only test (hit `spectral.centroid_hz.median` 1500 ± 50 and
   run inside a batch (a job cannot be rolled back); call it on its own.
 - `"auto"` selects continuous, modulatable parameters marked active in the
   schema, excluding performance/placement parameters: `voice.*`, `*.pan`,
-  `*_curve`, `*.delay`, `*.hold`, `*.velocity`, `*.fade`, `output.level`.
+  `*_curve`, `*.delay`, `*.hold`, `*.velocity`, `*.fade`, and the output
+  level (`output` or `output.level`).
 - Evaluation is single-threaded on one worker thread that owns a clone of the
   instance (cloned through its state). The best candidate's render is written
   by the worker under a render id reserved at start and joins the session's

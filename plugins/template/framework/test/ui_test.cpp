@@ -28,6 +28,7 @@
 #include "core/Files.h"
 #include "core/PresetLibrary.h"
 #include "core/PropertyTable.h"
+#include "gui/AutoEditor.h"
 #include "gui/EditorBase.h"
 #include "gui/Fonts.h"
 #include "gui/Gui.h"
@@ -1739,6 +1740,135 @@ struct ProductEditor {
     }
 };
 }  // namespace
+
+#if SUPPLE_AUTO_EDITOR
+TEST(the_automatic_editor_dims_what_the_definition_says_does_not_apply) {
+    // The parameter the first focused control edits applies only away from
+    // its default, by the host's values; a dimmed control takes no keys.
+    struct Moot final : Definition {
+        using Definition::Definition;
+        size_t index = 0;
+        bool applies(size_t i, const std::function<double(size_t)>& host) const override {
+            return i != index || host(i) != hostDefault(params().at(i));
+        }
+    };
+    struct MootHost final : MockHost {
+        const Definition* definition = nullptr;
+        const Definition& pluginDefinition() const override { return *definition; }
+    };
+    const Definition& product = *productDefinition();
+    Moot moot(product.info(), ParamTable(product::kParams, params::kCount));
+    // Tab `tabs` times, then Up: the parameter that moved when only one did
+    // (Up on the preset bar loads a preset), or -1.
+    auto nudge = [](MockHost& host, int tabs) {
+        double before[params::kCount];
+        std::copy(std::begin(host.values), std::end(host.values), before);
+        std::unique_ptr<EditorBase> editor = product::createEditor(host);
+        editor->idle(0.0);
+        for (int t = 0; t < tabs; ++t) editor->key(key::kTab, 0);
+        editor->key(key::kUp, 0);
+        int moved = -1;
+        for (size_t i = 0; i < params::kCount; ++i)
+            if (host.values[i] != before[i]) {
+                if (moved >= 0) return -1;
+                moved = static_cast<int>(i);
+            }
+        return moved;
+    };
+    // The first continuous parameter Tab reaches.
+    int tabs = 0, index = -1;
+    for (int t = 1; t <= 16 && index < 0; ++t) {
+        MockHost probe;
+        const int moved = nudge(probe, t);
+        if (moved >= 0 && params::at(static_cast<size_t>(moved)).kind == ParamKind::Continuous) {
+            tabs = t;
+            index = moved;
+        }
+    }
+    if (index < 0) {
+        std::printf("    (no continuous control takes arrow keys: skipped)\n");
+        return;
+    }
+    moot.index = static_cast<size_t>(index);
+    MootHost dimmed;  // at its default: dimmed, so Tab passes it by
+    dimmed.definition = &moot;
+    CHECK(nudge(dimmed, tabs) != index);
+    MootHost applying;  // away from it: it takes the key
+    applying.definition = &moot;
+    applying.values[moot.index] = toHost(params::at(moot.index), params::at(moot.index).max) * 0.5 +
+                                  hostDefault(params::at(moot.index)) * 0.5;
+    CHECK(nudge(applying, tabs) == index);
+}
+
+TEST(the_automatic_editor_leaves_out_a_hidden_property) {
+    // A text field makes room for itself; a hidden property's makes none.
+    struct PropertyHost final : MockHost {
+        std::unique_ptr<Definition> definition;
+        const Definition& pluginDefinition() const override { return *definition; }
+    };
+    const Definition& product = *productDefinition();
+    auto size = [&](std::vector<PropertyDef> properties) {
+        PropertyHost host;
+        host.definition = std::make_unique<Definition>(
+            product.info(), ParamTable(product::kParams, params::kCount), PropertyList(std::move(properties)));
+        std::unique_ptr<EditorBase> editor = product::createEditor(host);
+        return std::pair(editor->width(), editor->height());
+    };
+    const auto none = size({});
+    CHECK(size({property(900, "Notes")}) != none);
+    CHECK(size({property(900, "Notes").hidden()}) == none);
+}
+
+TEST(the_automatic_editor_gives_a_layers_panel_its_room_and_its_pointer) {
+    struct Panel final : AutoPanel {
+        Rect body;
+        std::vector<std::string> heard;
+        int painted = 0;
+        const char* title() const override { return "Own"; }
+        float width() const override { return 300.0f; }
+        float height() const override { return 120.0f; }
+        void open(EditorHost&, Ui&, Rect at) override { body = at; }
+        void paint(NVGcontext*, const Theme&) override { ++painted; }
+        bool pointerDown(float, float, int, uint32_t, bool) override {
+            heard.push_back("down");
+            return true;
+        }
+        bool pointerMove(float, float, uint32_t) override {
+            heard.push_back("move");
+            return true;
+        }
+        void pointerUp(float, float, int, uint32_t) override { heard.push_back("up"); }
+    };
+    MockHost host;
+    const std::unique_ptr<EditorBase> plain = product::createEditor(host);
+    auto own = std::make_unique<Panel>();
+    Panel& panel = *own;
+    std::vector<std::unique_ptr<AutoPanel>> panels;
+    panels.push_back(std::move(own));
+    const std::unique_ptr<EditorBase> editor = automaticEditor(host, std::move(panels));
+    CHECK(editor->width() * editor->height() > plain->width() * plain->height());
+    CHECK(panel.body.w == 300.0f && panel.body.h >= 120.0f);  // as tall as its row
+    CHECK(panel.body.right() <= editor->width() && panel.body.bottom() <= editor->height());
+    // A press in its body is the panel's until the release, wherever it goes.
+    CHECK(editor->pointerDown(panel.body.cx(), panel.body.cy(), 0, 0, false));
+    editor->pointerMove(1.0f, 1.0f, 0);
+    editor->pointerUp(1.0f, 1.0f, 0, 0);
+    CHECK((panel.heard == std::vector<std::string>{"down", "move", "up"}));
+    // Outside it, the editor's own.
+    panel.heard.clear();
+    editor->pointerDown(1.0f, 1.0f, 0, 0, false);
+    editor->pointerUp(1.0f, 1.0f, 0, 0);
+    CHECK(panel.heard.empty());
+    NVGcontext* vg = test::createHeadlessCanvas();
+    editor->attach(vg);
+    nvgBeginFrame(vg, editor->width(), editor->height(), 1.0f);
+    editor->render(vg);
+    nvgEndFrame(vg);
+    editor->detach();
+    nvgDeleteInternal(vg);
+    CHECK(panel.painted == 1);
+}
+#endif
 
 TEST(rebuilding_after_a_window_draw_keeps_the_displayed_editor_alive) {
     MockHost host;
