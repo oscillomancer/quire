@@ -351,3 +351,12 @@ if (SUPPLE_BUILD_PLUGIN)
         message(STATUS "clap-validator not found; its test is not registered")
     endif()
 endif()
+
+# What the fuzz preset builds: the state fuzzers above, or nothing when the
+# product has none (a run-time product, whose state no tables describe).
+add_custom_target(fuzz-tests)
+foreach(fuzzer state-fuzz state-fuzzer)
+    if (TARGET ${fuzzer})
+        add_dependencies(fuzz-tests ${fuzzer})
+    endif()
+endforeach()
