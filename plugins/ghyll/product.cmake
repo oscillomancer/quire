@@ -37,6 +37,7 @@ set(PRODUCT_DSP_SOURCES     product/Catalog.cpp)
 set(PRODUCT_EDITOR_SOURCES  "")
 set(PRODUCT_TEST_SOURCES    "")
 
-# Output: the room comes a little late, the dry level at once.
-set(PRODUCT_SMOKE_PLAIN_PARAM   "Output")
+# Room Width: the room's plan redraws at the editor's left, where a small
+# test screen still shows it (the Output knob sits past 1024 pixels).
+set(PRODUCT_SMOKE_PLAIN_PARAM   "Room Width")
 set(PRODUCT_SMOKE_LATENCY_PARAM "")

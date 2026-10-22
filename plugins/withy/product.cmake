@@ -37,6 +37,7 @@ set(PRODUCT_DSP_SOURCES     product/Catalog.cpp)
 set(PRODUCT_EDITOR_SOURCES  "")
 set(PRODUCT_TEST_SOURCES    "")
 
-# Output: it trims the level at once, whatever the voices are doing.
-set(PRODUCT_SMOKE_PLAIN_PARAM   "Output")
+# Delay: its knob and the strands redraw at the editor's left, where a
+# small test screen still shows them (the Output knob sits near 1024 pixels).
+set(PRODUCT_SMOKE_PLAIN_PARAM   "Delay")
 set(PRODUCT_SMOKE_LATENCY_PARAM "")
