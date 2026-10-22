@@ -28,5 +28,11 @@ if(SUPPLE_BUILD_TESTS)
   add_executable(clap-block-check tools/clap_block_check.cpp)
   target_link_libraries(clap-block-check PRIVATE supple::clap-host)
   supple_target_defaults(clap-block-check)
+
+  # A plugin's cost and its output per setup, to keep a change's sound
+  # (plugins/AGENTS.md); run by hand, not a test.
+  add_executable(clap-bench tools/clap_bench.cpp)
+  target_link_libraries(clap-bench PRIVATE supple::clap-host supple::core-json)
+  supple_target_defaults(clap-bench)
   endif()
 endif()
