@@ -93,6 +93,12 @@ double aliasHz(double c) { return 20000.0 * pow(0.0125, clamp(c, 0.0, 1.0)); }
 // Transformer's core corner for a character: 40 Hz to 400 Hz.
 double coreHz(double c) { return 40.0 * pow(10.0, clamp(c, 0.0, 1.0)); }
 
+double transistor(double u, double p) {
+    return u >= 0.0 ? algebraic(u, p) : 0.92 * algebraic(u / 0.92, p);
+}
+
+double crush(double u, double levels) { return round(tanh(u) * levels) / levels; }
+
 // The curve without memory: the static ones as they are; tape, tube and
 // alias without theirs; transformer as its core at the corner frequency.
 double curve(int style, double u, double c) {
@@ -107,7 +113,7 @@ double curve(int style, double u, double c) {
             return core(u);
         case 4: {
             const double p = 2.0 + 10.0 * pow(clamp(c, 0.0, 1.0), 1.5);
-            return u >= 0.0 ? algebraic(u, p) : 0.92 * algebraic(u / 0.92, p);
+            return transistor(u, p);
         }
         case 5: {
             const double t = 1.0 + 2.0 * c;
@@ -133,7 +139,7 @@ double curve(int style, double u, double c) {
         }
         case 10: {
             const double levels = exp2(crushBits(c) - 1.0);
-            return round(tanh(u) * levels) / levels;
+            return crush(u, levels);
         }
         default:
             return tanh(u);
@@ -152,6 +158,9 @@ struct Shaper {
     double leak = 0.9999;  // transformer: the core's flux, and its error a sample back
     double flux = 0.0, err = 0.0;
     double phase = 1.0, held = 0.0;  // alias: the sample held
+    double atCore = -1.0, atBias = -1.0, atAlias = -1.0;
+    double beta = 1.0, coreBias = 0.0, holdStep = 1.0;
+    double atHardness = -1.0, atBits = -1.0, hardness = 2.0, levels = 1.0;
 
     void prepare(double r) {
         rate = r;
@@ -169,6 +178,11 @@ struct Shaper {
         err = 0.0;
         phase = 1.0;
         held = 0.0;
+        atCore = -1.0;
+        atBias = -1.0;
+        atAlias = -1.0;
+        atHardness = -1.0;
+        atBits = -1.0;
     }
 
     double process(int style, double x, double c, double b) {
@@ -196,21 +210,48 @@ struct Shaper {
             // bass saturates first; the output is the input less the
             // derivative of what saturation took from the flux. Bias is a
             // standing flux (direct current through the winding).
-            const double beta = twoPi * coreHz(c) / rate;
+            // These depend on the controls, not on the signal. A glide or
+            // motion still updates them at every distinct character/bias.
+            if (c != atCore) {
+                atCore = c;
+                beta = twoPi * coreHz(c) / rate;
+            }
+            if (b != atBias) {
+                atBias = b;
+                coreBias = core(b);
+            }
             flux = leak * flux + beta * x;
-            const double e = core(flux + b) - flux - core(b);
+            const double e = core(flux + b) - flux - coreBias;
             const double y = x + (e - leak * err) / beta;
             err = e;
             return y;
         }
         if (style == 11) {
             // Alias: held at a lower rate, with no filter before it.
-            phase += aliasHz(c) / rate;
+            if (c != atAlias) {
+                atAlias = c;
+                holdStep = aliasHz(c) / rate;
+            }
+            phase += holdStep;
             if (phase >= 1.0) {
                 phase -= floor(phase);
                 held = tanh(x + b);
             }
             return held;
+        }
+        if (style == 4) {
+            if (c != atHardness) {
+                atHardness = c;
+                hardness = 2.0 + 10.0 * pow(clamp(c, 0.0, 1.0), 1.5);
+            }
+            return transistor(x + b, hardness);
+        }
+        if (style == 10) {
+            if (c != atBits) {
+                atBits = c;
+                levels = exp2(crushBits(c) - 1.0);
+            }
+            return crush(x + b, levels);
         }
         return curve(style, x + b, c);
     }
@@ -635,6 +676,9 @@ struct Teasel : Effect {
     // The auto gain: dB to apply after the curve, for each dB of drive, for
     // the style now and the one before a change.
     Array<double, 121> compNow, compWas;
+    Array<double, 64> compNodes, compWeights;
+    Array<double, 121> compDrives;
+    double compWeight = 1.0;
     double compGain = 1.0, compWasGain = 1.0, compStep = 0.002;
     int styleNow = 1, styleWas = 1;
     double fade = 1.0, fadeStep = 0.001;
@@ -668,7 +712,9 @@ struct Teasel : Effect {
     int quiet = 0, quietLimit = 48000;
     int modeNow = 0;
     double duck = 1.0, duckStep = 0.01;
-    double listenMix = 0.0, listenStep = 0.001;
+    int listenLength = 480, listenAt = 480;
+    double listenBand = 0.0, listenDelta = 0.0;
+    double listenFromBand = 0.0, listenFromDelta = 0.0;
     bool unplayed = true;
 
     // Meters, the spectra's rings and the transfer plot's samples.
@@ -716,7 +762,9 @@ struct Teasel : Effect {
         stepSin = sin(twoPi * probeStep);
         fadeStep = 1.0 / (0.02 * rate);
         compStep = 1.0 - exp(-1.0 / (0.01 * rate));
-        listenStep = 1.0 / (0.01 * rate);
+        listenLength = max(1, roundToInt(0.01 * rate));
+        listenMode = listen.index();
+        snapListen();
         duckStep = 1.0 / (0.003 * rate);
         duck = 1.0;
         loopOpen = 1.0;
@@ -766,6 +814,17 @@ struct Teasel : Effect {
         unplayed = true;
         styleNow = style.index();
         styleWas = styleNow;
+        // The quadrature and drive grid are independent of the curve.
+        // Parameter changes only need to measure it on this same grid.
+        compWeight = 0.0;
+        const double dz = 10.0 / kNodes;
+        for (int j = 0; j < kNodes; ++j) {
+            const double z = -5.0 + (j + 0.5) * dz;
+            compNodes[j] = z;
+            compWeights[j] = exp(-0.5 * z * z);
+            compWeight += compWeights[j];
+        }
+        for (int d = 0; d < kCompSteps; ++d) compDrives[d] = dbToGain(kCompLow + d);
         buildComp(compNow, styleNow);
         buildComp(compWas, styleNow);
         loopScale = 1.0 / max(1.0, steepest(styleNow));
@@ -789,21 +848,18 @@ struct Teasel : Effect {
     // and its offset removed) back to -18 dBFS RMS.
     void buildComp(Array<double, 121>& table, int st) {
         const double c = character.value(), b = 0.5 * bias.value();
-        const double dz = 10.0 / kNodes;
         for (int d = 0; d < kCompSteps; ++d) {
-            const double g = dbToGain(kCompLow + d);
-            double m = 0.0, m2 = 0.0, wsum = 0.0;
+            const double g = compDrives[d];
+            double m = 0.0, m2 = 0.0;
             for (int j = 0; j < kNodes; ++j) {
-                const double z = -5.0 + (j + 0.5) * dz;
-                const double w = exp(-0.5 * z * z);
+                const double z = compNodes[j], w = compWeights[j];
                 const double u = g * kRef * z;
                 const double y = st == 3 ? u : curve(st, u + b, c);
                 m += w * y;
                 m2 += w * y * y;
-                wsum += w;
             }
-            m /= wsum;
-            m2 /= wsum;
+            m /= compWeight;
+            m2 /= compWeight;
             const double rms = sqrt(max(m2 - m * m, 0.0));
             table[d] = rms > 1e-9 ? clamp(gainToDb(kRef / rms), -48.0, 24.0) : 24.0;
         }
@@ -887,8 +943,22 @@ struct Teasel : Effect {
         }
     }
 
+    void snapListen() {
+        listenBand = listenMode == 1 ? 1.0 : 0.0;
+        listenDelta = listenMode == 2 ? 1.0 : 0.0;
+        listenFromBand = listenBand;
+        listenFromDelta = listenDelta;
+        listenAt = listenLength;
+    }
+
     void update() {
-        listenMode = listen.index();
+        const int nextListen = listen.index();
+        if (nextListen != listenMode) {
+            listenFromBand = listenBand;
+            listenFromDelta = listenDelta;
+            listenAt = 0;
+            listenMode = nextListen;
+        }
         probeGain = dbToGain(drive.value());
         const int st = style.index();
         if (st != styleNow) {
@@ -917,7 +987,7 @@ struct Teasel : Effect {
             loopScale = 1.0 / max(1.0, steepest(styleNow));
         }
         if (!unplayed) return;
-        listenMix = listenMode > 0 ? 1.0 : 0.0;
+        snapListen();
         tune(true);
     }
 
@@ -951,7 +1021,10 @@ struct Teasel : Effect {
         const bool first = unplayed;
         const bool stereo = io.channels > 1;
         const int wantMode = stereo ? channelMode.index() : 0;
-        if (first) modeNow = wantMode;
+        if (first) {
+            modeNow = wantMode;
+            snapListen();
+        }
         const int target = motionTarget.index();
         double lastDriveDb = drive.value();
         unplayed = false;
@@ -1008,20 +1081,31 @@ struct Teasel : Effect {
             // Where each curve rests with no signal: its offset, taken away
             // at once (the bias would otherwise step and ring).
             const double restNow = styleNow == 3 ? 0.0 : curve(styleNow, b, c);
-            const double restWas = styleWas == 3 ? 0.0 : curve(styleWas, b, c);
             const bool level = autoGain.on();
             const double compTo = level ? dbToGain(compAt(compNow, driveDb)) : 1.0;
-            const double compWasTo = level ? dbToGain(compAt(compWas, driveDb)) : 1.0;
-            if (first && i == 0) {
-                compGain = compTo;
-                compWasGain = compWasTo;
-            }
+            if (first && i == 0) compGain = compTo;
             compGain += compStep * (compTo - compGain);
-            compWasGain += compStep * (compWasTo - compWasGain);
-            if (fade < 1.0) fade = min(1.0, fade + fadeStep);
-            const double t = 0.5 - 0.5 * cos(pi * fade);
+            double restWas = 0.0, t = 1.0;
+            // Once the old curve is inaudible, none of its control values
+            // is needed. The next style change copies compGain afresh.
+            if (fade < 1.0) {
+                restWas = styleWas == 3 ? 0.0 : curve(styleWas, b, c);
+                const double compWasTo = level ? dbToGain(compAt(compWas, driveDb)) : 1.0;
+                compWasGain += compStep * (compWasTo - compWasGain);
+                fade = min(1.0, fade + fadeStep);
+                t = 0.5 - 0.5 * cos(pi * fade);
+            }
             const double wet = mix.at(i);
-            listenMix = clamp(listenMix + (listenMode > 0 ? listenStep : -listenStep), 0.0, 1.0);
+            if (listenAt < listenLength) {
+                listenAt += 1;
+                const double progress = static_cast<double>(listenAt) / listenLength;
+                const double toBand = listenMode == 1 ? 1.0 : 0.0;
+                const double toDelta = listenMode == 2 ? 1.0 : 0.0;
+                listenBand =
+                    listenAt == listenLength ? toBand : lerp(listenFromBand, toBand, progress);
+                listenDelta =
+                    listenAt == listenLength ? toDelta : lerp(listenFromDelta, toDelta, progress);
+            }
 
             // Into the channels: left and right, or mid and side. A change
             // between them dips the output for 3 ms each way.
@@ -1099,11 +1183,10 @@ struct Teasel : Effect {
                             if (cutHigh) y = cut;
                         }
                     }
-                    double out = low + band + high + wet * (y - band);
-                    if (listenMix > 0.0) {
-                        const double heard = listenMode == 1 ? y : wet * (y - band);
-                        out += listenMix * (heard - out);
-                    }
+                    const double normal = low + band + high + wet * (y - band);
+                    double out = normal;
+                    if (listenBand > 0.0) out += listenBand * (y - normal);
+                    if (listenDelta > 0.0) out += listenDelta * (wet * (y - band) - normal);
                     o.set(k, out);
                 }
                 const double d = o.down();

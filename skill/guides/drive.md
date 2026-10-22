@@ -129,7 +129,10 @@ Folds pulsing in eighth notes:
 ## Measuring it
 
 `listen: "delta"` plays only what the drive changes; `"band"` the driven
-band alone. With `auto_gain` on, a −18 dBFS RMS signal leaves as loud as it
+band alone. Every listen change crossfades over 10 ms, including returning
+to `"off"`; interrupting a fade starts from the blend currently heard.
+Initial and reset modes snap into place without a startup fade.
+With `auto_gain` on, a −18 dBFS RMS signal leaves as loud as it
 came in at any drive (within about 0.5 dB on pink noise), so A/B renders
 compare fairly; material far louder or quieter than that shifts by a few
 dB, so compare loudness (`analyze`) before deciding more drive is better.
