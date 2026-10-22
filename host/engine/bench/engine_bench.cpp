@@ -473,8 +473,7 @@ int main(int argc, char** argv) {
     // Silence means a missing signal unless the anticipative renderer fell
     // behind: then its starved ring explains it and the run is a failure.
     const bool signal = backend.peak > 1e-5 || result["anticipation_misses"].asInt() > 0;
-    const bool valid =
-        healthy && signal && !probe.callback.dropped && !probe.renderJob.dropped;
+    const bool valid = healthy && signal && !probe.callback.dropped && !probe.renderJob.dropped;
     result["valid"] = valid;
     const auto serialized = json::writeCanonical(result) + "\n";
     if (!output.empty()) {
