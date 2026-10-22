@@ -28,6 +28,9 @@ plugins ship as CLAP (and VST3, AU) files of their own that other hosts load.
    one `.help()` sentence per parameter, groups, neutral defaults, factory
    patches, smoothed levels, and choice keys with a unit before a number
    (`.keys({"db12", ...})`, added to the language for this).
+   (2026-10-22) Defaults need not be neutral: a plugin may open doing what
+   it is for (Bracken echoing, Withy chorusing, Pollia phasing), with a
+   neutral setting still within reach.
 2. **Build.** `plugins/stock/<name>/` is the product folder a source export
    makes from the script (`product.cmake`, `Catalog.cpp`, `Layer.cpp`,
    `Processor.h`, `Theme.h`, `targets.cmake`, `NOTICES.txt`), built from
