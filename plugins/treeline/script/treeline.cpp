@@ -409,6 +409,13 @@ struct Treeline : Effect {
     Array<double, 30> blockOut, blockIn;
     int blockAt = 0, blocksFilled = 0, blockLength = 4800, blockCount = 0;
     double sumOut = 0.0, sumIn = 0.0;
+    // Accumulated windows start at the restart sample, independently of the
+    // rolling meters' blocks, weighting filters and interpolator history.
+    Array<double, 30> totalsOut;
+    Array<KWeighting, 2> totalsWeight;
+    Array<TruePeak, 2> totalsDetect;
+    int totalsAt = 0, totalsFilled = 0, totalsCount = 0, freshPeakSamples = 0;
+    double totalsSum = 0.0;
     Array<double, kBins> gatedEnergy;
     Array<int, kBins> gatedCount, rangeCount;
     double gatedTotal = 0.0, rangeTotal = 0.0;
@@ -488,6 +495,7 @@ struct Treeline : Effect {
             outDetect[c].clear();
             kOut[c].design(rate);
             kIn[c].design(rate);
+            totalsWeight[c].design(rate);
             kOut[c].clear();
             kIn[c].clear();
         }
@@ -556,6 +564,18 @@ struct Treeline : Effect {
 
     // Everything accumulated: on a start of play, and when accumulating is switched.
     void restartTotals() {
+        totalsOut.fill(0.0);
+        totalsAt = 0;
+        totalsFilled = 0;
+        totalsCount = 0;
+        totalsSum = 0.0;
+        for (int c = 0; c < 2; ++c) {
+            totalsWeight[c].clear();
+            totalsDetect[c].clear();
+        }
+        // After this many inputs the rolling interpolator contains only
+        // post-restart samples, including its two cached peak neighbours.
+        freshPeakSamples = kTaps + 2;
         gatedEnergy.fill(0.0);
         gatedCount.fill(0);
         rangeCount.fill(0);
@@ -707,10 +727,9 @@ struct Treeline : Effect {
             const double tl = outDetect[0].push(ol, fir);
             const double tr = stereoNow ? outDetect[1].push(orr, fir) : tl;
             const double tp = max(tl, tr);
-            peakHeld = max(peakHeld, tp);
             blockPeak = max(blockPeak, tp);
-            if (tp > overGain.get(ceiling.at(i) + 0.05)) {
-                overs += 1;
+            const double over = overGain.get(ceiling.at(i) + 0.05);
+            if (tp > over) {
                 recentOvers += 1;
                 overAge = 0;
             } else if (overAge < overHold) {
@@ -730,6 +749,7 @@ struct Treeline : Effect {
             sumOut += energy;
             blockCount += 1;
             if (blockCount >= blockLength) closeBlock();
+            if (accumulating) accumulateSample(ol, orr, tp, over);
 
             // Listening.
             const bool matched = listenMode == 1 && shortIn > -70.0 && shortNow > -70.0;
@@ -795,7 +815,7 @@ struct Treeline : Effect {
         rangeShown.set(rangeNow);
         peakShown.set(gainToDb(peakNow));
         plrPeakShown.set(gainToDb(accumulating ? peakHeld : max(peak30, blockPeak)));
-        secondsShown.set(measuredSeconds);
+        secondsShown.set(measuredSeconds + totalsCount / rate);
         matchShown.set(matchDb);
         gainReduction.set(deepest);
         shortTermLoudness.set(max(-70.0, shortNow));
@@ -827,16 +847,13 @@ struct Treeline : Effect {
         colBeat = 0;
     }
 
-    // A hundred milliseconds of loudness: the momentary (400 ms) block
-    // enters the integrated gate, the short-term (3 s) the range; while
-    // accumulating into histograms since play started, otherwise into the
-    // last 30 s.
+    // A hundred milliseconds for the rolling loudness and recent windows.
+    // Accumulated measurements have their own restart-aligned windows below.
     void closeBlock() {
         blockOut[blockAt] = sumOut / blockCount;
         blockIn[blockAt] = sumIn / blockCount;
         blockAt = blockAt == 29 ? 0 : blockAt + 1;
         blocksFilled = min(blocksFilled + 1, 30);
-        measuredSeconds += blockCount / rate;
         sumOut = 0.0;
         sumIn = 0.0;
         blockCount = 0;
@@ -863,12 +880,47 @@ struct Treeline : Effect {
             peak30 = max(peak30, v);
             if (k < kRecentPeak) peak2 = max(peak2, v);
         }
-        if (!accumulating) {
-            recentLoudness();
-            return;
+        if (!accumulating) recentLoudness();
+    }
+
+    void accumulateSample(double l, double r, double rollingPeak, double over) {
+        const double left = totalsWeight[0].process(l);
+        double energy = left * left;
+        if (stereoNow) {
+            const double right = totalsWeight[1].process(r);
+            energy += right * right;
         }
-        if (blocksFilled >= 4 && momentaryNow > -70.0) {
-            const int bin = clamp(floorToInt((momentaryNow + 70.0) * 10.0), 0, kBins - 1);
+        totalsSum += energy;
+        totalsCount += 1;
+        double peak = rollingPeak;
+        if (freshPeakSamples > 0) {
+            const double pl = totalsDetect[0].push(l, fir);
+            const double pr = stereoNow ? totalsDetect[1].push(r, fir) : pl;
+            peak = max(pl, pr);
+            freshPeakSamples -= 1;
+        }
+        peakHeld = max(peakHeld, peak);
+        if (peak > over) overs += 1;
+        if (totalsCount >= blockLength) closeTotalsBlock();
+    }
+
+    void closeTotalsBlock() {
+        totalsOut[totalsAt] = totalsSum / totalsCount;
+        totalsAt = totalsAt == 29 ? 0 : totalsAt + 1;
+        totalsFilled = min(totalsFilled + 1, 30);
+        measuredSeconds += totalsCount / rate;
+        totalsSum = 0.0;
+        totalsCount = 0;
+        double m = 0.0, s = 0.0;
+        for (int k = 0; k < totalsFilled; ++k) {
+            const double v = totalsOut[wrap(totalsAt - 1 - k, 30)];
+            if (k < 4) m += v;
+            s += v;
+        }
+        const double momentary = lufs(m / min(4, totalsFilled));
+        const double shortTerm = lufs(s / totalsFilled);
+        if (totalsFilled >= 4 && momentary > -70.0) {
+            const int bin = clamp(floorToInt((momentary + 70.0) * 10.0), 0, kBins - 1);
             gatedEnergy[bin] += m / 4.0;
             gatedCount[bin] += 1;
             gatedTotal += m / 4.0;
@@ -884,8 +936,8 @@ struct Treeline : Effect {
             }
             integratedNow = n > 0 ? lufs(e / n) : -120.0;
         }
-        if (blocksFilled >= 30 && shortNow > -70.0) {
-            const int bin = clamp(floorToInt((shortNow + 70.0) * 10.0), 0, kBins - 1);
+        if (totalsFilled >= 30 && shortTerm > -70.0) {
+            const int bin = clamp(floorToInt((shortTerm + 70.0) * 10.0), 0, kBins - 1);
             rangeCount[bin] += 1;
             rangeTotal += s / 30.0;
             rangeBlocks += 1;
