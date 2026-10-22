@@ -539,6 +539,36 @@ TEST_CASE("Stft: a sine reads its amplitude, and a spectrum left alone is a dela
     CHECK(worst < 1e-12);
 }
 
+TEST_CASE("Stft: one prepared for analysis reads the same bins with push() alone") {
+    script::detail::Instance instance;
+    script::detail::CurrentScope scope(&instance);
+    script::Stft full, look;
+    full.prepare(1024, 4);
+    look.prepareAnalysis(1024, 4);
+    CHECK(look.bins() == full.bins());
+    CHECK(look.hop() == full.hop());
+    bool same = true;
+    int frames = 0;
+    for (int n = 0; n < 8192; ++n) {
+        const double x = 0.5 * std::sin(0.37 * n) + 0.25 * std::sin(0.05 * n);
+        const bool ready = full.push(x);
+        CHECK(look.push(x) == ready);
+        if (ready) {
+            ++frames;
+            for (int k = 0; k < full.bins(); ++k)
+                same = same && look.real(k) == full.real(k) && look.imag(k) == full.imag(k);
+        }
+        full.pull();
+        // Still readable after a pull(), which gives nothing back.
+        if (ready) {
+            CHECK(look.pull() == 0.0);
+            same = same && look.magnitude(5) != 0.0;
+        }
+    }
+    CHECK(frames == 8192 / 256);
+    CHECK(same);
+}
+
 TEST_CASE("whole-number conversions match the saturating libm results at boundaries") {
     const auto saturate = [](double x) {
         if (!(x == x)) return 0;

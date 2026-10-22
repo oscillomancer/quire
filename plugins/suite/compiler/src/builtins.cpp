@@ -674,6 +674,10 @@ void Builtins::addClasses() {
     r.method(
         stft, "void prepare(int size, int overlap)",
         +[](S::Stft* s, int size, int overlap) { s->prepare(size, overlap); }, Writes::Self, kInit);
+    r.method(
+        stft, "void prepareAnalysis(int size, int overlap)",
+        +[](S::Stft* s, int size, int overlap) { s->prepareAnalysis(size, overlap); }, Writes::Self,
+        kInit);
     r.method(stft, "int size() const", +[](const S::Stft* s) { return s->size(); });
     r.method(stft, "int bins() const", +[](const S::Stft* s) { return s->bins(); });
     r.method(stft, "int hop() const", +[](const S::Stft* s) { return s->hop(); });

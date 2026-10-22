@@ -689,6 +689,12 @@ void Stft::prepare(int size, int overlap) {
     s.prepared = true;
     s.ready = false;
 }
+void Stft::prepareAnalysis(int size, int overlap) {
+    StftState& s = stft(state_);
+    s.stft.prepare(1, std::clamp(size, 16, 32768), overlap, dsp::Stft::Mode::Analyse);
+    s.prepared = true;
+    s.ready = false;
+}
 int Stft::size() const { return stft(state_).prepared ? stft(state_).stft.size() : 0; }
 int Stft::bins() const { return stft(state_).prepared ? stft(state_).stft.bins() : 0; }
 int Stft::hop() const { return stft(state_).prepared ? stft(state_).stft.hop() : 0; }
@@ -709,6 +715,8 @@ bool Stft::push(double x) {
 }
 double Stft::pull() {
     StftState& s = stft(state_);
+    // Analysing, the bins stay readable until the next push().
+    if (s.prepared && s.stft.mode() == dsp::Stft::Mode::Analyse) return s.stft.pull(0);
     s.ready = false;
     if (!s.prepared) {
         const double y = s.one;

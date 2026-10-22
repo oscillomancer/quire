@@ -1016,13 +1016,19 @@ class Oversampler {
 // from a push() that returned true until the pull() after it; otherwise
 // they read 0 and writes are lost. A sine of amplitude 1 at a bin's centre
 // frequency reads magnitude 1 there.
+//
+// An analyser that only reads bins calls prepareAnalysis(size, overlap)
+// instead: the same frames and bins at about half the cost, with no audio
+// back. push() alone each sample; the bins are readable from a push() that
+// returned true until the next push(), and pull() gives 0.
 class Stft {
   public:
     Stft();
     Stft(const Stft& other);
     Stft& operator=(const Stft& other);
     ~Stft();
-    void prepare(int size, int overlap);  // prepare() only: it allocates
+    void prepare(int size, int overlap);          // prepare() only: it allocates
+    void prepareAnalysis(int size, int overlap);  // the same, to read bins only
     int size() const;
     int bins() const;  // size() / 2 + 1
     int hop() const;   // samples between frames: size() / overlap
