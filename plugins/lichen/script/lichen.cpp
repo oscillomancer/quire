@@ -441,7 +441,7 @@ struct Lichen : Effect {
     Array<double, 30> blockE, blockMono;
     int blockAt = 0, blocksFilled = 0, blockLength = 4800, blockCount = 0;
     double sumE = 0.0, sumMono = 0.0, blockPeak = 0.0;
-    Array<double, kBins> gatedEnergy, monoEnergy, rangeEnergy;
+    Array<double, kBins> gatedEnergy, monoEnergy;
     Array<int, kBins> gatedCount, monoCount, rangeCount;
     double gatedTotal = 0.0, monoTotal = 0.0, rangeTotal = 0.0;
     int gatedBlocks = 0, monoBlocks = 0, rangeBlocks = 0;
@@ -456,7 +456,7 @@ struct Lichen : Effect {
     double frames = 0.0;  // samples measured
     double sumL = 0.0, sumR = 0.0, sumLL = 0.0, sumRR = 0.0, sumLR = 0.0;
     // The spectrum: now (smoothed over 300 ms) and the sums since play.
-    Array<double, kPoints> nowM, nowS, allM, allS;
+    Array<double, kPoints> nowM, nowS, allM;
     Array<double, kThirds> thirdNowL, thirdNowR, thirdNowX, thirdAllL, thirdAllR, thirdAllX;
     Array<double, kThirds> thirdAllM;
     Array<double, kNamed> namedM;
@@ -618,7 +618,6 @@ struct Lichen : Effect {
     void restartAll() {
         gatedEnergy.fill(0.0);
         monoEnergy.fill(0.0);
-        rangeEnergy.fill(0.0);
         gatedCount.fill(0);
         monoCount.fill(0);
         rangeCount.fill(0);
@@ -648,7 +647,6 @@ struct Lichen : Effect {
         sumRR = 0.0;
         sumLR = 0.0;
         allM.fill(0.0);
-        allS.fill(0.0);
         thirdAllL.fill(0.0);
         thirdAllR.fill(0.0);
         thirdAllX.fill(0.0);
@@ -838,7 +836,6 @@ struct Lichen : Effect {
             shortTop = max(shortTop, shortNow);
             if (shortNow > -70.0) {
                 const int bin = clamp(floorToInt((shortNow + 70.0) * 10.0), 0, kBins - 1);
-                rangeEnergy[bin] += s / 30.0;
                 rangeCount[bin] += 1;
                 rangeTotal += s / 30.0;
                 rangeBlocks += 1;
@@ -920,6 +917,8 @@ struct Lichen : Effect {
         const double width = hi - lo;
         const double smooth =
             (side ? between(cS, pS, lo, hi) : between(cM, pM, lo, hi)) / max(width, 1e-9);
+        // Once the band spans two bins the interpolation has zero weight.
+        if (width >= 2.0) return smooth;
         const double at = 0.5 * (lo + hi) - 0.5;
         const int k = floorToInt(at);
         const double t = at - k;
@@ -979,10 +978,7 @@ struct Lichen : Effect {
             const double m = gridPower(i, false), s = gridPower(i, true);
             nowM[i] += kFrameNow * (m - nowM[i]);
             nowS[i] += kFrameNow * (s - nowS[i]);
-            if (counted) {
-                allM[i] += m;
-                allS[i] += s;
-            }
+            if (counted) allM[i] += m;
         }
         // Third octaves: the correlation by band, now and since play; the mid
         // for the tilt.
