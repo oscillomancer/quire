@@ -4,6 +4,15 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.31.4
+
+What a product must do: nothing.
+
+- **`clap-probe` fails cleanly on an empty factory.** A plugin file with no
+  plugins in it (a script player given no scripts) crashed the probe on a
+  null descriptor; it now says so and exits 1, as the X11 and Win32 probes
+  already stop.
+
 ## 1.31.3
 
 What a product must do: nothing. On macOS, `ctest` now opens the editor in
