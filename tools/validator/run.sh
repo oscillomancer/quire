@@ -15,7 +15,11 @@ if [[ $# -eq 0 ]]; then
 fi
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
-binary="${CLAP_VALIDATOR_BIN:-${XDG_CACHE_HOME:-${HOME}/.cache}/quire-tools/clap-validator/0.4.1/target/release/clap-validator}"
+# Windows (Git Bash) names the binary .exe and has `python`, not `python3`.
+exe=""
+python=python3
+case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) exe=.exe python=python ;; esac
+binary="${CLAP_VALIDATOR_BIN:-${XDG_CACHE_HOME:-${HOME}/.cache}/quire-tools/clap-validator/0.4.1/target/release/clap-validator${exe}}"
 if [[ ! -x "${binary}" ]]; then
   echo "SKIP: clap-validator 0.4.1 is absent; run ${root}/tools/validator/build.sh" >&2
   exit 77
@@ -24,7 +28,7 @@ fi
 mkdir -p "${root}/build/validator"
 result=0
 for input in "$@"; do
-  if [[ ! -f "${input}" ]]; then
+  if [[ ! -e "${input}" ]]; then  # a macOS .clap is a bundle, a folder
     echo "clap-validator: plugin does not exist: ${input}" >&2
     result=1
     continue
@@ -40,7 +44,7 @@ for input in "$@"; do
   code=0
   "${binary}" validate --json --in-process "${exclude[@]}" "${plugin}" >"${json}" 2>"${stderr}" || code=$?
   summary=0
-  python3 - "${json}" "${report}" "${plugin}" "$("${binary}" --version)" "${code}" <<'PY' || summary=$?
+  "${python}" - "${json}" "${report}" "${plugin}" "$("${binary}" --version)" "${code}" <<'PY' || summary=$?
 import collections
 import json
 import sys

@@ -151,8 +151,9 @@ made with, so the same code serves plugins whose tables are made at run time.
   tags are permanent once shipped, as a product's are. The kind and layouts
   in `product.cmake` describe the plugin host-smoke tests (give one the
   product's own ID). CLAP and VST3 only. The framework tests and tools that
-  read tables as constants (core-tests, plugin-tests, ui-tests, render-cli,
-  gui-preview, the benchmark) are not built: test the catalog's plugins in
+  read tables as constants (core-tests, plugin-tests, ui-tests, state-fuzz
+  and the fuzz preset's state-fuzzer, render-cli, gui-preview, the
+  benchmark) are not built: test the catalog's plugins in
   the product's own tests, through the Engine and through the CLAP factory
   in process. The stages example.
 - `PRODUCT_LAYER ON` (either kind of product): `product::makeLayer(instance)`
@@ -599,6 +600,8 @@ must not overlap, except on different pages of one tab bar.
   purpose, `benchmark --update` and commit the file.
 - Saved state is untrusted input. `state-fuzz` runs in every preset; run the
   `fuzz` preset (clang) after touching state, properties or `property()`.
+  A run-time product has neither, so its fuzz preset builds and runs
+  nothing.
 
 ## Rules that are not negotiable
 

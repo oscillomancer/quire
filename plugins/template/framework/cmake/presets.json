@@ -87,8 +87,7 @@
       "name": "fuzz",
       "configurePreset": "fuzz",
       "targets": [
-        "state-fuzz",
-        "state-fuzzer"
+        "fuzz-tests"
       ]
     }
   ],

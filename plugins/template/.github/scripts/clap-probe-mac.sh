@@ -3,12 +3,13 @@
 # Runs clap-probe against the built CLAP in each of its host scenarios and
 # fails if the editor did not come up or the audio path went silent (for a
 # note effect, the notes it sends). Each
-# scenario's window capture lands in probe/<scenario>.png.
-#   clap-probe-mac.sh <Product name>
+# scenario's window capture lands in probe/<scenario>.png. The release
+# build's plugin and probe unless both are given (the mac-embedding test).
+#   clap-probe-mac.sh <Product name> [<binary inside the .clap> <clap-probe>]
 set -uo pipefail
 name="$1"
-binary="build/release/plugins/$name.clap/Contents/MacOS/$name"
-probe="build/release/clap-probe"
+binary="${2:-build/release/plugins/$name.clap/Contents/MacOS/$name}"
+probe="${3:-build/release/clap-probe}"
 mkdir -p probe
 
 # perl's alarm stands in for coreutils timeout, which macOS lacks.

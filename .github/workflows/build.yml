@@ -122,6 +122,10 @@ jobs:
           brew install ninja sdl3 ccache
           test "$(uname -m)" = arm64
           xcrun clang --version
+          # The pinned clap-validator, as on Linux (the runner has cargo).
+          export XDG_CACHE_HOME="$GITHUB_WORKSPACE/.deps/cache"
+          validator=$(tools/validator/build.sh)
+          echo "CLAP_VALIDATOR_BIN=$validator" >> "$GITHUB_ENV"
 
       # Ninja/clang-cl still need the Windows SDK and link.exe environment.
       - uses: ilammy/msvc-dev-cmd@v1
@@ -133,6 +137,10 @@ jobs:
           echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
           echo "VCPKG_BINARY_SOURCES=clear;files,$(cygpath -m "$GITHUB_WORKSPACE/.deps/vcpkg-binaries"),readwrite" >> "$GITHUB_ENV"
           clang-cl --version
+          # The pinned clap-validator, as on Linux (the runner has cargo).
+          export XDG_CACHE_HOME="$GITHUB_WORKSPACE/.deps/cache"
+          validator=$(tools/validator/build.sh)
+          echo "CLAP_VALIDATOR_BIN=$validator" >> "$GITHUB_ENV"
 
       # Shared core libraries are compiled in several isolated plugin builds.
       - name: Restore Linux compiler cache
@@ -186,6 +194,14 @@ jobs:
           TMPDIR: /tmp
           SUPPLE_PICTURE_OUTPUT_DIR: ${{ github.workspace }}/build/${{ matrix.preset }}/pictures
         run: xvfb-run -a -s '-screen 0 1920x1080x24' ctest --preset dev
+      # The runner's desktop is 1024x768, smaller than the stock editors and
+      # the 1320x840 the probes resize them to; win32-embedding can only see
+      # what is on screen.
+      - name: Windows display resolution
+        if: matrix.platform == 'windows'
+        continue-on-error: true
+        shell: pwsh
+        run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
       - name: Windows software OpenGL for GUI tests
         if: matrix.platform == 'windows'
         run: bash .github/scripts/gui-mesa-windows.sh

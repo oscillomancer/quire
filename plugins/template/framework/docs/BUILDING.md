@@ -189,6 +189,7 @@ last when it exists.
 | `exports-clap`, `exports-vst3` (Linux) | The modules export their entry points and nothing else |
 | `vst3-unload` (Linux) | The VST3 unloads cleanly and survives process exit while loaded |
 | `x11-embedding` (Linux) | A real X11 parent: mapped child, non-blank pixels, resize, `set_scale(2)` doubling the editor, hide/show, three create/destroy cycles while audio runs. Skipped without a display |
+| `mac-embedding` (macOS) | A real Cocoa host window in each `clap-probe` scenario (`.github/scripts/clap-probe-mac.sh`): the editor opens, resizes and reopens, CLAP-reported and native sizes agree after parenting and resizing, and the audio stays live. Reports and pictures in `mac-probe/probe` |
 | `win32-embedding`, `win32-embedding-no-host-timer` (Windows) | The same against a real Win32 parent HWND, plus native sizes after resize, sizing before `set_parent`, and module reload. On an inactive instance, automation must provoke a repaint before another capture and change the pixels. The second refuses the host timer and also requires `WM_TIMER` delivery |
 | `win32-module-ownership` (Windows) | CLAP and VST3 loaded together: each window belongs to its own DLL; VST3 unload preserves CLAP editors, and class cleanup follows the last instance |
 | `auv2-bundle` (macOS) | The AU carries clap-wrapper's AudioComponents plist and a valid signature |
@@ -285,7 +286,8 @@ release build then goes through what a host would do with it:
 
 - **macOS**: `product-install`, the AU's signature and plist, `auval
   -strict`, pluginval (strictness 8, VST3 and AU, editor included),
-  clap-validator, `clap-probe` in each scenario above (failing if the
+  clap-validator, `ctest` (so `mac-embedding` runs), `clap-probe` in each
+  scenario above on the release build, keeping its pictures (failing if the
   editor does not open, resize or reopen, or the audio goes silent; both
   CLAP-reported and native Cocoa dimensions are checked after parenting
   and resizing), and

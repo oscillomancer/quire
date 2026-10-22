@@ -20,7 +20,7 @@ Marram replaced, was removed on 2026-10-21; git history has it.
 `common/` holds the shared semantic-parameters extension
 (`com.suppleaudio.semantic-params`, spec in
 `docs/specs/semantic-params-extension.md`), the plugin test tools
-(`clap-reset-check`, `clap-block-check`, `clap-unload-probe`,
+(`clap-reset-check`, `clap-block-check`, `clap-state-check`, `clap-unload-probe`,
 `semantic-conformance`), `clap-bench` (run by hand: a plugin's cost per
 setup and factory patch, and whether its output is bit-identical to a saved
 run) and the CMake glue that links plugins against the monorepo's libraries.
@@ -45,6 +45,13 @@ copies.
   backends, Pugl/NanoVG integration, `Telemetry.h`, the host contract, the
   clap-wrapper patches and the probes) is the template's own: a fix that
   belongs there is made in the template and copied here, so no copy drifts.
+- **Template CI before the copy.** A framework change passes the template's
+  own native CI (`gh workflow run build.yml -f platforms=<...>` in the
+  template's repository, on the platforms the change can affect) before it
+  is copied here. The template's CI builds its starter and every example,
+  which exercise parts of the framework no stock plugin uses (tables,
+  presets, AU, VST3), and Quire's CI only proves the parts the stock
+  plugins use.
 - **Permanent identifiers.** The CLAP id (`com.suppleaudio.<id>`), the AU
   subtype, the state tag and every parameter's key identify saved sessions
   and patches. Never change or reuse them; add new parameters with new keys.

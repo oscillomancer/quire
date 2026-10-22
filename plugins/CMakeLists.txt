@@ -90,6 +90,10 @@ if(SUPPLE_BUILD_PLUGINS)
     set(${name}_clap "${staged}/${artifact}.clap" PARENT_SCOPE)
   endfunction()
 
+  # clap-validator's runner (tools/validator/run.sh) is a bash script; on
+  # Windows, Git's bash runs it.
+  find_program(SUPPLE_BASH bash HINTS "$ENV{ProgramFiles}/Git/bin")
+
   # The player runs DSP scripts (ADR-0032): its plugins are the scripts in
   # SUPPLE_SCRIPT_LIBRARY's folders, so the checks every stock plugin has run
   # with the player's test scripts (Smoke; Tilt, which keeps state; Pluck,
@@ -115,11 +119,11 @@ if(SUPPLE_BUILD_PLUGINS)
       set_tests_properties(plugin.player.unload PROPERTIES LABELS "rt;plugin-unload" TIMEOUT 30)
       list(APPEND player_tests plugin.player.unload)
     endif()
-    if(NOT SUPPLE_SANITIZE AND UNIX)
+    if(NOT SUPPLE_SANITIZE AND SUPPLE_BASH)
       # The player has factory presets, on which 0.4.1's preset-discovery
       # tests deadlock (the template's validate.cmake skips them too).
       add_test(NAME plugin.player.validator
-        COMMAND "${CMAKE_SOURCE_DIR}/tools/validator/run.sh"
+        COMMAND "${SUPPLE_BASH}" "${CMAKE_SOURCE_DIR}/tools/validator/run.sh"
                 --exclude "^preset-discovery-(crawl|load)$" "${player_clap}")
       set_tests_properties(plugin.player.validator PROPERTIES LABELS slow SKIP_RETURN_CODE 77)
       list(APPEND player_tests plugin.player.validator)
@@ -178,6 +182,9 @@ if(SUPPLE_BUILD_PLUGINS)
       # Bit-identical output in any host blocks, with every parameter automated.
       add_test(NAME plugin.${name}.blocks COMMAND clap-block-check "${clap}" ${id})
       set_tests_properties(plugin.${name}.blocks PROPERTIES LABELS rt TIMEOUT 180)
+      # Damaged saved state: refused with nothing changed, or accepted whole.
+      add_test(NAME plugin.${name}.state COMMAND clap-state-check "${clap}" ${id})
+      set_tests_properties(plugin.${name}.state PROPERTIES LABELS rt TIMEOUT 300)
       add_test(NAME plugin.${name}.semantic COMMAND semantic-conformance "${clap}" ${id})
       # Catalog.cpp, the folder's one generated file, still matches the script.
       add_test(NAME plugin.${name}.catalog
@@ -196,10 +203,10 @@ if(SUPPLE_BUILD_PLUGINS)
         add_test(NAME plugin.${name}.unload COMMAND clap-unload-probe "${clap}")
         set_tests_properties(plugin.${name}.unload PROPERTIES LABELS "rt;plugin-unload" TIMEOUT 30)
       endif()
-      if(NOT SUPPLE_SANITIZE AND UNIX)
+      if(NOT SUPPLE_SANITIZE AND SUPPLE_BASH)
         # Factory presets: clap-validator 0.4.1 deadlocks in preset discovery.
         add_test(NAME plugin.${name}.validator
-          COMMAND "${CMAKE_SOURCE_DIR}/tools/validator/run.sh"
+          COMMAND "${SUPPLE_BASH}" "${CMAKE_SOURCE_DIR}/tools/validator/run.sh"
                   --exclude "^preset-discovery-(crawl|load)$" "${clap}")
         set_tests_properties(plugin.${name}.validator PROPERTIES LABELS slow SKIP_RETURN_CODE 77)
       endif()

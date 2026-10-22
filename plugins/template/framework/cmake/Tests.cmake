@@ -283,6 +283,20 @@ if (SUPPLE_BUILD_PLUGIN)
         endif()
     endif()
 
+    if (APPLE AND SUPPLE_BUILD_GUI AND EXISTS "${SUPPLE_ROOT}/.github/scripts/clap-probe-mac.sh")
+        # A real Cocoa host window, in each host scenario the CI wrapper
+        # names and checks: open, resize, size before parenting, reopen, no
+        # host timer, teardown while hot, a parent dropped, mono. Each
+        # scenario's report and picture land in mac-probe/probe.
+        set(mac_probe "${CMAKE_BINARY_DIR}/mac-probe")
+        file(MAKE_DIRECTORY "${mac_probe}")
+        add_test(NAME mac-embedding
+            COMMAND bash ${SUPPLE_ROOT}/.github/scripts/clap-probe-mac.sh "${PRODUCT_NAME}"
+                    $<TARGET_FILE:product-plugin_clap> $<TARGET_FILE:clap-probe>
+            WORKING_DIRECTORY "${mac_probe}")
+        set_tests_properties(mac-embedding PROPERTIES RUN_SERIAL TRUE TIMEOUT 1200)
+    endif()
+
     if (WIN32 AND SUPPLE_BUILD_GUI)
         # A real Win32 parent: embedding, pixels, resize, set_scale(2),
         # hide/show, three create/destroy cycles while audio runs. Needs an
@@ -351,3 +365,12 @@ if (SUPPLE_BUILD_PLUGIN)
         message(STATUS "clap-validator not found; its test is not registered")
     endif()
 endif()
+
+# What the fuzz preset builds: the state fuzzers above, or nothing when the
+# product has none (a run-time product, whose state no tables describe).
+add_custom_target(fuzz-tests)
+foreach(fuzzer state-fuzz state-fuzzer)
+    if (TARGET ${fuzzer})
+        add_dependencies(fuzz-tests ${fuzzer})
+    endif()
+endforeach()

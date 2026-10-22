@@ -13,8 +13,7 @@ The port branch has on-demand Linux/macOS/Windows CI and portable presets
 (ADR-0034). Linux dev passes all 144 tests including the 12 CLAP validators.
 Native headless services, hosting/scanning, bridge, stock wrappers, device
 backend builds and GUI tests pass Windows CI (102 tests) and macOS arm64
-CI (102 executed tests; 12 optional external validators skipped, 114 CTest
-entries; ADR-0036/0037/0038/0039).
+CI (ADR-0036/0037/0038/0039).
 Windows executables run with the UTF-8 process code page, so non-ASCII
 paths work whatever the system locale; the minimum is Windows 10 1903
 (ADR-0044). Not yet confirmed by Windows CI.
@@ -596,8 +595,11 @@ Plugins:
 - Stock CLAP builds and product/conformance/reset checks run on Linux, macOS
   and Windows. Existing macOS AUv2 targets compile in CI but are not host-tested
   here. Stock VST3 builds remain opt-in; native VST3 hosting is tested with an
-  in-tree SDK fixture. External CLAP validators are optional and absent from
-  macOS CI (12 skipped tests).
+  in-tree SDK fixture. The pinned clap-validator checks every stock plugin
+  and the player on all three platforms in CI; it stays optional locally
+  (`tools/validator/build.sh`), and its tests skip without it. On macOS,
+  `mac-embedding` (template 1.31.3) opens each stock editor in a Cocoa host
+  window, as `x11-embedding` and `win32-embedding` do on Linux and Windows.
 
 Smaller recorded items: `describeFlat` skips hidden parameters in full
 detail; core-params formats magnitudes beyond six decimals imprecisely;
