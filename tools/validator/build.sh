@@ -8,7 +8,17 @@ tag=0.4.1
 cache_base="${XDG_CACHE_HOME:-${HOME}/.cache}/quire-tools/clap-validator/${tag}"
 source_dir="${cache_base}/source"
 exe=""
-case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) exe=.exe ;; esac
+case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*)
+  exe=.exe
+  # Git's bash puts its coreutils link.exe ahead of MSVC's on the PATH. In a
+  # Visual Studio environment, name MSVC's linker for cargo.
+  if [[ -n "${VCToolsInstallDir:-}" ]]; then
+    msvc_link="${VCToolsInstallDir%\\}\\bin\\Hostx64\\x64\\link.exe"
+    if [[ -f "$(cygpath -u "${msvc_link}")" ]]; then
+      export CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER="${msvc_link}"
+    fi
+  fi ;;
+esac
 binary="${cache_base}/target/release/clap-validator${exe}"
 
 if [[ -x "${binary}" ]]; then
