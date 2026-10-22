@@ -34,8 +34,11 @@ player, and every check the other stock plugins have.
   `cmake -DUPDATE=ON -DSANDBOX=build/dev/host/sandbox/quire-sandbox
   -DNAME=<name> -DDIR=plugins/<name> -DWORK=<scratch folder>
   -P plugins/catalog.cmake`.
-- `product.cmake`: identity, kept by hand: CLAP features, AU codes, and the
-  parameter host-smoke turns (one that changes the sound at its default).
+- `product.cmake`: identity, kept by hand: AU codes, the parameter
+  host-smoke turns (one that changes the sound at its default), and the
+  CLAP features, which the plugin takes from the script's `Info`
+  (`.features`, what the plugin is: Quire's plugin browser shows it after
+  the name) and `plugin.<name>.catalog` checks agree.
   The state tag is the player's for the id, so sessions saved while the
   script ran in the player load in the native plugin.
 - `Layer.cpp`, `Processor.h`, `Theme.h`, `targets.cmake`, `NOTICES.txt`: as

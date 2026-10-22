@@ -88,7 +88,8 @@ struct Hickory : Effect {
         .version = "1.0.0",
         .description =
             "Stereo utility: gain, polarity, channel routing, width, balance, bass mono, DC "
-            "block and a delay to line tracks up, with an image of where the sound sits."};
+            "block and a delay to line tracks up, with an image of where the sound sits.",
+        .features = {"utility"}};
 
     Param gain = decibels("Gain", -60, 24, 0)
                      .offAtMin()

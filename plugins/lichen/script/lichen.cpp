@@ -219,7 +219,8 @@ struct Lichen : Effect {
         .version = "1.0.0",
         .description =
             "Analyser that passes every sample untouched: loudness to BS.1770, true peak, "
-            "stereo, spectrum and key, for the ear and for agents."};
+            "stereo, spectrum and key, for the ear and for agents.",
+        .features = {"analyzer"}};
 
     // --- settings (none of them touch the sound) ----------------------------------------
 

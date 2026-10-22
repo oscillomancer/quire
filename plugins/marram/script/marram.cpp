@@ -504,6 +504,7 @@ struct Marram : Instrument {
             "Synthesizer: four oscillators (analog, wavetable, FM, noise, sub) with unison, two "
             "filters (ladder, state-variable, comb, formant), drive, three envelopes, three LFOs "
             "and four macros, connected by modulation routes.",
+        .features = {"synthesizer"},
         .voices = kVoices};
 
     // --- Voice ----------------------------------------------------------------------------

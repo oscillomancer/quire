@@ -294,6 +294,7 @@ struct Sundew : Effect {
         .description =
             "Compressor with six characters, from transparent to upward, a key input, "
             "lookahead, tempo-locked release and loudness matching.",
+        .features = {"compressor"},
         .sidechain = true};
 
     Param character =

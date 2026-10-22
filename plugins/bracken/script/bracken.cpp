@@ -470,6 +470,7 @@ struct Bracken : Effect {
             "Echoes in time or free: groove, ping-pong, tone and diffusion in the loop, pitch "
             "shift and reverse, clean, tape and analog media, ducking, freeze, and readouts of "
             "the echo time and decay.",
+        .features = {"delay"},
         .tail = -1};
 
     // --- time ---------------------------------------------------------------------------------

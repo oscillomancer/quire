@@ -258,7 +258,8 @@ struct Pollia : Effect {
             "A phaser of 1 to 24 stages with feedback and stage spread, swept by an LFO (free or "
             "in time) and the playing's envelope, through a photocell if wanted, or turning "
             "forever as a barber pole, with a stereo offset, a low end kept clean and a mix from "
-            "dry through notches to vibrato."};
+            "dry through notches to vibrato.",
+        .features = {"phaser"}};
 
     // --- the stages ---------------------------------------------------------------------------
 

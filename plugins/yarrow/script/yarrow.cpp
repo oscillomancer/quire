@@ -458,7 +458,8 @@ struct Yarrow : Effect {
                                   .version = "1.0.0",
                                   .description =
                                       "Eight-band zero-latency equaliser with dynamic bands, "
-                                      "mid/side placement and a high-resolution spectrum."};
+                                      "mid/side placement and a high-resolution spectrum.",
+                                  .features = {"equalizer"}};
 
     Param b1On = toggle("Band 1 On", false)
                      .in("Band 1")

@@ -381,6 +381,7 @@ struct Teasel : Effect {
             "Saturation and distortion: twelve curves from subtle warmth to folding and "
             "crushing, band focus, tuned feedback, dynamics and an LFO on the drive, auto gain, "
             "and readouts of the distortion it adds.",
+        .features = {"distortion"},
         // A ring lets go a second into silence: 1.25 s at 192 kHz.
         .tail = 240000};
 

@@ -169,7 +169,8 @@ struct Gorse : Effect {
         .version = "1.0.0",
         .description =
             "Transient shaper: raises or softens each hit's onset and its tail, the same at "
-            "any level, with a detector that can listen to one band, and a soft clip."};
+            "any level, with a detector that can listen to one band, and a soft clip.",
+        .features = {"transient-shaper"}};
 
     Param attack =
         decibels("Attack", -12, 12, 0)

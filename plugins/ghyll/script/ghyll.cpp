@@ -734,6 +734,7 @@ struct Ghyll : Effect {
             "A room built from its walls: size in metres, the surfaces' materials, where the "
             "sound stands and where you listen. Reflections, decay and level follow from the "
             "physics, heard through a pair of microphones or a head.",
+        .features = {"reverb"},
         .tail = -1};
 
     // --- the room -----------------------------------------------------------------------

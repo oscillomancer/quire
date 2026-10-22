@@ -284,7 +284,8 @@ struct Treeline : Effect {
         .version = "1.0.0",
         .description =
             "True-peak limiter that adapts its attack, hold and release to the music, with "
-            "loudness metering to BS.1770 and level-matched listening."};
+            "loudness metering to BS.1770 and level-matched listening.",
+        .features = {"limiter"}};
 
     Param gain =
         decibels("Gain", 0, 24, 0)

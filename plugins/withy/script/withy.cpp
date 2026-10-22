@@ -212,7 +212,8 @@ struct Withy : Effect {
         .description =
             "A chorus from a still widening to a choir: classic, dimension, ensemble, multi-voice "
             "and vibrato, depth in cents at any rate, shimmer, drift, bloom after each note, "
-            "clean or bucket-brigade voices, and lows kept dry."};
+            "clean or bucket-brigade voices, and lows kept dry.",
+        .features = {"chorus"}};
 
     // --- voices -------------------------------------------------------------------------------
 

@@ -104,6 +104,7 @@ struct Sorrel : Effect {
             "Gate and expander: lookahead that opens exactly on the onset, fades that follow "
             "the sound's own decay, a key input, and a level histogram that suggests the "
             "threshold.",
+        .features = {"gate"},
         .sidechain = true};
 
     Param mode = choice("Mode", {"Gate", "Expand"}, 0)

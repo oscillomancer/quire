@@ -24,6 +24,21 @@ if(NOT result EQUAL 0 OR NOT EXISTS "${WORK}/export/product/Catalog.cpp")
     message(FATAL_ERROR "exporting ${NAME} failed (${result}):\n${out}\n${err}")
 endif()
 
+# The plugin's CLAP features come from the script's Info; product.cmake keeps
+# the same list for the template.
+function(product_features file out)
+    file(STRINGS "${file}" line REGEX "^set\\(PRODUCT_FEATURES +\"[^\"]*\"\\)")
+    string(REGEX REPLACE "^set\\(PRODUCT_FEATURES +\"([^\"]*)\"\\).*" "\\1" value "${line}")
+    set(${out} "${value}" PARENT_SCOPE)
+endfunction()
+product_features("${WORK}/export/product/product.cmake" declared)
+product_features("${DIR}/product.cmake" kept_features)
+if(NOT declared STREQUAL kept_features)
+    message(FATAL_ERROR "${DIR}/product.cmake has PRODUCT_FEATURES \"${kept_features}\", but "
+                        "script/${NAME}.cpp's Info declares .features {\"${declared}\"}: "
+                        "make product.cmake match the script")
+endif()
+
 file(READ "${WORK}/export/product/Catalog.cpp" fresh)
 file(READ "${DIR}/Catalog.cpp" kept)
 if(fresh STREQUAL kept)
