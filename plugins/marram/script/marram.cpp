@@ -1563,6 +1563,7 @@ struct Marram : Instrument {
     Array<Random, kVoices> random;  // each voice's, seeded by the note it plays
     Array<OscSet, 4> osc;
     Array<FilterSet, 2> filt;
+    bool parallel = false;
     Array<int, 2> combWas;  // each filter's type, as update() last saw it
     Array<double, kUnison> detuneRatio;
     Array<double, kUnison> spreadAt;
@@ -1668,7 +1669,7 @@ struct Marram : Instrument {
             combWas[f] = filt[f].type;
         }
         // Routing: in series an oscillator sent to both enters filter 1.
-        const bool parallel = routing.index() == 1;
+        parallel = routing.index() == 1;
         for (int o = 0; o < 4; ++o) {
             OscSet& c = osc[o];
             c.toA = c.to == 0 || c.to == 2;
@@ -2155,7 +2156,6 @@ struct Marram : Instrument {
     // One channel through the filters as routed: a into filter 1, b into
     // filter 2, d past both.
     double filters(Voice& s, int c, double a, double b, double d) {
-        const bool parallel = routing.index() == 1;
         double one = a;
         if (filt[0].type != kOff) one = filterOne(s.filter[c], filt[0], s.now[0], a);
         if (filt[1].type == kOff) return one + b + d;
