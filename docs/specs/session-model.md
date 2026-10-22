@@ -135,8 +135,10 @@ field defaults to stereo (2) for older templates. Its strip-type bounds match
 `track.add`; FX pins retain their saved channel assignments.
 
 Presets and templates live in the user's configuration folder: FX chain
-presets (`supple.fx-chain/1.0`) in `<config>/<slug>/chains`, track templates
-in `track-templates`, and project templates in `templates`. A project
+presets (`supple.fx-chain/1.0`) in `<config>/<slug>/chains`, a plugin's own
+presets in `presets/<plugin id>/<name>.json` (`supple.preset/1.0`, the
+sandbox's preset document, sandbox.md), track templates in
+`track-templates`, and project templates in `templates`. A project
 template is a folder, `templates/<name>/`, holding `project.json` (an
 ordinary project file, §5, of the head without history) and `media/` with a
 copy of every audio file the head uses, named relative to it; a missing file
@@ -544,7 +546,8 @@ and naming. All `edit` unless marked (q) query or (a) action.
   `fx.param.get` (q), `fx.meters {fx, from: live|render}` (q: the read-only
   values of the playing instance, or as the last `render.mix` ended),
   `fx.patch.get` (q), `fx.patch.set`, `fx.patch.merge`,
-  `fx.describe` (q), `fx.preset.save` (a), `fx.preset.load`, chain presets
+  `fx.describe` (q), a plugin's presets `fx.preset.list` (q),
+  `fx.preset.load`, `fx.preset.save` (a), `fx.preset.delete` (a), chain presets
   `fx.chain.save` (a), `fx.chain.load`, `fx.chain.list` (q),
   `fx.chain.delete` (a), MIDI learn `fx.learn.set {fx, param, midi, mode?,
   soft_takeover?, when_selected?, when_focused?, when_visible?}` (one per

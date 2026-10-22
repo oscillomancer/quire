@@ -754,6 +754,7 @@ struct ChainFixture {
         options.workdir = dir;
         if (scratch) options.scratchDir = dir / "scratch";
         options.chainDir = dir / "chains";
+        options.presetDir = dir / "presets";
         options.templateDir = dir / "track-templates";
         options.projectTemplateDir = dir / "templates";
         options.pluginPath = {FIXTURE_CLAP_PATH};
@@ -845,6 +846,44 @@ TEST_CASE("FX chain presets round-trip ordered patches, blobs and options in one
     CHECK(copy["effects"] == doc["effects"]);
     f.run("fx.chain.save", R"({"track":"tr_1","name":"Tone","replace":true})");
     CHECK(readTextFile(saved.find("path")->asString()).value() == *text);
+}
+
+TEST_CASE("a plugin's user presets save, load in one edit and delete; other plugins' stay apart") {
+    ChainFixture f;
+    f.run("track.add", R"({"name":"Source"})");
+    f.run("fx.add", R"({"track":"tr_1","plugin":"Test Gain","patch":{"params":{"gain":-9}}})");
+    f.run("fx.add", R"({"track":"tr_1","plugin":"Test Gain"})");
+    f.run("fx.add", R"({"track":"tr_1","plugin":"Test Edge"})");
+    const auto beforeSave = f.history();
+    f.run("fx.preset.save", R"({"fx":"fx_1","name":"Quiet"})");
+    f.run("fx.preset.save", R"({"fx":"fx_3","name":"Plain"})");
+    CHECK(f.history() == beforeSave);
+    CHECK(fails(*f.bus, "fx.preset.save", R"({"fx":"fx_1","name":"Quiet"})") == "fx.preset_exists");
+    CHECK(fails(*f.bus, "fx.preset.save", R"({"fx":"fx_1","name":"a:b"})") == "fx.preset_name");
+    // Every instance of the plugin sees its presets, and only its own.
+    auto listed = f.run("fx.preset.list", R"({"fx":"fx_2"})");
+    REQUIRE(listed["presets"].size() == 1);
+    CHECK(listed["presets"].at(0).find("name")->asString() == "Quiet");
+    CHECK(listed["presets"].at(0).find("source")->asString() == "user");
+    auto plain = f.run("fx.preset.list", R"({"fx":"fx_3"})");
+    REQUIRE(plain["presets"].size() == 1);
+    CHECK(plain["presets"].at(0).find("name")->asString() == "Plain");
+
+    f.run("fx.preset.load", R"({"fx":"fx_2","name":"Quiet"})");
+    CHECK(f.history() == beforeSave + 1);
+    CHECK(f.run("fx.patch.get", R"({"fx":"fx_2"})") == f.run("fx.patch.get", R"({"fx":"fx_1"})"));
+    f.run("history.undo");
+    CHECK(f.run("fx.param.get", R"({"fx":"fx_2","param":"gain"})")["value"].asDouble() == 0);
+    f.run("fx.preset.load", R"({"fx":"fx_3","name":"Plain","source":"user"})");
+    CHECK(f.app->head().fx.find(*model::Id::parse("fx_3"))->state ==
+          "sha256:df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119");
+    CHECK(fails(*f.bus, "fx.preset.load", R"({"fx":"fx_2","name":"Plain"})") ==
+          "fx.unknown_preset");
+
+    f.run("fx.preset.delete", R"({"fx":"fx_2","name":"Quiet"})");
+    CHECK(f.run("fx.preset.list", R"({"fx":"fx_1"})")["presets"].size() == 0);
+    CHECK(fails(*f.bus, "fx.preset.delete", R"({"fx":"fx_2","name":"Quiet"})") ==
+          "fx.unknown_preset");
 }
 
 TEST_CASE("fx.copy puts a copy of a plugin and its settings last in another track's chain") {

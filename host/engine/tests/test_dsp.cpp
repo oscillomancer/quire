@@ -138,6 +138,7 @@ TEST_CASE("a DSP script written over the bus is a plugin an agent sets through i
     AppOptions o;
     o.workdir = root.path;
     o.chainDir = root.path / "chains";
+    o.presetDir = root.path / "presets";
     o.pluginPath = {kStock};
     auto app = EngineApp::create(o, {.console9 = false});
     REQUIRE(app);
@@ -186,6 +187,22 @@ TEST_CASE("a DSP script written over the bus is a plugin an agent sets through i
     call("history.undo", json::Value::object());
     CHECK(patch()["params"]["gain"].asDouble() == doctest::Approx(-6));
     CHECK(patch()["params"]["mix"].asDouble() == doctest::Approx(25));
+    // The FX window's preset menu: the factory patch first, read-only.
+    const json::Value fxArgs = json::parse(R"({"fx": ")" + fx + R"("})").value();
+    auto presets = call("fx.preset.list", fxArgs);
+    REQUIRE(presets["presets"].size() == 1);
+    CHECK(presets["presets"].at(0).find("name")->asString() == "Quiet");
+    CHECK(presets["presets"].at(0).find("source")->asString() == "factory");
+    auto named = fxArgs;
+    named["name"] = "Quiet";
+    for (const char* command : {"fx.preset.save", "fx.preset.delete"}) {
+        auto refused = bus.execute({command, named, kTest});
+        REQUIRE_FALSE(refused);
+        CHECK(refused.error().code == "fx.preset_factory");
+    }
+    call("fx.preset.load", named);
+    CHECK(patch()["params"]["gain"].asDouble() == doctest::Approx(-9));
+    call("history.undo", json::Value::object());
 
     // The harness, through the player: -6 dB fully wet halves the sine.
     json::Value measured = call("dsp.test", json::parse(R"({"script": "agent_gain",

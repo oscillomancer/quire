@@ -47,6 +47,7 @@ struct AppOptions {
     std::vector<std::filesystem::path> pluginPath;  // empty = host::defaultSearchPath()
     host::HostIdentity identity;
     std::filesystem::path chainDir;     // empty = the user config directory / <slug> / chains
+    std::filesystem::path presetDir;    // empty = … / <slug> / presets (fx.preset.*)
     std::filesystem::path templateDir;  // empty = … / <slug> / track-templates
     std::filesystem::path projectTemplateDir;  // empty = … / <slug> / templates
     std::filesystem::path workdir;

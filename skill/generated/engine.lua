@@ -471,6 +471,36 @@ q = nil
 ---@class Quire.fx_patch_set_result
 ---@field patch any
 
+---@class Quire.fx_preset_delete_args
+---@field fx string
+---@field name string
+
+---@class Quire.fx_preset_delete_result
+---@field path string
+
+---@class Quire.fx_preset_list_args
+---@field fx string
+
+---@class Quire.fx_preset_list_result
+---@field presets table[]
+
+---@class Quire.fx_preset_load_args
+---@field fx string
+---@field name string
+---@field source? string
+
+---@class Quire.fx_preset_load_result
+---@field name string
+---@field source string
+
+---@class Quire.fx_preset_save_args
+---@field fx string
+---@field name string
+---@field replace? boolean (default: false)
+
+---@class Quire.fx_preset_save_result
+---@field path string
+
 ---@class Quire.fx_remove_args
 ---@field fx string Plugin instance id, e.g. "fx_1".
 
@@ -1288,6 +1318,12 @@ q = nil
 ---@field list fun(args: Quire.fx_patch_list_args): Quire.fx_patch_list_result List an instance's read-only factory patches, by name.
 ---@field merge fun(args: Quire.fx_patch_merge_args): Quire.fx_patch_merge_result Merge a partial patch into a plugin instance; returns the effective change.
 ---@field set fun(args: Quire.fx_patch_set_args): Quire.fx_patch_set_result Replace a semantic patch, or apply a factory patch by name.
+
+---@class Quire.fx.preset
+---@field delete fun(args: Quire.fx_preset_delete_args): Quire.fx_preset_delete_result Delete one of the user's presets for a plugin; factory presets stay.
+---@field list fun(args: Quire.fx_preset_list_args): Quire.fx_preset_list_result List a plugin's presets: its factory ones, then the user's.
+---@field load fun(args: Quire.fx_preset_load_args): Quire.fx_preset_load_result Apply a factory or user preset to a plugin instance in one undo step.
+---@field save fun(args: Quire.fx_preset_save_args): Quire.fx_preset_save_result Save a plugin instance's current settings as a named user preset.
 
 ---@class Quire.history
 ---@field list fun(): Quire.history_list_result List the current branch's recent versions (newest first).

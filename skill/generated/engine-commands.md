@@ -4634,6 +4634,260 @@ Result:
 
 ```
 
+## `fx.preset.delete@1`
+
+Delete one of the user's presets for a plugin; factory presets stay.
+
+Removes the user preset's file. Factory presets belong to the plugin and cannot be deleted. Instances that loaded the preset keep their settings.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  |  |
+| `name` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_preset_delete_result",
+  "properties": {
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `fx.unknown_preset`: no user preset has that name Hint: choose a user preset from fx.preset.list
+- `fx.preset_factory`: factory presets cannot be deleted Hint: delete only presets whose source is user
+
+### Examples
+
+**Delete a saved preset** (`song_with_preset`)
+
+```json
+{
+  "fx": "fx_2",
+  "name": "Quiet"
+}
+
+```
+
+Result:
+
+```json
+{
+  "path": "<any>"
+}
+
+```
+
+## `fx.preset.list@1`
+
+List a plugin's presets: its factory ones, then the user's.
+
+source factory: the plugin's own patches in its order (read-only; the same as fx.patch.list's names). source user: the user's saved presets for this plugin, sorted by name, with their file path. See fx.preset.load and fx.preset.save.
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_preset_list_result",
+  "properties": {
+    "presets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "fx_preset_entry",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": ["name", "source"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["presets"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `fx.unknown`: no such plugin instance Hint: use an fx id from fx.add
+
+### Examples
+
+**List presets** (`song_with_fx`)
+
+```json
+{
+  "fx": "fx_2"
+}
+
+```
+
+Result:
+
+```json
+{
+  "presets": []
+}
+
+```
+
+## `fx.preset.load@1`
+
+Apply a factory or user preset to a plugin instance in one undo step.
+
+name from fx.preset.list. source (factory or user) is needed only when both have the name. A factory preset or a semantic plugin's user preset replaces the whole patch (omitted parameters take defaults); a plain plugin's user preset is its saved state. Options such as wet and bypass are not part of a preset.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  |  |
+| `name` | string |  |  |  |  |
+| `source` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_preset_load_result",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    }
+  },
+  "required": ["name", "source"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `fx.unknown_preset`: no preset has that name Hint: choose a name from fx.preset.list
+- `fx.preset_ambiguous`: a factory and a user preset share the name Hint: add source: factory or source: user
+- `fx.preset_invalid`: the preset file is not valid for this plugin Hint: save the preset again
+
+### Examples
+
+**Load a saved preset** (`song_with_preset`)
+
+```json
+{
+  "fx": "fx_2",
+  "name": "Quiet"
+}
+
+```
+
+Result:
+
+```json
+{
+  "name": "Quiet",
+  "source": "user"
+}
+
+```
+
+## `fx.preset.save@1`
+
+Save a plugin instance's current settings as a named user preset.
+
+Saves what the running plugin has now (editor edits included): the patch of a semantic plugin, else its state. The preset is the user's, for every instance of this plugin in any project. A factory preset's name cannot be taken; replace: true overwrites a user preset of that name.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `fx` | string |  |  |  |  |
+| `name` | string |  |  |  |  |
+| `replace` | boolean |  |  | false |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "fx_preset_save_result",
+  "properties": {
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `fx.preset_name`: invalid preset name Hint: use a name without path separators
+- `fx.preset_factory`: a factory preset has the name Hint: choose another name; factory presets are read-only
+- `fx.preset_exists`: a user preset has the name Hint: choose another name or set replace: true
+
+### Examples
+
+**Save the gain's settings** (`song_with_fx`)
+
+```json
+{
+  "fx": "fx_2",
+  "name": "Quiet"
+}
+
+```
+
+Result:
+
+```json
+{
+  "path": "<any>"
+}
+
+```
+
 ## `fx.remove@1`
 
 Remove a plugin instance (and its envelopes).

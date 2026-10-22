@@ -814,9 +814,461 @@ void registerProjectTemplateCommands(cmd::Registry& registry) {
     }
 }
 
+// --- plugin presets -----------------------------------------------------------------------
+// One plugin's settings by name: its factory patches (read-only, from the
+// plugin) and the user's own, a supple.preset/1.0 file each (the sandbox's
+// format, sandbox.md) in <dir>/<plugin id>/<name>.json.
+
+struct PresetDocument {
+    std::optional<std::string> schema;
+    std::optional<std::int64_t> version;
+    std::string plugin, name;
+    std::optional<std::string> pluginName, notes;
+    std::optional<std::vector<std::string>> tags;
+    std::optional<json::Value> patch;
+    std::optional<std::string> state;
+};
+
+const schema::Schema<PresetDocument>& presetSchema() {
+    static const auto value =
+        schema::object<PresetDocument>("preset")
+            .field("schema", &PresetDocument::schema,
+                   schema::string().pattern("^supple\\.preset/1\\.0$", "supple.preset/1.0"))
+            .field("version", &PresetDocument::version, schema::integer().min(1).max(1))
+            .field("plugin", &PresetDocument::plugin, schema::string().minLength(1))
+            .field("plugin_name", &PresetDocument::pluginName, schema::string())
+            .field("name", &PresetDocument::name, schema::string().minLength(1))
+            .field("tags", &PresetDocument::tags, schema::arrayOf(schema::string()))
+            .field("notes", &PresetDocument::notes, schema::string())
+            .field("patch", &PresetDocument::patch, schema::any())
+            .field("state", &PresetDocument::state, schema::string())
+            .build();
+    return value;
+}
+
+// A preset name: a chain name that is also a file name on every platform.
+Status validPresetName(const std::string& name) {
+    if (validName(name) && name.find_first_of(":*?\"<>|") == std::string::npos &&
+        name.front() != ' ' && name.front() != '.' && name.back() != ' ' && name.back() != '.')
+        return {};
+    return Error("fx.preset_name", "invalid preset name", "/name",
+                 "use 1–200 characters, without / \\ : * ? \" < > | or control characters, "
+                 "not starting or ending with a space or a dot");
+}
+
+Result<fs::path> presetDir(const EngineApp& app, const model::PluginRef& plugin) {
+    fs::path root = app.options().presetDir;
+    if (root.empty()) {
+        root = paths::config();
+        if (root.empty())
+            return Error("fx.preset_directory", "no configuration directory", {},
+                         "set AppOptions::presetDir to an explicit writable directory");
+        root = root / product::kSlug / "presets";
+    }
+    std::string folder = plugin.id;
+    for (char& ch : folder)
+        if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '.' && ch != '-' && ch != '_')
+            ch = '_';
+    if (folder.empty() || folder.front() == '.') folder.insert(folder.begin(), '_');
+    return root / folder;
+}
+
+const model::FxInstance* presetFx(const model::Session& s, const std::string& fx, Id& id) {
+    auto parsed = Id::parse(fx);
+    if (!parsed || parsed->kind != model::Kind::Fx) return nullptr;
+    id = *parsed;
+    return s.fx.find(id);
+}
+
+Error unknownFx(const std::string& fx) {
+    return Error("fx.unknown", "no plugin instance " + fx, "/fx",
+                 "use an fx id from fx.add, fx.copy or session.describe");
+}
+
+// The factory patches' names in the plugin's order; none for a plain plugin.
+Result<std::vector<std::string>> factoryNames(EngineApp& app, Id id, const model::FxInstance& fx) {
+    auto patches = app.fxFactoryPatches(id, fx);
+    if (!patches) return std::move(patches).error();
+    std::vector<std::string> names;
+    if (patches->isArray())
+        for (const auto& p : patches->asArray())
+            if (const auto* name = p.find("name"); name && name->isString())
+                names.push_back(name->asString());
+    return names;
+}
+
+// The user's presets for fx's plugin, sorted by name; documents for another
+// plugin or that do not parse are skipped with a warning.
+struct UserPreset {
+    std::string name;
+    fs::path path;
+    PresetDocument doc;
+};
+Result<std::vector<UserPreset>> userPresets(const EngineApp& app, const model::FxInstance& fx,
+                                            cmd::Context* ctx) {
+    auto dir = presetDir(app, fx.plugin);
+    if (!dir) return std::move(dir).error();
+    std::vector<UserPreset> rows;
+    std::error_code ec;
+    if (!fs::exists(*dir, ec)) return rows;
+    fs::directory_iterator it(*dir, ec), end;
+    while (!ec && it != end) {
+        const auto entry = *it;
+        it.increment(ec);
+        std::error_code kindError;
+        if (!entry.is_regular_file(kindError) || entry.path().extension() != ".json") continue;
+        auto text = readTextFile(entry.path(), kMaxFile);
+        auto parsed = text ? json::parse(*text) : Result<json::Value>(text.error());
+        auto doc = parsed ? presetSchema().decode(*parsed) : Result<PresetDocument>(parsed.error());
+        if (doc) {
+            if (doc->plugin != fx.plugin.id) continue;
+            if (doc->patch.has_value() == doc->state.has_value())
+                doc = Error("fx.preset_invalid", "a preset needs exactly one patch or state",
+                            "/state", "save the preset again");
+        }
+        if (!doc) {
+            if (ctx)
+                ctx->warn("fx.preset_invalid", entry.path().string() + ": " + doc.error().message);
+            continue;
+        }
+        rows.push_back({doc->name, entry.path(), std::move(*doc)});
+    }
+    if (ec)
+        return Error("fx.preset_directory", "cannot list " + dir->string() + ": " + ec.message(),
+                     {}, "check the directory permissions");
+    std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) {
+        return std::tie(a.name, a.path) < std::tie(b.name, b.path);
+    });
+    return rows;
+}
+
+struct PresetArgs {
+    std::string fx, name;
+    std::optional<std::string> source;
+};
+struct PresetDeleteArgs {
+    std::string fx, name;
+};
+struct PresetSaveArgs {
+    std::string fx, name;
+    bool replace = false;
+};
+struct PresetEntry {
+    std::string name, source;
+    std::optional<std::string> path;
+};
+struct PresetListArgs {
+    std::string fx;
+};
+struct PresetListResult {
+    std::vector<PresetEntry> presets;
+};
+struct PresetLoadResult {
+    std::string name, source;
+};
+
+void registerPresetCommands(cmd::Registry& registry) {
+    {
+        cmd::Command<PresetListArgs, PresetListResult> c;
+        c.name = "fx.preset.list";
+        c.kind = cmd::Kind::Query;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "List a plugin's presets: its factory ones, then the user's.";
+        c.description =
+            "source factory: the plugin's own patches in its order (read-only; the same as "
+            "fx.patch.list's names). source user: the user's saved presets for this plugin, "
+            "sorted by name, with their file path. See fx.preset.load and fx.preset.save.";
+        c.tags = {"fx", "presets"};
+        c.args =
+            schema::object<PresetListArgs>("fx_preset_list_args")
+                .field("fx", &PresetListArgs::fx, schema::string().pattern("^fx_[0-9]+$", "fx id"))
+                .build();
+        const auto entrySchema = schema::object<PresetEntry>("fx_preset_entry")
+                                     .field("name", &PresetEntry::name, schema::string())
+                                     .field("source", &PresetEntry::source, schema::string())
+                                     .field("path", &PresetEntry::path, schema::string())
+                                     .build();
+        c.result = schema::object<PresetListResult>("fx_preset_list_result")
+                       .field("presets", &PresetListResult::presets, schema::arrayOf(entrySchema))
+                       .build();
+        c.errors = {{"fx.unknown", "no such plugin instance", "use an fx id from fx.add"}};
+        c.examples = {
+            {"List presets", j(R"({"fx":"fx_2"})"), j(R"({"presets":[]})"), "song_with_fx"}};
+        c.run = [](const PresetListArgs& a, cmd::Context& ctx) -> Result<PresetListResult> {
+            auto& app = ctx.service<EngineApp>();
+            const auto s = app.view();
+            Id id;
+            const auto* fx = presetFx(s, a.fx, id);
+            if (!fx) return unknownFx(a.fx);
+            auto factory = factoryNames(app, id, *fx);
+            if (!factory) return std::move(factory).error();
+            auto user = userPresets(app, *fx, &ctx);
+            if (!user) return std::move(user).error();
+            PresetListResult result;
+            for (auto& name : *factory) result.presets.push_back({std::move(name), "factory", {}});
+            for (auto& p : *user) result.presets.push_back({p.name, "user", p.path.string()});
+            return result;
+        };
+        registry.add(std::move(c));
+    }
+    {
+        cmd::Command<PresetArgs, PresetLoadResult> c;
+        c.name = "fx.preset.load";
+        c.kind = cmd::Kind::Edit;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Apply a factory or user preset to a plugin instance in one undo step.";
+        c.description =
+            "name from fx.preset.list. source (factory or user) is needed only when both have "
+            "the name. A factory preset or a semantic plugin's user preset replaces the whole "
+            "patch (omitted parameters take defaults); a plain plugin's user preset is its saved "
+            "state. Options such as wet and bypass are not part of a preset.";
+        c.tags = {"fx", "presets"};
+        c.args = schema::object<PresetArgs>("fx_preset_load_args")
+                     .field("fx", &PresetArgs::fx, schema::string().pattern("^fx_[0-9]+$", "fx id"))
+                     .field("name", &PresetArgs::name, schema::string().minLength(1))
+                     .field("source", &PresetArgs::source,
+                            schema::string().pattern("^(factory|user)$", "factory or user"))
+                     .build();
+        c.result = schema::object<PresetLoadResult>("fx_preset_load_result")
+                       .field("name", &PresetLoadResult::name, schema::string())
+                       .field("source", &PresetLoadResult::source, schema::string())
+                       .build();
+        c.errors = {
+            {"fx.unknown_preset", "no preset has that name", "choose a name from fx.preset.list"},
+            {"fx.preset_ambiguous", "a factory and a user preset share the name",
+             "add source: factory or source: user"},
+            {"fx.preset_invalid", "the preset file is not valid for this plugin",
+             "save the preset again"}};
+        c.examples = {{"Load a saved preset", j(R"({"fx":"fx_2","name":"Quiet"})"),
+                       j(R"({"name":"Quiet","source":"user"})"), "song_with_preset"}};
+        c.run = [](const PresetArgs& a, cmd::Context& ctx) -> Result<PresetLoadResult> {
+            auto& app = ctx.service<EngineApp>();
+            const auto s = app.view();
+            Id id;
+            const auto* fx = presetFx(s, a.fx, id);
+            if (!fx) return unknownFx(a.fx);
+            const bool wantFactory = !a.source || *a.source == "factory";
+            const bool wantUser = !a.source || *a.source == "user";
+            std::vector<std::string> factory;
+            if (wantFactory) {
+                auto names = factoryNames(app, id, *fx);
+                if (!names) return std::move(names).error();
+                factory = std::move(*names);
+            }
+            std::vector<UserPreset> user;
+            if (wantUser) {
+                auto rows = userPresets(app, *fx, &ctx);
+                if (!rows) return std::move(rows).error();
+                user = std::move(*rows);
+            }
+            const bool inFactory =
+                std::find(factory.begin(), factory.end(), a.name) != factory.end();
+            const auto mine = std::find_if(user.begin(), user.end(),
+                                           [&](const UserPreset& p) { return p.name == a.name; });
+            const bool inUser = mine != user.end();
+            if (inFactory && inUser)
+                return Error("fx.preset_ambiguous",
+                             "both a factory and a user preset are named '" + a.name + "'",
+                             "/source", "add source: factory or source: user");
+            if (!inFactory && !inUser)
+                return Error("fx.unknown_preset", "no preset named '" + a.name + "'", "/name",
+                             "choose a name from fx.preset.list");
+            if (inFactory) {
+                auto args = json::Value::object();
+                args["fx"] = a.fx;
+                args["name"] = a.name;
+                auto set = invoke("fx.patch.set", std::move(args), ctx);
+                if (!set) return std::move(set).error();
+                return PresetLoadResult{a.name, "factory"};
+            }
+            const PresetDocument& doc = mine->doc;
+            if (doc.patch) {
+                auto patch = app.mergedPatch(*fx, *doc.patch, true);
+                if (!patch)
+                    return Error("fx.preset_invalid",
+                                 mine->path.string() + ": " + patch.error().message, "/name",
+                                 "the plugin refused this preset; save it again or delete it");
+                app.txn().modify<model::FxInstance>(
+                    id, [&](model::FxInstance& f) { f.patch = *patch; });
+                return PresetLoadResult{a.name, "user"};
+            }
+            auto info = app.findPlugin(fx->plugin.id);
+            if (!info) return std::move(info).error();
+            if (info->semantic)
+                return Error("fx.preset_invalid",
+                             mine->path.string() + " holds a plain state for a semantic plugin",
+                             "/name", "save the preset again");
+            auto bytes = base64Decode(*doc.state);
+            if (!bytes)
+                return Error("fx.preset_invalid", mine->path.string() + ": the state is not base64",
+                             "/name", "save the preset again");
+            // The plugin checks the state on a probe before the model changes.
+            auto probe = host::Instance::create(*info, app.options().identity);
+            if (!probe) return std::move(probe).error();
+            if (auto loaded = (*probe)->loadState(*bytes); !loaded)
+                return Error("fx.preset_invalid",
+                             mine->path.string() + ": " + loaded.error().message, "/name",
+                             "the plugin refused this preset; save it again or delete it");
+            const std::string hash = stateHash(*bytes);
+            app.txn().putBlob(hash,
+                              std::make_shared<const model::Blob>(model::Blob{std::move(*bytes)}));
+            app.txn().modify<model::FxInstance>(id, [&](model::FxInstance& f) {
+                f.state = hash;
+                f.params.clear();  // the state holds every value
+            });
+            return PresetLoadResult{a.name, "user"};
+        };
+        registry.add(std::move(c));
+    }
+    {
+        cmd::Command<PresetSaveArgs, PathResult> c;
+        c.name = "fx.preset.save";
+        c.kind = cmd::Kind::Action;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Save a plugin instance's current settings as a named user preset.";
+        c.description =
+            "Saves what the running plugin has now (editor edits included): the patch of a "
+            "semantic plugin, else its state. The preset is the user's, for every instance of "
+            "this plugin in any project. A factory preset's name cannot be taken; replace: true "
+            "overwrites a user preset of that name.";
+        c.tags = {"fx", "presets"};
+        c.args =
+            schema::object<PresetSaveArgs>("fx_preset_save_args")
+                .field("fx", &PresetSaveArgs::fx, schema::string().pattern("^fx_[0-9]+$", "fx id"))
+                .field("name", &PresetSaveArgs::name, schema::string().minLength(1))
+                .field("replace", &PresetSaveArgs::replace, schema::boolean())
+                .defaultValue(false)
+                .build();
+        c.result = schema::object<PathResult>("fx_preset_save_result")
+                       .field("path", &PathResult::path, schema::string())
+                       .build();
+        c.errors = {{"fx.preset_name", "invalid preset name", "use a name without path separators"},
+                    {"fx.preset_factory", "a factory preset has the name",
+                     "choose another name; factory presets are read-only"},
+                    {"fx.preset_exists", "a user preset has the name",
+                     "choose another name or set replace: true"}};
+        c.examples = {{"Save the gain's settings", j(R"({"fx":"fx_2","name":"Quiet"})"),
+                       j(R"({"path":"<any>"})"), "song_with_fx"}};
+        c.run = [](const PresetSaveArgs& a, cmd::Context& ctx) -> Result<PathResult> {
+            auto& app = ctx.service<EngineApp>();
+            SUPPLE_TRY(validPresetName(a.name));
+            const auto s = app.view();
+            Id id;
+            const auto* fx = presetFx(s, a.fx, id);
+            if (!fx) return unknownFx(a.fx);
+            auto factory = factoryNames(app, id, *fx);
+            if (!factory) return std::move(factory).error();
+            if (std::find(factory->begin(), factory->end(), a.name) != factory->end())
+                return Error("fx.preset_factory",
+                             "'" + a.name + "' is one of the plugin's own presets", "/name",
+                             "choose another name; factory presets are read-only");
+            PresetDocument doc;
+            doc.schema = "supple.preset/1.0";
+            doc.plugin = fx->plugin.id;
+            doc.pluginName = fx->plugin.name;
+            doc.name = a.name;
+            doc.tags = std::vector<std::string>{};
+            doc.notes = "";
+            // The running plugin's settings when there is one, else the model's.
+            model::FxInstance now = *fx;
+            now.patch.reset();
+            now.state.reset();
+            std::shared_ptr<const model::Blob> blob;
+            SUPPLE_TRY(captureLiveState(app, id, now, blob));
+            if (blob) {
+                doc.state = base64Encode(blob->data);
+            } else if (now.patch) {
+                doc.patch = *now.patch;
+            } else {
+                auto effects = encodeEffects(app, s, {id});
+                if (!effects) return std::move(effects).error();
+                const json::Value& entry = effects->front();
+                if (const auto* patch = entry.find("patch"))
+                    doc.patch = *patch;
+                else
+                    doc.state = entry.find("state")->asString();
+            }
+            auto dir = presetDir(app, fx->plugin);
+            if (!dir) return std::move(dir).error();
+            std::error_code ec;
+            fs::create_directories(*dir, ec);
+            if (ec)
+                return Error("fx.preset_directory",
+                             "cannot create " + dir->string() + ": " + ec.message(), {},
+                             "check the configuration directory's permissions");
+            const fs::path path = *dir / (a.name + ".json");
+            const auto text = json::writeCanonical(presetSchema().encode(doc)) + "\n";
+            if (text.size() > kMaxFile)
+                return Error("fx.preset_size", "the preset exceeds the 64 MiB file limit", "/fx",
+                             "this plugin's state is too large to keep as a preset");
+            if (auto written = writePreset(path, text, a.replace); !written) {
+                Error e = std::move(written).error();
+                if (e.code == "chain.exists")
+                    return Error("fx.preset_exists", "a user preset named '" + a.name + "' exists",
+                                 "/name", "choose another name or set replace: true");
+                return e;
+            }
+            return PathResult{path.string()};
+        };
+        registry.add(std::move(c));
+    }
+    {
+        cmd::Command<PresetDeleteArgs, PathResult> c;
+        c.name = "fx.preset.delete";
+        c.kind = cmd::Kind::Action;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Delete one of the user's presets for a plugin; factory presets stay.";
+        c.description =
+            "Removes the user preset's file. Factory presets belong to the plugin and cannot be "
+            "deleted. Instances that loaded the preset keep their settings.";
+        c.tags = {"fx", "presets"};
+        c.args = schema::object<PresetDeleteArgs>("fx_preset_delete_args")
+                     .field("fx", &PresetDeleteArgs::fx,
+                            schema::string().pattern("^fx_[0-9]+$", "fx id"))
+                     .field("name", &PresetDeleteArgs::name, schema::string().minLength(1))
+                     .build();
+        c.result = schema::object<PathResult>("fx_preset_delete_result")
+                       .field("path", &PathResult::path, schema::string())
+                       .build();
+        c.errors = {{"fx.unknown_preset", "no user preset has that name",
+                     "choose a user preset from fx.preset.list"},
+                    {"fx.preset_factory", "factory presets cannot be deleted",
+                     "delete only presets whose source is user"}};
+        c.examples = {{"Delete a saved preset", j(R"({"fx":"fx_2","name":"Quiet"})"),
+                       j(R"({"path":"<any>"})"), "song_with_preset"}};
+        c.run = [](const PresetDeleteArgs& a, cmd::Context& ctx) -> Result<PathResult> {
+            auto& app = ctx.service<EngineApp>();
+            const auto s = app.view();
+            Id id;
+            const auto* fx = presetFx(s, a.fx, id);
+            if (!fx) return unknownFx(a.fx);
+            auto user = userPresets(app, *fx, &ctx);
+            if (!user) return std::move(user).error();
+            for (const auto& p : *user)
+                if (p.name == a.name) {
+                    std::error_code ec;
+                    if (!fs::remove(p.path, ec) || ec)
+                        return Error("fx.preset_delete",
+                                     "cannot delete " + p.path.string() + ": " + ec.message(),
+                                     "/name", "check the presets folder's permissions");
+                    return PathResult{p.path.string()};
+                }
+            auto factory = factoryNames(app, id, *fx);
+            if (factory && std::find(factory->begin(), factory->end(), a.name) != factory->end())
+                return Error("fx.preset_factory",
+                             "'" + a.name + "' is one of the plugin's own presets", "/name",
+                             "factory presets cannot be deleted; delete only user presets");
+            return Error("fx.unknown_preset", "no user preset named '" + a.name + "'", "/name",
+                         "choose a user preset from fx.preset.list");
+        };
+        registry.add(std::move(c));
+    }
+}
+
 }  // namespace
 
 void registerChainCommands(cmd::Registry& registry) {
+    registerPresetCommands(registry);
     {
         cmd::Command<SaveArgs, SaveResult> c;
         c.name = "fx.chain.save";

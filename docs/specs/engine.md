@@ -585,6 +585,31 @@ case-sensitive; unknown names fail with `fx.unknown_factory_patch` at
 `fx.patch_args`. Listing uses the live instance when present, otherwise a
 scratch instance. It never changes the plugin or writes preset files.
 
+A plugin's presets, for the FX window's preset menu and for agents:
+`fx.preset.list {fx}` returns `presets`, the factory patches first (`source:
+"factory"`, the plugin's order, the names of `fx.patch.list`) and then the
+user's for that plugin id (`source: "user"`, sorted by name, with `path`).
+User presets are `supple.preset/1.0` documents (sandbox.md) in
+`AppOptions::presetDir`, by default `<config>/<slug>/presets`, one folder per
+plugin id (characters other than letters, digits, `.`, `-` and `_` become
+`_`); a file for another plugin id, or that does not decode, is skipped with
+a `fx.preset_invalid` warning. `fx.preset.load {fx, name, source?}` is one
+undo step: a factory preset goes through `fx.patch.set {name}`, a semantic
+plugin's user preset replaces the patch (validated by the plugin), and a
+plain plugin's user preset is its base64 state, checked on a scratch
+instance before the model takes it (the instance's `params` are cleared).
+`source` is needed only when a factory and a user preset share the name
+(`fx.preset_ambiguous`); an unknown name fails with `fx.unknown_preset`.
+`fx.preset.save {fx, name, replace?}` writes what the running instance has
+(editor edits included; else the model's patch or state) and creates no
+history; a factory preset's name is refused (`fx.preset_factory`) and an
+existing user preset needs `replace: true` (`fx.preset_exists`). Names are
+1 to 200 characters without `/ \ : * ? " < > |` or control characters and
+do not start or end with a space or a dot (`fx.preset_name`).
+`fx.preset.delete {fx, name}` removes a user preset's file; a factory name
+fails with `fx.preset_factory`. Wet, bypass and other instance options are
+not part of a preset.
+
 `fx.describe` returns `status_available` in both summary and full modes.
 When a live instance supports the extension it also returns `problems`,
 an array of `code`, `message`, `scope`, optional source `line`, `hint` and

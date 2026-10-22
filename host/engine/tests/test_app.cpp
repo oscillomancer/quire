@@ -44,6 +44,7 @@ std::unique_ptr<EngineApp> makeApp(const fs::path& dir, bool player = false) {
     AppOptions o;
     o.workdir = dir;
     o.chainDir = dir / "chains";  // never the user's config
+    o.presetDir = dir / "presets";
     o.templateDir = dir / "templates";
     o.projectTemplateDir = dir / "project-templates";
     o.pluginPath = {kFixture};
