@@ -22,6 +22,7 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 | `ghyll` (`plugins/stock/ghyll`) | Ghyll | `com.suppleaudio.ghyll` | `DIow` (the player's for the id) | `Ghyl` | audio-effect, reverb |
 | `lichen` (`plugins/stock/lichen`) | Lichen | `com.suppleaudio.lichen` | `cwHJ` (the player's for the id) | `Lchn` | audio-effect, analyzer |
 | `marram` (`plugins/stock/marram`) | Marram | `com.suppleaudio.marram` | `XZXx` (the player's for the id) | `Mrrm` | instrument, synthesizer |
+| `withy` (`plugins/stock/withy`) | Withy | `com.suppleaudio.withy` | `aSho` (the player's for the id) | `Wthy` | audio-effect, chorus |
 | `pollia` (`plugins/stock/pollia`) | Pollia | `com.suppleaudio.pollia` | `EGJQ` (the player's for the id) | `Poll` | audio-effect, phaser |
 
 Marram is an instrument; its spec, implementation notes included, is
@@ -612,7 +613,46 @@ maintainers:
   one core, stereo 48 kHz, noise: 3.3 % (the same in a booth or a
   cathedral; 2.6 % with `mono`).
 
-## 13. Phaser — Pollia [`pollia`] (`stock-effects.md` §11)
+## 13. Chorus — Withy [`withy`] (`stock-effects.md` §11)
+
+A DSP script (ADR-0047), `plugins/stock/withy/script/withy.cpp`, with no
+predecessor. Notes for maintainers:
+
+- **The interpolator is the sound.** A modulated read crosses samples
+  hundreds of times a second, so any interpolator whose level depends on
+  where it reads between samples (linear, cubic) amplitude-modulates the
+  highs at that rate. The sinc table is built in `prepare()` (no built-in
+  needed; ADR-0032's 2026-10-20 rule) and checked in two ways: a fixed
+  fractional delay and a delay moving at constant speed, both flat to
+  0.005 dB at 12 kHz. Keep the rows summing to 1 (the lows' level).
+- **Glides that sit at their target.** Every switch weight steps toward
+  its target with `approach()`, which never passes it. An earlier version
+  stepped down when it sat at 1, so the weight flipped between 1 and
+  1 − step every sample: a ±0.3 dB ripple at 12 kHz with the triangle,
+  found only by measuring the highs' envelope.
+- **Depth in cents.** The swings are worked out from the depth and the
+  rate every 16 frames (continuous, so block size does not matter) and
+  glided per sample; the readouts are computed from what the voices do,
+  after the 25 ms cap and bloom's speed, not from the knob.
+- **Levels.** The voices' normalisation and the style trims were measured
+  on pink noise limited to 30 Hz–18 kHz and on notes: pink noise down to
+  1 Hz has a third of its power where the voices and the dry are the same
+  signal and misleads both the trims and the mix law.
+- **The editor's response** is computed from what the audio code sends
+  (each voice's delay and side gains, normalisation included) and the
+  parameters, with the same mix law and feedback scaling, averaging power
+  over each drawn point's band so dense combs read as their depth.
+- **Tests.** The suite every stock plugin has, and `plugin.withy.response`:
+  dry (mix 0) a −12 dBFS 1 kHz sine passes at 0.00 dB, −6.00 with output
+  −6; one voice held still (vibrato, depth 0) at 0.00 dB; a 60 Hz sine
+  under a full vibrato with low keep at 1 kHz at 0.00 dB; `detune` reads
+  the depth, `sweep` 1.107 ms (sine) and 1.636 ms (triangle) for 12 ct at
+  1 Hz, `rate_now` 2 Hz for a quarter note at 120 BPM. Measurements are in
+  `stock-effects.md` §11. In the player (release sandbox), stereo 48 kHz,
+  noise: 1.5 % at the defaults, 3.9 % with eight voices, 5.0 % with eight
+  voices, the bucket brigade, shimmer, drift, low keep and high cut.
+
+## 14. Phaser — Pollia [`pollia`] (`stock-effects.md` §12)
 
 A DSP script (ADR-0047), `plugins/stock/pollia/script/pollia.cpp`. A new
 stock plugin with no predecessor. Notes for maintainers:
@@ -657,7 +697,7 @@ stock plugin with no predecessor. Notes for maintainers:
   (the loop's analytic response) and −6.02 with keep below at 1 kHz; the
   wet alone 0.00 dB held still, and the sine's level kept (−12.03 dBFS)
   while the phase turns; `centre_now` 1000 Hz with range 0. Measurements
-  are in `stock-effects.md` §11. In the player (JIT), stereo 48 kHz: 1.2 %
+  are in `stock-effects.md` §12. In the player (JIT), stereo 48 kHz: 1.2 %
   at 4 stages, 1.3 % at the defaults, 3.1 % at 24 stages with spread and
   feedback, 3.6 % with the barber pole, photocell, envelope and keep below
   on top.

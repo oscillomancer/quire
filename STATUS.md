@@ -194,8 +194,9 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
   the LLM evaluation harness (`tools/eval-harness`).
 - **Stock plugins** (ADR-0011, ADR-0047): Marram, Yarrow, Sundew, Treeline,
-  Gorse, Hickory, Sorrel, Teasel, Bracken, Ghyll, Pollia and Lichen, each passing clap-validator, a
-  reset determinism check, an unload test and the headless REAPER check;
+  Gorse, Hickory, Sorrel, Teasel, Bracken, Ghyll, Lichen, Withy and
+  Pollia, each passing clap-validator, a reset determinism check, an unload
+  test and the headless REAPER check;
   JSON patches and the semantic-parameters extension.
   Yarrow, the EQ, is the first written as a DSP script
   (`plugins/stock/yarrow`) and compiled natively from it, playing the same
@@ -327,8 +328,25 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   response with a node to drag, the envelopes and LFOs with handles and
   the newest note's place, the drive curve, the voices playing and the
   route list. It passes the stock checks and the REAPER check.
-  Pollia, the phaser (`plugins/stock/pollia`), is the twelfth and has no
-  predecessor: 1 to 24 trapezoidal all-pass stages, stacked or spread over
+  Withy, the chorus (`plugins/stock/withy`), is a stock plugin with no
+  predecessor. Five styles lay out its voices: classic (two in anti-phase,
+  left and right), dimension (two cross-mixed: the widest, with the
+  shallowest combs), ensemble (three a third of a cycle apart), multi (two
+  to eight at their own delays, rates and places) and vibrato (one voice, no
+  dry). The depth is the pitch each voice swings in cents, the same at any
+  rate, free or in note values locked to the song; sine or rounded
+  triangle, a fast shimmer, a slow random drift, and bloom, which holds the
+  voices still at each new note and lets them sway again (a singer's late
+  vibrato). Voices read through a 16-tap windowed sinc, flat within
+  0.01 dB to 16 kHz however fast they sweep; clean, or a bucket brigade
+  whose band follows its clock, with its lean and compander hiss. Low keep
+  leaves the lows dry and centred; high cut, feedback with its level held,
+  width and an equal-power mix. It reads out the detune, the sweep, the
+  rate and the mono loss; its editor weaves each voice's delay over the
+  last 3 s, shows each voice's pitch now, where the voices sit around the
+  listener, and the response now in stereo and folded to mono.
+  Pollia, the phaser (`plugins/stock/pollia`), has no predecessor
+  either: 1 to 24 trapezoidal all-pass stages, stacked or spread over
   up to six octaves, with feedback either way (its added level mostly
   taken back); a sweep by an LFO free or in time (six shapes, a phase, a
   stereo offset) or by the playing's envelope, measured against its own

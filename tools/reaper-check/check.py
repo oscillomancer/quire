@@ -57,6 +57,7 @@ CASES = {
     "com.suppleaudio.lichen": Case("Lichen", False, "Target", 0, 1, "transparent", True),
     "com.suppleaudio.marram": Case("Marram", True, "Output",
                                  normalized(0, -36, 12), normalized(-12, -36, 12), "gain"),
+    "com.suppleaudio.withy": Case("Withy", False, "Output", .5, .25, "gain"),
 }
 
 

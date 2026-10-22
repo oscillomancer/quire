@@ -1192,7 +1192,154 @@ Factory patches: Transparent Master (+3 dB, −1 dBTP), Streaming Loud (+6,
 −2, 200 ms, target −23), Acoustic Gentle (+2, −1, 300 ms, target −16), Bus
 Peak Catcher (0, −3, 50 ms).
 
-## 11. Phaser — "Pollia" [`pollia`]
+## 11. Chorus — "Withy" [`withy`]
+
+Voices a few milliseconds late, each swaying sharp and flat, from a still
+widening to a choir of eight and a vibrato, written as a DSP script
+(ADR-0047: `plugins/stock/withy/script/withy.cpp`). Main stereo or mono in
+and out (mono hears each voice's two sides summed); no latency.
+
+| key | type | range | curve | default |
+|---|---|---|---|---|
+| `style` | enum | `classic`, `dimension`, `ensemble`, `multi`, `vibrato` | | `classic` |
+| `voices` | int | 2..8: with `multi` | | 4 |
+| `delay` | ms | 1..40: the voices at rest (not with `vibrato`) | log | 7 |
+| `width` | % | 0..200: the voices' | linear | 100 |
+| `sync` | enum | `free`, `bars4`, `bars2`, `bar1`, `n2`, `n4`, `n8`, `n16`, `n32`, `n4t`, `n8t`, `n16t`, `n4d`, `n8d` | | `free` |
+| `rate` | Hz | 0.03..12: with `sync` free | log | 0.6 |
+| `depth` | ct | 0..100: each voice's pitch swing either way | pow 2 | 8 |
+| `shape` | enum | `sine`, `triangle` | | `triangle` |
+| `shimmer` | % | 0..100: a 6.1 Hz flutter, as a share of the depth | linear | 0 |
+| `drift` | % | 0..100: a slow random wander, as a share of the depth | linear | 0 |
+| `bloom` | ms | 0..2000: the sway's return after each onset; 0 is off (with `sync` free) | cubic | 0 |
+| `medium` | enum | `clean`, `bbd` | | `clean` |
+| `age` | % | 0..100: the bucket brigade's wear (with `bbd`) | linear | 30 |
+| `high_cut` | Hz | 1000..20000 on the voices; 20000 is off | log | 20000 |
+| `low_keep` | Hz | 20..1000: below it dry and centred; 20 is off | log | 20 |
+| `feedback` | % | −80..80 | linear | 0 |
+| `mix` | % | 0..100 (not with `vibrato`) | linear | 50 |
+| `output` | dB | −24..24 | linear | 0 |
+| `detune` | ct | readonly: the largest voice's pitch swing now | | |
+| `sweep` | ms | readonly: the furthest voice's delay swing either way now | | |
+| `rate_now` | Hz | readonly: the sway's rate, synced or free | | |
+| `mono_loss` | dB | readonly: the output's fold to mono against the input's, 300 ms | | |
+| `input_level`, `output_level` | dBFS | readonly: peaks, falling 20 dB/s | | |
+
+- **Lines.** One per channel, double precision, 100 ms long, written
+  twice over so a read never wraps. Every voice reads through a 16-tap
+  Kaiser-windowed sinc (β 8, passing 94 % of the band), 256 rows a sample
+  with a linear step between rows, each row summing to 1; the two lines
+  are read together. A cubic's level at 15 kHz falls 2.5 dB between
+  samples, so a sweeping voice warbles its highs at the rate it crosses
+  samples (hundreds of hertz); the sinc's falls under 0.01 dB.
+- **Styles.** Each voice has a gain into each side, a place in the cycle,
+  a rate and a delay against `delay`:
+  - classic: two, left and right, half a cycle apart;
+  - dimension: two half a cycle apart, each side its own voice plus the
+    other's × −0.3, then +0.35 dB;
+  - ensemble: three a third of a cycle apart, left, centre (× 0.707 each
+    side) and right, each flutter at its own rate (× 1, 1.09, 0.92);
+  - multi: N voices at `delay` × (0.65 … 1.35), evenly; places evenly
+    across ±0.9 (equal-power pan), taken from the edges inward in turn;
+    phases 0.618 apart; rates ± 11 % (fixed per voice; 1 when synced);
+    −0.45 dB per doubling of N;
+  - vibrato: one voice on both sides, no dry, read at the swing + 1 ms.
+  Each side's voices are scaled by one over the root of the sum of their
+  squared gains (they are mostly unlike one another): the voices alone sit
+  within a dB of the input. A change of style or of `voices` dips the
+  voices over 8 ms, lays them out afresh at the bottom and brings them
+  back; the vibrato's mix glides over the same 8 ms.
+- **Depth.** `depth` is the peak pitch swing, so the delay swing follows
+  from it: r = 2^(depth/1200) − 1, A = r / (f · s), s = 2π for the sine and
+  2π·0.995 / asin(0.995) for the triangle, f the voice's rate. The triangle
+  is asin(0.995 sin 2πφ) / asin(0.995): the pitch holds sharp, then flat,
+  and turns over 1.6 % of a cycle (no click). Shimmer adds a sine at 6.1 Hz
+  (× the voice's factor) of the depth × `shimmer`; drift a raised-cosine
+  glide between random values, one per cycle at 0.37 f, of the depth ×
+  `drift`. All three together are held to 25 ms either way (scaled down
+  together), and a voice's delay to the swing + 1 ms at least: past those
+  `detune` and `sweep` read what is heard. The swings and delays glide
+  (120 ms) to targets worked out every 16 frames; a shape change
+  crossfades the two over 10 ms.
+- **Sync.** A note value's cycle at the song's tempo and bar; while the
+  song plays, each voice's phase is drawn toward the song's place in the
+  cycle (time constant 1.5 s; at once before the first block), so a
+  locate never jumps the delay. Stopped, it runs free at that rate.
+- **Bloom.** Onsets are a fast envelope (0.5 ms up, 30 ms down) above
+  twice a slow one (30 ms, 300 ms) and −50 dBFS, re-armed below 1.3 times.
+  At an onset the sway's speed falls to 0 in 4 ms, holds 20 ms and returns
+  over `bloom` (raised cosine): the delay stays where it was, so the pitch
+  is exact while held and the swing grows back with the speed. Every
+  motion (sway, shimmer, drift) slows with it. Off while synced.
+- **Bucket brigade.** 512 × 0.25^age stages, clocked at stages / 2d for
+  each voice's delay d: a 12 dB/oct low-pass at 0.4 × the clock (at most
+  19 kHz) per voice, redesigned every 16 frames, so a longer delay is
+  darker and the band breathes with the sweep. Into the line the curve
+  (tanh(gx + 0.25) − tanh 0.25) / (1 − tanh² 0.25) / g, g = 0.35 + 1.15 ×
+  age; on each voice white noise (seeded per voice and side) at
+  −66 + 28 × age dB times the line's input envelope (2 ms up, 60 ms down),
+  the compander's hiss, silent in silence; a 4 Hz DC blocker on the
+  voices. The medium crossfades over 30 ms.
+- **Loop and tone.** What is fed back is the mean of each side's voices,
+  high-passed at 20 Hz and guarded (untouched to −6 dBFS, easing toward
+  full scale), × `feedback`; the voices are then scaled by
+  √(1 − 0.6 fb²) so the level holds as the feedback rises. `high_cut` is a
+  12 dB/oct low-pass on the voices; it and `low_keep` fade in and out over
+  10 ms at their ends of the range.
+- **Low keep and mix.** A Linkwitz–Riley crossover (two Butterworths each
+  way) at `low_keep`: the lows pass dry, the highs feed the lines and the
+  dry by the mix, so low + high × cos(πm/2) + voices × sin(πm/2) — at mix 0
+  the crossover's allpass sum, at any mix the lows exactly as they came
+  in. The mix is equal-power: the voices and the dry are unlike enough
+  that 50 % of each is as loud as either. Width is the voices' mid and
+  side (100 % exactly nothing); `output` last.
+- **Tail.** `setTail`: the longest delay (64 ms) times the passes the
+  feedback needs to fall 90 dB, plus one.
+
+Measured (release sandbox's player, 48 kHz):
+
+| check | result |
+|---|---|
+| a 1 kHz sine, mix 0; output −6; one voice held still (vibrato, depth 0) | 0.00, −6.00, 0.00 dB |
+| a 440 Hz tone, the voices alone, 8 ct triangle at 0.6 Hz | each voice −8.2..+8.3 ct, held at ±7.9 between turns |
+| a 440 Hz tone, 20 ct sine at 3 Hz | ±20.4 ct |
+| a 12 kHz tone, 20 ct; 16 kHz, 40 ct sine at 2 Hz | level steady within 0.005 dB; 0.01 dB |
+| pink noise (30 Hz–18 kHz), the voices alone against the input | classic −0.02, dimension 0.00, ensemble +0.49, multi of 4 +0.22, of 8 +0.95 dB; mix 50 −0.32 dB |
+| a centred source, the voices still, mix 50 | comb notches −21 dB classic, −13 dimension, −11 ensemble |
+| `mono_loss`, centred pink noise, defaults per style | classic −1.2, dimension −2.2, ensemble −0.7, multi −0.4 dB |
+| bucket brigade, 7 ms, pink noise | age 0: −1.5 dB at 12 kHz; age 30: −1.8 at 8 kHz, −5.4 at 12 kHz; age 100: −3.9 at 4 kHz, −13 at 8 kHz; age 30 at 2 ms: −1.1 at 16 kHz |
+| bucket brigade, a −12 dBFS 440 Hz tone, age 0 / 30 / 100 | second harmonic −39 / −34 / −27 dB, hiss 1.5–8 kHz −73 / −65 / −49 dB under the tone |
+| vibrato 30 ct at 5.2 Hz, bloom 450 ms, a held note | within 1.5 ct of the note from 25 to 150 ms after the onset, the full ±30 ct by 0.6 s |
+| `n4` at 120 BPM, playing, the voices alone | flat for the first and last quarter of each beat, sharp between, as the phase says, from the first beat to the fifth |
+| block sizes 1, 13, 64, 4096 against 256 | identical free; −150 dB synced (the host's beat position) |
+| feedback 50 to 80 %, −60 %, pink noise and notes | level within ±1.1 dB of none |
+| full-scale noise, feedback 80 %, eight voices at 2 ms | peaks +4 dBFS, bounded |
+| automation of every parameter | no step above the unautomated render's |
+| factory patches against the dry | within ±1.2 dB on notes; on pink noise within ±0.5 dB but Warped Record (−1.9 dB, its aged band) |
+
+Editor (1064 × 724): the strands, each voice's delay over the last 3 s,
+drawn over a dark edge so they read as woven, the delay set dashed behind
+them and the input's level along the foot (bloom flattens the strands at
+each note); dragged across for the rate (by octaves free, a note value per
+40 units synced), up and down for the depth, the wheel for the depth. The
+readouts: detune, sweep, rate (with the note value), mono loss, each
+voice's pitch now on a flat-to-sharp line, bloom's hold. The voices around
+the listener, each at its place and further back as it reads later (a
+crossed voice's turned-over share a ring on the other side). The styles as
+a list with a small picture of each, the voice count, delay and width; the
+sync grid, rate, depth, one voice's motion over two cycles with its shape,
+shimmer, drift and bloom; the medium, the response now (stereo and folded
+to mono, each point the power across its own band) with the low keep and
+high cut as handles to drag, age, high cut, low keep and feedback; mix and
+output. The header's withies are a basket weave, four stakes and a weaver
+for each voice (up to three), each bending as its voice sways.
+
+Factory patches: Classic Chorus (the defaults), Subtle Width, Deep
+Dimension, Bucket Brigade, Fast Warble, String Ensemble, Twelve-String,
+Thick Doubler, Choir of Eight, Bass Chorus, Vibrato, Singer's Vibrato,
+Warped Record, Flanged Swirl.
+
+## 12. Phaser — "Pollia" [`pollia`]
 
 Notches swept through the sound, from a slow four-stage swirl to a
 resonant sweep, a photocell vibe's throb, an envelope phaser and a barber
@@ -1319,7 +1466,7 @@ Factory patches: Swirl (the defaults), Classic Four, Resonant Sweep,
 Hollow Twelve, Photocell Throb, Lamp Vibrato, Endless Rise, Falling
 Spiral, Envelope Funk, Two-Bar Sweep, Stepped Notches, Bass Phase.
 
-## 12. Acceptance
+## 13. Acceptance
 
 A plugin is done when its tests, the CLAP validator, the RT sanitizer run,
 a REAPER load and automation check, and its skill page exist.

@@ -69,16 +69,18 @@ plugins ship as CLAP (and VST3, AU) files of their own that other hosts load.
    Done: Orrery is removed. (2026-10-21) Canopy is renamed Ghyll
    (`com.suppleaudio.ghyll`, `plugins/stock/ghyll`) before it shipped, so
    no session or patch needs migrating; a ghyll is a narrow ravine.
-   (2026-10-22) The twelfth is Pollia, the phaser
-   (`com.suppleaudio.pollia`), a stock plugin with no predecessor; the
-   marble berry Pollia condensata is blue by interference, as a phaser's
-   notches are.
+   (2026-10-22) The twelfth is Withy, the chorus (`com.suppleaudio.withy`),
+   and the thirteenth Pollia, the phaser (`com.suppleaudio.pollia`), stock
+   plugins with no predecessor; a withy is a willow rod woven into baskets,
+   and the marble berry Pollia condensata is blue by interference, as a
+   phaser's notches are.
 6. **Names and look.** A stock plugin is named after a plant or something
    else of the natural world, not after its effect type (Yarrow, the EQ;
    Sundew, the compressor; Treeline, the limiter; Gorse, the transient
    shaper; Hickory, the stereo utility; Sorrel, the gate; Teasel, the
    saturation; Bracken, the delay; Canopy, the reverb; Lichen, the
-   analyzer; Marram, the synthesizer; (2026-10-22) Pollia, the phaser).
+   analyzer; Marram, the synthesizer; (2026-10-22) Withy, the chorus;
+   Pollia, the phaser).
    Every stock script draws with the scripts' palette (`kScriptTheme` in
    `plugins/suite/glue`): warm and earthy, set apart from the host's
    graphite (walnut panels, a soil-dark floor under graphs, parchment

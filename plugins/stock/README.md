@@ -20,6 +20,7 @@ player, and every check the other stock plugins have.
 | `ghyll` | Ghyll, the reverb | `com.suppleaudio.ghyll` |
 | `lichen` | Lichen, the analyzer | `com.suppleaudio.lichen` |
 | `marram` | Marram, the synthesizer (in progress: `docs/specs/marram.md`) | `com.suppleaudio.marram` |
+| `withy` | Withy, the chorus | `com.suppleaudio.withy` |
 | `pollia` | Pollia, the phaser | `com.suppleaudio.pollia` |
 
 ## Files

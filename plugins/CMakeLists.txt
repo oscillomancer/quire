@@ -213,6 +213,7 @@ if(SUPPLE_BUILD_PLUGINS)
   supple_add_stock_script(ghyll Ghyll com.suppleaudio.ghyll)
   supple_add_stock_script(lichen Lichen com.suppleaudio.lichen)
   supple_add_stock_script(marram Marram com.suppleaudio.marram)
+  supple_add_stock_script(withy Withy com.suppleaudio.withy)
   supple_add_stock_script(pollia Pollia com.suppleaudio.pollia)
 
   # A plugin taken out of the suite leaves its staged files behind, and the
