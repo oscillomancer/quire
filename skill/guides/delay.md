@@ -32,7 +32,7 @@ changes only the keys it names.
 | `mix` | %, 0…100: the dry stays full to 50%, the echoes are full from 50% | 25 |
 | `output` | dB, −24…24 | 0 |
 | `echo_time` | ms, readonly: the time between echoes now, at the song's tempo | |
-| `decay` | ms, readonly: how long the echoes take to fall 60 dB (at 1 kHz); 600000 when held or growing | |
+| `decay` | ms, readonly: how long the longest active side takes to fall 60 dB (at 1 kHz); 600000 when held or growing | |
 | `duck_now` | dB, readonly: the ducking this moment | |
 | `echo_level`, `input_level`, `output_level` | dBFS, readonly: peaks, falling 20 dB/s | |
 
@@ -67,7 +67,13 @@ mean by "shorter" or "longer echoes":
 
 Decay grows with the time as well as the feedback: halving the time at the
 same feedback halves it. Cuts and age shorten it a little (they take level
-each pass).
+each pass). The readout follows the longest active loop: both sides in
+stereo, the alternating left/right loop in ping-pong, or the centred loop
+in mono (also on a mono bus). It accounts for groove, stereo offset and
+each half's 1 ms…5 s clamp. For example, at 1000 ms, feedback 75%, cuts
+off and age 0, decay is about 24.0 s; stereo offset +50% raises the right
+side to 36.0 s, which is then the readout. In ping-pong the same offset
+lengthens only the bounce back, giving about 30.0 s; mono ignores offset.
 
 ## Recipes
 
@@ -130,9 +136,12 @@ echoes leave through a ceiling that eases peaks above −2 dBFS toward 0 dBFS,
 so a runaway peaks at 0 dBFS before `mix` and `output`. With `mix` 50% or more the dry and the
 echoes sum: watch `output_level`. Diffusion needs a time of 24 ms or more.
 The pitch shift is a two-head shifter: a sustained tone's echoes carry a
-slight 17 Hz roughness. The tail Bracken reports follows the time, feedback
-and tempo, so renders end when the echoes have died; held or growing loops
-never end. Latency is zero.
+slight 17 Hz roughness. The tail Bracken reports follows the longest active
+loop's decay to 80 dB down across 60 Hz, 250 Hz, 1 kHz and 4 kHz, with
+room for the longest half, reversed slices and diffusion. Like the decay
+readout, it includes groove, offset, routing and clamping, and follows
+tempo changes. Reverse extends the tail for its slices; it does not alter
+the forward loop's decay. Held or growing loops never end. Latency is zero.
 
 See [mixing](mixing.md) and
 [stock spec §6](../../docs/specs/stock-effects.md#6-delay--bracken-bracken).

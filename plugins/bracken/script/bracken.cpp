@@ -993,34 +993,58 @@ struct Bracken : Effect {
         return g;
     }
 
-    // How long the echoes take to fall `db` below the first, at hz.
-    double fallSeconds(double hz, double seconds, double db, double r) const {
-        const double g = feedback * passGain(hz, seconds, r);
+    // Each loop alternates A and B: use their mean time and geometric mean
+    // loss per echo. Analog's clock (and thus loss) can differ in each half.
+    double fallSeconds(double hz, double a, double b, double db, double r) const {
+        const double g = feedback * sqrt(passGain(hz, a, r) * passGain(hz, b, r));
         if (g >= 0.99999 || freeze.on()) return -1.0;
         if (g <= 1e-9) return 0.0;
-        return db / (-20.0 * log10(g)) * seconds;
+        return db / (-20.0 * log10(g)) * (0.5 * (a + b));
+    }
+
+    // The same clamp order as the audio targets: first groove, then offset.
+    // Mono has one centred loop; ping-pong offsets only its second half.
+    double loopTime(int h, int route) const {
+        const double g = groove.value(), right = 1.0 + offset;
+        const double t = baseSeconds * (imod(h, 2) == 0 ? 1.0 + g : 1.0 - g);
+        const double samples = clamp(t, kShortest, kLongest) * rate;
+        const bool shifted = (route == 0 && h >= 2) || (route == 1 && h == 1);
+        return (shifted ? clamp(samples * right, kShortest * rate, kLongest * rate) : samples) /
+               rate;
     }
 
     // The tail the host is told: the echoes to -80 dB at the slowest of a
     // few frequencies, the last slice reversed, and the diffusers' ring.
     void reportTail() {
-        const double s = baseSeconds;
-        tailAt = s;
-        decaySeconds = fallSeconds(1000.0, s, 60.0, rate);
+        tailAt = baseSeconds;
+        const int route = channels() < 2 ? 2 : routing.index();
+        const int loops = route == 0 ? 2 : 1;
+        decaySeconds = 0.0;
         double longest = 0.0;
+        double longestHalf = 0.0;
         bool forever = false;
-        for (int k = 0; k < 4; ++k) {
-            const double hz = k == 0 ? 60.0 : (k == 1 ? 250.0 : (k == 2 ? 1000.0 : 4000.0));
-            const double t = fallSeconds(hz, s, 80.0, rate);
-            if (t < 0.0) forever = true;
-            longest = max(longest, t);
+        for (int c = 0; c < loops; ++c) {
+            const double a = loopTime(2 * c, route), b = loopTime(2 * c + 1, route);
+            longestHalf = max(longestHalf, max(a, b));
+            const double d = fallSeconds(1000.0, a, b, 60.0, rate);
+            if (d < 0.0 || decaySeconds < 0.0)
+                decaySeconds = -1.0;
+            else
+                decaySeconds = max(decaySeconds, d);
+            for (int k = 0; k < 4; ++k) {
+                const double hz = k == 0 ? 60.0 : (k == 1 ? 250.0 : (k == 2 ? 1000.0 : 4000.0));
+                const double t = fallSeconds(hz, a, b, 80.0, rate);
+                if (t < 0.0) forever = true;
+                longest = max(longest, t);
+            }
         }
         if (forever) {
             setTail(-1);
             return;
         }
-        const double extra =
-            1.5 * s + (reverse.on() ? min(1.5 * s, kSliceLongest) : 0.0) + 0.5 * diffusion + 0.1;
+        const double extra = 1.5 * longestHalf +
+                             (reverse.on() ? min(1.5 * longestHalf, kSliceLongest) : 0.0) +
+                             0.5 * diffusion + 0.1;
         setTail(min(roundToInt((longest + extra) * rate), 2000000000));
     }
 
