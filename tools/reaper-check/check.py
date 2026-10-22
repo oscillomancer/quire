@@ -53,6 +53,7 @@ CASES = {
     "com.suppleaudio.teasel": Case("Teasel", False, "Output", .5, .25, "gain"),
     "com.suppleaudio.bracken": Case("Bracken", False, "Output", .5, .25, "gain"),
     "com.suppleaudio.ghyll": Case("Ghyll", False, "Output", .5, .25, "gain"),
+    "com.suppleaudio.pollia": Case("Pollia", False, "Output", .5, .25, "gain"),
     "com.suppleaudio.lichen": Case("Lichen", False, "Target", 0, 1, "transparent", True),
     "com.suppleaudio.marram": Case("Marram", True, "Output",
                                  normalized(0, -36, 12), normalized(-12, -36, 12), "gain"),

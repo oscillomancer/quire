@@ -125,6 +125,7 @@ include startup ramps.
 | `teasel` | Teasel | Output | 0 / −12 dB | −12 ±1 dB |
 | `bracken` | Bracken | Output | 0 / −12 dB | −12 ±1 dB |
 | `ghyll` | Ghyll | Output | 0 / −12 dB | −12 ±1 dB |
+| `pollia` | Pollia | Output | 0 / −12 dB | −12 ±1 dB |
 | `lichen` | Lichen | Target | −30 / −5 LUFS | envelope reload + unchanged audio |
 | `marram` | Marram | Output | 0 / −12 dB | −12 ±1 dB |
 

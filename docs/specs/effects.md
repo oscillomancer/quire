@@ -22,6 +22,7 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 | `ghyll` (`plugins/stock/ghyll`) | Ghyll | `com.suppleaudio.ghyll` | `DIow` (the player's for the id) | `Ghyl` | audio-effect, reverb |
 | `lichen` (`plugins/stock/lichen`) | Lichen | `com.suppleaudio.lichen` | `cwHJ` (the player's for the id) | `Lchn` | audio-effect, analyzer |
 | `marram` (`plugins/stock/marram`) | Marram | `com.suppleaudio.marram` | `XZXx` (the player's for the id) | `Mrrm` | instrument, synthesizer |
+| `pollia` (`plugins/stock/pollia`) | Pollia | `com.suppleaudio.pollia` | `EGJQ` (the player's for the id) | `Poll` | audio-effect, phaser |
 
 Marram is an instrument; its spec, implementation notes included, is
 `docs/specs/marram.md`.
@@ -610,6 +611,56 @@ maintainers:
   concrete cube. Measurements are in `stock-effects.md` §7. Release build,
   one core, stereo 48 kHz, noise: 3.3 % (the same in a booth or a
   cathedral; 2.6 % with `mono`).
+
+## 13. Phaser — Pollia [`pollia`] (`stock-effects.md` §11)
+
+A DSP script (ADR-0047), `plugins/stock/pollia/script/pollia.cpp`. A new
+stock plugin with no predecessor. Notes for maintainers:
+
+- **Trapezoidal stages.** Each all-pass is 2·lp − x of a one-pole
+  integrator (g = tan(πf/fs)), which keeps its state meaningful while the
+  corner moves, so a sweep at 20 Hz or a `steps` jump does not zipper or
+  ring. Corners are computed every 8 frames (a `tan` per stage) and each G
+  steps linearly between, on a frame counter that only `prepare()` resets,
+  so the ticks fall on the same frames at any block size. Stages that
+  start (a larger count) are set at once, off the tick; the lamp and the
+  stages' glides move on only at ticks.
+- **The barber pole is a turn, not a crossfade.** The usual barber pole
+  crossfades several sweeping chains, which thins the notches mid-fade.
+  Pollia keeps the chain still and turns the wet's phase against the dry's
+  through a 90-degree pair, which slides every notch continuously at full
+  depth. The pair's corners (`pairCorner`) are a minimax design in the
+  warped domain u = tan(πf/fs), scaled to the geometric centre of 10 Hz
+  and 20 kHz (or 0.45 fs) at the running rate, so one table serves every
+  sample rate; seven sections a path hold 90° ± 0.34°, a −50 dB notch. The
+  dry passes the pair's in-phase path too: only the turn may differ
+  between the two. The feedback loop stays around the chain, before the
+  turn, so `feedback` sounds the same in every motion.
+- **Photocell.** The lamp and cell run at the corner ticks: brightness is
+  linear in the motion and the conductance's octaves are its log, which
+  is what makes the sweep lopsided; the darkening time grows as the cell
+  darkens. In rise and fall the motion's depth fades to 0 and the lamp
+  rests at the brightness of the centre (2^−range/2), so the stages sit at
+  the centre in either response.
+- **Feedback's level**: 80 % of the dB the loop adds to white noise
+  ((P₀/P)^0.4 in amplitude) is taken back, computed per frame from the smoothed `feedback` and
+  `mix`; the editor's response uses the same formula.
+- **The editor's history** is rows of 1/24 s (96: 4 s) the audio code
+  writes into shared arrays (each side's centre offset, the turn, the barber share,
+  the envelope); the editor finds each row's notches once (200 log-spaced
+  points, the response computed from the same formulas, minima below
+  −8 dB refined by a parabola) and again, 24 rows a paint, newest first,
+  when a setting that shapes the response moves.
+- **Tests.** The suite every stock plugin has, and
+  `plugin.pollia.response`: dry 0.00 dB, −6.00 with output −6; two stages
+  at 1 kHz cancel a 1 kHz sine (−188 dB), leave −16.08 dB with feedback 50%
+  (the loop's analytic response) and −6.02 with keep below at 1 kHz; the
+  wet alone 0.00 dB held still, and the sine's level kept (−12.03 dBFS)
+  while the phase turns; `centre_now` 1000 Hz with range 0. Measurements
+  are in `stock-effects.md` §11. In the player (JIT), stereo 48 kHz: 1.2 %
+  at 4 stages, 1.3 % at the defaults, 3.1 % at 24 stages with spread and
+  feedback, 3.6 % with the barber pole, photocell, envelope and keep below
+  on top.
 
 ## 6. Engine and benchmark use
 

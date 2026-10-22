@@ -1192,7 +1192,134 @@ Factory patches: Transparent Master (+3 dB, −1 dBTP), Streaming Loud (+6,
 −2, 200 ms, target −23), Acoustic Gentle (+2, −1, 300 ms, target −16), Bus
 Peak Catcher (0, −3, 50 ms).
 
-## 11. Acceptance
+## 11. Phaser — "Pollia" [`pollia`]
+
+Notches swept through the sound, from a slow four-stage swirl to a
+resonant sweep, a photocell vibe's throb, an envelope phaser and a barber
+pole whose notches rise or fall forever, written as a DSP script
+(ADR-0047: `plugins/stock/pollia/script/pollia.cpp`). Main stereo or mono
+in and out; no latency.
+
+| key | type | range | curve | default |
+|---|---|---|---|---|
+| `stages` | integer | 1..24 all-pass stages; every two make a notch | | 6 |
+| `centre` | Hz | 30..10000: the stages at the middle of the sweep, smoothed 30 ms | log | 700 |
+| `spread` | oct | 0..6: the stages staggered over this span, smoothed 60 ms | linear | 0 |
+| `feedback` | % | −95..95, smoothed 20 ms | linear | 0 |
+| `motion` | enum | `sweep`, `rise`, `fall` | | `sweep` |
+| `range` | oct | 0..8: the sweep's reach, top to bottom (sweep only) | linear | 3 |
+| `sync` | enum | `free`, `bars8`, `bars4`, `bars2`, `bar1`, `n2`, `n4`, `n8`, `n16`, `n2d`, `n4d`, `n8d`, `n2t`, `n4t`, `n8t` | | `free` |
+| `rate` | Hz | 0.01..20: with `sync` free, smoothed 50 ms | log | 0.3 |
+| `shape` | enum | `sine`, `triangle`, `ramp_up`, `ramp_down`, `steps`, `drift` (sweep only) | | `sine` |
+| `phase` | degrees | 0..360: the motion moved along its cycle, smoothed 50 ms | linear | 0 |
+| `stereo` | degrees | 0..180: the right side's motion ahead, smoothed 50 ms | linear | 0 |
+| `response` | enum | `direct`, `photocell` | | `direct` |
+| `envelope` | oct | −4..4: the stages moved by the playing at its loudest, smoothed 30 ms | linear | 0 |
+| `attack` | ms | 1..500 | log | 10 |
+| `release` | ms | 10..3000 | log | 200 |
+| `keep_below` | Hz | 20..1000: below passes untouched; 20 is off, smoothed 30 ms | log | 20 |
+| `mix` | % | 0..100: 50 the deepest notches, 100 the wet alone, smoothed 20 ms | linear | 50 |
+| `output` | dB | −24..24, smoothed 20 ms | linear | 0 |
+| `centre_now` | Hz | readonly: the left side's stages this moment | | |
+| `envelope_now` | % | readonly: the envelope, 100 at the recent peak | | |
+| `input_level`, `output_level` | dBFS | readonly: peaks, falling 20 dB/s | | |
+
+- **Stages.** First-order all-passes, trapezoidal (topology-preserving:
+  ap = 2·lp − x of a one-pole with g = tan(πf/fs)), so a corner can move
+  every frame without zipper. Stage k of n sits at centre × 2^(offset +
+  spread × (k/(n − 1) − 0.5)), clamped to 5 Hz..min(22 kHz, 0.47 fs);
+  each place glides over 30 ms when the count or spread changes. The
+  corners' targets are set every 8 frames and each corner's G = g/(1 + g)
+  steps linearly to its target over those frames. A change of `stages`
+  runs the longer chain for 20 ms and crossfades its taps at the old and
+  new counts; stages that start take their corners at once, and stages
+  that stop are cleared.
+- **The loop.** u = x + `feedback` × guard(c), c the chain's last output
+  (a frame late); guard is untouched to 0.6 and eases to 1.0 (tanh).
+  out = x(1 − m) + c·m. Feedback adds wet power 1/(1 − fb²) on noise; the
+  output (not the kept lows) is scaled by (P₀/P)^0.4, P = (1 − m)² +
+  m²/(1 − fb²), P₀ the same at fb 0, so feedback leaves white noise's
+  level within 0.2 dB and the peaks still ring.
+- **Motion.** One cycle position per frame: from the song position when
+  synced and playing (quarter notes / the note's beats, so a sweep lands
+  the same way on every play), else running at `rate` (synced and
+  stopped: at the note's rate at the tempo, 120 BPM without one). `phase`
+  is added; the right side adds `stereo`. The sweep's position p =
+  0.5 + 0.5 × shape(cycle): `ramp_up`/`ramp_down` return over the last 4%
+  of a cycle as a cosine; `steps` holds a hashed value per cycle,
+  gliding to it over the first 6%; `drift` glides between them over the
+  whole cycle (raised cosine).
+  - direct: the centre's offset = `range` × (p − 0.5) + e, e the
+    envelope's octaves.
+  - photocell: a lamp's light follows (g_min + (1 − g_min)p) × 2^e,
+    g_min = 2^−range, through a 12 ms lag; the cell's conductance follows
+    the light in 5 ms when brightening and 30 + 170 ms × (1 − conductance)
+    when darkening (darker, slower); the offset = log2(conductance) +
+    range/2. Linear light through a logarithmic law: the stages dwell
+    high and pass quickly through the low end, and the cell's slow
+    darkening leans the sweep.
+  - `rise`, `fall` (a barber pole): the stages stay at the centre (plus
+    the envelope; the sweep fades out over 30 ms). The chain's output and
+    the dry pass a 90-degree pair, two chains of seven first-order
+    all-passes whose phases differ by 90° ± 0.34° over four decades of
+    the warped frequency tan(πf/fs) (10 Hz..20 kHz at 44.1 kHz, wider at
+    higher rates; designed for Pollia by a minimax fit); the wet becomes
+    I cos θ − Q sin θ against the dry's I, θ turning one cycle per cycle
+    of the motion (down for rise, up for fall), so every notch slides to
+    the next's place at full depth: the wet is frequency-shifted by
+    `rate`, and the dry's phase (not its level) follows the pair's. The
+    loop stays around the chain alone, so feedback acts as in a sweep.
+    Changing between sweep and rise or fall crossfades 30 ms.
+- **Envelope.** The louder channel's level through a follower (`attack`,
+  `release`, one-pole), in dB, against a reference that takes each new
+  peak at once and falls 4 dB/s (floored at −60 dBFS): e = clamp(1 +
+  (level − reference)/24, 0, 1), faded out between −60 and −66 dBFS, ×
+  `envelope` octaves. No threshold: a note as loud as the recent peak
+  moves the full amount, one 24 dB quieter none.
+- **Keep below.** A 12 dB/oct low-pass (Q 0.5) at `keep_below` splits
+  the input; its part passes untouched and the rest is phased (x − low, so
+  the two sum back exactly). Off at 20 Hz; the filter always runs.
+- **Tail.** 60 dB of the loop at its slowest stage: n/(2π f_low) per pass
+  × 6.9/−ln|feedback| passes (one without feedback), plus 50 ms, at most
+  10 s; f_low from the centre, half the range and spread and the whole
+  envelope below it.
+
+Measured (dev player and the built plugin, 48 kHz):
+
+| check | result |
+|---|---|
+| 4 stages at 1 kHz, range 0, white noise | notches at 410 and 2391 Hz (theory 414.6 and 2393 Hz with the bilinear warp) |
+| 2 stages at 1 kHz, a 1 kHz sine | −188 dB; feedback 50%: −16.08 dB, the loop's analytic value |
+| rise, 8 stages, spread 4, 0.5 Hz, white noise, 44.1/48/96 kHz | the deepest notches −35 to −55 dB throughout, each reaching the next's place in 2 s |
+| rise, mix 100, a −12 dBFS sine | the level kept to 0.03 dB as the phase turns |
+| feedback −95..95, 6 stages, white noise | the level within 0.2 dB of feedback 0 |
+| white noise, 4 stages at 800 Hz, range 4, a 1 Hz sine sweep: direct and photocell | direct: the lowest notch 93..1335 Hz, symmetric; photocell: rises in 0.4 s, falls in 0.6 s, the lamp's lag keeping it off the bottom at this rate |
+| plucks at 0, −6 and −12 dB half a second apart, envelope +3 oct, range 0 | the stages 3.0, 2.6 and 2.2 octaves up at each (the reference falls 2 dB in each gap), falling between |
+| automation of stages, motion, response, keep below, centre, spread, shape, sync, phase | no step above the unautomated render's (feedback's rise is the louder loop's own) |
+| block sizes 1, 7, 64, 4096 (barber pole with photocell, envelope, keep below; steps synced) | bit-identical |
+
+Editor (1040 × 720): the response now (the left side over the right when
+`stereo` is set) with a bead at each notch, the sweep's reach shaded and
+each stage's corner marked; under it, where the notches went over the
+last 1 to 4 s (about a cycle and a half of the motion) as trails across
+time (waves for a sweep, diagonals for a barber pole, jumps for an
+envelope; the right side's in heather; feedback's peaks in clay).
+Dragged across, the centre (following the pointer); up and down, the
+range; the wheel, the feedback. The motion panel: sweep, rise or fall, the
+wave with the motion's place on it (with photocell, the path the cell
+takes it on, simulated as the audio runs it; a turning barber pole in
+rise and fall), the rate and a note grid, the shapes, phase and stereo, and direct
+or photocell with the lamp lit as the cell sees it. Stages (the counts,
+where the stages lie, centre, range, spread, feedback), the envelope (its
+last 4 s, amount, attack, release) and output (keep below, mix, output,
+the notches now). The header's mark is a cluster of marble berries whose
+sheen turns with the motion and brightens with the sound.
+
+Factory patches: Swirl (the defaults), Classic Four, Resonant Sweep,
+Hollow Twelve, Photocell Throb, Lamp Vibrato, Endless Rise, Falling
+Spiral, Envelope Funk, Two-Bar Sweep, Stepped Notches, Bass Phase.
+
+## 12. Acceptance
 
 A plugin is done when its tests, the CLAP validator, the RT sanitizer run,
 a REAPER load and automation check, and its skill page exist.

@@ -10,8 +10,9 @@ guide is about *how to get to a sound*.
 
 Effects are not part of it. Put the stock effects after it in the chain:
 Bracken for echoes (`guides/delay.md`), Ghyll for space
-(`guides/reverb.md`), Teasel for heavier saturation (`guides/drive.md`),
-Yarrow for EQ (`guides/eq.md`).
+(`guides/reverb.md`), Pollia for phasing (`guides/phaser.md`), Teasel
+for heavier saturation (`guides/drive.md`), Yarrow for EQ
+(`guides/eq.md`).
 
 ## The division of labour
 

@@ -194,7 +194,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
   the LLM evaluation harness (`tools/eval-harness`).
 - **Stock plugins** (ADR-0011, ADR-0047): Marram, Yarrow, Sundew, Treeline,
-  Gorse, Hickory, Sorrel, Teasel, Bracken, Ghyll and Lichen, each passing clap-validator, a
+  Gorse, Hickory, Sorrel, Teasel, Bracken, Ghyll, Pollia and Lichen, each passing clap-validator, a
   reset determinism check, an unload test and the headless REAPER check;
   JSON patches and the semantic-parameters extension.
   Yarrow, the EQ, is the first written as a DSP script
@@ -327,6 +327,24 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   response with a node to drag, the envelopes and LFOs with handles and
   the newest note's place, the drive curve, the voices playing and the
   route list. It passes the stock checks and the REAPER check.
+  Pollia, the phaser (`plugins/stock/pollia`), is the twelfth and has no
+  predecessor: 1 to 24 trapezoidal all-pass stages, stacked or spread over
+  up to six octaves, with feedback either way (its added level mostly
+  taken back); a sweep by an LFO free or in time (six shapes, a phase, a
+  stereo offset) or by the playing's envelope, measured against its own
+  recent peak so it needs no threshold, either direct or through a
+  photocell (a lamp the cell follows, quick up and slow down); and rise
+  and fall, a barber pole that turns the wet's phase through a 90-degree
+  pair so the notches climb or sink forever at full depth. Keep below
+  leaves the lows whole; mix runs from dry through the deepest notches to
+  a vibrato. It reads out the stages' centre and the envelope now. Its
+  editor draws the response with its notches, where the notches went
+  over about a cycle and a half of the motion, and the path a photocell
+  takes the sweep on; dragging the response moves the centre (across)
+  and the range (up and down). Twelve factory patches. Known limit: its
+  block-size invariance is tested with parameters held still; under
+  automation it rests on per-frame reads, as no tool automates a plugin
+  at several block sizes.
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The
