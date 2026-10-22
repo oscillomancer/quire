@@ -4,6 +4,16 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.31.1
+
+What a product must do: nothing.
+
+- **The editor probes wait for a drawn frame** (`tools/x11_probe.cpp`,
+  `tools/win32_probe.cpp`). Their pixel checks looked a fixed time after a
+  resize or a parameter change, so a heavy editor drawn in software on a
+  loaded CI runner could fail them. They now look again until the frame
+  is there, for up to about five seconds.
+
 ## 1.31.0
 
 What a product must do: nothing.

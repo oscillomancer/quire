@@ -139,6 +139,16 @@ bool capture(Display* d, Window parent, const char* path) {
     XDestroyImage(image);
     return ok;
 }
+// A first frame at a new size can be slow to draw under software rendering
+// on a loaded machine: wait for it, up to a generous deadline, rather than
+// decide by a fixed time.
+bool captureDrawn(Display* d, Host& host, Window parent, const char* path) {
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        if (capture(d, parent, path)) return true;
+        pump(d, host, 5);
+    }
+    return false;
+}
 }
 
 int main(int argc, char** argv) {
@@ -240,7 +250,7 @@ int main(int argc, char** argv) {
         pump(display, host, 15);
         uint32_t actualW = 0, actualH = 0;
         check(host.gui->get_size(host.plugin, &actualW, &actualH) && actualW == w && actualH == h, "resize dimensions match");
-        if (cycle == 0) check(capture(display, parent, output), "embedded editor draws nonblank pixels");
+        if (cycle == 0) check(captureDrawn(display, host, parent, output), "embedded editor draws nonblank pixels");
         if (cycle == 1) { check(host.gui->hide(host.plugin), "hide editor"); check(host.gui->show(host.plugin), "show after hide"); pump(display, host, 5); }
         if (cycle == 2) {
             // A host on a 200% display: sizes are physical pixels, so the
