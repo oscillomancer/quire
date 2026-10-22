@@ -539,6 +539,7 @@ struct Room {
 struct Ring {
     Buffer<float> data;
     int size = 4, at = 0;
+    int readAt = 2;  // floor of the last read: the slow wander usually stays in this interval
 
     void prepare(int n) {
         data.resize(n);
@@ -548,6 +549,7 @@ struct Ring {
     void clear() {
         data.fill(0.0f);
         at = 0;
+        readAt = 2;
     }
     void push(double x) {
         data[at] = static_cast<float>(x);
@@ -559,9 +561,10 @@ struct Ring {
         if (i < 0) i += size;
         return data[i];
     }
-    double read(double d) const {
+    double read(double d) {
         const double c = clamp(d, 2.0, size - 3.0);
-        const int k = floorToInt(c);
+        if (!(c >= readAt && c < readAt + 1.0)) readAt = floorToInt(c);
+        const int k = readAt;
         const double f = c - k;
         const double ym = tap(k - 1), y0 = tap(k), y1 = tap(k + 1), y2 = tap(k + 2);
         const double c1 = 0.5 * (y1 - ym);
@@ -686,9 +689,9 @@ void hadamard(Array<double, 16>& v) {
 
 // The sign each line's output has in the left and right sums: two rows of a
 // Hadamard matrix, so the two hear the same lines uncorrelated.
-double signLeft(int i) { return imod(i, 2) == 0 ? 1.0 : -1.0; }
-double signRight(int i) { return imod(idiv(i, 2), 2) == 0 ? 1.0 : -1.0; }
-double signIn(int i) { return imod(idiv(i, 4), 2) == 0 ? 1.0 : -1.0; }
+double signLeft(int i) { return i % 2 == 0 ? 1.0 : -1.0; }
+double signRight(int i) { return (i / 2) % 2 == 0 ? 1.0 : -1.0; }
+double signIn(int i) { return (i / 4) % 2 == 0 ? 1.0 : -1.0; }
 
 // The lines' lengths against the mean free path's time, spread over a
 // little more than an octave and a half; in an order that alternates long and
@@ -705,6 +708,40 @@ bool isPrime(int n) {
         if (imod(n, f) == 0) return false;
     return true;
 }
+
+// One reflection's current delay and paired clear/blur band weights, with
+// their targets beside them. A moving read advances only this path's glide.
+struct ReflectedPath {
+    double delay = 0.0, targetDelay = 0.0;
+    int whole = 0;
+    double clearLow = 0.0, blurLow = 0.0, clearMid = 0.0, blurMid = 0.0, clearHigh = 0.0,
+           blurHigh = 0.0;
+    double clearLowTo = 0.0, blurLowTo = 0.0, clearMidTo = 0.0, blurMidTo = 0.0, clearHighTo = 0.0,
+           blurHighTo = 0.0;
+    void move(double k) {
+        delay += k * (targetDelay - delay);
+        clearLow += k * (clearLowTo - clearLow);
+        blurLow += k * (blurLowTo - blurLow);
+        clearMid += k * (clearMidTo - clearMid);
+        blurMid += k * (blurMidTo - blurMid);
+        clearHigh += k * (clearHighTo - clearHigh);
+        blurHigh += k * (blurHighTo - blurHigh);
+    }
+    void snap(int size) {
+        delay = targetDelay;
+        whole = clamp(roundToInt(targetDelay), 0, size - 1);
+        clearLow = clearLowTo;
+        blurLow = blurLowTo;
+        clearMid = clearMidTo;
+        blurMid = blurMidTo;
+        clearHigh = clearHighTo;
+        blurHigh = blurHighTo;
+    }
+};
+
+struct ReflectedMic {
+    Array<ReflectedPath, kImages> paths;
+};
 
 // --- the look --------------------------------------------------------------------------
 
@@ -1106,9 +1143,7 @@ struct Ghyll : Effect {
     double atCrossover = -1.0;
 
     // What the reflections are heading for, and where they are.
-    Array<double, 124> tapAt, tapTo;
-    Array<int, 124> tapWhole;  // settled, in whole samples
-    Array<double, 372> specAt, specTo, blurAt, blurTo;
+    Array<ReflectedMic, 2> reflected;
     int moving = 0;  // samples the reflections still glide
     double glide = 0.001, lineGlide = 0.001, lateAt = 0.0, lateTo = 0.0;
     double injectAt = 1.0, injectTo = 1.0;  // samples: where the tail's input is read
@@ -1231,17 +1266,29 @@ struct Ghyll : Effect {
         room.compute();
         // (Whole samples: a glide starts and ends on one, where the settled
         // reflections read.)
-        for (int t = 0; t < 124; ++t) {
-            const double d = clamp(roundToInt(room.delay[t] * rate), 0, bands.size - 1);
-            if (abs(d - tapTo[t]) > 1e-6) moving = roundToInt(0.4 * rate);
-            tapTo[t] = d;
-        }
-        for (int t = 0; t < 372; ++t) {
-            if (abs(room.spec[t] - specTo[t]) > 1e-9 || abs(room.blur[t] - blurTo[t]) > 1e-9)
-                moving = roundToInt(0.4 * rate);
-            specTo[t] = room.spec[t];
-            blurTo[t] = room.blur[t];
-        }
+        for (int m = 0; m < 2; ++m)
+            for (int i = 0; i < 62; ++i) {
+                ReflectedPath& path = reflected[m].paths[i];
+                const int t = 62 * m + i, q = 3 * t;
+                const double d = clamp(roundToInt(room.delay[t] * rate), 0, bands.size - 1);
+                if (abs(d - path.targetDelay) > 1e-6) moving = roundToInt(0.4 * rate);
+                path.targetDelay = d;
+                if (abs(room.spec[q] - path.clearLowTo) > 1e-9 ||
+                    abs(room.blur[q] - path.blurLowTo) > 1e-9)
+                    moving = roundToInt(0.4 * rate);
+                path.clearLowTo = room.spec[q];
+                path.blurLowTo = room.blur[q];
+                if (abs(room.spec[q + 1] - path.clearMidTo) > 1e-9 ||
+                    abs(room.blur[q + 1] - path.blurMidTo) > 1e-9)
+                    moving = roundToInt(0.4 * rate);
+                path.clearMidTo = room.spec[q + 1];
+                path.blurMidTo = room.blur[q + 1];
+                if (abs(room.spec[q + 2] - path.clearHighTo) > 1e-9 ||
+                    abs(room.blur[q + 2] - path.blurHighTo) > 1e-9)
+                    moving = roundToInt(0.4 * rate);
+                path.clearHighTo = room.spec[q + 2];
+                path.blurHighTo = room.blur[q + 2];
+            }
         // The modes.
         for (int n = 0; n < 48; ++n) {
             if (n >= room.modes) {
@@ -1380,25 +1427,12 @@ struct Ghyll : Effect {
 
     // The reflections where they were heading, in whole samples.
     void settle() {
-        for (int t = 0; t < 124; ++t) {
-            tapAt[t] = tapTo[t];
-            tapWhole[t] = clamp(roundToInt(tapTo[t]), 0, bands.size - 1);
-        }
-        for (int t = 0; t < 372; ++t) {
-            specAt[t] = specTo[t];
-            blurAt[t] = blurTo[t];
-        }
+        for (auto& receiver : reflected)
+            for (auto& path : receiver.paths) path.snap(bands.size);
     }
 
     void snap() {
-        for (int t = 0; t < 124; ++t) {
-            tapAt[t] = tapTo[t];
-            tapWhole[t] = clamp(roundToInt(tapTo[t]), 0, bands.size - 1);
-        }
-        for (int t = 0; t < 372; ++t) {
-            specAt[t] = specTo[t];
-            blurAt[t] = blurTo[t];
-        }
+        settle();
         moving = 0;
         for (int i = 0; i < kLines; ++i) {
             Line& l = lines[i];
@@ -1472,28 +1506,20 @@ struct Ghyll : Effect {
             const int mics = toMono && moving == 0 ? 1 : 2;
             monoW = toMono ? min(1.0, monoW + freezeStep) : max(0.0, monoW - freezeStep);
 
-            // The reflections, gliding while the room moves.
-            if (moving > 0) {
-                for (int t = 0; t < 124; ++t) tapAt[t] += glide * (tapTo[t] - tapAt[t]);
-                for (int t = 0; t < 372; ++t) {
-                    specAt[t] += glide * (specTo[t] - specAt[t]);
-                    blurAt[t] += glide * (blurTo[t] - blurAt[t]);
-                }
-            }
             Array<double, 2> clearSum, blurSum;
             if (moving == 0) {
                 // Settled: each reflection at its whole sample, undulled.
                 for (int m = 0; m < mics; ++m) {
                     double cs = 0.0, bs = 0.0;
+                    const ReflectedMic& receiver = reflected[m];
                     for (int k = 0; k < kImages; ++k) {
-                        const int t = m * 62 + k;
-                        int i0 = bands.at - tapWhole[t];
+                        const ReflectedPath& path = receiver.paths[k];
+                        int i0 = bands.at - path.whole;
                         if (i0 < 0) i0 += bands.size;
-                        const int q = 3 * t;
                         const double x0 = bands.data[3 * i0], x1 = bands.data[3 * i0 + 1];
                         const double x2 = bands.data[3 * i0 + 2];
-                        cs += specAt[q] * x0 + specAt[q + 1] * x1 + specAt[q + 2] * x2;
-                        bs += blurAt[q] * x0 + blurAt[q + 1] * x1 + blurAt[q + 2] * x2;
+                        cs += path.clearLow * x0 + path.clearMid * x1 + path.clearHigh * x2;
+                        bs += path.blurLow * x0 + path.blurMid * x1 + path.blurHigh * x2;
                     }
                     clearSum[m] = cs;
                     blurSum[m] = bs;
@@ -1501,23 +1527,24 @@ struct Ghyll : Effect {
             }
             for (int m = 0; m < mics && moving > 0; ++m) {
                 double cs = 0.0, bs = 0.0;
+                ReflectedMic& receiver = reflected[m];
                 for (int k = 0; k < kImages; ++k) {
-                    const int t = m * 62 + k;
-                    const double dd = clamp(tapAt[t], 0.0, bands.size - 2.0);
+                    ReflectedPath& path = receiver.paths[k];
+                    path.move(glide);
+                    const double dd = clamp(path.delay, 0.0, bands.size - 2.0);
                     const int n = floorToInt(dd);
                     const double f = dd - n;
                     int i0 = bands.at - n, i1 = bands.at - n - 1;
                     if (i0 < 0) i0 += bands.size;
                     if (i1 < 0) i1 += bands.size;
-                    const int q = 3 * t;
                     const double x0 =
                         bands.data[3 * i0] + f * (bands.data[3 * i1] - bands.data[3 * i0]);
                     const double x1 = bands.data[3 * i0 + 1] +
                                       f * (bands.data[3 * i1 + 1] - bands.data[3 * i0 + 1]);
                     const double x2 = bands.data[3 * i0 + 2] +
                                       f * (bands.data[3 * i1 + 2] - bands.data[3 * i0 + 2]);
-                    cs += specAt[q] * x0 + specAt[q + 1] * x1 + specAt[q + 2] * x2;
-                    bs += blurAt[q] * x0 + blurAt[q + 1] * x1 + blurAt[q + 2] * x2;
+                    cs += path.clearLow * x0 + path.clearMid * x1 + path.clearHigh * x2;
+                    bs += path.blurLow * x0 + path.blurMid * x1 + path.blurHigh * x2;
                 }
                 clearSum[m] = cs;
                 blurSum[m] = bs;
