@@ -72,7 +72,7 @@ struct TruePeak {
         lastPoint = 0.0;
     }
 
-    double push(double x, const Array<Array<double, 32>, 4>& h, double gate) {
+    double push(double x, const Array<Array<double, 4>, 32>& h, double gate) {
         at = at == 0 ? kTaps - 1 : at - 1;
         hist[at] = x;
         hist[at + kTaps] = x;
@@ -87,11 +87,17 @@ struct TruePeak {
         Array<double, 6> s;
         s[0] = lastPoint;
         s[1] = abs(hist[at + kHalf]);
-        for (int k = 1; k < kPhases; ++k) {
-            double y = 0.0;
-            for (int j = 0; j < kTaps; ++j) y += h[k][j] * hist[at + j];
-            s[k + 1] = abs(y);
+        // Read the history once for all phases, keeping each sum's tap order.
+        double y1 = 0.0, y2 = 0.0, y3 = 0.0;
+        for (int j = 0; j < kTaps; ++j) {
+            const double xj = hist[at + j];
+            y1 += h[j][1] * xj;
+            y2 += h[j][2] * xj;
+            y3 += h[j][3] * xj;
         }
+        s[2] = abs(y1);
+        s[3] = abs(y2);
+        s[4] = abs(y3);
         s[5] = abs(hist[at + kHalf - 1]);
         double top = 0.0;
         for (int k = 1; k <= 4; ++k)
@@ -466,7 +472,7 @@ struct Lichen : Effect {
 
     // --- audio ------------------------------------------------------------------------------
 
-    Array<Array<double, 32>, 4> fir;
+    Array<Array<double, 4>, 32> fir;  // tap, then phase: the three weights are adjacent
     Array<TruePeak, 2> detect;
     Array<KWeighting, 2> kw, playKw;
     Array<Stft, 2> stft;
@@ -566,10 +572,10 @@ struct Lichen : Effect {
                 const double s = u == 0.0 ? 1.0 : sin(pi * u) / (pi * u);
                 const double r = 1.0 - (u / kHalf) * (u / kHalf);
                 const double w = r > 0.0 ? besselI0(beta * sqrt(r)) / besselI0(beta) : 0.0;
-                fir[k][j] = s * w;
+                fir[j][k] = s * w;
                 sum += s * w;
             }
-            for (int j = 0; j < kTaps; ++j) fir[k][j] /= sum;
+            for (int j = 0; j < kTaps; ++j) fir[j][k] /= sum;
         }
         // The transform: about a third of a second (16384 at 44.1 and 48 kHz),
         // a new frame every quarter of it.
@@ -1124,6 +1130,9 @@ struct Lichen : Effect {
             framesAll += second.framesAll;
             centroidFrames += second.centroidFrames;
         }
+        // A peak that left the window must no longer suppress interpolation
+        // of the quieter peaks still in it. Accumulation keeps its reference.
+        peakReference = peakTrue;
         findKey();
         tone();
         share();
