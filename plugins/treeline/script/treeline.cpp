@@ -409,7 +409,7 @@ struct Treeline : Effect {
     Array<double, 30> blockOut, blockIn;
     int blockAt = 0, blocksFilled = 0, blockLength = 4800, blockCount = 0;
     double sumOut = 0.0, sumIn = 0.0;
-    Array<double, kBins> gatedEnergy, rangeEnergy;
+    Array<double, kBins> gatedEnergy;
     Array<int, kBins> gatedCount, rangeCount;
     double gatedTotal = 0.0, rangeTotal = 0.0;
     int gatedBlocks = 0, rangeBlocks = 0;
@@ -557,7 +557,6 @@ struct Treeline : Effect {
     // Everything accumulated: on a start of play, and when accumulating is switched.
     void restartTotals() {
         gatedEnergy.fill(0.0);
-        rangeEnergy.fill(0.0);
         gatedCount.fill(0);
         rangeCount.fill(0);
         gatedTotal = 0.0;
@@ -887,7 +886,6 @@ struct Treeline : Effect {
         }
         if (blocksFilled >= 30 && shortNow > -70.0) {
             const int bin = clamp(floorToInt((shortNow + 70.0) * 10.0), 0, kBins - 1);
-            rangeEnergy[bin] += s / 30.0;
             rangeCount[bin] += 1;
             rangeTotal += s / 30.0;
             rangeBlocks += 1;
