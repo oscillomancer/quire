@@ -134,11 +134,14 @@ double fall(double x, double c) { return 1.0 - rise(1.0 - x, c); }
 // The drive's curves (soft, tape, fold, hard), each with its resting point
 // taken off so a bias adds no offset.
 double tapeCurve(double v) { return v >= 0.0 ? fastTanh(v * 1.2) / 1.2 : fastTanh(v * 0.8) / 0.8; }
+double driveTransfer(int type, double u) {
+    if (type == 1) return fastTanh(u);
+    if (type == 2) return tapeCurve(u);
+    if (type == 3) return sin(0.5 * pi * u);
+    return clamp(u, -1.0, 1.0);
+}
 double driveCurve(int type, double u, double bias) {
-    if (type == 1) return fastTanh(u + bias) - fastTanh(bias);
-    if (type == 2) return tapeCurve(u + bias) - tapeCurve(bias);
-    if (type == 3) return sin(0.5 * pi * (u + bias)) - sin(0.5 * pi * bias);
-    return clamp(u + bias, -1.0, 1.0) - clamp(bias, -1.0, 1.0);
+    return driveTransfer(type, u + bias) - driveTransfer(type, bias);
 }
 
 // A value from -1 to 1 for each whole number n and seed, the same everywhere:
@@ -409,6 +412,8 @@ struct Voice {
     double driveGain = 1.0;
     double driveBias = 0.0;
     double driveMix = 1.0;
+    double driveZero = 0.0;
+    double driveScale = 1.0;
     double ampL = 0.0;
     double ampLStep = 0.0;
     double ampR = 0.0;
@@ -2158,19 +2163,30 @@ struct Marram : Instrument {
         return filterOne(s.filter[2 + c], filt[1], s.now[1], one + b) + d;
     }
 
-    double shape(double x, int type, double gain, double bias, double mixed) {
-        const double y = driveCurve(type, x * gain, bias) / sqrt(max(1.0, gain));
-        return x + (y - x) * mixed;
+    // The bias offset and gain compensation are fixed between control ticks.
+    void driveAt(Voice& s, int type) {
+        s.driveZero = driveTransfer(type, s.driveBias);
+        s.driveScale = sqrt(max(1.0, s.driveGain));
+    }
+
+    double shape(double x, int type, const Voice& s) {
+        const double y =
+            (driveTransfer(type, x * s.driveGain + s.driveBias) - s.driveZero) / s.driveScale;
+        return x + (y - x) * s.driveMix;
     }
 
     void play(int v, int frames) {
         Voice& s = voice[v];
         const int dtype = driveType.index();
+        // A type change may split a block inside a tick. Refresh for that
+        // type here as well as when control() reads new routed settings.
+        if (dtype != 0 && s.tickLeft != 0) driveAt(s, dtype);
         for (int i = 0; i < frames; ++i) {
             if (s.tickLeft == 0) {
                 control(v, i);
                 s.tickLeft = kTick;
                 if (s.done) return;
+                if (dtype != 0) driveAt(s, dtype);
             }
             --s.tickLeft;
             // Noise is made at the plugin's rate and held across the
@@ -2275,8 +2291,8 @@ struct Marram : Instrument {
                     n.delay += n.delayStep;
                 }
                 if (dtype != 0) {
-                    yL = shape(yL, dtype, s.driveGain, s.driveBias, s.driveMix);
-                    yR = s.narrow ? yL : shape(yR, dtype, s.driveGain, s.driveBias, s.driveMix);
+                    yL = shape(yL, dtype, s);
+                    yR = s.narrow ? yL : shape(yR, dtype, s);
                 }
                 s.ampL += s.ampLStep;
                 s.ampR += s.ampRStep;
