@@ -218,9 +218,11 @@ struct Heads {
         const double sweep = window * (ratio - 1.0);
         d0 = held0 + (0.5 - phase) * sweep + mod;
         d1 = held1 + (0.5 - p1) * sweep + mod;
-        const double s = sin(pi * phase);
-        w0 = s * s;
         one = d0 == d1;
+        if (!one) {
+            const double s = sin(pi * phase);
+            w0 = s * s;
+        }
     }
     double sample(const Ring& r, double less) const {
         if (one) return r.read(d0 - less);
