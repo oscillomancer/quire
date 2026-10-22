@@ -93,6 +93,12 @@ double aliasHz(double c) { return 20000.0 * pow(0.0125, clamp(c, 0.0, 1.0)); }
 // Transformer's core corner for a character: 40 Hz to 400 Hz.
 double coreHz(double c) { return 40.0 * pow(10.0, clamp(c, 0.0, 1.0)); }
 
+double transistor(double u, double p) {
+    return u >= 0.0 ? algebraic(u, p) : 0.92 * algebraic(u / 0.92, p);
+}
+
+double crush(double u, double levels) { return round(tanh(u) * levels) / levels; }
+
 // The curve without memory: the static ones as they are; tape, tube and
 // alias without theirs; transformer as its core at the corner frequency.
 double curve(int style, double u, double c) {
@@ -107,7 +113,7 @@ double curve(int style, double u, double c) {
             return core(u);
         case 4: {
             const double p = 2.0 + 10.0 * pow(clamp(c, 0.0, 1.0), 1.5);
-            return u >= 0.0 ? algebraic(u, p) : 0.92 * algebraic(u / 0.92, p);
+            return transistor(u, p);
         }
         case 5: {
             const double t = 1.0 + 2.0 * c;
@@ -133,7 +139,7 @@ double curve(int style, double u, double c) {
         }
         case 10: {
             const double levels = exp2(crushBits(c) - 1.0);
-            return round(tanh(u) * levels) / levels;
+            return crush(u, levels);
         }
         default:
             return tanh(u);
@@ -152,6 +158,9 @@ struct Shaper {
     double leak = 0.9999;  // transformer: the core's flux, and its error a sample back
     double flux = 0.0, err = 0.0;
     double phase = 1.0, held = 0.0;  // alias: the sample held
+    double atCore = -1.0, atBias = -1.0, atAlias = -1.0;
+    double beta = 1.0, coreBias = 0.0, holdStep = 1.0;
+    double atHardness = -1.0, atBits = -1.0, hardness = 2.0, levels = 1.0;
 
     void prepare(double r) {
         rate = r;
@@ -169,6 +178,11 @@ struct Shaper {
         err = 0.0;
         phase = 1.0;
         held = 0.0;
+        atCore = -1.0;
+        atBias = -1.0;
+        atAlias = -1.0;
+        atHardness = -1.0;
+        atBits = -1.0;
     }
 
     double process(int style, double x, double c, double b) {
@@ -196,21 +210,48 @@ struct Shaper {
             // bass saturates first; the output is the input less the
             // derivative of what saturation took from the flux. Bias is a
             // standing flux (direct current through the winding).
-            const double beta = twoPi * coreHz(c) / rate;
+            // These depend on the controls, not on the signal. A glide or
+            // motion still updates them at every distinct character/bias.
+            if (c != atCore) {
+                atCore = c;
+                beta = twoPi * coreHz(c) / rate;
+            }
+            if (b != atBias) {
+                atBias = b;
+                coreBias = core(b);
+            }
             flux = leak * flux + beta * x;
-            const double e = core(flux + b) - flux - core(b);
+            const double e = core(flux + b) - flux - coreBias;
             const double y = x + (e - leak * err) / beta;
             err = e;
             return y;
         }
         if (style == 11) {
             // Alias: held at a lower rate, with no filter before it.
-            phase += aliasHz(c) / rate;
+            if (c != atAlias) {
+                atAlias = c;
+                holdStep = aliasHz(c) / rate;
+            }
+            phase += holdStep;
             if (phase >= 1.0) {
                 phase -= floor(phase);
                 held = tanh(x + b);
             }
             return held;
+        }
+        if (style == 4) {
+            if (c != atHardness) {
+                atHardness = c;
+                hardness = 2.0 + 10.0 * pow(clamp(c, 0.0, 1.0), 1.5);
+            }
+            return transistor(x + b, hardness);
+        }
+        if (style == 10) {
+            if (c != atBits) {
+                atBits = c;
+                levels = exp2(crushBits(c) - 1.0);
+            }
+            return crush(x + b, levels);
         }
         return curve(style, x + b, c);
     }
