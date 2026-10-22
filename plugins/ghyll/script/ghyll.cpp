@@ -209,6 +209,7 @@ struct Room {
         lz = clamp(1.7, 0.3, h - 0.3);
         double dx = sx - lx, dy = sy - ly;
         double flat = sqrt(dx * dx + dy * dy);
+        const double horizontal = flat;  // keep the distance when a fallback facing is needed
         if (flat < 1e-6) {
             dx = 0.0;
             dy = -1.0;
@@ -217,7 +218,7 @@ struct Room {
         fx = dx / flat;
         fy = dy / flat;
         const double dz = sz - lz;
-        r0 = max(0.5, sqrt(flat * flat + dz * dz));
+        r0 = max(0.5, sqrt(horizontal * horizontal + dz * dz));
         // The listener's right, facing the source.
         const double rx = -fy, ry = fx;
         double half = 0.085, angle = 0.9599310885968813;  // ORTF: 17 cm, 55 degrees out

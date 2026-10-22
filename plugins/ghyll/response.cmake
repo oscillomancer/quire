@@ -2,7 +2,7 @@
 # -12 dBFS on both channels. Dry (mix 0) it passes unchanged and output trims
 # what leaves. The readouts follow the room as set: the distance between two
 # places, and a concrete cube's reverberation time by Eyring's formula.
-# Required: SANDBOX (quire-sandbox), PLUGIN (Bracken.clap), WORK.
+# Required: SANDBOX (quire-sandbox), PLUGIN (Ghyll.clap), WORK.
 foreach(var SANDBOX PLUGIN WORK)
     if(NOT DEFINED ${var} OR "${${var}}" STREQUAL "")
         message(FATAL_ERROR "response: -D${var}=... is required")
@@ -76,6 +76,10 @@ endfunction()
 # 10 m apart on the plan, the listener's ear 0.2 m above the source.
 expect_meter("{\"room_width\":20,\"room_depth\":20,\"room_height\":10,\"source_x\":50,\"source_y\":25,\"listener_x\":50,\"listener_y\":75}"
     distance 10.002 2)
+# Coincident places still use their actual separation, floored at 0.5 m;
+# choosing a fallback facing must not invent one metre of horizontal distance.
+expect_meter("{\"source_x\":50,\"source_y\":50,\"listener_x\":50,\"listener_y\":50}"
+    distance 0.5 1)
 # A 10 m concrete cube: V 1000 m3, S 600 m2, absorbing 4% at 500 Hz and 5% at
 # 1 kHz, the air 2.73 and 4.66 dB/km; the mean of the two octaves' RT60s.
 expect_meter(
