@@ -34,6 +34,9 @@ millisecond before the level crosses the threshold, so onsets pass whole.
 `open_time` includes digital silence in its time window, and counts it as
 open while the hold keeps the gate open. The level histogram skips digital
 silence.
+Changing `listen` crossfades over 10 ms between the signals being heard,
+including Key to Delta and either one back to Off. Another change during a
+fade starts from the current blend.
 
 ## Finding the threshold
 

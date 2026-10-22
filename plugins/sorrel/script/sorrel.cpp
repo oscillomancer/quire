@@ -301,7 +301,9 @@ struct Sorrel : Effect {
     double rampFrom = 0.0, rampTo = 1.0, rampToDb = 0.0, rampAt = 0.0, rampStep = 0.1;
     int holdCount = 0;
     int listenMode = 0;
-    double listenMix = 0.0, listenStep = 0.001;
+    int listenLength = 480, listenAt = 480;
+    double listenKey = 0.0, listenDelta = 0.0;
+    double listenFromKey = 0.0, listenFromDelta = 0.0;
     bool unplayed = true;
 
     // The detector's level each millisecond, and the histogram's chunks.
@@ -352,7 +354,7 @@ struct Sorrel : Effect {
         targets.prepare(room);
         targets.clear();
         easeStep = 1.0 / (0.003 * rate);
-        listenStep = 1.0 / (0.01 * rate);
+        listenLength = max(1, roundToInt(0.01 * rate));
         msLength = 0.001 * rate;
         colLength = 0.005 * rate;
         fall = exp(-1.0 / (0.3 * rate));
@@ -396,6 +398,7 @@ struct Sorrel : Effect {
         envOut = 0.0;
         unplayed = true;
         settings();
+        snapListen();
         gainDb = closedDb;
         amp = gainOf(gainDb);
     }
@@ -416,13 +419,29 @@ struct Sorrel : Effect {
             hpf[c].highpass(keyHpf, 0.707);
             lpf[c].lowpass(min(keyLpf.value(), 0.45 * rate), 0.707);
         }
-        listenMode = listen.index();
+        const int nextListen = listen.index();
+        if (nextListen != listenMode) {
+            // A new edit starts from the blend heard at the last sample,
+            // even if the previous transition has not finished.
+            listenFromKey = listenKey;
+            listenFromDelta = listenDelta;
+            listenAt = 0;
+            listenMode = nextListen;
+        }
+    }
+
+    void snapListen() {
+        listenKey = listenMode == 1 ? 1.0 : 0.0;
+        listenDelta = listenMode == 2 ? 1.0 : 0.0;
+        listenFromKey = listenKey;
+        listenFromDelta = listenDelta;
+        listenAt = listenLength;
     }
 
     void update() {
         settings();
         if (unplayed) {
-            listenMix = listenMode > 0 ? 1.0 : 0.0;
+            snapListen();
             gainDb = closedDb;
             amp = gainOf(gainDb);
         }
@@ -531,18 +550,27 @@ struct Sorrel : Effect {
             double ol = dl * amp;
             double orr = dr * amp;
             const double aOut = max(abs(ol), abs(orr));  // what the gate passes, heard or not
-            listenMix = clamp(listenMix + (listenMode > 0 ? listenStep : -listenStep), 0.0, 1.0);
-            if (listenMix > 0.0) {
-                double hl = 0.0, hr = 0.0;
-                if (listenMode == 1) {
-                    hl = ahead > 0 ? keyDelay[0].read(ahead) : kl;
-                    hr = ahead > 0 ? keyDelay[1].read(ahead) : kr;
-                } else if (listenMode == 2) {
-                    hl = dl - ol;
-                    hr = dr - orr;
-                }
-                ol += listenMix * (hl - ol);
-                orr += listenMix * (hr - orr);
+            if (listenAt < listenLength) {
+                listenAt += 1;
+                const double t = static_cast<double>(listenAt) / listenLength;
+                const double toKey = listenMode == 1 ? 1.0 : 0.0;
+                const double toDelta = listenMode == 2 ? 1.0 : 0.0;
+                listenKey = listenAt == listenLength ? toKey : lerp(listenFromKey, toKey, t);
+                listenDelta =
+                    listenAt == listenLength ? toDelta : lerp(listenFromDelta, toDelta, t);
+            }
+            // Blend the live wet, key and delta signals. The wet signal's
+            // weight is the remainder; no transition fades through silence.
+            const double wetL = ol, wetR = orr;
+            if (listenKey > 0.0) {
+                const double hl = ahead > 0 ? keyDelay[0].read(ahead) : kl;
+                const double hr = ahead > 0 ? keyDelay[1].read(ahead) : kr;
+                ol += listenKey * (hl - wetL);
+                orr += listenKey * (hr - wetR);
+            }
+            if (listenDelta > 0.0) {
+                ol += listenDelta * ((dl - wetL) - wetL);
+                orr += listenDelta * ((dr - wetR) - wetR);
             }
             io[0][i] = ol;
             if (stereo) io[1][i] = orr;
