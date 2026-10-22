@@ -381,10 +381,10 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   given, and says what they edited. Plugin-file exports run on Linux,
   macOS and Windows.
 
-Benchmarks are in `docs/benchmarks/`: B1, 30 synth tracks with EQ and
-compression at 48 kHz and 64 frames without xruns using anticipation
-(`b1.md`, measured with Orrery; not yet rerun with Marram); the comparison
-with REAPER (`b2.md`); GUI cold start and frame costs (`gui.md`); Console 9
+Benchmarks are in `docs/benchmarks/`: B1, 75 Marram tracks with EQ and
+compression at 48 kHz and 64 frames without xruns using anticipation, 28 to 29
+without (`b1.md`); the comparison with REAPER, which sustains 82 to 83
+(`b2.md`); GUI cold start and frame costs (`gui.md`); Console 9
 strip cost (`console9-strips.md`). The benchmark harness also supports 64/128-frame requests, installed third-party effects,
 whole-callback/render-job tails and an observed ring low-water mark. Timing is
 bench-only; synthetic deadline counts and server xruns are separate. Historical
@@ -410,10 +410,9 @@ Engine and hosting:
   latency preferences report unsupported on other platforms. Windows MCP is
   intended for piped/file input; cancelling an interactive console read can
   await a keypress during shutdown.
-- Without anticipation, a single synth chain could miss deadlines at 64
-  frames although average load was low (per-block bursts at chord changes;
-  measured with Orrery);
-  the harness now exposes callback tails for further profiling.
+- B1's anticipation gain is about 2.6× (75 tracks against 28 to 29), short
+  of the 3× target, and REAPER's default anticipative FX sustains about 10 %
+  more tracks on the same session (B2).
 - Live multiprocessing requires at least two usable CPUs and successful
   helper scheduling; otherwise the engine reports a warning and runs serially.
   A serial plug-in chain cannot benefit, and a stalled helper that has claimed
@@ -562,5 +561,4 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
 - Profile the 64-frame worst case; a pipelined bridge mode.
 - Track groups, stretch markers, MIDI outputs, a background media cache.
 - Lua ergonomics (a script library path, hot reload).
-- B1 and B2 rerun with Marram as the synth.
 - Hardening and ports beyond Linux.
