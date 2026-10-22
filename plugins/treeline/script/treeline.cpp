@@ -82,11 +82,18 @@ struct TruePeak {
         Array<double, 6> s;
         s[0] = lastPoint;
         s[1] = abs(hist[at + kHalf]);
-        for (int k = 1; k < kPhases; ++k) {
-            double y = 0.0;
-            for (int j = 0; j < kTaps; ++j) y += h[k][j] * hist[at + j];
-            s[k + 1] = abs(y);
+        // All three phases read the same history. Keep each phase's sum in
+        // tap order while sharing that read and its bounds check.
+        double y1 = 0.0, y2 = 0.0, y3 = 0.0;
+        for (int j = 0; j < kTaps; ++j) {
+            const double v = hist[at + j];
+            y1 += h[1][j] * v;
+            y2 += h[2][j] * v;
+            y3 += h[3][j] * v;
         }
+        s[2] = abs(y1);
+        s[3] = abs(y2);
+        s[4] = abs(y3);
         s[5] = abs(hist[at + kHalf - 1]);
         double top = 0.0;
         for (int k = 1; k <= 4; ++k)
