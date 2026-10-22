@@ -619,6 +619,8 @@ struct Pollia : Effect {
         unplayed = false;
         const int chans = min(io.channels, 2);
         const int mode = motion.index();
+        // Song positions may be negative during a host's count-in.
+        const bool locked = sync.index() > 0 && io.transport.playing && io.transport.tempo > 0.0;
         const double fall = dbToGain(-20.0 / sr);  // the meters' fall, 20 dB a second
         // These parameters are unsmoothed; the runtime splits at every change.
         const double atk = exp(-1.0 / (attack.value() * 0.001 * sr));
@@ -629,7 +631,7 @@ struct Pollia : Effect {
         for (int i = 0; i < io.frames; ++i) {
             // The motion: the left's cycle position, the right's ahead of it.
             const double pos = cyclePos(io, i);
-            if (pos >= 0.0) {
+            if (locked) {
                 lfoCycle = floorToInt(pos);
                 lfoPhase = pos - lfoCycle;
             } else {
@@ -640,7 +642,7 @@ struct Pollia : Effect {
                 }
             }
             // Rise and fall turn the wet's phase a cycle each cycle of the motion.
-            if (pos >= 0.0) {
+            if (locked) {
                 turn = pos * (mode == 1 ? -1.0 : 1.0);
             } else if (mode > 0) {
                 turn += (-1.0 - pos) * (mode == 1 ? -1.0 : 1.0);

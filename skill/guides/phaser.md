@@ -74,6 +74,9 @@ The envelope measures the playing against its own recent peak (falling
 one moves the stages the full `envelope`, one 24 dB quieter not at all.
 It adds to the sweep and works in `rise` and `fall` too.
 
+Synced motion follows the song position through a host's count-in too,
+including positions before beat zero.
+
 ## Recipes
 
 A classic four-stage swirl:
