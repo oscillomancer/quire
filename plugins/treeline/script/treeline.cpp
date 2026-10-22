@@ -915,7 +915,8 @@ struct Treeline : Effect {
         }
         integratedNow = -120.0;
         if (n > 0) {
-            const double gate = lufs(e / n) - 10.0;
+            // The relative gate must not admit blocks the absolute gate rejected.
+            const double gate = max(-70.0, lufs(e / n) - 10.0);
             double passed = 0.0;
             int m = 0;
             for (int k = 0; k < recentFilled; ++k) {
