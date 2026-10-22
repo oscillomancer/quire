@@ -47,7 +47,11 @@ if (SUPPLE_BUILD_TESTS AND COMMAND supple_test)
         target_include_directories(processor-tests PRIVATE ${SUPPLE_SUITE}/compiler/tests ${SUPPLE_SUITE}/examples)
         target_compile_definitions(processor-tests PRIVATE SUPPLE_SCRIPT_EXAMPLES="${SUPPLE_SUITE}/examples")
         # The examples compiled as C++, as source exports build them.
-        target_compile_options(processor-tests PRIVATE -ffp-contract=off -fwrapv)
+        if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+            target_compile_options(processor-tests PRIVATE /clang:-ffp-contract=off /clang:-fwrapv)
+        else()
+            target_compile_options(processor-tests PRIVATE -ffp-contract=off -fwrapv)
+        endif()
         set_tests_properties(processor-tests PROPERTIES ENVIRONMENT "SUPPLE_SCRIPT_LIBRARY=${player_library}")
     endif()
     foreach(test host-smoke-2ch host-smoke-1ch vst3-unload exports-clap exports-vst3 x11-embedding

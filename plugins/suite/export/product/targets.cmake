@@ -4,7 +4,10 @@
 
 set(SUPPLE_SUITE ${SUPPLE_ROOT}/suite)
 include(${SUPPLE_SUITE}/suite.cmake)
-if (NOT MSVC)
+if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    set_source_files_properties(${SUPPLE_PRODUCT}/Catalog.cpp PROPERTIES
+        COMPILE_OPTIONS "/clang:-ffp-contract=off;/clang:-fwrapv;-Wno-missing-braces")
+elseif (NOT MSVC)
     set_source_files_properties(${SUPPLE_PRODUCT}/Catalog.cpp PROPERTIES
         COMPILE_OPTIONS "-ffp-contract=off;-fwrapv;-Wno-missing-braces")
 endif()

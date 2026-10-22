@@ -17,7 +17,10 @@ add_library(suite-runtime STATIC ${SUPPLE_SUITE}/runtime/src/runtime.cpp)
 target_include_directories(suite-runtime PUBLIC ${SUPPLE_SUITE}/runtime/include)
 target_include_directories(suite-runtime SYSTEM PRIVATE ${SUPPLE_FRAMEWORK})
 # Arithmetic as the script compiler's code does it: no fused multiply-adds.
-if (NOT MSVC)
+# clang-cl ignores the GNU spelling, so it takes it through /clang:.
+if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(suite-runtime PRIVATE /clang:-ffp-contract=off)
+elseif (NOT MSVC)
     target_compile_options(suite-runtime PRIVATE -ffp-contract=off)
 endif()
 supple_defaults(suite-runtime)
