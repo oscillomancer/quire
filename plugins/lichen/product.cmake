@@ -35,7 +35,7 @@ set(PRODUCT_STATE_TAG       "cwHJ")
 set(PRODUCT_DSP_SOURCES     product/Catalog.cpp)
 # The script draws its own editor (script_editor.cpp, from the suite).
 set(PRODUCT_EDITOR_SOURCES  "")
-set(PRODUCT_TEST_SOURCES    "")
+set(PRODUCT_TEST_SOURCES    product/test/restart_test.cpp)
 
 # Target moves only the editor's reference line; the audio passes through
 # exactly, which host-smoke checks of a transparent product.
