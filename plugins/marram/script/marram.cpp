@@ -321,10 +321,7 @@ struct Filter {
     }
 
     // Band b of the formant bank, a band pass with 0 dB at its peak.
-    double formantBand(int b, double x, double g, double k) {
-        const double a1 = 1.0 / (1.0 + g * (g + k));
-        const double a2 = g * a1;
-        const double a3 = g * a2;
+    double formantBand(int b, double x, double a1, double a2, double a3, double k) {
         const double s1 = band[b * 2];
         const double s2 = band[b * 2 + 1];
         const double v3 = x - s2;
@@ -356,7 +353,10 @@ struct FilterNow {
     double drive = 1.0;
     double feedback = 0.0;
     double damping = 0.0;
-    Array<double, 3> fg;  // the formant bands' gains and widths
+    // The formant coefficients stay fixed until the next control tick.
+    Array<double, 3> fa1;
+    Array<double, 3> fa2;
+    Array<double, 3> fa3;
     Array<double, 3> fk;
 };
 
@@ -2117,11 +2117,14 @@ struct Marram : Instrument {
         for (int b = 0; b < 3; ++b) {
             const double hz = lerp(formantHz(i, b), formantHz(i + 1, b), t) * up;
             const double h = min(hz, 0.45 * rate);
-            n.fg[b] = tan(pi * h / rate);
+            const double g = tan(pi * h / rate);
             // Speech's bandwidths, widened to a Q of at most 6 so the
             // harmonics of a low note still find the peaks.
             const double width = max(b == 0 ? 80.0 : b == 1 ? 90.0 : 120.0, h / 6.0);
             n.fk[b] = width / h;
+            n.fa1[b] = 1.0 / (1.0 + g * (g + n.fk[b]));
+            n.fa2[b] = g * n.fa1[b];
+            n.fa3[b] = g * n.fa2[b];
         }
     }
     double formantHz(int vowel, int band) {
@@ -2138,9 +2141,9 @@ struct Marram : Instrument {
         if (c.type == kLadder) return f.ladder(x, n.g, n.k, n.drive, c.steep);
         if (c.type == kSvf) return f.svf(x * n.drive, n.g, n.k, c.mode);
         if (c.type == kComb) return f.combFilter(x * n.drive, n.delay, n.feedback, n.damping);
-        const double one = f.formantBand(0, x, n.fg[0], n.fk[0]);
-        const double two = f.formantBand(1, x, n.fg[1], n.fk[1]);
-        const double three = f.formantBand(2, x, n.fg[2], n.fk[2]);
+        const double one = f.formantBand(0, x, n.fa1[0], n.fa2[0], n.fa3[0], n.fk[0]);
+        const double two = f.formantBand(1, x, n.fa1[1], n.fa2[1], n.fa3[1], n.fk[1]);
+        const double three = f.formantBand(2, x, n.fa1[2], n.fa2[2], n.fa3[2], n.fk[2]);
         return (one + 0.6 * two + 0.35 * three) * 2.5 * n.drive;
     }
 
