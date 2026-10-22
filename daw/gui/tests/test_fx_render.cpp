@@ -82,6 +82,7 @@ struct Fixture {
         engine::AppOptions options;
         options.workdir = dir;
         options.chainDir = dir / "chains";
+        options.presetDir = dir / "presets";
         options.pluginPath = {std::filesystem::path(SUPPLE_CLAP_DIR)};
         options.identity = host::HostIdentity{gui::test::name(), "Supple Audio", "", "0"};
         auto a = engine::EngineApp::create(options);
@@ -1360,4 +1361,96 @@ TEST_CASE("render preview has one deadline only while an open dialog is dirty") 
     REQUIRE(f.render->nextDeadline());
     f.render->close();
     CHECK_FALSE(f.render->nextDeadline());
+}
+
+TEST_CASE("an effect's presets menu loads factory presets and saves and deletes the user's") {
+    Fixture f;
+    if (!f.ok || !f.stockPlugins()) {
+        MESSAGE("skipped: no GUI or stock plugins");
+        return;
+    }
+    const auto track = f.addTrack("Source");
+    REQUIRE(f.run("fx.add", f.args({{"track", track.str()}, {"plugin", f.pluginId("Hickory")}})));
+    REQUIRE(f.fx->open(track));
+    auto factory = f.run("fx.patch.list", f.args({{"fx", "fx_1"}}));
+    REQUIRE(factory);
+    const std::size_t factoryCount = (*factory)["patches"].size();
+    REQUIRE(factoryCount > 0);
+    // Rows: "Factory", its presets, ["Saved", the user's,] a rule, "Save preset…".
+    auto row = [&](std::size_t i, float x = 30) {
+        auto* menu = f.root->find("fx.preset.menu");
+        REQUIRE(menu);
+        const auto& b = menu->bounds();
+        return ui::Point{x < 0 ? b.right() + x : b.x + x, b.y + 26 * static_cast<float>(i) + 13};
+    };
+    auto press = [&](ui::Point at, int button = 1) {
+        f.frame();
+        f.root->pointer({ui::PointerEvent::Type::Move, at, 0});
+        f.root->pointer({ui::PointerEvent::Type::Down, at, button});
+        f.root->pointer({ui::PointerEvent::Type::Up, at, button});
+        f.frame();
+    };
+
+    // The button toggles the menu; a click on a factory preset loads it in one step.
+    REQUIRE(f.click("fx.presets.fx_1"));
+    REQUIRE(f.root->find("fx.preset.menu"));
+    REQUIRE(f.click("fx.presets.fx_1"));
+    CHECK_FALSE(f.root->find("fx.preset.menu"));
+    REQUIRE(f.click("fx.presets.fx_1"));
+    const auto beforeLoad = f.historyCount();
+    press(row(1));
+    CHECK_FALSE(f.root->find("fx.preset.menu"));
+    CHECK(f.historyCount() == beforeLoad + 1);
+    const std::string first = (*factory)["patches"].at(0).find("name")->asString();
+    CHECK(f.fxStatus() == "Loaded " + first);
+    // A factory preset has no delete: a right click offers nothing.
+    REQUIRE(f.click("fx.presets.fx_1"));
+    press(row(1), 3);
+    CHECK_FALSE(f.root->find("fx.preset.menu.context"));
+    f.key("Escape");
+
+    // "Save preset…" shows the name field; a taken name needs a second Save.
+    REQUIRE(f.run("fx.param.set", f.args({{"fx", "fx_1"}, {"values", f.args({{"gain", -6}})}})));
+    if (!f.root->find("fx.preset.menu")) REQUIRE(f.click("fx.presets.fx_1"));
+    press(row(factoryCount + 2));
+    CHECK(f.root->find("fx.preset.prompt")->visible);
+    REQUIRE(f.root->focused()->id() == "fx.preset.name");
+    const auto beforeSave = f.historyCount();
+    f.type("Mine");
+    f.key("Return");
+    CHECK(f.fxStatus() == "Saved Mine");
+    CHECK_FALSE(f.root->find("fx.preset.prompt")->visible);
+    CHECK(f.historyCount() == beforeSave);
+    REQUIRE(f.click("fx.presets.fx_1"));
+    press(row(factoryCount + 4));  // past the Saved heading and Mine
+    f.type("Mine");
+    f.snapshot("fx-presets-save.png");
+    f.key("Return");
+    CHECK(f.fxStatus() == "“Mine” exists: Save again to replace it");
+    f.key("Return");
+    CHECK(f.fxStatus() == "Saved Mine");
+    auto listed = f.run("fx.preset.list", f.args({{"fx", "fx_1"}}));
+    REQUIRE(listed);
+    REQUIRE((*listed)["presets"].size() == factoryCount + 1);
+    const std::string file = (*listed)["presets"].at(factoryCount).find("path")->asString();
+    CHECK(file.starts_with((f.dir / "presets").string()));
+
+    // Loading it back; then its delete mark asks, and Delete removes the file.
+    REQUIRE(f.run("fx.param.set", f.args({{"fx", "fx_1"}, {"values", f.args({{"gain", 0}})}})));
+    REQUIRE(f.click("fx.presets.fx_1"));
+    press(row(factoryCount + 2));
+    CHECK(f.fxStatus() == "Loaded Mine");
+    auto gain = f.run("fx.param.get", f.args({{"fx", "fx_1"}, {"param", "gain"}}));
+    REQUIRE(gain);
+    CHECK((*gain)["value"].asDouble() == doctest::Approx(-6));
+    REQUIRE(f.click("fx.presets.fx_1"));
+    f.root->pointer({ui::PointerEvent::Type::Move, row(factoryCount + 2, -19), 0});
+    f.snapshot("fx-presets.png");
+    press(row(factoryCount + 2, -19));
+    REQUIRE(f.click("fx.preset.menu.context"));
+    CHECK_FALSE(std::filesystem::exists(file));
+    CHECK(f.fxStatus() == "Deleted Mine");
+    auto* menu = dynamic_cast<ui::List*>(f.root->find("fx.preset.menu"));
+    REQUIRE(menu);
+    CHECK(menu->count() == factoryCount + 3);  // the Saved heading went with it
 }

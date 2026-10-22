@@ -598,7 +598,16 @@ display (a monitor that is gone) is not used. The header's **Save chain…**
 shows a name field for a chain preset (fx.chain.save) and **Load chain…** a
 menu of saved presets (fx.chain.list; a click appends, Shift replaces);
 pressing either button again while its field or menu shows closes it. A right
-click on a preset in the menu offers Delete (fx.chain.delete). Commands:
+click on a preset in the menu offers Delete (fx.chain.delete). Each
+effect's row has a **presets** button beside params and Remove (plugin
+editors keep no preset bar of their own): its menu lists the plugin's factory
+presets under "Factory" and the user's under "Saved" (fx.preset.list), then
+"Save preset…". A click loads one (fx.preset.load, one undo step); "Save
+preset…" shows a name field under the header (fx.preset.save; a name that
+exists asks for a second Save, which replaces it). A saved preset has a
+delete mark at its right, and a right click on it offers the same Delete
+(fx.preset.delete); factory presets have neither. Pressing the button again
+closes the menu. Commands:
 `fx.*`, `plugin.*` (scan/describe), `param.*`, `patch.*`.
 
 ### 4.6 Routing view and matrix

@@ -225,6 +225,171 @@ class ChainMenu : public ui::List {
     std::function<bool(const std::string&)> remove_;
 };
 
+// One plugin's presets (fx.preset.list): the factory ones, the user's, then
+// "Save preset…". A click loads a preset; the user's have a delete mark at
+// the right, and a right click on one offers Delete too (the factory ones
+// cannot be deleted).
+class PresetMenu : public ui::List {
+  public:
+    struct Hooks {
+        std::function<void(const std::string& name, const std::string& source)> load;
+        std::function<bool(const std::string& name)> remove;  // true when it is gone
+        std::function<void()> save;
+    };
+    PresetMenu(ui::Root& root, const json::Value& presets, Hooks hooks)
+        : List("fx.preset.menu"), root_(root), hooks_(std::move(hooks)) {
+        rowHeight = 26;
+        layout.width = ui::SizeRule::fixed(280);
+        std::vector<Entry> factory, user;
+        for (const auto& p : presets.asArray()) {
+            const bool mine = p.find("source")->asString() == "user";
+            (mine ? user : factory)
+                .push_back({mine ? Kind::User : Kind::Factory, p.find("name")->asString()});
+        }
+        if (!factory.empty()) {
+            rows_.push_back({Kind::Heading, "Factory"});
+            rows_.insert(rows_.end(), factory.begin(), factory.end());
+        }
+        if (!user.empty()) {
+            rows_.push_back({Kind::Heading, "Saved"});
+            rows_.insert(rows_.end(), user.begin(), user.end());
+        }
+        if (rows_.empty()) rows_.push_back({Kind::Heading, "No presets yet"});
+        rows_.push_back({Kind::Separator, ""});
+        rows_.push_back({Kind::Save, "Save preset…"});
+        setCount(rows_.size());
+        paintRow = [this](ui::Canvas& c, std::size_t i, const ui::Rect& r, bool) {
+            const auto& t = c.theme();
+            const Entry& e = rows_[i];
+            switch (e.kind) {
+                case Kind::Separator:
+                    c.fillRect({r.x + 8, r.y + r.h / 2, r.w - 16, 1}, t.color("rule"));
+                    return;
+                case Kind::Heading:
+                    c.text({r.x + 10, r.y, r.w - 20, r.h}, e.name, ui::Font::UiBold,
+                           t.type("caption"), t.color("ink-quiet"));
+                    return;
+                default:
+                    break;
+            }
+            c.text({r.x + 18, r.y, r.w - 46, r.h}, e.name, ui::Font::Ui, t.type("small"),
+                   t.color("ink"));
+            if (e.kind == Kind::User) {
+                // The delete mark, a cross drawn in lines (the UI font has no glyph).
+                const ui::Rect x = deleteMark(r);
+                const ui::Color ink = hoverDelete_ == i ? t.color("ink") : t.color("ink-faint");
+                c.line({x.x + 7, x.y + 7}, {x.right() - 7, x.bottom() - 7}, ink, 1.4f);
+                c.line({x.right() - 7, x.y + 7}, {x.x + 7, x.bottom() - 7}, ink, 1.4f);
+            }
+        };
+        onActivate = [this](std::size_t i) {
+            const Entry e = rows_[i];
+            if (e.kind == Kind::Heading || e.kind == Kind::Separator) return;
+            auto hooks = hooks_;  // closing destroys this menu
+            root_.closePopup();
+            if (e.kind == Kind::Save)
+                hooks.save();
+            else
+                hooks.load(e.name, e.kind == Kind::User ? "user" : "factory");
+        };
+        onContext = [this](std::size_t i, ui::Point at) { offerDelete(i, at); };
+    }
+    ui::Size measure(const ui::Canvas&, ui::Size) override {
+        return {280, rowHeight * static_cast<float>(rows_.size())};
+    }
+    bool onPointer(const ui::PointerEvent& e) override {
+        const auto row = rowAtPoint(e.pos);
+        if (e.type == ui::PointerEvent::Type::Move && bounds().contains(e.pos)) {
+            const auto over =
+                row && rows_[*row].kind == Kind::User && deleteMark(rowRect(*row)).contains(e.pos)
+                    ? row
+                    : std::nullopt;
+            if (over != hoverDelete_) {
+                hoverDelete_ = over;
+                root_.damageAll();
+            }
+            if (row && selectable(*row)) select(*row);
+            return true;
+        }
+        if (e.type == ui::PointerEvent::Type::Down && row) {
+            if (!selectable(*row)) return true;  // headings and the rule do nothing
+            if (e.button == 1 && rows_[*row].kind == Kind::User &&
+                deleteMark(rowRect(*row)).contains(e.pos)) {
+                pressedDelete_ = row;
+                return true;
+            }
+        }
+        if (e.type == ui::PointerEvent::Type::Up && pressedDelete_) {
+            const auto pressed = *pressedDelete_;
+            pressedDelete_.reset();
+            if (row == pressed && deleteMark(rowRect(pressed)).contains(e.pos))
+                offerDelete(pressed, e.pos);
+            return true;
+        }
+        // A single click activates a row, as in a menu.
+        if (e.type == ui::PointerEvent::Type::Up && e.button == 1 && selected()) {
+            if (bounds().contains(e.pos)) {
+                auto activate = onActivate;
+                activate(*selected());
+            }
+            return true;
+        }
+        return List::onPointer(e);
+    }
+
+  private:
+    enum class Kind { Heading, Factory, User, Separator, Save };
+    struct Entry {
+        Kind kind;
+        std::string name;
+    };
+    bool selectable(std::size_t i) const {
+        return rows_[i].kind != Kind::Heading && rows_[i].kind != Kind::Separator;
+    }
+    std::optional<std::size_t> rowAtPoint(ui::Point p) const {
+        if (!bounds().contains(p)) return std::nullopt;
+        const auto i = static_cast<std::size_t>((p.y - bounds().y + scroll()) / rowHeight);
+        return i < rows_.size() ? std::optional<std::size_t>(i) : std::nullopt;
+    }
+    ui::Rect rowRect(std::size_t i) const {
+        return {bounds().x, bounds().y + rowHeight * static_cast<float>(i) - scroll(), bounds().w,
+                rowHeight};
+    }
+    static ui::Rect deleteMark(const ui::Rect& row) {
+        return {row.right() - 30, row.y + (row.h - 22) / 2, 22, 22};
+    }
+    void offerDelete(std::size_t i, ui::Point at) {
+        if (rows_[i].kind != Kind::User) return;
+        ui::MenuItem item;
+        item.label = "Delete \"" + rows_[i].name + "\"";
+        item.run = [this, i] {
+            if (hooks_.remove(rows_[i].name)) removeRow(i);
+        };
+        root_.openPopup(ui::makeMenu("fx.preset.menu.context", {std::move(item)},
+                                     [this] { root_.closePopup(); }),
+                        ui::Rect{at.x, at.y, 0, 0}, ui::Placement::Below);
+    }
+    void removeRow(std::size_t i) {
+        rows_.erase(rows_.begin() + static_cast<std::ptrdiff_t>(i));
+        // A heading with nothing under it goes too.
+        if (rows_[i - 1].kind == Kind::Heading &&
+            (i == rows_.size() || rows_[i].kind != Kind::User)) {
+            rows_.erase(rows_.begin() + static_cast<std::ptrdiff_t>(i - 1));
+            if (rows_.front().kind == Kind::Separator)
+                rows_.insert(rows_.begin(), {Kind::Heading, "No presets yet"});
+        }
+        hoverDelete_.reset();
+        select(std::nullopt);
+        setCount(rows_.size());
+        root_.relayout();
+        root_.damageAll();
+    }
+    ui::Root& root_;
+    Hooks hooks_;
+    std::vector<Entry> rows_;
+    std::optional<std::size_t> hoverDelete_, pressedDelete_;
+};
+
 ui::Node& line(ui::Node& row, const std::string& id) {
     auto& n = row.emplace<ui::Node>(id);
     n.layout.dir = ui::Layout::Dir::Row;
@@ -303,6 +468,17 @@ std::unique_ptr<ui::Node> FxWindow::buildPage() {
     saveName_->onCancel = [this] { hideSavePrompt(); };
     savePrompt_->emplace<ui::Button>("fx.chain.commit", "Save", [this] { saveChain(); });
 
+    presetPrompt_ = &page->emplace<ui::Node>("fx.preset.prompt");
+    presetPrompt_->layout.dir = ui::Layout::Dir::Row;
+    presetPrompt_->layout.height = ui::SizeRule::fixed(28);
+    presetPrompt_->layout.gap = 8;
+    presetPrompt_->visible = false;
+    presetName_ = &presetPrompt_->emplace<ui::TextField>("fx.preset.name", "", "Preset name");
+    presetName_->layout.width = ui::SizeRule::fraction();
+    presetName_->onSubmit = [this](const std::string&) { savePreset(); };
+    presetName_->onCancel = [this] { hidePresetPrompt(); };
+    presetPrompt_->emplace<ui::Button>("fx.preset.commit", "Save", [this] { savePreset(); });
+
     tabsRow_ = &page->emplace<ui::Node>("fx.tabs");
     tabsRow_->layout.dir = ui::Layout::Dir::Row;
     tabsRow_->layout.height = ui::SizeRule::fixed(28);
@@ -344,6 +520,10 @@ Status FxWindow::open(model::Id track) {
         savePrompt_->visible = false;
         root_.releaseWithin(savePrompt_);
     }
+    if (presetPrompt_) {
+        presetPrompt_->visible = false;
+        root_.releaseWithin(presetPrompt_);
+    }
     latency_.clear();  // a fresh window measures each effect again
     if (page_) {       // already open: switch track in place
         refresh();
@@ -359,6 +539,8 @@ Status FxWindow::open(model::Id track) {
         presetChainButton_ = nullptr;
         savePrompt_ = nullptr;
         saveName_ = nullptr;
+        presetPrompt_ = nullptr;
+        presetName_ = nullptr;
     });
     refresh();
     return {};
@@ -817,6 +999,7 @@ void FxWindow::buildRow(ui::Node& body, model::Id fx, std::size_t index, bool in
             selected_ = fx;
             showParamsTab();
         });
+        l1.emplace<ui::Button>(prefix + "presets." + id, "presets", [this, fx] { presetMenu(fx); });
         l1.emplace<ui::Button>(prefix + "remove." + id, "Remove", [this, fx] {
             const std::vector<model::Id> each = targets(fx);
             auto removed = dispatcher_.transact(
@@ -1098,6 +1281,7 @@ void FxWindow::choosePresetChain(bool input) {
 
 void FxWindow::promptSaveChain() {
     if (!savePrompt_ || !saveName_) return;
+    hidePresetPrompt();
     savePrompt_->visible = true;
     saveName_->setText("");
     root_.relayout();
@@ -1170,6 +1354,90 @@ void FxWindow::loadChainMenu(bool replace) {
     chainMenuOpen_ = true;
     root_.openPopup(std::move(menu), button ? button->bounds() : ui::Rect{}, ui::Placement::Below,
                     [this] { chainMenuOpen_ = false; });
+}
+
+void FxWindow::presetMenu(model::Id fx) {
+    if (presetMenuOpen_) {  // the button toggles its menu (and closes a menu above it)
+        while (presetMenuOpen_ && root_.popupOpen()) root_.closePopup();
+        return;
+    }
+    auto args = json::Value::object();
+    args["fx"] = fx.str();
+    auto listed = dispatcher_.execute({"fx.preset.list", std::move(args), kUiOrigin});
+    if (!listed) {
+        setStatus(listed.error().message);
+        return;
+    }
+    PresetMenu::Hooks hooks;
+    hooks.load = [this, fx](const std::string& name, const std::string& source) {
+        auto load = json::Value::object();
+        load["fx"] = fx.str();
+        load["name"] = name;
+        load["source"] = source;
+        if (dispatch("fx.preset.load", std::move(load))) {
+            setStatus("Loaded " + name);
+            refresh();
+        }
+    };
+    hooks.remove = [this, fx](const std::string& name) {
+        auto remove = json::Value::object();
+        remove["fx"] = fx.str();
+        remove["name"] = name;
+        if (!dispatch("fx.preset.delete", std::move(remove))) return false;
+        setStatus("Deleted " + name);
+        return true;
+    };
+    hooks.save = [this, fx] { promptSavePreset(fx); };
+    auto menu = std::make_unique<PresetMenu>(root_, (*listed)["presets"], std::move(hooks));
+    const auto input = inputChain();
+    const std::string prefix =
+        std::find(input.begin(), input.end(), fx) != input.end() ? "ifx." : "fx.";
+    const auto* button = root_.find(prefix + "presets." + fx.str());
+    presetMenuOpen_ = true;
+    root_.openPopup(std::move(menu), button ? button->bounds() : ui::Rect{}, ui::Placement::Below,
+                    [this] { presetMenuOpen_ = false; });
+}
+
+void FxWindow::promptSavePreset(model::Id fx) {
+    if (!presetPrompt_ || !presetName_) return;
+    if (savePrompt_ && savePrompt_->visible) hideSavePrompt();
+    presetFx_ = fx;
+    presetReplace_.clear();
+    presetPrompt_->visible = true;
+    presetName_->setText("");
+    root_.relayout();
+    root_.focus(presetName_);
+    setStatus("Save " + nameOf(fx) + "'s settings as a preset");
+}
+
+void FxWindow::savePreset() {
+    if (!presetName_) return;
+    const std::string name = presetName_->text();
+    auto args = json::Value::object();
+    args["fx"] = presetFx_.str();
+    args["name"] = name;
+    if (!presetReplace_.empty() && presetReplace_ == name) args["replace"] = true;
+    auto result = dispatcher_.execute({"fx.preset.save", std::move(args), kUiOrigin});
+    if (!result) {
+        if (result.error().code == "fx.preset_exists") {
+            presetReplace_ = name;
+            setStatus("“" + name + "” exists: Save again to replace it");
+        } else {
+            setStatus(result.error().message);
+        }
+        return;
+    }
+    setStatus("Saved " + name);
+    hidePresetPrompt();
+}
+
+void FxWindow::hidePresetPrompt() {
+    if (!presetPrompt_ || !presetPrompt_->visible) return;
+    presetPrompt_->visible = false;
+    presetReplace_.clear();
+    root_.releaseWithin(presetPrompt_);
+    root_.relayout();
+    root_.damageAll();
 }
 
 }  // namespace supple::gui

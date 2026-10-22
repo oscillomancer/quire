@@ -156,7 +156,10 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   in a folder of its own with its own media; imports are copied into the
   project by default, and Save as into another folder copies the media. FX
   chain presets and project templates (with a copy of their audio) are
-  saved, loaded and deleted in the app. Takes: show all takes in lanes,
+  saved, loaded and deleted in the app. Each effect's row in the FX chain
+  has a presets menu: the plugin's factory presets, read-only, and the
+  user's own, saved and deleted there (`fx.preset.*`, the sandbox's preset
+  format, kept per plugin in the configuration folder). Takes: show all takes in lanes,
   explode onto tracks or along the track, delete one, Ctrl-drag one out, and
   render an item through its FX (MIDI to audio) in place or as a new take.
   The FX chain selects several effects (Ctrl/Shift+click) to bypass, offline
@@ -461,6 +464,10 @@ Engine and hosting:
 - Stopped-transport audio from tracks that are not live (a plugin's own
   preview button, for example) is not heard in anticipative mode unless the
   track is armed and monitored.
+- A plugin's factory presets are the semantic extension's factory patches:
+  a third-party plugin's own presets (CLAP preset discovery, VST3 program
+  lists) are not listed in the presets menu, and the menu does not mark the
+  preset last loaded.
 - Multi-output plugins: main output ports wider than stereo are not used,
   and there are no per-output meters.
 - Overlapping gestures on a plugin without semantic parameters share one
