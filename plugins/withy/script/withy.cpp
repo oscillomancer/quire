@@ -200,6 +200,7 @@ struct Voice {
     double rateFactor = 1.0, shimmerFactor = 1.0, spread = 1.0;
     double left = 0.0, right = 0.0;  // its gain into each side
     Biquad bandL, bandR;             // the bucket brigade's band
+    double bandHz = -1.0, bandDesigned = -1.0;
     Noise hissL, hissR;
 };
 
@@ -470,6 +471,7 @@ struct Withy : Effect {
     double bbdW = 0.0, bbdStep = 0.001, glide = 0.001, filterGlide = 0.01, triW = 1.0;
     double envUp = 0.01, envDown = 0.001, lockPull = 0.0001, vibratoW = 0.0;
     double normL = 1.0, normR = 1.0, normMono = 1.0;
+    double cutDesigned = -1.0, keepDesigned = -1.0;
 
     // The sway when synced: the song's tempo and bar, the last heard.
     double tempoNow = 120.0, barNow = 4.0;
@@ -496,6 +498,8 @@ struct Withy : Effect {
 
     void prepare() {
         rate48 = sampleRate();
+        cutDesigned = -1.0;
+        keepDesigned = -1.0;
         buildSinc();
         const int length = ceilToInt(kLine * rate48) + 2 * kTaps;
         for (int c = 0; c < 2; ++c) {
@@ -516,6 +520,8 @@ struct Withy : Effect {
             Voice& s = voice[v];
             s.bandL.clear();
             s.bandR.clear();
+            s.bandHz = -1.0;
+            s.bandDesigned = -1.0;
             s.hissL.seed(1009 + 17 * v);
             s.hissR.seed(2029 + 31 * v);
         }
@@ -836,12 +842,19 @@ struct Withy : Effect {
     // The filters' designs, from their glides (every 16 frames).
     void tuneFilters() {
         const double top = 0.45 * rate48;
-        for (int c = 0; c < 2; ++c) {
-            cutA[c].lowpass(min(cutHz, top), 0.7071);
-            keepLow[2 * c].lowpass(keepHz, 0.7071);
-            keepLow[2 * c + 1].lowpass(keepHz, 0.7071);
-            keepHigh[2 * c].highpass(keepHz, 0.7071);
-            keepHigh[2 * c + 1].highpass(keepHz, 0.7071);
+        const double cut = min(cutHz, top);
+        if (cut != cutDesigned) {
+            for (int c = 0; c < 2; ++c) cutA[c].lowpass(cut, 0.7071);
+            cutDesigned = cut;
+        }
+        if (keepHz != keepDesigned) {
+            for (int c = 0; c < 2; ++c) {
+                keepLow[2 * c].lowpass(keepHz, 0.7071);
+                keepLow[2 * c + 1].lowpass(keepHz, 0.7071);
+                keepHigh[2 * c].highpass(keepHz, 0.7071);
+                keepHigh[2 * c + 1].highpass(keepHz, 0.7071);
+            }
+            keepDesigned = keepHz;
         }
         // A bucket brigade's clock runs at its stages over twice its delay;
         // its filters pass a little under half the clock.
@@ -849,9 +862,9 @@ struct Withy : Effect {
         for (int v = 0; v < active; ++v) {
             Voice& s = voice[v];
             const double clock = stages / (2.0 * max(s.delay, 1.0) / rate48);
-            const double band = min(0.4 * clock, min(19000.0, top));
-            s.bandL.lowpass(band, 0.7071);
-            s.bandR.lowpass(band, 0.7071);
+            // Keep the same 16-frame target even while the medium is clean;
+            // only build its coefficients when the voice will use them.
+            s.bandHz = min(0.4 * clock, min(19000.0, top));
         }
     }
 
@@ -1031,6 +1044,11 @@ struct Withy : Effect {
                     yr = yl;
                 }
                 if (bbdW > 0.0) {
+                    if (s.bandHz != s.bandDesigned) {
+                        s.bandL.lowpass(s.bandHz, 0.7071);
+                        s.bandR.lowpass(s.bandHz, 0.7071);
+                        s.bandDesigned = s.bandHz;
+                    }
                     const double nl = yl + hiss * envelope[0] * s.hissL.white();
                     yl = lerp(yl, s.bandL.process(nl), bbdW);
                     if (chans > 1) {
