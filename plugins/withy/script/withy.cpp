@@ -2126,6 +2126,17 @@ struct Withy : Effect {
             br += er / n;
             bi += ei / n;
         }
+        // The audio widens only the wet mid/side before mixing the dry.
+        // Width cancels in the mono fold; keep that curve and 100% exact.
+        if (!mono && width.value() != 1.0) {
+            const double mr = 0.5 * (lr + rr), mi = 0.5 * (li + ri);
+            const double sr = 0.5 * (lr - rr) * width.value();
+            const double si = 0.5 * (li - ri) * width.value();
+            lr = mr + sr;
+            li = mi + si;
+            rr = mr - sr;
+            ri = mi - si;
+        }
         // The loop: 1 / (1 - fb * mean).
         const double dr = 1.0 - fb * br, di = -fb * bi;
         const double dm = dr * dr + di * di;
