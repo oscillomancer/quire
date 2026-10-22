@@ -242,8 +242,13 @@ int saturate(double x) {
 }
 }  // namespace
 
-int toInt(double x) { return saturate(std::trunc(x)); }
-int floorToInt(double x) { return saturate(std::floor(x)); }
+int toInt(double x) { return saturate(x); }
+int floorToInt(double x) {
+    // A normal positive value truncates to its floor without a libm call.
+    // Keep libm for the other cases, including subnormals under FTZ/DAZ.
+    if (x >= 1.0 && x <= 2147483647.0) return static_cast<int>(x);
+    return saturate(std::floor(x));
+}
 int ceilToInt(double x) { return saturate(std::ceil(x)); }
 int roundToInt(double x) { return saturate(std::round(x)); }
 int idiv(int a, int b) {

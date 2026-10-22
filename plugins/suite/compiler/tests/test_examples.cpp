@@ -539,6 +539,25 @@ TEST_CASE("Stft: a sine reads its amplitude, and a spectrum left alone is a dela
     CHECK(worst < 1e-12);
 }
 
+TEST_CASE("whole-number conversions match the saturating libm results at boundaries") {
+    const auto saturate = [](double x) {
+        if (!(x == x)) return 0;
+        if (x >= 2147483647.0) return std::numeric_limits<int>::max();
+        if (x <= -2147483648.0) return std::numeric_limits<int>::min();
+        return static_cast<int>(x);
+    };
+    const double tiny = std::numeric_limits<double>::denorm_min();
+    const double largestSubnormal = std::nextafter(std::numeric_limits<double>::min(), 0.0);
+    const double inf = std::numeric_limits<double>::infinity();
+    for (double x : {1.0, 1.5, 2147483646.5, 2147483647.0, 2147483647.5, 0.5, 0.0, -0.0, -0.5, -1.5,
+                     tiny, -tiny, largestSubnormal, -largestSubnormal,
+                     std::numeric_limits<double>::quiet_NaN(), inf, -inf, -2147483648.5}) {
+        CAPTURE(x);
+        CHECK(script::toInt(x) == saturate(std::trunc(x)));
+        CHECK(script::floorToInt(x) == saturate(std::floor(x)));
+    }
+}
+
 TEST_CASE("Oversampler: 1x passes through, and linear phase is a pure delay") {
     script::detail::Instance instance;
     script::detail::CurrentScope scope(&instance);
