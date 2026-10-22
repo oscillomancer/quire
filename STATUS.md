@@ -586,8 +586,6 @@ Plugins:
   the plugin itself has not been profiled.
 - Lichen's readouts refresh every 100 ms and reach a host as meter events
   at 30 Hz, so a render's last reading can miss its final 100 ms or more.
-  Its three transforms also synthesize output it discards: the shared
-  `Stft` has no analysis-only path.
 - clang-cl builds the suite runtime and stock scripts with
   `/clang:-ffp-contract=off` and `/clang:-fwrapv` (they had neither); native
   Windows CI has not run since.

@@ -582,7 +582,7 @@ struct Lichen : Effect {
         int size = 16;
         while (size < 32768 && size * 1.5 < 0.34 * rate) size *= 2;
         for (int c = 0; c < 2; ++c) {
-            stft[c].prepare(size, 4);
+            stft[c].prepareAnalysis(size, 4);
             kw[c].design(rate);
             kw[c].clear();
             detect[c].clear();
@@ -591,7 +591,7 @@ struct Lichen : Effect {
         // (2048 at 48 kHz), a quarter of one apart.
         int shortSize = 16;
         while (shortSize < 32768 && shortSize * 1.5 < 0.0427 * rate) shortSize *= 2;
-        brief.prepare(shortSize, 4);
+        brief.prepareAnalysis(shortSize, 4);
         bins = stft[0].bins();
         binHz = rate / stft[0].size();
         pM.resize(bins);
@@ -888,16 +888,14 @@ struct Lichen : Effect {
             scopeR[scopeAt] = static_cast<float>(r);
             scopeAt = scopeAt + 1 == kScope ? 0 : scopeAt + 1;
 
-            // The transform: both channels push, a frame is read, both pull.
+            // The transforms, for analysis only: both channels push, and a
+            // frame is read when one is ready.
             const bool ready = stft[0].push(l);
             if (stereoNow) stft[1].push(r);
             if (ready) frame(measuring);
-            stft[0].pull();
-            if (stereoNow) stft[1].pull();
             if (brief.push(0.5 * (l + r)) && measuring &&
                 (!requireCleanWindows || sinceRestart >= brief.size()))
                 centroidFrame();
-            brief.pull();
             if (measuring && seconds[secondAt].frames >= secondLength) nextSecond();
         }
         scopeHead.set(scopeAt);

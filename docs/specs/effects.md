@@ -419,8 +419,8 @@ design. Notes for maintainers:
 - **The audio thread does the analysis**, all of it cheap per sample: the
   true peak's interpolation only near the highest peaks (§9 of the spec),
   K-weighting, sums; two 16k transforms a frame every 85 ms (the runtime's
-  `Stft`, whose output is pulled and dropped) and a 2k one for the
-  centroid. Histograms replace stored history (loudness in tenths of a LU,
+  `Stft`, prepared for analysis only, so no inverse transform runs) and a
+  2k one for the centroid. Histograms replace stored history (loudness in tenths of a LU,
   the centroid in 300 log steps), so a play of any length costs the same.
 - **Readouts as the offline analysis defines them.** The named bands, the
   tilt, the centroid, width, balance, correlation and mono loss follow
