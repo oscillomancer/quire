@@ -199,20 +199,20 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   test and the headless REAPER check;
   JSON patches and the semantic-parameters extension.
   Yarrow, the EQ, is the first written as a DSP script
-  (`plugins/stock/yarrow`) and compiled natively from it, playing the same
+  (`plugins/yarrow`) and compiled natively from it, playing the same
   samples as the script in the player: eight matched zero-latency bands
   (bells, shelves, cuts to 48 dB/oct, notch, tilt) on stereo, mid, side or
   one channel, dynamic bells and shelves, band listening, gain scale, auto
   gain, and an editor of its own with a 32768-point spectrum line. It
   replaced Facet (`com.suppleaudio.eq`). Sundew, the compressor
-  (`plugins/stock/sundew`), is the second: six characters (Clean, Glue,
+  (`plugins/sundew`), is the second: six characters (Clean, Glue,
   Opto, FET, Vari-Mu and the upward Bloom), the feedback ones solved sample
   by sample; an external key, a key high-pass, link, mid/side, lookahead
   (a restart), tempo-locked release, colour, mix and loudness matching; an
   editor with a scrolling history with bars and beats, a transfer curve, a
   gain-change needle and a plot of each character's ballistics. It replaced
   Ballast (`com.suppleaudio.comp`). Treeline, the limiter
-  (`plugins/stock/treeline`), is the third: a true-peak ceiling (a 4×
+  (`plugins/treeline`), is the third: a true-peak ceiling (a 4×
   interpolating detector, within 0.01 dB to 20 kHz), attack along two
   overshoot-free curves blended by how sudden the music is, a hold that
   spans a cycle of a leading bass line, a two-stage release, 4.5 ms of
@@ -222,7 +222,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   level-matched and delta listening, and an editor with a history of what
   was held down, the loudness and the reduction in its sustained and peak
   parts, and plots of what the engine is doing. Gorse, the transient
-  shaper (`plugins/stock/gorse`), is the fourth: attack and sustain the
+  shaper (`plugins/gorse`), is the fourth: attack and sustain the
   same at any level, a detector whose hold spans a cycle of what plays (so
   held tones, bass lines and voices get no gain), a focus on the lows,
   mids or highs, a 1 ms lookahead that lands the gain on each onset, and a
@@ -230,7 +230,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   recent hits over each other at their onsets and shows what each part
   changed, and a history with each hit it found. It replaced Flint
   (`com.suppleaudio.transient`). Hickory, the stereo utility
-  (`plugins/stock/hickory`), is the fifth: gain, mute, polarity, channel
+  (`plugins/hickory`), is the fifth: gain, mute, polarity, channel
   routing (swap, left, right, mono, side), width, balance, bass mono on
   the side only, a DC block and a delay of up to 50 ms to line tracks up,
   every switch crossfaded and the output the input bit for bit at rest;
@@ -238,7 +238,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   editor with an image of where the sound sits and the correlation an
   octave at a time, where bass mono's crossover is dragged. It replaced
   Plumb (`com.suppleaudio.utility`). Sorrel, the gate and expander
-  (`plugins/stock/sorrel`), is the sixth: with lookahead (a restart, 2 ms
+  (`plugins/sorrel`), is the sixth: with lookahead (a restart, 2 ms
   by default) its raised-cosine opening ends a millisecond before the
   level crosses the threshold, so onsets pass whole; it closes at a steady
   rate in dB, eased in, and with Follow at the rate the sound was already
@@ -251,7 +251,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   in, what goes out and what was taken, the histogram, the gain, a
   transfer plot with the hysteresis loop and a sketch of the timing. It
   replaced Sluice (`com.suppleaudio.gate`). Teasel, the saturation
-  (`plugins/stock/teasel`), is the seventh: twelve curves in three
+  (`plugins/teasel`), is the seventh: twelve curves in three
   families (soft, tape, tube, transformer; transistor, diode, clip, fuzz;
   fold, rectify, crush, alias), four of them with memory (tape's
   hysteresis, tube's sag, a transformer core that saturates the bass
@@ -267,7 +267,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   the spectrum in and out with what the curve adds, the curve with where
   the music sits on it, the harmonics, the dynamics and the LFO. It
   replaced Kiln (`com.suppleaudio.drive`). Bracken, the delay
-  (`plugins/stock/bracken`), is the eighth: each side's loop in two halves,
+  (`plugins/bracken`), is the eighth: each side's loop in two halves,
   so every second echo can come early or late with each pair still on the
   beat (groove); stereo, ping-pong or mono; time free or in note values,
   bent like tape or faded to when it changes; tone, diffusion and a pitch
@@ -280,7 +280,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   to come (dragged across for the time, up and down for the feedback) with
   a playhead from the last sound, each echo's tone, the medium and the
   ducking. It replaced Echelon (`com.suppleaudio.delay`). Ghyll, the
-  reverb (`plugins/stock/ghyll`), is the ninth: a room built from its size
+  reverb (`plugins/ghyll`), is the ninth: a room built from its size
   in metres, the materials of its walls, floor and ceiling, and where the
   source and the listener stand. Its reflections are the room's mirror
   images off up to three surfaces, each as late, weak and dark as its path
@@ -297,7 +297,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   the materials, every reflection on a time line (one hovered traces its
   path through the room), and each octave's decay with the modes beneath.
   It replaced Nave (`com.suppleaudio.reverb`). Lichen, the analyzer
-  (`plugins/stock/lichen`), is the tenth: it never writes its output (host-
+  (`plugins/lichen`), is the tenth: it never writes its output (host-
   smoke holds it to a bit-exact pass-through) and reports as read-only
   parameters BS.1770 loudness (momentary, short-term, integrated, range,
   their highest), true and sample peak, PLR, crest, overs, clipped runs,
@@ -310,7 +310,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   vectorscope with correlation by third octave, the pitch classes round
   the circle of fifths, and a health list. It replaced Gauge
   (`com.suppleaudio.analyzer`).
-  Marram, the synthesizer (`plugins/stock/marram`, `docs/specs/marram.md`),
+  Marram, the synthesizer (`plugins/marram`, `docs/specs/marram.md`),
   replaced Orrery (`com.suppleaudio.orrery`, removed); the synth guide
   (`skill/guides/sound-design.md`), the evaluation tasks, the optimizer's
   tests, the MCP demos and the B1 recipe use it. Four
@@ -328,7 +328,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   response with a node to drag, the envelopes and LFOs with handles and
   the newest note's place, the drive curve, the voices playing and the
   route list. It passes the stock checks and the REAPER check.
-  Withy, the chorus (`plugins/stock/withy`), is a stock plugin with no
+  Withy, the chorus (`plugins/withy`), is a stock plugin with no
   predecessor. Five styles lay out its voices: classic (two in anti-phase,
   left and right), dimension (two cross-mixed: the widest, with the
   shallowest combs), ensemble (three a third of a cycle apart), multi (two
@@ -345,7 +345,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   rate and the mono loss; its editor weaves each voice's delay over the
   last 3 s, shows each voice's pitch now, where the voices sit around the
   listener, and the response now in stereo and folded to mono.
-  Pollia, the phaser (`plugins/stock/pollia`), has no predecessor
+  Pollia, the phaser (`plugins/pollia`), has no predecessor
   either: 1 to 24 trapezoidal all-pass stages, stacked or spread over
   up to six octaves, with feedback either way (its added level mostly
   taken back); a sweep by an LFO free or in time (six shapes, a phase, a

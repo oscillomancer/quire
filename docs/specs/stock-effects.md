@@ -79,7 +79,7 @@
 ## 1. EQ — "Yarrow" [`yarrow`]
 
 An eight-band equaliser with zero latency, written as a DSP script
-(ADR-0047: `plugins/stock/yarrow/script/yarrow.cpp`). Built for the
+(ADR-0047: `plugins/yarrow/script/yarrow.cpp`). Built for the
 analysis-driven workflow ("cut 250 Hz by 3 dB, Q 1.2" is one merge patch)
 and for hands: dynamic bands, mid/side placement, band listening, gain
 scaling, and a spectrum analyser that favours bass resolution.
@@ -182,7 +182,7 @@ Weight (auto gain), Mono Bass (side cut), Telephone.
 ## 2. Compressor — "Sundew" [`sundew`]
 
 A compressor with six characters and zero latency unless lookahead is on,
-written as a DSP script (ADR-0047: `plugins/stock/sundew/script/sundew.cpp`).
+written as a DSP script (ADR-0047: `plugins/sundew/script/sundew.cpp`).
 A character is a whole gain cell (detector, law and ballistics), not a
 preset; ratio, attack and release mean the same in each. Main stereo or mono
 in and out, and a key input as wide as the main bus.
@@ -312,7 +312,7 @@ Treeline (§10).
 ## 3. Gate / expander — "Sorrel" [`sorrel`]
 
 A gate that means to leave no trace on what it lets through, written as a
-DSP script (ADR-0047: `plugins/stock/sorrel/script/sorrel.cpp`), with a
+DSP script (ADR-0047: `plugins/sorrel/script/sorrel.cpp`), with a
 key input and readouts that say where its threshold belongs. Main stereo or
 mono in and out, a stereo "Sidechain" input; latency is the lookahead.
 
@@ -397,7 +397,7 @@ Pauses (expand), Amp Hiss, Full Silence, Keyed Chop (external key).
 ## 4. Transient shaper — "Gorse" [`gorse`]
 
 Raises or softens each hit's onset and its tail, the same at any level,
-written as a DSP script (ADR-0047: `plugins/stock/gorse/script/gorse.cpp`).
+written as a DSP script (ADR-0047: `plugins/gorse/script/gorse.cpp`).
 Main stereo or mono in and out, one gain for every channel (stereo-linked),
 a fixed 1 ms lookahead.
 
@@ -504,7 +504,7 @@ clip).
 
 Saturation and distortion from a trace of warmth on a master to folding,
 crushing and tuned feedback, written as a DSP script (ADR-0047:
-`plugins/stock/teasel/script/teasel.cpp`). Main stereo or mono in and out;
+`plugins/teasel/script/teasel.cpp`). Main stereo or mono in and out;
 latency is the oversampler's (0 to 5 samples).
 
 | key | type | range | curve | default |
@@ -656,7 +656,7 @@ Radio.
 ## 6. Delay — "Bracken" [`bracken`]
 
 Echoes from a clean slapback to a smeared, shifting, reversed wash, written
-as a DSP script (ADR-0047: `plugins/stock/bracken/script/bracken.cpp`).
+as a DSP script (ADR-0047: `plugins/bracken/script/bracken.cpp`).
 Main stereo or mono in and out (mono plays as `mono` routing); no latency.
 
 | key | type | range | curve | default |
@@ -798,7 +798,7 @@ Centre Echo.
 ## 7. Reverb — "Ghyll" [`ghyll`]
 
 A real room built from its walls, written as a DSP script (ADR-0047:
-`plugins/stock/ghyll/script/ghyll.cpp`). The reflections, the decay of
+`plugins/ghyll/script/ghyll.cpp`). The reflections, the decay of
 each octave, the room's modes and the level all follow from the room's
 size, its surfaces and the two places in it. Main stereo or mono in and
 out; no latency. The dry signal is the direct sound: at `mix` 50 % the room
@@ -931,7 +931,7 @@ Measured (dev build, 48 kHz):
 ## 8. Utility — "Hickory" [`hickory`]
 
 The plain stereo tool, written as a DSP script (ADR-0047:
-`plugins/stock/hickory/script/hickory.cpp`): level, polarity, routing,
+`plugins/hickory/script/hickory.cpp`): level, polarity, routing,
 width, balance, bass mono, a DC block and a delay to line tracks up, with
 readouts an agent can check a render against. Main stereo or mono in and
 out, zero latency. On a mono bus only gain, mute, `invert_left`, the DC
@@ -992,7 +992,7 @@ DC Clean.
 ## 9. Analyzer — "Lichen" [`lichen`]
 
 An analyser for people and agents, written as a DSP script (ADR-0047:
-`plugins/stock/lichen/script/lichen.cpp`). The audio code reads the block
+`plugins/lichen/script/lichen.cpp`). The audio code reads the block
 and never writes it, so every sample leaves as it came (host-smoke checks it
 bit for bit as a transparent product, float and double, in place and not).
 Main stereo or mono; no latency, no tail. Its measurements are read-only
@@ -1090,7 +1090,7 @@ parameters, so a host, the editor and an agent (`fx.meters`, `dsp.test`'s
 ## 10. Limiter — "Treeline" [`treeline`]
 
 A true-peak limiter for the end of a mix, written as a DSP script
-(ADR-0047: `plugins/stock/treeline/script/treeline.cpp`). Three controls
+(ADR-0047: `plugins/treeline/script/treeline.cpp`). Three controls
 shape the sound; attack, hold and release adapt to the music. Main stereo
 or mono in and out, one gain for every channel (stereo-linked), fixed
 latency.
@@ -1207,7 +1207,7 @@ Peak Catcher (0, −3, 50 ms).
 
 Voices a few milliseconds late, each swaying sharp and flat, from a still
 widening to a choir of eight and a vibrato, written as a DSP script
-(ADR-0047: `plugins/stock/withy/script/withy.cpp`). Main stereo or mono in
+(ADR-0047: `plugins/withy/script/withy.cpp`). Main stereo or mono in
 and out (mono hears each voice's two sides summed); no latency.
 
 | key | type | range | curve | default |
@@ -1355,7 +1355,7 @@ Warped Record, Flanged Swirl.
 Notches swept through the sound, from a slow four-stage swirl to a
 resonant sweep, a photocell vibe's throb, an envelope phaser and a barber
 pole whose notches rise or fall forever, written as a DSP script
-(ADR-0047: `plugins/stock/pollia/script/pollia.cpp`). Main stereo or mono
+(ADR-0047: `plugins/pollia/script/pollia.cpp`). Main stereo or mono
 in and out; no latency.
 
 | key | type | range | curve | default |

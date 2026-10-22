@@ -4,9 +4,9 @@
 synth guide (`skill/guides/sound-design.md`) and the evaluation tasks use
 it; Orrery, the hand-written synthesizer it replaced, was removed on
 2026-10-21.
-**Plugin:** `plugins/stock/marram`, CLAP id `com.suppleaudio.marram`,
+**Plugin:** `plugins/marram`, CLAP id `com.suppleaudio.marram`,
 instrument. A DSP script compiled natively (ADR-0047),
-`plugins/stock/marram/script/marram.cpp`.
+`plugins/marram/script/marram.cpp`.
 
 Marram rebuilds Orrery as a script. Orrery's patch is a structure (slots
 that exist or not, a route table); a script has a fixed list of

@@ -11,19 +11,19 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 
 | id (dir, code, CLAP id suffix) | display name | CLAP id | State magic | AU subtype | Features |
 |---|---|---|---|---|---|
-| `yarrow` (`plugins/stock/yarrow`) | Yarrow | `com.suppleaudio.yarrow` | `LzjE` (the player's for the id) | `Yarw` | audio-effect, equalizer |
-| `sundew` (`plugins/stock/sundew`) | Sundew | `com.suppleaudio.sundew` | `pqwP` (the player's for the id) | `Sndw` | audio-effect, compressor |
-| `treeline` (`plugins/stock/treeline`) | Treeline | `com.suppleaudio.treeline` | `tdOY` (the player's for the id) | `Trln` | audio-effect, limiter |
-| `gorse` (`plugins/stock/gorse`) | Gorse | `com.suppleaudio.gorse` | `dEQG` (the player's for the id) | `Gors` | audio-effect, transient-shaper |
-| `hickory` (`plugins/stock/hickory`) | Hickory | `com.suppleaudio.hickory` | `iEKh` (the player's for the id) | `Hkry` | audio-effect, utility |
-| `sorrel` (`plugins/stock/sorrel`) | Sorrel | `com.suppleaudio.sorrel` | `sTMn` (the player's for the id) | `Sorl` | audio-effect, gate |
-| `teasel` (`plugins/stock/teasel`) | Teasel | `com.suppleaudio.teasel` | `BLWw` (the player's for the id) | `Tesl` | audio-effect, distortion |
-| `bracken` (`plugins/stock/bracken`) | Bracken | `com.suppleaudio.bracken` | `PzKJ` (the player's for the id) | `Brkn` | audio-effect, delay |
-| `ghyll` (`plugins/stock/ghyll`) | Ghyll | `com.suppleaudio.ghyll` | `DIow` (the player's for the id) | `Ghyl` | audio-effect, reverb |
-| `lichen` (`plugins/stock/lichen`) | Lichen | `com.suppleaudio.lichen` | `cwHJ` (the player's for the id) | `Lchn` | audio-effect, analyzer |
-| `marram` (`plugins/stock/marram`) | Marram | `com.suppleaudio.marram` | `XZXx` (the player's for the id) | `Mrrm` | instrument, synthesizer |
-| `withy` (`plugins/stock/withy`) | Withy | `com.suppleaudio.withy` | `aSho` (the player's for the id) | `Wthy` | audio-effect, chorus |
-| `pollia` (`plugins/stock/pollia`) | Pollia | `com.suppleaudio.pollia` | `EGJQ` (the player's for the id) | `Poll` | audio-effect, phaser |
+| `yarrow` (`plugins/yarrow`) | Yarrow | `com.suppleaudio.yarrow` | `LzjE` (the player's for the id) | `Yarw` | audio-effect, equalizer |
+| `sundew` (`plugins/sundew`) | Sundew | `com.suppleaudio.sundew` | `pqwP` (the player's for the id) | `Sndw` | audio-effect, compressor |
+| `treeline` (`plugins/treeline`) | Treeline | `com.suppleaudio.treeline` | `tdOY` (the player's for the id) | `Trln` | audio-effect, limiter |
+| `gorse` (`plugins/gorse`) | Gorse | `com.suppleaudio.gorse` | `dEQG` (the player's for the id) | `Gors` | audio-effect, transient-shaper |
+| `hickory` (`plugins/hickory`) | Hickory | `com.suppleaudio.hickory` | `iEKh` (the player's for the id) | `Hkry` | audio-effect, utility |
+| `sorrel` (`plugins/sorrel`) | Sorrel | `com.suppleaudio.sorrel` | `sTMn` (the player's for the id) | `Sorl` | audio-effect, gate |
+| `teasel` (`plugins/teasel`) | Teasel | `com.suppleaudio.teasel` | `BLWw` (the player's for the id) | `Tesl` | audio-effect, distortion |
+| `bracken` (`plugins/bracken`) | Bracken | `com.suppleaudio.bracken` | `PzKJ` (the player's for the id) | `Brkn` | audio-effect, delay |
+| `ghyll` (`plugins/ghyll`) | Ghyll | `com.suppleaudio.ghyll` | `DIow` (the player's for the id) | `Ghyl` | audio-effect, reverb |
+| `lichen` (`plugins/lichen`) | Lichen | `com.suppleaudio.lichen` | `cwHJ` (the player's for the id) | `Lchn` | audio-effect, analyzer |
+| `marram` (`plugins/marram`) | Marram | `com.suppleaudio.marram` | `XZXx` (the player's for the id) | `Mrrm` | instrument, synthesizer |
+| `withy` (`plugins/withy`) | Withy | `com.suppleaudio.withy` | `aSho` (the player's for the id) | `Wthy` | audio-effect, chorus |
+| `pollia` (`plugins/pollia`) | Pollia | `com.suppleaudio.pollia` | `EGJQ` (the player's for the id) | `Poll` | audio-effect, phaser |
 
 Marram is an instrument; its spec, implementation notes included, is
 `docs/specs/marram.md`.
@@ -31,7 +31,7 @@ Marram is an instrument; its spec, implementation notes included, is
 ## 1. The shape every effect shares
 
 (2026-10-20) No stock effect has this shape any more: each is a DSP script
-(ADR-0047; `plugins/stock/README.md` says how to change one). This section
+(ADR-0047; `plugins/README.md` says how to change one). This section
 records the hand-written design they replaced. Orrery, the synthesizer,
 was the last plugin built this way (through `SemanticAdapter`, after
 `FlatSemantic` went with its last user); it and `plugins/common`'s plugin
@@ -173,7 +173,7 @@ In the plugin copy (as Orrery): `host_smoke`, `editor_input`, the template's hos
 
 ## 2. EQ — Yarrow [`yarrow`] (`stock-effects.md` §1)
 
-A DSP script (ADR-0047), `plugins/stock/yarrow/script/yarrow.cpp`; the
+A DSP script (ADR-0047), `plugins/yarrow/script/yarrow.cpp`; the
 spec section holds the designs and measured accuracy. Notes for maintainers:
 
 - **Audio.** `update()` reads the parameters into eight `Setting`s and, when
@@ -203,7 +203,7 @@ spec section holds the designs and measured accuracy. Notes for maintainers:
 
 ## 3. Compressor — Sundew [`sundew`] (`stock-effects.md` §2)
 
-A DSP script (ADR-0047), `plugins/stock/sundew/script/sundew.cpp`; the
+A DSP script (ADR-0047), `plugins/sundew/script/sundew.cpp`; the
 spec section holds the laws and ballistics. Notes for maintainers:
 
 - **Audio.** `Law` holds a character's static law and its one-pole steps at
@@ -242,7 +242,7 @@ spec section holds the laws and ballistics. Notes for maintainers:
 
 ## 12. Limiter — Treeline [`treeline`] (`stock-effects.md` §10)
 
-A DSP script (ADR-0047), `plugins/stock/treeline/script/treeline.cpp`; the
+A DSP script (ADR-0047), `plugins/treeline/script/treeline.cpp`; the
 spec section holds the detector, the gain path and the loudness meters.
 Notes for maintainers:
 
@@ -296,7 +296,7 @@ Notes for maintainers:
 
 ## 9. Transient shaper — Gorse [`gorse`] (`stock-effects.md` §4)
 
-A DSP script (ADR-0047), `plugins/stock/gorse/script/gorse.cpp`; the spec
+A DSP script (ADR-0047), `plugins/gorse/script/gorse.cpp`; the spec
 section holds the detector, the law and the hit view. It keeps Flint's
 design (a held peak, fast and slow followers in dB, one part at a time) and
 changes what Flint got wrong in use. Notes for maintainers:
@@ -315,7 +315,7 @@ changes what Flint got wrong in use. Notes for maintainers:
   decaying 78 dB/s, sustain −6 dB now gives about −4 dB at default
   settings. The slow follower stays within 30 dB of the fast one
   (`kSpread`). To watch the law at work, have a scratch copy
-  (`plugins/stock/README.md`) write o and fast − slow to its output in
+  (`plugins/README.md`) write o and fast − slow to its output in
   place of the audio, and render material through it.
 - **Lookahead.** Flint's 1 ms one-pole let the first millisecond through:
   an attack cut missed the click it was meant to soften. Two boxes ramp the
@@ -348,7 +348,7 @@ changes what Flint got wrong in use. Notes for maintainers:
 
 ## 4. Utility — Hickory [`hickory`] (`stock-effects.md` §8)
 
-A DSP script (ADR-0047), `plugins/stock/hickory/script/hickory.cpp`. It
+A DSP script (ADR-0047), `plugins/hickory/script/hickory.cpp`. It
 keeps Plumb's controls and laws (the linear balance, bass mono as a
 Linkwitz–Riley high-pass on the side only, bit-exact at rest) and changes
 the rest. Notes for maintainers:
@@ -401,7 +401,7 @@ the rest. Notes for maintainers:
 
 ## 5. Analyzer — Lichen [`lichen`] (`stock-effects.md` §9)
 
-A DSP script (ADR-0047), `plugins/stock/lichen/script/lichen.cpp`. It
+A DSP script (ADR-0047), `plugins/lichen/script/lichen.cpp`. It
 replaced Gauge (`com.suppleaudio.analyzer`, a template plugin with a
 measurement worker and the `get_telemetry` extension member) with a new
 design. Notes for maintainers:
@@ -437,7 +437,7 @@ design. Notes for maintainers:
 
 ## 7. Saturation — Teasel [`teasel`] (`stock-effects.md` §5)
 
-A DSP script (ADR-0047), `plugins/stock/teasel/script/teasel.cpp`. It
+A DSP script (ADR-0047), `plugins/teasel/script/teasel.cpp`. It
 replaced Kiln (`com.suppleaudio.drive`) with a new design. Notes for
 maintainers:
 
@@ -486,7 +486,7 @@ maintainers:
 
 ## 8. Gate / expander — Sorrel [`sorrel`] (`stock-effects.md` §3)
 
-A DSP script (ADR-0047), `plugins/stock/sorrel/script/sorrel.cpp`. It
+A DSP script (ADR-0047), `plugins/sorrel/script/sorrel.cpp`. It
 replaced Sluice (`com.suppleaudio.gate`) with a new design. Notes for
 maintainers:
 
@@ -536,7 +536,7 @@ maintainers:
 
 ## 10. Delay — Bracken [`bracken`] (`stock-effects.md` §6)
 
-A DSP script (ADR-0047), `plugins/stock/bracken/script/bracken.cpp`. It
+A DSP script (ADR-0047), `plugins/bracken/script/bracken.cpp`. It
 replaced Echelon (`com.suppleaudio.delay`) with a new design. Notes for
 maintainers:
 
@@ -579,7 +579,7 @@ maintainers:
 
 ## 11. Reverb — Ghyll [`ghyll`] (`stock-effects.md` §7)
 
-A DSP script (ADR-0047), `plugins/stock/ghyll/script/ghyll.cpp`. It
+A DSP script (ADR-0047), `plugins/ghyll/script/ghyll.cpp`. It
 replaced Nave (`com.suppleaudio.reverb`) with a new design. Notes for
 maintainers:
 
@@ -615,7 +615,7 @@ maintainers:
 
 ## 13. Chorus — Withy [`withy`] (`stock-effects.md` §11)
 
-A DSP script (ADR-0047), `plugins/stock/withy/script/withy.cpp`, with no
+A DSP script (ADR-0047), `plugins/withy/script/withy.cpp`, with no
 predecessor. Notes for maintainers:
 
 - **The interpolator is the sound.** A modulated read crosses samples
@@ -654,7 +654,7 @@ predecessor. Notes for maintainers:
 
 ## 14. Phaser — Pollia [`pollia`] (`stock-effects.md` §12)
 
-A DSP script (ADR-0047), `plugins/stock/pollia/script/pollia.cpp`. A new
+A DSP script (ADR-0047), `plugins/pollia/script/pollia.cpp`. A new
 stock plugin with no predecessor. Notes for maintainers:
 
 - **Trapezoidal stages.** Each all-pass is 2·lp − x of a one-pole

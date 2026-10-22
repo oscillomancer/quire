@@ -5,17 +5,16 @@ specific to `plugins/`.
 
 ## Layout
 
-Every stock plugin is a DSP script (ADR-0047) in `stock/`: one folder each,
+Every stock plugin is a DSP script (ADR-0047) in a folder of its own here,
 holding the script and the product folder a source export makes from it,
-built from `template/` with `suite/`. `stock/README.md` says how to change
-one. Yarrow (`stock/yarrow`, the EQ), Sundew (`stock/sundew`, the
-compressor), Treeline (`stock/treeline`, the limiter), Gorse
-(`stock/gorse`, the transient shaper), Hickory (`stock/hickory`, the stereo
-utility), Sorrel (`stock/sorrel`, the gate), Teasel (`stock/teasel`, the
-saturation), Bracken (`stock/bracken`, the delay), Ghyll (`stock/ghyll`,
-the reverb), Lichen (`stock/lichen`, the analyzer), Marram
-(`stock/marram`, the synthesizer), Withy (`stock/withy`, the chorus) and
-Pollia (`stock/pollia`, the phaser). Orrery, the hand-written synthesizer
+built from `template/` with `suite/`. `README.md` says how to change one.
+Yarrow (`yarrow`, the EQ), Sundew (`sundew`, the compressor), Treeline
+(`treeline`, the limiter), Gorse (`gorse`, the transient shaper), Hickory
+(`hickory`, the stereo utility), Sorrel (`sorrel`, the gate), Teasel
+(`teasel`, the saturation), Bracken (`bracken`, the delay), Ghyll
+(`ghyll`, the reverb), Lichen (`lichen`, the analyzer), Marram (`marram`,
+the synthesizer), Withy (`withy`, the chorus) and Pollia (`pollia`, the
+phaser). Orrery, the hand-written synthesizer
 Marram replaced, was removed on 2026-10-21; git history has it.
 
 `common/` holds the shared semantic-parameters extension

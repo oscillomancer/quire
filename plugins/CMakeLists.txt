@@ -161,12 +161,12 @@ if(SUPPLE_BUILD_PLUGINS)
     set_tests_properties(plugin.export.source PROPERTIES LABELS slow TIMEOUT 3600 RUN_SERIAL TRUE)
   endif()
 
-  # The stock plugins written as DSP scripts (plugins/stock/README.md): each
+  # The stock plugins written as DSP scripts (plugins/README.md): each
   # folder is a source export's product folder holding its script, built
   # from the template like the player, with the checks every stock plugin
   # has. supple_add_stock_script(<folder> <artifact> <CLAP id>).
   function(supple_add_stock_script name artifact id)
-    supple_add_template_product(${name} stock/${name} "${artifact}")
+    supple_add_template_product(${name} ${name} "${artifact}")
     if(SUPPLE_BUILD_TESTS)
       set(clap "${CMAKE_BINARY_DIR}/plugins/clap/${artifact}.clap")
       add_test(NAME plugin.${name}.reset COMMAND clap-reset-check "${clap}")
@@ -182,15 +182,15 @@ if(SUPPLE_BUILD_PLUGINS)
       # Catalog.cpp, the folder's one generated file, still matches the script.
       add_test(NAME plugin.${name}.catalog
         COMMAND ${CMAKE_COMMAND} -DSANDBOX=$<TARGET_FILE:${PRODUCT_SLUG}-sandbox> -DNAME=${name}
-                -DDIR=${CMAKE_CURRENT_SOURCE_DIR}/stock/${name}
+                -DDIR=${CMAKE_CURRENT_SOURCE_DIR}/${name}
                 -DWORK=${CMAKE_BINARY_DIR}/plugins/stock-test/${name}-catalog
-                -P ${CMAKE_CURRENT_SOURCE_DIR}/stock/catalog.cmake)
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/catalog.cmake)
       # The plugin's own measurements, where it has them.
-      if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/stock/${name}/response.cmake")
+      if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${name}/response.cmake")
         add_test(NAME plugin.${name}.response
           COMMAND ${CMAKE_COMMAND} -DSANDBOX=$<TARGET_FILE:${PRODUCT_SLUG}-sandbox> -DPLUGIN=${clap}
                   -DWORK=${CMAKE_BINARY_DIR}/plugins/stock-test/${name}-response
-                  -P ${CMAKE_CURRENT_SOURCE_DIR}/stock/${name}/response.cmake)
+                  -P ${CMAKE_CURRENT_SOURCE_DIR}/${name}/response.cmake)
       endif()
       if(UNIX AND NOT APPLE)
         add_test(NAME plugin.${name}.unload COMMAND clap-unload-probe "${clap}")

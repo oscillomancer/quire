@@ -76,7 +76,9 @@ plugins ship as CLAP (and VST3, AU) files of their own that other hosts load.
    and the thirteenth Pollia, the phaser (`com.suppleaudio.pollia`), stock
    plugins with no predecessor; a withy is a willow rod woven into baskets,
    and the marble berry Pollia condensata is blue by interference, as a
-   phaser's notches are.
+   phaser's notches are. (2026-10-22) The folders moved up a level, from
+   `plugins/stock/<name>/` to `plugins/<name>/`, beside `common`, `suite`
+   and `template`, once the template-built stock plugins were all gone.
 6. **Names and look.** A stock plugin is named after a plant or something
    else of the natural world, not after its effect type (Yarrow, the EQ;
    Sundew, the compressor; Treeline, the limiter; Gorse, the transient
