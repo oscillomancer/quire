@@ -61,6 +61,26 @@ double binAt(double ms) {
 
 // --- the gain path -----------------------------------------------------------------------
 
+// Every delay here is a fixed whole number of samples. A ring reads that
+// sample directly, without the fractional delay's unused interpolation.
+struct SampleDelay {
+    Buffer<double> ring;
+    int length = 1;
+    int at = 0;
+
+    void prepare(int samples) {
+        length = samples + 1;
+        ring.resize(length);
+        ring.fill(0.0);
+        at = 0;
+    }
+    double step(double x) {
+        ring[at] = x;
+        at = at + 1 == length ? 0 : at + 1;
+        return ring[at];
+    }
+};
+
 // A moving average over the last `length` values: one box of a cascade.
 struct Box {
     Buffer<double> ring;
@@ -250,8 +270,8 @@ struct Gorse : Effect {
     double lowPower = 0.0, allPower = 0.0, kPower = 0.0, lowPeriod = 0.0;
     int sinceCross = 0, lowHold = 0, lengthHold = 0;
     bool lowArmed = false;
-    Array<DelayLine, 2> delay, plain;
-    DelayLine partDelay;
+    Array<SampleDelay, 2> delay, plain;
+    SampleDelay partDelay;
     Array<Oversampler, 2> over;
     int focusNow = 0;
     double previous = 0.0, previous2 = 0.0;
@@ -316,18 +336,15 @@ struct Gorse : Effect {
         for (int c = 0; c < 2; ++c) {
             over[c].prepare(4);
             over[c].clear();
-            delay[c].prepare(look + 8);
-            delay[c].clear();
+            delay[c].prepare(look);
             keyA[c].clear();
             keyB[c].clear();
         }
         overDelay = over[0].latency();
         for (int c = 0; c < 2; ++c) {
-            plain[c].prepare(overDelay + 8);
-            plain[c].clear();
+            plain[c].prepare(overDelay);
         }
-        partDelay.prepare(look + 8);
-        partDelay.clear();
+        partDelay.prepare(look);
         setLatency(look + overDelay);
         setFocus(focus.index());
         clipStep = 1.0 / (0.01 * rate);
@@ -523,8 +540,7 @@ struct Gorse : Effect {
             const double o = onsetness(peak, sensitivity.at(i));
             const double want = o > 0.0 ? attack.at(i) * o : -sustain.at(i) * o;
             const double gainDb = rampB.step(rampA.step(want));
-            partDelay.push(o);
-            const double part = partDelay.read(look);
+            const double part = partDelay.step(o);
 
             // A hit, for the view: an onset the shaping treats as half of
             // one or more (so what the view shows follows sensitivity).
@@ -538,19 +554,15 @@ struct Gorse : Effect {
             sinceHit = min(sinceHit + 1, minGap);
 
             // The audio, delayed to meet its gain; mixed, then the clip.
-            delay[0].push(l);
-            delay[1].push(r);
-            const double dl = delay[0].read(look);
-            const double dr = delay[1].read(look);
+            const double dl = delay[0].step(l);
+            const double dr = delay[1].step(r);
             const double gain = dbToGain(gainDb);
             const double m = mix.at(i), out = dbToGain(output.at(i));
             const double ml = dl + m * (dl * gain - dl);
             const double mr = dr + m * (dr * gain - dr);
             const double sl = ml * out, sr = mr * out;
-            plain[0].push(sl);
-            plain[1].push(sr);
-            double yl = plain[0].read(overDelay);
-            double yr = plain[1].read(overDelay);
+            double yl = plain[0].step(sl);
+            double yr = plain[1].step(sr);
             // The clip fades in and out over 10 ms; switched off, it rests,
             // and starts afresh as it fades back in.
             if (clipOn && clipMix == 0.0) {
