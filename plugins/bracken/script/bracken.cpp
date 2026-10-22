@@ -124,6 +124,25 @@ double hashUnit(int n) {
     return x / 32760.0 - 1.0;
 }
 
+// The random endpoints stay fixed for a whole cycle. Only the interpolation
+// moves each sample; both sides keep the same hashes as a direct lookup.
+struct CycleNoise {
+    int cycle = -1;
+    Array<double, 2> from, to;
+
+    double value(int side, int n, int stride, double phase) {
+        if (n != cycle) {
+            cycle = n;
+            for (int c = 0; c < 2; ++c) {
+                from[c] = hashUnit(n * stride + c);
+                to[c] = hashUnit(n * stride + c + stride);
+            }
+        }
+        const double a = from[side], b = to[side];
+        return a + (b - a) * (0.5 - 0.5 * cos(pi * phase));
+    }
+};
+
 // --- the loop's parts --------------------------------------------------------------------
 
 // A line of the past. read(d) is d samples before the sample about to be
@@ -310,6 +329,23 @@ struct Tone {
     double cleanBand = 0.0, step = 0.0;            // clean's filter's share; its quantum (0: none)
     double tapeCoef = 1.0;                         // tape's one-pole
     double driveGain = 1.0, driveBlend = 0.0;
+    double atAge = -1.0, atDrive = -1.0;
+
+    // Reuse exact values only: a smoothed control still follows every sample.
+    void configure(double age, double drive, double rate) {
+        if (age != atAge) {
+            atAge = age;
+            cleanBand = clamp(age * 4.0, 0.0, 1.0);
+            const double bits = cleanBits(age);
+            step = bits < 23.5 ? 1.0 / exp2(bits - 1.0) : 0.0;
+            tapeCoef = 1.0 - exp(-twoPi * tapeHz(age) / rate);
+        }
+        if (drive != atDrive) {
+            atDrive = drive;
+            driveGain = dbToGain(drive);
+            driveBlend = clamp(drive, 0.0, 1.0);
+        }
+    }
 };
 
 // One pass through the loop's colour. The media that are silent are cleared,
@@ -755,6 +791,7 @@ struct Bracken : Effect {
     // Modulation: a phase per side, and tape's own wow and flutter.
     double modPhase = 0.0, wowPhase = 0.0, flutterPhase = 0.0;
     int modCycle = 0, wowCycle = 0;
+    CycleNoise modNoise, wowNoise;
 
     // The filters' designs: what they were last designed for.
     double atLow = -1.0, atHigh = -1.0, atClean = -1.0;
@@ -781,6 +818,8 @@ struct Bracken : Effect {
 
     void prepare() {
         rate = sampleRate();
+        tone.atAge = -1.0;
+        tone.atDrive = -1.0;
         const int length = ceilToInt((kLongest + kSliceLongest + 2.0 * kModReach + 0.05) * rate);
         diffuseSum = 0.0;
         for (int k = 0; k < 4; ++k) {
@@ -830,6 +869,8 @@ struct Bracken : Effect {
         flutterPhase = 0.0;
         modCycle = 0;
         wowCycle = 0;
+        modNoise.cycle = -1;
+        wowNoise.cycle = -1;
         duckEnv = 0.0;
         duckDb = 0.0;
         duckGain = 1.0;
@@ -988,7 +1029,7 @@ struct Bracken : Effect {
     }
 
     // The modulation at this sample for a side, in samples, before its cap.
-    double wobble(int side, double depth, double wear, int m) const {
+    double wobble(int side, double depth, double wear, int m) {
         double ph = modPhase + (side == 1 ? 0.25 : 0.0);
         if (ph >= 1.0) ph -= 1.0;
         double v = 0.0;
@@ -997,16 +1038,14 @@ struct Bracken : Effect {
         } else if (m == 1) {
             // Tape: a sine with a drifting random part, and age's own wow and
             // flutter on top.
-            const double a = hashUnit(modCycle * 2 + side), b = hashUnit(modCycle * 2 + side + 2);
-            const double drift = a + (b - a) * (0.5 - 0.5 * cos(pi * modPhase));
+            const double drift = modNoise.value(side, modCycle, 2, modPhase);
             v = 0.7 * sin(twoPi * ph) + 0.3 * drift;
         } else {
             v = sin(twoPi * ph);
         }
         double s = depth * kModReach * v;
         if (m == 1) {
-            const double wa = hashUnit(wowCycle * 3 + side), wb = hashUnit(wowCycle * 3 + side + 3);
-            const double wow = wa + (wb - wa) * (0.5 - 0.5 * cos(pi * wowPhase));
+            const double wow = wowNoise.value(side, wowCycle, 3, wowPhase);
             s += wear * (0.00035 * wow + 0.00006 * sin(twoPi * (flutterPhase + 0.3 * side)));
         }
         return s * rate;
@@ -1087,13 +1126,7 @@ struct Bracken : Effect {
             tone.analog = analogW;
             tone.lowOn = lowW;
             tone.highOn = highW;
-            tone.cleanBand = clamp(ag * 4.0, 0.0, 1.0);
-            const double bits = cleanBits(ag);
-            tone.step = bits < 23.5 ? 1.0 / exp2(bits - 1.0) : 0.0;
-            tone.tapeCoef = 1.0 - exp(-twoPi * tapeHz(ag) / rate);
-            const double dr = drive.at(i);
-            tone.driveGain = dbToGain(dr);
-            tone.driveBlend = clamp(dr, 0.0, 1.0);
+            tone.configure(ag, drive.at(i), rate);
 
             // Modulation.
             const double depth = modulation.at(i) * (1.0 - frozenW);
