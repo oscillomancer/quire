@@ -373,6 +373,7 @@ struct Voice {
     Array<double, 32> fb2;
     Array<double, 32> panL;
     Array<double, 32> panR;
+    Array<double, 32> panAt;   // pan used to compute each copy's gains
     Array<double, 32> wander;  // each copy's own drift, a standard normal
     Array<double, 8> wrapped;  // where Osc 1's copies wrapped, for sync; -1 not
 
@@ -417,6 +418,9 @@ struct Voice {
     double ampLStep = 0.0;
     double ampR = 0.0;
     double ampRStep = 0.0;
+    double ampPanAt = 2.0;  // outside the pan's range until first computed
+    double ampCos = 0.0;
+    double ampSin = 0.0;
     double velocity = 0.0;
     bool sounding = false;
     bool fresh = false;
@@ -1748,6 +1752,7 @@ struct Marram : Instrument {
                 s.gainStep[o] = 0.0;
             }
             s.wrapped.fill(-1.0);
+            s.panAt.fill(2.0);
             s.amp.kill();
             s.mod.kill();
             s.env3.kill();
@@ -1896,9 +1901,12 @@ struct Marram : Instrument {
                 }
                 const double p = clamp(m.pan + (stacked ? spreadAt[u] : 0.0), -1.0, 1.0);
                 if (p != 0.0) centred = false;
-                const double a = (p + 1.0) * 0.25 * pi;
-                s.panL[x] = cos(a) * sqrt(2.0);
-                s.panR[x] = sin(a) * sqrt(2.0);
+                if (s.panAt[x] != p) {
+                    const double a = (p + 1.0) * 0.25 * pi;
+                    s.panL[x] = cos(a) * sqrt(2.0);
+                    s.panR[x] = sin(a) * sqrt(2.0);
+                    s.panAt[x] = p;
+                }
             }
             const double g = m.gain * (stacked ? copyGain : 1.0);
             if (snap) {
@@ -1975,9 +1983,14 @@ struct Marram : Instrument {
         const double level =
             ampEnv * dbToGain(velDb + ampLevel.forVoice(v)) * voiceVolume(v) * kVoiceGain;
         const double p = clamp(ampPan.forVoice(v) + (voicePan(v) - 0.5) * 2.0, -1.0, 1.0);
-        const double a = (p + 1.0) * 0.25 * pi;
-        const double l = level * cos(a) * sqrt(2.0);
-        const double rr = level * sin(a) * sqrt(2.0);
+        if (s.ampPanAt != p) {
+            const double a = (p + 1.0) * 0.25 * pi;
+            s.ampCos = cos(a);
+            s.ampSin = sin(a);
+            s.ampPanAt = p;
+        }
+        const double l = level * s.ampCos * sqrt(2.0);
+        const double rr = level * s.ampSin * sqrt(2.0);
         if (snap) {
             s.ampL = 0.0;
             s.ampR = 0.0;
