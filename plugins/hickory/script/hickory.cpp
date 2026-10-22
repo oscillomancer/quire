@@ -185,7 +185,9 @@ struct Hickory : Effect {
     Array<DelayLine, 2> line;
     int delayWant = 0, delayNow = 0, delayOld = 0;
     double delayMix = 1.0, delayStep = 0.001;
+    double gainDb = 0.0, gainLinear = 1.0;
     bool unplayed = true;
+    bool stereoBus = true;  // conservative until the first block supplies its layout
 
     // The meters: 3 s in chunks of 100 ms.
     int chunkLength = 4800, chunkAt = 0, chunkHead = 0, chunksFilled = 0;
@@ -226,6 +228,8 @@ struct Hickory : Effect {
             bandR[k].bandpass(hz, 1.414);
         }
         unplayed = true;
+        delayWant = clamp(roundToInt(delay * 0.001 * rate), 0, roundToInt(0.05 * rate));
+        reportTail();
     }
 
     void update() {
@@ -243,15 +247,31 @@ struct Hickory : Effect {
         dcMix.set(dcBlock.on() ? 1.0 : 0.0, fade, snap);
         monoMix.set(bassMono.on() ? 1.0 : 0.0, fade, snap);
         muted.set(mute.on() ? 0.0 : 1.0, fade, snap);
-        const double hz = min(monoBelow.value(), 0.45 * rate);
-        sideA.highpass(hz, 0.7071);
-        sideB.highpass(hz, 0.7071);
+        if (snap || monoBelow.changed()) {
+            const double hz = min(monoBelow.value(), 0.45 * rate);
+            sideA.highpass(hz, 0.7071);
+            sideB.highpass(hz, 0.7071);
+        }
         delayWant = clamp(roundToInt(delay * 0.001 * rate), 0, roundToInt(0.05 * rate));
         if (snap) {
             delayNow = delayWant;
             delayOld = delayWant;
             delayMix = 1.0;
         }
+        reportTail();
+    }
+
+    void reportTail() {
+        // Keep both audible delay taps, and a pending change during a crossfade.
+        int samples = max(delayWant, delayNow);
+        if (delayMix < 1.0) samples = max(samples, delayOld);
+        // At maximum gain and width, a full-scale impulse is below -100 dBFS
+        // by 438 ms (5 Hz DC block) / 102 ms (30 Hz bass mono) at 8 kHz.
+        // These bounds also leave margin for sustained input and filter cascades.
+        double seconds = dcBlock.on() || dcMix.value != 0.0 ? 0.75 : 0.0;
+        if (stereoBus && (bassMono.on() || monoMix.value != 0.0))
+            seconds += 5.0 / min(monoBelow.value(), 0.45 * rate);
+        setTail(samples + ceilToInt(seconds * rate));
     }
 
     // The chunk just ended joins the window, and the meters read the window.
@@ -294,6 +314,7 @@ struct Hickory : Effect {
     void process(Block& io) {
         if (unplayed) unplayed = false;
         const bool stereo = io.channels > 1;
+        stereoBus = stereo;
         for (int i = 0; i < io.frames; ++i) {
             const double inL = io[0][i];
             const double inR = stereo ? io[1][i] : inL;
@@ -370,7 +391,12 @@ struct Hickory : Effect {
             }
 
             const double db = gain.at(i);
-            const double g = (db <= -60.0 ? 0.0 : dbToGain(db)) * muted.next();
+            // Reuse the exact conversion once the smoothed gain holds still.
+            if (db != gainDb) {
+                gainDb = db;
+                gainLinear = db <= -60.0 ? 0.0 : dbToGain(db);
+            }
+            const double g = gainLinear * muted.next();
             if (g != 1.0) {
                 x *= g;
                 y *= g;
@@ -413,6 +439,7 @@ struct Hickory : Effect {
             }
         }
 
+        reportTail();
         outputPeak.set(mPeak);
         correlation.set(mCorrelation);
         levelBalance.set(mBalance);

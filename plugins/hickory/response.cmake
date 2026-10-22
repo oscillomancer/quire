@@ -76,3 +76,23 @@ expect("{\"channels\":\"mono\",\"width\":0,\"bass_mono\":true}" 1000 0)
 expect("{\"invert_left\":true,\"invert_right\":true}" 1000 0)
 # The DC block's 12 dB/oct at 5 Hz: 0.02 dB down at 20 Hz.
 expect("{\"dc_block\":true}" 20 -0.02)
+
+# The 50 ms delay must retain the second half of a 100 ms input, rather
+# than letting the host stop at its musical end on a reported zero tail.
+execute_process(
+    COMMAND ${CMAKE_COMMAND} -E env "HOME=${home}" "USERPROFILE=${home}" "APPDATA=${home}/config"
+            "LOCALAPPDATA=${home}/local" "XDG_DATA_HOME=${home}/data" "${SANDBOX}" exec
+            "{\"command\":\"dsp.test\",\"args\":{\"plugin\":\"${PLUGIN}\",\"seconds\":0.1,\"sample_rate\":48000,\"signals\":[\"sine\"],\"patch\":{\"params\":{\"delay\":50}},\"save\":true}}"
+            --workdir "${WORK}/delay-tail"
+    RESULT_VARIABLE result OUTPUT_VARIABLE json ERROR_VARIABLE err)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "delay tail: dsp.test failed (${result}):\n${json}\n${err}")
+endif()
+string(JSON path GET "${json}" signals 0 path)
+# Stereo float32 WAV: 7200 frames need 57600 bytes of audio, before any
+# header. The old truncated render has only 38400 bytes plus its header.
+file(SIZE "${path}" bytes)
+if(bytes LESS 57600 OR bytes GREATER 58000)
+    message(FATAL_ERROR "50 ms delay lost its tail: WAV has ${bytes} bytes, expected 7200 frames")
+endif()
+message(STATUS "50 ms delay retains its tail: ${bytes}-byte WAV")
