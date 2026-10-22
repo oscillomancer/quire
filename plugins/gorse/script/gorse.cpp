@@ -81,6 +81,25 @@ struct SampleDelay {
     }
 };
 
+// Reuse the exact conversion while its input stays still, including after
+// a smoothed parameter arrives. A moving value is converted every sample.
+struct CachedGain {
+    double db = 0.0;
+    double gain = 1.0;
+
+    void clear() {
+        db = 0.0;
+        gain = 1.0;
+    }
+    double step(double value) {
+        if (value != db) {
+            db = value;
+            gain = dbToGain(value);
+        }
+        return gain;
+    }
+};
+
 // A moving average over the last `length` values: one box of a cascade.
 struct Box {
     Buffer<double> ring;
@@ -280,6 +299,8 @@ struct Gorse : Effect {
     double cycleTop = 0.0, lowSince = 0.0;
     bool started = false;
     double reference = 0.0, fast = 0.0, slow = 0.0;
+    double detectorPeak = 0.0, detectorLevel = -120.0;
+    CachedGain shapeGain, outputGain;
     double lengthNow = 0.0, fastAttack = 0.0, fastRelease = 0.0, slowRelease = 0.0;
     double clipMix = 0.0, clipStep = 0.001;
     bool unplayed = true;
@@ -360,6 +381,10 @@ struct Gorse : Effect {
         reference = 0.0;
         fast = 0.0;
         slow = 0.0;
+        detectorPeak = 0.0;
+        detectorLevel = gainToDb(0.0);
+        shapeGain.clear();
+        outputGain.clear();
         lengthNow = 0.0;
         setLength(length);
         for (int k = 0; k <= kBins; ++k) {
@@ -493,7 +518,11 @@ struct Gorse : Effect {
     // How far the hit has started (above 0) or decayed (below), -1 to 1,
     // from the followers.
     double onsetness(double peak, double sens) {
-        const double level = gainToDb(peak);
+        if (peak != detectorPeak) {
+            detectorPeak = peak;
+            detectorLevel = gainToDb(peak);
+        }
+        const double level = detectorLevel;
         if (!started) {
             if (peak <= 0.0) return 0.0;
             reference = level;
@@ -556,8 +585,8 @@ struct Gorse : Effect {
             // The audio, delayed to meet its gain; mixed, then the clip.
             const double dl = delay[0].step(l);
             const double dr = delay[1].step(r);
-            const double gain = dbToGain(gainDb);
-            const double m = mix.at(i), out = dbToGain(output.at(i));
+            const double gain = shapeGain.step(gainDb);
+            const double m = mix.at(i), out = outputGain.step(output.at(i));
             const double ml = dl + m * (dl * gain - dl);
             const double mr = dr + m * (dr * gain - dr);
             const double sl = ml * out, sr = mr * out;
