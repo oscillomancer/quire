@@ -708,6 +708,9 @@ struct Teasel : Effect {
     double lfoPhase = 0.0;
     int lfoCycle = 0;
     double lfoNow = 0.0;
+    bool randomFresh = true;
+    int randomCycle = 0;
+    double randomAt = 0.0, randomNext = 0.0;
 
     // The probe: a sine through its own curve, measured each 20 cycles.
     Shaper probe;
@@ -798,6 +801,7 @@ struct Teasel : Effect {
         lfoPhase = 0.0;
         lfoCycle = 0;
         lfoNow = 0.0;
+        randomFresh = true;
         probePhase = 0.0;
         probeCos = 1.0;
         probeSin = 0.0;
@@ -1028,7 +1032,17 @@ struct Teasel : Effect {
                 lfoCycle += 1;
             }
         }
-        return lfoShape(motionShape.index(), lfoPhase, lfoCycle);
+        const int shape = motionShape.index();
+        if (shape < 5) return lfoShape(shape, lfoPhase, lfoCycle);
+        // Random and drift's hash values depend on the cycle, not its phase.
+        if (randomFresh || randomCycle != lfoCycle) {
+            randomFresh = false;
+            randomCycle = lfoCycle;
+            randomAt = hashUnit(lfoCycle);
+            randomNext = hashUnit(lfoCycle + 1);
+        }
+        if (shape == 5) return randomAt;
+        return randomAt + (randomNext - randomAt) * (0.5 - 0.5 * cos(pi * lfoPhase));
     }
 
     void process(Block& io) {
