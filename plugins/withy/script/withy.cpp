@@ -201,6 +201,7 @@ struct Voice {
     double left = 0.0, right = 0.0;  // its gain into each side
     Biquad bandL, bandR;             // the bucket brigade's band
     double bandHz = -1.0, bandDesigned = -1.0;
+    bool bandDirty = false;
     Noise hissL, hissR;
 };
 
@@ -472,6 +473,7 @@ struct Withy : Effect {
     double envUp = 0.01, envDown = 0.001, lockPull = 0.0001, vibratoW = 0.0;
     double normL = 1.0, normR = 1.0, normMono = 1.0;
     double cutDesigned = -1.0, keepDesigned = -1.0;
+    bool cutDirty = false, keepDirty = false;
 
     // The sway when synced: the song's tempo and bar, the last heard.
     double tempoNow = 120.0, barNow = 4.0;
@@ -500,6 +502,8 @@ struct Withy : Effect {
         rate48 = sampleRate();
         cutDesigned = -1.0;
         keepDesigned = -1.0;
+        cutDirty = false;
+        keepDirty = false;
         buildSinc();
         const int length = ceilToInt(kLine * rate48) + 2 * kTaps;
         for (int c = 0; c < 2; ++c) {
@@ -522,6 +526,7 @@ struct Withy : Effect {
             s.bandR.clear();
             s.bandHz = -1.0;
             s.bandDesigned = -1.0;
+            s.bandDirty = false;
             s.hissL.seed(1009 + 17 * v);
             s.hissR.seed(2029 + 31 * v);
         }
@@ -912,6 +917,7 @@ struct Withy : Effect {
                         voice[v].flutter = fmod(voice[0].flutter + voice[v].offset, 1.0);
                         voice[v].bandL.clear();
                         voice[v].bandR.clear();
+                        voice[v].bandDirty = false;
                     }
                     motionTargets(true);
                 }
@@ -994,6 +1000,7 @@ struct Withy : Effect {
             // Low keep: the lows go round the voices, the rest into them.
             double lowL = 0.0, lowR = 0.0, srcL = xl, srcR = xr;
             if (keepW > 0.0) {
+                keepDirty = true;
                 lowL = keepLow[1].process(keepLow[0].process(xl));
                 const double hl = keepHigh[1].process(keepHigh[0].process(xl));
                 srcL = lerp(xl, hl, keepW);
@@ -1007,11 +1014,12 @@ struct Withy : Effect {
                     lowR = lowL;
                     srcR = srcL;
                 }
-            } else {
+            } else if (keepDirty) {
                 for (int q = 0; q < 4; ++q) {
                     keepLow[q].clear();
                     keepHigh[q].clear();
                 }
+                keepDirty = false;
             }
 
             // Into the lines, with the voices handed back and the bucket
@@ -1030,7 +1038,7 @@ struct Withy : Effect {
             envelope[1] += (abs(inR) - envelope[1]) * (abs(inR) > envelope[1] ? envUp : envDown);
 
             // The voices.
-            const double hiss = dbToGain(-66.0 + 28.0 * age.at(i));
+            const double hiss = bbdW > 0.0 ? dbToGain(-66.0 + 28.0 * age.at(i)) : 0.0;
             double wl = 0.0, wr = 0.0, sumL = 0.0, sumR = 0.0;
             for (int v = 0; v < active; ++v) {
                 Voice& s = voice[v];
@@ -1044,6 +1052,7 @@ struct Withy : Effect {
                     yr = yl;
                 }
                 if (bbdW > 0.0) {
+                    s.bandDirty = true;
                     if (s.bandHz != s.bandDesigned) {
                         s.bandL.lowpass(s.bandHz, 0.7071);
                         s.bandR.lowpass(s.bandHz, 0.7071);
@@ -1057,9 +1066,10 @@ struct Withy : Effect {
                     } else {
                         yr = yl;
                     }
-                } else {
+                } else if (s.bandDirty) {
                     s.bandL.clear();
                     s.bandR.clear();
+                    s.bandDirty = false;
                 }
                 sumL += yl;
                 sumR += yr;
@@ -1091,11 +1101,13 @@ struct Withy : Effect {
                 wr = lerp(wr, dcBlock[1].highpass(wr), bbdW);
             }
             if (cutW > 0.0) {
+                cutDirty = true;
                 wl = lerp(wl, cutA[0].process(wl), cutW);
                 wr = lerp(wr, cutA[1].process(wr), cutW);
-            } else {
+            } else if (cutDirty) {
                 cutA[0].clear();
                 cutA[1].clear();
+                cutDirty = false;
             }
             const double wd = width.at(i);
             const double mid = 0.5 * (wl + wr), side = 0.5 * (wl - wr) * wd;
