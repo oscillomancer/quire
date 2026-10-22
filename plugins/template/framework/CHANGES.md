@@ -4,6 +4,18 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.31.0
+
+What a product must do: nothing.
+
+- **An STFT for analysis only** (`dsp/Stft.h`). `prepare(channels, size,
+  overlap, Stft::Mode::Analyse)` gives the same frames and bins with no
+  inverse transform and no overlap-add, about half the cost, for an
+  analyser or meter that only reads the spectrum. `push()` alone is enough
+  each sample, the spectrum stays readable until the next `push()`,
+  `process()` leaves the audio as it is and `pull()` gives 0. The default,
+  `Mode::Resynthesise`, is unchanged.
+
 ## 1.30.1
 
 What a product must do: nothing. A product that glides with `pitchAt()`
