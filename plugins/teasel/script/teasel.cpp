@@ -1059,18 +1059,20 @@ struct Teasel : Effect {
             // Where each curve rests with no signal: its offset, taken away
             // at once (the bias would otherwise step and ring).
             const double restNow = styleNow == 3 ? 0.0 : curve(styleNow, b, c);
-            const double restWas = styleWas == 3 ? 0.0 : curve(styleWas, b, c);
             const bool level = autoGain.on();
             const double compTo = level ? dbToGain(compAt(compNow, driveDb)) : 1.0;
-            const double compWasTo = level ? dbToGain(compAt(compWas, driveDb)) : 1.0;
-            if (first && i == 0) {
-                compGain = compTo;
-                compWasGain = compWasTo;
-            }
+            if (first && i == 0) compGain = compTo;
             compGain += compStep * (compTo - compGain);
-            compWasGain += compStep * (compWasTo - compWasGain);
-            if (fade < 1.0) fade = min(1.0, fade + fadeStep);
-            const double t = 0.5 - 0.5 * cos(pi * fade);
+            double restWas = 0.0, t = 1.0;
+            // Once the old curve is inaudible, none of its control values
+            // is needed. The next style change copies compGain afresh.
+            if (fade < 1.0) {
+                restWas = styleWas == 3 ? 0.0 : curve(styleWas, b, c);
+                const double compWasTo = level ? dbToGain(compAt(compWas, driveDb)) : 1.0;
+                compWasGain += compStep * (compWasTo - compWasGain);
+                fade = min(1.0, fade + fadeStep);
+                t = 0.5 - 0.5 * cos(pi * fade);
+            }
             const double wet = mix.at(i);
             listenMix = clamp(listenMix + (listenMode > 0 ? listenStep : -listenStep), 0.0, 1.0);
 
