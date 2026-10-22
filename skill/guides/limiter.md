@@ -43,6 +43,10 @@ LRA the last 30 s, true peak the last 2 s, overs the last 5 s. With
 since it was switched on). The recent window keeps rolling in either mode;
 switching `accumulate` restarts only the accumulated totals. Starting the
 transport restarts both the recent window and the accumulated totals.
+Accumulated measurements use only output samples after their restart:
+integrated loudness waits for a fresh 400 ms window and LRA for a fresh
+3 s window. Their weighting and true-peak detector history start afresh too;
+the accumulated peak, overs and elapsed time exclude the old measurement.
 
 ## Recipes
 
