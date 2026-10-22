@@ -539,6 +539,7 @@ struct Room {
 struct Ring {
     Buffer<float> data;
     int size = 4, at = 0;
+    int readAt = 2;  // floor of the last read: the slow wander usually stays in this interval
 
     void prepare(int n) {
         data.resize(n);
@@ -548,6 +549,7 @@ struct Ring {
     void clear() {
         data.fill(0.0f);
         at = 0;
+        readAt = 2;
     }
     void push(double x) {
         data[at] = static_cast<float>(x);
@@ -559,9 +561,10 @@ struct Ring {
         if (i < 0) i += size;
         return data[i];
     }
-    double read(double d) const {
+    double read(double d) {
         const double c = clamp(d, 2.0, size - 3.0);
-        const int k = floorToInt(c);
+        if (!(c >= readAt && c < readAt + 1.0)) readAt = floorToInt(c);
+        const int k = readAt;
         const double f = c - k;
         const double ym = tap(k - 1), y0 = tap(k), y1 = tap(k + 1), y2 = tap(k + 2);
         const double c1 = 0.5 * (y1 - ym);
@@ -686,9 +689,9 @@ void hadamard(Array<double, 16>& v) {
 
 // The sign each line's output has in the left and right sums: two rows of a
 // Hadamard matrix, so the two hear the same lines uncorrelated.
-double signLeft(int i) { return imod(i, 2) == 0 ? 1.0 : -1.0; }
-double signRight(int i) { return imod(idiv(i, 2), 2) == 0 ? 1.0 : -1.0; }
-double signIn(int i) { return imod(idiv(i, 4), 2) == 0 ? 1.0 : -1.0; }
+double signLeft(int i) { return i % 2 == 0 ? 1.0 : -1.0; }
+double signRight(int i) { return (i / 2) % 2 == 0 ? 1.0 : -1.0; }
+double signIn(int i) { return (i / 4) % 2 == 0 ? 1.0 : -1.0; }
 
 // The lines' lengths against the mean free path's time, spread over a
 // little more than an octave and a half; in an order that alternates long and
