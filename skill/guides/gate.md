@@ -13,7 +13,7 @@ changes only the keys it names.
 | `range` | dB, −80…0: the gain while closed; −80 is silence | −40 |
 | `ratio` | 1.2…10 (expand): each dB under the threshold becomes this many | 2 |
 | `attack` | ms, 0.05…50: how long the opening takes | 1 |
-| `hold` | ms, 0…1000: how long it stays open once the level falls under the close level | 20 |
+| `hold` | ms, 0…1000: how long Gate stays open below the close level, or Expand holds gain before it falls | 20 |
 | `release` | ms, 10…3000: how fast it closes, as the time to turn down 60 dB | 150 |
 | `follow` | bool: close at the rate the sound was already decaying at, within ¼ to 4 × the release (gate) | true |
 | `lookahead` | `off`, `ms1`, `ms2`, `ms5`; adds that latency; a restart, not automatable | ms2 |

@@ -159,11 +159,11 @@ struct Sorrel : Effect {
                        .help(
                            "How long it takes to open; with lookahead the opening ends as the "
                            "sound arrives.");
-    Param hold =
-        milliseconds("Hold", 0, 1000, 20)
-            .in("Timing")
-            .activeWhen(mode, {"Gate"})
-            .help("How long it stays open after the level falls under the close level (Gate).");
+    Param hold = milliseconds("Hold", 0, 1000, 20)
+                     .in("Timing")
+                     .help(
+                         "Gate stays open this long below the close level; Expand holds a falling "
+                         "gain this long.");
     Param release = milliseconds("Release", 10, 3000, 150)
                         .in("Timing")
                         .help("How fast it closes: the time it takes to turn down by 60 dB.");

@@ -139,4 +139,17 @@ TEST(interrupted_listen_fades_start_from_the_mix_currently_heard_and_ignore_bloc
         }
 }
 
+TEST(hold_applies_in_both_gate_and_expand) {
+    auto definitions = product::makeCatalog()->list();
+    CHECK(definitions.size() == 1);
+    const auto& definition = definitions.front();
+    const size_t hold = parameter(*definition, "Hold");
+    const size_t mode = parameter(*definition, "Mode");
+    for (int choice : {0, 1})
+        CHECK(definition->applies(hold, [&](size_t i) {
+            const auto& p = definition->params().at(i);
+            return i == mode ? toHost(p, choice) : hostDefault(p);
+        }));
+}
+
 SUPPLE_TEST_MAIN
