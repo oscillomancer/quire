@@ -675,6 +675,9 @@ struct Teasel : Effect {
     // The auto gain: dB to apply after the curve, for each dB of drive, for
     // the style now and the one before a change.
     Array<double, 121> compNow, compWas;
+    Array<double, 64> compNodes, compWeights;
+    Array<double, 121> compDrives;
+    double compWeight = 1.0;
     double compGain = 1.0, compWasGain = 1.0, compStep = 0.002;
     int styleNow = 1, styleWas = 1;
     double fade = 1.0, fadeStep = 0.001;
@@ -806,6 +809,17 @@ struct Teasel : Effect {
         unplayed = true;
         styleNow = style.index();
         styleWas = styleNow;
+        // The quadrature and drive grid are independent of the curve.
+        // Parameter changes only need to measure it on this same grid.
+        compWeight = 0.0;
+        const double dz = 10.0 / kNodes;
+        for (int j = 0; j < kNodes; ++j) {
+            const double z = -5.0 + (j + 0.5) * dz;
+            compNodes[j] = z;
+            compWeights[j] = exp(-0.5 * z * z);
+            compWeight += compWeights[j];
+        }
+        for (int d = 0; d < kCompSteps; ++d) compDrives[d] = dbToGain(kCompLow + d);
         buildComp(compNow, styleNow);
         buildComp(compWas, styleNow);
         loopScale = 1.0 / max(1.0, steepest(styleNow));
@@ -829,21 +843,18 @@ struct Teasel : Effect {
     // and its offset removed) back to -18 dBFS RMS.
     void buildComp(Array<double, 121>& table, int st) {
         const double c = character.value(), b = 0.5 * bias.value();
-        const double dz = 10.0 / kNodes;
         for (int d = 0; d < kCompSteps; ++d) {
-            const double g = dbToGain(kCompLow + d);
-            double m = 0.0, m2 = 0.0, wsum = 0.0;
+            const double g = compDrives[d];
+            double m = 0.0, m2 = 0.0;
             for (int j = 0; j < kNodes; ++j) {
-                const double z = -5.0 + (j + 0.5) * dz;
-                const double w = exp(-0.5 * z * z);
+                const double z = compNodes[j], w = compWeights[j];
                 const double u = g * kRef * z;
                 const double y = st == 3 ? u : curve(st, u + b, c);
                 m += w * y;
                 m2 += w * y * y;
-                wsum += w;
             }
-            m /= wsum;
-            m2 /= wsum;
+            m /= compWeight;
+            m2 /= compWeight;
             const double rms = sqrt(max(m2 - m * m, 0.0));
             table[d] = rms > 1e-9 ? clamp(gainToDb(kRef / rms), -48.0, 24.0) : 24.0;
         }
