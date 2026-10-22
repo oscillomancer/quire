@@ -1124,6 +1124,9 @@ struct Lichen : Effect {
             framesAll += second.framesAll;
             centroidFrames += second.centroidFrames;
         }
+        // A peak that left the window must no longer suppress interpolation
+        // of the quieter peaks still in it. Accumulation keeps its reference.
+        peakReference = peakTrue;
         findKey();
         tone();
         share();

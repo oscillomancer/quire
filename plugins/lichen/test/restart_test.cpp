@@ -26,7 +26,8 @@ struct Fixture {
         script.prepare();
     }
 
-    void feed(int frames, bool playing, bool sound, int blockSize = 256) {
+    void feed(int frames, bool playing, bool sound, int blockSize = 256, double amplitude = 0.25,
+              double frequency = 1000.0, double phase = 0.0) {
         D::CurrentScope current(&instance);
         double* data[] = {left, right};
         S::Block block;
@@ -38,7 +39,9 @@ struct Fixture {
             block.frames = std::min(frames, blockSize);
             for (int i = 0; i < block.frames; ++i)
                 left[i] = right[i] =
-                    sound ? 0.25 * S::sin(S::twoPi * 1000.0 * (position + i) / 48000.0) : 0.0;
+                    sound ? amplitude *
+                                S::sin(S::twoPi * frequency * (position + i) / 48000.0 + phase)
+                          : 0.0;
             script.process(block);
             frames -= block.frames;
             position += block.frames;
@@ -152,6 +155,16 @@ TEST(the_window_keeps_the_last_minute_and_accumulating_keeps_the_play) {
     CHECK(D::ParamBinding::reported(whole->script.integrated) > -20.0);
     CHECK(D::ParamBinding::reported(whole->script.truePeak) > -20.0);
     CHECK(D::ParamBinding::reported(whole->script.measured) == 66000.0);
+}
+
+TEST(expired_loud_peaks_do_not_disable_quiet_true_peak_interpolation) {
+    auto f = std::make_unique<Fixture>();
+    f->feed(48000, true, true, 256, 0.9);
+    // At 12 kHz with this phase, samples lie 3 dB below the sine's true peak.
+    // Once the old loud tone expires, its interpolation gate must expire too.
+    f->feed(62 * 48000, true, true, 256, 0.1, 12000.0, S::pi * 0.25);
+    CHECK_NEAR(D::ParamBinding::reported(f->script.samplePeak), -23.0103, 0.01);
+    CHECK_NEAR(D::ParamBinding::reported(f->script.truePeak), -20.0, 0.01);
 }
 
 SUPPLE_TEST_MAIN
