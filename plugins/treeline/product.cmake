@@ -35,7 +35,10 @@ set(PRODUCT_STATE_TAG       "tdOY")
 set(PRODUCT_DSP_SOURCES     product/Catalog.cpp)
 # The script draws its own editor (script_editor.cpp, from the suite).
 set(PRODUCT_EDITOR_SOURCES  "")
-set(PRODUCT_TEST_SOURCES    "")
+set(PRODUCT_TEST_SOURCES    product/tests/meters.cpp)
+# The test includes the script, whose Array initializers use single braces.
+set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/tests/meters.cpp PROPERTIES
+    COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:Clang,AppleClang,GNU>:-Wno-missing-braces>")
 
 set(PRODUCT_SMOKE_PLAIN_PARAM   "Gain")
 set(PRODUCT_SMOKE_LATENCY_PARAM "")

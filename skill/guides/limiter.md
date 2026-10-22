@@ -40,8 +40,9 @@ at −70 LUFS and 10 LU under, short-term 3 s, LRA from the 10th to the 95th
 percentile). By default they follow the recent music: integrated and
 LRA the last 30 s, true peak the last 2 s, overs the last 5 s. With
 `accumulate` on they total the whole performance since play started (or
-since it was switched on). Starting the transport and switching
-`accumulate` restart them.
+since it was switched on). The recent window keeps rolling in either mode;
+switching `accumulate` restarts only the accumulated totals. Starting the
+transport restarts both the recent window and the accumulated totals.
 
 ## Recipes
 
