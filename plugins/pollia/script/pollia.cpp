@@ -623,6 +623,9 @@ struct Pollia : Effect {
         // These parameters are unsmoothed; the runtime splits at every change.
         const double atk = exp(-1.0 / (attack.value() * 0.001 * sr));
         const double rel = exp(-1.0 / (release.value() * 0.001 * sr));
+        // Start outside the parameter ranges so the first frame calculates both gains.
+        double lastFb = 2.0, lastMix = -1.0, lastDb = 25.0;
+        double level = 1.0, outGain = 1.0;
         for (int i = 0; i < io.frames; ++i) {
             // The motion: the left's cycle position, the right's ahead of it.
             const double pos = cyclePos(io, i);
@@ -691,11 +694,19 @@ struct Pollia : Effect {
             // Feedback adds power, 1/(1 - fb^2) of the wet's on noise: most of
             // it is taken back, so turning it up leaves the level near where
             // it was and the peaks still ring out.
-            const double plain = (1.0 - m) * (1.0 - m) + m * m;
-            const double fed = (1.0 - m) * (1.0 - m) + m * m / (1.0 - fb * fb);
-            const double level = pow(plain / fed, 0.4);
+            if (fb != lastFb || m != lastMix) {
+                const double plain = (1.0 - m) * (1.0 - m) + m * m;
+                const double fed = (1.0 - m) * (1.0 - m) + m * m / (1.0 - fb * fb);
+                level = pow(plain / fed, 0.4);
+                lastFb = fb;
+                lastMix = m;
+            }
             const double keep = keepBelow.at(i);
-            const double outGain = dbToGain(output.at(i));
+            const double outDb = output.at(i);
+            if (outDb != lastDb) {
+                outGain = dbToGain(outDb);
+                lastDb = outDb;
+            }
             double yMax = 0.0;
             for (int c = 0; c < chans; ++c) {
                 Side& h = ch[c];
