@@ -36,6 +36,7 @@ class OneScript final : public supple::Catalog {
             auto code = std::make_shared<const Code>(std::vector<Code::Key>{
                 {&Script::target, "target"},
                 {&Script::restartOnPlay, "restart_on_play"},
+                {&Script::accumulate, "accumulate"},
                 {&Script::reset, "reset"},
                 {&Script::slope, "slope"},
                 {&Script::integrated, "integrated"},

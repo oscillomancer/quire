@@ -52,6 +52,12 @@ struct Fixture {
         D::ParamBinding::setValue(script.reset, 1.0, false);
     }
 
+    void accumulate() {
+        D::CurrentScope current(&instance);
+        D::ParamBinding::setValue(script.accumulate, 1.0, true);
+        script.update();
+    }
+
     void checkSilentPlay() const {
         CHECK(D::ParamBinding::reported(script.integrated) == -70.0);
         CHECK(script.gatedBlocks == 0);
@@ -128,6 +134,24 @@ TEST(only_complete_post_restart_loudness_windows_enter_the_histograms) {
     f->feed(4800, true, true);
     CHECK(f->script.rangeBlocks == 1);
     CHECK(D::ParamBinding::reported(f->script.shortTermMax) > -20.0);
+}
+
+TEST(the_window_keeps_the_last_minute_and_accumulating_keeps_the_play) {
+    auto window = std::make_unique<Fixture>();
+    auto whole = std::make_unique<Fixture>();
+    whole->accumulate();
+    for (Fixture* f : {window.get(), whole.get()}) {
+        f->feed(5 * 48000, true, true);
+        f->feed(61 * 48000, true, false);
+    }
+    // A minute of silence later the window holds none of the tone.
+    CHECK(D::ParamBinding::reported(window->script.integrated) == -70.0);
+    CHECK(D::ParamBinding::reported(window->script.truePeak) == -70.0);
+    CHECK(window->script.framesAll == 0);
+    CHECK(D::ParamBinding::reported(window->script.measured) <= 60000.0);
+    CHECK(D::ParamBinding::reported(whole->script.integrated) > -20.0);
+    CHECK(D::ParamBinding::reported(whole->script.truePeak) > -20.0);
+    CHECK(D::ParamBinding::reported(whole->script.measured) == 66000.0);
 }
 
 SUPPLE_TEST_MAIN

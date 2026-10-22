@@ -22,8 +22,9 @@
 //              them, so a live reading compares with an analysis report.
 //   Harmony    the pitch classes heard, and the key they most resemble.
 //
-// The readings that summarise ("since play") cover the last play from start
-// to stop: they restart when play starts and hold when it stops, so an agent
+// The readings that summarise cover the last 60 s of the play or, with
+// Accumulate on (the clock lit), all of it from start to stop. They restart
+// when play starts (with Restart on Play) and hold when it stops, so an agent
 // can play or render a passage and read them afterwards. With the transport
 // never started (a live input) they keep gathering until reset.
 
@@ -163,15 +164,56 @@ double powerDb(double p) { return p > 1e-30 ? 10.0 * log10(p) : -300.0; }
 // The 31 ISO third-octave bands, 20 Hz to 20 kHz: centre b (0..30), base two.
 double thirdHz(int b) { return 1000.0 * pow(2.0, (b - 17) / 3.0); }
 
-constexpr int kPoints = 240;     // the drawn spectrum: 20 Hz to 20 kHz, 24 points an octave
-constexpr int kSmooth = 12;      // smoothed over a twelfth of an octave
-constexpr int kThirds = 31;      // third-octave bands
-constexpr int kNamed = 7;        // sub, low, low mid, mid, high mid, presence, air
-constexpr int kBins = 900;       // loudness histograms: -70 to +20 LUFS in tenths
-constexpr int kCentroids = 300;  // the centroid's histogram, 20 Hz to 20 kHz
-constexpr int kHistory = 600;    // a minute of loudness, tenths of a second
-constexpr int kScope = 1024;     // the vectorscope's samples
-constexpr int kSpread = 60;      // the short-term distribution drawn: -60 to 0 LUFS, 1 LU each
+constexpr int kPoints = 240;        // the drawn spectrum: 20 Hz to 20 kHz, 24 points an octave
+constexpr int kSmooth = 12;         // smoothed over a twelfth of an octave
+constexpr int kThirds = 31;         // third-octave bands
+constexpr int kNamed = 7;           // sub, low, low mid, mid, high mid, presence, air
+constexpr int kBins = 900;          // loudness histograms: -70 to +20 LUFS in tenths
+constexpr int kCentroids = 300;     // the centroid's histogram, 20 Hz to 20 kHz
+constexpr int kHistory = 600;       // a minute of loudness, tenths of a second
+constexpr int kScope = 1024;        // the vectorscope's samples
+constexpr int kSpread = 60;         // the short-term distribution drawn: -60 to 0 LUFS, 1 LU each
+constexpr int kWindow = 60;         // the readings' window: a minute in seconds, the newest filling
+constexpr int kWindowBlocks = 600;  // and in loudness blocks of 100 ms
+
+// A second of what the summarising readings add up, so the window can drop
+// its oldest: the spectrum's sums, the stereo sums and the peaks.
+struct Second {
+    Array<double, kPoints> allM;
+    Array<double, kThirds> thirdL, thirdR, thirdX, thirdM;
+    Array<double, kNamed> namedM;
+    Array<double, 12> chroma;
+    Array<int, kCentroids> centroids;
+    double frames = 0.0, sumL = 0.0, sumR = 0.0, sumLL = 0.0, sumRR = 0.0, sumLR = 0.0;
+    double totalM = 0.0, lowM = 0.0, lowS = 0.0, peakTrue = 0.0, peakSample = 0.0;
+    int framesAll = 0, centroidFrames = 0, overs = 0, clips = 0;
+
+    void clear() {
+        allM.fill(0.0);
+        thirdL.fill(0.0);
+        thirdR.fill(0.0);
+        thirdX.fill(0.0);
+        thirdM.fill(0.0);
+        namedM.fill(0.0);
+        chroma.fill(0.0);
+        centroids.fill(0);
+        frames = 0.0;
+        sumL = 0.0;
+        sumR = 0.0;
+        sumLL = 0.0;
+        sumRR = 0.0;
+        sumLR = 0.0;
+        totalM = 0.0;
+        lowM = 0.0;
+        lowS = 0.0;
+        peakTrue = 0.0;
+        peakSample = 0.0;
+        framesAll = 0;
+        centroidFrames = 0;
+        overs = 0;
+        clips = 0;
+    }
+};
 
 // The pitch-class profiles keys are matched against: the share of each
 // scale degree's duration in tonal music (Albrecht and Shanahan, 2013).
@@ -234,8 +276,15 @@ struct Lichen : Effect {
             .notAutomatable()
             .in("Settings")
             .help(
-                "On, the readings since play start afresh each time play starts; off, each play "
-                "adds to them.");
+                "On, the summarising readings start afresh each time play starts; off, each "
+                "play adds to them.");
+    Param accumulate =
+        toggle("Accumulate", false)
+            .notAutomatable()
+            .in("Settings")
+            .help(
+                "Off, the summarising readings follow the last 60 s; on, they total everything "
+                "since play started. Switching starts them afresh.");
     Param reset = toggle("Reset", false)
                       .notAutomatable()
                       .in("Settings")
@@ -250,10 +299,11 @@ struct Lichen : Effect {
 
     // --- loudness -----------------------------------------------------------------------
 
-    Param integrated = decibels("Integrated", -70, 10, -70)
-                           .meter()
-                           .in("Loudness")
-                           .help("Gated loudness since play started (BS.1770), in LUFS.");
+    Param integrated =
+        decibels("Integrated", -70, 10, -70)
+            .meter()
+            .in("Loudness")
+            .help("Gated loudness over the last 60 s or since play (BS.1770), in LUFS.");
     Param shortTerm = decibels("Short-Term", -70, 10, -70)
                           .meter()
                           .in("Loudness")
@@ -265,26 +315,26 @@ struct Lichen : Effect {
     Param lra = decibels("Loudness Range", 0, 40, 0)
                     .meter()
                     .in("Loudness")
-                    .help("EBU R128 loudness range since play started, in LU.");
+                    .help("EBU R128 loudness range over the last 60 s or since play, in LU.");
     Param shortTermMax = decibels("Short-Term Max", -70, 10, -70)
                              .meter()
                              .in("Loudness")
-                             .help("The loudest 3 s since play started, in LUFS.");
+                             .help("The loudest 3 s of the last 60 s or since play, in LUFS.");
     Param momentaryMax = decibels("Momentary Max", -70, 10, -70)
                              .meter()
                              .in("Loudness")
-                             .help("The loudest 400 ms since play started, in LUFS.");
+                             .help("The loudest 400 ms of the last 60 s or since play, in LUFS.");
 
     // --- peaks and problems ---------------------------------------------------------------
 
     Param truePeak = decibels("True Peak", -70, 20, -70)
                          .meter()
                          .in("Peaks")
-                         .help("The highest true peak since play started, in dBTP.");
+                         .help("The highest true peak of the last 60 s or since play, in dBTP.");
     Param samplePeak = decibels("Sample Peak", -70, 20, -70)
                            .meter()
                            .in("Peaks")
-                           .help("The highest sample since play started, in dBFS.");
+                           .help("The highest sample of the last 60 s or since play, in dBFS.");
     Param plr = decibels("PLR", 0, 70, 0)
                     .meter()
                     .in("Peaks")
@@ -315,7 +365,7 @@ struct Lichen : Effect {
                             .in("Stereo")
                             .help(
                                 "+1 mono, 0 unrelated, below 0 the channels oppose each "
-                                "other (since play started).");
+                                "other (the last 60 s or since play).");
     Param width = percent("Width", 0)
                       .meter()
                       .in("Stereo")
@@ -399,9 +449,11 @@ struct Lichen : Effect {
                             .help(
                                 "How closely the pitch classes match that key: above 70 is "
                                 "clear, below 50 doubtful.");
-    Param measured = milliseconds("Measured", 0, 36000000, 0)
-                         .meter()
-                         .help("How much audio the readings since play cover.");
+    Param measured =
+        milliseconds("Measured", 0, 36000000, 0)
+            .meter()
+            .help(
+                "How much audio the summarising readings cover: 60 s at most unless accumulating.");
 
     void factoryPatches(Patches& p) {
         p.add("Streaming").set(target, -14);
@@ -439,6 +491,16 @@ struct Lichen : Effect {
     bool stereoNow = true;
     bool unplayed = true;
     bool requireCleanWindows = false;
+    bool accumulating = false;
+    double sinceRestart = 0.0;  // samples measured since the readings restarted
+
+    // The window: the last minute in seconds, the newest filling, and the
+    // loudness blocks' readings, -200 where a block was not yet complete.
+    Array<Second, kWindow> seconds;
+    int secondAt = 0, secondLength = 48000;
+    Array<double, kWindowBlocks> winMomentary, winEnergy, winMono, winMonoEnergy;
+    Array<double, kWindowBlocks> winShort, winShortEnergy;
+    int winAt = 0, winFilled = 0;
 
     // Loudness: hundred-millisecond energies (stereo, and the mono fold-down).
     Array<double, 30> blockE, blockMono;
@@ -453,14 +515,14 @@ struct Lichen : Effect {
     double momentaryNow = -120.0, shortNow = -120.0, integratedNow = -120.0;
     double monoIntegrated = -120.0, rangeNow = 0.0, rangeLow = -120.0, rangeHigh = -120.0;
     double momentaryTop = -120.0, shortTop = -120.0;
-    // Peaks, problems and the stereo sums, since play started.
+    // Peaks, problems and the stereo sums: the window's, or since play.
     double peakTrue = 0.0, peakSample = 0.0, peakReference = 0.0;
     int overCount = 0, clipCount = 0;
     bool inOver = false;
     Array<int, 2> flatRun;
     double frames = 0.0;  // samples measured
     double sumL = 0.0, sumR = 0.0, sumLL = 0.0, sumRR = 0.0, sumLR = 0.0;
-    // The spectrum: now (smoothed over 300 ms) and the sums since play.
+    // The spectrum: now (smoothed over 300 ms) and the sums of the window or play.
     Array<double, kPoints> nowM, nowS, allM;
     Array<double, kThirds> thirdNowL, thirdNowR, thirdNowX, thirdAllL, thirdAllR, thirdAllX;
     Array<double, kThirds> thirdAllM;
@@ -580,10 +642,12 @@ struct Lichen : Effect {
         kNeedle = 1.0 - exp(-1.0 / (0.3 * rate));
         fall = exp(-1.0 / (0.3 * rate));
         blockLength = max(1, roundToInt(0.1 * rate));
+        secondLength = max(1, roundToInt(rate));
         // A restart prepares an instance that has played: start it afresh.
         wasPlaying = false;
         holding = false;
         unplayed = true;
+        accumulating = accumulate.on();
         restartAll();
         blockE.fill(0.0);
         blockMono.fill(0.0);
@@ -637,6 +701,11 @@ struct Lichen : Effect {
         playMono.fill(0.0);
         sumPlayE = 0.0;
         sumPlayMono = 0.0;
+        sinceRestart = 0.0;
+        for (auto& second : seconds) second.clear();
+        secondAt = 0;
+        winAt = 0;
+        winFilled = 0;
         gatedEnergy.fill(0.0);
         monoEnergy.fill(0.0);
         gatedCount.fill(0);
@@ -694,7 +763,9 @@ struct Lichen : Effect {
     }
 
     void update() {
-        if (reset.changed()) {
+        // A reset, or the clock switched, starts every summarising reading afresh.
+        if (reset.changed() || accumulate.on() != accumulating) {
+            accumulating = accumulate.on();
             holding = false;
             restartAll();
         }
@@ -728,25 +799,35 @@ struct Lichen : Effect {
             const double al = abs(l), ar = abs(r);
             blockPeak = max(blockPeak, tp);
             if (measuring) {
+                Second& now = seconds[secondAt];
                 peakReference = max(peakReference, tp);
                 // The interpolator uses 32 inputs and two preceding peak
                 // points. Wait until those also belong to the new play.
-                if (!requireCleanWindows || frames >= kTaps + 1.0) {
+                if (!requireCleanWindows || sinceRestart >= kTaps + 1.0) {
                     peakTrue = max(peakTrue, tp);
+                    now.peakTrue = max(now.peakTrue, tp);
                     if (tp > 1.0) {
-                        if (!inOver) overCount += 1;
+                        if (!inOver) {
+                            overCount += 1;
+                            now.overs += 1;
+                        }
                         inOver = true;
                     } else {
                         inOver = false;
                     }
                 }
-                peakSample = max(peakSample, max(al, ar));
+                const double sample = max(al, ar);
+                peakSample = max(peakSample, sample);
+                now.peakSample = max(now.peakSample, sample);
                 for (int c = 0; c < 2; ++c) {
                     if (c == 1 && !stereoNow) continue;
                     const double a = c == 0 ? al : ar;
                     if (a >= 0.999) {
                         flatRun[c] += 1;
-                        if (flatRun[c] == 3) clipCount += 1;
+                        if (flatRun[c] == 3) {
+                            clipCount += 1;
+                            now.clips += 1;
+                        }
                     } else {
                         flatRun[c] = 0;
                     }
@@ -757,6 +838,13 @@ struct Lichen : Effect {
                 sumLL += l * l;
                 sumRR += r * r;
                 sumLR += l * r;
+                now.frames += 1.0;
+                now.sumL += l;
+                now.sumR += r;
+                now.sumLL += l * l;
+                now.sumRR += r * r;
+                now.sumLR += l * r;
+                sinceRestart += 1.0;
             }
 
             // Loudness: the K-weighted energy, and the fold-down's (the mono
@@ -801,9 +889,10 @@ struct Lichen : Effect {
             stft[0].pull();
             if (stereoNow) stft[1].pull();
             if (brief.push(0.5 * (l + r)) && measuring &&
-                (!requireCleanWindows || frames >= brief.size()))
+                (!requireCleanWindows || sinceRestart >= brief.size()))
                 centroidFrame();
             brief.pull();
+            if (measuring && seconds[secondAt].frames >= secondLength) nextSecond();
         }
         scopeHead.set(scopeAt);
         levelLeft.set(gainToDb(peakL));
@@ -879,36 +968,26 @@ struct Lichen : Effect {
             requireCleanWindows ? lufs(pm / min(4, blocksFilled)) : momentaryNow;
         const double playShort = requireCleanWindows ? lufs(ps / blocksFilled) : shortNow;
         const double monoMomentary = lufs(pmm / min(4, blocksFilled));
-        if (measuring && blocksFilled >= 4 && frames >= 4.0 * blockLength) {
-            momentaryTop = max(momentaryTop, playMomentary);
-            if (playMomentary > -70.0) {
-                const int bin = clamp(floorToInt((playMomentary + 70.0) * 10.0), 0, kBins - 1);
-                gatedEnergy[bin] += pm / 4.0;
-                gatedCount[bin] += 1;
-                gatedTotal += pm / 4.0;
-                gatedBlocks += 1;
-                integratedNow = gatedMean(gatedEnergy, gatedCount, gatedTotal, gatedBlocks);
-            }
-            if (monoMomentary > -70.0) {
-                const int bin = clamp(floorToInt((monoMomentary + 70.0) * 10.0), 0, kBins - 1);
-                monoEnergy[bin] += pmm / 4.0;
-                monoCount[bin] += 1;
-                monoTotal += pmm / 4.0;
-                monoBlocks += 1;
-                monoIntegrated = gatedMean(monoEnergy, monoCount, monoTotal, monoBlocks);
-            }
+        const bool momentaryReady =
+            measuring && blocksFilled >= 4 && sinceRestart >= 4.0 * blockLength;
+        const bool shortReady =
+            measuring && blocksFilled >= 30 && sinceRestart >= 30.0 * blockLength;
+        if (measuring) {
+            winMomentary[winAt] = momentaryReady ? playMomentary : -200.0;
+            winEnergy[winAt] = pm / 4.0;
+            winMono[winAt] = monoMomentary;
+            winMonoEnergy[winAt] = pmm / 4.0;
+            winShort[winAt] = shortReady ? playShort : -200.0;
+            winShortEnergy[winAt] = ps / 30.0;
+            winAt = winAt == kWindowBlocks - 1 ? 0 : winAt + 1;
+            winFilled = min(winFilled + 1, kWindowBlocks);
         }
-        if (measuring && blocksFilled >= 30 && frames >= 30.0 * blockLength) {
-            shortTop = max(shortTop, playShort);
-            if (playShort > -70.0) {
-                const int bin = clamp(floorToInt((playShort + 70.0) * 10.0), 0, kBins - 1);
-                rangeCount[bin] += 1;
-                rangeTotal += ps / 30.0;
-                rangeBlocks += 1;
-                loudnessRange();
-                const int lu = floorToInt(playShort + 60.0);
-                if (lu >= 0 && lu < kSpread) spreadShown[lu] += 1.0f;
-            }
+        if (accumulating) {
+            if (momentaryReady) countMomentary(playMomentary, pm / 4.0, monoMomentary, pmm / 4.0);
+            if (shortReady) countShort(playShort, ps / 30.0);
+            loudnessReadings();
+        } else if (measuring) {
+            windowLoudness();
         }
         histShort[historyAt] = static_cast<float>(blocksFilled >= 30 ? shortNow : -120.0);
         histMomentary[historyAt] = static_cast<float>(blocksFilled >= 4 ? momentaryNow : -120.0);
@@ -919,6 +998,135 @@ struct Lichen : Effect {
         historyHead.set(historyAt);
         historyCount.set(historyFilled);
         publish();
+    }
+
+    // A complete momentary block (400 ms) into the gates of the integrated
+    // loudness and the fold-down's.
+    void countMomentary(double level, double energy, double monoLevel, double monoE) {
+        momentaryTop = max(momentaryTop, level);
+        if (level > -70.0) {
+            const int bin = clamp(floorToInt((level + 70.0) * 10.0), 0, kBins - 1);
+            gatedEnergy[bin] += energy;
+            gatedCount[bin] += 1;
+            gatedTotal += energy;
+            gatedBlocks += 1;
+        }
+        if (monoLevel > -70.0) {
+            const int bin = clamp(floorToInt((monoLevel + 70.0) * 10.0), 0, kBins - 1);
+            monoEnergy[bin] += monoE;
+            monoCount[bin] += 1;
+            monoTotal += monoE;
+            monoBlocks += 1;
+        }
+    }
+
+    // A complete short-term block (3 s) into the range's.
+    void countShort(double level, double energy) {
+        shortTop = max(shortTop, level);
+        if (level > -70.0) {
+            const int bin = clamp(floorToInt((level + 70.0) * 10.0), 0, kBins - 1);
+            rangeCount[bin] += 1;
+            rangeTotal += energy;
+            rangeBlocks += 1;
+            const int lu = floorToInt(level + 60.0);
+            if (lu >= 0 && lu < kSpread) spreadShown[lu] += 1.0f;
+        }
+    }
+
+    void loudnessReadings() {
+        integratedNow = gatedMean(gatedEnergy, gatedCount, gatedTotal, gatedBlocks);
+        monoIntegrated = gatedMean(monoEnergy, monoCount, monoTotal, monoBlocks);
+        if (rangeBlocks > 0) loudnessRange();
+    }
+
+    // The window's loudness: the gates rebuilt from the last minute's blocks,
+    // oldest first.
+    void windowLoudness() {
+        gatedEnergy.fill(0.0);
+        monoEnergy.fill(0.0);
+        gatedCount.fill(0);
+        monoCount.fill(0);
+        rangeCount.fill(0);
+        gatedTotal = 0.0;
+        monoTotal = 0.0;
+        rangeTotal = 0.0;
+        gatedBlocks = 0;
+        monoBlocks = 0;
+        rangeBlocks = 0;
+        momentaryTop = -120.0;
+        shortTop = -120.0;
+        rangeNow = 0.0;
+        rangeLow = -120.0;
+        rangeHigh = -120.0;
+        spreadShown.fill(0.0f);
+        for (int k = winFilled; k > 0; --k) {
+            const int b = wrap(winAt - k, kWindowBlocks);
+            if (winMomentary[b] > -199.0)
+                countMomentary(winMomentary[b], winEnergy[b], winMono[b], winMonoEnergy[b]);
+            if (winShort[b] > -199.0) countShort(winShort[b], winShortEnergy[b]);
+        }
+        loudnessReadings();
+    }
+
+    // A second of the window has passed: the oldest gives way to a new one
+    // and, unless accumulating, the sums become the window's again.
+    void nextSecond() {
+        secondAt = secondAt == kWindow - 1 ? 0 : secondAt + 1;
+        seconds[secondAt].clear();
+        if (accumulating) return;
+        frames = 0.0;
+        sumL = 0.0;
+        sumR = 0.0;
+        sumLL = 0.0;
+        sumRR = 0.0;
+        sumLR = 0.0;
+        peakTrue = 0.0;
+        peakSample = 0.0;
+        overCount = 0;
+        clipCount = 0;
+        allM.fill(0.0);
+        thirdAllL.fill(0.0);
+        thirdAllR.fill(0.0);
+        thirdAllX.fill(0.0);
+        thirdAllM.fill(0.0);
+        namedM.fill(0.0);
+        chromaAll.fill(0.0);
+        centroidCount.fill(0);
+        totalM = 0.0;
+        lowM = 0.0;
+        lowS = 0.0;
+        framesAll = 0;
+        centroidFrames = 0;
+        for (const auto& second : seconds) {
+            frames += second.frames;
+            sumL += second.sumL;
+            sumR += second.sumR;
+            sumLL += second.sumLL;
+            sumRR += second.sumRR;
+            sumLR += second.sumLR;
+            peakTrue = max(peakTrue, second.peakTrue);
+            peakSample = max(peakSample, second.peakSample);
+            overCount += second.overs;
+            clipCount += second.clips;
+            for (int i = 0; i < kPoints; ++i) allM[i] += second.allM[i];
+            for (int b = 0; b < kThirds; ++b) {
+                thirdAllL[b] += second.thirdL[b];
+                thirdAllR[b] += second.thirdR[b];
+                thirdAllX[b] += second.thirdX[b];
+                thirdAllM[b] += second.thirdM[b];
+            }
+            for (int n = 0; n < kNamed; ++n) namedM[n] += second.namedM[n];
+            for (int c = 0; c < 12; ++c) chromaAll[c] += second.chroma[c];
+            for (int b = 0; b < kCentroids; ++b) centroidCount[b] += second.centroids[b];
+            totalM += second.totalM;
+            lowM += second.lowM;
+            lowS += second.lowS;
+            framesAll += second.framesAll;
+            centroidFrames += second.centroidFrames;
+        }
+        findKey();
+        tone();
+        share();
     }
 
     // EBU 3342: short-term values gated at -70 LUFS and 20 LU under their
@@ -1038,14 +1246,18 @@ struct Lichen : Effect {
         // square is the total over three.
         const bool silent = total / 3.0 < 1e-7;
         const bool counted =
-            measuring && !silent && (!requireCleanWindows || frames >= stft[0].size());
+            measuring && !silent && (!requireCleanWindows || sinceRestart >= stft[0].size());
+        Second& now = seconds[secondAt];
 
         // The drawn spectrum, now and since play.
         for (int i = 0; i < kPoints; ++i) {
             const double m = gridPower(i, false), s = gridPower(i, true);
             nowM[i] += kFrameNow * (m - nowM[i]);
             nowS[i] += kFrameNow * (s - nowS[i]);
-            if (counted) allM[i] += m;
+            if (counted) {
+                allM[i] += m;
+                now.allM[i] += m;
+            }
         }
         // Third octaves: the correlation by band, now and since play; the mid
         // for the tilt.
@@ -1057,25 +1269,45 @@ struct Lichen : Effect {
             thirdNowR[b] += kFrameBand * (br - thirdNowR[b]);
             thirdNowX[b] += kFrameBand * (bx - thirdNowX[b]);
             if (counted) {
+                const double bm = between(cM, pM, lo, hi);
                 thirdAllL[b] += bl;
                 thirdAllR[b] += br;
                 thirdAllX[b] += bx;
-                thirdAllM[b] += between(cM, pM, lo, hi);
+                thirdAllM[b] += bm;
+                now.thirdL[b] += bl;
+                now.thirdR[b] += br;
+                now.thirdX[b] += bx;
+                now.thirdM[b] += bm;
             }
         }
         for (int c = 0; c < 12; ++c) chromaNow[c] += kFrameChroma * (chromaFrame[c] - chromaNow[c]);
         if (counted) {
             framesAll += 1;
-            for (int n = 0; n < kNamed; ++n)
-                namedM[n] += between(cM, pM, namedEdge[n], namedEdge[n + 1]);
-            totalM += between(cM, pM, namedEdge[0], namedEdge[7]);
-            lowM += between(cM, pM, namedEdge[0], namedEdge[2]);
-            lowS += between(cS, pS, namedEdge[0], namedEdge[2]);
+            now.framesAll += 1;
+            for (int n = 0; n < kNamed; ++n) {
+                const double e = between(cM, pM, namedEdge[n], namedEdge[n + 1]);
+                namedM[n] += e;
+                now.namedM[n] += e;
+            }
+            const double t = between(cM, pM, namedEdge[0], namedEdge[7]);
+            const double lm = between(cM, pM, namedEdge[0], namedEdge[2]);
+            const double ls = between(cS, pS, namedEdge[0], namedEdge[2]);
+            totalM += t;
+            lowM += lm;
+            lowS += ls;
+            now.totalM += t;
+            now.lowM += lm;
+            now.lowS += ls;
             // Each frame's pitch classes count alike, however loud.
             double chromaSum = 0.0;
             for (int c = 0; c < 12; ++c) chromaSum += chromaFrame[c];
-            if (chromaSum > 0.0)
-                for (int c = 0; c < 12; ++c) chromaAll[c] += chromaFrame[c] / chromaSum;
+            if (chromaSum > 0.0) {
+                for (int c = 0; c < 12; ++c) {
+                    const double part = chromaFrame[c] / chromaSum;
+                    chromaAll[c] += part;
+                    now.chroma[c] += part;
+                }
+            }
             findKey();
         }
         tone();
@@ -1103,6 +1335,8 @@ struct Lichen : Effect {
             clamp(floorToInt(kCentroids * log2(hz / 20.0) / log2(1000.0)), 0, kCentroids - 1);
         centroidCount[at] += 1;
         centroidFrames += 1;
+        seconds[secondAt].centroids[at] += 1;
+        seconds[secondAt].centroidFrames += 1;
     }
 
     // The profile of key k (0..11 major from C, 12..23 minor) at pitch class c.
@@ -1361,12 +1595,14 @@ struct Lichen : Effect {
     static constexpr double ex = 772, ey = 592, ew = 292, eh = 192;
     // Controls.
     static constexpr double restartX = 872, resetX = 1000, pillY = 15, pillH = 20;
+    static constexpr double clockY = 33;  // the timer's clock, in the header
     static constexpr double slopeX = 884, slopeY = 355;
     static constexpr double chipX = 88, chipY = 297, chipW = 36, chipH = 18;
 
     // The editor's own.
     double hoverX = -1.0, hoverY = -1.0;
-    int dragging = 0;  // 1 the target
+    double clockX = 0.0, clockW = 0.0;  // where the clock and its text were drawn
+    int dragging = 0;                   // 1 the target
     Array<double, kPoints> eNowM, eNowS, eAll, eHold;
     bool primed = false;
     double zoom = 1.0;
@@ -1724,18 +1960,59 @@ struct Lichen : Effect {
                                         : "listening";
         g.fillText(what, 66 + nameWidth, 37);
         const double w2 = g.measureText(what);
-        g.fillStyle(Theme::textFaint);
-        g.monoFont(10.5);
-        fillClock(g, measured.value(), 78 + nameWidth + w2, 37);
-        const double w3 = g.measureText("0:00.0");
-        g.serifItalicFont(11);
-        g.fillText("measured", 86 + nameWidth + w2 + w3, 37);
         g.textBaseline(TextBaseline::Middle);
+        clockX = 90 + nameWidth + w2;
+        drawClock(g);
         drawLevel(g, 680, 22, 150, levelLeft.get(), levelRight.get(), "LEVEL");
         pill(g, restartX, pillY, 120, pillH, "RESTART ON PLAY", restartOnPlay.on(), kLichen,
              hovered(restartX, pillY, 120, pillH));
         pill(g, resetX, pillY, 64, pillH, "RESET", false, kLichen,
              hovered(resetX, pillY, 64, pillH));
+    }
+
+    // The timer and its clock: accumulating since play started (lit, the
+    // time it covers), or following the last 60 s. A click on either switches.
+    void drawClock(Canvas& g) {
+        const bool on = accumulate.on();
+        g.textAlign(TextAlign::Left);
+        g.textBaseline(TextBaseline::Middle);
+        if (on) {
+            const int whole = toInt(0.001 * measured.value());
+            g.fillStyle(Theme::textMuted);
+            g.monoFont(10.5);
+            g.fillText(format("%d:%02d", idiv(whole, 60), imod(whole, 60)), clockX + 11, clockY);
+            clockW = 11 + g.measureText(format("%d:%02d", idiv(whole, 60), imod(whole, 60)));
+        } else {
+            g.fillStyle(Theme::textFaint);
+            g.serifItalicFont(11);
+            g.fillText("last 60 s", clockX + 11, clockY);
+            clockW = 11 + g.measureText("last 60 s");
+        }
+        const bool hot = dragging == 0 && onClock(hoverX, hoverY);
+        const int colour = on ? kMarigold : (hot ? Theme::textMuted : Theme::textFaint);
+        if (on) {
+            g.fillStyle(kMarigold);
+            g.globalAlpha(0.18);
+            g.beginPath();
+            g.circle(clockX, clockY, 6);
+            g.fill();
+            g.globalAlpha(1.0);
+        }
+        g.strokeStyle(colour);
+        g.lineWidth(1.3);
+        g.beginPath();
+        g.circle(clockX, clockY, 5.5);
+        g.stroke();
+        g.lineWidth(1.2);
+        g.beginPath();
+        g.moveTo(clockX, clockY - 3.4);
+        g.lineTo(clockX, clockY);
+        g.lineTo(clockX + 2.6, clockY);
+        g.stroke();
+    }
+
+    bool onClock(double x, double y) const {
+        return y > clockY - 10 && y < clockY + 10 && x > clockX - 9 && x < clockX + clockW + 2;
     }
 
     // --- loudness -------------------------------------------------------------------------------
@@ -2165,7 +2442,7 @@ struct Lichen : Effect {
         label(g, "SIDE", sx + 580, sy + 20, TextAlign::Left);
         g.fillStyle(kMarigold);
         g.fillRect(sx + 622, sy + 19, 14, 2);
-        label(g, "SINCE PLAY", sx + 642, sy + 20, TextAlign::Left);
+        label(g, accumulate.on() ? "SINCE PLAY" : "LAST 60 S", sx + 642, sy + 20, TextAlign::Left);
         g.fillStyle(kLinen);
         g.globalAlpha(0.3);
         g.fillRect(sx + 716, sy + 19, 14, 1);
@@ -2365,7 +2642,8 @@ struct Lichen : Effect {
     void drawStereo(Canvas& g) {
         panel(g, ox, oy, ow, oh);
         heading(g, "Stereo", ox + 16, oy + 20);
-        aside(g, "bars now, ticks since play", ox + ow - 16, oy + 20, TextAlign::Right);
+        aside(g, accumulate.on() ? "bars now, ticks since play" : "bars now, ticks the last 60 s",
+              ox + ow - 16, oy + 20, TextAlign::Right);
         drawScope(g);
         stereoBar(g, oy + 52, corrNeedle.get(), correlation.value(), 1.0, "CORRELATION", true);
         stereoBar(g, oy + 84, balanceNeedle.get(), balance.value(), 12.0, "BALANCE", false);
@@ -2626,7 +2904,8 @@ struct Lichen : Effect {
     void drawHealth(Canvas& g) {
         panel(g, ex, ey, ew, eh);
         heading(g, "Health", ex + 16, ey + 20);
-        aside(g, "since play", ex + ew - 16, ey + 20, TextAlign::Right);
+        aside(g, accumulate.on() ? "since play" : "last 60 s", ex + ew - 16, ey + 20,
+              TextAlign::Right);
         const bool any = samplePeak.value() > -69.95;
         const double vx0 = ex + ew - 16;
         const double tp = truePeak.value();
@@ -2693,6 +2972,10 @@ struct Lichen : Effect {
     }
 
     void pressed(const Pointer& p) {
+        if (onClock(p.x(), p.y())) {
+            accumulate.edit(accumulate.on() ? 0.0 : 1.0);
+            return;
+        }
         if (p.over(restartX, pillY, 120, pillH)) {
             restartOnPlay.edit(restartOnPlay.on() ? 0.0 : 1.0);
             return;

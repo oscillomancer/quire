@@ -17,12 +17,16 @@ measure; read it with `fx.meters`.
 The readings come in two kinds:
 
 - **Now:** `momentary` (400 ms) and `short_term` (3 s) loudness.
-- **The play:** everything else, from when play starts until it stops, after
-  which they hold. A render plays, so these summarize its audio. A play
-  starts them afresh unless `restart_on_play` is false; any change to
-  `reset` starts them afresh too. With the transport never started (a live
-  input, `dsp.test`) they gather until reset. `measured` says how much audio
-  they cover: check it before trusting them.
+- **The play:** everything else. By default they cover the last 60 s of
+  the play; with `accumulate` on, all of it from when play starts until it
+  stops. Either way they hold when play stops, and a render plays, so these
+  summarize its audio: **set `accumulate: true` to measure a render longer
+  than a minute as a whole.** A play starts them afresh unless
+  `restart_on_play` is false; any change to `reset` or to `accumulate`
+  starts them afresh too. With the transport never started (a live input,
+  `dsp.test`) they gather until reset. `measured` says how much audio they
+  cover (60 s at most without `accumulate`): check it before trusting
+  them.
 
 Readings refresh every 100 ms, so the last reading can miss up to the final
 100 ms of a render, plus the host's meter cadence. This includes `measured`;
@@ -59,7 +63,7 @@ range and short-term maximum, and a full transform window for tone and key.
 | `sub`, `low`, `low_mid`, `mid`, `high_mid`, `presence`, `air` | dB | Each band's share of the whole: 20–60, 60–250, 250–500, 500–2k, 2k–4k, 4k–6k, 6k–20k Hz |
 | `key` | key | `a_minor`, `e_flat_major`, … or `none`: the key the notes heard most resemble |
 | `key_strength` | % | How well they match it: above 70 clear, below 50 doubtful |
-| `measured` | ms | Audio the play's readings cover |
+| `measured` | ms | Audio the play's readings cover: at most 60 s, unless `accumulate` |
 
 The tone readings (bands, tilt, centroid), the stereo readings and the
 loudness use the definitions of `analyze`, so a live reading compares with
@@ -67,16 +71,17 @@ an analysis report of the same audio and with `compare` against a
 reference.
 
 Settings (none change the sound): `target` (LUFS, −30…−5, default −14: the
-editor's reference), `restart_on_play` (default true), `reset` (any change
-restarts the readings), `slope` (`flat`, `db3`, `db4_5`: how the editor
+editor's reference), `restart_on_play` (default true), `accumulate`
+(default false: the last 60 s; true: the whole play; the editor's clock),
+`reset` (any change restarts the readings), `slope` (`flat`, `db3`, `db4_5`: how the editor
 tilts its spectrum). Factory patches set the target: Streaming (−14),
 Streaming, Quieter (−16), Broadcast, EBU R128 (−23), Broadcast, ATSC A/85
 (−24), Loud Master (−9), Level Spectrum (−14, drawn flat).
 
 ## Recipes
 
-**Check a mix against a delivery target.** Lichen last on the master,
-`render.mix`, then `fx.meters {from: "render"}`. Streaming wants about
+**Check a mix against a delivery target.** Lichen last on the master with
+`accumulate: true`, `render.mix`, then `fx.meters {from: "render"}`. Streaming wants about
 −14 LUFS integrated and a true peak at or under −1 dBTP; broadcast −23
 (EBU) or −24 (ATSC) and −1 or −2 dBTP. `overs` and `clipped` should be 0.
 Fix loudness with Treeline, not by trusting the reading alone.

@@ -303,8 +303,9 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   their highest), true and sample peak, PLR, crest, overs, clipped runs,
   DC, correlation, width, the width below 250 Hz, balance, mono loss, the
   seven named bands, tilt and centroid (as the offline analysis defines
-  them) and the key with its strength, over the last play (or render).
-  Agents read them with `fx.meters`. Its editor shows the loudness against
+  them) and the key with its strength, over the last 60 s of the play (or
+  render), or all of it with `accumulate` (the editor's clock, as in
+  Treeline). Agents read them with `fx.meters`. Its editor shows the loudness against
   a target, the last minute and the play's distribution, the spectrum now
   (mid and side), its peak and the play's average with the named bands, a
   vectorscope with correlation by third octave, the pitch classes round

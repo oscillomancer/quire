@@ -1014,6 +1014,7 @@ parameters, so a host, the editor and an agent (`fx.meters`, `dsp.test`'s
 |---|---|---|---|---|
 | `target` | dB (LUFS) | −30..−5: the editor's reference | linear | −14 |
 | `restart_on_play` | bool | the readings since play restart when play starts | | true |
+| `accumulate` | bool | off, the play's readings cover its last 60 s; on, all of it | | false |
 | `reset` | bool | any change starts every reading afresh | | false |
 | `slope` | enum | `flat`, `db3`, `db4_5`: the tilt the spectrum is drawn with | | `db4_5` |
 | `integrated`, `short_term`, `momentary` | LUFS | readonly, −70..10 (−70: nothing) | | |
@@ -1033,12 +1034,16 @@ parameters, so a host, the editor and an agent (`fx.meters`, `dsp.test`'s
 | `sub`, `low`, `low_mid`, `mid`, `high_mid`, `presence`, `air` | dB | readonly, −80..0, of the whole | | |
 | `key` | enum | readonly: `none`, `c_major` … `b_major`, `c_minor` … `b_minor` (flats `d_flat_major`, sharps `f_sharp_minor`) | | |
 | `key_strength` | % | readonly | | |
-| `measured` | ms | readonly: the audio the readings since play cover | | |
+| `measured` | ms | readonly: the audio the play's readings cover | | |
 
 - **The play.** `momentary` and `short_term` follow the audio now. Every
   other reading covers "the play": from when play starts (when
   `restart_on_play`, otherwise added to the last) to when it stops, after
-  which they hold. With the transport never started (a live input, the
+  which they hold. Without `accumulate` only its last 60 s count: the
+  loudness gates are rebuilt each 100 ms from the last 600 blocks, and the
+  other sums are kept per second, the oldest dropped as each second ends
+  (59 to 60 s of them). Switching `accumulate` starts every reading
+  afresh. With the transport never started (a live input, the
   sandbox's `dsp.test`) they keep gathering until `reset` changes. Offline
   renders play the transport, so a render's readings cover the render, up
   to the last 100 ms refresh (the host's meter cadence can lag further).
@@ -1088,7 +1093,10 @@ parameters, so a host, the editor and an agent (`fx.meters`, `dsp.test`'s
   (otherwise `none`); `key_strength` is that correlation. On test
   progressions in all 24 keys it named 22; the two misses were a close
   relative (E minor read as C major, G minor as C minor).
-- **The editor** (1080 × 800): loudness against the target (four usual
+- **The editor** (1080 × 800): in the header, the state (listening,
+  measuring the play, holding it) and Treeline's clock, which switches
+  `accumulate`: unlit, "last 60 s"; lit, the time the play's readings
+  cover; Restart on Play and Reset. Loudness against the target (four usual
   targets as chips, the value dragged or wheeled); the last minute of
   short-term and momentary loudness and true peak with the target and the
   loudness range shaded, beside the play's short-term distribution with the
