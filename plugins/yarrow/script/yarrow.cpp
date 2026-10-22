@@ -1002,6 +1002,7 @@ struct Yarrow : Effect {
     double rate = 48000.0;
     double gainScale = 1.0;
     double autoTarget = 0.0, autoNow = 0.0;
+    double gainDb = 1e9, gainLinear = 1.0;
     double wetStep = 0.001, glide = 0.05, quick = 0.2, slow = 0.01, fall = 0.999;
     double attackMs = 3.0;
     int tick = 0;
@@ -1272,9 +1273,13 @@ struct Yarrow : Effect {
                 hear0.clear();
                 hear1.clear();
             }
-            const double g = dbToGain(output.at(i) + autoNow);
-            l *= g;
-            r *= g;
+            const double db = output.at(i) + autoNow;
+            if (db != gainDb) {
+                gainLinear = dbToGain(db);
+                gainDb = db;
+            }
+            l *= gainLinear;
+            r *= gainLinear;
             io[0][i] = l;
             if (stereo) io[1][i] = r;
             peakOut0 = max(abs(l), peakOut0 * fall);
