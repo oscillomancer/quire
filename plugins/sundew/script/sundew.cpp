@@ -634,18 +634,25 @@ struct Sundew : Effect {
                 if (!isFinite(kr)) kr = 0.0;
             }
             // The audio, delayed by the lookahead; the key is not.
-            delay[0].push(l);
-            delay[1].push(r);
-            const double dl = ahead > 0 ? delay[0].read(ahead) : l;
-            const double dr = ahead > 0 ? delay[1].read(ahead) : r;
+            // Lookahead changes restart and prepare the buffers, so there
+            // is no history to retain while it is off.
+            double dl = l, dr = r;
+            if (ahead > 0) {
+                delay[0].push(l);
+                delay[1].push(r);
+                dl = delay[0].read(ahead);
+                dr = delay[1].read(ahead);
+            }
             double k0 = midSide ? 0.5 * (kl + kr) : kl;
             double k1 = midSide ? 0.5 * (kl - kr) : kr;
             if (filterOn) {
                 k0 = keyFilter[0].process(k0);
                 k1 = keyFilter[1].process(k1);
             }
-            keyDelay[0].push(midSide ? k0 + k1 : k0);
-            keyDelay[1].push(midSide ? k0 - k1 : k1);
+            if (ahead > 0) {
+                keyDelay[0].push(midSide ? k0 + k1 : k0);
+                keyDelay[1].push(midSide ? k0 - k1 : k1);
+            }
             keyPeak = max(max(abs(k0), abs(k1)), keyPeak * fall);
 
             // The detector: each channel's level in dB, then linked.
