@@ -261,8 +261,9 @@ signal (even/odd coefficients: Glue 0.02/−0.10, Opto 0.06/−0.03, FET
 0.35 + 0.65·min(1, amount/10 dB), the input to the polynomial limited to
 ±1.5 and the DC its even part makes removed (8 Hz). Then `mix` against the
 delayed dry signal, the match, and `output`. Listen plays the key (delayed
-as the audio) or the delta (dry minus compressed, before mix and output),
-faded over 10 ms.
+as the audio) or the delta (dry minus compressed, before mix and output).
+Every switch crossfades over 10 ms from what is heard to what is chosen;
+a switch during a fade starts from the blend heard.
 
 Match measures the dry and the mixed signal's power (one-poles of 600 ms)
 and, while the input is above −57 dBFS, moves an offset toward their ratio
@@ -324,7 +325,7 @@ mono in and out, a stereo "Sidechain" input; latency is the lookahead.
 | `range` | dB | −80..0: the gain while closed; −80 is silence (−inf) | linear | −40 |
 | `ratio` | ratio | 1.2..10 (expand) | log | 2 |
 | `attack` | ms | 0.05..50: the opening's length | log | 1 |
-| `hold` | ms | 0..1000: open after the level falls under the close level | cubic | 20 |
+| `hold` | ms | 0..1000: open after the level falls under the close level (gate); a falling gain held this long (expand) | cubic | 20 |
 | `release` | ms | 10..3000: the time to turn down 60 dB | log | 150 |
 | `follow` | bool | close at the sound's own rate of decay (gate) | | true |
 | `lookahead` | enum | `off`, `ms1`, `ms2`, `ms5`; a restart, not automatable | | `ms2` |
@@ -335,7 +336,7 @@ mono in and out, a stereo "Sidechain" input; latency is the lookahead.
 | `gain` | dB | readonly, −80..0: the lowest gain of the last block | | |
 | `noise_floor` | dBFS | readonly: the commonest key level of the quietest 30 % of the last 10 s | | |
 | `loud_level` | dBFS | readonly: the key level exceeded 5 % of the last 10 s | | |
-| `suggested_threshold` | dBFS | readonly: see below | | |
+| `suggested` | dBFS | readonly: see below | | |
 | `open_time` | % | readonly: the share of the last 10 s it was open | | |
 | `openings` | | readonly: how many times it opened in the last 10 s | | |
 
@@ -362,14 +363,15 @@ mono in and out, a stereo "Sidechain" input; latency is the lookahead.
   a shorter hold), clamped to a quarter to four times the release's rate.
   A sound that stops dead closes fast; a ringing tom fades as it rang.
 - **Listen.** `key` plays the filtered key, delayed with the audio;
-  `delta` plays input − output, what the gate takes away. A switch fades
-  over 10 ms.
+  `delta` plays input − output, what the gate takes away. Every switch
+  crossfades over 10 ms from what is heard to what is chosen; a switch
+  during a fade starts from the blend heard.
 - **Readouts.** The detector's level each millisecond goes into a
   histogram of 1 dB bins (−96..0 dBFS; digital silence is skipped), kept in
   100 chunks of 100 ms. Every 100 ms: `noise_floor` is the commonest level
   among the quietest 30 % (smoothed over ±2 dB); the noise's peaks reach
   twice as far above it as the quietest 2 % lie below it, and at least
-  4 dB; `suggested_threshold` puts the close level 2 dB above those peaks
+  4 dB; `suggested` puts the close level 2 dB above those peaks
   (`threshold − hysteresis` = peaks + 2), kept 3 dB under `loud_level`. The
   levels between the noise and the sound are full of the sound's own
   decays, so the suggestion is measured from below. All read −96 until
@@ -606,8 +608,9 @@ latency is the oversampler's (0 to 5 samples).
   Transformer holds the mids' level: a saturating bass loses level.
 - **Cuts and mix.** `low_cut` and `high_cut` (12 dB/oct) on the driven
   band's output; out = dry + mix × (wet − dry). `listen`: `band` plays the
-  driven band's output alone, `delta` mix × (wet − dry); a switch fades
-  over 10 ms. `channels` changes dip the output for 3 ms each way.
+  driven band's output alone, `delta` mix × (wet − dry); every switch
+  crossfades over 10 ms from the blend heard. `channels` changes dip the
+  output for 3 ms each way.
 - **The probe** (`thd`, `even`): a 100 Hz sine at −18 dBFS RMS through its
   own copy of the curve (base rate, style, drive, character and bias as
   set, without dynamics or motion); every 20 cycles its first 16 harmonics
@@ -754,12 +757,16 @@ Main stereo or mono in and out (mono plays as `mono` routing); no latency.
   down by `duck` × clamp((level + 60)/30, 0, 1) dB, rising in 5 ms and
   letting go over 150 ms.
 - **Tail and decay.** A pass's gain at a frequency is the cuts' and the
-  medium's (analytic). `decay` is the time the echoes take to fall 60 dB
+  medium's (analytic). Each loop (one per side, or the one ping-pong or
+  mono loop) alternates two halves, after groove and offset and their
+  clamps; a pass takes their mean time at the geometric mean of their
+  gains. `decay` is the time the slowest loop's echoes take to fall 60 dB
   at 1 kHz with the feedback as set (drive aside), 600 s when held or past
   the loop's losses. The tail (`setTail`) is the time to fall 80 dB at the
-  slowest of 60 Hz, 250 Hz, 1 kHz and 4 kHz, plus 1.5 T, a reversed slice
-  and the diffusers' ring (0.5 s × `diffusion`): forever when frozen or
-  past the losses. It follows the tempo as it changes.
+  slowest of 60 Hz, 250 Hz, 1 kHz and 4 kHz in any loop, plus 1.5 × the
+  longest half, a reversed slice and the diffusers' ring (0.5 s ×
+  `diffusion`): forever when frozen or past the losses. It follows the
+  tempo as it changes.
 
 Measured (dev build, 48 kHz):
 
@@ -859,7 +866,8 @@ is as loud against it as at the listener's place.
   Each arrives (r − r₀)/c after the direct sound (r₀ source to listener,
   0.5 m at least) plus `predelay`, at r₀/r, × each surface's √(1 − α) per
   band and the air's e^(−m(r − r₀)/2), × the source's pattern along the
-  path it left by (the image's direction folded back through its mirrors),
+  path it left by (the image's direction folded back through its mirrors;
+  0.7 + 0.3 cos θ, θ from its direction toward the listener, which it faces),
   × the capsule's pattern from its direction over its pattern toward the
   source (the dry is the direct sound each hears). Three bands: below
   500 Hz (α the mean of 125 and 250), 500 Hz–4 kHz (500, 1k, 2k), above
@@ -876,7 +884,7 @@ is as loud against it as at the listener's place.
   taken at 200 Hz, 1.3 kHz and 6.5 kHz for the bands); `mono`: one omni.
 - **The tail.** Sixteen lines, each a prime number of samples near
   T × 0.62 × 2.6^(k/15) (ranks shuffled), T the mean free path's time
-  4V/Sc, at least 15 ms per second of mid-band RT60 (a small, long room
+  4V/Sc, at least 20 ms per second of mid-band RT60 (a small, long room
   would ring otherwise) and 8 to 110 ms. A fast Walsh–Hadamard transform
   mixes them (× ¼); each line wanders ±0.25 ms (less in rooms under 20 ms
   of free path) at 0.13 to 0.9 Hz, read by a cubic. Each line loses its
@@ -974,6 +982,9 @@ balance → gain and mute.
   (non-finite samples included); a non-finite sample never reaches a
   filter's or the delay's state.
 - The readouts are sums over 30 chunks of 100 ms, reported each block.
+- The tail (`setTail`) is the delay (both times while it crossfades), plus
+  750 ms while the DC block is on or fading out and five periods of
+  `mono_below` while bass mono applies on a stereo bus; zero at rest.
 
 Editor (900 × 580): an image of where the sound sits (the mid up, the side
 across, scaled to the level), with the correlation and the left-right
@@ -1029,7 +1040,11 @@ parameters, so a host, the editor and an agent (`fx.meters`, `dsp.test`'s
   `restart_on_play`, otherwise added to the last) to when it stops, after
   which they hold. With the transport never started (a live input, the
   sandbox's `dsp.test`) they keep gathering until `reset` changes. Offline
-  renders play the transport, so a render's readings cover the render.
+  renders play the transport, so a render's readings cover the render, up
+  to the last 100 ms refresh (the host's meter cadence can lag further).
+  Since-play figures hold only the play's own samples: a loudness block
+  joins them once its window lies wholly after the restart, while the
+  rolling readings (momentary, short-term, the spectrum) carry on.
 - **Loudness** is BS.1770-5 / EBU R128 as Treeline measures it: K-weighting
   from the analogue prototypes at any rate, 100 ms energy blocks, momentary
   400 ms, short-term 3 s, integrated gated at −70 LUFS and −10 LU over
@@ -1164,7 +1179,8 @@ modes:
   of 0.1 LU bins, and true peak and overs, since it was switched on; the
   editor shows the running time.
 
-Switching the mode and starting the transport restart the measurement.
+The recent window keeps rolling in either mode; switching the mode
+restarts the accumulated totals, and starting the transport restarts both.
 
 Listen: `matched` turns the output down by the dry input's short-term
 loudness against the output's (−30..+6 dB, gliding over 400 ms, back over
@@ -1226,7 +1242,7 @@ and out (mono hears each voice's two sides summed); no latency.
 | `medium` | enum | `clean`, `bbd` | | `clean` |
 | `age` | % | 0..100: the bucket brigade's wear (with `bbd`) | linear | 30 |
 | `high_cut` | Hz | 1000..20000 on the voices; 20000 is off | log | 20000 |
-| `low_keep` | Hz | 20..1000: below it dry and centred; 20 is off | log | 20 |
+| `low_keep` | Hz | 20..1000: below it dry, each side as it came in; 20 is off | log | 20 |
 | `feedback` | % | −80..80 | linear | 0 |
 | `mix` | % | 0..100 (not with `vibrato`) | linear | 50 |
 | `output` | dB | −24..24 | linear | 0 |
@@ -1304,8 +1320,9 @@ and out (mono hears each voice's two sides summed); no latency.
   in. The mix is equal-power: the voices and the dry are unlike enough
   that 50 % of each is as loud as either. Width is the voices' mid and
   side (100 % exactly nothing); `output` last.
-- **Tail.** `setTail`: the longest delay (64 ms) times the passes the
-  feedback needs to fall 90 dB, plus one.
+- **Tail.** `setTail`: the longest delay (89 ms: the deepest centre,
+  40 ms × 1.35, plus the widest swing and 10 ms) times the passes the
+  feedback needs to fall 90 dB, plus one, and 50 ms more.
 
 Measured (release sandbox's player, 48 kHz):
 
