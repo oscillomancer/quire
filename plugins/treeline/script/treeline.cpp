@@ -257,6 +257,20 @@ double lufs(double meanSquare) {
     return meanSquare > 1e-12 ? -0.691 + 10.0 * log10(meanSquare) : -120.0;
 }
 
+// A level can stay still for many samples, including after a glide lands.
+// Reuse exactly the same conversion until its dB value changes.
+struct LevelGain {
+    double db = 0.0, linear = 1.0;
+
+    double get(double value) {
+        if (value != db) {
+            db = value;
+            linear = dbToGain(value);
+        }
+        return linear;
+    }
+};
+
 // --- the look --------------------------------------------------------------------------
 
 constexpr int kInk = 0x1A1411;
@@ -412,6 +426,7 @@ struct Treeline : Effect {
     int recentOvers = 0, overAge = 0, overHold = 240000;
     // Listening.
     int listenMode = 0;
+    LevelGain driveGain, overGain, matchGain;
     double matchDb = 0.0, kMatch = 0.0, kMatchOff = 0.0, deltaMix = 0.0, deltaStep = 0.001;
     bool unplayed = true;
     bool wasPlaying = false;
@@ -639,7 +654,7 @@ struct Treeline : Effect {
             double r = stereoNow ? io[1][i] : l;
             if (!isFinite(l)) l = 0.0;
             if (!isFinite(r)) r = 0.0;
-            const double drive = dbToGain(gain.at(i));
+            const double drive = driveGain.get(gain.at(i));
             const double xl = l * drive, xr = r * drive;
 
             // The peak to hold, and the reduction that holds it.
@@ -695,7 +710,7 @@ struct Treeline : Effect {
             const double tp = max(tl, tr);
             peakHeld = max(peakHeld, tp);
             blockPeak = max(blockPeak, tp);
-            if (tp > dbToGain(ceiling.at(i) + 0.05)) {
+            if (tp > overGain.get(ceiling.at(i) + 0.05)) {
                 overs += 1;
                 recentOvers += 1;
                 overAge = 0;
@@ -721,7 +736,7 @@ struct Treeline : Effect {
             const bool matched = listenMode == 1 && shortIn > -70.0 && shortNow > -70.0;
             matchDb += (listenMode == 1 ? kMatch : kMatchOff) *
                        ((matched ? clamp(shortIn - shortNow, -30.0, 6.0) : 0.0) - matchDb);
-            const double m = dbToGain(matchDb);
+            const double m = matchGain.get(matchDb);
             deltaMix = clamp(deltaMix + (listenMode == 2 ? deltaStep : -deltaStep), 0.0, 1.0);
             // Delta: what it took, at the level it came in.
             const double undo = 1.0 / drive;
