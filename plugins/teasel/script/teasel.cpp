@@ -62,6 +62,15 @@ struct GainCache {
     }
 };
 
+// Equivalent exp form, saturated where double tanh already rounds to 1.
+double equivalentTanh(double x) {
+    const double a = abs(x);
+    if (a >= 20.0) return x < 0.0 ? -1.0 : 1.0;
+    const double e = exp(-2.0 * a);
+    const double y = (1.0 - e) / (1.0 + e);
+    return x < 0.0 ? -y : y;
+}
+
 // --- the curves ---------------------------------------------------------------------------
 //
 // Each takes the driven signal (bias added) and gives one near +-1 at full
@@ -208,8 +217,8 @@ struct Shaper {
             const double s = u > last ? 1.0 : (u < last ? -1.0 : 0.0);
             last = u;
             dir += dirStep * (s - dir);
-            const double t = tanh(u);
-            return tanh(u - 0.35 * c * dir * t * t * t * t);
+            const double t = equivalentTanh(u);
+            return equivalentTanh(u - 0.35 * c * dir * t * t * t * t);
         }
         if (style == 2) {
             // Tube: peaks past the grid charge it, and the charge biases the
