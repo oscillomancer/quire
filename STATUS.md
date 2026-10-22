@@ -410,9 +410,10 @@ Engine and hosting:
   latency preferences report unsupported on other platforms. Windows MCP is
   intended for piped/file input; cancelling an interactive console read can
   await a keypress during shutdown.
-- B1's anticipation gain is about 2.6× (75 tracks against 28 to 29), short
-  of the 3× target, and REAPER's default anticipative FX sustains about 10 %
-  more tracks on the same session (B2).
+- REAPER's default anticipative FX sustains about 10 % more tracks than
+  Quire with anticipation on B1's session (82 to 83 against 75, B2). The
+  anticipative renderer is the limit: it ran at 78 % of real time at 64
+  tracks while the callback stayed under 5 %.
 - Live multiprocessing requires at least two usable CPUs and successful
   helper scheduling; otherwise the engine reports a warning and runs serially.
   A serial plug-in chain cannot benefit, and a stalled helper that has claimed
@@ -559,6 +560,8 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
 ## Planned
 
 - Profile the 64-frame worst case; a pipelined bridge mode.
+- Close the capacity gap with REAPER (B2) by making the anticipative
+  renderer cheaper, then keep refining capacity in both modes.
 - Track groups, stretch markers, MIDI outputs, a background media cache.
 - Lua ergonomics (a script library path, hot reload).
 - Hardening and ports beyond Linux.

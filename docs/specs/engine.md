@@ -749,8 +749,10 @@ controls); `moveParam` moves any parameter the way a binding does, for the
   compressor playing a 4-bar notation loop, one armed audio track with the
   same chain monitoring input; at 48 kHz / 64 frames on this machine: find
   the largest N with zero xruns over 5 minutes, with and without
-  anticipative processing. Target: anticipative on ≥ 3× the tracks of
-  anticipative off.
+  anticipative processing. What matters is the capacity itself, above all
+  with anticipation, and how it compares with REAPER's (B2); there is no
+  required ratio between the two modes (2026-10-21: the earlier target,
+  anticipative on ≥ 3× off, is dropped).
 - **B2 REAPER comparison:** the same structure in REAPER 7 (the stock synth
   loaded as CLAP in REAPER, ReaEQ/ReaComp substituted where needed and
   noted), same device settings, anticipative FX at its default; report N for

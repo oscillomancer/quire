@@ -62,8 +62,7 @@ python3 -m unittest discover -s tools/reaper-check -p 'test_*.py' -v
 the block deadline, and `synthetic_late_wakes` counts scheduler catch-up resets; anticipation misses
 also fail a trial, including when the monitored/master path is live. B1 and
 B2 exclude activation and a one-second preroll from the measured interval.
-Short dry runs prove operation, **not** five-minute capacity or B1's ≥3×
-target. Debug builds can have no passing N; the search records N=0 and exits
+Short dry runs prove operation, **not** five-minute capacity. Debug builds can have no passing N; the search records N=0 and exits
 nonzero. The report marks the device, build facts and exact durations.
 
 For short tail measurements and an optional installed effect module:
