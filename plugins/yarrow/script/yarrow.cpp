@@ -1012,6 +1012,7 @@ struct Yarrow : Effect {
     double listenHz = 0.0, listenQ = 0.0;
     int listenKind = -1;
     Biquad hear0, hear1;
+    bool hearDirty = false;
     double peakIn0 = 0.0, peakIn1 = 0.0, peakOut0 = 0.0, peakOut1 = 0.0;
     int pos = 0;
     int total = 0;
@@ -1269,9 +1270,11 @@ struct Yarrow : Effect {
             if (listenMix > 0.0) {
                 l += listenMix * (hear0.process(l) - l);
                 r += listenMix * (hear1.process(r) - r);
-            } else if (listenBand == 0) {
+                hearDirty = true;
+            } else if (hearDirty && listenBand == 0) {
                 hear0.clear();
                 hear1.clear();
+                hearDirty = false;
             }
             const double db = output.at(i) + autoNow;
             if (db != gainDb) {
