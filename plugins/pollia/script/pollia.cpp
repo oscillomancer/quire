@@ -620,6 +620,9 @@ struct Pollia : Effect {
         const int chans = min(io.channels, 2);
         const int mode = motion.index();
         const double fall = dbToGain(-20.0 / sr);  // the meters' fall, 20 dB a second
+        // These parameters are unsmoothed; the runtime splits at every change.
+        const double atk = exp(-1.0 / (attack.value() * 0.001 * sr));
+        const double rel = exp(-1.0 / (release.value() * 0.001 * sr));
         for (int i = 0; i < io.frames; ++i) {
             // The motion: the left's cycle position, the right's ahead of it.
             const double pos = cyclePos(io, i);
@@ -643,8 +646,6 @@ struct Pollia : Effect {
             // The envelope, against its own recent peak.
             double x0 = abs(io[0][i]);
             if (chans > 1) x0 = max(x0, abs(io[1][i]));
-            const double atk = exp(-1.0 / (attack.value() * 0.001 * sr));
-            const double rel = exp(-1.0 / (release.value() * 0.001 * sr));
             follow =
                 x0 > follow ? atk * follow + (1.0 - atk) * x0 : rel * follow + (1.0 - rel) * x0;
             const double db = gainToDb(follow);
