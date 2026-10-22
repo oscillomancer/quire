@@ -35,7 +35,7 @@ set(PRODUCT_STATE_TAG       "EGJQ")
 set(PRODUCT_DSP_SOURCES     product/Catalog.cpp)
 # The script draws its own editor (script_editor.cpp, from the suite).
 set(PRODUCT_EDITOR_SOURCES  "")
-set(PRODUCT_TEST_SOURCES    "")
+set(PRODUCT_TEST_SOURCES    product/test/motion.cpp)
 
 # Output: the level out, heard at once.
 set(PRODUCT_SMOKE_PLAIN_PARAM   "Output")

@@ -475,7 +475,7 @@ struct Pollia : Effect {
     double peakRef = -60.0;  // dBFS: the recent peak it is measured against
     double envNow = 0.0;     // 0..1
     double inPeak = 0.0, outPeak = 0.0;
-    double lastKeep = 0.0;
+    double lastKeep = 0.0;  // the cutoff last designed on both channels
     // The editor's history: frames into the row, its newest row, rows written.
     int rowAt = 0, head = 0, rows = 0;
 
@@ -620,11 +620,19 @@ struct Pollia : Effect {
         unplayed = false;
         const int chans = min(io.channels, 2);
         const int mode = motion.index();
+        // Song positions may be negative during a host's count-in.
+        const bool locked = sync.index() > 0 && io.transport.playing && io.transport.tempo > 0.0;
         const double fall = dbToGain(-20.0 / sr);  // the meters' fall, 20 dB a second
+        // These parameters are unsmoothed; the runtime splits at every change.
+        const double atk = exp(-1.0 / (attack.value() * 0.001 * sr));
+        const double rel = exp(-1.0 / (release.value() * 0.001 * sr));
+        // Start outside the parameter ranges so the first frame calculates both gains.
+        double lastFb = 2.0, lastMix = -1.0, lastDb = 25.0;
+        double level = 1.0, outGain = 1.0;
         for (int i = 0; i < io.frames; ++i) {
             // The motion: the left's cycle position, the right's ahead of it.
             const double pos = cyclePos(io, i);
-            if (pos >= 0.0) {
+            if (locked) {
                 lfoCycle = floorToInt(pos);
                 lfoPhase = pos - lfoCycle;
             } else {
@@ -635,7 +643,7 @@ struct Pollia : Effect {
                 }
             }
             // Rise and fall turn the wet's phase a cycle each cycle of the motion.
-            if (pos >= 0.0) {
+            if (locked) {
                 turn = pos * (mode == 1 ? -1.0 : 1.0);
             } else if (mode > 0) {
                 turn += (-1.0 - pos) * (mode == 1 ? -1.0 : 1.0);
@@ -644,8 +652,6 @@ struct Pollia : Effect {
             // The envelope, against its own recent peak.
             double x0 = abs(io[0][i]);
             if (chans > 1) x0 = max(x0, abs(io[1][i]));
-            const double atk = exp(-1.0 / (attack.value() * 0.001 * sr));
-            const double rel = exp(-1.0 / (release.value() * 0.001 * sr));
             follow =
                 x0 > follow ? atk * follow + (1.0 - atk) * x0 : rel * follow + (1.0 - rel) * x0;
             const double db = gainToDb(follow);
@@ -691,18 +697,27 @@ struct Pollia : Effect {
             // Feedback adds power, 1/(1 - fb^2) of the wet's on noise: most of
             // it is taken back, so turning it up leaves the level near where
             // it was and the peaks still ring out.
-            const double plain = (1.0 - m) * (1.0 - m) + m * m;
-            const double fed = (1.0 - m) * (1.0 - m) + m * m / (1.0 - fb * fb);
-            const double level = pow(plain / fed, 0.4);
+            if (fb != lastFb || m != lastMix) {
+                const double plain = (1.0 - m) * (1.0 - m) + m * m;
+                const double fed = (1.0 - m) * (1.0 - m) + m * m / (1.0 - fb * fb);
+                level = pow(plain / fed, 0.4);
+                lastFb = fb;
+                lastMix = m;
+            }
             const double keep = keepBelow.at(i);
-            const double outGain = dbToGain(output.at(i));
+            const bool tuneKeep = abs(keep - lastKeep) > 0.01 || (first && i == 0);
+            const double outDb = output.at(i);
+            if (outDb != lastDb) {
+                outGain = dbToGain(outDb);
+                lastDb = outDb;
+            }
             double yMax = 0.0;
             for (int c = 0; c < chans; ++c) {
                 Side& h = ch[c];
                 const double x = io[c][i];
                 // Keep below: the low part passes untouched (a split that sums
                 // back exactly).
-                if (abs(keep - lastKeep) > 0.01 || (first && i == 0)) h.split.lowpass(keep, 0.5);
+                if (tuneKeep) h.split.lowpass(keep, 0.5);
                 const double lowPart = h.split.process(x);
                 const double kept = keep > 20.5 ? lowPart : 0.0;
                 const double dry = x - kept;
@@ -741,7 +756,7 @@ struct Pollia : Effect {
                 yMax = max(yMax, abs(y));
             }
             outPeak = max(outPeak * fall, yMax);
-            lastKeep = keep;
+            if (tuneKeep) lastKeep = keep;
             rowAt += 1;
             if (rowAt >= toInt(sr / 24.0)) {
                 rowAt = 0;
