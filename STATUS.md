@@ -597,7 +597,9 @@ Plugins:
   here. Stock VST3 builds remain opt-in; native VST3 hosting is tested with an
   in-tree SDK fixture. The pinned clap-validator checks every stock plugin
   and the player on all three platforms in CI; it stays optional locally
-  (`tools/validator/build.sh`), and its tests skip without it.
+  (`tools/validator/build.sh`), and its tests skip without it. On macOS,
+  `mac-embedding` (template 1.31.3) opens each stock editor in a Cocoa host
+  window, as `x11-embedding` and `win32-embedding` do on Linux and Windows.
 
 Smaller recorded items: `describeFlat` skips hidden parameters in full
 detail; core-params formats magnitudes beyond six decimals imprecisely;

@@ -4,6 +4,17 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.31.3
+
+What a product must do: nothing. On macOS, `ctest` now opens the editor in
+a Cocoa window, as it already does in an X11 or Win32 one.
+
+- **`mac-embedding`** (`cmake/Tests.cmake`): the CI wrapper's `clap-probe`
+  scenarios (`.github/scripts/clap-probe-mac.sh`, which now takes the
+  plugin binary and the probe as arguments) as a test, so the editor's
+  embedding is checked wherever the tests run on macOS, not only in CI's
+  release job. Registered when the product carries the wrapper.
+
 ## 1.31.2
 
 What a product must do: nothing.
