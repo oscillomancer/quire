@@ -38,10 +38,7 @@ constexpr double kPredelayLongest = 0.25;
 constexpr double kLineLongest = 0.2;    // s: the longest delay line, modulation included
 constexpr double kSourceQ = 1.92;       // the source's directivity: a voice, an instrument
 constexpr double kHeadRadius = 0.0875;  // m
-constexpr double kDensity =
-    0.02;  // s of mean line per second of decay, at the least      // s of mean line per second of
-           // decay, at the least      // s of mean line per second of decay, at the least      // s
-           // of mean line per second of decay, at the least
+constexpr double kDensity = 0.02;       // s of mean line per second of decay, at the least
 
 // --- the materials --------------------------------------------------------------------
 
@@ -209,6 +206,7 @@ struct Room {
         lz = clamp(1.7, 0.3, h - 0.3);
         double dx = sx - lx, dy = sy - ly;
         double flat = sqrt(dx * dx + dy * dy);
+        const double horizontal = flat;  // keep the distance when a fallback facing is needed
         if (flat < 1e-6) {
             dx = 0.0;
             dy = -1.0;
@@ -217,7 +215,7 @@ struct Room {
         fx = dx / flat;
         fy = dy / flat;
         const double dz = sz - lz;
-        r0 = max(0.5, sqrt(flat * flat + dz * dz));
+        r0 = max(0.5, sqrt(horizontal * horizontal + dz * dz));
         // The listener's right, facing the source.
         const double rx = -fy, ry = fx;
         double half = 0.085, angle = 0.9599310885968813;  // ORTF: 17 cm, 55 degrees out
@@ -265,10 +263,11 @@ struct Room {
 
     // The source's pattern for a path leaving along (ex, ey, ez), against its
     // pattern toward the listener: wider than a cardioid, as a voice is.
+    // (fx, fy) faces from listener to source; the source faces the other way.
     double sourceGain(double ex, double ey, double ez) const {
         const double n = sqrt(ex * ex + ey * ey + ez * ez);
         if (n < 1e-9) return 1.0;
-        return 0.7 + 0.3 * (ex * fx + ey * fy) / n;
+        return 0.7 - 0.3 * (ex * fx + ey * fy) / n;
     }
 
     void compute() {
@@ -657,6 +656,19 @@ struct Bands {
         int i0 = at - k;
         if (i0 < 0) i0 += size;
         return data[3 * i0] + data[3 * i0 + 1] + data[3 * i0 + 2];
+    }
+};
+
+// A level's conversion stays the same until its smoothed value moves.
+struct DbGain {
+    double at = 1000.0, gain = 1.0;
+
+    double get(double db) {
+        if (db != at) {
+            at = db;
+            gain = dbToGain(db);
+        }
+        return gain;
     }
 };
 
@@ -1119,6 +1131,7 @@ struct Ghyll : Effect {
     double peakIn0 = 0.0, peakIn1 = 0.0, peakOut0 = 0.0, peakOut1 = 0.0, peakRoom = 0.0,
            peakRoom0 = 0.0, peakRoom1 = 0.0, fall = 0.999;
     double atLow = -1.0, atHigh = -1.0;
+    DbGain earlyGain, lateGain, outputGain;
 
     void prepare() {
         rate = sampleRate();
@@ -1178,17 +1191,28 @@ struct Ghyll : Effect {
         atLow = -1.0;
         atHigh = -1.0;
         unplayed = true;
-        rebuild();
+        rebuild(true);
         snap();
     }
 
     void update() {
-        rebuild();
+        const bool lossesChanged = roomWidth.changed() || roomDepth.changed() ||
+                                   roomHeight.changed() || walls.changed() || floor.changed() ||
+                                   ceiling.changed() || decay.changed();
+        if (lossesChanged || scatter.changed() || sourceX.changed() || sourceY.changed() ||
+            listenerX.changed() || listenerY.changed() || mic.changed() || predelay.changed()) {
+            rebuild(lossesChanged);
+        } else {
+            // Output controls leave the room and the fitted losses unchanged.
+            // Keep the loss glide's schedule, including during an existing glide.
+            lossMoving = 24;
+            reportTail();
+        }
         if (unplayed) snap();
     }
 
     // The room as set, and everything that follows from it.
-    void rebuild() {
+    void rebuild(bool lossesChanged) {
         room.w = roomWidth;
         room.d = roomDepth;
         room.h = roomHeight;
@@ -1246,7 +1270,7 @@ struct Ghyll : Effect {
         // The tail: lines as long as the mean free path (8 ms at the least),
         // each a prime number of samples.
         // (A small room that rings long needs more of them than its size
-        // gives, or its tail rings: at least 15 ms per second of decay.)
+        // gives, or its tail rings: at least 20 ms per second of decay.)
         const double path =
             clamp(max(room.freePath / kSound, kDensity * room.rtMid()), 0.008, 0.11);
         double mean = 0.0;
@@ -1257,7 +1281,8 @@ struct Ghyll : Effect {
             mean += n;
         }
         mean = mean / kLines;
-        for (int i = 0; i < kLines; ++i) fitLine(lines[i]);
+        if (lossesChanged)
+            for (int i = 0; i < kLines; ++i) fitLine(lines[i]);
         lossMoving = 24;
         // The input's diffusion, about a free path long.
         for (int k = 0; k < 4; ++k) {
@@ -1343,11 +1368,13 @@ struct Ghyll : Effect {
         const double k = lossMoving <= 0 ? 1.0 : 0.25;
         for (int j = 0; j < kLines; ++j) {
             Line& l = lines[j];
+            const double low = l.lowAt, high = l.highAt, air = l.airAt, gain = l.gainAt;
             l.lowAt += k * (l.lowTo - l.lowAt);
             l.highAt += k * (l.highTo - l.highAt);
             l.airAt += k * (l.airTo - l.airAt);
             l.gainAt += k * (l.gainTo - l.gainAt);
-            designLine(l);
+            if (l.lowAt != low || l.highAt != high || l.airAt != air || l.gainAt != gain)
+                designLine(l);
         }
     }
 
@@ -1583,8 +1610,8 @@ struct Ghyll : Effect {
             tr += modeOut[1].process(m1);
 
             // The room: reflections and tail, cuts, width, mix.
-            const double eg = levelGain(early.at(i));
-            const double lgain = levelGain(late.at(i));
+            const double eg = levelGain(early.at(i), earlyGain);
+            const double lgain = levelGain(late.at(i), lateGain);
             double wl = er[0] * eg + tl * lgain;
             double wr = er[1] * eg + tr * lgain;
             if (lowW > 0.0) {
@@ -1603,7 +1630,7 @@ struct Ghyll : Effect {
             }
             const double mx = mix.at(i);
             const double dry = min(1.0, 2.0 * (1.0 - mx)), wet = min(1.0, 2.0 * mx);
-            const double gainOut = dbToGain(output.at(i));
+            const double gainOut = outputGain.get(output.at(i));
             const double ol = (l * dry + wl * wet) * gainOut;
             const double orr = (r * dry + wr * wet) * gainOut;
             io[0][i] = ol;
@@ -1621,9 +1648,9 @@ struct Ghyll : Effect {
     }
 
     // A level that reaches nothing at -30 dB: the last 6 dB fade out.
-    double levelGain(double db) const {
+    double levelGain(double db, DbGain& cache) const {
         if (db <= -29.99) return 0.0;
-        const double g = dbToGain(db);
+        const double g = cache.get(db);
         return db < -24.0 ? g * (db + 30.0) / 6.0 : g;
     }
 
