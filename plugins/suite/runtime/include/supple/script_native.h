@@ -336,6 +336,8 @@ class NativeCode final : public Code {
         info_.version = i.version;
         info_.description = i.description;
         info_.url = i.url;
+        for (const char* f : i.features)
+            if (f && *f) info_.features.emplace_back(f);
         for (int w : i.channels)
             if (w > 0) info_.channels.push_back(w);
         info_.sidechain = i.sidechain;

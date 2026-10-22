@@ -56,6 +56,7 @@ struct Tilt : Effect {
 | `id` | Reverse DNS, `com.example.tilt-eq`: words of letters, digits and `-` joined by `.` (no `_`). Saved sessions find the plugin by it: never change it once the plugin is used |
 | `version` | Major, minor, patch: `"1.0.0"` (the default) |
 | `vendor`, `description`, `url` | As they say |
+| `features` | What the plugin is, as CLAP features after the main category (which the kind gives): `{"reverb"}`, `{"equalizer", "stereo"}`; lower case, digits and `-`, at most four. Hosts sort plugins by them, and Quire's plugin browser shows a stock plugin's first one after its name |
 | `channels` | Main bus widths offered, the first the default: `{2, 1}` (the default) is stereo, then mono |
 | `sidechain` | `true`: a key input as wide as the main bus (`io.sidechain(c)`) |
 | `outputs` | Names of extra outputs (`io.output(bus, c)`) |

@@ -109,6 +109,7 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
     info.features = {info.instrument()   ? "instrument"
                      : info.noteEffect() ? "note-effect"
                                          : "audio-effect"};
+    info.features.insert(info.features.end(), i.features.begin(), i.features.end());
     info.layouts.clear();
     if (!info.noteEffect()) {
         std::vector<int> widths = i.channels;

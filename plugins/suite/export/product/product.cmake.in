@@ -20,7 +20,7 @@ set(PRODUCT_RUNTIME     ON)
 set(PRODUCT_PRESETS     ON)
 set(PRODUCT_KIND        "@KIND@")
 set(PRODUCT_CHANNELS    @CHANNELS@)
-set(PRODUCT_FEATURES    "")
+set(PRODUCT_FEATURES    "@FEATURES@")
 
 # The suite's layer: the semantic-params extension and the script's status
 # in the host's log.

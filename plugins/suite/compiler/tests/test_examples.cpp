@@ -412,6 +412,7 @@ void sameDescription(const char* file,
     CHECK(a.channels == b.channels);
     CHECK(a.sidechain == b.sidechain);
     CHECK(a.outputs == b.outputs);
+    CHECK(a.features == b.features);
     CHECK(a.voices == b.voices);
     CHECK(a.latency == b.latency);
     CHECK(a.tail == b.tail);

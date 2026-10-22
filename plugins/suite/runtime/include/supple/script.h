@@ -708,6 +708,9 @@ struct Info {
     const char* version = "1.0.0";
     const char* description = "";
     const char* url = "";
+    // CLAP features after the main category (which the kind gives): what the
+    // plugin is, first ("reverb", "distortion"), as hosts sort and label it.
+    const char* features[4] = {};
     // Main bus widths offered, the first the default: {2, 1} is stereo, then
     // mono. 0 entries means stereo and mono for an effect, stereo otherwise.
     int channels[4] = {0, 0, 0, 0};

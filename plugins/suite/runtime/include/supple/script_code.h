@@ -138,6 +138,7 @@ struct SharedModel {
 
 struct InfoModel {
     std::string name, id, vendor, version = "1.0.0", description, url;
+    std::vector<std::string> features;  // after the main category, what the plugin is first
     std::vector<int> channels;  // main bus widths, the default first; empty: the kind's default
     bool sidechain = false;
     std::vector<std::string> outputs;

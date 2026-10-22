@@ -1803,9 +1803,9 @@ void Sema::evaluateInfo(FieldDecl* f) {
               "static constexpr Info info = {.name = \"Tilt\", .id = \"com.example.tilt\"};");
         return;
     }
-    static const std::vector<std::string> order = {"name",        "id",     "vendor",   "version",
-                                                   "description", "url",    "channels", "sidechain",
-                                                   "outputs",     "voices", "latency",  "tail"};
+    static const std::vector<std::string> order = {
+        "name",     "id",        "vendor",  "version", "description", "url", "features",
+        "channels", "sidechain", "outputs", "voices",  "latency",     "tail"};
     auto* list = static_cast<InitListExpr*>(f->init);
     size_t last = 0;
     for (auto& item : list->items) {
@@ -1826,8 +1826,7 @@ void Sema::evaluateInfo(FieldDecl* f) {
         if (index < last) {
             error(item.loc, "script.type.designator_order",
                   "designated initializers must follow Info's order: name, id, vendor, version, "
-                  "description, url, "
-                  "channels, sidechain, outputs, voices, latency, tail",
+                  "description, url, features, channels, sidechain, outputs, voices, latency, tail",
                   "move ." + item.designator + " earlier");
         }
         last = index;
@@ -1890,6 +1889,38 @@ void Sema::evaluateInfo(FieldDecl* f) {
             if (info.channels.size() > 4)
                 error(item.loc, "script.plugin.info", "at most four channel layouts",
                       "keep the four layouts the plugin needs most");
+        } else if (d == "features") {
+            // CLAP's spelling: lower case, digits and '-'. The main category
+            // comes from the kind, so it is not repeated here.
+            if (v->kind != Constant::Kind::List) {
+                error(item.loc, "script.plugin.info",
+                      ".features is a list of CLAP features: {\"reverb\"}",
+                      ".features = {\"reverb\"}");
+                continue;
+            }
+            for (const Constant& c : v->list) {
+                bool ok = c.kind == Constant::Kind::String && !c.stringValue.empty() &&
+                          c.stringValue.size() <= 32;
+                for (char ch : ok ? c.stringValue : std::string())
+                    ok = ok && ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-');
+                if (!ok) {
+                    error(item.loc, "script.plugin.info",
+                          ".features lists CLAP features: lower case, digits and '-'",
+                          ".features = {\"reverb\", \"stereo\"}");
+                    break;
+                }
+                if (c.stringValue == "instrument" || c.stringValue == "audio-effect" ||
+                    c.stringValue == "note-effect") {
+                    error(item.loc, "script.plugin.info",
+                          "'" + c.stringValue + "' is the main category, which the kind gives",
+                          "leave it out; list what the plugin is: .features = {\"reverb\"}");
+                    break;
+                }
+                info.features.push_back(c.stringValue);
+            }
+            if (info.features.size() > 4)
+                error(item.loc, "script.plugin.info", "at most four features",
+                      "keep what the plugin is first, and three more");
         } else if (d == "outputs") {
             if (v->kind != Constant::Kind::List) {
                 error(item.loc, "script.plugin.info",

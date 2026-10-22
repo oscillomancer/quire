@@ -391,6 +391,17 @@ TEST_CASE("the first scripts' mistakes are refused with a hint") {
     CHECK(firstError(withInfo(".id = \"com.example.t\", .version = \"1.2\"")) ==
           "script.plugin.info");
     CHECK(firstError(withInfo(".id = \"com.example.t\", .version = \"1.2.10\"")) == "");
+    // CLAP features after the main category, which the kind gives.
+    CHECK(firstError(withInfo(".id = \"com.example.t\", .features = {\"reverb\", \"stereo\"}")) ==
+          "");
+    CHECK(firstError(withInfo(".id = \"com.example.t\", .features = {\"Reverb\"}")) ==
+          "script.plugin.info");
+    CHECK(firstError(withInfo(".id = \"com.example.t\", .features = {\"audio-effect\"}")) ==
+          "script.plugin.info");
+    CHECK(firstError(withInfo(".id = \"com.example.t\", .features = \"reverb\"")) ==
+          "script.plugin.info");
+    CHECK(firstError(withInfo(".id = \"com.example.t\", .tail = 1, .features = {\"reverb\"}")) ==
+          "script.type.designator_order");
     // Instruments: notes reach voices through the voice hooks, which only an
     // instrument has; scripts send no notes, so no note effects.
     auto instrument = [&](const std::string& body) {

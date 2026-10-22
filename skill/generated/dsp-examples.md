@@ -351,6 +351,7 @@ struct Reverb : Effect {
     static constexpr Info info = {.name = "Convolution Reverb",
                                   .id = "com.example.convolution-reverb",
                                   .vendor = "Example",
+                                  .features = {"reverb"},
                                   .tail = 3840000};
 
     Convolver room = impulseResponse("Room").help("A recording of a space's echo.");

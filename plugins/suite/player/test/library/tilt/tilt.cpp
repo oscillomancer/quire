@@ -5,7 +5,8 @@
 // A tilt equaliser: one control raises the highs and lowers the lows around
 // a pivot (or the reverse), with two shelves meeting at the pivot.
 struct Tilt : Effect {
-    static constexpr Info info = {.name = "Tilt", .id = "com.example.tilt", .vendor = "Example"};
+    static constexpr Info info = {
+        .name = "Tilt", .id = "com.example.tilt", .vendor = "Example", .features = {"equalizer"}};
 
     Param tilt = decibels("Tilt", -6, 6, 0).help("Positive brightens: highs up, lows down.");
     Param pivot = frequency("Pivot", 200, 5000, 1000).help("Where the two shelves meet.");
