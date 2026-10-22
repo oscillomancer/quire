@@ -184,6 +184,7 @@ struct Hickory : Effect {
     Array<DelayLine, 2> line;
     int delayWant = 0, delayNow = 0, delayOld = 0;
     double delayMix = 1.0, delayStep = 0.001;
+    double gainDb = 0.0, gainLinear = 1.0;
     bool unplayed = true;
 
     // The meters: 3 s in chunks of 100 ms.
@@ -242,9 +243,11 @@ struct Hickory : Effect {
         dcMix.set(dcBlock.on() ? 1.0 : 0.0, fade, snap);
         monoMix.set(bassMono.on() ? 1.0 : 0.0, fade, snap);
         muted.set(mute.on() ? 0.0 : 1.0, fade, snap);
-        const double hz = min(monoBelow.value(), 0.45 * rate);
-        sideA.highpass(hz, 0.7071);
-        sideB.highpass(hz, 0.7071);
+        if (snap || monoBelow.changed()) {
+            const double hz = min(monoBelow.value(), 0.45 * rate);
+            sideA.highpass(hz, 0.7071);
+            sideB.highpass(hz, 0.7071);
+        }
         delayWant = clamp(roundToInt(delay * 0.001 * rate), 0, roundToInt(0.05 * rate));
         if (snap) {
             delayNow = delayWant;
@@ -369,7 +372,12 @@ struct Hickory : Effect {
             }
 
             const double db = gain.at(i);
-            const double g = (db <= -60.0 ? 0.0 : dbToGain(db)) * muted.next();
+            // Reuse the exact conversion once the smoothed gain holds still.
+            if (db != gainDb) {
+                gainDb = db;
+                gainLinear = db <= -60.0 ? 0.0 : dbToGain(db);
+            }
+            const double g = gainLinear * muted.next();
             if (g != 1.0) {
                 x *= g;
                 y *= g;
