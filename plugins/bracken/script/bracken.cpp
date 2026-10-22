@@ -124,6 +124,25 @@ double hashUnit(int n) {
     return x / 32760.0 - 1.0;
 }
 
+// The random endpoints stay fixed for a whole cycle. Only the interpolation
+// moves each sample; both sides keep the same hashes as a direct lookup.
+struct CycleNoise {
+    int cycle = -1;
+    Array<double, 2> from, to;
+
+    double value(int side, int n, int stride, double phase) {
+        if (n != cycle) {
+            cycle = n;
+            for (int c = 0; c < 2; ++c) {
+                from[c] = hashUnit(n * stride + c);
+                to[c] = hashUnit(n * stride + c + stride);
+            }
+        }
+        const double a = from[side], b = to[side];
+        return a + (b - a) * (0.5 - 0.5 * cos(pi * phase));
+    }
+};
+
 // --- the loop's parts --------------------------------------------------------------------
 
 // A line of the past. read(d) is d samples before the sample about to be
@@ -199,9 +218,11 @@ struct Heads {
         const double sweep = window * (ratio - 1.0);
         d0 = held0 + (0.5 - phase) * sweep + mod;
         d1 = held1 + (0.5 - p1) * sweep + mod;
-        const double s = sin(pi * phase);
-        w0 = s * s;
         one = d0 == d1;
+        if (!one) {
+            const double s = sin(pi * phase);
+            w0 = s * s;
+        }
     }
     double sample(const Ring& r, double less) const {
         if (one) return r.read(d0 - less);
@@ -310,6 +331,23 @@ struct Tone {
     double cleanBand = 0.0, step = 0.0;            // clean's filter's share; its quantum (0: none)
     double tapeCoef = 1.0;                         // tape's one-pole
     double driveGain = 1.0, driveBlend = 0.0;
+    double atAge = -1.0, atDrive = -1.0;
+
+    // Reuse exact values only: a smoothed control still follows every sample.
+    void configure(double age, double drive, double rate) {
+        if (age != atAge) {
+            atAge = age;
+            cleanBand = clamp(age * 4.0, 0.0, 1.0);
+            const double bits = cleanBits(age);
+            step = bits < 23.5 ? 1.0 / exp2(bits - 1.0) : 0.0;
+            tapeCoef = 1.0 - exp(-twoPi * tapeHz(age) / rate);
+        }
+        if (drive != atDrive) {
+            atDrive = drive;
+            driveGain = dbToGain(drive);
+            driveBlend = clamp(drive, 0.0, 1.0);
+        }
+    }
 };
 
 // One pass through the loop's colour. The media that are silent are cleared,
@@ -756,6 +794,7 @@ struct Bracken : Effect {
     // Modulation: a phase per side, and tape's own wow and flutter.
     double modPhase = 0.0, wowPhase = 0.0, flutterPhase = 0.0;
     int modCycle = 0, wowCycle = 0;
+    CycleNoise modNoise, wowNoise;
 
     // The filters' designs: what they were last designed for.
     double atLow = -1.0, atHigh = -1.0, atClean = -1.0;
@@ -768,6 +807,7 @@ struct Bracken : Effect {
     int sinceHit = 1000000000, hitHold = 4800;
 
     double tempoNow = 120.0, baseSeconds = 0.5;
+    double tailAt = -1.0, decaySeconds = 0.0;
     double peakIn0 = 0.0, peakIn1 = 0.0, peakOut0 = 0.0, peakOut1 = 0.0, peakEcho = 0.0,
            fall = 0.999;
     double trailIn = 0.0, trailEcho = 0.0, trailDuck = 0.0;
@@ -782,6 +822,8 @@ struct Bracken : Effect {
 
     void prepare() {
         rate = sampleRate();
+        tone.atAge = -1.0;
+        tone.atDrive = -1.0;
         const int length = ceilToInt((kLongest + kSliceLongest + 2.0 * kModReach + 0.05) * rate);
         diffuseSum = 0.0;
         for (int k = 0; k < 4; ++k) {
@@ -831,6 +873,8 @@ struct Bracken : Effect {
         flutterPhase = 0.0;
         modCycle = 0;
         wowCycle = 0;
+        modNoise.cycle = -1;
+        wowNoise.cycle = -1;
         duckEnv = 0.0;
         duckDb = 0.0;
         duckGain = 1.0;
@@ -838,6 +882,7 @@ struct Bracken : Effect {
         slowEnv = 0.0;
         sinceHit = 1000000000;
         tempoNow = 120.0;
+        tailAt = -1.0;
         peakIn0 = 0.0;
         peakIn1 = 0.0;
         peakOut0 = 0.0;
@@ -949,32 +994,58 @@ struct Bracken : Effect {
         return g;
     }
 
-    // How long the echoes take to fall `db` below the first, at hz.
-    double fallSeconds(double hz, double seconds, double db, double r) const {
-        const double g = feedback * passGain(hz, seconds, r);
+    // Each loop alternates A and B: use their mean time and geometric mean
+    // loss per echo. Analog's clock (and thus loss) can differ in each half.
+    double fallSeconds(double hz, double a, double b, double db, double r) const {
+        const double g = feedback * sqrt(passGain(hz, a, r) * passGain(hz, b, r));
         if (g >= 0.99999 || freeze.on()) return -1.0;
         if (g <= 1e-9) return 0.0;
-        return db / (-20.0 * log10(g)) * seconds;
+        return db / (-20.0 * log10(g)) * (0.5 * (a + b));
+    }
+
+    // The same clamp order as the audio targets: first groove, then offset.
+    // Mono has one centred loop; ping-pong offsets only its second half.
+    double loopTime(int h, int route) const {
+        const double g = groove.value(), right = 1.0 + offset;
+        const double t = baseSeconds * (imod(h, 2) == 0 ? 1.0 + g : 1.0 - g);
+        const double samples = clamp(t, kShortest, kLongest) * rate;
+        const bool shifted = (route == 0 && h >= 2) || (route == 1 && h == 1);
+        return (shifted ? clamp(samples * right, kShortest * rate, kLongest * rate) : samples) /
+               rate;
     }
 
     // The tail the host is told: the echoes to -80 dB at the slowest of a
     // few frequencies, the last slice reversed, and the diffusers' ring.
     void reportTail() {
-        const double s = baseSeconds;
+        tailAt = baseSeconds;
+        const int route = channels() < 2 ? 2 : routing.index();
+        const int loops = route == 0 ? 2 : 1;
+        decaySeconds = 0.0;
         double longest = 0.0;
+        double longestHalf = 0.0;
         bool forever = false;
-        for (int k = 0; k < 4; ++k) {
-            const double hz = k == 0 ? 60.0 : (k == 1 ? 250.0 : (k == 2 ? 1000.0 : 4000.0));
-            const double t = fallSeconds(hz, s, 80.0, rate);
-            if (t < 0.0) forever = true;
-            longest = max(longest, t);
+        for (int c = 0; c < loops; ++c) {
+            const double a = loopTime(2 * c, route), b = loopTime(2 * c + 1, route);
+            longestHalf = max(longestHalf, max(a, b));
+            const double d = fallSeconds(1000.0, a, b, 60.0, rate);
+            if (d < 0.0 || decaySeconds < 0.0)
+                decaySeconds = -1.0;
+            else
+                decaySeconds = max(decaySeconds, d);
+            for (int k = 0; k < 4; ++k) {
+                const double hz = k == 0 ? 60.0 : (k == 1 ? 250.0 : (k == 2 ? 1000.0 : 4000.0));
+                const double t = fallSeconds(hz, a, b, 80.0, rate);
+                if (t < 0.0) forever = true;
+                longest = max(longest, t);
+            }
         }
         if (forever) {
             setTail(-1);
             return;
         }
-        const double extra =
-            1.5 * s + (reverse.on() ? min(1.5 * s, kSliceLongest) : 0.0) + 0.5 * diffusion + 0.1;
+        const double extra = 1.5 * longestHalf +
+                             (reverse.on() ? min(1.5 * longestHalf, kSliceLongest) : 0.0) +
+                             0.5 * diffusion + 0.1;
         setTail(min(roundToInt((longest + extra) * rate), 2000000000));
     }
 
@@ -989,7 +1060,7 @@ struct Bracken : Effect {
     }
 
     // The modulation at this sample for a side, in samples, before its cap.
-    double wobble(int side, double depth, double wear, int m) const {
+    double wobble(int side, double depth, double wear, int m) {
         double ph = modPhase + (side == 1 ? 0.25 : 0.0);
         if (ph >= 1.0) ph -= 1.0;
         double v = 0.0;
@@ -998,16 +1069,14 @@ struct Bracken : Effect {
         } else if (m == 1) {
             // Tape: a sine with a drifting random part, and age's own wow and
             // flutter on top.
-            const double a = hashUnit(modCycle * 2 + side), b = hashUnit(modCycle * 2 + side + 2);
-            const double drift = a + (b - a) * (0.5 - 0.5 * cos(pi * modPhase));
+            const double drift = modNoise.value(side, modCycle, 2, modPhase);
             v = 0.7 * sin(twoPi * ph) + 0.3 * drift;
         } else {
             v = sin(twoPi * ph);
         }
         double s = depth * kModReach * v;
         if (m == 1) {
-            const double wa = hashUnit(wowCycle * 3 + side), wb = hashUnit(wowCycle * 3 + side + 3);
-            const double wow = wa + (wb - wa) * (0.5 - 0.5 * cos(pi * wowPhase));
+            const double wow = wowNoise.value(side, wowCycle, 3, wowPhase);
             s += wear * (0.00035 * wow + 0.00006 * sin(twoPi * (flutterPhase + 0.3 * side)));
         }
         return s * rate;
@@ -1017,7 +1086,9 @@ struct Bracken : Effect {
         const int chans = io.channels;
         tempoNow = io.transport.tempo > 0.0 ? io.transport.tempo : 120.0;
         baseSeconds = baseTime(io);
-        reportTail();
+        // update() handles every control change; between updates only the
+        // transport can change the time used by these analytic estimates.
+        if (baseSeconds != tailAt) reportTail();
         const bool bend = timeChanges.index() == 0;
         const bool frozenNow = freeze.on();
         const int routeWant = chans < 2 ? 2 : routing.index();
@@ -1088,13 +1159,7 @@ struct Bracken : Effect {
             tone.analog = analogW;
             tone.lowOn = lowW;
             tone.highOn = highW;
-            tone.cleanBand = clamp(ag * 4.0, 0.0, 1.0);
-            const double bits = cleanBits(ag);
-            tone.step = bits < 23.5 ? 1.0 / exp2(bits - 1.0) : 0.0;
-            tone.tapeCoef = 1.0 - exp(-twoPi * tapeHz(ag) / rate);
-            const double dr = drive.at(i);
-            tone.driveGain = dbToGain(dr);
-            tone.driveBlend = clamp(dr, 0.0, 1.0);
+            tone.configure(ag, drive.at(i), rate);
 
             // Modulation.
             const double depth = modulation.at(i) * (1.0 - frozenW);
@@ -1273,7 +1338,7 @@ struct Bracken : Effect {
         outputLevel.set(gainToDb(peakOut0 > peakOut1 ? peakOut0 : peakOut1));
         echoLevel.set(gainToDb(peakEcho));
         echoTime.set(baseSeconds * 1000.0);
-        const double d = fallSeconds(1000.0, baseSeconds, 60.0, rate);
+        const double d = decaySeconds;
         decay.set(d < 0.0 ? 600000.0 : min(d * 1000.0, 600000.0));
         duckNow.set(gainToDb(duckGain));
         inLeft.set(gainToDb(peakIn0));
