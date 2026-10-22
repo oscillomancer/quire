@@ -75,6 +75,10 @@ as compression rises; loudness falls unless `match` or `output` makes it up.
 decide whether the result is better, not merely louder. `loudness_change`
 says how much quieter the compression made it.
 
+Every change of `listen` crossfades over 10 ms between the audible signals,
+including Key to Delta and either one back to Off. Switching again during
+a fade starts a new 10 ms crossfade from the mixture currently heard.
+
 ## Limits
 
 Sundew is not a limiter: there is no ceiling and no true-peak detection.
