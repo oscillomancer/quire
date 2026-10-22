@@ -8,6 +8,7 @@
 #include "generated_media.h"
 #include "product_fixture.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -818,6 +819,8 @@ TEST_CASE("the plugin browser names the plugin's file and marks a shadowed copy"
     CHECK(f.fx->browser().detail().find("Hickory.clap") != std::string::npos);
     CHECK(f.fx->browser().detail().find("shadowed") == std::string::npos);
     CHECK(f.fx->browser().rowText(0).vendor == "stock");
+    // A stock plugin's name does not say what it is; the row does.
+    CHECK(f.fx->browser().rowText(0).name == "Hickory (utility)");
     f.key("Escape");
 
     // A copy of the same plugin earlier on the search path shadows the built
@@ -870,6 +873,26 @@ TEST_CASE("the plugin browser names the plugin's file and marks a shadowed copy"
     list->select(*shadowedRow == 0 ? 1 : 0, true);
     CHECK(browser.detail().find(dup.string()) != std::string::npos);
     browser.close();
+}
+
+TEST_CASE("the plugin browser finds a stock plugin by what it is") {
+    Fixture f;
+    if (!f.ok) return;
+    if (!f.stockPlugins()) {
+        MESSAGE("skipped: no stock plugins (a partial build)");
+        return;
+    }
+    const model::Id track = f.addTrack("Guitar");
+    REQUIRE(f.fx->open(track));
+    f.click("fx.add");
+    f.snapshot("plugin-browser.png");
+    f.type("reverb");
+    const auto& shown = f.fx->browser().shown();
+    const auto ghyll = std::find(shown.begin(), shown.end(), "com.suppleaudio.ghyll");
+    REQUIRE(ghyll != shown.end());
+    CHECK(f.fx->browser().rowText(static_cast<std::size_t>(ghyll - shown.begin())).name ==
+          "Ghyll (reverb)");
+    f.key("Escape");
 }
 
 TEST_CASE("the FX chain badges each effect's state, and a failed one offers a restart") {

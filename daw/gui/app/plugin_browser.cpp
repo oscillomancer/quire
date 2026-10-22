@@ -33,6 +33,18 @@ bool contains(std::string_view haystack, std::string_view needle) {
 
 const char* kFavMark = "*";  // ASCII: Inter has no visible U+2605
 
+// What a stock plugin is, shown after its name, since its name does not say:
+// the first CLAP feature after the main category ("reverb"), in the words a
+// mixer uses.
+std::string stockKind(const std::string& vendor, const std::vector<std::string>& features) {
+    if (lower(vendor) != lower(product::kVendor) || features.size() < 2) return {};
+    if (features[1] == "equalizer") return "eq";
+    if (features[1] == "synthesizer") return "synth";
+    std::string kind = features[1];
+    std::replace(kind.begin(), kind.end(), '-', ' ');
+    return kind;
+}
+
 }  // namespace
 
 // --- Favourites -----------------------------------------------------------------
@@ -176,6 +188,7 @@ PluginBrowser::RowText PluginBrowser::rowText(std::size_t row) const {
     if (row >= rows_.size()) return text;
     const Entry& entry = *rows_[row].entry;
     text.name = (rows_[row].favourite ? std::string(kFavMark) + " " : "") + entry.name;
+    if (!entry.kind.empty()) text.name += " (" + entry.kind + ")";
     text.vendor = entry.shadowed                                   ? "shadowed"
                   : lower(entry.vendor) == lower(product::kVendor) ? "stock"
                                                                    : entry.vendor;
@@ -282,6 +295,11 @@ void PluginBrowser::refresh() {
             e.semantic = p.find("semantic") && p.find("semantic")->asBool();
             e.path = str("path");
             e.shadowed = p.find("shadowed") && p.find("shadowed")->asBool();
+            std::vector<std::string> features;
+            if (const json::Value* f = p.find("features"); f && f->isArray())
+                for (const json::Value& x : f->asArray())
+                    if (x.isString()) features.push_back(x.asString());
+            e.kind = stockKind(e.vendor, features);
             all_.push_back(std::move(e));
         }
     sortAndFilter();
@@ -293,7 +311,7 @@ void PluginBrowser::sortAndFilter() {
     rows_.clear();
     for (const Entry& e : all_) {
         if (!query.empty() && !contains(e.id, query) && !contains(e.name, query) &&
-            !contains(e.vendor, query))
+            !contains(e.vendor, query) && !contains(e.kind, query))
             continue;
         rows_.push_back(Row{&e, favourites_.has(e.id)});
     }

@@ -553,7 +553,10 @@ POSIX FD support. Display tests remain opt-in, never enabled by normal CI.
 
 
 Chain list with add (searchable browser over the plugin scan cache;
-favourites and stock plugins first; the browser also opens on its own from a
+favourites and stock plugins first; a stock plugin's row says what it is
+after its name, from its first CLAP feature after the main category
+("Ghyll (reverb)", "Yarrow (eq)", "Marram (synth)"), and the search matches
+that too; the browser also opens on its own from a
 strip's "+", titled with the track and with its own Close), reorder by
 dragging a row (an insertion bar; Escape cancels; Alt+Up/Down on a focused
 row too; no arrow buttons), bypass vs offline
