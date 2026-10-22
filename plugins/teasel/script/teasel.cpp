@@ -49,6 +49,19 @@ constexpr int kTrace = 1024;       // the transfer plot's recent samples
 constexpr int kLevelBins = 48;     // and its histogram of levels, -72 to 0 dBFS
 constexpr double kPivot = 1000.0;  // where the emphasis tilt turns
 
+// Gains often hold still for many frames. Cache only exact repeats, so a
+// parameter glide or modulation still gets every distinct gain it asks for.
+struct GainCache {
+    double at = 1e100, value = 1.0;
+    double get(double db) {
+        if (db != at) {
+            at = db;
+            value = dbToGain(db);
+        }
+        return value;
+    }
+};
+
 // --- the curves ---------------------------------------------------------------------------
 //
 // Each takes the driven signal (bias added) and gives one near +-1 at full
@@ -668,6 +681,7 @@ struct Teasel : Effect {
     int factor = 1;
     int latency = 0;
     double hi = 48000.0;  // the oversampled rate
+    GainCache driveGain, levelGain, previousLevelGain, outputGain;
     Array<Oversampler, 2> over;
     Array<Lane, 2> lane;
     Array<DelayLine, 2> loop;
@@ -1052,10 +1066,15 @@ struct Teasel : Effect {
             const double a = max(abs(l), abs(r));
             fastEnv += (a > fastEnv ? fastUp : fastDown) * (a - fastEnv);
             slowEnv += (a > slowEnv ? slowUp : slowDown) * (a - slowEnv);
-            const double slowDb = gainToDb(slowEnv);
-            const double gate = clamp((slowDb + 70.0) / 10.0, 0.0, 1.0);
-            const double dynDb =
-                dynamics.at(i) * clamp(gainToDb(fastEnv) - slowDb, -24.0, 24.0) * gate;
+            // Keep both followers warm for a later edit, but their dB
+            // difference is unused while the glided depth is exactly zero.
+            double dynDb = 0.0;
+            const double amount = dynamics.at(i);
+            if (amount != 0.0) {
+                const double slowDb = gainToDb(slowEnv);
+                const double gate = clamp((slowDb + 70.0) / 10.0, 0.0, 1.0);
+                dynDb = amount * clamp(gainToDb(fastEnv) - slowDb, -24.0, 24.0) * gate;
+            }
 
             // Motion.
             const double depth = motion.at(i);
@@ -1077,12 +1096,12 @@ struct Teasel : Effect {
             loopOpen = clamp(loopOpen, 0.0, 1.0);
             const double fb = feedback.at(i) * loopScale * loopOpen;
             const bool fbOn = fb != 0.0;
-            const double g = dbToGain(driveDb);
+            const double g = driveGain.get(driveDb);
             // Where each curve rests with no signal: its offset, taken away
             // at once (the bias would otherwise step and ring).
             const double restNow = styleNow == 3 ? 0.0 : curve(styleNow, b, c);
             const bool level = autoGain.on();
-            const double compTo = level ? dbToGain(compAt(compNow, driveDb)) : 1.0;
+            const double compTo = level ? levelGain.get(compAt(compNow, driveDb)) : 1.0;
             if (first && i == 0) compGain = compTo;
             compGain += compStep * (compTo - compGain);
             double restWas = 0.0, t = 1.0;
@@ -1090,7 +1109,8 @@ struct Teasel : Effect {
             // is needed. The next style change copies compGain afresh.
             if (fade < 1.0) {
                 restWas = styleWas == 3 ? 0.0 : curve(styleWas, b, c);
-                const double compWasTo = level ? dbToGain(compAt(compWas, driveDb)) : 1.0;
+                const double compWasTo =
+                    level ? previousLevelGain.get(compAt(compWas, driveDb)) : 1.0;
                 compWasGain += compStep * (compWasTo - compWasGain);
                 fade = min(1.0, fade + fadeStep);
                 t = 0.5 - 0.5 * cos(pi * fade);
@@ -1200,7 +1220,7 @@ struct Teasel : Effect {
                 ol = v0 + v1;
                 orr = v0 - v1;
             }
-            const double gainOut = dbToGain(output.at(i)) * duck;
+            const double gainOut = outputGain.get(output.at(i)) * duck;
             ol *= gainOut;
             orr *= gainOut;
             io[0][i] = ol;
