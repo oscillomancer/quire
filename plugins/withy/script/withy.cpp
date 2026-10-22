@@ -200,6 +200,8 @@ struct Voice {
     double rateFactor = 1.0, shimmerFactor = 1.0, spread = 1.0;
     double left = 0.0, right = 0.0;  // its gain into each side
     Biquad bandL, bandR;             // the bucket brigade's band
+    double bandHz = -1.0, bandDesigned = -1.0;
+    bool bandDirty = false;
     Noise hissL, hissR;
 };
 
@@ -471,6 +473,11 @@ struct Withy : Effect {
     double bbdW = 0.0, bbdStep = 0.001, glide = 0.001, filterGlide = 0.01, triW = 1.0;
     double envUp = 0.01, envDown = 0.001, lockPull = 0.0001, vibratoW = 0.0;
     double normL = 1.0, normR = 1.0, normMono = 1.0;
+    double cutDesigned = -1.0, keepDesigned = -1.0;
+    bool cutDirty = false, keepDirty = false;
+    // Reuse exact gain conversions while the smoothed controls stand still.
+    double mixPosition = -1.0, dryGain = 1.0, wetGain = 0.0;
+    double outputDb = -1000.0, outputGain = 1.0, hissAge = -1.0, hissGain = 0.0;
 
     // The sway when synced: the song's tempo and bar, the last heard.
     double tempoNow = 120.0, barNow = 4.0;
@@ -497,6 +504,13 @@ struct Withy : Effect {
 
     void prepare() {
         rate48 = sampleRate();
+        cutDesigned = -1.0;
+        keepDesigned = -1.0;
+        cutDirty = false;
+        keepDirty = false;
+        mixPosition = -1.0;
+        outputDb = -1000.0;
+        hissAge = -1.0;
         buildSinc();
         const int length = ceilToInt(kLine * rate48) + 2 * kTaps;
         for (int c = 0; c < 2; ++c) {
@@ -517,6 +531,9 @@ struct Withy : Effect {
             Voice& s = voice[v];
             s.bandL.clear();
             s.bandR.clear();
+            s.bandHz = -1.0;
+            s.bandDesigned = -1.0;
+            s.bandDirty = false;
             s.hissL.seed(1009 + 17 * v);
             s.hissR.seed(2029 + 31 * v);
         }
@@ -788,6 +805,8 @@ struct Withy : Effect {
         const double hz = swayHz();
         rateHz = hz;
         const double r = exp2(depth.value() / 1200.0) - 1.0;
+        const double rShimmer = exp2(depth.value() * shimmer.value() / 1200.0) - 1.0;
+        const double rDrift = exp2(depth.value() * drift.value() / 1200.0) - 1.0;
         const double slope = shapeSlope(shape.index());
         const bool vibrato = styleNow == 4;
         double most = 0.0, cents = 0.0;
@@ -795,10 +814,9 @@ struct Withy : Effect {
             Voice& s = voice[v];
             const double f = hz * (sync.index() == 0 ? s.rateFactor : 1.0);
             double a = r / (f * slope);
-            double a2 = (exp2(depth.value() * shimmer.value() / 1200.0) - 1.0) /
-                        (kShimmerHz * s.shimmerFactor * twoPi);
+            double a2 = rShimmer / (kShimmerHz * s.shimmerFactor * twoPi);
             const double fd = 0.37 * f;
-            double ad = (exp2(depth.value() * drift.value() / 1200.0) - 1.0) / (pi * fd);
+            double ad = rDrift / (pi * fd);
             const double total = a + a2 + ad;
             if (total > kSwingMost) {
                 const double k = kSwingMost / total;
@@ -837,12 +855,19 @@ struct Withy : Effect {
     // The filters' designs, from their glides (every 16 frames).
     void tuneFilters() {
         const double top = 0.45 * rate48;
-        for (int c = 0; c < 2; ++c) {
-            cutA[c].lowpass(min(cutHz, top), 0.7071);
-            keepLow[2 * c].lowpass(keepHz, 0.7071);
-            keepLow[2 * c + 1].lowpass(keepHz, 0.7071);
-            keepHigh[2 * c].highpass(keepHz, 0.7071);
-            keepHigh[2 * c + 1].highpass(keepHz, 0.7071);
+        const double cut = min(cutHz, top);
+        if (cut != cutDesigned) {
+            for (int c = 0; c < 2; ++c) cutA[c].lowpass(cut, 0.7071);
+            cutDesigned = cut;
+        }
+        if (keepHz != keepDesigned) {
+            for (int c = 0; c < 2; ++c) {
+                keepLow[2 * c].lowpass(keepHz, 0.7071);
+                keepLow[2 * c + 1].lowpass(keepHz, 0.7071);
+                keepHigh[2 * c].highpass(keepHz, 0.7071);
+                keepHigh[2 * c + 1].highpass(keepHz, 0.7071);
+            }
+            keepDesigned = keepHz;
         }
         // A bucket brigade's clock runs at its stages over twice its delay;
         // its filters pass a little under half the clock.
@@ -850,9 +875,9 @@ struct Withy : Effect {
         for (int v = 0; v < active; ++v) {
             Voice& s = voice[v];
             const double clock = stages / (2.0 * max(s.delay, 1.0) / rate48);
-            const double band = min(0.4 * clock, min(19000.0, top));
-            s.bandL.lowpass(band, 0.7071);
-            s.bandR.lowpass(band, 0.7071);
+            // Keep the same 16-frame target even while the medium is clean;
+            // only build its coefficients when the voice will use them.
+            s.bandHz = min(0.4 * clock, min(19000.0, top));
         }
     }
 
@@ -900,6 +925,7 @@ struct Withy : Effect {
                         voice[v].flutter = fmod(voice[0].flutter + voice[v].offset, 1.0);
                         voice[v].bandL.clear();
                         voice[v].bandR.clear();
+                        voice[v].bandDirty = false;
                     }
                     motionTargets(true);
                 }
@@ -982,6 +1008,7 @@ struct Withy : Effect {
             // Low keep: the lows go round the voices, the rest into them.
             double lowL = 0.0, lowR = 0.0, srcL = xl, srcR = xr;
             if (keepW > 0.0) {
+                keepDirty = true;
                 lowL = keepLow[1].process(keepLow[0].process(xl));
                 const double hl = keepHigh[1].process(keepHigh[0].process(xl));
                 srcL = lerp(xl, hl, keepW);
@@ -995,11 +1022,12 @@ struct Withy : Effect {
                     lowR = lowL;
                     srcR = srcL;
                 }
-            } else {
+            } else if (keepDirty) {
                 for (int q = 0; q < 4; ++q) {
                     keepLow[q].clear();
                     keepHigh[q].clear();
                 }
+                keepDirty = false;
             }
 
             // Into the lines, with the voices handed back and the bucket
@@ -1018,7 +1046,15 @@ struct Withy : Effect {
             envelope[1] += (abs(inR) - envelope[1]) * (abs(inR) > envelope[1] ? envUp : envDown);
 
             // The voices.
-            const double hiss = dbToGain(-66.0 + 28.0 * age.at(i));
+            double hiss = 0.0;
+            if (bbdW > 0.0) {
+                const double a = age.at(i);
+                if (a != hissAge) {
+                    hissAge = a;
+                    hissGain = dbToGain(-66.0 + 28.0 * a);
+                }
+                hiss = hissGain;
+            }
             double wl = 0.0, wr = 0.0, sumL = 0.0, sumR = 0.0;
             for (int v = 0; v < active; ++v) {
                 Voice& s = voice[v];
@@ -1032,6 +1068,12 @@ struct Withy : Effect {
                     yr = yl;
                 }
                 if (bbdW > 0.0) {
+                    s.bandDirty = true;
+                    if (s.bandHz != s.bandDesigned) {
+                        s.bandL.lowpass(s.bandHz, 0.7071);
+                        s.bandR.lowpass(s.bandHz, 0.7071);
+                        s.bandDesigned = s.bandHz;
+                    }
                     const double nl = yl + hiss * envelope[0] * s.hissL.white();
                     yl = lerp(yl, s.bandL.process(nl), bbdW);
                     if (chans > 1) {
@@ -1040,9 +1082,10 @@ struct Withy : Effect {
                     } else {
                         yr = yl;
                     }
-                } else {
+                } else if (s.bandDirty) {
                     s.bandL.clear();
                     s.bandR.clear();
+                    s.bandDirty = false;
                 }
                 sumL += yl;
                 sumR += yr;
@@ -1074,11 +1117,13 @@ struct Withy : Effect {
                 wr = lerp(wr, dcBlock[1].highpass(wr), bbdW);
             }
             if (cutW > 0.0) {
+                cutDirty = true;
                 wl = lerp(wl, cutA[0].process(wl), cutW);
                 wr = lerp(wr, cutA[1].process(wr), cutW);
-            } else {
+            } else if (cutDirty) {
                 cutA[0].clear();
                 cutA[1].clear();
+                cutDirty = false;
             }
             const double wd = width.at(i);
             const double mid = 0.5 * (wl + wr), side = 0.5 * (wl - wr) * wd;
@@ -1088,8 +1133,18 @@ struct Withy : Effect {
             // enough that 50% of each sounds as loud as either alone.
             vibratoW = approach(vibratoW, styleNow == 4 ? 1.0 : 0.0, styleStep);
             const double m = lerp(mix.at(i), 1.0, vibratoW);
-            const double gd = cos(0.5 * pi * m), gw = sin(0.5 * pi * m);
-            const double og = dbToGain(output.at(i));
+            if (m != mixPosition) {
+                mixPosition = m;
+                dryGain = cos(0.5 * pi * m);
+                wetGain = sin(0.5 * pi * m);
+            }
+            const double gd = dryGain, gw = wetGain;
+            const double db = output.at(i);
+            if (db != outputDb) {
+                outputDb = db;
+                outputGain = dbToGain(db);
+            }
+            const double og = outputGain;
             // The dry: the lows whole, the rest by the mix.
             const double ol = (lowL + srcL * gd + gw * wl) * og;
             const double orr = (lowR + srcR * gd + gw * wr) * og;
@@ -2071,6 +2126,17 @@ struct Withy : Effect {
             ri += rightShown[v] * ei;
             br += er / n;
             bi += ei / n;
+        }
+        // The audio widens only the wet mid/side before mixing the dry.
+        // Width cancels in the mono fold; keep that curve and 100% exact.
+        if (!mono && width.value() != 1.0) {
+            const double mr = 0.5 * (lr + rr), mi = 0.5 * (li + ri);
+            const double sr = 0.5 * (lr - rr) * width.value();
+            const double si = 0.5 * (li - ri) * width.value();
+            lr = mr + sr;
+            li = mi + si;
+            rr = mr - sr;
+            ri = mi - si;
         }
         // The loop: 1 / (1 - fb * mean).
         const double dr = 1.0 - fb * br, di = -fb * bi;
