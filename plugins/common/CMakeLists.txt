@@ -22,5 +22,11 @@ if(SUPPLE_BUILD_TESTS)
   add_executable(clap-reset-check tools/clap_reset_check.cpp)
   target_link_libraries(clap-reset-check PRIVATE supple::clap-host)
   supple_target_defaults(clap-reset-check)
+
+  # Checks that output does not depend on the host's block size under
+  # sample-accurate automation (the engine's real-time/offline match).
+  add_executable(clap-block-check tools/clap_block_check.cpp)
+  target_link_libraries(clap-block-check PRIVATE supple::clap-host)
+  supple_target_defaults(clap-block-check)
   endif()
 endif()

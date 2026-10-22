@@ -54,6 +54,17 @@
   default in both states, so a plugin whose default is a passthrough still
   shows its processing state; a switch that silences the plugin by itself
   (a mute) stays at its default, since the reference must carry signal.
+- **Block-size invariance under automation.** The real-time engine matches
+  the offline render only for plugins whose output does not depend on the
+  host's block (`docs/specs/engine.md`). `clap-block-check`
+  (`plugins/common/tools/clap_block_check.cpp`, registered as
+  `plugin.<name>.blocks` for every scripted stock plugin) renders two
+  seconds of noise under a tone with 400 seeded jumps of the writable,
+  automatable parameters, as sample-accurate events (and seeded notes for
+  an instrument), once in blocks of 4096 and once in blocks of 1, 7, 64,
+  513, 2 and 1000 frames, and requires the two to be bit-identical. A
+  run-time product has no `core-tests`, whose test of the same claim reads
+  the parameter table at compile time.
 - **Readonly telemetry parameters** (gain reduction, levels, readouts) exist
   for generic hosts and agents (`fx.meters`). `clap-reset-check` compares
   them too: after `reset()` a plugin's read-only values at the end of a

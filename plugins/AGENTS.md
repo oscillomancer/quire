@@ -21,8 +21,9 @@ Marram replaced, was removed on 2026-10-21; git history has it.
 `common/` holds the shared semantic-parameters extension
 (`com.suppleaudio.semantic-params`, spec in
 `docs/specs/semantic-params-extension.md`), the plugin test tools
-(`clap-reset-check`, `clap-unload-probe`, `semantic-conformance`) and the
-CMake glue that links plugins against the monorepo's libraries.
+(`clap-reset-check`, `clap-block-check`, `clap-unload-probe`,
+`semantic-conformance`) and the CMake glue that links plugins against the
+monorepo's libraries.
 
 The monorepo builds each plugin as an isolated ExternalProject
 (`plugins/CMakeLists.txt`, `supple_add_template_product` and

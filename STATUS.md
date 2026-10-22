@@ -359,10 +359,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   editor draws the response with its notches, where the notches went
   over about a cycle and a half of the motion, and the path a photocell
   takes the sweep on; dragging the response moves the centre (across)
-  and the range (up and down). Twelve factory patches. Known limit: its
-  block-size invariance is tested with parameters held still; under
-  automation it rests on per-frame reads, as no tool automates a plugin
-  at several block sizes.
+  and the range (up and down). Twelve factory patches.
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The

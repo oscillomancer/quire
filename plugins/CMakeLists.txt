@@ -175,6 +175,9 @@ if(SUPPLE_BUILD_PLUGINS)
       add_test(NAME plugin.${name}.reset-stepped COMMAND clap-reset-check "${clap}" ${id} --stepped)
       set_tests_properties(plugin.${name}.reset plugin.${name}.reset-stepped PROPERTIES
         LABELS "rt;plugin-reset" TIMEOUT 180)
+      # Bit-identical output in any host blocks, with every parameter automated.
+      add_test(NAME plugin.${name}.blocks COMMAND clap-block-check "${clap}" ${id})
+      set_tests_properties(plugin.${name}.blocks PROPERTIES LABELS rt TIMEOUT 180)
       add_test(NAME plugin.${name}.semantic COMMAND semantic-conformance "${clap}" ${id})
       # Catalog.cpp, the folder's one generated file, still matches the script.
       add_test(NAME plugin.${name}.catalog
