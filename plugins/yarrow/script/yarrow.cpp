@@ -1054,7 +1054,15 @@ struct Yarrow : Effect {
     // its power gain averaged across the spectrum, weighted toward the
     // middle where loudness is judged. Dynamic bands count as resting.
     double compensation() {
-        Array<Sec, 4> sec;
+        Array<Shape, 8> curve;
+        for (int b = 0; b < 8; ++b) {
+            const Setting& s = want[b];
+            if (!s.on) continue;
+            double db = hasGain(s.kind) ? s.db * gainScale : 0.0;
+            if (s.dynamic && canBeDynamic(s.kind)) db = 0.0;
+            const int count = design(curve[b].sec, s.kind, s.hz, db, s.q, s.order, rate);
+            curve[b].count = count;
+        }
         double weight = 0.0, sum = 0.0;
         for (int k = 0; k < 40; ++k) {
             const double hz = 30.0 * pow(16000.0 / 30.0, k / 39.0);
@@ -1064,12 +1072,7 @@ struct Yarrow : Effect {
             const double p1 = sn * sn;
             double gain = 1.0;
             for (int b = 0; b < 8; ++b) {
-                const Setting& s = want[b];
-                if (!s.on) continue;
-                double db = hasGain(s.kind) ? s.db * gainScale : 0.0;
-                if (s.dynamic && canBeDynamic(s.kind)) db = 0.0;
-                const int n = design(sec, s.kind, s.hz, db, s.q, s.order, rate);
-                for (int j = 0; j < n; ++j) gain *= power(sec[j], p1);
+                for (int j = 0; j < curve[b].count; ++j) gain *= power(curve[b].sec[j], p1);
             }
             weight += w;
             sum += w * gain;
