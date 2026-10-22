@@ -474,6 +474,9 @@ struct Withy : Effect {
     double normL = 1.0, normR = 1.0, normMono = 1.0;
     double cutDesigned = -1.0, keepDesigned = -1.0;
     bool cutDirty = false, keepDirty = false;
+    // Reuse exact gain conversions while the smoothed controls stand still.
+    double mixPosition = -1.0, dryGain = 1.0, wetGain = 0.0;
+    double outputDb = -1000.0, outputGain = 1.0, hissAge = -1.0, hissGain = 0.0;
 
     // The sway when synced: the song's tempo and bar, the last heard.
     double tempoNow = 120.0, barNow = 4.0;
@@ -504,6 +507,9 @@ struct Withy : Effect {
         keepDesigned = -1.0;
         cutDirty = false;
         keepDirty = false;
+        mixPosition = -1.0;
+        outputDb = -1000.0;
+        hissAge = -1.0;
         buildSinc();
         const int length = ceilToInt(kLine * rate48) + 2 * kTaps;
         for (int c = 0; c < 2; ++c) {
@@ -798,6 +804,8 @@ struct Withy : Effect {
         const double hz = swayHz();
         rateHz = hz;
         const double r = exp2(depth.value() / 1200.0) - 1.0;
+        const double rShimmer = exp2(depth.value() * shimmer.value() / 1200.0) - 1.0;
+        const double rDrift = exp2(depth.value() * drift.value() / 1200.0) - 1.0;
         const double slope = shapeSlope(shape.index());
         const bool vibrato = styleNow == 4;
         double most = 0.0, cents = 0.0;
@@ -805,10 +813,9 @@ struct Withy : Effect {
             Voice& s = voice[v];
             const double f = hz * (sync.index() == 0 ? s.rateFactor : 1.0);
             double a = r / (f * slope);
-            double a2 = (exp2(depth.value() * shimmer.value() / 1200.0) - 1.0) /
-                        (kShimmerHz * s.shimmerFactor * twoPi);
+            double a2 = rShimmer / (kShimmerHz * s.shimmerFactor * twoPi);
             const double fd = 0.37 * f;
-            double ad = (exp2(depth.value() * drift.value() / 1200.0) - 1.0) / (pi * fd);
+            double ad = rDrift / (pi * fd);
             const double total = a + a2 + ad;
             if (total > kSwingMost) {
                 const double k = kSwingMost / total;
@@ -1038,7 +1045,15 @@ struct Withy : Effect {
             envelope[1] += (abs(inR) - envelope[1]) * (abs(inR) > envelope[1] ? envUp : envDown);
 
             // The voices.
-            const double hiss = bbdW > 0.0 ? dbToGain(-66.0 + 28.0 * age.at(i)) : 0.0;
+            double hiss = 0.0;
+            if (bbdW > 0.0) {
+                const double a = age.at(i);
+                if (a != hissAge) {
+                    hissAge = a;
+                    hissGain = dbToGain(-66.0 + 28.0 * a);
+                }
+                hiss = hissGain;
+            }
             double wl = 0.0, wr = 0.0, sumL = 0.0, sumR = 0.0;
             for (int v = 0; v < active; ++v) {
                 Voice& s = voice[v];
@@ -1117,8 +1132,18 @@ struct Withy : Effect {
             // enough that 50% of each sounds as loud as either alone.
             vibratoW = approach(vibratoW, styleNow == 4 ? 1.0 : 0.0, styleStep);
             const double m = lerp(mix.at(i), 1.0, vibratoW);
-            const double gd = cos(0.5 * pi * m), gw = sin(0.5 * pi * m);
-            const double og = dbToGain(output.at(i));
+            if (m != mixPosition) {
+                mixPosition = m;
+                dryGain = cos(0.5 * pi * m);
+                wetGain = sin(0.5 * pi * m);
+            }
+            const double gd = dryGain, gw = wetGain;
+            const double db = output.at(i);
+            if (db != outputDb) {
+                outputDb = db;
+                outputGain = dbToGain(db);
+            }
+            const double og = outputGain;
             // The dry: the lows whole, the rest by the mix.
             const double ol = (lowL + srcL * gd + gw * wl) * og;
             const double orr = (lowR + srcR * gd + gw * wr) * og;
