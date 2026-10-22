@@ -182,6 +182,9 @@ if(SUPPLE_BUILD_PLUGINS)
       # Bit-identical output in any host blocks, with every parameter automated.
       add_test(NAME plugin.${name}.blocks COMMAND clap-block-check "${clap}" ${id})
       set_tests_properties(plugin.${name}.blocks PROPERTIES LABELS rt TIMEOUT 180)
+      # Damaged saved state: refused with nothing changed, or accepted whole.
+      add_test(NAME plugin.${name}.state COMMAND clap-state-check "${clap}" ${id})
+      set_tests_properties(plugin.${name}.state PROPERTIES LABELS rt TIMEOUT 300)
       add_test(NAME plugin.${name}.semantic COMMAND semantic-conformance "${clap}" ${id})
       # Catalog.cpp, the folder's one generated file, still matches the script.
       add_test(NAME plugin.${name}.catalog

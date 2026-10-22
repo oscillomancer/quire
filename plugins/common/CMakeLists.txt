@@ -29,6 +29,11 @@ if(SUPPLE_BUILD_TESTS)
   target_link_libraries(clap-block-check PRIVATE supple::clap-host)
   supple_target_defaults(clap-block-check)
 
+  # Damaged saved state, refused cleanly or accepted whole.
+  add_executable(clap-state-check tools/clap_state_check.cpp)
+  target_link_libraries(clap-state-check PRIVATE supple::clap-host supple::core-json)
+  supple_target_defaults(clap-state-check)
+
   # A plugin's cost and its output per setup, to keep a change's sound
   # (plugins/AGENTS.md); run by hand, not a test.
   add_executable(clap-bench tools/clap_bench.cpp)

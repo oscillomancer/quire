@@ -65,6 +65,18 @@
   513, 2 and 1000 frames, and requires the two to be bit-identical. A
   run-time product has no `core-tests`, whose test of the same claim reads
   the parameter table at compile time.
+- **Damaged saved state.** A host hands a plugin whatever bytes a project
+  or preset holds. `clap-state-check`
+  (`plugins/common/tools/clap_state_check.cpp`, registered as
+  `plugin.<name>.state` for every scripted stock plugin) saves the
+  plugin's defaults, two seeded random settings and up to four of its
+  factory patches, damages each 600 ways from a fixed seed (bits flipped,
+  cut short, bytes inserted, awkward lengths, runs repeated) and loads
+  them all. A refused load must leave the state as it was; an accepted one
+  must save, load into a fresh instance and save again byte for byte, then
+  process finite audio. Under the sanitizer presets nothing may be
+  reported. A run-time product has no template `state-fuzz`, which builds
+  its states from the parameter table at compile time.
 - **Readonly telemetry parameters** (gain reduction, levels, readouts) exist
   for generic hosts and agents (`fx.meters`). `clap-reset-check` compares
   them too: after `reset()` a plugin's read-only values at the end of a
