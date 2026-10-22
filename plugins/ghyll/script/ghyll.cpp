@@ -263,10 +263,11 @@ struct Room {
 
     // The source's pattern for a path leaving along (ex, ey, ez), against its
     // pattern toward the listener: wider than a cardioid, as a voice is.
+    // (fx, fy) faces from listener to source; the source faces the other way.
     double sourceGain(double ex, double ey, double ez) const {
         const double n = sqrt(ex * ex + ey * ey + ez * ez);
         if (n < 1e-9) return 1.0;
-        return 0.7 + 0.3 * (ex * fx + ey * fy) / n;
+        return 0.7 - 0.3 * (ex * fx + ey * fy) / n;
     }
 
     void compute() {

@@ -46,6 +46,8 @@ place. Patches use `supple.ghyll-patch/1.0`, with physical values under
   physical: at `mix` 50 it is the balance heard at the listener's place.
   Distance is floored at 0.5 m; when the two places coincide on the plan,
   the listener faces the front wall.
+  The source faces the listener, sending stronger reflections along that
+  direction than behind it.
 - **Small rooms** have audible standing waves (modes) below a few hundred
   hertz: the bass changes with where the source and listener stand. In the
   middle of the room the lowest modes cancel; in a corner they all sound.

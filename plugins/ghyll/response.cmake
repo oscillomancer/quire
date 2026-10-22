@@ -60,6 +60,14 @@ endfunction()
 expect("{\"mix\":0}" 0)
 expect("{\"mix\":0,\"output\":-6}" -6)
 
+# Only the stone floor reflects: a single path from a source facing the
+# listener. The 10 m horizontal path has a 3.2 m image height difference;
+# its source gain is 0.7 + 0.3 * 10 / sqrt(110.24), not the backwards lobe.
+# Including distance, absorption, air and the three-band split gives
+# -0.704 dB at 1 kHz (the backwards source gives -8.233 dB).
+expect("{\"room_width\":20,\"room_depth\":20,\"room_height\":10,\"walls\":\"open\",\"floor\":\"stone\",\"ceiling\":\"open\",\"source_x\":50,\"source_y\":25,\"listener_x\":50,\"listener_y\":75,\"mic\":\"mono\",\"scatter\":0,\"mix\":100,\"late\":-30}"
+    -0.704)
+
 # A readout, within `tolerance` thousandths of `want`.
 function(expect_meter params key want tolerance)
     measure("${params}" json)
