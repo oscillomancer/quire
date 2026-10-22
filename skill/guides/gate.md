@@ -13,7 +13,7 @@ changes only the keys it names.
 | `range` | dB, −80…0: the gain while closed; −80 is silence | −40 |
 | `ratio` | 1.2…10 (expand): each dB under the threshold becomes this many | 2 |
 | `attack` | ms, 0.05…50: how long the opening takes | 1 |
-| `hold` | ms, 0…1000: how long it stays open once the level falls under the close level | 20 |
+| `hold` | ms, 0…1000: how long Gate stays open below the close level, or Expand holds gain before it falls | 20 |
 | `release` | ms, 10…3000: how fast it closes, as the time to turn down 60 dB | 150 |
 | `follow` | bool: close at the rate the sound was already decaying at, within ¼ to 4 × the release (gate) | true |
 | `lookahead` | `off`, `ms1`, `ms2`, `ms5`; adds that latency; a restart, not automatable | ms2 |
@@ -24,13 +24,19 @@ changes only the keys it names.
 | `gain` | dB, readonly: the gain now (0 open, the range closed) | |
 | `noise_floor` | dBFS, readonly: the commonest quiet key level of the last 10 s | |
 | `loud_level` | dBFS, readonly: the key level exceeded 5 % of the last 10 s | |
-| `suggested_threshold` | dBFS, readonly: a threshold that clears the noise | |
+| `suggested` | dBFS, readonly: a threshold that clears the noise | |
 | `open_time` | %, readonly: how much of the last 10 s it was open | |
 | `openings` | readonly: how many times it opened in the last 10 s | |
 
 Levels are the key's peak over 10 ms, in dBFS: compare them with the
 readouts, not with an RMS loudness. With lookahead the opening ends a
 millisecond before the level crosses the threshold, so onsets pass whole.
+`open_time` includes digital silence in its time window, and counts it as
+open while the hold keeps the gate open. The level histogram skips digital
+silence.
+Changing `listen` crossfades over 10 ms between the signals being heard,
+including Key to Delta and either one back to Off. Another change during a
+fade starts from the current blend.
 
 ## Finding the threshold
 
@@ -40,7 +46,7 @@ then read the readouts with `param_get`:
 1. `noise_floor` is the noise or spill; `loud_level` the sound. Less than
    about 15 dB between them and a gate will not separate them: use Expand,
    or leave it.
-2. `suggested_threshold` puts the close level (threshold − hysteresis)
+2. `suggested` puts the close level (threshold − hysteresis)
    2 dB above the noise's peaks. Set `threshold` to it.
 3. Render again and read `openings`: about one per hit or phrase is right.
    Many more is chatter: raise `hysteresis` or `hold`. Fewer means quiet

@@ -74,6 +74,29 @@ struct PeakHold {
     }
 };
 
+// All Sorrel's delays are whole samples: no interpolation is needed.
+struct SampleDelay {
+    Buffer<double> samples;
+    int size = 1, at = 0;
+
+    void prepare(int n) {
+        size = max(1, n + 1);
+        samples.resize(size);
+        at = 0;
+    }
+    void clear() { samples.fill(0.0); }
+    void push(double x) {
+        at = at + 1 == size ? 0 : at + 1;
+        samples[at] = x;
+    }
+    double read(int delay) const {
+        const int i = at - delay;
+        // Match the interpolated line's addition at an integer position,
+        // including its handling of signed zero.
+        return 0.0 + samples[i < 0 ? i + size : i];
+    }
+};
+
 // --- the look --------------------------------------------------------------------------
 
 constexpr int kInk = 0x1A1411;
@@ -137,11 +160,11 @@ struct Sorrel : Effect {
                        .help(
                            "How long it takes to open; with lookahead the opening ends as the "
                            "sound arrives.");
-    Param hold =
-        milliseconds("Hold", 0, 1000, 20)
-            .in("Timing")
-            .activeWhen(mode, {"Gate"})
-            .help("How long it stays open after the level falls under the close level (Gate).");
+    Param hold = milliseconds("Hold", 0, 1000, 20)
+                     .in("Timing")
+                     .help(
+                         "Gate stays open this long below the close level; Expand holds a falling "
+                         "gain this long.");
     Param release = milliseconds("Release", 10, 3000, 150)
                         .in("Timing")
                         .help("How fast it closes: the time it takes to turn down by 60 dB.");
@@ -261,10 +284,11 @@ struct Sorrel : Effect {
     int ahead = 0;  // the lookahead, samples
     int envLength = 480;
     PeakHold env, up;
+    double heldPeak = -1.0, heldLevel = -120.0;
     Array<Biquad, 2> hpf, lpf;
     bool hpOn = false, lpOn = false;
-    Array<DelayLine, 2> delay, keyDelay;
-    DelayLine targets;
+    Array<SampleDelay, 2> delay, keyDelay;
+    SampleDelay targets;
     bool expand = false;
     double closedDb = -40.0;
     int attackSamples = 48, window = 48, holdSamples = 960;
@@ -278,7 +302,9 @@ struct Sorrel : Effect {
     double rampFrom = 0.0, rampTo = 1.0, rampToDb = 0.0, rampAt = 0.0, rampStep = 0.1;
     int holdCount = 0;
     int listenMode = 0;
-    double listenMix = 0.0, listenStep = 0.001;
+    int listenLength = 480, listenAt = 480;
+    double listenKey = 0.0, listenDelta = 0.0;
+    double listenFromKey = 0.0, listenFromDelta = 0.0;
     bool unplayed = true;
 
     // The detector's level each millisecond, and the histogram's chunks.
@@ -286,9 +312,9 @@ struct Sorrel : Effect {
     Array<double, 2048> msLevel;
     int msHead = 0, msFilled = 0;
     Buffer<int> chunkBins;
-    Array<int, 100> chunkCount, chunkOpen, chunkOpenings;
+    Array<int, 100> chunkCount, chunkTime, chunkOpen, chunkOpenings;
     Array<int, 96> total;
-    int totalCount = 0, totalOpen = 0, totalOpenings = 0;
+    int totalCount = 0, totalTime = 0, totalOpen = 0, totalOpenings = 0;
     int chunk = 0, msInChunk = 0;
     double floorNow = -96.0, loudNow = -96.0, suggestNow = -96.0;
 
@@ -314,6 +340,8 @@ struct Sorrel : Effect {
         setLatency(ahead);
         envLength = max(1, roundToInt(0.01 * rate));
         env.prepare(envLength + 2);
+        heldPeak = -1.0;
+        heldLevel = -120.0;
         up.prepare(ahead + 4);
         const int room = ahead + 8;
         for (int c = 0; c < 2; ++c) {
@@ -327,7 +355,7 @@ struct Sorrel : Effect {
         targets.prepare(room);
         targets.clear();
         easeStep = 1.0 / (0.003 * rate);
-        listenStep = 1.0 / (0.01 * rate);
+        listenLength = max(1, roundToInt(0.01 * rate));
         msLength = 0.001 * rate;
         colLength = 0.005 * rate;
         fall = exp(-1.0 / (0.3 * rate));
@@ -336,10 +364,12 @@ struct Sorrel : Effect {
         // A restart prepares an instance that has played: start it afresh.
         chunkBins.fill(0);
         chunkCount.fill(0);
+        chunkTime.fill(0);
         chunkOpen.fill(0);
         chunkOpenings.fill(0);
         total.fill(0);
         totalCount = 0;
+        totalTime = 0;
         totalOpen = 0;
         totalOpenings = 0;
         chunk = 0;
@@ -369,6 +399,7 @@ struct Sorrel : Effect {
         envOut = 0.0;
         unplayed = true;
         settings();
+        snapListen();
         gainDb = closedDb;
         amp = gainOf(gainDb);
     }
@@ -389,13 +420,29 @@ struct Sorrel : Effect {
             hpf[c].highpass(keyHpf, 0.707);
             lpf[c].lowpass(min(keyLpf.value(), 0.45 * rate), 0.707);
         }
-        listenMode = listen.index();
+        const int nextListen = listen.index();
+        if (nextListen != listenMode) {
+            // A new edit starts from the blend heard at the last sample,
+            // even if the previous transition has not finished.
+            listenFromKey = listenKey;
+            listenFromDelta = listenDelta;
+            listenAt = 0;
+            listenMode = nextListen;
+        }
+    }
+
+    void snapListen() {
+        listenKey = listenMode == 1 ? 1.0 : 0.0;
+        listenDelta = listenMode == 2 ? 1.0 : 0.0;
+        listenFromKey = listenKey;
+        listenFromDelta = listenDelta;
+        listenAt = listenLength;
     }
 
     void update() {
         settings();
         if (unplayed) {
-            listenMix = listenMode > 0 ? 1.0 : 0.0;
+            snapListen();
             gainDb = closedDb;
             amp = gainOf(gainDb);
         }
@@ -459,7 +506,12 @@ struct Sorrel : Effect {
             keyDelay[0].push(kl);
             keyDelay[1].push(kr);
             const double peak = env.push(min(max(abs(kl), abs(kr)), 1e4), envLength);
-            const double level = gainToDb(peak);
+            // A held peak usually stays unchanged for many samples.
+            if (peak != heldPeak) {
+                heldPeak = peak;
+                heldLevel = gainToDb(peak);
+            }
+            const double level = heldLevel;
             lastLevel = level;
 
             // The state, as the detector hears it (a lookahead early).
@@ -499,18 +551,27 @@ struct Sorrel : Effect {
             double ol = dl * amp;
             double orr = dr * amp;
             const double aOut = max(abs(ol), abs(orr));  // what the gate passes, heard or not
-            listenMix = clamp(listenMix + (listenMode > 0 ? listenStep : -listenStep), 0.0, 1.0);
-            if (listenMix > 0.0) {
-                double hl = 0.0, hr = 0.0;
-                if (listenMode == 1) {
-                    hl = ahead > 0 ? keyDelay[0].read(ahead) : kl;
-                    hr = ahead > 0 ? keyDelay[1].read(ahead) : kr;
-                } else if (listenMode == 2) {
-                    hl = dl - ol;
-                    hr = dr - orr;
-                }
-                ol += listenMix * (hl - ol);
-                orr += listenMix * (hr - orr);
+            if (listenAt < listenLength) {
+                listenAt += 1;
+                const double t = static_cast<double>(listenAt) / listenLength;
+                const double toKey = listenMode == 1 ? 1.0 : 0.0;
+                const double toDelta = listenMode == 2 ? 1.0 : 0.0;
+                listenKey = listenAt == listenLength ? toKey : lerp(listenFromKey, toKey, t);
+                listenDelta =
+                    listenAt == listenLength ? toDelta : lerp(listenFromDelta, toDelta, t);
+            }
+            // Blend the live wet, key and delta signals. The wet signal's
+            // weight is the remainder; no transition fades through silence.
+            const double wetL = ol, wetR = orr;
+            if (listenKey > 0.0) {
+                const double hl = ahead > 0 ? keyDelay[0].read(ahead) : kl;
+                const double hr = ahead > 0 ? keyDelay[1].read(ahead) : kr;
+                ol += listenKey * (hl - wetL);
+                orr += listenKey * (hr - wetR);
+            }
+            if (listenDelta > 0.0) {
+                ol += listenDelta * ((dl - wetL) - wetL);
+                orr += listenDelta * ((dr - wetR) - wetR);
             }
             io[0][i] = ol;
             if (stereo) io[1][i] = orr;
@@ -614,10 +675,12 @@ struct Sorrel : Effect {
             total[b] += 1;
             chunkCount[chunk] += 1;
             totalCount += 1;
-            if (open) {
-                chunkOpen[chunk] += 1;
-                totalOpen += 1;
-            }
+        }
+        chunkTime[chunk] += 1;
+        totalTime += 1;
+        if (open) {
+            chunkOpen[chunk] += 1;
+            totalOpen += 1;
         }
         msInChunk += 1;
         if (msInChunk >= 100) closeChunk();
@@ -634,9 +697,11 @@ struct Sorrel : Effect {
             chunkBins[chunk * kBins + b] = 0;
         }
         totalCount -= chunkCount[chunk];
+        totalTime -= chunkTime[chunk];
         totalOpen -= chunkOpen[chunk];
         totalOpenings -= chunkOpenings[chunk];
         chunkCount[chunk] = 0;
+        chunkTime[chunk] = 0;
         chunkOpen[chunk] = 0;
         chunkOpenings[chunk] = 0;
     }
@@ -698,7 +763,7 @@ struct Sorrel : Effect {
         floorShown.set(floorNow);
         loudShown.set(loudNow);
         suggestShown.set(suggestNow);
-        openTime.set(totalCount > 0 ? static_cast<double>(totalOpen) / totalCount : 0.0);
+        openTime.set(totalTime > 0 ? static_cast<double>(totalOpen) / totalTime : 0.0);
         openings.set(totalOpenings);
     }
 
