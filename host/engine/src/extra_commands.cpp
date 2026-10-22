@@ -125,6 +125,7 @@ struct PluginEntry {
     bool instrument = false, semantic = false;
     std::string path;
     std::optional<bool> shadowed;  // an earlier location on the plugin path has this id
+    std::vector<std::string> features;
 };
 struct ScanReason {
     std::string code, message, path, hint;
@@ -1110,6 +1111,10 @@ void registerExtraCommands(cmd::Registry& registry) {
                 .field("format", &PluginEntry::format, schema::string().doc("clap or vst3"))
                 .field("instrument", &PluginEntry::instrument, schema::boolean())
                 .field("semantic", &PluginEntry::semantic, schema::boolean())
+                .field("features", &PluginEntry::features,
+                       schema::arrayOf(schema::string())
+                           .doc("CLAP features (a VST3's subcategories): the main category "
+                                "first, then the kind of plugin, such as reverb"))
                 .field("path", &PluginEntry::path, schema::string())
                 .field("shadowed", &PluginEntry::shadowed,
                        schema::boolean().doc("Another location earlier on the plugin path has the "
@@ -1132,8 +1137,8 @@ void registerExtraCommands(cmd::Registry& registry) {
                     p.name.find(*a.filter) == std::string::npos &&
                     p.vendor.find(*a.filter) == std::string::npos)
                     continue;
-                PluginEntry e{p.id,         p.name,     p.vendor,        p.format,
-                              p.instrument, p.semantic, p.path.string(), {}};
+                PluginEntry e{p.id,       p.name,          p.vendor, p.format,  p.instrument,
+                              p.semantic, p.path.string(), {},       p.features};
                 if (host::shadowed(*found, i)) e.shadowed = true;
                 out.plugins.push_back(std::move(e));
             }
@@ -1165,6 +1170,10 @@ void registerExtraCommands(cmd::Registry& registry) {
                 .field("format", &PluginEntry::format, schema::string().doc("clap or vst3"))
                 .field("instrument", &PluginEntry::instrument, schema::boolean())
                 .field("semantic", &PluginEntry::semantic, schema::boolean())
+                .field("features", &PluginEntry::features,
+                       schema::arrayOf(schema::string())
+                           .doc("CLAP features (a VST3's subcategories): the main category "
+                                "first, then the kind of plugin, such as reverb"))
                 .field("path", &PluginEntry::path, schema::string())
                 .field("shadowed", &PluginEntry::shadowed, schema::boolean())
                 .build();
@@ -1219,8 +1228,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             out.scan = scanReport(engine.pluginScanReport());
             for (std::size_t i = 0; i < found->size(); ++i) {
                 const auto& p = (*found)[i];
-                PluginEntry e{p.id,         p.name,     p.vendor,        p.format,
-                              p.instrument, p.semantic, p.path.string(), {}};
+                PluginEntry e{p.id,       p.name,          p.vendor, p.format,  p.instrument,
+                              p.semantic, p.path.string(), {},       p.features};
                 if (host::shadowed(*found, i)) e.shadowed = true;
                 out.plugins.push_back(std::move(e));
             }

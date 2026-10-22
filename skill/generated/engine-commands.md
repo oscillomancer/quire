@@ -6551,6 +6551,13 @@ Kind: `query`. Exposure: `mcp-tool`.
           "semantic": {
             "type": "boolean"
           },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "CLAP features (a VST3's subcategories): the main category first, then the kind of plugin, such as reverb"
+          },
           "path": {
             "type": "string"
           },
@@ -6559,7 +6566,7 @@ Kind: `query`. Exposure: `mcp-tool`.
             "description": "Another location earlier on the plugin path has the same id; fx.add by id uses that one"
           }
         },
-        "required": ["id", "name", "vendor", "format", "instrument", "semantic", "path"],
+        "required": ["id", "name", "vendor", "format", "instrument", "semantic", "features", "path"],
         "additionalProperties": false
       }
     },
@@ -6716,6 +6723,13 @@ Kind: `action`. Exposure: `mcp-tool`.
           "semantic": {
             "type": "boolean"
           },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "CLAP features (a VST3's subcategories): the main category first, then the kind of plugin, such as reverb"
+          },
           "path": {
             "type": "string"
           },
@@ -6723,7 +6737,7 @@ Kind: `action`. Exposure: `mcp-tool`.
             "type": "boolean"
           }
         },
-        "required": ["id", "name", "vendor", "format", "instrument", "semantic", "path"],
+        "required": ["id", "name", "vendor", "format", "instrument", "semantic", "features", "path"],
         "additionalProperties": false
       }
     },
