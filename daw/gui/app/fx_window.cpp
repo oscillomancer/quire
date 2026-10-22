@@ -285,12 +285,12 @@ class PresetMenu : public ui::List {
         onActivate = [this](std::size_t i) {
             const Entry e = rows_[i];
             if (e.kind == Kind::Heading || e.kind == Kind::Separator) return;
-            auto hooks = hooks_;  // closing destroys this menu
+            auto kept = hooks_;  // closing destroys this menu
             root_.closePopup();
             if (e.kind == Kind::Save)
-                hooks.save();
+                kept.save();
             else
-                hooks.load(e.name, e.kind == Kind::User ? "user" : "factory");
+                kept.load(e.name, e.kind == Kind::User ? "user" : "factory");
         };
         onContext = [this](std::size_t i, ui::Point at) { offerDelete(i, at); };
     }

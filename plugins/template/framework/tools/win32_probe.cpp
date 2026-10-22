@@ -283,6 +283,17 @@ struct ObservePaint {
 };
 ObservePaint* ObservePaint::current = nullptr;
 
+// A first frame at a new size can be slow to draw under software rendering
+// on a loaded machine: wait for it, up to a generous deadline, rather than
+// decide by a fixed time.
+bool captureDrawn(Host& host, HWND parent, const char* path) {
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        if (capture(parent, path)) return true;
+        pump(host, 5);
+    }
+    return false;
+}
+
 void verifyTimerRepaint(Host& host, HWND parent, const char* output) {
     const auto* params = static_cast<const clap_plugin_params_t*>(
         host.plugin->get_extension(host.plugin, CLAP_EXT_PARAMS));
@@ -331,10 +342,19 @@ void verifyTimerRepaint(Host& host, HWND parent, const char* output) {
         check(observe.paints > 0, "parameter automation repaints without a forced expose");
         if (host.refuseTimer) check(observe.timers > 0, "fallback WM_TIMER reaches the editor");
     }
-    check(capture(parent, (prefix + "-after.ppm").c_str(), &after), "updated timer-check pixels");
+    // The new picture can be slow to draw under software rendering on a
+    // loaded machine: wait for it, up to a generous deadline. Only the
+    // timer runs meanwhile, so it still shows the automation.
+    bool captured = false;
     size_t changed = 0;
-    if (before.size() == after.size())
-        for (size_t i = 0; i < before.size(); ++i) changed += before[i] != after[i];
+    for (int attempt = 0; attempt < 100 && changed <= 100; ++attempt) {
+        if (attempt) pump(host, 5);
+        captured = capture(parent, (prefix + "-after.ppm").c_str(), &after);
+        changed = 0;
+        if (before.size() == after.size())
+            for (size_t i = 0; i < before.size(); ++i) changed += before[i] != after[i];
+    }
+    check(captured, "updated timer-check pixels");
     check(changed > 100, "parameter automation changes the displayed editor");
 }
 
@@ -444,7 +464,7 @@ int main(int argc, char** argv) {
             check(host.gui->get_size(host.plugin, &realW, &realH) && realW == preW && realH == preH,
                   "pre-parent size survives realizing");
         }
-        if (cycle == 0) check(capture(parent, output), "embedded editor draws nonblank pixels");
+        if (cycle == 0) check(captureDrawn(host, parent, output), "embedded editor draws nonblank pixels");
 
         w = 1320;
         h = 840;
@@ -457,7 +477,7 @@ int main(int argc, char** argv) {
         check(childSize(parent, cw, ch) && cw == w && ch == h, "editor window follows the resize");
         if (cycle == 0) {
             const std::string resized = std::string(output) + ".resized.ppm";
-            check(capture(parent, resized.c_str()), "resized editor draws nonblank pixels");
+            check(captureDrawn(host, parent, resized.c_str()), "resized editor draws nonblank pixels");
         }
         if (cycle == 1) {
             check(host.gui->hide(host.plugin), "hide editor");
