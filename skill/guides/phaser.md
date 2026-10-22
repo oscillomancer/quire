@@ -77,6 +77,9 @@ It adds to the sweep and works in `rise` and `fall` too.
 Synced motion follows the song position through a host's count-in too,
 including positions before beat zero.
 
+`keep_below` follows slow automation too: its filter updates when the
+cutoff moves more than 0.01 Hz from the last filter design.
+
 ## Recipes
 
 A classic four-stage swirl:

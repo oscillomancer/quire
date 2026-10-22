@@ -474,7 +474,7 @@ struct Pollia : Effect {
     double peakRef = -60.0;  // dBFS: the recent peak it is measured against
     double envNow = 0.0;     // 0..1
     double inPeak = 0.0, outPeak = 0.0;
-    double lastKeep = 0.0;
+    double lastKeep = 0.0;  // the cutoff last designed on both channels
     // The editor's history: frames into the row, its newest row, rows written.
     int rowAt = 0, head = 0, rows = 0;
 
@@ -704,6 +704,7 @@ struct Pollia : Effect {
                 lastMix = m;
             }
             const double keep = keepBelow.at(i);
+            const bool tuneKeep = abs(keep - lastKeep) > 0.01 || (first && i == 0);
             const double outDb = output.at(i);
             if (outDb != lastDb) {
                 outGain = dbToGain(outDb);
@@ -715,7 +716,7 @@ struct Pollia : Effect {
                 const double x = io[c][i];
                 // Keep below: the low part passes untouched (a split that sums
                 // back exactly).
-                if (abs(keep - lastKeep) > 0.01 || (first && i == 0)) h.split.lowpass(keep, 0.5);
+                if (tuneKeep) h.split.lowpass(keep, 0.5);
                 const double lowPart = h.split.process(x);
                 const double kept = keep > 20.5 ? lowPart : 0.0;
                 const double dry = x - kept;
@@ -754,7 +755,7 @@ struct Pollia : Effect {
                 yMax = max(yMax, abs(y));
             }
             outPeak = max(outPeak * fall, yMax);
-            lastKeep = keep;
+            if (tuneKeep) lastKeep = keep;
             rowAt += 1;
             if (rowAt >= toInt(sr / 24.0)) {
                 rowAt = 0;
