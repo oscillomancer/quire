@@ -38,10 +38,7 @@ constexpr double kPredelayLongest = 0.25;
 constexpr double kLineLongest = 0.2;    // s: the longest delay line, modulation included
 constexpr double kSourceQ = 1.92;       // the source's directivity: a voice, an instrument
 constexpr double kHeadRadius = 0.0875;  // m
-constexpr double kDensity =
-    0.02;  // s of mean line per second of decay, at the least      // s of mean line per second of
-           // decay, at the least      // s of mean line per second of decay, at the least      // s
-           // of mean line per second of decay, at the least
+constexpr double kDensity = 0.02;       // s of mean line per second of decay, at the least
 
 // --- the materials --------------------------------------------------------------------
 
@@ -1271,7 +1268,7 @@ struct Ghyll : Effect {
         // The tail: lines as long as the mean free path (8 ms at the least),
         // each a prime number of samples.
         // (A small room that rings long needs more of them than its size
-        // gives, or its tail rings: at least 15 ms per second of decay.)
+        // gives, or its tail rings: at least 20 ms per second of decay.)
         const double path =
             clamp(max(room.freePath / kSound, kDensity * room.rtMid()), 0.008, 0.11);
         double mean = 0.0;
