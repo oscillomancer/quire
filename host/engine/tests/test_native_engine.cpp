@@ -117,8 +117,8 @@ TEST_CASE("native in-process engine output equals offline in both executors" *
             auto measuredOptions = options;
             measuredOptions.benchProbe = &probe;
             Engine engine(rtPool, media, measuredOptions);
-            REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
-            REQUIRE(engine.load(s).ok());
+            REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}));
+            REQUIRE(engine.load(s));
             engine.play();
             if (options.anticipative)
                 runAhead(engine, backend, (48000 * 2 + 4096) / 128, 128);

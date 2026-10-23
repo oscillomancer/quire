@@ -27,10 +27,10 @@ TEST_CASE("SMF format zero round trip") {
                   {1000, ControlKind::ProgramChange, 0, 0, 5}};
     s.sysex = {{1200, {0xf0, 0x7e, 0x7f, 0xf7}}};
     auto encoded = writeSmf(s, {{0, Meter{4, 4}}}, {{0, 120.0}});
-    REQUIRE(encoded.ok());
+    REQUIRE(encoded);
     SmfInfo info;
     auto decoded = readSmf(*encoded, &info);
-    REQUIRE(decoded.ok());
+    REQUIRE(decoded);
     s.canonicalize();
     CHECK(decoded.value() == s);
     CHECK(info.meters == std::vector<std::pair<std::int64_t, Meter>>{{0, Meter{4, 4}}});
@@ -43,7 +43,7 @@ TEST_CASE("running status, zero-velocity off, and unterminated note") {
         'M', 'T', 'h', 'd', 0, 0,    0,  6,   0,    0,  0,  1,    3,  0xc0, 'M',  'T',  'r',  'k',
         0,   0,   0,   14,  0, 0x90, 60, 100, 0x10, 62, 90, 0x10, 60, 0,    0x10, 0xff, 0x2f, 0};
     auto result = readSmf(smf);
-    REQUIRE(result.ok());
+    REQUIRE(result);
     REQUIRE(result->notes.size() == 2);
     CHECK(result->notes[0].length == 32);
     CHECK(result->notes[1].length == 32);
@@ -56,7 +56,7 @@ TEST_CASE("format one merges tracks before pairing notes") {
         0,   'M', 'T', 'r', 'k', 0, 0,    0,  8,   10, 0x80, 60,   40, 0,    0xff, 0x2f, 0};
     SmfInfo info;
     auto result = readSmf(smf, &info);
-    REQUIRE(result.ok());
+    REQUIRE(result);
     REQUIRE(result->notes.size() == 1);
     CHECK(result->notes[0].length == 10);
     CHECK(result->notes[0].offVelocity == 40);
@@ -65,7 +65,7 @@ TEST_CASE("format one merges tracks before pairing notes") {
     CHECK(info.format == 1);
     CHECK(info.trackCount == 2);
     auto selected = readSmf(smf, nullptr, SmfReadOptions{0});
-    REQUIRE(selected.ok());
+    REQUIRE(selected);
     REQUIRE(selected->notes.size() == 1);
     CHECK(selected->notes[0].length == 20);
     auto badTrack = readSmf(smf, nullptr, SmfReadOptions{2});
@@ -84,7 +84,7 @@ TEST_CASE("SMF writer validates the clip and metadata") {
     s.notes[0].velocity = 96;
     CHECK_FALSE(writeSmf(s, {{0, Meter{3, 3}}}, {}).ok());
     CHECK_FALSE(writeSmf(s, {}, {{0, -10.0}}).ok());
-    CHECK(writeSmf(s, {{0, Meter{3, 4}}}, {{0, 120.0}}).ok());
+    CHECK(writeSmf(s, {{0, Meter{3, 4}}}, {{0, 120.0}}));
 }
 
 TEST_CASE("SMF writing rejects unbounded delta padding with a structured error") {

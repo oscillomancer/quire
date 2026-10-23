@@ -303,7 +303,7 @@ TEST_CASE("audio split is sample exact and take activation changes the render") 
     for (std::size_t i = 0; i < source.frames(); ++i)
         source.channels[0][i] =
             static_cast<float>(0.25 * std::sin(2 * 3.141592653589793 * 440 * double(i) / 48000));
-    REQUIRE(audio::writeWav(dir.path / "source.wav", source).ok());
+    REQUIRE(audio::writeWav(dir.path / "source.wav", source));
     auto app = makeApp(dir.path);
     cmd::Registry registry;
     registerEngineCommands(registry);
@@ -378,7 +378,7 @@ TEST_CASE("FX order is audible and rulers survive save and reopen") {
         "{\"path\":" + json::writeCompact(json::Value((dir.path / "project.json").string())) + "}";
     run(bus, "project.save", save);
     auto reopened = makeApp(dir.path / "reopened");
-    REQUIRE(reopened->open(dir.path / "project.json").ok());
+    REQUIRE(reopened->open(dir.path / "project.json"));
     CHECK(reopened->head().markers.find(*model::Id::parse("mk_1"))->name == "Verse");
     CHECK(reopened->head().regions.find(*model::Id::parse("rg_1"))->end == 8);
 
@@ -673,7 +673,7 @@ TEST_CASE("typed strip commands: rejected edits roll back and masters render ind
         CHECK(result.error().code == code);
         CHECK_FALSE(result.error().hint.empty());
         CHECK(app->head().version == version);
-        CHECK(model::checkInvariants(app->head()).ok());
+        CHECK(model::checkInvariants(app->head()));
     };
     rejected("track.add", R"({"parent":"tr_3"})", "track.strip_type");
     rejected("track.set", R"({"track":"tr_3","type":"buss"})", "track.strip_type");
@@ -731,7 +731,7 @@ TEST_CASE("project.open returns migration warnings in its load report") {
     auto doc = model::projectToJson(app->head());
     doc["schema"] = "supple.project/1.0";
     doc["project"]["pan_law_db"] = -3;
-    REQUIRE(writeFileAtomic(dir.path / "legacy.json", json::writeCanonical(doc)).ok());
+    REQUIRE(writeFileAtomic(dir.path / "legacy.json", json::writeCanonical(doc)));
     cmd::Registry registry;
     registerEngineCommands(registry);
     cmd::Dispatcher bus(registry, *app);
@@ -1407,7 +1407,7 @@ TEST_CASE("item.add hashes the file, reads its header, and adds one source per f
         source.channels[0][i] = source.channels[1][i] =
             static_cast<float>(0.5 * std::sin(2 * 3.141592653589793 * 440.0 * double(i) / 48000));
     const fs::path file = dir.path / "source.wav";
-    REQUIRE(audio::writeWav(file, source).ok());
+    REQUIRE(audio::writeWav(file, source));
     auto app = makeApp(dir.path);
     cmd::Registry registry;
     registerEngineCommands(registry);
@@ -1444,7 +1444,7 @@ TEST_CASE("item.add hashes the file, reads its header, and adds one source per f
         "{\"path\":" + json::writeCompact(json::Value((dir.path / "project.json").string())) + "}";
     run(bus, "project.save", save);
     auto reopened = makeApp(dir.path / "reopened");
-    REQUIRE(reopened->open(dir.path / "project.json").ok());
+    REQUIRE(reopened->open(dir.path / "project.json"));
     const auto* again = reopened->head().media.find(model::Id{model::Kind::Media, 1});
     REQUIRE(again != nullptr);
     CHECK(again->hash == md->hash);
@@ -1459,7 +1459,7 @@ TEST_CASE("item.add reuses a pre-hash source for the same file and backfills its
         source.channels[0][i] = source.channels[1][i] =
             static_cast<float>(0.5 * std::sin(2 * 3.141592653589793 * 440.0 * double(i) / 48000));
     const fs::path file = dir.path / "source.wav";
-    REQUIRE(audio::writeWav(file, source).ok());
+    REQUIRE(audio::writeWav(file, source));
     auto app = makeApp(dir.path);
     cmd::Registry registry;
     registerEngineCommands(registry);
@@ -1475,8 +1475,8 @@ TEST_CASE("item.add reuses a pre-hash source for the same file and backfills its
     auto doc = model::projectToJson(app->head());
     doc["schema"] = "supple.project/1.0";
     doc["sources"]["media"]["md_1"]["hash"] = "";
-    REQUIRE(writeFileAtomic(dir.path / "legacy.json", json::writeCanonical(doc)).ok());
-    REQUIRE(app->open(dir.path / "legacy.json").ok());
+    REQUIRE(writeFileAtomic(dir.path / "legacy.json", json::writeCanonical(doc)));
+    REQUIRE(app->open(dir.path / "legacy.json"));
     REQUIRE(app->head().media.size() == 1);
     const auto media = [&] { return app->head().media.find(model::Id{model::Kind::Media, 1}); };
     REQUIRE(media() != nullptr);
@@ -1495,7 +1495,7 @@ TEST_CASE("item.add reuses a pre-hash source for the same file and backfills its
     audio::AudioData other = source;
     for (float& v : other.channels[0]) v *= 0.5f;
     const fs::path otherFile = dir.path / "other.wav";
-    REQUIRE(audio::writeWav(otherFile, other).ok());
+    REQUIRE(audio::writeWav(otherFile, other));
     const auto third = run(bus, "item.add",
                            "{\"track\":\"tr_1\",\"audio_file\":" +
                                json::writeCompact(json::Value(otherFile.string())) + "}");

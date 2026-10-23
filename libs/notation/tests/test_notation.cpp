@@ -108,7 +108,7 @@ TEST_CASE("valid notation corpus matches event listings") {
             for (const auto& detail : result.error().details) errorInfo += "\n" + detail.toString();
         }
         INFO(errorInfo);
-        REQUIRE(result.ok());
+        REQUIRE(result);
         const auto expectedPath =
             entry.path().parent_path() / (entry.path().stem().string() + ".events");
         const auto actual = dump(result->sequence);
@@ -154,14 +154,14 @@ TEST_CASE("invalid notation corpus has precise errors") {
 TEST_CASE("compile a simple voice") {
     auto result =
         compile("notation 1\nppq 960\nmeter 4/4\nvoice bass ch 1\n1: C4:q D4:q E4:q F4:q\n");
-    REQUIRE(result.ok());
+    REQUIRE(result);
     CHECK(result->sequence.notes.size() == 4);
     CHECK(result->sequence.length == 3840);
 }
 
 TEST_CASE("thirty-second duration is distinct from exact tick suffix") {
     auto result = compile("voice lead\n1: C4:t D4:120t r:*\n");
-    REQUIRE(result.ok());
+    REQUIRE(result);
     REQUIRE(result->sequence.notes.size() == 2);
     CHECK(result->sequence.notes[0].length == 120);
     CHECK(result->sequence.notes[1].length == 120);
@@ -170,11 +170,11 @@ TEST_CASE("thirty-second duration is distinct from exact tick suffix") {
 TEST_CASE("implicit main voice matches an explicit declaration") {
     const auto implicit = compile("notation 1\n1: C4:q E4:q G4:h\n");
     const auto explicitVoice = compile("notation 1\nvoice main\n1: C4:q E4:q G4:h\n");
-    REQUIRE(implicit.ok());
-    REQUIRE(explicitVoice.ok());
+    REQUIRE(implicit);
+    REQUIRE(explicitVoice);
     CHECK(implicit->sequence == explicitVoice->sequence);
     auto written = decompile(implicit->sequence);
-    REQUIRE(written.ok());
+    REQUIRE(written);
     CHECK(written->find("voice ") != std::string::npos);
 }
 
@@ -192,9 +192,9 @@ TEST_CASE("a bar number after a pipe is accepted when it is the next bar") {
         "notation 1\nmeter 3/4\n"
         "1: C4:q E4:q G4:q\n2: A4:q G4:q E4:q\n3: F4:q A4:q C5:q\n4: G4:q E4:q C4:q\n";
     auto withNumbers = compile(numbered);
-    REQUIRE(withNumbers.ok());
+    REQUIRE(withNumbers);
     auto withNewlines = compile(byLine);
-    REQUIRE(withNewlines.ok());
+    REQUIRE(withNewlines);
     CHECK(withNumbers->sequence == withNewlines->sequence);
 }
 
@@ -212,17 +212,17 @@ TEST_CASE("a pipe number that is not the next bar is an error") {
 
 TEST_CASE("a pipe without a number still continues the next bar") {
     auto result = compile("voice lead\n1: C4:w | D4:w\n");
-    REQUIRE(result.ok());
+    REQUIRE(result);
     REQUIRE(result->sequence.notes.size() == 2);
     CHECK(result->sequence.length == 7680);
     auto numbered = compile("voice lead\n1: C4:w | 2: D4:w\n");
-    REQUIRE(numbered.ok());
+    REQUIRE(numbered);
     CHECK(numbered->sequence == result->sequence);
 }
 
 TEST_CASE("exact item length and repeated lane point") {
     auto result = compile("notation 1\nppq 960\nlength 0+1t\nlane cc 1\n1.1 10\n1.1 20\n");
-    REQUIRE(result.ok());
+    REQUIRE(result);
     CHECK(result->sequence.length == 1);
     CHECK(result->sequence.controls.size() == 2);
 }
@@ -232,9 +232,9 @@ TEST_CASE("note round trip") {
     s.length = 900;
     s.notes = {{50, 800, 0, 60, 100, 20}, {100, 200, 0, 64, 70, 0}};
     auto written = decompile(s);
-    REQUIRE(written.ok());
+    REQUIRE(written);
     auto compiled = compile(*written);
-    REQUIRE(compiled.ok());
+    REQUIRE(compiled);
     s.canonicalize();
     CHECK(compiled->sequence == s);
 }
@@ -244,10 +244,10 @@ TEST_CASE("decompiler emits grid and copy lines when exact") {
     drums.length = 3840;
     drums.notes = {{0, 240, 9, 36, 100, 0}, {960, 240, 9, 36, 100, 0}};
     auto grid = decompile(drums);
-    REQUIRE(grid.ok());
+    REQUIRE(grid);
     CHECK(grid->find("voice drums ch 10 grid s") != std::string::npos);
     auto compiledGrid = compile(*grid);
-    REQUIRE(compiledGrid.ok());
+    REQUIRE(compiledGrid);
     drums.canonicalize();
     CHECK(compiledGrid->sequence == drums);
 
@@ -256,10 +256,10 @@ TEST_CASE("decompiler emits grid and copy lines when exact") {
     repeated.notes = {
         {0, 3840, 0, 60, 96, 0}, {3840, 3840, 0, 60, 96, 0}, {7680, 3840, 0, 60, 96, 0}};
     auto copied = decompile(repeated);
-    REQUIRE(copied.ok());
+    REQUIRE(copied);
     CHECK(copied->find("2-3 = 1") != std::string::npos);
     auto compiledCopy = compile(*copied);
-    REQUIRE(compiledCopy.ok());
+    REQUIRE(compiledCopy);
     repeated.canonicalize();
     CHECK(compiledCopy->sequence == repeated);
 }
@@ -270,10 +270,10 @@ TEST_CASE("same-tick lane writes retain order through decompile") {
     s.controls = {{0, supple::midi::ControlKind::CC, 0, 74, 20},
                   {0, supple::midi::ControlKind::CC, 0, 74, 90}};
     auto written = decompile(s);
-    REQUIRE(written.ok());
+    REQUIRE(written);
     CHECK(written->find("1.1 20\n1.1 90") != std::string::npos);
     auto compiled = compile(*written);
-    REQUIRE(compiled.ok());
+    REQUIRE(compiled);
     CHECK(compiled->sequence == s);
 }
 
@@ -288,10 +288,10 @@ TEST_CASE("fractional denominator beats retain integer tick controls") {
         CompileContext context;
         context.meterAt = options.meterAt;
         auto written = decompile(s, options);
-        REQUIRE(written.ok());
+        REQUIRE(written);
         CHECK(written->find("1.1+2t 80") != std::string::npos);
         auto compiled = compile(*written, context);
-        REQUIRE(compiled.ok());
+        REQUIRE(compiled);
         CHECK(compiled->sequence == s);
     }
 }
@@ -343,7 +343,7 @@ TEST_CASE("round-trip random canonical sequences") {
         context.meterAt = options.meterAt;
         auto text = decompile(s, options);
         INFO("seed=", seed, " iteration=", iteration);
-        REQUIRE(text.ok());
+        REQUIRE(text);
         auto compiled = compile(*text, context);
         INFO(*text);
         std::string errorInfo;
@@ -353,7 +353,7 @@ TEST_CASE("round-trip random canonical sequences") {
                 errorInfo += "\n" + detail.toString();
         }
         INFO(errorInfo);
-        REQUIRE(compiled.ok());
+        REQUIRE(compiled);
         CHECK(compiled->sequence == s);
     }
 }

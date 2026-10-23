@@ -415,8 +415,8 @@ void runHelpers(PortAudioBackend& backend, unsigned live, unsigned background,
     };
     for (unsigned i = 0; i < live; ++i) spawn(liveSetup, i);
     for (unsigned i = 0; i < background; ++i) spawn(backgroundSetup, i);
-    CHECK(liveSetup.finish().ok());
-    CHECK(backgroundSetup.finish().ok());
+    CHECK(liveSetup.finish());
+    CHECK(backgroundSetup.finish());
     for (unsigned seen; (seen = entered.load()) < live + background;) entered.wait(seen);
     whileRunning();
     release.store(1);
@@ -561,10 +561,10 @@ TEST_CASE("macOS workgroup wrapper joins once per thread, leaves and rejoins") {
         MESSAGE("real-time thread policy refused; workgroup join not exercised");
         return;
     }
-    CHECK(first.ok());
+    CHECK(first);
     REQUIRE_FALSE(second.ok());
     CHECK(second.error().code == "workgroup.join");
-    CHECK(third.ok());
+    CHECK(third);
     // A thread that never joined cannot leave another thread's membership.
     wrapped->leave();
 }

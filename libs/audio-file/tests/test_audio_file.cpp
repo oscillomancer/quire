@@ -223,7 +223,7 @@ TEST_CASE("writeWav is atomic and creates directories") {
     const fs::path dir = fs::temp_directory_path() / "supple-audio-file-test";
     fs::remove_all(dir);
     const fs::path file = dir / "sub" / "out.wav";
-    REQUIRE(writeWav(file, tone(100, 48000, 2)).ok());
+    REQUIRE(writeWav(file, tone(100, 48000, 2)));
     CHECK(fs::exists(file));
     CHECK_FALSE(fs::exists(file.string() + ".tmp"));
     auto back = readAudio(file);
@@ -283,19 +283,19 @@ TEST_CASE("a streamed WAV is readable after every header update and after close"
     const auto path = std::filesystem::temp_directory_path() /
                       ("supple-wav-stream-" + std::to_string(supple::test::processId()) + ".wav");
     supple::audio::WavStreamWriter w;
-    REQUIRE(w.open(path, 48000, 2).ok());
+    REQUIRE(w.open(path, 48000, 2));
     std::vector<float> block(2 * 1000);
     for (std::size_t i = 0; i < 1000; ++i) {
         block[2 * i] = static_cast<float>(i) / 1000.0f;
         block[2 * i + 1] = -static_cast<float>(i) / 1000.0f;
     }
-    REQUIRE(w.append(block.data(), 1000).ok());
-    REQUIRE(w.updateHeader().ok());
+    REQUIRE(w.append(block.data(), 1000));
+    REQUIRE(w.updateHeader());
     auto partial = supple::audio::readAudio(path);  // as a crash would leave it
     REQUIRE(partial);
     CHECK(partial->frames() == 1000);
-    REQUIRE(w.append(block.data(), 500).ok());
-    REQUIRE(w.close().ok());
+    REQUIRE(w.append(block.data(), 500));
+    REQUIRE(w.close());
     auto whole = supple::audio::readAudio(path);
     REQUIRE(whole);
     CHECK(whole->frames() == 1500);
@@ -311,13 +311,13 @@ TEST_CASE("repairing a streamed WAV recovers the frames written after the last h
                       ("supple-wav-repair-" + std::to_string(supple::test::processId()) + ".wav");
     {
         supple::audio::WavStreamWriter w;
-        REQUIRE(w.open(path, 44100, 1).ok());
+        REQUIRE(w.open(path, 44100, 1));
         std::vector<float> ramp(1500);
         for (std::size_t i = 0; i < ramp.size(); ++i) ramp[i] = static_cast<float>(i) / 2000.0f;
-        REQUIRE(w.append(ramp.data(), 1000).ok());
-        REQUIRE(w.updateHeader().ok());
-        REQUIRE(w.append(ramp.data() + 1000, 500).ok());
-        REQUIRE(w.flush().ok());
+        REQUIRE(w.append(ramp.data(), 1000));
+        REQUIRE(w.updateHeader());
+        REQUIRE(w.append(ramp.data() + 1000, 500));
+        REQUIRE(w.flush());
         // A crash now: the header says 1000 frames, the file holds 1500 (and
         // half a frame the OS got before the end).
         const float half = 0.25f;
@@ -387,7 +387,7 @@ TEST_CASE("inspect reads metadata without decoding, and agrees with readAudio") 
     for (std::size_t i = 0; i < tone.frames(); ++i)
         tone.channels[0][i] = tone.channels[1][i] =
             static_cast<float>(0.5 * std::sin(2 * 3.141592653589793 * 440.0 * double(i) / 48000));
-    REQUIRE(writeWav(dir / "float.wav", tone).ok());
+    REQUIRE(writeWav(dir / "float.wav", tone));
     auto wav = inspect(dir / "float.wav");
     REQUIRE(wav);
     CHECK(wav->container == Container::Wav);
@@ -397,7 +397,7 @@ TEST_CASE("inspect reads metadata without decoding, and agrees with readAudio") 
     CHECK_FALSE(wav->truncated);
     WavOptions pcm;
     pcm.format = SampleFormat::Pcm24;
-    REQUIRE(writeWav(dir / "pcm.wav", tone, pcm).ok());
+    REQUIRE(writeWav(dir / "pcm.wav", tone, pcm));
     auto pcmInfo = inspect(dir / "pcm.wav");
     REQUIRE(pcmInfo);
     CHECK(pcmInfo->frames == 12345);
@@ -408,7 +408,7 @@ TEST_CASE("inspect reads metadata without decoding, and agrees with readAudio") 
     const auto bytes = encodeWav(tone, pcm).value();
     auto shortBytes = bytes;
     shortBytes.resize(shortBytes.size() - 1000);
-    REQUIRE(supple::writeFileAtomic(dir / "short.wav", shortBytes).ok());
+    REQUIRE(supple::writeFileAtomic(dir / "short.wav", shortBytes));
     auto shortInfo = inspect(dir / "short.wav");
     REQUIRE(shortInfo);
     CHECK(shortInfo->truncated);

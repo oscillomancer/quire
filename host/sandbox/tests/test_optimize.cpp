@@ -235,7 +235,7 @@ TEST_CASE("compare reports the scored loss the optimizer minimizes") {
     for (auto& channel : quietAudio->channels)
         for (float& sample : channel) sample *= 0.5f;
     const fs::path quiet = h.root.path / "quiet.wav";
-    REQUIRE(audio::writeWav(quiet, *quietAudio, {}).ok());
+    REQUIRE(audio::writeWav(quiet, *quietAudio, {}));
     json::Value matched =
         h.call("compare", R"({"reference": "rd_1", "test": ")" + quiet.generic_string() +
                               R"(", "test_note_off_s": 1.0})");
@@ -482,7 +482,7 @@ TEST_CASE("reference read and analysis run on the job worker after optimize.star
     audio.sampleRate = 48000.0;
     audio.channels = {std::vector<float>(48000, 0.0f), std::vector<float>(48000, 0.0f)};
     const fs::path file = h.root.path / "reference.wav";
-    REQUIRE(audio::writeWav(file, audio, {}).ok());
+    REQUIRE(audio::writeWav(file, audio, {}));
     const auto start = std::chrono::steady_clock::now();
     auto started = h.call("optimize.start", R"({"instance":"in_1",
         "params":["filter1.cutoff"],"target":{"reference":")" +

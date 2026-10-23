@@ -78,7 +78,7 @@ TEST_CASE("seeded command histories preserve invariants, undo and saved projects
         auto result = test::historySequence(*app, bus, stream);
         INFO("seed: " << seed);
         INFO((result ? std::string() : result.error().toString()));
-        CHECK(result.ok());
+        CHECK(result);
     }
 }
 
@@ -96,7 +96,7 @@ TEST_CASE("every engine command example runs against its fixture") {
         },
         [](std::string_view fixture) { return SUPPLE_EDITORS || fixture != "dsp_player_editor"; });
     INFO((st ? std::string() : st.error().toString()));
-    CHECK(st.ok());
+    CHECK(st);
     CHECK(n >= 25);
 }
 
@@ -380,7 +380,7 @@ TEST_CASE("an isolated plugin that crashes is reported and restarted over the bu
     host::Instance* crash = app->instanceOf(crashFx);
     REQUIRE(crash);
     CHECK(crash->isolated());
-    REQUIRE(crash->setParam(1, 1.0).ok());  // crash in its next process()
+    REQUIRE(crash->setParam(1, 1.0));  // crash in its next process()
     for (int i = 0; i < 2000 && !crash->failed(); ++i)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     auto status = call("engine.status", "{}");
@@ -1656,8 +1656,8 @@ TEST_CASE("true peak limiting keeps distant audio at the normalization gain") {
             0.05 * std::sin(2.0 * M_PI * 440.0 * static_cast<double>(i) / 48000.0));
     original.channels[0][48000] = 1.0f;
     auto unlimited = original, limited = original;
-    REQUIRE(normalizeRenderAudio(unlimited, "lufs_i", -20).ok());
-    REQUIRE(normalizeRenderAudio(limited, "lufs_i", -20, -1).ok());
+    REQUIRE(normalizeRenderAudio(unlimited, "lufs_i", -20));
+    REQUIRE(normalizeRenderAudio(limited, "lufs_i", -20, -1));
     const std::size_t far = 10000;
     CHECK(std::fabs(static_cast<double>(limited.channels[0][far])) >=
           0.8 * std::fabs(static_cast<double>(unlimited.channels[0][far])));
