@@ -1524,6 +1524,8 @@ machine gives a mix to a worn, underbiased, warbling cassette, written as a
 DSP script (ADR-0047: `plugins/umber/script/umber.cpp`). Main stereo or
 mono in and out. Latency: 8 ms plus the oversampler's (456 samples at
 48 kHz with 4x), or with `latency` low 9 samples at 44.1 and 48 kHz.
+Tail: with print-through on, one turn at the speed plus 0.1 s; otherwise
+none (hiss, hum and DC noise are the machine's own, not the input's).
 
 | key | type | range | curve | default |
 |---|---|---|---|---|
@@ -1533,7 +1535,7 @@ mono in and out. Latency: 8 ms plus the oversampler's (456 samples at
 | `record_amp` | % | 0..100: the class-A record amplifier's drive, gliding | linear | 15 |
 | `hf_saturation` | % | 0..200: the highs' ceiling, ×2^(1 − x) (100 the tape's own), gliding | linear | 100 |
 | `record_hf` | dB | −6..6: the record side's HF trim, a shelf about 4 kHz at 15 ips (following the speed), gliding | linear | 0 |
-| `auto_gain` | bool | the playback level falls as the drive rises | | on |
+| `auto_gain` | bool | the playback level falls as the drive rises; toggling crossfades over 20 ms | | on |
 | `speed` | enum | `ips30`, `ips15`, `ips7_5`, `ips3_75` | | `ips15` |
 | `emphasis` | enum | `nab`, `iec` (not at 30 ips: AES) | | `iec` |
 | `head_bump` | % | 0..200 of a real head's, gliding | linear | 100 |
@@ -1542,16 +1544,16 @@ mono in and out. Latency: 8 ms plus the oversampler's (456 samples at
 | `head_magnetism` | % | −100..100: a magnetized record head's steady field (even harmonics, DC noise), gliding | linear | 0 |
 | `dropouts` | % | 0..100: 4x² a second | pow 2 | 0 |
 | `drop_depth` | % | 0..100; applies while `dropouts` > 0 | linear | 30 |
-| `print_through` | dB | −80..−30 against the signal; −80 is off | linear | −80 |
-| `crosstalk` | dB | −80..−20; −80 is off | linear | −80 |
+| `print_through` | dB | −80..−30 against the signal, smoothed 20 ms; −80 is off | linear | −80 |
+| `crosstalk` | dB | −80..−20, smoothed 20 ms; −80 is off | linear | −80 |
 | `wow` | % | 0..2: peak speed error at 15 ips, slow (× √(15/ips) at other speeds) | pow 3 | 0.02 |
 | `flutter` | % | 0..1: peak speed error at 15 ips, fast (× √(15/ips)) | pow 3 | 0.02 |
 | `scrape` | % | 0..100: kilohertz jitter, 380 ns RMS × x^1.25 at 15 ips | pow 2 | 10 |
 | `repro_amp` | % | 0..100: the class-A playback amplifier's drive, gliding | linear | 15 |
 | `repro_hf` | dB | −6..6: the playback side's HF trim, as `record_hf`'s, gliding | linear | 0 |
-| `hiss` | dB | −30..12 against the tape's own noise; −30 is off | linear | −30 |
-| `mod_noise` | dB | −30..12 against the tape's own modulation noise; −30 is off | linear | 0 |
-| `hum` | dB | −100..−40 against reference level; −100 is off | linear | −100 |
+| `hiss` | dB | −30..12 against the tape's own noise, smoothed 20 ms; −30 is off | linear | −30 |
+| `mod_noise` | dB | −30..12 against the tape's own modulation noise, smoothed 20 ms; −30 is off | linear | 0 |
+| `hum` | dB | −100..−40 against reference level, smoothed 20 ms; −100 is off | linear | −100 |
 | `mains` | enum | `hz50`, `hz60`; applies while `hum` is on | | `hz60` |
 | `output` | dB | −24..24, smoothed 20 ms | linear | 0 |
 | `oversampling` | enum | `x1`, `x2`, `x4`, `x8`, `x16` (restarts) | | `x4` |
@@ -1588,7 +1590,8 @@ crosstalk), the values are a modern machine's as judged, and say so.
   −80 dBc each at reference level at 15%, −47 at 50%, −30 at 100%,
   rising 1 dB per dB; a 2 Hz coupling takes out the offset's DC. Both run
   oversampled: the record amp before the record curve, the playback amp
-  after the moving read.
+  after the moving read. At 0% a stage passes the input, its coupling
+  still following it.
 - **Record and playback equalisation.** The record side's HF trim
   (first-order shelf, geometric centre 4 kHz·v, v = ips/15: each speed's
   equalisation has its own trim, so its reach follows the wavelength; at
@@ -1650,7 +1653,7 @@ crosstalk), the values are a modern machine's as judged, and say so.
   later, the right's half earlier. Window and spread glide per frame,
   interpolated across the oversampled steps; together they take at most
   0.6 of the read's reach, past which both shrink together (with low
-  latency, beyond about 0.3° at 15 ips).
+  latency, beyond about 0.3° at 15 ips), in the response plot too.
 - **The tape's condition.** Dropouts at 4·`dropouts`² a second, each
   `drop_depth` × (0.3 to 1) deep, 6 to 66 ms long (a raised sine), the
   right side 0.6 to 1 of the left's (one speck crosses both tracks): the
@@ -1712,20 +1715,25 @@ crosstalk), the values are a modern machine's as judged, and say so.
   little uneven, as a machine's is (not random per instance: offline
   renders must match the live output). Harmonics are rotations of the
   fundamental, renormalized every 32 frames.
-- **Changes.** `drive` and `output` glide per sample; the settings marked
-  gliding move 30 ms toward their values, the curves redesigned every 32
-  frames while they move. A new `speed` or `emphasis` fades the output out
-  over 4 ms; at silence the new curves go in and every stage starts
-  clear; the input fades in over 4 ms, so the tape fills again from
-  nothing (about 16 ms of silence at full latency).
+- **Changes.** `drive` glides per sample over 30 ms; `output`,
+  `print_through`, `crosstalk`, `hiss`, `hum` and `mod_noise` over 20 ms,
+  and `auto_gain` crossfades over 20 ms. The settings marked gliding move
+  30 ms toward their values, the curves redesigned every 32 frames while
+  they move (the hiss's calibration when the tape lands). `wow`,
+  `flutter` and `scrape` step; a dropout takes its depth as it begins. A
+  new `speed` or `emphasis` fades the output out over 4 ms; at silence
+  the new curves go in and every stage starts clear; the input fades in
+  over 4 ms, so the tape fills again from nothing (about 16 ms of silence
+  at full latency). A choice changed again meanwhile switches once more.
 - **Oversampling.** As `oversampling` says, at any session rate (the
   user does the arithmetic; the editor shows the rate inside and that
   176 to 384 kHz is best); linear phase at full latency, minimum phase
   at low.
 - **Readouts.** `vu`: the record level rectified through two poles of
   65 ms, × π/(2√2), against reference RMS; `headroom`: the field at 3%
-  (the tape's headroom over its reference field) over the peak field
-  (oversampled), held 0.3 s; `saturation`: the field over the flux at
+  (the tape's headroom over its reference field; the midband's, the
+  highs having their own ceiling) over the peak field (oversampled), held
+  0.3 s; `saturation`: the field over the flux at
   the peaks above 5% of the limit, in dB, decaying over 0.3 s.
 
 Measured (dev player and the built plugin, 48 kHz, 4x, wow, flutter,

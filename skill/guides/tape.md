@@ -125,7 +125,8 @@ Machine, Warped, Clean Transfer (`preset_list`/`fx_patch_list`).
   −78.5 dBFS A-weighted at 15 ips (IEC), with the electronics' rumble
   under it (about 10 dB more between 20 and 60 Hz than the hiss alone;
   NAB, which cuts the lows on playback, has less). Modulation noise is on, at the
-  real tape's: it rides the signal and vanishes in silence.
+  real tape's: it rides the signal and vanishes in silence unless the head
+  is magnetized.
 
 ## Limits
 
@@ -139,7 +140,10 @@ Machine, Warped, Clean Transfer (`preset_list`/`fx_patch_list`).
 - At 1x and 2x, loud highs alias; 4x is clean but for extreme drive, 8x
   for everything.
 - Switching `speed` or `emphasis` while playing drops out for about 15 ms
-  (the machine restarts clear); automate them between notes. Everything
-  else glides.
+  (the machine restarts clear); automate them between notes. `wow`,
+  `flutter`, `scrape` and `mains` step too; everything else glides.
+- The plugin reports a tail only for print-through (one turn of the reel,
+  about 1.5 s at 15 ips): a host that stops processing in silence may
+  stop the hiss and hum with it.
 
 See [stock spec §13](../../docs/specs/stock-effects.md#13-tape--umber-umber).

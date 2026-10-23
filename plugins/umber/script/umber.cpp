@@ -66,6 +66,15 @@ struct GainCache {
         }
         return value;
     }
+    double offAt(double db, double minimum) {
+        if (db <= minimum) return 0.0;
+        if (db != at) {
+            at = db;
+            // Keep Param::gain()'s arithmetic for unchanged patches.
+            value = db == 0.0 ? 1.0 : pow(10.0, db / 20.0);
+        }
+        return value;
+    }
 };
 
 // A first-order section, g (1 + s/wa) / (1 + s/wb), by the bilinear transform
@@ -260,7 +269,11 @@ struct Amp {
         keep = exp(-twoPi * 2.0 / fs);
     }
     double process(double x) {
-        if (a <= 1e-12) return x;
+        if (a <= 1e-12) {
+            y1 = x - x1 + keep * y1;
+            x1 = x;
+            return x;
+        }
         const double y = (tanh(a * x + offset) - t0) * inv;
         const double out = y - x1 + keep * y1;
         x1 = y;
@@ -352,6 +365,14 @@ double azimuthWindow(double degrees, double atIps) {
 }
 double azimuthSpread(double degrees, double atIps) {
     return 0.004 * tan(degrees * pi / 180.0) / (atIps * 0.0254);
+}
+// Both tracks' reads must fit the moving delay, in the audio and its plot.
+void capAzimuth(double& spread, double& window, double reach) {
+    const double extent = spread + 0.5 * window, room = 0.6 * reach;
+    if (extent > room) {
+        spread *= room / extent;
+        window *= room / extent;
+    }
 }
 // The window's loss at hz, for the editor's response.
 double azimuthDb(double hz, double window) {
@@ -632,6 +653,7 @@ struct Umber : Effect {
                               "How deep each dropout goes: the highs first (spacing loss), then "
                               "the level.");
     Param printThrough = decibels("Print-Through", -80, -30, -80)
+                             .smoothed(20)
                              .offAtMin()
                              .in("Tape")
                              .help(
@@ -639,6 +661,7 @@ struct Umber : Effect {
                                  "at 15 ips): -56 dB is a modern tape stored a day; off at the "
                                  "minimum.");
     Param crosstalk = decibels("Crosstalk", -80, -20, -80)
+                          .smoothed(20)
                           .offAtMin()
                           .in("Tape")
                           .help(
@@ -682,6 +705,7 @@ struct Umber : Effect {
                             "the speed): brighter or darker playback, the tape's saturation "
                             "unchanged.");
     Param hiss = decibels("Hiss", -30, 12, -30)
+                     .smoothed(20)
                      .offAtMin()
                      .in("Playback")
                      .help(
@@ -689,6 +713,7 @@ struct Umber : Effect {
                          "this speed gives, and the playback electronics' low rumble beneath "
                          "it. 0 dB is real; off at the minimum.");
     Param modNoise = decibels("Mod Noise", -30, 12, 0)
+                         .smoothed(20)
                          .offAtMin()
                          .in("Playback")
                          .help(
@@ -696,6 +721,7 @@ struct Umber : Effect {
                              "oxide's roughness, against this tape's: 0 dB is real; off at the "
                              "minimum.");
     Param hum = decibels("Hum", -100, -40, -100)
+                    .smoothed(20)
                     .offAtMin()
                     .in("Playback")
                     .help(
@@ -740,8 +766,8 @@ struct Umber : Effect {
     Param headroom = decibels("Headroom", -36, 48, 48)
                          .meter()
                          .help(
-                             "How far the loudest recent peak, as the tape sees it (highs "
-                             "lifted), stayed below the tape's 3% limit; negative is over.");
+                             "How far the loudest recent peak stayed below the tape's 3% "
+                             "limit (the midband's: the highs have their own); negative is over.");
     Param saturation =
         decibels("Saturation", 0, 24, 0)
             .meter()
@@ -771,7 +797,8 @@ struct Umber : Effect {
     double recAmpNow = 0.15, reproAmpNow = 0.15, glideCoef = 0.1;
     double field = 0.2, square = 0.24, pin = 1e-5, molField = 1.0;
     double edgeCeiling = 1.0;  // the highs' ceiling, in the flux's units
-    double hissGain = 0.0, hissPower = 1.0, rumbleGain = 0.0, modGain = 0.0, modScale = 1.0;
+    double hissGain = 0.0, hissPower = 1.0, rumbleGain = 0.0, modTapeGain = 0.0, modScale = 1.0;
+    double printTapeGain = 1.0;
     double sensitivity = 1.0, dc = 0.0, dcOut = 0.0;
     // Azimuth, in seconds: half the time between the tracks (left late by it,
     // right early) and the window each track's gap spreads over; where they
@@ -821,6 +848,9 @@ struct Umber : Effect {
     double peakField = 0.0, peakKeep = 0.9999, rounding = 0.0, roundKeep = 0.9999;
     double roundRatio = 1.0;  // the rounding as a ratio, refreshed every kTick frames
     GainCache driveCache, outputCache;
+    GainCache printCache, crossCache, hissCache, humCache, modCache;
+    double autoMix = 1.0, autoFrom = 1.0, autoTarget = 1.0;
+    int autoLeft = 0, autoSamples = 960;
     double vuCoef = 0.001;
     double tapeRun = 0.0;  // metres of tape played, for the editor's reels
     bool rolling = false;
@@ -837,7 +867,7 @@ struct Umber : Effect {
     // --- shared with the editor -------------------------------------------------------------
 
     Shared<double> vuLeft, vuRight, inLeft, inRight, outLeft, outRight;
-    Shared<double> tapeMetres, sampleRateNow, idle, heldWow;
+    Shared<double> tapeMetres, sampleRateNow, idle, heldWow, readReach;
     Shared<int> latencyNow;
     Shared<bool> running;
     Shared<int> scopeHead, trailHead;
@@ -985,6 +1015,7 @@ struct Umber : Effect {
         const int osLatency = track[0].os.latency();
         center = low ? max(2, 9 - osLatency) : roundToInt(0.008 * rate);
         reach = (center - 1.5) / rate;
+        readReach.set(reach);
         lag = osLatency + center;
         setLatency(lag);
         const int size = (center * 2 + 8) * factor + 8;
@@ -1013,6 +1044,7 @@ struct Umber : Effect {
         travelKeep = exp(-1.0 / (4.0 * rate));
         glideCoef = 1.0 - exp(-kTick / (0.03 * rate));
         fadeStep = 1.0 / (0.004 * rate);
+        autoSamples = max(1, roundToInt(0.02 * rate));
         swayCoef = 1.0 - exp(-1.0 / (0.7 * rate));
         skewCoef = 1.0 - exp(-1.0 / (0.03 * rate));
         swayEvery = max(1, roundToInt(0.25 * rate / kTick));
@@ -1071,6 +1103,11 @@ struct Umber : Effect {
         roundRatio = 1.0;
         driveCache.at = 1e100;
         outputCache.at = 1e100;
+        printCache.at = 1e100;
+        crossCache.at = 1e100;
+        hissCache.at = 1e100;
+        humCache.at = 1e100;
+        modCache.at = 1e100;
         tapeRun = 0.0;
         rolling = false;
         quiet = 0.0;
@@ -1101,12 +1138,24 @@ struct Umber : Effect {
         magNow = headMagnetism.value();
         recAmpNow = recordAmp.value();
         reproAmpNow = reproAmp.value();
+        autoMix = autoGain.on() ? 1.0 : 0.0;
+        autoFrom = autoMix;
+        autoTarget = autoMix;
+        autoLeft = 0;
+    }
+
+    bool choicesChanged() const {
+        const int s = speed.index();
+        const int nab = emphasis.index() == 0 && s != 0 ? 1 : 0;
+        return s != speedNow || nab != nabNow;
+    }
+
+    void updateTail() {
+        setTail(printThrough.value() > -80.0 ? ceilToInt((turnSeconds(ips) + 0.1) * rate) : 0);
     }
 
     void update() {
-        const int s = speed.index();
-        const int nab = emphasis.index() == 0 && s != 0 ? 1 : 0;
-        const bool changed = s != speedNow || nab != nabNow;
+        const bool changed = choicesChanged();
         if (unplayed) {
             // Until the first block, settings are where they are going.
             settle();
@@ -1118,11 +1167,17 @@ struct Umber : Effect {
         } else if (changed && switching == 0) {
             switching = 1;
         }
+        const double wantedAuto = autoGain.on() ? 1.0 : 0.0;
+        if (wantedAuto != autoTarget) {
+            autoFrom = autoMix;
+            autoTarget = wantedAuto;
+            autoLeft = autoSamples;
+        }
         holdTransport();
         const double mainsHz = mains.index() == 0 ? 50.0 : 60.0;
         humBase.rate(mainsHz / rate);
-        modGain = modNoise.value() <= -30.0 ? 0.0 : dbToGain(oxideNow.modDb) * modNoise.gain();
         dropChance = 4.0 * dropouts.value() * dropouts.value() / rate;
+        updateTail();
     }
 
     // The speed and the standard: the record and playback curves, the noise's
@@ -1200,11 +1255,21 @@ struct Umber : Effect {
         jitterScale = sqrt(held / (pi * 19.0 * v));
         designAll();
         holdTransport();
+        updateTail();
+    }
+
+    // What follows the tape as it glides. Softer, older tapes print more
+    // (print-through goes about as one over the coercivity): 10 dB more on
+    // the 5 dB tape than the 12.5.
+    void designTape() {
+        oxideNow.set(tapeNow);
+        printTapeGain = dbToGain(1.333 * (12.5 - tapeNow));
+        modTapeGain = dbToGain(oxideNow.modDb);
     }
 
     // Everything the gliding settings decide.
     void designAll() {
-        oxideNow.set(tapeNow);
+        designTape();
         hissPower = measureHiss(speedNow, oxideNow.loss);
         designRecord();
         designHead();
@@ -1246,11 +1311,7 @@ struct Umber : Effect {
         // together past it.
         spread = 0.5 * azimuthSpread(azNow, ips);
         window = azimuthWindow(azNow, ips);
-        const double extent = spread + 0.5 * window, room = 0.6 * reach;
-        if (extent > room) {
-            spread *= room / extent;
-            window *= room / extent;
-        }
+        capAzimuth(spread, window, reach);
         for (Track& k : track)
             k.head.design(s, oxideNow.loss, bumpNow, bumpHzNow, biasTiltDb(s, b), reproHfNow, rate);
     }
@@ -1273,6 +1334,7 @@ struct Umber : Effect {
         return abs(target - next) < tiny ? target : next;
     }
     void glide() {
+        const bool azimuthMoves = azNow != azimuth.value();
         const bool recordMoves = tapeNow != tape.value() || hfSatNow != hfSaturation.value() ||
                                  recHfNow != recordHf.value() || recAmpNow != recordAmp.value() ||
                                  reproAmpNow != reproAmp.value();
@@ -1287,7 +1349,11 @@ struct Umber : Effect {
             recHfNow = glideTo(recHfNow, recordHf.value(), 1e-4);
             recAmpNow = glideTo(recAmpNow, recordAmp.value(), 1e-5);
             reproAmpNow = glideTo(reproAmpNow, reproAmp.value(), 1e-5);
-            if (tapeMoves) oxideNow.set(tapeNow);
+            if (tapeMoves) {
+                designTape();
+                // Integrating the noise response is done once, when the glide lands.
+                if (tapeNow == tape.value()) hissPower = measureHiss(speedNow, oxideNow.loss);
+            }
             designRecord();
         }
         biasNow = glideTo(biasNow, bias.value(), 1e-4);
@@ -1297,6 +1363,7 @@ struct Umber : Effect {
         azNow = glideTo(azNow, azimuth.value(), 1e-6);
         magNow = glideTo(magNow, headMagnetism.value(), 1e-4);
         designHead();
+        if (azimuthMoves) holdTransport();
     }
 
     // The particles' own noise loses its shortest wavelengths too.
@@ -1467,7 +1534,7 @@ struct Umber : Effect {
     // between its samples.
     double printEcho(const Track& t) const {
         const int n = t.print.size();
-        const double back = printDelay + static_cast<double>(t.printPhase) / printDecim;
+        const double back = printDelay - static_cast<double>(t.printPhase) / printDecim;
         const int whole = floorToInt(back);
         const double f = back - whole;
         const double a = t.print[wrap(t.printAt - whole, n)];
@@ -1478,12 +1545,6 @@ struct Umber : Effect {
     void process(Block& io) {
         if (unplayed) unplayed = false;
         const int channels = min(io.channels, 2);
-        const double hissOn = hiss.value() <= -30.0 ? 0.0 : hiss.gain();
-        // Softer, older tapes print more (print-through goes about as one
-        // over the coercivity): 10 dB more on the 5 dB tape than the 12.5.
-        const double printGain = printThrough.gain() * dbToGain(1.333 * (12.5 - tapeNow));
-        const double crossGain = channels == 2 ? crosstalk.gain() : 0.0;
-        const double humGain = hum.gain() * kRefRms * kHumNorm;
         double vuL = 0.0, vuR = 0.0;
         Array<double, 2> y = {0.0, 0.0};
         double scopeIn = 0.0;
@@ -1510,12 +1571,26 @@ struct Umber : Effect {
             } else if (switching == 2) {
                 fade = min(1.0, fade + fadeStep);
                 inFade = fade;
-                if (fade == 1.0) switching = 0;
+                if (fade == 1.0) switching = choicesChanged() ? 1 : 0;
+            }
+            // The levels glide on their own; the tape's factors with it.
+            const double printGain = printCache.offAt(printThrough.at(i), -80.0) * printTapeGain;
+            const double crossGain = channels == 2 ? crossCache.offAt(crosstalk.at(i), -80.0) : 0.0;
+            const double hissOn = hissCache.offAt(hiss.at(i), -30.0);
+            const double humGain = humCache.offAt(hum.at(i), -100.0) * kRefRms * kHumNorm;
+            const double modGain = modTapeGain * modCache.offAt(modNoise.at(i), -30.0);
+            if (autoLeft > 0) {
+                --autoLeft;
+                autoMix = autoLeft == 0 ? autoTarget
+                                        : lerp(autoFrom, autoTarget,
+                                               1.0 - static_cast<double>(autoLeft) / autoSamples);
             }
             const double g = drive.at(i);
             const double driveLevel = driveCache.get(g);
             const double driveGain = driveLevel * inFade;
-            const double back = autoGain.on() ? 1.0 / driveLevel : 1.0;
+            const double back = autoMix == 1.0   ? 1.0 / driveLevel
+                                : autoMix == 0.0 ? 1.0
+                                                 : lerp(1.0, 1.0 / driveLevel, autoMix);
             const double out = outputCache.get(output.at(i)) * back * sensitivity * outFade;
             double humNow = 0.0;
             if (humGain > 0.0) {
@@ -2488,6 +2563,7 @@ struct Umber : Effect {
             g.lineWidth(1.0 + 0.6 * t);
             g.beginPath();
             for (int j = 0; j <= per; ++j) {
+                if (r * per + j >= kShown) break;
                 const int idx = wrap(head - kShown + r * per + j, kScope);
                 const double x = cx + scopeH[idx] * sx, y = cy - scopeM[idx] * sy;
                 if (j == 0)
@@ -2615,7 +2691,9 @@ struct Umber : Effect {
         shelf(viewTrim, recordHf.value(), min(4000.0 * v, 0.3 * hiRate), hiRate);
         viewHead.design(s, f.loss, headBump.value(), bumpFreq.value(), biasTiltDb(s, bias.value()),
                         reproHf.value(), r);
-        const double azWindow = azimuthWindow(azimuth.value(), speedIps(s));
+        double azWindow = azimuthWindow(azimuth.value(), speedIps(s));
+        double azSpread = 0.5 * azimuthSpread(azimuth.value(), speedIps(s));
+        if (readReach.get() > 0.0) capAzimuth(azSpread, azWindow, readReach.get());
         const double fieldRef = f.field * dbToGain(speedFieldDb(s));
         const double levelDb = biasLevelDb(bias.value());
         for (int pass = 0; pass < 2; ++pass) {
