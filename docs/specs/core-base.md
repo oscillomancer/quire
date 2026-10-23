@@ -110,6 +110,15 @@ and rounds to nearest, ties to even, using vendored fast_float under MIT on
 every platform. Integer parsing remains `std::from_chars`. No additional
 format argument or long-double overload is provided.
 
+## Printing errors
+
+`supple/base/result.h` declares `operator<<(std::ostream&, …)` for `Error`
+(its `toString()`), `Status` and `Result<T>` (`ok`, or the error). The header
+includes only `<iosfwd>`; callers that print include `<ostream>`. doctest
+finds the operator, so a failed `REQUIRE(result)` reports the error's code,
+path, message and hint. Tests check a result directly rather than
+`result.ok()`, which reports only `false`.
+
 ## Platform builds
 
 Core-base sources and platform-neutral tests build on Linux, macOS and Windows

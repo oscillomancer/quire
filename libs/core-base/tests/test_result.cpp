@@ -30,14 +30,21 @@ static supple::Status chain(int x) {
 
 TEST_CASE("Result carries value or structured error") {
     auto a = half(4);
-    REQUIRE(a.ok());
+    REQUIRE(a);
     CHECK(*a == 2);
     auto b = half(3);
     REQUIRE(!b.ok());
     CHECK(b.error().code == "test.odd");
     CHECK(b.error().toString() == "test.odd at /x: value is odd Hint: pass an even number");
     CHECK(!chain(5).ok());
-    CHECK(chain(6).ok());
+    CHECK(chain(6));
+}
+
+TEST_CASE("a failed REQUIRE(result) reports the error") {
+    CHECK(doctest::toString(half(4)) == "ok");
+    CHECK(doctest::toString(chain(6)) == "ok");
+    CHECK(doctest::toString(half(3)) == "test.odd at /x: value is odd Hint: pass an even number");
+    CHECK(doctest::toString(chain(5)) == "test.odd at /x: value is odd Hint: pass an even number");
 }
 
 TEST_CASE("product identity comes from the generated header") {

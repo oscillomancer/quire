@@ -7,6 +7,7 @@
 #pragma once
 
 #include <cassert>
+#include <iosfwd>
 #include <optional>
 #include <string>
 #include <utility>
@@ -134,6 +135,16 @@ class [[nodiscard]] Result<void> {
 using Status = Result<void>;
 
 inline Status okStatus() { return {}; }
+
+// Print an Error as toString(), a Result as "ok" or its error: logs, and the
+// test framework's report of a failed REQUIRE(result).
+std::ostream& operator<<(std::ostream& os, const Error& e);
+std::ostream& operator<<(std::ostream& os, const Status& s);
+template <typename T>
+std::ostream& operator<<(std::ostream& os, const Result<T>& r) {
+    if (r.ok()) return os << okStatus();
+    return os << r.error();
+}
 
 // Propagate an error from an expression yielding Result<...>.
 #define SUPPLE_TRY(expr)                                                  \
