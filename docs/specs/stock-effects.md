@@ -1653,11 +1653,18 @@ crosstalk), the values are a modern machine's as judged, and say so.
   latency, beyond about 0.3° at 15 ips).
 - **The tape's condition.** Dropouts at 4·`dropouts`² a second, each
   `drop_depth` × (0.3 to 1) deep, 6 to 66 ms long (a raised sine), the
-  right side 0.6 to 1 of the left's: the highs above 1.5 kHz·v blended
-  away first (×1.4), the level down 12 dB × the depth. Print-through: the
-  played signal low-passed at 3 kHz and kept at about 12 kHz, read one
-  turn of a half-wound 10.5-inch reel later (0.534 m/v: 1.4 s at 15 ips),
-  through a band-pass at 1 kHz·√v (Q 0.5), at `print_through`'s level.
+  right side 0.6 to 1 of the left's (one speck crosses both tracks): the
+  tape lifts up to 40 µm × the depth, and its spacing loss (54.6 dB per
+  wavelength of lift, corner v/(2πd)) sweeps down from the top and back as
+  two one-poles at 0.76 of that corner; the level down up to 6 dB with it
+  (flux that is missing). The deepest event at 15 ips: 10 kHz −40 dB,
+  1 kHz −9, 200 Hz −5. Print-through: the played signal low-passed at
+  3 kHz·v and kept at about 12 kHz, read one turn of a half-wound
+  10.5-inch reel later (0.534 m/v: 1.4 s at 15 ips), through a band-pass
+  at 1 kHz·v (Q 0.5: the stray field reaches the next layer best at
+  wavelengths about 2π times the base film's thickness), at
+  `print_through`'s level, +1.33 dB per dB of `tape` under 12.5 (softer
+  tapes print more: 10 dB more at 5).
   Crosstalk: the lows (one-pole at 300 Hz·v) moved between the tracks,
   left + g·(low right − low left) and the reverse, so a centred sound keeps
   its level.

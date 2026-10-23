@@ -22,8 +22,8 @@ physical values under `params`; a merge changes only the keys it names.
 | `azimuth` | degrees, 0…1: the playback head's tilt: highs lost within each track (−1.6 dB at 12 kHz at 0.3° at 15 ips), the two tracks apart in time (55 µs there, so the mono sum combs); 0.02 a well-aligned machine | 0 |
 | `head_magnetism` | %, −100…100: a magnetized record head: even harmonics from the tape itself (−39 dB at 0 VU at 100%) and DC noise, a grain that stays in silence (with `mod_noise` on) | 0 |
 | `dropouts` | %, 0…100: how often the oxide loses the head (100: about four a second) | 0 |
-| `drop_depth` | %, 0…100: how deep each dropout goes, the highs first | 30 |
-| `print_through` | dB, −80…−30: the echo of the reel's next layer one turn later (1.4 s at 15 ips); −56 a modern tape; −80 is off | −80 (off) |
+| `drop_depth` | %, 0…100: how deep each dropout goes: the tape lifts off the head, the highs going first and the dullness sweeping down and back (at 100% the deepest take 10 kHz down 40 dB, 1 kHz 9) | 30 |
+| `print_through` | dB, −80…−30: the echo of the reel's next layer one turn later (1.4 s at 15 ips), a band about 1 kHz at 15 ips that moves with the speed; −56 a modern tape, and softer tapes print more (10 dB more at `tape` 5); −80 is off | −80 (off) |
 | `crosstalk` | dB, −80…−20: the lows leaking between the tracks; −55 a two-track machine; −80 is off | −80 (off) |
 | `wow` | %, 0…2: slow pitch drift as a peak speed error; 0.02 a studio machine, 0.2 a cassette deck | 0.02 |
 | `flutter` | %, 0…1: faster pitch waver (capstan, idler, friction) | 0.02 |

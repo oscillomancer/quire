@@ -440,7 +440,7 @@ struct Track {
     Biquad rumbleCut;                   // and the deck's limit below it
     Head head;
     double modZ1 = 0.0, modZ2 = 0.0;  // modulation noise, low-passed
-    double dropLow = 0.0;             // what a dropout leaves: the lows
+    double drop1 = 0.0, drop2 = 0.0;  // a dropout's spacing loss, two poles
     double crossLow = 0.0;            // what leaks to the other track: the lows
     Buffer<double> print;             // the reel's next layer, decimated
     int printAt = 0, printPhase = 0;
@@ -466,7 +466,8 @@ struct Track {
         head.clear();
         modZ1 = 0.0;
         modZ2 = 0.0;
-        dropLow = 0.0;
+        drop1 = 0.0;
+        drop2 = 0.0;
         crossLow = 0.0;
         for (int i = 0; i < print.size(); ++i) print[i] = 0.0;
         printAt = 0;
@@ -773,7 +774,7 @@ struct Umber : Effect {
     int tick = 0;
     // Dropouts.
     double dropDepthNow = 0.0, dropAt = 1.0, dropStep = 0.0, dropOther = 1.0;
-    double dropChance = 0.0, dropCoef = 0.1;
+    double dropChance = 0.0, dropReach = 1.0;
     // Print-through, crosstalk, hum.
     int printDecim = 4;
     double printRate = 12000.0, printDelay = 1.0;
@@ -1120,17 +1121,24 @@ struct Umber : Effect {
             else
                 k.rumbleLow.design(fLow, fLow, 1.0, rate);
             k.rumbleCut.highpass(15.0, 0.707);
-            k.printIn.lowpass(min(3000.0, 0.4 * printRate), 0.707);
-            // Print-through takes the wavelengths near the layer's own
-            // spacing best: a broad band about 1 kHz at 15 ips.
-            k.printOut.bandpass(min(1000.0 * sqrt(v), 0.4 * rate), 0.5);
+            k.printIn.lowpass(min(3000.0 * v, 0.4 * printRate), 0.707);
+            // Print-through: the recording's stray field reaches the next
+            // layer across the base film strongest at wavelengths about 2 pi
+            // times that distance (shorter ones die off across the gap,
+            // longer ones barely field it): a broad band about 1 kHz at
+            // 15 ips, moving with the speed as a wavelength does.
+            k.printOut.bandpass(min(1000.0 * v, 0.4 * rate), 0.5);
         }
         printDelay = turnSeconds(ips) * printRate;
         // Modulation noise: a low noise of unit RMS that the signal rides.
         const double modHz = 1500.0 * v;
         modCoef = 1.0 - exp(-twoPi * modHz / rate);
         modScale = sqrt(2.0 * rate / (pi * modHz));
-        dropCoef = 1.0 - exp(-twoPi * 1500.0 * v / rate);
+        // A dropout lifts the tape up to 40 um off the head at full depth:
+        // spacing loss, 54.6 dB per wavelength of lift, puts its corner at
+        // v / (2 pi d); two poles at 0.76 of that follow the exponential
+        // to about twice it.
+        dropReach = 0.76 * ips * 0.0254 / (twoPi * 40e-6) / rate;
         crossCoef = 1.0 - exp(-twoPi * 300.0 * v / rate);
         // The transport's rates follow the speed: the reels turn once per
         // metre or so, the capstan (25 mm) and an idler (11 mm) faster.
@@ -1424,7 +1432,9 @@ struct Umber : Effect {
         if (unplayed) unplayed = false;
         const int channels = min(io.channels, 2);
         const double hissOn = hiss.value() <= -30.0 ? 0.0 : hiss.gain();
-        const double printGain = printThrough.gain();
+        // Softer, older tapes print more (print-through goes about as one
+        // over the coercivity): 10 dB more on the 5 dB tape than the 12.5.
+        const double printGain = printThrough.gain() * dbToGain(1.333 * (12.5 - tapeNow));
         const double crossGain = channels == 2 ? crosstalk.gain() : 0.0;
         const double humGain = hum.gain() * kRefRms / 0.8100925873009825;
         double vuL = 0.0, vuR = 0.0;
@@ -1551,13 +1561,19 @@ struct Umber : Effect {
                     v += (n * hissGain + low * rumbleGain) * hissOn * inFade;
                 }
                 v = t.head.process(v);
-                // A dropout: the highs go first, then the level.
-                t.dropLow += dropCoef * (v - t.dropLow);
+                // A dropout: the tape lifts off the head and its spacing loss
+                // sweeps down from the top and back as it lifts and settles;
+                // a little of the flux is simply missing (6 dB at the
+                // deepest).
+                double lift = 1.0;
                 if (drop > 0.0) {
                     const double e = drop * (c == 0 ? 1.0 : dropOther);
-                    v = (t.dropLow + (v - t.dropLow) * (1.0 - min(1.0, 1.4 * e))) *
-                        dbToGain(-12.0 * e);
+                    lift = 1.0 - exp(-twoPi * min(dropReach / max(e, 1e-6), 0.45));
+                    v *= 1.0 - 0.5 * e;
                 }
+                t.drop1 += lift * (v - t.drop1);
+                t.drop2 += lift * (t.drop1 - t.drop2);
+                v = t.drop2;
                 t.crossLow += crossCoef * (v - t.crossLow);
                 y[c] = v;
             }
