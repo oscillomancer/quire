@@ -11,7 +11,7 @@
 set(PRODUCT_NAME        "Umber")
 set(PRODUCT_ID          "com.suppleaudio.umber")
 set(PRODUCT_VERSION     "1.0.0")
-set(PRODUCT_DESCRIPTION "A tape machine modelled from the oxide up: record equalisation, a magnetic core whose hysteresis follows the bias, the playback head's bump and losses, wow and flutter, hiss and wear, at four speeds and three tapes, from a faint rounding of peaks to a worn, warbling cassette.")
+set(PRODUCT_DESCRIPTION "A tape machine modelled from the oxide up: class-A electronics, record equalisation, a magnetic core whose hysteresis follows the bias, the playback head's bump and losses, wow, flutter and scrape, dropouts, print-through, crosstalk, hiss and hum, at four speeds, from a faint rounding of peaks to a worn, warbling cassette.")
 set(PRODUCT_VENDOR      "Supple Audio")
 set(PRODUCT_URL         "")
 set(PRODUCT_COPYRIGHT   "Copyright (c) 2026 Supple Audio")

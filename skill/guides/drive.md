@@ -40,7 +40,7 @@ changes only the keys it names.
 ## The curves
 
 Teasel's `tape` is a curve with a loop, for colour among other curves. For
-a whole tape machine (record equalisation that saturates the highs first,
+a whole tape machine (highs that saturate on their own, class-A electronics,
 bias, the head bump, wow and flutter, hiss), use
 [Umber, the tape machine](tape.md).
 

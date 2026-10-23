@@ -362,30 +362,34 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   and the range (up and down). Twelve factory patches.
   Umber, the tape machine (`plugins/umber`), has no predecessor: a tape
   machine modelled part by part and fitted to published data for current
-  studio tape (third harmonic about 0.1% at reference level, 3% at
-  +12.5 dB at 15 ips; saturation of the highs; noise). The drive is
-  calibrated as a machine is (0 VU, reference level, is −18 dBFS RMS).
-  Record equalisation lifts the highs into the tape as the losses at short
-  wavelengths and the standard (NAB or IEC; AES at 30 ips) require, so
-  highs saturate first and sooner at slower speeds; playback undoes it
-  exactly. The oxide's magnetization is a tanh of the field (single-domain
-  needles) squared off by the tape's squareness, its irreversible part
-  pinned and relaxing toward that curve by an exact exponential step, so
-  bias decides how much hysteresis is left: none audible at the
-  recommended bias, an opening loop and grain below it. The playback head
-  adds its bump (about 3.8 Hz per ips), dip and aligned top; wear adds
-  spacing and azimuth loss, a lean between the channels, magnetized heads'
-  even harmonics and dropouts; the transport adds wow (reels, a drift)
-  and flutter (capstan, idler, scrape) read at the oversampled rate; hiss
-  and modulation noise come from the tape, calibrated A-weighted. Three
-  tapes, four speeds; full latency (8 ms and linear-phase oversampling,
-  for deep wow) or low (under 10 samples, for tracking). It reads out the
-  VU level, the headroom to the tape's 3% limit and how much the peaks
-  were rounded. Its editor shows the machine (reels turning at the tape's
-  speed, heads, VU meters and a peak lamp), the oxide's flux against the
-  field live over its curve (dragged for drive and bias) and the response
-  quiet and hot. Twelve factory patches, Mastering among them for the
-  subtle rounding of a mix's peaks.
+  studio tape (third harmonic about 0.1% at reference level, 1% at +9 and
+  3% at about +13 dB at 15 ips; the highs' saturation output at 10 and
+  16 kHz; noise). The drive is calibrated as a machine is (0 VU,
+  reference level, is −18 dBFS RMS). Class-A record and playback
+  amplifiers add second harmonic. The oxide's magnetization is a tanh of
+  the field (single-domain needles) squared off by the tape's squareness,
+  its irreversible part pinned and relaxing toward that curve by an exact
+  exponential step, so bias decides how much hysteresis is left. The highs
+  saturate on their own: above a split (5 kHz at 15 ips) they meet a
+  ceiling of their own, so a loud cymbal no longer squashes the mids with
+  it, and the split sums back to an allpass. The tape is a continuous
+  headroom (5 to 13 dB to its 3% point), four speeds, NAB or IEC (AES at
+  30 ips). The playback head adds its bump (frequency adjustable), dip
+  and ripple, azimuth (highs lost, the tracks apart in time), the HF trims
+  of both sides; the tape adds dropouts, print-through and crosstalk; the
+  transport adds wow (reels, a wander) and flutter (capstan, idler,
+  friction) with each part's depth drifting, and scrape, kilohertz jitter;
+  hiss, modulation noise and hum. Oversampling is 1x to 16x as the user
+  sets it (best 176 to 384 kHz inside); full latency (8 ms, linear phase,
+  deep wow) or low (9 samples: the wow scaled to fit, its shape kept).
+  It reads out the VU level, the headroom to the tape's 3% limit and how
+  much the peaks were rounded. Its editor shows the machine (reels
+  turning at the tape's speed, heads, VU meters, a peak lamp), a
+  magnetization scope (the field recorded against the flux played back,
+  each axis scaled to the trail, drawn from 8 kHz points so the highs
+  draw stars; dragged for drive and bias), the response quiet and hot,
+  and the transport's displacement. Thirteen factory patches, Mastering
+  among them for the subtle rounding of a mix's peaks.
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The

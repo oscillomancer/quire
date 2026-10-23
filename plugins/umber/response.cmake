@@ -3,7 +3,8 @@
 # the record equalisation) but for the head bump; the drive's gain shows
 # without auto gain; and the tape's third harmonic follows the datasheet it
 # was fitted to: about 0.1% at reference level (a sine at -18 dBFS RMS, which
-# the VU meter reads as 0) and 3% at 12.5 dB above it.
+# the VU meter reads as 0) and 3% at 12.5 dB above it. The highs saturate on
+# their own: a 10 kHz sine 12 dB over reference loses about 3 dB.
 # Required: SANDBOX (quire-sandbox), PLUGIN (Umber.clap), WORK.
 foreach(var SANDBOX PLUGIN WORK)
     if(NOT DEFINED ${var} OR "${${var}}" STREQUAL "")
@@ -78,3 +79,4 @@ expect(60 -35 "{\"head_bump\":0}" gain 0 50)
 expect(1000 -15 "{}" vu 0 100)
 expect(1000 -15 "{}" thd 0.1 50)
 expect(1000 -2.5 "{}" thd 3 1000)
+expect(10000 -3 "{}" gain -2.9 500)
