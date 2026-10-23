@@ -27,7 +27,7 @@ physical values under `params`; a merge changes only the keys it names.
 | `crosstalk` | dB, −80…−20: the lows leaking between the tracks; −55 a two-track machine; −80 is off | −80 (off) |
 | `wow` | %, 0…2: slow pitch drift as a peak speed error; 0.02 a studio machine, 0.2 a cassette deck | 0.02 |
 | `flutter` | %, 0…1: faster pitch waver (capstan, idler, friction) | 0.02 |
-| `scrape` | %, 0…100: the tape's vibration over the heads, a kilohertz jitter that roughens the highs; 100 a worn transport | 10 |
+| `scrape` | %, 0…100: the tape's vibration over the heads, a kilohertz jitter that roughens the highs: 10 a good machine (inaudible on music), 50 a worn one, 100 a badly worn, dirty transport (a plain grit on sustained highs, −35 dB around a 10 kHz tone) | 10 |
 | `repro_amp` | %, 0…100: the class-A playback amplifier, as `record_amp` | 15 |
 | `repro_hf` | dB, −6…6: the playback side's HF trim, placed as `record_hf`'s (brighter or darker, saturation unchanged) | 0 |
 | `hiss` | dB, −30…12: the machine's noise floor, the real tape's hiss at this speed and the playback electronics' low rumble beneath it; −30 is off | −30 (off) |

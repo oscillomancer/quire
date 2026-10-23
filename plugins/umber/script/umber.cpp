@@ -647,7 +647,8 @@ struct Umber : Effect {
                        .in("Transport")
                        .help(
                            "The tape's vibration over the heads and guides: a jitter in the "
-                           "kilohertz that roughens the highs; 100% is a worn transport.");
+                           "kilohertz that roughens the highs; 10% is a good machine, 100% a "
+                           "badly worn, dirty transport.");
 
     // --- playback ----------------------------------------------------------------------------
 
@@ -1316,9 +1317,15 @@ struct Umber : Effect {
         }
     }
 
-    // Scrape's RMS jitter in seconds: 120 ns at 100% at 15 ips, more at
-    // lower speeds (the same vibration is a longer time).
-    double scrapeSeconds() const { return 120e-9 * scrape.value() * sqrt(15.0 / ips); }
+    // Scrape's RMS jitter in seconds: 380 ns at 100% at 15 ips (sidebands
+    // about -35 dB around a 10 kHz tone: a badly worn, dirty transport),
+    // rising as the setting to the 1.25 so the low end stays a good
+    // machine's (about -57 dB at 10%); more at lower speeds (the same
+    // vibration is a longer time).
+    double scrapeSeconds() const {
+        const double sc = scrape.value();
+        return sc > 0.0 ? 380e-9 * pow(sc, 1.25) * sqrt(15.0 / ips) : 0.0;
+    }
 
     // A soft bound: linear to 80% of the reach, then easing toward it, so
     // the deepest settings compress the motion instead of clipping it.

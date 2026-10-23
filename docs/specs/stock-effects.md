@@ -1546,7 +1546,7 @@ mono in and out. Latency: 8 ms plus the oversampler's (456 samples at
 | `crosstalk` | dB | −80..−20; −80 is off | linear | −80 |
 | `wow` | % | 0..2: peak speed error, slow | pow 3 | 0.02 |
 | `flutter` | % | 0..1: peak speed error, fast | pow 3 | 0.02 |
-| `scrape` | % | 0..100: kilohertz jitter, 120 ns RMS at 100% at 15 ips | pow 2 | 10 |
+| `scrape` | % | 0..100: kilohertz jitter, 380 ns RMS × x^1.25 at 15 ips | pow 2 | 10 |
 | `repro_amp` | % | 0..100: the class-A playback amplifier's drive, gliding | linear | 15 |
 | `repro_hf` | dB | −6..6: the playback side's HF trim, as `record_hf`'s, gliding | linear | 0 |
 | `hiss` | dB | −30..12 against the tape's own noise; −30 is off | linear | −30 |
@@ -1675,7 +1675,7 @@ crosstalk), the values are a modern machine's as judged, and say so.
   over 0.7 s; the wander is noise held 32 frames through two poles at
   0.5 Hz·v, the friction the same between 6 and 25 Hz·v, each scaled to
   unit RMS. Its integral (leaking over 4 s) is the tape's displacement;
-  scrape adds `scrape` × 120 ns × √(15/ips) RMS of noise through a
+  scrape adds 380 ns × `scrape`^1.25 × √(15/ips) RMS of noise through a
   band-pass at 3 kHz (Q 0.9). The displacement is bounded softly (linear to
   80% of the read's reach, then easing to it). The read's reach is 8 ms
   less 1.5 samples, or with low latency 9 samples less the oversampler's
@@ -1741,7 +1741,7 @@ scrape and modulation noise off unless said):
 | hiss at 0 dB, A-weighted (dBFS) | −78.5 (15 ips IEC), −76.0 (NAB), −81.0 (30 ips), −64.5 (`tape` 5, 3.75 ips) |
 | the electronics' noise in the floor, 20–60 / 60–200 Hz / above 200 Hz | +10.5 / +4 / 0 dB at 15 ips IEC (−96.1, −97.9 dBFS); +11.7 / +5.3 at 30 ips; +1 / 0 at 3.75 ips, where the tape's hiss covers it |
 | wow and flutter at the defaults, a 3 kHz tone | 0.013 % RMS, 0.038 % peak; with low latency 0.011 % RMS (the wow held to 40 %); wow 0.5 % alone, low latency: scaled, the flutter band 0.000 % |
-| scrape, sidebands 100 Hz to 5 kHz off a 10 kHz tone | −65 dBc at 10 % (15 ips), −68 (30 ips); −56 at 30 %; −45 at 100 % |
+| scrape, sidebands 100 Hz to 5 kHz off a 10 kHz tone (modulation noise on) | −60 dBc at 10 % (15 ips), −63 (30 ips); −48 at 30 %; −43 at 50 %; −35 at 100 % |
 | the Mastering patch on two test mixes (peaks −3 dBFS) | the peaks rounded 0.6 and 1.4 dB, the nonlinear part 36 and 31 dB under the music |
 | automation: each parameter jumped mid-sine | no step above the screen's threshold (largest excess 0.010, wow to 2 %) |
 | cost (dev player, stereo, 48 kHz) | 3.4 % of a core at 2x, 5.5 to 6 % at 4x, 9.3 to 10 % at 8x, 16 to 18 % at 16x |
