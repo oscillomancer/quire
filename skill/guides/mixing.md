@@ -111,6 +111,7 @@ For echoes, in time or free, ping-pong and ducked throws, see [Bracken, the dela
 Use [Ghyll, the reverb](reverb.md) for a room or hall built from its size, materials and the places of the source and listener; its `rt60` and `clarity` readouts say how long and how clear it is. Use 100% mix on a send return.
 For chorus, doubling, width or vibrato, see [Withy, the chorus](chorus.md); its `detune` and `mono_loss` readouts say how far the voices swing and what folding to mono costs.
 For phasing, a swirl, a resonant or tempo-locked sweep, a photocell throb or an endless barber pole, see [Pollia, the phaser](phaser.md); its `centre_now` readout says where the stages sit, and `keep_below` keeps a bass's or a mix's lows whole.
+For tape, from a mix's peaks gently rounded to a worn cassette, see [Umber, the tape machine](tape.md); set its drive by the `vu` readout (0 VU is −18 dBFS RMS), and its `headroom` and `saturation` readouts say how close the peaks came to the tape's limit and what they lost.
 
 ## Strip types and Console 9 gain staging
 

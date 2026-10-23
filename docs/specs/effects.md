@@ -24,6 +24,7 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 | `marram` (`plugins/marram`) | Marram | `com.suppleaudio.marram` | `XZXx` (the player's for the id) | `Mrrm` | instrument, synthesizer |
 | `withy` (`plugins/withy`) | Withy | `com.suppleaudio.withy` | `aSho` (the player's for the id) | `Wthy` | audio-effect, chorus |
 | `pollia` (`plugins/pollia`) | Pollia | `com.suppleaudio.pollia` | `EGJQ` (the player's for the id) | `Poll` | audio-effect, phaser |
+| `umber` (`plugins/umber`) | Umber | `com.suppleaudio.umber` | `auff` (the player's for the id) | `Umbr` | audio-effect, distortion, tape |
 
 Marram is an instrument; its spec, implementation notes included, is
 `docs/specs/marram.md`.
@@ -701,6 +702,50 @@ stock plugin with no predecessor. Notes for maintainers:
   at 4 stages, 1.3 % at the defaults, 3.1 % at 24 stages with spread and
   feedback, 3.6 % with the barber pole, photocell, envelope and keep below
   on top.
+
+## 15. Tape — Umber [`umber`] (`stock-effects.md` §13)
+
+A DSP script (ADR-0047), `plugins/umber/script/umber.cpp`. A new stock
+plugin with no predecessor. Notes for maintainers:
+
+- **Fitted, not guessed.** The constants come from small fits kept with
+  the script's comments: the squareness and reference field to the
+  datasheet's third harmonic against level, the record curve's two zeros
+  to its saturation at 10 and 16 kHz at 15 ips, the speed trims to its
+  MOL at 30 and 7.5 ips, the hiss to its A-weighted noise. Changing the
+  oxide or the record curve moves all of them; recheck with
+  `plugin.umber.response` and a THD sweep (dsp.test, 1 kHz, reference
+  level −15 dBFS peak, +4, +9, +12.5 dB).
+- **The oxide's step.** Jiles–Atherton's irreversible magnetization is
+  stiff when the loop is narrow (the recommended bias leaves k of 1e-5):
+  an explicit RK4 diverges. The step relaxes toward the anhysteretic value
+  by exp(−|Δh|/k) instead, exact for the curve held over the step, so it
+  is stable at any k; past |Δh|/k = 20 it sets the value directly. The
+  mean field of Jiles–Atherton is not used: a negative one (demagnetizing)
+  fitted no better than the squareness term, and needs an iteration.
+- **Exact inverse.** Record and playback curves are first-order sections
+  g(1 + s/ωa)/(1 + s/ωb) with both corners prewarped, so the playback
+  sections are the record's with the corners swapped and the cascade is 1
+  to rounding at low level (the 1 kHz and 10 kHz gains at −35 dBFS are
+  0.00 dB). The record curve is not used elsewhere: a quiet signal shows
+  only the head.
+- **Block invariance.** Everything that moves (the transport's sines and
+  random parts, the glides of bias, head bump and wear, the meters'
+  refresh, the switch fade) counts frames, not blocks; the counter and
+  phases reset only in `prepare()`. The switch clears every stage in the
+  frame the output reaches silence and feeds that frame nothing (a full
+  sample into a cleared chain came back 8 ms later as a click).
+- **Cost.** The cubic read went to Horner form with an unwrapped fast
+  path, the sines to rotations, tanh below 0.3 to its series, and the
+  saturation readout compares ratios instead of taking a log per
+  oversampled sample: 31 to 22 refs at the defaults (`clap-bench`,
+  release, 2.0% of a core), 9.5 with low latency. The linear-phase
+  oversampler is most of what remains.
+- **Tests.** The suite every stock plugin has, and
+  `plugin.umber.response`: quiet sines at 1 and 10 kHz 0.00 dB, output
+  −6 dB, the drive's +6 dB without auto gain, the head bump +1.56 dB at
+  60 Hz and 0 with `head_bump` 0, the VU at 0 for a sine at reference
+  level, and the third harmonic about 0.1% there and 3% at +12.5 dB.
 
 ## 6. Engine and benchmark use
 

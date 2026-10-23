@@ -79,13 +79,16 @@ plugins ship as CLAP (and VST3, AU) files of their own that other hosts load.
    phaser's notches are. (2026-10-22) The folders moved up a level, from
    `plugins/stock/<name>/` to `plugins/<name>/`, beside `common`, `suite`
    and `template`, once the template-built stock plugins were all gone.
+   (2026-10-22) The fourteenth is Umber, the tape machine
+   (`com.suppleaudio.umber`), with no predecessor; umber is an earth
+   pigment, iron oxide with a little manganese, as a tape's coat is.
 6. **Names and look.** A stock plugin is named after a plant or something
    else of the natural world, not after its effect type (Yarrow, the EQ;
    Sundew, the compressor; Treeline, the limiter; Gorse, the transient
    shaper; Hickory, the stereo utility; Sorrel, the gate; Teasel, the
    saturation; Bracken, the delay; Canopy, the reverb; Lichen, the
    analyzer; Marram, the synthesizer; (2026-10-22) Withy, the chorus;
-   Pollia, the phaser).
+   Pollia, the phaser; Umber, the tape machine).
    Every stock script draws with the scripts' palette (`kScriptTheme` in
    `plugins/suite/glue`): warm and earthy, set apart from the host's
    graphite (walnut panels, a soil-dark floor under graphs, parchment

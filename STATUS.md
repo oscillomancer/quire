@@ -193,8 +193,8 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
   the LLM evaluation harness (`tools/eval-harness`).
 - **Stock plugins** (ADR-0011, ADR-0047): Marram, Yarrow, Sundew, Treeline,
-  Gorse, Hickory, Sorrel, Teasel, Bracken, Ghyll, Lichen, Withy and
-  Pollia, each passing clap-validator, a reset determinism check, an unload
+  Gorse, Hickory, Sorrel, Teasel, Bracken, Ghyll, Lichen, Withy, Pollia
+  and Umber, each passing clap-validator, a reset determinism check, an unload
   test and the headless REAPER check;
   JSON patches and the semantic-parameters extension.
   Yarrow, the EQ, is the first written as a DSP script
@@ -360,6 +360,32 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   over about a cycle and a half of the motion, and the path a photocell
   takes the sweep on; dragging the response moves the centre (across)
   and the range (up and down). Twelve factory patches.
+  Umber, the tape machine (`plugins/umber`), has no predecessor: a tape
+  machine modelled part by part and fitted to published data for current
+  studio tape (third harmonic about 0.1% at reference level, 3% at
+  +12.5 dB at 15 ips; saturation of the highs; noise). The drive is
+  calibrated as a machine is (0 VU, reference level, is −18 dBFS RMS).
+  Record equalisation lifts the highs into the tape as the losses at short
+  wavelengths and the standard (NAB or IEC; AES at 30 ips) require, so
+  highs saturate first and sooner at slower speeds; playback undoes it
+  exactly. The oxide's magnetization is a tanh of the field (single-domain
+  needles) squared off by the tape's squareness, its irreversible part
+  pinned and relaxing toward that curve by an exact exponential step, so
+  bias decides how much hysteresis is left: none audible at the
+  recommended bias, an opening loop and grain below it. The playback head
+  adds its bump (about 3.8 Hz per ips), dip and aligned top; wear adds
+  spacing and azimuth loss, a lean between the channels, magnetized heads'
+  even harmonics and dropouts; the transport adds wow (reels, a drift)
+  and flutter (capstan, idler, scrape) read at the oversampled rate; hiss
+  and modulation noise come from the tape, calibrated A-weighted. Three
+  tapes, four speeds; full latency (8 ms and linear-phase oversampling,
+  for deep wow) or low (under 10 samples, for tracking). It reads out the
+  VU level, the headroom to the tape's 3% limit and how much the peaks
+  were rounded. Its editor shows the machine (reels turning at the tape's
+  speed, heads, VU meters and a peak lamp), the oxide's flux against the
+  field live over its curve (dragged for drive and bias) and the response
+  quiet and hot. Twelve factory patches, Mastering among them for the
+  subtle rounding of a mix's peaks.
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The
