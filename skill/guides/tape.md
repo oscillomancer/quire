@@ -32,7 +32,7 @@ physical values under `params`; a merge changes only the keys it names.
 | `repro_hf` | dB, −6…6: the playback side's HF trim, placed as `record_hf`'s (brighter or darker, saturation unchanged) | 0 |
 | `hiss` | dB, −30…12: the machine's noise floor, the real tape's hiss at this speed and the playback electronics' low rumble beneath it; −30 is off | −30 (off) |
 | `mod_noise` | dB, −30…12 against the real tape's modulation noise (grain riding the signal); −30 is off | 0 (real) |
-| `hum` | dB, −100…−40 against the reference level: mains hum in the playback electronics; −100 is off | −100 (off) |
+| `hum` | dB, −100…−40 against the reference level: the power supply's ripple (a buzz at twice the mains) and the playback head's pickup of the mains; −85 a well-earthed machine, −65 a poorly earthed one; −100 is off | −100 (off) |
 | `mains` | `hz50`, `hz60`: the hum's frequency | hz60 |
 | `output` | dB, −24…24 | 0 |
 | `oversampling` | `x1`, `x2`, `x4`, `x8`, `x16`: how many times the session rate the tape runs at; best when that is 176 to 384 kHz (4x or 8x at 44.1 and 48 kHz, 2x or 4x at 88.2 and 96); restarts the plugin | x4 |
@@ -61,11 +61,12 @@ about −8 dB to sit in the same place.
 ## Recipes
 
 The subtle one, for a mix bus or a master (the Mastering patch): a modern
-machine at 30 ips, clean electronics, a good transport, real hiss. Check
+machine at 30 ips, clean electronics, a good transport, real hiss and a
+well-earthed machine's hum. Check
 `saturation` reads a fraction of a dB on the loudest moments:
 
 ```json
-{"params":{"speed":"ips30","drive":-2,"record_amp":12,"repro_amp":12,"azimuth":0.01,"wow":0.012,"flutter":0.015,"scrape":8,"crosstalk":-60,"hiss":0}}
+{"params":{"speed":"ips30","drive":-2,"record_amp":12,"repro_amp":12,"azimuth":0.01,"wow":0.012,"flutter":0.015,"scrape":8,"crosstalk":-60,"hiss":0,"hum":-85}}
 ```
 
 Rounding peaks without any pitch movement (drums, a bus):
@@ -89,11 +90,11 @@ Second harmonic without much tape (warm electronics):
 A worn machine, and a cassette:
 
 ```json
-{"params":{"tape":5,"speed":"ips7_5","bias":85,"drive":4,"azimuth":0.12,"head_magnetism":40,"wow":0.25,"flutter":0.15,"scrape":50,"dropouts":45,"drop_depth":50,"print_through":-48,"crosstalk":-38,"hiss":4,"hum":-70,"output":3.5}}
+{"params":{"tape":5,"speed":"ips7_5","bias":85,"drive":4,"azimuth":0.12,"head_magnetism":40,"wow":0.25,"flutter":0.15,"scrape":50,"dropouts":45,"drop_depth":50,"print_through":-48,"crosstalk":-38,"hiss":4,"hum":-65,"output":3.5}}
 ```
 
 ```json
-{"params":{"tape":5,"speed":"ips3_75","drive":-3,"azimuth":0.08,"wow":0.12,"flutter":0.1,"scrape":35,"dropouts":15,"hiss":0,"output":3}}
+{"params":{"tape":5,"speed":"ips3_75","drive":-3,"azimuth":0.08,"wow":0.12,"flutter":0.1,"scrape":35,"dropouts":15,"hiss":0,"hum":-75,"output":3}}
 ```
 
 Tracking through it live: `"latency":"low"` with `"oversampling":"x2"`

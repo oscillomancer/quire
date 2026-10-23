@@ -202,6 +202,25 @@ struct Phasor {
     }
 };
 
+// Hum's harmonics of the mains, 1 to 16: the head's magnetic pickup on the
+// odd ones (fundamental, then falling fast), the supply's ripple on the
+// even ones (twice the mains, then a slowly falling buzz), unevenly.
+double humWeight(int n) {
+    if (n == 1) return 0.6;
+    if (n == 3) return 0.21;
+    if (n == 5) return 0.09;
+    if (n == 7) return 0.036;
+    if (n == 2) return 1.0;
+    if (n == 4) return 0.45;
+    if (n == 6) return 0.30;
+    if (n == 8) return 0.22;
+    if (n == 10) return 0.14;
+    if (n == 12) return 0.11;
+    if (n == 14) return 0.07;
+    if (n == 16) return 0.05;
+    return 0.0;
+}
+
 // The oxide of one track: irreversible magnetization pinned until the field
 // pushes it on, toward the anhysteretic value (an exact exponential step in
 // the field, so a narrow loop never goes unstable), and a reversible part
@@ -681,13 +700,17 @@ struct Umber : Effect {
                     .offAtMin()
                     .in("Playback")
                     .help(
-                        "The mains' hum in the playback electronics, against the reference "
-                        "level; off at the minimum.");
+                        "The mains' hum, against the reference level: the power supply's "
+                        "ripple (a buzz at twice the mains) and the playback head's pickup "
+                        "(the mains itself, less with NAB); -85 dB a well-earthed machine; off "
+                        "at the minimum.");
     Param mains = choice("Mains", {"50 Hz", "60 Hz"}, 1)
                       .keys({"hz50", "hz60"})
                       .in("Playback")
                       .activeAbove(hum, -100)
-                      .help("The hum's frequency, with its second and third harmonics.");
+                      .help(
+                          "The mains' frequency: the hum is its harmonics, the power "
+                          "supply's ripple at twice it and the head's pickup at it.");
 
     // --- output -----------------------------------------------------------------------------
 
@@ -780,7 +803,15 @@ struct Umber : Effect {
     int printDecim = 4;
     double printRate = 12000.0, printDelay = 1.0;
     double crossCoef = 0.01;
-    Phasor hum1, hum2, hum3;
+    // Hum: the mains' fundamental and odd harmonics picked up magnetically
+    // at the playback head (so through the playback curve's lows), and the
+    // power supply's ripple, twice the mains with a buzz of harmonics into
+    // the low kilohertz. The balance is fixed, a little uneven as a real
+    // machine's is (not random: offline renders must match the live
+    // output), and the whole is `hum` RMS against reference.
+    Phasor humBase;
+    Section humLow;  // the magnetic part through NAB's playback lows
+    static constexpr double kHumNorm = 1.0 / 0.946967792483;
     double modCoef = 0.1;
     // Meters.
     double peakField = 0.0, peakKeep = 0.9999, rounding = 0.0, roundKeep = 0.9999;
@@ -824,7 +855,8 @@ struct Umber : Effect {
             .set(flutter, 0.015)
             .set(scrape, 8)
             .set(crosstalk, -60)
-            .set(hiss, 0);
+            .set(hiss, 0)
+            .set(hum, -85);
         p.add("Mix Bus")
             .set(drive, 2)
             .set(azimuth, 0.02)
@@ -889,6 +921,7 @@ struct Umber : Effect {
             .set(dropDepth, 25)
             .set(hiss, 0)
             .set(modNoise, 3)
+            .set(hum, -75)
             .set(output, 3);
         p.add("Worn Machine")
             .set(tape, 5)
@@ -908,7 +941,7 @@ struct Umber : Effect {
             .set(crosstalk, -38)
             .set(hiss, 4)
             .set(modNoise, 6)
-            .set(hum, -70)
+            .set(hum, -65)
             .set(output, 3.5);
         p.add("Warped")
             .set(tape, 5)
@@ -1027,9 +1060,8 @@ struct Umber : Effect {
         dropAt = 1.0;
         dropStep = 0.0;
         dropOther = 1.0;
-        hum1.start(0.0);
-        hum2.start(0.0);
-        hum3.start(0.0);
+        humBase.start(0.0);
+        humLow.clear();
         peakField = 0.0;
         rounding = 0.0;
         roundRatio = 1.0;
@@ -1084,9 +1116,7 @@ struct Umber : Effect {
         }
         holdTransport();
         const double mainsHz = mains.index() == 0 ? 50.0 : 60.0;
-        hum1.rate(mainsHz / rate);
-        hum2.rate(2.0 * mainsHz / rate);
-        hum3.rate(3.0 * mainsHz / rate);
+        humBase.rate(mainsHz / rate);
         modGain = modNoise.value() <= -30.0 ? 0.0 : dbToGain(oxideNow.modDb) * modNoise.gain();
         dropChance = 4.0 * dropouts.value() * dropouts.value() / rate;
     }
@@ -1130,6 +1160,10 @@ struct Umber : Effect {
             // 15 ips, moving with the speed as a wavelength does.
             k.printOut.bandpass(min(1000.0 * v, 0.4 * rate), 0.5);
         }
+        if (nab)
+            humLow.design(fLow * eps, fLow, eps, rate);
+        else
+            humLow.design(fLow, fLow, 1.0, rate);
         printDelay = turnSeconds(ips) * printRate;
         // Modulation noise: a low noise of unit RMS that the signal rides.
         const double modHz = 1500.0 * v;
@@ -1349,9 +1383,7 @@ struct Umber : Effect {
             takeup.hold();
             capstan.hold();
             idler.hold();
-            hum1.hold();
-            hum2.hold();
-            hum3.hold();
+            humBase.hold();
             if (++swayTicks >= swayEvery) {
                 swayTicks = 0;
                 for (int k = 0; k < 4; ++k) swayTarget[k] = 1.0 + 0.45 * random.bipolar();
@@ -1443,7 +1475,7 @@ struct Umber : Effect {
         // over the coercivity): 10 dB more on the 5 dB tape than the 12.5.
         const double printGain = printThrough.gain() * dbToGain(1.333 * (12.5 - tapeNow));
         const double crossGain = channels == 2 ? crosstalk.gain() : 0.0;
-        const double humGain = hum.gain() * kRefRms / 0.8100925873009825;
+        const double humGain = hum.gain() * kRefRms * kHumNorm;
         double vuL = 0.0, vuR = 0.0;
         Array<double, 2> y = {0.0, 0.0};
         double scopeIn = 0.0;
@@ -1478,10 +1510,19 @@ struct Umber : Effect {
             const double out = outputCache.get(output.at(i)) * back * sensitivity * outFade;
             double humNow = 0.0;
             if (humGain > 0.0) {
-                hum1.next();
-                hum2.next();
-                hum3.next();
-                humNow = humGain * (hum1.s + 0.5 * hum2.s + 0.25 * hum3.s) * inFade;
+                humBase.next();
+                // Each harmonic's sine by rotation from the fundamental's.
+                double hr = humBase.c, hs = humBase.s, magnetic = 0.0, ripple = 0.0;
+                for (int n = 1; n <= 16; ++n) {
+                    if (n % 2 == 1)
+                        magnetic += humWeight(n) * hs;
+                    else
+                        ripple += humWeight(n) * hs;
+                    const double nr = hr * humBase.c - hs * humBase.s;
+                    hs = hs * humBase.c + hr * humBase.s;
+                    hr = nr;
+                }
+                humNow = humGain * (humLow.process(magnetic) + ripple) * inFade;
             }
             bool loud = false;
             for (int c = 0; c < channels; ++c) {

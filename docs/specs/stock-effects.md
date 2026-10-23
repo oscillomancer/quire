@@ -1700,9 +1700,15 @@ crosstalk), the values are a modern machine's as judged, and say so.
   × (1 + n), its steady part from `head_magnetism` included (DC noise:
   the grain stays when the signal stops), then that part's offset taken
   out; n uniform noise through two poles at 1.5 kHz·v at −66, −61,
-  −55 dB RMS at the fitted tapes, × `mod_noise`. Hum: the mains with its
-  second and third harmonics (1, ½, ¼) at `hum` RMS against reference,
-  the same in both channels, in the playback electronics.
+  −55 dB RMS at the fitted tapes, × `mod_noise`. Hum, the same in both
+  channels, at `hum` RMS against reference: the power supply's ripple on
+  the mains' even harmonics (2, 4 … 16: 1, 0.45, 0.30, 0.22, 0.14, 0.11,
+  0.07, 0.05, a buzz into the low kilohertz) and the playback head's
+  magnetic pickup on the odd ones (1, 3, 5, 7: 0.6, 0.21, 0.09, 0.036),
+  that part through NAB's playback lows. The balance is fixed and a
+  little uneven, as a machine's is (not random per instance: offline
+  renders must match the live output). Harmonics are rotations of the
+  fundamental, renormalized every 32 frames.
 - **Changes.** `drive` and `output` glide per sample; the settings marked
   gliding move 30 ms toward their values, the curves redesigned every 32
   frames while they move. A new `speed` or `emphasis` fades the output out
@@ -1738,6 +1744,7 @@ scrape and modulation noise off unless said):
 | quiet sines (−35 dBFS), 15 ips | 0.00 dB at 1 and 10 kHz; +1.93 dB at 60 Hz |
 | the head, quiet noise: peak, dip, ripple, second dip | 15 ips +1.9 dB near 57 Hz, −1.0 at 115, +0.4 at 170, −0.2 at 230; 30 ips +1.5 at 115, −12.6 dB at 20 Hz; 7.5 ips +2.5 at 30 |
 | `repro_hf` +6 dB at 2, 4, 8 kHz | 7.5 ips +3.0, +4.8, +5.8; 15 ips +1.3, +3.1, +5.1; 30 ips +0.4, +1.3, +3.6 dB |
+| `hum` −60 dB, 60 Hz | −60.0 dB re reference RMS; 120 Hz −63, 60 Hz −67, 240 Hz −69, 360 Hz −73 … 960 Hz −89; NAB 60 Hz −69 |
 | hiss at 0 dB, A-weighted (dBFS) | −78.5 (15 ips IEC), −76.0 (NAB), −81.0 (30 ips), −64.5 (`tape` 5, 3.75 ips) |
 | the electronics' noise in the floor, 20–60 / 60–200 Hz / above 200 Hz | +10.5 / +4 / 0 dB at 15 ips IEC (−96.1, −97.9 dBFS); +11.7 / +5.3 at 30 ips; +1 / 0 at 3.75 ips, where the tape's hiss covers it |
 | wow and flutter at the defaults, a 3 kHz tone | 0.013 % RMS, 0.038 % peak; with low latency 0.011 % RMS (the wow held to 40 %); wow 0.5 % alone, low latency: scaled, the flutter band 0.000 % |
