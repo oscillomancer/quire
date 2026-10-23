@@ -19,8 +19,8 @@ physical values under `params`; a merge changes only the keys it names.
 | `emphasis` | `nab`, `iec`: the equalisation standard; not at 30 ips (AES) | iec |
 | `head_bump` | %, 0…200: the playback head's swell in the lows and the ripples above it; 100 is a real head's (+2 dB at 15 ips, +1.5 at 30, +2.5 at 7.5) | 100 |
 | `bump_freq` | Hz, 30…120: where the bump peaks at 15 ips (doubles at 30, halves at 7.5) | 57 |
-| `azimuth` | degrees, 0…0.5: the playback head's tilt: highs lost, the two tracks apart in time; 0.02 a well-aligned machine | 0 |
-| `head_magnetism` | %, −100…100: a magnetized record head: even harmonics from the tape itself | 0 |
+| `azimuth` | degrees, 0…1: the playback head's tilt: highs lost within each track (−1.6 dB at 12 kHz at 0.3° at 15 ips), the two tracks apart in time (55 µs there, so the mono sum combs); 0.02 a well-aligned machine | 0 |
+| `head_magnetism` | %, −100…100: a magnetized record head: even harmonics from the tape itself (−39 dB at 0 VU at 100%) and DC noise, a grain that stays in silence (with `mod_noise` on) | 0 |
 | `dropouts` | %, 0…100: how often the oxide loses the head (100: about four a second) | 0 |
 | `drop_depth` | %, 0…100: how deep each dropout goes, the highs first | 30 |
 | `print_through` | dB, −80…−30: the echo of the reel's next layer one turn later (1.4 s at 15 ips); −56 a modern tape; −80 is off | −80 (off) |
@@ -134,6 +134,7 @@ Machine, Warped, Clean Transfer (`preset_list`/`fx_patch_list`).
   phase turns around 5 kHz (15 ips), as a machine's does.
 - Low latency holds wow to the 9 samples there are: about 40% of the
   default wow, less of deeper settings; deep wow needs `full`.
+  Azimuth past about 0.3° (at 15 ips) is held there too.
 - At 1x and 2x, loud highs alias; 4x is clean but for extreme drive, 8x
   for everything.
 - Switching `speed` or `emphasis` while playing drops out for about 15 ms

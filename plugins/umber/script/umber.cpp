@@ -259,11 +259,11 @@ struct Amp {
 // The playback head's filters as the settings put them, for the audio and
 // for the editor's copy.
 struct Head {
-    Biquad low, bump, dip, ripple, dip2, top, az, tilt;
+    Biquad low, bump, dip, ripple, dip2, top, tilt;
     Section repro;
-    bool topOn = false, azOn = false;
-    void design(int s, double loss, double amount, double bumpHz, double azHz, double tiltDb,
-                double reproDb, double rate) {
+    bool topOn = false;
+    void design(int s, double loss, double amount, double bumpHz, double tiltDb, double reproDb,
+                double rate) {
         const double v = speedIps(s) / 15.0;
         const double fb = bumpHz * v;
         const double bumpDb = speedBumpDb(s) * amount;
@@ -272,7 +272,6 @@ struct Head {
         // there the machine is flat, so the filters stay out (they still
         // run, at that edge, so they come in from a live state).
         topOn = topHz < 0.45 * rate;
-        azOn = azHz < 0.45 * rate;
         low.highpass(max(5.0, 0.36 * fb * min(1.0, amount)), 0.75);
         bump.peak(fb, 1.2, 1.07 * bumpDb);
         // The interference's undulation, every bump frequency on: a dip of
@@ -282,7 +281,6 @@ struct Head {
         ripple.peak(min(3.0 * fb, 0.4 * rate), 3.4, 0.38 * bumpDb);
         dip2.peak(min(4.0 * fb, 0.4 * rate), 3.5, -0.15 * bumpDb);
         top.lowpass(min(topHz, 0.45 * rate), 0.75);
-        az.lowpass(min(azHz, 0.45 * rate), 0.6);
         tilt.highShelf(min(5000.0 * v, 0.4 * rate), 0.6, tiltDb);
         shelf(repro, reproDb, min(4000.0 * v, 0.3 * rate), rate);
     }
@@ -290,8 +288,6 @@ struct Head {
         double y = repro.process(tilt.process(x));
         const double topped = top.process(y);
         if (topOn) y = topped;
-        const double slanted = az.process(y);
-        if (azOn) y = slanted;
         return dip2.process(ripple.process(dip.process(bump.process(low.process(y)))));
     }
     double responseDb(double hz, double rate) const {
@@ -299,7 +295,6 @@ struct Head {
                     ripple.responseDb(hz) + dip2.responseDb(hz) + tilt.responseDb(hz) +
                     gainToDb(repro.gainAt(hz, rate));
         if (topOn) db += top.responseDb(hz);
-        if (azOn) db += az.responseDb(hz);
         return db;
     }
     void clear() {
@@ -309,7 +304,6 @@ struct Head {
         ripple.clear();
         dip2.clear();
         top.clear();
-        az.clear();
         tilt.clear();
         repro.clear();
     }
@@ -331,24 +325,24 @@ double biasLevelDb(double b) {
     return 0.0;
 }
 
-// An azimuth error's loss within the track: the gap's loss of a 2 mm track
-// read at that slant, as the frequency where it takes 3 dB (the head's
-// low-pass); none when aligned.
-double azimuthCorner(double degrees, int s) {
-    if (degrees <= 0.0) return 1e9;
-    const double slant = 0.002 * tan(degrees * pi / 180.0), speedMs = speedIps(s) * 0.0254;
-    double lo = 100.0, hiHz = 1e6;
-    for (int i = 0; i < 40; ++i) {
-        const double f = sqrt(lo * hiHz);
-        const double x = pi * slant * f / speedMs;
-        const double sinc = x < 1e-6 ? 1.0 : abs(sin(x) / x);
-        if (-gainToDb(max(sinc, 1e-6)) > 3.0)
-            hiHz = f;
-        else
-            lo = f;
-    }
-    return lo;
+// Azimuth: the playback gap tilted by an angle crosses each 2 mm track at a
+// slant, so it hears the track's signal spread over the time the tape takes
+// to move that slant: an average over a window, whose response is a sinc
+// with true nulls. The same tilt reaches the two tracks' centres, 4 mm apart,
+// at different times. In seconds, at a speed:
+double azimuthWindow(double degrees, double atIps) {
+    return 0.002 * tan(degrees * pi / 180.0) / (atIps * 0.0254);
 }
+double azimuthSpread(double degrees, double atIps) {
+    return 0.004 * tan(degrees * pi / 180.0) / (atIps * 0.0254);
+}
+// The window's loss at hz, for the editor's response.
+double azimuthDb(double hz, double window) {
+    const double x = pi * hz * window;
+    if (x < 1e-9) return 0.0;
+    return gainToDb(max(abs(sin(x) / x), 1e-3));
+}
+constexpr int kTaps = 8;  // reads across the azimuth window
 
 // The record equalisation's lows: NAB's lift below 50 Hz (3180 us, held to
 // +10 dB), which playback undoes; IEC and AES leave the lows flat. Their
@@ -590,18 +584,20 @@ struct Umber : Effect {
                          .help(
                              "Where the head bump peaks at 15 ips (the head's length decides "
                              "it); it doubles at 30 ips and halves at 7.5.");
-    Param azimuth = degrees("Azimuth", 0, 0.5, 0)
+    Param azimuth = degrees("Azimuth", 0, 1, 0)
                         .curved(Curve::Pow, 2)
                         .in("Heads")
                         .help(
                             "The playback head's tilt against the record head's, in degrees: "
-                            "highs lost within each track and the two tracks apart in time. "
-                            "0.02 is a well-aligned machine.");
+                            "highs lost within each track (a sinc, with nulls) and the two "
+                            "tracks apart in time. 0.02 is a well-aligned machine.");
     Param headMagnetism = percent("Head Magnetism", 0, -100, 100)
                               .in("Heads")
                               .help(
                                   "A magnetized record head: a steady field that puts even "
-                                  "harmonics into the tape itself; the sign is its polarity.");
+                                  "harmonics into the tape itself (about -40 dB at reference level "
+                                  "at 100%) and DC noise, the oxide's grain on that field, with "
+                                  "the modulation noise; the sign is its polarity.");
 
     // --- the tape's condition ----------------------------------------------------------------
 
@@ -752,7 +748,12 @@ struct Umber : Effect {
     double field = 0.2, square = 0.24, pin = 1e-5, molField = 1.0;
     double edgeCeiling = 1.0;  // the highs' ceiling, in the flux's units
     double hissGain = 0.0, hissPower = 1.0, rumbleGain = 0.0, modGain = 0.0, modScale = 1.0;
-    double sensitivity = 1.0, dc = 0.0, dcOut = 0.0, skew = 0.0, skewNow = 0.0, skewCoef = 0.001;
+    double sensitivity = 1.0, dc = 0.0, dcOut = 0.0;
+    // Azimuth, in seconds: half the time between the tracks (left late by it,
+    // right early) and the window each track's gap spreads over; where they
+    // are going, now and at the frame before, gliding per frame.
+    double spread = 0.0, window = 0.0, spreadNow = 0.0, windowNow = 0.0;
+    double spreadWas = 0.0, windowWas = 0.0, skewCoef = 0.001;
     double ips = 15.0;
     // The transport: the speed error's parts, each turning part's depth
     // drifting toward a new target every quarter second.
@@ -768,7 +769,7 @@ struct Umber : Effect {
     double travel = 0.0, travelKeep = 0.9999;  // the tape's displacement, in seconds
     double readNow = 0.0, readWas = 0.0;       // the read's delay, oversampled samples
     double wowHeld = 1.0, flutterHeld = 1.0;   // what fits the read's reach
-    double movedNow = 0.0, skewWas = 0.0;
+    double movedNow = 0.0;
     int tick = 0;
     // Dropouts.
     double dropDepthNow = 0.0, dropAt = 1.0, dropStep = 0.0, dropOther = 1.0;
@@ -989,8 +990,7 @@ struct Umber : Effect {
         clearState();
         settle();
         applyChoices();
-        skewNow = skew;
-        skewWas = skew;
+        landAzimuth();
         unplayed = true;
     }
 
@@ -1076,8 +1076,7 @@ struct Umber : Effect {
                 applyChoices();
             else
                 designAll();
-            skewNow = skew;
-            skewWas = skew;
+            landAzimuth();
         } else if (changed && switching == 0) {
             switching = 1;
         }
@@ -1190,18 +1189,33 @@ struct Umber : Effect {
         pin = b < 1.0 ? basePin * pow(10.0, 2.5 * (1.0 - b) / 0.5)
                       : basePin * max(0.2, 1.0 - 0.6 * (b - 1.0));
         sensitivity = dbToGain(biasLevelDb(b));
-        // A magnetized head: a steady field, a quarter of reference at 100%.
-        dc = 0.25 * magNow * oxideNow.field;
+        // A magnetized head: a steady field, KMAG of reference at 100%.
+        dc = 1.5 * magNow * oxideNow.field;
         dcOut = anhysteretic(dc, square);
-        // Azimuth: the left track read late by its slant across the 4 mm
-        // between the tracks' centres (at most 0.45 of the read's reach).
-        const double slant = tan(azNow * pi / 180.0);
-        skew = min(0.004 * slant / (ips * 0.0254), 0.45 * reach);
-        const double azHz = azimuthCorner(azNow, s);
+        // Azimuth's half spread and window; together they may take at most
+        // 0.6 of the read's reach (low latency's 9 samples), shrinking
+        // together past it.
+        spread = 0.5 * azimuthSpread(azNow, ips);
+        window = azimuthWindow(azNow, ips);
+        const double extent = spread + 0.5 * window, room = 0.6 * reach;
+        if (extent > room) {
+            spread *= room / extent;
+            window *= room / extent;
+        }
         for (Track& k : track)
-            k.head.design(s, oxideNow.loss, bumpNow, bumpHzNow, azHz, biasTiltDb(s, b), reproHfNow,
-                          rate);
+            k.head.design(s, oxideNow.loss, bumpNow, bumpHzNow, biasTiltDb(s, b), reproHfNow, rate);
     }
+
+    // Azimuth where it is going, for restarts.
+    void landAzimuth() {
+        spreadNow = spread;
+        spreadWas = spread;
+        windowNow = window;
+        windowWas = window;
+    }
+
+    // How far a read reaches either side of the moving centre for azimuth.
+    double azimuthExtent() const { return spread + 0.5 * window; }
 
     // The gliding settings move 30 ms toward their values; their curves are
     // redesigned every kTick frames while they move.
@@ -1281,7 +1295,7 @@ struct Umber : Effect {
     // latency the wow is scaled down first (its shape kept), then the
     // flutter.
     void holdTransport() {
-        const double budget = 0.8 * max(0.0, reach - skew) - scrapeSeconds() * 4.0;
+        const double budget = 0.8 * max(0.0, reach - azimuthExtent()) - scrapeSeconds() * 4.0;
         const double w = wow.value() * wowReach(), f = flutter.value() * flutterReach();
         wowHeld = 1.0;
         flutterHeld = 1.0;
@@ -1348,12 +1362,16 @@ struct Umber : Effect {
         double moved = travel;
         const double scrapeNow = scrapeSeconds();
         if (scrapeNow > 0.0) moved += scrapeNow * scrapeNorm * scrapeBand.process(noise.gaussian());
-        moved = bound(moved, reach - skew);
+        moved = bound(moved, reach - max(azimuthExtent(), spreadNow + 0.5 * windowNow));
         movedNow = moved;
         readWas = readNow;
         readNow = (center + moved * rate) * factor;
-        skewWas = skewNow;
-        skewNow += skewCoef * (skew - skewNow);
+        spreadWas = spreadNow;
+        windowWas = windowNow;
+        spreadNow += skewCoef * (spread - spreadNow);
+        windowNow += skewCoef * (window - windowNow);
+        if (abs(spread - spreadNow) < 1e-12) spreadNow = spread;
+        if (abs(window - windowNow) < 1e-12) windowNow = window;
         // Dropouts: a moment's spacing, the highs lost first.
         if (dropAt >= 1.0 && dropChance > 0.0 && random.next() < dropChance) {
             dropAt = 0.0;
@@ -1463,15 +1481,22 @@ struct Umber : Effect {
                 else
                     peakInR = max(abs(x), peakInR * fall);
                 // Modulation noise: the signal's level rides a low noise.
-                double modOver = 1.0 / field;
+                // Modulation noise: the magnetization rides a low noise, a
+                // magnetized head's steady part too (DC noise: the grain
+                // stays when the signal stops).
+                double ride = 1.0;
                 if (modGain > 0.0) {
                     t.modZ1 += modCoef * (noise.bipolar() * 1.7320508075688772 - t.modZ1);
                     t.modZ2 += modCoef * (t.modZ1 - t.modZ2);
-                    modOver = (1.0 + modGain * modScale * t.modZ2) / field;
+                    ride = 1.0 + modGain * modScale * t.modZ2;
                 }
+                const double invField = 1.0 / field;
                 t.os.up(rec);
                 const double readStep = (readNow - readWas) / factor;
-                const double skewStep = (skewNow - skewWas) / factor;
+                const double spreadStep = (spreadNow - spreadWas) / factor;
+                const double windowStep = (windowNow - windowWas) / factor;
+                const bool slanted = spreadNow > 0.0 || spreadWas > 0.0;
+                const double side = c == 0 ? 1.0 : -1.0;
                 for (int k = 0; k < factor; ++k) {
                     double u = t.os.sample(k);
                     u = t.recAmp.process(u * (1.0 / kRef)) * kRef;
@@ -1487,13 +1512,25 @@ struct Umber : Effect {
                     }
                     // The flux, its highs held to what the tape can take, and
                     // NAB's lows undone.
-                    const double flux = t.edge.process((m - dcOut) * modOver, edgeCeiling);
+                    const double flux = t.edge.process((m * ride - dcOut) * invField, edgeCeiling);
                     const double played = t.play.process(flux);
                     t.at = t.at + 1 == t.ring.size() ? 0 : t.at + 1;
                     t.ring[t.at] = played;
-                    const double where = readWas + readStep * (k + 1) +
-                                         (c == 0 ? (skewWas + skewStep * (k + 1)) * hi : 0.0);
-                    const double r = readRing(t, where);
+                    const double where = readWas + readStep * (k + 1);
+                    double r = 0.0;
+                    if (!slanted) {
+                        r = readRing(t, where);
+                    } else {
+                        // Each track's gap hears its window's average, the
+                        // left half the tracks' spread later, the right
+                        // earlier.
+                        const double centre =
+                            where + side * (spreadWas + spreadStep * (k + 1)) * hi;
+                        const double width = (windowWas + windowStep * (k + 1)) * hi;
+                        for (int j = 0; j < kTaps; ++j)
+                            r += readRing(t, centre + width * ((j + 0.5) / kTaps - 0.5));
+                        r *= 1.0 / kTaps;
+                    }
                     t.os.set(k, t.reproAmp.process(r * (1.0 / kRef)) * kRef);
                 }
                 double v = t.os.down();
@@ -2504,9 +2541,9 @@ struct Umber : Effect {
         const double ceiling = edgeFor(s, nab, f.loss, hfSaturation.value());
         const double v = speedIps(s) / 15.0;
         shelf(viewTrim, recordHf.value(), min(4000.0 * v, 0.3 * hiRate), hiRate);
-        viewHead.design(s, f.loss, headBump.value(), bumpFreq.value(),
-                        azimuthCorner(azimuth.value(), s), biasTiltDb(s, bias.value()),
+        viewHead.design(s, f.loss, headBump.value(), bumpFreq.value(), biasTiltDb(s, bias.value()),
                         reproHf.value(), r);
+        const double azWindow = azimuthWindow(azimuth.value(), speedIps(s));
         const double fieldRef = f.field * dbToGain(speedFieldDb(s));
         const double levelDb = biasLevelDb(bias.value());
         for (int pass = 0; pass < 2; ++pass) {
@@ -2524,8 +2561,8 @@ struct Umber : Effect {
                 const double core = describe(amp * e * trim, f.square);
                 const double edge =
                     edgeGain(hz, 5000.0 * v, 9000.0 * v, level * trim * core, ceiling);
-                const double db =
-                    viewHead.responseDb(hz, r) + levelDb + gainToDb(trim) + gainToDb(core * edge);
+                const double db = viewHead.responseDb(hz, r) + azimuthDb(hz, azWindow) + levelDb +
+                                  gainToDb(trim) + gainToDb(core * edge);
                 const double x = hzToX(hz, 20, 20000, gx, gw), y = responseY(db);
                 if (i == 0)
                     g.moveTo(x, y);

@@ -740,10 +740,16 @@ plugin with no predecessor. Notes for maintainers:
   oversampled with the tape, the playback amp after the moving read.
 - **Glides without clicks.** Every continuous colour glides 30 ms and its
   curves are redesigned every 32 frames. A filter that switches in (the
-  head's top and azimuth low-passes, as the tape's loss or the azimuth
-  crosses 0.45 fs) always runs, so it comes in from a live state; the
-  azimuth's read offset glides per sample, interpolated across the
-  oversampled substeps like the transport's read.
+  head's top low-pass, as the tape's loss crosses 0.45 fs) always runs,
+  so it comes in from a live state; azimuth's window and spread glide per
+  frame, interpolated across the oversampled substeps like the
+  transport's read.
+- **Azimuth as the gap hears it.** A low-pass at the sinc's −3 dB point
+  skipped small angles (0 dB at 0.1°, the sinc −0.2) and overshot large
+  ones (−7.7 dB at 0.5° at 12 kHz, the sinc −4.9); one track read late
+  spent the read's reach twice as fast as splitting the spread. Averaging
+  8 reads across the window is the sinc to within 0.3 dB to 1°, and costs
+  nothing while the azimuth is 0.
 - **Low latency.** 9 samples leaves 73 µs of reach at 48 kHz; the
   default wow needs about 120 µs. The wow, then the flutter, are scaled to
   fit 80% of it (the estimate of what they need is within 3% of the

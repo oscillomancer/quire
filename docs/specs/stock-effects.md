@@ -1538,8 +1538,8 @@ mono in and out. Latency: 8 ms plus the oversampler's (456 samples at
 | `emphasis` | enum | `nab`, `iec` (not at 30 ips: AES) | | `iec` |
 | `head_bump` | % | 0..200 of a real head's, gliding | linear | 100 |
 | `bump_freq` | Hz | 30..120: the bump's peak at 15 ips, gliding; applies while `head_bump` > 0 | log | 57 |
-| `azimuth` | ° | 0..0.5: the playback head's tilt, gliding | pow 2 | 0 |
-| `head_magnetism` | % | −100..100: a magnetized record head's steady field, gliding | linear | 0 |
+| `azimuth` | ° | 0..1: the playback head's tilt, gliding | pow 2 | 0 |
+| `head_magnetism` | % | −100..100: a magnetized record head's steady field (even harmonics, DC noise), gliding | linear | 0 |
 | `dropouts` | % | 0..100: 4x² a second | pow 2 | 0 |
 | `drop_depth` | % | 0..100; applies while `dropouts` > 0 | linear | 30 |
 | `print_through` | dB | −80..−30 against the signal; −80 is off | linear | −80 |
@@ -1608,8 +1608,9 @@ crosstalk), the values are a modern machine's as judged, and say so.
   the recommended bias b and × max(0.2, 1 − 0.6(b − 1)) over it: at b = 1
   the loop is closed for any audible signal, at 0.5 it opens into an
   unbiased tape's crossover grain. `head_magnetism` adds a steady field of
-  0.25 × the reference field × its value (its offset taken out of the
-  flux), so the tape itself makes even harmonics.
+  1.5 × the reference field × its value (its offset taken out of the
+  flux), so the tape itself makes even harmonics, and its steady
+  magnetization carries the modulation noise (DC noise, below).
 - **The highs' saturation.** The flux splits at 5 kHz·v (v = ips/15)
   into lows and highs, each through two bilinear one-poles (so the two
   sum to the signal exactly); the highs are lifted by a first-order zero
@@ -1639,12 +1640,17 @@ crosstalk), the values are a modern machine's as judged, and say so.
   lower than 5 Hz, the aligned top end, a 12 dB/oct low-pass (Q 0.75) at
   30, 24, 17, 10.5 kHz by speed over the tape's loss factor where it falls
   under 0.45 fs (at 44.1 and 48 kHz the top at 30 and 15 ips is flat),
-  bias's tilt and the playback HF trim (as the record side's). Azimuth θ:
-  the gap loss of a 2 mm track read at that slant as a 12 dB/oct low-pass
-  (Q 0.6) at its −3 dB point, and the left track read late by
-  4 mm·tan θ/v (at most 0.45 of the read's reach), gliding per sample.
-  Filters that are switched out still run, so they come in from a live
-  state.
+  bias's tilt and the playback HF trim (as the record side's). Filters
+  that are switched out still run, so they come in from a live state.
+- **Azimuth** θ, in the moving read at the oversampled rate: the tilted
+  gap crosses each 2 mm track at a slant, so it hears the track spread
+  over a window of 2 mm·tan θ/v, read as the average of 8 Lagrange reads
+  across it (a sinc with its nulls); the two track centres, 4 mm apart,
+  are 4 mm·tan θ/v apart in time, the left track's window half that
+  later, the right's half earlier. Window and spread glide per frame,
+  interpolated across the oversampled steps; together they take at most
+  0.6 of the read's reach, past which both shrink together (with low
+  latency, beyond about 0.3° at 15 ips).
 - **The tape's condition.** Dropouts at 4·`dropouts`² a second, each
   `drop_depth` × (0.3 to 1) deep, 6 to 66 ms long (a raised sine), the
   right side 0.6 to 1 of the left's: the highs above 1.5 kHz·v blended
@@ -1683,8 +1689,10 @@ crosstalk), the values are a modern machine's as judged, and say so.
   curve's integration a first-order fall from 25 Hz to the standard's
   corner (and NAB's playback cut of the lows), a 12 dB/oct high-pass at
   15 Hz below; fixed, 8 dB over a modern tape's hiss at 50 Hz at 15 ips
-  IEC, 26 dB under it A-weighted. Modulation noise: the flux ×
-  (1 + n), n uniform noise through two poles at 1.5 kHz·v at −66, −61,
+  IEC, 26 dB under it A-weighted. Modulation noise: the magnetization
+  × (1 + n), its steady part from `head_magnetism` included (DC noise:
+  the grain stays when the signal stops), then that part's offset taken
+  out; n uniform noise through two poles at 1.5 kHz·v at −66, −61,
   −55 dB RMS at the fitted tapes, × `mod_noise`. Hum: the mains with its
   second and third harmonics (1, ½, ¼) at `hum` RMS against reference,
   the same in both channels, in the playback electronics.
@@ -1713,6 +1721,8 @@ scrape and modulation noise off unless said):
 | the same at 30 ips | 0.002, 0.084, 0.22, 0.84 (1.12 at +10), 2.4, 2.8 % (datasheet: 0.04 at reference, 1 % at +10, 3 % at +13) |
 | the same at 7.5 ips | 0.007, 0.20, 0.57 (0.99 at +6), 2.4 (3.2 at +10), 6.5 % (datasheet: 0.28, 1 % at +6, 3 % at +10) |
 | `tape` 9 and 5, 15 ips: 3 % reached at | about +9 and +4.5 dB |
+| `head_magnetism` 25, 50, 100 %, 1 kHz at 0 VU, amplifiers off | second harmonic −53, −47, −39 dBc; in silence with `mod_noise` at 0, DC noise −65 and −59.5 dB re reference RMS at 50 and 100 % (the SM911 sheet's DC noise: −56 dB) |
+| `azimuth` 0.1, 0.3, 0.5, 1°, 15 ips, at 12 kHz | −0.17, −1.59, −4.79, −20.7 dB (the exact sinc: −0.17, −1.61, −4.85, −21.0); left after right by 18.3, 55.0, 91.6, 183.3 µs; with low latency the same to 0.3°, then held near 0.32° |
 | second harmonic, both amplifiers at 15 %, at −3 VU | −77 dBc, rising 1 dB per dB |
 | saturation output (the most a sine gets out), 10 / 16 kHz | 30 ips +12.8 / +9.1, 15 ips +10.0 / +6.8, 7.5 ips +10 kHz −1.3, 12.5 kHz −3.5 dB re reference (datasheet 11.5 / 9.0, 10.5 / 7.5, 0.5, −3.5) |
 | a 60 Hz sine at −9 dBFS under a 2 kHz one at −24 dBFS | the 2 kHz's sidebands −34 dBc (a JA model with an AC bias carrier at 768 kHz: −27) |
