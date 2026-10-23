@@ -24,6 +24,7 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 | `marram` (`plugins/marram`) | Marram | `com.suppleaudio.marram` | `XZXx` (the player's for the id) | `Mrrm` | instrument, synthesizer |
 | `withy` (`plugins/withy`) | Withy | `com.suppleaudio.withy` | `aSho` (the player's for the id) | `Wthy` | audio-effect, chorus |
 | `pollia` (`plugins/pollia`) | Pollia | `com.suppleaudio.pollia` | `EGJQ` (the player's for the id) | `Poll` | audio-effect, phaser |
+| `umber` (`plugins/umber`) | Umber | `com.suppleaudio.umber` | `auff` (the player's for the id) | `Umbr` | audio-effect, distortion, tape |
 
 Marram is an instrument; its spec, implementation notes included, is
 `docs/specs/marram.md`.
@@ -701,6 +702,76 @@ stock plugin with no predecessor. Notes for maintainers:
   at 4 stages, 1.3 % at the defaults, 3.1 % at 24 stages with spread and
   feedback, 3.6 % with the barber pole, photocell, envelope and keep below
   on top.
+
+## 15. Tape — Umber [`umber`] (`stock-effects.md` §13)
+
+A DSP script (ADR-0047), `plugins/umber/script/umber.cpp`. A new stock
+plugin with no predecessor. Notes for maintainers:
+
+- **Fitted, not guessed.** The constants come from small fits kept with
+  the script's comments: the squareness and reference field to the
+  datasheet's third harmonic against level, the speed trims to its 1% and
+  3% points at 30, 15 and 7.5 ips, the highs' ceilings to its saturation
+  output at 10 and 16 kHz, the hiss to its A-weighted noise. Changing the
+  oxide, the amplifiers or the highs' stage moves them; recheck with
+  `plugin.umber.response` and sweeps (dsp.test: 1 kHz THD at reference
+  level, −15 dBFS peak, +4, +9, +12.5 dB; the most a 10 and a 16 kHz sine
+  get out).
+- **The highs saturate on their own.** The first version lifted the highs
+  into the oxide (the record curve's zeros), so a loud cymbal saturated
+  the whole oxide for an instant and took the mids down with it: on music
+  8 dB more distortion between 500 Hz and 4 kHz than a JA model with an AC
+  bias carrier at 768 kHz (Ferric), measured band by band against the same
+  chain at −24 dB drive. A slope limit after the oxide (the flux's
+  gradient) fixed that but aliased badly (its corners: −44 dBc at 4x for
+  a 15 kHz sine at −6 dBFS, −18 at 200%). The split (lows and highs from
+  bilinear one-poles, which sum exactly; a tanh on the highs only; lows
+  minus highs, an allpass) keeps both: the mids never meet the highs'
+  curve, and a tanh's harmonics fall fast enough (−88 dBc at 4x). Depth
+  layers (a surface and a deeper half driven by a low-passed field) were
+  tried and dropped: within 1 dB once the highs had their own stage.
+- **The oxide's step.** Jiles–Atherton's irreversible magnetization is
+  stiff when the loop is narrow (the recommended bias leaves k of 1e-5):
+  an explicit RK4 diverges. The step relaxes toward the anhysteretic value
+  by exp(−|Δh|/k) instead, exact for the curve held over the step, so it
+  is stable at any k; past |Δh|/k = 20 it sets the value directly.
+- **Amplifiers.** Both offsets have the same sign, so their second
+  harmonics add (opposite signs cancelled them to −90 dBc). They are
+  oversampled with the tape, the playback amp after the moving read.
+- **Glides without clicks.** Every continuous colour glides 30 ms and its
+  curves are redesigned every 32 frames. A filter that switches in (the
+  head's top low-pass, as the tape's loss crosses 0.45 fs) always runs,
+  so it comes in from a live state; azimuth's window and spread glide per
+  frame, interpolated across the oversampled substeps like the
+  transport's read.
+- **Azimuth as the gap hears it.** A low-pass at the sinc's −3 dB point
+  skipped small angles (0 dB at 0.1°, the sinc −0.2) and overshot large
+  ones (−7.7 dB at 0.5° at 12 kHz, the sinc −4.9); one track read late
+  spent the read's reach twice as fast as splitting the spread. Averaging
+  8 reads across the window is the sinc to within 0.3 dB to 1°, and costs
+  nothing while the azimuth is 0.
+- **Low latency.** 9 samples leaves 73 µs of reach at 48 kHz; the
+  default wow needs about 120 µs. The wow, then the flutter, are scaled to
+  fit 80% of it (the estimate of what they need is within 3% of the
+  measured peak for wow, conservative for flutter), never squashed: the
+  first version's tanh on the displacement turned deep wow into jerks
+  (the flutter band from 0.005 to 0.023% with wow alone).
+- **Block invariance.** Everything that moves (the transport's sines,
+  sways and random parts, the glides, the meters' refresh, the switch
+  fade) counts frames, not blocks; the counter and phases reset only in
+  `prepare()`. The switch clears every stage in the frame the output
+  reaches silence and feeds that frame nothing.
+- **Cost.** The oversampled loop (record amp, trim, the standard's lows,
+  the oxide, the highs' stage, the playback lows, the moving read, the
+  playback amp) is most of it, so the cost goes with `oversampling`: in
+  the dev player about 3.4% of a core at 2x, 6% at 4x, 10% at 8x, 18% at
+  16x (stereo, 48 kHz).
+- **Tests.** The suite every stock plugin has, and
+  `plugin.umber.response`: quiet sines at 1 and 10 kHz 0.00 dB, output
+  −6 dB, the drive's +6 dB without auto gain, the head bump +1.93 dB at
+  60 Hz and 0 with `head_bump` 0, the VU at 0 for a sine at reference
+  level, the third harmonic about 0.1% there and 3% at +12.5 dB, and a
+  10 kHz sine 12 dB over reference down about 3 dB (the highs' ceiling).
 
 ## 6. Engine and benchmark use
 

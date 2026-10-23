@@ -1516,7 +1516,290 @@ Factory patches: Swirl (the defaults), Classic Four, Resonant Sweep,
 Hollow Twelve, Photocell Throb, Lamp Vibrato, Endless Rise, Falling
 Spiral, Envelope Funk, Two-Bar Sweep, Stepped Notches, Bass Phase.
 
-## 13. Acceptance
+## 13. Tape — "Umber" [`umber`]
+
+A tape machine, modelled part by part from the oxide up rather than copied
+from any one machine: from the faint rounding of peaks a well-kept modern
+machine gives a mix to a worn, underbiased, warbling cassette, written as a
+DSP script (ADR-0047: `plugins/umber/script/umber.cpp`). Main stereo or
+mono in and out. Latency: 8 ms plus the oversampler's (456 samples at
+48 kHz with 4x), or with `latency` low 9 samples at 44.1 and 48 kHz.
+Tail: with print-through on, one turn at the speed plus 0.1 s; otherwise
+none (hiss, hum and DC noise are the machine's own, not the input's).
+
+| key | type | range | curve | default |
+|---|---|---|---|---|
+| `drive` | dB | −24..24: the record level; at 0 a sine at −18 dBFS RMS records at reference level, smoothed 30 ms | linear | 0 |
+| `tape` | dB | 5..13: the tape's headroom, its 3% point over reference (12.5 modern, 9 classic, 5 early), gliding 30 ms | linear | 12.5 |
+| `bias` | % | 50..150 of the recommended bias, gliding 30 ms | linear | 100 |
+| `record_amp` | % | 0..100: the class-A record amplifier's drive, gliding | linear | 15 |
+| `hf_saturation` | % | 0..200: the highs' ceiling, ×2^(1 − x) (100 the tape's own), gliding | linear | 100 |
+| `record_hf` | dB | −6..6: the record side's HF trim, a shelf about 4 kHz at 15 ips (following the speed), gliding | linear | 0 |
+| `auto_gain` | bool | the playback level falls as the drive rises; toggling crossfades over 20 ms | | on |
+| `speed` | enum | `ips30`, `ips15`, `ips7_5`, `ips3_75` | | `ips15` |
+| `emphasis` | enum | `nab`, `iec` (not at 30 ips: AES) | | `iec` |
+| `head_bump` | % | 0..200 of a real head's, gliding | linear | 100 |
+| `bump_freq` | Hz | 30..120: the bump's peak at 15 ips, gliding; applies while `head_bump` > 0 | log | 57 |
+| `azimuth` | ° | 0..1: the playback head's tilt, gliding | pow 2 | 0 |
+| `head_magnetism` | % | −100..100: a magnetized record head's steady field (even harmonics, DC noise), gliding | linear | 0 |
+| `dropouts` | % | 0..100: 4x² a second | pow 2 | 0 |
+| `drop_depth` | % | 0..100; applies while `dropouts` > 0 | linear | 30 |
+| `print_through` | dB | −80..−30 against the signal, smoothed 20 ms; −80 is off | linear | −80 |
+| `crosstalk` | dB | −80..−20, smoothed 20 ms; −80 is off | linear | −80 |
+| `wow` | % | 0..2: peak speed error at 15 ips, slow (× √(15/ips) at other speeds) | pow 3 | 0.02 |
+| `flutter` | % | 0..1: peak speed error at 15 ips, fast (× √(15/ips)) | pow 3 | 0.02 |
+| `scrape` | % | 0..100: kilohertz jitter, 380 ns RMS × x^1.25 at 15 ips | pow 2 | 10 |
+| `repro_amp` | % | 0..100: the class-A playback amplifier's drive, gliding | linear | 15 |
+| `repro_hf` | dB | −6..6: the playback side's HF trim, as `record_hf`'s, gliding | linear | 0 |
+| `hiss` | dB | −30..12 against the tape's own noise, smoothed 20 ms; −30 is off | linear | −30 |
+| `mod_noise` | dB | −30..12 against the tape's own modulation noise, smoothed 20 ms; −30 is off | linear | 0 |
+| `hum` | dB | −100..−40 against reference level, smoothed 20 ms; −100 is off | linear | −100 |
+| `mains` | enum | `hz50`, `hz60`; applies while `hum` is on | | `hz60` |
+| `output` | dB | −24..24, smoothed 20 ms | linear | 0 |
+| `oversampling` | enum | `x1`, `x2`, `x4`, `x8`, `x16` (restarts) | | `x4` |
+| `latency` | enum | `full`, `low` (restarts) | | `full` |
+| `vu` | dB | readonly: the record level against reference, as a VU meter reads it | | |
+| `headroom` | dB | readonly: the 3% limit over the loudest recent peak field, held 0.3 s | | |
+| `saturation` | dB | readonly: what the oxide took off the loudest recent peaks | | |
+
+The model was fitted to published data for current studio tape (RTM
+SM911's and ATR Master Tape's datasheets: third harmonic at reference
+level 0.04, 0.10 and 0.28% at 30, 15 and 7.5 ips, 1% at +10, +9 and +6 dB,
+3% at +13, +12.5 and +10 dB, saturation output at 10 kHz 11.5, 10.5 and
+0.5 dB and at 16 kHz 9.0 and 7.5 (12.5 kHz −3.5 at 7.5 ips) over
+reference, A-weighted noise about 60 dB under it, print-through −56 dB),
+and to the common figures for heads and transports (a head bump near
+4 Hz per ips, 0.03 to 0.05% weighted wow and flutter on a good machine).
+Where nothing was published (the amplifiers' harmonics, scrape's level,
+crosstalk), the values are a modern machine's as judged, and say so.
+
+- **Calibration.** Reference level (0 VU, the datasheets' 320 nWb/m) is
+  a sine at −18 dBFS RMS at `drive` 0. The field it records at is, at the
+  three fitted tapes (12.5, 9, 5 dB), 0.1978, 0.2969 and 0.4440 in the
+  oxide's units, times −0.7, −0.2, +2.75 and +5.0 dB at 30, 15, 7.5 and
+  3.75 ips: the tape's limit at mid frequencies falls as the wavelength
+  shortens. The output is divided by the same field, so a quiet signal
+  keeps its level; `auto_gain` divides by the drive's gain as well.
+- **The tape.** Between the fitted tapes the constants follow the line
+  through them (the field and pinning in log, squareness, hiss and
+  modulation noise and the loss factor 1, 1.1, 1.3 linearly in the
+  headroom); the switch between them glides, so `tape` is automatable.
+- **Amplifiers.** Each is (tanh(a·x + o) − tanh o)/(a·(1 − tanh² o)), x
+  the signal over the reference peak, a = 0.2·amount³, o 0.35 (record)
+  and 0.25 (playback): unit gain for small signals, second harmonic about
+  −80 dBc each at reference level at 15%, −47 at 50%, −30 at 100%,
+  rising 1 dB per dB; a 2 Hz coupling takes out the offset's DC. Both run
+  oversampled: the record amp before the record curve, the playback amp
+  after the moving read. At 0% a stage passes the input, its coupling
+  still following it.
+- **Record and playback equalisation.** The record side's HF trim
+  (first-order shelf, geometric centre 4 kHz·v, v = ips/15: each speed's
+  equalisation has its own trim, so its reach follows the wavelength; at
+  most 0.3 fs'), then the standard's lows:
+  with NAB below 30 ips, the 3180 µs lift, held to +10 dB below 15.8 Hz,
+  which playback undoes exactly. The standard's highs act through the
+  highs' ceiling (below). fs' is the oversampled rate; sections are
+  first-order, bilinear with both corners prewarped.
+- **The oxide.** The anhysteretic magnetization is tanh(u + q·u³), the
+  two-state (single-domain needle) Langevin form, q the tape's squareness
+  (0.24, 0.16, 0.08 at the fitted tapes); below |u + q·u³| = 0.3 its series
+  to the ninth power stands in (within 2e-8). Irreversible magnetization is
+  pinned until the field moves toward the curve, then relaxes to it by
+  exp(−|Δh|/k), an exact step that stays stable however narrow the loop; a
+  reversible part (0.3 of the gap) follows at once. k is 1e-5, 3e-5, 1e-4
+  at the fitted tapes (×3 at 7.5 ips, ×8 at 3.75), × 10^(5(1 − b)) under
+  the recommended bias b and × max(0.2, 1 − 0.6(b − 1)) over it: at b = 1
+  the loop is closed for any audible signal, at 0.5 it opens into an
+  unbiased tape's crossover grain. `head_magnetism` adds a steady field of
+  1.5 × the reference field × its value (its offset taken out of the
+  flux), so the tape itself makes even harmonics, and its steady
+  magnetization carries the modulation noise (DC noise, below).
+- **The highs' saturation.** The flux splits at 5 kHz·v (v = ips/15)
+  into lows and highs, each through two bilinear one-poles (so the two
+  sum to the signal exactly); the highs are lifted by a first-order zero
+  at 9 kHz·v, meet c·tanh(x/c), and are lowered again; output = lows −
+  highs, an allpass at low level. c, in reference peaks, is 1.6, 3.4,
+  1.32, 0.54 by speed, × the NAB/IEC curves' ratio at 10 kHz with NAB
+  (+2.8 dB at 15 ips), ÷ the tape's loss², × 2^(1 − `hf_saturation`):
+  fitted to the saturation outputs above. Because the mids never pass the
+  highs' curve, a loud cymbal saturates the highs alone (with the highs
+  lifted into the oxide instead, it squashed the mids with it: 8 dB more
+  distortion between 500 Hz and 4 kHz on music).
+- **Bias** also tilts the highs (a high shelf at 5 kHz·v, Q 0.6) by ΔS ×
+  (1 − b)/0.3 under it, back to 0 at b = 0.4, and −ΔS × (b − 1)/0.3 over
+  it, ΔS 1.5, 3, 6.5, 9 dB by speed (the datasheet's ΔS10); every
+  frequency falls 6((0.7 − b)/0.2)² dB below b = 0.7 and 0.8(b − 1)/0.5 dB
+  over 1.
+- **The playback head.** A bump at `bump_freq`·v of 1.5, 2.0, 2.5,
+  2.75 dB by speed × `head_bump` (a peak of Q 1.2 and 1.07 × that gain, so
+  that with the rest it peaks there), and the contour effect's undulation
+  above it, one every bump frequency, smaller each time: a dip at 2 times
+  (Q 1.8, −0.8 ×, about −1 dB at 15 ips), a ripple at 3 times (Q 3.4,
+  +0.38 ×, about +0.4 dB), a second dip at 4 times (Q 3.5, −0.15 ×, about
+  −0.2 dB). Bumps are larger at the slower speeds as machines aligned at
+  100 Hz measure (at 30 ips the alignment trims the bump and leaves the
+  roll-off below it). Then a 12 dB/oct high-pass
+  (Q 0.75) at 0.36 × the bump's frequency × min(1, `head_bump`) and no
+  lower than 5 Hz, the aligned top end, a 12 dB/oct low-pass (Q 0.75) at
+  30, 24, 17, 10.5 kHz by speed over the tape's loss factor where it falls
+  under 0.45 fs (at 44.1 and 48 kHz the top at 30 and 15 ips is flat),
+  bias's tilt and the playback HF trim (as the record side's). Filters
+  that are switched out still run, so they come in from a live state.
+- **Azimuth** θ, in the moving read at the oversampled rate: the tilted
+  gap crosses each 2 mm track at a slant, so it hears the track spread
+  over a window of 2 mm·tan θ/v, read as the average of 8 Lagrange reads
+  across it (a sinc with its nulls); the two track centres, 4 mm apart,
+  are 4 mm·tan θ/v apart in time, the left track's window half that
+  later, the right's half earlier. Window and spread glide per frame,
+  interpolated across the oversampled steps; together they take at most
+  0.6 of the read's reach, past which both shrink together (with low
+  latency, beyond about 0.3° at 15 ips), in the response plot too.
+- **The tape's condition.** Dropouts at 4·`dropouts`² a second, each
+  `drop_depth` × (0.3 to 1) deep, 6 to 66 ms long (a raised sine), the
+  right side 0.6 to 1 of the left's (one speck crosses both tracks): the
+  tape lifts up to 40 µm × the depth, and its spacing loss (54.6 dB per
+  wavelength of lift, corner v/(2πd)) sweeps down from the top and back as
+  two one-poles at 0.76 of that corner; the level down up to 6 dB with it
+  (flux that is missing). The deepest event at 15 ips: 10 kHz −40 dB,
+  1 kHz −9, 200 Hz −5. Print-through: the played signal low-passed at
+  3 kHz·v and kept at about 12 kHz, read one turn of a half-wound
+  10.5-inch reel later (0.534 m/v: 1.4 s at 15 ips), through a band-pass
+  at 1 kHz·v (Q 0.5: the stray field reaches the next layer best at
+  wavelengths about 2π times the base film's thickness), at
+  `print_through`'s level, +1.33 dB per dB of `tape` under 12.5 (softer
+  tapes print more: 10 dB more at 5).
+  Crosstalk: the lows (one-pole at 300 Hz·v) moved between the tracks,
+  left + g·(low right − low left) and the reverse, so a centred sound keeps
+  its level.
+- **Transport.** Wow and flutter grow as the tape slows, as machines'
+  specifications do (about 0.04, 0.05, 0.08% at 30, 15, 7.5 ips): their
+  knobs are the speed error at 15 ips, × √(15/ips). The speed error is
+  `wow` × (0.5 sin(reel, 0.6 Hz·v) +
+  0.25 sin(take-up, 0.5 Hz·v) + 0.3 wander) + `flutter` × (0.45
+  sin(capstan, 4.85 Hz·v) + 0.2 sin(idler, 11 Hz·v) + 0.35 friction); each
+  sine's depth drifts toward 1 ± 0.45 (uniform), drawn every 0.25 s, gliding
+  over 0.7 s; the wander is noise held 32 frames through two poles at
+  0.5 Hz·v, the friction the same between 6 and 25 Hz·v, each scaled to
+  unit RMS. Its integral (leaking over 4 s) is the tape's displacement;
+  scrape adds 380 ns × `scrape`^1.25 × √(15/ips) RMS of noise through a
+  band-pass at 3 kHz (Q 0.9). The displacement is bounded softly (linear to
+  80% of the read's reach, then easing to it). The read's reach is 8 ms
+  less 1.5 samples, or with low latency 9 samples less the oversampler's
+  less 1.5; what the wow and flutter need (their parts' displacements at
+  the deepest sway, the random parts' at three times their RMS) is fitted
+  to 80% of it by scaling the wow, then the flutter, keeping their shapes.
+  The read is a 4-point Lagrange at the oversampled rate, exact (a whole
+  sample) when nothing moves. The sines turn as rotations, renormalized
+  every 32 frames, on a frame count only `prepare()` resets.
+- **Noise.** Hiss: white noise through the playback curve (the standard's
+  zero at 1/(2πτ), τ 17.5 µs at 30 ips, IEC 35, 70, 90 µs, NAB 50, 50,
+  90 µs; NAB's inverse lift) and a one-pole loss at 10 kHz·v, scaled so
+  that through the IEC curve and the aligned top it measures, A-weighted,
+  −63, −60.5, −58, −55 dB under reference by speed, +0, +3.5, +8.5 dB at
+  the fitted tapes (NAB, with more lift of the highs on playback, comes
+  out 2.5 dB noisier at 15 ips), × `hiss`. With it, the playback
+  electronics' own noise: white at the head, so through the playback
+  curve's integration a first-order fall from 25 Hz to the standard's
+  corner (and NAB's playback cut of the lows), a 12 dB/oct high-pass at
+  15 Hz below; fixed, 8 dB over a modern tape's hiss at 50 Hz at 15 ips
+  IEC, 26 dB under it A-weighted. Modulation noise: the magnetization
+  × (1 + n), its steady part from `head_magnetism` included (DC noise:
+  the grain stays when the signal stops), then that part's offset taken
+  out; n uniform noise through two poles at 1.5 kHz·v at −66, −61,
+  −55 dB RMS at the fitted tapes, × `mod_noise`. Hum, the same in both
+  channels, at `hum` RMS against reference: the power supply's ripple on
+  the mains' even harmonics (2, 4 … 16: 1, 0.45, 0.30, 0.22, 0.14, 0.11,
+  0.07, 0.05, a buzz into the low kilohertz) and the playback head's
+  magnetic pickup on the odd ones (1, 3, 5, 7: 0.6, 0.21, 0.09, 0.036),
+  that part through NAB's playback lows. The balance is fixed and a
+  little uneven, as a machine's is (not random per instance: offline
+  renders must match the live output). Harmonics are rotations of the
+  fundamental, renormalized every 32 frames.
+- **Changes.** `drive` glides per sample over 30 ms; `output`,
+  `print_through`, `crosstalk`, `hiss`, `hum` and `mod_noise` over 20 ms,
+  and `auto_gain` crossfades over 20 ms. The settings marked gliding move
+  30 ms toward their values, the curves redesigned every 32 frames while
+  they move (the hiss's calibration when the tape lands). `wow`,
+  `flutter` and `scrape` step; a dropout takes its depth as it begins. A
+  new `speed` or `emphasis` fades the output out over 4 ms; at silence
+  the new curves go in and every stage starts clear; the input fades in
+  over 4 ms, so the tape fills again from nothing (about 16 ms of silence
+  at full latency). A choice changed again meanwhile switches once more.
+- **Oversampling.** As `oversampling` says, at any session rate (the
+  user does the arithmetic; the editor shows the rate inside and that
+  176 to 384 kHz is best); linear phase at full latency, minimum phase
+  at low.
+- **Readouts.** `vu`: the record level rectified through two poles of
+  65 ms, × π/(2√2), against reference RMS; `headroom`: the field at 3%
+  (the tape's headroom over its reference field; the midband's, the
+  highs having their own ceiling) over the peak field (oversampled), held
+  0.3 s; `saturation`: the field over the flux at
+  the peaks above 5% of the limit, in dB, decaying over 0.3 s.
+
+Measured (dev player and the built plugin, 48 kHz, 4x, wow, flutter,
+scrape and modulation noise off unless said):
+
+| check | result |
+|---|---|
+| third harmonic (THD), 1 kHz, 15 ips IEC, at −20, 0, +4, +9, +12.5, +13 dB re reference | 0.002, 0.094, 0.25, 0.97, 2.8, 3.2 % (datasheet: —, 0.10, 0.25, 1.0, 3.0 at +12.5) |
+| the same at 30 ips | 0.002, 0.084, 0.22, 0.84 (1.12 at +10), 2.4, 2.8 % (datasheet: 0.04 at reference, 1 % at +10, 3 % at +13) |
+| the same at 7.5 ips | 0.007, 0.20, 0.57 (0.99 at +6), 2.4 (3.2 at +10), 6.5 % (datasheet: 0.28, 1 % at +6, 3 % at +10) |
+| `tape` 9 and 5, 15 ips: 3 % reached at | about +9 and +4.5 dB |
+| `head_magnetism` 25, 50, 100 %, 1 kHz at 0 VU, amplifiers off | second harmonic −53, −47, −39 dBc; in silence with `mod_noise` at 0, DC noise −65 and −59.5 dB re reference RMS at 50 and 100 % (the SM911 sheet's DC noise: −56 dB) |
+| `azimuth` 0.1, 0.3, 0.5, 1°, 15 ips, at 12 kHz | −0.17, −1.59, −4.79, −20.7 dB (the exact sinc: −0.17, −1.61, −4.85, −21.0); left after right by 18.3, 55.0, 91.6, 183.3 µs; with low latency the same to 0.3°, then held near 0.32° |
+| second harmonic, both amplifiers at 15 %, at −3 VU | −77 dBc, rising 1 dB per dB |
+| saturation output (the most a sine gets out), 10 / 16 kHz | 30 ips +12.8 / +9.1, 15 ips +10.0 / +6.8, 7.5 ips +10 kHz −1.3, 12.5 kHz −3.5 dB re reference (datasheet 11.5 / 9.0, 10.5 / 7.5, 0.5, −3.5) |
+| a 60 Hz sine at −9 dBFS under a 2 kHz one at −24 dBFS | the 2 kHz's sidebands −34 dBc (a JA model with an AC bias carrier at 768 kHz: −27) |
+| distortion on two test mixes (peaks −3 dBFS) by band, 500 Hz to 4 kHz | 24 to 28 dB under the music, as that JA model gives (23 to 28); with the highs lifted into the oxide instead, 13 to 18 |
+| aliasing: a sine's largest other component, 20 Hz to 20 kHz; 15 kHz at −6 dBFS / 18 kHz at −9 / 9 kHz at 7.5 ips +6 dB drive | 1x −9, 2x −44, 4x −98, 8x −108 dBc / 4x −94 / 4x −56, 8x −99; 5 kHz at 0 dBFS with +12 dB drive: 4x −43, 8x −83 |
+| quiet sines (−35 dBFS), 15 ips | 0.00 dB at 1 and 10 kHz; +1.93 dB at 60 Hz |
+| the head, quiet noise: peak, dip, ripple, second dip | 15 ips +1.9 dB near 57 Hz, −1.0 at 115, +0.4 at 170, −0.2 at 230; 30 ips +1.5 at 115, −12.6 dB at 20 Hz; 7.5 ips +2.5 at 30 |
+| `repro_hf` +6 dB at 2, 4, 8 kHz | 7.5 ips +3.0, +4.8, +5.8; 15 ips +1.3, +3.1, +5.1; 30 ips +0.4, +1.3, +3.6 dB |
+| `hum` −60 dB, 60 Hz | −60.0 dB re reference RMS; 120 Hz −63, 60 Hz −67, 240 Hz −69, 360 Hz −73 … 960 Hz −89; NAB 60 Hz −69 |
+| hiss at 0 dB, A-weighted (dBFS) | −78.5 (15 ips IEC), −76.0 (NAB), −81.0 (30 ips), −64.5 (`tape` 5, 3.75 ips) |
+| the electronics' noise in the floor, 20–60 / 60–200 Hz / above 200 Hz | +10.5 / +4 / 0 dB at 15 ips IEC (−96.1, −97.9 dBFS); +11.7 / +5.3 at 30 ips; +1 / 0 at 3.75 ips, where the tape's hiss covers it |
+| wow and flutter at the defaults, a 3 kHz tone | 0.013 % RMS, 0.038 % peak at 15 ips (RMS 0.010 at 30, 0.021 at 7.5, 0.027 at 3.75); with low latency 0.011 % RMS (the wow held to 40 %); wow 0.5 % alone, low latency: scaled, the flutter band 0.000 % |
+| scrape, sidebands 100 Hz to 5 kHz off a 10 kHz tone (modulation noise on) | −60 dBc at 10 % (15 ips), −63 (30 ips); −48 at 30 %; −43 at 50 %; −35 at 100 % |
+| the Mastering patch on two test mixes (peaks −3 dBFS) | the peaks rounded 0.6 and 1.4 dB, the nonlinear part 36 and 31 dB under the music |
+| automation: each parameter jumped mid-sine | no step above the screen's threshold (largest excess 0.010, wow to 2 %) |
+| cost (dev player, stereo, 48 kHz) | 3.4 % of a core at 2x, 5.5 to 6 % at 4x, 9.3 to 10 % at 8x, 16 to 18 % at 16x |
+| latency | 456 samples at 48 kHz (4x, full), 9 with `latency` low |
+| block sizes (`plugin.umber.blocks`) | bit-identical |
+
+Editor (1200 × 880): the machine's face, with the supply and take-up
+reels turning at the tape's speed (their packs trading tape over a
+30-minute reel), the tape over erase, record and play heads and between
+the capstan and its roller, two VU meters with a peak lamp for the 3%
+limit, and the speed, standard, tape and oversampling. Record: drive,
+tape and bias, the amplifier, HF saturation, the record HF trim and the
+output; the headroom and the peaks' rounding; auto gain. Heads and tape:
+the bump and its frequency, azimuth, head magnetism, dropouts and their
+depth, print-through, crosstalk. Magnetism, the centre: a scope of the
+field recorded (the record level, held back by the latency) against the
+flux played back (the playback side before the output's level), both
+low-passed at 2 kHz and taken at about 8 kHz, the last 384 points drawn
+as straight lines in 24 runs brightening to the newest, with a lamp at
+the newest; each axis scales to the trail on its own (up at once, down
+over about half a second), with the reference level and the tape's 3%
+point marked when the field reaches them, and the trail fades when the
+input stops. Every control reaches it: the oxide's curve and loop, the
+amplifiers' bend, the head bump's phase, the transport's motion, the
+noise. Dragged across, the drive; up and down, the bias. Under it the
+oversampling (with the rate inside and the best range) and latency.
+Playback: speed, emphasis, the response at −20 VU and at +10 VU (the
+head, bias's tilt and the trims, each frequency's describing gain
+through the oxide's curve and the highs' ceiling), the playback
+amplifier and HF trim, hiss and modulation noise. Transport: wow,
+flutter, scrape and hum, the tape's displacement over four seconds
+(with what the wow is held to at low latency), the mains. The header's
+mark is a reel with an umber pack.
+
+Factory patches: Mastering, Mix Bus, Peak Rounding, Tracking, Hot Drums,
+Fat Bass, Saturated, Warm Electronics, Underbiased, Cassette, Worn
+Machine, Warped, Clean Transfer; on a test mix within 0.9 LU of the dry
+signal, on drums down to −1.7 LU for the heaviest.
+
+## 14. Acceptance
 
 A plugin is done when its tests, the CLAP validator, the RT sanitizer run,
 a REAPER load and automation check, and its skill page exist.

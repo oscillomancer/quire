@@ -13,8 +13,8 @@ Yarrow (`yarrow`, the EQ), Sundew (`sundew`, the compressor), Treeline
 (`hickory`, the stereo utility), Sorrel (`sorrel`, the gate), Teasel
 (`teasel`, the saturation), Bracken (`bracken`, the delay), Ghyll
 (`ghyll`, the reverb), Lichen (`lichen`, the analyzer), Marram (`marram`,
-the synthesizer), Withy (`withy`, the chorus) and Pollia (`pollia`, the
-phaser). Orrery, the hand-written synthesizer
+the synthesizer), Withy (`withy`, the chorus), Pollia (`pollia`, the
+phaser) and Umber (`umber`, the tape machine). Orrery, the hand-written synthesizer
 Marram replaced, was removed on 2026-10-21; git history has it.
 
 `common/` holds the shared semantic-parameters extension

@@ -23,6 +23,7 @@ player, and every check the other stock plugins have.
 | `marram` | Marram, the synthesizer (in progress: `docs/specs/marram.md`) | `com.suppleaudio.marram` |
 | `withy` | Withy, the chorus | `com.suppleaudio.withy` |
 | `pollia` | Pollia, the phaser | `com.suppleaudio.pollia` |
+| `umber` | Umber, the tape machine | `com.suppleaudio.umber` |
 
 ## Files
 

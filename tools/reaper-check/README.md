@@ -129,6 +129,7 @@ include startup ramps.
 | `lichen` | Lichen | Target | −30 / −5 LUFS | envelope reload + unchanged audio |
 | `marram` | Marram | Output | 0 / −12 dB | −12 ±1 dB |
 | `withy` | Withy | Output | 0 / −12 dB | −12 ±1 dB |
+| `umber` | Umber | Output | 0 / −12 dB | −12 ±1 dB |
 
 Continuous values use ADR-0010's normalized CLAP domain. The table keeps those
 values explicit. Add a plugin in a few lines in `CASES`
