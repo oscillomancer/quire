@@ -1532,7 +1532,7 @@ mono in and out. Latency: 8 ms plus the oversampler's (456 samples at
 | `bias` | % | 50..150 of the recommended bias, gliding 30 ms | linear | 100 |
 | `record_amp` | % | 0..100: the class-A record amplifier's drive, gliding | linear | 15 |
 | `hf_saturation` | % | 0..200: the highs' ceiling, ×2^(1 − x) (100 the tape's own), gliding | linear | 100 |
-| `record_hf` | dB | −6..6: the record side's HF trim, a shelf about 4 kHz, gliding | linear | 0 |
+| `record_hf` | dB | −6..6: the record side's HF trim, a shelf about 4 kHz at 15 ips (following the speed), gliding | linear | 0 |
 | `auto_gain` | bool | the playback level falls as the drive rises | | on |
 | `speed` | enum | `ips30`, `ips15`, `ips7_5`, `ips3_75` | | `ips15` |
 | `emphasis` | enum | `nab`, `iec` (not at 30 ips: AES) | | `iec` |
@@ -1548,7 +1548,7 @@ mono in and out. Latency: 8 ms plus the oversampler's (456 samples at
 | `flutter` | % | 0..1: peak speed error, fast | pow 3 | 0.02 |
 | `scrape` | % | 0..100: kilohertz jitter, 120 ns RMS at 100% at 15 ips | pow 2 | 10 |
 | `repro_amp` | % | 0..100: the class-A playback amplifier's drive, gliding | linear | 15 |
-| `repro_hf` | dB | −6..6: the playback side's HF trim, gliding | linear | 0 |
+| `repro_hf` | dB | −6..6: the playback side's HF trim, as `record_hf`'s, gliding | linear | 0 |
 | `hiss` | dB | −30..12 against the tape's own noise; −30 is off | linear | −30 |
 | `mod_noise` | dB | −30..12 against the tape's own modulation noise; −30 is off | linear | 0 |
 | `hum` | dB | −100..−40 against reference level; −100 is off | linear | −100 |
@@ -1590,7 +1590,9 @@ crosstalk), the values are a modern machine's as judged, and say so.
   oversampled: the record amp before the record curve, the playback amp
   after the moving read.
 - **Record and playback equalisation.** The record side's HF trim
-  (first-order shelf, geometric centre 4 kHz), then the standard's lows:
+  (first-order shelf, geometric centre 4 kHz·v, v = ips/15: each speed's
+  equalisation has its own trim, so its reach follows the wavelength; at
+  most 0.3 fs'), then the standard's lows:
   with NAB below 30 ips, the 3180 µs lift, held to +10 dB below 15.8 Hz,
   which playback undoes exactly. The standard's highs act through the
   highs' ceiling (below). fs' is the oversampled rate; sections are
@@ -1624,9 +1626,15 @@ crosstalk), the values are a modern machine's as judged, and say so.
   it, ΔS 1.5, 3, 6.5, 9 dB by speed (the datasheet's ΔS10); every
   frequency falls 6((0.7 − b)/0.2)² dB below b = 0.7 and 0.8(b − 1)/0.5 dB
   over 1.
-- **The playback head.** A bump at `bump_freq`·v (Q 1.2) of 1.2, 1.6,
-  2.0, 2.2 dB by speed × `head_bump`, a dip at 2.1 times it (Q 2, −0.4 ×
-  the bump) and a ripple at 3.4 times (Q 3, +0.12 ×), a 12 dB/oct high-pass
+- **The playback head.** A bump at `bump_freq`·v of 1.5, 2.0, 2.5,
+  2.75 dB by speed × `head_bump` (a peak of Q 1.2 and 1.07 × that gain, so
+  that with the rest it peaks there), and the contour effect's undulation
+  above it, one every bump frequency, smaller each time: a dip at 2 times
+  (Q 1.8, −0.8 ×, about −1 dB at 15 ips), a ripple at 3 times (Q 3.4,
+  +0.38 ×, about +0.4 dB), a second dip at 4 times (Q 3.5, −0.15 ×, about
+  −0.2 dB). Bumps are larger at the slower speeds as machines aligned at
+  100 Hz measure (at 30 ips the alignment trims the bump and leaves the
+  roll-off below it). Then a 12 dB/oct high-pass
   (Q 0.75) at 0.36 × the bump's frequency × min(1, `head_bump`) and no
   lower than 5 Hz, the aligned top end, a 12 dB/oct low-pass (Q 0.75) at
   30, 24, 17, 10.5 kHz by speed over the tape's loss factor where it falls
@@ -1705,7 +1713,9 @@ scrape and modulation noise off unless said):
 | a 60 Hz sine at −9 dBFS under a 2 kHz one at −24 dBFS | the 2 kHz's sidebands −34 dBc (a JA model with an AC bias carrier at 768 kHz: −27) |
 | distortion on two test mixes (peaks −3 dBFS) by band, 500 Hz to 4 kHz | 24 to 28 dB under the music, as that JA model gives (23 to 28); with the highs lifted into the oxide instead, 13 to 18 |
 | aliasing: a sine's largest other component, 20 Hz to 20 kHz; 15 kHz at −6 dBFS / 18 kHz at −9 / 9 kHz at 7.5 ips +6 dB drive | 1x −9, 2x −44, 4x −98, 8x −108 dBc / 4x −94 / 4x −56, 8x −99; 5 kHz at 0 dBFS with +12 dB drive: 4x −43, 8x −83 |
-| quiet sines (−35 dBFS), 15 ips | 0.00 dB at 1 and 10 kHz; +1.56 dB at 60 Hz |
+| quiet sines (−35 dBFS), 15 ips | 0.00 dB at 1 and 10 kHz; +1.93 dB at 60 Hz |
+| the head, quiet noise: peak, dip, ripple, second dip | 15 ips +1.9 dB near 57 Hz, −1.0 at 115, +0.4 at 170, −0.2 at 230; 30 ips +1.5 at 115, −12.6 dB at 20 Hz; 7.5 ips +2.5 at 30 |
+| `repro_hf` +6 dB at 2, 4, 8 kHz | 7.5 ips +3.0, +4.8, +5.8; 15 ips +1.3, +3.1, +5.1; 30 ips +0.4, +1.3, +3.6 dB |
 | hiss at 0 dB, A-weighted (dBFS) | −78.5 (15 ips IEC), −76.0 (NAB), −81.0 (30 ips), −64.5 (`tape` 5, 3.75 ips) |
 | wow and flutter at the defaults, a 3 kHz tone | 0.013 % RMS, 0.038 % peak; with low latency 0.011 % RMS (the wow held to 40 %); wow 0.5 % alone, low latency: scaled, the flutter band 0.000 % |
 | scrape, sidebands 100 Hz to 5 kHz off a 10 kHz tone | −65 dBc at 10 % (15 ips), −68 (30 ips); −56 at 30 %; −45 at 100 % |

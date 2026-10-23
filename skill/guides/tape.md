@@ -13,11 +13,11 @@ physical values under `params`; a merge changes only the keys it names.
 | `bias` | %, 50…150 of the recommended bias: under is brighter and grittier (distortion at low levels too), over darker and cleaner | 100 |
 | `record_amp` | %, 0…100: the class-A record amplifier: second harmonic, about −80 dB at reference at 15%, −47 at 50%, −30 at 100% | 15 |
 | `hf_saturation` | %, 0…200: how soon the highs saturate: 100 the tape's own, 200 6 dB sooner, 0 6 dB later; the response stays flat | 100 |
-| `record_hf` | dB, −6…6: the record side's HF trim: up writes the highs harder (brighter, and they saturate sooner) | 0 |
+| `record_hf` | dB, −6…6: the record side's HF trim, a shelf about 4 kHz at 15 ips that follows the speed (2 kHz at 7.5, 8 at 30): up writes the highs harder (brighter, and they saturate sooner) | 0 |
 | `auto_gain` | on: the playback level falls as the drive rises, so the level holds | on |
 | `speed` | `ips30`, `ips15`, `ips7_5`, `ips3_75` (inches per second) | ips15 |
 | `emphasis` | `nab`, `iec`: the equalisation standard; not at 30 ips (AES) | iec |
-| `head_bump` | %, 0…200: the playback head's swell in the lows; 100 is a real head's | 100 |
+| `head_bump` | %, 0…200: the playback head's swell in the lows and the ripples above it; 100 is a real head's (+2 dB at 15 ips, +1.5 at 30, +2.5 at 7.5) | 100 |
 | `bump_freq` | Hz, 30…120: where the bump peaks at 15 ips (doubles at 30, halves at 7.5) | 57 |
 | `azimuth` | degrees, 0…0.5: the playback head's tilt: highs lost, the two tracks apart in time; 0.02 a well-aligned machine | 0 |
 | `head_magnetism` | %, −100…100: a magnetized record head: even harmonics from the tape itself | 0 |
@@ -29,7 +29,7 @@ physical values under `params`; a merge changes only the keys it names.
 | `flutter` | %, 0…1: faster pitch waver (capstan, idler, friction) | 0.02 |
 | `scrape` | %, 0…100: the tape's vibration over the heads, a kilohertz jitter that roughens the highs; 100 a worn transport | 10 |
 | `repro_amp` | %, 0…100: the class-A playback amplifier, as `record_amp` | 15 |
-| `repro_hf` | dB, −6…6: the playback side's HF trim (brighter or darker, saturation unchanged) | 0 |
+| `repro_hf` | dB, −6…6: the playback side's HF trim, placed as `record_hf`'s (brighter or darker, saturation unchanged) | 0 |
 | `hiss` | dB, −30…12 against the real tape's noise at this speed; −30 is off | −30 (off) |
 | `mod_noise` | dB, −30…12 against the real tape's modulation noise (grain riding the signal); −30 is off | 0 (real) |
 | `hum` | dB, −100…−40 against the reference level: mains hum in the playback electronics; −100 is off | −100 (off) |

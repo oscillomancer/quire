@@ -97,6 +97,8 @@ struct Section {
 };
 
 // A first-order shelf of `db` in the highs, centred (geometrically) on hz.
+// The machine's HF trims centre on 4 kHz per 15 ips: each speed's
+// equalisation has its own, so their reach follows the wavelength.
 void shelf(Section& s, double db, double hz, double fs) {
     const double r = sqrt(dbToGain(db));
     s.design(hz / r, hz * r, 1.0, fs);
@@ -154,7 +156,7 @@ double speedHissDb(int s) { return s == 0 ? -63.0 : (s == 1 ? -60.5 : (s == 2 ? 
 // How far the highs move as bias moves from peak to the recommended setting
 // (the datasheet's delta S10), and the head bump's height.
 double speedBiasTilt(int s) { return s == 0 ? 1.5 : (s == 1 ? 3.0 : (s == 2 ? 6.5 : 9.0)); }
-double speedBumpDb(int s) { return s == 0 ? 1.2 : (s == 1 ? 1.6 : (s == 2 ? 2.0 : 2.2)); }
+double speedBumpDb(int s) { return s == 0 ? 1.5 : (s == 1 ? 2.0 : (s == 2 ? 2.5 : 2.75)); }
 // The top end of an aligned machine at low level.
 double speedTopHz(int s) {
     return s == 0 ? 30000.0 : (s == 1 ? 24000.0 : (s == 2 ? 17000.0 : 10500.0));
@@ -257,7 +259,7 @@ struct Amp {
 // The playback head's filters as the settings put them, for the audio and
 // for the editor's copy.
 struct Head {
-    Biquad low, bump, dip, ripple, top, az, tilt;
+    Biquad low, bump, dip, ripple, dip2, top, az, tilt;
     Section repro;
     bool topOn = false, azOn = false;
     void design(int s, double loss, double amount, double bumpHz, double azHz, double tiltDb,
@@ -272,13 +274,17 @@ struct Head {
         topOn = topHz < 0.45 * rate;
         azOn = azHz < 0.45 * rate;
         low.highpass(max(5.0, 0.36 * fb * min(1.0, amount)), 0.75);
-        bump.peak(fb, 1.2, bumpDb);
-        dip.peak(2.1 * fb, 2.0, -0.4 * bumpDb);
-        ripple.peak(min(3.4 * fb, 0.4 * rate), 3.0, 0.12 * bumpDb);
+        bump.peak(fb, 1.2, 1.07 * bumpDb);
+        // The interference's undulation, every bump frequency on: a dip of
+        // about 1 dB at twice it, a ripple at three times, a fainter dip at
+        // four, each smaller as the core ends stop contributing.
+        dip.peak(2.0 * fb, 1.8, -0.8 * bumpDb);
+        ripple.peak(min(3.0 * fb, 0.4 * rate), 3.4, 0.38 * bumpDb);
+        dip2.peak(min(4.0 * fb, 0.4 * rate), 3.5, -0.15 * bumpDb);
         top.lowpass(min(topHz, 0.45 * rate), 0.75);
         az.lowpass(min(azHz, 0.45 * rate), 0.6);
         tilt.highShelf(min(5000.0 * v, 0.4 * rate), 0.6, tiltDb);
-        shelf(repro, reproDb, 4000.0, rate);
+        shelf(repro, reproDb, min(4000.0 * v, 0.3 * rate), rate);
     }
     double process(double x) {
         double y = repro.process(tilt.process(x));
@@ -286,11 +292,12 @@ struct Head {
         if (topOn) y = topped;
         const double slanted = az.process(y);
         if (azOn) y = slanted;
-        return ripple.process(dip.process(bump.process(low.process(y))));
+        return dip2.process(ripple.process(dip.process(bump.process(low.process(y)))));
     }
     double responseDb(double hz, double rate) const {
         double db = low.responseDb(hz) + bump.responseDb(hz) + dip.responseDb(hz) +
-                    ripple.responseDb(hz) + tilt.responseDb(hz) + gainToDb(repro.gainAt(hz, rate));
+                    ripple.responseDb(hz) + dip2.responseDb(hz) + tilt.responseDb(hz) +
+                    gainToDb(repro.gainAt(hz, rate));
         if (topOn) db += top.responseDb(hz);
         if (azOn) db += az.responseDb(hz);
         return db;
@@ -300,6 +307,7 @@ struct Head {
         bump.clear();
         dip.clear();
         ripple.clear();
+        dip2.clear();
         top.clear();
         az.clear();
         tilt.clear();
@@ -538,8 +546,9 @@ struct Umber : Effect {
     Param recordHf = decibels("Record HF", -6, 6, 0)
                          .in("Record")
                          .help(
-                             "The record side's HF trim (a shelf at 4 kHz): up writes the highs "
-                             "harder, so they saturate sooner and come back brighter.");
+                             "The record side's HF trim (a shelf at 4 kHz at 15 ips, following the "
+                             "speed): up writes the highs harder, so they saturate sooner and come "
+                             "back brighter.");
     Param autoGain = toggle("Auto Gain", true)
                          .in("Record")
                          .help(
@@ -648,8 +657,9 @@ struct Umber : Effect {
     Param reproHf = decibels("Repro HF", -6, 6, 0)
                         .in("Playback")
                         .help(
-                            "The playback side's HF trim (a shelf at 4 kHz): brighter or darker "
-                            "playback, the tape's saturation unchanged.");
+                            "The playback side's HF trim (a shelf at 4 kHz at 15 ips, following "
+                            "the speed): brighter or darker playback, the tape's saturation "
+                            "unchanged.");
     Param hiss = decibels("Hiss", -30, 12, -30)
                      .offAtMin()
                      .in("Playback")
@@ -1141,7 +1151,7 @@ struct Umber : Effect {
             k.rec.design(nab, hi, false);
             k.edge.design(5000.0 * v, 9000.0 * v, hi);
             k.play.design(nab, hi, true);
-            shelf(k.recTrim, recHfNow, 4000.0, hi);
+            shelf(k.recTrim, recHfNow, min(4000.0 * v, 0.3 * hi), hi);
             k.recAmp.set(recAmpNow, 0.35, hi);
             k.reproAmp.set(reproAmpNow, 0.25, hi);
         }
@@ -2470,7 +2480,7 @@ struct Umber : Effect {
         view.design(nab, hiRate, false);
         const double ceiling = edgeFor(s, nab, f.loss, hfSaturation.value());
         const double v = speedIps(s) / 15.0;
-        shelf(viewTrim, recordHf.value(), 4000.0, hiRate);
+        shelf(viewTrim, recordHf.value(), min(4000.0 * v, 0.3 * hiRate), hiRate);
         viewHead.design(s, f.loss, headBump.value(), bumpFreq.value(),
                         azimuthCorner(azimuth.value(), s), biasTiltDb(s, bias.value()),
                         reproHf.value(), r);

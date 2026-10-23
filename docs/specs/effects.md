@@ -762,7 +762,7 @@ plugin with no predecessor. Notes for maintainers:
   16x (stereo, 48 kHz).
 - **Tests.** The suite every stock plugin has, and
   `plugin.umber.response`: quiet sines at 1 and 10 kHz 0.00 dB, output
-  −6 dB, the drive's +6 dB without auto gain, the head bump +1.56 dB at
+  −6 dB, the drive's +6 dB without auto gain, the head bump +1.93 dB at
   60 Hz and 0 with `head_bump` 0, the VU at 0 for a sine at reference
   level, the third harmonic about 0.1% there and 3% at +12.5 dB, and a
   10 kHz sine 12 dB over reference down about 3 dB (the highs' ceiling).

@@ -74,7 +74,7 @@ expect(10000 -35 "{}" gain 0 50)
 expect(1000 -35 "{\"output\":-6}" gain -6 20)
 expect(1000 -35 "{\"drive\":6,\"auto_gain\":false}" gain 6 30)
 # The head bump at 15 ips (57 Hz), and none.
-expect(60 -35 "{}" gain 1.56 100)
+expect(60 -35 "{}" gain 1.93 100)
 expect(60 -35 "{\"head_bump\":0}" gain 0 50)
 expect(1000 -15 "{}" vu 0 100)
 expect(1000 -15 "{}" thd 0.1 50)
