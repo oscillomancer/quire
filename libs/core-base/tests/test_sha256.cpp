@@ -79,18 +79,18 @@ TEST_CASE("sha256File hashes the file's bytes, however large") {
     std::filesystem::create_directories(dir);
 
     // Small: the bytes of "abc" on disk hash to the "abc" vector.
-    REQUIRE(writeFileAtomic(dir / "abc", std::string_view("abc")).ok());
+    REQUIRE(writeFileAtomic(dir / "abc", std::string_view("abc")));
     auto small = sha256File(dir / "abc");
-    REQUIRE(small.ok());
+    REQUIRE(small);
     CHECK(*small == std::string("sha256:") + kAbc);
 
     // Larger than one read buffer (64 KiB), with a byte pattern that repeats.
     std::vector<std::uint8_t> big(1u << 20);  // 1 MiB
     for (std::size_t i = 0; i < big.size(); ++i)
         big[i] = static_cast<std::uint8_t>((i * 31 + (i >> 8)) & 0xff);
-    REQUIRE(writeFileAtomic(dir / "big", big).ok());
+    REQUIRE(writeFileAtomic(dir / "big", big));
     auto hashed = sha256File(dir / "big");
-    REQUIRE(hashed.ok());
+    REQUIRE(hashed);
     CHECK(*hashed == "sha256:" + sha256Hex(big));
     CHECK(hashed->size() == 7 + 64);  // "sha256:" + 64 lowercase hex digits
     for (char c : hashed->substr(7)) {

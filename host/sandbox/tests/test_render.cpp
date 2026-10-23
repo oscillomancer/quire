@@ -102,7 +102,7 @@ TEST_CASE("chain latency is compensated") {
     host::Instance* dry[] = {sine.get()};
     auto reference = render(dry, s, req);
     REQUIRE(reference);
-    REQUIRE(gain->setPatch(R"({"params": {"latency": "short"}})", CLAP_SUPPLE_SET_MERGE).ok());
+    REQUIRE(gain->setPatch(R"({"params": {"latency": "short"}})", CLAP_SUPPLE_SET_MERGE));
     host::Instance* chain[] = {sine.get(), gain.get()};
     auto r = render(chain, s, req);
     REQUIRE(r);
@@ -201,7 +201,7 @@ TEST_CASE("a chain renders with FTZ and DAZ, as in a session (ADR-0025)" *
           doctest::description("rt")) {
     auto edge = make("com.suppleaudio.test.edge");
     const std::uint8_t probe[4] = {50, 0, 0, 0};  // the underflow probe
-    REQUIRE(edge->loadState(probe).ok());
+    REQUIRE(edge->loadState(probe));
     host::Instance* chain[] = {edge.get()};
     audio::AudioData in;
     in.sampleRate = 48000;
@@ -254,7 +254,7 @@ TEST_CASE("transport positions") {
 TEST_CASE("render follows a tail that changes while the chain processes") {
     auto edge = make("com.suppleaudio.test.edge");
     const std::uint8_t learned[4] = {20, 0xe8, 0x03, 0};  // 1000, then 2000 once processing
-    REQUIRE(edge->loadState(learned).ok());
+    REQUIRE(edge->loadState(learned));
     host::Instance* chain[] = {edge.get()};
     audio::AudioData in;
     in.sampleRate = 48000;
@@ -273,7 +273,7 @@ TEST_CASE("render follows a tail that changes while the chain processes") {
 TEST_CASE("render ends when the chain's reported tail elapses") {
     auto edge = make("com.suppleaudio.test.edge");
     const std::uint8_t tail1000[4] = {0, 0xe8, 0x03, 0};
-    REQUIRE(edge->loadState(tail1000).ok());
+    REQUIRE(edge->loadState(tail1000));
     host::Instance* chain[] = {edge.get()};
     audio::AudioData in;
     in.sampleRate = 48000;
@@ -292,7 +292,7 @@ TEST_CASE("render ends when the chain's reported tail elapses") {
 TEST_CASE("render reports a refused start_processing") {
     auto edge = make("com.suppleaudio.test.edge");
     const std::uint8_t refuse[4] = {1, 0, 0, 0};
-    REQUIRE(edge->loadState(refuse).ok());
+    REQUIRE(edge->loadState(refuse));
     host::Instance* chain[] = {edge.get()};
     RenderRequest req;
     req.lengthSamples = 100;

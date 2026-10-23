@@ -197,7 +197,7 @@ TEST_CASE("VST3 fixture notes, latency, and bridge") {
     auto instrument = Instance::create(*sine, {});
     REQUIRE(instrument);
     REQUIRE((*instrument)->acceptsNotes());
-    REQUIRE((*instrument)->activate(48000, 1, 64).ok());
+    REQUIRE((*instrument)->activate(48000, 1, 64));
     REQUIRE((*instrument)->startProcessing());
     Buffers buf(64);
     Event note{.kind = Event::Kind::NoteOn, .time = 10, .key = 69, .noteId = 7};
@@ -211,16 +211,16 @@ TEST_CASE("VST3 fixture notes, latency, and bridge") {
     REQUIRE(latency != found->end());
     auto delay = Instance::create(*latency, {});
     REQUIRE(delay);
-    REQUIRE((*delay)->activate(48000, 1, 64).ok());
+    REQUIRE((*delay)->activate(48000, 1, 64));
     CHECK((*delay)->latency() == 0);
-    REQUIRE((*delay)->setParam(1, 1).ok());
+    REQUIRE((*delay)->setParam(1, 1));
     CHECK((*delay)->serviceMainThread());
     CHECK((*delay)->takeNotifications().latencyChanged);
     CHECK((*delay)->latency() == 64);
     CHECK_FALSE((*delay)->restartPending());  // not processing: reactivated at once
     // kLatencyChanged while processing: the reactivation VST3 asks for waits.
     REQUIRE((*delay)->startProcessing());
-    REQUIRE((*delay)->setParam(1, 0).ok());
+    REQUIRE((*delay)->setParam(1, 0));
     (*delay)->serviceMainThread();
     CHECK((*delay)->restartPending());
     CHECK((*delay)->active());
@@ -237,8 +237,8 @@ TEST_CASE("VST3 fixture notes, latency, and bridge") {
     auto bridged = Instance::create(*gain, {}, true);
     REQUIRE_MESSAGE(bridged, (bridged ? "" : bridged.error().message));
     CHECK((*bridged)->raw() == nullptr);
-    REQUIRE((*bridged)->setParam(1, 0.2).ok());
-    REQUIRE((*bridged)->activate(48000, 1, 64).ok());
+    REQUIRE((*bridged)->setParam(1, 0.2));
+    REQUIRE((*bridged)->activate(48000, 1, 64));
     REQUIRE((*bridged)->startProcessing());
     CHECK_FALSE((*bridged)->processRequested());
     REQUIRE((*bridged)->setParam(1, 0.2));
@@ -273,12 +273,12 @@ TEST_CASE("a VST3's edit controller is reached from the main thread only") {
     CHECK(instance.paramsNormalized());  // and the engine converts for it
     CHECK(*instance.normalizedParam(1, 0.25) == doctest::Approx(0.25));
     CHECK(*instance.plainParam(1, 0.75) == doctest::Approx(0.75));
-    REQUIRE(instance.activate(48000, 1, 64).ok());
+    REQUIRE(instance.activate(48000, 1, 64));
     REQUIRE(instance.startProcessing());
     Buffers buffer(64);
     std::fill(buffer.l.begin(), buffer.l.end(), 1.0f);
     std::fill(buffer.r.begin(), buffer.r.end(), 1.0f);
-    REQUIRE(instance.setParam(1, 0.25).ok());  // converted here, not on the audio thread
+    REQUIRE(instance.setParam(1, 0.25));  // converted here, not on the audio thread
     CHECK(instance.processRequested());
     CHECK(instance.takeProcessRequest());
     CHECK_FALSE(instance.processRequested());
@@ -621,7 +621,7 @@ TEST_CASE("lifecycle: a bridged plug-in's restart waits for processing too, and 
     auto inst = Instance::create(find("com.suppleaudio.test.gain"), {}, true);
     REQUIRE_MESSAGE(inst, (inst ? "" : inst.error().message));
     auto& g = **inst;
-    REQUIRE(g.activate(48000, 1, 256).ok());
+    REQUIRE(g.activate(48000, 1, 256));
     REQUIRE(g.startProcessing());
     Buffers buf(64);
     Event e{.kind = Event::Kind::Param, .paramId = 1, .value = 1.0};  // latency "short"
@@ -710,7 +710,7 @@ TEST_CASE("isolation: a bridged instance behaves like the in-process one") {
     CHECK(*r.paramFromText(0, "-6 dB") == doctest::Approx(gainClap(-6)));
     CHECK_FALSE(r.paramFromText(0, "loud"));
     REQUIRE(r.semanticSchema());
-    REQUIRE(r.setPatch(R"({"params": {"gain": "-4.5 dB"}})", CLAP_SUPPLE_SET_MERGE).ok());
+    REQUIRE(r.setPatch(R"({"params": {"gain": "-4.5 dB"}})", CLAP_SUPPLE_SET_MERGE));
     CHECK(*r.describe(true) == "Gain: Gain -4.5 dB");
     auto bad = r.setPatch(R"({"params": {"gian": 1}})", CLAP_SUPPLE_SET_MERGE);
     REQUIRE_FALSE(bad.ok());
@@ -718,14 +718,14 @@ TEST_CASE("isolation: a bridged instance behaves like the in-process one") {
     CHECK(bad.error().path == "/params/gian");
     auto state = r.saveState();
     REQUIRE(state);
-    REQUIRE(l.loadState(*state).ok());
+    REQUIRE(l.loadState(*state));
     CHECK(*l.paramValue(0) == doctest::Approx(gainClap(-4.5)));
 
     // Latency: a restart in the bridge, reported back.
-    REQUIRE(r.activate(48000, 1, 256).ok());
-    REQUIRE(l.activate(48000, 1, 256).ok());
-    REQUIRE(r.setPatch(R"({"params": {"latency": "short"}})", CLAP_SUPPLE_SET_MERGE).ok());
-    REQUIRE(l.setPatch(R"({"params": {"latency": "short"}})", CLAP_SUPPLE_SET_MERGE).ok());
+    REQUIRE(r.activate(48000, 1, 256));
+    REQUIRE(l.activate(48000, 1, 256));
+    REQUIRE(r.setPatch(R"({"params": {"latency": "short"}})", CLAP_SUPPLE_SET_MERGE));
+    REQUIRE(l.setPatch(R"({"params": {"latency": "short"}})", CLAP_SUPPLE_SET_MERGE));
     for (int i = 0; i < 10 && r.latency() != 64; ++i) r.serviceMainThread();
     l.serviceMainThread();
     CHECK(r.latency() == 64);
@@ -778,7 +778,7 @@ TEST_CASE("a bridged instance's audio thread is named audio-bridge") {
     auto remote = Instance::create(find("com.suppleaudio.test.gain"), {}, true);
     REQUIRE_MESSAGE(remote, (remote ? "" : remote.error().toString()));
     Instance& r = **remote;
-    REQUIRE(r.activate(48000, 1, 256).ok());
+    REQUIRE(r.activate(48000, 1, 256));
     CHECK(eventually([&] { return tasksNamed(r.bridgePid(), "audio-bridge").size() == 1; }));
     r.deactivate();
 }
@@ -807,7 +807,7 @@ TEST_CASE("a bridged audio thread takes the bridge audio policy when processing 
     auto remote = Instance::create(find("com.suppleaudio.test.gain"), {}, true);
     REQUIRE_MESSAGE(remote, (remote ? "" : remote.error().toString()));
     Instance& r = **remote;
-    REQUIRE(r.activate(48000, 1, 256).ok());
+    REQUIRE(r.activate(48000, 1, 256));
     REQUIRE(eventually([&] { return tasksNamed(r.bridgePid(), "audio-bridge").size() == 1; }));
     const pid_t audio = tasksNamed(r.bridgePid(), "audio-bridge").front();
     CHECK(policyOf(audio) == normal);
@@ -887,14 +887,14 @@ TEST_CASE("isolation: a crashing plugin fails its instance, not the host") {
     auto inst = Instance::create(find("com.suppleaudio.test.crash"), {}, true);
     REQUIRE_MESSAGE(inst, (inst ? "" : inst.error().toString()));
     Instance& c = **inst;
-    REQUIRE(c.activate(48000, 1, 256).ok());
+    REQUIRE(c.activate(48000, 1, 256));
     REQUIRE(c.startProcessing());
     Buffers buf(256);
     std::fill(buf.l.begin(), buf.l.end(), 0.25f);
     std::fill(buf.r.begin(), buf.r.end(), 0.25f);
     REQUIRE(c.process(buf.block(256)));
     CHECK(buf.ol[10] == 0.25f);          // passes audio through
-    REQUIRE(c.setParam(1, 1.0).ok());    // crash in the next process()
+    REQUIRE(c.setParam(1, 1.0));         // crash in the next process()
     REQUIRE(c.process(buf.block(256)));  // the node goes silent; no error for the host
     CHECK(c.failed());
     CHECK(buf.ol[10] == 0.0f);
@@ -911,9 +911,9 @@ TEST_CASE("isolation: a hanging plugin is killed at the deadline") {
     auto inst = Instance::create(find("com.suppleaudio.test.crash"), {}, true);
     REQUIRE(inst);
     Instance& c = **inst;
-    REQUIRE(c.activate(48000, 1, 256).ok());
+    REQUIRE(c.activate(48000, 1, 256));
     REQUIRE(c.startProcessing());
-    REQUIRE(c.setParam(1, 2.0).ok());  // hang in the next process()
+    REQUIRE(c.setParam(1, 2.0));  // hang in the next process()
     Buffers buf(256);
     REQUIRE(c.process(buf.block(256)));
     CHECK(c.failed());
@@ -934,8 +934,8 @@ TEST_CASE("a sidechain key reaches CLAP and VST3 plug-ins, in process and isolat
     // the key sums into the output; without a key the plug-in hears silence.
     auto check = [](Instance& inst, bool keyActive) {
         REQUIRE(inst.sidechainChannels() == 2);
-        REQUIRE(inst.setSidechainActive(keyActive).ok());
-        REQUIRE(inst.activate(48000, 1, 64).ok());
+        REQUIRE(inst.setSidechainActive(keyActive));
+        REQUIRE(inst.activate(48000, 1, 64));
         REQUIRE(inst.startProcessing());
         Buffers buffer(64);
         std::fill(buffer.l.begin(), buffer.l.end(), 0.25f);
@@ -987,7 +987,7 @@ TEST_CASE("a sidechain key reaches CLAP and VST3 plug-ins, in process and isolat
             CAPTURE(active);
             auto made = Instance::create(*sidechain, {}, isolated);
             REQUIRE(made);
-            REQUIRE((*made)->setParam(1, 1.0).ok());
+            REQUIRE((*made)->setParam(1, 1.0));
             const auto r = check(**made, active);
             // An inactive key bus hears nothing, as when no route feeds it.
             CHECK(r[0] == doctest::Approx(active ? 0.75 : 0.25));
@@ -1298,12 +1298,12 @@ TEST_CASE("state restore is a queued-edit barrier and inactive saves flush edits
             const auto id = vst3 ? 1u : 0u;
             const double original = vst3 ? 0.25 : gainClap(-6);
             const double edited = vst3 ? 0.75 : gainClap(0);
-            REQUIRE(instance.setParam(id, original).ok());
+            REQUIRE(instance.setParam(id, original));
             auto saved = instance.saveState();
             REQUIRE_MESSAGE(saved, (saved ? "" : saved.error().toString()));
-            REQUIRE(instance.activate(48000, 1, 64).ok());
-            REQUIRE(instance.setParam(id, edited).ok());
-            REQUIRE(instance.loadState(*saved).ok());
+            REQUIRE(instance.activate(48000, 1, 64));
+            REQUIRE(instance.setParam(id, edited));
+            REQUIRE(instance.loadState(*saved));
             REQUIRE(instance.startProcessing());
             Buffers buffers(64);
             std::fill(buffers.l.begin(), buffers.l.end(), 1.0f);
@@ -1311,14 +1311,14 @@ TEST_CASE("state restore is a queued-edit barrier and inactive saves flush edits
             REQUIRE(instance.process(buffers.block(64)));
             CHECK(buffers.ol[0] == doctest::Approx(vst3 ? 0.25 : std::pow(10.0, -6.0 / 20.0)));
             instance.stopProcessing();
-            REQUIRE(instance.setParam(id, edited).ok());
+            REQUIRE(instance.setParam(id, edited));
             instance.deactivate();
             auto flushed = instance.saveState();
             REQUIRE(flushed);
             auto restored = Instance::create(info, {}, isolated);
             REQUIRE(restored);
-            REQUIRE((*restored)->loadState(*flushed).ok());
-            REQUIRE((*restored)->activate(48000, 1, 64).ok());
+            REQUIRE((*restored)->loadState(*flushed));
+            REQUIRE((*restored)->activate(48000, 1, 64));
             REQUIRE((*restored)->startProcessing());
             REQUIRE((*restored)->process(buffers.block(64)));
             CHECK(buffers.ol[0] == doctest::Approx(vst3 ? 0.75 : 1.0));
@@ -1729,13 +1729,13 @@ TEST_CASE("a VST3 controller without state of its own still saves the component'
         CAPTURE(isolated);
         auto made = Instance::create(*info, {}, isolated);
         REQUIRE(made);
-        REQUIRE((*made)->setParam(1, 0.8).ok());
+        REQUIRE((*made)->setParam(1, 0.8));
         // The controller's getState answers kNotImplemented, as sfizz's does.
         auto saved = (*made)->saveState();
         REQUIRE_MESSAGE(saved, (saved ? "" : saved.error().toString()));
         auto restored = Instance::create(*info, {}, isolated);
         REQUIRE(restored);
-        REQUIRE((*restored)->loadState(*saved).ok());
+        REQUIRE((*restored)->loadState(*saved));
         const auto value = (*restored)->paramValue(1);
         REQUIRE(value);
         CHECK(*value == doctest::Approx(0.8));

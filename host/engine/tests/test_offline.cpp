@@ -494,9 +494,9 @@ TEST_CASE("audio items: position, take offset, fade, channel mode, offline media
         ramp.channels[0][static_cast<std::size_t>(i)] = static_cast<float>(i) / 48000.0f;
         ramp.channels[1][static_cast<std::size_t>(i)] = -static_cast<float>(i) / 48000.0f;
     }
-    REQUIRE(audio::writeWav(dir / "media" / "ramp.wav", ramp).ok());
+    REQUIRE(audio::writeWav(dir / "media" / "ramp.wav", ramp));
     ramp.sampleRate = 44100;
-    REQUIRE(audio::writeWav(dir / "media" / "slow.wav", ramp).ok());
+    REQUIRE(audio::writeWav(dir / "media" / "slow.wav", ramp));
 
     model::EditTxn t(model::Session::create({.console9 = false}), 1);
     const Id tr = addTrack(t, "Audio");
@@ -590,10 +590,10 @@ TEST_CASE("take playrate: varispeed resamples, the stretch keeps the pitch") {
         tone.channels[0][i] = static_cast<float>(s);
         tone.channels[1][i] = static_cast<float>(s);
     }
-    REQUIRE(audio::writeWav(dir / "media" / "tone.wav", tone).ok());
+    REQUIRE(audio::writeWav(dir / "media" / "tone.wav", tone));
     audio::AudioData longTone = tone;  // 4 s, for the variant size guard
     longTone.channels.assign(2, std::vector<float>(4 * 48000));
-    REQUIRE(audio::writeWav(dir / "media" / "long.wav", longTone).ok());
+    REQUIRE(audio::writeWav(dir / "media" / "long.wav", longTone));
 
     auto pool = makePool();
     MediaCache media;
@@ -784,7 +784,7 @@ TEST_CASE("a new state blob for a processing instance goes to a fresh instance (
     t.putBlob("sha256:one", std::make_shared<const model::Blob>(model::Blob{{0, 1, 0, 0}}));
     const auto s1 = commit(t);
     host::Instance* a = pool.get(fx, *s1.fx.find(fx), s1).value();
-    REQUIRE(a->activate(48000, 1, 256).ok());
+    REQUIRE(a->activate(48000, 1, 256));
     REQUIRE(a->startProcessing());  // as if a plan were playing it
 
     model::EditTxn t2(s1, 2);
@@ -1210,7 +1210,7 @@ TEST_CASE(
     for (std::size_t i = 0; i < 48000; ++i)
         tone.channels[0][i] = tone.channels[1][i] =
             static_cast<float>(0.5 * std::sin(2 * M_PI * 440.0 * static_cast<double>(i) / 48000.0));
-    REQUIRE(audio::writeWav(dir / "media" / "tone.wav", tone).ok());
+    REQUIRE(audio::writeWav(dir / "media" / "tone.wav", tone));
     auto audioSession = [&](bool takeFx, bool envelope) {
         model::EditTxn t(model::Session::create({.console9 = false}), 1);
         const Id tr = addTrack(t, "Audio");

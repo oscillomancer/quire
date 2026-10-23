@@ -133,7 +133,7 @@ const ParamSpec& P(std::string_view key) { return *findByKey(kT, key); }
 TEST_CASE("the fixture table is valid") {
     auto s = validateTable(kT);
     INFO((s.ok() ? std::string() : s.error().toString()));
-    CHECK(s.ok());
+    CHECK(s);
 }
 
 TEST_CASE("table validation rejects every rule violation") {

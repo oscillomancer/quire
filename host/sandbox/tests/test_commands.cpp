@@ -89,7 +89,7 @@ TEST_CASE("a surround file is analyzed with all its channels; other counts are r
             audio.channels.push_back(std::move(channel));
         }
         const fs::path file = root.path / ("ch" + std::to_string(count) + ".wav");
-        REQUIRE(audio::writeWav(file, audio, {}).ok());
+        REQUIRE(audio::writeWav(file, audio, {}));
         auto args = json::Value::object();
         args["source"] = file.string();
         return dispatcher.execute({"analyze", std::move(args), kTest});
@@ -118,7 +118,7 @@ TEST_CASE("every sandbox command example runs against its fixture" * doctest::de
         },
         [](std::string_view fixture) { return SUPPLE_EDITORS || fixture != "dsp_player_editor"; });
     INFO((st ? std::string() : st.error().toString()));
-    CHECK(st.ok());
+    CHECK(st);
     CHECK(n >= (SUPPLE_EDITORS ? 16 : 14));
 }
 

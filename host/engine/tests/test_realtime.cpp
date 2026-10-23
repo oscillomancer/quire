@@ -368,8 +368,8 @@ TEST_CASE("real-time output equals the offline render (any block size)" *
             auto measuredOptions = options;
             measuredOptions.benchProbe = &probe;
             Engine engine(rtPool, media, measuredOptions);
-            REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
-            REQUIRE(engine.load(s).ok());
+            REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}));
+            REQUIRE(engine.load(s));
             engine.play();
             if (options.anticipative)
                 runAhead(engine, backend, (48000 * 2 + 4096) / 128, 128);
@@ -421,8 +421,8 @@ TEST_CASE("take FX: real-time output equals the offline render" * doctest::descr
         DummyBackend backend(
             {.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2 + 4096});
         Engine engine(rtPool, media, options);
-        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
-        REQUIRE(engine.load(s).ok());
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}));
+        REQUIRE(engine.load(s));
         engine.play();
         if (options.anticipative)
             runAhead(engine, backend, (48000 * 2 + 4096) / 128, 128);
@@ -448,7 +448,7 @@ TEST_CASE("a stretched take: real-time output equals the offline render" *
         tone.channels[0][i] = static_cast<float>(s);
         tone.channels[1][i] = static_cast<float>(s);
     }
-    REQUIRE(audio::writeWav(dir / "media" / "tone.wav", tone).ok());
+    REQUIRE(audio::writeWav(dir / "media" / "tone.wav", tone));
 
     // One audio item, half speed with the pitch preserved, 2 s long: the
     // stretcher builds this variant on the main thread when the plan loads.
@@ -487,8 +487,8 @@ TEST_CASE("a stretched take: real-time output equals the offline render" *
     MediaCache media;
     DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2 + 4096});
     Engine engine(rtPool, media, kInCallback);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
-    REQUIRE(engine.load(session, dir).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}));
+    REQUIRE(engine.load(session, dir));
     engine.play();
     backend.run((48000 * 2 + 4096) / 128);
     engine.stop();
@@ -513,8 +513,8 @@ TEST_CASE("VST3 effect in chain: real-time output equals offline" * doctest::des
     MediaCache media;
     DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2 + 4096});
     Engine engine(rtPool, media, kInCallback);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
-    REQUIRE(engine.load(session).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}));
+    REQUIRE(engine.load(session));
     engine.play();
     backend.run((48000 * 2 + 4096) / 128);
     engine.stop();
@@ -566,8 +566,8 @@ TEST_CASE("an automated VST3 parameter renders real time = offline" * doctest::d
     MediaCache media;
     DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2 + 4096});
     Engine engine(rtPool, media, kInCallback);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
-    REQUIRE(engine.load(session).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}));
+    REQUIRE(engine.load(session));
     engine.play();
     backend.run((48000 * 2 + 4096) / 128);
     engine.stop();
@@ -600,7 +600,7 @@ TEST_CASE("a stage that leaves processing mid-ramp does not replay the ramp" *
     auto compiled = detail::compile(s, pool, 0.0, 256, 48000);
     REQUIRE(compiled);
     detail::Plan p = std::move(*compiled);
-    REQUIRE(detail::prepare(p, s).ok());
+    REQUIRE(detail::prepare(p, s));
     REQUIRE(p.nodes.size() >= 2);
     detail::Stage* stage = nullptr;
     for (detail::Stage& st : p.nodes[0].chain)
@@ -632,14 +632,14 @@ TEST_CASE(
     MediaCache media;
     DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 48000});
     Engine engine(pool, media, kInCallback);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
-    REQUIRE(engine.load(synthSession(0.0)).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}));
+    REQUIRE(engine.load(synthSession(0.0)));
     engine.play();
     backend.run(10);
     CHECK(engine.transport().playing);
     CHECK(engine.transport().sample == 2560);
     // A new version (-6 dB) replaces the plan at the next cycle; the instance is kept.
-    REQUIRE(engine.load(synthSession(-6.0206)).ok());
+    REQUIRE(engine.load(synthSession(-6.0206)));
     CHECK(pool.size() == 1);  // same fx id and plugin: the instance (and its state) is kept
     backend.run(10);
     engine.service();
@@ -673,11 +673,11 @@ TEST_CASE("threaded backend: plan swaps from the main thread race-free" *
     MediaCache media;
     DummyBackend backend({.mode = DummyBackend::Mode::Thread});
     Engine engine(pool, media);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 64}).ok());
-    REQUIRE(engine.load(synthSession(0.0)).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 64}));
+    REQUIRE(engine.load(synthSession(0.0)));
     engine.play();
     for (int i = 0; i < 20; ++i) {
-        REQUIRE(engine.load(synthSession(-0.5 * i)).ok());
+        REQUIRE(engine.load(synthSession(-0.5 * i)));
         while (backend.cycles() < 20 * (i + 1)) std::this_thread::yield();
         engine.service();
         if (i % 7 == 3) engine.seek(0.25 * i);
@@ -693,8 +693,8 @@ TEST_CASE(
     MediaCache media;
     DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 4800});
     Engine engine(pool, media, kInCallback);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
-    REQUIRE(engine.load(synthSession(0.0)).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}));
+    REQUIRE(engine.load(synthSession(0.0)));
     for (int i = 0; i < 40; ++i) {  // 120 requests, more than any queue held
         engine.play();
         engine.seek(0.5);
@@ -722,8 +722,8 @@ TEST_CASE("a seek off the block grid never grows event storage on the audio thre
         Engine engine(pool, media, options);
         // Two notes at sample 75, two at 100: aligned 100-frame blocks hold two
         // each, but the block [1, 101) after a one-sample seek holds all four.
-        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 100}).ok());
-        REQUIRE(engine.load(clusterSession({3, 3, 4, 4})).ok());
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 100}));
+        REQUIRE(engine.load(clusterSession({3, 3, 4, 4})));
         engine.seek(1.0 / 48000.0);
         engine.play();
         if (options.anticipative) REQUIRE(engine.awaitRendered(400));
@@ -744,7 +744,7 @@ TEST_CASE("a plugin that refuses to start is passed through, not processed") {
         MediaCache media;
         DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 4800});
         Engine engine(pool, media, options);
-        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}));
         model::Session s = synthSession(0.0, "com.suppleaudio.test.edge");
         model::EditTxn t(s, 2);
         for (const auto& e : s.fx)
@@ -753,7 +753,7 @@ TEST_CASE("a plugin that refuses to start is passed through, not processed") {
                     e.id, [](model::FxInstance& f) { f.state = "sha256:edge-refuses-start"; });
         t.putBlob("sha256:edge-refuses-start",
                   std::make_shared<const model::Blob>(model::Blob{{1, 0, 0, 0}}));
-        REQUIRE(engine.load(t.commit().value()).ok());
+        REQUIRE(engine.load(t.commit().value()));
         engine.play();
         if (options.anticipative) REQUIRE(engine.awaitRendered(2560));
         backend.run(10);
@@ -780,8 +780,8 @@ TEST_CASE("stop() stops plugins on the audio thread even with second-long gaps b
     model::Project project = *s.project;
     project.sampleRate = 8000;
     s.project = std::make_shared<const model::Project>(project);
-    REQUIRE(engine.start(backend, {.sampleRate = 8000, .blockSize = 8192}).ok());
-    REQUIRE(engine.load(s).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 8000, .blockSize = 8192}));
+    REQUIRE(engine.load(s));
     engine.play();
     while (backend.cycles() < 1) std::this_thread::yield();
     engine.stop();  // lands mid-gap: no timeout, no stop from this thread
@@ -794,8 +794,8 @@ TEST_CASE("a manual backend's stop is the audio thread's stop") {
     MediaCache media;
     DummyBackend backend({.mode = DummyBackend::Mode::Manual});
     Engine engine(pool, media);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
-    REQUIRE(engine.load(synthSession(0.0)).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}));
+    REQUIRE(engine.load(synthSession(0.0)));
     engine.play();
     backend.run(2);
     engine.stop();
@@ -812,8 +812,8 @@ TEST_CASE("the engine plays through the JACK backend (a stand-in libjack)" *
     o.library = FakeJack::kPath;
     JackBackend backend(o);
     Engine engine(pool, media);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
-    REQUIRE(engine.load(synthSession(0.0)).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}));
+    REQUIRE(engine.load(synthSession(0.0)));
     engine.play();
     for (int i = 0; i < 5000 && fake.outputPeak("supple:out_1") <= 0.01f; ++i)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -834,8 +834,8 @@ TEST_CASE("the engine survives the JACK server going away") {
     o.library = FakeJack::kPath;
     JackBackend backend(o);
     Engine engine(pool, media, kInCallback);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
-    REQUIRE(engine.load(synthSession(0.0)).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}));
+    REQUIRE(engine.load(synthSession(0.0)));
     engine.play();
     const auto until = fake.cycles() + 5;
     while (fake.cycles() < until) std::this_thread::yield();
@@ -858,10 +858,10 @@ TEST_CASE("the engine runs a session at the device's rate, not the project's") {
         EngineOptions options;
         options.anticipative = anticipative;
         Engine engine(pool, media, options);
-        REQUIRE(engine.start(backend, {.sampleRate = 44100, .blockSize = 147}).ok());
+        REQUIRE(engine.start(backend, {.sampleRate = 44100, .blockSize = 147}));
         const model::Session s = synthSession(0.0);
         REQUIRE(s.project->sampleRate == 48000.0);
-        REQUIRE(engine.load(s).ok());
+        REQUIRE(engine.load(s));
         engine.play();
         if (anticipative)
             runAhead(engine, backend, 44100 / 147, 147);
@@ -890,8 +890,8 @@ TEST_CASE(
     MediaCache media;
     DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 48000});
     Engine engine(pool, media);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
-    REQUIRE(engine.load(synthSession(0.0)).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}));
+    REQUIRE(engine.load(synthSession(0.0)));
     engine.play();
     engine.awaitTransport();
     CHECK(engine.transport().playing);
@@ -932,12 +932,12 @@ TEST_CASE("anticipative: an edit takes effect after the audio already rendered, 
     MediaCache media;
     DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 48000});
     Engine engine(pool, media);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
-    REQUIRE(engine.load(synthSession(0.0)).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}));
+    REQUIRE(engine.load(synthSession(0.0)));
     engine.play();
     runAhead(engine, backend, 10, 256);
     REQUIRE(engine.awaitRendered(1 << 20));  // 200 ms (9600 frames) ahead of 2560
-    REQUIRE(engine.load(synthSession(-6.0206)).ok());
+    REQUIRE(engine.load(synthSession(-6.0206)));
     runAhead(engine, backend, 150, 256);
     engine.service();
     const auto& cap = backend.capture();
@@ -959,8 +959,8 @@ TEST_CASE("anticipative: a renderer that falls behind counts misses and plays si
     MediaCache media;
     DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 96000});
     Engine engine(pool, media);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
-    REQUIRE(engine.load(synthSession(0.0)).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}));
+    REQUIRE(engine.load(synthSession(0.0)));
     engine.play();
     runAhead(engine, backend, 4, 256);
     engine.holdRenderer(true);
@@ -982,15 +982,15 @@ TEST_CASE("anticipative on a paced device: edits and transport from the main thr
     MediaCache media;
     DummyBackend backend({.mode = DummyBackend::Mode::Thread, .paced = true});
     Engine engine(pool, media, {.renderBlock = 512, .renderAheadMs = 50, .workers = 3});
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
-    REQUIRE(engine.load(synthSession(0.0, "com.suppleaudio.test.gain")).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}));
+    REQUIRE(engine.load(synthSession(0.0, "com.suppleaudio.test.gain")));
     engine.play();
     for (int i = 0; i < 40; ++i) {
         const auto until = backend.cycles() + 4;
         while (backend.cycles() < until) std::this_thread::yield();
         switch (i % 5) {
             case 0:
-                REQUIRE(engine.load(synthSession(-0.5 * i, "com.suppleaudio.test.gain")).ok());
+                REQUIRE(engine.load(synthSession(-0.5 * i, "com.suppleaudio.test.gain")));
                 break;
             case 1:
                 engine.seek(0.1 * i);
@@ -1019,8 +1019,8 @@ TEST_CASE("anticipative: the renderer stops the plugins when the JACK server goe
     o.library = FakeJack::kPath;
     JackBackend backend(o);
     Engine engine(pool, media);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
-    REQUIRE(engine.load(synthSession(0.0)).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}));
+    REQUIRE(engine.load(synthSession(0.0)));
     engine.play();
     const auto until = fake.cycles() + 5;
     while (fake.cycles() < until) std::this_thread::yield();
@@ -1079,8 +1079,8 @@ TEST_CASE("isolation: a plugin crashing in its bridge silences its node, the ses
     MediaCache media;
     DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 96000});
     Engine engine(pool, media);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
-    REQUIRE(engine.load(s).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}));
+    REQUIRE(engine.load(s));
     host::Instance* crash = pool.find(crashFx);
     REQUIRE(crash);
     CHECK(crash->isolated());
@@ -1095,8 +1095,8 @@ TEST_CASE("isolation: a plugin crashing in its bridge silences its node, the ses
     };
     CHECK(peak(0, 5000, 10240) > 0.1 * (0.472135955 / 0.70710678118654752));
     CHECK(peak(1, 5000, 10240) > 0.1 * (0.472135955 / 0.70710678118654752));
-    REQUIRE(crash->setParam(1, 1.0).ok());  // crash in its next process()
-    runAhead(engine, backend, 200, 256);    // 51200 more frames
+    REQUIRE(crash->setParam(1, 1.0));     // crash in its next process()
+    runAhead(engine, backend, 200, 256);  // 51200 more frames
     CHECK(crash->failed());
     CHECK(pool.failed().size() == 1);
     CHECK(peak(0, 50000, 61440) >
@@ -1129,8 +1129,8 @@ TEST_CASE("plugin automation: real-time output equals the offline render" *
         DummyBackend backend(
             {.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2 + 4096});
         Engine engine(rtPool, media, options);
-        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
-        REQUIRE(engine.load(s).ok());
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}));
+        REQUIRE(engine.load(s));
         engine.play();
         if (options.anticipative)
             runAhead(engine, backend, (48000 * 2 + 4096) / 128, 128);
@@ -1158,16 +1158,16 @@ TEST_CASE("recording: every input frame lands in the take, placed where it was h
                                                      1000.0f * (c ? -1.0f : 1.0f);
                               }});
         Engine engine(pool, media, options);
-        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}));
         const model::Session s = synthSession(0.0);
-        REQUIRE(engine.load(s).ok());
+        REQUIRE(engine.load(s));
         Id track;
         for (const auto& e : s.tracks)
             if (e.value->type == model::StripType::Channel) track = e.id;
         const auto dir =
             std::filesystem::temp_directory_path() / ("supple-rec-" + std::to_string(::getpid()));
         std::filesystem::remove_all(dir);
-        REQUIRE(engine.startRecording({{track, {0, 1}, dir / "take.wav", {}}}).ok());
+        REQUIRE(engine.startRecording({{track, {0, 1}, dir / "take.wav", {}}}));
         CHECK(engine.recording());
         engine.seek(1.0);
         engine.play();
@@ -1214,16 +1214,16 @@ TEST_CASE("recording through a playback dropout keeps the take on the timeline" 
                  for (std::uint32_t i = 0; i < n; ++i) in[c][i] = 0.5f;
          }});
     Engine engine(pool, media, EngineOptions{});
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 384, .inputs = 2}).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 384, .inputs = 2}));
     const model::Session s = synthSession(0.0);
-    REQUIRE(engine.load(s).ok());
+    REQUIRE(engine.load(s));
     Id track;
     for (const auto& e : s.tracks)
         if (e.value->type == model::StripType::Channel) track = e.id;
     const auto dir =
         std::filesystem::temp_directory_path() / ("supple-rec-gap-" + std::to_string(::getpid()));
     std::filesystem::remove_all(dir);
-    REQUIRE(engine.startRecording({{track, {0}, dir / "take.wav", {}}}).ok());
+    REQUIRE(engine.startRecording({{track, {0}, dir / "take.wav", {}}}));
     engine.play();
     runAhead(engine, backend, 20, 384);
     engine.holdRenderer(true);
@@ -1283,9 +1283,9 @@ TEST_CASE("monitoring in the callback: the input is heard through the track, sto
     MediaCache media;
     DummyBackend backend(constantInput(48000));
     Engine engine(pool, media, kInCallback);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}));
     // The sine track, monitoring; its notes are silent at 1.75 s (between notes).
-    REQUIRE(engine.load(monitoring(synthSession(-6.0206))).ok());
+    REQUIRE(engine.load(monitoring(synthSession(-6.0206))));
     backend.run(4);  // stopped: input only, through the fader (-6 dB) and centre pan (-3 dB)
     const auto& cap = backend.capture();
     const double g = 0.5 * 0.472135955;
@@ -1307,15 +1307,15 @@ TEST_CASE("monitoring needs the arm; auto hears the input stopped, the timeline 
     MediaCache media;
     DummyBackend backend(constantInput(48000));
     Engine engine(pool, media, kInCallback);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}));
     const auto& cap = backend.capture();
     const double g = 0.5 * 0.472135955;
     // Monitor on, not armed: nothing is heard.
-    REQUIRE(engine.load(monitoring(synthSession(-6.0206), model::Monitor::On, false)).ok());
+    REQUIRE(engine.load(monitoring(synthSession(-6.0206), model::Monitor::On, false)));
     backend.run(4);
     CHECK(double(cap.channels[0][600]) == 0.0);
     // Auto, armed: heard while stopped...
-    REQUIRE(engine.load(monitoring(synthSession(-6.0206), model::Monitor::Auto, true)).ok());
+    REQUIRE(engine.load(monitoring(synthSession(-6.0206), model::Monitor::Auto, true)));
     backend.run(4);
     CHECK(double(cap.channels[0][1024 + 600]) == doctest::Approx(0.5 * g).epsilon(1e-4));
     // ...and not while playing without recording (1.75 s is between the notes).
@@ -1395,8 +1395,8 @@ TEST_CASE("anticipative monitoring: live input and rendered playback, identical 
         auto measuredOptions = options;
         measuredOptions.benchProbe = &probe;
         Engine engine(pool, media, measuredOptions);
-        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
-        REQUIRE(engine.load(s).ok());
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}));
+        REQUIRE(engine.load(s));
         engine.play();
         if (options.anticipative)
             runAhead(engine, backend, kCycles, 256);
@@ -1443,8 +1443,8 @@ TEST_CASE("anticipative monitoring: heard while stopped; arming mid-play hands t
     MediaCache media;
     DummyBackend backend(rampInput(96000));
     Engine engine(pool, media, {.workers = 2});
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
-    REQUIRE(engine.load(withVocal(true)).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}));
+    REQUIRE(engine.load(withVocal(true)));
     REQUIRE(engine.awaitPlan());
     backend.run(20);  // stopped: the vocal is heard, nothing else plays
     const auto& cap = backend.capture();
@@ -1458,7 +1458,7 @@ TEST_CASE("anticipative monitoring: heard while stopped; arming mid-play hands t
     engine.play();
     runAhead(engine, backend, 40, 256);
     for (bool monitored : {false, true, false, true}) {
-        REQUIRE(engine.load(withVocal(monitored)).ok());
+        REQUIRE(engine.load(withVocal(monitored)));
         runAhead(engine, backend, 60, 256);
         engine.service();
     }
@@ -1480,7 +1480,7 @@ TEST_CASE("a plug-in that asks to restart while processing gets restarted with i
         MediaCache media;
         DummyBackend backend(rampInput(96000));
         Engine engine(pool, media, anticipative ? EngineOptions{.workers = 2} : kInCallback);
-        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}));
         auto withLatency = [](const char* choice) {
             auto s = synthSession(0, "com.suppleaudio.test.gain");
             model::EditTxn t(s, 5);
@@ -1500,7 +1500,7 @@ TEST_CASE("a plug-in that asks to restart while processing gets restarted with i
         Id gain;
         for (const auto& e : none.fx)
             if (e.value->plugin.id == "com.suppleaudio.test.gain") gain = e.id;
-        REQUIRE(engine.load(none).ok());
+        REQUIRE(engine.load(none));
         REQUIRE(engine.awaitPlan());
         engine.play();
         auto run = [&](int cycles) {
@@ -1516,7 +1516,7 @@ TEST_CASE("a plug-in that asks to restart while processing gets restarted with i
         CHECK(instance->latency() == 0);
         CHECK(instance->processing());
         // The mode changes while playing: the plug-in asks for a restart.
-        REQUIRE(engine.load(withLatency("short")).ok());
+        REQUIRE(engine.load(withLatency("short")));
         for (int i = 0; i < 40 && instance->latency() != 64; ++i) run(4);
         CHECK(pool.find(gain) == instance);  // restarted, not recreated
         CHECK(instance->latency() == 64);
@@ -1552,8 +1552,8 @@ TEST_CASE("loop playback wraps without a gap: the output is the offline render, 
             DummyBackend backend(
                 {.mode = DummyBackend::Mode::Manual, .captureFrames = kFrames + 4096});
             Engine engine(rtPool, media, options);
-            REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
-            REQUIRE(engine.load(s).ok());
+            REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}));
+            REQUIRE(engine.load(s));
             engine.setLoop(1.0, 2.0, true);
             engine.play();
             const std::int64_t cycles = (kFrames + 4096) / 256;
@@ -1605,8 +1605,8 @@ TEST_CASE("a note held across the loop end is released at the wrap" * doctest::d
         MediaCache media;
         DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 96000});
         Engine engine(pool, media, options);
-        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
-        REQUIRE(engine.load(s).ok());
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}));
+        REQUIRE(engine.load(s));
         engine.setLoop(0.5, 1.0, true);
         engine.play();
         if (options.anticipative)
@@ -1642,8 +1642,8 @@ TEST_CASE("anticipative monitoring with a loop: identical to the in-callback ref
         MediaCache media;
         DummyBackend backend(rampInput(kCycles * 256));
         Engine engine(pool, media, options);
-        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
-        REQUIRE(engine.load(s).ok());
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}));
+        REQUIRE(engine.load(s));
         engine.setLoop(0.5, 1.2, true);
         engine.play();
         if (options.anticipative)
@@ -1682,9 +1682,9 @@ TEST_CASE("loop recording: one contiguous file, a run per pass, placed on the ti
                                           in[c][i] = static_cast<float>(frame + i);
                               }});
         Engine engine(pool, media, options);
-        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}));
         const model::Session s = synthSession(0.0);
-        REQUIRE(engine.load(s).ok());
+        REQUIRE(engine.load(s));
         Id track;
         for (const auto& e : s.tracks)
             if (e.value->type == model::StripType::Channel) track = e.id;
@@ -1693,7 +1693,7 @@ TEST_CASE("loop recording: one contiguous file, a run per pass, placed on the ti
         std::filesystem::remove_all(dir);
         engine.setLoop(0.5, 1.0, true);
         engine.seek(0.25);
-        REQUIRE(engine.startRecording({{track, {0}, dir / "take.wav", {}}}).ok());
+        REQUIRE(engine.startRecording({{track, {0}, dir / "take.wav", {}}}));
         engine.play();
         constexpr std::int64_t kCycles = 400;  // 102400 frames: 36000 + 24000 * 2 + 18400
         if (options.anticipative)
@@ -1798,7 +1798,7 @@ TEST_CASE("MIDI monitoring: a keyboard plays the instrument live, sample-accurat
             REQUIRE(
                 engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .midiInputs = true})
                     .ok());
-            REQUIRE(engine.load(keyboardSession()).ok());
+            REQUIRE(engine.load(keyboardSession()));
             REQUIRE(engine.awaitPlan());  // everything is live: nothing renders ahead
             if (playing) engine.play();
             if (playing) engine.awaitTransport();
@@ -1860,8 +1860,8 @@ TEST_CASE("MIDI monitoring preserves every event in a device block" * doctest::d
         // Both messages fit in one block: losing the off leaves a stuck voice.
         DummyBackend backend(keyboard({{10, 0x90, 60, 100}, {100, 0x80, 60, 0}}, 512));
         Engine engine(pool, media, options);
-        REQUIRE(engine.start(backend, {.blockSize = 256, .midiInputs = true}).ok());
-        REQUIRE(engine.load(keyboardSession()).ok());
+        REQUIRE(engine.start(backend, {.blockSize = 256, .midiInputs = true}));
+        REQUIRE(engine.load(keyboardSession()));
         REQUIRE(engine.awaitPlan());
         backend.run(2);
         engine.stop();
@@ -1877,8 +1877,8 @@ TEST_CASE("live buffers cover a device block larger than the render block" *
     MediaCache media;
     DummyBackend backend(constantInput(512));
     Engine engine(pool, media, {.renderBlock = 64, .workers = 0});
-    REQUIRE(engine.start(backend, {.blockSize = 256, .inputs = 2}).ok());
-    REQUIRE(engine.load(monitoring(synthSession())).ok());
+    REQUIRE(engine.start(backend, {.blockSize = 256, .inputs = 2}));
+    REQUIRE(engine.load(monitoring(synthSession())));
     // Check before driving it: the unfixed plan would overrun its buffers.
     REQUIRE(EngineTestAccess::latestPlan(engine).block >= 256);
     REQUIRE(engine.awaitPlan());
@@ -1905,8 +1905,8 @@ TEST_CASE("seeking restarts the console seeds in both executors" * doctest::desc
         MediaCache media;
         DummyBackend backend({.captureFrames = 8192});
         Engine engine(pool, media, options);
-        REQUIRE(engine.start(backend, {.blockSize = 128}).ok());
-        REQUIRE(engine.load(s).ok());
+        REQUIRE(engine.start(backend, {.blockSize = 128}));
+        REQUIRE(engine.load(s));
         engine.play();
         if (options.anticipative) REQUIRE(engine.awaitRendered(2048));
         backend.run(16);
@@ -1941,7 +1941,7 @@ TEST_CASE("MIDI recording: events land on the timeline where they were heard, pe
         REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .midiInputs = true})
                     .ok());
         const model::Session s = keyboardSession(true);
-        REQUIRE(engine.load(s).ok());
+        REQUIRE(engine.load(s));
         Id track;
         for (const auto& e : s.tracks)
             if (e.value->type == model::StripType::Channel) track = e.id;
@@ -1949,7 +1949,7 @@ TEST_CASE("MIDI recording: events land on the timeline where they were heard, pe
         RecordTarget target;
         target.track = track;
         target.midi = RecordTarget::Midi{midiPortMask(engine.midiPorts(), "key"), 1, 0};
-        REQUIRE(engine.startRecording({target}).ok());
+        REQUIRE(engine.startRecording({target}));
         REQUIRE(engine.awaitPlan());  // everything is live: nothing renders ahead
         engine.play();
         engine.awaitTransport();
@@ -1981,7 +1981,7 @@ TEST_CASE("turning MIDI monitoring off while a key is held releases the note" *
         REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .midiInputs = true})
                     .ok());
         model::Session s = keyboardSession();
-        REQUIRE(engine.load(s).ok());
+        REQUIRE(engine.load(s));
         REQUIRE(engine.awaitPlan());
         backend.run(40);  // 10240 frames: the note sounds
         model::EditTxn t(s, 2);
@@ -1989,7 +1989,7 @@ TEST_CASE("turning MIDI monitoring off while a key is held releases the note" *
             if (e.id != kMaster)
                 t.modify<model::Track>(
                     e.id, [](model::Track& x) { x.record.monitor = model::Monitor::Off; });
-        REQUIRE(engine.load(t.commit().value()).ok());
+        REQUIRE(engine.load(t.commit().value()));
         REQUIRE(engine.awaitPlan());
         backend.run(120);
         engine.stop();
@@ -2016,7 +2016,7 @@ TEST_CASE("a monitored MIDI route change releases held notes" * doctest::descrip
                 engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .midiInputs = true})
                     .ok());
             const model::Session s = keyboardSession();
-            REQUIRE(engine.load(s).ok());
+            REQUIRE(engine.load(s));
             REQUIRE(engine.awaitPlan());
             backend.run(40);  // the key is down at the edit
             model::EditTxn t(s, 2);
@@ -2026,7 +2026,7 @@ TEST_CASE("a monitored MIDI route change releases held notes" * doctest::descrip
                         if (change == 1) route.from.midiDevice = "pads";
                         if (change == 2) route.midi->fromChannel = 2;
                     });
-            REQUIRE(engine.load(t.commit().value()).ok());
+            REQUIRE(engine.load(t.commit().value()));
             REQUIRE(engine.awaitPlan());
             backend.run(80);
             engine.stop();
@@ -2051,15 +2051,15 @@ TEST_CASE("a mute while playing fades over 10 ms instead of clicking" *
     MediaCache media;
     DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 48000});
     Engine engine(pool, media, kInCallback);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}));
     model::Session s = synthSession(0.0);
-    REQUIRE(engine.load(s).ok());
+    REQUIRE(engine.load(s));
     engine.play();
     backend.run(10);  // 2560 frames
     model::EditTxn t(s, 2);
     for (const auto& e : s.tracks)
         if (e.id != kMaster) t.modify<model::Track>(e.id, [](model::Track& x) { x.mute = true; });
-    REQUIRE(engine.load(t.commit().value()).ok());
+    REQUIRE(engine.load(t.commit().value()));
     backend.run(10);
     engine.stop();
     const auto& L = backend.capture().channels[0];
@@ -2101,8 +2101,8 @@ TEST_CASE("wet and bypass edits retarget an active ramp without a step" *
         MediaCache media;
         DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 8192});
         Engine engine(pool, media, kInCallback);
-        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
-        REQUIRE(engine.load(s).ok());
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}));
+        REQUIRE(engine.load(s));
         engine.play();
         backend.run(10);
         auto edit = [&](bool turnOff, std::uint64_t version) {
@@ -2114,7 +2114,7 @@ TEST_CASE("wet and bypass edits retarget an active ramp without a step" *
                     f.wet = turnOff ? 0.0 : 100.0;
             });
             s = t.commit().value();
-            REQUIRE(engine.load(s).ok());
+            REQUIRE(engine.load(s));
         };
         edit(true, 3);
         backend.run(1);  // 256 samples into the 480-sample ramp
@@ -2163,14 +2163,14 @@ TEST_CASE("a long, dense MIDI performance records without overflow (the writer d
     REQUIRE(
         engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .midiInputs = true}).ok());
     const model::Session s = keyboardSession(true);
-    REQUIRE(engine.load(s).ok());
+    REQUIRE(engine.load(s));
     Id track;
     for (const auto& e : s.tracks)
         if (e.value->type == model::StripType::Channel) track = e.id;
     RecordTarget target;
     target.track = track;
     target.midi = RecordTarget::Midi{midiPortMask(engine.midiPorts(), "*"), 0, 0};
-    REQUIRE(engine.startRecording({target}).ok());
+    REQUIRE(engine.startRecording({target}));
     engine.play();
     std::this_thread::sleep_for(std::chrono::milliseconds(1200));
     auto takes = engine.stopRecording();
@@ -2206,8 +2206,8 @@ TEST_CASE("monitoring off while playing: the track plays on live, with its insta
     MediaCache media;
     DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 96000});
     Engine engine(pool, media, EngineOptions{.workers = 0});
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
-    REQUIRE(engine.load(monitored).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}));
+    REQUIRE(engine.load(monitored));
     REQUIRE(engine.awaitPlan());
     engine.play();
     engine.awaitTransport();
@@ -2215,7 +2215,7 @@ TEST_CASE("monitoring off while playing: the track plays on live, with its insta
     const Id fx = s.fx.begin()->id;
     host::Instance* const instance = pool.find(fx);
     REQUIRE(instance);
-    REQUIRE(engine.load(s).ok());  // monitoring off: still live while playing
+    REQUIRE(engine.load(s));  // monitoring off: still live while playing
     REQUIRE(engine.awaitPlan());
     CHECK(EngineTestAccess::latestPlan(engine).heldLive);
     CHECK(pool.find(fx) == instance);
@@ -2254,8 +2254,8 @@ TEST_CASE("a transport write in progress never stalls the audio callback" *
         MediaCache media;
         DummyBackend backend({.mode = DummyBackend::Mode::Manual});
         Engine engine(pool, media, EngineOptions{.anticipative = anticipative, .workers = 0});
-        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}).ok());
-        REQUIRE(engine.load(synthSession(0.0)).ok());
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256}));
+        REQUIRE(engine.load(synthSession(0.0)));
         if (anticipative) REQUIRE(engine.awaitPlan());
         engine.setLoop(0.0, 1.0, true);
         engine.play();
@@ -2364,7 +2364,7 @@ TEST_CASE("a keyed plug-in plays in real time as offline, rendered ahead or live
                 Engine engine(rtPool, media, options);
                 REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128, .inputs = 2})
                             .ok());
-                REQUIRE(engine.load(s).ok());
+                REQUIRE(engine.load(s));
                 if (options.anticipative) REQUIRE(engine.awaitPlan());
                 engine.play();
                 if (options.anticipative && !monitored)
@@ -2417,8 +2417,8 @@ TEST_CASE("a key routed while playing reaches a plug-in that follows port activa
     MediaCache media;
     DummyBackend backend({.mode = DummyBackend::Mode::Manual});
     Engine engine(pool, media, kInCallback);
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
-    REQUIRE(engine.load(s).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}));
+    REQUIRE(engine.load(s));
     engine.play();
     backend.run(8);
     REQUIRE(pool.find(keyedFx));
@@ -2432,7 +2432,7 @@ TEST_CASE("a key routed while playing reaches a plug-in that follows port activa
         t.create(key);
         s = t.commit().value();
     }
-    REQUIRE(engine.load(s).ok());
+    REQUIRE(engine.load(s));
     backend.run(8);
     REQUIRE(pool.find(keyedFx));
     CHECK(pool.find(keyedFx)->sidechainActive());
@@ -2497,7 +2497,7 @@ TEST_CASE("auxiliary channels play in real time as offline, rendered ahead or li
             Engine engine(rtPool, media, options);
             REQUIRE(
                 engine.start(backend, {.sampleRate = 48000, .blockSize = 128, .inputs = 2}).ok());
-            REQUIRE(engine.load(s).ok());
+            REQUIRE(engine.load(s));
             if (options.anticipative) REQUIRE(engine.awaitPlan());
             engine.play();
             if (options.anticipative && !monitored)
@@ -2578,7 +2578,7 @@ TEST_CASE("a multi-out instrument's outputs play in real time as offline (ADR-00
             Engine engine(rtPool, media, options);
             REQUIRE(
                 engine.start(backend, {.sampleRate = 48000, .blockSize = 128, .inputs = 2}).ok());
-            REQUIRE(engine.load(s).ok());
+            REQUIRE(engine.load(s));
             if (options.anticipative) REQUIRE(engine.awaitPlan());
             engine.play();
             if (options.anticipative && !monitored)
@@ -2636,8 +2636,8 @@ TEST_CASE("multiple masters: real-time main output is independent of later roots
         MediaCache media;
         DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 8192});
         Engine engine(rtPool, media, options);
-        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
-        REQUIRE(engine.load(*s).ok());
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}));
+        REQUIRE(engine.load(*s));
         engine.play();
         if (options.anticipative)
             runAhead(engine, backend, 64, 128);
@@ -2700,7 +2700,7 @@ TEST_CASE("meters report what has been heard, not what has been rendered" *
         tone.channels[0][i] = static_cast<float>(s);
         tone.channels[1][i] = static_cast<float>(s);
     }
-    REQUIRE(audio::writeWav(dir / "media" / "tone.wav", tone).ok());
+    REQUIRE(audio::writeWav(dir / "media" / "tone.wav", tone));
 
     model::EditTxn t(model::Session::create({.console9 = false}), 1);
     model::Track sine;
@@ -2732,8 +2732,8 @@ TEST_CASE("meters report what has been heard, not what has been rendered" *
     MediaCache media;
     DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 48000});
     Engine engine(pool, media, EngineOptions{.workers = 0});  // anticipative
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
-    REQUIRE(engine.load(session, dir).ok());
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}));
+    REQUIRE(engine.load(session, dir));
     const auto bank = engine.meterBank();
     REQUIRE(bank != nullptr);
     const Id master = kMaster;
@@ -2812,9 +2812,9 @@ TEST_CASE("meters show a monitored input while the transport is stopped" *
     MediaCache media;
     DummyBackend backend(constantInput(4096));
     Engine engine(pool, media, kInCallback);  // no anticipation: the callback meters
-    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
-    REQUIRE(engine.load(monitoring(synthSession(-6.0206))).ok());  // its track monitors 1-2
-    backend.run(4);                                                // stopped: input only
+    REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}));
+    REQUIRE(engine.load(monitoring(synthSession(-6.0206))));  // its track monitors 1-2
+    backend.run(4);                                           // stopped: input only
 
     const auto bank = engine.meterBank();
     REQUIRE(bank != nullptr);
@@ -2861,7 +2861,7 @@ TEST_CASE("a count-in clicks a bar while the position holds, then plays and reco
             REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = kBlock, .inputs = 2})
                         .ok());
             const model::Session s = synthSession(0.0);
-            REQUIRE(engine.load(s).ok());
+            REQUIRE(engine.load(s));
             engine.setMetronome(false, 0.0);  // the count clicks regardless
             const auto dir = std::filesystem::temp_directory_path() /
                              ("supple-count-" + std::to_string(::getpid()));
@@ -2870,7 +2870,7 @@ TEST_CASE("a count-in clicks a bar while the position holds, then plays and reco
                 Id track;
                 for (const auto& e : s.tracks)
                     if (e.value->type == model::StripType::Channel) track = e.id;
-                REQUIRE(engine.startRecording({{track, {0, 1}, dir / "take.wav", {}}}).ok());
+                REQUIRE(engine.startRecording({{track, {0, 1}, dir / "take.wav", {}}}));
             }
             if (countIn)
                 engine.playCountIn(kBar, kBar / 4, 4);
@@ -2943,8 +2943,8 @@ TEST_CASE("the metronome clicks every beat in the live output, accented on the b
         MediaCache media;
         DummyBackend backend({.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2});
         Engine engine(rtPool, media, options);
-        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
-        REQUIRE(engine.load(s).ok());
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}));
+        REQUIRE(engine.load(s));
         engine.setMetronome(true, 0.0);
         engine.play();
         if (options.anticipative)
@@ -3845,8 +3845,8 @@ TEST_CASE("parallel, oversampled and pdc-ignored FX: real-time output equals the
         DummyBackend backend(
             {.mode = DummyBackend::Mode::Manual, .captureFrames = 48000 * 2 + 4096});
         Engine engine(rtPool, media, options);
-        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}).ok());
-        REQUIRE(engine.load(s).ok());
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 128}));
+        REQUIRE(engine.load(s));
         engine.play();
         if (options.anticipative)
             runAhead(engine, backend, (48000 * 2 + 4096) / 128, 128);
@@ -3910,8 +3910,8 @@ TEST_CASE("input FX process the armed input: monitored and recorded, aligned wit
                                                      1000.0f * (c ? -1.0f : 1.0f);
                               }});
         Engine engine(pool, media, options);
-        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
-        REQUIRE(engine.load(s).ok());
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}));
+        REQUIRE(engine.load(s));
         CHECK(engine.processErrors() == 0);
         const auto dir = std::filesystem::temp_directory_path() /
                          ("supple-inputfx-" + std::to_string(::getpid()));
@@ -3965,8 +3965,8 @@ TEST_CASE("a monitored input is heard through its input FX" * doctest::descripti
         MediaCache media;
         DummyBackend backend(constantInput(48000));
         Engine engine(pool, media, options);
-        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}).ok());
-        REQUIRE(engine.load(s).ok());
+        REQUIRE(engine.start(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2}));
+        REQUIRE(engine.load(s));
         REQUIRE(engine.awaitPlan());
         backend.run(20);  // stopped: the input, the input FX, the fader and centre pan
         const auto& cap = backend.capture();
@@ -4207,7 +4207,7 @@ std::filesystem::path tinyMedia(const char* name) {
     audio::AudioData data;
     data.sampleRate = 48000;
     data.channels.assign(2, tinySignal());
-    REQUIRE(audio::writeWav(dir / "media" / "tiny.wav", data).ok());
+    REQUIRE(audio::writeWav(dir / "media" / "tiny.wav", data));
     return dir;
 }
 

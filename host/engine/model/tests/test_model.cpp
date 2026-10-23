@@ -108,7 +108,7 @@ TEST_CASE("a new session: master, one tempo point, one meter, counters past them
     CHECK(s.next[Kind::Track] == 1);
     CHECK(s.next[Kind::TempoPoint] == 2);
     CHECK(s.timeMap->secondsAt(4) == 2.0);
-    CHECK(checkInvariants(s).ok());
+    CHECK(checkInvariants(s));
 }
 
 TEST_CASE("transactions: new IDs, change lists, revisions, structural sharing") {

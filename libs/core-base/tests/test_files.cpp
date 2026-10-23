@@ -38,13 +38,13 @@ TEST_CASE("base64: RFC 4648 test vectors round-trip") {
         const auto b = bytesOf(plain);
         CHECK(base64Encode(b) == encoded);
         auto d = base64Decode(encoded);
-        REQUIRE(d.ok());
+        REQUIRE(d);
         CHECK(*d == b);
     }
     std::vector<std::uint8_t> all(256);
     for (int i = 0; i < 256; ++i) all[static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(i);
     auto d = base64Decode(base64Encode(all));
-    REQUIRE(d.ok());
+    REQUIRE(d);
     CHECK(*d == all);
 }
 
@@ -62,15 +62,15 @@ TEST_CASE("files: atomic write, read back, errors") {
         fs::temp_directory_path() / ("supple-files-test-" + std::to_string(::getpid()));
     fs::remove_all(dir);
     const fs::path p = dir / "sub" / "a.txt";
-    REQUIRE(writeFileAtomic(p, std::string_view("hello")).ok());
+    REQUIRE(writeFileAtomic(p, std::string_view("hello")));
     CHECK(!fs::exists(p.string() + ".tmp"));
     auto t = readTextFile(p);
-    REQUIRE(t.ok());
+    REQUIRE(t);
     CHECK(*t == "hello");
-    REQUIRE(writeFileAtomic(p, std::string_view("")).ok());
+    REQUIRE(writeFileAtomic(p, std::string_view("")));
     CHECK(readTextFile(p).value() == "");
-    CHECK(readFile(p, 0).ok());
-    REQUIRE(writeFileAtomic(p, std::string_view("12345")).ok());
+    CHECK(readFile(p, 0));
+    REQUIRE(writeFileAtomic(p, std::string_view("12345")));
     CHECK(readFile(p, 4).error().code == "file.too_large");
     CHECK(readFile(dir / "missing").error().code == "file.open");
     // Concurrent writers of one target: every write succeeds, the result is
@@ -108,11 +108,11 @@ TEST_CASE("files: native Unicode paths and binary bytes survive replacement") {
     const fs::path path = dir / fs::path(std::u8string(u8"音声.wav"));
     const std::vector<std::uint8_t> first{0, 10, 13, 26, 255};
     const std::vector<std::uint8_t> second{26, 13, 10, 0};
-    REQUIRE(writeFileAtomic(path, first).ok());
-    REQUIRE(readFile(path).ok());
+    REQUIRE(writeFileAtomic(path, first));
+    REQUIRE(readFile(path));
     CHECK(*readFile(path) == first);
-    REQUIRE(writeFileAtomic(path, second).ok());
-    REQUIRE(readFile(path).ok());
+    REQUIRE(writeFileAtomic(path, second));
+    REQUIRE(readFile(path));
     CHECK(*readFile(path) == second);
     fs::remove_all(dir);
 }
@@ -121,7 +121,7 @@ TEST_CASE("files: atomic replacement preserves an existing reader") {
     const fs::path dir =
         fs::temp_directory_path() / ("supple-reader-" + std::to_string(::getpid()));
     const fs::path path = dir / "data";
-    REQUIRE(writeFileAtomic(path, std::string_view("old")).ok());
+    REQUIRE(writeFileAtomic(path, std::string_view("old")));
     {
 #ifdef _WIN32
         struct Reader {
@@ -133,7 +133,7 @@ TEST_CASE("files: atomic replacement preserves an existing reader") {
         REQUIRE(reader.handle != INVALID_HANDLE_VALUE);
         const auto replaced = writeFileAtomic(path, std::string_view("new"));
         INFO((replaced ? "ok" : replaced.error().message));
-        REQUIRE(replaced.ok());
+        REQUIRE(replaced);
         char old[3];
         DWORD count = 0;
         REQUIRE(::ReadFile(reader.handle, old, sizeof(old), &count, nullptr));
@@ -141,7 +141,7 @@ TEST_CASE("files: atomic replacement preserves an existing reader") {
 #else
         std::ifstream reader(path, std::ios::binary);
         REQUIRE(reader.good());
-        REQUIRE(writeFileAtomic(path, std::string_view("new")).ok());
+        REQUIRE(writeFileAtomic(path, std::string_view("new")));
         const std::string previous((std::istreambuf_iterator<char>(reader)),
                                    std::istreambuf_iterator<char>());
 #endif
@@ -192,7 +192,7 @@ struct DenyDeleteHolder {
 TEST_CASE("files: a brief hold without delete sharing delays the replace, then it succeeds") {
     const fs::path dir = fs::temp_directory_path() / ("supple-busy-" + std::to_string(::getpid()));
     const fs::path path = dir / "data";
-    REQUIRE(writeFileAtomic(path, std::string_view("old")).ok());
+    REQUIRE(writeFileAtomic(path, std::string_view("old")));
     DenyDeleteHolder holder(path);
     REQUIRE(holder.handle != INVALID_HANDLE_VALUE);
     std::thread releaser([&] {
@@ -202,7 +202,7 @@ TEST_CASE("files: a brief hold without delete sharing delays the replace, then i
     const auto replaced = writeFileAtomic(path, std::string_view("new"));
     releaser.join();
     INFO((replaced ? "ok" : replaced.error().message));
-    REQUIRE(replaced.ok());
+    REQUIRE(replaced);
     CHECK(readTextFile(path).value() == "new");
     std::error_code ec;
     int files = 0;
@@ -217,7 +217,7 @@ TEST_CASE("files: a brief hold without delete sharing delays the replace, then i
 TEST_CASE("files: a lasting hold without delete sharing is a structured error") {
     const fs::path dir = fs::temp_directory_path() / ("supple-held-" + std::to_string(::getpid()));
     const fs::path path = dir / "data";
-    REQUIRE(writeFileAtomic(path, std::string_view("old")).ok());
+    REQUIRE(writeFileAtomic(path, std::string_view("old")));
     {
         DenyDeleteHolder holder(path);
         REQUIRE(holder.handle != INVALID_HANDLE_VALUE);
@@ -239,7 +239,7 @@ TEST_CASE("files: a lasting hold without delete sharing is a structured error") 
         CHECK(files == 1);
     }
     // Once released the same save works.
-    CHECK(writeFileAtomic(path, std::string_view("new")).ok());
+    CHECK(writeFileAtomic(path, std::string_view("new")));
     std::error_code ec;
     fs::remove_all(dir, ec);
 }

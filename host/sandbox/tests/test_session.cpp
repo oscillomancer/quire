@@ -170,10 +170,10 @@ TEST_CASE("chain: instruments first, effects after, errors name the fix") {
     REQUIRE(g2);
     CHECK(*g2 == "in_3");  // the failed loads consumed no IDs
     CHECK(s->chain() == std::vector<std::string>{"in_2", "in_3", "in_1"});
-    CHECK(s->move("in_1", 1).ok());
+    CHECK(s->move("in_1", 1));
     CHECK(s->chain() == std::vector<std::string>{"in_2", "in_1", "in_3"});
     CHECK(s->move("in_2", 2).error().code == "sandbox.chain_order");
-    CHECK(s->remove("in_1").ok());
+    CHECK(s->remove("in_1"));
     CHECK(s->chain() == std::vector<std::string>{"in_2", "in_3"});
     auto gone = s->instance("in_1");
     REQUIRE(!gone);
@@ -238,7 +238,7 @@ TEST_CASE("patches: merge reports the effective change; invalid patches change n
     CHECK(s->patchGet(g, false).value() == before);
 
     auto full = s->patchSet(g, before);
-    CHECK(full.ok());
+    CHECK(full);
     const std::string sine = s->load(kSine).value();
     auto ns = s->patchGet(sine, false);
     REQUIRE(!ns);
@@ -354,11 +354,11 @@ TEST_CASE("transactions: rollback restores chain, state and renders; IDs stay un
     in.notes = twoNotes();
     REQUIRE(s->render(in));
 
-    REQUIRE(s->begin().ok());
+    REQUIRE(s->begin());
     CHECK(s->begin().error().code == "sandbox.transaction_nested");
     REQUIRE(s->patchMerge(g, *json::parse(R"({"params": {"gain": -30}})")));
     const std::string g2 = s->load(kGain).value();
-    REQUIRE(s->remove(sine).ok());
+    REQUIRE(s->remove(sine));
     auto r = s->render([] {
         RenderInput a;
         a.seconds = 0.1;
@@ -368,7 +368,7 @@ TEST_CASE("transactions: rollback restores chain, state and renders; IDs stay un
     const fs::path madeInTxn = (*r)->path;
     SessionSettings st = s->settings();
     st.tempo = 90;
-    REQUIRE(s->setSettings(st).ok());
+    REQUIRE(s->setSettings(st));
     REQUIRE(s->rollback());
 
     CHECK(s->chain() == std::vector<std::string>{sine, g});
@@ -383,8 +383,8 @@ TEST_CASE("transactions: rollback restores chain, state and renders; IDs stay un
     CHECK((*after)->id == "rd_3");  // rd_2 was rolled back, never reused
     CHECK(s->load(kGain).value() == "in_4");
 
-    REQUIRE(s->begin().ok());
-    REQUIRE(s->remove(g).ok());
+    REQUIRE(s->begin());
+    REQUIRE(s->remove(g));
     s->commit();
     CHECK(!s->instance(g).ok());
 }
@@ -406,7 +406,7 @@ TEST_CASE("settings: validation paths, summary, reset") {
     REQUIRE(s->render(in));
     SessionSettings hi;
     hi.sampleRate = 96000;
-    REQUIRE(s->setSettings(hi).ok());
+    REQUIRE(s->setSettings(hi));
     auto r = s->render(in);
     REQUIRE(r);
     CHECK((*r)->sampleRate == 96000);

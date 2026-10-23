@@ -73,7 +73,7 @@ TEST_CASE("VST3 fixture scans, processes, and restores state") {
     REQUIRE(made);
     auto& instance = **made;
     REQUIRE(instance.params().size() == 1);
-    REQUIRE(instance.setParam(1, 0.25).ok());
+    REQUIRE(instance.setParam(1, 0.25));
     CHECK(*instance.paramValue(1) == doctest::Approx(0.25));
     auto text = instance.paramText(1, 0.25);
     REQUIRE(text);
@@ -82,10 +82,10 @@ TEST_CASE("VST3 fixture scans, processes, and restores state") {
     CHECK(*parsed == doctest::Approx(0.25));
     auto state = instance.saveState();
     REQUIRE_MESSAGE(state, (state ? "" : state.error().message));
-    REQUIRE(instance.setParam(1, 0.75).ok());
-    REQUIRE(instance.loadState(*state).ok());
+    REQUIRE(instance.setParam(1, 0.75));
+    REQUIRE(instance.loadState(*state));
     CHECK(*instance.paramValue(1) == doctest::Approx(0.25));
-    REQUIRE(instance.activate(48000, 1, 64).ok());
+    REQUIRE(instance.activate(48000, 1, 64));
     REQUIRE(instance.startProcessing());
     Buffers buffer(64);
     std::fill(buffer.l.begin(), buffer.l.end(), 1.0f);
@@ -113,8 +113,8 @@ TEST_CASE("VST3 plug-ins with a sidechain bus get every bus; kNotImplemented sta
     REQUIRE(made);
     auto& instance = **made;
     CHECK(instance.audioInputChannels() == 2);
-    REQUIRE(instance.setParam(1, 0.5).ok());
-    REQUIRE(instance.activate(48000, 1, 64).ok());
+    REQUIRE(instance.setParam(1, 0.5));
+    REQUIRE(instance.activate(48000, 1, 64));
     REQUIRE(instance.startProcessing());
     Buffers buffer(64);
     std::fill(buffer.l.begin(), buffer.l.end(), 1.0f);
@@ -138,7 +138,7 @@ TEST_CASE("a VST3 reset ends the notes the host delivered") {
     auto made = Instance::create(*sine, {});
     REQUIRE(made);
     auto& instrument = **made;
-    REQUIRE(instrument.activate(48000, 1, 64).ok());
+    REQUIRE(instrument.activate(48000, 1, 64));
     REQUIRE(instrument.startProcessing());
     Buffers buffer(64);
     Event note{.kind = Event::Kind::NoteOn, .time = 0, .key = 69, .noteId = 3};
@@ -183,7 +183,7 @@ TEST_CASE("gain: ports, params, sample-accurate automation") {
     CHECK(*g.paramFromText(0, "-6 dB") == doctest::Approx(gainClap(-6)));
     CHECK_FALSE(g.paramFromText(0, "loud"));
 
-    REQUIRE(g.activate(48000, 1, 512).ok());
+    REQUIRE(g.activate(48000, 1, 512));
     g.startProcessing();
     Buffers buf(256);
     for (std::uint32_t i = 0; i < 256; ++i) buf.l[i] = buf.r[i] = 0.5f;
@@ -192,13 +192,13 @@ TEST_CASE("gain: ports, params, sample-accurate automation") {
     CHECK(static_cast<double>(buf.ol[99]) == doctest::Approx(0.5));
     CHECK(buf.ol[100] == 0.0f);  // -60 dB is off-at-min: silence exactly from sample 100
     // A queued change applies at the start of the next block.
-    REQUIRE(g.setParam(0, gainClap(0)).ok());
+    REQUIRE(g.setParam(0, gainClap(0)));
     REQUIRE(g.process(buf.block(256)));
     CHECK(static_cast<double>(buf.ol[0]) == doctest::Approx(0.5));
     g.stopProcessing();
     g.deactivate();
     // Inactive: flushed immediately on the main thread.
-    REQUIRE(g.setParam(0, gainClap(-12)).ok());
+    REQUIRE(g.setParam(0, gainClap(-12)));
     CHECK(*g.paramValue(0) == doctest::Approx(gainClap(-12)));
 }
 
@@ -207,10 +207,10 @@ TEST_CASE("gain: state round trip across instances") {
     auto b = Instance::create(find("com.suppleaudio.test.gain"), {});
     REQUIRE(a);
     REQUIRE(b);
-    REQUIRE((*a)->setParam(0, gainClap(-3)).ok());
+    REQUIRE((*a)->setParam(0, gainClap(-3)));
     auto state = (*a)->saveState();
     REQUIRE(state);
-    REQUIRE((*b)->loadState(*state).ok());
+    REQUIRE((*b)->loadState(*state));
     CHECK(*(*b)->paramValue(0) == doctest::Approx(gainClap(-3)));
     std::vector<std::uint8_t> junk = {1, 2, 3};
     CHECK_FALSE((*b)->loadState(junk).ok());
@@ -225,7 +225,7 @@ TEST_CASE("gain: semantic schema, patches, errors, validate-only") {
     CHECK(schema->find("params")->find("gain")->find("unit")->asString() == "dB");
     CHECK(*g.getPatch(true) ==
           "{\n  \"schema\": \"supple.test-gain-patch/1.0\",\n  \"params\": {}\n}\n");
-    REQUIRE(g.setPatch(R"({"params": {"gain": "-4.5 dB"}})", CLAP_SUPPLE_SET_MERGE).ok());
+    REQUIRE(g.setPatch(R"({"params": {"gain": "-4.5 dB"}})", CLAP_SUPPLE_SET_MERGE));
     CHECK(*g.paramValue(0) == doctest::Approx(gainClap(-4.5)));
     CHECK(g.getPatch(true)->find("\"gain\": -4.5") != std::string::npos);
     CHECK(*g.describe(true) == "Gain: Gain -4.5 dB");
@@ -234,7 +234,7 @@ TEST_CASE("gain: semantic schema, patches, errors, validate-only") {
     CHECK(bad.error().code == "params.unknown_key");
     CHECK(bad.error().path == "/params/gian");
     CHECK(bad.error().hint.find("gain") != std::string::npos);
-    REQUIRE(g.setPatch(R"({"params": {"gain": 6}})", CLAP_SUPPLE_SET_VALIDATE_ONLY).ok());
+    REQUIRE(g.setPatch(R"({"params": {"gain": 6}})", CLAP_SUPPLE_SET_VALIDATE_ONLY));
     CHECK(*g.paramValue(0) == doctest::Approx(gainClap(-4.5)));  // unchanged
 }
 
@@ -242,9 +242,9 @@ TEST_CASE("gain: latency change requests a restart; serviceMainThread reactivate
     auto inst = Instance::create(find("com.suppleaudio.test.gain"), {});
     REQUIRE(inst);
     auto& g = **inst;
-    REQUIRE(g.activate(48000, 1, 256).ok());
+    REQUIRE(g.activate(48000, 1, 256));
     CHECK(g.latency() == 0);
-    REQUIRE(g.setPatch(R"({"params": {"latency": "short"}})", CLAP_SUPPLE_SET_MERGE).ok());
+    REQUIRE(g.setPatch(R"({"params": {"latency": "short"}})", CLAP_SUPPLE_SET_MERGE));
     CHECK(g.serviceMainThread());
     CHECK(g.active());
     CHECK(g.latency() == 64);
@@ -263,7 +263,7 @@ TEST_CASE("sine: notes at sample offsets, note end events, MIDI dialect") {
     auto& s = **inst;
     CHECK(s.audioInputChannels() == 0);
     CHECK(s.acceptsNotes());
-    REQUIRE(s.activate(48000, 1, 512).ok());
+    REQUIRE(s.activate(48000, 1, 512));
     s.startProcessing();
     Buffers buf(512);
     const Event events[] = {
@@ -308,7 +308,7 @@ bool rtBlock(Instance& g, const ProcessBlock& b, OutputEvents& out) SUPPLE_RT {
 TEST_CASE("the process path is real-time safe" * doctest::description("rt")) {
     auto inst = Instance::create(find("com.suppleaudio.test.sine"), {});
     REQUIRE(inst);
-    REQUIRE((*inst)->activate(48000, 1, 256).ok());
+    REQUIRE((*inst)->activate(48000, 1, 256));
     (*inst)->startProcessing();
     Buffers buf(256);
     std::vector<OutputEvent> storage(64);
@@ -325,7 +325,7 @@ TEST_CASE("lifecycle: a restart requested while processing waits until processin
     auto inst = Instance::create(find("com.suppleaudio.test.gain"), {});
     REQUIRE(inst);
     auto& g = **inst;
-    REQUIRE(g.activate(48000, 1, 256).ok());
+    REQUIRE(g.activate(48000, 1, 256));
     CHECK(g.latency() == 0);
     REQUIRE(g.startProcessing());
     Buffers buf(64);
@@ -358,13 +358,13 @@ TEST_CASE("lifecycle: request_flush while active is served on the audio thread")
     auto flushes = [&] { return p.paramValue(7).value(); };
     const std::uint8_t plain[4] = {0, 0, 0, 0};
     // Inactive: the host flushes on the main thread.
-    REQUIRE(p.loadState(plain).ok());
+    REQUIRE(p.loadState(plain));
     CHECK_FALSE(p.needsAudioFlush());
     p.serviceMainThread();
     CHECK(flushes() == 1.0);
     // Active: the main thread must not flush; flushParams() on the audio thread does.
-    REQUIRE(p.activate(48000, 1, 256).ok());
-    REQUIRE(p.loadState(plain).ok());
+    REQUIRE(p.activate(48000, 1, 256));
+    REQUIRE(p.loadState(plain));
     CHECK(p.needsAudioFlush());
     p.serviceMainThread();
     CHECK(flushes() == 1.0);
@@ -372,7 +372,7 @@ TEST_CASE("lifecycle: request_flush while active is served on the audio thread")
     CHECK(flushes() == 2.0);
     CHECK_FALSE(p.needsAudioFlush());
     // A process call also satisfies the request.
-    REQUIRE(p.loadState(plain).ok());
+    REQUIRE(p.loadState(plain));
     REQUIRE(p.startProcessing());
     Buffers buf(32);
     REQUIRE(p.process(buf.block(32)));
@@ -385,10 +385,10 @@ TEST_CASE("lifecycle: refused start_processing blocks process(); tail is reporte
     REQUIRE(inst);
     auto& p = **inst;
     const std::uint8_t refuse[4] = {1, 0xe8, 0x03, 0};  // tail 1000 samples
-    REQUIRE(p.loadState(refuse).ok());
+    REQUIRE(p.loadState(refuse));
     CHECK(p.reportsTail());
     CHECK(p.tail() == 1000);
-    REQUIRE(p.activate(48000, 1, 256).ok());
+    REQUIRE(p.activate(48000, 1, 256));
     CHECK_FALSE(p.startProcessing());
     Buffers buf(32);
     CHECK_FALSE(p.process(buf.block(32)));
@@ -399,9 +399,9 @@ TEST_CASE("events: queued params wait when the arena is full; overflow is counte
     auto inst = Instance::create(find("com.suppleaudio.test.gain"), {});
     REQUIRE(inst);
     auto& g = **inst;
-    REQUIRE(g.activate(48000, 1, 256).ok());
+    REQUIRE(g.activate(48000, 1, 256));
     REQUIRE(g.startProcessing());
-    REQUIRE(g.setParam(0, gainClap(-6)).ok());  // queued (active)
+    REQUIRE(g.setParam(0, gainClap(-6)));  // queued (active)
     std::vector<Event> midi(9000);
     for (auto& e : midi) {
         e.kind = Event::Kind::Midi;  // ignored by the gain fixture
@@ -423,8 +423,8 @@ TEST_CASE("CLAP without port activation follows key buffers while processing") {
     REQUIRE(made);
     Instance& in = **made;
     CHECK_FALSE(in.followsKeyActivation());
-    REQUIRE(in.setSidechainActive(false).ok());
-    REQUIRE(in.activate(48000, 1, 64).ok());
+    REQUIRE(in.setSidechainActive(false));
+    REQUIRE(in.activate(48000, 1, 64));
     REQUIRE(in.startProcessing());
     Buffers buffer(64);
     std::fill(buffer.l.begin(), buffer.l.end(), 0.25f);

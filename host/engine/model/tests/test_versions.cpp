@@ -90,18 +90,18 @@ TEST_CASE("undo and redo are linear per branch; a new edit clears redo") {
     run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -3})")});
     run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -6})")});
     CHECK(track(vs, "main", "tr_1")->volumeDb == -6.0);
-    REQUIRE(vs.undo().ok());
-    REQUIRE(vs.undo().ok());
+    REQUIRE(vs.undo());
+    REQUIRE(vs.undo());
     CHECK(track(vs, "main", "tr_1")->volumeDb == 0.0);
-    REQUIRE(vs.redo().ok());
+    REQUIRE(vs.redo());
     CHECK(track(vs, "main", "tr_1")->volumeDb == -3.0);
     run(vs, {inv("track.set", R"({"track": "tr_1", "mute": true})")});
     CHECK_FALSE(vs.canRedo());
     CHECK(vs.redo().error().code == "history.nothing_to_redo");
     CHECK(vs.history().size() == 4);  // mute, -3, add, initial
-    REQUIRE(vs.undo().ok());
-    REQUIRE(vs.undo().ok());
-    REQUIRE(vs.undo().ok());
+    REQUIRE(vs.undo());
+    REQUIRE(vs.undo());
+    REQUIRE(vs.undo());
     CHECK(vs.head()->tracks.size() == 1);
     CHECK(vs.head()->next[Kind::Track] == 2);  // allocated ids survive undo
     run(vs, {inv("track.add", R"({"name":"B"})")});
@@ -117,22 +117,22 @@ TEST_CASE("coalescing: one gesture is one undo step") {
     CHECK(track(vs, "main", "tr_1")->volumeDb == -5.0);
     CHECK(vs.history().size() == 3);  // gesture, add, initial
     CHECK(vs.history().front()->txn.invocations.size() == 5);
-    REQUIRE(vs.undo().ok());
+    REQUIRE(vs.undo());
     CHECK(track(vs, "main", "tr_1")->volumeDb == 0.0);
 }
 
 TEST_CASE("branches: isolated heads, fast-forward merge") {
     VersionStore vs(Session::create());
     run(vs, {inv("track.add", R"({"name": "A"})")});
-    REQUIRE(vs.createBranch("agent/claude/darker", "main").ok());
+    REQUIRE(vs.createBranch("agent/claude/darker", "main"));
     CHECK(vs.createBranch("agent/claude/darker", "main").error().code == "branch.exists");
-    REQUIRE(vs.switchBranch("agent/claude/darker").ok());
+    REQUIRE(vs.switchBranch("agent/claude/darker"));
     run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -9})")});
     CHECK(track(vs, "main", "tr_1")->volumeDb == 0.0);  // main is untouched
     CHECK_FALSE(vs.canRedo());
-    REQUIRE(vs.undo().ok());
+    REQUIRE(vs.undo());
     CHECK_FALSE(vs.canUndo());  // undo stops where the branch began
-    REQUIRE(vs.redo().ok());
+    REQUIRE(vs.redo());
     auto m = vs.merge("agent/claude/darker", "main", apply, schemas);
     CHECK(m.conflicts.empty());
     CHECK(m.fastForward);
@@ -140,16 +140,16 @@ TEST_CASE("branches: isolated heads, fast-forward merge") {
     CHECK(vs.merge("agent/claude/darker", "main", apply, schemas).upToDate);
     CHECK(vs.deleteBranch("main").error().code == "branch.protected");
     CHECK(vs.deleteBranch("agent/claude/darker").error().code == "branch.current");
-    REQUIRE(vs.switchBranch("main").ok());
-    CHECK(vs.deleteBranch("agent/claude/darker").ok());
+    REQUIRE(vs.switchBranch("main"));
+    CHECK(vs.deleteBranch("agent/claude/darker"));
     CHECK(vs.switchBranch("nope").error().code == "branch.unknown");
 }
 
 TEST_CASE("merge by replay remaps IDs created on both sides") {
     VersionStore vs(Session::create());
-    REQUIRE(vs.createBranch("topic", "main").ok());
+    REQUIRE(vs.createBranch("topic", "main"));
     run(vs, {inv("track.add", R"({"name": "Main track"})")});  // tr_1 on main
-    REQUIRE(vs.switchBranch("topic").ok());
+    REQUIRE(vs.switchBranch("topic"));
     run(vs, {inv("track.add", R"({"name": "Branch track"})")});  // tr_1 on the branch too
     run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -3})")});
     auto m = vs.merge("topic", "main", apply, schemas);
@@ -162,8 +162,8 @@ TEST_CASE("merge by replay remaps IDs created on both sides") {
     CHECK(track(vs, "main", "tr_2")->volumeDb == -3.0);  // the edit followed the remap
     CHECK(vs.head("main")->tracks.find(kMaster)->children.size() == 2);  // no false conflict
     CHECK(vs.merge("topic", "main", apply, schemas).upToDate);
-    REQUIRE(vs.switchBranch("main").ok());
-    REQUIRE(vs.undo().ok());  // undo steps back through the replayed transactions
+    REQUIRE(vs.switchBranch("main"));
+    REQUIRE(vs.undo());  // undo steps back through the replayed transactions
     CHECK(track(vs, "main", "tr_2")->volumeDb == 0.0);
 }
 
@@ -171,14 +171,14 @@ TEST_CASE("merge conflicts: same field, removed object, failed replay; target un
     auto setup = [] {
         VersionStore vs(Session::create());
         run(vs, {inv("track.add", R"({"name": "A"})")});
-        REQUIRE(vs.createBranch("topic", "main").ok());
+        REQUIRE(vs.createBranch("topic", "main"));
         return vs;
     };
     {
         VersionStore vs = setup();
         run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -1})")});
         const auto headBefore = vs.headVersion("main");
-        REQUIRE(vs.switchBranch("topic").ok());
+        REQUIRE(vs.switchBranch("topic"));
         run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -2})")});
         auto m = vs.merge("topic", "main", apply, schemas);
         REQUIRE(m.conflicts.size() == 1);
@@ -190,7 +190,7 @@ TEST_CASE("merge conflicts: same field, removed object, failed replay; target un
     {
         VersionStore vs = setup();  // different fields of one object merge cleanly
         run(vs, {inv("track.set", R"({"track": "tr_1", "mute": true})")});
-        REQUIRE(vs.switchBranch("topic").ok());
+        REQUIRE(vs.switchBranch("topic"));
         run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -2})")});
         auto m = vs.merge("topic", "main", apply, schemas);
         CHECK(m.conflicts.empty());
@@ -200,7 +200,7 @@ TEST_CASE("merge conflicts: same field, removed object, failed replay; target un
     {
         VersionStore vs = setup();
         run(vs, {inv("track.remove", R"({"track": "tr_1"})")});
-        REQUIRE(vs.switchBranch("topic").ok());
+        REQUIRE(vs.switchBranch("topic"));
         run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -2})")});
         auto m = vs.merge("topic", "main", apply, schemas);
         REQUIRE(m.conflicts.size() == 1);
@@ -209,7 +209,7 @@ TEST_CASE("merge conflicts: same field, removed object, failed replay; target un
     {
         VersionStore vs = setup();
         run(vs, {inv("track.add", R"({"name": "B"})")});
-        REQUIRE(vs.switchBranch("topic").ok());
+        REQUIRE(vs.switchBranch("topic"));
         run(vs, {inv("track.add", R"({"name": "C"})")});
         auto failing = [](const Session&, const std::vector<Invocation>&,
                           std::uint64_t) -> Result<Replayed> {
@@ -240,7 +240,7 @@ TEST_CASE("coalescing never erases a version another branch references (review r
     run(vs, {inv("track.add", R"({"name": "A"})")});
     const auto v1 =
         run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -1})")}, "fader:tr_1");
-    REQUIRE(vs.createBranch("topic", "main").ok());
+    REQUIRE(vs.createBranch("topic", "main"));
     const auto v2 =
         run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -2})")}, "fader:tr_1");
     CHECK(v2 != v1);  // not coalesced: topic's head is v1
@@ -252,16 +252,16 @@ TEST_CASE("coalescing never erases a version another branch references (review r
         run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -3})")}, "fader:tr_1");
     CHECK(vs.version(v2) == nullptr);
     CHECK(track(vs, "main", "tr_1")->volumeDb == -3.0);
-    REQUIRE(vs.undo().ok());
+    REQUIRE(vs.undo());
     CHECK(track(vs, "main", "tr_1")->volumeDb == -1.0);
     (void)v3;
 }
 
 TEST_CASE("merge remaps only schema-declared IDs (review round 3)") {
     VersionStore vs(Session::create());
-    REQUIRE(vs.createBranch("topic", "main").ok());
+    REQUIRE(vs.createBranch("topic", "main"));
     run(vs, {inv("track.add", R"({"name": "Main track"})")});  // tr_1 on main
-    REQUIRE(vs.switchBranch("topic").ok());
+    REQUIRE(vs.switchBranch("topic"));
     run(vs, {inv("track.add", R"({"name": "Branch track"})")});           // tr_1 on the branch
     run(vs, {inv("track.set", R"({"track": "tr_1", "name": "tr_1"})")});  // literal text
     auto m = vs.merge("topic", "main", apply, schemas);
