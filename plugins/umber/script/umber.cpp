@@ -135,7 +135,7 @@ double speedIps(int s) { return s == 0 ? 30.0 : (s == 1 ? 15.0 : (s == 2 ? 7.5 :
 // MOL at 30, 15 and 7.5 ips; 3.75 extrapolated).
 double speedFieldDb(int s) { return s == 0 ? -0.7 : (s == 1 ? -0.2 : (s == 2 ? 2.75 : 5.0)); }
 // The time constant of each speed's standard, in seconds: 30 ips is AES's
-// 17.5 us either way, and NAB adds a 3180 us lift of the lows below 15 ips.
+// 17.5 us either way, and NAB adds a 3180 us lift of the lows at 15 ips and below.
 double speedTau(int s, bool nab) {
     if (s == 0) return 17.5e-6;
     if (s == 1) return nab ? 50e-6 : 35e-6;
@@ -226,11 +226,10 @@ double humWeight(int n) {
 // the field, so a narrow loop never goes unstable), and a reversible part
 // that follows the field at once.
 struct Oxide {
-    double h = 0.0, mirr = 0.0, m = 0.0;
+    double h = 0.0, mirr = 0.0;
     void clear() {
         h = 0.0;
         mirr = 0.0;
-        m = 0.0;
     }
     double step(double hn, double sq, double pin) {
         const double dh = hn - h;
@@ -241,8 +240,7 @@ struct Oxide {
             const double t = abs(dh) / pin;
             mirr = t > 20.0 ? man : man - diff * exp(-t);
         }
-        m = mirr + 0.3 * (man - mirr);
-        return m;
+        return mirr + 0.3 * (man - mirr);
     }
 };
 
@@ -792,6 +790,7 @@ struct Umber : Effect {
     double jitterScale = 1.0, jitterTarget = 0.0;
     Biquad scrapeBand;
     double scrapeNorm = 1.0;
+    double scrapeRms = 0.0;                    // depends only on the scrape setting and the speed
     double travel = 0.0, travelKeep = 0.9999;  // the tape's displacement, in seconds
     double readNow = 0.0, readWas = 0.0;       // the read's delay, oversampled samples
     double wowHeld = 1.0, flutterHeld = 1.0;   // what fits the read's reach
@@ -1140,6 +1139,10 @@ struct Umber : Effect {
         const double eps = 0.316;
         const double fLow = 1.0 / (twoPi * 3180e-6);
         for (Track& k : track) {
+            // These curves depend only on the speed, standard and sample rate.
+            k.rec.design(nab, hi, false);
+            k.edge.design(5000.0 * v, 9000.0 * v, hi);
+            k.play.design(nab, hi, true);
             // The hiss: white in the tape, through the playback curve.
             k.hissTau.design(fTau, 0.45 * rate, 1.0, rate);
             k.hissTop.design(0.49 * rate, hissCorner(s), 1.0, rate);
@@ -1217,9 +1220,6 @@ struct Umber : Effect {
         edgeCeiling = edgeFor(s, nab, oxideNow.loss, hfSatNow) * kRef;
         const double v = ips / 15.0;
         for (Track& k : track) {
-            k.rec.design(nab, hi, false);
-            k.edge.design(5000.0 * v, 9000.0 * v, hi);
-            k.play.design(nab, hi, true);
             shelf(k.recTrim, recHfNow, min(4000.0 * v, 0.3 * hi), hi);
             k.recAmp.set(recAmpNow, 0.35, hi);
             k.reproAmp.set(reproAmpNow, 0.25, hi);
@@ -1344,7 +1344,8 @@ struct Umber : Effect {
     // latency the wow is scaled down first (its shape kept), then the
     // flutter.
     void holdTransport() {
-        const double budget = 0.8 * max(0.0, reach - azimuthExtent()) - scrapeSeconds() * 4.0;
+        scrapeRms = scrapeSeconds();
+        const double budget = 0.8 * max(0.0, reach - azimuthExtent()) - scrapeRms * 4.0;
         const double w = wow.value() * speedDepth * wowReach();
         const double f = flutter.value() * speedDepth * flutterReach();
         wowHeld = 1.0;
@@ -1415,8 +1416,7 @@ struct Umber : Effect {
             flutterNow * (0.45 * sway[2] * capstan.s + 0.2 * sway[3] * idler.s + 0.35 * jitter);
         travel = travel * travelKeep + speedError / rate;
         double moved = travel;
-        const double scrapeNow = scrapeSeconds();
-        if (scrapeNow > 0.0) moved += scrapeNow * scrapeNorm * scrapeBand.process(noise.gaussian());
+        if (scrapeRms > 0.0) moved += scrapeRms * scrapeNorm * scrapeBand.process(noise.gaussian());
         moved = bound(moved, reach - max(azimuthExtent(), spreadNow + 0.5 * windowNow));
         movedNow = moved;
         readWas = readNow;
@@ -1513,8 +1513,9 @@ struct Umber : Effect {
                 if (fade == 1.0) switching = 0;
             }
             const double g = drive.at(i);
-            const double driveGain = driveCache.get(g) * inFade;
-            const double back = autoGain.on() ? 1.0 / driveCache.get(g) : 1.0;
+            const double driveLevel = driveCache.get(g);
+            const double driveGain = driveLevel * inFade;
+            const double back = autoGain.on() ? 1.0 / driveLevel : 1.0;
             const double out = outputCache.get(output.at(i)) * back * sensitivity * outFade;
             double humNow = 0.0;
             if (humGain > 0.0) {
@@ -1532,6 +1533,11 @@ struct Umber : Effect {
                 }
                 humNow = humGain * (humLow.process(magnetic) + ripple) * inFade;
             }
+            const double invField = 1.0 / field;
+            const double readStep = (readNow - readWas) / factor;
+            const double spreadStep = (spreadNow - spreadWas) / factor;
+            const double windowStep = (windowNow - windowWas) / factor;
+            const bool slanted = spreadNow > 0.0 || spreadWas > 0.0;
             bool loud = false;
             for (int c = 0; c < channels; ++c) {
                 Track& t = track[c];
@@ -1546,7 +1552,6 @@ struct Umber : Effect {
                     peakInL = max(abs(x), peakInL * fall);
                 else
                     peakInR = max(abs(x), peakInR * fall);
-                // Modulation noise: the signal's level rides a low noise.
                 // Modulation noise: the magnetization rides a low noise, a
                 // magnetized head's steady part too (DC noise: the grain
                 // stays when the signal stops).
@@ -1556,12 +1561,7 @@ struct Umber : Effect {
                     t.modZ2 += modCoef * (t.modZ1 - t.modZ2);
                     ride = 1.0 + modGain * modScale * t.modZ2;
                 }
-                const double invField = 1.0 / field;
                 t.os.up(rec);
-                const double readStep = (readNow - readWas) / factor;
-                const double spreadStep = (spreadNow - spreadWas) / factor;
-                const double windowStep = (windowNow - windowWas) / factor;
-                const bool slanted = spreadNow > 0.0 || spreadWas > 0.0;
                 const double side = c == 0 ? 1.0 : -1.0;
                 for (int k = 0; k < factor; ++k) {
                     double u = t.os.sample(k);
