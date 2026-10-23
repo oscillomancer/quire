@@ -1678,7 +1678,12 @@ crosstalk), the values are a modern machine's as judged, and say so.
   that through the IEC curve and the aligned top it measures, A-weighted,
   −63, −60.5, −58, −55 dB under reference by speed, +0, +3.5, +8.5 dB at
   the fitted tapes (NAB, with more lift of the highs on playback, comes
-  out 2.5 dB noisier at 15 ips), × `hiss`. Modulation noise: the flux ×
+  out 2.5 dB noisier at 15 ips), × `hiss`. With it, the playback
+  electronics' own noise: white at the head, so through the playback
+  curve's integration a first-order fall from 25 Hz to the standard's
+  corner (and NAB's playback cut of the lows), a 12 dB/oct high-pass at
+  15 Hz below; fixed, 8 dB over a modern tape's hiss at 50 Hz at 15 ips
+  IEC, 26 dB under it A-weighted. Modulation noise: the flux ×
   (1 + n), n uniform noise through two poles at 1.5 kHz·v at −66, −61,
   −55 dB RMS at the fitted tapes, × `mod_noise`. Hum: the mains with its
   second and third harmonics (1, ½, ¼) at `hum` RMS against reference,
@@ -1717,6 +1722,7 @@ scrape and modulation noise off unless said):
 | the head, quiet noise: peak, dip, ripple, second dip | 15 ips +1.9 dB near 57 Hz, −1.0 at 115, +0.4 at 170, −0.2 at 230; 30 ips +1.5 at 115, −12.6 dB at 20 Hz; 7.5 ips +2.5 at 30 |
 | `repro_hf` +6 dB at 2, 4, 8 kHz | 7.5 ips +3.0, +4.8, +5.8; 15 ips +1.3, +3.1, +5.1; 30 ips +0.4, +1.3, +3.6 dB |
 | hiss at 0 dB, A-weighted (dBFS) | −78.5 (15 ips IEC), −76.0 (NAB), −81.0 (30 ips), −64.5 (`tape` 5, 3.75 ips) |
+| the electronics' noise in the floor, 20–60 / 60–200 Hz / above 200 Hz | +10.5 / +4 / 0 dB at 15 ips IEC (−96.1, −97.9 dBFS); +11.7 / +5.3 at 30 ips; +1 / 0 at 3.75 ips, where the tape's hiss covers it |
 | wow and flutter at the defaults, a 3 kHz tone | 0.013 % RMS, 0.038 % peak; with low latency 0.011 % RMS (the wow held to 40 %); wow 0.5 % alone, low latency: scaled, the flutter band 0.000 % |
 | scrape, sidebands 100 Hz to 5 kHz off a 10 kHz tone | −65 dBc at 10 % (15 ips), −68 (30 ips); −56 at 30 %; −45 at 100 % |
 | the Mastering patch on two test mixes (peaks −3 dBFS) | the peaks rounded 0.6 and 1.4 dB, the nonlinear part 36 and 31 dB under the music |

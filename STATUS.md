@@ -379,7 +379,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   of both sides; the tape adds dropouts, print-through and crosstalk; the
   transport adds wow (reels, a wander) and flutter (capstan, idler,
   friction) with each part's depth drifting, and scrape, kilohertz jitter;
-  hiss, modulation noise and hum. Oversampling is 1x to 16x as the user
+  hiss with the electronics' low rumble under it, modulation noise and hum. Oversampling is 1x to 16x as the user
   sets it (best 176 to 384 kHz inside); full latency (8 ms, linear phase,
   deep wow) or low (9 samples: the wow scaled to fit, its shape kept).
   It reads out the VU level, the headroom to the tape's 3% limit and how

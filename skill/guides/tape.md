@@ -30,7 +30,7 @@ physical values under `params`; a merge changes only the keys it names.
 | `scrape` | %, 0…100: the tape's vibration over the heads, a kilohertz jitter that roughens the highs; 100 a worn transport | 10 |
 | `repro_amp` | %, 0…100: the class-A playback amplifier, as `record_amp` | 15 |
 | `repro_hf` | dB, −6…6: the playback side's HF trim, placed as `record_hf`'s (brighter or darker, saturation unchanged) | 0 |
-| `hiss` | dB, −30…12 against the real tape's noise at this speed; −30 is off | −30 (off) |
+| `hiss` | dB, −30…12: the machine's noise floor, the real tape's hiss at this speed and the playback electronics' low rumble beneath it; −30 is off | −30 (off) |
 | `mod_noise` | dB, −30…12 against the real tape's modulation noise (grain riding the signal); −30 is off | 0 (real) |
 | `hum` | dB, −100…−40 against the reference level: mains hum in the playback electronics; −100 is off | −100 (off) |
 | `mains` | `hz50`, `hz60`: the hum's frequency | hz60 |
@@ -121,7 +121,9 @@ Machine, Warped, Clean Transfer (`preset_list`/`fx_patch_list`).
   comes out quieter, because the tape takes the peaks off. Trim `output`
   by ear or with an analysis.
 - **Hiss** is off by default. At 0 dB it is the real tape's: about
-  −78.5 dBFS A-weighted at 15 ips (IEC). Modulation noise is on, at the
+  −78.5 dBFS A-weighted at 15 ips (IEC), with the electronics' rumble
+  under it (about 10 dB more between 20 and 60 Hz than the hiss alone;
+  NAB, which cuts the lows on playback, has less). Modulation noise is on, at the
   real tape's: it rides the signal and vanishes in silence.
 
 ## Limits

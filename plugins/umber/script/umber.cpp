@@ -442,6 +442,8 @@ struct Track {
     Buffer<double> ring;  // the moving read, at the oversampled rate
     int at = 0;
     Section hissTau, hissLow, hissTop;  // the hiss through the playback equalisation
+    Section rumbleTau, rumbleLow;       // the electronics' noise through it
+    Biquad rumbleCut;                   // and the deck's limit below it
     Head head;
     double modZ1 = 0.0, modZ2 = 0.0;  // modulation noise, low-passed
     double dropLow = 0.0;             // what a dropout leaves: the lows
@@ -464,6 +466,9 @@ struct Track {
         hissTau.clear();
         hissLow.clear();
         hissTop.clear();
+        rumbleTau.clear();
+        rumbleLow.clear();
+        rumbleCut.clear();
         head.clear();
         modZ1 = 0.0;
         modZ2 = 0.0;
@@ -664,8 +669,9 @@ struct Umber : Effect {
                      .offAtMin()
                      .in("Playback")
                      .help(
-                         "The tape's hiss against what this tape at this speed gives: 0 dB is "
-                         "real; off at the minimum.");
+                         "The machine's noise floor: the tape's hiss against what this tape at "
+                         "this speed gives, and the playback electronics' low rumble beneath "
+                         "it. 0 dB is real; off at the minimum.");
     Param modNoise = decibels("Mod Noise", -30, 12, 0)
                          .offAtMin()
                          .in("Playback")
@@ -745,7 +751,7 @@ struct Umber : Effect {
     double recAmpNow = 0.15, reproAmpNow = 0.15, glideCoef = 0.1;
     double field = 0.2, square = 0.24, pin = 1e-5, molField = 1.0;
     double edgeCeiling = 1.0;  // the highs' ceiling, in the flux's units
-    double hissGain = 0.0, hissPower = 1.0, modGain = 0.0, modScale = 1.0;
+    double hissGain = 0.0, hissPower = 1.0, rumbleGain = 0.0, modGain = 0.0, modScale = 1.0;
     double sensitivity = 1.0, dc = 0.0, dcOut = 0.0, skew = 0.0, skewNow = 0.0, skewCoef = 0.001;
     double ips = 15.0;
     // The transport: the speed error's parts, each turning part's depth
@@ -955,6 +961,11 @@ struct Umber : Effect {
         lagRing.resize(lag + 2);
         random.seed(0x5eed);
         noise.seed(0x7a9e);
+        // The electronics' noise, fixed (it is not the tape's): 8 dB over a
+        // modern tape's hiss at 15 ips at 50 Hz, where the IEC curve leaves
+        // it 7 dB under its own floor; A-weighted, 26 dB under the hiss.
+        rumbleGain = kRefRms * dbToGain(-60.5) / sqrt(measureHiss(1, 1.0)) * dbToGain(8.0) *
+                     2.2360679774997898;
         peakKeep = exp(-1.0 / (0.3 * rate));
         roundKeep = peakKeep;
         vuCoef = 1.0 - exp(-1.0 / (0.065 * rate));
@@ -1100,6 +1111,16 @@ struct Umber : Effect {
                 k.hissLow.design(fLow * eps, fLow, eps, rate);
             else
                 k.hissLow.design(fLow, fLow, 1.0, rate);
+            // The playback electronics' own noise: white at the head, so
+            // the playback curve's integration leaves it falling 6 dB an
+            // octave from the standard's corner down to the deck's limit at
+            // 25 Hz, and below 15 Hz nothing.
+            k.rumbleTau.design(fTau, 25.0, 1.0, rate);
+            if (nab)
+                k.rumbleLow.design(fLow * eps, fLow, eps, rate);
+            else
+                k.rumbleLow.design(fLow, fLow, 1.0, rate);
+            k.rumbleCut.highpass(15.0, 0.707);
             k.printIn.lowpass(min(3000.0, 0.4 * printRate), 0.707);
             // Print-through takes the wavelengths near the layer's own
             // spacing best: a broad band about 1 kHz at 15 ips.
@@ -1488,7 +1509,9 @@ struct Umber : Effect {
                 if (hissOn > 0.0) {
                     const double n =
                         t.hissTop.process(t.hissLow.process(t.hissTau.process(noise.gaussian())));
-                    v += n * hissGain * hissOn * inFade;
+                    const double low = t.rumbleCut.process(
+                        t.rumbleLow.process(t.rumbleTau.process(noise.gaussian())));
+                    v += (n * hissGain + low * rumbleGain) * hissOn * inFade;
                 }
                 v = t.head.process(v);
                 // A dropout: the highs go first, then the level.
