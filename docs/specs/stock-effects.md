@@ -1544,8 +1544,8 @@ mono in and out. Latency: 8 ms plus the oversampler's (456 samples at
 | `drop_depth` | % | 0..100; applies while `dropouts` > 0 | linear | 30 |
 | `print_through` | dB | −80..−30 against the signal; −80 is off | linear | −80 |
 | `crosstalk` | dB | −80..−20; −80 is off | linear | −80 |
-| `wow` | % | 0..2: peak speed error, slow | pow 3 | 0.02 |
-| `flutter` | % | 0..1: peak speed error, fast | pow 3 | 0.02 |
+| `wow` | % | 0..2: peak speed error at 15 ips, slow (× √(15/ips) at other speeds) | pow 3 | 0.02 |
+| `flutter` | % | 0..1: peak speed error at 15 ips, fast (× √(15/ips)) | pow 3 | 0.02 |
 | `scrape` | % | 0..100: kilohertz jitter, 380 ns RMS × x^1.25 at 15 ips | pow 2 | 10 |
 | `repro_amp` | % | 0..100: the class-A playback amplifier's drive, gliding | linear | 15 |
 | `repro_hf` | dB | −6..6: the playback side's HF trim, as `record_hf`'s, gliding | linear | 0 |
@@ -1668,7 +1668,10 @@ crosstalk), the values are a modern machine's as judged, and say so.
   Crosstalk: the lows (one-pole at 300 Hz·v) moved between the tracks,
   left + g·(low right − low left) and the reverse, so a centred sound keeps
   its level.
-- **Transport.** The speed error is `wow` × (0.5 sin(reel, 0.6 Hz·v) +
+- **Transport.** Wow and flutter grow as the tape slows, as machines'
+  specifications do (about 0.04, 0.05, 0.08% at 30, 15, 7.5 ips): their
+  knobs are the speed error at 15 ips, × √(15/ips). The speed error is
+  `wow` × (0.5 sin(reel, 0.6 Hz·v) +
   0.25 sin(take-up, 0.5 Hz·v) + 0.3 wander) + `flutter` × (0.45
   sin(capstan, 4.85 Hz·v) + 0.2 sin(idler, 11 Hz·v) + 0.35 friction); each
   sine's depth drifts toward 1 ± 0.45 (uniform), drawn every 0.25 s, gliding
@@ -1747,7 +1750,7 @@ scrape and modulation noise off unless said):
 | `hum` −60 dB, 60 Hz | −60.0 dB re reference RMS; 120 Hz −63, 60 Hz −67, 240 Hz −69, 360 Hz −73 … 960 Hz −89; NAB 60 Hz −69 |
 | hiss at 0 dB, A-weighted (dBFS) | −78.5 (15 ips IEC), −76.0 (NAB), −81.0 (30 ips), −64.5 (`tape` 5, 3.75 ips) |
 | the electronics' noise in the floor, 20–60 / 60–200 Hz / above 200 Hz | +10.5 / +4 / 0 dB at 15 ips IEC (−96.1, −97.9 dBFS); +11.7 / +5.3 at 30 ips; +1 / 0 at 3.75 ips, where the tape's hiss covers it |
-| wow and flutter at the defaults, a 3 kHz tone | 0.013 % RMS, 0.038 % peak; with low latency 0.011 % RMS (the wow held to 40 %); wow 0.5 % alone, low latency: scaled, the flutter band 0.000 % |
+| wow and flutter at the defaults, a 3 kHz tone | 0.013 % RMS, 0.038 % peak at 15 ips (RMS 0.010 at 30, 0.021 at 7.5, 0.027 at 3.75); with low latency 0.011 % RMS (the wow held to 40 %); wow 0.5 % alone, low latency: scaled, the flutter band 0.000 % |
 | scrape, sidebands 100 Hz to 5 kHz off a 10 kHz tone (modulation noise on) | −60 dBc at 10 % (15 ips), −63 (30 ips); −48 at 30 %; −43 at 50 %; −35 at 100 % |
 | the Mastering patch on two test mixes (peaks −3 dBFS) | the peaks rounded 0.6 and 1.4 dB, the nonlinear part 36 and 31 dB under the music |
 | automation: each parameter jumped mid-sine | no step above the screen's threshold (largest excess 0.010, wow to 2 %) |

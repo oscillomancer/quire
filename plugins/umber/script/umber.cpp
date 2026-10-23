@@ -654,13 +654,14 @@ struct Umber : Effect {
                     .in("Transport")
                     .help(
                         "Slow pitch drift from the reels and the tape's wander, as a peak speed "
-                        "error: 0.02% is a good studio machine, 0.2% a cassette deck.");
+                        "error at 15 ips (more at slower speeds, less at 30): 0.02% is a good "
+                        "studio machine.");
     Param flutter = percent("Flutter", 0.02, 0, 1)
                         .curved(Curve::Pow, 3)
                         .in("Transport")
                         .help(
                             "Faster pitch waver from the capstan, an idler and friction, as a "
-                            "peak speed error.");
+                            "peak speed error at 15 ips (more at slower speeds, less at 30).");
     Param scrape = percent("Scrape", 10)
                        .curved(Curve::Pow, 2)
                        .in("Transport")
@@ -794,6 +795,10 @@ struct Umber : Effect {
     double travel = 0.0, travelKeep = 0.9999;  // the tape's displacement, in seconds
     double readNow = 0.0, readWas = 0.0;       // the read's delay, oversampled samples
     double wowHeld = 1.0, flutterHeld = 1.0;   // what fits the read's reach
+    // Wow and flutter grow as the tape slows (a machine's specification
+    // runs about 0.04, 0.05, 0.08% at 30, 15, 7.5 ips): the knobs are the
+    // speed error at 15 ips, times the square root of 15 over the speed.
+    double speedDepth = 1.0;
     double movedNow = 0.0;
     int tick = 0;
     // Dropouts.
@@ -851,8 +856,8 @@ struct Umber : Effect {
             .set(recordAmp, 12)
             .set(reproAmp, 12)
             .set(azimuth, 0.01)
-            .set(wow, 0.012)
-            .set(flutter, 0.015)
+            .set(wow, 0.017)
+            .set(flutter, 0.021)
             .set(scrape, 8)
             .set(crosstalk, -60)
             .set(hiss, 0)
@@ -914,8 +919,8 @@ struct Umber : Effect {
             .set(speed, "ips3_75")
             .set(drive, -3)
             .set(azimuth, 0.08)
-            .set(wow, 0.12)
-            .set(flutter, 0.1)
+            .set(wow, 0.06)
+            .set(flutter, 0.05)
             .set(scrape, 35)
             .set(dropouts, 15)
             .set(dropDepth, 25)
@@ -932,8 +937,8 @@ struct Umber : Effect {
             .set(reproAmp, 40)
             .set(azimuth, 0.12)
             .set(headMagnetism, 40)
-            .set(wow, 0.25)
-            .set(flutter, 0.15)
+            .set(wow, 0.18)
+            .set(flutter, 0.11)
             .set(scrape, 50)
             .set(dropouts, 45)
             .set(dropDepth, 50)
@@ -948,8 +953,8 @@ struct Umber : Effect {
             .set(speed, "ips3_75")
             .set(drive, -2)
             .set(azimuth, 0.1)
-            .set(wow, 1.4)
-            .set(flutter, 0.35)
+            .set(wow, 0.7)
+            .set(flutter, 0.18)
             .set(scrape, 40)
             .set(dropouts, 30)
             .set(hiss, 6)
@@ -1177,6 +1182,7 @@ struct Umber : Effect {
         crossCoef = 1.0 - exp(-twoPi * 300.0 * v / rate);
         // The transport's rates follow the speed: the reels turn once per
         // metre or so, the capstan (25 mm) and an idler (11 mm) faster.
+        speedDepth = sqrt(1.0 / v);
         reel.rate(0.6 * v / rate);
         takeup.rate(0.5 * v / rate);
         capstan.rate(4.85 * v / rate);
@@ -1339,7 +1345,8 @@ struct Umber : Effect {
     // flutter.
     void holdTransport() {
         const double budget = 0.8 * max(0.0, reach - azimuthExtent()) - scrapeSeconds() * 4.0;
-        const double w = wow.value() * wowReach(), f = flutter.value() * flutterReach();
+        const double w = wow.value() * speedDepth * wowReach();
+        const double f = flutter.value() * speedDepth * flutterReach();
         wowHeld = 1.0;
         flutterHeld = 1.0;
         if (w + f <= budget) return;
@@ -1401,7 +1408,8 @@ struct Umber : Effect {
         takeup.next();
         capstan.next();
         idler.next();
-        const double wowNow = wow.value() * wowHeld, flutterNow = flutter.value() * flutterHeld;
+        const double wowNow = wow.value() * speedDepth * wowHeld;
+        const double flutterNow = flutter.value() * speedDepth * flutterHeld;
         const double speedError =
             wowNow * (0.5 * sway[0] * reel.s + 0.25 * sway[1] * takeup.s + 0.3 * drift) +
             flutterNow * (0.45 * sway[2] * capstan.s + 0.2 * sway[3] * idler.s + 0.35 * jitter);

@@ -25,8 +25,8 @@ physical values under `params`; a merge changes only the keys it names.
 | `drop_depth` | %, 0…100: how deep each dropout goes: the tape lifts off the head, the highs going first and the dullness sweeping down and back (at 100% the deepest take 10 kHz down 40 dB, 1 kHz 9) | 30 |
 | `print_through` | dB, −80…−30: the echo of the reel's next layer one turn later (1.4 s at 15 ips), a band about 1 kHz at 15 ips that moves with the speed; −56 a modern tape, and softer tapes print more (10 dB more at `tape` 5); −80 is off | −80 (off) |
 | `crosstalk` | dB, −80…−20: the lows leaking between the tracks; −55 a two-track machine; −80 is off | −80 (off) |
-| `wow` | %, 0…2: slow pitch drift as a peak speed error; 0.02 a studio machine, 0.2 a cassette deck | 0.02 |
-| `flutter` | %, 0…1: faster pitch waver (capstan, idler, friction) | 0.02 |
+| `wow` | %, 0…2: slow pitch drift as a peak speed error at 15 ips (× √(15/ips) at other speeds: 0.7 at 30, 1.4 at 7.5, 2 at 3.75); 0.02 a studio machine | 0.02 |
+| `flutter` | %, 0…1: faster pitch waver (capstan, idler, friction), at 15 ips, scaled with speed as `wow` | 0.02 |
 | `scrape` | %, 0…100: the tape's vibration over the heads, a kilohertz jitter that roughens the highs: 10 a good machine (inaudible on music), 50 a worn one, 100 a badly worn, dirty transport (a plain grit on sustained highs, −35 dB around a 10 kHz tone) | 10 |
 | `repro_amp` | %, 0…100: the class-A playback amplifier, as `record_amp` | 15 |
 | `repro_hf` | dB, −6…6: the playback side's HF trim, placed as `record_hf`'s (brighter or darker, saturation unchanged) | 0 |
@@ -66,7 +66,7 @@ well-earthed machine's hum. Check
 `saturation` reads a fraction of a dB on the loudest moments:
 
 ```json
-{"params":{"speed":"ips30","drive":-2,"record_amp":12,"repro_amp":12,"azimuth":0.01,"wow":0.012,"flutter":0.015,"scrape":8,"crosstalk":-60,"hiss":0,"hum":-85}}
+{"params":{"speed":"ips30","drive":-2,"record_amp":12,"repro_amp":12,"azimuth":0.01,"wow":0.017,"flutter":0.021,"scrape":8,"crosstalk":-60,"hiss":0,"hum":-85}}
 ```
 
 Rounding peaks without any pitch movement (drums, a bus):
@@ -90,11 +90,11 @@ Second harmonic without much tape (warm electronics):
 A worn machine, and a cassette:
 
 ```json
-{"params":{"tape":5,"speed":"ips7_5","bias":85,"drive":4,"azimuth":0.12,"head_magnetism":40,"wow":0.25,"flutter":0.15,"scrape":50,"dropouts":45,"drop_depth":50,"print_through":-48,"crosstalk":-38,"hiss":4,"hum":-65,"output":3.5}}
+{"params":{"tape":5,"speed":"ips7_5","bias":85,"drive":4,"azimuth":0.12,"head_magnetism":40,"wow":0.18,"flutter":0.11,"scrape":50,"dropouts":45,"drop_depth":50,"print_through":-48,"crosstalk":-38,"hiss":4,"hum":-65,"output":3.5}}
 ```
 
 ```json
-{"params":{"tape":5,"speed":"ips3_75","drive":-3,"azimuth":0.08,"wow":0.12,"flutter":0.1,"scrape":35,"dropouts":15,"hiss":0,"hum":-75,"output":3}}
+{"params":{"tape":5,"speed":"ips3_75","drive":-3,"azimuth":0.08,"wow":0.06,"flutter":0.05,"scrape":35,"dropouts":15,"hiss":0,"hum":-75,"output":3}}
 ```
 
 Tracking through it live: `"latency":"low"` with `"oversampling":"x2"`
