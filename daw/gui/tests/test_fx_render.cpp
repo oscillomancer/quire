@@ -1549,3 +1549,36 @@ TEST_CASE("double clicking empty FX chain space adds to its main, input or take 
     CHECK(f.root->find("browser"));  // the strip's standalone browser stays on main
     CHECK_FALSE(f.panel->root().find("browser"));
 }
+
+TEST_CASE("FX native title follows track switches, renames and take headers") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto first = f.addTrack("First"), second = f.addTrack("Second");
+    REQUIRE(f.fx->open(first));
+    const auto window = f.panel->window()->id();
+    auto title = [&] { return std::string(SDL_GetWindowTitle(f.panel->window()->sdl())); };
+    auto matchesHeader = [&] { CHECK(title() == f.panel->root().find("fx.title")->valueText()); };
+    CHECK(title() == "FX: First");
+    matchesHeader();
+    REQUIRE(f.fx->open(second));
+    CHECK(f.panel->window()->id() == window);
+    CHECK(title() == "FX: Second");
+    matchesHeader();
+    REQUIRE(f.run("track.set", f.args({{"track", second.str()}, {"name", "Renamed"}})));
+    f.fx->tick();
+    CHECK(title() == "FX: Renamed");
+    matchesHeader();
+    const auto item = f.run("item.add", f.args({{"track", second.str()},
+                                                {"position", 0.0},
+                                                {"length", 4.0},
+                                                {"notation", "1: C4:w"}}));
+    REQUIRE(item);
+    const auto take = *model::Id::parse(item->find("take")->asString());
+    REQUIRE(f.fx->openTake(take));
+    CHECK(title() == "Take FX: Renamed / " + take.str());
+    matchesHeader();
+    REQUIRE(f.run("track.set", f.args({{"track", second.str()}, {"name", "Take track"}})));
+    f.fx->tick();
+    CHECK(title() == "Take FX: Take track / " + take.str());
+    matchesHeader();
+}

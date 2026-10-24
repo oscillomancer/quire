@@ -378,6 +378,7 @@ void RoutingMatrix::open(std::optional<ui::Rect> anchor) {
     header.layout.align = ui::Layout::Align::Center;
     auto& title = header.emplace<ui::Label>("routing.title", "Routing", ui::Font::UiBold, "body");
     title.layout.width = ui::SizeRule::fraction();
+    panel_.setTitle(title.text());
     header.emplace<ui::Button>("routing.close", "Close", [this] { close(); });
     auto& grid = panel->emplace<Grid>(
         model_, [this](std::size_t row, std::size_t col) { (void)clickCell(row, col); },

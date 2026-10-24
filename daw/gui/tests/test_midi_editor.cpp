@@ -6,7 +6,7 @@
 #include "product_fixture.h"
 #include "test_support.h"
 
-#include <SDL3/SDL_keycode.h>
+#include <SDL3/SDL.h>
 
 #include <array>
 #include <filesystem>
@@ -690,12 +690,15 @@ TEST_CASE("routing matrix: rules shown, a click sends, the send edits and goes")
     const std::string verb =
         f.exec("track.add", R"({"type":"buss","name":"Verb"})")["track"].asString();
     f.exec("route.add", R"({"from":")" + verb + R"(","to":")" + drums + R"("})");
-    gui::FloatingPanel panel(*f.platform, *f.window, *f.root, SUPPLE_GUI_FONTS_DIR, "Routing", 860,
+    gui::FloatingPanel panel(*f.platform, *f.window, *f.root, SUPPLE_GUI_FONTS_DIR, "Panel", 860,
                              560, 800, 360);
     gui::RoutingMatrix matrix(panel, *f.actions, *f.dispatcher, *f.app);
     matrix.open();
     panel.root().frame(false);
     REQUIRE(matrix.isOpen());
+    CHECK(std::string(SDL_GetWindowTitle(panel.window()->sdl())) == "Routing");
+    CHECK(panel.root().find("routing.title")->valueText() ==
+          SDL_GetWindowTitle(panel.window()->sdl()));
     const auto& m = matrix.model();
     auto row = [&](const std::string& id) {
         for (std::size_t i = 0; i < m.sources.size(); ++i)

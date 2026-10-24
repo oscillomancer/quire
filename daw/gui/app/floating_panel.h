@@ -27,6 +27,7 @@ class FloatingPanel {
     bool handle(const SDL_Event& event);  // consumes only this window's events
     void frame(bool present = true);
     void setTheme(const ui::Theme& theme);
+    void setTitle(std::string title);
     bool hasFocus() const;
     ui::Root& root() const { return *root_; }  // after ensure()
     Window* window() const { return window_.get(); }

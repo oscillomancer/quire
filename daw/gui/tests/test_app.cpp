@@ -1958,6 +1958,21 @@ TEST_CASE("floating panels own their events, resize, sleep and persist placement
     if (std::string(SDL_GetCurrentVideoDriver()) != "offscreen")
         CHECK(SDL_GetWindowParent(panel.window()->sdl()) == f.window->sdl());
     panel.frame(false);
+    auto checkSurface = [&] {
+        const auto image = panel.root().readBack();
+        REQUIRE(image.width > 8);
+        REQUIRE(image.height > 8);
+        const auto pixel =
+            static_cast<std::size_t>((image.height - 4) * image.width + image.width / 2) * 4;
+        const auto color = panel.root().theme().color("raised");
+        std::size_t channel = 0;
+        for (const float value : {color.r, color.g, color.b}) {
+            CHECK(std::abs(static_cast<int>(image.rgba[pixel + channel]) -
+                           static_cast<int>(std::lround(value * 255.0f))) <= 1);
+            ++channel;
+        }
+    };
+    checkSurface();
     CHECK_FALSE(f.root->find("panel"));
     panel.window()->setSize(1000, 650);
     panel.root().relayout();
@@ -1972,6 +1987,7 @@ TEST_CASE("floating panels own their events, resize, sleep and persist placement
     panel.setTheme(ui::Theme::light());
     CHECK(panel.root().wantsFrame());
     panel.frame(false);
+    checkSurface();
     SDL_Event key{};
     key.type = SDL_EVENT_KEY_DOWN;
     key.key.windowID = panel.window()->id();

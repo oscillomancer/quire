@@ -188,7 +188,9 @@ instructions are in `docs/guides/installing.md`.
   The FX chain selects several effects (Ctrl/Shift+click) to bypass, offline
   or remove together; a double click opens an effect's editor. FX chains and
   the routing matrix use separate resizable utility windows owned by the main
-  window, with per-kind positions/sizes in the project UI sidecar. Their menus,
+  window, with per-kind positions/sizes in the project UI sidecar. Their raised
+  theme surface matches the former popups, and OS titles follow their headers
+  (including FX track/take switches and track renames). Their menus,
   browsers and MIDI learn dialogs stay in their window; unused keys reach the
   app keymap. Empty-chain double clicks add main, input or take FX. Each root
   repaints on demand and follows theme switches. The main window

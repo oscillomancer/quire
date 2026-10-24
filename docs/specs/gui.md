@@ -247,10 +247,14 @@ FX and routing are resizable utility windows owned by the main window, using
 the same SDL utility/parent mechanism as plugin editors (ADR-0005/0039).
 Each has its own GL context, bundled fonts, retained root, focus, damage cache
 and popup stack. Resources are created on first open and retained while
-hidden. Close or an unhandled Escape hides only that panel; Escape first
-closes a nested popup or cancels a widget gesture. Events are routed by SDL
-window identity before the main window's quit handling. Unused keys reach the
-app keymap with the floating root's typing context. Theme/palette switches
+hidden. Both panels fill their client area with the theme's `raised` surface,
+matching the former popup frame. Their OS titles match their visible headers:
+"Routing", "FX: <track>", or the take FX header; switching tracks/takes or
+renaming the track updates the FX title in place. Close or an unhandled Escape
+hides only that panel; Escape first closes a nested popup or cancels a widget
+gesture. Events are routed by SDL window identity before the main window's
+quit handling. Unused keys reach the app keymap with the floating root's typing
+context. Theme/palette switches
 repaint all roots. Each visible root paints only on damage/animation, with
 its context forcibly rebound after plugin editor calls; hidden roots do not
 paint. `--snapshot out.png` also writes `out.fx.png` and `out.routing.png`

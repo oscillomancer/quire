@@ -920,9 +920,11 @@ void FxWindow::refresh() {
     }
     const std::string trackName = track->name.empty() ? track_.str() : track->name;
     if (take_ && !app_.head().takes.find(*take_)) take_.reset();  // the take is gone
-    if (title_)
+    if (title_) {
         title_->setText(take_ ? "Take FX: " + trackName + " / " + take_->str()
                               : "FX: " + trackName);
+        panel_.setTitle(title_->text());
+    }
     body_->clear();
     if (hasSelected() && !app_.head().fx.find(selected_)) selected_ = {};
     for (auto it = picked_.begin(); it != picked_.end();) {

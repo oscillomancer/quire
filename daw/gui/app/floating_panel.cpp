@@ -9,6 +9,20 @@
 #include "supple/gui/png.h"
 
 namespace supple::gui {
+namespace {
+
+class PanelSurface : public ui::Node {
+  public:
+    explicit PanelSurface(std::unique_ptr<ui::Node> content) : Node("floating.surface") {
+        layout.dir = ui::Layout::Dir::Column;
+        add(std::move(content));
+    }
+    void paint(ui::Canvas& canvas) override {
+        canvas.fillRect(bounds(), canvas.theme().color("raised"));
+    }
+};
+
+}  // namespace
 
 FloatingPanel::FloatingPanel(const Platform& platform, Window& owner, ui::Root& ownerRoot,
                              std::filesystem::path fonts, std::string title, int width, int height,
@@ -105,7 +119,7 @@ void FloatingPanel::place(std::optional<ui::Rect> anchor) {
 void FloatingPanel::open(std::unique_ptr<ui::Node> content, std::function<void()> closed,
                          std::optional<ui::Rect> anchor) {
     root_->setTheme(ownerRoot_.theme());
-    root_->setContent(std::move(content));
+    root_->setContent(std::make_unique<PanelSurface>(std::move(content)));
     closed_ = std::move(closed);
     place(anchor);
     open_ = true;
@@ -155,6 +169,12 @@ void FloatingPanel::frame(bool present) {
 
 void FloatingPanel::setTheme(const ui::Theme& theme) {
     if (root_) root_->setTheme(theme);
+}
+
+void FloatingPanel::setTitle(std::string title) {
+    if (title_ == title) return;
+    title_ = std::move(title);
+    if (window_) window_->setTitle(title_);
 }
 
 bool FloatingPanel::hasFocus() const {
