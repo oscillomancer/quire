@@ -555,6 +555,13 @@ std::optional<fs::path> resourceDir(const fs::path& installed, const fs::path& b
     const fs::path dir = exe.parent_path();
     for (const fs::path& candidate : {dir / installed, dir.parent_path().parent_path() / built})
         if (fs::is_directory(candidate, ec)) return fs::weakly_canonical(candidate, ec);
+#if defined(__APPLE__)
+    // A CMake build-tree GUI lives three levels deeper inside its .app.
+    const fs::path build =
+        dir.parent_path().parent_path().parent_path().parent_path().parent_path();
+    if (fs::is_regular_file(build / "CMakeCache.txt", ec) && fs::is_directory(build / built, ec))
+        return fs::weakly_canonical(build / built, ec);
+#endif
     return std::nullopt;
 }
 }  // namespace

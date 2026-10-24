@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=@PRODUCT_NAME@
+Comment=Digital audio workstation
+Exec=@PRODUCT_SLUG@ %f
+Icon=@PRODUCT_SLUG@
+Terminal=false
+Categories=AudioVideo;Audio;Midi;Mixer;
+StartupWMClass=@PRODUCT_SLUG@

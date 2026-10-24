@@ -12,6 +12,10 @@
 //          [--audio jack|portaudio|dummy|none] [--theme dark|light|FILE] [--palette warm|ink]
 //          [--action ID]...
 #include <SDL3/SDL.h>
+#if defined(_WIN32)
+#include <SDL3/SDL_main.h>
+#include <windows.h>
+#endif
 #include "supple/base/waitable.h"
 #include "supple/gui/process.h"
 
@@ -237,6 +241,17 @@ double percentile(std::vector<double> v, double p) {
 }  // namespace
 
 int main(int argc, char** argv) {
+#if defined(_WIN32)
+    // Preserve redirected handles from CTest/pipes. Only reopen streams with
+    // no inherited handle when launched from a terminal without redirection.
+    if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+        FILE* stream = nullptr;
+        if (_fileno(stdout) < 0 && GetFileType(GetStdHandle(STD_OUTPUT_HANDLE)) == FILE_TYPE_CHAR)
+            (void)freopen_s(&stream, "CONOUT$", "w", stdout);
+        if (_fileno(stderr) < 0 && GetFileType(GetStdHandle(STD_ERROR_HANDLE)) == FILE_TYPE_CHAR)
+            (void)freopen_s(&stream, "CONOUT$", "w", stderr);
+    }
+#endif
     Options o;
     if (!parse(argc, argv, o)) return usage();
 
@@ -252,7 +267,10 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "%s\n", window.error().toString().c_str());
         return 1;
     }
-    auto fonts = gui::loadFonts((*window)->vg(), SUPPLE_GUI_FONTS_DIR);
+    fs::path fontDir = SUPPLE_GUI_FONTS_DIR;
+    if (auto skill = host::skillDir(); skill && fs::is_directory(skill->parent_path() / "fonts"))
+        fontDir = skill->parent_path() / "fonts";
+    auto fonts = gui::loadFonts((*window)->vg(), fontDir);
     if (!fonts) {
         std::fprintf(stderr, "%s\n", fonts.error().toString().c_str());
         return 1;

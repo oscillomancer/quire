@@ -267,6 +267,26 @@
         "macos",
         "windows"
       ]
+    },
+    {
+      "name": "NSIS",
+      "dir": "nsis",
+      "license": "Zlib",
+      "license_file": "nsis/LICENSE.txt",
+      "version": "3.x (runner toolchain)",
+      "source": "https://nsis.sourceforge.io/",
+      "purpose": "Windows installer stub and uninstaller, zlib compressor only; source toolchain installed on disposable CI runner",
+      "linkage": "installer-stub"
+    },
+    {
+      "name": "SDL3-runtime",
+      "dir": "sdl3-runtime",
+      "license": "Zlib",
+      "license_file": "sdl3-runtime/LICENSE.txt",
+      "version": "3.x (3.2.30 in Linux CI)",
+      "source": "https://libsdl.org/",
+      "purpose": "Redistributed SDL3 runtime; source built in CI or supplied by platform package manager",
+      "linkage": "shared"
     }
   ],
   "system_libraries": [

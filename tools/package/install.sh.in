@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -euo pipefail
+slug='@PRODUCT_SLUG@'
+prefix="${HOME}/.local"
+plugins=0
+while (($#)); do
+  case "$1" in
+    --prefix) prefix=${2:?--prefix needs a directory}; shift 2 ;;
+    --plugins) plugins=1; shift ;;
+    *) echo "Usage: $0 [--prefix DIR] [--plugins]" >&2; exit 2 ;;
+  esac
+done
+[[ $prefix = /* && $prefix != *$'\n'* ]] || { echo 'Use an absolute prefix without newlines' >&2; exit 1; }
+source_dir=$(cd -- "$(dirname -- "$0")" && pwd)
+app="$prefix/opt/$slug"
+[[ ! -e $app && ! -L $app ]] || { echo "Already installed: run $app/uninstall.sh --prefix '$prefix' first" >&2; exit 1; }
+# Refuse collisions before copying anything; never replace another host's CLAP.
+for exe in "$source_dir"/bin/*; do
+  dest="$prefix/bin/${exe##*/}"
+  [[ ! -e $dest && ! -L $dest ]] || { echo "Already exists: $dest" >&2; exit 1; }
+done
+for rel in "share/applications/$slug.desktop" $(cd "$source_dir" && find share/icons -type f 2>/dev/null || true); do
+  [[ ! -e "$prefix/$rel" && ! -L "$prefix/$rel" ]] || { echo "Already exists: $prefix/$rel" >&2; exit 1; }
+done
+if ((plugins)); then
+  for file in "$source_dir/lib/$slug/plugins/"*; do
+    [[ ! -e "$HOME/.clap/${file##*/}" && ! -L "$HOME/.clap/${file##*/}" ]] || { echo "Already exists: $HOME/.clap/${file##*/}" >&2; exit 1; }
+  done
+fi
+mkdir -p "$prefix/opt" "$prefix/bin"
+cp -a "$source_dir" "$app"
+manifest="$app/.installed-files"
+: > "$manifest"
+# Roll back partial installs on failure using the same ownership manifest.
+trap '"$app/uninstall.sh" --prefix "$prefix"' ERR
+for exe in "$app"/bin/*; do
+  dest="$prefix/bin/${exe##*/}"
+  ln -s "$exe" "$dest"
+  printf '%s\n' "$dest" >> "$manifest"
+done
+mkdir -p "$prefix/share/applications"
+desktop="$prefix/share/applications/$slug.desktop"
+# Desktop Exec quoting is distinct from shell quoting.
+escaped=${app//\\/\\\\}; escaped=${escaped//\"/\\\"}; escaped=${escaped//\$/\\\$}; escaped=${escaped//\`/\\\`}; escaped=${escaped//%/%%}
+escaped=${escaped//\\/\\\\}
+while IFS= read -r line; do
+  case "$line" in
+    Exec=*) printf 'Exec="%s/bin/%s" %%f\n' "$escaped" "$slug" ;;
+    *) printf '%s\n' "$line" ;;
+  esac
+done < "$app/share/applications/$slug.desktop" > "$desktop"
+printf '%s\n' "$desktop" >> "$manifest"
+while IFS= read -r -d '' file; do
+  rel=${file#"$app/"}; dest="$prefix/$rel"
+  mkdir -p "${dest%/*}"; cp -a "$file" "$dest"; printf '%s\n' "$dest" >> "$manifest"
+done < <(find "$app/share/icons" -type f -print0 2>/dev/null || true)
+if ((plugins)); then
+  mkdir -p "$HOME/.clap"
+  for file in "$app/lib/$slug/plugins/"*; do
+    dest="$HOME/.clap/${file##*/}"
+    cp -a "$file" "$dest"; printf '%s\n' "$dest" >> "$manifest"
+  done
+fi
+desktop_cache="$prefix/share/applications/mimeinfo.cache"
+icon_cache="$prefix/share/icons/hicolor/icon-theme.cache"
+[[ -e "$desktop_cache" ]] && had_desktop_cache=1 || had_desktop_cache=0
+[[ -e "$icon_cache" ]] && had_icon_cache=1 || had_icon_cache=0
+command -v update-desktop-database >/dev/null && update-desktop-database "$prefix/share/applications" || true
+command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -f -t "$prefix/share/icons/hicolor" >/dev/null 2>&1 || true
+if ((!had_desktop_cache)) && [[ -f "$desktop_cache" ]]; then printf '%s\n' "$desktop_cache" >> "$manifest"; fi
+if ((!had_icon_cache)) && [[ -f "$icon_cache" ]]; then printf '%s\n' "$icon_cache" >> "$manifest"; fi
+trap - ERR
+printf 'Installed %s in %s\nMCP command: %s/bin/%s-mcp\n' '@PRODUCT_NAME@' "$app" "$prefix" "$slug"

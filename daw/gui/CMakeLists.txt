@@ -78,6 +78,23 @@ target_link_libraries(gui-app PUBLIC supple::gui-persistence supple::gui-service
 supple_target_defaults(gui-app)
 
 add_executable(${PRODUCT_SLUG} app/main.cpp)
+if(WIN32)
+  set_target_properties(${PRODUCT_SLUG} PROPERTIES WIN32_EXECUTABLE TRUE)
+elseif(APPLE)
+  if(NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+    message(FATAL_ERROR "The application bundle supports Apple Silicon (arm64) only")
+  endif()
+  configure_file(${PROJECT_SOURCE_DIR}/cmake/package/Info.plist.in
+    ${CMAKE_CURRENT_BINARY_DIR}/Info.plist @ONLY)
+  set_target_properties(${PRODUCT_SLUG} PROPERTIES MACOSX_BUNDLE TRUE
+    OUTPUT_NAME "${PRODUCT_SLUG}"
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/Info.plist")
+  # Keep the longstanding build-tree command usable. CTest target references
+  # resolve directly to the bundle executable via TARGET_FILE.
+  add_custom_command(TARGET ${PRODUCT_SLUG} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E create_symlink
+      "$<TARGET_FILE:${PRODUCT_SLUG}>" "${CMAKE_CURRENT_BINARY_DIR}/${PRODUCT_SLUG}")
+endif()
 target_link_libraries(${PRODUCT_SLUG} PRIVATE gui-app)
 add_dependencies(${PRODUCT_SLUG} ${PRODUCT_SLUG}-bridge)
 target_compile_definitions(${PRODUCT_SLUG} PRIVATE
@@ -165,3 +182,6 @@ if(SUPPLE_BUILD_TESTS)
   set_tests_properties(gui.agent-over-socket PROPERTIES LABELS "gui;tsan-skip"
                        ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
 endif()
+
+# Imported SDL targets are directory-scoped; stage runtime artifacts here.
+include(${PROJECT_SOURCE_DIR}/cmake/Install.cmake)

@@ -359,8 +359,8 @@ int main(int argc, char** argv) {
     }
     if (options.workdir.empty())
         options.workdir = project.empty() ? defaultWorkdir() : project.parent_path();
-    if (!options.pluginPath.empty())
-        for (auto& p : host::defaultSearchPath()) options.pluginPath.push_back(p);
+    if (auto stock = host::stockPluginDir()) options.pluginPath.push_back(*stock);
+    for (auto& p : host::defaultSearchPath()) options.pluginPath.push_back(p);
     auto app = engine::EngineApp::create(options);
     if (!app) {
         print(errorJson(app.error()));

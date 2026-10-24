@@ -34,7 +34,18 @@ declaration and maintainer approval; AGPL is forbidden. LGPL/MPL need the mainta
 | nanovg | Zlib (bundled stb_truetype/stb_image: public domain or MIT) | `ce3bf74` (template's pin) | Vector rendering for the DAW GUI | static |
 | nanosvg | Zlib | `239e102` (template's pin) | SVG parsing for editors of plugins built on the plugin template; only the parser header is vendored, unmodified | static, plugins only |
 
-System libraries (dynamically linked, not bundled): SDL3 (Zlib), zlib (Zlib; PNG snapshots and dsp.preview's pictures), libjack
+Packaging redistributes the **SDL3-runtime** (Zlib; license in
+`third_party/sdl3-runtime/LICENSE.txt`). Linux CI builds 3.2.30; other
+platforms use the runner's SDL3 package. Windows installers contain the
+**NSIS** 3.x stub and uninstaller (Zlib; `third_party/nsis/LICENSE.txt`).
+They explicitly select the zlib compressor: NSIS's separately licensed LZMA
+compressor is not used. NSIS is a build tool on disposable runners.
+Linux packages also carry private libstdc++/libgcc shared runtimes, with the
+GCC GPLv3 runtime exception and actual system-package copyright notices;
+these system-runtime libraries are not plugin source dependencies. The
+release container establishes their minimum ABI. No JACK library is bundled.
+
+Other system libraries (dynamically linked, not bundled): zlib (Zlib; PNG snapshots and dsp.preview's pictures), libjack
 from pipewire-jack (MIT, dlopen'ed), libpipewire-0.3 (MIT), alsa-lib (LGPL,
 OS library, dynamic only — explicitly permitted by policy), libX11/libGL, and libEGL (dlopen'ed by
 plugins of the template to draw an editor without a window).
