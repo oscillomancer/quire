@@ -32,6 +32,7 @@ Function ValidateTarget
   StrCmp $PreviousInstall "" check_empty
   IfFileExists "$INSTDIR\uninstall.exe" target_valid
 check_empty:
+  ClearErrors
   FindFirst $2 $3 "$INSTDIR\*"
   IfErrors target_valid
 check_next:
@@ -43,6 +44,7 @@ check_next:
   SetErrorLevel 1
   Abort
 next_entry:
+  ClearErrors
   FindNext $2 $3
   IfErrors target_empty
   Goto check_next
