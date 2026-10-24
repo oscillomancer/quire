@@ -7,6 +7,9 @@ if (($#)); then
   [[ $# = 2 && $1 = --prefix ]] || { echo "Usage: $0 [--prefix DIR]" >&2; exit 2; }
   prefix=$2
 fi
+[[ $prefix = /* && $prefix != *$'\n'* ]] || { echo 'Use an absolute prefix without newlines' >&2; exit 1; }
+prefix=$(realpath -m -- "$prefix")
+[[ $prefix != / ]] || { echo 'Choose a user-space installation prefix, not /' >&2; exit 1; }
 app="$prefix/opt/$slug"
 [[ -f "$app/.installed-files" ]] || { echo "No installation manifest in $app" >&2; exit 1; }
 # Only paths explicitly added by install.sh; existing unrelated files survive.

@@ -88,7 +88,7 @@ class Installer(unittest.TestCase):
 
     def test_installed_installer_does_not_delete_itself(self):
         self.assertEqual(self.install().returncode, 0)
-        result = subprocess.run([str(self.prefix / "opt/example/install.sh"), "--prefix", str(self.prefix)],
+        result = subprocess.run([str(self.prefix / "opt/example/install.sh"), "--prefix", str(self.prefix) + "/."],
                                 env=self.env, capture_output=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertTrue((self.prefix / "bin/example").is_file())

@@ -11,8 +11,10 @@ while (($#)); do
     *) echo "Usage: $0 [--prefix DIR] [--plugins]" >&2; exit 2 ;;
   esac
 done
+source_dir=$(cd -- "$(dirname -- "$0")" && pwd -P)
 [[ $prefix = /* && $prefix != *$'\n'* ]] || { echo 'Use an absolute prefix without newlines' >&2; exit 1; }
-source_dir=$(cd -- "$(dirname -- "$0")" && pwd)
+prefix=$(realpath -m -- "$prefix")
+[[ $prefix != / ]] || { echo 'Choose a user-space installation prefix, not /' >&2; exit 1; }
 app="$prefix/opt/$slug"
 [[ $source_dir != "$app" ]] || { echo 'Run install.sh from the new extracted download, outside the installed app folder.' >&2; exit 1; }
 if [[ -f "$app/.installed-files" && -f "$app/uninstall.sh" && ! -L $app ]]; then
