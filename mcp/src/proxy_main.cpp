@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
+#include <supple/cmd/bus.h>
 #include <supple/mcp/server.h>
 #include <supple/product.h>
+#include <chrono>
 #include <cstdio>
 #include <iostream>
 
@@ -33,6 +35,10 @@ int main(int argc, char** argv) {
     }
     if (path.empty()) path = rpc::socketPath(instance);
     rpc::Client client;
+    // A valid job.wait can consume the whole command wait budget. The wire
+    // deadline also needs room for dispatch and delivery of its response.
+    client.setTimeout(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::duration<double>{2.0 * cmd::kMaxWaitSeconds}));
     auto connected = client.connect(path, "mcp-proxy", {}, true);
     if (!connected) {
         std::fprintf(stderr, "%s\nIs %.*s running (instance \"%s\")? Start it, then reconnect.\n",

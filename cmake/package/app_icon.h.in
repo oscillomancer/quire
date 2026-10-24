@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Generated from the application icon; decode with NanoVG's shared stb_image.
+#pragma once
+namespace supple::gui {
+inline constexpr unsigned char kAppIconPng[] = {@app_icon_bytes@};
+}

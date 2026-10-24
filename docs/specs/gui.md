@@ -984,3 +984,16 @@ its private project before native window-close on Windows (TerminateProcess
 cannot run shutdown/snapshot cleanup); POSIX retains SIGTERM. Final snapshots
 must match the window's design aspect ratio at its framebuffer density. All
 fixtures use dummy/no audio and private work/config directories.
+
+
+### Distributed application startup
+
+See `distribution.md` and ADR-0048. The Windows GUI uses a windowed subsystem
+with SDL3's UTF-8 argument startup and parent-console output where available;
+CLI redirection and offscreen snapshot flags remain supported. Other helper
+programs remain console executables. The Apple Silicon app bundle declares
+high DPI and microphone use and retains a build-tree command symlink. Fonts
+load from the directory beside the installed skill before checkout fallback.
+The application ID is the product slug, matching Linux desktop StartupWMClass.
+Linux/Windows windows use the embedded 256px application icon; Windows also
+embeds the multi-size ICO resource for Explorer and Start-menu shortcuts.

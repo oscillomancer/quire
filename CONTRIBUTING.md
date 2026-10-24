@@ -208,3 +208,59 @@ checks cleanup after the leader exits. Credentials remain references: a symlink,
 or on Windows without symlink privilege a same-volume hard link (different-volume
 failure is explicit; credentials are never copied). Real sandbox scorer checks
 still require SUPPLE_EVAL_INTEGRATION=1, and real endpoint runs are never CI tests.
+
+## Building distribution packages
+
+See [ADR-0048](docs/decisions/0048-packaging-and-distribution.md) and the
+[distribution contract](docs/specs/distribution.md). Build only the required
+Release targets, then stage and package (Linux example):
+
+```sh
+cmake --preset linux-package
+cmake --build --preset linux-package --target package-runtime --parallel 6
+cmake --install build/linux-package --prefix /tmp/package-tree --component Runtime
+cmake --install build/linux-package --prefix /tmp/package-tree --component Plugins
+python3 tools/package/linux.py --build-dir build/linux-package
+```
+
+Artifacts go to `dist/`; `--output-dir` selects another folder. Linux scripts
+require Python 3, xz, ldd and binutils (nm) to audit exported symbols. For
+published builds use the Ubuntu 22.04 container in `package.yml`; packaging
+on a newer workstation warns because it raises the glibc minimum. The
+runtime audit must pass: no shared libstdc++/libgcc_s dependency or runtime
+exports. CI uses Clang 22 with GCC 12's headers and static libstdc++, selected
+explicitly with `-DCMAKE_CXX_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/12`.
+See [ADR-0049](docs/decisions/0049-isolated-linux-package-runtimes.md). Do not bundle JACK or graphics drivers.
+
+On macOS use `cmake --preset macos -DCMAKE_BUILD_TYPE=Release -DSUPPLE_BUILD_TESTS=OFF -DSUPPLE_PACKAGE_ONLY=ON`, build
+`package-runtime`, then `python3 tools/package/macos.py --build-dir build/macos`.
+It requires Apple Silicon, hdiutil, ditto, install_name_tool and codesign;
+signing is ad hoc without an account. On Windows use the `windows` preset
+with `-DCMAKE_BUILD_TYPE=Release -DSUPPLE_BUILD_TESTS=OFF -DSUPPLE_PACKAGE_ONLY=ON`, build `package-runtime`, then
+`python tools/package/windows.py --build-dir build/windows`. Install NSIS
+in the build environment first (Zlib compressor only); never change the
+working audio workstation's system packages for packaging.
+
+`gh workflow run package.yml --ref <branch> -f platforms=all` manually builds
+and smokes packages on native runners (Linux in an Ubuntu 22.04 container).
+`-f draft_release=true` additionally attaches downloads to a **draft**
+`v<version>` release; it never publishes or modifies a published release.
+Run `build.yml` separately for native regression coverage. CI smokes installed
+artifacts with dummy audio, isolated preferences and no real agent registration.
+
+GitHub discovers dispatch-only workflows on the default branch. A newly added
+`package.yml` cannot be dispatched from a topic branch until the workflow file
+exists on that default branch; the CLI returns 404 in that case. Do not change
+the default branch just to bypass review. Once available there, `--ref` selects
+the implementation branch to validate.
+
+Before the workflow reaches the default branch, a maintainer-authorized
+throwaway `package-ci` branch can add a single push-trigger commit for branch
+validation. Keep that trigger off the integration branch; delete the temporary
+branch locally and remotely after validation. Push runs default to all platforms
+and never create draft releases.
+
+`SUPPLE_PACKAGE_ONLY=ON` selects the template's existing CLAP and notices
+targets, avoiding unshipped macOS AUv2 wrappers. It requires tests off; native
+regression builds keep the full plugin formats and test coverage. Packaging CI
+uses a shared compiler cache for Linux/macOS template instances.

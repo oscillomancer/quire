@@ -8,3 +8,5 @@ __pycache__/
 *.pyc
 /renders/
 /docs/benchmarks/eval/audio/
+
+/dist/

@@ -3,6 +3,11 @@
 Commands use the current binary names; they follow `PRODUCT_SLUG` in
 `cmake/Product.cmake`.
 
+For downloaded packages, start with [Installing Quire](installing.md). The
+installed GUI and helpers work outside the checkout; use the installed
+`quire-mcp` absolute path when registering an agent. On macOS the build-tree
+`daw/gui/quire` command links to the executable inside its app bundle.
+
 ## Build and start
 
 ```sh
@@ -26,8 +31,8 @@ run leaves its folder behind, recordings included.
 
 ## Plugins
 
-The app scans, in this order: the stock plugins built beside it
-(`build/release/plugins/clap`), then `CLAP_PATH`, `~/.clap`, the system CLAP
+The app scans, in this order: its private installed stock plugins (or
+`build/release/plugins/clap` in a build tree), then `CLAP_PATH`, `~/.clap`, the system CLAP
 folders and the VST3 folders. The first copy of a plugin id wins, so an older
 stock plugin installed in `~/.clap` is listed as shadowed and never loaded.
 `--plugin-path P` (repeatable) replaces the whole list.

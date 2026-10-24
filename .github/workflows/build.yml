@@ -164,11 +164,19 @@ jobs:
           if [[ '${{ matrix.platform }}' == linux ]]; then
             echo "CCACHE_DIR=$GITHUB_WORKSPACE/.compiler-cache" >> "$GITHUB_ENV"
             echo "CCACHE_NOHASHDIR=true" >> "$GITHUB_ENV"
+            # Export tests configure fresh child projects; CMake reads these
+            # defaults even when the exported project's command has no flags.
+            echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+            echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
             echo "CCACHE_MAXSIZE=500M" >> "$GITHUB_ENV"
             cmake --preset dev -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           elif [[ '${{ matrix.platform }}' == macos ]]; then
             echo "CCACHE_DIR=$GITHUB_WORKSPACE/.compiler-cache" >> "$GITHUB_ENV"
             echo "CCACHE_NOHASHDIR=true" >> "$GITHUB_ENV"
+            # Export tests configure fresh child projects; CMake reads these
+            # defaults even when the exported project's command has no flags.
+            echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+            echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
             echo "CCACHE_MAXSIZE=1G" >> "$GITHUB_ENV"
             cmake --preset macos -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           else
@@ -186,7 +194,18 @@ jobs:
         # compiler concurrency on every runner.
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: ${{ matrix.platform == 'macos' && '2' || '6' }}
-        run: cmake --build --preset ${{ matrix.preset }} --parallel "$CMAKE_BUILD_PARALLEL_LEVEL" -- -k 0
+        run: |
+          build_log="$RUNNER_TEMP/native-build.log"
+          if cmake --build --preset ${{ matrix.preset }} --parallel "$CMAKE_BUILD_PARALLEL_LEVEL" -- -k 0 2>&1 | tee "$build_log"; then
+            :
+          elif [[ '${{ matrix.platform }}' == windows ]] && tr -d '\000' < "$build_log" | grep -F 'The process cannot access the file because it is being used by another process.' > /dev/null; then
+            # Temporary scanner/file locks can race manifest embedding. Ninja
+            # has finished the other targets; retry only its unfinished work.
+            sleep 1
+            cmake --build --preset ${{ matrix.preset }} --parallel "$CMAKE_BUILD_PARALLEL_LEVEL" -- -k 0
+          else
+            exit 1
+          fi
       - name: Test Linux (software OpenGL under Xvfb)
         if: matrix.platform == 'linux'
         env:

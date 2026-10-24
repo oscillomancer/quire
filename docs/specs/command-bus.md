@@ -343,6 +343,12 @@ when the result is an object (MCP structured content is an object) and
 the Error JSON. Protocol-level problems (unknown tool) are JSON-RPC errors
 per MCP.
 
+The standalone MCP proxy gives its RPC client twice the command bus's maximum
+job-wait duration (currently 60 seconds versus 30). Dispatch and response delivery
+therefore have headroom when `job.wait` consumes its full server-side budget.
+The generic RPC client's configurable 30-second default and no-resend recovery
+contract remain unchanged.
+
 ### 4.4 Tests
 
 A scripted MCP client (C++ test or Python tooling in `tests/integration/`)

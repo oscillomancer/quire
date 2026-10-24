@@ -12,6 +12,24 @@
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "SUPPLE_WERROR": "ON" } },
     { "name": "release", "inherits": "base", "displayName": "Clang Release",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "SUPPLE_WERROR": "ON" } },
+    {
+      "name": "linux-package",
+      "inherits": "release",
+      "displayName": "Linux Release with isolated static C++ runtimes",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "SUPPLE_BUILD_TESTS": "OFF",
+        "CMAKE_C_FLAGS": "-D_GNU_SOURCE",
+        "SUPPLE_PACKAGE_ONLY": "ON",
+        "CMAKE_EXE_LINKER_FLAGS": "-static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL",
+        "CMAKE_SHARED_LINKER_FLAGS": "-static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL",
+        "CMAKE_MODULE_LINKER_FLAGS": "-static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL"
+      }
+    },
     { "name": "gcc", "inherits": "base", "displayName": "GCC Debug",
       "cacheVariables": { "CMAKE_C_COMPILER": "gcc", "CMAKE_CXX_COMPILER": "g++",
                           "CMAKE_BUILD_TYPE": "Debug", "SUPPLE_WERROR": "ON" } },
@@ -68,6 +86,7 @@
   "buildPresets": [
     { "name": "dev", "configurePreset": "dev", "jobs": 6 },
     { "name": "release", "configurePreset": "release", "jobs": 6 },
+    { "name": "linux-package", "configurePreset": "linux-package", "jobs": 6 },
     { "name": "gcc", "configurePreset": "gcc", "jobs": 6 },
     { "name": "asan", "configurePreset": "asan", "jobs": 6 },
     { "name": "ubsan", "configurePreset": "ubsan", "jobs": 6 },

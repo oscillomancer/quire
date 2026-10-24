@@ -131,6 +131,12 @@ TEST_CASE("supervised scan isolates entry crashes/hangs and caches results until
     }
 }
 
+TEST_CASE("the agent skill ships beside the binary") {
+    const auto skill = skillDir();
+    REQUIRE(skill);
+    CHECK(fs::is_regular_file(*skill / "SKILL.md"));
+}
+
 TEST_CASE("the stock folder's modules are scanned afresh, never from the cache") {
     // The script player lists the scripts in its library: its file does not
     // change when they do.

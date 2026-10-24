@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-10-16. This file describes the present: what works, what is
+Updated 2026-10-24. This file describes the present: what works, what is
 known not to, and what is planned. Keep it current with each change; the
 history is in git.
 
@@ -69,6 +69,23 @@ checks remain explicit opt-ins. Source-export player/factory/audio conformance
 runs natively, including binary exports: Windows retains the module trailer;
 macOS uses a bundle resource and ad-hoc signing. The lifecycle and thirteen
 source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows.
+
+Packaging (ADR-0048) has CMake install components, a relocatable Linux tarball
+and user-space installer, an Apple Silicon app/dmg and Windows per-user NSIS
+installer, with portable zip alternatives. The five helpers/programs, fourteen
+stock CLAPs, agent skill, fonts and license texts ship together. Package CI is
+manual and tests installed artifacts; optional release upload creates drafts
+only. Linux package builds now use hidden static C++ runtimes (ADR-0049), preserving
+third-party plugin runtime independence; the audit rejects shared C++ runtimes.
+Both installers upgrade their own previous version and preserve unrelated
+files; Linux remembers external-plugin opt-in and completes collision preflight
+before removing an old installation. Tests cover these upgrade paths and icon-directory ownership. Package CI
+checks installed native artifacts, upgrades and uninstall cleanup separately
+from the native regression suite. macOS finalization keeps notices in bundle
+resources and signs nested code before the app. Bundled SDL resolves package-manager
+symlinks into private library files. Before default-branch workflow discovery,
+branch validation uses a disposable package-ci push-trigger commit. No paid signing or notarization is available; first-launch
+instructions are in `docs/guides/installing.md`.
 
 ## What works
 
@@ -187,7 +204,9 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   learned for an action that only runs per press.
 - **Agents**: the MCP server for the running app or a headless engine, for
   any MCP client (Claude Code, Codex, Hermes, …); the bundled skill
-  (`skill/`). There is no built-in agent panel (ADR-0043).
+  (`skill/`). The proxy transport deadline exceeds the maximum `job.wait`
+  duration, avoiding a timeout race during long optimization jobs.
+  There is no built-in agent panel (ADR-0043).
 - **Analysis and sound design**: `core-analysis` (BS.1770/R128 loudness
   validated against EBU Tech 3341/3342, spectral, pitch, envelope, stereo,
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);

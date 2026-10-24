@@ -14,6 +14,8 @@ retaining the Linux audio bridge and the remaining engine/device/GUI gates.
 RF64 publication lift the POSIX audio-file gate; see engine.md's Native audio
 files contract. Device audio, bridge and GUI remain separate gates.
 
+**Packaging amendment, 2026-10-24:** [ADR-0048](0048-packaging-and-distribution.md) adds installed layouts and on-demand package CI.
+
 ## Context
 
 The macOS and Windows port needs branch CI before changes can reach the

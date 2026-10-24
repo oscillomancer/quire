@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -euo pipefail
+slug='@PRODUCT_SLUG@'
+prefix="${HOME}/.local"
+if (($#)); then
+  [[ $# = 2 && $1 = --prefix ]] || { echo "Usage: $0 [--prefix DIR]" >&2; exit 2; }
+  prefix=$2
+fi
+[[ $prefix = /* && $prefix != *$'\n'* ]] || { echo 'Use an absolute prefix without newlines' >&2; exit 1; }
+prefix=$(realpath -m -- "$prefix")
+[[ $prefix != / ]] || { echo 'Choose a user-space installation prefix, not /' >&2; exit 1; }
+app="$prefix/opt/$slug"
+[[ -f "$app/.installed-files" ]] || { echo "No installation manifest in $app" >&2; exit 1; }
+# Only paths explicitly added by install.sh; existing unrelated files survive.
+while IFS= read -r file; do
+  case "$file" in
+    "$prefix/bin/"*|"$prefix/share/applications/$slug.desktop"|"$prefix/share/applications/mimeinfo.cache"|"$prefix/share/icons/"*|"$HOME/.clap/"*|"$app/"*) rm -f -- "$file" ;;
+    *) echo "Invalid manifest path: $file" >&2; exit 1 ;;
+  esac
+  # Prune only ancestors of files this installer owned, never unrelated
+  # empty directories elsewhere in the icon tree.
+  if [[ $file == "$prefix/share/icons/"* ]]; then
+    dir=${file%/*}
+    while [[ $dir == "$prefix/share/icons/"* ]]; do
+      rmdir -- "$dir" 2>/dev/null || break
+      dir=${dir%/*}
+    done
+  fi
+done < "$app/.installed-files"
+rm -f -- "$app/.installed-files"
+if [[ -f "$app/.installed-dirs" ]]; then
+  # Paths recorded at install time only; rmdir preserves unknown user files.
+  mapfile -t installed_dirs < "$app/.installed-dirs"
+  rm -f -- "$app/.installed-dirs"
+  for ((i=${#installed_dirs[@]}-1; i>=0; --i)); do
+    dir=${installed_dirs[i]}
+    [[ $dir == "$app" || $dir == "$app/"* ]] || { echo "Invalid directory: $dir" >&2; exit 1; }
+    rmdir -- "$dir" 2>/dev/null || true
+  done
+fi
+for dir in "$prefix/share/applications" "$prefix/share/icons" "$prefix/share" "$prefix/bin" "$prefix/opt" "$prefix"; do
+  rmdir -- "$dir" 2>/dev/null || true
+done
+command -v update-desktop-database >/dev/null && [[ -d "$prefix/share/applications" ]] && update-desktop-database "$prefix/share/applications" || true
+command -v gtk-update-icon-cache >/dev/null && [[ -d "$prefix/share/icons/hicolor" ]] && gtk-update-icon-cache -f -t "$prefix/share/icons/hicolor" >/dev/null 2>&1 || true
+printf 'Uninstalled %s\n' '@PRODUCT_NAME@'

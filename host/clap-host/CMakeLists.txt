@@ -1,7 +1,7 @@
 supple_add_library(clap-host
   SOURCES src/clap_host.cpp src/vst3_host.cpp src/platform.cpp src/scan.cpp
   DEPS supple::core-base supple::core-json supple::clap supple::semantic-params-abi supple::vst3-host
-  PRIVATE_DEPS ${CMAKE_DL_LIBS})
+  PRIVATE_DEPS ${CMAKE_DL_LIBS} supple::product-info)
 target_sources(clap-host PRIVATE src/bridge_client.cpp src/bridge_protocol.cpp src/bridge_platform.cpp src/bridge_child.cpp)
 if(WIN32)
   target_sources(clap-host PRIVATE src/child_process_windows.cpp src/editor_platform_windows.cpp)
@@ -134,4 +134,16 @@ if(SUPPLE_BUILD_TESTS)
   target_compile_definitions(clap-host.tests PRIVATE
     FIXTURE_VST3_PATH="${CMAKE_CURRENT_BINARY_DIR}/test-vst3.vst3"
     FIXTURE_VST3_MODULE="$<TARGET_FILE:clap-host-vst3-fixtures>")
+endif()
+
+if(APPLE AND SUPPLE_BUILD_TESTS)
+  # Exercise actual executable-relative lookup from the GUI bundle's depth,
+  # rather than relying on a build-tree symlink to keep its old location.
+  set(bundle_probe_dir "${CMAKE_BINARY_DIR}/daw/gui/host-lookup-test.app/Contents/MacOS")
+  file(MAKE_DIRECTORY "${bundle_probe_dir}")
+  add_custom_command(TARGET clap-host.tests POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:clap-host.tests>" "${bundle_probe_dir}/host-lookup-tests")
+  add_test(NAME clap-host.bundle-lookup COMMAND "${bundle_probe_dir}/host-lookup-tests"
+    "--test-case=bridge lookup resolves*,the agent skill ships*")
+  set_tests_properties(clap-host.bundle-lookup PROPERTIES LABELS clap-host)
 endif()

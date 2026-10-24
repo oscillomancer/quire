@@ -16,6 +16,10 @@ option(SUPPLE_BUILD_TESTS "Build unit tests" ON)
 option(SUPPLE_BUILD_PLUGINS "Build the stock plugins (template-derived)" ON)
 option(SUPPLE_BUILD_GUI "Build GUI components" ON)
 option(SUPPLE_BUILD_SPIKES "Build experimental research spikes" OFF)
+option(SUPPLE_PACKAGE_ONLY "Build only the stock plugin formats shipped in packages" OFF)
+if(SUPPLE_PACKAGE_ONLY AND SUPPLE_BUILD_TESTS)
+  message(FATAL_ERROR "SUPPLE_PACKAGE_ONLY requires SUPPLE_BUILD_TESTS=OFF; native CI builds the full suite")
+endif()
 
 include(cmake/Platforms.cmake)
 include(cmake/Defaults.cmake)
@@ -38,6 +42,11 @@ add_subdirectory(plugins)
 add_subdirectory(host)
 add_subdirectory(mcp)
 add_subdirectory(daw)
+# The build's copy of the agent skill, where host::skillDir() looks in a build tree.
+add_custom_target(skill-tree ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${PROJECT_SOURCE_DIR}/skill ${CMAKE_BINARY_DIR}/skill
+  COMMENT "Copying the agent skill into the build tree"
+  VERBATIM)
 add_subdirectory(tests)
 if(SUPPLE_BUILD_SPIKES)
   add_subdirectory(tools/spikes/gui-shell)
@@ -56,6 +65,9 @@ if(Python3_FOUND)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/license-check/check.py --root ${CMAKE_SOURCE_DIR}
     COMMENT "Checking third-party licenses"
     VERBATIM)
+  if(TARGET package-runtime)
+    add_dependencies(package-runtime license-check)
+  endif()
   if(SUPPLE_BUILD_TESTS)
     add_test(NAME license-check
              COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/license-check/check.py --root ${CMAKE_SOURCE_DIR})
