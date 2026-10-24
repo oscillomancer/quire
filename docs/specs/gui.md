@@ -254,11 +254,13 @@ renaming the track updates the FX title in place. Close or an unhandled Escape
 hides only that panel; Escape first closes a nested popup or cancels a widget
 gesture. Events are routed by SDL window identity before the main window's
 quit handling. Unused keys reach the app keymap with the floating root's typing
-context. Opening a popup activates its owning visible OS window, including
-main-window dialogs opened by shortcuts forwarded from FX/routing; hidden
-snapshot/test windows stay hidden. An already-key owner is not raised, keeping
+context. Opening a popup activates its owning visible OS window only when
+another window of this app has keyboard focus, including main-window dialogs
+opened by shortcuts forwarded from FX/routing. Background popups do not request
+foreground activation; hidden snapshot/test windows stay hidden. An already-key owner is not raised, keeping
 normal-level Cocoa bridge editors above it when opening a menu. Explicitly
-reopening a floating panel still raises that panel, including when it is key.
+reopening a floating panel still raises that panel, including when it is key
+or the app is in the background; that path follows an explicit user action.
 X11 supplements the activation request with
 an input-focus handoff only when SDL and the X server agree that one of this
 app's windows already owns focus; Cocoa/Windows use SDL's native activation.
