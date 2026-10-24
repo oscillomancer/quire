@@ -2,6 +2,10 @@
 
 **Status:** Accepted, 2026-10-24. Amends ADR-0034's build-only CI scope.
 
+**Runtime amendment, 2026-10-24:** [ADR-0049](0049-isolated-linux-package-runtimes.md)
+replaces shared Linux C++ runtimes with hidden static runtimes for in-process
+plugin compatibility. The original decision below is retained for history.
+
 ## Context
 
 Users need runnable downloads without a compiler, and agents need a stable

@@ -14,7 +14,7 @@ from common import options, run, stage
 # Libraries provided by the OS/graphics drivers. Never bundle JACK or glibc.
 BASE = re.compile(r"^(linux-vdso\.so.*|ld-linux.*|lib(c|m|dl|pthread|rt|resolv|util)\.so\..*|"
                   r"lib(GL|GLX|GLdispatch|OpenGL|EGL|GLESv2|X11|Xext|Xcursor|Xrandr|Xfixes|Xi|Xrender|Xss|Xinerama|Xau|Xdmcp|xcb|xcb-[\w-]+|asound|z)\.so\..*)$")
-BUNDLED = ("libstdc++.so.6", "libgcc_s.so.1")
+FORBIDDEN_RUNTIME = ("libstdc++", "libgcc_s")
 
 
 def check_dependencies(tree, slug):
@@ -27,6 +27,8 @@ def check_dependencies(tree, slug):
         with path.open("rb") as stream:
             if stream.read(4) != b"\x7fELF":
                 continue
+        if path.name.startswith(FORBIDDEN_RUNTIME):
+            raise RuntimeError(f"{path}: shared C++ runtimes must not be bundled")
         checked += 1
         output = subprocess.check_output(["ldd", str(path)], env=env, text=True)
         for line in output.splitlines():
@@ -36,6 +38,8 @@ def check_dependencies(tree, slug):
             soname = line.split()[0]
             if soname.startswith("/"):
                 soname = Path(soname).name
+            if soname.startswith(FORBIDDEN_RUNTIME):
+                raise RuntimeError(f"{path}: shared C++ runtime dependency {soname}; build with linux-package")
             if "not found" in line:
                 raise RuntimeError(f"{path}: unresolved {line}")
             if soname.startswith("libjack"):
@@ -44,6 +48,13 @@ def check_dependencies(tree, slug):
                 continue
             if not BASE.fullmatch(soname):
                 raise RuntimeError(f"{path}: unbundled dependency {line}")
+        symbols = subprocess.check_output(["nm", "-D", "--defined-only", "--format=posix", str(path)], text=True)
+        exported = {line.split()[0] for line in symbols.splitlines() if line.split()}
+        runtime_prefixes = ("__cxa_", "__gxx_", "_Unwind_", "_ZSt", "_ZNSt", "_ZNKSt", "_ZTISt", "_ZTVSt", "_ZN9__gnu_cxx", "_ZN10__cxxabiv1")
+        if any(name.startswith(runtime_prefixes) for name in exported):
+            raise RuntimeError(f"{path}: C++ runtime symbols are exported")
+        if path.suffix == ".clap" and "clap_entry" not in exported:
+            raise RuntimeError(f"{path}: CLAP entry point is hidden or missing")
     print(f"Dependency audit passed: {checked} ELF files")
 
 
@@ -78,14 +89,6 @@ def main():
     name = f'{slug}-{product["version"]}-linux-{arch}'
     with tempfile.TemporaryDirectory(prefix="package-", dir="/tmp") as temp:
         tree = stage(args.build_dir, Path(temp) / name)
-        private = tree / "lib" / slug
-        # The template's Linux plugins use shared libstdc++. Bundle one private
-        # runtime for the DAW and its stock plugins, retaining exception notices.
-        for soname in BUNDLED:
-            runtime = subprocess.check_output(["c++", f"-print-file-name={soname}"], text=True).strip()
-            if runtime == soname:
-                raise RuntimeError(f"Cannot locate {soname}")
-            shutil.copy2(Path(runtime).resolve(), private / soname)
         runtime_notices(tree / "share/doc" / slug / "third-party/GCC-runtime")
         check_dependencies(tree, slug)
         with tarfile.open(args.output_dir / f"{name}.tar.xz", "w:xz", preset=3) as archive:

@@ -216,18 +216,21 @@ See [ADR-0048](docs/decisions/0048-packaging-and-distribution.md) and the
 Release targets, then stage and package (Linux example):
 
 ```sh
-cmake --preset release
-cmake --build --preset release --target package-runtime --parallel 6
-cmake --install build/release --prefix /tmp/package-tree --component Runtime
-cmake --install build/release --prefix /tmp/package-tree --component Plugins
-python3 tools/package/linux.py --build-dir build/release
+cmake --preset linux-package
+cmake --build --preset linux-package --target package-runtime --parallel 6
+cmake --install build/linux-package --prefix /tmp/package-tree --component Runtime
+cmake --install build/linux-package --prefix /tmp/package-tree --component Plugins
+python3 tools/package/linux.py --build-dir build/linux-package
 ```
 
 Artifacts go to `dist/`; `--output-dir` selects another folder. Linux scripts
-require Python 3, xz, ldd and a C++ compiler to locate libstdc++/libgcc. For
+require Python 3, xz, ldd and binutils (nm) to audit exported symbols. For
 published builds use the Ubuntu 22.04 container in `package.yml`; packaging
 on a newer workstation warns because it raises the glibc minimum. The
-runtime audit must pass. Do not bundle JACK or graphics drivers.
+runtime audit must pass: no shared libstdc++/libgcc_s dependency or runtime
+exports. CI uses Clang 22 with GCC 12's headers and static libstdc++, selected
+explicitly with `-DCMAKE_CXX_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/12`.
+See [ADR-0049](docs/decisions/0049-isolated-linux-package-runtimes.md). Do not bundle JACK or graphics drivers.
 
 On macOS use `cmake --preset macos -DCMAKE_BUILD_TYPE=Release`, build
 `package-runtime`, then `python3 tools/package/macos.py --build-dir build/macos`.
@@ -250,3 +253,9 @@ GitHub discovers dispatch-only workflows on the default branch. A newly added
 exists on that default branch; the CLI returns 404 in that case. Do not change
 the default branch just to bypass review. Once available there, `--ref` selects
 the implementation branch to validate.
+
+Before the workflow reaches the default branch, a maintainer-authorized
+throwaway `package-ci` branch can add a single push-trigger commit for branch
+validation. Keep that trigger off the integration branch; delete the temporary
+branch locally and remotely after validation. Push runs default to all platforms
+and never create draft releases.

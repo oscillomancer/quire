@@ -31,7 +31,7 @@ foreach(suffix "" -engine -mcp -bridge -scanner)
     set_target_properties(${target} PROPERTIES INSTALL_RPATH "@executable_path/../Frameworks")
   elseif(UNIX)
     set_target_properties(${target} PROPERTIES INSTALL_RPATH "$ORIGIN/../lib/${PRODUCT_SLUG}")
-    # DT_RPATH also applies to dlopened plugins and their C++ runtime.
+    # DT_RPATH also applies to private dependencies of dlopened plugins.
     target_link_options(${target} PRIVATE "LINKER:--disable-new-dtags")
   endif()
   if(APPLE AND suffix STREQUAL "")
