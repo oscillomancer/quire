@@ -91,10 +91,17 @@ Result<std::vector<PluginInfo>> scan(std::span<const std::filesystem::path> dirs
 const ScanReport& lastScanReport();
 // CLAP and VST3 standard search paths, plus CLAP_PATH/VST3_PATH (existing only).
 std::vector<std::filesystem::path> defaultSearchPath();
-// The stock plugins built beside the running binary: build/<preset>/plugins/clap,
-// two folders above daw/gui/ and host/engine/, when it exists. The apps search it
-// before defaultSearchPath(), so an older stock copy in ~/.clap never wins.
+// The stock plugins that ship with the running binary, when the folder exists:
+// installed, plugins/clap beside it (Windows), ../PlugIns/CLAP (macOS bundle) or
+// ../lib/<slug>/plugins (Linux); in a build tree, build/<preset>/plugins/clap,
+// two folders above daw/gui/ and host/engine/. The apps search it before
+// defaultSearchPath(), so an older stock copy in ~/.clap never wins.
 std::optional<std::filesystem::path> stockPluginDir();
+// The agent skill (the folder holding SKILL.md) that ships with the running
+// binary, found as stockPluginDir() is: skill beside it (Windows),
+// ../Resources/skill (macOS bundle), ../share/<slug>/skill (Linux), or
+// build/<preset>/skill, the build's copy of the repository's skill/.
+std::optional<std::filesystem::path> skillDir();
 // Orders a scan result as a catalogue: by id, and within one id in search-path
 // order, so a lookup by id takes the first location that has it (an explicit
 // --plugin-path before ~/.clap). `shadowed` marks the later copies.

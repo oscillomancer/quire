@@ -25,6 +25,7 @@
 
 #include "supple/clap/semantic_params.h"
 #include "supple/json/json.h"
+#include "supple/product.h"
 
 namespace supple::host {
 
@@ -543,13 +544,41 @@ const void* CLAP_ABI HostCallbacks::getExtension(const clap_host_t*, const char*
 // Scanning
 // ---------------------------------------------------------------------------
 
-std::optional<fs::path> stockPluginDir() {
+namespace {
+// The first of `installed` (relative to the executable's folder) or `built`
+// (relative to the build tree) that is a folder. Installed layouts come first:
+// an installed binary's build-tree guess lands outside the installation.
+std::optional<fs::path> resourceDir(const fs::path& installed, const fs::path& built) {
     std::error_code ec;
     const fs::path exe = platform::executablePath();
     if (exe.empty()) return std::nullopt;
-    const fs::path dir = exe.parent_path().parent_path().parent_path() / "plugins" / "clap";
-    if (!fs::is_directory(dir, ec)) return std::nullopt;
-    return fs::weakly_canonical(dir, ec);
+    const fs::path dir = exe.parent_path();
+    for (const fs::path& candidate : {dir / installed, dir.parent_path().parent_path() / built})
+        if (fs::is_directory(candidate, ec)) return fs::weakly_canonical(candidate, ec);
+    return std::nullopt;
+}
+}  // namespace
+
+std::optional<fs::path> stockPluginDir() {
+#if defined(_WIN32)
+    const fs::path installed = fs::path("plugins") / "clap";
+#elif defined(__APPLE__)
+    const fs::path installed = fs::path("..") / "PlugIns" / "CLAP";
+#else
+    const fs::path installed = fs::path("..") / "lib" / std::string(product::kSlug) / "plugins";
+#endif
+    return resourceDir(installed, fs::path("plugins") / "clap");
+}
+
+std::optional<fs::path> skillDir() {
+#if defined(_WIN32)
+    const fs::path installed = "skill";
+#elif defined(__APPLE__)
+    const fs::path installed = fs::path("..") / "Resources" / "skill";
+#else
+    const fs::path installed = fs::path("..") / "share" / std::string(product::kSlug) / "skill";
+#endif
+    return resourceDir(installed, "skill");
 }
 
 std::vector<fs::path> defaultSearchPath() {

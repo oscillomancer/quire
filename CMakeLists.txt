@@ -38,6 +38,11 @@ add_subdirectory(plugins)
 add_subdirectory(host)
 add_subdirectory(mcp)
 add_subdirectory(daw)
+# The build's copy of the agent skill, where host::skillDir() looks in a build tree.
+add_custom_target(skill-tree ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${PROJECT_SOURCE_DIR}/skill ${CMAKE_BINARY_DIR}/skill
+  COMMENT "Copying the agent skill into the build tree"
+  VERBATIM)
 add_subdirectory(tests)
 if(SUPPLE_BUILD_SPIKES)
   add_subdirectory(tools/spikes/gui-shell)

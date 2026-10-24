@@ -1,7 +1,7 @@
 supple_add_library(clap-host
   SOURCES src/clap_host.cpp src/vst3_host.cpp src/platform.cpp src/scan.cpp
   DEPS supple::core-base supple::core-json supple::clap supple::semantic-params-abi supple::vst3-host
-  PRIVATE_DEPS ${CMAKE_DL_LIBS})
+  PRIVATE_DEPS ${CMAKE_DL_LIBS} supple::product-info)
 target_sources(clap-host PRIVATE src/bridge_client.cpp src/bridge_protocol.cpp src/bridge_platform.cpp src/bridge_child.cpp)
 if(WIN32)
   target_sources(clap-host PRIVATE src/child_process_windows.cpp src/editor_platform_windows.cpp)
