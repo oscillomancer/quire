@@ -43,6 +43,8 @@ def main():
             if result.returncode != expected:
                 raise RuntimeError(f"{suffix}: exit {result.returncode}\n{result.stdout}\n{result.stderr}")
             return result
+        help_result = execute("", "--help", expected=2)
+        assert "usage:" in help_result.stderr.lower(), "GUI CLI output was lost"
         snapshot = user / "snapshot.png"
         execute("", "--offscreen", "--no-socket", "--audio", "dummy", "--frames", "5",
                 "--snapshot", str(snapshot))
@@ -62,7 +64,7 @@ def main():
             assert (binary_dir / f"{slug}{suffix}{ext}").is_file()
         assert (data / "skill/SKILL.md").is_file()
         assert (data / "fonts/Inter-Regular.ttf").is_file()
-    print("Packaged smoke: GUI snapshot, 14 plugins, MCP failure, helpers, skill, fonts passed")
+    print("Packaged smoke: GUI help/snapshot, 14 plugins, MCP failure, helpers, skill, fonts passed")
 
 
 if __name__ == "__main__":
