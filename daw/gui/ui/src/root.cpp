@@ -21,6 +21,8 @@ namespace supple::ui {
 
 struct Root::Cache {
     NVGLUframebuffer* fb = nullptr;
+    NVGLUframebuffer* snapshot = nullptr;
+    bool captured = false;
     int width = 0, height = 0;  // pixels
 };
 
@@ -70,7 +72,9 @@ Root::Root(gui::Window& window, const gui::Fonts& fonts, Theme theme)
 
 Root::~Root() {
     *alive_ = nullptr;
+    window_.forceCurrent();
     if (cache_ && cache_->fb) nvgluDeleteFramebuffer(cache_->fb);
+    if (cache_ && cache_->snapshot) nvgluDeleteFramebuffer(cache_->snapshot);
 }
 
 void Root::setContent(std::unique_ptr<Node> content) {
@@ -197,6 +201,9 @@ void Root::ensureCache() {
     if (cache_ && cache_->width == pw && cache_->height == ph) return;
     if (!cache_) cache_ = std::make_unique<Cache>();
     if (cache_->fb) nvgluDeleteFramebuffer(cache_->fb);
+    if (cache_->snapshot) nvgluDeleteFramebuffer(cache_->snapshot);
+    cache_->snapshot = nullptr;
+    cache_->captured = false;
     cache_->fb = nvgluCreateFramebuffer(window_.vg(), pw, ph, 0);
     if (!cache_->fb) {  // never draw through a missing cache: try again next frame
         cache_.reset();
@@ -283,12 +290,18 @@ void Root::frame(bool present) {
         damage_.clear();
     }
 
-    // 2. Blit the cache to the window, then paint the overlays on top.
+    // 2. Compose snapshots into a size-matched target: SDL's offscreen EGL
+    // surface can retain its creation size after a resize. Include overlays,
+    // just as in a presented frame, without relying on that surface's size.
+    if (!present && !cache_->snapshot)
+        cache_->snapshot = nvgluCreateFramebuffer(vg, cache_->width, cache_->height, 0);
+    cache_->captured = !present && cache_->snapshot;
+    const GLuint target = cache_->captured ? cache_->snapshot->fbo : 0;
     glBindFramebuffer(GL_READ_FRAMEBUFFER, cache_->fb->fbo);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, target);
     glBlitFramebuffer(0, 0, cache_->width, cache_->height, 0, 0, cache_->width, cache_->height,
                       GL_COLOR_BUFFER_BIT, GL_NEAREST);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, target);
     glViewport(0, 0, cache_->width, cache_->height);
     if (!overlay_->children().empty()) {
         glClear(GL_STENCIL_BUFFER_BIT);
@@ -299,6 +312,14 @@ void Root::frame(bool present) {
     animate_ = false;
     ++stats_.frames;
     if (present) window_.present();
+}
+
+gui::Image Root::readBack() const {
+    window_.forceCurrent();
+    glBindFramebuffer(GL_FRAMEBUFFER, cache_ && cache_->captured ? cache_->snapshot->fbo : 0);
+    auto image = window_.readPixels();
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    return image;
 }
 
 void Root::focus(Node* node) {

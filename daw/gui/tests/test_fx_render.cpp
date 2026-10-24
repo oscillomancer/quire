@@ -47,6 +47,7 @@ struct Fixture {
     gui::UiState ui;
     std::unique_ptr<ui::Root> root;
     std::unique_ptr<gui::AppActions> actions;
+    std::unique_ptr<gui::FloatingPanel> panel;
     std::unique_ptr<gui::FxWindow> fx;
     std::unique_ptr<gui::RenderDialog> render;
     bool ok = false;
@@ -96,7 +97,14 @@ struct Fixture {
         root = std::make_unique<ui::Root>(*window, fonts, ui::Theme::dark());
         actions = std::make_unique<gui::AppActions>(
             registry, *dispatcher, *app, ui, actions::Keymap::defaultFile(gui::test::slug()));
-        fx = std::make_unique<gui::FxWindow>(*app, *dispatcher, *root, gui::FxWindow::Hooks{},
+        panel = std::make_unique<gui::FloatingPanel>(
+            *platform, *window, *root, SUPPLE_GUI_FONTS_DIR, "FX", 840, 560, 800, 360);
+        panel->onUnhandledKey = [this](const ui::KeyEvent& e, ui::Root& source) {
+            const bool typing = source.focused() && source.focused()->role() == ui::Role::TextField;
+            return actions->key(e.key, e.mods, typing);
+        };
+        fx = std::make_unique<gui::FxWindow>(*app, *dispatcher, *root, *panel,
+                                             gui::FxWindow::Hooks{},
                                              gui::Favourites::defaultFile(gui::test::slug()));
         render = std::make_unique<gui::RenderDialog>(*app, *dispatcher, *root);
         actions->addUi("ui.fx.chain", "FX: chain…", "track",
@@ -117,6 +125,7 @@ struct Fixture {
         // Destroy the panels before the root they point into.
         render.reset();
         fx.reset();
+        panel.reset();
         actions.reset();
         root.reset();
         dispatcher.reset();
@@ -161,35 +170,40 @@ struct Fixture {
                     }
         return {};
     }
+    ui::Root& uiRoot() { return root->popupOpen() || !fx->isOpen() ? *root : panel->root(); }
     void frame() {
         root->damageAll();
         root->frame(false);
+        if (panel->isOpen()) {
+            panel->root().damageAll();
+            panel->frame(false);
+        }
     }
     // Clicks need a layout pass: a popup has no bounds until the next frame.
     bool click(const std::string& id) {
         frame();
-        const bool hit = root->click(id);
+        const bool hit = uiRoot().click(id);
         frame();
         return hit;
     }
     void type(std::string_view text) {
-        root->text(text);
+        uiRoot().text(text);
         frame();
     }
     // A press and release of `button` on the first row of a list.
     void pressFirstRow(const std::string& id, int button) {
         frame();
-        auto* node = root->find(id);
+        auto* node = uiRoot().find(id);
         REQUIRE(node);
         const ui::Point at{node->bounds().x + 10, node->bounds().y + 8};
-        root->pointer({ui::PointerEvent::Type::Down, at, button});
-        root->pointer({ui::PointerEvent::Type::Up, at, button});
+        uiRoot().pointer({ui::PointerEvent::Type::Down, at, button});
+        uiRoot().pointer({ui::PointerEvent::Type::Up, at, button});
         frame();
     }
     void key(const char* chord) {
         const auto c = actions::parseChord(chord);
         REQUIRE(c);
-        root->key(c->key, c->mods);
+        uiRoot().key(c->key, c->mods);
         frame();
     }
     std::size_t historyCount() {
@@ -197,17 +211,17 @@ struct Fixture {
         return app->versions().history(1000).size();
     }
     std::string fxStatus() {
-        auto* label = dynamic_cast<ui::Label*>(root->find("fx.status"));
+        auto* label = dynamic_cast<ui::Label*>(uiRoot().find("fx.status"));
         return label ? label->text() : std::string();
     }
     void snapshot(const char* name) {
         const char* out = std::getenv("SUPPLE_TEST_SNAPSHOTS");
         if (!out) return;
         frame();
-        (void)gui::writePng(std::filesystem::path(out) / name, root->readBack());
+        (void)gui::writePng(std::filesystem::path(out) / name, uiRoot().readBack());
     }
     void golden(const char* name) {
-        const gui::Image image = root->readBack();
+        const gui::Image image = uiRoot().readBack();
 #if !defined(__linux__)
         REQUIRE(image.width > 0);
         REQUIRE(image.height > 0);
@@ -271,31 +285,31 @@ TEST_CASE("FX and render hidden subpanels release focus; popup close releases it
     const auto track = f.app->head().project->masters.front();
     REQUIRE(f.fx->open(track));
     REQUIRE(f.click("fx.chain.save"));
-    auto* name = dynamic_cast<ui::TextField*>(f.root->find("fx.chain.name"));
+    auto* name = dynamic_cast<ui::TextField*>(f.uiRoot().find("fx.chain.name"));
     REQUIRE(name);
-    REQUIRE(f.root->focused() == name);
+    REQUIRE(f.uiRoot().focused() == name);
     REQUIRE(f.fx->open(track));
-    CHECK(f.root->focused() == nullptr);
+    CHECK(f.uiRoot().focused() == nullptr);
     const auto before = name->text();
-    f.root->text("hidden");
+    f.uiRoot().text("hidden");
     CHECK(name->text() == before);
-    f.root->focus(f.root->find("fx.close"));
+    f.uiRoot().focus(f.uiRoot().find("fx.close"));
     f.fx->close();
-    CHECK(f.root->focused() == nullptr);
+    CHECK(f.uiRoot().focused() == nullptr);
     f.render->open();
     f.render->setSource(gui::RenderDialog::Source::Stems);
     f.frame();
-    auto* mode = dynamic_cast<ui::TextField*>(f.root->find("render.mode"));
+    auto* mode = dynamic_cast<ui::TextField*>(f.uiRoot().find("render.mode"));
     REQUIRE(mode);
-    f.root->focus(mode);
+    f.uiRoot().focus(mode);
     f.render->setSource(gui::RenderDialog::Source::Master);
-    CHECK(f.root->focused() == nullptr);
+    CHECK(f.uiRoot().focused() == nullptr);
     const auto modeBefore = mode->text();
-    f.root->text("hidden");
+    f.uiRoot().text("hidden");
     CHECK(mode->text() == modeBefore);
-    f.root->focus(f.root->find("render.pattern"));
+    f.uiRoot().focus(f.uiRoot().find("render.pattern"));
     f.render->close();
-    CHECK(f.root->focused() == nullptr);
+    CHECK(f.uiRoot().focused() == nullptr);
 }
 
 TEST_CASE("FX drags survive model refresh and separate drags have separate undo steps") {
@@ -310,22 +324,22 @@ TEST_CASE("FX drags survive model refresh and separate drags have separate undo 
     const auto effect = f.fx->chain().front();
     auto drag = [&](const std::string& id, bool right) {
         f.frame();
-        auto* slider = f.root->find(id);
+        auto* slider = f.uiRoot().find(id);
         REQUIRE(slider);
         const auto b = slider->bounds();
         const float y = b.y + b.h / 2;
         const float from = right ? b.x + 12 : b.right() - 12;
         const float to = right ? b.right() - 12 : b.x + 12;
         const auto history = f.historyCount();
-        f.root->pointer({ui::PointerEvent::Type::Down, {from, y}, 1});
+        f.uiRoot().pointer({ui::PointerEvent::Type::Down, {from, y}, 1});
         for (int i = 1; i <= 5; ++i) {
             const float x = from + (to - from) * i / 5;
-            f.root->pointer({ui::PointerEvent::Type::Move, {x, y}, 1});
+            f.uiRoot().pointer({ui::PointerEvent::Type::Move, {x, y}, 1});
             f.fx->tick();
-            f.root->frame(false);
-            CHECK(f.root->find(id) == slider);
+            f.uiRoot().frame(false);
+            CHECK(f.uiRoot().find(id) == slider);
         }
-        f.root->pointer({ui::PointerEvent::Type::Up, {to, y}, 1});
+        f.uiRoot().pointer({ui::PointerEvent::Type::Up, {to, y}, 1});
         f.fx->tick();
         f.frame();
         CHECK(f.historyCount() == history + 1);
@@ -340,7 +354,7 @@ TEST_CASE("FX drags survive model refresh and separate drags have separate undo 
     drag("fx.param.gain", false);
     REQUIRE(f.run("track.remove", f.args({{"track", track.str()}})));
     f.fx->tick();
-    CHECK_FALSE(f.root->find("fx.param.gain"));
+    CHECK_FALSE(f.uiRoot().find("fx.param.gain"));
 }
 
 TEST_CASE("plugin browser refresh after close does not retain destroyed labels") {
@@ -396,7 +410,7 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     // Add a stock plugin from the browser.
     f.click("fx.add");
     REQUIRE(f.fx->browser().isOpen());
-    auto* search = dynamic_cast<ui::TextField*>(f.root->find("browser.search"));
+    auto* search = dynamic_cast<ui::TextField*>(f.uiRoot().find("browser.search"));
     REQUIRE(search);
     f.type("Hickory");
     f.key("Return");
@@ -413,25 +427,25 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     REQUIRE(f.fx->chain().size() == 2);
     const model::Id fx2 = f.fx->chain()[1];
     CHECK(f.app->head().fx.find(fx2)->plugin.id == yarrow);
-    const auto secondSelected = f.root->readBack();
+    const auto secondSelected = f.uiRoot().readBack();
     f.fx->select(fx1);
     f.frame();
-    CHECK(f.root->readBack().rgba != secondSelected.rgba);
+    CHECK(f.uiRoot().readBack().rgba != secondSelected.rgba);
     // Drag the second row above the first (one fx.move), then back below it.
     auto dragRow = [&](const model::Id& fx, const model::Id& over, bool above) {
-        const ui::Rect from = f.root->find("fx.row." + fx.str())->bounds();
-        const ui::Rect to = f.root->find("fx.row." + over.str())->bounds();
+        const ui::Rect from = f.uiRoot().find("fx.row." + fx.str())->bounds();
+        const ui::Rect to = f.uiRoot().find("fx.row." + over.str())->bounds();
         const ui::Point start{from.x + 40, from.y + from.h / 2};
         const ui::Point end{to.x + 40, above ? to.y + 2 : to.bottom() - 2};
-        f.root->pointer({ui::PointerEvent::Type::Down, start, 1});
+        f.uiRoot().pointer({ui::PointerEvent::Type::Down, start, 1});
         for (int i = 1; i <= 8; ++i)
-            f.root->pointer({ui::PointerEvent::Type::Move,
-                             {start.x, start.y + (end.y - start.y) * static_cast<float>(i) / 8},
-                             1});
-        f.root->pointer({ui::PointerEvent::Type::Up, end, 1});
+            f.uiRoot().pointer({ui::PointerEvent::Type::Move,
+                                {start.x, start.y + (end.y - start.y) * static_cast<float>(i) / 8},
+                                1});
+        f.uiRoot().pointer({ui::PointerEvent::Type::Up, end, 1});
         f.frame();
     };
-    CHECK_FALSE(f.root->find("fx.up." + fx2.str()));  // no arrow buttons: drag instead
+    CHECK_FALSE(f.uiRoot().find("fx.up." + fx2.str()));  // no arrow buttons: drag instead
     dragRow(fx2, fx1, true);
     REQUIRE(f.fx->chain().size() == 2);
     CHECK(f.fx->chain()[0] == fx2);
@@ -440,7 +454,7 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     CHECK(f.fx->chain()[0] == fx1);
 
     // Reorder by keyboard too (Alt+Down / Alt+Up on a focused row).
-    f.root->focus(f.root->find("fx.row." + fx1.str()));
+    f.uiRoot().focus(f.uiRoot().find("fx.row." + fx1.str()));
     f.key("Alt+Down");
     CHECK(f.fx->chain()[0] == fx2);
     f.key("Alt+Up");
@@ -456,23 +470,23 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     CHECK(f.app->head().fx.find(fx2)->bypass == false);
 
     // A wet/dry drag is one undo step too (the cap sits at 100 %: drag left).
-    ui::Node* wet = f.root->find("fx.wet." + fx1.str());
+    ui::Node* wet = f.uiRoot().find("fx.wet." + fx1.str());
     REQUIRE(wet);
     const std::size_t wetBefore = f.historyCount();
     const float wetY = wet->bounds().y + wet->bounds().h / 2;
     const float wetX = wet->bounds().x + wet->bounds().w - 12;
-    f.root->pointer({ui::PointerEvent::Type::Down, {wetX, wetY}, 1});
+    f.uiRoot().pointer({ui::PointerEvent::Type::Down, {wetX, wetY}, 1});
     for (int i = 1; i <= 20; ++i)
-        f.root->pointer({ui::PointerEvent::Type::Move, {wetX - i * 6.0f, wetY}, 1});
-    f.root->pointer({ui::PointerEvent::Type::Up, {wetX - 140.0f, wetY}, 1});
+        f.uiRoot().pointer({ui::PointerEvent::Type::Move, {wetX - i * 6.0f, wetY}, 1});
+    f.uiRoot().pointer({ui::PointerEvent::Type::Up, {wetX - 140.0f, wetY}, 1});
     CHECK(f.historyCount() == wetBefore + 1);
     CHECK(f.app->head().fx.find(fx1)->wet < 100.0);
 
     // The semantic parameter panel: a value set with units.
     f.click("fx.params." + fx1.str());
-    auto* gainText = dynamic_cast<ui::TextField*>(f.root->find("fx.param.text.gain"));
+    auto* gainText = dynamic_cast<ui::TextField*>(f.uiRoot().find("fx.param.text.gain"));
     REQUIRE(gainText);
-    f.root->focus(gainText);
+    f.uiRoot().focus(gainText);
     f.key("Ctrl+A");  // the field holds the formatted value: replace it
     f.type("-6 dB");
     f.key("Return");
@@ -481,15 +495,15 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     CHECK((*gain)["value"].asDouble() == doctest::Approx(-6.0));
 
     // A 20-move slider drag is one undo step (Origin::gesture).
-    ui::Node* slider = f.root->find("fx.param.gain");
+    ui::Node* slider = f.uiRoot().find("fx.param.gain");
     REQUIRE(slider);
     const std::size_t before = f.historyCount();
     const float y = slider->bounds().y + slider->bounds().h / 2;
     const float x0 = slider->bounds().x + 12;
-    f.root->pointer({ui::PointerEvent::Type::Down, {x0, y}, 1});
+    f.uiRoot().pointer({ui::PointerEvent::Type::Down, {x0, y}, 1});
     for (int i = 1; i <= 20; ++i)
-        f.root->pointer({ui::PointerEvent::Type::Move, {x0 + i * 8.0f, y}, 1});
-    f.root->pointer(
+        f.uiRoot().pointer({ui::PointerEvent::Type::Move, {x0 + i * 8.0f, y}, 1});
+    f.uiRoot().pointer(
         {ui::PointerEvent::Type::Up, {slider->bounds().x + slider->bounds().w - 12, y}, 1});
     CHECK(f.historyCount() == before + 1);
     auto moved = f.run("fx.param.get", f.args({{"fx", fx1.str()}, {"param", "gain"}}));
@@ -497,7 +511,7 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     CHECK((*moved)["value"].asDouble() > -6.0);
 
     // An out-of-range value is rejected by the plugin and the reason shown.
-    f.root->focus(gainText);
+    f.uiRoot().focus(gainText);
     f.key("Ctrl+A");
     f.type("9999 dB");
     f.key("Return");
@@ -527,7 +541,7 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     CHECK(f.fx->chain().size() == 2);  // the main chain is untouched
     const model::Id inputFx = f.fx->inputChain()[0];
     CHECK(f.app->head().fx.find(inputFx)->plugin.name == "Hickory");
-    CHECK(f.root->find("ifx.row." + inputFx.str()) != nullptr);
+    CHECK(f.uiRoot().find("ifx.row." + inputFx.str()) != nullptr);
     f.click("ifx.remove." + inputFx.str());
     CHECK(f.fx->inputChain().empty());
     f.fx->close();
@@ -538,7 +552,7 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     f.frame();
     CHECK_FALSE(f.fx->isOpen());
     REQUIRE(f.fx->browser().isOpen());
-    CHECK(f.root->find("browser.title")->valueText() == "Add plugin to Guitar");
+    CHECK(f.uiRoot().find("browser.title")->valueText() == "Add plugin to Guitar");
     f.click("browser.close");
     CHECK_FALSE(f.fx->browser().isOpen());
     REQUIRE(f.fx->openToAdd(selection, json::Value::object()));
@@ -572,7 +586,7 @@ TEST_CASE(
         return;
     }
     std::vector<model::Id> opened;
-    f.fx = std::make_unique<gui::FxWindow>(*f.app, *f.dispatcher, *f.root,
+    f.fx = std::make_unique<gui::FxWindow>(*f.app, *f.dispatcher, *f.root, *f.panel,
                                            gui::FxWindow::Hooks{[&](model::Id id) -> Status {
                                                opened.push_back(id);
                                                return {};
@@ -589,12 +603,12 @@ TEST_CASE(
     f.frame();
     auto press = [&](const model::Id& id, unsigned mods, int clicks = 1) {
         f.frame();
-        const ui::Rect r = f.root->find("fx.row." + id.str())->bounds();
+        const ui::Rect r = f.uiRoot().find("fx.row." + id.str())->bounds();
         const ui::Point at{r.x + 6, r.y + 8};
         ui::PointerEvent down{ui::PointerEvent::Type::Down, at, 1, clicks, mods};
         ui::PointerEvent up{ui::PointerEvent::Type::Up, at, 1, clicks, mods};
-        f.root->pointer(down);
-        f.root->pointer(up);
+        f.uiRoot().pointer(down);
+        f.uiRoot().pointer(up);
         f.frame();
     };
     auto inst = [&](const model::Id& id) { return f.app->head().fx.find(id); };
@@ -650,13 +664,13 @@ TEST_CASE("the FX window's MIDI button learns a controller for a parameter (fx.l
         MESSAGE("skipped: no stock plugins (a partial build)");
         return;
     }
-    f.fx = std::make_unique<gui::FxWindow>(*f.app, *f.dispatcher, *f.root,
+    f.fx = std::make_unique<gui::FxWindow>(*f.app, *f.dispatcher, *f.root, *f.panel,
                                            gui::FxWindow::Hooks{{},
                                                                 {},
                                                                 [&](gui::LearnRequest request) {
                                                                     gui::openLearnDialog(
-                                                                        *f.root, *f.actions, *f.app,
-                                                                        std::move(request));
+                                                                        f.panel->root(), *f.actions,
+                                                                        *f.app, std::move(request));
                                                                 }},
                                            gui::Favourites::defaultFile(gui::test::slug()));
     const model::Id track = f.addTrack("Keys");
@@ -682,11 +696,11 @@ TEST_CASE("the FX window's MIDI button learns a controller for a parameter (fx.l
     f.fx->select(fx);
     f.fx->showParamsTab();
     f.frame();
-    REQUIRE(f.root->find("fx.param.learn." + key));
-    CHECK(f.root->find("fx.param.learn." + key)->valueText() == "MIDI");
+    REQUIRE(f.uiRoot().find("fx.param.learn." + key));
+    CHECK(f.uiRoot().find("fx.param.learn." + key)->valueText() == "MIDI");
     REQUIRE(f.click("fx.param.learn." + key));
-    REQUIRE(f.root->find("learn"));
-    CHECK(f.root->find("learn.soft"));  // a parameter's options
+    REQUIRE(f.uiRoot().find("learn"));
+    CHECK(f.uiRoot().find("learn.soft"));  // a parameter's options
     CHECK(f.app->learning());
     engine::EngineApp::ControlEvent e;
     e.midi.bytes[0] = 0xb1;
@@ -695,13 +709,13 @@ TEST_CASE("the FX window's MIDI button learns a controller for a parameter (fx.l
     e.device = "nanoKONTROL2";
     f.actions->control({e});
     f.frame();
-    CHECK(f.root->find("learn.control.value")->valueText() == "CC 21 · ch 2 · nanoKONTROL2");
+    CHECK(f.uiRoot().find("learn.control.value")->valueText() == "CC 21 · ch 2 · nanoKONTROL2");
     f.snapshot("fx-midi-learn.png");
     REQUIRE(f.click("learn.mode.set"));
-    REQUIRE(f.root->find("learn.mode.menu"));
-    f.root->closePopup();
+    REQUIRE(f.uiRoot().find("learn.mode.menu"));
+    f.uiRoot().closePopup();
     REQUIRE(f.click("learn.soft.set"));
-    CHECK(f.root->find("learn.soft.set")->valueText() == "On");
+    CHECK(f.uiRoot().find("learn.soft.set")->valueText() == "On");
     REQUIRE(f.click("learn.ok"));
     CHECK_FALSE(f.app->learning());
     const model::FxInstance& bound = *f.app->head().fx.find(fx);
@@ -711,7 +725,7 @@ TEST_CASE("the FX window's MIDI button learns a controller for a parameter (fx.l
     CHECK(bound.learn[0].softTakeover);
     f.fx->tick();
     f.frame();
-    CHECK(f.root->find("fx.param.learn." + key)->valueText() == "CC 21");
+    CHECK(f.uiRoot().find("fx.param.learn." + key)->valueText() == "CC 21");
     f.snapshot("fx-midi-learn-params.png");
     // Remove from the same button.
     REQUIRE(f.click("fx.param.learn." + key));
@@ -755,15 +769,15 @@ TEST_CASE("a knob bound to the last touched parameter follows the panel's last e
     f.fx->select(fx);
     f.fx->showParamsTab();
     f.frame();
-    auto* field = dynamic_cast<ui::TextField*>(f.root->find("fx.param.text.gain"));
+    auto* field = dynamic_cast<ui::TextField*>(f.uiRoot().find("fx.param.text.gain"));
     REQUIRE(field);
-    f.root->focus(field);
+    f.uiRoot().focus(field);
     field->setText("-6");
     REQUIRE(field->onSubmit);
     field->onSubmit("-6");
     f.fx->tick();
     f.frame();
-    CHECK(f.root->find("fx.touched")->valueText() == "Last touched: Hickory · Gain");
+    CHECK(f.uiRoot().find("fx.touched")->valueText() == "Last touched: Hickory · Gain");
     f.snapshot("fx-last-touched.png");
     auto gain = [&] {
         const model::FxInstance& inst = *f.app->head().fx.find(fx);
@@ -844,11 +858,11 @@ TEST_CASE("the plugin browser names the plugin's file and marks a shadowed copy"
     gui::PluginBrowser browser(**app, bus, *f.root,
                                f.configDir / gui::test::slug() / "favourites.json");
     browser.open([](const std::string&) {});
-    auto* search = dynamic_cast<ui::TextField*>(f.root->find("browser.search"));
+    auto* search = dynamic_cast<ui::TextField*>(f.uiRoot().find("browser.search"));
     REQUIRE(search);
-    f.root->focus(search);
+    f.uiRoot().focus(search);
     f.type("Hickory");
-    auto* list = dynamic_cast<ui::List*>(f.root->find("browser.results"));
+    auto* list = dynamic_cast<ui::List*>(f.uiRoot().find("browser.results"));
     REQUIRE(list);
     bool sawShadowed = false, sawWinner = false;
     std::optional<std::size_t> shadowedRow;
@@ -905,11 +919,11 @@ TEST_CASE("the FX chain badges each effect's state, and a failed one offers a re
     f.key("Return");
     REQUIRE(f.fx->chain().size() == 1);
     const model::Id fx = f.fx->chain()[0];
-    CHECK(f.root->find("fx.badge." + fx.str())->valueText() == "in-process");
+    CHECK(f.uiRoot().find("fx.badge." + fx.str())->valueText() == "in-process");
     f.click("fx.offline." + fx.str());
-    CHECK(f.root->find("fx.badge." + fx.str())->valueText() == "in-process · offline");
+    CHECK(f.uiRoot().find("fx.badge." + fx.str())->valueText() == "in-process · offline");
     f.click("fx.offline." + fx.str());  // back on
-    CHECK(f.root->find("fx.badge." + fx.str())->valueText() == "in-process");
+    CHECK(f.uiRoot().find("fx.badge." + fx.str())->valueText() == "in-process");
     // The isolation modes and a failed instance compose the same badge.
     model::FxInstance inst;
     inst.isolation = model::Isolation::Dedicated;
@@ -921,7 +935,7 @@ TEST_CASE("the FX chain badges each effect's state, and a failed one offers a re
     // the set empty.
     f.fx->tick();
     CHECK(f.fx->failed().empty());
-    CHECK(f.root->find("fx.restart." + fx.str()) == nullptr);
+    CHECK(f.uiRoot().find("fx.restart." + fx.str()) == nullptr);
 }
 
 TEST_CASE(
@@ -936,26 +950,26 @@ TEST_CASE(
     REQUIRE(f.fx->chain().size() == 1);
     const model::Id fx = f.fx->chain()[0];
     // A stereo strip: no pins button.
-    CHECK(f.root->find("fx.pins." + fx.str()) == nullptr);
+    CHECK(f.uiRoot().find("fx.pins." + fx.str()) == nullptr);
     REQUIRE(f.run("track.set", f.args({{"track", track.str()}, {"channels", 4}})));
     f.fx->refresh();
     f.frame();
-    REQUIRE(f.root->find("fx.pins." + fx.str()));
-    CHECK(f.root->find("fx.pins." + fx.str())->valueText() == "pins 1/2");
+    REQUIRE(f.uiRoot().find("fx.pins." + fx.str()));
+    CHECK(f.uiRoot().find("fx.pins." + fx.str())->valueText() == "pins 1/2");
     // Rows: In 1/2, In 3/4, rule, Out 1/2, Out 3/4, rule, Key (routes), Key 1/2, Key 3/4.
     auto pick = [&](int row) {
         REQUIRE(f.click("fx.pins." + fx.str()));
-        ui::Node* menu = f.root->find("fx.pins.menu");
+        ui::Node* menu = f.uiRoot().find("fx.pins.menu");
         REQUIRE(menu);
         const ui::Point p{menu->bounds().x + 30, menu->bounds().y + row * 26.0f + 13};
-        f.root->pointer({ui::PointerEvent::Type::Move, p});
-        f.root->pointer({ui::PointerEvent::Type::Down, p, 1});
-        f.root->pointer({ui::PointerEvent::Type::Up, p, 1});
+        f.uiRoot().pointer({ui::PointerEvent::Type::Move, p});
+        f.uiRoot().pointer({ui::PointerEvent::Type::Down, p, 1});
+        f.uiRoot().pointer({ui::PointerEvent::Type::Up, p, 1});
         f.frame();
     };
     pick(1);
     CHECK(f.app->head().fx.find(fx)->pins.in == std::vector<int>{3, 4});
-    CHECK(f.root->find("fx.pins." + fx.str())->valueText() == "3/4 → 1/2");
+    CHECK(f.uiRoot().find("fx.pins." + fx.str())->valueText() == "3/4 → 1/2");
     pick(0);  // back to 1/2: stored as the default
     CHECK(f.app->head().fx.find(fx)->pins.empty());
     CHECK(gui::FxWindow::pinsText({{3, 4}, {1, 2}, {3, 4}}) == "3/4 → 1/2 · key 3/4");
@@ -971,7 +985,7 @@ TEST_CASE("the render dialog: the preview matches render.dry-run and a job lists
     f.render->setField("render.end", "8");  // a short render: fast and load-insensitive
     // An empty field explains the default the engine would use.
     const auto placeholder = [&](const char* id) {
-        auto* field = dynamic_cast<ui::TextField*>(f.root->find(id));
+        auto* field = dynamic_cast<ui::TextField*>(f.uiRoot().find(id));
         REQUIRE(field);
         return field->placeholder();
     };
@@ -1025,7 +1039,7 @@ TEST_CASE("the render dialog: the preview matches render.dry-run and a job lists
     CHECK(std::filesystem::exists(f.render->resultFiles()[0]));
     CHECK(f.render->statusText().find("1 file") != std::string::npos);
     // The result list carries the analysis summary when the render has one.
-    CHECK(f.root->find("render.results")->valueText().find("LUFS") != std::string::npos);
+    CHECK(f.uiRoot().find("render.results")->valueText().find("LUFS") != std::string::npos);
 
     // add_to_project: the file lands as an item on a new track (one undo step).
     const std::size_t tracksBefore = f.trackCount();
@@ -1033,7 +1047,7 @@ TEST_CASE("the render dialog: the preview matches render.dry-run and a job lists
     CHECK_FALSE(f.render->addToProject());
     f.click("render.add");
     CHECK(f.render->addToProject());
-    CHECK(f.root->find("render.add")->valueText() == "[x] Add to project");
+    CHECK(f.uiRoot().find("render.add")->valueText() == "[x] Add to project");
     f.render->setField("render.pattern", "added-{counter:02}");
     f.render->refreshPreview();
     f.render->run();
@@ -1066,7 +1080,7 @@ TEST_CASE("the render dialog: FLAC, a second file, and the render queue") {
     // Queue it, change the pattern, queue again: two pinned renders.
     f.click("render.queue.add");
     CHECK(f.app->renderQueue().size() == 1);
-    CHECK(f.root->find("render.queue")->valueText() == "Queue (1)");
+    CHECK(f.uiRoot().find("render.queue")->valueText() == "Queue (1)");
     f.render->setField("render.pattern", "r-{counter:02}");
     f.render->setField("render.secondary", "");
     f.click("render.queue.add");
@@ -1074,8 +1088,8 @@ TEST_CASE("the render dialog: FLAC, a second file, and the render queue") {
     // The queue panel lists both; Render all runs them as one job.
     f.click("render.queue");
     f.frame();
-    REQUIRE(f.root->find("render.queue.list"));
-    CHECK(f.root->find("render.queue.list")->valueText().find("q-01.flac") != std::string::npos);
+    REQUIRE(f.uiRoot().find("render.queue.list"));
+    CHECK(f.uiRoot().find("render.queue.list")->valueText().find("q-01.flac") != std::string::npos);
     f.click("render.queue.run");
     REQUIRE_FALSE(f.render->job().empty());
     for (int i = 0; i < 6000 && !f.render->job().empty(); ++i) {
@@ -1090,7 +1104,7 @@ TEST_CASE("the render dialog: FLAC, a second file, and the render queue") {
     CHECK_FALSE(std::filesystem::exists(f.app->rendersDir() / "r-01.wav"));
     CHECK(f.app->renderQueue().empty());
     f.render->tick();
-    CHECK(f.root->find("render.queue")->valueText() == "Queue");
+    CHECK(f.uiRoot().find("render.queue")->valueText() == "Queue");
 }
 
 TEST_CASE("FX chain preset buttons save, append and Shift-replace through the bus") {
@@ -1108,7 +1122,7 @@ TEST_CASE("FX chain preset buttons save, append and Shift-replace through the bu
     f.frame();
     const auto beforeSave = f.historyCount();
     REQUIRE(f.click("fx.chain.save"));
-    REQUIRE(f.root->focused()->id() == "fx.chain.name");
+    REQUIRE(f.uiRoot().focused()->id() == "fx.chain.name");
     f.type("Guitar");
     f.key("Return");
     CHECK(f.historyCount() == beforeSave);
@@ -1119,7 +1133,7 @@ TEST_CASE("FX chain preset buttons save, append and Shift-replace through the bu
     REQUIRE(f.fx->open(target));
     const auto beforeLoad = f.historyCount();
     REQUIRE(f.click("fx.chain.load"));
-    REQUIRE(f.root->find("fx.chain.menu"));
+    REQUIRE(f.uiRoot().find("fx.chain.menu"));
     f.key("Home");
     f.key("Return");
     CHECK(f.historyCount() == beforeLoad + 1);
@@ -1171,19 +1185,19 @@ TEST_CASE("FX chain preset buttons toggle their popups; a right click deletes a 
     }
     // Save chain… shows its name field; pressed again, hides it.
     REQUIRE(f.click("fx.chain.save"));
-    CHECK(f.root->find("fx.chain.prompt")->visible);
+    CHECK(f.uiRoot().find("fx.chain.prompt")->visible);
     REQUIRE(f.click("fx.chain.save"));
-    CHECK_FALSE(f.root->find("fx.chain.prompt")->visible);
+    CHECK_FALSE(f.uiRoot().find("fx.chain.prompt")->visible);
     // Load chain… opens one menu; pressed again, closes it (never a second).
     REQUIRE(f.click("fx.chain.load"));
-    REQUIRE(f.root->find("fx.chain.menu"));
+    REQUIRE(f.uiRoot().find("fx.chain.menu"));
     REQUIRE(f.click("fx.chain.load"));
-    CHECK_FALSE(f.root->find("fx.chain.menu"));
-    CHECK(f.root->find("fx"));  // the FX window itself stays
+    CHECK_FALSE(f.uiRoot().find("fx.chain.menu"));
+    CHECK(f.uiRoot().find("fx"));  // the FX window itself stays
     REQUIRE(f.click("fx.chain.load"));
     REQUIRE(f.click("fx.chain.load"));
     REQUIRE(f.click("fx.chain.load"));
-    CHECK(f.root->find("fx.chain.menu"));
+    CHECK(f.uiRoot().find("fx.chain.menu"));
     // Sorted by name: Drop first. A right click offers to delete it.
     const auto before = f.historyCount();
     f.pressFirstRow("fx.chain.menu", 3);
@@ -1192,13 +1206,13 @@ TEST_CASE("FX chain preset buttons toggle their popups; a right click deletes a 
     CHECK(std::filesystem::exists(f.dir / "chains" / "Keep.json"));
     CHECK(f.historyCount() == before);
     CHECK(f.fxStatus() == "Deleted Drop");
-    auto* menu = dynamic_cast<ui::List*>(f.root->find("fx.chain.menu"));
+    auto* menu = dynamic_cast<ui::List*>(f.uiRoot().find("fx.chain.menu"));
     REQUIRE(menu);
     CHECK(menu->count() == 1);
     // Deleting the last one closes the menu.
     f.pressFirstRow("fx.chain.menu", 3);
     REQUIRE(f.click("fx.chain.menu.context"));
-    CHECK_FALSE(f.root->find("fx.chain.menu"));
+    CHECK_FALSE(f.uiRoot().find("fx.chain.menu"));
     CHECK_FALSE(std::filesystem::exists(f.dir / "chains" / "Keep.json"));
 }
 
@@ -1245,10 +1259,10 @@ TEST_CASE("the FX window shows a take's chain (take FX): add, reorder, no input 
     REQUIRE(f.fx->openTake(take));
     f.frame();
     REQUIRE(f.fx->take());
-    CHECK(f.root->find("fx.title")->valueText().rfind("Take FX: Synth", 0) == 0);
+    CHECK(f.uiRoot().find("fx.title")->valueText().rfind("Take FX: Synth", 0) == 0);
     CHECK(f.fx->chain().size() == 2);
     CHECK(f.fx->inputChain().empty());
-    CHECK(f.root->find("fx.add.input") == nullptr);  // a take has no input chain
+    CHECK(f.uiRoot().find("fx.add.input") == nullptr);  // a take has no input chain
     // Preset buttons are for track chains.
     f.click("fx.chain.save");
     CHECK(f.fxStatus() == "Chain presets are for track chains");
@@ -1268,7 +1282,7 @@ TEST_CASE("FX latency badge follows an effect edit and undo without reopening") 
     f.frame();
     const auto effect = f.fx->chain().front();
     auto text = [&] {
-        auto* label = f.root->find("fx.latency." + effect.str());
+        auto* label = f.uiRoot().find("fx.latency." + effect.str());
         REQUIRE(label);
         return label->valueText();
     };
@@ -1333,7 +1347,7 @@ TEST_CASE("audit3: reopened render add button matches its stored value") {
     f.render->close();
     f.render->open();
     CHECK(f.render->addToProject());
-    CHECK(f.root->find("render.add")->valueText() == "[x] Add to project");
+    CHECK(f.uiRoot().find("render.add")->valueText() == "[x] Add to project");
 }
 TEST_CASE("audit3: active render refuses additional launches") {
     Fixture f;
@@ -1364,7 +1378,7 @@ TEST_CASE("audit3: active render refuses additional launches") {
     f.render->runQueue();
     CHECK(f.render->job() == "probe-1");
     CHECK(starts == 1);
-    CHECK(f.root->find("render.status")->valueText().find("active") != std::string::npos);
+    CHECK(f.uiRoot().find("render.status")->valueText().find("active") != std::string::npos);
 }
 
 TEST_CASE("render preview has one deadline only while an open dialog is dirty") {
@@ -1401,48 +1415,48 @@ TEST_CASE("an effect's presets menu loads factory presets and saves and deletes 
     REQUIRE(factoryCount > 0);
     // Rows: "Factory", its presets, ["Saved", the user's,] a rule, "Save preset…".
     auto row = [&](std::size_t i, float x = 30) {
-        auto* menu = f.root->find("fx.preset.menu");
+        auto* menu = f.uiRoot().find("fx.preset.menu");
         REQUIRE(menu);
         const auto& b = menu->bounds();
         return ui::Point{x < 0 ? b.right() + x : b.x + x, b.y + 26 * static_cast<float>(i) + 13};
     };
     auto press = [&](ui::Point at, int button = 1) {
         f.frame();
-        f.root->pointer({ui::PointerEvent::Type::Move, at, 0});
-        f.root->pointer({ui::PointerEvent::Type::Down, at, button});
-        f.root->pointer({ui::PointerEvent::Type::Up, at, button});
+        f.uiRoot().pointer({ui::PointerEvent::Type::Move, at, 0});
+        f.uiRoot().pointer({ui::PointerEvent::Type::Down, at, button});
+        f.uiRoot().pointer({ui::PointerEvent::Type::Up, at, button});
         f.frame();
     };
 
     // The button toggles the menu; a click on a factory preset loads it in one step.
     REQUIRE(f.click("fx.presets.fx_1"));
-    REQUIRE(f.root->find("fx.preset.menu"));
+    REQUIRE(f.uiRoot().find("fx.preset.menu"));
     REQUIRE(f.click("fx.presets.fx_1"));
-    CHECK_FALSE(f.root->find("fx.preset.menu"));
+    CHECK_FALSE(f.uiRoot().find("fx.preset.menu"));
     REQUIRE(f.click("fx.presets.fx_1"));
     const auto beforeLoad = f.historyCount();
     press(row(1));
-    CHECK_FALSE(f.root->find("fx.preset.menu"));
+    CHECK_FALSE(f.uiRoot().find("fx.preset.menu"));
     CHECK(f.historyCount() == beforeLoad + 1);
     const std::string first = (*factory)["patches"].at(0).find("name")->asString();
     CHECK(f.fxStatus() == "Loaded " + first);
     // A factory preset has no delete: a right click offers nothing.
     REQUIRE(f.click("fx.presets.fx_1"));
     press(row(1), 3);
-    CHECK_FALSE(f.root->find("fx.preset.menu.context"));
+    CHECK_FALSE(f.uiRoot().find("fx.preset.menu.context"));
     f.key("Escape");
 
     // "Save preset…" shows the name field; a taken name needs a second Save.
     REQUIRE(f.run("fx.param.set", f.args({{"fx", "fx_1"}, {"values", f.args({{"gain", -6}})}})));
-    if (!f.root->find("fx.preset.menu")) REQUIRE(f.click("fx.presets.fx_1"));
+    if (!f.uiRoot().find("fx.preset.menu")) REQUIRE(f.click("fx.presets.fx_1"));
     press(row(factoryCount + 2));
-    CHECK(f.root->find("fx.preset.prompt")->visible);
-    REQUIRE(f.root->focused()->id() == "fx.preset.name");
+    CHECK(f.uiRoot().find("fx.preset.prompt")->visible);
+    REQUIRE(f.uiRoot().focused()->id() == "fx.preset.name");
     const auto beforeSave = f.historyCount();
     f.type("Mine");
     f.key("Return");
     CHECK(f.fxStatus() == "Saved Mine");
-    CHECK_FALSE(f.root->find("fx.preset.prompt")->visible);
+    CHECK_FALSE(f.uiRoot().find("fx.preset.prompt")->visible);
     CHECK(f.historyCount() == beforeSave);
     REQUIRE(f.click("fx.presets.fx_1"));
     press(row(factoryCount + 4));  // past the Saved heading and Mine
@@ -1467,13 +1481,169 @@ TEST_CASE("an effect's presets menu loads factory presets and saves and deletes 
     REQUIRE(gain);
     CHECK((*gain)["value"].asDouble() == doctest::Approx(-6));
     REQUIRE(f.click("fx.presets.fx_1"));
-    f.root->pointer({ui::PointerEvent::Type::Move, row(factoryCount + 2, -19), 0});
+    f.uiRoot().pointer({ui::PointerEvent::Type::Move, row(factoryCount + 2, -19), 0});
     f.snapshot("fx-presets.png");
     press(row(factoryCount + 2, -19));
     REQUIRE(f.click("fx.preset.menu.context"));
     CHECK_FALSE(std::filesystem::exists(file));
     CHECK(f.fxStatus() == "Deleted Mine");
-    auto* menu = dynamic_cast<ui::List*>(f.root->find("fx.preset.menu"));
+    auto* menu = dynamic_cast<ui::List*>(f.uiRoot().find("fx.preset.menu"));
     REQUIRE(menu);
     CHECK(menu->count() == factoryCount + 3);  // the Saved heading went with it
+}
+
+TEST_CASE("double clicking empty FX chain space adds to its main, input or take chain") {
+    Fixture f;
+    if (!f.ok || !f.stockPlugins()) return;
+    const auto track = f.addTrack("Empty chain");
+    REQUIRE(f.fx->open(track));
+    auto doubleClick = [&](ui::Point p, int clicks = 2, int button = 1) {
+        f.panel->root().pointer({ui::PointerEvent::Type::Down, p, button, clicks, 0});
+        f.panel->root().pointer({ui::PointerEvent::Type::Up, p, button, clicks, 0});
+        f.frame();
+    };
+    f.frame();
+    const auto b = f.panel->root().find("fx.empty")->bounds();
+    const ui::Point empty{b.x + 20, b.y + b.h / 2};
+    doubleClick(empty, 1);
+    CHECK_FALSE(f.fx->browser().isOpen());
+    doubleClick(empty, 2, 3);
+    CHECK_FALSE(f.fx->browser().isOpen());
+    doubleClick(empty);
+    REQUIRE(f.fx->browser().isOpen());
+    CHECK(f.panel->root().find("browser"));
+    CHECK_FALSE(f.root->find("browser"));
+    f.fx->browser().onAdd()(f.pluginId("Hickory"));
+    f.fx->browser().close();
+    CHECK(f.fx->chain().size() == 1);
+    f.frame();
+    const auto list = f.panel->root().find("fx.body")->bounds();
+    doubleClick({list.x + 20, list.bottom() - 20});
+    REQUIRE(f.fx->browser().isOpen());  // below the final effect row
+    f.fx->browser().close();
+    f.frame();
+    const auto input = f.panel->root().find("ifx.empty")->bounds();
+    doubleClick({input.x + 20, input.y + input.h / 2});
+    REQUIRE(f.fx->browser().isOpen());
+    f.fx->browser().onAdd()(f.pluginId("Hickory"));
+    f.fx->browser().close();
+    CHECK(f.fx->inputChain().size() == 1);
+    auto made = f.run(
+        "item.add",
+        f.args(
+            {{"track", track.str()}, {"position", 0.0}, {"length", 4.0}, {"notation", "1: C4:w"}}));
+    REQUIRE(made);
+    const auto take = *model::Id::parse((*made)["take"].asString());
+    REQUIRE(f.fx->openTake(take));
+    f.frame();
+    const auto takeEmpty = f.panel->root().find("fx.empty")->bounds();
+    doubleClick({takeEmpty.x + 20, takeEmpty.y + takeEmpty.h / 2});
+    REQUIRE(f.fx->browser().isOpen());
+    f.fx->browser().onAdd()(f.pluginId("Hickory"));
+    f.fx->browser().close();
+    CHECK(f.fx->chain().size() == 1);
+    CHECK(f.app->head().tracks.find(track)->chain.size() == 1);
+    CHECK(f.app->head().tracks.find(track)->inputChain.size() == 1);
+    gui::UiState ui;
+    REQUIRE(f.fx->openToAdd(ui, track.str()));
+    CHECK(f.root->find("browser"));  // the strip's standalone browser stays on main
+    CHECK_FALSE(f.panel->root().find("browser"));
+}
+
+TEST_CASE("FX native title follows track switches, renames and take headers") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto first = f.addTrack("First"), second = f.addTrack("Second");
+    REQUIRE(f.fx->open(first));
+    const auto window = f.panel->window()->id();
+    auto title = [&] { return std::string(SDL_GetWindowTitle(f.panel->window()->sdl())); };
+    auto matchesHeader = [&] { CHECK(title() == f.panel->root().find("fx.title")->valueText()); };
+    CHECK(title() == "FX: First");
+    matchesHeader();
+    REQUIRE(f.fx->open(second));
+    CHECK(f.panel->window()->id() == window);
+    CHECK(title() == "FX: Second");
+    matchesHeader();
+    REQUIRE(f.run("track.set", f.args({{"track", second.str()}, {"name", "Renamed"}})));
+    f.fx->tick();
+    CHECK(title() == "FX: Renamed");
+    matchesHeader();
+    const auto item = f.run("item.add", f.args({{"track", second.str()},
+                                                {"position", 0.0},
+                                                {"length", 4.0},
+                                                {"notation", "1: C4:w"}}));
+    REQUIRE(item);
+    const auto take = *model::Id::parse(item->find("take")->asString());
+    REQUIRE(f.fx->openTake(take));
+    CHECK(title() == "Take FX: Renamed / " + take.str());
+    matchesHeader();
+    REQUIRE(f.run("track.set", f.args({{"track", second.str()}, {"name", "Take track"}})));
+    f.fx->tick();
+    CHECK(title() == "Take FX: Take track / " + take.str());
+    matchesHeader();
+}
+
+TEST_CASE("FX project replacement closes overlays and clears pending prompts") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto track = f.addTrack("Old project");
+    REQUIRE(f.fx->open(track));
+    REQUIRE(f.click("fx.chain.save"));
+    f.type("Old chain");
+    REQUIRE(f.click("fx.add"));
+    REQUIRE(f.panel->root().find("browser"));
+    bool applied = false;
+    gui::LearnRequest request;
+    request.title = "Old parameter";
+    request.onOk = [&](const gui::LearnChoice&) { applied = true; };
+    gui::openLearnDialog(f.panel->root(), *f.actions, *f.app, std::move(request));
+    REQUIRE(f.panel->root().find("learn"));
+    REQUIRE(f.app->learning());
+    REQUIRE(f.run("project.new", json::Value::object()));
+    CHECK(f.addTrack("Replacement") == track);  // the old captured id is reused
+    f.fx->syncProject();                        // before another event, without waiting for a frame
+    CHECK(f.fx->isOpen());
+    CHECK_FALSE(f.panel->root().popupOpen());
+    CHECK_FALSE(f.panel->root().find("browser"));
+    CHECK_FALSE(f.panel->root().find("learn"));
+    CHECK_FALSE(f.panel->root().find("fx.chain.prompt")->visible);
+    CHECK_FALSE(f.panel->root().find("fx.preset.prompt")->visible);
+    CHECK(f.panel->root().find("fx.chain.name")->valueText().empty());
+    CHECK_FALSE(f.fx->browser().onAdd());
+    CHECK_FALSE(f.app->learning());
+    CHECK_FALSE(f.actions->learnSink);
+    CHECK_FALSE(applied);
+}
+
+TEST_CASE("simultaneous plugin browsers preserve each other's favourite toggles") {
+    Fixture f;
+    if (!f.ok || !f.stockPlugins()) return;
+    REQUIRE(f.panel->ensure());
+    const auto file = gui::Favourites::defaultFile(gui::test::slug());
+    gui::PluginBrowser first(*f.app, *f.dispatcher, *f.root, file);
+    gui::PluginBrowser second(*f.app, *f.dispatcher, f.panel->root(), file);
+    first.open([](const std::string&) {});
+    second.open([](const std::string&) {});
+    auto toggle = [&](ui::Root& root, const char* name) {
+        root.frame(false);
+        root.focus(root.find("browser.search"));
+        root.key(SDLK_A, ui::kCtrl);
+        root.text(name);
+        root.frame(false);
+        REQUIRE(root.click("browser.fav"));
+    };
+    const auto a = f.pluginId("Hickory"), b = f.pluginId("Yarrow");
+    toggle(*f.root, "Hickory");
+    toggle(f.panel->root(), "Yarrow");
+    auto saved = gui::Favourites::load(file);
+    REQUIRE(saved);
+    CHECK(saved->has(a));
+    CHECK(saved->has(b));
+    toggle(*f.root, "Hickory");  // remove A through its older browser cache
+    saved = gui::Favourites::load(file);
+    REQUIRE(saved);
+    CHECK_FALSE(saved->has(a));
+    CHECK(saved->has(b));
+    first.close();
+    second.close();
 }

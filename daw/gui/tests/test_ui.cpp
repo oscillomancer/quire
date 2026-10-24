@@ -762,6 +762,12 @@ TEST_CASE("a plugin editor switching GL contexts behind SDL's back cannot break 
     CHECK(box.paints > painted);
     const gui::Image image = root.readBack();
     CHECK(image.width >= 360);
+    // Resized offscreen EGL surfaces may still have their original drawable
+    // size. A non-presented frame captures the whole new root, including the
+    // newly exposed corner and the top edge, rather than reading past it.
+    REQUIRE(image.rgba.size() >= 4);
+    CHECK(image.rgba[0] > 0);
+    CHECK(image.rgba[image.rgba.size() - 4] > 0);
     f.window->setSize(320, 200);
     root.frame(false);
 }

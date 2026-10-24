@@ -89,6 +89,9 @@ class Window {
     // bind it believes is already in place.
     void forceCurrent() const;
     void show();
+    // Activate a visible window when focus is elsewhere; an already-key window
+    // is not raised, and hidden/offscreen windows stay hidden.
+    void activate() const;
     void hide();
     void setSize(int width, int height);  // design units
     // The position on the desktop (screen coordinates of the client area).
@@ -102,7 +105,7 @@ class Window {
     void beginFrame(std::uint32_t rgb);
     void endFrame();  // flushes NanoVG's draw calls
     void present();   // swaps buffers
-    // The back buffer as drawn (between endFrame and present).
+    // The currently bound read framebuffer (or the window back buffer), RGBA8.
     Image readPixels() const;
 
   private:

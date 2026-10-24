@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
-// The FX chain window (docs/specs/gui.md §4.5): a popup panel for one track's
+// The FX chain window (docs/specs/gui.md §4.5): a floating panel for one track's
 // chain — per-effect name, bypass and offline (distinct, fx.set), wet/dry,
 // latency, editor, reorder and remove — plus the input chain, the plugin
 // browser and a semantic parameter tab. Every change is a command on the bus.
@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include "floating_panel.h"
 #include "fx_params.h"
 #include "plugin_browser.h"
 #include "supple/engine/app.h"
@@ -45,8 +46,8 @@ class FxWindow {
         std::function<void(LearnRequest)> openLearn = {};
     };
 
-    FxWindow(engine::EngineApp& app, cmd::Dispatcher& dispatcher, ui::Root& root, Hooks hooks,
-             std::filesystem::path favouritesFile);
+    FxWindow(engine::EngineApp& app, cmd::Dispatcher& dispatcher, ui::Root& mainRoot,
+             FloatingPanel& panel, Hooks hooks, std::filesystem::path favouritesFile);
     ~FxWindow();
 
     Status open(model::Id track);
@@ -63,6 +64,11 @@ class FxWindow {
 
     // Frame pass: refresh after changes made elsewhere (agents, undo).
     void tick(bool event = true);
+    // Before dispatching floating input: project commands may have run earlier
+    // in the same SDL event batch, before the next frame's regular tick.
+    void syncProject() {
+        if (app_.projectGeneration() != projectGeneration_) tick(false);
+    }
     void refresh();
     void setStatus(std::string message);
 
@@ -94,7 +100,9 @@ class FxWindow {
     void showChainTab();
     std::vector<model::Id> chain() const;
     std::vector<model::Id> inputChain() const;
-    PluginBrowser& browser() { return *browser_; }
+    PluginBrowser& browser() {
+        return mainBrowser_->isOpen() || !browser_ ? *mainBrowser_ : *browser_;
+    }
 
   private:
     enum class Tab { Chain, Params };
@@ -114,6 +122,7 @@ class FxWindow {
     std::string latencyOf(model::Id fx);
     void moveFx(model::Id fx, int delta);
     void dragRow(model::Id fx, int phase, ui::Point p);  // phase: Row::Phase
+    void openBrowser(bool input = false);
     void addFx(const std::string& pluginId);
     void addFxTo(model::Id track, const std::string& pluginId);
     void promptSaveChain();
@@ -131,10 +140,13 @@ class FxWindow {
 
     engine::EngineApp& app_;
     cmd::Dispatcher& dispatcher_;
-    ui::Root& root_;
+    ui::Root& root() const { return panel_.root(); }
+    FloatingPanel& panel_;
+    std::filesystem::path favouritesFile_;
     Hooks hooks_;
     std::unique_ptr<PluginBrowser> browser_;
-    ParamPanel params_;
+    std::unique_ptr<PluginBrowser> mainBrowser_;
+    std::unique_ptr<ParamPanel> params_;
 
     model::Id track_, selected_;
     model::Id anchor_;               // Shift+click extends from here

@@ -38,6 +38,7 @@
 #include "appearance.h"
 #include "chrome.h"
 #include "file_actions.h"
+#include "floating_panel.h"
 #include "fx_window.h"
 #include "generate.h"
 #include "help_actions.h"
@@ -381,6 +382,10 @@ int main(int argc, char** argv) {
         return 1;
     }
     ui::Root root(**window, *fonts, std::move(*theme));
+    gui::FloatingPanel fxPanel(**platform, **window, root, SUPPLE_GUI_FONTS_DIR, "FX", 840, 560,
+                               800, 360);
+    gui::FloatingPanel routingPanel(**platform, **window, root, SUPPLE_GUI_FONTS_DIR, "Routing",
+                                    860, 560, 800, 360);
     bool quit = false;
     std::vector<std::filesystem::path> dropped;  // files of a drop in progress
     ui::Point dropAt{};
@@ -407,6 +412,8 @@ int main(int argc, char** argv) {
     // The look: switching repaints at once and is saved (not in offscreen runs).
     auto applyLook = [&] {
         root.setTheme(look.theme());
+        fxPanel.setTheme(root.theme());
+        routingPanel.setTheme(root.theme());
         if (o.offscreen) return;
         if (auto saved = look.save(appearanceFile); !saved)
             std::fprintf(stderr, "appearance: %s\n", saved.error().toString().c_str());
@@ -426,7 +433,7 @@ int main(int argc, char** argv) {
     };
     pluginWindows.setOwner(window->get());
     gui::MidiEditor midiEditor(root, appActions, dispatcher, **app, uiState);
-    gui::RoutingMatrix routing(root, appActions, dispatcher, **app);
+    gui::RoutingMatrix routing(routingPanel, appActions, dispatcher, **app);
     shell.onRouting = [&routing](const model::Id&, const ui::Rect& anchor) {
         routing.open(anchor);
     };
@@ -449,12 +456,12 @@ int main(int argc, char** argv) {
             return pluginWindows.toggle(*id);
         });
     gui::FxWindow fxWindow(
-        **app, dispatcher, root,
+        **app, dispatcher, root, fxPanel,
         gui::FxWindow::Hooks{
             [&](model::Id id) { return pluginWindows.toggle(id); },
             [](const std::string& message) { std::fprintf(stderr, "%s\n", message.c_str()); },
             [&](gui::LearnRequest request) {
-                gui::openLearnDialog(root, appActions, **app, std::move(request));
+                gui::openLearnDialog(fxPanel.root(), appActions, **app, std::move(request));
             }},
         gui::Favourites::defaultFile(product::kSlug));
     // MIDI learn (ADR-0027): the devices' messages reach the actions bound to
@@ -497,15 +504,15 @@ int main(int argc, char** argv) {
     appActions.onPrompt = [&](const actions::Action& action) {
         gui::openActionPrompt(root, appActions, action);
     };
-    root.onUnhandledKey = [&](const ui::KeyEvent& e) {
-        const bool typing = root.focused() && root.focused()->role() == ui::Role::TextField;
+    auto unhandledKey = [&](const ui::KeyEvent& e, ui::Root& source) {
+        const bool typing = source.focused() && source.focused()->role() == ui::Role::TextField;
         // The keymap's sections, innermost first: a text field, the MIDI
         // editor or the mixer when the focus is inside it, then the arrange
         // view (its defaults edit the selection, shared by every panel) and
         // global bindings.
         std::vector<std::string> sections;
         if (typing) sections.push_back("text");
-        for (const ui::Node* n = root.focused(); n; n = n->parent())
+        for (const ui::Node* n = source.focused(); n; n = n->parent())
             if (n->id() == "midi.editor" || n->id() == "mixer") {
                 sections.push_back(n->id() == "mixer" ? "mixer" : "midi");
                 break;
@@ -514,6 +521,8 @@ int main(int argc, char** argv) {
         sections.push_back("global");
         return appActions.key(e.key, e.mods, typing, sections);
     };
+    root.onUnhandledKey = [&](const ui::KeyEvent& e) { return unhandledKey(e, root); };
+    fxPanel.onUnhandledKey = routingPanel.onUnhandledKey = unhandledKey;
     {
         auto frame = std::make_unique<ui::Node>("window");
         frame->layout.dir = ui::Layout::Dir::Column;
@@ -825,6 +834,18 @@ int main(int argc, char** argv) {
         "plugin_windows", [&] { return pluginWindows.saveLayout(); },
         [&](const json::Value& v) { pluginWindows.loadLayout(v); });
     uiFile.add(
+        "windows",
+        [&] {
+            auto v = json::Value::object();
+            v["fx"] = fxPanel.saveLayout();
+            v["routing"] = routingPanel.saveLayout();
+            return v;
+        },
+        [&](const json::Value& v) {
+            fxPanel.loadLayout(v.find("fx") ? *v.find("fx") : json::Value());
+            routingPanel.loadLayout(v.find("routing") ? *v.find("routing") : json::Value());
+        });
+    uiFile.add(
         "window",
         [&] {
             json::Value v = json::Value::object();
@@ -1033,6 +1054,8 @@ int main(int argc, char** argv) {
                 std::max(0.0f, arrange.trackLayout().contentHeight() - arrange.lanesRect().h);
             arrange.setViewport(v);
         }
+        fxPanel.frame();
+        routingPanel.frame();
         if (o.frames > 0) root.requestAnimationFrame();  // benchmark runs draw every pass
         if (root.wantsFrame()) {
             const double cpu0 = gui::threadCpuMs();
@@ -1061,12 +1084,21 @@ int main(int argc, char** argv) {
                 uiFile.arm();
                 inputChanged = true;
             }
+            bool panelEvent = false;
+            timed([&] {
+                preserveUi([&] {
+                    fxWindow.syncProject();
+                    panelEvent = fxPanel.handle(e) || routingPanel.handle(e);
+                });
+            });
+            if (panelEvent) continue;
             if (pluginWindows.handle(e)) continue;  // an editor window's event
             // Bridged Cocoa editors follow the DAW window back to the front (ADR-0041).
             if (e.type == SDL_EVENT_WINDOW_FOCUS_GAINED &&
                 SDL_GetWindowFromEvent(&e) == (*window)->sdl())
                 pluginWindows.appActivated();
-            if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+            if (e.type == SDL_EVENT_QUIT || (e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
+                                             SDL_GetWindowFromEvent(&e) == (*window)->sdl())) {
                 // Hidden test windows cannot answer an interactive discard prompt.
                 if (o.offscreen || o.frames > 0 || !fileActions.dirty())
                     quit = true;
@@ -1090,6 +1122,8 @@ int main(int argc, char** argv) {
         const double c0 = gui::processCpuMs(), w0 = gui::wallMs();
         while (!quit && !loop.stopRequested() && gui::wallMs() - w0 < o.idleSeconds * 1000) {
             const int next = service();
+            fxPanel.frame();
+            routingPanel.frame();
             if (root.wantsFrame()) root.frame();
             SDL_Event e;
             const double left = o.idleSeconds * 1000 - (gui::wallMs() - w0);
@@ -1114,6 +1148,16 @@ int main(int argc, char** argv) {
         meterFeed.poll();
         root.damageAll();
         root.frame(false);
+        for (const auto& [name, panel] : {std::pair{"fx", &fxPanel}, {"routing", &routingPanel}}) {
+            const fs::path path =
+                o.snapshot.parent_path() /
+                (o.snapshot.stem().string() + "." + name + o.snapshot.extension().string());
+            if (auto written = panel->snapshot(path); !written) {
+                std::fprintf(stderr, "%s\n", written.error().toString().c_str());
+                return 1;
+            }
+        }
+        (*window)->forceCurrent();
         auto written = gui::writePng(o.snapshot, root.readBack());
         if (!written) {
             std::fprintf(stderr, "%s\n", written.error().toString().c_str());

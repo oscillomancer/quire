@@ -74,16 +74,16 @@ class LearnPanel : public ui::Node {
             if (request_.current) finish(false);
         });
         remove.enabled = request_.current.has_value();
-        actions_.learnSink = [this](const std::vector<engine::EngineApp::ControlEvent>& events) {
-            heard(events);
-        };
-        app_.setLearning(true);
+        owner_ = actions_.beginLearn(
+            [this](const std::vector<engine::EngineApp::ControlEvent>& events) { heard(events); },
+            [root = &root_, panel = this] {
+                // Close this dialog and its menus. Capture the root separately:
+                // removing the dialog may destroy it within this callback.
+                while (root->find("learn") == panel && root->popupOpen()) root->closePopup();
+            });
         refresh();
     }
-    ~LearnPanel() override {
-        actions_.learnSink = nullptr;
-        app_.setLearning(false);
-    }
+    ~LearnPanel() override { actions_.endLearn(owner_); }
     void paint(ui::Canvas&) override {}
 
   private:
@@ -193,6 +193,7 @@ class LearnPanel : public ui::Node {
     AppActions& actions_;
     engine::EngineApp& app_;
     LearnRequest request_;
+    std::uint64_t owner_ = 0;
     LearnChoice choice_;
     bool heard_ = false, anyDevice_ = true;
     std::string heardDevice_;

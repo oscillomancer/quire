@@ -20,13 +20,16 @@
 #include "appearance.h"
 #include "chrome.h"
 #include "file_actions.h"
+#include "floating_panel.h"
 #include "help_actions.h"
 #include "history_panel.h"
+#include "learn_dialog.h"
 #include "mixer.h"
 #include "mouse_dialog.h"
 #include "screensets.h"
 #include "shell.h"
 #include "supple/audio/audio_file.h"
+#include "supple/base/environment.h"
 #include "supple/base/files.h"
 #include "supple/base/paths.h"
 #include "supple/engine/app.h"
@@ -60,19 +63,21 @@ struct App {
     std::unique_ptr<gui::AppActions> actions;
     bool ok = false;
 
-    App(int width = 1000, int height = 640) {
+    App(int width = 1000, int height = 640,
+        gui::Platform::Driver driver = gui::Platform::Driver::Offscreen) {
         dir = std::filesystem::temp_directory_path() /
               ("supple-app-test-" + std::to_string(testProcessId()));
         (void)gui::help::removeExportTree(dir);
         std::filesystem::create_directories(dir / "config");
         testConfigHome(dir / "config");
-        auto p = gui::Platform::start(gui::Platform::Driver::Offscreen);
+        auto p = gui::Platform::start(driver);
 #if !defined(__linux__)
         REQUIRE_MESSAGE(p, (p ? "" : p.error().message));
 #endif
         if (!p) return;
         platform = std::move(*p);
-        auto w = gui::Window::open(*platform, {"app-test", width, height, true});
+        auto w = gui::Window::open(
+            *platform, {"app-test", width, height, driver == gui::Platform::Driver::Offscreen});
 #if !defined(__linux__)
         REQUIRE_MESSAGE(w, (w ? "" : w.error().message));
 #endif
@@ -1932,4 +1937,222 @@ TEST_CASE("Help identifies only the missing MCP helper") {
               a.root->find("help.close")->bounds().bottom() >=
           16);
     a.snapshot("help-missing-helper.png");
+}
+
+TEST_CASE("floating panels own their events, resize, sleep and persist placement") {
+    App f;
+    if (!f.ok) return;
+    gui::FloatingPanel panel(*f.platform, *f.window, *f.root, SUPPLE_GUI_FONTS_DIR, "Panel", 840,
+                             560, 640, 360);
+    CHECK(panel.window() == nullptr);  // no GL resources before first use
+    REQUIRE(panel.ensure());
+    auto content = std::make_unique<ui::Node>("panel");
+    content->layout.dir = ui::Layout::Dir::Column;
+    content->emplace<ui::Button>("panel.ok", "OK", [] {});
+    int closed = 0, shortcuts = 0;
+    f.actions->addUi("ui.actions", "Actions", [&] { ++shortcuts; });
+    panel.onUnhandledKey = [&](const ui::KeyEvent& e, ui::Root& source) {
+        return f.actions->key(e.key, e.mods,
+                              source.focused() && source.focused()->role() == ui::Role::TextField);
+    };
+    panel.open(std::move(content), [&] { ++closed; });
+    REQUIRE(panel.window());
+    CHECK(panel.window()->id() != f.window->id());
+    CHECK((SDL_GetWindowFlags(panel.window()->sdl()) & SDL_WINDOW_UTILITY) != 0);
+    if (std::string(SDL_GetCurrentVideoDriver()) != "offscreen")
+        CHECK(SDL_GetWindowParent(panel.window()->sdl()) == f.window->sdl());
+    panel.frame(false);
+    auto checkSurface = [&] {
+        const auto image = panel.root().readBack();
+        REQUIRE(image.width > 8);
+        REQUIRE(image.height > 8);
+        const auto pixel =
+            static_cast<std::size_t>((image.height - 4) * image.width + image.width / 2) * 4;
+        const auto color = panel.root().theme().color("raised");
+        std::size_t channel = 0;
+        for (const float value : {color.r, color.g, color.b}) {
+            CHECK(std::abs(static_cast<int>(image.rgba[pixel + channel]) -
+                           static_cast<int>(std::lround(value * 255.0f))) <= 1);
+            ++channel;
+        }
+    };
+    checkSurface();
+    CHECK_FALSE(f.root->find("panel"));
+    panel.window()->setSize(1000, 650);
+    panel.root().relayout();
+    panel.frame(false);
+    CHECK(panel.root().content()->bounds().w ==
+          doctest::Approx(static_cast<double>(panel.window()->width())));
+    CHECK(panel.root().content()->bounds().h ==
+          doctest::Approx(static_cast<double>(panel.window()->height())));
+    const auto frames = panel.root().stats().frames;
+    panel.frame(false);
+    CHECK(panel.root().stats().frames == frames);  // idle never schedules a frame
+    panel.setTheme(ui::Theme::light());
+    CHECK(panel.root().wantsFrame());
+    panel.frame(false);
+    checkSurface();
+    SDL_Event key{};
+    key.type = SDL_EVENT_KEY_DOWN;
+    key.key.windowID = panel.window()->id();
+    key.key.key = SDLK_F1;
+    f.actions->keymap().bind({{*actions::parseChord("F1")}, "global", "ui.actions"});
+    REQUIRE(panel.handle(key));
+    CHECK(shortcuts == 1);
+    const auto project = f.dir / "song.json";
+    auto section = [&](gui::UiPersistence& file) {
+        file.add(
+            "windows",
+            [&] {
+                auto v = json::Value::object();
+                v["fx"] = panel.saveLayout();
+                return v;
+            },
+            [&](const json::Value& v) {
+                panel.loadLayout(v.find("fx") ? *v.find("fx") : json::Value());
+            });
+    };
+    json::Value saved;
+    {
+        gui::UiPersistence file;
+        section(file);
+        file.tick(project);
+        panel.window()->setSize(1010, 660);
+        saved = panel.saveLayout();
+        REQUIRE(file.flush(project));
+    }
+    SDL_Event close{};
+    close.type = SDL_EVENT_WINDOW_CLOSE_REQUESTED;
+    close.window.windowID = f.window->id();
+    CHECK_FALSE(panel.handle(close));
+    close.window.windowID = panel.window()->id();
+    REQUIRE(panel.handle(close));  // main's quit handler must never see this request
+    CHECK_FALSE(panel.isOpen());
+    CHECK(closed == 1);
+    CHECK(SDL_GetWindowFromID(f.window->id()) == f.window->sdl());
+    CHECK(panel.saveLayout() == saved);
+    panel.loadLayout(json::Value());
+    {
+        gui::UiPersistence file;
+        section(file);
+        file.tick(project);
+        CHECK(panel.saveLayout() == saved);
+    }
+    panel.open(std::make_unique<ui::Node>("reopened"), [&] { ++closed; });
+    CHECK(panel.window()->width() == doctest::Approx(1010));
+    CHECK(panel.window()->height() == doctest::Approx(660));
+    panel.root().key(SDLK_ESCAPE);
+    CHECK_FALSE(panel.isOpen());
+    CHECK(closed == 2);
+    auto invalid = saved;
+    invalid["x"] = 1000000;
+    invalid["y"] = 1000000;
+    invalid["width"] = 1;
+    invalid["height"] = 1;
+    panel.loadLayout(invalid);
+    panel.open(std::make_unique<ui::Node>("minimum"), [] {});
+    CHECK(panel.window()->width() == doctest::Approx(640));
+    CHECK(panel.window()->height() == doctest::Approx(360));
+    CHECK(panel.window()->position().first != 1000000);
+    CHECK(panel.window()->position().second != 1000000);
+    panel.close();
+}
+
+TEST_CASE("MIDI learn has one owner across roots, including deferred destruction") {
+    App f;
+    if (!f.ok) return;
+    gui::FloatingPanel panel(*f.platform, *f.window, *f.root, SUPPLE_GUI_FONTS_DIR, "FX", 840, 560,
+                             640, 360);
+    REQUIRE(panel.ensure());
+    panel.open(std::make_unique<ui::Node>("panel"), [] {});
+    gui::LearnRequest first;
+    first.title = "First parameter";
+    gui::openLearnDialog(panel.root(), *f.actions, *f.app, std::move(first));
+    auto* old = panel.root().find("learn");
+    REQUIRE(old);
+    // Replacing from an input callback defers destruction of the old dialog
+    // until after the new dialog has registered its app-wide listener.
+    auto& replace = old->emplace<ui::Button>("learn.replace", "Replace", [&] {
+        gui::LearnRequest second;
+        second.title = "Second action";
+        gui::openLearnDialog(*f.root, *f.actions, *f.app, std::move(second));
+    });
+    panel.root().focus(&replace);
+    panel.root().key(SDLK_RETURN);
+    CHECK_FALSE(panel.root().find("learn"));
+    REQUIRE(f.root->find("learn"));
+    CHECK(f.app->learning());
+    REQUIRE(f.actions->learnSink);
+    panel.close();  // closing the old window must not disable the surviving learn
+    f.actions->control({controlEvent(0xb0, 21, 64)});
+    CHECK(f.root->find("learn.control.value")->valueText().find("CC 21") == 0);
+    f.root->closePopup();
+    CHECK_FALSE(f.app->learning());
+    CHECK_FALSE(f.actions->learnSink);
+}
+
+TEST_CASE("native floating shortcut activates the main popup owner") {
+    if (!environmentFlagEnabled("SUPPLE_GUI_DISPLAY_TEST")) {
+        MESSAGE("skipped: set SUPPLE_GUI_DISPLAY_TEST=1 in a native desktop session");
+        return;
+    }
+    App f(1000, 640, gui::Platform::Driver::Native);
+    REQUIRE(f.ok);
+    gui::FloatingPanel panel(*f.platform, *f.window, *f.root, SUPPLE_GUI_FONTS_DIR, "FX", 840, 560,
+                             640, 360);
+    REQUIRE(panel.ensure());
+    panel.onUnhandledKey = [&](const ui::KeyEvent& e, ui::Root& source) {
+        return f.actions->key(e.key, e.mods,
+                              source.focused() && source.focused()->role() == ui::Role::TextField);
+    };
+    panel.open(std::make_unique<ui::Node>("panel"), [] {});
+    // XWayland needs a presented buffer before these GL windows can map.
+    f.root->frame();
+    panel.frame();
+    auto dispatch = [&](const SDL_Event& e) {
+        if (!panel.handle(e)) f.root->handle(e);
+    };
+    auto focus = [&](SDL_Window* target) {
+        while (SDL_GetKeyboardFocus() != target) {
+            SDL_Event e{};
+            REQUIRE(SDL_WaitEvent(&e));
+            REQUIRE(e.type != SDL_EVENT_QUIT);
+            REQUIRE(e.type != SDL_EVENT_WINDOW_CLOSE_REQUESTED);
+            dispatch(e);
+        }
+    };
+    // Allow the initial desktop activation to reach SDL before switching
+    // between this app's windows. No wall-clock threshold decides success.
+    while (!SDL_GetKeyboardFocus()) {
+        SDL_Event e{};
+        REQUIRE(SDL_WaitEvent(&e));
+        dispatch(e);
+    }
+    panel.raise();
+    focus(panel.window()->sdl());
+    SDL_Event key{};
+    key.type = SDL_EVENT_KEY_DOWN;
+    key.key.windowID = panel.window()->id();
+    key.key.key = SDLK_P;
+#if defined(__APPLE__)
+    key.key.mod = SDL_KMOD_GUI | SDL_KMOD_SHIFT;
+#else
+    key.key.mod = SDL_KMOD_CTRL | SDL_KMOD_SHIFT;
+#endif
+    dispatch(key);
+    REQUIRE(f.root->find("actions"));
+    focus(f.window->sdl());  // real SDL/WM focus, not just retained-tree focus
+    CHECK(SDL_GetKeyboardFocus() == f.window->sdl());
+    SDL_Event text{};
+    text.type = SDL_EVENT_TEXT_INPUT;
+    text.text.windowID = SDL_GetWindowID(SDL_GetKeyboardFocus());
+    text.text.text = "search";
+    dispatch(text);
+    CHECK(f.root->find("actions.search")->valueText() == "search");
+    key.key.windowID = SDL_GetWindowID(SDL_GetKeyboardFocus());
+    key.key.key = SDLK_ESCAPE;
+    key.key.mod = SDL_KMOD_NONE;
+    dispatch(key);
+    CHECK_FALSE(f.root->find("actions"));
+    CHECK(panel.isOpen());
 }

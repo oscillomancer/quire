@@ -83,8 +83,8 @@ lane or take's item.
 
 ### 1.2 UI state is not session state
 
-Zoom, scroll, selection, window layout, open editors, plug-in editor
-placements, docking and
+Zoom, scroll, selection, window layout, open editors, FX/routing window
+placements, plug-in editor placements, docking and
 screensets live in a separate per-project UI file (`<name>.ui.json`,
 canonical JSON, never in the project's diff) plus per-user settings
 (keymaps, toolbars, theme) under the user config directory
@@ -105,6 +105,16 @@ that earliest check, so long gestures still persist; unchanged idle UI has no
 periodic check. Internal wake events do not arm writes. Writer completion/failure
 posts to main; failures arm a bounded one-second retry. Project switches and
 exit retain explicit flushes.
+
+The `windows` section stores one placement for each floating panel kind:
+`{"fx": {"x": ..., "y": ..., "width": ..., "height": ...}, "routing": {...}}`.
+Desktop positions use SDL screen coordinates; sizes use design units. Geometry
+is retained on close and restored on reopen, regardless of the FX track/take.
+Missing sections preserve first-open defaults. Invalid fields are ignored,
+sizes clamp to the panel minimum and 8192 units, and a position with no visible
+48-unit corner on a current display is discarded. Open panels adopt the new
+project's placement on project replacement. Screensets continue to store the
+mixer/history docks and arrange layout; floating panels are not screenset entries.
 
 Screenset names trim leading and trailing spaces and tabs. Import skips
 empty names and silently keeps the first entry when trimmed names collide.
@@ -178,7 +188,10 @@ only what the DAW needs, designed for virtualized, data-heavy views.
   (SDL's offscreen video driver or EGL surfaceless) for golden-image tests
   (per-pixel tolerance, stored as PNG under `daw/gui/tests/golden/`), and a
   test API drives nodes by id/role (click, type, drag) and reads back state.
-  GL readback, not XGetImage (ADR-0005 open item).
+  GL readback, not XGetImage (ADR-0005 open item). Non-presented frames compose
+  content and overlays into a framebuffer at the observed pixel size; resized
+  offscreen EGL drawables need not resize their original back buffer. Readback
+  binds the source root's context and capture target explicitly.
 
 ## 3. Data-dense rendering
 
@@ -226,9 +239,33 @@ Transport bar (play/stop/record/loop/punch, position in bars|beats and
 time, tempo/meter, CPU/xrun/anticipation readouts from engine telemetry);
 toolbar (actions, §6: only what the transport bar does not already have —
 undo, redo, add channel, the actions list by default); the arrange area (track control panel + timeline);
-a bottom dock (mixer, MIDI editor, FX chain, routing, render queue,
-command log) with tabs; floating windows for plugin GUIs and any undocked
-view. Window layout is UI state (§1.2).
+bottom docks for the mixer and MIDI editor, and a history dock; separate
+floating windows for the FX chain, routing matrix and plugin GUIs. Render and
+other dialogs remain popups. Window layout is UI state (§1.2).
+
+FX and routing are resizable utility windows owned by the main window, using
+the same SDL utility/parent mechanism as plugin editors (ADR-0005/0039).
+Each has its own GL context, bundled fonts, retained root, focus, damage cache
+and popup stack. Resources are created on first open and retained while
+hidden. Both panels fill their client area with the theme's `raised` surface,
+matching the former popup frame. Their OS titles match their visible headers:
+"Routing", "FX: <track>", or the take FX header; switching tracks/takes or
+renaming the track updates the FX title in place. Close or an unhandled Escape
+hides only that panel; Escape first closes a nested popup or cancels a widget
+gesture. Events are routed by SDL window identity before the main window's
+quit handling. Unused keys reach the app keymap with the floating root's typing
+context. Opening a popup activates its owning visible OS window, including
+main-window dialogs opened by shortcuts forwarded from FX/routing; hidden
+snapshot/test windows stay hidden. An already-key owner is not raised, keeping
+normal-level Cocoa bridge editors above it when opening a menu. Explicitly
+reopening a floating panel still raises that panel, including when it is key.
+X11 supplements the activation request with
+an input-focus handoff only when SDL and the X server agree that one of this
+app's windows already owns focus; Cocoa/Windows use SDL's native activation.
+Theme/palette switches repaint all roots. Each visible root paints only on
+damage/animation, with its context forcibly rebound after plugin editor calls; hidden roots do not
+paint. `--snapshot out.png` also writes `out.fx.png` and `out.routing.png`
+for open floating panels, using their own GL readback.
 
 The transport tempo button opens a BPM field (1..1000) with Tap, Set and
 Cancel. Tap estimates BPM from the mean interval between the latest eight
@@ -507,6 +544,24 @@ drop outside the strips cancels; each is one undo step.
 
 ### 4.5 FX chain and plugins
 
+The single FX window switches track/take in place and raises when opened
+again. Its first content size is 840 × 560 design units, positioned like the
+former centred popup (18% down the main client area, clamped to its edges).
+The minimum size is 800 × 360. Content fills the client area on resize.
+Its Add plugin browser, chain/preset/pins menus and parameter MIDI learn
+dialog belong to its own root. A strip's standalone "+" / `ui.fx.add` browser
+belongs to the main root. Both browsers reload shared favourites on open and
+immediately before applying a toggle, preserving edits from another still-open
+browser. A failed reload reports an error and does not overwrite the file.
+For MIDI learn's "when focused" gate, the FX OS window must have keyboard
+focus and a node in that root must be focused (including a nested dialog).
+Project replacement closes every FX-root popup (browser, menus and learn),
+hides/clears save prompts, and resets pending track/take/effect requests before
+refreshing the new project, even when its ids match the old ones. The input
+boundary checks the generation too, closing stale overlays before another
+floating-window event in the same SDL batch can invoke them.
+
+
 Native editor parents are tagged X11 XIDs, Cocoa NSViews or Win32 HWNDs
 (ADR-0040). Local CLAP and VST3 views embed into an SDL editor container.
 Windows bridged views use the same HWND across processes. macOS bridged views
@@ -561,7 +616,10 @@ strip's "+", titled with the track and with its own Close), reorder by
 dragging a row (an insertion bar; Escape cancels; Alt+Up/Down on a focused
 row too; no arrow buttons), bypass vs offline
 (distinct, `reaper-ux.md` addendum), a double click on a row opens that
-effect's own GUI, Ctrl+click adds a row to the selection (or takes it out)
+effect's own GUI; a left double click on empty chain space (including the
+"No effects yet" message or below the last row) opens Add plugin, as in the
+mixer. The input section's empty area adds input FX; a take adds take FX.
+Single and right clicks on empty space do not open the browser. Ctrl+click adds a row to the selection (or takes it out)
 and Shift+click selects the rows from the last one clicked; on a row of a
 multi-selection, bypass, offline and Remove act on every selected effect in
 one undo step (the editor button and a double click open only that row's
@@ -581,7 +639,10 @@ control moved last (kind, number, channel, input), offers the CC mode
 when the effect's track (or a take FX's item) is selected, when its FX window
 or editor has the focus, or when one of them shows, and soft takeover; OK
 binds through `fx.learn.set`, Remove (when bound) through `fx.learn.remove`.
-While the dialog is open nothing learned moves. Latency badges refresh after effect model edits,
+MIDI learn is one app-wide session across roots: opening another dialog closes
+the first and its nested menus. Owner tokens prevent deferred destruction of
+an old dialog from disabling the new listener. While the dialog is open
+nothing learned moves. Latency badges refresh after effect model edits,
 host replacement and live latency changes. File-descriptor service startup
 and poll failures are reported; editors requiring unavailable FD service
 cannot remain open. App instances use the app-wide local descriptor snapshot; caller-owned editor
@@ -614,6 +675,15 @@ closes the menu. Commands:
 `fx.*`, `plugin.*` (scan/describe), `param.*`, `patch.*`.
 
 ### 4.6 Routing view and matrix
+
+The routing matrix is one separate utility window. Its first content size
+is 860 × 560 design units (minimum 800 × 360), positioned like the former
+popup: centred from the View action, or below the strip's "out" button with
+above-anchor fallback and edge clamping. Remembered geometry takes precedence.
+The grid expands with the client area; its channel menu opens in the same
+window. The panel Close button, WM close request and unhandled Escape all
+close this panel without quitting the app.
+
 
 One grid (`reaper-ux.md` addendum 2): sources (strips in hierarchy, hardware
 inputs, MIDI inputs) × destinations (parent, strips, plugin keys, hardware

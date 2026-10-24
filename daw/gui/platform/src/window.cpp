@@ -3,6 +3,11 @@
 #include "supple/gui/window.h"
 
 #include <SDL3/SDL.h>
+#if defined(__linux__)
+#include <X11/Xlib.h>
+#undef None
+#undef Status
+#endif
 #if defined(__APPLE__)
 #include <dlfcn.h>
 #include <objc/runtime.h>
@@ -146,6 +151,60 @@ Window::~Window() {
 
 std::uint32_t Window::id() const { return SDL_GetWindowID(window_); }
 
+void Window::activate() const {
+    if ((SDL_GetWindowFlags(window_) & SDL_WINDOW_HIDDEN) != 0) return;
+    // Raising an already-key Cocoa owner would cover normal-level bridged
+    // editors, without a FOCUS_GAINED event to restore their ordering.
+    if (SDL_GetKeyboardFocus() == window_) return;
+    SDL_RaiseWindow(window_);
+#if defined(__linux__)
+    // EWMH activation requests may be declined (e.g. Hyprland's default
+    // focus policy). Transfer X11 focus only within this already-active app;
+    // never force focus away from another application. Cocoa/Win32 use SDL's
+    // native activation path above. libX11 is an existing OS dependency.
+    SDL_Window* source = SDL_GetKeyboardFocus();
+    if (!source) return;
+    const auto props = SDL_GetWindowProperties(window_);
+    auto* display = static_cast<Display*>(
+        SDL_GetPointerProperty(props, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, nullptr));
+    const auto xid =
+        static_cast<::Window>(SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0));
+    if (!display || !xid) return;  // includes the offscreen driver
+    struct X11Focus {
+        SDL_SharedObject* library = SDL_LoadObject("libX11.so.6");
+        decltype(&XGetWindowAttributes) attributes =
+            library ? reinterpret_cast<decltype(attributes)>(
+                          SDL_LoadFunction(library, "XGetWindowAttributes"))
+                    : nullptr;
+        decltype(&XGetInputFocus) current =
+            library
+                ? reinterpret_cast<decltype(current)>(SDL_LoadFunction(library, "XGetInputFocus"))
+                : nullptr;
+        decltype(&XSetInputFocus) focus =
+            library ? reinterpret_cast<decltype(focus)>(SDL_LoadFunction(library, "XSetInputFocus"))
+                    : nullptr;
+        decltype(&XFlush) flush =
+            library ? reinterpret_cast<decltype(flush)>(SDL_LoadFunction(library, "XFlush"))
+                    : nullptr;
+        ~X11Focus() {
+            if (library) SDL_UnloadObject(library);
+        }
+    };
+    static X11Focus api;
+    XWindowAttributes attributes{};
+    ::Window current = 0;
+    int revert = 0;
+    const auto sourceId = static_cast<::Window>(SDL_GetNumberProperty(
+        SDL_GetWindowProperties(source), SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0));
+    if (sourceId && api.attributes && api.current && api.focus && api.flush &&
+        api.current(display, &current, &revert) && current == sourceId &&
+        api.attributes(display, xid, &attributes) && attributes.map_state == IsViewable) {
+        api.focus(display, xid, RevertToParent, CurrentTime);
+        api.flush(display);
+    }
+#endif
+}
+
 void Window::setSize(int width, int height) {
     SDL_SetWindowSize(window_, static_cast<int>(static_cast<float>(width) * inputScale()),
                       static_cast<int>(static_cast<float>(height) * inputScale()));
@@ -283,7 +342,9 @@ Image Window::readPixels() const {
     const auto row = static_cast<std::size_t>(image.width) * 4;
     std::vector<std::uint8_t> bottomUp(row * static_cast<std::size_t>(image.height));
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadBuffer(GL_BACK);
+    GLint target = 0;
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &target);
+    glReadBuffer(target == 0 ? GL_BACK : GL_COLOR_ATTACHMENT0);
     glReadPixels(0, 0, image.width, image.height, GL_RGBA, GL_UNSIGNED_BYTE, bottomUp.data());
     image.rgba.resize(bottomUp.size());
     for (int y = 0; y < image.height; ++y)
