@@ -11,8 +11,10 @@ namespace supple::gui {
 // Help is app-local UI, like Preferences; these actions aren't engine commands.
 class HelpActions {
   public:
+    using FolderPicker = std::function<void(std::function<void(std::filesystem::path)>,
+                                            std::function<void(std::string)>)>;
     HelpActions(ui::Root& root, AppActions& actions, SDL_Window* window, DialogLifetime::Post post,
-                std::filesystem::path executable);
+                std::filesystem::path executable, FolderPicker picker = {});
     ~HelpActions();
     void download(bool link);
     void mcp();
@@ -23,7 +25,9 @@ class HelpActions {
         std::atomic<bool> alive{true}, cancelled{false};
     };
     using Work = std::function<std::string()>;
-    std::unique_ptr<ui::Node> panel(const std::string& title, float height);
+    std::unique_ptr<ui::Node> panel(const std::string& title);
+    void notice(const std::string& title, const std::string& message, bool replace = false);
+    bool translocationWarning(const std::string& title);
     void status(const std::string& message);
     void refreshButtons();
     void copy(const std::string& text);
@@ -37,6 +41,8 @@ class HelpActions {
     SDL_Window* window_;
     DialogLifetime::Post post_;
     help::Executables executables_;
+    FolderPicker picker_;
+    bool translocated_ = false;
     std::shared_ptr<Lifetime> lifetime_ = std::make_shared<Lifetime>();
     DialogLifetime dialogs_;
     std::thread worker_;

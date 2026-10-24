@@ -15,10 +15,10 @@ struct Folder {
     fs::path path =
         fs::temp_directory_path() / ("supple-help-test-" + std::to_string(testProcessId()));
     Folder() {
-        fs::remove_all(path);
+        (void)help::removeExportTree(path);
         fs::create_directories(path);
     }
-    ~Folder() { fs::remove_all(path); }
+    ~Folder() { (void)help::removeExportTree(path); }
     void write(const fs::path& relative, const std::string& text = "skill") {
         fs::create_directories((path / relative).parent_path());
         std::ofstream(path / relative) << text;
@@ -35,7 +35,7 @@ TEST_CASE("Help constructs each harness registration without splitting paths") {
     CHECK(help::registrationArgs(help::Harness::Hermes, server) ==
           std::vector<std::string>{"mcp", "add", slug, "--command", server});
     CHECK(help::commandText("cli", {server}, help::Platform::Posix) ==
-          "'cli' '/a path/it'\\''s a server/$HOME-mcp'");
+          "cli '/a path/it'\\''s a server/$HOME-mcp'");
     CHECK(help::commandText("C:\\a b\\cli.cmd", {"it's"}, help::Platform::Windows) ==
           "& 'C:\\a b\\cli.cmd' 'it''s'");
     const auto script = help::windowsScript("C:\\a & b\\cli.cmd", {"100% & !USER!", ""});
@@ -91,13 +91,13 @@ TEST_CASE("Help skill copy and link replace only skill folders or links with con
     REQUIRE(help::exportSkill(source, parent, false, true));
     CHECK(help::inspectTarget(target) == help::Target::Skill);
     CHECK(fs::exists(source / "SKILL.md"));  // removing the old link did not follow it
-    fs::remove_all(target);
+    REQUIRE(help::removeExportTree(target));
     fs::create_directory(target);
     std::ofstream(target / "unrelated.txt") << "keep";
     CHECK(help::inspectTarget(target) == help::Target::Refuse);
     CHECK_FALSE(help::exportSkill(source, parent, false, true));
     CHECK(fs::exists(target / "unrelated.txt"));
-    fs::remove_all(target);
+    REQUIRE(help::removeExportTree(target));
     std::ofstream(target) << "keep";
     CHECK_FALSE(help::exportSkill(source, parent, true, true));
     CHECK(fs::is_regular_file(target));
@@ -157,20 +157,46 @@ TEST_CASE("Help protects an existing Codex registration and accepts Hermes tool 
     Folder f;
     const auto cli = f.path / "harness";
     const auto marker = f.path / "added";
-    std::ofstream(cli) << "#!/bin/sh\nif [ \"$2\" = get ]; then echo '{\"command\":\"original\"}'; "
-                          "exit 0; fi\ntouch '"
-                       << marker.string() << "'\n";
+    std::ofstream(cli) << "#!/bin/sh\nif [ \"$2\" = list ]; then echo '[{\"name\":\""
+                       << std::string(product::kSlug)
+                       << "\",\"command\":\"original\"}]'; exit 0; fi\ntouch '" << marker.string()
+                       << "'\n";
     fs::permissions(cli, fs::perms::owner_all);
     auto result = help::registerHarness(help::Harness::Codex, cli, "/tmp/new-mcp");
     REQUIRE(result);
     CHECK(result->text.find("already exists") != std::string::npos);
     CHECK_FALSE(fs::exists(marker));
-    std::ofstream(cli) << "#!/bin/sh\nif [ \"$2\" = get ]; then echo 'Error: No MCP server named "
-                          "test found.' >&2; exit 1; fi\ntouch '"
+    std::ofstream(cli) << "#!/bin/sh\nif [ \"$2\" = list ]; then echo '[]'; echo 'arbitrary "
+                          "warning' >&2; exit 0; fi\ntouch '"
                        << marker.string() << "'\n";
     result = help::registerHarness(help::Harness::Codex, cli, "/tmp/new-mcp");
     REQUIRE(result);
     CHECK(fs::exists(marker));
+    fs::remove(marker);
+    std::ofstream(cli)
+        << "#!/bin/sh\nif [ \"$2\" = list ]; then echo '[{\"name\":\"another-server\",\"detail\":\""
+        << std::string(7000, 'a') << "\"}]'; exit 0; fi\ntouch '" << marker.string() << "'\n";
+    result = help::registerHarness(help::Harness::Codex, cli, "/tmp/new-mcp");
+    REQUIRE(result);
+    CHECK(fs::exists(marker));
+    fs::remove(marker);
+    std::ofstream(cli)
+        << "#!/bin/sh\nif [ \"$2\" = list ]; then echo invalid-json; exit 0; fi\ntouch '"
+        << marker.string() << "'\n";
+    result = help::registerHarness(help::Harness::Codex, cli, "/tmp/new-mcp");
+    CHECK_FALSE(result);
+    CHECK_FALSE(fs::exists(marker));
+    std::ofstream(cli) << "#!/bin/sh\nif [ \"$2\" = list ]; then echo '[{}]'; exit 0; fi\ntouch '"
+                       << marker.string() << "'\n";
+    result = help::registerHarness(help::Harness::Codex, cli, "/tmp/new-mcp");
+    CHECK_FALSE(result);
+    CHECK_FALSE(fs::exists(marker));
+    std::ofstream(cli) << "#!/bin/sh\necho 'cannot read configuration' >&2\nexit 3\n";
+    result = help::registerHarness(help::Harness::Codex, cli, "/tmp/new-mcp");
+    REQUIRE(result);
+    CHECK(result->exitCode == 3);
+    CHECK(result->text.find("cannot read configuration") != std::string::npos);
+    CHECK_FALSE(fs::exists(marker));
     std::ofstream(cli) << "#!/bin/sh\nIFS= read -r answer || exit 9\n[ -z \"$answer\" ] || exit "
                           "8\necho 'Saved to config'\n";
     result = help::registerHarness(help::Harness::Hermes, cli, "/tmp/new-mcp");
@@ -200,3 +226,48 @@ TEST_CASE("Help can replace a dangling link but rejects a parent alias into the 
     CHECK_FALSE(help::exportSkill(f.path / "source", f.path / "alias", false, true));
 }
 #endif
+
+TEST_CASE("Help detects a temporary macOS translocation path") {
+    CHECK(help::isTranslocated(
+        "/private/var/folders/a/AppTranslocation/id/d/Example.app/Contents/MacOS/app"));
+    CHECK_FALSE(help::isTranslocated("/Applications/Example.app/Contents/MacOS/app"));
+    CHECK_FALSE(help::isTranslocated("/home/user/AppTranslocation-not-a-folder/app"));
+}
+TEST_CASE("Help quotes only tokens that need shell quoting") {
+    CHECK(help::commandText(
+              "claude", {"mcp", "add", "-s", "user", "test", "--", "/home/user/bin/server"},
+              help::Platform::Posix) == "claude mcp add -s user test -- /home/user/bin/server");
+    CHECK(help::commandText("C:\\tools\\server.exe", {"--mcp"}, help::Platform::Windows) ==
+          "C:\\tools\\server.exe --mcp");
+    for (const auto platform : {help::Platform::Posix, help::Platform::Windows}) {
+        CHECK(help::commandText("cli", {"", "$HOME", "a;bad", "one two", "$(touch /tmp/no)"},
+                                platform)
+                  .find("'' '$HOME' 'a;bad' 'one two' '$(touch /tmp/no)'") != std::string::npos);
+    }
+}
+TEST_CASE("Help cleans staged links after a failed publication without following them") {
+    Folder f;
+    f.write("source/SKILL.md", "installed skill");
+    fs::create_directory(f.path / "destination");
+    const auto parent = f.path / "destination";
+    // Exercise both a freshly staged link and rollback of a previous link.
+    for (bool previous : {false, true}) {
+        if (previous) REQUIRE(help::exportSkill(f.path / "source", parent, true, false));
+        const auto result =
+            help::exportSkill(f.path / "source", parent, true, previous,
+                              [](const fs::path&, const fs::path&) -> Status {
+                                  return Error("test.publish", "publication failed");
+                              });
+        CHECK_FALSE(result);
+        CHECK(fs::is_regular_file(f.path / "source/SKILL.md"));
+        const auto target = parent / std::string(product::kSlug);
+        CHECK(help::inspectTarget(target) ==
+              (previous ? help::Target::Link : help::Target::Missing));
+        std::size_t entries = 0;
+        for (const auto& entry : fs::directory_iterator(parent)) {
+            (void)entry;
+            ++entries;
+        }
+        CHECK(entries == (previous ? 1 : 0));
+    }
+}

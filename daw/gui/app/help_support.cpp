@@ -10,6 +10,7 @@
 #include <thread>
 #include "supple/base/paths.h"
 #include "supple/host/child_process.h"
+#include "supple/json/parse.h"
 #include "supple/product.h"
 #if defined(_WIN32)
 #include <windows.h>
@@ -50,11 +51,11 @@ std::string env(const char* name) {
     return value ? value : "";
 #endif
 }
+Status removeTarget(const fs::path& path);
 struct Temp {
     fs::path path;
     ~Temp() {
-        std::error_code ec;
-        fs::remove_all(path, ec);
+        if (!path.empty()) (void)removeTarget(path);
     }
 };
 Result<fs::path> temporary(const fs::path& parent) {
@@ -100,10 +101,17 @@ Status removeTarget(const fs::path& path) {
         return {};
     }
 #endif
-    if (isLink(path))
-        fs::remove(path, ec);
-    else
-        fs::remove_all(path, ec);
+    if (!isLink(path) && fs::is_directory(fs::symlink_status(path, ec))) {
+        fs::directory_iterator entries(path, ec);
+        if (ec) return failure(ec.message(), path);
+        for (auto end = fs::directory_iterator(); entries != end; entries.increment(ec)) {
+            if (ec) return failure(ec.message(), path);
+            if (auto removed = removeTarget(entries->path()); !removed) return removed;
+        }
+        if (ec) return failure(ec.message(), path);
+    }
+    ec.clear();
+    fs::remove(path, ec);
     if (ec) return failure(ec.message(), path);
     return {};
 }
@@ -159,6 +167,9 @@ Status directoryLink(const fs::path& source, const fs::path& target) {
 }
 }  // namespace
 
+bool isTranslocated(std::string_view executable) {
+    return executable.find("/AppTranslocation/") != std::string_view::npos;
+}
 Platform nativePlatform() {
 #if defined(_WIN32)
     return Platform::Windows;
@@ -224,12 +235,20 @@ std::vector<std::string> registrationArgs(Harness h, const std::string& mcp) {
 std::string commandText(const std::string& exe, const std::vector<std::string>& args,
                         Platform platform) {
     auto quote = [](const std::string& s, bool windows) {
+        const auto safe = [windows](unsigned char c) {
+            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                   std::string_view("_./:-").find(static_cast<char>(c)) != std::string_view::npos ||
+                   (windows && c == '\\');
+        };
+        if (!s.empty() && std::all_of(s.begin(), s.end(), safe)) return s;
         std::string out = "'";
         for (char c : s) out += c == '\'' ? (windows ? "''" : "'\\''") : std::string(1, c);
         return out + "'";
     };
     const bool win = platform == Platform::Windows;
-    std::string out = (win ? "& " : "") + quote(exe, win);
+    const auto command = quote(exe, win);
+    // PowerShell requires the call operator for a quoted executable path.
+    std::string out = (win && command != exe ? "& " : "") + command;
     for (const auto& arg : args) out += " " + quote(arg, win);
     return out;
 }
@@ -256,7 +275,7 @@ Result<std::string> windowsScript(const std::string& exe, const std::vector<std:
 
 Result<ProcessResult> runCaptured(const fs::path& exe, const std::vector<std::string>& args,
                                   const std::function<bool()>& cancelled, const std::string& input,
-                                  const std::string& searchPath) {
+                                  const std::string& searchPath, bool captureStderr) {
     std::vector<std::string> launch;
     fs::path runner;
     auto temp = temporary(fs::temp_directory_path());
@@ -272,6 +291,7 @@ Result<ProcessResult> runCaptured(const fs::path& exe, const std::vector<std::st
     (void)searchPath;
     auto script = windowsScript(utf8(exe), args);
     if (!script) return script.error();
+    if (!captureStderr) script->replace(script->rfind("2>&1"), 4, "2>nul");
     // Redirect a finite input file: Hermes asks whether to enable discovered tools.
     // A single blank line accepts that default, but never its default-No overwrite.
     // The child needn't inherit a working directory; use the absolute input path.
@@ -290,8 +310,9 @@ Result<ProcessResult> runCaptured(const fs::path& exe, const std::vector<std::st
     // Only a fixed script enters the shell; executable and arguments are positional.
     runner = "/bin/sh";
     launch = {"-c",
-              "input=$1; search=$2; shift 2; if [ -n \"$search\" ]; then PATH=$search; export "
-              "PATH; fi; exec \"$@\" < \"$input\" 2>&1",
+              std::string("input=$1; search=$2; shift 2; if [ -n \"$search\" ]; then PATH=$search; "
+                          "export PATH; fi; exec \"$@\" < \"$input\" ") +
+                  (captureStderr ? "2>&1" : "2>/dev/null"),
               "help-connect",
               utf8(inputFile),
               searchPath,
@@ -317,7 +338,7 @@ Result<ProcessResult> runCaptured(const fs::path& exe, const std::vector<std::st
     watcher.join();
     if (!output) return output.error();
     std::string excerpt = std::move(output->text);
-    if (excerpt.size() > 6000)
+    if (captureStderr && excerpt.size() > 6000)
         excerpt = excerpt.substr(0, 2500) + "\n… output shortened …\n" +
                   excerpt.substr(excerpt.size() - 3500);
     return ProcessResult{output->exitCode, std::move(excerpt)};
@@ -392,25 +413,35 @@ Result<ProcessResult> registerHarness(Harness harness, const fs::path& executabl
     }
 #endif
     if (harness == Harness::Codex) {
-        // Codex add replaces silently; get first so Connect cannot overwrite an
-        // existing server pointing at another installation.
+        // The list is structural; stderr warnings must not corrupt its JSON.
         auto current =
-            runCaptured(executable, {"mcp", "get", std::string(product::kSlug), "--json"},
-                        cancelled, "", searchPath);
+            runCaptured(executable, {"mcp", "list", "--json"}, cancelled, "", searchPath, false);
         if (!current) return current.error();
-        if (current->exitCode == 0) {
-            current->text =
-                "Server already exists. Review its path in Codex before replacing it.\n" +
-                current->text;
-            return current;
+        if (current->exitCode != 0)
+            return runCaptured(executable, {"mcp", "list", "--json"}, cancelled, "", searchPath);
+        auto servers = json::parse(current->text);
+        if (!servers || !servers->isArray())
+            return Error("help.codex_list", "Codex returned an invalid server list", "/command",
+                         "run codex mcp list --json in a terminal and check its configuration");
+        for (const auto& server : servers->asArray()) {
+            const auto* name = server.isObject() ? server.find("name") : nullptr;
+            if (!name || !name->isString())
+                return Error("help.codex_list", "Codex returned an invalid server entry",
+                             "/command",
+                             "run codex mcp list --json in a terminal and check its configuration");
+            if (name->asString() == product::kSlug) {
+                current->text =
+                    "Server already exists. Review its path in Codex before replacing it.";
+                return current;
+            }
         }
-        if (current->text.find("No MCP server named") == std::string::npos) return current;
     }
     if (cancelled && cancelled())
         return Error("help.cancelled", "connection cancelled", "/command", "try connecting again");
     return runCaptured(executable, registrationArgs(harness, mcp), cancelled,
                        harness == Harness::Hermes ? "\n" : "", searchPath);
 }
+Status removeExportTree(const fs::path& path) { return removeTarget(path); }
 Target inspectTarget(const fs::path& path) {
     if (isLink(path)) return Target::Link;
     std::error_code ec;
@@ -422,7 +453,8 @@ Target inspectTarget(const fs::path& path) {
     return Target::Refuse;
 }
 Result<fs::path> exportSkill(const fs::path& source, const fs::path& parent, bool link,
-                             bool replace) {
+                             bool replace,
+                             std::function<Status(const fs::path&, const fs::path&)> publish) {
     std::error_code ec;
     const auto src = fs::canonical(source, ec);
     if (ec || !fs::is_regular_file(src / "SKILL.md", ec))
@@ -470,9 +502,14 @@ Result<fs::path> exportSkill(const fs::path& source, const fs::path& parent, boo
         fs::rename(target, backup, ec);
         if (ec) return failure(ec.message(), target);
     }
-    fs::rename(staged, target, ec);
-    if (ec) {
-        const auto message = ec.message();
+    auto published = [&]() -> Status {
+        if (publish) return publish(staged, target);
+        fs::rename(staged, target, ec);
+        if (ec) return failure(ec.message(), target);
+        return {};
+    }();
+    if (!published) {
+        const auto message = published.error().message;
         if (current != Target::Missing) {
             fs::rename(backup, target, ec);
             if (ec) {

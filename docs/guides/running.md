@@ -38,6 +38,11 @@ mixer, or Track > FX: add plugin….
 
 ## Driving Quire from an agent (MCP)
 
+On macOS, move Quire.app into Applications before connecting an agent. If
+macOS runs it from an App Translocation temporary location, Help blocks the
+copy/Connect controls and explains how to restart from a stable installation.
+See the [install guide](installing.md) for clearing quarantine.
+
 For an installed copy, use **Help > Connect an agent…** to register its
 running-app server with Claude Code, Codex or Hermes. Choose the agent, review
 the command, then click Connect (or Copy command to run it yourself). The result

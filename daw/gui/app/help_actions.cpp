@@ -4,9 +4,11 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cctype>
+#include <sstream>
 #include "supple/host/clap_host.h"
 #include "supple/json/write.h"
 #include "supple/product.h"
+#include "supple/ui/controls.h"
 #include "supple/ui/scroll_view.h"
 #include "supple/ui/widgets.h"
 
@@ -26,6 +28,46 @@ ui::Node& row(ui::Node& parent, const std::string& id) {
     r.layout.gap = 8;
     return r;
 }
+// JSON is code: draw explicit lines so NanoVG's word wrapper cannot discard
+// indentation. Copy and display use the same string.
+class JsonBlock : public ui::Node {
+  public:
+    explicit JsonBlock(std::string text)
+        : Node("help.mcp.json", ui::Role::Label), text_(std::move(text)) {
+        layout.height = ui::SizeRule::content();
+    }
+    ui::Size measure(const ui::Canvas& c, ui::Size available) override {
+        return {available.w, static_cast<float>(std::count(text_.begin(), text_.end(), '\n') + 1) *
+                                 c.theme().type("caption") * 1.4f};
+    }
+    void paint(ui::Canvas& c) override {
+        const float size = c.theme().type("caption");
+        float y = bounds().y;
+        std::istringstream stream(text_);
+        std::string line;
+        while (std::getline(stream, line)) {
+            c.text({bounds().x, y, bounds().w, size * 1.4f}, line, ui::Font::Mono, size,
+                   c.theme().color("ink-quiet"));
+            y += size * 1.4f;
+        }
+    }
+    std::string valueText() const override { return text_; }
+
+  private:
+    std::string text_;
+};
+class OutputScroll : public ui::ScrollView {
+  public:
+    explicit OutputScroll(std::string id) : ScrollView(std::move(id)) {
+        layout.height = ui::SizeRule::content();
+    }
+    float maxHeight = 210;
+    ui::Size measure(const ui::Canvas& c, ui::Size available) override {
+        const auto size = content().measure(
+            c, {std::min(available.w, 684.0f) - ui::ScrollBar::kThickness, available.h});
+        return {available.w, std::min(size.h, maxHeight)};
+    }
+};
 struct FolderRequest {
     std::function<void(DialogLifetime::Paths)> done;
     std::function<void(std::string)> error;
@@ -39,11 +81,14 @@ void SDLCALL folderResult(void* userdata, const char* const* files, int) {
 }
 }  // namespace
 HelpActions::HelpActions(ui::Root& root, AppActions& actions, SDL_Window* window,
-                         DialogLifetime::Post post, std::filesystem::path executable)
+                         DialogLifetime::Post post, std::filesystem::path executable,
+                         FolderPicker picker)
     : root_(root),
       window_(window),
       post_(std::move(post)),
-      executables_(help::executables(executable, help::nativePlatform())) {
+      executables_(help::executables(executable, help::nativePlatform())),
+      picker_(std::move(picker)),
+      translocated_(help::isTranslocated(pathText(executable))) {
     actions.addUi("ui.help.skill", "Help: download skill…", [this] { download(false); });
     actions.addUi("ui.help.skill_link", "Help: download skill link…", [this] { download(true); });
     actions.addUi("ui.help.mcp", "Help: MCP server…", [this] { mcp(); });
@@ -54,13 +99,13 @@ HelpActions::~HelpActions() {
     lifetime_->cancelled.store(true);
     if (worker_.joinable()) worker_.join();
 }
-std::unique_ptr<ui::Node> HelpActions::panel(const std::string& title, float height) {
+std::unique_ptr<ui::Node> HelpActions::panel(const std::string& title) {
     ++generation_;
     root_.closePopups();
     auto form = std::make_unique<ui::Node>("help.panel");
     form->layout.dir = ui::Layout::Dir::Column;
     form->layout.width = ui::SizeRule::fixed(720);
-    form->layout.height = ui::SizeRule::fixed(height);
+    form->layout.height = ui::SizeRule::content();
     form->layout.padding = ui::Insets::all(18);
     form->layout.gap = 12;
     form->emplace<ui::Label>("help.title", title, ui::Font::UiBold, "body");
@@ -69,6 +114,7 @@ std::unique_ptr<ui::Node> HelpActions::panel(const std::string& title, float hei
 void HelpActions::status(const std::string& text) {
     if (auto* label = dynamic_cast<ui::TextBlock*>(root_.find("help.status"))) {
         label->setText(text);
+        label->visible = !text.empty();
         root_.relayout();
         root_.damageAll();
     }
@@ -108,27 +154,34 @@ void HelpActions::background(Work work) {
             });
     });
 }
-void HelpActions::download(bool link) {
-    link_ = link;
-    folder_.clear();
-    auto form = panel(link ? "Download skill link" : "Download skill", 350);
-    paragraph(*form, "help.skill.about",
-              link ? "Choose any folder for a link to this copy's bundled skill. The link follows "
-                     "updates to this installation. Keep this installation in place while using it."
-                   : "Choose any folder for a copy of this installation's bundled skill. Add that "
-                     "folder to your agent's skills.");
-    paragraph(*form, "help.skill.destination",
-              "The chosen folder will contain a skill folder named " + std::string(product::kSlug) +
-                  ", with SKILL.md inside.");
-    paragraph(*form, "help.status", "Choose a destination folder to continue.");
-    auto& buttons = row(*form, "help.skill.buttons");
-    buttons.emplace<ui::Button>("help.skill.choose", "Choose folder…", [this] { chooseFolder(); });
-    auto& replace = buttons.emplace<ui::Button>("help.skill.replace", "Replace existing skill",
-                                                [this] { install(true); });
-    replace.visible = false;
-    buttons.emplace<ui::Button>("help.close", "Close", [this] { root_.closePopup(); });
+void HelpActions::notice(const std::string& title, const std::string& message, bool replace) {
+    auto form = panel(title);
+    auto& output = form->emplace<OutputScroll>("help.result.output");
+    paragraph(output.content(), "help.status", message);
+    auto& buttons = row(*form, "help.buttons");
+    if (replace)
+        buttons.emplace<ui::Button>("help.skill.replace", "Replace", [this] { install(true); });
+    buttons.emplace<ui::Button>("help.close", replace ? "Cancel" : "Close",
+                                [this] { root_.closePopup(); });
     root_.openPopup(std::move(form), {}, ui::Placement::Center);
     refreshButtons();
+}
+bool HelpActions::translocationWarning(const std::string& title) {
+    if (!translocated_) return false;
+    const std::string name(product::kName);
+    notice(title, name + " is running from a temporary location macOS assigned. Move " + name +
+                      ".app to Applications (and see the install guide for clearing quarantine), "
+                      "restart it, then connect.");
+    return true;
+}
+void HelpActions::download(bool link) {
+    if (busy_)
+        return notice("Download skill", "An operation is still running. Wait for it to finish.");
+    link_ = link;
+    folder_.clear();
+    ++generation_;
+    root_.closePopups();
+    chooseFolder();
 }
 void HelpActions::chooseFolder() {
     if (busy_) return status("An operation is still running.");
@@ -141,9 +194,18 @@ void HelpActions::chooseFolder() {
         if (state->alive.load())
             post([this, state, generation, message = std::move(message)] {
                 if (state->alive.load() && generation == generation_)
-                    status("Folder picker failed: " + message);
+                    notice("Download skill", "Folder picker failed: " + message +
+                                                 ". Try again or choose another folder.");
             });
     };
+    if (picker_) {
+        picker_(
+            [done](std::filesystem::path path) {
+                if (!path.empty()) done({std::move(path)});
+            },
+            std::move(error));
+        return;
+    }
     SDL_ShowOpenFolderDialog(folderResult, new FolderRequest{std::move(done), std::move(error)},
                              window_, nullptr, false);
 }
@@ -151,24 +213,26 @@ void HelpActions::chosen(const std::filesystem::path& parent) {
     folder_ = parent;
     const auto target = parent / std::string(product::kSlug);
     const auto kind = help::inspectTarget(target);
-    auto* replace = root_.find("help.skill.replace");
-    if (replace) replace->visible = kind == help::Target::Link || kind == help::Target::Skill;
     if (kind == help::Target::Refuse) {
-        status("Cannot replace " + pathText(target) +
-               ": it is not a skill folder or a link. Choose another folder.");
+        notice("Download skill",
+               "Cannot replace " + pathText(target) +
+                   ": it is not a skill folder or a link. Choose another folder.");
     } else if (kind != help::Target::Missing) {
-        status(
-            pathText(target) +
-            " already exists. Replace this skill or link? Its current contents will be removed.");
-    } else
+        notice("Replace existing skill?",
+               pathText(target) +
+                   " already exists. Replace this skill or link? Its current contents will be "
+                   "removed.",
+               true);
+    } else {
         install(false);
-    root_.relayout();
+    }
 }
+
 void HelpActions::install(bool replace) {
     if (folder_.empty()) return;
     const auto parent = folder_;
     const bool link = link_;
-    if (auto* button = root_.find("help.skill.replace")) button->visible = false;
+    notice(link ? "Download skill link" : "Download skill", "Working…");
     background([parent, link, replace] {
         auto source = host::skillDir();
         if (!source)
@@ -176,20 +240,35 @@ void HelpActions::install(bool replace) {
                 "Bundled skill not found. Restore this installation's skill folder, then try "
                 "again.");
         auto result = help::exportSkill(*source, parent, link, replace);
-        return result ? std::string(link ? "Skill link created: " : "Skill copied: ") +
-                            pathText(*result)
+        return result ? std::string(link ? "Link created at " : "Skill saved to ") +
+                            pathText(*result) + (link ? " → " + pathText(*source) : "")
                       : "Skill download failed: " + result.error().toString();
     });
 }
 void HelpActions::mcp() {
-    auto form = panel("MCP server", 610);
-    auto& scroll = form->emplace<ui::ScrollView>("help.mcp.scroll");
-    scroll.layout.height = ui::SizeRule::fraction();
+    if (translocationWarning("MCP server")) return;
+    auto form = panel("MCP server");
+    auto& scroll = form->emplace<OutputScroll>("help.mcp.scroll");
+    int windowHeight = 0;
+    SDL_GetWindowSize(window_, nullptr, &windowHeight);
+    const float height = root_.overlay().bounds().h > 0 ? root_.overlay().bounds().h
+                                                        : static_cast<float>(windowHeight);
+    scroll.maxHeight = std::min(620.0f, std::max(100.0f, height - 200.0f));
     auto& content = scroll.content();
     content.layout.gap = 12;
     const auto platform = help::nativePlatform();
     const auto proxy = help::commandText(pathText(executables_.mcp), {}, platform);
     const auto engine = help::commandText(pathText(executables_.engine), {"--mcp"}, platform);
+    std::string missing;
+    for (const auto& file : {executables_.mcp, executables_.engine}) {
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(file, ec))
+            missing +=
+                (missing.empty() ? "Missing helper: " : "\nMissing helper: ") + pathText(file);
+    }
+    if (!missing.empty())
+        paragraph(content, "help.mcp.missing",
+                  missing + "\nRestore this installation before connecting.");
     paragraph(content, "help.mcp.intro",
               "MCP clients start a stdio server by running a command. Add a stdio server named " +
                   std::string(product::kSlug) +
@@ -214,15 +293,14 @@ void HelpActions::mcp() {
     servers[std::string(product::kSlug)] = std::move(entry);
     config["mcpServers"] = std::move(servers);
     const std::string text = json::write(config).value();
-    content.emplace<ui::TextBlock>("help.mcp.json", "Common JSON configuration\n" + text,
-                                   ui::Font::Mono, "caption", "ink-quiet");
+    paragraph(content, "help.mcp.json.title", "Common JSON configuration");
+    content.emplace<JsonBlock>(text);
     row(content, "help.mcp.json.buttons")
         .emplace<ui::Button>("help.mcp.json.copy", "Copy JSON", [this, text] { copy(text); });
     paragraph(content, "help.mcp.skill",
               "Add the skill separately with Help > Download skill or Download skill link.");
-    paragraph(
-        *form, "help.status",
-        "Commands use absolute paths. A missing helper means this installation is incomplete.");
+    paragraph(*form, "help.status", "");
+    form->find("help.status")->visible = false;
     row(*form, "help.buttons").emplace<ui::Button>("help.close", "Close", [this] {
         root_.closePopup();
     });
@@ -230,25 +308,30 @@ void HelpActions::mcp() {
     refreshButtons();
 }
 void HelpActions::agents() {
-    auto form = panel("Connect an agent", 460);
+    if (translocationWarning("Connect an agent")) return;
+    auto form = panel("Connect an agent");
+    const std::string name(product::kName);
     paragraph(*form, "help.agent.intro",
-              "Register this copy's running-app MCP server in your agent's user configuration. "
-              "Hermes enables all discovered tools. Start " +
-                  std::string(product::kName) +
-                  " before using it, then restart or reconnect the agent.");
+              "Adds " + name +
+                  "'s MCP server to your agent's settings so the agent can operate this copy of " +
+                  name + ". Start " + name + " before you use the agent.");
     auto& choices = row(*form, "help.agent.choices");
-    choices.emplace<ui::Button>("help.agent.claude", "Claude Code",
-                                [this] { select(help::Harness::Claude); });
-    choices.emplace<ui::Button>("help.agent.codex", "Codex",
-                                [this] { select(help::Harness::Codex); });
-    choices.emplace<ui::Button>("help.agent.hermes", "Hermes",
-                                [this] { select(help::Harness::Hermes); });
-    paragraph(*form, "help.agent.selected", "");
+    choices
+        .emplace<ui::Toggle>("help.agent.claude", "Claude Code", "accent",
+                             [this](bool) { select(help::Harness::Claude); })
+        .layout.width = ui::SizeRule::content();
+    choices
+        .emplace<ui::Toggle>("help.agent.codex", "Codex", "accent",
+                             [this](bool) { select(help::Harness::Codex); })
+        .layout.width = ui::SizeRule::content();
+    choices
+        .emplace<ui::Toggle>("help.agent.hermes", "Hermes", "accent",
+                             [this](bool) { select(help::Harness::Hermes); })
+        .layout.width = ui::SizeRule::content();
     paragraph(*form, "help.agent.command", "");
     paragraph(*form, "help.agent.skill",
               "The skill is added separately via Help > Download skill / Download skill link.");
-    auto& scroll = form->emplace<ui::ScrollView>("help.agent.output");
-    scroll.layout.height = ui::SizeRule::fraction();
+    auto& scroll = form->emplace<OutputScroll>("help.agent.output");
     paragraph(scroll.content(), "help.status", "");
     auto& buttons = row(*form, "help.agent.buttons");
     buttons.emplace<ui::Button>("help.agent.copy", "Copy command", [this] {
@@ -264,19 +347,20 @@ void HelpActions::agents() {
 }
 void HelpActions::select(help::Harness harness) {
     harness_ = harness;
-    const auto name = harness == help::Harness::Claude  ? "Claude Code"
-                      : harness == help::Harness::Codex ? "Codex"
-                                                        : "Hermes";
-    if (auto* label = dynamic_cast<ui::TextBlock*>(root_.find("help.agent.selected")))
-        label->setText(std::string("Selected: ") + name);
+    for (const auto& entry : {std::pair{"help.agent.claude", help::Harness::Claude},
+                              std::pair{"help.agent.codex", help::Harness::Codex},
+                              std::pair{"help.agent.hermes", help::Harness::Hermes}})
+        if (auto* button = dynamic_cast<ui::Toggle*>(root_.find(entry.first)))
+            button->setOn(entry.second == harness);
     if (auto* label = dynamic_cast<ui::TextBlock*>(root_.find("help.agent.command")))
         label->setText(help::commandText(
             help::harnessCommand(harness),
             help::registrationArgs(harness, pathText(executables_.mcp)), help::nativePlatform()));
-    status(busy_ ? "An operation is still running."
-                 : "Connect runs this command in the background. On Windows, the copied command is "
-                   "for PowerShell. Existing registrations are reported by the agent; review the "
-                   "result before reconnecting.");
+    std::string note = "Connect runs this command in the background.";
+    if (harness == help::Harness::Hermes) note += " Hermes enables all discovered tools.";
+    if (help::nativePlatform() == help::Platform::Windows)
+        note += " The copied command is for PowerShell.";
+    status(busy_ ? "An operation is still running." : note);
 }
 void HelpActions::connect() {
     const auto harness = harness_;
