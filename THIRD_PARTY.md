@@ -40,12 +40,15 @@ platforms use the runner's SDL3 package. Windows installers contain the
 **NSIS** 3.x stub and uninstaller (Zlib; `third_party/nsis/LICENSE.txt`).
 They explicitly select the zlib compressor: NSIS's separately licensed LZMA
 compressor is not used. NSIS is a build tool on disposable runners.
+Windows also redistributes **zlib-runtime** 1.3.2 from vcpkg (Zlib;
+`third_party/zlib-runtime/LICENSE.txt`); its configured version is recorded
+beside that notice in the package's `VERSION.txt`. Linux/macOS use OS zlib.
 Linux package programs and stock CLAPs statically link hidden libstdc++/libgcc runtimes, with the
 GCC GPLv3 runtime exception and actual system-package copyright notices;
 no shared C++ runtime is bundled or required by the packaged code (ADR-0049). The
 release container establishes their minimum ABI. No JACK library is bundled.
 
-Other system libraries (dynamically linked, not bundled): zlib (Zlib; PNG snapshots and dsp.preview's pictures), libjack
+Other system libraries (dynamically linked, not bundled): zlib on Linux/macOS (Zlib; PNG snapshots and dsp.preview's pictures), libjack
 from pipewire-jack (MIT, dlopen'ed), libpipewire-0.3 (MIT), alsa-lib (LGPL,
 OS library, dynamic only — explicitly permitted by policy), libX11/libGL, and libEGL (dlopen'ed by
 plugins of the template to draw an editor without a window).

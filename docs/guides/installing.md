@@ -85,7 +85,11 @@ The portable zip also runs from its extracted folder. The installer is the
 recommended download: Windows can propagate Mark of the Web from a zip to
 its nested binaries, causing additional helper/plugin launch restrictions.
 The installer and uninstaller support `/S`; `/D=C:\absolute\path` must be
-the last installer argument. Optional plugins stay off in a silent install.
+the last installer argument. Optional plugins stay off on a first silent install;
+add `/PLUGINS` to select them. Upgrades remember that selection and preserve
+unrelated files in the external plugin folder. A conflicting new payload path
+refuses the upgrade before removing the existing version. Restore any replaced
+payload directory links/junctions before uninstalling; the remover refuses them.
 
 ## Connecting an agent
 

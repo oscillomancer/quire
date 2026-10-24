@@ -12,8 +12,21 @@ prefix=$(realpath -m -- "$prefix")
 [[ $prefix != / ]] || { echo 'Choose a user-space installation prefix, not /' >&2; exit 1; }
 app="$prefix/opt/$slug"
 [[ -f "$app/.installed-files" ]] || { echo "No installation manifest in $app" >&2; exit 1; }
+check_payload_ancestors() {
+  local dir=${1%/*}
+  while [[ $dir == "$app" || $dir == "$app/"* ]]; do
+    [[ ! -L $dir ]] || { echo "Refusing linked payload directory: $dir" >&2; return 1; }
+    dir=${dir%/*}
+  done
+}
+# Validate the entire payload before removing anything. Keep ownership metadata
+# on refusal; only paths inside the private app tree have this restriction.
+while IFS= read -r file; do
+  if [[ $file == "$app/"* ]]; then check_payload_ancestors "$file"; fi
+done < "$app/.installed-files"
 # Only paths explicitly added by install.sh; existing unrelated files survive.
 while IFS= read -r file; do
+  if [[ $file == "$app/"* ]]; then check_payload_ancestors "$file"; fi
   case "$file" in
     "$prefix/bin/"*|"$prefix/share/applications/$slug.desktop"|"$prefix/share/applications/mimeinfo.cache"|"$prefix/share/icons/"*|"$HOME/.clap/"*|"$app/"*) rm -f -- "$file" ;;
     *) echo "Invalid manifest path: $file" >&2; exit 1 ;;
