@@ -1582,3 +1582,68 @@ TEST_CASE("FX native title follows track switches, renames and take headers") {
     CHECK(title() == "Take FX: Take track / " + take.str());
     matchesHeader();
 }
+
+TEST_CASE("FX project replacement closes overlays and clears pending prompts") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto track = f.addTrack("Old project");
+    REQUIRE(f.fx->open(track));
+    REQUIRE(f.click("fx.chain.save"));
+    f.type("Old chain");
+    REQUIRE(f.click("fx.add"));
+    REQUIRE(f.panel->root().find("browser"));
+    bool applied = false;
+    gui::LearnRequest request;
+    request.title = "Old parameter";
+    request.onOk = [&](const gui::LearnChoice&) { applied = true; };
+    gui::openLearnDialog(f.panel->root(), *f.actions, *f.app, std::move(request));
+    REQUIRE(f.panel->root().find("learn"));
+    REQUIRE(f.app->learning());
+    REQUIRE(f.run("project.new", json::Value::object()));
+    CHECK(f.addTrack("Replacement") == track);  // the old captured id is reused
+    f.fx->syncProject();                        // before another event, without waiting for a frame
+    CHECK(f.fx->isOpen());
+    CHECK_FALSE(f.panel->root().popupOpen());
+    CHECK_FALSE(f.panel->root().find("browser"));
+    CHECK_FALSE(f.panel->root().find("learn"));
+    CHECK_FALSE(f.panel->root().find("fx.chain.prompt")->visible);
+    CHECK_FALSE(f.panel->root().find("fx.preset.prompt")->visible);
+    CHECK(f.panel->root().find("fx.chain.name")->valueText().empty());
+    CHECK_FALSE(f.fx->browser().onAdd());
+    CHECK_FALSE(f.app->learning());
+    CHECK_FALSE(f.actions->learnSink);
+    CHECK_FALSE(applied);
+}
+
+TEST_CASE("simultaneous plugin browsers preserve each other's favourite toggles") {
+    Fixture f;
+    if (!f.ok || !f.stockPlugins()) return;
+    REQUIRE(f.panel->ensure());
+    const auto file = gui::Favourites::defaultFile(gui::test::slug());
+    gui::PluginBrowser first(*f.app, *f.dispatcher, *f.root, file);
+    gui::PluginBrowser second(*f.app, *f.dispatcher, f.panel->root(), file);
+    first.open([](const std::string&) {});
+    second.open([](const std::string&) {});
+    auto toggle = [&](ui::Root& root, const char* name) {
+        root.frame(false);
+        root.focus(root.find("browser.search"));
+        root.key(SDLK_A, ui::kCtrl);
+        root.text(name);
+        root.frame(false);
+        REQUIRE(root.click("browser.fav"));
+    };
+    const auto a = f.pluginId("Hickory"), b = f.pluginId("Yarrow");
+    toggle(*f.root, "Hickory");
+    toggle(f.panel->root(), "Yarrow");
+    auto saved = gui::Favourites::load(file);
+    REQUIRE(saved);
+    CHECK(saved->has(a));
+    CHECK(saved->has(b));
+    toggle(*f.root, "Hickory");  // remove A through its older browser cache
+    saved = gui::Favourites::load(file);
+    REQUIRE(saved);
+    CHECK_FALSE(saved->has(a));
+    CHECK(saved->has(b));
+    first.close();
+    second.close();
+}

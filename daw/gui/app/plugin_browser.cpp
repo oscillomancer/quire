@@ -163,6 +163,13 @@ std::unique_ptr<ui::Node> PluginBrowser::buildPage() {
         const auto row = list_->selected();
         if (!row || *row >= rows_.size()) return;
         const std::string id = rows_[*row].entry->id;
+        // Another open browser may have saved since this one was opened.
+        auto latest = Favourites::load(favouritesFile_);
+        if (!latest) {
+            setStatus("favourites: " + latest.error().message);
+            return;
+        }
+        favourites_ = std::move(*latest);
         const bool now = favourites_.toggle(id);
         if (auto saved = favourites_.save(favouritesFile_); !saved)
             setStatus("favourites: " + saved.error().message);
@@ -220,6 +227,7 @@ void PluginBrowser::open(std::function<void(const std::string&)> onAdd, std::str
     }
     auto page = buildPage();
     root_.openPopup(std::move(page), {}, ui::Placement::Center, [this] {
+        onAdd_ = {};
         page_ = nullptr;
         search_ = nullptr;
         list_ = nullptr;

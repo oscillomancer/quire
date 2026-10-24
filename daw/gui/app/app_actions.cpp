@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <utility>
 
 #include "supple/engine/midi_control.h"
 #include "supple/json/parse.h"
@@ -334,6 +335,27 @@ AppActions::AppActions(const cmd::Registry& registry, cmd::Dispatcher& dispatche
                      loaded.error().toString().c_str());
         keymap_ = actions::Keymap::defaults();
     }
+}
+
+AppActions::~AppActions() {
+    if (auto close = std::exchange(closeLearn_, {})) close();
+}
+
+std::uint64_t AppActions::beginLearn(LearnSink sink, std::function<void()> close) {
+    if (auto previous = std::exchange(closeLearn_, {})) previous();
+    learnOwner_ = ++learnSerial_;
+    learnSink = std::move(sink);
+    closeLearn_ = std::move(close);
+    app_.setLearning(true);
+    return learnOwner_;
+}
+
+void AppActions::endLearn(std::uint64_t owner) {
+    if (owner != learnOwner_) return;
+    learnOwner_ = 0;
+    learnSink = {};
+    closeLearn_ = {};
+    app_.setLearning(false);
 }
 
 void AppActions::addUi(std::string id, std::string name, std::function<void()> run) {

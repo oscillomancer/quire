@@ -749,6 +749,29 @@ void FxWindow::checkFailures() {
 }
 
 void FxWindow::tick(bool event) {
+    const bool replaced = app_.projectGeneration() != projectGeneration_;
+    if (replaced) {
+        latency_.clear();
+        failed_.clear();
+        selected_ = anchor_ = {};
+        picked_.clear();
+        take_.reset();
+        gesture_.clear();
+        pendingChain_ = "main";
+        presetFx_ = {};
+        presetReplace_.clear();
+        choosePresetChain(false);
+        if (page_) {
+            // These siblings of the page retain project ids in callbacks.
+            root().closePopups();
+            hideSavePrompt();
+            hidePresetPrompt();
+            if (saveName_) saveName_->setText("");
+            if (presetName_) presetName_->setText("");
+            root().releaseWithin(page_);
+        }
+        projectGeneration_ = app_.projectGeneration();
+    }
     mainBrowser_->tick();
     if (browser_) browser_->tick();
     if (event) checkFailures();
@@ -764,15 +787,7 @@ void FxWindow::tick(bool event) {
             root().damageAll();
         }
     }
-    if (app_.projectGeneration() != projectGeneration_) {
-        latency_.clear();
-        failed_.clear();
-        selected_ = {};
-        if (page_) root().releaseWithin(page_);
-    }
-    if (page_ &&
-        (app_.projectGeneration() != projectGeneration_ || app_.head().version != shownVersion_))
-        refresh();
+    if (page_ && (replaced || app_.head().version != shownVersion_)) refresh();
     if (page_ && body_)
         for (const auto& [id, cached] : latency_) {
             const auto fx = model::Id::parse(id);

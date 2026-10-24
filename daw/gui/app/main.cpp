@@ -1086,7 +1086,10 @@ int main(int argc, char** argv) {
             }
             bool panelEvent = false;
             timed([&] {
-                preserveUi([&] { panelEvent = fxPanel.handle(e) || routingPanel.handle(e); });
+                preserveUi([&] {
+                    fxWindow.syncProject();
+                    panelEvent = fxPanel.handle(e) || routingPanel.handle(e);
+                });
             });
             if (panelEvent) continue;
             if (pluginWindows.handle(e)) continue;  // an editor window's event

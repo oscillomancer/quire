@@ -157,6 +157,7 @@ Node& Root::openPopup(std::unique_ptr<Node> content, const Rect& anchor, Placeme
         return nullptr;
     };
     focus(first(*f.content_));
+    window_.activate();
     return *f.content_;
 }
 

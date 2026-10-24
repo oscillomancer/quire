@@ -138,7 +138,7 @@ void FloatingPanel::open(std::unique_ptr<ui::Node> content, std::function<void()
 void FloatingPanel::raise() {
     if (!open_ || platform_.driver() == Platform::Driver::Offscreen) return;
     window_->show();
-    SDL_RaiseWindow(window_->sdl());
+    window_->activate();
 }
 
 void FloatingPanel::close() {

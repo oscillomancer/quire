@@ -192,7 +192,11 @@ instructions are in `docs/guides/installing.md`.
   theme surface matches the former popups, and OS titles follow their headers
   (including FX track/take switches and track renames). Their menus,
   browsers and MIDI learn dialogs stay in their window; unused keys reach the
-  app keymap. Empty-chain double clicks add main, input or take FX. Each root
+  app keymap; dialogs opened by forwarded shortcuts activate their owner.
+  Project replacement closes FX overlays and clears their pending requests.
+  MIDI learn has one app-wide owner across roots, including deferred closes.
+  Concurrent plugin browsers reload favourites before toggles to preserve edits.
+  Empty-chain double clicks add main, input or take FX. Each root
   repaints on demand and follows theme switches. The main window
   waits on app/local plug-in/ModelLoop notifications and demand-driven
   deadlines; stopped transport and stationary meters have no refresh timer.
@@ -618,6 +622,9 @@ Session and editing:
   squashed steps keep large invocation arguments.
 
 GUI:
+- The opt-in native popup-focus regression passes on Hyprland/XWayland,
+  including typing and Escape after a forwarded floating-window shortcut.
+  Cocoa/Windows activation remains pending native CI/manual checks.
 - FX/routing utility windows have not been checked by hand on Hyprland,
   Cocoa or Windows: WM floating, owner stacking and XWayland positioning
   remain manual checks. Native CI for these changes is pending coordinator

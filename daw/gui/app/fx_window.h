@@ -64,6 +64,11 @@ class FxWindow {
 
     // Frame pass: refresh after changes made elsewhere (agents, undo).
     void tick(bool event = true);
+    // Before dispatching floating input: project commands may have run earlier
+    // in the same SDL event batch, before the next frame's regular tick.
+    void syncProject() {
+        if (app_.projectGeneration() != projectGeneration_) tick(false);
+    }
     void refresh();
     void setStatus(std::string message);
 

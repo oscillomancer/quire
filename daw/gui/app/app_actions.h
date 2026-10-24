@@ -47,6 +47,7 @@ class AppActions {
     AppActions(const cmd::Registry& registry, cmd::Dispatcher& dispatcher, engine::EngineApp& app,
                UiState& ui, std::filesystem::path keymapFile,
                std::filesystem::path controlsFile = {});
+    ~AppActions();
 
     actions::ActionRegistry& registry() { return registry_; }
     actions::Keymap& keymap() { return keymap_; }
@@ -88,8 +89,13 @@ class AppActions {
     // The devices' messages: a press runs its action once (a note on, a CC
     // above 0, an encoder step); a "(MIDI CC)" action follows the value.
     void control(const std::vector<engine::EngineApp::ControlEvent>& events);
-    // Set while a learn dialog listens: it gets the messages instead.
-    std::function<void(const std::vector<engine::EngineApp::ControlEvent>&)> learnSink;
+    // One app-wide learn dialog across roots. Replacement closes the old
+    // dialog; its deferred destruction cannot end the new owner's session.
+    using LearnSink = std::function<void(const std::vector<engine::EngineApp::ControlEvent>&)>;
+    std::uint64_t beginLearn(LearnSink sink, std::function<void()> close);
+    void endLearn(std::uint64_t owner);
+    LearnSink learnSink;  // active listener (also read by tests)
+
     // The "(MIDI CC)" action that follows a knob for `action`, when `action`
     // only runs per press (a command whose value a knob cannot pass); "" if none.
     std::string followingControl(std::string_view action) const;
@@ -101,6 +107,8 @@ class AppActions {
                     std::function<Status(const actions::ControlValue&)> run);
 
   private:
+    std::uint64_t learnSerial_ = 0, learnOwner_ = 0;
+    std::function<void()> closeLearn_;
     actions::ActionRegistry registry_;
     actions::Keymap keymap_;
     std::filesystem::path keymapFile_;

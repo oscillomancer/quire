@@ -254,9 +254,13 @@ renaming the track updates the FX title in place. Close or an unhandled Escape
 hides only that panel; Escape first closes a nested popup or cancels a widget
 gesture. Events are routed by SDL window identity before the main window's
 quit handling. Unused keys reach the app keymap with the floating root's typing
-context. Theme/palette switches
-repaint all roots. Each visible root paints only on damage/animation, with
-its context forcibly rebound after plugin editor calls; hidden roots do not
+context. Opening a popup activates its owning visible OS window, including
+main-window dialogs opened by shortcuts forwarded from FX/routing; hidden
+snapshot/test windows stay hidden. X11 supplements the activation request with
+an input-focus handoff only when SDL and the X server agree that one of this
+app's windows already owns focus; Cocoa/Windows use SDL's native activation.
+Theme/palette switches repaint all roots. Each visible root paints only on
+damage/animation, with its context forcibly rebound after plugin editor calls; hidden roots do not
 paint. `--snapshot out.png` also writes `out.fx.png` and `out.routing.png`
 for open floating panels, using their own GL readback.
 
@@ -543,9 +547,16 @@ former centred popup (18% down the main client area, clamped to its edges).
 The minimum size is 800 × 360. Content fills the client area on resize.
 Its Add plugin browser, chain/preset/pins menus and parameter MIDI learn
 dialog belong to its own root. A strip's standalone "+" / `ui.fx.add` browser
-belongs to the main root. Both browsers reload shared favourites on open.
+belongs to the main root. Both browsers reload shared favourites on open and
+immediately before applying a toggle, preserving edits from another still-open
+browser. A failed reload reports an error and does not overwrite the file.
 For MIDI learn's "when focused" gate, the FX OS window must have keyboard
 focus and a node in that root must be focused (including a nested dialog).
+Project replacement closes every FX-root popup (browser, menus and learn),
+hides/clears save prompts, and resets pending track/take/effect requests before
+refreshing the new project, even when its ids match the old ones. The input
+boundary checks the generation too, closing stale overlays before another
+floating-window event in the same SDL batch can invoke them.
 
 
 Native editor parents are tagged X11 XIDs, Cocoa NSViews or Win32 HWNDs
@@ -625,7 +636,10 @@ control moved last (kind, number, channel, input), offers the CC mode
 when the effect's track (or a take FX's item) is selected, when its FX window
 or editor has the focus, or when one of them shows, and soft takeover; OK
 binds through `fx.learn.set`, Remove (when bound) through `fx.learn.remove`.
-While the dialog is open nothing learned moves. Latency badges refresh after effect model edits,
+MIDI learn is one app-wide session across roots: opening another dialog closes
+the first and its nested menus. Owner tokens prevent deferred destruction of
+an old dialog from disabling the new listener. While the dialog is open
+nothing learned moves. Latency badges refresh after effect model edits,
 host replacement and live latency changes. File-descriptor service startup
 and poll failures are reported; editors requiring unavailable FD service
 cannot remain open. App instances use the app-wide local descriptor snapshot; caller-owned editor
