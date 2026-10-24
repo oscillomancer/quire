@@ -171,10 +171,11 @@ bool HelpActions::translocationWarning(const std::string& title) {
     const std::string name(product::kName);
     notice(title, name + " is running from a temporary location macOS assigned. Move " + name +
                       ".app to Applications (and see the install guide for clearing quarantine), "
-                      "restart it, then connect.");
+                      "restart it, then try again.");
     return true;
 }
 void HelpActions::download(bool link) {
+    if (link && translocationWarning("Download skill link")) return;
     if (busy_)
         return notice("Download skill", "An operation is still running. Wait for it to finish.");
     link_ = link;

@@ -152,7 +152,8 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
   skill as a copy or link, shows this copy's MCP commands and JSON, and registers
   its running-app server with Claude Code, Codex or Hermes on a background
   worker. Downloads open the native folder picker directly and report the result
-  in a compact notice. Temporary macOS translocation paths block registration.
+  in a compact notice. Temporary macOS translocation paths block registration
+  and skill links; independent skill copies remain available.
   Saved menu layouts that predate Help retain access to it. The transport has a
   master playrate knob, context menu, key-bindable pitch steps and
   per-project display range (ADR-0045). Projects and renders default to

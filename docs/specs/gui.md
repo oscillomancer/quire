@@ -806,9 +806,12 @@ Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
   folder receives `<slug>/SKILL.md` and the rest of the bundled `host::skillDir()`.
   Copies are independent; links follow this installation's updates (a directory
   symlink on Linux/macOS, a native directory junction on Windows, requiring no
-  administrator or developer mode). Existing skill folders or links require
-  an explicit Replace click. Files and folders without SKILL.md are refused,
-  as are destinations within, identical to, or containing the source skill.
+  administrator or developer mode). Skill links from temporary macOS App
+  Translocation paths are refused until the app is moved and restarted;
+  independent skill copies remain available. Existing skill folders or links
+  require an explicit Replace click. Files and folders without SKILL.md are
+  refused, as are destinations within, identical to, or containing the source
+  skill.
   Preparation happens on a worker before replacement; a failed publication
   restores the previous target. Cleanup explicitly removes symlinks and Windows
   reparse points as links, including links inside temporary or previous exports;
@@ -833,9 +836,10 @@ Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
   single blank response to enable discovered tools, but declines overwrites.
   Codex checks its structural `mcp list --json` result for an existing
   registration before its add command can replace it.
-  Temporary macOS App Translocation paths block copy/Connect and explain how
-  to move the app to Applications and restart. JSON preserves its copied
-  indentation; command tokens are quoted only when the platform shell needs it.
+  Temporary macOS App Translocation paths block MCP/agent command copying and
+  Connect. The panels explain how to move the app to Applications and restart.
+  JSON preserves its copied indentation; command tokens are quoted only when
+  the platform shell needs it.
   Panels fit their contents; longer operation output scrolls. The dialog reports
   exit status and an output excerpt, including existing-registration outcomes;
   a missing harness leaves the command available to copy. Skills are installed
