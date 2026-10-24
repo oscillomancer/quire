@@ -116,7 +116,9 @@ jobs:
             cmake --preset ${{ matrix.preset }} -DCMAKE_BUILD_TYPE=Release -DSUPPLE_BUILD_TESTS=OFF -DSUPPLE_PACKAGE_ONLY=ON
           fi
       - name: Build distribution targets
-        run: cmake --build --preset ${{ matrix.preset }} --target package-runtime --parallel 6
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: ${{ matrix.platform == 'macos' && '2' || '6' }}
+        run: cmake --build --preset ${{ matrix.preset }} --target package-runtime --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
       - name: Package
         run: python3 tools/package/${{ matrix.platform }}.py --build-dir build/${{ matrix.preset }}
       - name: Linux install, smoke and uninstall

@@ -82,7 +82,7 @@ if(SUPPLE_BUILD_PLUGINS)
   foreach(product IN LISTS products)
     if(APPLE)
       install(DIRECTORY "${CMAKE_BINARY_DIR}/plugins/clap/${product}.clap"
-        DESTINATION "${plugin_dest}" COMPONENT Plugins)
+        DESTINATION "${plugin_dest}" USE_SOURCE_PERMISSIONS COMPONENT Plugins)
     else()
       install(FILES "${CMAKE_BINARY_DIR}/plugins/clap/${product}.clap"
         DESTINATION "${plugin_dest}" COMPONENT Plugins)
