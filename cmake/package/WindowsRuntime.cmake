@@ -19,11 +19,26 @@ file(GET_RUNTIME_DEPENDENCIES
   POST_INCLUDE_REGEXES ".*[Mm][Ss][Vv][Cc][Pp]140.*\\.[Dd][Ll][Ll]$"
                        ".*[Vv][Cc][Rr][Uu][Nn][Tt][Ii][Mm][Ee]140.*\\.[Dd][Ll][Ll]$"
                        ".*[Cc][Oo][Nn][Cc][Rr][Tt]140\\.[Dd][Ll][Ll]$"
-  POST_EXCLUDE_REGEXES ".*/[Ss][Yy][Ss][Tt][Ee][Mm]32/.*"
-                       ".*/[Ss][Yy][Ss][Ww][Oo][Ww]64/.*")
-if(unresolved OR conflicts_FILENAMES)
-  message(FATAL_ERROR "Runtime dependencies unresolved: ${unresolved}; conflicting: ${conflicts_FILENAMES}")
+  POST_EXCLUDE_REGEXES [=[.*[/\\][Ss][Yy][Ss][Tt][Ee][Mm]32[/\\].*]=]
+                       [=[.*[/\\][Ss][Yy][Ss][Ww][Oo][Ww]64[/\\].*]=])
+if(unresolved)
+  message(FATAL_ERROR "Runtime dependencies unresolved: ${unresolved}")
 endif()
+# vcpkg deploys identical DLLs beside multiple executables. CMake calls their
+# different paths a conflict; accept only byte-identical copies of one runtime.
+foreach(name IN LISTS conflicts_FILENAMES)
+  set(digest "")
+  foreach(candidate IN LISTS conflicts_${name})
+    file(SHA256 "${candidate}" candidate_digest)
+    if(NOT digest)
+      set(digest "${candidate_digest}")
+      set(source "${candidate}")
+    elseif(NOT digest STREQUAL candidate_digest)
+      message(FATAL_ERROR "Conflicting runtime versions for ${name}: ${conflicts_${name}}")
+    endif()
+  endforeach()
+  list(APPEND resolved "${source}")
+endforeach()
 set(names)
 foreach(library IN LISTS resolved)
   get_filename_component(name "${library}" NAME)
