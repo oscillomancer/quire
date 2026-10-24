@@ -1862,7 +1862,9 @@ TEST_CASE("Help opens the folder picker directly and shows compact results") {
     mcpScroll->scrollToEnd();
     a.root->frame(false);
     REQUIRE(a.root->click("help.mcp.json.copy"));
-    CHECK(a.root->clipboard() == json);
+    auto copied = a.root->clipboard();
+    std::erase(copied, '\r');  // the Windows clipboard holds CRLF line endings
+    CHECK(copied == json);
     mcpScroll->scrollTo(0);
     a.root->frame(false);
     a.snapshot("help-mcp.png");
