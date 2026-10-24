@@ -164,11 +164,19 @@ jobs:
           if [[ '${{ matrix.platform }}' == linux ]]; then
             echo "CCACHE_DIR=$GITHUB_WORKSPACE/.compiler-cache" >> "$GITHUB_ENV"
             echo "CCACHE_NOHASHDIR=true" >> "$GITHUB_ENV"
+            # Export tests configure fresh child projects; CMake reads these
+            # defaults even when the exported project's command has no flags.
+            echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+            echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
             echo "CCACHE_MAXSIZE=500M" >> "$GITHUB_ENV"
             cmake --preset dev -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           elif [[ '${{ matrix.platform }}' == macos ]]; then
             echo "CCACHE_DIR=$GITHUB_WORKSPACE/.compiler-cache" >> "$GITHUB_ENV"
             echo "CCACHE_NOHASHDIR=true" >> "$GITHUB_ENV"
+            # Export tests configure fresh child projects; CMake reads these
+            # defaults even when the exported project's command has no flags.
+            echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
+            echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "$GITHUB_ENV"
             echo "CCACHE_MAXSIZE=1G" >> "$GITHUB_ENV"
             cmake --preset macos -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           else

@@ -23,6 +23,7 @@
       },
       "cacheVariables": {
         "SUPPLE_BUILD_TESTS": "OFF",
+        "SUPPLE_PACKAGE_ONLY": "ON",
         "CMAKE_EXE_LINKER_FLAGS": "-static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL",
         "CMAKE_SHARED_LINKER_FLAGS": "-static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL",
         "CMAKE_MODULE_LINKER_FLAGS": "-static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL"

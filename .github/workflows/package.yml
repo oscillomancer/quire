@@ -111,9 +111,9 @@ jobs:
             # preserve modern warnings for our code in the native dev workflow.
             cmake --preset linux-package -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache "-DCMAKE_CXX_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/12 -Wno-deprecated-declarations"
           elif [[ '${{ matrix.platform }}' == macos ]]; then
-            cmake --preset macos -DCMAKE_BUILD_TYPE=Release -DSUPPLE_BUILD_TESTS=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+            cmake --preset macos -DCMAKE_BUILD_TYPE=Release -DSUPPLE_BUILD_TESTS=OFF -DSUPPLE_PACKAGE_ONLY=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           else
-            cmake --preset ${{ matrix.preset }} -DCMAKE_BUILD_TYPE=Release -DSUPPLE_BUILD_TESTS=OFF
+            cmake --preset ${{ matrix.preset }} -DCMAKE_BUILD_TYPE=Release -DSUPPLE_BUILD_TESTS=OFF -DSUPPLE_PACKAGE_ONLY=ON
           fi
       - name: Build distribution targets
         run: cmake --build --preset ${{ matrix.preset }} --target package-runtime --parallel 6

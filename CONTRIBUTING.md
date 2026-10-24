@@ -232,11 +232,11 @@ exports. CI uses Clang 22 with GCC 12's headers and static libstdc++, selected
 explicitly with `-DCMAKE_CXX_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/12`.
 See [ADR-0049](docs/decisions/0049-isolated-linux-package-runtimes.md). Do not bundle JACK or graphics drivers.
 
-On macOS use `cmake --preset macos -DCMAKE_BUILD_TYPE=Release`, build
+On macOS use `cmake --preset macos -DCMAKE_BUILD_TYPE=Release -DSUPPLE_BUILD_TESTS=OFF -DSUPPLE_PACKAGE_ONLY=ON`, build
 `package-runtime`, then `python3 tools/package/macos.py --build-dir build/macos`.
 It requires Apple Silicon, hdiutil, ditto, install_name_tool and codesign;
 signing is ad hoc without an account. On Windows use the `windows` preset
-with `-DCMAKE_BUILD_TYPE=Release`, build `package-runtime`, then
+with `-DCMAKE_BUILD_TYPE=Release -DSUPPLE_BUILD_TESTS=OFF -DSUPPLE_PACKAGE_ONLY=ON`, build `package-runtime`, then
 `python tools/package/windows.py --build-dir build/windows`. Install NSIS
 in the build environment first (Zlib compressor only); never change the
 working audio workstation's system packages for packaging.
@@ -259,3 +259,8 @@ throwaway `package-ci` branch can add a single push-trigger commit for branch
 validation. Keep that trigger off the integration branch; delete the temporary
 branch locally and remotely after validation. Push runs default to all platforms
 and never create draft releases.
+
+`SUPPLE_PACKAGE_ONLY=ON` selects the template's existing CLAP and notices
+targets, avoiding unshipped macOS AUv2 wrappers. It requires tests off; native
+regression builds keep the full plugin formats and test coverage. Packaging CI
+uses a shared compiler cache for Linux/macOS template instances.

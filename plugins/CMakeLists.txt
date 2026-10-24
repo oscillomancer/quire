@@ -33,6 +33,12 @@ if(SUPPLE_BUILD_PLUGINS)
     else()
       set(plugin_sanitize "")
     endif()
+    set(plugin_build_targets)
+    if(SUPPLE_PACKAGE_ONLY)
+      # Select existing template targets; leave its shared files unchanged.
+      # In particular, macOS packages ship CLAP alone, not AUv2 wrappers.
+      list(APPEND plugin_build_targets --target product-plugin_clap product-notices)
+    endif()
     set(tp "${CMAKE_SOURCE_DIR}/third_party")
     ExternalProject_Add(plugin-${name}
       SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/template"
@@ -71,7 +77,7 @@ if(SUPPLE_BUILD_PLUGINS)
         -DFETCHCONTENT_SOURCE_DIR_PUGL=${tp}/pugl
         -DFETCHCONTENT_SOURCE_DIR_NANOVG=${tp}/nanovg
         -DFETCHCONTENT_SOURCE_DIR_NANOSVG=${tp}/nanosvg
-      BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --parallel 1)
+      BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --parallel 1 ${plugin_build_targets})
     set(staged "${CMAKE_BINARY_DIR}/plugins/clap")
     if(APPLE)
       set(_stage_notices "${plugin_build}/plugins/${artifact}.clap/Contents/Resources")

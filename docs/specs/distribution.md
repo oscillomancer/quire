@@ -41,3 +41,7 @@ paths with nonrecursive directory cleanup. Linux records owned payload and
 integration paths, preserves user files during upgrade/removal, and prunes
 only owned directory ancestors. Optional macOS CLAP installation documents
 recursive quarantine removal after copying trusted plugins.
+
+`SUPPLE_PACKAGE_ONLY=ON` (with tests off) builds the template's existing CLAP
+and notice targets without unshipped wrappers. Normal native builds retain
+all plugin formats and tests; no shared template file changes are required.
