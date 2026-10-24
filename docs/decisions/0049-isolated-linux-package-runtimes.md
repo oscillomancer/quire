@@ -30,7 +30,11 @@ policy. GNU C declarations (`-D_GNU_SOURCE`) are enabled for the older glibc
 headers so the template renderer can use `RTLD_DEFAULT`, without altering its
 shared code. The GCC runtime exception
 and copyright notices still ship for the statically linked runtime, including
-in the optional stock-plugin notices copied for other hosts.
+in the optional stock-plugin notices copied for other hosts. X11's OS-provided
+transitive dependencies include libbsd and libmd on the Ubuntu 22.04 base;
+the audit accepts them as host libraries. Ubuntu documents the
+[libXdmcp → libbsd](https://packages.ubuntu.com/jammy/libxdmcp6) and
+[libbsd → libmd](https://packages.ubuntu.com/jammy/amd64/libbsd0) dependencies.
 No shared libstdc++ or libgcc_s is bundled or accepted as a packaged ELF
 dependency. The audit also rejects runtime exports and missing CLAP entry
 points. Optional `--plugins` copies therefore need no host libstdc++ upgrade.

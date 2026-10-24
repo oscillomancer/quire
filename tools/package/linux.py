@@ -13,7 +13,7 @@ from common import options, run, stage
 
 # Libraries provided by the OS/graphics drivers. Never bundle JACK or glibc.
 BASE = re.compile(r"^(linux-vdso\.so.*|ld-linux.*|lib(c|m|dl|pthread|rt|resolv|util)\.so\..*|"
-                  r"lib(GL|GLX|GLdispatch|OpenGL|EGL|GLESv2|X11|Xext|Xcursor|Xrandr|Xfixes|Xi|Xrender|Xss|Xinerama|Xau|Xdmcp|xcb|xcb-[\w-]+|asound|z)\.so\..*)$")
+                  r"lib(GL|GLX|GLdispatch|OpenGL|EGL|GLESv2|X11|Xext|Xcursor|Xrandr|Xfixes|Xi|Xrender|Xss|Xinerama|Xau|Xdmcp|xcb|xcb-[\w-]+|asound|z|bsd|md)\.so\..*)$")
 FORBIDDEN_RUNTIME = ("libstdc++", "libgcc_s")
 
 
@@ -27,6 +27,8 @@ def check_dependencies(tree, slug):
         with path.open("rb") as stream:
             if stream.read(4) != b"\x7fELF":
                 continue
+        if path.name.startswith("libjack"):
+            raise RuntimeError(f"{path}: JACK must never be bundled")
         if path.name.startswith(FORBIDDEN_RUNTIME):
             raise RuntimeError(f"{path}: shared C++ runtimes must not be bundled")
         checked += 1

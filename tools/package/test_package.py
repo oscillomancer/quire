@@ -114,7 +114,8 @@ class Dependencies(unittest.TestCase):
                 linux.check_dependencies(root, "example")
 
     def test_base_libraries(self):
-        self.check("libc.so.6 => /lib/libc.so.6 (0x1)\n/lib64/ld-linux-x86-64.so.2 (0x2)\n")
+        self.check("libc.so.6 => /lib/libc.so.6 (0x1)\n/lib64/ld-linux-x86-64.so.2 (0x2)\n"
+                   "libbsd.so.0 => /lib/libbsd.so.0 (0x3)\nlibmd.so.0 => /lib/libmd.so.0 (0x4)\n")
 
     def test_undeclared_library(self):
         with self.assertRaisesRegex(RuntimeError, "unbundled dependency"):
@@ -127,6 +128,8 @@ class Dependencies(unittest.TestCase):
     def test_jack_is_never_linked(self):
         with self.assertRaisesRegex(RuntimeError, "JACK"):
             self.check("libjack.so.0 => /usr/lib/libjack.so.0 (0x1)\n")
+        with self.assertRaisesRegex(RuntimeError, "JACK"):
+            self.check("", filename="libjack.so.0")
 
     def test_shared_cxx_runtimes_are_never_needed(self):
         for soname in ("libstdc++.so.6", "libgcc_s.so.1"):
