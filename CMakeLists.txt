@@ -65,6 +65,9 @@ if(Python3_FOUND)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/license-check/check.py --root ${CMAKE_SOURCE_DIR}
     COMMENT "Checking third-party licenses"
     VERBATIM)
+  if(TARGET package-runtime)
+    add_dependencies(package-runtime license-check)
+  endif()
   if(SUPPLE_BUILD_TESTS)
     add_test(NAME license-check
              COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/license-check/check.py --root ${CMAKE_SOURCE_DIR})
