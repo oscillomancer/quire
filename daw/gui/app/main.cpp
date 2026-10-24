@@ -40,6 +40,7 @@
 #include "file_actions.h"
 #include "fx_window.h"
 #include "generate.h"
+#include "help_actions.h"
 #include "history_panel.h"
 #include "learn_dialog.h"
 #include "meter_feed.h"
@@ -438,6 +439,9 @@ int main(int argc, char** argv) {
     gui::HistoryPanel history(root, appActions, dispatcher, **app);
     gui::FileActions fileActions(root, appActions, dispatcher, **app, uiState, (*window)->sdl(),
                                  [&](std::function<void()> f) { loop.post(std::move(f)); });
+    gui::HelpActions helpActions(
+        root, appActions, (*window)->sdl(),
+        [&](std::function<void()> f) { loop.post(std::move(f)); }, gui::help::ownExecutable());
     appActions.addUi(
         "ui.fx.editor", "FX: open or close editor", "fx", [&](const json::Value& v) -> Status {
             const auto id = v.isString() ? model::Id::parse(v.asString()) : std::nullopt;

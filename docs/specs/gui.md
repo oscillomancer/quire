@@ -796,7 +796,50 @@ Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
   config (`menus.json`, supple.menus/1.0). Edited in the app: Ctrl+T in the
   actions list puts the selected action on the toolbar (or takes it off),
   Ctrl+M adds it to a menu or removes it; a toolbar button's right-click menu
-  moves or removes it, or resets menus and toolbar.
+  moves or removes it, or resets menus and toolbar. The default top-level
+  menus end with Project, then Help. Loading an older `menus.json` appends
+  Help if absent; existing custom menus, toolbar and explicit Help edits remain.
+- **Help** provides four app-local actions (not engine command-registry entries):
+  `ui.help.skill`, `ui.help.skill_link`, `ui.help.mcp`, `ui.help.agent`.
+  **Download skill…** and **Download skill link…** open the native folder
+  picker directly, with no preset destination or intermediate panel. The chosen
+  folder receives `<slug>/SKILL.md` and the rest of the bundled `host::skillDir()`.
+  Copies are independent; links follow this installation's updates (a directory
+  symlink on Linux/macOS, a native directory junction on Windows, requiring no
+  administrator or developer mode). Existing skill folders or links require
+  an explicit Replace click. Files and folders without SKILL.md are refused,
+  as are destinations within, identical to, or containing the source skill.
+  Preparation happens on a worker before replacement; a failed publication
+  restores the previous target. Cleanup explicitly removes symlinks and Windows
+  reparse points as links, including links inside temporary or previous exports;
+  it never relies on recursive removal following platform-specific link rules.
+  Success and actionable failure appear in a compact result dialog.
+  **MCP server…** displays copyable absolute commands for this running copy's
+  adjacent `<slug>-mcp` and `<slug>-engine --mcp`, with build-tree fallback
+  (`mcp/` and `host/engine/`). A development `.app` under `daw/gui/` uses
+  the same fallback when the inferred build root contains `CMakeCache.txt`;
+  adjacent helpers always take precedence. It includes common `mcpServers`
+  JSON, stdio instructions, app-first startup, automatic reconnect and
+  `--instance NAME`.
+  **Connect an agent…** offers Claude Code, Codex and Hermes, with a copyable
+  registration command and Connect. Claude Code uses user scope; all three
+  use the current MCP executable. Connect searches PATH, common user install
+  folders, and the login shell on POSIX (including Finder launches). Windows
+  searches `.exe`, `.cmd` and `.bat`; npm shims run through a temporary batch
+  file with percent expansion escaped and delayed expansion disabled. The
+  copied Windows command is for PowerShell. Child processes run off the UI
+  thread with captured stdout/stderr, a 30-second deadline, bounded output,
+  cancellation on shutdown and owned process-tree cleanup. Hermes receives a
+  single blank response to enable discovered tools, but declines overwrites.
+  Codex checks its structural `mcp list --json` result for an existing
+  registration before its add command can replace it.
+  Temporary macOS App Translocation paths block copy/Connect and explain how
+  to move the app to Applications and restart. JSON preserves its copied
+  indentation; command tokens are quoted only when the platform shell needs it.
+  Panels fit their contents; longer operation output scrolls. The dialog reports
+  exit status and an output excerpt, including existing-registration outcomes;
+  a missing harness leaves the command available to copy. Skills are installed
+  separately through the two Download actions.
 - **Mouse modifiers:** a map per context — item drag
   (move, copy, slip; each also off the grid), item edge (trim, stretch), item
   click (select, toggle, extend), automation item edge (stretch, loop), fade

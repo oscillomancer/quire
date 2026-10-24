@@ -43,6 +43,29 @@ mixer, or Track > FX: add plugin….
 
 ## Driving Quire from an agent (MCP)
 
+On macOS, move Quire.app into Applications before connecting an agent. If
+macOS runs it from an App Translocation temporary location, Help blocks the
+copy/Connect controls and explains how to restart from a stable installation.
+See the [install guide](installing.md) for clearing quarantine.
+
+For an installed copy, use **Help > Connect an agent…** to register its
+running-app server with Claude Code, Codex or Hermes. Choose the agent, review
+the command, then click Connect (or Copy command to run it yourself). The result
+includes the exit status and output. If the name is already registered, review
+its path in your agent before replacing it. Restart or reconnect your agent
+after registering. Windows copied commands are for PowerShell.
+
+**Help > MCP server…** shows this copy's absolute paths, a headless command and
+general stdio/JSON instructions for any MCP client. **Help > Download skill…**
+copies the bundled skill into a folder you choose, under `quire/`; **Download
+skill link…** creates a symlink (Linux/macOS) or directory junction (Windows),
+which follows updates to that installation. Existing skills or links require
+confirmation; unrelated folders and files are protected. Add the resulting
+folder to your agent's skills separately. Keep the installation in place when
+using a link.
+
+For a development build, the manual commands below remain useful.
+
 `quire-mcp` serves the running app's commands as MCP tools over stdio: what an
 agent does lands in the same undo history as your own edits. Register it once:
 

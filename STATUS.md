@@ -165,7 +165,12 @@ instructions are in `docs/guides/installing.md`.
   the plugin browser, routing matrix, MIDI editor, render dialog, history
   dock with branches, actions list with key bindings and macros, editable
   menus, toolbar and mouse modifiers, screensets, two palettes in dark and
-  light, preferences, and tap tempo in the tempo form. The transport has a
+  light, preferences, and tap tempo in the tempo form. Help exports the bundled
+  skill as a copy or link, shows this copy's MCP commands and JSON, and registers
+  its running-app server with Claude Code, Codex or Hermes on a background
+  worker. Downloads open the native folder picker directly and report the result
+  in a compact notice. Temporary macOS translocation paths block registration.
+  Saved menu layouts that predate Help retain access to it. The transport has a
   master playrate knob, context menu, key-bindable pitch steps and
   per-project display range (ADR-0045). Projects and renders default to
   `~/Documents/<slug>-media` (the render folder is choosable), each project
@@ -604,6 +609,9 @@ Session and editing:
   squashed steps keep large invocation arguments.
 
 GUI:
+- Help onboarding has Linux unit/render coverage; the new Windows junction,
+  npm shim launch and macOS Finder lookup paths await native CI and manual
+  folder-picker trials. Native CI is run by the packaging coordinator.
 - Native shell/toolkit builds and tests pass CI (ADR-0039).
   Cocoa/Windows hidden-window tests replace Linux EGL offscreen;
   Linux golden references are unchanged. Native editor embedding is integrated

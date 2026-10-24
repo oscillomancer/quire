@@ -741,6 +741,10 @@ the bridge on Linux and the standalone scanner on other platforms; the
 compatibility error path remains `/bridge`. Missing scanner behavior and supervised
 background requirements are unchanged. ChildProcess::spawn(executable, args)
 uses native process creation with redirected stdout and null stdin/stderr.
+Windows `cmd.exe` switches stay bare because cmd parses its own switches.
+Its single batch-file path after `/c` or `/k` gets inner path quotes and an
+outer pair for `/s` to strip; other executables retain CRT quoting. Help uses
+this path for npm-installed agent CLIs.
 collect(steady_clock deadline, maxBytes) returns {text, exitCode, crashed};
 errors are child.spawn/io/wait/timeout/output_limit with path and hint. Scan
 rebases those error codes to host.scan.*. Destruction kills descendants and

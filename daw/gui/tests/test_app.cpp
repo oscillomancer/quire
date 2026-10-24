@@ -20,6 +20,7 @@
 #include "appearance.h"
 #include "chrome.h"
 #include "file_actions.h"
+#include "help_actions.h"
 #include "history_panel.h"
 #include "mixer.h"
 #include "mouse_dialog.h"
@@ -59,10 +60,10 @@ struct App {
     std::unique_ptr<gui::AppActions> actions;
     bool ok = false;
 
-    App() {
+    App(int width = 1000, int height = 640) {
         dir = std::filesystem::temp_directory_path() /
               ("supple-app-test-" + std::to_string(testProcessId()));
-        std::filesystem::remove_all(dir);
+        (void)gui::help::removeExportTree(dir);
         std::filesystem::create_directories(dir / "config");
         testConfigHome(dir / "config");
         auto p = gui::Platform::start(gui::Platform::Driver::Offscreen);
@@ -71,7 +72,7 @@ struct App {
 #endif
         if (!p) return;
         platform = std::move(*p);
-        auto w = gui::Window::open(*platform, {"app-test", 1000, 640, true});
+        auto w = gui::Window::open(*platform, {"app-test", width, height, true});
 #if !defined(__linux__)
         REQUIRE_MESSAGE(w, (w ? "" : w.error().message));
 #endif
@@ -114,7 +115,7 @@ struct App {
         root.reset();
         dispatcher.reset();
         app.reset();
-        std::filesystem::remove_all(dir);
+        (void)gui::help::removeExportTree(dir);
     }
     std::size_t tracks(std::string_view type = {}) const {
         std::size_t n = 0;
@@ -1787,4 +1788,140 @@ TEST_CASE("meter frames end at the floor including holds; hidden meters do not a
     CHECK_FALSE(feed.moving());
     CHECK_FALSE(feed.visible());
     feed.detach(&meter);
+}
+
+TEST_CASE("Help opens the folder picker directly and shows compact results") {
+    App a(1400, 900);
+    REQUIRE(a.ok);
+    std::mutex mutex;
+    std::condition_variable ready;
+    std::vector<std::function<void()>> posted;
+    auto post = [&](std::function<void()> task) {
+        std::lock_guard lock(mutex);
+        posted.push_back(std::move(task));
+        ready.notify_one();
+    };
+    auto pump = [&] {
+        std::function<void()> task;
+        {
+            std::unique_lock lock(mutex);
+            ready.wait(lock, [&] { return !posted.empty(); });
+            task = std::move(posted.front());
+            posted.erase(posted.begin());
+        }
+        task();
+    };
+    std::filesystem::path destination;
+    bool picked = false;
+    gui::HelpActions help(*a.root, *a.actions, a.window->sdl(), post, gui::help::ownExecutable(),
+                          [&](auto done, auto) {
+                              picked = true;
+                              CHECK_FALSE(a.root->find("help.panel"));
+                              done(destination);
+                          });
+    const auto layout = gui::ChromeLayout::defaults();
+    REQUIRE(layout.menus.back().title == "Help");
+    for (const auto& action : layout.menus.back().items)
+        REQUIRE(a.actions->registry().find(action));
+    for (const bool link : {false, true}) {
+        destination = a.dir / (link ? "link" : "copy");
+        std::filesystem::create_directories(destination);
+        picked = false;
+        REQUIRE(a.actions->run(link ? "ui.help.skill_link" : "ui.help.skill"));
+        CHECK(picked);
+        pump();  // native picker response
+        pump();  // export worker completion
+        a.root->frame(false);
+        const auto* panel = a.root->find("help.panel");
+        const auto* close = a.root->find("help.close");
+        REQUIRE(panel);
+        REQUIRE(close);
+        CHECK(panel->bounds().bottom() - close->bounds().bottom() < 24);
+        CHECK(a.root->find("help.status")
+                  ->valueText()
+                  .find(link ? "Link created at" : "Skill saved to") != std::string::npos);
+        CHECK(std::filesystem::exists(destination / std::string(product::kSlug) / "SKILL.md"));
+        a.snapshot(link ? "skill-link.png" : "skill.png");
+        REQUIRE(a.root->click("help.close"));
+        // Existing targets ask before the export worker is started.
+        REQUIRE(a.actions->run(link ? "ui.help.skill_link" : "ui.help.skill"));
+        pump();
+        REQUIRE(a.root->find("help.skill.replace"));
+        a.root->frame(false);
+        a.snapshot(link ? "skill-link-replace.png" : "skill-replace.png");
+        REQUIRE(a.root->click("help.close"));
+        REQUIRE(gui::help::removeExportTree(destination));
+    }
+    REQUIRE(a.actions->run("ui.help.mcp"));
+    a.root->frame(false);
+    REQUIRE(a.root->find("help.mcp.json"));
+    const auto json = a.root->find("help.mcp.json")->valueText();
+    CHECK(json.find("\n    ") != std::string::npos);
+    auto* mcpScroll = dynamic_cast<ui::ScrollView*>(a.root->find("help.mcp.scroll"));
+    REQUIRE(mcpScroll);
+    mcpScroll->scrollToEnd();
+    a.root->frame(false);
+    REQUIRE(a.root->click("help.mcp.json.copy"));
+    CHECK(a.root->clipboard() == json);
+    mcpScroll->scrollTo(0);
+    a.root->frame(false);
+    a.snapshot("help-mcp.png");
+    REQUIRE(a.actions->run("ui.help.agent"));
+    a.root->frame(false);
+    CHECK_FALSE(a.root->find("help.agent.selected"));
+    REQUIRE(a.root->click("help.agent.codex"));
+    CHECK(a.root->find("help.agent.command")->valueText().starts_with("codex mcp add "));
+    if (gui::help::nativePlatform() != gui::help::Platform::Windows)
+        CHECK(a.root->find("help.status")->valueText().find("PowerShell") == std::string::npos);
+    REQUIRE(a.root->click("help.agent.hermes"));
+    CHECK(a.root->find("help.status")->valueText().find("Hermes enables") != std::string::npos);
+    REQUIRE(a.root->click("help.agent.claude"));
+    CHECK(a.root->find("help.status")->valueText().find("Hermes enables") == std::string::npos);
+    a.root->frame(false);
+    CHECK(a.root->find("help.panel")->bounds().bottom() -
+              a.root->find("help.close")->bounds().bottom() <
+          24);
+    a.snapshot("help-agent.png");
+    REQUIRE(a.root->click("help.close"));
+    REQUIRE(a.root->click("menu.Help"));
+    a.root->frame(false);
+    a.snapshot("help-menu.png");
+}
+TEST_CASE("Help blocks connection commands from a macOS translocation path") {
+    App a;
+    REQUIRE(a.ok);
+    gui::HelpActions help(
+        *a.root, *a.actions, a.window->sdl(), [](auto task) { task(); },
+        std::filesystem::path("/private/AppTranslocation/id/d/Example.app/Contents/MacOS/app"));
+    for (const auto* action : {"ui.help.mcp", "ui.help.agent"}) {
+        REQUIRE(a.actions->run(action));
+        a.root->frame(false);
+        REQUIRE(a.root->find("help.status"));
+        CHECK(a.root->find("help.status")->valueText().find("Applications") != std::string::npos);
+        CHECK_FALSE(a.root->find("help.agent.connect"));
+        CHECK_FALSE(a.root->find("help.agent.copy"));
+        CHECK_FALSE(a.root->find("help.mcp.proxy.copy"));
+    }
+    a.snapshot("help-translocation.png");
+}
+
+TEST_CASE("Help identifies only the missing MCP helper") {
+    App a;
+    REQUIRE(a.ok);
+    const auto executable = a.dir / "installed" / std::string(product::kSlug);
+    const auto helpers = gui::help::executables(executable, gui::help::nativePlatform());
+    std::filesystem::create_directories(executable.parent_path());
+    REQUIRE(writeFileAtomic(helpers.mcp, "fixture"));
+    gui::HelpActions help(
+        *a.root, *a.actions, a.window->sdl(), [](auto task) { task(); }, executable);
+    REQUIRE(a.actions->run("ui.help.mcp"));
+    a.root->frame(false);
+    const auto message = a.root->find("help.mcp.missing")->valueText();
+    const auto engineText = helpers.engine.u8string();
+    CHECK(message.find(std::string(engineText.begin(), engineText.end())) != std::string::npos);
+    CHECK(message.find("Missing helper: " + helpers.mcp.string()) == std::string::npos);
+    CHECK(a.root->find("help.panel")->bounds().bottom() -
+              a.root->find("help.close")->bounds().bottom() >=
+          16);
+    a.snapshot("help-missing-helper.png");
 }
