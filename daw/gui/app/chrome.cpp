@@ -107,6 +107,7 @@ ChromeLayout ChromeLayout::defaults() {
           "transport.seek:start", "transport.seek:end"}},
         {"Project",
          {"project.timebase:beats", "project.timebase:time", "project.timebase:beats_position"}},
+        {"Help", {"ui.help.skill", "ui.help.skill_link", "ui.help.mcp", "ui.help.agent"}},
     };
     // Transport actions live in the transport bar's own row; not duplicated here.
     l.toolbar = {"history.undo", "history.redo", "track.add:channel", "ui.actions"};
@@ -160,6 +161,11 @@ Result<ChromeLayout> ChromeLayout::load(const std::filesystem::path& file) {
         if (!ids) return std::move(ids).error();
         l.toolbar = std::move(*ids);
     }
+    // Older saved layouts must retain a route to onboarding. Preserve an
+    // explicitly customized Help menu, but append it when the file predates Help.
+    if (std::none_of(l.menus.begin(), l.menus.end(),
+                     [](const Menu& m) { return m.title == "Help"; }))
+        l.menus.push_back(defaults().menus.back());
     return l;
 }
 

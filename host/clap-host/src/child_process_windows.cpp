@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <algorithm>
 #include <array>
+#include <cwctype>
 #include <vector>
 #include "platform.h"
 #include "supple/base/waitable.h"
@@ -129,8 +130,25 @@ Result<std::unique_ptr<ChildProcess>> ChildProcess::spawn(const std::filesystem:
     startup.StartupInfo.hStdError = standardError;
     startup.lpAttributeList = attributes;
     std::wstring command = quote(executable.wstring());
-    for (const auto& arg : arguments)
-        command += L" " + quote(platform::pathFromText(arg).wstring());
+    auto filename = executable.filename().wstring();
+    std::transform(filename.begin(), filename.end(), filename.begin(),
+                   [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+    const bool shell = filename == L"cmd.exe";
+    bool commandArgument = false;
+    for (const auto& arg : arguments) {
+        const auto text = platform::pathFromText(arg).wstring();
+        // cmd parses its own switches rather than a CRT argv. Keep switches
+        // bare; the final batch-file path remains quoted as one command.
+        const bool option = shell && !text.empty() && text.front() == L'/' &&
+                            text.find_first_of(L" \t\r\n\"") == std::wstring::npos;
+        if (shell && commandArgument) {
+            // /s strips this outer pair, retaining the quoted batch-file path.
+            command += L" \"" + quote(text) + L"\"";
+        } else {
+            command += L" " + (option ? text : quote(text));
+        }
+        commandArgument = shell && (text == L"/c" || text == L"/k");
+    }
     PROCESS_INFORMATION process{};
     if (!CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, TRUE,
                         EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_NO_WINDOW, nullptr,

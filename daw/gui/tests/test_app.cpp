@@ -20,6 +20,7 @@
 #include "appearance.h"
 #include "chrome.h"
 #include "file_actions.h"
+#include "help_actions.h"
 #include "history_panel.h"
 #include "mixer.h"
 #include "mouse_dialog.h"
@@ -1787,4 +1788,33 @@ TEST_CASE("meter frames end at the floor including holds; hidden meters do not a
     CHECK_FALSE(feed.moving());
     CHECK_FALSE(feed.visible());
     feed.detach(&meter);
+}
+
+TEST_CASE("Help actions expose the panels and keep onboarding in the last menu") {
+    App a;
+    REQUIRE(a.ok);
+    gui::HelpActions help(
+        *a.root, *a.actions, a.window->sdl(), [](std::function<void()> work) { work(); },
+        gui::help::ownExecutable());
+    const auto layout = gui::ChromeLayout::defaults();
+    REQUIRE(layout.menus.back().title == "Help");
+    for (const auto& action : layout.menus.back().items) {
+        REQUIRE(a.actions->registry().find(action));
+        REQUIRE(a.actions->run(action));
+        a.root->frame(false);
+        REQUIRE(a.root->find("help.title"));
+        REQUIRE(a.root->find("help.close"));
+    }
+    REQUIRE(a.root->find("help.agent.claude"));
+    REQUIRE(a.root->find("help.agent.codex"));
+    REQUIRE(a.root->find("help.agent.hermes"));
+    REQUIRE(a.root->click("help.agent.codex"));
+    CHECK(a.root->find("help.agent.command")->valueText().find("codex") != std::string::npos);
+    REQUIRE(a.root->click("help.agent.hermes"));
+    CHECK(a.root->find("help.agent.command")->valueText().find("--command") != std::string::npos);
+    a.snapshot("help-agent.png");
+    REQUIRE(a.root->click("help.close"));
+    REQUIRE(a.root->click("menu.Help"));
+    a.root->frame(false);
+    a.snapshot("help-menu.png");
 }

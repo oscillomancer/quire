@@ -1,0 +1,315 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
+#include "help_actions.h"
+#include <SDL3/SDL.h>
+#include <algorithm>
+#include <cctype>
+#include "supple/host/clap_host.h"
+#include "supple/json/write.h"
+#include "supple/product.h"
+#include "supple/ui/scroll_view.h"
+#include "supple/ui/widgets.h"
+
+namespace supple::gui {
+namespace {
+std::string pathText(const std::filesystem::path& p) {
+    const auto s = p.u8string();
+    return {s.begin(), s.end()};
+}
+void paragraph(ui::Node& parent, const std::string& id, const std::string& text) {
+    parent.emplace<ui::TextBlock>(id, text, ui::Font::Ui, "small", "ink-quiet");
+}
+ui::Node& row(ui::Node& parent, const std::string& id) {
+    auto& r = parent.emplace<ui::Node>(id);
+    r.layout.dir = ui::Layout::Dir::Row;
+    r.layout.height = ui::SizeRule::fixed(30);
+    r.layout.gap = 8;
+    return r;
+}
+struct FolderRequest {
+    std::function<void(DialogLifetime::Paths)> done;
+    std::function<void(std::string)> error;
+};
+void SDLCALL folderResult(void* userdata, const char* const* files, int) {
+    std::unique_ptr<FolderRequest> request(static_cast<FolderRequest*>(userdata));
+    if (!files) return request->error(SDL_GetError());
+    if (*files)
+        request->done(
+            {std::filesystem::path(std::u8string_view(reinterpret_cast<const char8_t*>(*files)))});
+}
+}  // namespace
+HelpActions::HelpActions(ui::Root& root, AppActions& actions, SDL_Window* window,
+                         DialogLifetime::Post post, std::filesystem::path executable)
+    : root_(root),
+      window_(window),
+      post_(std::move(post)),
+      executables_(help::executables(executable, help::nativePlatform())) {
+    actions.addUi("ui.help.skill", "Help: download skill…", [this] { download(false); });
+    actions.addUi("ui.help.skill_link", "Help: download skill link…", [this] { download(true); });
+    actions.addUi("ui.help.mcp", "Help: MCP server…", [this] { mcp(); });
+    actions.addUi("ui.help.agent", "Help: connect an agent…", [this] { agents(); });
+}
+HelpActions::~HelpActions() {
+    lifetime_->alive.store(false);
+    lifetime_->cancelled.store(true);
+    if (worker_.joinable()) worker_.join();
+}
+std::unique_ptr<ui::Node> HelpActions::panel(const std::string& title, float height) {
+    ++generation_;
+    root_.closePopups();
+    auto form = std::make_unique<ui::Node>("help.panel");
+    form->layout.dir = ui::Layout::Dir::Column;
+    form->layout.width = ui::SizeRule::fixed(720);
+    form->layout.height = ui::SizeRule::fixed(height);
+    form->layout.padding = ui::Insets::all(18);
+    form->layout.gap = 12;
+    form->emplace<ui::Label>("help.title", title, ui::Font::UiBold, "body");
+    return form;
+}
+void HelpActions::status(const std::string& text) {
+    if (auto* label = dynamic_cast<ui::TextBlock*>(root_.find("help.status"))) {
+        label->setText(text);
+        root_.relayout();
+        root_.damageAll();
+    }
+}
+void HelpActions::refreshButtons() {
+    for (const auto* id : {"help.agent.claude", "help.agent.codex", "help.agent.hermes",
+                           "help.agent.connect", "help.skill.choose", "help.skill.replace"})
+        if (auto* button = root_.find(id)) button->enabled = !busy_;
+    root_.damageAll();
+}
+void HelpActions::copy(const std::string& text) {
+    status(SDL_SetClipboardText(text.c_str()) ? "Copied to clipboard."
+                                              : "Could not copy: " + std::string(SDL_GetError()));
+}
+void HelpActions::background(Work work) {
+    if (busy_) return status("An operation is still running. Wait for it to finish.");
+    if (worker_.joinable()) worker_.join();
+    busy_ = true;
+    refreshButtons();
+    status("Working…");
+    const unsigned generation = generation_;
+    auto state = lifetime_;
+    auto post = post_;
+    worker_ = std::thread([this, state, post, generation, work = std::move(work)] {
+        std::string result;
+        try {
+            result = work();
+        } catch (const std::exception& error) {
+            result = "Could not complete the operation: " + std::string(error.what());
+        }
+        if (state->alive.load())
+            post([this, state, generation, result = std::move(result)] {
+                if (!state->alive.load()) return;
+                busy_ = false;
+                refreshButtons();
+                if (generation == generation_) status(result);
+            });
+    });
+}
+void HelpActions::download(bool link) {
+    link_ = link;
+    folder_.clear();
+    auto form = panel(link ? "Download skill link" : "Download skill", 350);
+    paragraph(*form, "help.skill.about",
+              link ? "Choose any folder for a link to this copy's bundled skill. The link follows "
+                     "updates to this installation. Keep this installation in place while using it."
+                   : "Choose any folder for a copy of this installation's bundled skill. Add that "
+                     "folder to your agent's skills.");
+    paragraph(*form, "help.skill.destination",
+              "The chosen folder will contain a skill folder named " + std::string(product::kSlug) +
+                  ", with SKILL.md inside.");
+    paragraph(*form, "help.status", "Choose a destination folder to continue.");
+    auto& buttons = row(*form, "help.skill.buttons");
+    buttons.emplace<ui::Button>("help.skill.choose", "Choose folder…", [this] { chooseFolder(); });
+    auto& replace = buttons.emplace<ui::Button>("help.skill.replace", "Replace existing skill",
+                                                [this] { install(true); });
+    replace.visible = false;
+    buttons.emplace<ui::Button>("help.close", "Close", [this] { root_.closePopup(); });
+    root_.openPopup(std::move(form), {}, ui::Placement::Center);
+    refreshButtons();
+}
+void HelpActions::chooseFolder() {
+    if (busy_) return status("An operation is still running.");
+    const auto generation = generation_;
+    auto done = dialogs_.guard(post_, [this, generation](auto paths) {
+        if (generation == generation_) chosen(paths.front());
+    });
+    auto state = lifetime_;
+    auto error = [this, state, post = post_, generation](std::string message) {
+        if (state->alive.load())
+            post([this, state, generation, message = std::move(message)] {
+                if (state->alive.load() && generation == generation_)
+                    status("Folder picker failed: " + message);
+            });
+    };
+    SDL_ShowOpenFolderDialog(folderResult, new FolderRequest{std::move(done), std::move(error)},
+                             window_, nullptr, false);
+}
+void HelpActions::chosen(const std::filesystem::path& parent) {
+    folder_ = parent;
+    const auto target = parent / std::string(product::kSlug);
+    const auto kind = help::inspectTarget(target);
+    auto* replace = root_.find("help.skill.replace");
+    if (replace) replace->visible = kind == help::Target::Link || kind == help::Target::Skill;
+    if (kind == help::Target::Refuse) {
+        status("Cannot replace " + pathText(target) +
+               ": it is not a skill folder or a link. Choose another folder.");
+    } else if (kind != help::Target::Missing) {
+        status(
+            pathText(target) +
+            " already exists. Replace this skill or link? Its current contents will be removed.");
+    } else
+        install(false);
+    root_.relayout();
+}
+void HelpActions::install(bool replace) {
+    if (folder_.empty()) return;
+    const auto parent = folder_;
+    const bool link = link_;
+    if (auto* button = root_.find("help.skill.replace")) button->visible = false;
+    background([parent, link, replace] {
+        auto source = host::skillDir();
+        if (!source)
+            return std::string(
+                "Bundled skill not found. Restore this installation's skill folder, then try "
+                "again.");
+        auto result = help::exportSkill(*source, parent, link, replace);
+        return result ? std::string(link ? "Skill link created: " : "Skill copied: ") +
+                            pathText(*result)
+                      : "Skill download failed: " + result.error().toString();
+    });
+}
+void HelpActions::mcp() {
+    auto form = panel("MCP server", 610);
+    auto& scroll = form->emplace<ui::ScrollView>("help.mcp.scroll");
+    scroll.layout.height = ui::SizeRule::fraction();
+    auto& content = scroll.content();
+    content.layout.gap = 12;
+    const auto platform = help::nativePlatform();
+    const auto proxy = help::commandText(pathText(executables_.mcp), {}, platform);
+    const auto engine = help::commandText(pathText(executables_.engine), {"--mcp"}, platform);
+    paragraph(content, "help.mcp.intro",
+              "MCP clients start a stdio server by running a command. Add a stdio server named " +
+                  std::string(product::kSlug) +
+                  " using one of these commands (paths belong to this running copy).");
+    paragraph(content, "help.mcp.proxy", "Running app\n" + proxy);
+    row(content, "help.mcp.proxy.buttons")
+        .emplace<ui::Button>("help.mcp.proxy.copy", "Copy running-app command",
+                             [this, proxy] { copy(proxy); });
+    paragraph(content, "help.mcp.headless", "Headless (renders, no window)\n" + engine);
+    row(content, "help.mcp.engine.buttons")
+        .emplace<ui::Button>("help.mcp.engine.copy", "Copy headless command",
+                             [this, engine] { copy(engine); });
+    paragraph(content, "help.mcp.instructions",
+              "Start " + std::string(product::kName) +
+                  " first when using the running-app server. It reconnects on the next tool call "
+                  "after the app restarts. For a second instance, start the app with --instance "
+                  "NAME and add --instance NAME to the server's arguments.");
+    json::Value entry = json::Value::object(), servers = json::Value::object(),
+                config = json::Value::object();
+    entry["command"] = pathText(executables_.mcp);
+    entry["args"] = json::Value::array();
+    servers[std::string(product::kSlug)] = std::move(entry);
+    config["mcpServers"] = std::move(servers);
+    const std::string text = json::write(config).value();
+    content.emplace<ui::TextBlock>("help.mcp.json", "Common JSON configuration\n" + text,
+                                   ui::Font::Mono, "caption", "ink-quiet");
+    row(content, "help.mcp.json.buttons")
+        .emplace<ui::Button>("help.mcp.json.copy", "Copy JSON", [this, text] { copy(text); });
+    paragraph(content, "help.mcp.skill",
+              "Add the skill separately with Help > Download skill or Download skill link.");
+    paragraph(
+        *form, "help.status",
+        "Commands use absolute paths. A missing helper means this installation is incomplete.");
+    row(*form, "help.buttons").emplace<ui::Button>("help.close", "Close", [this] {
+        root_.closePopup();
+    });
+    root_.openPopup(std::move(form), {}, ui::Placement::Center);
+    refreshButtons();
+}
+void HelpActions::agents() {
+    auto form = panel("Connect an agent", 460);
+    paragraph(*form, "help.agent.intro",
+              "Register this copy's running-app MCP server in your agent's user configuration. "
+              "Hermes enables all discovered tools. Start " +
+                  std::string(product::kName) +
+                  " before using it, then restart or reconnect the agent.");
+    auto& choices = row(*form, "help.agent.choices");
+    choices.emplace<ui::Button>("help.agent.claude", "Claude Code",
+                                [this] { select(help::Harness::Claude); });
+    choices.emplace<ui::Button>("help.agent.codex", "Codex",
+                                [this] { select(help::Harness::Codex); });
+    choices.emplace<ui::Button>("help.agent.hermes", "Hermes",
+                                [this] { select(help::Harness::Hermes); });
+    paragraph(*form, "help.agent.selected", "");
+    paragraph(*form, "help.agent.command", "");
+    paragraph(*form, "help.agent.skill",
+              "The skill is added separately via Help > Download skill / Download skill link.");
+    auto& scroll = form->emplace<ui::ScrollView>("help.agent.output");
+    scroll.layout.height = ui::SizeRule::fraction();
+    paragraph(scroll.content(), "help.status", "");
+    auto& buttons = row(*form, "help.agent.buttons");
+    buttons.emplace<ui::Button>("help.agent.copy", "Copy command", [this] {
+        copy(help::commandText(help::harnessCommand(harness_),
+                               help::registrationArgs(harness_, pathText(executables_.mcp)),
+                               help::nativePlatform()));
+    });
+    buttons.emplace<ui::Button>("help.agent.connect", "Connect", [this] { connect(); });
+    buttons.emplace<ui::Button>("help.close", "Close", [this] { root_.closePopup(); });
+    root_.openPopup(std::move(form), {}, ui::Placement::Center);
+    select(harness_);
+    refreshButtons();
+}
+void HelpActions::select(help::Harness harness) {
+    harness_ = harness;
+    const auto name = harness == help::Harness::Claude  ? "Claude Code"
+                      : harness == help::Harness::Codex ? "Codex"
+                                                        : "Hermes";
+    if (auto* label = dynamic_cast<ui::TextBlock*>(root_.find("help.agent.selected")))
+        label->setText(std::string("Selected: ") + name);
+    if (auto* label = dynamic_cast<ui::TextBlock*>(root_.find("help.agent.command")))
+        label->setText(help::commandText(
+            help::harnessCommand(harness),
+            help::registrationArgs(harness, pathText(executables_.mcp)), help::nativePlatform()));
+    status(busy_ ? "An operation is still running."
+                 : "Connect runs this command in the background. On Windows, the copied command is "
+                   "for PowerShell. Existing registrations are reported by the agent; review the "
+                   "result before reconnecting.");
+}
+void HelpActions::connect() {
+    const auto harness = harness_;
+    const auto mcp = executables_.mcp;
+    const auto state = lifetime_;
+    background([harness, mcp, state] {
+        const auto exe = help::findHarness(harness, [state] { return state->cancelled.load(); });
+        if (exe.empty())
+            return help::harnessCommand(harness) +
+                   " was not found. Install it or copy the command and run it in your terminal.";
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(mcp, ec))
+            return std::string("MCP executable is missing: ") + pathText(mcp) +
+                   ". Restore this installation before connecting.";
+        const auto result = help::registerHarness(harness, exe, pathText(mcp),
+                                                  [state] { return state->cancelled.load(); });
+        if (!result) return std::string("Connection command failed: ") + result.error().toString();
+        std::string text = result->text;
+        std::string lower = text;
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        const bool reportedFailure = lower.find("cancelled") != std::string::npos ||
+                                     lower.find("failed to connect") != std::string::npos ||
+                                     lower.find("not saved") != std::string::npos;
+        std::string outcome = result->exitCode == 0 && !reportedFailure
+                                  ? "Registration command completed"
+                                  : "Registration command failed or was cancelled";
+        if (lower.find("already exists") != std::string::npos ||
+            lower.find("already configured") != std::string::npos)
+            outcome =
+                "A server with this name is already registered. Check its path in the agent before "
+                "replacing it";
+        return outcome + " (exit " + std::to_string(result->exitCode) + ").\n" + text;
+    });
+}
+}  // namespace supple::gui
