@@ -59,9 +59,9 @@ class Root {
     void handle(const SDL_Event& e);
     bool wantsFrame() const;
     // Lays out if needed, repaints damage into the cache, blits it, paints the
-    // overlays. present=false leaves the frame in the back buffer (snapshots).
+    // overlays. present=false composes a snapshot for readBack().
     void frame(bool present = true);
-    gui::Image readBack() const { return window_.readPixels(); }
+    gui::Image readBack() const;
 
     // --- damage and layout
     void damage(const Rect& area);

@@ -257,11 +257,13 @@ class Grid : public ui::Node {
 
 }  // namespace
 
-RoutingMatrix::RoutingMatrix(ui::Root& root, AppActions& actions, cmd::Dispatcher& dispatcher,
+RoutingMatrix::RoutingMatrix(FloatingPanel& panel, AppActions& actions, cmd::Dispatcher& dispatcher,
                              engine::EngineApp& app)
-    : root_(root), actions_(actions), dispatcher_(dispatcher), app_(app) {
+    : panel_(panel), actions_(actions), dispatcher_(dispatcher), app_(app) {
     actions_.addUi("ui.routing", "View: routing matrix", [this] { open(); });
 }
+
+RoutingMatrix::~RoutingMatrix() { close(); }
 
 Result<json::Value> RoutingMatrix::exec(const std::string& command, json::Value args) {
     auto r = dispatcher_.execute({command, std::move(args), kOrigin});
@@ -356,11 +358,18 @@ Status RoutingMatrix::reload() {
 }
 
 void RoutingMatrix::open(std::optional<ui::Rect> anchor) {
-    if (isOpen()) return;
+    if (isOpen()) {
+        panel_.raise();
+        return;
+    }
+    if (auto ready = panel_.ensure(); !ready) {
+        if (actions_.onError) actions_.onError(ready.error().message);
+        return;
+    }
     auto panel = std::make_unique<ui::Node>("routing");
     panel->layout.dir = ui::Layout::Dir::Column;
-    panel->layout.width = ui::SizeRule::fixed(860);
-    panel->layout.height = ui::SizeRule::fixed(560);
+    panel->layout.width = ui::SizeRule::fraction();
+    panel->layout.height = ui::SizeRule::fraction();
     panel->layout.padding = ui::Insets::all(10);
     panel->layout.gap = 8;
     auto& header = panel->emplace<ui::Node>("routing.header");
@@ -369,7 +378,7 @@ void RoutingMatrix::open(std::optional<ui::Rect> anchor) {
     header.layout.align = ui::Layout::Align::Center;
     auto& title = header.emplace<ui::Label>("routing.title", "Routing", ui::Font::UiBold, "body");
     title.layout.width = ui::SizeRule::fraction();
-    header.emplace<ui::Button>("routing.close", "Close", [this] { root_.closePopup(); });
+    header.emplace<ui::Button>("routing.close", "Close", [this] { close(); });
     auto& grid = panel->emplace<Grid>(
         model_, [this](std::size_t row, std::size_t col) { (void)clickCell(row, col); },
         [this](std::optional<std::pair<std::size_t, std::size_t>> cell) {
@@ -485,9 +494,9 @@ void RoutingMatrix::open(std::optional<ui::Rect> anchor) {
             items.push_back(std::move(m));
         }
         const ui::Rect b = channels_->bounds();
-        root_.openPopup(
-            ui::makeMenu("routing.channels.menu", std::move(items), [this] { root_.closePopup(); }),
-            b, ui::Placement::Below);
+        root().openPopup(ui::makeMenu("routing.channels.menu", std::move(items),
+                                      [this] { root().closePopup(); }),
+                         b, ui::Placement::Below);
     });
     channels_->layout.width = ui::SizeRule::fixed(96);
     phase_ = &details_->emplace<ui::Button>("routing.phase", "\u00f8", [this] {
@@ -516,17 +525,19 @@ void RoutingMatrix::open(std::optional<ui::Rect> anchor) {
     });
     status_ = &panel->emplace<ui::Label>("routing.status", "", ui::Font::Ui, "small", "ink-quiet");
     status_->layout.height = ui::SizeRule::fixed(18);
-    root_.openPopup(std::move(panel), anchor.value_or(ui::Rect{}),
-                    anchor ? ui::Placement::Below : ui::Placement::Center, [this] {
-                        grid_ = nullptr;
-                        status_ = sendTitle_ = nullptr;
-                        details_ = nullptr;
-                        volume_ = pan_ = nullptr;
-                        mute_ = nullptr;
-                        channels_ = phase_ = nullptr;
-                        taps_.clear();
-                        selected_.reset();
-                    });
+    panel_.open(
+        std::move(panel),
+        [this] {
+            grid_ = nullptr;
+            status_ = sendTitle_ = nullptr;
+            details_ = nullptr;
+            volume_ = pan_ = nullptr;
+            mute_ = nullptr;
+            channels_ = phase_ = nullptr;
+            taps_.clear();
+            selected_.reset();
+        },
+        anchor);
     if (auto r = reload(); !r && status_) status_->setText(r.error().message);
     if (status_) status_->setText(status());
 }

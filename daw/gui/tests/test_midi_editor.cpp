@@ -158,12 +158,13 @@ struct Fixture {
         const ui::Rect b = root->find("midi.grip")->bounds();
         return {b.x + b.w / 2, b.y + b.h / 2};
     }
-    void snapshot(const char* name) {
+    void snapshot(const char* name, ui::Root* source = nullptr) {
         const char* out = std::getenv("SUPPLE_TEST_SNAPSHOTS");
         if (!out) return;
-        root->damageAll();
-        root->frame(false);
-        (void)gui::writePng(std::filesystem::path(out) / name, root->readBack());
+        auto& target = source ? *source : *root;
+        target.damageAll();
+        target.frame(false);
+        (void)gui::writePng(std::filesystem::path(out) / name, target.readBack());
     }
 };
 
@@ -689,9 +690,11 @@ TEST_CASE("routing matrix: rules shown, a click sends, the send edits and goes")
     const std::string verb =
         f.exec("track.add", R"({"type":"buss","name":"Verb"})")["track"].asString();
     f.exec("route.add", R"({"from":")" + verb + R"(","to":")" + drums + R"("})");
-    gui::RoutingMatrix matrix(*f.root, *f.actions, *f.dispatcher, *f.app);
+    gui::FloatingPanel panel(*f.platform, *f.window, *f.root, SUPPLE_GUI_FONTS_DIR, "Routing", 860,
+                             560, 800, 360);
+    gui::RoutingMatrix matrix(panel, *f.actions, *f.dispatcher, *f.app);
     matrix.open();
-    f.root->frame(false);
+    panel.root().frame(false);
     REQUIRE(matrix.isOpen());
     const auto& m = matrix.model();
     auto row = [&](const std::string& id) {
@@ -718,7 +721,7 @@ TEST_CASE("routing matrix: rules shown, a click sends, the send edits and goes")
     // Hovering a blocked cell says why.
     auto* grid = matrix.grid();
     REQUIRE(grid);
-    f.snapshot("routing-open.png");
+    f.snapshot("routing-open.png", &panel.root());
     // A click on an allowed cell sends (one version) and selects the new send.
     const auto v = f.app->head().version;
     REQUIRE(matrix.clickCell(row(keys), col(drums)));
@@ -729,46 +732,46 @@ TEST_CASE("routing matrix: rules shown, a click sends, the send edits and goes")
     CHECK_FALSE(matrix.clickCell(row(drums), col(verb)));
     CHECK(f.app->head().version == v + 1);
     // Edit the send: level with units, pre-fader, mute; then remove it.
-    f.root->click("routing.volume");
-    f.root->key(SDLK_A, ui::kCtrl);
-    f.root->text("-6 dB");
-    f.root->key(SDLK_RETURN, 0);
+    panel.root().click("routing.volume");
+    panel.root().key(SDLK_A, ui::kCtrl);
+    panel.root().text("-6 dB");
+    panel.root().key(SDLK_RETURN, 0);
     CHECK(m.sendsAt(row(keys), col(drums)).front()->volumeDb == doctest::Approx(-6.0));
-    REQUIRE(f.root->click("routing.tap.pre"));
+    REQUIRE(panel.root().click("routing.tap.pre"));
     CHECK(m.sendsAt(row(keys), col(drums)).front()->tap == "pre_fader");
-    REQUIRE(f.root->click("routing.mute"));
+    REQUIRE(panel.root().click("routing.mute"));
     CHECK(m.sendsAt(row(keys), col(drums)).front()->mute);
-    f.snapshot("routing-send.png");
+    f.snapshot("routing-send.png", &panel.root());
     // Channels: the menu's second row swaps left and right (route.set channels).
-    REQUIRE(f.root->click("routing.channels"));
-    f.root->frame(false);
-    ui::Node* menu = f.root->find("routing.channels.menu");
+    REQUIRE(panel.root().click("routing.channels"));
+    panel.root().frame(false);
+    ui::Node* menu = panel.root().find("routing.channels.menu");
     REQUIRE(menu);
     const ui::Point swapRow{menu->bounds().x + 30, menu->bounds().y + 26 + 13};
-    f.root->pointer({ui::PointerEvent::Type::Move, swapRow});
-    f.root->pointer({ui::PointerEvent::Type::Down, swapRow, 1});
-    f.root->pointer({ui::PointerEvent::Type::Up, swapRow, 1});
-    f.root->frame(false);
+    panel.root().pointer({ui::PointerEvent::Type::Move, swapRow});
+    panel.root().pointer({ui::PointerEvent::Type::Down, swapRow, 1});
+    panel.root().pointer({ui::PointerEvent::Type::Up, swapRow, 1});
+    panel.root().frame(false);
     CHECK(m.sendsAt(row(keys), col(drums)).front()->mapTo == std::vector<int>{2, 1});
-    CHECK(f.root->find("routing.channels")->valueText() == "Swap R/L");
+    CHECK(panel.root().find("routing.channels")->valueText() == "Swap R/L");
     // A 4-channel destination offers its aux pair (ADR-0020): row 7, "1/2 -> 3/4".
     f.exec("track.set", R"({"track":")" + drums + R"(","channels":4})");
     matrix.sync();
-    REQUIRE(f.root->click("routing.channels"));
-    f.root->frame(false);
-    menu = f.root->find("routing.channels.menu");
+    REQUIRE(panel.root().click("routing.channels"));
+    panel.root().frame(false);
+    menu = panel.root().find("routing.channels.menu");
     REQUIRE(menu);
     const ui::Point auxRow{menu->bounds().x + 30, menu->bounds().y + 7 * 26 + 13};
-    f.root->pointer({ui::PointerEvent::Type::Move, auxRow});
-    f.root->pointer({ui::PointerEvent::Type::Down, auxRow, 1});
-    f.root->pointer({ui::PointerEvent::Type::Up, auxRow, 1});
-    f.root->frame(false);
+    panel.root().pointer({ui::PointerEvent::Type::Move, auxRow});
+    panel.root().pointer({ui::PointerEvent::Type::Down, auxRow, 1});
+    panel.root().pointer({ui::PointerEvent::Type::Up, auxRow, 1});
+    panel.root().frame(false);
     CHECK(m.sendsAt(row(keys), col(drums)).front()->mapTo == std::vector<int>{3, 4});
-    CHECK(f.root->find("routing.channels")->valueText() == "1/2\u21923/4");
-    REQUIRE(f.root->click("routing.phase"));
+    CHECK(panel.root().find("routing.channels")->valueText() == "1/2\u21923/4");
+    REQUIRE(panel.root().click("routing.phase"));
     CHECK(m.sendsAt(row(keys), col(drums)).front()->phaseInvert);
-    f.snapshot("routing-channels.png");
-    REQUIRE(f.root->click("routing.remove"));
+    f.snapshot("routing-channels.png", &panel.root());
+    REQUIRE(panel.root().click("routing.remove"));
     CHECK(m.sendsAt(row(keys), col(drums)).empty());
     // Changes from elsewhere arrive on sync.
     f.exec("route.add", R"({"from":")" + keys + R"(","to":")" + verb + R"("})");
@@ -779,9 +782,9 @@ TEST_CASE("routing matrix: rules shown, a click sends, the send edits and goes")
     CHECK_FALSE(f.app->head().tracks.find(*model::Id::parse(keys))->parentSend.enabled);
     REQUIRE(matrix.clickCell(row(keys), col("tr_0")));
     CHECK(f.app->head().tracks.find(*model::Id::parse(keys))->parentSend.enabled);
-    REQUIRE(f.root->click("routing.close"));
+    REQUIRE(panel.root().click("routing.close"));
     CHECK_FALSE(matrix.isOpen());
-    CHECK(f.root->focused() == nullptr);
+    CHECK(panel.root().focused() == nullptr);
 }
 
 TEST_CASE("routing matrix: a multi-out instrument's outputs get rows that send them (ADR-0021)") {
@@ -791,9 +794,11 @@ TEST_CASE("routing matrix: a multi-out instrument's outputs get rows that send t
     const std::string kick =
         f.exec("track.add", R"({"type":"buss","name":"Kick"})")["track"].asString();
     f.exec("fx.add", R"({"track":")" + drums + R"(","plugin":"com.suppleaudio.test.multiout"})");
-    gui::RoutingMatrix matrix(*f.root, *f.actions, *f.dispatcher, *f.app);
+    gui::FloatingPanel panel(*f.platform, *f.window, *f.root, SUPPLE_GUI_FONTS_DIR, "Routing", 860,
+                             560, 800, 360);
+    gui::RoutingMatrix matrix(panel, *f.actions, *f.dispatcher, *f.app);
     matrix.open();
-    f.root->frame(false);
+    panel.root().frame(false);
     const auto& m = matrix.model();
     std::size_t main = m.sources.size();
     for (std::size_t i = 0; i < m.sources.size(); ++i)
@@ -818,7 +823,7 @@ TEST_CASE("routing matrix: a multi-out instrument's outputs get rows that send t
     const model::Route& route = *f.app->head().routes.begin()->value;
     CHECK(route.channels.from == std::vector<int>{3, 4});
     CHECK(route.channels.to == std::vector<int>{1, 2});
-    CHECK(f.root->find("routing.send")->valueText().find("Drums 3/4  Kick") == 0);
+    CHECK(panel.root().find("routing.send")->valueText().find("Drums 3/4  Kick") == 0);
     // An auxiliary pair's send leaves room for the main pair's (and a send drag's).
     const auto drumsId = *model::Id::parse(drums), kickId = *model::Id::parse(kick);
     CHECK_FALSE(model::sendsTo(f.app->head(), drumsId, kickId));
@@ -826,7 +831,7 @@ TEST_CASE("routing matrix: a multi-out instrument's outputs get rows that send t
     CHECK(m.sendsAt(main, col).size() == 1);
     CHECK(model::sendsTo(f.app->head(), drumsId, kickId));
     CHECK(f.app->head().routes.size() == 2);
-    f.snapshot("routing-multiout.png");
+    f.snapshot("routing-multiout.png", &panel.root());
 }
 
 TEST_CASE("mixer: grouped strips, a fader drag is one undo step, toggles, pan, Console 9, meters") {
@@ -1333,9 +1338,11 @@ TEST_CASE("routing matrix clamps scrolling when channel rows are deleted") {
     for (int i = 0; i < 30; ++i)
         tracks.push_back(
             f.exec("track.add", R"({"type":"buss","name":"Bus"})")["track"].asString());
-    gui::RoutingMatrix matrix(*f.root, *f.actions, *f.dispatcher, *f.app);
+    gui::FloatingPanel panel(*f.platform, *f.window, *f.root, SUPPLE_GUI_FONTS_DIR, "Routing", 860,
+                             560, 800, 360);
+    gui::RoutingMatrix matrix(panel, *f.actions, *f.dispatcher, *f.app);
     matrix.open();
-    f.root->frame(false);
+    panel.root().frame(false);
     const auto bounds = matrix.grid()->bounds();
     ui::PointerEvent wheel;
     wheel.type = ui::PointerEvent::Type::Wheel;
@@ -1345,13 +1352,13 @@ TEST_CASE("routing matrix clamps scrolling when channel rows are deleted") {
     matrix.grid()->onPointer(wheel);
     for (const auto& track : tracks) f.exec("track.remove", R"({"track":")" + track + R"("})");
     matrix.sync();
-    f.root->frame(false);
+    panel.root().frame(false);
     // Row zero and column zero return to their ordinary screen positions.
     ui::PointerEvent hover;
     hover.type = ui::PointerEvent::Type::Move;
     hover.pos = {bounds.x + 201, bounds.y + 123};
     matrix.grid()->onPointer(hover);
-    auto* status = f.root->find("routing.status");
+    auto* status = panel.root().find("routing.status");
     REQUIRE(status);
     CHECK(status->valueText().find(matrix.model().blocked(0, 0)) != std::string::npos);
     CHECK(status->valueText().find("not allowed") != std::string::npos);

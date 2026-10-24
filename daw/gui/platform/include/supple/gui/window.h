@@ -102,7 +102,7 @@ class Window {
     void beginFrame(std::uint32_t rgb);
     void endFrame();  // flushes NanoVG's draw calls
     void present();   // swaps buffers
-    // The back buffer as drawn (between endFrame and present).
+    // The currently bound read framebuffer (or the window back buffer), RGBA8.
     Image readPixels() const;
 
   private:

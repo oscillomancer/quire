@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "app_actions.h"
+#include "floating_panel.h"
 #include "supple/ui/root.h"
 
 namespace supple::ui {
@@ -65,8 +66,10 @@ struct MatrixModel {
 
 class RoutingMatrix {
   public:
-    RoutingMatrix(ui::Root& root, AppActions& actions, cmd::Dispatcher& dispatcher,
+    RoutingMatrix(FloatingPanel& panel, AppActions& actions, cmd::Dispatcher& dispatcher,
                   engine::EngineApp& app);
+    ~RoutingMatrix();
+    void close() { panel_.close(); }
     void open(std::optional<ui::Rect> anchor = std::nullopt);
     bool isOpen() const { return grid_ != nullptr; }
     void sync();  // reload when the session changed while open
@@ -84,7 +87,8 @@ class RoutingMatrix {
     void select(std::optional<std::string> send);
     Result<json::Value> exec(const std::string& command, json::Value args);
     void setSend(const char* field, json::Value value);
-    ui::Root& root_;
+    ui::Root& root() const { return panel_.root(); }
+    FloatingPanel& panel_;
     AppActions& actions_;
     cmd::Dispatcher& dispatcher_;
     engine::EngineApp& app_;

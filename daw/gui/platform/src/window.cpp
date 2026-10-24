@@ -283,7 +283,9 @@ Image Window::readPixels() const {
     const auto row = static_cast<std::size_t>(image.width) * 4;
     std::vector<std::uint8_t> bottomUp(row * static_cast<std::size_t>(image.height));
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadBuffer(GL_BACK);
+    GLint target = 0;
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &target);
+    glReadBuffer(target == 0 ? GL_BACK : GL_COLOR_ATTACHMENT0);
     glReadPixels(0, 0, image.width, image.height, GL_RGBA, GL_UNSIGNED_BYTE, bottomUp.data());
     image.rgba.resize(bottomUp.size());
     for (int y = 0; y < image.height; ++y)

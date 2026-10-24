@@ -210,6 +210,7 @@ void PluginBrowser::updateDetail() {
 }
 
 void PluginBrowser::open(std::function<void(const std::string&)> onAdd, std::string title) {
+    if (auto loaded = Favourites::load(favouritesFile_)) favourites_ = std::move(*loaded);
     onAdd_ = std::move(onAdd);
     titleText_ = title.empty() ? std::string("Add plugin") : std::move(title);
     if (page_) {  // already open: raise it

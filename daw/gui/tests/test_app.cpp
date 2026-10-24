@@ -20,6 +20,7 @@
 #include "appearance.h"
 #include "chrome.h"
 #include "file_actions.h"
+#include "floating_panel.h"
 #include "help_actions.h"
 #include "history_panel.h"
 #include "mixer.h"
@@ -1932,4 +1933,107 @@ TEST_CASE("Help identifies only the missing MCP helper") {
               a.root->find("help.close")->bounds().bottom() >=
           16);
     a.snapshot("help-missing-helper.png");
+}
+
+TEST_CASE("floating panels own their events, resize, sleep and persist placement") {
+    App f;
+    if (!f.ok) return;
+    gui::FloatingPanel panel(*f.platform, *f.window, *f.root, SUPPLE_GUI_FONTS_DIR, "Panel", 840,
+                             560, 640, 360);
+    CHECK(panel.window() == nullptr);  // no GL resources before first use
+    REQUIRE(panel.ensure());
+    auto content = std::make_unique<ui::Node>("panel");
+    content->layout.dir = ui::Layout::Dir::Column;
+    content->emplace<ui::Button>("panel.ok", "OK", [] {});
+    int closed = 0, shortcuts = 0;
+    f.actions->addUi("ui.actions", "Actions", [&] { ++shortcuts; });
+    panel.onUnhandledKey = [&](const ui::KeyEvent& e, ui::Root& source) {
+        return f.actions->key(e.key, e.mods,
+                              source.focused() && source.focused()->role() == ui::Role::TextField);
+    };
+    panel.open(std::move(content), [&] { ++closed; });
+    REQUIRE(panel.window());
+    CHECK(panel.window()->id() != f.window->id());
+    CHECK((SDL_GetWindowFlags(panel.window()->sdl()) & SDL_WINDOW_UTILITY) != 0);
+    if (std::string(SDL_GetCurrentVideoDriver()) != "offscreen")
+        CHECK(SDL_GetWindowParent(panel.window()->sdl()) == f.window->sdl());
+    panel.frame(false);
+    CHECK_FALSE(f.root->find("panel"));
+    panel.window()->setSize(1000, 650);
+    panel.root().relayout();
+    panel.frame(false);
+    CHECK(panel.root().content()->bounds().w ==
+          doctest::Approx(static_cast<double>(panel.window()->width())));
+    CHECK(panel.root().content()->bounds().h ==
+          doctest::Approx(static_cast<double>(panel.window()->height())));
+    const auto frames = panel.root().stats().frames;
+    panel.frame(false);
+    CHECK(panel.root().stats().frames == frames);  // idle never schedules a frame
+    panel.setTheme(ui::Theme::light());
+    CHECK(panel.root().wantsFrame());
+    panel.frame(false);
+    SDL_Event key{};
+    key.type = SDL_EVENT_KEY_DOWN;
+    key.key.windowID = panel.window()->id();
+    key.key.key = SDLK_F1;
+    f.actions->keymap().bind({{*actions::parseChord("F1")}, "global", "ui.actions"});
+    REQUIRE(panel.handle(key));
+    CHECK(shortcuts == 1);
+    const auto project = f.dir / "song.json";
+    auto section = [&](gui::UiPersistence& file) {
+        file.add(
+            "windows",
+            [&] {
+                auto v = json::Value::object();
+                v["fx"] = panel.saveLayout();
+                return v;
+            },
+            [&](const json::Value& v) {
+                panel.loadLayout(v.find("fx") ? *v.find("fx") : json::Value());
+            });
+    };
+    json::Value saved;
+    {
+        gui::UiPersistence file;
+        section(file);
+        file.tick(project);
+        panel.window()->setSize(1010, 660);
+        saved = panel.saveLayout();
+        REQUIRE(file.flush(project));
+    }
+    SDL_Event close{};
+    close.type = SDL_EVENT_WINDOW_CLOSE_REQUESTED;
+    close.window.windowID = f.window->id();
+    CHECK_FALSE(panel.handle(close));
+    close.window.windowID = panel.window()->id();
+    REQUIRE(panel.handle(close));  // main's quit handler must never see this request
+    CHECK_FALSE(panel.isOpen());
+    CHECK(closed == 1);
+    CHECK(SDL_GetWindowFromID(f.window->id()) == f.window->sdl());
+    CHECK(panel.saveLayout() == saved);
+    panel.loadLayout(json::Value());
+    {
+        gui::UiPersistence file;
+        section(file);
+        file.tick(project);
+        CHECK(panel.saveLayout() == saved);
+    }
+    panel.open(std::make_unique<ui::Node>("reopened"), [&] { ++closed; });
+    CHECK(panel.window()->width() == doctest::Approx(1010));
+    CHECK(panel.window()->height() == doctest::Approx(660));
+    panel.root().key(SDLK_ESCAPE);
+    CHECK_FALSE(panel.isOpen());
+    CHECK(closed == 2);
+    auto invalid = saved;
+    invalid["x"] = 1000000;
+    invalid["y"] = 1000000;
+    invalid["width"] = 1;
+    invalid["height"] = 1;
+    panel.loadLayout(invalid);
+    panel.open(std::make_unique<ui::Node>("minimum"), [] {});
+    CHECK(panel.window()->width() == doctest::Approx(640));
+    CHECK(panel.window()->height() == doctest::Approx(360));
+    CHECK(panel.window()->position().first != 1000000);
+    CHECK(panel.window()->position().second != 1000000);
+    panel.close();
 }

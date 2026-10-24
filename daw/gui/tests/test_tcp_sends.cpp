@@ -645,16 +645,18 @@ TEST_CASE("TCP: the wheel over the tracks scrolls them and the lanes together, n
 
 TEST_CASE("TCP sends: output click opens the existing routing matrix action") {
     SendsFixture f;
-    gui::RoutingMatrix matrix(*f.root, *f.actions, *f.dispatcher, *f.app);
+    gui::FloatingPanel panel(*f.platform, *f.window, *f.root, SUPPLE_GUI_FONTS_DIR, "Routing", 860,
+                             560, 800, 360);
+    gui::RoutingMatrix matrix(panel, *f.actions, *f.dispatcher, *f.app);
     f.shell->onRouting = {};
     const auto before = f.history();
     REQUIRE(f.root->click(f.out(f.a).id()));
     f.root->frame(false);
     CHECK(matrix.isOpen());
-    REQUIRE(f.root->find("routing"));
+    REQUIRE(panel.root().find("routing"));
     CHECK(f.routes().size() == 0);
     CHECK(f.history() == before);
-    f.root->key(SDLK_ESCAPE);
+    panel.root().key(SDLK_ESCAPE);
     CHECK_FALSE(matrix.isOpen());
 }
 

@@ -401,17 +401,49 @@ ui::Node& line(ui::Node& row, const std::string& id) {
 
 }  // namespace
 
-FxWindow::FxWindow(engine::EngineApp& app, cmd::Dispatcher& dispatcher, ui::Root& root, Hooks hooks,
-                   std::filesystem::path favouritesFile)
+namespace {
+class EmptyChainScroll : public ui::ScrollView {
+  public:
+    explicit EmptyChainScroll(std::function<void(ui::Point)> add)
+        : ScrollView("fx.body"), add_(std::move(add)) {}
+    bool onPointer(const ui::PointerEvent& e) override {
+        if (e.type == ui::PointerEvent::Type::Down && e.button == 1 && e.clicks == 2) {
+            add_(e.pos);
+            return true;
+        }
+        return ScrollView::onPointer(e);
+    }
+
+  private:
+    std::function<void(ui::Point)> add_;
+};
+class EmptyInputSpace : public ui::Node {
+  public:
+    explicit EmptyInputSpace(std::function<void()> add) : Node("ifx.empty"), add_(std::move(add)) {
+        interactive = true;
+        layout.height = ui::SizeRule::fixed(22);
+    }
+    bool onPointer(const ui::PointerEvent& e) override {
+        if (e.type == ui::PointerEvent::Type::Down && e.button == 1 && e.clicks == 2) {
+            add_();
+            return true;
+        }
+        return false;
+    }
+
+  private:
+    std::function<void()> add_;
+};
+}  // namespace
+
+FxWindow::FxWindow(engine::EngineApp& app, cmd::Dispatcher& dispatcher, ui::Root& mainRoot,
+                   FloatingPanel& panel, Hooks hooks, std::filesystem::path favouritesFile)
     : app_(app),
       dispatcher_(dispatcher),
-      root_(root),
+      panel_(panel),
+      favouritesFile_(std::move(favouritesFile)),
       hooks_(std::move(hooks)),
-      browser_(std::make_unique<PluginBrowser>(app, dispatcher, root, std::move(favouritesFile))),
-      params_(dispatcher, root) {
-    params_.onError = [this](const std::string& message) { setStatus(message); };
-    params_.openLearn = hooks_.openLearn;
-}
+      mainBrowser_(std::make_unique<PluginBrowser>(app, dispatcher, mainRoot, favouritesFile_)) {}
 
 bool FxWindow::shows(model::Id fx) const {
     if (!page_) return false;
@@ -420,20 +452,16 @@ bool FxWindow::shows(model::Id fx) const {
     return false;
 }
 
-bool FxWindow::hasFocus() const {
-    for (const ui::Node* n = root_.focused(); n; n = n->parent())
-        if (n == page_) return true;
-    return false;
-}
+bool FxWindow::hasFocus() const { return page_ && panel_.hasFocus(); }
 
-FxWindow::~FxWindow() = default;
+FxWindow::~FxWindow() { close(); }
 
 std::unique_ptr<ui::Node> FxWindow::buildPage() {
     auto page = std::make_unique<ui::Node>("fx");
     page_ = page.get();
     page->layout.dir = ui::Layout::Dir::Column;
-    page->layout.width = ui::SizeRule::fixed(840);
-    page->layout.height = ui::SizeRule::fixed(560);
+    page->layout.width = ui::SizeRule::fraction();
+    page->layout.height = ui::SizeRule::fraction();
     page->layout.padding = ui::Insets::all(12);
     page->layout.gap = 8;
 
@@ -485,10 +513,7 @@ std::unique_ptr<ui::Node> FxWindow::buildPage() {
     tabsRow_->layout.gap = 6;
     tabsRow_->emplace<ui::Button>("fx.tab.chain", "Chain", [this] { showChainTab(); });
     tabsRow_->emplace<ui::Button>("fx.tab.params", "Parameters", [this] { showParamsTab(); });
-    tabsRow_->emplace<ui::Button>("fx.add", "Add plugin…", [this] {
-        pendingChain_ = "main";
-        browser_->open([this](const std::string& pluginId) { addFx(pluginId); });
-    });
+    tabsRow_->emplace<ui::Button>("fx.add", "Add plugin…", [this] { openBrowser(); });
     status_ = &tabsRow_->emplace<ui::Label>("fx.status", "", ui::Font::Ui, "caption", "ink-quiet");
     status_->layout.width = ui::SizeRule::fraction();
     // What "FX: last touched parameter (MIDI CC)" moves (ADR-0027).
@@ -497,7 +522,16 @@ std::unique_ptr<ui::Node> FxWindow::buildPage() {
     touched_->layout.width = ui::SizeRule::content();
     touchedSerial_ = ~std::uint64_t{0};
 
-    auto& scroll = page->emplace<ui::ScrollView>("fx.body");
+    auto& scroll = page->emplace<EmptyChainScroll>([this](ui::Point p) {
+        if (tab_ != Tab::Chain) return;
+        const auto* section = root().find(take_ ? "fx.section.take" : "fx.section.chain");
+        if (!section) return;  // the track may have been removed
+        float end = section->bounds().bottom();
+        for (auto id : chain())
+            if (auto* row = root().find("fx.row." + id.str()))
+                end = std::max(end, row->bounds().bottom());
+        if (p.y >= end) openBrowser();
+    });
     scroll.layout.width = ui::SizeRule::fraction();
     scroll.layout.height = ui::SizeRule::fraction();
     body_ = &scroll.content();
@@ -508,6 +542,14 @@ std::unique_ptr<ui::Node> FxWindow::buildPage() {
 Status FxWindow::open(model::Id track) {
     if (!app_.head().tracks.find(track))
         return Error("track.unknown", "no track " + track.str(), "/track", "use track.list");
+    SUPPLE_TRY(panel_.ensure());
+    if (!browser_) {
+        browser_ = std::make_unique<PluginBrowser>(app_, dispatcher_, root(), favouritesFile_);
+        params_ = std::make_unique<ParamPanel>(dispatcher_, root());
+        params_->onError = [this](const std::string& message) { setStatus(message); };
+        params_->openLearn = hooks_.openLearn;
+    }
+    root().closePopups();
     track_ = track;
     pendingChain_ = "main";
     take_.reset();
@@ -518,19 +560,20 @@ Status FxWindow::open(model::Id track) {
     if (presetChainButton_) presetChainButton_->setText("Main chain");
     if (savePrompt_) {
         savePrompt_->visible = false;
-        root_.releaseWithin(savePrompt_);
+        root().releaseWithin(savePrompt_);
     }
     if (presetPrompt_) {
         presetPrompt_->visible = false;
-        root_.releaseWithin(presetPrompt_);
+        root().releaseWithin(presetPrompt_);
     }
     latency_.clear();  // a fresh window measures each effect again
     if (page_) {       // already open: switch track in place
         refresh();
+        panel_.raise();
         return {};
     }
     auto page = buildPage();
-    root_.openPopup(std::move(page), {}, ui::Placement::Center, [this] {
+    panel_.open(std::move(page), [this] {
         page_ = nullptr;
         body_ = nullptr;
         tabsRow_ = nullptr;
@@ -588,8 +631,8 @@ Status FxWindow::openToAdd(const UiState& ui, const json::Value& prompt) {
                      text.empty() ? "no track given and nothing is selected" : "no track " + text,
                      "/track", "select a track, or give a track id like tr_1");
     const model::Id track = *id;
-    browser_->open([this, track](const std::string& pluginId) { addFxTo(track, pluginId); },
-                   "Add plugin to " + model::trackLabel(app_.head(), track));
+    mainBrowser_->open([this, track](const std::string& pluginId) { addFxTo(track, pluginId); },
+                       "Add plugin to " + model::trackLabel(app_.head(), track));
     return {};
 }
 
@@ -614,9 +657,7 @@ void FxWindow::addFxTo(model::Id track, const std::string& pluginId) {
     refresh();
 }
 
-void FxWindow::close() {
-    if (page_) root_.closePopup();
-}
+void FxWindow::close() { panel_.close(); }
 
 void FxWindow::setStatus(std::string message) {
     if (status_) status_->setText(std::move(message));
@@ -708,7 +749,8 @@ void FxWindow::checkFailures() {
 }
 
 void FxWindow::tick(bool event) {
-    browser_->tick();
+    mainBrowser_->tick();
+    if (browser_) browser_->tick();
     if (event) checkFailures();
     if (page_ && touched_) {
         const auto t = app_.lastTouched();
@@ -718,15 +760,15 @@ void FxWindow::tick(bool event) {
             touched_->setText(t ? "Last touched: " + nameOf(t->fx) + " · " +
                                       app_.paramName(t->fx, t->param)
                                 : std::string());
-            root_.relayout();
-            root_.damageAll();
+            root().relayout();
+            root().damageAll();
         }
     }
     if (app_.projectGeneration() != projectGeneration_) {
         latency_.clear();
         failed_.clear();
         selected_ = {};
-        if (page_) root_.releaseWithin(page_);
+        if (page_) root().releaseWithin(page_);
     }
     if (page_ &&
         (app_.projectGeneration() != projectGeneration_ || app_.head().version != shownVersion_))
@@ -756,7 +798,7 @@ void FxWindow::select(model::Id fx) {
                 if (auto* row = dynamic_cast<Row*>(child.get()))
                     row->selected =
                         row->id() == "fx.row." + fx.str() || row->id() == "ifx.row." + fx.str();
-        root_.damageAll();
+        root().damageAll();
     }
 }
 
@@ -849,7 +891,7 @@ void FxWindow::press(model::Id fx, unsigned mods, int clicks) {
                 const auto id = model::Id::parse(rid.substr(dot + 1));
                 row->selected = id && picked(*id);
             }
-    root_.damageAll();
+    root().damageAll();
 }
 
 void FxWindow::showChainTab() {
@@ -866,7 +908,7 @@ void FxWindow::refresh() {
     if (!page_) return;
     if (body_ && draggingSlider(*body_)) return;  // keep capture and previews until release
     gesture_.clear();
-    const std::string focusId = root_.focused() ? root_.focused()->id() : std::string();
+    const std::string focusId = root().focused() ? root().focused()->id() : std::string();
     const model::Track* track = app_.head().tracks.find(track_);
     if (!track) {
         body_->clear();
@@ -900,10 +942,10 @@ void FxWindow::refresh() {
         buildParams(*body_);
     shownVersion_ = app_.head().version;
     projectGeneration_ = app_.projectGeneration();
-    root_.relayout();
-    root_.damageAll();
+    root().relayout();
+    root().damageAll();
     if (!focusId.empty())
-        if (ui::Node* node = root_.find(focusId)) root_.focus(node);
+        if (ui::Node* node = root().find(focusId)) root().focus(node);
 }
 
 void FxWindow::buildChain(ui::Node& body) {
@@ -928,12 +970,10 @@ void FxWindow::buildChain(ui::Node& body) {
     inputHeader.layout.align = ui::Layout::Align::Center;
     inputHeader.emplace<ui::Label>("fx.section.input", "Input chain (recorded input)",
                                    ui::Font::UiBold, "caption", "ink-quiet");
-    inputHeader.emplace<ui::Button>("fx.add.input", "Add input FX", [this] {
-        pendingChain_ = "input";
-        browser_->open([this](const std::string& pluginId) { addFx(pluginId); });
-    });
+    inputHeader.emplace<ui::Button>("fx.add.input", "Add input FX", [this] { openBrowser(true); });
     for (std::size_t i = 0; i < track->inputChain.size(); ++i)
         buildRow(body, track->inputChain[i], i, true);
+    body.emplace<EmptyInputSpace>([this] { openBrowser(true); });
     body.emplace<ui::Label>("fx.section.chain", "Chain", ui::Font::UiBold, "caption", "ink-quiet");
     if (track->chain.empty())
         body.emplace<ui::Label>("fx.empty", "No effects yet — use “Add plugin…”.", ui::Font::Ui,
@@ -1174,8 +1214,9 @@ void FxWindow::openPinsMenu(model::Id fx, const ui::Rect& anchor) {
         };
         items.push_back(std::move(m));
     }
-    root_.openPopup(ui::makeMenu("fx.pins.menu", std::move(items), [this] { root_.closePopup(); }),
-                    anchor, ui::Placement::Below);
+    root().openPopup(
+        ui::makeMenu("fx.pins.menu", std::move(items), [this] { root().closePopup(); }), anchor,
+        ui::Placement::Below);
 }
 
 void FxWindow::buildParams(ui::Node& body) {
@@ -1206,7 +1247,7 @@ void FxWindow::buildParams(ui::Node& body) {
                                 "small", "ink-quiet");
         return;
     }
-    if (auto built = params_.build(body, selected_); !built)
+    if (auto built = params_->build(body, selected_); !built)
         body.emplace<ui::Label>("fx.params.error", built.error().message, ui::Font::Ui, "small",
                                 "clip");
 }
@@ -1217,7 +1258,7 @@ void FxWindow::dragRow(model::Id fx, int phase, ui::Point p) {
     const std::vector<model::Id> c = chain();
     std::vector<Row*> rows;
     for (model::Id id : c)
-        if (auto* row = dynamic_cast<Row*>(root_.find("fx.row." + id.str()))) rows.push_back(row);
+        if (auto* row = dynamic_cast<Row*>(root().find("fx.row." + id.str()))) rows.push_back(row);
     if (rows.size() != c.size()) return;
     const auto from = static_cast<std::size_t>(std::find(c.begin(), c.end(), fx) - c.begin());
     std::size_t gap = 0;
@@ -1231,7 +1272,7 @@ void FxWindow::dragRow(model::Id fx, int phase, ui::Point p) {
         rows[i]->markerTop = moving && i == gap;
         rows[i]->markerBottom = moving && gap == rows.size() && i + 1 == rows.size();
     }
-    root_.damageAll();
+    root().damageAll();
     if (shown != Row::Phase::Drop || index == from || from >= c.size()) return;
     json::Value args = json::Value::object();
     args["fx"] = fx.str();
@@ -1250,6 +1291,11 @@ void FxWindow::moveFx(model::Id fx, int delta) {
     args["fx"] = fx.str();
     args["index"] = static_cast<std::int64_t>(to);
     if (dispatch("fx.move", std::move(args))) refresh();
+}
+
+void FxWindow::openBrowser(bool input) {
+    pendingChain_ = input ? "input" : "main";
+    browser_->open([this](const std::string& pluginId) { addFx(pluginId); });
 }
 
 void FxWindow::addFx(const std::string& pluginId) {
@@ -1284,8 +1330,8 @@ void FxWindow::promptSaveChain() {
     hidePresetPrompt();
     savePrompt_->visible = true;
     saveName_->setText("");
-    root_.relayout();
-    root_.focus(saveName_);
+    root().relayout();
+    root().focus(saveName_);
     setStatus("Save the " + presetChain_ + " chain");
 }
 
@@ -1307,15 +1353,15 @@ void FxWindow::saveChain() {
 void FxWindow::hideSavePrompt() {
     if (!savePrompt_) return;
     savePrompt_->visible = false;
-    root_.releaseWithin(savePrompt_);
-    root_.focus(root_.find("fx.chain.save"));
-    root_.relayout();
-    root_.damageAll();
+    root().releaseWithin(savePrompt_);
+    root().focus(root().find("fx.chain.save"));
+    root().relayout();
+    root().damageAll();
 }
 
 void FxWindow::loadChainMenu(bool replace) {
     if (chainMenuOpen_) {  // the button toggles its menu (and closes a menu above it)
-        while (chainMenuOpen_ && root_.popupOpen()) root_.closePopup();
+        while (chainMenuOpen_ && root().popupOpen()) root().closePopup();
         return;
     }
     auto listed = dispatcher_.execute({"fx.chain.list", json::Value::object(), kUiOrigin});
@@ -1331,7 +1377,7 @@ void FxWindow::loadChainMenu(bool replace) {
     const auto track = track_;
     const auto chain = presetChain_;
     auto menu = std::make_unique<ChainMenu>(
-        root_, (*listed)["chains"], replace,
+        root(), (*listed)["chains"], replace,
         [this, track, chain](const std::string& path, bool replacing) {
             auto args = json::Value::object();
             args["track"] = track.str();
@@ -1350,15 +1396,15 @@ void FxWindow::loadChainMenu(bool replace) {
             setStatus("Deleted " + name);
             return true;
         });
-    const auto* button = root_.find("fx.chain.load");
+    const auto* button = root().find("fx.chain.load");
     chainMenuOpen_ = true;
-    root_.openPopup(std::move(menu), button ? button->bounds() : ui::Rect{}, ui::Placement::Below,
-                    [this] { chainMenuOpen_ = false; });
+    root().openPopup(std::move(menu), button ? button->bounds() : ui::Rect{}, ui::Placement::Below,
+                     [this] { chainMenuOpen_ = false; });
 }
 
 void FxWindow::presetMenu(model::Id fx) {
     if (presetMenuOpen_) {  // the button toggles its menu (and closes a menu above it)
-        while (presetMenuOpen_ && root_.popupOpen()) root_.closePopup();
+        while (presetMenuOpen_ && root().popupOpen()) root().closePopup();
         return;
     }
     auto args = json::Value::object();
@@ -1388,14 +1434,14 @@ void FxWindow::presetMenu(model::Id fx) {
         return true;
     };
     hooks.save = [this, fx] { promptSavePreset(fx); };
-    auto menu = std::make_unique<PresetMenu>(root_, (*listed)["presets"], std::move(hooks));
+    auto menu = std::make_unique<PresetMenu>(root(), (*listed)["presets"], std::move(hooks));
     const auto input = inputChain();
     const std::string prefix =
         std::find(input.begin(), input.end(), fx) != input.end() ? "ifx." : "fx.";
-    const auto* button = root_.find(prefix + "presets." + fx.str());
+    const auto* button = root().find(prefix + "presets." + fx.str());
     presetMenuOpen_ = true;
-    root_.openPopup(std::move(menu), button ? button->bounds() : ui::Rect{}, ui::Placement::Below,
-                    [this] { presetMenuOpen_ = false; });
+    root().openPopup(std::move(menu), button ? button->bounds() : ui::Rect{}, ui::Placement::Below,
+                     [this] { presetMenuOpen_ = false; });
 }
 
 void FxWindow::promptSavePreset(model::Id fx) {
@@ -1405,8 +1451,8 @@ void FxWindow::promptSavePreset(model::Id fx) {
     presetReplace_.clear();
     presetPrompt_->visible = true;
     presetName_->setText("");
-    root_.relayout();
-    root_.focus(presetName_);
+    root().relayout();
+    root().focus(presetName_);
     setStatus("Save " + nameOf(fx) + "'s settings as a preset");
 }
 
@@ -1435,9 +1481,9 @@ void FxWindow::hidePresetPrompt() {
     if (!presetPrompt_ || !presetPrompt_->visible) return;
     presetPrompt_->visible = false;
     presetReplace_.clear();
-    root_.releaseWithin(presetPrompt_);
-    root_.relayout();
-    root_.damageAll();
+    root().releaseWithin(presetPrompt_);
+    root().relayout();
+    root().damageAll();
 }
 
 }  // namespace supple::gui

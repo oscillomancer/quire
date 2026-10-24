@@ -186,7 +186,12 @@ instructions are in `docs/guides/installing.md`.
   explode onto tracks or along the track, delete one, Ctrl-drag one out, and
   render an item through its FX (MIDI to audio) in place or as a new take.
   The FX chain selects several effects (Ctrl/Shift+click) to bypass, offline
-  or remove together; a double click opens an effect's editor. The window
+  or remove together; a double click opens an effect's editor. FX chains and
+  the routing matrix use separate resizable utility windows owned by the main
+  window, with per-kind positions/sizes in the project UI sidecar. Their menus,
+  browsers and MIDI learn dialogs stay in their window; unused keys reach the
+  app keymap. Empty-chain double clicks add main, input or take FX. Each root
+  repaints on demand and follows theme switches. The main window
   waits on app/local plug-in/ModelLoop notifications and demand-driven
   deadlines; stopped transport and stationary meters have no refresh timer.
   Input/commands coalesce UI sidecar checks, and writer completion wakes main.
@@ -611,12 +616,16 @@ Session and editing:
   squashed steps keep large invocation arguments.
 
 GUI:
+- FX/routing utility windows have not been checked by hand on Hyprland,
+  Cocoa or Windows: WM floating, owner stacking and XWayland positioning
+  remain manual checks. Native CI for these changes is pending coordinator
+  validation; local Linux tests do not establish macOS/Windows behaviour.
 - Help onboarding tests pass native CI on Linux, macOS and Windows. Real
   harness registration, App Translocation and the native folder pickers have
   not been tried by hand.
 - Native shell/toolkit builds and tests pass CI (ADR-0039).
   Cocoa/Windows hidden-window tests replace Linux EGL offscreen;
-  Linux golden references are unchanged. Native editor embedding is integrated
+  Linux retains pixel reference tests. Native editor embedding is integrated
   (ADR-0040), with combined native builds and hermetic tests passing CI.
   Windows config keys use a protected current-user ACL; filesystems without
   ACL support fail the save. macOS cold-start timing reads the kernel process
