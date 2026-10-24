@@ -816,8 +816,11 @@ Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
   Success and actionable failure appear in a compact result dialog.
   **MCP server…** displays copyable absolute commands for this running copy's
   adjacent `<slug>-mcp` and `<slug>-engine --mcp`, with build-tree fallback
-  (`mcp/` and `host/engine/`). It includes common `mcpServers` JSON, stdio
-  instructions, app-first startup, automatic reconnect and `--instance NAME`.
+  (`mcp/` and `host/engine/`). A development `.app` under `daw/gui/` uses
+  the same fallback when the inferred build root contains `CMakeCache.txt`;
+  adjacent helpers always take precedence. It includes common `mcpServers`
+  JSON, stdio instructions, app-first startup, automatic reconnect and
+  `--instance NAME`.
   **Connect an agent…** offers Claude Code, Codex and Hermes, with a copyable
   registration command and Connect. Claude Code uses user scope; all three
   use the current MCP executable. Connect searches PATH, common user install

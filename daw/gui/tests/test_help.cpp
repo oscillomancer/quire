@@ -65,6 +65,22 @@ TEST_CASE("Help locates adjacent installed and build-tree helper executables") {
         CHECK(help::executables(dir / (slug + suffix), platform).mcp ==
               dir / (slug + "-mcp" + suffix));
     }
+    const auto build = fs::path("build/mac-dev");
+    const auto bundle = build / "daw/gui/Any Name.app/Contents/MacOS";
+    const auto gui = f.path / bundle / slug;
+    f.write(bundle / slug);
+    f.write(build / "mcp" / (slug + "-mcp"));
+    f.write(build / "host/engine" / (slug + "-engine"));
+    // An installed bundle must not search outside itself without a build marker.
+    CHECK(help::executables(gui, help::Platform::Posix).mcp == gui.parent_path() / (slug + "-mcp"));
+    f.write(build / "CMakeCache.txt");
+    const auto bundled = help::executables(gui, help::Platform::Posix);
+    CHECK(bundled.mcp == f.path / build / "mcp" / (slug + "-mcp"));
+    CHECK(bundled.engine == f.path / build / "host/engine" / (slug + "-engine"));
+    f.write(bundle / (slug + "-mcp"));
+    const auto adjacent = help::executables(gui, help::Platform::Posix);
+    CHECK(adjacent.mcp == gui.parent_path() / (slug + "-mcp"));
+    CHECK(adjacent.engine == bundled.engine);
 }
 TEST_CASE("Help skill copy and link replace only skill folders or links with consent") {
     Folder f;

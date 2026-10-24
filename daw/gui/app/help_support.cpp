@@ -210,17 +210,29 @@ std::string harnessCommand(Harness h) {
 }
 Executables executables(const fs::path& gui, Platform platform) {
     const auto dir = gui.parent_path();
-    const auto root = dir.parent_path().parent_path();
+    auto buildGui = dir;
+    // CMake nests a macOS development executable inside daw/gui/<name>.app.
+    // Require the build marker before looking outside an installed bundle.
+    if (dir.filename() == "MacOS" && dir.parent_path().filename() == "Contents" &&
+        dir.parent_path().parent_path().extension() == ".app") {
+        const auto bundleGui = dir.parent_path().parent_path().parent_path();
+        std::error_code ec;
+        if (bundleGui.filename() == "gui" && bundleGui.parent_path().filename() == "daw" &&
+            fs::is_regular_file(bundleGui.parent_path().parent_path() / "CMakeCache.txt", ec))
+            buildGui = bundleGui;
+    }
+    const auto root = buildGui.parent_path().parent_path();
     const std::string suffix = platform == Platform::Windows ? ".exe" : "";
     const auto locate = [&](const std::string& helper, const fs::path& buildDir) {
         const auto file = std::string(product::kSlug) + helper + suffix;
         const auto installed = dir / file;
         std::error_code ec;
-        return fs::absolute(fs::exists(installed, ec) ? installed
-                            : dir.filename() == "gui" && dir.parent_path().filename() == "daw"
-                                ? root / buildDir / file
-                                : installed,
-                            ec)
+        return fs::absolute(
+                   fs::exists(installed, ec) ? installed
+                   : buildGui.filename() == "gui" && buildGui.parent_path().filename() == "daw"
+                       ? root / buildDir / file
+                       : installed,
+                   ec)
             .lexically_normal();
     };
     return {locate("-mcp", "mcp"), locate("-engine", fs::path("host") / "engine")};
