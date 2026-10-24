@@ -403,6 +403,8 @@ fs::path findHarness(Harness h, const std::function<bool()>& cancelled) {
             if (candidate.is_absolute() && executableFile(candidate)) return candidate;
         }
     }
+#else
+    (void)cancelled;  // Windows has no login shell to ask.
 #endif
     return {};
 }
