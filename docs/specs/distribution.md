@@ -37,6 +37,9 @@ macOS plugin notices stay inside each CLAP bundle's `Contents/Resources`;
 the surrounding `PlugIns` directory contains code only. Finalization signs
 nested binaries, then CLAP bundles, then the application and its main executable.
 This follows Apple's [nested-code placement and signing rules](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/Procedures/Procedures.html).
+The installed private SDL dylib contains the resolved library bytes even when
+the package manager's imported path is a symlink. Bundle finalization rejects
+dangling symlinks and links that leave the application.
 
 Installers upgrade their own prior installation and refuse foreign target
 collisions. Windows checks mapped binaries before uninstalling the previous

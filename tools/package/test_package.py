@@ -149,6 +149,20 @@ class Dependencies(unittest.TestCase):
 
 
 class MacSigning(unittest.TestCase):
+    def test_bundle_rejects_dangling_or_external_runtime_links(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = Path(temp) / "Example.app"
+            frameworks = app / "Contents/Frameworks"
+            frameworks.mkdir(parents=True)
+            outside = Path(temp) / "versioned.dylib"
+            link = frameworks / "runtime.dylib"
+            link.symlink_to(outside)
+            for present in (False, True):
+                if present:
+                    outside.write_bytes(b"library")
+                with self.assertRaisesRegex(RuntimeError, "symlink"):
+                    macos.finish_bundle(app)
+
     def test_application_seal_follows_nested_bundle_signatures(self):
         with tempfile.TemporaryDirectory() as temp:
             app = Path(temp) / "Example.app"

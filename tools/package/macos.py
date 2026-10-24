@@ -15,6 +15,9 @@ def is_macho(path):
 
 
 def finish_bundle(app):
+    for link in app.rglob("*"):
+        if link.is_symlink() and (not link.exists() or not link.resolve().is_relative_to(app.resolve())):
+            raise RuntimeError(f"Bundle symlink is dangling or leaves the app: {link}")
     frameworks = app / "Contents/Frameworks"
     with (app / "Contents/Info.plist").open("rb") as stream:
         main_executable = app / "Contents/MacOS" / plistlib.load(stream)["CFBundleExecutable"]
@@ -39,7 +42,7 @@ def finish_bundle(app):
     for plugin in app.glob("Contents/PlugIns/CLAP/*.clap"):
         run("codesign", "--force", "--sign", "-", plugin)
     run("codesign", "--force", "--sign", "-", app)
-    run("codesign", "--verify", "--deep", "--strict", app)
+    run("codesign", "--verify", "--deep", "--strict", "--verbose=4", app)
 
 
 def main():

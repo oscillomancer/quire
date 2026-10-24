@@ -45,10 +45,19 @@ foreach(suffix "" -engine -mcp -bridge -scanner)
 endforeach()
 # Imported target files preserve the actual runtime filename and its SONAME.
 if(TARGET SDL3::SDL3-shared)
-  install(IMPORTED_RUNTIME_ARTIFACTS SDL3::SDL3-shared
-    LIBRARY DESTINATION "${lib_dest}" COMPONENT Runtime
-    RUNTIME DESTINATION "${lib_dest}" COMPONENT Runtime
-    FRAMEWORK DESTINATION "${lib_dest}" COMPONENT Runtime)
+  if(APPLE)
+    # Homebrew's imported location can be a symlink to a versioned dylib.
+    # Copy the actual bytes under the imported filename, never just that link.
+    install(CODE "file(REAL_PATH \"$<TARGET_FILE:SDL3::SDL3-shared>\" runtime_source)
+      file(INSTALL DESTINATION \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${lib_dest}\"
+        TYPE SHARED_LIBRARY FILES \${runtime_source}
+        RENAME \"$<TARGET_FILE_NAME:SDL3::SDL3-shared>\")" COMPONENT Runtime)
+  else()
+    install(IMPORTED_RUNTIME_ARTIFACTS SDL3::SDL3-shared
+      LIBRARY DESTINATION "${lib_dest}" COMPONENT Runtime
+      RUNTIME DESTINATION "${lib_dest}" COMPONENT Runtime
+      FRAMEWORK DESTINATION "${lib_dest}" COMPONENT Runtime)
+  endif()
 endif()
 if(WIN32)
   # vcpkg app-local deployment places zlib/SDL and the dynamic CRT beside the GUI.
