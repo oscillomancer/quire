@@ -1,6 +1,6 @@
 # Distribution contract
 
-ADR-0048 defines the layouts and rationale. Product identity comes exclusively
+ADR-0048 and ADR-0049 define the layouts and rationale. Product identity comes exclusively
 from `cmake/Product.cmake`. `cmake --install` exposes components `Runtime`
 (five programs, SDL3, resources, licenses, desktop integration sources) and
 `Plugins` (fourteen stock CLAPs plus license/notices; no Script Player).
@@ -23,9 +23,21 @@ keeps a `daw/gui/<slug>` symlink for existing launch commands; CTest uses the
 actual executable target path.
 
 Artifacts are `<slug>-<version>-<platform>-<arch>.<ext>`: Linux x86_64 tar.xz,
-macOS arm64 dmg/zip, Windows x86_64 exe/zip. Linux package audit rejects
-unresolved/undeclared ELF dependencies and linked JACK. macOS finalization
+macOS arm64 dmg/zip, Windows x86_64 exe/zip. Linux packages use the `linux-package` preset's hidden static C++ runtimes
+for all five programs and the stock CLAPs; the parent forwards configure
+flags without modifying shared plugin-template files. Release CI uses Clang 22
+with GCC 12 libstdc++ on Ubuntu 22.04. Package audit rejects
+unresolved/undeclared ELF dependencies, shared libstdc++/libgcc_s, C++ runtime
+exports and linked JACK. macOS finalization
 rejects unbundled non-system absolute dylib references and verifies the
 finished ad-hoc signature. Installed smoke checks exercise GUI snapshots,
 stock plugin discovery without explicit paths, MCP's clean missing-app
 failure, and required helper/resource presence in an isolated user profile.
+
+Installers upgrade their own prior installation and refuse foreign target
+collisions. Windows checks mapped binaries before uninstalling the previous
+version, remembers the external-plugin choice, and removes only staged file
+paths with nonrecursive directory cleanup. Linux records owned payload and
+integration paths, preserves user files during upgrade/removal, and prunes
+only owned directory ancestors. Optional macOS CLAP installation documents
+recursive quarantine removal after copying trusted plugins.

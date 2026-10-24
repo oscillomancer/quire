@@ -75,11 +75,12 @@ and user-space installer, an Apple Silicon app/dmg and Windows per-user NSIS
 installer, with portable zip alternatives. The five helpers/programs, fourteen
 stock CLAPs, agent skill, fonts and license texts ship together. Package CI is
 manual and tests installed artifacts; optional release upload creates drafts
-only. Local Linux install, tarball dependency audit (23 ELF files), extracted
-and installed smoke, installer cleanup and eight focused CTests pass. Native
-package/signature/installer verification is pending: GitHub cannot dispatch the
-new package workflow until it exists on the default branch. Native regression
-CI is separate. No paid signing or notarization is available; first-launch
+only. Linux package builds now use hidden static C++ runtimes (ADR-0049), preserving
+third-party plugin runtime independence; the audit rejects shared C++ runtimes.
+Both installers upgrade their own previous version and preserve unrelated
+files; Linux tests cover upgrade and icon-directory ownership. Package and
+native regression CI validation of the revised implementation is in progress
+using a disposable package-ci push trigger before default-branch discovery. No paid signing or notarization is available; first-launch
 instructions are in `docs/guides/installing.md`.
 
 ## What works

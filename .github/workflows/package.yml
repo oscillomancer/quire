@@ -30,10 +30,10 @@ jobs:
       - uses: actions/checkout@v4
       - id: plan
         env:
-          PLATFORMS: ${{ inputs.platforms }}
+          PLATFORMS: ${{ inputs.platforms || 'all' }}
         run: |
           matrix=$(jq -cn --arg choice "$PLATFORMS" '{include:[
-            {platform:"linux",runner:"ubuntu-24.04",preset:"release"},
+            {platform:"linux",runner:"ubuntu-24.04",preset:"linux-package"},
             {platform:"macos",runner:"macos-15",preset:"macos"},
             {platform:"windows",runner:"windows-2022",preset:"windows"}
           ] | map(select($choice == "all" or .platform == $choice))}')
@@ -89,7 +89,14 @@ jobs:
           echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
           choco install nsis --no-progress -y
       - name: Configure Release
-        run: cmake --preset ${{ matrix.preset }} -DCMAKE_BUILD_TYPE=Release -DSUPPLE_BUILD_TESTS=OFF
+        run: |
+          if [[ '${{ matrix.platform }}' == linux ]]; then
+            clang++ --version
+            g++-12 --version
+            cmake --preset linux-package -DCMAKE_CXX_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/12
+          else
+            cmake --preset ${{ matrix.preset }} -DCMAKE_BUILD_TYPE=Release -DSUPPLE_BUILD_TESTS=OFF
+          fi
       - name: Build distribution targets
         run: cmake --build --preset ${{ matrix.preset }} --target package-runtime --parallel 6
       - name: Package
@@ -102,9 +109,10 @@ jobs:
           mkdir -p /tmp/package-extracted /tmp/package-home
           tar -xJf dist/*.tar.xz -C /tmp/package-extracted
           tree=$(find /tmp/package-extracted -mindepth 1 -maxdepth 1 -type d)
-          slug=$(python3 -c 'import json; print(json.load(open("build/release/package/product.json"))["slug"])')
+          slug=$(python3 -c 'import json; print(json.load(open("build/linux-package/package/product.json"))["slug"])')
           HOME=/tmp/package-home "$tree/install.sh" --prefix /tmp/package-installed --plugins
-          xvfb-run -a python3 tools/package/smoke.py "/tmp/package-installed/opt/$slug" --build-dir build/release
+          HOME=/tmp/package-home "$tree/install.sh" --prefix /tmp/package-installed --plugins
+          xvfb-run -a python3 tools/package/smoke.py "/tmp/package-installed/opt/$slug" --build-dir build/linux-package
           HOME=/tmp/package-home "/tmp/package-installed/opt/$slug/uninstall.sh" --prefix /tmp/package-installed
           test ! -e /tmp/package-installed
           test -z "$(find /tmp/package-home -type f -o -type l)"
@@ -126,22 +134,37 @@ jobs:
           $product = Get-Content build/windows/package/product.json | ConvertFrom-Json
           $install = Join-Path $env:RUNNER_TEMP 'packaged-app'
           $installer = (Get-ChildItem dist/*.exe).FullName
+          $foreign = Join-Path $env:RUNNER_TEMP 'foreign-target'
+          New-Item $foreign -ItemType Directory -Force | Out-Null
+          Set-Content "$foreign/unrelated.txt" 'keep'
+          $process = Start-Process -Wait -PassThru $installer -ArgumentList '/S', "/D=$foreign"
+          if ($process.ExitCode -eq 0) { throw 'Installer accepted a foreign nonempty directory' }
+          if ((Get-Content "$foreign/unrelated.txt") -ne 'keep') { throw 'Foreign file changed' }
+          if (Test-Path "$foreign/$($product.slug).exe") { throw 'Foreign target was partially installed' }
+          $sibling = Join-Path $env:RUNNER_TEMP 'unrelated-sibling.txt'
+          Set-Content $sibling 'keep sibling'
           $process = Start-Process -Wait -PassThru $installer -ArgumentList '/S', "/D=$install"
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          # A second silent installation must perform an upgrade in place.
+          $process = Start-Process -Wait -PassThru $installer -ArgumentList '/S', "/D=$install"
+          if ($process.ExitCode -ne 0) { throw "Upgrade failed: $($process.ExitCode)" }
+          Set-Content "$install/unrelated-project.json" 'keep project'
           # Disposable CI-only software OpenGL, added after packaging.
           bash .github/scripts/gui-mesa-windows.sh
           if ($LASTEXITCODE -ne 0) { throw 'Mesa setup failed' }
           Copy-Item .deps/gui-mesa-24.3.4/x64/opengl32.dll,.deps/gui-mesa-24.3.4/x64/libglapi.dll,.deps/gui-mesa-24.3.4/x64/libgallium_wgl.dll $install
           python tools/package/smoke.py $install --build-dir build/windows
           if ($LASTEXITCODE -ne 0) { throw 'Packaged smoke failed' }
+          Remove-Item "$install/opengl32.dll","$install/libglapi.dll","$install/libgallium_wgl.dll"
           # _?= prevents NSIS's background self-copy, so -Wait waits for removal.
           $process = Start-Process -Wait -PassThru "$install/uninstall.exe" -ArgumentList '/S', "_?=$install"
           if ($process.ExitCode -ne 0) { throw 'Uninstall failed' }
           Remove-Item "$install/uninstall.exe" -ErrorAction SilentlyContinue
-          if (Test-Path $install) {
-            if ((Get-ChildItem $install -Force).Count -gt 0) { throw 'Uninstall left files' }
-            Remove-Item $install
-          }
+          if ((Get-Content "$install/unrelated-project.json") -ne 'keep project') { throw 'Uninstall removed a user project' }
+          if ((Get-Content $sibling) -ne 'keep sibling') { throw 'Uninstall removed a sibling file' }
+          Remove-Item "$install/unrelated-project.json"
+          if ((Get-ChildItem $install -Force).Count -gt 0) { throw 'Uninstall left owned files' }
+          Remove-Item $install
           $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$($product.slug)"
           if (Test-Path $key) { throw 'Uninstall left registry key' }
           if (Test-Path "$env:LOCALAPPDATA/Programs/Common/CLAP/$($product.slug)") { throw 'Optional plugins installed by default' }
