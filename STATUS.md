@@ -80,7 +80,8 @@ third-party plugin runtime independence; the audit rejects shared C++ runtimes.
 Both installers upgrade their own previous version and preserve unrelated
 files; Linux tests cover upgrade and icon-directory ownership. Package CI
 checks installed native artifacts, upgrades and uninstall cleanup separately
-from the native regression suite. Before default-branch workflow discovery,
+from the native regression suite. macOS finalization keeps notices in bundle
+resources and signs nested code before the app. Before default-branch workflow discovery,
 branch validation uses a disposable package-ci push-trigger commit. No paid signing or notarization is available; first-launch
 instructions are in `docs/guides/installing.md`.
 

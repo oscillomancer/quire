@@ -33,6 +33,10 @@ rejects unbundled non-system absolute dylib references and verifies the
 finished ad-hoc signature. Installed smoke checks exercise GUI snapshots,
 stock plugin discovery without explicit paths, MCP's clean missing-app
 failure, and required helper/resource presence in an isolated user profile.
+macOS plugin notices stay inside each CLAP bundle's `Contents/Resources`;
+the surrounding `PlugIns` directory contains code only. Finalization signs
+nested binaries, then CLAP bundles, then the application and its main executable.
+This follows Apple's [nested-code placement and signing rules](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/Procedures/Procedures.html).
 
 Installers upgrade their own prior installation and refuse foreign target
 collisions. Windows checks mapped binaries before uninstalling the previous

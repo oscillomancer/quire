@@ -87,9 +87,13 @@ if(SUPPLE_BUILD_PLUGINS)
       install(FILES "${CMAKE_BINARY_DIR}/plugins/clap/${product}.clap"
         DESTINATION "${plugin_dest}" COMPONENT Plugins)
     endif()
-    install(FILES "${CMAKE_BINARY_DIR}/plugins/clap/${product}-LICENSE.txt"
-      "${CMAKE_BINARY_DIR}/plugins/clap/${product}-NOTICES.txt"
-      DESTINATION "${plugin_dest}" COMPONENT Plugins)
+    if(NOT APPLE)
+      # macOS bundles already carry notices in Contents/Resources. Loose text
+      # in PlugIns is treated as nested code by Apple's signing machinery.
+      install(FILES "${CMAKE_BINARY_DIR}/plugins/clap/${product}-LICENSE.txt"
+        "${CMAKE_BINARY_DIR}/plugins/clap/${product}-NOTICES.txt"
+        DESTINATION "${plugin_dest}" COMPONENT Plugins)
+    endif()
   endforeach()
 endif()
 if(APPLE)

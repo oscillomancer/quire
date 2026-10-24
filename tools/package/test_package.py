@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Installer ownership/collision checks and strict dependency audit regressions."""
 import os
+import plistlib
 from pathlib import Path
 import subprocess
 import tempfile
@@ -8,6 +9,7 @@ import unittest
 from unittest.mock import patch
 import linux
 import windows
+import macos
 from common import ROOT
 
 
@@ -144,6 +146,28 @@ class Dependencies(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "entry point"):
             self.check("", filename="Stock.clap")
         self.check("", "clap_entry D 123 45\n", filename="Stock.clap")
+
+
+class MacSigning(unittest.TestCase):
+    def test_application_seal_follows_nested_bundle_signatures(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = Path(temp) / "Example.app"
+            main = app / "Contents/MacOS/example"
+            helper = app / "Contents/MacOS/example-mcp"
+            plugin = app / "Contents/PlugIns/CLAP/Stock.clap"
+            plugin_binary = plugin / "Contents/MacOS/Stock"
+            for binary in (main, helper, plugin_binary):
+                binary.parent.mkdir(parents=True, exist_ok=True)
+                binary.write_bytes(b"code")
+            (app / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleExecutable": "example"}))
+            with patch("macos.is_macho", side_effect=lambda p: p in (main, helper, plugin_binary)), \
+                 patch("macos.subprocess.check_output", return_value="binary:\n"), patch("macos.run") as run:
+                macos.finish_bundle(app)
+            signatures = [call.args[-1] for call in run.call_args_list if "--sign" in call.args]
+            self.assertNotIn(main, signatures, "Signing main early seals the containing app")
+            self.assertEqual(signatures[-2:], [plugin, app])
+            self.assertLess(signatures.index(plugin_binary), signatures.index(plugin))
+            self.assertIn(helper, signatures)
 
 
 class WindowsManifest(unittest.TestCase):

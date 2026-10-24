@@ -3,6 +3,7 @@
 """Fix private dylib references, sign inside-out, and produce a dmg and zip."""
 from pathlib import Path
 import platform
+import plistlib
 import shutil
 import subprocess
 import tempfile
@@ -15,6 +16,8 @@ def is_macho(path):
 
 def finish_bundle(app):
     frameworks = app / "Contents/Frameworks"
+    with (app / "Contents/Info.plist").open("rb") as stream:
+        main_executable = app / "Contents/MacOS" / plistlib.load(stream)["CFBundleExecutable"]
     binaries = [p for p in app.rglob("*") if is_macho(p) and not p.is_symlink()]
     dylibs = {p.name: p for p in frameworks.glob("*.dylib")}
     for binary in binaries:
@@ -29,7 +32,10 @@ def finish_bundle(app):
         if binary.parent == frameworks:
             run("install_name_tool", "-id", f"@rpath/{binary.name}", binary)
     for binary in sorted(binaries, key=lambda p: len(p.parts), reverse=True):
-        run("codesign", "--force", "--sign", "-", binary)
+        # Signing the main executable signs its containing bundle too. Defer
+        # that seal until all nested plugin bundles have their final signatures.
+        if binary != main_executable:
+            run("codesign", "--force", "--sign", "-", binary)
     for plugin in app.glob("Contents/PlugIns/CLAP/*.clap"):
         run("codesign", "--force", "--sign", "-", plugin)
     run("codesign", "--force", "--sign", "-", app)
@@ -48,7 +54,7 @@ def main():
         plugins = tree / "Stock plugins for other hosts"
         shutil.copytree(app / "Contents/PlugIns/CLAP", plugins)
         (plugins / "README.txt").write_text(
-            "Optional: copy the .clap bundles and accompanying notices to\n"
+            "Optional: copy the .clap bundles (including their embedded notices) to\n"
             "~/Library/Audio/Plug-Ins/CLAP (create it if necessary).\n"
             "The application already contains these plugins for its own use.\n"
             "Downloaded plugins may retain quarantine and be blocked by other hosts.\n"

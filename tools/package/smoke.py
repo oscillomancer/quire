@@ -60,6 +60,8 @@ def main():
                 with (plugin / "Contents/Info.plist").open("rb") as stream:
                     executable = plistlib.load(stream)["CFBundleExecutable"]
                 assert os.access(plugin / "Contents/MacOS" / executable, os.X_OK), "CLAP bundle lost executable permissions"
+                for notice in ("LICENSE.txt", "NOTICES.txt"):
+                    assert (plugin / "Contents/Resources" / notice).is_file(), "CLAP bundle lost embedded notices"
             assert plugin.resolve() in discovered, f"{plugin.name} not discovered from the packaged location"
         assert len(list(plugins.glob("*.clap"))) == 14
         # A unique absent socket/instance must produce an actionable failure.
