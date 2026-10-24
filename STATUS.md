@@ -70,6 +70,15 @@ runs natively, including binary exports: Windows retains the module trailer;
 macOS uses a bundle resource and ad-hoc signing. The lifecycle and thirteen
 source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows.
 
+Packaging (ADR-0048) has CMake install components, a relocatable Linux tarball
+and user-space installer, an Apple Silicon app/dmg and Windows per-user NSIS
+installer, with portable zip alternatives. The five helpers/programs, fourteen
+stock CLAPs, agent skill, fonts and license texts ship together. Package CI is
+manual and tests installed artifacts; optional release upload creates drafts
+only. Native package/signature/installer verification is pending; local Linux
+verification is recorded in the packaging hand-back. No paid signing or
+notarization is available; first-launch instructions are in `guides/installing.md`.
+
 ## What works
 
 - **Licensing** (ADR-0033): DAW code is GPL-3.0-or-later; stock plugins

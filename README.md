@@ -54,6 +54,14 @@ machine, but file formats and commands can still change.
 - **Text formats.** Projects, patches and FX chains are canonical JSON; MIDI
   can be written in a compact text notation.
 
+## Installing
+
+Download a Linux tarball, Apple Silicon macOS dmg, or Windows per-user installer
+from the release assets. [Installing Quire](docs/guides/installing.md) covers
+user-space installation, unsigned first-launch steps, optional stock plugins
+for other hosts and the bundled MCP helper/skill. Portable downloads also run
+in place.
+
 ## Building
 
 Requirements: Linux, CMake 3.25+, Ninja, Clang (GCC also builds), Python 3,
