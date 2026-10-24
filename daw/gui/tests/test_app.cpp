@@ -1862,7 +1862,9 @@ TEST_CASE("Help opens the folder picker directly and shows compact results") {
     mcpScroll->scrollToEnd();
     a.root->frame(false);
     REQUIRE(a.root->click("help.mcp.json.copy"));
-    CHECK(a.root->clipboard() == json);
+    auto copied = a.root->clipboard();
+    std::erase(copied, '\r');  // the Windows clipboard holds CRLF line endings
+    CHECK(copied == json);
     mcpScroll->scrollTo(0);
     a.root->frame(false);
     a.snapshot("help-mcp.png");
@@ -1887,15 +1889,18 @@ TEST_CASE("Help opens the folder picker directly and shows compact results") {
     a.root->frame(false);
     a.snapshot("help-menu.png");
 }
-TEST_CASE("Help blocks connection commands from a macOS translocation path") {
+TEST_CASE("Help blocks connection commands and skill links from a macOS translocation path") {
     App a;
     REQUIRE(a.ok);
+    bool picked = false;
     gui::HelpActions help(
         *a.root, *a.actions, a.window->sdl(), [](auto task) { task(); },
-        std::filesystem::path("/private/AppTranslocation/id/d/Example.app/Contents/MacOS/app"));
-    for (const auto* action : {"ui.help.mcp", "ui.help.agent"}) {
+        std::filesystem::path("/private/AppTranslocation/id/d/Example.app/Contents/MacOS/app"),
+        [&](auto, auto) { picked = true; });
+    for (const auto* action : {"ui.help.mcp", "ui.help.agent", "ui.help.skill_link"}) {
         REQUIRE(a.actions->run(action));
         a.root->frame(false);
+        CHECK_FALSE(picked);
         REQUIRE(a.root->find("help.status"));
         CHECK(a.root->find("help.status")->valueText().find("Applications") != std::string::npos);
         CHECK_FALSE(a.root->find("help.agent.connect"));
@@ -1903,6 +1908,9 @@ TEST_CASE("Help blocks connection commands from a macOS translocation path") {
         CHECK_FALSE(a.root->find("help.mcp.proxy.copy"));
     }
     a.snapshot("help-translocation.png");
+    REQUIRE(a.actions->run("ui.help.skill"));
+    CHECK(picked);  // A copy remains valid after the temporary mount goes away.
+    CHECK_FALSE(a.root->find("help.panel"));
 }
 
 TEST_CASE("Help identifies only the missing MCP helper") {
