@@ -611,9 +611,9 @@ Session and editing:
   squashed steps keep large invocation arguments.
 
 GUI:
-- Help onboarding has Linux unit/render coverage; the new Windows junction,
-  npm shim launch and macOS Finder lookup paths await native CI and manual
-  folder-picker trials. Native CI is run by the packaging coordinator.
+- Help onboarding tests pass native CI on Linux, macOS and Windows. Real
+  harness registration, App Translocation and the native folder pickers have
+  not been tried by hand.
 - Native shell/toolkit builds and tests pass CI (ADR-0039).
   Cocoa/Windows hidden-window tests replace Linux EGL offscreen;
   Linux golden references are unchanged. Native editor embedding is integrated
