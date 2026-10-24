@@ -138,7 +138,13 @@ void FloatingPanel::open(std::unique_ptr<ui::Node> content, std::function<void()
 void FloatingPanel::raise() {
     if (!open_ || platform_.driver() == Platform::Driver::Offscreen) return;
     window_->show();
-    window_->activate();
+    // Reopening deliberately raises this panel, even if it is already key.
+    // Popup activation uses Window::activate instead and never re-raises an
+    // already-key owner (notably the main window above Cocoa bridge editors).
+    if (SDL_GetKeyboardFocus() == window_->sdl())
+        SDL_RaiseWindow(window_->sdl());
+    else
+        window_->activate();
 }
 
 void FloatingPanel::close() {

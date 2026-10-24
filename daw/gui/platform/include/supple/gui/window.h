@@ -89,7 +89,8 @@ class Window {
     // bind it believes is already in place.
     void forceCurrent() const;
     void show();
-    // Ask the WM to activate a visible window; hidden/offscreen windows stay hidden.
+    // Activate a visible window when focus is elsewhere; an already-key window
+    // is not raised, and hidden/offscreen windows stay hidden.
     void activate() const;
     void hide();
     void setSize(int width, int height);  // design units

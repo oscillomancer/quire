@@ -153,6 +153,9 @@ std::uint32_t Window::id() const { return SDL_GetWindowID(window_); }
 
 void Window::activate() const {
     if ((SDL_GetWindowFlags(window_) & SDL_WINDOW_HIDDEN) != 0) return;
+    // Raising an already-key Cocoa owner would cover normal-level bridged
+    // editors, without a FOCUS_GAINED event to restore their ordering.
+    if (SDL_GetKeyboardFocus() == window_) return;
     SDL_RaiseWindow(window_);
 #if defined(__linux__)
     // EWMH activation requests may be declined (e.g. Hyprland's default

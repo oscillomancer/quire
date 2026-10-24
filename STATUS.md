@@ -624,7 +624,9 @@ Session and editing:
 GUI:
 - The opt-in native popup-focus regression passes on Hyprland/XWayland,
   including typing and Escape after a forwarded floating-window shortcut.
-  Cocoa/Windows activation remains pending native CI/manual checks.
+  Opening a popup in an already-key owner skips raising it, preserving Cocoa
+  bridge-editor ordering; explicit panel reopen still raises the panel.
+  Cocoa bridge stacking and Windows activation remain pending native CI/manual checks.
 - FX/routing utility windows have not been checked by hand on Hyprland,
   Cocoa or Windows: WM floating, owner stacking and XWayland positioning
   remain manual checks. Native CI for these changes is pending coordinator

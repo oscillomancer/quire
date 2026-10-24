@@ -256,7 +256,10 @@ gesture. Events are routed by SDL window identity before the main window's
 quit handling. Unused keys reach the app keymap with the floating root's typing
 context. Opening a popup activates its owning visible OS window, including
 main-window dialogs opened by shortcuts forwarded from FX/routing; hidden
-snapshot/test windows stay hidden. X11 supplements the activation request with
+snapshot/test windows stay hidden. An already-key owner is not raised, keeping
+normal-level Cocoa bridge editors above it when opening a menu. Explicitly
+reopening a floating panel still raises that panel, including when it is key.
+X11 supplements the activation request with
 an input-focus handoff only when SDL and the X server agree that one of this
 app's windows already owns focus; Cocoa/Windows use SDL's native activation.
 Theme/palette switches repaint all roots. Each visible root paints only on
