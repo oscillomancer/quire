@@ -86,6 +86,13 @@ class Installer(unittest.TestCase):
         self.assertEqual(private_note.read_text(), "user project")
         self.assertFalse((self.prefix / "bin/example").exists())
 
+    def test_installed_installer_does_not_delete_itself(self):
+        self.assertEqual(self.install().returncode, 0)
+        result = subprocess.run([str(self.prefix / "opt/example/install.sh"), "--prefix", str(self.prefix)],
+                                env=self.env, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue((self.prefix / "bin/example").is_file())
+
     def test_uninstall_preserves_foreign_empty_icon_directories(self):
         unrelated = self.prefix / "share/icons/other-theme/32x32/apps"
         unrelated.mkdir(parents=True)
@@ -98,12 +105,12 @@ class Installer(unittest.TestCase):
 
 
 class Dependencies(unittest.TestCase):
-    def check(self, output):
+    def check(self, output, symbols="", filename="app"):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "lib/example").mkdir(parents=True)
-            (root / "app").write_bytes(b"\x7fELF")
-            with patch("linux.subprocess.check_output", return_value=output):
+            (root / filename).write_bytes(b"\x7fELF")
+            with patch("linux.subprocess.check_output", side_effect=lambda command, **kwargs: symbols if command[0] == "nm" else output):
                 linux.check_dependencies(root, "example")
 
     def test_base_libraries(self):
@@ -125,6 +132,15 @@ class Dependencies(unittest.TestCase):
         for soname in ("libstdc++.so.6", "libgcc_s.so.1"):
             with self.subTest(soname=soname), self.assertRaisesRegex(RuntimeError, r"shared C\+\+ runtime"):
                 self.check(f"{soname} => /usr/lib/{soname} (0x1)\n")
+
+    def test_runtime_symbols_cannot_interpose(self):
+        with self.assertRaisesRegex(RuntimeError, "runtime symbols are exported"):
+            self.check("", "__cxa_throw T 123 45\n")
+
+    def test_stock_entry_point_is_visible(self):
+        with self.assertRaisesRegex(RuntimeError, "entry point"):
+            self.check("", filename="Stock.clap")
+        self.check("", "clap_entry D 123 45\n", filename="Stock.clap")
 
 
 class WindowsManifest(unittest.TestCase):

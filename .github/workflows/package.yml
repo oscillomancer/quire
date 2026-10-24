@@ -59,7 +59,7 @@ jobs:
         run: |
           apt-get update -q
           DEBIAN_FRONTEND=noninteractive apt-get install -y git curl wget ca-certificates software-properties-common \
-            ninja-build python3 python3-pip g++-12 libx11-dev libxcursor-dev libxrandr-dev libxext-dev \
+            ninja-build ccache python3 python3-pip g++-12 libx11-dev libxcursor-dev libxrandr-dev libxext-dev \
             libgl1-mesa-dev libegl1-mesa-dev zlib1g-dev libasound2-dev xvfb xauth xz-utils
           pip3 install cmake==3.31.6
           wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh
@@ -79,7 +79,7 @@ jobs:
         if: matrix.platform == 'macos'
         run: |
           export HOMEBREW_NO_AUTO_UPDATE=1
-          brew install ninja sdl3
+          brew install ninja sdl3 ccache
           test "$(uname -m)" = arm64
       - uses: ilammy/msvc-dev-cmd@v1
         if: matrix.platform == 'windows'
@@ -88,12 +88,30 @@ jobs:
         run: |
           echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
           choco install nsis --no-progress -y
+      - name: Restore compiler cache
+        if: matrix.platform != 'windows'
+        id: compiler-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .compiler-cache
+          key: package-compiler-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: package-compiler-${{ runner.os }}-${{ runner.arch }}-
+      - name: Configure compiler cache
+        if: matrix.platform != 'windows'
+        run: |
+          echo "CCACHE_DIR=$GITHUB_WORKSPACE/.compiler-cache" >> "$GITHUB_ENV"
+          echo "CCACHE_NOHASHDIR=true" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=1G" >> "$GITHUB_ENV"
       - name: Configure Release
         run: |
           if [[ '${{ matrix.platform }}' == linux ]]; then
             clang++ --version
             g++-12 --version
-            cmake --preset linux-package -DCMAKE_CXX_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/12
+            # GCC 12's stable_partition internals call a deprecated helper;
+            # preserve modern warnings for our code in the native dev workflow.
+            cmake --preset linux-package -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache "-DCMAKE_CXX_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/12 -Wno-deprecated-declarations"
+          elif [[ '${{ matrix.platform }}' == macos ]]; then
+            cmake --preset macos -DCMAKE_BUILD_TYPE=Release -DSUPPLE_BUILD_TESTS=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           else
             cmake --preset ${{ matrix.preset }} -DCMAKE_BUILD_TYPE=Release -DSUPPLE_BUILD_TESTS=OFF
           fi
@@ -145,6 +163,13 @@ jobs:
           Set-Content $sibling 'keep sibling'
           $process = Start-Process -Wait -PassThru $installer -ArgumentList '/S', "/D=$install"
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          # A mapped executable must reject an upgrade before any file removal.
+          $locked = [System.IO.File]::Open("$install/$($product.slug).exe", [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+          try {
+            $process = Start-Process -Wait -PassThru $installer -ArgumentList '/S', "/D=$install"
+            if ($process.ExitCode -eq 0) { throw 'Upgrade accepted locked program files' }
+            if (!(Test-Path "$install/skill/SKILL.md")) { throw 'Locked upgrade removed existing files' }
+          } finally { $locked.Dispose() }
           # A second silent installation must perform an upgrade in place.
           $process = Start-Process -Wait -PassThru $installer -ArgumentList '/S', "/D=$install"
           if ($process.ExitCode -ne 0) { throw "Upgrade failed: $($process.ExitCode)" }
@@ -168,6 +193,12 @@ jobs:
           $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$($product.slug)"
           if (Test-Path $key) { throw 'Uninstall left registry key' }
           if (Test-Path "$env:LOCALAPPDATA/Programs/Common/CLAP/$($product.slug)") { throw 'Optional plugins installed by default' }
+      - name: Save compiler cache
+        if: always() && matrix.platform != 'windows' && steps.compiler-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .compiler-cache
+          key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
       - uses: actions/upload-artifact@v4
         with:
           name: packages-${{ matrix.platform }}

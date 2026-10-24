@@ -78,9 +78,10 @@ manual and tests installed artifacts; optional release upload creates drafts
 only. Linux package builds now use hidden static C++ runtimes (ADR-0049), preserving
 third-party plugin runtime independence; the audit rejects shared C++ runtimes.
 Both installers upgrade their own previous version and preserve unrelated
-files; Linux tests cover upgrade and icon-directory ownership. Package and
-native regression CI validation of the revised implementation is in progress
-using a disposable package-ci push trigger before default-branch discovery. No paid signing or notarization is available; first-launch
+files; Linux tests cover upgrade and icon-directory ownership. Package CI
+checks installed native artifacts, upgrades and uninstall cleanup separately
+from the native regression suite. Before default-branch workflow discovery,
+branch validation uses a disposable package-ci push-trigger commit. No paid signing or notarization is available; first-launch
 instructions are in `docs/guides/installing.md`.
 
 ## What works

@@ -23,7 +23,10 @@ presets retain their existing runtime choice.
 Release CI runs in Ubuntu 22.04 with Clang 22 and GCC 12's libstdc++ headers
 and static runtime libraries. It explicitly selects
 `--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/12`, forwards that compiler flag
-to the stock builds and prints compiler versions. The GCC runtime exception
+to the stock builds and prints compiler versions. The package job suppresses
+deprecation diagnostics for this older standard library, whose stable-partition
+implementation calls a deprecated helper; native CI retains the normal warning
+policy. The GCC runtime exception
 and copyright notices still ship for the statically linked runtime.
 No shared libstdc++ or libgcc_s is bundled or accepted as a packaged ELF
 dependency. The audit also rejects runtime exports and missing CLAP entry

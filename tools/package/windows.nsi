@@ -59,7 +59,9 @@ Section "${PRODUCT_NAME}" SEC_APP
   IfFileExists "$PreviousInstall\uninstall.exe" 0 install_new
   ; Check all mapped executable/DLL/plugin files before changing anything.
   !insertmacro CheckAppUnlocked "$PreviousInstall" install_locked upgrade
+  ClearErrors
   ExecWait '$\"$PreviousInstall\uninstall.exe$\" /S _?=$PreviousInstall' $1
+  IfErrors install_locked
   StrCmp $1 0 0 install_locked
   Delete "$PreviousInstall\uninstall.exe"
 install_new:
