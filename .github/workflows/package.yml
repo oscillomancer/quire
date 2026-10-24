@@ -132,7 +132,7 @@ jobs:
           slug=$(python3 -c 'import json; print(json.load(open("build/linux-package/package/product.json"))["slug"])')
           HOME=/tmp/package-home "$tree/install.sh" --prefix /tmp/package-installed --plugins
           HOME=/tmp/package-home "$tree/install.sh" --prefix /tmp/package-installed
-          test "$(find /tmp/package-home/.clap -name '*.clap' | wc -l)" -eq 14
+          test "$(find /tmp/package-home/.clap -type f -name '*.clap' | wc -l)" -eq 14
           xvfb-run -a python3 tools/package/smoke.py "/tmp/package-installed/opt/$slug" --build-dir build/linux-package
           HOME=/tmp/package-home "/tmp/package-installed/opt/$slug/uninstall.sh" --prefix /tmp/package-installed
           test ! -e /tmp/package-installed
