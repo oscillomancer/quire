@@ -89,8 +89,8 @@ class Window {
     // bind it believes is already in place.
     void forceCurrent() const;
     void show();
-    // Activate a visible window when focus is elsewhere; an already-key window
-    // is not raised, and hidden/offscreen windows stay hidden.
+    // Move focus between this app's visible windows. Background apps and
+    // already-key windows are not raised; hidden/offscreen windows stay hidden.
     void activate() const;
     void hide();
     void setSize(int width, int height);  // design units

@@ -2113,21 +2113,28 @@ TEST_CASE("native floating shortcut activates the main popup owner") {
         if (!panel.handle(e)) f.root->handle(e);
     };
     auto focus = [&](SDL_Window* target) {
-        while (SDL_GetKeyboardFocus() != target) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        for (;;) {
+            SDL_Window* current = SDL_GetKeyboardFocus();
+            if (current && (!target || current == target)) return;
+            const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                       deadline - std::chrono::steady_clock::now())
+                                       .count();
+            REQUIRE_MESSAGE(remaining > 0, "timed out waiting for native keyboard focus (target "
+                                               << (target ? SDL_GetWindowID(target) : 0)
+                                               << ", current "
+                                               << (current ? SDL_GetWindowID(current) : 0) << ")");
             SDL_Event e{};
-            REQUIRE(SDL_WaitEvent(&e));
-            REQUIRE(e.type != SDL_EVENT_QUIT);
-            REQUIRE(e.type != SDL_EVENT_WINDOW_CLOSE_REQUESTED);
-            dispatch(e);
+            if (SDL_WaitEventTimeout(&e, static_cast<int>(remaining))) {
+                REQUIRE(e.type != SDL_EVENT_QUIT);
+                REQUIRE(e.type != SDL_EVENT_WINDOW_CLOSE_REQUESTED);
+                dispatch(e);
+            }
         }
     };
-    // Allow the initial desktop activation to reach SDL before switching
-    // between this app's windows. No wall-clock threshold decides success.
-    while (!SDL_GetKeyboardFocus()) {
-        SDL_Event e{};
-        REQUIRE(SDL_WaitEvent(&e));
-        dispatch(e);
-    }
+    // Wait for initial activation before testing focus handoff within the app.
+    // A missing event fails with a diagnostic instead of hanging this opt-in test.
+    focus(nullptr);
     panel.raise();
     focus(panel.window()->sdl());
     SDL_Event key{};
