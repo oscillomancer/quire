@@ -207,9 +207,10 @@
       "sha256": "fdc934db5c858ee9aa77c09e21a3ed19ddc243ae441eb4c9b08e79b203c34055",
       "purpose": "JIT compiler and interpreter behind DSP scripts (ADR-0032): plugins/suite compiles scripts to MIR and runs them as machine code or interpreted. Only the core, generator and interpreter sources are vendored (no c2mir, tests or tools).",
       "local_patches": [
-        "cmake/patches/mir-spilled-reg-reload.patch"
+        "cmake/patches/mir-spilled-reg-reload.patch",
+        "cmake/patches/mir-float-compare-rex.patch"
       ],
-      "notes": "The local patch replaces an assertion in the register allocator (an instruction naming one spilled register three times, as in d = d * d after coalescing) with the generator's ordinary reload, which aborted the host compiling such a script.",
+      "notes": "The first local patch replaces an assertion in the register allocator (an instruction naming one spilled register three times, as in d = d * d after coalescing) with the generator's ordinary reload, which aborted the host compiling such a script. The second gives the x86-64 pattern for a float == or != the optional REX prefix every other ucomiss pattern has: without it the size estimate for xmm8-15 operands fell a byte short, which aborted a debug host and could make a release build choose a short jump that does not reach.",
       "linkage": "static"
     },
     {

@@ -943,3 +943,45 @@ struct T : Effect {
 };
 )");
 }
+
+TEST_CASE("float equality where registers run past xmm7 compiles and runs (MIR, patched)") {
+    // MIR 1.0.0's pattern for a float == or != left out the REX prefix its
+    // xmm8-15 operands need, so its size estimate fell a byte short: a debug
+    // build asserted, aborting the host, and a release build could choose a
+    // short jump that does not reach.
+    auto result = compileOk(R"(#include <supple/script.h>
+struct T : Effect {
+    static constexpr Info info = {.name = "T", .id = "com.example.t"};
+    void process(Block& io) {
+        Array<float, 12> f;
+        for (int k = 0; k < 12; ++k) f[k] = static_cast<float>(io[0][k]);
+        float a = f[0], b = f[1], c = f[2], d = f[3], e = f[4], g = f[5];
+        float h = f[6], i = f[7], j = f[8], l = f[9], m = f[10], n = f[11];
+        float nan = static_cast<float>(sqrt(-1.0));
+        int same = 0, differ = 0;
+        if (a == b) same += 1;
+        if (c != d) differ += 1;
+        if (e == g) same += 1;
+        if (h != i) differ += 1;
+        if (j == l) same += 1;
+        if (m != n) differ += 1;
+        if (nan == nan) same += 100;
+        if (nan != nan) differ += 10;
+        io[0][0] = same;
+        io[0][1] = differ;
+        io[0][2] = a + b + c + d + e + g + h + i + j + l + m + n;
+    }
+};
+)");
+    JitRunner run(result.program);
+    Audio audio(1, 12);
+    audio.data[0] = {1, 1, 2, 3, 4, 4, 5, 5, 6, 6, 7, 8};
+    script::detail::CurrentScope current(&run.instance);
+    run.instance.budget = 1000;
+    run.blocks(audio, 12, [&](script::Block& block) {
+        callRealtime(result.program->process(), &run.instance, run.self(), &block);
+    });
+    CHECK(audio.data[0][0] == 3);   // a == b, e == g, j == l; NaN equals nothing
+    CHECK(audio.data[0][1] == 12);  // c != d, m != n, and NaN differs from itself
+    CHECK(audio.data[0][2] == 52);
+}
