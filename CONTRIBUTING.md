@@ -245,6 +245,8 @@ working audio workstation's system packages for packaging.
 and smokes packages on native runners (Linux in an Ubuntu 22.04 container).
 `-f draft_release=true` additionally attaches downloads to a **draft**
 `v<version>` release; it never publishes or modifies a published release.
+Re-running it replaces the draft's files and moves its target to the commit
+just built, so the tag created on publication matches the downloads.
 Run `build.yml` separately for native regression coverage. CI smokes installed
 artifacts with dummy audio, isolated preferences and no real agent registration.
 

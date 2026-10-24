@@ -247,6 +247,8 @@ jobs:
           tag="v$VERSION"
           if gh release view "$tag" --json isDraft >/tmp/release.json 2>/dev/null; then
             test "$(jq -r .isDraft /tmp/release.json)" = true || { echo 'Refusing to modify a published release'; exit 1; }
+            # The tag is created on publish: point it at the commit these files come from.
+            gh release edit "$tag" --target "$GITHUB_SHA"
           else
             gh release create "$tag" --draft --target "$GITHUB_SHA" --title "$tag" --notes 'Unsigned packages; see docs/guides/installing.md for first-launch steps.'
           fi
