@@ -12,7 +12,7 @@ Windows: `plugins/clap` and `skill` from the flat executable directory.
 macOS: `../PlugIns/CLAP` and `../Resources/skill` from `Contents/MacOS/`.
 Fonts are a sibling `fonts/` directory to the installed skill. Installed
 paths take precedence over build-tree fallback; CMake's macOS GUI bundle
-also resolves resources from its containing build tree. `engine exec` uses
+also resolves resources and bridge/scanner helpers from its containing build tree. `engine exec` uses
 the same stock discovery as the GUI and other engine modes.
 
 Windows GUI startup creates no console; CLI invocations preserve redirected

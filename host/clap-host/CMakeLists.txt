@@ -135,3 +135,15 @@ if(SUPPLE_BUILD_TESTS)
     FIXTURE_VST3_PATH="${CMAKE_CURRENT_BINARY_DIR}/test-vst3.vst3"
     FIXTURE_VST3_MODULE="$<TARGET_FILE:clap-host-vst3-fixtures>")
 endif()
+
+if(APPLE AND SUPPLE_BUILD_TESTS)
+  # Exercise actual executable-relative lookup from the GUI bundle's depth,
+  # rather than relying on a build-tree symlink to keep its old location.
+  set(bundle_probe_dir "${CMAKE_BINARY_DIR}/daw/gui/host-lookup-test.app/Contents/MacOS")
+  file(MAKE_DIRECTORY "${bundle_probe_dir}")
+  add_custom_command(TARGET clap-host.tests POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:clap-host.tests>" "${bundle_probe_dir}/host-lookup-tests")
+  add_test(NAME clap-host.bundle-lookup COMMAND "${bundle_probe_dir}/host-lookup-tests"
+    "--test-case=bridge lookup resolves*,the agent skill ships*")
+  set_tests_properties(clap-host.bundle-lookup PROPERTIES LABELS clap-host)
+endif()

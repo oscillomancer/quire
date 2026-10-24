@@ -69,6 +69,16 @@ bool locateBridgeExecutable(std::string_view name) {
             setBridgeExecutable(candidate);
             return true;
         }
+#if defined(__APPLE__)
+    // CMake's GUI executable is nested inside daw/gui/<slug>.app/Contents/MacOS.
+    const auto build = dir.parent_path().parent_path().parent_path().parent_path().parent_path();
+    const auto candidate = build / "host" / "clap-host" / file;
+    if (std::filesystem::is_regular_file(build / "CMakeCache.txt", ec) &&
+        std::filesystem::is_regular_file(candidate, ec)) {
+        setBridgeExecutable(candidate);
+        return true;
+    }
+#endif
     return false;
 }
 
