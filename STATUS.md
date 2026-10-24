@@ -201,7 +201,9 @@ instructions are in `docs/guides/installing.md`.
   learned for an action that only runs per press.
 - **Agents**: the MCP server for the running app or a headless engine, for
   any MCP client (Claude Code, Codex, Hermes, …); the bundled skill
-  (`skill/`). There is no built-in agent panel (ADR-0043).
+  (`skill/`). The proxy transport deadline exceeds the maximum `job.wait`
+  duration, avoiding a timeout race during long optimization jobs.
+  There is no built-in agent panel (ADR-0043).
 - **Analysis and sound design**: `core-analysis` (BS.1770/R128 loudness
   validated against EBU Tech 3341/3342, spectral, pitch, envelope, stereo,
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
