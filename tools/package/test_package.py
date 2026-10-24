@@ -136,6 +136,46 @@ class Installer(unittest.TestCase):
         self.assertTrue(unrelated.is_dir())
         self.assertFalse((self.prefix / "share/icons/hicolor").exists())
 
+    def test_uninstall_refuses_replaced_payload_directory(self):
+        self.assertEqual(self.install().returncode, 0)
+        app = self.prefix / "opt/example"
+        outside = self.root / "foreign-host-data"
+        outside.mkdir()
+        original = app / "lib/example/plugins"
+        original.rename(original.with_name("plugins-original"))
+        original.symlink_to(outside, target_is_directory=True)
+        foreign = outside / "Stock-LICENSE.txt"
+        foreign.write_text("another host owns this notice")
+        result = subprocess.run([str(app / "uninstall.sh"), "--prefix", str(self.prefix)],
+                                env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(foreign.read_text(), "another host owns this notice")
+        self.assertTrue((app / ".installed-files").is_file())
+        self.assertTrue((app / "bin/example").is_file(), "Refusal must happen before any removal")
+
+    def test_uninstall_refuses_linked_app_root(self):
+        self.assertEqual(self.install().returncode, 0)
+        app = self.prefix / "opt/example"
+        moved = self.root / "moved-app"
+        app.rename(moved)
+        app.symlink_to(moved, target_is_directory=True)
+        result = subprocess.run([str(app / "uninstall.sh"), "--prefix", str(self.prefix)],
+                                env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue((moved / ".installed-files").is_file())
+
+    def test_uninstall_keeps_path_based_external_entries(self):
+        self.assertEqual(self.install("--plugins").returncode, 0)
+        for original in (self.prefix / "bin", self.home / ".clap"):
+            moved = self.root / (original.name + "-elsewhere")
+            original.rename(moved)
+            original.symlink_to(moved, target_is_directory=True)
+        result = subprocess.run([str(self.prefix / "opt/example/uninstall.sh"), "--prefix", str(self.prefix)],
+                                env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.root / "bin-elsewhere/example").exists())
+        self.assertFalse((self.root / ".clap-elsewhere/Stock.clap").exists())
+
 
 class Dependencies(unittest.TestCase):
     def check(self, output, symbols="", filename="app"):
@@ -231,6 +271,15 @@ class WindowsManifest(unittest.TestCase):
             self.assertNotIn("unrelated", manifest)
             self.assertNotIn("RMDir /r", manifest)
             self.assertNotIn('Delete "${root}\\*"', manifest)
+            ownership = (tree / ".installed-files").read_text(encoding="utf-16-le")
+            self.assertIn("F|app.exe\n", ownership)
+            self.assertIn("D|plugins\\clap\n", ownership)
+            self.assertIn("F|.installed-files\n", ownership)
+            self.assertIn("F|uninstall.exe\n", ownership)
+            optional = (tree / ".installed-plugins").read_text(encoding="utf-16-le")
+            self.assertEqual(optional, "F|Stock.clap\n")
+            self.assertNotIn("unrelated", ownership)
+            self.assertLess(manifest.index('Call un.CheckDirectoryChain'), manifest.index('Delete "${root}\\app.exe"'))
 
 
 if __name__ == "__main__":

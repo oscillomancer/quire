@@ -88,6 +88,12 @@ jobs:
         run: |
           echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
           choco install nsis --no-progress -y
+      - name: Compile Windows installer safety instructions
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          python tools/package/verify_windows.py --syntax-only
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS compilation failed' }
       - name: Restore compiler cache
         if: matrix.platform != 'windows'
         id: compiler-cache
@@ -196,6 +202,13 @@ jobs:
           $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$($product.slug)"
           if (Test-Path $key) { throw 'Uninstall left registry key' }
           if (Test-Path "$env:LOCALAPPDATA/Programs/Common/CLAP/$($product.slug)") { throw 'Optional plugins installed by default' }
+      - name: Windows ownership and selected-component regressions
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $archive = (Get-ChildItem dist/*.zip).FullName
+          python tools/package/verify_windows.py --build-dir build/windows --archive $archive
+          if ($LASTEXITCODE -ne 0) { throw 'Native installer ownership regressions failed' }
       - name: Save compiler cache
         if: always() && matrix.platform != 'windows' && steps.compiler-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4

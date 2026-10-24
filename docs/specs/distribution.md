@@ -44,7 +44,15 @@ dangling symlinks and links that leave the application.
 Installers upgrade their own prior installation and refuse foreign target
 collisions. Windows checks mapped binaries before uninstalling the previous
 version, remembers the external-plugin choice, and removes only staged file
-paths with nonrecursive directory cleanup. Linux records owned payload and
+paths with nonrecursive directory cleanup.
+Windows persists relative UTF-16 ownership inventories in `.installed-files`
+and `.installed-plugins`. Upgrade preflight checks both the app and selected
+external CLAP files before removal; unowned new paths are refused. `/PLUGINS`
+selects the optional component for silent installation. Uninstall refuses
+reparse points in private app/plugin directory chains before any deletion.
+Linux similarly refuses symlinked private payload ancestors, keeping the
+manifest on refusal; external bin/desktop/icon/CLAP entries remain path-based.
+Linux records owned payload and
 integration paths, preserves user files during upgrade/removal, and prunes
 only owned directory ancestors. Linux upgrades remember external-plugin opt-in
 and preflight all new destinations against previous ownership before uninstalling,
