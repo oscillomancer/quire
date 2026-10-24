@@ -26,8 +26,11 @@ and static runtime libraries. It explicitly selects
 to the stock builds and prints compiler versions. The package job suppresses
 deprecation diagnostics for this older standard library, whose stable-partition
 implementation calls a deprecated helper; native CI retains the normal warning
-policy. The GCC runtime exception
-and copyright notices still ship for the statically linked runtime.
+policy. GNU C declarations (`-D_GNU_SOURCE`) are enabled for the older glibc
+headers so the template renderer can use `RTLD_DEFAULT`, without altering its
+shared code. The GCC runtime exception
+and copyright notices still ship for the statically linked runtime, including
+in the optional stock-plugin notices copied for other hosts.
 No shared libstdc++ or libgcc_s is bundled or accepted as a packaged ELF
 dependency. The audit also rejects runtime exports and missing CLAP entry
 points. Optional `--plugins` copies therefore need no host libstdc++ upgrade.

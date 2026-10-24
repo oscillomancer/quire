@@ -89,7 +89,15 @@ def main():
     name = f'{slug}-{product["version"]}-linux-{arch}'
     with tempfile.TemporaryDirectory(prefix="package-", dir="/tmp") as temp:
         tree = stage(args.build_dir, Path(temp) / name)
-        runtime_notices(tree / "share/doc" / slug / "third-party/GCC-runtime")
+        notices = tree / "share/doc" / slug / "third-party/GCC-runtime"
+        runtime_notices(notices)
+        # Optional copies for other hosts must carry the static-runtime texts
+        # too, even after the user removes the private application tree.
+        text = "\n\nGCC runtime library notices (statically linked with hidden symbols)\n"
+        text += "\n\n".join(path.read_text() for path in sorted(notices.iterdir()))
+        for plugin_notice in (tree / "lib" / slug / "plugins").glob("*-NOTICES.txt"):
+            plugin_notice.write_text(plugin_notice.read_text() + text)
+
         check_dependencies(tree, slug)
         with tarfile.open(args.output_dir / f"{name}.tar.xz", "w:xz", preset=3) as archive:
             archive.add(tree, arcname=name)
