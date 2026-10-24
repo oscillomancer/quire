@@ -125,6 +125,13 @@ jobs:
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: ${{ matrix.platform == 'macos' && '2' || '6' }}
         run: cmake --build --preset ${{ matrix.preset }} --target package-runtime --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
+      - name: Windows reused-build staging regression
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          # Simulate an unrelated DLL left beside the GUI by native testing.
+          Set-Content build/windows/daw/gui/unrelated-staging-test.dll 'must never ship'
+          Set-Content build/windows/daw/gui/opengl32.dll 'must use the OS renderer'
       - name: Package
         run: python3 tools/package/${{ matrix.platform }}.py --build-dir build/${{ matrix.preset }}
       - name: Linux install, smoke and uninstall

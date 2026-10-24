@@ -84,7 +84,8 @@ tests cover upgrade collisions, directory links and icon-directory ownership. Pa
 checks installed native artifacts, upgrades and uninstall cleanup separately
 from the native regression suite. macOS finalization keeps notices in bundle
 resources and signs nested code before the app. Bundled SDL resolves package-manager
-symlinks into private library files. No paid signing or notarization is available; first-launch
+symlinks into private library files. Windows stages the resolved DLL set and
+ships SDL/zlib notices; unrelated build-tree DLLs are rejected. No paid signing or notarization is available; first-launch
 instructions are in `docs/guides/installing.md`.
 
 ## What works

@@ -12,6 +12,13 @@ def nsis_path(path):
     return str(path).replace("/", "\\").replace("$", "$$").replace('"', '$\\"')
 
 
+def check_runtime_dlls(tree, expected):
+    """Only the exact CMake-resolved runtime set belongs in the staged root."""
+    actual = {p.name.lower() for p in tree.iterdir() if p.is_file() and p.suffix.lower() == '.dll'}
+    expected = {name.lower() for name in expected if name}
+    if actual != expected:
+        raise RuntimeError(f"Runtime DLL inventory mismatch: unexpected {sorted(actual - expected)}; missing {sorted(expected - actual)}")
+
 
 def write_manifests(tree, destination):
     """Persist ownership and generate preflight/removal lists for the payload."""
@@ -100,6 +107,7 @@ def main():
     name = f'{product["slug"]}-{product["version"]}-windows-x86_64'
     with tempfile.TemporaryDirectory(prefix="package-") as temp:
         tree = stage(args.build_dir, Path(temp) / "tree")
+        check_runtime_dlls(tree, (args.build_dir / 'package/windows-runtime.txt').read_text().splitlines())
         archive_zip(tree, args.output_dir / f"{name}.zip")
         build_installer(tree, Path(temp), product, args.output_dir / f"{name}.exe")
     print(args.output_dir / f"{name}.exe")

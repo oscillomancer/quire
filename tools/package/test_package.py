@@ -256,6 +256,16 @@ class MacSigning(unittest.TestCase):
 
 
 class WindowsManifest(unittest.TestCase):
+    def test_runtime_audit_rejects_unrelated_staged_dll(self):
+        with tempfile.TemporaryDirectory() as temp:
+            stage = Path(temp)
+            (stage / "SDL3.dll").write_bytes(b"runtime")
+            (stage / "zlib1.dll").write_bytes(b"runtime")
+            windows.check_runtime_dlls(stage, ["sdl3.dll", "zlib1.dll"])
+            (stage / "opengl32.dll").write_bytes(b"unrelated CI renderer")
+            with self.assertRaisesRegex(RuntimeError, "unexpected.*opengl32"):
+                windows.check_runtime_dlls(stage, ["sdl3.dll", "zlib1.dll"])
+
     def test_uninstall_lists_only_staged_files(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
