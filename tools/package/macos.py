@@ -50,7 +50,10 @@ def main():
         (plugins / "README.txt").write_text(
             "Optional: copy the .clap bundles and accompanying notices to\n"
             "~/Library/Audio/Plug-Ins/CLAP (create it if necessary).\n"
-            "The application already contains these plugins for its own use.\n")
+            "The application already contains these plugins for its own use.\n"
+            "Downloaded plugins may retain quarantine and be blocked by other hosts.\n"
+            "After copying trusted bundles, clear it recursively for each bundle:\n"
+            'xattr -dr com.apple.quarantine "$HOME/Library/Audio/Plug-Ins/CLAP/<file>.clap"\n' )
         (tree / "Applications").symlink_to("/Applications")
         run("hdiutil", "create", "-volname", product["name"], "-srcfolder", tree,
             "-ov", "-format", "UDZO", args.output_dir / f"{name}.dmg")

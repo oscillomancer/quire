@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import linux
+import windows
 from common import ROOT
 
 
@@ -69,6 +70,32 @@ class Installer(unittest.TestCase):
         self.assertEqual(self.install().returncode, 0)
         self.assertFalse((self.home / ".clap").exists())
 
+    def test_upgrade_replaces_owned_files_and_preserves_user_data(self):
+        self.assertEqual(self.install("--plugins").returncode, 0)
+        private_note = self.prefix / "opt/example/my-project.json"
+        private_note.write_text("user project")
+        (self.source / "bin/example").write_text("new version")
+        (self.source / "lib/example/plugins/Stock.clap").write_text("new plugin")
+        result = self.install("--plugins")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.prefix / "bin/example").read_text(), "new version")
+        self.assertEqual((self.home / ".clap/Stock.clap").read_text(), "new plugin")
+        self.assertEqual(private_note.read_text(), "user project")
+        self.assertEqual(subprocess.run([str(self.prefix / "opt/example/uninstall.sh"), "--prefix", str(self.prefix)],
+                                       env=self.env, capture_output=True).returncode, 0)
+        self.assertEqual(private_note.read_text(), "user project")
+        self.assertFalse((self.prefix / "bin/example").exists())
+
+    def test_uninstall_preserves_foreign_empty_icon_directories(self):
+        unrelated = self.prefix / "share/icons/other-theme/32x32/apps"
+        unrelated.mkdir(parents=True)
+        self.assertEqual(self.install().returncode, 0)
+        result = subprocess.run([str(self.prefix / "opt/example/uninstall.sh"), "--prefix", str(self.prefix)],
+                                env=self.env, capture_output=True)
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue(unrelated.is_dir())
+        self.assertFalse((self.prefix / "share/icons/hicolor").exists())
+
 
 class Dependencies(unittest.TestCase):
     def check(self, output):
@@ -93,6 +120,29 @@ class Dependencies(unittest.TestCase):
     def test_jack_is_never_linked(self):
         with self.assertRaisesRegex(RuntimeError, "JACK"):
             self.check("libjack.so.0 => /usr/lib/libjack.so.0 (0x1)\n")
+
+    def test_shared_cxx_runtimes_are_never_needed(self):
+        for soname in ("libstdc++.so.6", "libgcc_s.so.1"):
+            with self.subTest(soname=soname), self.assertRaisesRegex(RuntimeError, r"shared C\+\+ runtime"):
+                self.check(f"{soname} => /usr/lib/{soname} (0x1)\n")
+
+
+class WindowsManifest(unittest.TestCase):
+    def test_uninstall_lists_only_staged_files(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            tree = root / "stage"
+            (tree / "plugins/clap").mkdir(parents=True)
+            (tree / "plugins/clap/Stock.clap").write_bytes(b"plugin")
+            (tree / "app.exe").write_bytes(b"program")
+            (root / "unrelated.txt").write_text("keep")
+            windows.write_manifests(tree, root)
+            manifest = (root / "app-files.nsh").read_text()
+            self.assertIn('Delete "${root}\\app.exe"', manifest)
+            self.assertIn('RMDir "${root}\\plugins\\clap"', manifest)
+            self.assertNotIn("unrelated", manifest)
+            self.assertNotIn("RMDir /r", manifest)
+            self.assertNotIn('Delete "${root}\\*"', manifest)
 
 
 if __name__ == "__main__":

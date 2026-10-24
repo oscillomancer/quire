@@ -14,7 +14,21 @@ done
 [[ $prefix = /* && $prefix != *$'\n'* ]] || { echo 'Use an absolute prefix without newlines' >&2; exit 1; }
 source_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 app="$prefix/opt/$slug"
-[[ ! -e $app && ! -L $app ]] || { echo "Already installed: run $app/uninstall.sh --prefix '$prefix' first" >&2; exit 1; }
+if [[ -f "$app/.installed-files" && -f "$app/uninstall.sh" && ! -L $app ]]; then
+  # Optional external plugins are removed by the previous version; opt in again.
+  "$app/uninstall.sh" --prefix "$prefix"
+  upgrade=1
+else
+  upgrade=0
+fi
+if ((!upgrade)) && [[ -e $app || -L $app ]]; then
+  echo "Refusing foreign installation folder: $app" >&2; exit 1
+fi
+# An upgrade may leave user files inside the old app folder. Preserve them.
+while IFS= read -r -d '' file; do
+  rel=${file#"$source_dir/"}
+  [[ ! -e "$app/$rel" && ! -L "$app/$rel" ]] || { echo "Already exists: $app/$rel" >&2; exit 1; }
+done < <(find "$source_dir" \( -type f -o -type l \) -print0)
 # Refuse collisions before copying anything; never replace another host's CLAP.
 for exe in "$source_dir"/bin/*; do
   dest="$prefix/bin/${exe##*/}"
@@ -29,9 +43,11 @@ if ((plugins)); then
   done
 fi
 mkdir -p "$prefix/opt" "$prefix/bin"
-cp -a "$source_dir" "$app"
+mkdir -p "$app"
+cp -a "$source_dir/." "$app/"
 manifest="$app/.installed-files"
-: > "$manifest"
+find "$source_dir" -type d -printf '%P\n' | while IFS= read -r rel; do printf '%s\n' "$app${rel:+/$rel}"; done > "$app/.installed-dirs"
+find "$source_dir" \( -type f -o -type l \) -printf '%P\n' | while IFS= read -r rel; do printf '%s\n' "$app/$rel"; done > "$manifest"
 # Roll back partial installs on failure using the same ownership manifest.
 trap '"$app/uninstall.sh" --prefix "$prefix"' ERR
 for exe in "$app"/bin/*; do
