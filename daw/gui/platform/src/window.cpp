@@ -8,6 +8,11 @@
 #include <objc/runtime.h>
 #endif
 #include <nanovg.h>
+#include "supple/product.h"
+#if defined(SUPPLE_APP_ICON)
+#include <stb_image.h>
+#include "app_icon.h"
+#endif
 #include "supple/gui/gl_api.h"
 #define NANOVG_GL3 1
 #include <nanovg_gl.h>
@@ -36,6 +41,23 @@ constexpr const char* offscreenDriver() {
     return desktopDriver();  // hidden native windows: no EGL dependency
 #endif
 }
+void setAppIcon(SDL_Window* window) {
+#if defined(SUPPLE_APP_ICON)
+    int width = 0, height = 0, channels = 0;
+    unsigned char* pixels = stbi_load_from_memory(
+        kAppIconPng, static_cast<int>(sizeof(kAppIconPng)), &width, &height, &channels, 4);
+    if (!pixels) return;
+    SDL_Surface* surface =
+        SDL_CreateSurfaceFrom(width, height, SDL_PIXELFORMAT_RGBA32, pixels, width * 4);
+    if (surface) {
+        (void)SDL_SetWindowIcon(window, surface);
+        SDL_DestroySurface(surface);
+    }
+    stbi_image_free(pixels);
+#else
+    (void)window;  // macOS uses the .app's icns.
+#endif
+}
 Error sdlError(std::string code, std::string what) {
     return Error(std::move(code), what + ": " + SDL_GetError(), {},
                  "the GUI needs a desktop session and OpenGL 3.3 core (4.1 on macOS)");
@@ -45,6 +67,7 @@ Error sdlError(std::string code, std::string what) {
 Result<std::unique_ptr<Platform>> Platform::start(Driver driver) {
     // Plugin editors are X11 children of our windows, so DAW windows are X11
     // windows even on Wayland desktops (ADR-0005 §1).
+    SDL_SetHint(SDL_HINT_APP_ID, std::string(product::kSlug).c_str());
     SDL_SetHint(SDL_HINT_VIDEO_DRIVER,
                 driver == Driver::Offscreen ? offscreenDriver() : desktopDriver());
     if (!SDL_Init(SDL_INIT_VIDEO)) return sdlError("gui.platform", "SDL_Init");
@@ -73,6 +96,7 @@ Result<std::unique_ptr<Window>> Window::open(const Platform& platform,
         if (options.utility) flags |= SDL_WINDOW_UTILITY;
         w->window_ = SDL_CreateWindow(options.title.c_str(), options.width, options.height, flags);
         if (!w->window_) return sdlError("gui.window", "SDL_CreateWindow");
+        setAppIcon(w->window_);
         if (options.parent && options.parent->window_)
             (void)SDL_SetWindowParent(w->window_, options.parent->window_);
         return w;
@@ -95,6 +119,7 @@ Result<std::unique_ptr<Window>> Window::open(const Platform& platform,
     if (options.hidden) flags |= SDL_WINDOW_HIDDEN;
     w->window_ = SDL_CreateWindow(options.title.c_str(), options.width, options.height, flags);
     if (!w->window_) return sdlError("gui.window", "SDL_CreateWindow");
+    setAppIcon(w->window_);
     w->setSize(options.width, options.height);
     if (options.parent && options.parent->window_)
         (void)SDL_SetWindowParent(w->window_, options.parent->window_);

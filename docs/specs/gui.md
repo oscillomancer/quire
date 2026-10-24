@@ -994,3 +994,6 @@ CLI redirection and offscreen snapshot flags remain supported. Other helper
 programs remain console executables. The Apple Silicon app bundle declares
 high DPI and microphone use and retains a build-tree command symlink. Fonts
 load from the directory beside the installed skill before checkout fallback.
+The application ID is the product slug, matching Linux desktop StartupWMClass.
+Linux/Windows windows use the embedded 256px application icon; Windows also
+embeds the multi-size ICO resource for Explorer and Start-menu shortcuts.

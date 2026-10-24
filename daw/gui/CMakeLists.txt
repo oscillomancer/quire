@@ -28,6 +28,15 @@ supple_add_library(gui-platform
   DEPS supple::core-base
   PRIVATE_DEPS SDL3::SDL3 gui-nanovg ZLIB::ZLIB)
 target_include_directories(gui-platform PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/platform/include)
+target_link_libraries(gui-platform PRIVATE supple::product-info)
+if(NOT APPLE AND EXISTS "${PROJECT_SOURCE_DIR}/assets/icon/png/app-256.png")
+  file(READ "${PROJECT_SOURCE_DIR}/assets/icon/png/app-256.png" app_icon_bytes HEX)
+  string(REGEX REPLACE "(..)" "0x\\1," app_icon_bytes "${app_icon_bytes}")
+  configure_file(${PROJECT_SOURCE_DIR}/cmake/package/app_icon.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/app_icon.h @ONLY)
+  target_include_directories(gui-platform PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+  target_compile_definitions(gui-platform PRIVATE SUPPLE_APP_ICON=1)
+endif()
 target_link_libraries(gui-platform PUBLIC gui-nanovg)
 
 # Waveform peak pyramids: builder, disk cache, worker (no GL).
@@ -80,6 +89,10 @@ supple_target_defaults(gui-app)
 add_executable(${PRODUCT_SLUG} app/main.cpp)
 if(WIN32)
   set_target_properties(${PRODUCT_SLUG} PROPERTIES WIN32_EXECUTABLE TRUE)
+  if(EXISTS "${PROJECT_SOURCE_DIR}/assets/icon/app.ico")
+    configure_file(${PROJECT_SOURCE_DIR}/cmake/package/app.rc.in ${CMAKE_CURRENT_BINARY_DIR}/app.rc @ONLY)
+    target_sources(${PRODUCT_SLUG} PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/app.rc)
+  endif()
 elseif(APPLE)
   if(NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
     message(FATAL_ERROR "The application bundle supports Apple Silicon (arm64) only")
