@@ -78,7 +78,8 @@ manual and tests installed artifacts; optional release upload creates drafts
 only. Linux package builds now use hidden static C++ runtimes (ADR-0049), preserving
 third-party plugin runtime independence; the audit rejects shared C++ runtimes.
 Both installers upgrade their own previous version and preserve unrelated
-files; Linux tests cover upgrade and icon-directory ownership. Package CI
+files; Linux remembers external-plugin opt-in and completes collision preflight
+before removing an old installation. Tests cover these upgrade paths and icon-directory ownership. Package CI
 checks installed native artifacts, upgrades and uninstall cleanup separately
 from the native regression suite. macOS finalization keeps notices in bundle
 resources and signs nested code before the app. Bundled SDL resolves package-manager

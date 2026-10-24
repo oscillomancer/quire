@@ -46,7 +46,9 @@ collisions. Windows checks mapped binaries before uninstalling the previous
 version, remembers the external-plugin choice, and removes only staged file
 paths with nonrecursive directory cleanup. Linux records owned payload and
 integration paths, preserves user files during upgrade/removal, and prunes
-only owned directory ancestors. Optional macOS CLAP installation documents
+only owned directory ancestors. Linux upgrades remember external-plugin opt-in
+and preflight all new destinations against previous ownership before uninstalling,
+so a collision leaves the old version intact. Optional macOS CLAP installation documents
 recursive quarantine removal after copying trusted plugins.
 
 `SUPPLE_PACKAGE_ONLY=ON` (with tests off) builds the template's existing CLAP

@@ -17,9 +17,16 @@ prefix=$(realpath -m -- "$prefix")
 [[ $prefix != / ]] || { echo 'Choose a user-space installation prefix, not /' >&2; exit 1; }
 app="$prefix/opt/$slug"
 [[ $source_dir != "$app" ]] || { echo 'Run install.sh from the new extracted download, outside the installed app folder.' >&2; exit 1; }
+declare -A previous_files=() previous_dirs=()
 if [[ -f "$app/.installed-files" && -f "$app/uninstall.sh" && ! -L $app ]]; then
-  # Optional external plugins are removed by the previous version; opt in again.
-  "$app/uninstall.sh" --prefix "$prefix"
+  # Preserve the previous opt-in and ownership until all preflight checks pass.
+  while IFS= read -r file; do
+    previous_files["$file"]=1
+    case "$file" in "$HOME/.clap/"*) plugins=1 ;; esac
+  done < "$app/.installed-files"
+  if [[ -f "$app/.installed-dirs" ]]; then
+    while IFS= read -r dir; do previous_dirs["$dir"]=1; done < "$app/.installed-dirs"
+  fi
   upgrade=1
 else
   upgrade=0
@@ -27,24 +34,57 @@ fi
 if ((!upgrade)) && [[ -e $app || -L $app ]]; then
   echo "Refusing foreign installation folder: $app" >&2; exit 1
 fi
-# An upgrade may leave user files inside the old app folder. Preserve them.
+# Existing owned files will be removed by the old uninstaller. Shared real
+# directories may remain; foreign files and directory symlinks may not collide.
+check_destination() {
+  local dest=$1 kind=$2
+  if [[ ! -e $dest && ! -L $dest ]]; then return; fi
+  if [[ $kind = directory && -d $dest && ! -L $dest ]]; then return; fi
+  if [[ ${previous_files["$dest"]:-0} = 1 && (! -d $dest || -L $dest) ]]; then return; fi
+  # An old owned directory is free only if uninstall can actually remove it.
+  if [[ $kind = file && -d $dest && ! -L $dest && ${previous_dirs["$dest"]:-0} = 1 ]]; then
+    local entry
+    while IFS= read -r -d '' entry; do
+      [[ ${previous_files["$entry"]:-0} = 1 || ${previous_dirs["$entry"]:-0} = 1 ]] || {
+        echo "Already exists: $entry" >&2; return 1;
+      }
+    done < <(find "$dest" -mindepth 1 -print0)
+    return
+  fi
+  echo "Already exists: $dest" >&2; return 1
+}
+# Check every destination directory too, so a foreign ancestor cannot cause a
+# copy failure after the old installation has been removed.
+for dir in "$prefix/opt" "$prefix/bin" "$prefix/share" "$prefix/share/applications"; do
+  check_destination "$dir" directory
+done
+while IFS= read -r -d '' dir; do
+  rel=${dir#"$source_dir"}
+  check_destination "$app$rel" directory
+done < <(find "$source_dir" -type d -print0)
 while IFS= read -r -d '' file; do
   rel=${file#"$source_dir/"}
-  [[ ! -e "$app/$rel" && ! -L "$app/$rel" ]] || { echo "Already exists: $app/$rel" >&2; exit 1; }
+  check_destination "$app/$rel" file
 done < <(find "$source_dir" \( -type f -o -type l \) -print0)
 # Refuse collisions before copying anything; never replace another host's CLAP.
 for exe in "$source_dir"/bin/*; do
   dest="$prefix/bin/${exe##*/}"
-  [[ ! -e $dest && ! -L $dest ]] || { echo "Already exists: $dest" >&2; exit 1; }
+  check_destination "$dest" file
 done
-for rel in "share/applications/$slug.desktop" $(cd "$source_dir" && find share/icons -type f 2>/dev/null || true); do
-  [[ ! -e "$prefix/$rel" && ! -L "$prefix/$rel" ]] || { echo "Already exists: $prefix/$rel" >&2; exit 1; }
-done
+check_destination "$prefix/share/applications/$slug.desktop" file
+while IFS= read -r -d '' dir; do
+  check_destination "$prefix/${dir#"$source_dir/"}" directory
+done < <(find "$source_dir/share/icons" -type d -print0 2>/dev/null || true)
+while IFS= read -r -d '' file; do
+  check_destination "$prefix/${file#"$source_dir/"}" file
+done < <(find "$source_dir/share/icons" -type f -print0 2>/dev/null || true)
 if ((plugins)); then
+  check_destination "$HOME/.clap" directory
   for file in "$source_dir/lib/$slug/plugins/"*; do
-    [[ ! -e "$HOME/.clap/${file##*/}" && ! -L "$HOME/.clap/${file##*/}" ]] || { echo "Already exists: $HOME/.clap/${file##*/}" >&2; exit 1; }
+    check_destination "$HOME/.clap/${file##*/}" file
   done
 fi
+if ((upgrade)); then "$app/uninstall.sh" --prefix "$prefix"; fi
 mkdir -p "$prefix/opt" "$prefix/bin"
 mkdir -p "$app"
 cp -a "$source_dir/." "$app/"

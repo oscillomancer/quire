@@ -19,7 +19,8 @@ Ensure `~/.local/bin` is on PATH for terminal launches. The application menu
 entry works independently of PATH. Add `--plugins` only if other DAWs should
 also find the stock CLAPs in `~/.clap`; Quire always has its own private copy.
 Re-running the installer upgrades its own previous installation automatically;
-pass `--plugins` again to keep external CLAP copies. Foreign paths are refused,
+it remembers whether external CLAP copies were previously enabled. All collision
+checks run before removing the old version, so a refused upgrade leaves it intact. Foreign paths are refused,
 and unrelated user files and icon folders survive uninstall. X11/XWayland and OpenGL
 are required; audio uses your existing JACK/PipeWire setup. Releases target
 Ubuntu 22.04's glibc or newer. No root access or system changes are needed.

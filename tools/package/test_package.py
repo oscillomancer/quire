@@ -95,6 +95,37 @@ class Installer(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertTrue((self.prefix / "bin/example").is_file())
 
+    def test_upgrade_remembers_external_plugins(self):
+        self.assertEqual(self.install("--plugins").returncode, 0)
+        (self.source / "lib/example/plugins/Stock.clap").write_text("new plugin")
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.home / ".clap/Stock.clap").read_text(), "new plugin")
+
+    def test_upgrade_collision_preserves_previous_installation(self):
+        self.assertEqual(self.install("--plugins").returncode, 0)
+        private_note = self.prefix / "opt/example/my-project.json"
+        private_note.write_text("user project")
+        (self.source / "my-project.json").write_text("new shipped file")
+        (self.source / "bin/example").write_text("new program")
+        result = self.install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Already exists:", result.stderr)
+        self.assertEqual((self.prefix / "bin/example").read_text(), "program")
+        self.assertEqual((self.home / ".clap/Stock.clap").read_text(), "plugin")
+        self.assertEqual(private_note.read_text(), "user project")
+        self.assertTrue((self.prefix / "opt/example/uninstall.sh").is_file())
+
+    def test_upgrade_foreign_ancestor_preserves_previous_installation(self):
+        self.assertEqual(self.install().returncode, 0)
+        (self.prefix / "opt/example/new-folder").write_text("user file")
+        (self.source / "new-folder").mkdir()
+        (self.source / "new-folder/new-file").write_text("new shipped file")
+        result = self.install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.prefix / "bin/example").read_text(), "program")
+        self.assertEqual((self.prefix / "opt/example/new-folder").read_text(), "user file")
+
     def test_uninstall_preserves_foreign_empty_icon_directories(self):
         unrelated = self.prefix / "share/icons/other-theme/32x32/apps"
         unrelated.mkdir(parents=True)
