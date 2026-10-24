@@ -1,0 +1,176 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Package
+on:
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: Platforms to package
+        type: choice
+        options: [linux, macos, windows, all]
+        default: all
+      draft_release:
+        description: Attach artifacts to a draft release (never publish)
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: '6'
+  TMPDIR: /tmp
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        env:
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          matrix=$(jq -cn --arg choice "$PLATFORMS" '{include:[
+            {platform:"linux",runner:"ubuntu-24.04",preset:"release"},
+            {platform:"macos",runner:"macos-15",preset:"macos"},
+            {platform:"windows",runner:"windows-2022",preset:"windows"}
+          ] | map(select($choice == "all" or .platform == $choice))}')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          version=$(sed -n 's/^set(PRODUCT_VERSION "\([^"]*\)").*/\1/p' cmake/Product.cmake)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+  package:
+    needs: plan
+    name: Package ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.platform == 'linux' && 'ubuntu:22.04' || '' }}
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Container tools
+        if: matrix.platform == 'linux'
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -y git curl wget ca-certificates software-properties-common \
+            ninja-build python3 python3-pip g++-12 libx11-dev libxcursor-dev libxrandr-dev libxext-dev \
+            libgl1-mesa-dev libegl1-mesa-dev zlib1g-dev libasound2-dev xvfb xauth xz-utils
+          pip3 install cmake==3.31.6
+          wget -q https://apt.llvm.org/llvm.sh -O /tmp/llvm.sh
+          bash /tmp/llvm.sh 22
+          echo /usr/lib/llvm-22/bin >> "$GITHUB_PATH"
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .deps
+          key: package-deps-${{ matrix.platform }}-${{ hashFiles('.github/scripts/sdl3.sh', 'vcpkg.json') }}
+      - name: Linux SDL3
+        if: matrix.platform == 'linux'
+        run: |
+          .github/scripts/sdl3.sh
+          echo "CMAKE_PREFIX_PATH=$GITHUB_WORKSPACE/.deps/install" >> "$GITHUB_ENV"
+      - name: macOS dependencies
+        if: matrix.platform == 'macos'
+        run: |
+          export HOMEBREW_NO_AUTO_UPDATE=1
+          brew install ninja sdl3
+          test "$(uname -m)" = arm64
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: matrix.platform == 'windows'
+      - name: Windows dependencies
+        if: matrix.platform == 'windows'
+        run: |
+          echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
+          choco install nsis --no-progress -y
+      - name: Configure Release
+        run: cmake --preset ${{ matrix.preset }} -DCMAKE_BUILD_TYPE=Release -DSUPPLE_BUILD_TESTS=OFF
+      - name: Build distribution targets
+        run: cmake --build --preset ${{ matrix.preset }} --target package-runtime --parallel 6
+      - name: Package
+        run: python3 tools/package/${{ matrix.platform }}.py --build-dir build/${{ matrix.preset }}
+      - name: Linux install, smoke and uninstall
+        if: matrix.platform == 'linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: |
+          mkdir -p /tmp/package-extracted /tmp/package-home
+          tar -xJf dist/*.tar.xz -C /tmp/package-extracted
+          tree=$(find /tmp/package-extracted -mindepth 1 -maxdepth 1 -type d)
+          slug=$(python3 -c 'import json; print(json.load(open("build/release/package/product.json"))["slug"])')
+          HOME=/tmp/package-home "$tree/install.sh" --prefix /tmp/package-installed --plugins
+          xvfb-run -a python3 tools/package/smoke.py "/tmp/package-installed/opt/$slug" --build-dir build/release
+          HOME=/tmp/package-home "/tmp/package-installed/opt/$slug/uninstall.sh" --prefix /tmp/package-installed
+          test ! -e /tmp/package-installed
+          test -z "$(find /tmp/package-home -type f -o -type l)"
+      - name: macOS mount, copy, smoke and remove
+        if: matrix.platform == 'macos'
+        run: |
+          mkdir -p "$RUNNER_TEMP/mounted" "$RUNNER_TEMP/installed"
+          hdiutil attach dist/*.dmg -mountpoint "$RUNNER_TEMP/mounted" -nobrowse
+          ditto "$RUNNER_TEMP/mounted/"*.app "$RUNNER_TEMP/installed/$(basename "$RUNNER_TEMP/mounted/"*.app)"
+          hdiutil detach "$RUNNER_TEMP/mounted"
+          python3 tools/package/smoke.py "$RUNNER_TEMP/installed/"*.app --build-dir build/macos
+          codesign --verify --deep --strict "$RUNNER_TEMP/installed/"*.app
+          rm -r "$RUNNER_TEMP/installed/"*.app
+          test -z "$(ls -A "$RUNNER_TEMP/installed")"
+      - name: Windows packaged install and smoke
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $product = Get-Content build/windows/package/product.json | ConvertFrom-Json
+          $install = Join-Path $env:RUNNER_TEMP 'packaged-app'
+          $installer = (Get-ChildItem dist/*.exe).FullName
+          $process = Start-Process -Wait -PassThru $installer -ArgumentList '/S', "/D=$install"
+          if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          # Disposable CI-only software OpenGL, added after packaging.
+          bash .github/scripts/gui-mesa-windows.sh
+          if ($LASTEXITCODE -ne 0) { throw 'Mesa setup failed' }
+          Copy-Item .deps/gui-mesa-24.3.4/x64/opengl32.dll,.deps/gui-mesa-24.3.4/x64/libglapi.dll,.deps/gui-mesa-24.3.4/x64/libgallium_wgl.dll $install
+          python tools/package/smoke.py $install --build-dir build/windows
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged smoke failed' }
+          # _?= prevents NSIS's background self-copy, so -Wait waits for removal.
+          $process = Start-Process -Wait -PassThru "$install/uninstall.exe" -ArgumentList '/S', "_?=$install"
+          if ($process.ExitCode -ne 0) { throw 'Uninstall failed' }
+          Remove-Item "$install/uninstall.exe" -ErrorAction SilentlyContinue
+          if (Test-Path $install) {
+            if ((Get-ChildItem $install -Force).Count -gt 0) { throw 'Uninstall left files' }
+            Remove-Item $install
+          }
+          $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$($product.slug)"
+          if (Test-Path $key) { throw 'Uninstall left registry key' }
+          if (Test-Path "$env:LOCALAPPDATA/Programs/Common/CLAP/$($product.slug)") { throw 'Optional plugins installed by default' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+  draft:
+    if: inputs.draft_release
+    needs: [plan, package]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: packages-*
+          path: dist
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          tag="v$VERSION"
+          if gh release view "$tag" --json isDraft >/tmp/release.json 2>/dev/null; then
+            test "$(jq -r .isDraft /tmp/release.json)" = true || { echo 'Refusing to modify a published release'; exit 1; }
+          else
+            gh release create "$tag" --draft --target "$GITHUB_SHA" --title "$tag" --notes 'Unsigned packages; see docs/guides/installing.md for first-launch steps.'
+          fi
+          gh release upload "$tag" dist/* --clobber
