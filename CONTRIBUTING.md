@@ -244,3 +244,9 @@ and smokes packages on native runners (Linux in an Ubuntu 22.04 container).
 `v<version>` release; it never publishes or modifies a published release.
 Run `build.yml` separately for native regression coverage. CI smokes installed
 artifacts with dummy audio, isolated preferences and no real agent registration.
+
+GitHub discovers dispatch-only workflows on the default branch. A newly added
+`package.yml` cannot be dispatched from a topic branch until the workflow file
+exists on that default branch; the CLI returns 404 in that case. Do not change
+the default branch just to bypass review. Once available there, `--ref` selects
+the implementation branch to validate.

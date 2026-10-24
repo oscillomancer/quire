@@ -30,6 +30,8 @@ supple_add_library(gui-platform
 target_include_directories(gui-platform PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/platform/include)
 target_link_libraries(gui-platform PRIVATE supple::product-info)
 if(NOT APPLE AND EXISTS "${PROJECT_SOURCE_DIR}/assets/icon/png/app-256.png")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${PROJECT_SOURCE_DIR}/assets/icon/png/app-256.png")
   file(READ "${PROJECT_SOURCE_DIR}/assets/icon/png/app-256.png" app_icon_bytes HEX)
   string(REGEX REPLACE "(..)" "0x\\1," app_icon_bytes "${app_icon_bytes}")
   configure_file(${PROJECT_SOURCE_DIR}/cmake/package/app_icon.h.in
@@ -105,6 +107,7 @@ elseif(APPLE)
   # Keep the longstanding build-tree command usable. CTest target references
   # resolve directly to the bundle executable via TARGET_FILE.
   add_custom_command(TARGET ${PRODUCT_SLUG} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E rm -f "${CMAKE_CURRENT_BINARY_DIR}/${PRODUCT_SLUG}"
     COMMAND ${CMAKE_COMMAND} -E create_symlink
       "$<TARGET_FILE:${PRODUCT_SLUG}>" "${CMAKE_CURRENT_BINARY_DIR}/${PRODUCT_SLUG}")
 endif()

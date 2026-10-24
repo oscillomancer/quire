@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-10-16. This file describes the present: what works, what is
+Updated 2026-10-24. This file describes the present: what works, what is
 known not to, and what is planned. Keep it current with each change; the
 history is in git.
 
@@ -75,9 +75,12 @@ and user-space installer, an Apple Silicon app/dmg and Windows per-user NSIS
 installer, with portable zip alternatives. The five helpers/programs, fourteen
 stock CLAPs, agent skill, fonts and license texts ship together. Package CI is
 manual and tests installed artifacts; optional release upload creates drafts
-only. Native package/signature/installer verification is pending; local Linux
-verification is recorded in the packaging hand-back. No paid signing or
-notarization is available; first-launch instructions are in `guides/installing.md`.
+only. Local Linux install, tarball dependency audit (23 ELF files), extracted
+and installed smoke, installer cleanup and eight focused CTests pass. Native
+package/signature/installer verification is pending: GitHub cannot dispatch the
+new package workflow until it exists on the default branch. Native regression
+CI is separate. No paid signing or notarization is available; first-launch
+instructions are in `docs/guides/installing.md`.
 
 ## What works
 

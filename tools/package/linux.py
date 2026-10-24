@@ -50,8 +50,9 @@ def check_dependencies(tree, slug):
 def runtime_notices(dest):
     # Ubuntu's copyright file includes GCC's licenses and runtime exception;
     # Arch separates the exception and common GPL text. Preserve the real texts.
-    candidates = [Path("/usr/share/doc/gcc-11-base/copyright"),
-                  Path("/usr/share/doc/gcc-12-base/copyright")]
+    candidates = [Path("/usr/share/doc/libstdc++6/copyright"),
+                  Path("/usr/share/doc/gcc-12-base/copyright"),
+                  Path("/usr/share/doc/gcc-11-base/copyright")]
     notice = next((p for p in candidates if p.exists()), None)
     dest.mkdir(parents=True, exist_ok=True)
     if notice:

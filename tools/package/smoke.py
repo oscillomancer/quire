@@ -51,8 +51,9 @@ def main():
         result = execute("-engine", "exec", '{"command":"plugin.list","args":{}}',
                          "--workdir", temp)
         listing = json.loads(result.stdout)
+        discovered = {Path(plugin["path"]).resolve() for plugin in listing["plugins"]}
         for plugin in plugins.glob("*.clap"):
-            assert plugin.stem.lower() in json.dumps(listing).lower(), f"{plugin.name} not discovered"
+            assert plugin.resolve() in discovered, f"{plugin.name} not discovered from the packaged location"
         assert len(list(plugins.glob("*.clap"))) == 14
         # A unique absent socket/instance must produce an actionable failure.
         result = execute("-mcp", "--instance", "package-smoke-absent", expected=1)
