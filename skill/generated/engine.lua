@@ -123,6 +123,18 @@ q = nil
 ---@field diagnostics table[]
 ---@field plugin? table
 
+---@class Quire.dsp_edit_args
+---@field name string
+---@field edits table[]
+
+---@class Quire.dsp_edit_result
+---@field name string
+---@field path string
+---@field ok boolean it compiled
+---@field diagnostics table[]
+---@field plugin? table
+---@field listed boolean plugin.list shows it (the script player is on the plugin path)
+
 ---@class Quire.dsp_export_args
 ---@field script string a name from dsp.list
 ---@field format? "clap"|"source" clap (default): a plugin file; source: a C++ project
@@ -154,7 +166,8 @@ q = nil
 ---@field plugin? string
 ---@field script? string
 ---@field patch? any
----@field signal? "sine"|"sweep"|"impulse"|"noise"|"silence"|"notes"|"note"
+---@field signal? "sine"|"sweep"|"impulse"|"noise"|"silence"|"notes"|"note"|"file"
+---@field audio_file? string the absolute path of a WAV, FLAC or MP3 (10 minutes at most) the file signal plays through an effect
 ---@field level_db? number|string Quantity strings are range-checked by the server. (default: -12.0)
 ---@field frequency_hz? number|string Quantity strings are range-checked by the server. (default: 1000.0)
 ---@field seconds? number (default: 1.0)
@@ -174,7 +187,8 @@ q = nil
 ---@field plugin? string
 ---@field script? string
 ---@field patch? any
----@field signals? "sine"|"sweep"|"impulse"|"noise"|"silence"|"notes"|"note"[] default: effects five; instruments three, or notes and silence with custom notes
+---@field signals? "sine"|"sweep"|"impulse"|"noise"|"silence"|"notes"|"note"|"file"[] default: effects five, or file with audio_file; instruments three, or notes and silence with custom notes
+---@field audio_file? string the absolute path of a WAV, FLAC or MP3 (10 minutes at most) the file signal plays through an effect
 ---@field automation? table[] discrete physical-value changes on every signal
 ---@field sidechain? table timed generated key input
 ---@field notes? table[] instrument sequence replacing the notes stimulus
@@ -183,6 +197,7 @@ q = nil
 ---@field seconds? number (default: 1.0)
 ---@field sample_rate? number|string default: the session's or project's rate Quantity strings are range-checked by the server.
 ---@field save? boolean (default: false)
+---@field trace_points? integer intervals the signal's traces are kept in (default: 100)
 
 ---@class Quire.dsp_test_result
 ---@field plugin string
@@ -1265,6 +1280,7 @@ q = nil
 
 ---@class Quire.dsp
 ---@field check fun(args?: Quire.dsp_check_args): Quire.dsp_check_result Compile a DSP script without saving it; return its diagnostics.
+---@field edit fun(args: Quire.dsp_edit_args): Quire.dsp_edit_result Change part of a library script by replacing text; compile it, as dsp.write.
 ---@field export fun(args: Quire.dsp_export_args): Quire.dsp_export_result Export a DSP script as a plugin for other DAWs: a CLAP file, or C++ source.
 ---@field get fun(args: Quire.dsp_get_args): Quire.dsp_get_result Read a DSP script from the library.
 ---@field list fun(): Quire.dsp_list_result List the DSP scripts in the library, compiled, with their plugin ids.

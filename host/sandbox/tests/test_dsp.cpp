@@ -397,6 +397,127 @@ TEST_CASE("dsp.test reports meters as they stood when the signal ended") {
     CHECK(meters->find("level")->asDouble() == doctest::Approx(-12.0).epsilon(0.01));
 }
 
+TEST_CASE("dsp.test plays a file through an effect, at the render's rate, as the only signal") {
+    Harness h;
+    h.write("peak", script("Peak", "com.example.peak",
+                           "    Param level = decibels(\"Level\", -60, 0, -60).meter();\n"
+                           "    Param right = decibels(\"Right\", -60, 0, -60).meter();\n"
+                           "    void process(Block& io) {\n"
+                           "        double l = 0.0, r = 0.0;\n"
+                           "        for (int i = 0; i < io.frames; ++i) {\n"
+                           "            l = max(l, abs(io[0][i]));\n"
+                           "            r = max(r, abs(io[1][i]));\n"
+                           "        }\n"
+                           "        level.set(max(-60.0, gainToDb(l)));\n"
+                           "        right.set(max(-60.0, gainToDb(r)));\n"
+                           "    }"));
+    // A mono 44.1 kHz file of half a second at -6 dBFS: it plays on both
+    // channels at 48 kHz.
+    audio::AudioData tone;
+    tone.sampleRate = 44100.0;
+    tone.channels.assign(1, std::vector<float>(22050, 0.0f));
+    for (size_t i = 0; i < 22050; ++i)
+        tone.channels[0][i] = static_cast<float>(
+            0.5 * std::sin(2.0 * std::numbers::pi * 220.0 * static_cast<double>(i) / 44100.0));
+    const fs::path file = h.root.path / "tone.wav";
+    REQUIRE(audio::writeWav(file, tone));
+    auto args = json::Value::object();
+    args["script"] = "peak";
+    args["audio_file"] = file.string();
+    args["sample_rate"] = 48000;
+    auto result = h.measured(json::writeCompact(args));
+    REQUIRE(result["signals"].size() == 1);
+    json::Value signal = result["signals"].at(0);
+    CHECK(signal["signal"].asString() == "file");
+    CHECK(signal["meters"]["level"].asDouble() == doctest::Approx(-6.02).epsilon(0.01));
+    CHECK(signal["meters"]["right"].asDouble() == doctest::Approx(-6.02).epsilon(0.01));
+    CHECK(json::writeCompact(result["log"]).find("resampled to 48000 Hz") != std::string::npos);
+    // The file signal needs its file.
+    auto missing = h.test(R"({"script":"peak","signals":["file"]})");
+    REQUIRE(!missing);
+    CHECK(missing.error().code == "dsp.file");
+    // A relative path would name a file wherever the host happens to run.
+    auto relative = h.test(R"({"script":"peak","audio_file":"tone.wav"})");
+    REQUIRE(!relative);
+    CHECK(relative.error().code == "dsp.file");
+}
+
+TEST_CASE("dsp.test gives what a script traced, interval by interval, and says what was NaN") {
+    Harness h;
+    // Every frame's count since prepare(), at that frame: each interval's
+    // last is the frame before the next interval starts.
+    h.write("counter", script("Counter", "com.example.counter",
+                              "    int n = 0;\n"
+                              "    void prepare() { n = 0; }\n"
+                              "    void process(Block& io) {\n"
+                              "        for (int i = 0; i < io.frames; ++i) {\n"
+                              "            trace(\"frame\", n, i);\n"
+                              "            n += 1;\n"
+                              "        }\n"
+                              "        trace(\"broken\", 0.0 / (n - n));\n"
+                              "    }"));
+    auto result = h.measured(
+        R"({"script":"counter","signals":["sine"],"seconds":0.5,"sample_rate":48000,"trace_points":5})");
+    json::Value signal = result["signals"].at(0);
+    CHECK(signal["trace_interval_s"].asDouble() == doctest::Approx(0.1));
+    json::Value traces = signal["traces"];
+    REQUIRE(traces.size() == 2);
+    json::Value frame = traces.at(0), broken = traces.at(1);
+    CHECK(frame["name"].asString() == "frame");
+    for (size_t k = 0; k < 5; ++k) {
+        CHECK(frame["last"].at(k).asDouble() == 4800.0 * static_cast<double>(k + 1) - 1);
+        CHECK(frame["low"].at(k).asDouble() == 4800.0 * static_cast<double>(k));
+    }
+    CHECK(broken["name"].asString() == "broken");
+    CHECK(broken["last"].at(0).isNull());
+    CHECK(broken["non_finite"].asInt() > 0);
+    REQUIRE(result["problems"].size() == 1);
+    CHECK(result["problems"].at(0).asString().find("\"broken\"") != std::string::npos);
+}
+
+TEST_CASE("dsp.edit replaces text in a script in order, and saves nothing when an edit misses") {
+    Harness h;
+    h.write("gain", script("Gain", "com.example.edit",
+                           "    Param gain = decibels(\"Gain\", -24, 24, 0);\n"
+                           "    void process(Block& io) {}"));
+    auto edit = [&](std::string_view edits) {
+        auto args = json::Value::object();
+        args["name"] = "gain";
+        args["edits"] = json::parse(edits).value();
+        return h.bus->execute({"dsp.edit", args, kTest});
+    };
+    // The second edit sees what the first left.
+    auto edited = edit(R"([{"old":"-24, 24, 0","new":"-36, 36, 0"},
+                           {"old":"\"Gain\", -36","new":"\"Level\", -36"}])");
+    REQUIRE_MESSAGE(edited, (edited ? "" : edited.error().toString()));
+    CHECK((*edited)["ok"].asBool());
+    json::Value param = (*edited)["plugin"]["params"].at(0);
+    CHECK(param["min"].asDouble() == -36.0);
+    const fs::path file = (*edited)["path"].asString();
+    const std::string after = readTextFile(file).value();
+    CHECK(after.find("decibels(\"Level\", -36, 36, 0)") != std::string::npos);
+    // Text that is nowhere, or in two places: an error at the edit, and the
+    // script as it was, though the edit before it matched.
+    auto missing = edit(R"([{"old":"void process","new":"void process "},
+                            {"old":"decibels(\"Level\", -36, 24","new":"x"}])");
+    REQUIRE_FALSE(missing);
+    CHECK(missing.error().code == "dsp.edit");
+    CHECK(missing.error().path == "/args/edits/1/old");
+    CHECK(missing.error().message.find("at line 5") != std::string::npos);
+    auto twice = edit(R"([{"old":"36","new":"48"}])");
+    REQUIRE_FALSE(twice);
+    CHECK(twice.error().message.find("2 times") != std::string::npos);
+    CHECK(readTextFile(file).value() == after);
+    // A script saved with Windows line ends takes text copied without them,
+    // and keeps its own.
+    std::string windows;
+    for (char ch : after) windows += ch == '\n' ? std::string("\r\n") : std::string(1, ch);
+    REQUIRE(writeFileAtomic(file, windows));
+    auto lines = edit(R"([{"old":"36, 0);\n    void process","new":"36, 6);\n    void process"}])");
+    REQUIRE_MESSAGE(lines, (lines ? "" : lines.error().toString()));
+    CHECK(readTextFile(file).value().find("36, 6);\r\n    void process") != std::string::npos);
+}
+
 TEST_CASE("every patch in the synth guide plays on Marram") {
     if (!fs::exists(kStock / "Marram.clap")) {
         MESSAGE("skipped: no Marram in " << kStock.string());

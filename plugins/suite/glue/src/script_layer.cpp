@@ -2,7 +2,10 @@
 // Copyright (c) 2026 Supple Audio
 #include "supple/suite/script_layer.h"
 
+#include <algorithm>
 #include <atomic>
+#include <climits>
+#include <cmath>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -40,11 +43,68 @@ const clap_plugin_supple_plugin_status_t kStatus = {
         auto* layer = dynamic_cast<ScriptLayer*>(plugin::Layer::of(plugin));
         return layer && layer->getStatus(out);
     }};
+const clap_plugin_supple_trace_t kTrace = {
+    sizeof(clap_plugin_supple_trace_t),
+    [](const clap_plugin_t* plugin, uint32_t interval, uint32_t bins) {
+        auto* layer = dynamic_cast<ScriptLayer*>(plugin::Layer::of(plugin));
+        return layer && layer->startTrace(interval, bins);
+    },
+    [](const clap_plugin_t* plugin, const clap_ostream_t* out) {
+        auto* layer = dynamic_cast<ScriptLayer*>(plugin::Layer::of(plugin));
+        return layer && layer->readTrace(out);
+    }};
+
+// A trace's bins as numbers, null where nothing was traced.
+json::Value series(const std::vector<double>& values, size_t from, int count) {
+    json::Value out = json::Value::array();
+    for (int b = 0; b < count; ++b) {
+        const double v = values[from + static_cast<size_t>(b)];
+        out.push_back(std::isnan(v) ? json::Value() : json::Value(v));
+    }
+    return out;
+}
 }  // namespace
 
 const void* ScriptLayer::extension(const char* id) {
-    return std::strcmp(id, CLAP_EXT_SUPPLE_PLUGIN_STATUS) == 0 ? &kStatus
-                                                               : SemanticLayer::extension(id);
+    if (std::strcmp(id, CLAP_EXT_SUPPLE_PLUGIN_STATUS) == 0) return &kStatus;
+    if (std::strcmp(id, CLAP_EXT_SUPPLE_TRACE) == 0) return &kTrace;
+    return SemanticLayer::extension(id);
+}
+
+bool ScriptLayer::startTrace(uint32_t interval, uint32_t bins) {
+    using script::detail::TraceLog;
+    if (instance().isActive() || interval == 0 || bins > TraceLog::kMaxBins) return false;
+    processor().trace(nullptr);
+    trace_ = bins > 0 ? std::make_unique<TraceLog>(
+                            static_cast<int>(std::min<uint32_t>(interval, INT32_MAX)),
+                            static_cast<int>(bins))
+                      : nullptr;
+    processor().trace(trace_.get());
+    return true;
+}
+
+bool ScriptLayer::readTrace(const clap_ostream_t* out) {
+    if (instance().isActive() || !trace_) return false;
+    const script::detail::TraceLog& log = *trace_;
+    json::Value doc = json::Value::object();
+    doc["schema"] = "supple.trace/1.0";
+    doc["interval"] = static_cast<long long>(log.interval);
+    doc["bins"] = static_cast<long long>(log.bins);
+    json::Value traces = json::Value::array();
+    const int names = log.names.load(std::memory_order_acquire);
+    for (int k = 0; k < names; ++k) {
+        const size_t from = static_cast<size_t>(k) * static_cast<size_t>(log.bins);
+        json::Value t = json::Value::object();
+        t["name"] = std::string(log.name[k]);
+        t["last"] = series(log.last, from, log.bins);
+        t["low"] = series(log.low, from, log.bins);
+        t["high"] = series(log.high, from, log.bins);
+        t["non_finite"] = static_cast<long long>(log.nonFinite[k].load(std::memory_order_relaxed));
+        traces.push_back(std::move(t));
+    }
+    doc["traces"] = std::move(traces);
+    doc["dropped"] = static_cast<long long>(log.dropped.load(std::memory_order_relaxed));
+    return writeAll(out, json::writeCanonical(doc));
 }
 
 bool ScriptLayer::getStatus(const clap_ostream_t* out) {
@@ -88,6 +148,7 @@ void ScriptLayer::tick() {
 void ScriptLayer::redefined() {
     SemanticLayer::redefined();
     statusRestarted();
+    if (trace_) processor().trace(trace_.get());  // the new definition's processor
 }
 
 #if SUPPLE_WITH_GUI

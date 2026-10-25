@@ -818,6 +818,12 @@ class Plugin {
     // plugin hears or is set to (a delay's, its time and feedback); Info's
     // .tail until called. The host is told of each change.
     void setTail(int samples);
+    // Debugging: value, under name (a string literal), at the start of the
+    // block or at its frame i, for a host that traces the plugin (dsp.test
+    // gives each name's values over the signal). While none does it costs a
+    // check; at most 16 names, of 47 characters at most.
+    void trace(const char* name, double value) const;
+    void trace(const char* name, double value, int i) const;
 
   private:
     friend struct detail::Instance;

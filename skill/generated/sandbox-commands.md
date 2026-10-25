@@ -378,6 +378,208 @@ Result:
 
 ```
 
+## `dsp.edit@1`
+
+Change part of a library script by replacing text; compile it, as dsp.write.
+
+For a change to part of a script, instead of sending all of it to dsp.write. Each edit replaces old, which must be in the script exactly once, with new (empty deletes it). The edits apply in order, each to the script as the ones before left it, and all or none: when one fails, nothing is saved and the error says where old and the script part. Then as dsp.write: it saves the script, compiles it and returns the diagnostics; instances playing it follow within half a second.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `name` | string |  |  |  |  |
+| `edits` | array |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "dsp_write_result",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "it compiled"
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "dsp_diagnostic",
+        "properties": {
+          "severity": {
+            "type": "string",
+            "description": "error or warning"
+          },
+          "code": {
+            "type": "string",
+            "description": "script.<area>.<what>"
+          },
+          "message": {
+            "type": "string"
+          },
+          "hint": {
+            "type": "string",
+            "description": "what to write instead"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "column": {
+            "type": "integer"
+          }
+        },
+        "required": ["severity", "code", "message", "hint", "line", "column"],
+        "additionalProperties": false
+      }
+    },
+    "plugin": {
+      "type": "object",
+      "title": "dsp_plugin",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "description": "effect (audio in, audio out) or instrument (notes in)"
+        },
+        "params": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "dsp_param",
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "the patch key"
+              },
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "description": "continuous, integer, choice or toggle"
+              },
+              "unit": {
+                "type": "string",
+                "description": "dB, Hz, ms, % ..."
+              },
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "default": {
+                "type": "number"
+              },
+              "choices": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "meter": {
+                "type": "boolean",
+                "description": "an output the plugin reports"
+              }
+            },
+            "required": ["key", "name", "kind", "min", "max", "default", "choices", "meter"],
+            "additionalProperties": false
+          }
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "dsp_file",
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "the patch's properties key"
+              },
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "description": "audio (a sample) or impulse (a Convolver's response)"
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "required": ["key", "name", "kind"],
+            "additionalProperties": false
+          },
+          "description": "the script's files (AudioFile, Convolver), when it has any: give each an absolute path in a patch, {\"properties\": {\"<key>\": \"/path.wav\"}}"
+        }
+      },
+      "required": ["id", "name", "kind", "params"],
+      "additionalProperties": false
+    },
+    "listed": {
+      "type": "boolean",
+      "description": "plugin.list shows it (the script player is on the plugin path)"
+    }
+  },
+  "required": ["name", "path", "ok", "diagnostics", "listed"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `dsp.unknown`: no such script Hint: dsp.list names the library's scripts
+- `dsp.edit`: an edit's old text is not in the script, or in several places Hint: copy old exactly from dsp.get's source, with enough around it to be unique
+- `dsp.size`: the script would be longer than 1 MiB Hint: split it up
+- `dsp.id_taken`: another script in the library has its id; not saved Hint: give Info.id a value no other script has
+
+### Examples
+
+**Widen a parameter's range** (`dsp_script`)
+
+```json
+{
+  "name": "gain",
+  "edits": [
+    {
+      "old": "-24, 24, 0",
+      "new": "-36, 36, 0"
+    }
+  ]
+}
+
+```
+
+Result:
+
+```json
+{
+  "name": "gain",
+  "path": "<any>",
+  "ok": true,
+  "diagnostics": [],
+  "plugin": "<any>",
+  "listed": "<any>"
+}
+
+```
+
 ## `dsp.export@1`
 
 Export a DSP script as a plugin for other DAWs: a CLAP file, or C++ source.
@@ -644,7 +846,7 @@ Result:
 
 Draw a plugin's editor to a PNG, after a test signal plays through it.
 
-Give plugin (an id) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays signal -- an effect: sine (the default, at frequency_hz), sweep, impulse, noise or silence, peaking at level_db; an instrument: notes (the default), note or silence -- for seconds while its editor watches, so meters and the script's draw() show what played. Then the editor is drawn without a window, scale times its design size, and saved as a PNG (path; width and height in pixels): read the file to see it. A script with neither editor() nor draw() shows the automatic editor. pointer, if given, acts on the editor first, in its design units (the picture's pixels at scale 1): move (a hover; a drag after a press), press, release, click, double_click, drag (from x, y to to_x, to_y) and wheel (steps notches, up positive), with shift, ctrl or alt held; edits is a merge patch of what they changed, as a user's edits would. problems says what went wrong in the editor's code (a loop stopped by its budget, an index out of range), with the line. Headless pictures use EGL on Linux, Metal on macOS and WGL on Windows; an unavailable renderer returns dsp.no_picture.
+Give plugin (an id) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays signal -- an effect: sine (the default, at frequency_hz), sweep, impulse, noise or silence, peaking at level_db, for seconds, or file (the default with audio_file), the file played whole as dsp.test plays it; an instrument: notes (the default), note or silence, for seconds -- while its editor watches, so meters and the script's draw() show what played. Then the editor is drawn without a window, scale times its design size, and saved as a PNG (path; width and height in pixels): read the file to see it. A script with neither editor() nor draw() shows the automatic editor. pointer, if given, acts on the editor first, in its design units (the picture's pixels at scale 1): move (a hover; a drag after a press), press, release, click, double_click, drag (from x, y to to_x, to_y) and wheel (steps notches, up positive), with shift, ctrl or alt held; edits is a merge patch of what they changed, as a user's edits would. problems says what went wrong in the editor's code (a loop stopped by its budget, an index out of range), with the line. Headless pictures use EGL on Linux, Metal on macOS and WGL on Windows; an unavailable renderer returns dsp.no_picture.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -656,6 +858,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `script` | string |  |  |  |  |
 | `patch` | value |  |  |  |  |
 | `signal` | string |  |  |  |  |
+| `audio_file` | string |  |  |  | the absolute path of a WAV, FLAC or MP3 (10 minutes at most) the file signal plays through an effect |
 | `level_db` | value | dB | -60.0..0.0 | -12.0 | Quantity strings are range-checked by the server. |
 | `frequency_hz` | value | Hz | 10.0..20000.0 | 1000.0 | Quantity strings are range-checked by the server. |
 | `seconds` | number |  | 0.0..10.0 | 1.0 |  |
@@ -712,6 +915,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 - `dsp.id_taken`: another script in the library has the script's id Hint: give each script its own Info.id
 - `dsp.not_listed`: the script compiles but no plugin has its id Hint: put the script player on the plugin path
 - `dsp.signal`: a signal the plugin cannot play Hint: an effect plays audio signals, an instrument notes
+- `dsp.file`: the file signal without audio_file, or a file that is not absolute, is over 10 minutes or holds no audio Hint: give audio_file a WAV, FLAC or MP3, or another signal
 - `dsp.pointer`: a drag without its end, or too many steps Hint: give a drag to_x and to_y; at most 64 steps
 - `dsp.no_picture`: the plugin cannot draw its editor without a window Hint: scripts can, through the script player; other plugins need the editor-picture extension
 
@@ -782,7 +986,7 @@ Result:
 
 Play test signals or notes through a plugin and measure it: levels, THD, pitch.
 
-Give plugin (an id: a script's, or any effect's or instrument's) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays each signal. An effect: sine (frequency_hz; gain_db and thd_percent), sweep (20 Hz to 20 kHz), impulse (response_db at octave centres), pink noise and silence, each peaking at level_db. An instrument, at velocity 0.8: notes (a note, then a chord), note (A4; pitch_hz, the pitch heard), and silence (no notes); release_ms is how long the sound lasts after the last release. Each reports peak and RMS in dBFS, DC, samples beyond 0 dBFS and denormals; problems says in words what looks wrong (clipping, DC, sound from silence, no output, a note out of tune, sound that never dies away, non-finite samples the framework silenced, a script stopped by its loop budget or indexing outside an array). cpu_percent is measured, so it varies between runs. save: true keeps each output as a WAV (path) for analyze and compare. automation is a list of {param, at_s, value}: semantic patch keys and physical values, as discrete sample-accurate changes applied to every signal (no implicit ramps). automation.max_step is the largest adjacent-sample change in full-scale amplitude; baseline_max_step uses the same render without automation; excess_step is their positive difference. A step above both four times baseline and 0.05 suggests clicks or zipper noise: a screening heuristic, not proof of an artifact or of inaudibility. sidechain supplies a timed key; its middle half is measured against a connected silent key with identical automation: gain_change_db is negative for ducking, null if either output is below -120 dBFS. Slow attack may not settle in that window. Each pass has a fresh instance and initial patch. THD and impulse response are omitted during automation or a non-silent key; gain_db then describes the changing render, not static gain. notes supplies an instrument's sequence ({key, velocity, start_s, length_s}), replacing the notes signal; defaults become notes and silence. Do not combine it with the A4 note signal or select only silence. release_ms starts at its last note-off. Times round to samples at the render rate; spans must fit within seconds. sample_rate renders at that rate instead of the session's (sandbox) or the project's (DAW); latency is in samples at the rate used, which sample_rate in the result reports. meters gives a semantic plugin's read-only parameters (its meters and readouts) by patch key in physical units, as they stood when the signal ended (the tail after it does not move them).
+Give plugin (an id: a script's, or any effect's or instrument's) or script (a name in the library). A fresh instance, set by patch (a merge patch) when given, plays each signal. An effect: sine (frequency_hz; gain_db and thd_percent), sweep (20 Hz to 20 kHz), impulse (response_db at octave centres), pink noise and silence, each peaking at level_db; and file, audio_file played as it is (resampled to the render's rate, mono on both channels, at most 60 s), the only signal when signals is not given. An instrument, at velocity 0.8: notes (a note, then a chord), note (A4; pitch_hz, the pitch heard), and silence (no notes); release_ms is how long the sound lasts after the last release. Each reports peak and RMS in dBFS, DC, samples beyond 0 dBFS and denormals; problems says in words what looks wrong (clipping, DC, sound from silence, no output, a note out of tune, sound that never dies away, non-finite samples the framework silenced, a script stopped by its loop budget or indexing outside an array). cpu_percent is measured, so it varies between runs. save: true keeps each output as a WAV (path) for analyze and compare. automation is a list of {param, at_s, value}: semantic patch keys and physical values, as discrete sample-accurate changes applied to every signal (no implicit ramps). automation.max_step is the largest adjacent-sample change in full-scale amplitude; baseline_max_step uses the same render without automation; excess_step is their positive difference. A step above both four times baseline and 0.05 suggests clicks or zipper noise: a screening heuristic, not proof of an artifact or of inaudibility. sidechain supplies a timed key; its middle half is measured against a connected silent key with identical automation: gain_change_db is negative for ducking, null if either output is below -120 dBFS. Slow attack may not settle in that window. Each pass has a fresh instance and initial patch. THD and impulse response are omitted during automation or a non-silent key; gain_db then describes the changing render, not static gain. notes supplies an instrument's sequence ({key, velocity, start_s, length_s}), replacing the notes signal; defaults become notes and silence. Do not combine it with the A4 note signal or select only silence. release_ms starts at its last note-off. Times round to samples at the render rate; spans must fit within seconds. sample_rate renders at that rate instead of the session's (sandbox) or the project's (DAW); latency is in samples at the rate used, which sample_rate in the result reports. meters gives a semantic plugin's read-only parameters (its meters and readouts) by patch key in physical units, as they stood when the signal ended (the tail after it does not move them). traces gives what a script's trace(name, value) calls recorded over the signal, in trace_points intervals of trace_interval_s: for each name, the last value in each interval and the lowest and highest, null where none was given.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -793,7 +997,8 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `plugin` | string |  |  |  |  |
 | `script` | string |  |  |  |  |
 | `patch` | value |  |  |  |  |
-| `signals` | array |  |  |  | default: effects five; instruments three, or notes and silence with custom notes |
+| `signals` | array |  |  |  | default: effects five, or file with audio_file; instruments three, or notes and silence with custom notes |
+| `audio_file` | string |  |  |  | the absolute path of a WAV, FLAC or MP3 (10 minutes at most) the file signal plays through an effect |
 | `automation` | array |  |  |  | discrete physical-value changes on every signal |
 | `sidechain` | object |  |  |  | timed generated key input |
 | `notes` | array |  |  |  | instrument sequence replacing the notes stimulus |
@@ -802,6 +1007,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 | `seconds` | number |  | 0.1..10.0 | 1.0 |  |
 | `sample_rate` | value | Hz | 8000.0..384000.0 |  | default: the session's or project's rate Quantity strings are range-checked by the server. |
 | `save` | boolean |  |  | false |  |
+| `trace_points` | integer |  | 1.0..4096.0 | 100 | intervals the signal's traces are kept in |
 
 ### Result
 
@@ -928,6 +1134,39 @@ Kind: `action`. Exposure: `mcp-tool`.
           },
           "meters": {
             "description": "read-only parameters (meters) by patch key, physical, as of the signal's end"
+          },
+          "trace_interval_s": {
+            "type": "number",
+            "description": "each trace interval's length"
+          },
+          "traces": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "title": "dsp_trace_result",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "last": {
+                  "description": "each interval's last value, or null"
+                },
+                "low": {
+                  "description": "each interval's lowest"
+                },
+                "high": {
+                  "description": "each interval's highest"
+                },
+                "non_finite": {
+                  "type": "integer",
+                  "minimum": 0.0,
+                  "description": "NaN or infinity given, not kept"
+                }
+              },
+              "required": ["name", "last", "low", "high", "non_finite"],
+              "additionalProperties": false
+            },
+            "description": "what trace() recorded, by name"
           }
         },
         "required": ["signal", "peak_dbfs", "rms_dbfs", "dc", "clipped", "denormals"],
@@ -968,6 +1207,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 - `dsp.sidechain`: no key input or invalid key timing Hint: choose a plugin with a key and a nonempty span within seconds
 - `dsp.notes`: invalid custom sequence or signal selection Hint: use an instrument, notes or notes and silence, and spans within seconds
 - `dsp.frequency`: a sine at or above half the sample rate Hint: lower frequency_hz or raise sample_rate
+- `dsp.file`: the file signal without audio_file, or a file that is not absolute, is over 10 minutes or holds no audio Hint: give audio_file a WAV, FLAC or MP3, or leave file out of signals
 
 ### Examples
 

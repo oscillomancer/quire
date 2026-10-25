@@ -20,6 +20,7 @@
 #include "supple/clap/editor_picture.h"
 #include "supple/clap/plugin_status.h"
 #include "supple/clap/semantic_params.h"
+#include "supple/clap/trace.h"
 #include "supple/suite/json.h"
 
 namespace json = supple::suite::json;
@@ -427,6 +428,37 @@ TEST(runtime_problems_have_lines_and_reload_clears_them) {
         CHECK(std::fabs(a.play() - 0.5f) < 1e-6f);
         CHECK(parsed(a.status()).find("problems")->size() == 0);
     }
+}
+
+TEST(a_trace_starts_and_is_read_only_while_the_plugin_is_inactive) {
+    Library library("smoke");
+    const std::string good = "io[c][i] *= dbToGain(gain.at(i));";
+    library.edit("smoke", good, good + " trace(\"out\", io[c][i], i);", 2);
+    Instance a("com.suppleaudio.script-player");
+    CHECK(a.plugin != nullptr);
+    const auto* trace = static_cast<const clap_plugin_supple_trace_t*>(
+        a.plugin->get_extension(a.plugin, CLAP_EXT_SUPPLE_TRACE));
+    CHECK(trace != nullptr);
+    if (!trace) return;
+    Text none;
+    CHECK(!trace->read(a.plugin, &none.out));  // nothing started
+    CHECK(!trace->start(a.plugin, 0, 4));      // no interval
+    CHECK(trace->start(a.plugin, 64, 4));
+    a.activate();
+    CHECK(!trace->start(a.plugin, 64, 4));
+    CHECK(!trace->read(a.plugin, &none.out));
+    for (int i = 0; i < 3; ++i) a.play();  // three blocks of 64
+    a.deactivate();
+    Text t;
+    CHECK(trace->read(a.plugin, &t.out));
+    const json::Value doc = parsed(t.text);
+    CHECK(doc.find("schema")->asString() == "supple.trace/1.0");
+    const auto& out = doc.find("traces")->asArray().at(0);
+    CHECK(out.find("name")->asString() == "out");
+    const auto& last = out.find("last")->asArray();
+    CHECK(last.size() == 4);
+    CHECK(std::fabs(last.at(0).asDouble() - 0.5) < 1e-6);
+    CHECK(last.at(3).isNull());  // a fourth block never played
 }
 
 TEST(a_script_whose_parameters_change_redefines_the_plugin) {

@@ -538,6 +538,21 @@ TEST_CASE("editor code reads parameters and Shared members, and keeps the rest a
         firstError(plugin(
             process + "void draw(Canvas& g) { g.fillText(format(\"%d and %d\", 1.0), 0, 0); }")) ==
         "script.format.count");
+    // trace() is the audio code's, under a name written out.
+    CHECK(firstError(plugin("void process(Block& io) { trace(\"x\", 1.0); trace(\"y\", 2.0, 3); "
+                            "}")) == "");
+    CHECK(firstError(plugin("void process(Block& io) { const char* name = \"x\"; "
+                            "trace(name, 1.0); }")) == "script.trace.name");
+    CHECK(firstError(plugin("void process(Block& io) { trace(\"" + std::string(48, 'a') +
+                            "\", 1.0); }")) == "script.trace.name");
+    CHECK(firstError(plugin(process + "void draw(Canvas& g) { trace(\"x\", 1.0); }")) ==
+          "script.editor.call");
+    // As many names as a trace keeps (a name given twice is one), not more.
+    std::string names;
+    for (int k = 0; k < 16; ++k) names += "trace(\"n" + std::to_string(k) + "\", 1.0); ";
+    CHECK(firstError(plugin("void process(Block& io) { " + names + "trace(\"n0\", 2.0); }")) == "");
+    CHECK(firstError(plugin("void process(Block& io) { " + names + "trace(\"n16\", 2.0); }")) ==
+          "script.trace.names");
     // Shared state belongs to the plugin struct, starts at zero, holds numbers.
     CHECK(firstError(plugin(process + "void draw(Canvas& g) { Shared<double> x; }")) ==
           "script.shared.where");

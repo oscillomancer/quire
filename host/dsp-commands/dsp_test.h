@@ -40,7 +40,7 @@ struct TestTraits;  // static settings(h), identity(h), outputDir(h)
 namespace test {
 namespace fs = std::filesystem;
 
-enum class Signal { Sine, Sweep, Impulse, Noise, Silence, Notes, Note };
+enum class Signal { Sine, Sweep, Impulse, Noise, Silence, Notes, Note, File };
 inline constexpr Signal kEffectSignals[] = {Signal::Sine, Signal::Sweep, Signal::Impulse,
                                             Signal::Noise, Signal::Silence};
 inline constexpr Signal kInstrumentSignals[] = {Signal::Notes, Signal::Note, Signal::Silence};
@@ -60,6 +60,8 @@ inline const char* signalName(Signal s) {
             return "notes";
         case Signal::Note:
             return "note";
+        case Signal::File:
+            return "file";
         default:
             return "silence";
     }
@@ -80,7 +82,7 @@ struct Note {
     double velocity = 0.8, startS = 0.0, lengthS = 0.0;
 };
 struct TestArgs {
-    std::optional<std::string> plugin, script;
+    std::optional<std::string> plugin, script, audioFile;
     std::optional<json::Value> patch;
     std::optional<std::vector<Signal>> signals;
     std::optional<std::vector<AutomationEvent>> automation;
@@ -91,6 +93,7 @@ struct TestArgs {
     double seconds = 1.0;
     std::optional<double> sampleRate;
     bool save = false;
+    int tracePoints = 100;
 };
 struct ResponsePoint {
     double hz = 0.0, db = 0.0;
@@ -101,6 +104,13 @@ struct AutomationResult {
 struct SidechainResult {
     double rmsDbfs = -200.0, referenceRmsDbfs = -200.0;
     json::Value gainChangeDb;  // null when either measurement is below -120 dBFS
+};
+// One name a script traced: per interval, the last value given and the least
+// and greatest, null where it gave none.
+struct TraceResult {
+    std::string name;
+    json::Value last, low, high;
+    std::int64_t nonFinite = 0;
 };
 struct SignalResult {
     std::string signal;
@@ -113,6 +123,8 @@ struct SignalResult {
     std::optional<AutomationResult> automation;
     std::optional<SidechainResult> sidechain;
     std::optional<json::Value> meters;  // read-only parameters by key, physical
+    std::optional<double> traceIntervalS;
+    std::optional<std::vector<TraceResult>> traces;
 };
 struct TestResult {
     std::string plugin;
@@ -198,10 +210,65 @@ inline audio::AudioData stimulus(Signal s, double rate, double seconds, double l
         case Signal::Silence:
         case Signal::Notes:  // an instrument's: notes, no audio
         case Signal::Note:
+        case Signal::File:  // the file's own (fileSignal)
             break;
     }
     a.channels.assign(2, x);
     return a;
+}
+
+// The longest file a file signal plays, and the longest file it reads: a
+// longer one would be decoded whole only to be cut.
+inline constexpr double kFileSeconds = 60.0;
+inline constexpr double kFileReadSeconds = 600.0;
+
+// What a file signal plays: the file at the render's rate, stereo (a mono
+// file on both sides, of more channels the first two), its first 60 s.
+inline Result<audio::AudioData> fileSignal(const std::string& path, double rate,
+                                           std::vector<std::string>& log) {
+    if (!fs::path(path).is_absolute())
+        return Error("dsp.file", "audio_file is not an absolute path", "/audio_file",
+                     "give the file's full path");
+    auto info = audio::inspect(path);
+    if (!info) return std::move(info).error().at("/audio_file");
+    if (info->sampleRate > 0 &&
+        static_cast<double>(info->frames) / info->sampleRate > kFileReadSeconds)
+        return Error("dsp.file",
+                     "audio_file is " +
+                         std::to_string(std::lround(info->frames / info->sampleRate)) +
+                         " s long; at most its first 60 s would play",
+                     "/audio_file", "give a file of 10 minutes or less: a section of it");
+    auto audio = audio::readAudio(path);
+    if (!audio) return std::move(audio).error().at("/audio_file");
+    if (audio->channels.empty() || audio->frames() == 0)
+        return Error("dsp.file", "audio_file holds no audio", "/audio_file",
+                     "give a WAV, FLAC or MP3 with at least one frame");
+    if (audio->truncated) log.push_back("audio_file is truncated; playing what is there");
+    if (audio->channels.size() > 2) {
+        log.push_back("audio_file has " + std::to_string(audio->channels.size()) +
+                      " channels; the first two played");
+        audio->channels.resize(2);
+    }
+    if (audio->channels.size() == 1) audio->channels.push_back(audio->channels.front());
+    // Cut before resampling, so only what plays is resampled.
+    auto cut = [&](double at) {
+        const auto most = static_cast<std::size_t>(std::llround(kFileSeconds * at));
+        if (audio->frames() <= most) return false;
+        for (auto& c : audio->channels) c.resize(most);
+        return true;
+    };
+    if (cut(audio->sampleRate))
+        log.push_back("audio_file is longer than 60 s; its first 60 s played");
+    if (audio->sampleRate != rate) {
+        log.push_back("audio_file is at " + std::to_string(std::lround(audio->sampleRate)) +
+                      " Hz; resampled to " + std::to_string(std::lround(rate)) + " Hz");
+        auto resampled = audio::resample(*audio, rate);
+        if (!resampled) return std::move(resampled).error().at("/audio_file");
+        audio = std::move(resampled);
+        cut(rate);  // the resampler's rounding
+    }
+    audio->sampleRate = rate;
+    return std::move(*audio);
 }
 
 // An instrument's stimulus: its notes (key, on, at a fraction of `seconds`),
@@ -473,6 +540,49 @@ inline SignalResult measure(Signal s, const audio::AudioData& out, std::size_t i
     return r;
 }
 
+// A trace's numbers to six significant digits: what a reader needs, and short.
+inline json::Value sixDigits(const json::Value& values) {
+    json::Value out = json::Value::array();
+    if (!values.isArray()) return out;
+    for (const auto& v : values.asArray()) {
+        if (!v.isNumber()) {
+            out.push_back(json::Value());
+            continue;
+        }
+        char text[32];
+        std::snprintf(text, sizeof text, "%.6g", v.asDouble());
+        out.push_back(std::strtod(text, nullptr));
+    }
+    return out;
+}
+
+// What the plugin traced in a render, as the result gives it; problems for
+// what it could not keep.
+inline std::vector<TraceResult> traceResults(const json::Value& doc,
+                                             std::vector<std::string>& problems,
+                                             const std::string& signal) {
+    std::vector<TraceResult> out;
+    if (const auto* traces = doc.find("traces"); traces && traces->isArray())
+        for (const auto& t : traces->asArray()) {
+            TraceResult r;
+            if (const auto* n = t.find("name"); n && n->isString()) r.name = n->asString();
+            if (const auto* v = t.find("last")) r.last = sixDigits(*v);
+            if (const auto* v = t.find("low")) r.low = sixDigits(*v);
+            if (const auto* v = t.find("high")) r.high = sixDigits(*v);
+            if (const auto* v = t.find("non_finite"); v && v->isNumber())
+                r.nonFinite = static_cast<std::int64_t>(v->asDouble());
+            if (r.nonFinite > 0)
+                problems.push_back("trace \"" + r.name + "\" was given NaN or infinity " +
+                                   std::to_string(r.nonFinite) + " times with the " + signal +
+                                   " (look for a division by zero or a log of 0 there)");
+            out.push_back(std::move(r));
+        }
+    if (const auto* d = doc.find("dropped"); d && d->isNumber() && d->asDouble() > 0)
+        problems.push_back("trace() was given more than 16 names with the " + signal +
+                           "; the values under the rest were dropped");
+    return out;
+}
+
 inline std::string fixed(double v, int digits = 1) {
     char text[32];
     std::snprintf(text, sizeof text, "%.*f", digits, v);
@@ -497,7 +607,9 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
         "the library). A fresh instance, set by patch (a merge patch) when given, plays each "
         "signal. An effect: sine (frequency_hz; gain_db and thd_percent), sweep (20 Hz to 20 "
         "kHz), impulse (response_db at octave centres), pink noise and silence, each peaking at "
-        "level_db. An instrument, at velocity 0.8: notes (a note, then a chord), note (A4; "
+        "level_db; and file, audio_file played as it is (resampled to the render's rate, mono "
+        "on both channels, at most 60 s), the only signal when signals is not given. An "
+        "instrument, at velocity 0.8: notes (a note, then a chord), note (A4; "
         "pitch_hz, the pitch heard), and silence (no notes); release_ms is how long the sound "
         "lasts after the last release. Each reports peak and RMS in dBFS, DC, samples beyond 0 "
         "dBFS and denormals; problems says in words what looks wrong (clipping, DC, sound from "
@@ -525,7 +637,10 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
         "project's (DAW); latency is in samples at the rate used, which sample_rate in the "
         "result reports. meters gives a semantic plugin's read-only parameters (its meters "
         "and readouts) by patch key in physical units, as they stood when the signal ended "
-        "(the tail after it does not move them).";
+        "(the tail after it does not move them). traces gives what a script's trace(name, "
+        "value) calls recorded over the signal, in trace_points intervals of "
+        "trace_interval_s: for each name, the last value in each interval and the lowest and "
+        "highest, null where none was given.";
     c.tags = {"dsp", "analysis"};
     auto automationEvent = schema::object<AutomationEvent>("dsp_automation_event")
                                .field("param", &AutomationEvent::param,
@@ -571,9 +686,14 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                                                                      {Signal::Noise, "noise"},
                                                                      {Signal::Silence, "silence"},
                                                                      {Signal::Notes, "notes"},
-                                                                     {Signal::Note, "note"}}))
-                            .doc("default: effects five; instruments three, or notes and silence "
-                                 "with custom notes"))
+                                                                     {Signal::Note, "note"},
+                                                                     {Signal::File, "file"}}))
+                            .doc("default: effects five, or file with audio_file; instruments "
+                                 "three, or notes and silence with custom notes"))
+                 .field("audio_file", &TestArgs::audioFile,
+                        schema::string().minLength(1).doc(
+                            "the absolute path of a WAV, FLAC or MP3 (10 minutes at most) the file "
+                            "signal plays through an effect"))
                  .field("automation", &TestArgs::automation,
                         schema::arrayOf(automationEvent)
                             .minItems(1)
@@ -599,6 +719,10 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                             .doc("default: the session's or project's rate"))
                  .field("save", &TestArgs::save, schema::boolean())
                  .defaultValue(false)
+                 .field("trace_points", &TestArgs::tracePoints,
+                        schema::integerOf<int>().range(1, 4096).doc(
+                            "intervals the signal's traces are kept in"))
+                 .defaultValue(100)
                  .build();
     auto point = schema::object<ResponsePoint>("dsp_response_point")
                      .field("hz", &ResponsePoint::hz, schema::number())
@@ -628,6 +752,16 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
             .field("reference_rms_dbfs", &SidechainResult::referenceRmsDbfs, schema::number())
             .field("gain_change_db", &SidechainResult::gainChangeDb, nullableNumber)
             .build();
+    auto traceResult =
+        schema::object<TraceResult>("dsp_trace_result")
+            .field("name", &TraceResult::name, schema::string())
+            .field("last", &TraceResult::last,
+                   schema::any().doc("each interval's last value, or null"))
+            .field("low", &TraceResult::low, schema::any().doc("each interval's lowest"))
+            .field("high", &TraceResult::high, schema::any().doc("each interval's highest"))
+            .field("non_finite", &TraceResult::nonFinite,
+                   schema::integer().min(0).doc("NaN or infinity given, not kept"))
+            .build();
     auto signal = schema::object<SignalResult>("dsp_signal_result")
                       .field("signal", &SignalResult::signal, schema::string())
                       .field("peak_dbfs", &SignalResult::peakDbfs, schema::number())
@@ -649,6 +783,10 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                       .field("meters", &SignalResult::meters,
                              schema::any().doc("read-only parameters (meters) by patch key, "
                                                "physical, as of the signal's end"))
+                      .field("trace_interval_s", &SignalResult::traceIntervalS,
+                             schema::number().doc("each trace interval's length"))
+                      .field("traces", &SignalResult::traces,
+                             schema::arrayOf(traceResult).doc("what trace() recorded, by name"))
                       .build();
     c.result = schema::object<TestResult>("dsp_test_result")
                    .field("plugin", &TestResult::plugin, schema::string())
@@ -677,7 +815,11 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                 {"dsp.notes", "invalid custom sequence or signal selection",
                  "use an instrument, notes or notes and silence, and spans within seconds"},
                 {"dsp.frequency", "a sine at or above half the sample rate",
-                 "lower frequency_hz or raise sample_rate"}};
+                 "lower frequency_hz or raise sample_rate"},
+                {"dsp.file",
+                 "the file signal without audio_file, or a file that is not absolute, is over 10 "
+                 "minutes or holds no audio",
+                 "give audio_file a WAV, FLAC or MP3, or leave file out of signals"}};
     if (!exampleEffect.empty()) {
         json::Value args = json::Value::object();
         args["plugin"] = exampleEffect;
@@ -786,6 +928,7 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
         const std::vector<Signal> signals =
             a.signals && !a.signals->empty() ? *a.signals
             : a.notes                        ? std::vector<Signal>{Signal::Notes, Signal::Silence}
+            : a.audioFile && !instrument     ? std::vector<Signal>{Signal::File}
             : instrument
                 ? std::vector<Signal>(std::begin(kInstrumentSignals), std::end(kInstrumentSignals))
                 : std::vector<Signal>(std::begin(kEffectSignals), std::end(kEffectSignals));
@@ -803,9 +946,20 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                                  signalName(signals[k]),
                              "/signals/" + std::to_string(k),
                              instrument ? "use notes, note or silence"
-                                        : "use sine, sweep, impulse, noise or silence");
+                                        : "use sine, sweep, impulse, noise, silence or file");
+        const bool playsFile =
+            std::find(signals.begin(), signals.end(), Signal::File) != signals.end();
+        if (playsFile && !a.audioFile)
+            return Error("dsp.file", "the file signal plays audio_file, which is not given",
+                         "/audio_file", "give audio_file a WAV, FLAC or MP3 to play");
         sandbox::RenderSettings settings = Traits::settings(s);
         if (a.sampleRate) settings.sampleRate = *a.sampleRate;
+        std::optional<audio::AudioData> file;
+        if (playsFile) {
+            auto loaded = fileSignal(*a.audioFile, settings.sampleRate, out.log);
+            if (!loaded) return std::move(loaded).error();
+            file = std::move(*loaded);
+        }
         const double nyquist = 0.5 * settings.sampleRate;
         if (a.frequencyHz >= nyquist &&
             std::find(signals.begin(), signals.end(), Signal::Sine) != signals.end())
@@ -855,8 +1009,14 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
         }
         std::set<std::string> logged;
         double rendered = 0.0, spent = 0.0;
-        auto renderPass =
-            [&](const sandbox::RenderRequest& request) -> Result<sandbox::RenderResult> {
+        // The traces' intervals: each signal's frames in trace_points of them.
+        const auto traceBins = static_cast<std::uint32_t>(std::clamp(a.tracePoints, 1, 4096));
+        std::uint32_t traceInterval = 1;
+        // A pass on a fresh instance; with `trace`, what its trace() calls
+        // recorded over `traceFrames` frames, read once it is deactivated.
+        auto renderPass = [&](const sandbox::RenderRequest& request,
+                              std::optional<json::Value>* trace =
+                                  nullptr) -> Result<sandbox::RenderResult> {
             auto fresh = host::Instance::create(*info, Traits::identity(s));
             if (!fresh) return std::move(fresh).error();
             if (a.patch) {
@@ -864,12 +1024,20 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                     (*fresh)->setPatch(json::writeCompact(*a.patch), CLAP_SUPPLE_SET_MERGE);
                 if (!applied) return patchError(std::move(applied).error());
             }
+            const bool tracing = trace && (*fresh)->traces();
+            if (tracing) SUPPLE_TRY((*fresh)->startTrace(traceInterval, traceBins));
             host::Instance* chain[] = {fresh->get()};
             const auto start = std::chrono::steady_clock::now();
             auto result = sandbox::render(chain, settings, request);
             spent +=
                 std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             if (result) rendered += result->audio.seconds();
+            if (result && tracing) {
+                (*fresh)->deactivate();
+                auto read = (*fresh)->readTrace();
+                if (!read) return std::move(read).error();
+                *trace = std::move(*read);
+            }
             return result;
         };
         auto diagnose = [&](Signal sig, const sandbox::RenderResult& r, const SignalResult& m,
@@ -915,13 +1083,16 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
             }
         };
         for (const Signal sig : signals) {
-            const audio::AudioData input =
-                instrument
+            const audio::AudioData generated =
+                instrument || sig == Signal::File
                     ? audio::AudioData{}
                     : stimulus(sig, settings.sampleRate, a.seconds, a.levelDb, a.frequencyHz);
+            const audio::AudioData& input = sig == Signal::File ? *file : generated;
             const std::size_t inputFrames =
                 instrument ? static_cast<std::size_t>(std::llround(a.seconds * settings.sampleRate))
                            : input.frames();
+            traceInterval = static_cast<std::uint32_t>(std::max<std::size_t>(
+                1, (std::max<std::size_t>(inputFrames, 1) + traceBins - 1) / traceBins));
             sandbox::RenderRequest request;
             if (instrument) {
                 request.lengthSamples = static_cast<std::int64_t>(inputFrames);
@@ -945,11 +1116,20 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                                                 : rank(x.event.kind) < rank(y.event.kind);
                 });
             if (a.sidechain) request.sidechain = &key;
-            auto r = renderPass(request);
+            std::optional<json::Value> traced;
+            auto r = renderPass(request, &traced);
             if (!r) return std::move(r).error();
             out.latency = r->latency;
             SignalResult m = measure(sig, r->audio, inputFrames, a, releasedAt);
             m.meters = meterValues(*r);
+            if (traced) {
+                auto kept = traceResults(*traced, out.problems, m.signal);
+                if (!kept.empty()) {
+                    m.traceIntervalS =
+                        rounded(static_cast<double>(traceInterval) / settings.sampleRate, 6);
+                    m.traces = std::move(kept);
+                }
+            }
             diagnose(sig, *r, m, "");
             if (a.automation) {
                 auto baselineRequest = request;
@@ -993,10 +1173,10 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                 m.sidechain = metric;
             }
             if (a.save) {
-                const fs::path file =
+                const fs::path saved =
                     Traits::outputDir(s) / ("dsp-test-" + info->id + "-" + m.signal + ".wav");
-                SUPPLE_TRY(audio::writeWav(file, r->audio));
-                m.path = file.string();
+                SUPPLE_TRY(audio::writeWav(saved, r->audio));
+                m.path = saved.string();
             }
             out.signals.push_back(std::move(m));
         }

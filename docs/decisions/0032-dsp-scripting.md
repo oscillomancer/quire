@@ -680,3 +680,36 @@ writes through the patch codec, so it makes only what a patch can. The
 automatic editor takes it through a generic hook of the template's,
 `AutoPanel` (framework 1.30.0), a panel a layer draws after the parameters;
 a plugin with no routes has no panel, so having routes is the switch.
+
+### Traces (2026-10-24)
+
+`trace("name", value)`, and `trace("name", value, i)` at frame `i`, record
+a value for a host that traces the plugin: `dsp.test` returns each name's
+last, least and greatest values over the signal, in `trace_points`
+intervals, and says when one was NaN. It passes the built-ins rule: a
+script cannot reach the host but through its parameters, and debugging a
+stock plugin meant turning its meters into probes (one, a percent, clamped
+the value it carried) and reading only where a render ended. The host side
+is a CLAP extension of its own (`trace-extension.md`), so a source export
+offers it as the player does; it works only while the plugin is inactive,
+so the audio thread's writes and the host's reads never meet and the audio
+code needs no lock. While nothing traces, a call is one atomic load. The
+compiler holds a script to 16 names, a trace's limit, so none is dropped
+while it runs, and a stock script ships with none left in (its catalog
+check). A script's own member named `trace` (Sorrel's and Gorse's
+drawing helpers) hides the base one, as in C++.
+
+### Files through dsp.test (2026-10-24)
+
+`dsp.test` and `dsp.preview` play an audio file through an effect (the
+`file` signal, with `audio_file`): material a generator cannot make, a
+recorded instrument or a drum loop, now goes through the harness and its
+measurements instead of a render and a separate read of the meters.
+
+### Editing in place (2026-10-24)
+
+`dsp.edit` replaces text in a library script (each `old` in exactly one
+place, in order, all or none) and then does what `dsp.write` does. An agent
+with only the MCP tools changed a line of a long script by sending all of
+it back, which costs the whole file each time and can lose code to a slip
+in the copy.

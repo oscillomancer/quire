@@ -747,6 +747,10 @@ Result<std::unique_ptr<Instance>> Instance::create(const PluginInfo& info,
         (self->extPicture_->struct_size < sizeof(clap_plugin_supple_editor_picture_t) ||
          !self->extPicture_->watch || !self->extPicture_->draw))
         self->extPicture_ = nullptr;
+    self->extTrace_ = static_cast<const clap_plugin_supple_trace_t*>(ext(CLAP_EXT_SUPPLE_TRACE));
+    if (self->extTrace_ && (self->extTrace_->struct_size < sizeof(clap_plugin_supple_trace_t) ||
+                            !self->extTrace_->start || !self->extTrace_->read))
+        self->extTrace_ = nullptr;
 
     // Port configuration: prefer stereo main in/out (or stereo out for instruments).
     if (auto* cfg = static_cast<const clap_plugin_audio_ports_config_t*>(
@@ -1584,6 +1588,42 @@ Result<json::Value> Instance::factoryPatches() {
                      "The plugin returned invalid factory patches.", {},
                      "Restart or replace the plugin; it must report supple.factory-patches/1.0.");
     return *patches;
+}
+
+Status Instance::startTrace(std::uint32_t interval, std::uint32_t bins) {
+    if (!traces())
+        return Error("host.trace.unsupported", info_.id + " offers no traces here", {},
+                     "it needs com.suppleaudio.trace/1, in process");
+    if (active_)
+        return Error("host.trace.active", "a trace starts while the plugin is inactive", {},
+                     "deactivate it first");
+    if (!extTrace_->start(plugin_, interval, bins))
+        return Error("host.trace",
+                     info_.id + " refused a trace of " + std::to_string(bins) + " bins of " +
+                         std::to_string(interval) + " frames",
+                     {}, "give an interval of at least 1 and at most 4096 bins");
+    return okStatus();
+}
+
+Result<json::Value> Instance::readTrace() {
+    if (!traces())
+        return Error("host.trace.unsupported", info_.id + " offers no traces here", {},
+                     "it needs com.suppleaudio.trace/1, in process");
+    if (active_)
+        return Error("host.trace.active", "a trace is read while the plugin is inactive", {},
+                     "deactivate it first");
+    StringSink sink;
+    if (!extTrace_->read(plugin_, &sink.stream))
+        return Error("host.trace", info_.id + " has no trace to read", {},
+                     "start one with startTrace() before processing");
+    auto doc = json::parse(sink.text);
+    if (!doc) return std::move(doc).error();
+    const auto* schema = doc->find("schema");
+    if (!schema || !schema->isString() || schema->asString() != "supple.trace/1.0" ||
+        !doc->find("traces") || !doc->find("traces")->isArray())
+        return Error("host.trace", info_.id + " wrote a trace that is not supple.trace/1.0", {},
+                     "report the plugin's trace to its developer");
+    return std::move(*doc);
 }
 
 Status Instance::watchEditor(bool on) {

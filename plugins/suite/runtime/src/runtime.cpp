@@ -368,6 +368,58 @@ void Plugin::setLatency(int samples) {
 void Plugin::setTail(int samples) {
     if (instance_) instance_->tail = samples < 0 ? -1 : samples;
 }
+void Plugin::trace(const char* name, double value) const { trace(name, value, 0); }
+void Plugin::trace(const char* name, double value, int i) const {
+    if (!instance_ || !name) return;
+    if (detail::TraceLog* log = instance_->trace.load(std::memory_order_acquire))
+        log->record(name, value, log->at + (i > 0 ? i : 0));
+}
+
+// --- traces --------------------------------------------------------------------
+
+namespace detail {
+
+TraceLog::TraceLog(int interval_, int bins_)
+    : interval(std::max(1, interval_)),
+      bins(std::clamp(bins_, 1, kMaxBins)),
+      last(static_cast<std::size_t>(kNames * bins), std::nan("")),
+      low(last),
+      high(last) {}
+
+void TraceLog::record(const char* text, double value, std::int64_t frame) {
+    const std::int64_t bin = frame / interval;
+    if (bin >= bins) return;
+    // The name by what it says (not where its text lies: a script reloaded
+    // since may hold another name there).
+    const int count = names.load(std::memory_order_relaxed);
+    int k = 0;
+    while (k < count && std::strncmp(name[k], text, kNameBytes - 1) != 0) ++k;
+    if (k == count) {
+        if (count == kNames) {
+            dropped.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+        int n = 0;
+        for (; n < kNameBytes - 1 && text[n]; ++n) name[k][n] = text[n];
+        name[k][n] = '\0';
+        names.store(count + 1, std::memory_order_release);
+    }
+    if (!std::isfinite(value)) {
+        nonFinite[k].fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    const auto cell = static_cast<std::size_t>(k * bins + bin);
+    if (std::isnan(last[cell])) {
+        low[cell] = value;
+        high[cell] = value;
+    } else {
+        low[cell] = std::min(low[cell], value);
+        high[cell] = std::max(high[cell], value);
+    }
+    last[cell] = value;
+}
+
+}  // namespace detail
 
 // --- instruments -----------------------------------------------------------------
 

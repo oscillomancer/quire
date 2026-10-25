@@ -140,6 +140,8 @@ class Sema {
     Expr* checkIndex(IndexExpr* x);
     Expr* checkCall(CallExpr* c);
     void checkFormat(CallExpr* c);
+    void checkTrace(CallExpr* c);
+    std::set<std::string> traceNames_;  // the names given to trace() so far
     Expr* checkUnary(UnaryExpr* u);
     Expr* checkBinary(BinaryExpr* bin);
     Expr* checkAssign(AssignExpr* a);

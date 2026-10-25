@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include "supple/script.h"
 
@@ -33,6 +34,31 @@ struct Status {
     }
 };
 static_assert(std::atomic<bool>::is_always_lock_free);
+
+// What trace() records while a host traces the plugin
+// (com.suppleaudio.trace/1): each name's values in bins of `interval` frames,
+// counted from the first block processed after tracing began, the last value
+// given in each bin and the least and the greatest. The host's layer makes it
+// on the main thread while the plugin is inactive, and reads it only then;
+// the audio code writes into what is already there.
+struct TraceLog {
+    static constexpr int kNames = 16;
+    static constexpr int kNameBytes = 48;  // a name's longest, with its terminator
+    static constexpr int kMaxBins = 4096;
+
+    TraceLog(int interval, int bins);
+    // The value under `name` at `frame` since tracing began; audio thread.
+    void record(const char* name, double value, std::int64_t frame);
+
+    const int interval, bins;
+    std::int64_t at = 0;  // the frame the block being processed starts at; the glue's
+    std::atomic<int> names{0};
+    char name[kNames][kNameBytes] = {};
+    // name * bins + bin; NaN where nothing was traced.
+    std::vector<double> last, low, high;
+    std::atomic<std::uint32_t> nonFinite[kNames] = {};  // NaN or infinity, not recorded
+    std::atomic<std::uint32_t> dropped{0};              // values under a seventeenth name or later
+};
 
 // An instrument's voices as the glue keeps them (the framework's voice
 // manager): what Instrument's methods read and do. Indexes are in range.
@@ -197,6 +223,8 @@ struct Instance {
     int tail = kInfoTail;         // setTail()'s: samples, -1 forever
     static constexpr int kInfoTail = -2;
     EditorServices* editor = nullptr;  // the editor's copy of the plugin: text, names
+    // While a host traces the plugin, where trace() records.
+    std::atomic<TraceLog*> trace{nullptr};
 
     static void bind(Plugin& plugin, Instance* instance) { plugin.instance_ = instance; }
 };

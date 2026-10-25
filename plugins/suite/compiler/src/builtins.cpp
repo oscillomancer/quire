@@ -517,6 +517,15 @@ void Builtins::addClasses() {
     r.method(
         plugin, "void setTail(int samples)", +[](S::Plugin* p, int n) { p->setTail(n); },
         Writes::Self, kInit | kAudio);
+    // Debugging, for a host that traces the plugin; the audio code's.
+    r.method(
+        plugin, "void trace(const char* name, double value) const",
+        +[](const S::Plugin* p, const char* name, double v) { p->trace(name, v); }, Writes::Nothing,
+        kInit | kAudio);
+    r.method(
+        plugin, "void trace(const char* name, double value, int i) const",
+        +[](const S::Plugin* p, const char* name, double v, int i) { p->trace(name, v, i); },
+        Writes::Nothing, kInit | kAudio);
     plugin_ = plugin;
 
     // DSP objects.

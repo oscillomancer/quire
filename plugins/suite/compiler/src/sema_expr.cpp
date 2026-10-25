@@ -1181,25 +1181,33 @@ Expr* Sema::checkCall(CallExpr* c) {
             }
             case RefKind::BuiltinMethod: {
                 // A plugin base method: sampleRate() and friends (intrinsics),
-                // and an instrument's voice methods.
+                // and an instrument's voice methods. Of overloads (trace()),
+                // the one taking as many arguments as the call gives.
+                const BuiltinMethod* named = nullptr;
                 for (const auto& bm : b_.pluginBase()->methods)
-                    if (bm.name == calleeName) {
-                        c->builtinMethod = &bm;
-                        c->implicitThis = true;
-                        if (bm.instrument && self_ && self_->base != PluginKind::Instrument)
-                            error(c->loc, "script.plugin.instrument",
-                                  calleeName + "() is an instrument's, and " + self_->name +
-                                      " has no voices",
-                                  "derive from Instrument to play notes: struct Synth : "
-                                  "Instrument { ... }");
-                        if (fn_ && fn_->isConst && !bm.isConst)
-                            error(c->loc, "script.call.const",
-                                  "calling " + calleeName + "() from a const member function",
-                                  "drop the const from the member function");
-                        c->args = callArguments(c, bm.params, {}, calleeName + "()");
-                        c->qt = bm.result;
-                        return c;
-                    }
+                    if (bm.name == calleeName &&
+                        (!named || (named->params.size() != c->args.size() &&
+                                    bm.params.size() == c->args.size())))
+                        named = &bm;
+                if (named) {
+                    const BuiltinMethod& bm = *named;
+                    c->builtinMethod = &bm;
+                    c->implicitThis = true;
+                    if (bm.instrument && self_ && self_->base != PluginKind::Instrument)
+                        error(c->loc, "script.plugin.instrument",
+                              calleeName + "() is an instrument's, and " + self_->name +
+                                  " has no voices",
+                              "derive from Instrument to play notes: struct Synth : "
+                              "Instrument { ... }");
+                    if (fn_ && fn_->isConst && !bm.isConst)
+                        error(c->loc, "script.call.const",
+                              "calling " + calleeName + "() from a const member function",
+                              "drop the const from the member function");
+                    c->args = callArguments(c, bm.params, {}, calleeName + "()");
+                    c->qt = bm.result;
+                    if (calleeName == "trace") checkTrace(c);
+                    return c;
+                }
                 return c;
             }
             case RefKind::Builtin: {
@@ -1302,6 +1310,30 @@ Expr* Sema::checkCall(CallExpr* c) {
     error(c->loc, "script.call.callee", "this cannot be called",
           "call a function by its name: f(x)");
     return c;
+}
+
+// trace(name, value[, i]): a literal name, short enough to keep whole, and
+// no more names than a trace keeps, so a host can tell the traces apart and
+// none is dropped while the plugin runs.
+void Sema::checkTrace(CallExpr* c) {
+    Expr* name = c->args.empty() ? nullptr : c->args[0];
+    while (name && name->kind == ExprKind::Cast) name = static_cast<CastExpr*>(name)->operand;
+    if (!name || name->kind != ExprKind::StringLit) {
+        error(c->loc, "script.trace.name", "trace()'s name is a string literal",
+              "trace(\"envelope\", env)");
+        return;
+    }
+    const std::string& text = static_cast<StringLitExpr*>(name)->value;
+    if (text.empty() || text.size() > 47)
+        error(name->loc, "script.trace.name",
+              text.empty() ? "trace()'s name is empty"
+                           : "trace()'s name is " + std::to_string(text.size()) +
+                                 " characters; at most 47 are kept",
+              "name it in a word or two: trace(\"gain\", g)");
+    else if (traceNames_.insert(text).second && traceNames_.size() > 16)
+        error(name->loc, "script.trace.names",
+              "\"" + text + "\" is the seventeenth name given to trace(); a trace keeps 16",
+              "trace fewer values at once, or reuse a name");
 }
 
 // format(pattern, values...): a literal pattern whose conversions are the

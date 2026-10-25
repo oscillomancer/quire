@@ -26,6 +26,11 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
      `instrument`) and its parameters as the patch will show them (`key`,
      `unit`, range, default), and its `files` when it has any (a sample, an
      impulse response). `listed: true` means `plugin_list` shows it now.
+   - To fix or change part of it, `dsp_edit {name: "tilt_eq", edits:
+     [{old: "<text it has, once>", new: "<what replaces it>"}]}` rather
+     than writing the whole file again. Copy `old` exactly, with enough
+     around it to be in one place; the edits apply in order, all or none,
+     and the answer is `dsp_write`'s.
    - `dsp_check {source}` compiles a whole script without saving.
    - `ok: true, listed: false`: the compiler accepted it but the player did
      not list its ID. Check `plugin_list` and the host's plugin path; the
@@ -73,7 +78,7 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
    what it changed, so a check that a drag edits what it should needs no
    mouse. `problems` names a loop or an index that went wrong in the
    editor's code, with the line.
-6. **Change it** by writing the same name again. Instances already playing
+6. **Change it** with `dsp_edit`, or by writing the same name again. Instances already playing
    it switch to the new code within half a second, crossfaded, keeping
    their parameter values. Changing the parameters themselves (adding,
    removing, renaming, a new range) restarts the plugin in the host;
@@ -108,7 +113,7 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
 `dsp_get {name}` returns one's source. The DAW and the sandbox share the
 library by default in the GUI app and sandbox CLI
 (`<XDG_DATA_HOME or ~/.local/share>/<slug>/scripts`) and have the same
-seven commands. With `--workdir`, or in the headless engine, scripts live
+eight commands. With `--workdir`, or in the headless engine, scripts live
 in `<workdir>/scripts`; `dsp_list.library` gives the actual location.
 
 ## Export limits
@@ -168,6 +173,11 @@ notes. Each signal still gets a fresh instance.
   session's. Anything sized or tuned from `sampleRate()` (filters, delays,
   latency) should measure the same at every rate; `latency` is in samples
   at the rate used.
+- `audio_file`: play a WAV, FLAC or MP3 (its absolute path) through an
+  effect (the `file` signal, the only one unless `signals` lists others):
+  a recorded instrument, a drum loop, anything a generator cannot make. It
+  is resampled to the render's rate and plays its own length (60 s at
+  most; a file over 10 minutes is refused); `dsp_preview` takes it too.
 
 ```json
 {"script": "compressor", "signals": ["sine"], "level_db": -30,
@@ -176,6 +186,21 @@ notes. Each signal still gets a fresh instance.
 
 With automation or a sounding key, THD and the impulse response are left
 out: they describe a plugin that holds still.
+
+## See inside it while it runs
+
+When a number comes out wrong and you cannot tell why, trace the values on
+the way to it rather than guessing: `trace("envelope", env, i)` in the
+per-frame loop, `trace("beat", beat)` once a block, then `dsp_test`. Each
+signal's `traces` gives every name's `last`, `low` and `high` value in each
+of `trace_points` intervals (100 by default) of `trace_interval_s`, `null`
+where it was not traced; a NaN is counted (`non_finite`) and named in
+`problems`. Use few points to see a trend, more (up to 4096) to find the
+moment something jumps, and `audio_file` to trace what real material does.
+
+```json
+{"script": "tilt_eq", "signals": ["sweep"], "trace_points": 20}
+```
 
 ## Follow the stock plugins
 

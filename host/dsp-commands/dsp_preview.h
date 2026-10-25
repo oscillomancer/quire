@@ -37,7 +37,7 @@ struct PointerStep {
 inline constexpr std::size_t kMaxSteps = 64;
 
 struct PreviewArgs {
-    std::optional<std::string> plugin, script;
+    std::optional<std::string> plugin, script, audioFile;
     std::optional<json::Value> patch;
     std::optional<test::Signal> signal;
     double levelDb = -12.0;
@@ -119,9 +119,11 @@ void registerDspPreview(cmd::Registry& registry) {
     c.description =
         "Give plugin (an id) or script (a name in the library). A fresh instance, set by patch (a "
         "merge patch) when given, plays signal -- an effect: sine (the default, at frequency_hz), "
-        "sweep, impulse, noise or silence, peaking at level_db; an instrument: notes (the "
-        "default), note or silence -- for seconds while its editor watches, so meters and the "
-        "script's draw() show what played. Then the editor is drawn without a window, scale "
+        "sweep, impulse, noise or silence, peaking at level_db, for seconds, or file (the "
+        "default with audio_file), the file played whole as dsp.test plays it; an instrument: "
+        "notes (the default), note or silence, for seconds -- while its editor watches, so "
+        "meters and the script's draw() show what played. Then the editor is drawn without a "
+        "window, scale "
         "times its design size, and saved as a PNG (path; width and height in pixels): read the "
         "file to see it. A script with neither editor() nor draw() shows the automatic editor. "
         "pointer, if given, acts on the editor first, in its design units (the picture's pixels "
@@ -174,7 +176,12 @@ void registerDspPreview(cmd::Registry& registry) {
                                                      {Signal::Noise, "noise"},
                                                      {Signal::Silence, "silence"},
                                                      {Signal::Notes, "notes"},
-                                                     {Signal::Note, "note"}}))
+                                                     {Signal::Note, "note"},
+                                                     {Signal::File, "file"}}))
+                 .field("audio_file", &PreviewArgs::audioFile,
+                        schema::string().minLength(1).doc(
+                            "the absolute path of a WAV, FLAC or MP3 (10 minutes at most) the file "
+                            "signal plays through an effect"))
                  .field("level_db", &PreviewArgs::levelDb,
                         schema::number().range(-60, 0).unit(units::Unit::dB))
                  .defaultValue(-12.0)
@@ -204,6 +211,10 @@ void registerDspPreview(cmd::Registry& registry) {
                  "put the script player on the plugin path"},
                 {"dsp.signal", "a signal the plugin cannot play",
                  "an effect plays audio signals, an instrument notes"},
+                {"dsp.file",
+                 "the file signal without audio_file, or a file that is not absolute, is over 10 "
+                 "minutes or holds no audio",
+                 "give audio_file a WAV, FLAC or MP3, or another signal"},
                 {"dsp.pointer", "a drag without its end, or too many steps",
                  "give a drag to_x and to_y; at most 64 steps"},
                 {"dsp.no_picture", "the plugin cannot draw its editor without a window",
@@ -273,7 +284,9 @@ void registerDspPreview(cmd::Registry& registry) {
                          "scripts can, through the script player; other plugins need "
                          "com.suppleaudio.editor-picture/1");
         const bool instrument = instance.audioInputChannels() == 0;
-        const Signal sig = a.signal.value_or(instrument ? Signal::Notes : Signal::Sine);
+        const Signal sig = a.signal.value_or(instrument    ? Signal::Notes
+                                             : a.audioFile ? Signal::File
+                                                           : Signal::Sine);
         if (sig != Signal::Silence && forInstruments(sig) != instrument)
             return Error("dsp.signal",
                          info->name +
@@ -282,7 +295,10 @@ void registerDspPreview(cmd::Registry& registry) {
                              signalName(sig),
                          "/signal",
                          instrument ? "use notes, note or silence"
-                                    : "use sine, sweep, impulse, noise or silence");
+                                    : "use sine, sweep, impulse, noise, silence or file");
+        if (sig == Signal::File && !a.audioFile)
+            return Error("dsp.file", "the file signal plays audio_file, which is not given",
+                         "/audio_file", "give audio_file a WAV, FLAC or MP3 to play");
         if (a.patch) {
             if (!instance.info().semantic)
                 return Error("dsp.not_semantic", info->name + " takes no patch", "/patch",
@@ -294,12 +310,16 @@ void registerDspPreview(cmd::Registry& registry) {
         PreviewResult out;
         out.plugin = info->id;
         SUPPLE_TRY(instance.watchEditor(true));
-        if (a.seconds > 0.0) {
+        if (a.seconds > 0.0 || sig == Signal::File) {
             const sandbox::RenderSettings settings = Traits::settings(s);
-            const audio::AudioData input =
-                instrument
-                    ? audio::AudioData{}
-                    : stimulus(sig, settings.sampleRate, a.seconds, a.levelDb, a.frequencyHz);
+            audio::AudioData input;
+            if (sig == Signal::File) {
+                auto loaded = fileSignal(*a.audioFile, settings.sampleRate, out.log);
+                if (!loaded) return std::move(loaded).error();
+                input = std::move(*loaded);
+            } else if (!instrument) {
+                input = stimulus(sig, settings.sampleRate, a.seconds, a.levelDb, a.frequencyHz);
+            }
             sandbox::RenderRequest request;
             if (instrument) {
                 request.events = noteEvents(sig, settings.sampleRate, a.seconds);
@@ -311,7 +331,7 @@ void registerDspPreview(cmd::Registry& registry) {
             host::Instance* chain[] = {&instance};
             auto r = sandbox::render(chain, settings, request);
             if (!r) return std::move(r).error();
-            out.log = r->log;
+            out.log.insert(out.log.end(), r->log.begin(), r->log.end());
         }
         // What the pointer edits: the patch before and after.
         auto patchNow = [&]() -> json::Value {
