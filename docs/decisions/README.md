@@ -63,3 +63,6 @@ current state.
 | [0045](0045-master-playrate.md) | Master playrate in device-time graphs | Accepted |
 | [0046](0046-live-scalar-playrate.md) | Live scalar playrate controls | Accepted |
 | [0047](0047-stock-plugins-as-scripts.md) | Stock plugins written as DSP scripts | Accepted |
+| [0048](0048-packaging-and-distribution.md) | Packaging and distribution | Accepted |
+| [0049](0049-isolated-linux-package-runtimes.md) | Isolated C++ runtimes in Linux packages | Accepted |
+| [0050](0050-audio-device-preferences.md) | Audio device preferences and per-client graph requests | Accepted |

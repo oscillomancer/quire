@@ -11,6 +11,10 @@ info/activity. Owner status never queries the ASIO/CoreAudio driver rate.
 **2026-10-15 amendment:** [ADR-0042](0042-native-midi-input.md) adds CoreMIDI /
 WinMM inputs to the PortAudio backend and supersedes the MIDI deferral below.
 
+**2026-10-25 amendment:** [ADR-0050](0050-audio-device-preferences.md) makes the
+GUI start the native device by default (headless engine.start keeps dummy),
+asks CoreAudio for an explicit rate and lets WASAPI shared mode convert rates.
+
 ## Decision
 
 - Vendor the latest eligible stable PortAudio release, v19.7.0 (2021-04-06,

@@ -6,6 +6,10 @@
 adds PortAudio on macOS/Windows and device-derived, self-applied helper policies;
 Linux mechanisms and callback publication/lifetime rules remain unchanged.
 
+**Device preferences amendment, 2026-10-25:** [ADR-0050](0050-audio-device-preferences.md)
+adds a suggested graph rate (`PIPEWIRE_RATE`) and an opt-in per-client force of
+the quantum and rate (`node.force-*`) while the engine runs.
+
 ## Context
 
 Target: Arch, PipeWire 1.6.9 with pipewire-jack (no jack2), WirePlumber
