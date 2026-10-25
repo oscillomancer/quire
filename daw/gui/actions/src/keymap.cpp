@@ -134,11 +134,21 @@ Keymap Keymap::defaults() {
     add({"M"}, "arrange", "ui.marker.add");
     add({"Shift+R"}, "arrange", "ui.region.add");
     add({"Delete"}, "arrange", "edit.delete");
+    add({"Alt+C"}, "arrange", "edit.delete");
     add({"Ctrl+C"}, "arrange", "ui.item.copy");
     add({"Ctrl+X"}, "arrange", "ui.item.cut");
     add({"Ctrl+V"}, "arrange", "ui.item.paste");
     add({"Ctrl+D"}, "arrange", "ui.item.duplicate");
     add({"Ctrl+A"}, "arrange", "ui.item.select_all");
+    // The MIDI editor's notes: the same keys over the editor (or with its focus).
+    add({"Delete"}, "midi", "ui.midi.notes.delete");
+    add({"Backspace"}, "midi", "ui.midi.notes.delete");
+    add({"Alt+C"}, "midi", "ui.midi.notes.delete");
+    add({"Ctrl+C"}, "midi", "ui.midi.notes.copy");
+    add({"Ctrl+X"}, "midi", "ui.midi.notes.cut");
+    add({"Ctrl+V"}, "midi", "ui.midi.notes.paste");
+    add({"Ctrl+D"}, "midi", "ui.midi.notes.duplicate");
+    add({"Ctrl+A"}, "midi", "ui.midi.notes.select_all");
     for (int n = 1; n <= 5; ++n) {  // screensets (gap log #38)
         const std::string digit = std::to_string(n);
         const std::string saveKey = "Ctrl+Alt+" + digit, loadKey = "Alt+" + digit;

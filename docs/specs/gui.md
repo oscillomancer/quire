@@ -373,12 +373,17 @@ and selects it; a right-click there opens the same Channel / Buss / Master menu
 at the pointer. Track selection is shared by the TCP and the mixer: a click on
 a row's or strip's empty part selects it alone, Ctrl+click toggles, Shift+click
 extends from the last click in that view's order; a right-click on a selected
-track keeps the selection. The track menu's Delete (and the Delete key, when
+track keeps the selection, and so does a plain press on one, so a drag from
+it moves every selected track of its parent and type together, in their
+order, as one undo step (`views::reorderMoves`, track.move steps); released
+without a drag, it selects that track alone. The track menu's Delete (and the Delete key, when
 tracks were selected after items) removes every selected track as one undo
 step (`track.remove:selected`; the main master stays; children before folders).
 Its Duplicate (and Track > duplicate selected) copies every selected channel
 and buss right after its original as one undo step (`track.duplicate`, see
-session-model.md) and selects the copies.
+session-model.md) and selects the copies. Track > channels of the first
+selected… opens the same Channels menu as the track menu's, for the first
+selected track only.
 Commands: `track.*`, `route.*`, `fx.*` (bypass/offline), transport.
 
 ### 4.3 Arrange view
@@ -455,6 +460,14 @@ its own clipboard unit. Empty lanes use the saved scalar as their fallback
 and redraw when that scalar changes. The lane display range is independent
 of the transport knob's per-project display range. In the staged engine the
 curve is editable and saved, but audio application remains pending.
+
+**Menus.** A right-click on an item opens its menu: **Cut**, **Copy**,
+**Paste** (at the pointer's beat on the grid and its channel), **Duplicate**
+(after the selection), **Delete**, **Merge MIDI items** (several MIDI items
+on one channel; with one item selected, **Merge takes** layers its MIDI
+takes; `midi.merge`, greyed otherwise), then the timebases and the take
+entries below. A right-click on empty lane space opens a menu with Paste.
+The keys each action has are shown beside it.
 
 **Takes.** An item with several takes shows each in a lane under its name
 bar when the row is tall enough (at least 14 units a lane), the heard one
@@ -732,6 +745,12 @@ LLM-native differentiator: the same text an agent writes is visible and
 editable by the human. The event list edits notes and CC events;
 double-click editing requires a row hit and edits that row. Roll gesture
 anchors use exact model timing rather than the rounded `midi.notes` query.
+A right-click on the grid (on a note: that note joins or is the selection)
+opens **Delete**, **Copy**, **Cut**, **Paste** (at the pointer's beat on the
+grid, pitches as copied) and **Duplicate** for the selected notes; the same
+actions (`ui.midi.notes.*`) have the arrange view's keys in the `midi`
+section: Delete, Backspace and Alt+C, Ctrl+C, Ctrl+X, Ctrl+V (at the
+playhead), Ctrl+D and Ctrl+A.
 
 The panel's top border is a drag handle: dragging resizes the panel (up is
 taller; up to nearly the whole window, always leaving the transport and a strip
@@ -867,13 +886,19 @@ Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
   or in place, delete the heard take, show all takes (`ui.item.takes`).
 - **Keymaps:** per context section (global, arrange, MIDI editor, mixer,
   text field), chords allowed, conflicts shown in the editor. A key looks in
-  `text` while a text field has focus, in `midi` or `mixer` while the focus
-  is inside that panel, then in `arrange` (its defaults edit the shared
-  selection) and `global`, innermost first. Stored as
+  `text` while a text field has focus, in `midi` or `mixer` while the
+  pointer is over that panel (else while the focus is inside it: the pointer
+  is over the bars or outside the window), then in `arrange` (its defaults
+  edit the shared selection) and `global`, innermost first
+  (`gui::keySections`). So a key acts on what is under the pointer: Delete
+  over the arrange view removes the selected items even while the MIDI
+  editor has the focus. Stored as
   canonical JSON in user config; defaults close to REAPER's common keys
   where they are not proprietary assets (key choices are not copyrightable
   expression; no REAPER files are copied). Among the defaults: Space
-  play/stop, R record (also Ctrl+R), L loop, Ctrl+M or Alt+D the mixer,
+  play/stop, R record (also Ctrl+R), L loop, Delete or Alt+C deletes the
+  selection (items, tracks or points; notes over the MIDI editor), Ctrl+M or
+  Alt+D the mixer,
   Alt+E the MIDI editor on the item it had last (else the selected or first
   MIDI item; nothing without one). Space is never a button's: buttons and
   toggles take Enter, so Space after a click still plays or stops, and a

@@ -16,6 +16,8 @@
 #include "supple/schema/schema.h"
 #include "supple/ui/controls.h"
 #include "supple/ui/node.h"
+#include "supple/ui/root.h"
+#include "supple/views/track_layout.h"
 
 namespace supple::gui {
 
@@ -24,7 +26,9 @@ void selectTrack(UiState& ui, const std::string& track, unsigned mods,
     auto& sel = ui.selectedTracks;
     ui.tracksFocused = true;
     ui.envelopeFocused = false;
-    if (mods & ui::kShift) {  // extend from the anchor, in the view's order
+    if ((mods & views::kSelectKeep) && std::find(sel.begin(), sel.end(), track) != sel.end()) {
+        ui.trackAnchor = track;      // a press that may drag the selection: it stays
+    } else if (mods & ui::kShift) {  // extend from the anchor, in the view's order
         const std::string from = ui.trackAnchor.value_or(track);
         auto a = std::find(order.begin(), order.end(), from);
         auto b = std::find(order.begin(), order.end(), track);
@@ -46,6 +50,28 @@ void selectTrack(UiState& ui, const std::string& track, unsigned mods,
         sel = {track};
         ui.trackAnchor = track;
     }
+}
+
+std::vector<std::string> keySections(const ui::Root& root) {
+    const bool typing = root.focused() && root.focused()->role() == ui::Role::TextField;
+    std::vector<std::string> sections;
+    if (typing) sections.push_back("text");
+    const ui::Node* context = root.focused();
+    if (const auto at = root.lastPointer(); at && !typing)
+        for (const char* panel : {"midi.editor", "mixer", "arrange"})
+            if (const ui::Node* n = root.find(panel);
+                n && n->visible && n->bounds().contains(*at)) {
+                context = n;
+                break;
+            }
+    for (const ui::Node* n = context; n; n = n->parent())
+        if (n->id() == "midi.editor" || n->id() == "mixer") {
+            sections.push_back(n->id() == "mixer" ? "mixer" : "midi");
+            break;
+        }
+    sections.push_back("arrange");
+    sections.push_back("global");
+    return sections;
 }
 
 bool trackSelected(const UiState& ui, const std::string& track) {

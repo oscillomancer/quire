@@ -131,6 +131,16 @@ class MidiEditor {
     void transpose(int semitones);
     void removeSelected();
     void duplicate();
+    // The note clipboard: copies keep the notes' pitches and their places
+    // from the earliest; a paste puts the earliest at `itemBeat` (default: the
+    // playhead, in the item) and selects what it added.
+    void copySelected();
+    void cutSelected();
+    void paste(std::optional<double> itemBeat = {});
+    bool canPaste() const { return !clipboard_.empty(); }
+    // The grid's right-click menu at a window point (`itemBeat` under it):
+    // Delete, Copy, Cut, Paste (there), Duplicate.
+    void openNoteMenu(ui::Point at, double itemBeat);
 
   private:
     Status reload();
@@ -149,7 +159,8 @@ class MidiEditor {
     engine::EngineApp& app_;
     UiState& ui_;
     RollState state_;
-    std::string lastItem_;  // the item opened last (ui.midi.toggle reopens it)
+    std::string lastItem_;             // the item opened last (ui.midi.toggle reopens it)
+    std::vector<RollNote> clipboard_;  // starts from the earliest copied note
     float height_ = kDefaultHeight;
     const views::MouseMap* mouse_ = nullptr;
     ui::Node* panel_ = nullptr;

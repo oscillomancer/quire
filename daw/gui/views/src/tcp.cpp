@@ -186,6 +186,7 @@ class TcpPanel::Row : public ui::Node {
     // Dragging the bottom edge (the track's height).
     bool resizing_ = false;
     float resizeY_ = 0, resizeFrom_ = 0;
+    bool deferSelect_ = false;  // a plain press on a selected track: select it alone on release
 };
 
 TcpPanel::Row::Row(TcpPanel& panel, std::size_t slot)
@@ -539,7 +540,11 @@ bool TcpPanel::Row::onPointer(const ui::PointerEvent& e) {
                     if (ui::Root* r = root()) r->focus(this);  // Escape cancels
             } else {
                 if (ui::Root* r = root(); r && r->focused() == this) r->focus(nullptr);
+                const bool dragged = panel_.reorder_->moved;
+                const model::Id track = *track_;
                 panel_.endReorder(e.button == 1);
+                if (std::exchange(deferSelect_, false) && !dragged && panel_.cb_.select)
+                    panel_.cb_.select(track, 0);
             }
             return true;
         }
@@ -564,10 +569,18 @@ bool TcpPanel::Row::onPointer(const ui::PointerEvent& e) {
         return true;
     }
     // A right-click on a selected track keeps the selection (its menu acts on
-    // all of it); otherwise the press selects as usual.
-    const bool keep = e.button == 3 && panel_.cb_.selected && panel_.cb_.selected(*track_);
-    if (panel_.cb_.select && !keep) panel_.cb_.select(*track_, e.button == 3 ? 0 : e.mods);
+    // all of it), and so does a plain press on one (a drag moves all of it; a
+    // release without one selects it alone); otherwise the press selects as usual.
+    const bool selected = panel_.cb_.selected && panel_.cb_.selected(*track_);
+    const bool keep = e.button == 3 && selected;
+    deferSelect_ = e.button == 1 && selected && !(e.mods & (ui::kShift | ui::kCtrl));
+    if (panel_.cb_.select && !keep)
+        panel_.cb_.select(*track_, e.button == 3 ? 0 : deferSelect_ ? kSelectKeep : e.mods);
     if (e.button == 1) panel_.beginReorder(*track_, e.pos);  // a drag from here moves the track
+    if (deferSelect_ && !panel_.reorder_) {  // nothing to drag (a master): select it now
+        deferSelect_ = false;
+        if (panel_.cb_.select) panel_.cb_.select(*track_, 0);
+    }
     // A right-click: the track's menu, at the pointer.
     if (e.button == 3 && panel_.cb_.menu) {
         const model::Id track = *track_;
@@ -747,7 +760,7 @@ class TcpPanel::ReorderGhost : public ui::Node {
     void paint(ui::Canvas& c) override {
         if (!*alive_) return;
         const auto& panel = **alive_;
-        if (!panel.reorder_ || !panel.reorder_->moved || !panel.reorder_->index) return;
+        if (!panel.reorder_ || !panel.reorder_->moved || panel.reorder_->moves.empty()) return;
         const ui::Rect tcp = panel.bounds();
         const float y = panel.reorder_->markerY;
         if (y < tcp.y || y > tcp.bottom()) return;
@@ -763,7 +776,7 @@ class TcpPanel::ReorderGhost : public ui::Node {
 void TcpPanel::beginReorder(const model::Id& track, ui::Point press) {
     const model::Track* t = session_.tracks.find(track);
     if (!t || t->type == model::StripType::Master) return;
-    reorder_ = Reorder{track, press, false, std::nullopt, 0};
+    reorder_ = Reorder{track, press, false, {}, 0};
 }
 
 void TcpPanel::moveReorder(ui::Point p) {
@@ -784,7 +797,9 @@ void TcpPanel::moveReorder(ui::Point p) {
 // automation lanes). Other types and other parents are never targets.
 void TcpPanel::updateReorder(ui::Point p) {
     Reorder& r = *reorder_;
-    r.index.reset();
+    r.moves.clear();
+    auto selected = [this](model::Id id) { return cb_.selected && cb_.selected(id); };
+    const std::vector<model::Id> group = reorderGroup(session_, r.track, selected);
     const model::Track* t = session_.tracks.find(r.track);
     const model::Track* parent = t && t->parent ? session_.tracks.find(*t->parent) : nullptr;
     if (!parent) return;
@@ -795,7 +810,9 @@ void TcpPanel::updateReorder(ui::Point p) {
     for (model::Id id : displayChildren(session_, *parent)) {
         const model::Track* s = session_.tracks.find(id);
         const auto row = layout_.indexOf(id);
-        if (!s || s->type != t->type || id == r.track || !row) continue;
+        if (!s || s->type != t->type || !row ||
+            std::find(group.begin(), group.end(), id) != group.end())
+            continue;
         const ui::Rect rect = rowRect(*row);
         if (p.y < rect.y + rect.h / 2) {
             before = id;
@@ -812,9 +829,7 @@ void TcpPanel::updateReorder(ui::Point p) {
         if (!end) return;  // nothing of this type to reorder among
         markerY = *end;
     }
-    const auto index = reorderIndex(session_, r.track, before);
-    if (!index) return;  // not a move
-    r.index = index;
+    r.moves = reorderMoves(session_, r.track, selected, before);
     r.markerY = markerY;
 }
 
@@ -824,10 +839,15 @@ void TcpPanel::endReorder(bool commit) {
     reorder_.reset();
     reorderOverlayHandle_.reset();
     invalidate();
-    if (commit && r.moved && r.index && cb_.commit) {
-        json::Value args = trackArg(r.track);
-        args["index"] = static_cast<std::int64_t>(*r.index);
-        cb_.commit("track.move", std::move(args), {});
+    if (commit && r.moved && cb_.commit) {
+        // Several tracks: one gesture, so the moves are one undo step.
+        const std::string gesture =
+            r.moves.size() > 1 ? gestureFor("tcp.reorder", r.track, ++gestureSerial_) : "";
+        for (const TrackMove& m : r.moves) {
+            json::Value args = trackArg(m.track);
+            args["index"] = static_cast<std::int64_t>(m.index);
+            cb_.commit("track.move", std::move(args), gesture);
+        }
     }
 }
 

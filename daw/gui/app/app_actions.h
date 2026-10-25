@@ -20,6 +20,10 @@
 #include "supple/actions/actions.h"
 #include "supple/engine/app.h"
 
+namespace supple::ui {
+class Root;
+}  // namespace supple::ui
+
 namespace supple::gui {
 
 // Per-project UI state (gui.md §1.2); persisted later to <project>.ui.json.
@@ -38,6 +42,15 @@ struct UiState {
 void selectTrack(UiState& ui, const std::string& track, unsigned mods,
                  const std::vector<std::string>& order);
 bool trackSelected(const UiState& ui, const std::string& track);
+
+// The keymap's sections for a key on `root`, innermost first: "text" in a
+// text field, the MIDI editor or the mixer when the pointer is over it (else
+// when the focus is inside it: the pointer is elsewhere, over the bars or out
+// of the window), then the arrange view (its defaults edit the selection,
+// shared by every panel) and global bindings. So Delete over the arrange view
+// removes items even while the MIDI editor has the focus, and over the editor
+// removes notes.
+std::vector<std::string> keySections(const ui::Root& root);
 
 // GUI-only commands: `gui.selection` (read-only selection for agents, §1.2).
 void registerGuiCommands(cmd::Registry& registry, const UiState& ui);

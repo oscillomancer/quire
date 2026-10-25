@@ -426,6 +426,14 @@ Status Shell::openColorMenu(const model::Id& track, const ui::Rect& anchor) {
     return trackMenu_->openColors(track, anchor);
 }
 
+Status Shell::openChannelsMenu(const model::Id& track, const ui::Rect& anchor) {
+    if (!trackMenu_) return Error("gui.root", "the window is not ready");
+    if (!app_.head().tracks.find(track))
+        return Error("track.unknown", "no track " + track.str(), "/track", "select a track");
+    trackMenu_->openChannels(track, anchor);
+    return {};
+}
+
 void Shell::openInputMenu(const model::Id& track, const ui::Rect& anchor) {
     if (!root_) return;
     const json::Value& list = inputs(/*force=*/true);

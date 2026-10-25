@@ -487,6 +487,16 @@ int main(int argc, char** argv) {
         return fxWindow.openFor(uiState, v);
     });
     // The colour menu on the first selected track colours every selected one.
+    // How many channels the first selected track has (one track: the count is its own).
+    appActions.addUi("ui.track.channels", "Track: channels of the first selected…", [&] {
+        const auto id = uiState.selectedTracks.empty()
+                            ? std::nullopt
+                            : model::Id::parse(uiState.selectedTracks.front());
+        Status st = id ? shell.openChannelsMenu(*id, {})
+                       : Status(Error("gui.track", "nothing is selected", "/track",
+                                      "select a track first"));
+        if (!st && appActions.onError) appActions.onError("Track: channels: " + st.error().message);
+    });
     appActions.addUiFor("ui.track.color", "Track: color…", "track",
                         [&](const json::Value& v) -> Status {
                             std::string text = v.isString() ? v.asString() : std::string{};
@@ -508,20 +518,7 @@ int main(int argc, char** argv) {
     };
     auto unhandledKey = [&](const ui::KeyEvent& e, ui::Root& source) {
         const bool typing = source.focused() && source.focused()->role() == ui::Role::TextField;
-        // The keymap's sections, innermost first: a text field, the MIDI
-        // editor or the mixer when the focus is inside it, then the arrange
-        // view (its defaults edit the selection, shared by every panel) and
-        // global bindings.
-        std::vector<std::string> sections;
-        if (typing) sections.push_back("text");
-        for (const ui::Node* n = source.focused(); n; n = n->parent())
-            if (n->id() == "midi.editor" || n->id() == "mixer") {
-                sections.push_back(n->id() == "mixer" ? "mixer" : "midi");
-                break;
-            }
-        sections.push_back("arrange");
-        sections.push_back("global");
-        return appActions.key(e.key, e.mods, typing, sections);
+        return appActions.key(e.key, e.mods, typing, gui::keySections(source));
     };
     root.onUnhandledKey = [&](const ui::KeyEvent& e) { return unhandledKey(e, root); };
     fxPanel.onUnhandledKey = routingPanel.onUnhandledKey = unhandledKey;
@@ -633,6 +630,7 @@ int main(int argc, char** argv) {
         g.onError = [](const Error& e) {
             std::fprintf(stderr, "edit refused: %s\n", e.toString().c_str());
         };
+        g.keysFor = [&](std::string_view action) { return appActions.keysFor(action); };
         g.onSeek = [&dispatcher, ui](double seconds) {
             json::Value args = json::Value::object();
             args["seconds"] = seconds;
@@ -691,35 +689,36 @@ int main(int argc, char** argv) {
     appActions.addUi("ui.env.points.paste", "Envelope: paste points at the playhead", [&] {
         reportEdit("paste points", shell.arrange()->gestures().pastePoints(playheadBeat()));
     });
-    appActions.addUi("ui.item.copy", "Edit: copy items (or automation points)", [&] {
+    appActions.addUi("ui.item.copy", "Item: copy selected (or automation points)", [&] {
         if (pointKeys())
             shell.arrange()->gestures().copyPoints();
         else
             shell.arrange()->gestures().copySelection();
     });
-    appActions.addUi("ui.item.cut", "Edit: cut items (or automation points)", [&] {
+    appActions.addUi("ui.item.cut", "Item: cut selected (or automation points)", [&] {
         auto& g = shell.arrange()->gestures();
         if (pointKeys())
             reportEdit("cut points", g.cutPoints());
         else
             reportEdit("cut", g.cutSelection());
     });
-    appActions.addUi(
-        "ui.item.paste", "Edit: paste items (or automation points) at the playhead", [&] {
-            if (pointKeys()) {
-                reportEdit("paste points", shell.arrange()->gestures().pastePoints(playheadBeat()));
-                return;
-            }
-            views::ArrangeView& a = *shell.arrange();
-            std::optional<model::Id> track;
-            if (!uiState.selectedTracks.empty())
-                track = model::Id::parse(uiState.selectedTracks.front());
-            reportEdit("paste",
-                       a.gestures().paste((*app)->head().timeMap->beatAt(a.playhead()), track));
-        });
-    appActions.addUi("ui.item.duplicate", "Item: duplicate after itself", [&] {
+    appActions.addUi("ui.item.paste", "Item: paste at the playhead (or automation points)", [&] {
+        if (pointKeys()) {
+            reportEdit("paste points", shell.arrange()->gestures().pastePoints(playheadBeat()));
+            return;
+        }
+        views::ArrangeView& a = *shell.arrange();
+        std::optional<model::Id> track;
+        if (!uiState.selectedTracks.empty())
+            track = model::Id::parse(uiState.selectedTracks.front());
+        reportEdit("paste",
+                   a.gestures().paste((*app)->head().timeMap->beatAt(a.playhead()), track));
+    });
+    appActions.addUi("ui.item.duplicate", "Item: duplicate selected after itself", [&] {
         reportEdit("duplicate", shell.arrange()->gestures().duplicateSelection());
     });
+    appActions.addUi("ui.item.merge", "Item: merge selected MIDI items (or one item's takes)",
+                     [&] { reportEdit("merge", shell.arrange()->gestures().mergeSelection()); });
     // Navigation: the previous/next marker or region start from the playhead.
     auto jump = [&](bool forward) {
         views::ArrangeView& a = *shell.arrange();

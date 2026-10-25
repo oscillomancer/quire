@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -73,6 +74,9 @@ class Root {
     void focus(Node* node);
     Node* focused() const { return focused_; }
     Node* hovered() const { return hovered_; }
+    // Where the pointer was last seen over this root (keys act on the panel
+    // under it); empty before any pointer event.
+    std::optional<Point> lastPointer() const { return lastPointer_; }
     void capture(Node* node);
     // Release focus and cancel a captured gesture inside a hidden subtree.
     void releaseWithin(const Node* subtree);
@@ -135,6 +139,7 @@ class Root {
     std::vector<std::shared_ptr<Node>> retired_;
     Node* focused_ = nullptr;
     Node* hovered_ = nullptr;
+    std::optional<Point> lastPointer_;
     Node* captured_ = nullptr;
     std::vector<Rect> damage_;
     bool layoutPending_ = true, animate_ = false;

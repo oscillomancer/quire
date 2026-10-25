@@ -22,6 +22,7 @@
 #include "meter_feed.h"
 #include "selection_edit.h"
 #include "supple/ui/root.h"
+#include "supple/views/track_layout.h"
 #include "track_menu.h"
 
 namespace supple::ui {
@@ -97,7 +98,10 @@ class Mixer {
         ui::Rect source, marker;  // the dragged item; the insertion bar or target strip
         std::string target;       // Copy: the strip dropped on
         bool chain = false;       // Copy: the plug-in's whole chain (Ctrl held)
-        std::size_t index = 0;    // Reorder: the track.move / fx.move index
+        std::size_t index = 0;    // Reorder: the track.move (masters) / fx.move index
+        // Reorder of channels or busses: the track.move steps (the dragged strip
+        // and the selected strips of its parent and type move together).
+        std::vector<views::TrackMove> moves;
     };
     const DragView& drag() const { return *drag_; }
 

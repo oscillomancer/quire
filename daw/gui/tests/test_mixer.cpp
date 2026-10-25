@@ -706,6 +706,29 @@ TEST_CASE("mixer: dragging a strip's empty part reorders it among its own kind, 
     CHECK(f.errors.empty());
 }
 
+TEST_CASE("mixer: dragging one of several selected strips moves them all, one undo step") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto a = f.addTrack("channel", "A");
+    const auto b = f.addTrack("channel", "B");
+    const auto c = f.addTrack("channel", "C");
+    f.refresh();
+    f.ui.selectedTracks = {a, b};
+    f.refresh();
+    const auto before = f.steps();
+    const ui::Rect last = f.strip(c).node->bounds();
+    f.drag(f.empty(a), {last.right() - 10, last.y + 200});
+    f.refresh();
+    CHECK(f.children("tr_0") == std::vector<std::string>{c, a, b});
+    CHECK(f.steps() == before + 1);
+    CHECK(f.ui.selectedTracks == std::vector<std::string>{a, b});
+    // A click without a drag selects the strip alone.
+    f.pointer(ui::PointerEvent::Type::Down, f.empty(b));
+    f.pointer(ui::PointerEvent::Type::Up, f.empty(b));
+    CHECK(f.ui.selectedTracks == std::vector<std::string>{b});
+    CHECK(f.errors.empty());
+}
+
 TEST_CASE("mixer: masters reorder among masters; tr_0 stays first") {
     Fixture f;
     if (!f.ok) return;

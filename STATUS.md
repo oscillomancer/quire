@@ -183,7 +183,13 @@ instructions are in `docs/guides/installing.md`.
   the app. Tracks duplicate from either right-click menu with their chains,
   items, sends and automation (`track.duplicate`), the whole selection at
   once. In the mixer, Ctrl dragging a plug-in onto another strip copies its
-  whole chain, and a plug-in's right-click menu renames that instance. Each effect's row in the FX chain
+  whole chain, and a plug-in's right-click menu renames that instance.
+  Dragging one of several selected tracks (TCP or mixer) moves them all.
+  Keys act on the panel under the pointer (Delete or Alt+C removes items
+  over the arrange view, notes over the MIDI editor). The arrange view's
+  right-click menus cut, copy, paste at the pointer, duplicate, delete and
+  merge MIDI items (`midi.merge`, also an item's MIDI takes); the MIDI
+  editor's grid menu deletes, copies, cuts, pastes and duplicates notes. Each effect's row in the FX chain
   has a presets menu: the plugin's factory presets, read-only, and the
   user's own, saved and deleted there (`fx.preset.*`, the sandbox's preset
   format, kept per plugin in the configuration folder). Takes: show all takes in lanes,

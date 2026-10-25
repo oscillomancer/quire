@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <utility>
 
 #include <SDL3/SDL_keycode.h>
 
@@ -442,7 +443,13 @@ class StripFrame : public ui::Node {
             if (menu_) menu_(e.pos);
             return true;
         }
-        if (e.type == ui::PointerEvent::Type::Down && e.button == 1 && select) select(e.mods);
+        // A plain press on a selected strip keeps the selection (a drag moves
+        // all of it); a release without a drag selects it alone.
+        if (e.type == ui::PointerEvent::Type::Down && e.button == 1 && select) {
+            deferSelect_ =
+                selected && selected() && drag.notify && !(e.mods & (ui::kShift | ui::kCtrl));
+            select(deferSelect_ ? views::kSelectKeep : e.mods);
+        }
         if (e.type == ui::PointerEvent::Type::Cancel) {
             drag.cancel();
             return true;
@@ -459,8 +466,9 @@ class StripFrame : public ui::Node {
             return now;
         }
         if (e.type == ui::PointerEvent::Type::Up && e.button == 1 && drag.down()) {
-            (void)drag.release(e.pos);
+            const bool dragged = drag.release(e.pos);
             if (root() && root()->focused() == this) root()->focus(nullptr);
+            if (std::exchange(deferSelect_, false) && !dragged && select) select(0);
             return true;
         }
         return false;
@@ -479,6 +487,7 @@ class StripFrame : public ui::Node {
   private:
     std::string color_;
     std::function<void(ui::Point)> menu_;
+    bool deferSelect_ = false;
 };
 
 // The drag's feedback, over everything: the dragged strip dimmed, an insertion
@@ -1059,6 +1068,7 @@ void Mixer::dragSend(const std::string& track, DragPhase phase, ui::Point p) {
 void Mixer::resolveStripDrop() {
     DragView& d = *drag_;
     d.drop = DragView::Drop::None;
+    d.moves.clear();
     const model::Session& s = app_.head();
     const auto dragged = model::Id::parse(d.track);
     const model::Track* track = dragged ? s.tracks.find(*dragged) : nullptr;
@@ -1093,12 +1103,17 @@ void Mixer::resolveStripDrop() {
             std::find(masters.begin(), masters.end(), *dragged) - masters.begin());
         if (slot != at) index = slot;
     } else {
-        // In front of the first strip of its own parent and type after the gap.
+        // In front of the first strip of its own parent and type after the gap
+        // (not one moving with it), with the selected strips of that kind.
+        auto selected = [this](model::Id id) { return trackSelected(actions_.ui(), id.str()); };
+        const auto moving = views::reorderGroup(s, *dragged, selected);
         std::optional<model::Id> before;
         for (std::size_t i = gap; i < ids.size() && !before; ++i)
-            if (ids[i] != *dragged && s.tracks.find(ids[i])->parent == track->parent)
+            if (std::find(moving.begin(), moving.end(), ids[i]) == moving.end() &&
+                s.tracks.find(ids[i])->parent == track->parent)
                 before = ids[i];
-        index = views::reorderIndex(s, *dragged, before);
+        d.moves = views::reorderMoves(s, *dragged, selected, before);
+        if (!d.moves.empty()) index = 0;
     }
     if (!index) return;
     const float x = gap < group.size() ? group[gap]->node->bounds().x - 2
@@ -1202,6 +1217,20 @@ void Mixer::endDrag(bool commit) {
         command = "route.add";
         args["from"] = done.track;
         args["to"] = done.target;
+    } else if (done.kind == DragView::Kind::Strip && !done.moves.empty()) {
+        auto r = dispatcher_.transact(
+            done.moves.size() == 1 ? "Move track" : "Move tracks", kOrigin,
+            [&]() -> Result<json::Value> {
+                for (const views::TrackMove& m : done.moves) {
+                    json::Value one = json::Value::object();
+                    one["track"] = m.track.str();
+                    one["index"] = static_cast<std::int64_t>(m.index);
+                    SUPPLE_TRY(dispatcher_.execute({"track.move", std::move(one), kOrigin}));
+                }
+                return json::Value::object();
+            });
+        if (!r && actions_.onError) actions_.onError(std::string("mixer: ") + r.error().message);
+        return;
     } else if (done.kind == DragView::Kind::Strip) {
         command = "track.move";
         args["track"] = done.track;

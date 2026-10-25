@@ -13,6 +13,7 @@
 #include <cstdio>
 
 #include "supple/notation/notation.h"
+#include "supple/ui/popup.h"
 #include "supple/ui/scroll_view.h"
 #include "supple/ui/text_area.h"
 #include "supple/ui/widgets.h"
@@ -219,6 +220,14 @@ class Roll : public ui::Node {
             repaintAll();
             return true;
         }
+        if (e.type == T::Down && e.button == 3) {
+            focusSelf();
+            if (const auto hit = noteAt(e.pos, nullptr); hit && !s_.selected.contains(*hit))
+                s_.selected = {*hit};
+            repaintAll();
+            editor_.openNoteMenu(e.pos, std::max(0.0, s_.snapBeat(g.beatOf(e.pos.x))));
+            return true;
+        }
         if (e.type == T::Down && e.button == 1) {
             focusSelf();
             press_ = e.pos;
@@ -344,11 +353,8 @@ class Roll : public ui::Node {
 
     bool onKey(const ui::KeyEvent& e) override {
         const bool shift = e.mods & ui::kShift;
+        // Delete, the clipboard keys and Ctrl+A are the keymap's (midi section).
         switch (e.key) {
-            case SDLK_DELETE:
-            case SDLK_BACKSPACE:
-                editor_.removeSelected();
-                return true;
             case SDLK_UP:
                 editor_.transpose(shift ? 12 : 1);
                 return true;
@@ -379,16 +385,6 @@ class Roll : public ui::Node {
                 return true;
             default:
                 break;
-        }
-        if (e.mods & ui::kCtrl) {
-            if (e.key == SDLK_A) {
-                editor_.selectAll();
-                return true;
-            }
-            if (e.key == SDLK_D) {
-                editor_.duplicate();
-                return true;
-            }
         }
         return false;
     }
@@ -734,16 +730,14 @@ class Panel : public ui::Node {
 MidiEditor::MidiEditor(ui::Root& root, AppActions& actions, cmd::Dispatcher& dispatcher,
                        engine::EngineApp& app, UiState& ui)
     : root_(root), actions_(actions), dispatcher_(dispatcher), app_(app), ui_(ui) {
-    actions_.addUi("ui.midi.edit", "MIDI: edit selected item", [this] {
-        for (const std::string& it : ui_.selectedItems)
-            if (open(it)) return;
-        if (actions_.onError) actions_.onError("select a MIDI item to edit");
-    });
-    actions_.addUi("ui.midi.open", "MIDI: edit item…", "item",
-                   [this](const json::Value& v) -> Status {
-                       if (!v.isString()) return Error("gui.midi", "an item id like it_3", "/item");
-                       return open(v.asString());
-                   });
+    // The selected MIDI item, or the one a caller names.
+    actions_.addUiFor("ui.midi.edit", "MIDI: edit selected item", "item",
+                      [this](const json::Value& v) -> Status {
+                          if (v.isString()) return open(v.asString());
+                          for (const std::string& it : ui_.selectedItems)
+                              if (open(it)) return {};
+                          return Error("gui.midi", "select a MIDI item to edit");
+                      });
     actions_.addUi("ui.midi.close", "MIDI: close editor", [this] { close(); });
     // Alt+E: hide the editor, or show it on the item it had last (else the
     // selected MIDI item, else the first); nothing when there is no MIDI item.
@@ -768,6 +762,14 @@ MidiEditor::MidiEditor(ui::Root& root, AppActions& actions, cmd::Dispatcher& dis
             if (isMidi(it) && open(it)) return;
     });
     actions_.addUi("ui.midi.quantize", "MIDI: quantize selected notes", [this] { quantize(); });
+    actions_.addUi("ui.midi.notes.delete", "MIDI: delete selected notes",
+                   [this] { removeSelected(); });
+    actions_.addUi("ui.midi.notes.copy", "MIDI: copy selected notes", [this] { copySelected(); });
+    actions_.addUi("ui.midi.notes.cut", "MIDI: cut selected notes", [this] { cutSelected(); });
+    actions_.addUi("ui.midi.notes.paste", "MIDI: paste notes at the playhead", [this] { paste(); });
+    actions_.addUi("ui.midi.notes.duplicate", "MIDI: duplicate selected notes after themselves",
+                   [this] { duplicate(); });
+    actions_.addUi("ui.midi.notes.select_all", "MIDI: select all notes", [this] { selectAll(); });
 }
 
 MidiEditor::~MidiEditor() = default;
@@ -1285,6 +1287,61 @@ void MidiEditor::duplicate() {
         ops.push_back(std::move(op));
     }
     (void)edit(std::move(ops));
+}
+
+void MidiEditor::copySelected() {
+    if (!isOpen() || state_.selected.empty()) return;
+    double first = 1e18;
+    for (std::size_t i : state_.selected) first = std::min(first, state_.notes[i].start);
+    clipboard_.clear();
+    for (std::size_t i : state_.selected) {
+        RollNote n = state_.notes[i];
+        n.start -= first;
+        clipboard_.push_back(n);
+    }
+}
+
+void MidiEditor::cutSelected() {
+    copySelected();
+    removeSelected();
+}
+
+void MidiEditor::paste(std::optional<double> itemBeat) {
+    if (!isOpen() || clipboard_.empty()) return;
+    const double at =
+        itemBeat.value_or(std::max(0.0, actions_.context().playheadBeats - state_.itemPosition));
+    json::Value ops = json::Value::array();
+    for (const RollNote& n : clipboard_) {
+        json::Value op = json::Value::object();
+        op["op"] = "add";
+        op["pitch"] = n.pitch;
+        op["start"] = at + n.start;
+        op["length"] = n.length;
+        op["velocity"] = n.velocity;
+        if (n.channel != 1) op["channel"] = n.channel;
+        ops.push_back(std::move(op));
+    }
+    (void)edit(std::move(ops));
+}
+
+void MidiEditor::openNoteMenu(ui::Point at, double itemBeat) {
+    const bool any = !state_.selected.empty();
+    std::vector<ui::MenuItem> items;
+    auto add = [&](std::string label, const char* action, bool enabled, std::function<void()> run) {
+        ui::MenuItem m;
+        m.label = std::move(label);
+        m.shortcut = actions_.keysFor(action);
+        m.enabled = enabled;
+        m.run = std::move(run);
+        items.push_back(std::move(m));
+    };
+    add("Delete", "ui.midi.notes.delete", any, [this] { removeSelected(); });
+    add("Copy", "ui.midi.notes.copy", any, [this] { copySelected(); });
+    add("Cut", "ui.midi.notes.cut", any, [this] { cutSelected(); });
+    add("Paste", "ui.midi.notes.paste", canPaste(), [this, itemBeat] { paste(itemBeat); });
+    add("Duplicate", "ui.midi.notes.duplicate", any, [this] { duplicate(); });
+    root_.openPopup(ui::makeMenu("midi.menu", std::move(items), [this] { root_.closePopup(); }),
+                    ui::Rect{at.x, at.y, 0, 0}, ui::Placement::Below);
 }
 
 void MidiEditor::sync() {
