@@ -574,6 +574,14 @@ Engine and hosting:
   WASAPI/ASIO on Windows), with selection, latency/xruns and restart notifications.
   Fake-device output equals offline in both executors, with native CI coverage.
   Hardware latency, disconnect behavior and scheduling benefit are unmeasured.
+  Edit > Audio device (ADR-0050) chooses and saves the audio system, devices,
+  sample rate and buffer size, restarting a running engine; the GUI starts the
+  native device by default on macOS/Windows. On Linux a rate is suggested to
+  PipeWire, or the rate and quantum are forced on the graph while the engine
+  runs. Whether a given PipeWire server grants a suggested rate, and how
+  CoreAudio, WASAPI and ASIO devices take each rate and buffer, are untested
+  on hardware. The dialog lists the devices present when it opens; there is no
+  hotplug refresh while it stays open.
   Refusing native MIDI inputs are skipped with structured startup warnings;
   audio and other inputs keep running. CoreMIDI/WinMM use bounded per-port queues,
   timestamp mapping, bounded per-port merging, routing/learn/recording and

@@ -17,9 +17,13 @@ build/release/daw/gui/quire                 # a new project
 build/release/daw/gui/quire song.json       # open one
 ```
 
-Audio goes through JACK (PipeWire's JACK on this machine). If the device is
-not ready, the app still opens; run `engine.start` from the actions list
-(Shift+/) once it is.
+Audio goes through JACK (PipeWire's JACK) on Linux and the system's audio
+device (Core Audio; WASAPI or ASIO) on macOS and Windows. **Edit > Audio
+device…** chooses the audio system, devices, sample rate and buffer size, and
+remembers them. On Linux the rate and buffer size are requests to PipeWire;
+choose **Force while the engine runs** to hold them on the whole graph while
+the engine runs. If the device is not ready, the app still opens; choose
+**Restart audio** in that dialog once it is.
 
 ## Unsaved projects
 

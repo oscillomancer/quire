@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "app_actions.h"
+#include "audio_device.h"
 #include "meter_feed.h"
 #include "mixer.h"
 #include "preferences.h"
@@ -24,6 +25,8 @@
 #include "supple/engine/app.h"
 #include "supple/gui/png.h"
 #include "supple/gui/window.h"
+#include "supple/json/parse.h"
+#include "supple/json/write.h"
 #include "supple/ui/controls.h"
 #include "supple/ui/list.h"
 #include "supple/ui/root.h"
@@ -986,6 +989,14 @@ TEST_CASE("preferences: canonical round trip, older schemas and rejected values"
     values.preventDeepIdle = true;
     values.renderDirectory = f.dir / "renders";
     values.copyImports = false;
+    values.audio.backend = "portaudio";
+    values.audio.hostApi = "Core Audio";
+    values.audio.outputDevice = "Studio Out";
+    values.audio.inputDevice = "Studio In";
+    values.audio.record = false;
+    values.audio.rate = 96000;
+    values.audio.block = 128;
+    values.audio.forceGraph = true;
     REQUIRE(values.save(file));
     auto loaded = gui::Preferences::load(file);
     REQUIRE(loaded);
@@ -995,13 +1006,14 @@ TEST_CASE("preferences: canonical round trip, older schemas and rejected values"
     CHECK(loaded->preventDeepIdle);
     CHECK(loaded->renderDirectory == f.dir / "renders");
     CHECK_FALSE(loaded->copyImports);
+    CHECK(loaded->audio == values.audio);
     const auto bytes = readFile(file).value();
-    CHECK(std::string(bytes.begin(), bytes.end()).find("supple.preferences/1.4") !=
+    CHECK(std::string(bytes.begin(), bytes.end()).find("supple.preferences/1.5") !=
           std::string::npos);
     REQUIRE(loaded->save(file));
     CHECK(readFile(file).value() == bytes);
     // Older schemas load, with defaults for what they lack.
-    for (const char* version : {"1.0", "1.1", "1.2", "1.3", "1.4"}) {
+    for (const char* version : {"1.0", "1.1", "1.2", "1.3", "1.4", "1.5"}) {
         REQUIRE(writeFileAtomic(
             file, std::string("{\"schema\":\"supple.preferences/") + version + "\"}"));
         auto old = gui::Preferences::load(file);
@@ -1011,6 +1023,7 @@ TEST_CASE("preferences: canonical round trip, older schemas and rejected values"
         CHECK_FALSE(old->preventDeepIdle);
         CHECK(old->renderDirectory.empty());
         CHECK(old->copyImports);
+        CHECK(old->audio == gui::AudioDeviceSettings{});
     }
     // A wrong value names its field.
     for (auto [field, bad] : {std::pair{"audio_threads", "65"},
@@ -1019,13 +1032,223 @@ TEST_CASE("preferences: canonical round trip, older schemas and rejected values"
                               {"prevent_deep_idle", "\"true\""},
                               {"render_directory", "\"relative\""},
                               {"copy_imported_media", "1"}}) {
-        REQUIRE(writeFileAtomic(file, std::string(R"({"schema":"supple.preferences/1.4",")") +
+        REQUIRE(writeFileAtomic(file, std::string(R"({"schema":"supple.preferences/1.5",")") +
                                           field + "\":" + bad + "}"));
         auto rejected = gui::Preferences::load(file);
         REQUIRE_FALSE(rejected);
         CHECK(rejected.error().path == std::string("/") + field);
         CHECK_FALSE(rejected.error().hint.empty());
     }
+    // So does a wrong audio device value, under /audio.
+    for (auto [field, bad] : {std::pair{"backend", "\"alsa\""},
+                              {"host_api", "1"},
+                              {"record", "\"yes\""},
+                              {"rate", "-1"},
+                              {"rate", "\"48000\""},
+                              {"block", "8"},
+                              {"block", "256.5"},
+                              {"force_graph", "0"}}) {
+        REQUIRE(
+            writeFileAtomic(file, std::string(R"({"schema":"supple.preferences/1.5","audio":{")") +
+                                      field + "\":" + bad + "}}"));
+        auto rejected = gui::Preferences::load(file);
+        REQUIRE_FALSE(rejected);
+        CHECK(rejected.error().code == "preferences.audio");
+        CHECK(rejected.error().path == std::string("/audio/") + field);
+        CHECK_FALSE(rejected.error().hint.empty());
+    }
+}
+
+namespace {
+std::vector<engine::AudioDevice> fakeDevices() {
+    // Two host APIs in PortAudio's Windows order: ASIO is listed (and would be
+    // its default) first, but an unset host API means WASAPI.
+    return {{"ASIO", "Interface ASIO", 18, 20, 48000, true, true},
+            {"Windows WASAPI", "Speakers", 0, 2, 48000, false, true},
+            {"Windows WASAPI", "Microphone", 1, 0, 44100, true, false},
+            {"Windows WASAPI", "Interface", 8, 10, 96000, false, false}};
+}
+}  // namespace
+
+TEST_CASE("audio device: settings become engine.start arguments") {
+    const auto devices = fakeDevices();
+    auto args = [&](const gui::AudioDeviceSettings& s) {
+        return json::writeCanonical(gui::engineStartArgs(s, devices));
+    };
+    auto canon = [](std::string_view text) {
+        return json::writeCanonical(json::parse(text).value());
+    };
+    gui::AudioDeviceSettings s;
+    s.backend = "portaudio";
+    // Defaults: WASAPI, its default devices, the output's own rate.
+    CHECK(args(s) == canon(R"({"backend":"portaudio","block":256,"host_api":"Windows WASAPI",)"
+                           R"("inputs":1,"rate":48000.0})"));
+    // Named devices; every input channel (up to 32); a chosen rate wins.
+    s.outputDevice = "Interface";
+    s.inputDevice = "Interface";
+    s.rate = 44100;
+    s.block = 64;
+    CHECK(args(s) == canon(R"({"backend":"portaudio","block":64,"host_api":"Windows WASAPI",)"
+                           R"("output_device":"Interface","input_device":"Interface","inputs":8,)"
+                           R"("rate":44100.0})"));
+    // Playback only opens no input.
+    s.record = false;
+    s.rate = 0;
+    CHECK(args(s) == canon(R"({"backend":"portaudio","block":64,"host_api":"Windows WASAPI",)"
+                           R"("output_device":"Interface","rate":96000.0})"));
+    // ASIO: one device both ways, whatever input was chosen before.
+    s = {};
+    s.backend = "portaudio";
+    s.hostApi = "ASIO";
+    s.inputDevice = "Microphone";
+    CHECK(args(s) == canon(R"({"backend":"portaudio","block":256,"host_api":"ASIO",)"
+                           R"("input_device":"Interface ASIO","inputs":18,"rate":48000.0})"));
+    // A device that is not listed now is still asked for: engine.start names it.
+    s = {};
+    s.backend = "portaudio";
+    s.inputDevice = "Unplugged";
+    CHECK(args(s) == canon(R"({"backend":"portaudio","block":256,"host_api":"Windows WASAPI",)"
+                           R"("input_device":"Unplugged","inputs":2,"rate":48000.0})"));
+    // JACK: a rate is a request; force_graph only when chosen. Dummy: the block.
+    s = {};
+    s.backend = "jack";
+    CHECK(args(s) == canon(R"({"backend":"jack","block":256})"));
+    s.rate = 96000;
+    s.forceGraph = true;
+    CHECK(args(s) == canon(R"({"backend":"jack","block":256,"force_graph":true,"rate":96000.0})"));
+    s = {};
+    s.backend = "dummy";
+    s.block = 512;
+    CHECK(args(s) == canon(R"({"backend":"dummy","block":512})"));
+    // Without WASAPI (macOS), the first listed host API.
+    const std::vector<engine::AudioDevice> mac{{"Core Audio", "Built-in", 1, 2, 44100, true, true}};
+    s = {};
+    s.backend = "portaudio";
+    CHECK(json::writeCanonical(gui::engineStartArgs(s, mac)) ==
+          canon(R"({"backend":"portaudio","block":256,"host_api":"Core Audio",)"
+                R"("inputs":1,"rate":44100.0})"));
+    // The platform's default backend.
+    CHECK(gui::effectiveBackend({}) == gui::defaultAudioBackend());
+}
+
+TEST_CASE("audio device: the dialog saves each choice and restarts the engine with it") {
+    Fixture f;
+    if (!f.ok) return;
+    views::MouseMap map;
+    gui::MouseDialog mouse(*f.root, map, {});
+    const auto file = f.dir / "config" / "preferences.json";
+    gui::PreferencesDialog prefs(*f.root, *f.app, mouse, gui::Preferences{}, file);
+    gui::AudioDeviceSettings initial;
+    initial.backend = "portaudio";
+    gui::AudioDeviceDialog audio(
+        *f.root, *f.dispatcher, *f.app, initial,
+        [&](const gui::AudioDeviceSettings& s) { return prefs.setAudioDevice(s); });
+    std::vector<std::string> starts;
+    int stops = 0;
+    bool running = false, refuse = false;
+    audio.enumerate = [] { return Result<std::vector<engine::AudioDevice>>(fakeDevices()); };
+    audio.startEngine = [&](const json::Value& args) -> Result<json::Value> {
+        starts.push_back(json::writeCompact(args));
+        if (refuse && args.find("output_device"))
+            return Error("backend.device", "device was not found", "/output_device",
+                         "choose an exact name from engine.devices");
+        // A device-free engine stands in for the device.
+        json::Value dummy = json::Value::object();
+        dummy["backend"] = "dummy";
+        dummy["block"] = args.find("block")->asInt();
+        auto st =
+            f.dispatcher->execute({"engine.start", dummy, {cmd::Origin::Type::Test, "t", {}}});
+        running = static_cast<bool>(st);
+        return st;
+    };
+    audio.stopEngine = [&] {
+        ++stops;
+        (void)f.dispatcher->execute(
+            {"engine.stop", json::Value::object(), {cmd::Origin::Type::Test, "t", {}}});
+        running = false;
+    };
+    std::vector<std::string> errors;
+    audio.onError = [&](const std::string& e) { errors.push_back(e); };
+
+    REQUIRE(audio.start(true));
+    REQUIRE(starts.size() == 1);
+    CHECK(running);
+    // Preferences shows the device and opens the dialog from its row.
+    prefs.onAudioDevice = [&] { audio.open(); };
+    prefs.audioSummary = [&] { return audio.summary(); };
+    prefs.open();
+    f.root->frame(false);
+    CHECK(f.node("prefs.audio.open")->valueText().find("Native device") != std::string::npos);
+    REQUIRE(f.root->click("prefs.audio.open"));
+    f.root->frame(false);
+    REQUIRE(audio.isOpen());
+    CHECK_FALSE(prefs.isOpen());
+    CHECK(f.node("audio.status.0")->valueText().find("Running") == 0);
+    // Choose an output from the menu: saved, and the engine restarts with it.
+    REQUIRE(f.root->click("audio.output.set"));
+    auto* menu = dynamic_cast<ui::List*>(f.root->find("audio.output.menu"));
+    REQUIRE(menu);
+    auto activate = menu->onActivate;
+    activate(2);  // System default, Speakers, Interface
+    f.root->frame(false);
+    CHECK(audio.settings().outputDevice == "Interface");
+    REQUIRE(starts.size() == 2);
+    CHECK(stops == 1);
+    CHECK(starts.back().find(R"("output_device":"Interface")") != std::string::npos);
+    CHECK(gui::Preferences::load(file)->audio.outputDevice == "Interface");
+    REQUIRE(audio.isOpen());  // rebuilt with the new choice
+    CHECK(f.node("audio.output.set")->valueText() == "Interface");
+    // Rate and buffer size from their menus.
+    REQUIRE(f.root->click("audio.rate.set"));
+    menu = dynamic_cast<ui::List*>(f.root->find("audio.rate.menu"));
+    REQUIRE(menu);
+    activate = menu->onActivate;
+    activate(4);  // automatic, 44100, 48000, 88200, 96000
+    f.root->frame(false);
+    CHECK(audio.settings().rate == 96000);
+    REQUIRE(f.root->click("audio.block.set"));
+    menu = dynamic_cast<ui::List*>(f.root->find("audio.block.menu"));
+    REQUIRE(menu);
+    activate = menu->onActivate;
+    activate(1);  // 64 frames
+    f.root->frame(false);
+    CHECK(audio.settings().block == 64);
+    CHECK(starts.back().find(R"("block":64)") != std::string::npos);
+    CHECK(starts.back().find(R"("rate":96000.0)") != std::string::npos);
+    auto saved = gui::Preferences::load(file);
+    REQUIRE(saved);
+    CHECK(saved->audio == audio.settings());
+    // A refused device leaves the engine stopped and says why; the choice is kept.
+    refuse = true;
+    REQUIRE_FALSE(audio.restart());
+    CHECK_FALSE(running);
+    CHECK(f.node("audio.status.0")->valueText().find("Not running: device was not found") == 0);
+    // At app start a refused choice falls back to the defaults, and says so.
+    REQUIRE(audio.start(true));
+    CHECK(running);
+    CHECK(starts.back().find("output_device") == std::string::npos);
+    REQUIRE(errors.size() == 1);
+    CHECK(errors[0].find("using the default device") != std::string::npos);
+    CHECK(audio.settings().outputDevice == "Interface");
+    refuse = false;
+    // Stop audio: later changes are saved without starting the engine.
+    f.root->frame(false);
+    REQUIRE(f.root->click("audio.stop"));
+    CHECK_FALSE(running);
+    const auto count = starts.size();
+    gui::AudioDeviceSettings dummy = audio.settings();
+    dummy.backend = "dummy";
+    REQUIRE(audio.apply(dummy));
+    CHECK(starts.size() == count);
+    CHECK(gui::Preferences::load(file)->audio.backend == "dummy");
+    // An invalid value is refused before anything is saved.
+    gui::AudioDeviceSettings bad = audio.settings();
+    bad.block = 8;
+    auto refused = audio.apply(bad);
+    REQUIRE_FALSE(refused);
+    CHECK(refused.error().path == "/audio/block");
+    CHECK(gui::Preferences::load(file)->audio.block == 64);
+    REQUIRE(f.root->click("audio.close"));
 }
 
 TEST_CASE("audit3: hiding a mixer ends its captured fader gesture") {

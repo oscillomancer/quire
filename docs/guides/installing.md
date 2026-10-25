@@ -47,6 +47,8 @@ xattr -dr com.apple.quarantine /Applications/Quire.app
 
 Recursive removal also covers the bundled helpers and stock plugins. Allow
 microphone access when macOS asks so recording can use your input device.
+Audio plays through the system's default output; **Edit > Audio device…**
+chooses another device, the sample rate and the buffer size.
 The dmg's **Stock plugins for other hosts** folder is optional: copy its
 CLAP bundles and accompanying notices into
 `~/Library/Audio/Plug-Ins/CLAP` (create the folder if needed). The app already
@@ -69,6 +71,8 @@ Run `quire-<version>-windows-x86_64.exe`. If SmartScreen blocks the unsigned
 installer, choose **More info → Run anyway** for a trusted download. It
 installs only for you under `%LOCALAPPDATA%\Programs\Quire`, without admin
 rights, and adds a Start-menu shortcut and an Installed Apps entry.
+Audio plays through the default WASAPI device; **Edit > Audio device…**
+chooses ASIO or another device, the sample rate and the buffer size.
 
 Leave **Stock plugins for other hosts (CLAP)** unchecked unless you want
 other hosts to see them. That component installs under

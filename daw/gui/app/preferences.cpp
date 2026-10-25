@@ -14,7 +14,7 @@
 namespace supple::gui {
 namespace {
 
-constexpr const char* kSchema = "supple.preferences/1.4";
+constexpr const char* kSchema = "supple.preferences/1.5";
 
 Error threadLimitError() {
     return Error("preferences.audio_threads", "audio processing thread limit is out of range",
@@ -72,7 +72,8 @@ Result<Preferences> Preferences::load(const std::filesystem::path& file) {
         (schema->asString() != kSchema && schema->asString() != "supple.preferences/1.0" &&
          schema->asString() != "supple.preferences/1.1" &&
          schema->asString() != "supple.preferences/1.2" &&
-         schema->asString() != "supple.preferences/1.3"))
+         schema->asString() != "supple.preferences/1.3" &&
+         schema->asString() != "supple.preferences/1.4"))
         return Error("preferences.schema", file.string() + " is not a " + kSchema + " document",
                      "/schema");
     if (const json::Value* m = doc->find("default_monitor")) {
@@ -116,6 +117,11 @@ Result<Preferences> Preferences::load(const std::filesystem::path& file) {
                          "choose the folder again in the render dialog, or remove the field");
         out.renderDirectory = v->asString();
     }
+    if (const auto* v = doc->find("audio")) {
+        auto audio = parseAudioDevice(*v);
+        if (!audio) return std::move(audio).error();
+        out.audio = std::move(*audio);
+    }
     return out;
 }
 
@@ -129,6 +135,7 @@ Status Preferences::save(const std::filesystem::path& file) const {
     doc["audio_threads"] = static_cast<std::int64_t>(audioThreads);
     if (!renderDirectory.empty()) doc["render_directory"] = renderDirectory.string();
     doc["copy_imported_media"] = copyImports;
+    doc["audio"] = audioDeviceJson(audio);
     std::error_code ec;
     std::filesystem::create_directories(file.parent_path(), ec);
     return writeFileAtomic(file, json::writeCanonical(doc) + "\n");
@@ -270,6 +277,13 @@ void PreferencesDialog::open() {
                              ui::Font::Ui, "small", "ink-quiet")
         .layout.height = ui::SizeRule::fixed(20);
 
+    auto& audio = row(*form, "prefs.audio", "Audio device");
+    audio_ = &audio.emplace<ui::Button>("prefs.audio.open", "", [this] {
+        if (onAudioDevice) onAudioDevice();
+    });
+    audio_->layout.width = ui::SizeRule::fraction();
+    audio_->layout.height = ui::SizeRule::fixed(26);
+
     auto& mouse = row(*form, "prefs.mouse", "Mouse modifiers");
     mouse
         .emplace<ui::Button>("prefs.mouse.open", "Edit mouse modifiers…", [this] { mouse_.open(); })
@@ -282,6 +296,7 @@ void PreferencesDialog::open() {
         latency_ = nullptr;
         latencyNote_.fill(nullptr);
         imports_ = nullptr;
+        audio_ = nullptr;
     });
     refresh();
 }
@@ -321,6 +336,8 @@ void PreferencesDialog::refresh() {
     protectionNote(memoryNote_, app_.memoryLockStatus(), "Locked");
     if (threads_) threads_->setText(threadLabel(prefs_.audioThreads));
     if (monitor_) monitor_->setText(monitorLabel(prefs_.defaultMonitor));
+    if (audio_)
+        audio_->setText((audioSummary ? audioSummary() : std::string("Audio device")) + "…");
 }
 
 void PreferencesDialog::setDefaultMonitor(model::Monitor m) {
@@ -370,6 +387,15 @@ Status PreferencesDialog::setCopyImports(bool on) {
     if (!file_.empty()) SUPPLE_TRY(next.save(file_));
     prefs_ = next;
     app_.setCopyImportedMedia(on);
+    refresh();
+    return {};
+}
+
+Status PreferencesDialog::setAudioDevice(const AudioDeviceSettings& audio) {
+    auto next = prefs_;
+    next.audio = audio;
+    if (!file_.empty()) SUPPLE_TRY(next.save(file_));
+    prefs_ = next;
     refresh();
     return {};
 }

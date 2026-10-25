@@ -1051,6 +1051,34 @@ Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
   other types report `preferences.copy_imported_media`) and applied to
   `EngineApp::setCopyImportedMedia` at once. A note says the project then
   keeps working if the original file moves or is deleted.
+  **Audio device** (1.5): the row shows the audio system, output device,
+  rate and buffer, and opens the audio device dialog (also Edit > Audio
+  device…, action `ui.audio.device`). Saved as the `audio` object:
+  `backend` (`jack`, `portaudio` or `dummy`; absent: JACK on Linux, the
+  native device elsewhere), `host_api` (absent: WASAPI where it lists
+  devices, else PortAudio's first), `output_device`, `input_device`
+  (exact names; absent: the host API's defaults), boolean `record`, `rate`
+  (0: the device's or graph's own; up to 768000), integer `block` (16..4096)
+  and boolean `force_graph`. Absent (and in older files) it means the
+  defaults; a wrong value reports `preferences.audio` at `/audio/<field>`
+  with a hint. The dialog's rows are menus: **Audio system** (JACK (PipeWire)
+  on Linux; each PortAudio host API that lists devices — Core Audio, Windows
+  WASAPI, ASIO — on macOS/Windows; and Dummy (no device)), **Output device**
+  and **Input device** (native only: System default or an exact device; the
+  input also None (playback only); ASIO uses the output device both ways),
+  **Sample rate** (the device's or graph's own rate, or 44.1–192 kHz),
+  **Buffer size** (32–2048 frames, with milliseconds) and, for JACK,
+  **PipeWire graph** (Request, shared with other apps, or Force while the
+  engine runs). A short note says what the choices mean on that system, and
+  status lines show the running backend, rate, block, device period and
+  output latency, a needed restart, or why the engine is not running.
+  Restart audio and Stop audio buttons follow. Each choice is saved, then a
+  running engine (or one whose start failed) restarts with it at once; a
+  stopped one stays stopped. The native input opens all its channels up to
+  32. At app start a refused saved choice retries the backend's defaults and
+  reports it; the saved choice is kept. engine.start receives the mapping
+  (`engineStartArgs`): an explicit rate, or for the native device the output
+  device's own rate; for JACK, `force_graph` only when forcing.
 
 
 
@@ -1136,10 +1164,11 @@ build on all platforms; actual editor display tests still require the exact
 SUPPLE_GUI_DISPLAY_TEST=1 opt-in. Linux pipe/poll injection fixtures remain
 Linux-only alongside portable waitable coverage.
 
-The app accepts `--audio jack|portaudio|dummy|none`. Interactive Linux runs
-default to JACK, native runs to dummy (matching the engine); finite/offscreen
-runs default to none. `--audio portaudio` explicitly selects native device
-audio. Tests use dummy/none and never enable hardware opt-ins.
+The app accepts `--audio jack|portaudio|dummy|none`, a backend with its
+defaults. Without it, interactive runs start the audio device saved in
+Preferences (§6, **Audio device**): JACK on Linux and the native device on
+macOS/Windows by default (ADR-0050); finite/offscreen runs default to none.
+Tests use dummy/none and never enable hardware opt-ins.
 
 SDL drivers are forced to X11/Cocoa/Windows respectively. Layout uses design
 units; SDL pixel density and Windows per-monitor display scale determine the

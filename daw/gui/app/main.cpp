@@ -10,6 +10,7 @@
 //          [--workdir DIR] [--plugin-path P]... [--generate N] [--script]
 //          [--idle SECONDS] [--view START_SECONDS,PIXELS_PER_SECOND]
 //          [--audio jack|portaudio|dummy|none] [--theme dark|light|FILE] [--palette warm|ink]
+//          (without --audio, interactive runs start the device saved in Preferences)
 //          [--action ID]...
 #include <SDL3/SDL.h>
 #if defined(_WIN32)
@@ -36,6 +37,7 @@
 #include "actions_list.h"
 #include "app_actions.h"
 #include "appearance.h"
+#include "audio_device.h"
 #include "chrome.h"
 #include "file_actions.h"
 #include "floating_panel.h"
@@ -575,6 +577,17 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "%s\n", message.c_str());
     };
     appActions.addUi("ui.preferences", "Edit: preferences…", [&] { preferences.open(); });
+    // The audio device: saved with the preferences, applied to the engine at once.
+    gui::AudioDeviceDialog audioDevice(
+        root, dispatcher, **app, prefs.audio,
+        [&](const gui::AudioDeviceSettings& audio) { return preferences.setAudioDevice(audio); });
+    audioDevice.onError = [&shell](const std::string& message) {
+        std::fprintf(stderr, "%s\n", message.c_str());
+        if (shell.onError) shell.onError(message);
+    };
+    preferences.onAudioDevice = [&] { audioDevice.open(); };
+    preferences.audioSummary = [&] { return audioDevice.summary(); };
+    appActions.addUi("ui.audio.device", "Edit: audio device…", [&] { audioDevice.open(); });
     renderDialog.onChooseFolder = [&] {
         fileActions.chooseFolder((*app)->rendersDir(), [&](const fs::path& dir) {
             if (auto set = preferences.setRenderDirectory(dir); !set)
@@ -776,25 +789,20 @@ int main(int argc, char** argv) {
                      [&] { shell.arrange()->addMarker(); });
     appActions.addUi("ui.region.add", "Region: add over loop range",
                      [&] { shell.arrange()->addRegion(); });
-    // The audio engine: the device for interactive use, nothing offscreen.
-    const std::string audioMode = !o.audio.empty() ? o.audio
-                                                   : (o.offscreen || o.frames > 0 ? "none" :
-#if defined(__linux__)
-                                                                                  "jack"
-#else
-                                                                                  "dummy"
-#endif
-                                                     );
-    if (audioMode != "none") {
+    // The audio engine: the saved device for interactive use (Edit > Audio
+    // device), nothing offscreen; --audio picks a backend with its defaults.
+    if (!o.audio.empty() && o.audio != "none") {
         json::Value args = json::Value::object();
-        args["backend"] = audioMode;
+        args["backend"] = o.audio;
         if (auto started = dispatcher.execute(
                 {"engine.start", std::move(args), {cmd::Origin::Type::Ui, "gui", {}}});
             !started)
-            std::fprintf(
-                stderr,
-                "audio: %s (run engine.start from the actions list when the device is ready)\n",
-                started.error().toString().c_str());
+            std::fprintf(stderr, "audio: %s (choose a device in Edit > Audio device)\n",
+                         started.error().toString().c_str());
+    } else if (o.audio.empty() && !o.offscreen && o.frames == 0) {
+        if (auto started = audioDevice.start(true); !started)
+            audioDevice.onError("audio: " + started.error().message +
+                                " (choose a device in Edit > Audio device)");
     }
 
     // Per-project UI state (gui.md §1.2).
@@ -1002,6 +1010,7 @@ int main(int argc, char** argv) {
             fxWindow.tick(event);
             renderDialog.tick();
             if (preferences.isOpen()) preferences.refresh();
+            if (audioDevice.isOpen()) audioDevice.refresh();
             if (shell.arrange()->poll(event)) root.requestAnimationFrame();
         });
         return next;

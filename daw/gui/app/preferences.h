@@ -2,8 +2,9 @@
 // Copyright (c) 2026 Supple Audio
 // Preferences (Edit > Preferences…): app-wide settings, never project state.
 // The monitoring mode, audio thread limit, opt-in process controls, render
-// folder and import copying are saved to <config>/<slug>/preferences.json
-// (supple.preferences/1.4). A button opens the mouse modifiers dialog.
+// folder, import copying and the audio device are saved to
+// <config>/<slug>/preferences.json (supple.preferences/1.5). Buttons open the
+// audio device and mouse modifiers dialogs.
 #pragma once
 
 #include <array>
@@ -12,6 +13,7 @@
 #include <string>
 #include <string_view>
 
+#include "audio_device.h"
 #include "mouse_dialog.h"
 #include "supple/engine/app.h"
 #include "supple/ui/root.h"
@@ -24,7 +26,8 @@ struct Preferences {
     bool lockMemory = false;
     bool preventDeepIdle = false;
     std::filesystem::path renderDirectory{};  // empty: the app's default (mediaHome())
-    bool copyImports = true;  // imported audio is copied into the project's media folder
+    bool copyImports = true;    // imported audio is copied into the project's media folder
+    AudioDeviceSettings audio;  // the device the engine starts with (1.5)
     static std::filesystem::path defaultFile(std::string_view slug);
     static Result<Preferences> load(const std::filesystem::path& file);  // absent: defaults
     Status save(const std::filesystem::path& file) const;
@@ -46,6 +49,11 @@ class PreferencesDialog {
     Status setAudioThreads(unsigned limit);  // saved; next engine start
     // The render dialog's folder choice: saved, and renders go there at once.
     Status setRenderDirectory(const std::filesystem::path& dir);
+    // The audio device dialog's settings: saved (the dialog applies them).
+    Status setAudioDevice(const AudioDeviceSettings& audio);
+    // Opens the audio device dialog (the Audio device row's button).
+    std::function<void()> onAudioDevice;
+    std::function<std::string()> audioSummary;  // the row's text
     const Preferences& preferences() const { return prefs_; }
     std::function<void(const std::string&)> onError;
 
@@ -61,6 +69,7 @@ class PreferencesDialog {
     std::array<ui::Label*, 4> memoryNote_{};
     ui::Button* latency_ = nullptr;
     ui::Button* imports_ = nullptr;
+    ui::Button* audio_ = nullptr;
     std::array<ui::Label*, 4> latencyNote_{};
 };
 
