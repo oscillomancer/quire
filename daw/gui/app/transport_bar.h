@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 // The transport bar (gui.md §4.1): play/stop, record, loop and punch buttons
-// (the same actions the keymap runs), the position in bars|beats and time, the
+// drawn as symbols (the same actions the keymap runs), the position in
+// bars|beats and time, the
 // session tempo and meter (click to edit them), and the engine's readouts.
 #pragma once
 
@@ -23,6 +24,8 @@ class Root;
 }  // namespace supple::ui
 
 namespace supple::gui {
+
+class TransportButton;
 
 class TransportBar {
   public:
@@ -46,12 +49,12 @@ class TransportBar {
     AppActions& actions_;
     cmd::Dispatcher& dispatcher_;
     ui::Root& root_;
-    ui::Button* play_ = nullptr;
-    ui::Button* record_ = nullptr;
-    ui::Button* loop_ = nullptr;
-    ui::Button* punch_ = nullptr;
-    ui::Button* click_ = nullptr;  // the metronome
-    ui::Button* count_ = nullptr;  // count-in bars before recording
+    TransportButton* play_ = nullptr;
+    TransportButton* record_ = nullptr;
+    TransportButton* loop_ = nullptr;
+    TransportButton* punch_ = nullptr;
+    TransportButton* click_ = nullptr;  // the metronome
+    TransportButton* count_ = nullptr;  // count-in bars before recording
     ui::Button* tempo_ = nullptr;
     ui::Button* meter_ = nullptr;
     ui::Label* position_ = nullptr;

@@ -39,6 +39,9 @@ class Button : public Node {
     bool onKey(const KeyEvent& e) override;
     std::string valueText() const override { return text_; }
 
+  protected:
+    bool pressed() const { return pressed_; }
+
   private:
     std::string text_;
     bool pressed_ = false;

@@ -235,7 +235,12 @@ never works around the bus.
 
 ### 4.1 Main window
 
-Transport bar (play/stop/record/loop/punch, position in bars|beats and
+Transport bar (go to start, play/stop, record, loop, punch, metronome and
+count-in as symbol buttons: |◀, ▶ or ■ while playing, a red ● (a ring while
+counting in), circling arrows, [●], a metronome and →| with the bar count;
+each is lit in its colour while on — green playing, red recording, accent for
+loop, punch, metronome and count-in — and keeps its state word as its value
+text; position in bars|beats and
 time, tempo/meter, CPU/xrun/anticipation readouts from engine telemetry);
 toolbar (actions, §6: only what the transport bar does not already have —
 undo, redo, add channel, the actions list by default); the arrange area (track control panel + timeline);

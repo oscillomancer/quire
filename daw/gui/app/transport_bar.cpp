@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <numbers>
 #include <string>
 #include <vector>
 
@@ -89,7 +90,115 @@ void setIfChanged(ui::Button* button, const std::string& text) {
 
 std::string countText(int bars) { return bars > 0 ? "count " + std::to_string(bars) : "count"; }
 
+// An arc around `o` from a0 to a1 (clockwise) ending in an arrowhead.
+void arcArrow(ui::Canvas& c, ui::Point o, float r, float a0, float a1, ui::Color ink) {
+    c.strokeArc(o, r, a0, a1, ink, 1.5f);
+    const ui::Point p{o.x + r * std::cos(a1), o.y + r * std::sin(a1)};
+    const ui::Point along{-std::sin(a1), std::cos(a1)}, out{std::cos(a1), std::sin(a1)};
+    const float len = r * 0.7f, half = r * 0.45f;
+    c.fillPath({{p.x + along.x * len, p.y + along.y * len},
+                {p.x + out.x * half, p.y + out.y * half},
+                {p.x - out.x * half, p.y - out.y * half}},
+               ink);
+}
+
 }  // namespace
+
+// A transport button drawn as a symbol. Its text stays the state word ("play",
+// "stop", "loop on", "count 2") for tests and the GUI query; only the symbol
+// (and the count-in's bar count) is painted. A lit button (playing,
+// recording, loop on…) is tinted with its colour token.
+class TransportButton : public ui::Button {
+  public:
+    enum class Symbol { Start, Play, Stop, Record, CountingIn, Loop, Punch, Click, CountIn };
+    TransportButton(std::string id, Symbol symbol, std::string text, std::function<void()> click)
+        : ui::Button(std::move(id), std::move(text), std::move(click)), symbol_(symbol) {}
+
+    // Only a change repaints: the idle loop must stay at zero work.
+    void show(Symbol symbol, const std::string& text, std::string lit = {},
+              std::string badge = {}) {
+        if (symbol != symbol_ || lit != lit_ || badge != badge_) {
+            symbol_ = symbol;
+            lit_ = std::move(lit);
+            badge_ = std::move(badge);
+            invalidate();
+        }
+        if (valueText() != text) setText(text);
+    }
+
+    void paint(ui::Canvas& c) override {
+        const ui::Theme& t = c.theme();
+        const ui::Rect b = bounds();
+        c.fillRound(b, t.radius("s"),
+                    pressed()   ? t.color("selection")
+                    : hovered() ? t.color("raised")
+                                : t.color("panel"));
+        ui::Color ink = enabled ? t.color("ink") : t.color("ink-faint");
+        ui::Color outline = t.color("rule");
+        if (!lit_.empty()) {
+            ink = t.color(lit_);
+            c.fillRound(b, t.radius("s"), ink.withAlpha(0.2f));
+            outline = ink.withAlpha(0.7f);
+        }
+        c.strokeRound(b, t.radius("s"), focused() ? t.color("focus") : outline);
+        // The symbol in an s×s square, left of centre when a count follows it.
+        const float s = std::min(b.w, b.h) - 10;
+        const float cx = std::round(b.x + b.w / 2 - (badge_.empty() ? 0 : 5));
+        const float cy = std::round(b.y + b.h / 2);
+        const float x = cx - s / 2, y = cy - s / 2;
+        auto at = [&](float u, float v) { return ui::Point{x + s * u, y + s * v}; };
+        const ui::Color red = t.color("armed");
+        constexpr float pi = std::numbers::pi_v<float>;
+        switch (symbol_) {
+            case Symbol::Start:  // |◀
+                c.fillRect({x + s * 0.1f, y + s * 0.1f, s * 0.16f, s * 0.8f}, ink);
+                c.fillPath({at(0.92f, 0.1f), at(0.92f, 0.9f), at(0.3f, 0.5f)}, ink);
+                break;
+            case Symbol::Play:  // ▶
+                c.fillPath({at(0.18f, 0.06f), at(0.94f, 0.5f), at(0.18f, 0.94f)}, ink);
+                break;
+            case Symbol::Stop:  // ■
+                c.fillRound({x + s * 0.12f, y + s * 0.12f, s * 0.76f, s * 0.76f}, 1.0f, ink);
+                break;
+            case Symbol::Record:  // ●
+                c.fillCircle({cx, cy}, s * 0.42f, red);
+                break;
+            case Symbol::CountingIn:  // ○, waiting for the count-in to end
+                c.strokeCircle({cx, cy}, s * 0.36f, red, 1.8f);
+                break;
+            case Symbol::Loop:  // two arrows chasing round a circle
+                arcArrow(c, {cx, cy}, s * 0.4f, pi + 0.3f, 2 * pi - 0.75f, ink);
+                arcArrow(c, {cx, cy}, s * 0.4f, 0.3f, pi - 0.75f, ink);
+                break;
+            case Symbol::Punch:  // [●]: record inside a range
+                c.strokePath({at(0.3f, 0.06f), at(0.06f, 0.06f), at(0.06f, 0.94f), at(0.3f, 0.94f)},
+                             ink, 1.5f, false);
+                c.strokePath({at(0.7f, 0.06f), at(0.94f, 0.06f), at(0.94f, 0.94f), at(0.7f, 0.94f)},
+                             ink, 1.5f, false);
+                c.fillCircle({cx, cy}, s * 0.2f, red);
+                break;
+            case Symbol::Click:  // a metronome
+                c.strokePath(
+                    {at(0.14f, 0.94f), at(0.86f, 0.94f), at(0.62f, 0.06f), at(0.38f, 0.06f)}, ink,
+                    1.4f);
+                c.line(at(0.5f, 0.72f), at(0.82f, 0.18f), ink, 1.5f);
+                break;
+            case Symbol::CountIn:  // →| : a run-up into the first bar
+                c.line(at(0.04f, 0.5f), at(0.56f, 0.5f), ink, 1.5f);
+                c.fillPath({at(0.46f, 0.24f), at(0.78f, 0.5f), at(0.46f, 0.76f)}, ink);
+                c.fillRect({x + s * 0.82f, y + s * 0.1f, s * 0.16f, s * 0.8f}, ink);
+                break;
+        }
+        if (!badge_.empty())
+            c.text({cx + s / 2 + 2, b.y, b.x + b.w - (cx + s / 2 + 2), b.h}, badge_,
+                   ui::Font::UiBold, t.type("small"), ink, ui::kLeft | ui::kMiddle);
+    }
+
+  private:
+    Symbol symbol_;
+    std::string lit_;  // a colour token; empty when not lit
+    std::string badge_;
+};
 
 TransportBar::TransportBar(engine::EngineApp& app, AppActions& actions, cmd::Dispatcher& dispatcher,
                            ui::Root& root)
@@ -101,20 +210,25 @@ std::unique_ptr<ui::Node> TransportBar::build() {
     bar->layout.height = ui::SizeRule::fixed(44);
     bar->layout.padding = ui::Insets::xy(12, 0);
     bar->layout.gap = 6;
-    auto actionButton = [&](const char* id, const char* text, const char* action, float width) {
-        auto& b = bar->emplace<ui::Button>(id, text, [this, action] {
-            auto r = actions_.run(action);
-            if (!r && actions_.onError) actions_.onError(r.error().message);
-        });
+    using Symbol = TransportButton::Symbol;
+    auto symbolButton = [&](const char* id, Symbol symbol, const char* text,
+                            std::function<void()> click, float width = 30) {
+        auto& b = bar->emplace<TransportButton>(id, symbol, text, std::move(click));
         b.layout.width = ui::SizeRule::fixed(width);
         b.layout.height = ui::SizeRule::fixed(24);
         return &b;
     };
-    actionButton("transport.start", "start", "transport.seek:start", 44);  // also W, Home
-    play_ = actionButton("transport.play", "play", "transport.toggle", 44);
-    record_ = actionButton("transport.record", "rec", "transport.record", 38);
-    loop_ = actionButton("transport.loop", "loop", "transport.loop.toggle", 48);
-    punch_ = &bar->emplace<ui::Button>("transport.punch", "punch", [this] {
+    auto actionButton = [&](const char* id, Symbol symbol, const char* text, const char* action) {
+        return symbolButton(id, symbol, text, [this, action] {
+            auto r = actions_.run(action);
+            if (!r && actions_.onError) actions_.onError(r.error().message);
+        });
+    };
+    actionButton("transport.start", Symbol::Start, "start", "transport.seek:start");  // W, Home
+    play_ = actionButton("transport.play", Symbol::Play, "play", "transport.toggle");
+    record_ = actionButton("transport.record", Symbol::Record, "rec", "transport.record");
+    loop_ = actionButton("transport.loop", Symbol::Loop, "loop", "transport.loop.toggle");
+    punch_ = symbolButton("transport.punch", Symbol::Punch, "punch", [this] {
         // No action: the punch range is set elsewhere (P5.6); the button only
         // toggles it.
         json::Value args = json::Value::object();
@@ -122,31 +236,28 @@ std::unique_ptr<ui::Node> TransportBar::build() {
         auto r = dispatcher_.execute({"transport.punch", std::move(args), kOrigin});
         if (!r && actions_.onError) actions_.onError(r.error().message);
     });
-    punch_->layout.width = ui::SizeRule::fixed(52);
-    punch_->layout.height = ui::SizeRule::fixed(24);
-    click_ = &bar->emplace<ui::Button>("transport.metronome", "click", [this] {
+    click_ = symbolButton("transport.metronome", Symbol::Click, "click", [this] {
         json::Value args = json::Value::object();
         args["enabled"] = !app_.metronome().enabled;
         auto r = dispatcher_.execute({"transport.metronome", std::move(args), kOrigin});
         if (!r && actions_.onError) actions_.onError(r.error().message);
         sync();
     });
-    click_->layout.width = ui::SizeRule::fixed(56);
-    click_->layout.height = ui::SizeRule::fixed(24);
     // Count-in before recording: none, 1, 2 or 4 bars (transport.metronome).
-    count_ = &bar->emplace<ui::Button>("transport.count", countText(0), [this] {
-        const int now = app_.metronome().countInBars;
-        json::Value args = json::Value::object();
-        args["count_in_bars"] = static_cast<std::int64_t>(now == 0  ? 1
-                                                          : now < 2 ? 2
-                                                          : now < 4 ? 4
-                                                                    : 0);
-        auto r = dispatcher_.execute({"transport.metronome", std::move(args), kOrigin});
-        if (!r && actions_.onError) actions_.onError(r.error().message);
-        sync();
-    });
-    count_->layout.width = ui::SizeRule::fixed(64);
-    count_->layout.height = ui::SizeRule::fixed(24);
+    count_ = symbolButton(
+        "transport.count", Symbol::CountIn, "count",
+        [this] {
+            const int now = app_.metronome().countInBars;
+            json::Value args = json::Value::object();
+            args["count_in_bars"] = static_cast<std::int64_t>(now == 0  ? 1
+                                                              : now < 2 ? 2
+                                                              : now < 4 ? 4
+                                                                        : 0);
+            auto r = dispatcher_.execute({"transport.metronome", std::move(args), kOrigin});
+            if (!r && actions_.onError) actions_.onError(r.error().message);
+            sync();
+        },
+        40);
     bar->emplace<ui::Node>("transport.gap").layout.width = ui::SizeRule::fixed(10);
     position_ = &bar->emplace<ui::Label>("transport.position", "1.1.000", ui::Font::MonoBold,
                                          "title", "ink");
@@ -203,12 +314,28 @@ void TransportBar::sync(bool event, std::chrono::steady_clock::time_point now) {
     if (time_) setIfChanged(time_, timeText(info.seconds));
     if (tempo_) setIfChanged(tempo_, bpmText(*s.timeMap));
     if (meter_) setIfChanged(meter_, meterText(*s.timeMap));
-    if (play_) setIfChanged(play_, info.playing ? "stop" : "play");
-    if (record_) setIfChanged(record_, info.countingIn ? "count" : "rec");
-    if (count_) setIfChanged(count_, countText(app_.metronome().countInBars));
-    if (loop_) setIfChanged(loop_, info.loop.enabled ? "loop on" : "loop");
-    if (punch_) setIfChanged(punch_, info.punch.enabled ? "punch on" : "punch");
-    if (click_) setIfChanged(click_, app_.metronome().enabled ? "click on" : "click");
+    using Symbol = TransportButton::Symbol;
+    if (play_)
+        play_->show(info.playing ? Symbol::Stop : Symbol::Play, info.playing ? "stop" : "play",
+                    info.playing ? "meter" : "");
+    if (record_)
+        record_->show(info.countingIn ? Symbol::CountingIn : Symbol::Record,
+                      info.countingIn ? "count" : "rec",
+                      info.recording || info.countingIn ? "armed" : "");
+    if (count_) {
+        const int bars = app_.metronome().countInBars;
+        count_->show(Symbol::CountIn, countText(bars), bars > 0 ? "accent" : "",
+                     bars > 0 ? std::to_string(bars) : "");
+    }
+    if (loop_)
+        loop_->show(Symbol::Loop, info.loop.enabled ? "loop on" : "loop",
+                    info.loop.enabled ? "accent" : "");
+    if (punch_)
+        punch_->show(Symbol::Punch, info.punch.enabled ? "punch on" : "punch",
+                     info.punch.enabled ? "accent" : "");
+    if (click_)
+        click_->show(Symbol::Click, app_.metronome().enabled ? "click on" : "click",
+                     app_.metronome().enabled ? "accent" : "");
     if (rate_ && !rate_->dragging()) {
         // Automation follows consumption telemetry, not the latest authored
         // curve or renderer lookahead. The accessor executes no logged command.
