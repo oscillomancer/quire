@@ -1,7 +1,7 @@
 {
   "schema": "supple.command-registry/1.0",
   "product": "Quire",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "commands": {
     "batch@1": {
       "name": "batch",
