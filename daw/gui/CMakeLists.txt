@@ -184,6 +184,12 @@ if(SUPPLE_BUILD_TESTS)
                    --action ui.no-such-action)
   set_tests_properties(gui.app-unknown-action PROPERTIES LABELS "gui;tsan-skip" WILL_FAIL TRUE
                        ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+  # Started from an unwritable directory (as Finder does), nothing is left there.
+  add_test(NAME gui.launch-dir
+           COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/gui_launch_dir.py
+                   $<TARGET_FILE:${PRODUCT_SLUG}>)
+  set_tests_properties(gui.launch-dir PROPERTIES LABELS "gui;tsan-skip"
+                       ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
   # Named screensets saved into the UI file and recalled in a later run.
   add_test(NAME gui.screensets
            COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/gui_screensets.py

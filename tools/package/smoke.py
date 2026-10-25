@@ -38,17 +38,18 @@ def main():
                    CLAP_PATH="", VST3_PATH="", SUPPLE_SCRIPT_LIBRARY="", ASAN_OPTIONS="detect_leaks=0")
         if os.name == "nt":
             env.update(USERPROFILE=temp, LOCALAPPDATA=str(user / "local"), APPDATA=str(user / "roaming"))
-        def execute(suffix, *command, expected=0):
+        def execute(suffix, *command, expected=0, cwd=temp):
             result = subprocess.run([str(binary_dir / f"{slug}{suffix}{ext}"), *command],
-                                    env=env, cwd=temp, capture_output=True, text=True, timeout=120)
+                                    env=env, cwd=cwd, capture_output=True, text=True, timeout=120)
             if result.returncode != expected:
                 raise RuntimeError(f"{suffix}: exit {result.returncode}\n{result.stdout}\n{result.stderr}")
             return result
         help_result = execute("", "--help", expected=2)
         assert "usage:" in help_result.stderr.lower(), "GUI CLI output was lost"
         snapshot = user / "snapshot.png"
+        # From the filesystem root, as Finder starts apps (read-only on macOS).
         execute("", "--offscreen", "--no-socket", "--audio", "dummy", "--frames", "5",
-                "--snapshot", str(snapshot))
+                "--snapshot", str(snapshot), cwd=user.anchor)
         assert snapshot.stat().st_size > 100, "GUI snapshot missing"
         # No --plugin-path: this verifies installed stockPluginDir lookup.
         result = execute("-engine", "exec", '{"command":"plugin.list","args":{}}',

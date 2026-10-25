@@ -289,9 +289,12 @@ int main(int argc, char** argv) {
         if (auto stock = host::stockPluginDir()) options.pluginPath.push_back(*stock);
         for (auto& p : host::defaultSearchPath()) options.pluginPath.push_back(p);
     }
+    // Without a project, the user's data folder, never the launch directory:
+    // Finder starts apps in the read-only "/", and a launcher's choice (the
+    // home or installation folder) would collect a stray renders/ folder.
     options.workdir = !o.workdir.empty()   ? o.workdir
                       : !o.project.empty() ? o.project.parent_path()
-                                           : fs::current_path();
+                                           : dataFolder();
     options.scratchDir = scratchFolder(o);
     // Renders go to the user's media folder (or the folder chosen in the render
     // dialog, a preference); under --workdir (tests) to <workdir>/renders.

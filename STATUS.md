@@ -85,7 +85,9 @@ checks installed native artifacts, upgrades and uninstall cleanup separately
 from the native regression suite. macOS finalization keeps notices in bundle
 resources and signs nested code before the app. Bundled SDL resolves package-manager
 symlinks into private library files. Windows stages the resolved DLL set and
-ships SDL/zlib notices; unrelated build-tree DLLs are rejected. No paid signing or notarization is available; first-launch
+ships SDL/zlib notices; unrelated build-tree DLLs are rejected. The packaged
+smoke starts the GUI offscreen from the filesystem root, as Finder does; a
+windowed launch through Finder or a desktop launcher is checked by hand only. No paid signing or notarization is available; first-launch
 instructions are in `docs/guides/installing.md`.
 
 ## What works

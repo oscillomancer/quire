@@ -1172,5 +1172,10 @@ programs remain console executables. The Apple Silicon app bundle declares
 high DPI and microphone use and retains a build-tree command symlink. Fonts
 load from the directory beside the installed skill before checkout fallback.
 The application ID is the product slug, matching Linux desktop StartupWMClass.
+Startup never depends on the launch directory: without a project or
+`--workdir`, the engine's work directory (the base of relative command paths)
+is the data folder `<data>/<slug>`. Finder starts apps in the read-only `/`,
+which made the app exit at once; desktop and Start-menu launchers start in the
+home or installation folder, which collected a stray `renders/`.
 Linux/Windows windows use the embedded 256px application icon; Windows also
 embeds the multi-size ICO resource for Explorer and Start-menu shortcuts.
