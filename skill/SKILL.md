@@ -63,7 +63,6 @@ their undo history and can be reviewed.
 | Phasing: swirls, resonant sweeps, a photocell vibe's throb, envelope and tempo sweeps, an endless barber pole (Pollia) | `guides/phaser.md` |
 | Tape: a mix's peaks gently rounded, drums pushed into tape, head bump, wow and flutter, hiss, a worn machine or a cassette (Umber) | `guides/tape.md` |
 | Measuring loudness, peaks, tonal balance, stereo and key at any point in a chain, and reading any plugin's meters (Lichen, `fx.meters`) | `guides/analyzer.md` |
-| The note a sound is and how many cents off: tuning an instrument, a sample or a synth, in equal or an older temperament (Sedge) | `guides/tuner.md` |
 | What the analysis numbers mean | `guides/analysis.md` |
 
 Files under `generated/` are produced from the code and always match the
