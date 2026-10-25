@@ -352,9 +352,13 @@ void TransportBar::sync(bool event, std::chrono::steady_clock::time_point now) {
         if (!st.running) {
             setIfChanged(engine_, "engine stopped");
         } else {
+            // The device's period (the JACK quantum) is the buffer the user
+            // set; the engine's block only splits it. A backend that reports
+            // no period runs in blocks.
             char buf[96];
+            const std::int64_t buffer = st.period > 0 ? st.period : st.block;
             std::snprintf(buf, sizeof buf, "%.1fk/%lld  xr %lld  err %lld  mis %lld",
-                          st.sampleRate / 1000.0, static_cast<long long>(st.block),
+                          st.sampleRate / 1000.0, static_cast<long long>(buffer),
                           static_cast<long long>(st.xruns),
                           static_cast<long long>(st.processErrors),
                           static_cast<long long>(st.anticipationMisses));

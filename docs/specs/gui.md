@@ -241,7 +241,8 @@ counting in), circling arrows, [●], a metronome and →| with the bar count;
 each is lit in its colour while on — green playing, red recording, accent for
 loop, punch, metronome and count-in — and keeps its state word as its value
 text; position in bars|beats and
-time, tempo/meter, CPU/xrun/anticipation readouts from engine telemetry);
+time, tempo/meter, CPU/xrun/anticipation readouts from engine telemetry; the
+rate and buffer readout shows the device's period, e.g. the JACK quantum);
 toolbar (actions, §6: only what the transport bar does not already have —
 undo, redo, add channel, the actions list by default); the arrange area (track control panel + timeline);
 bottom docks for the mixer and MIDI editor, and a history dock; separate
