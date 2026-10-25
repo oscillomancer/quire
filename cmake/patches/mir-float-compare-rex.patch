@@ -1,0 +1,14 @@
+--- a/third_party/mir-1.0.0/mir-gen-x86_64.c
++++ b/third_party/mir-1.0.0/mir-gen-x86_64.c
+@@ -1460,9 +1460,9 @@
+ #define FEQ(ICODE, V, SET_OPCODE)                                                            \
+   /*xor %eax,%eax;ucomiss r1,{r,m2};mov V,%edx;set[n]p r0;cmovne %rdx,%rax; mov %rax,r0:  */ \
+   {ICODE, "r r r",                                                                           \
+-   "33 h0 H0; 0F 2E r1 R2; BA " V "; " SET_OPCODE " H0; X 0F 45 h0 H2; X 8B r0 H0", 0},      \
++   "33 h0 H0; Y 0F 2E r1 R2; BA " V "; " SET_OPCODE " H0; X 0F 45 h0 H2; X 8B r0 H0", 0},      \
+     {ICODE, "r r md",                                                                        \
+-     "33 h0 H0; 0F 2E r1 m2; BA " V "; " SET_OPCODE " H0; X 0F 45 h0 H2; X 8B r0 H0", 0},
++     "33 h0 H0; Y 0F 2E r1 m2; BA " V "; " SET_OPCODE " H0; X 0F 45 h0 H2; X 8B r0 H0", 0},
+ 
+ #define DEQ(ICODE, V, SET_OPCODE)                                                            \
+   /*xor %eax,%eax;ucomisd r1,{r,m2};mov V,%edx;set[n]p r0;cmovne %rdx,%rax; mov %rax,r0:  */ \
