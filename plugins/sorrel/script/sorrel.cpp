@@ -1072,8 +1072,8 @@ struct Sorrel : Effect {
     }
 
     // A level history as a path through the midpoints of its columns.
-    void trace(Canvas& g, const SharedArray<float, 1024>& v, int head, int count, double step,
-               bool fromEdge) {
+    void historyPath(Canvas& g, const SharedArray<float, 1024>& v, int head, int count, double step,
+                     bool fromEdge) {
         double qx = gx + gw, qy = levelY(eased(v, head, 0, count));
         if (fromEdge) {
             g.moveTo(qx, gy + gh);
@@ -1177,31 +1177,31 @@ struct Sorrel : Effect {
             // What came in, in the colour of what was taken; what goes out
             // over it, so the rose left showing is what the gate removed.
             g.beginPath();
-            trace(g, hIn, head, count, step, true);
+            historyPath(g, hIn, head, count, step, true);
             g.fillStyle(kPetal);
             g.globalAlpha(0.45);
             g.fill();
             g.globalAlpha(1.0);
             g.beginPath();
-            trace(g, hOut, head, count, step, true);
+            historyPath(g, hOut, head, count, step, true);
             g.linearGradient(0, gy, 0, gy + gh, 0x625749, 0x2A231D);
             g.fill();
             g.lineJoin(LineJoin::Round);
             g.beginPath();
-            trace(g, hIn, head, count, step, false);
+            historyPath(g, hIn, head, count, step, false);
             g.strokeStyle(kPetal);
             g.globalAlpha(0.55);
             g.lineWidth(1);
             g.stroke();
             g.globalAlpha(1.0);
             g.beginPath();
-            trace(g, hOut, head, count, step, false);
+            historyPath(g, hOut, head, count, step, false);
             g.strokeStyle(kCurve);
             g.lineWidth(1.2);
             g.stroke();
             if (keyShaped()) {
                 g.beginPath();
-                trace(g, hKey, head, count, step, false);
+                historyPath(g, hKey, head, count, step, false);
                 g.strokeStyle(Theme::accent2);
                 g.globalAlpha(0.85);
                 g.lineWidth(1);
