@@ -56,11 +56,17 @@ machine, but file formats and commands can still change.
 
 ## Installing
 
-Download a Linux tarball, Apple Silicon macOS dmg, or Windows per-user installer
-from the release assets. [Installing Quire](docs/guides/installing.md) covers
-user-space installation, unsigned first-launch steps, optional stock plugins
-for other hosts and the bundled MCP helper/skill. Portable downloads also run
-in place.
+Downloads for [Quire 0.1.0](https://github.com/oscillomancer/quire/releases/tag/v0.1.0):
+
+| Platform | Installer | Portable |
+| --- | --- | --- |
+| Linux (x86_64) | [quire-0.1.0-linux-x86_64.tar.xz](https://github.com/oscillomancer/quire/releases/download/v0.1.0/quire-0.1.0-linux-x86_64.tar.xz) (runs in place, or `./install.sh` for your user) | the same tarball |
+| macOS (Apple Silicon) | [quire-0.1.0-macos-arm64.dmg](https://github.com/oscillomancer/quire/releases/download/v0.1.0/quire-0.1.0-macos-arm64.dmg) | [zip](https://github.com/oscillomancer/quire/releases/download/v0.1.0/quire-0.1.0-macos-arm64.zip) |
+| Windows (x86_64) | [quire-0.1.0-windows-x86_64.exe](https://github.com/oscillomancer/quire/releases/download/v0.1.0/quire-0.1.0-windows-x86_64.exe) (per user, no admin) | [zip](https://github.com/oscillomancer/quire/releases/download/v0.1.0/quire-0.1.0-windows-x86_64.zip) |
+
+The packages are unsigned. [Installing Quire](docs/guides/installing.md)
+covers user-space installation, unsigned first-launch steps, optional stock
+plugins for other hosts and the bundled MCP helper/skill.
 
 ## Building
 
