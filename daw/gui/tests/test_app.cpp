@@ -1159,6 +1159,7 @@ TEST_CASE("the transport bar drives the transport, the tempo and the meter (P5.5
     CHECK(*bar->nextDeadline() == statusAt + std::chrono::milliseconds(250));
     bar->sync(false, statusAt + std::chrono::milliseconds(250));
     CHECK(*bar->nextDeadline() == statusAt + std::chrono::milliseconds(500));
+    CHECK(a.root->find("transport.play")->valueText() == "stop");  // drawn as ■
     // Recording needs an armed track with an input.
     json::Value add = json::Value::object();
     add["name"] = "Rec";
