@@ -127,8 +127,11 @@ class MidiEditor {
     Status edit(json::Value ops, std::optional<std::uint64_t> expectedVersion =
                                      {});  // midi.edit on the open item, keeping the selection
     void selectAll();
+    void selectNone();
     void quantize();
     void transpose(int semitones);
+    void nudge(int steps);  // the selected notes, by grid steps
+    // The selected notes; with the event list shown, its selected rows.
     void removeSelected();
     void duplicate();
     // The note clipboard: copies keep the notes' pitches and their places

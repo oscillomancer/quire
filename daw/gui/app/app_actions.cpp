@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <utility>
+#include <vector>
 
 #include "supple/engine/midi_control.h"
 #include "supple/json/parse.h"
@@ -58,15 +59,15 @@ std::vector<std::string> keySections(const ui::Root& root) {
     if (typing) sections.push_back("text");
     const ui::Node* context = root.focused();
     if (const auto at = root.lastPointer(); at && !typing)
-        for (const char* panel : {"midi.editor", "mixer", "arrange"})
+        for (const char* panel : {"midi.editor", "mixer", "fx", "arrange"})
             if (const ui::Node* n = root.find(panel);
                 n && n->visible && n->bounds().contains(*at)) {
                 context = n;
                 break;
             }
     for (const ui::Node* n = context; n; n = n->parent())
-        if (n->id() == "midi.editor" || n->id() == "mixer") {
-            sections.push_back(n->id() == "mixer" ? "mixer" : "midi");
+        if (n->id() == "midi.editor" || n->id() == "mixer" || n->id() == "fx") {
+            sections.push_back(n->id() == "midi.editor" ? "midi" : n->id());
             break;
         }
     sections.push_back("arrange");
@@ -611,12 +612,18 @@ void AppActions::control(const std::vector<engine::EngineApp::ControlEvent>& eve
     }
 }
 
-std::string AppActions::keysFor(std::string_view action) const {
-    const auto bindings = keymap_.bindingsFor(action);
-    if (bindings.empty()) return {};
+std::string AppActions::keysFor(std::string_view action, bool all) const {
+    std::vector<std::string> shown;
+    for (const actions::Binding& b : keymap_.bindingsFor(action)) {
+        std::string keys;
+        for (const actions::Chord& c : b.keys)
+            keys += (keys.empty() ? "" : " ") + actions::describe(c);
+        // The same keys bound in another section show once.
+        if (std::find(shown.begin(), shown.end(), keys) == shown.end()) shown.push_back(keys);
+        if (!all) break;
+    }
     std::string out;
-    for (const actions::Chord& c : bindings.front().keys)
-        out += (out.empty() ? "" : " ") + actions::describe(c);
+    for (const std::string& keys : shown) out += (out.empty() ? "" : ", ") + keys;
     return out;
 }
 

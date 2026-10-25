@@ -186,7 +186,9 @@ instructions are in `docs/guides/installing.md`.
   whole chain, and a plug-in's right-click menu renames that instance.
   Dragging one of several selected tracks (TCP or mixer) moves them all.
   Keys act on the panel under the pointer (Delete or Alt+C removes items
-  over the arrange view, notes over the MIDI editor). The arrange view's
+  over the arrange view, notes over the MIDI editor). Every key that is not
+  part of a gesture or a focused control is a rebindable action, and the
+  actions list shows all of an action's keys. The arrange view's
   right-click menus cut, copy, paste at the pointer, duplicate, delete and
   merge MIDI items (`midi.merge`, also an item's MIDI takes); the MIDI
   editor's grid menu deletes, copies, cuts, pastes and duplicates notes. Each effect's row in the FX chain

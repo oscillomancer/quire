@@ -35,13 +35,12 @@ bool draggingSlider(const ui::Node& node) {
 
 // A chain row: paints its selection, selects the effect on a left press
 // (with the press's modifiers and click count), and reorders by dragging
-// (onDrag) or with Alt+Up / Alt+Down (fx.move).
+// (onDrag; the keys are the ui.fx.move_up/down actions).
 class Row : public ui::Node {
   public:
     enum class Phase { Move, Drop, Cancel };
-    Row(std::string id, std::function<void(unsigned mods, int clicks)> onSelect,
-        std::function<void(int)> onMove = {})
-        : Node(std::move(id)), onSelect_(std::move(onSelect)), onMove_(std::move(onMove)) {
+    Row(std::string id, std::function<void(unsigned mods, int clicks)> onSelect)
+        : Node(std::move(id)), onSelect_(std::move(onSelect)) {
         interactive = true;
         focusable = true;
         layout.dir = ui::Layout::Dir::Column;
@@ -98,23 +97,11 @@ class Row : public ui::Node {
             if (auto callback = onDrag) callback(Phase::Cancel, {});
             return true;
         }
-        if (!onMove_ || !(e.mods & ui::kAlt)) return false;
-        if (e.key == SDLK_UP) {
-            auto callback = onMove_;
-            callback(-1);
-            return true;
-        }
-        if (e.key == SDLK_DOWN) {
-            auto callback = onMove_;
-            callback(1);
-            return true;
-        }
         return false;
     }
 
   private:
     std::function<void(unsigned, int)> onSelect_;
-    std::function<void(int)> onMove_;
     std::optional<ui::Point> pressAt_;
     bool moving_ = false;
 };
@@ -1024,9 +1011,7 @@ void FxWindow::buildRow(ui::Node& body, model::Id fx, std::size_t index, bool in
     const std::string prefix = input ? "ifx." : "fx.";
     const std::string id = fx.str();
     auto& row = body.emplace<Row>(
-        prefix + "row." + id, [this, fx](unsigned mods, int clicks) { press(fx, mods, clicks); },
-        input ? std::function<void(int)>{}
-              : std::function<void(int)>{[this, fx](int delta) { moveFx(fx, delta); }});
+        prefix + "row." + id, [this, fx](unsigned mods, int clicks) { press(fx, mods, clicks); });
     row.selected = picked(fx);
     if (!input)  // drag the row to reorder the chain
         row.onDrag = [this, fx](Row::Phase phase, ui::Point p) {
@@ -1317,15 +1302,16 @@ void FxWindow::dragRow(model::Id fx, int phase, ui::Point p) {
     if (dispatch("fx.move", std::move(args))) refresh();
 }
 
-void FxWindow::moveFx(model::Id fx, int delta) {
+void FxWindow::moveSelected(int delta) {
+    if (!isOpen() || !hasSelected()) return;
     const std::vector<model::Id> c = chain();
-    auto it = std::find(c.begin(), c.end(), fx);
+    auto it = std::find(c.begin(), c.end(), selected_);
     if (it == c.end()) return;
     const auto from = static_cast<std::ptrdiff_t>(it - c.begin());
     const auto to = from + delta;
     if (to < 0 || to >= static_cast<std::ptrdiff_t>(c.size())) return;
     json::Value args = json::Value::object();
-    args["fx"] = fx.str();
+    args["fx"] = selected_.str();
     args["index"] = static_cast<std::int64_t>(to);
     if (dispatch("fx.move", std::move(args))) refresh();
 }

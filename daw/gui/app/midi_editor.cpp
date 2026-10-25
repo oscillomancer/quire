@@ -6,8 +6,6 @@
 #include "panel_height.h"
 #include "supple/ui/shortcut.h"
 
-#include <SDL3/SDL_keycode.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -347,44 +345,6 @@ class Roll : public ui::Node {
             if (ops.size() > 0) (void)editor_.edit(std::move(ops), s_.gestureVersion);
             repaintAll();
             return true;
-        }
-        return false;
-    }
-
-    bool onKey(const ui::KeyEvent& e) override {
-        const bool shift = e.mods & ui::kShift;
-        // Delete, the clipboard keys and Ctrl+A are the keymap's (midi section).
-        switch (e.key) {
-            case SDLK_UP:
-                editor_.transpose(shift ? 12 : 1);
-                return true;
-            case SDLK_DOWN:
-                editor_.transpose(shift ? -12 : -1);
-                return true;
-            case SDLK_LEFT:
-            case SDLK_RIGHT: {
-                if (s_.selected.empty()) return false;
-                json::Value op = json::Value::object(), sel = json::Value::array();
-                for (std::size_t i : s_.selected) sel.push_back(static_cast<std::int64_t>(i));
-                op["op"] = "move";
-                op["notes"] = std::move(sel);
-                op["beats"] = (e.key == SDLK_LEFT ? -1.0 : 1.0) * s_.grid;
-                json::Value ops = json::Value::array();
-                ops.push_back(std::move(op));
-                (void)editor_.edit(std::move(ops));
-                return true;
-            }
-            case SDLK_ESCAPE:
-                if (s_.selected.empty()) return false;
-                s_.selected.clear();
-                repaintAll();
-                return true;
-            case SDLK_Q:
-                if (e.mods & (ui::kCtrl | ui::kAlt)) return false;
-                editor_.quantize();
-                return true;
-            default:
-                break;
         }
         return false;
     }
@@ -761,15 +721,30 @@ MidiEditor::MidiEditor(ui::Root& root, AppActions& actions, cmd::Dispatcher& dis
         for (const std::string& it : candidates)
             if (isMidi(it) && open(it)) return;
     });
-    actions_.addUi("ui.midi.quantize", "MIDI: quantize selected notes", [this] { quantize(); });
-    actions_.addUi("ui.midi.notes.delete", "MIDI: delete selected notes",
+    actions_.addUi("ui.midi.quantize", "MIDI: quantize selected notes (or all)",
+                   [this] { quantize(); });
+    actions_.addUi("ui.midi.notes.delete", "MIDI: delete selected notes (or the event list's)",
                    [this] { removeSelected(); });
+    actions_.addUi("ui.midi.notes.up", "MIDI: transpose selected notes up a semitone",
+                   [this] { transpose(1); });
+    actions_.addUi("ui.midi.notes.down", "MIDI: transpose selected notes down a semitone",
+                   [this] { transpose(-1); });
+    actions_.addUi("ui.midi.notes.octave_up", "MIDI: transpose selected notes up an octave",
+                   [this] { transpose(12); });
+    actions_.addUi("ui.midi.notes.octave_down", "MIDI: transpose selected notes down an octave",
+                   [this] { transpose(-12); });
+    actions_.addUi("ui.midi.notes.earlier", "MIDI: move selected notes a grid step earlier",
+                   [this] { nudge(-1); });
+    actions_.addUi("ui.midi.notes.later", "MIDI: move selected notes a grid step later",
+                   [this] { nudge(1); });
     actions_.addUi("ui.midi.notes.copy", "MIDI: copy selected notes", [this] { copySelected(); });
     actions_.addUi("ui.midi.notes.cut", "MIDI: cut selected notes", [this] { cutSelected(); });
     actions_.addUi("ui.midi.notes.paste", "MIDI: paste notes at the playhead", [this] { paste(); });
     actions_.addUi("ui.midi.notes.duplicate", "MIDI: duplicate selected notes after themselves",
                    [this] { duplicate(); });
     actions_.addUi("ui.midi.notes.select_all", "MIDI: select all notes", [this] { selectAll(); });
+    actions_.addUi("ui.midi.notes.select_none", "MIDI: clear the note selection",
+                   [this] { selectNone(); });
 }
 
 MidiEditor::~MidiEditor() = default;
@@ -1232,6 +1207,12 @@ void MidiEditor::selectAll() {
     if (velocity_) velocity_->invalidate();
 }
 
+void MidiEditor::selectNone() {
+    state_.selected.clear();
+    if (roll_) roll_->invalidate();
+    if (velocity_) velocity_->invalidate();
+}
+
 void MidiEditor::quantize() {
     if (!isOpen()) return;
     json::Value op = json::Value::object();
@@ -1254,8 +1235,24 @@ void MidiEditor::transpose(int semitones) {
     (void)edit(std::move(ops));
 }
 
-void MidiEditor::removeSelected() {
+void MidiEditor::nudge(int steps) {
     if (!isOpen() || state_.selected.empty()) return;
+    json::Value op = json::Value::object();
+    op["op"] = "move";
+    op["notes"] = selectionOf(state_);
+    op["beats"] = steps * state_.grid;
+    json::Value ops = json::Value::array();
+    ops.push_back(std::move(op));
+    (void)edit(std::move(ops));
+}
+
+void MidiEditor::removeSelected() {
+    if (!isOpen()) return;
+    if (eventList_ && listPane_ && listPane_->visible) {  // its notes and controls
+        eventList_->removeSelected();
+        return;
+    }
+    if (state_.selected.empty()) return;
     json::Value op = json::Value::object();
     op["op"] = "remove";
     op["notes"] = selectionOf(state_);

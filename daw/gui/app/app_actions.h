@@ -96,7 +96,9 @@ class AppActions {
                   std::function<Status(const json::Value& value)> run);
     // Shown by the app (status line): the last action's error, if any.
     std::function<void(const std::string&)> onError;
-    std::string keysFor(std::string_view action) const;  // "Ctrl+Z", or ""
+    // The action's first key binding ("Ctrl+Z", or ""), for menus; with
+    // all, every binding ("Ctrl+Shift+Z, Ctrl+Y"), for the actions list.
+    std::string keysFor(std::string_view action, bool all = false) const;
 
     // MIDI learn for actions (ADR-0027): the controls bound to them, saved
     // in controlsFile() (nothing is saved without one).

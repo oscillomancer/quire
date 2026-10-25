@@ -2,8 +2,6 @@
 // Copyright (c) 2026 Supple Audio
 #include "midi_event_list.h"
 
-#include <SDL3/SDL_keycode.h>
-
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -82,7 +80,6 @@ class EventRows : public ui::List {
     std::size_t editRow = 0, editColumn = 0;
     unsigned mods = 0;
     std::function<void(std::size_t, std::size_t)> editCell;
-    std::function<void()> erase;
     std::function<void()> cancelEdit;
     void placeField(const ui::Canvas& canvas) {
         auto r = bounds();
@@ -115,11 +112,7 @@ class EventRows : public ui::List {
     }
     bool onKey(const ui::KeyEvent& e) override {
         mods = e.mods;
-        if (e.key == SDLK_DELETE || e.key == SDLK_BACKSPACE) {
-            if (erase) erase();
-            return true;
-        }
-        return List::onKey(e);
+        return List::onKey(e);  // Delete is the keymap's (ui.midi.notes.delete)
     }
 };
 
@@ -153,7 +146,6 @@ std::unique_ptr<ui::Node> MidiEventList::build() {
     rows.editCell = [this](std::size_t row, std::size_t column) {
         begin(row, static_cast<Column>(column));
     };
-    rows.erase = [this] { remove(); };
     rows.cancelEdit = [this] { cancel(); };
     rows.paintRow = [this](ui::Canvas& c, std::size_t row, const ui::Rect& r, bool) {
         c.fillRect(r, c.theme().color(selected(row) ? "selection" : "ground"));
@@ -408,7 +400,7 @@ void MidiEventList::submit(const std::string& text) {
     root_.focus(list_);
 }
 
-void MidiEventList::remove() {
+void MidiEventList::removeSelected() {
     sync();
     auto ops = json::Value::array();
     auto notes = json::Value::array();

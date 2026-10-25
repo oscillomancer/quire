@@ -767,6 +767,9 @@ TEST_CASE("actions list: keys after a click on a row, overriding defaults, and a
     REQUIRE(a.root->click("keys.reset.confirm"));
     CHECK(a.actions->keysFor("track.add:master").empty());
     CHECK(a.actions->keysFor("item.split:playhead") == "S");
+    // Menus show an action's first key; the actions list shows them all.
+    CHECK(a.actions->keysFor("edit.delete") == "Delete");
+    CHECK(a.actions->keysFor("edit.delete", true) == "Delete, Alt+C");
     auto saved = actions::Keymap::load(a.actions->keymapFile());
     REQUIRE(saved);
     CHECK(saved->bindings() == actions::Keymap::defaults().bindings());

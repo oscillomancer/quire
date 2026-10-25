@@ -35,6 +35,7 @@ class MidiEventList {
     void activate(bool shown);
     void cancel();
     RowText rowText(std::size_t row) const;
+    void removeSelected();  // the selected rows, notes and controls, in one midi.edit
     ui::List* list() const { return list_; }
 
   private:
@@ -48,7 +49,6 @@ class MidiEventList {
     bool selected(std::size_t row) const;
     void begin(std::size_t row, Column column);
     void submit(const std::string& text);
-    void remove();
     void add();
     void refreshSelection();
     void status(std::string text);

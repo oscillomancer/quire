@@ -412,7 +412,8 @@ cancels the gesture. Wheel zoom holds the **project cursor** (the playhead,
 the transport position the position display shows) still by default, or the
 mouse pointer when the mouse setting `wheel.zoom` is `mouse_pointer` (Edit >
 Mouse modifiers); a cursor outside the visible
-lanes falls back to the pointer. Keyboard zoom anchors at the playhead. The
+lanes falls back to the pointer. Keyboard zoom (`ui.arrange.zoom_in/out`:
+= or Shift+= or Keypad +, - or Keypad -) anchors at the playhead. The
 timeline's start stops the view, so zooming out near it pulls the anchor left
 on screen; zooming back in returns it to where it was, as each step holds
 the anchor where the first step of the run found it. The run ends when anything
@@ -641,8 +642,9 @@ after its name, from its first CLAP feature after the main category
 ("Ghyll (reverb)", "Yarrow (eq)", "Marram (synth)"), and the search matches
 that too; the browser also opens on its own from a
 strip's "+", titled with the track and with its own Close), reorder by
-dragging a row (an insertion bar; Escape cancels; Alt+Up/Down on a focused
-row too; no arrow buttons), bypass vs offline
+dragging a row (an insertion bar; Escape cancels; Alt+Up/Down, the
+`fx` section's `ui.fx.move_up/down`, move the selected effect; no arrow
+buttons), bypass vs offline
 (distinct, `reaper-ux.md` addendum), a double click on a row opens that
 effect's own GUI; a left double click on empty chain space (including the
 "No effects yet" message or below the last row) opens Add plugin, as in the
@@ -750,7 +752,11 @@ opens **Delete**, **Copy**, **Cut**, **Paste** (at the pointer's beat on the
 grid, pitches as copied) and **Duplicate** for the selected notes; the same
 actions (`ui.midi.notes.*`) have the arrange view's keys in the `midi`
 section: Delete, Backspace and Alt+C, Ctrl+C, Ctrl+X, Ctrl+V (at the
-playhead), Ctrl+D and Ctrl+A.
+playhead), Ctrl+D and Ctrl+A. The rest of the editor's keys are actions in
+that section too: Up/Down transpose the selection a semitone (Shift: an
+octave), Left/Right move it a grid step, Q quantizes it (every note when
+none is selected), Escape clears it. With the event list shown, the delete
+action removes its selected rows, notes and CC events alike.
 
 The panel's top border is a drag handle: dragging resizes the panel (up is
 taller; up to nearly the whole window, always leaving the transport and a strip
@@ -857,7 +863,8 @@ Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
   context-dependent arguments resolve from the selection ("selected
   tracks") at invocation.
 - **Actions list** (`?`): fuzzy search over names, descriptions and
-  commands; shows bound keys; runs, binds (Ctrl+B, then the chord), adds to
+  commands; shows every key bound to an action (menus show only the
+  first); runs, binds (Ctrl+B, then the chord), adds to
   toolbar/menu (Ctrl+T, Ctrl+M), and learns a MIDI control for it (Ctrl+L:
   the learn dialog of §4.5 with the CC mode and input choice). The list shows
   a bound control after the keys. A press (note on, CC above 0, program
@@ -885,10 +892,10 @@ Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
   features: explode onto tracks or in sequence, render with FX as a new take
   or in place, delete the heard take, show all takes (`ui.item.takes`).
 - **Keymaps:** per context section (global, arrange, MIDI editor, mixer,
-  text field), chords allowed, conflicts shown in the editor. A key looks in
-  `text` while a text field has focus, in `midi` or `mixer` while the
-  pointer is over that panel (else while the focus is inside it: the pointer
-  is over the bars or outside the window), then in `arrange` (its defaults
+  FX window, text field), chords allowed, conflicts shown in the editor. A
+  key looks in `text` while a text field has focus, in `midi`, `mixer` or
+  `fx` while the pointer is over that panel (else while the focus is inside
+  it: the pointer is over the bars or outside the window), then in `arrange` (its defaults
   edit the shared selection) and `global`, innermost first
   (`gui::keySections`). So a key acts on what is under the pointer: Delete
   over the arrange view removes the selected items even while the MIDI
@@ -1082,7 +1089,11 @@ Quire's own character, not a REAPER clone or a generic dark theme
 ## 8. Commands and UI state
 
 Every GUI action is a command or a UI action in the actions list
-(`app_actions.h`); the GUI never edits the session any other way. State that
+(`app_actions.h`); the GUI never edits the session any other way. A panel
+keeps only the keys of a gesture in progress or a focused control (Escape
+cancels a drag, Enter confirms a dialog, a list's arrows move its
+selection); every other key is a keymap binding of an action, so it shows
+in the actions list and can be rebound. State that
 is not the session's (selection, zoom and scroll, panel sizes, screensets,
 plug-in editor placements) lives in the UI sidecar (§1.2); `gui.selection`
 exposes the selection to agents.

@@ -486,7 +486,10 @@ int main(int argc, char** argv) {
     appActions.addUiFor("ui.fx.chain", "FX: chain…", "track", [&](const json::Value& v) -> Status {
         return fxWindow.openFor(uiState, v);
     });
-    // The colour menu on the first selected track colours every selected one.
+    appActions.addUi("ui.fx.move_up", "FX: move the selected plugin up the chain",
+                     [&] { fxWindow.moveSelected(-1); });
+    appActions.addUi("ui.fx.move_down", "FX: move the selected plugin down the chain",
+                     [&] { fxWindow.moveSelected(1); });
     // How many channels the first selected track has (one track: the count is its own).
     appActions.addUi("ui.track.channels", "Track: channels of the first selected…", [&] {
         const auto id = uiState.selectedTracks.empty()
@@ -497,6 +500,7 @@ int main(int argc, char** argv) {
                                       "select a track first"));
         if (!st && appActions.onError) appActions.onError("Track: channels: " + st.error().message);
     });
+    // The colour menu on the first selected track colours every selected one.
     appActions.addUiFor("ui.track.color", "Track: color…", "track",
                         [&](const json::Value& v) -> Status {
                             std::string text = v.isString() ? v.asString() : std::string{};
@@ -761,6 +765,10 @@ int main(int argc, char** argv) {
     });
     appActions.addUi("ui.keys.reset", "Edit: reset key bindings to the defaults\u2026",
                      [&] { gui::openKeymapReset(root, appActions); });
+    appActions.addUi("ui.arrange.zoom_in", "View: zoom in (about the playhead)",
+                     [&] { shell.arrange()->zoomStep(true); });
+    appActions.addUi("ui.arrange.zoom_out", "View: zoom out (about the playhead)",
+                     [&] { shell.arrange()->zoomStep(false); });
     appActions.addUi("ui.marker.add", "Marker: add at playhead",
                      [&] { shell.arrange()->addMarker(); });
     appActions.addUi("ui.region.add", "Region: add over loop range",
