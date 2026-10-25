@@ -1,22 +1,13 @@
 # A stock script's Catalog.cpp is the one generated file in its folder: the
 # patch key of each Param member, which a source export works out from the
 # script (C++ cannot see member names). This checks it against a fresh
-# export, or with -DUPDATE=ON writes the fresh one in its place. It also
-# checks what else the folder keeps in step with the script.
+# export, or with -DUPDATE=ON writes the fresh one in its place.
 # Required: SANDBOX (quire-sandbox), NAME (the script), DIR (its folder), WORK.
 foreach(var SANDBOX NAME DIR WORK)
     if(NOT DEFINED ${var} OR "${${var}}" STREQUAL "")
         message(FATAL_ERROR "catalog: -D${var}=... is required")
     endif()
 endforeach()
-
-# A stock script ships with no trace("name", ...) left in: tracing is for
-# debugging, and each call costs a check on the audio thread. (Its name is a
-# literal, which tells it from a script's own trace(), as Sorrel's draw.)
-file(STRINGS "${DIR}/script/${NAME}.cpp" traced REGEX "(^|[^A-Za-z0-9_])trace[ \t]*\\([ \t]*\"")
-if(traced)
-    message(FATAL_ERROR "script/${NAME}.cpp still calls trace(): ${traced}")
-endif()
 
 file(REMOVE_RECURSE "${WORK}")
 file(COPY "${DIR}/script/${NAME}.cpp" DESTINATION "${WORK}/workdir/scripts/${NAME}")

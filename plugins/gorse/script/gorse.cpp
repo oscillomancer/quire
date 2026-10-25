@@ -1481,8 +1481,8 @@ struct Gorse : Effect {
     }
 
     // A level history as a path through the midpoints of its columns.
-    void trace(Canvas& g, const SharedArray<float, 1024>& v, int head, int count, double step,
-               bool fromEdge) {
+    void historyPath(Canvas& g, const SharedArray<float, 1024>& v, int head, int count, double step,
+                     bool fromEdge) {
         double qx = gx + gw, qy = levelY(eased(v, head, 0, count));
         if (fromEdge) {
             g.moveTo(qx, gy + gh);
@@ -1560,20 +1560,20 @@ struct Gorse : Effect {
         }
         if (count > 1) {
             g.beginPath();
-            trace(g, hOut, head, count, step, true);
+            historyPath(g, hOut, head, count, step, true);
             g.linearGradient(0, gy, 0, gy + gh, 0x6A5F52, 0x2A231D);
             g.globalAlpha(0.8);
             g.fill();
             g.globalAlpha(1.0);
             g.beginPath();
-            trace(g, hOut, head, count, step, false);
+            historyPath(g, hOut, head, count, step, false);
             g.strokeStyle(kCurve);
             g.globalAlpha(0.8);
             g.lineWidth(1.1);
             g.lineJoin(LineJoin::Round);
             g.stroke();
             g.beginPath();
-            trace(g, hIn, head, count, step, false);
+            historyPath(g, hIn, head, count, step, false);
             g.strokeStyle(kLinen);
             g.globalAlpha(0.35);
             g.lineWidth(1);
