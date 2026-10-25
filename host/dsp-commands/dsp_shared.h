@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 // DSP scripts (ADR-0032), shared by the engine and the sandbox: the commands
-// that write, check, read and list the scripts the script player turns into
+// that write, edit, check, read and list the scripts the script player turns into
 // plugins. A script is <library>/<name>/<name>.cpp (Host::scriptDir()); once
 // it compiles, plugin.list shows it under its own id and it is loaded, set
 // and saved like any other plugin. Live instances follow edits by themselves.
@@ -66,6 +66,13 @@ struct WriteResult {
     std::vector<Diagnostic> diagnostics;
     std::optional<PluginSummary> plugin;
     bool listed = false;
+};
+struct Replacement {
+    std::string before, after;
+};
+struct EditArgs {
+    std::string name;
+    std::vector<Replacement> edits;
 };
 struct CheckArgs {
     std::optional<std::string> name, source;
@@ -240,6 +247,116 @@ Status uniqueId(const Host& a, const std::string& id, const std::string& name,
                  path, "give Info.id a value no other script in the library has");
 }
 
+// The line, from 1, that holds byte `at` of `text`.
+inline std::int64_t lineAt(const std::string& text, std::size_t at) {
+    return 1 + std::count(text.begin(), text.begin() + static_cast<std::ptrdiff_t>(at), '\n');
+}
+
+// A few characters of `text` from `at`, line breaks and tabs shown.
+inline std::string excerpt(const std::string& text, std::size_t at) {
+    std::string out;
+    for (std::size_t i = at; i < text.size() && i < at + 24; ++i)
+        out += text[i] == '\n'   ? "\\n"
+               : text[i] == '\r' ? "\\r"
+               : text[i] == '\t' ? "\\t"
+                                 : std::string(1, text[i]);
+    return out;
+}
+
+// `text` after `edits`, each replacing the one place its old text is in the
+// script as the edits before it left it; an error at the first edit whose old
+// text is nowhere, or in more than one place.
+inline Result<std::string> applyEdits(std::string text, const std::vector<Replacement>& edits) {
+    // Plain line ends as Windows ones, where the script has those.
+    auto crlf = [](const std::string& from) {
+        std::string out;
+        for (std::size_t i = 0; i < from.size(); ++i) {
+            if (from[i] == '\n' && (i == 0 || from[i - 1] != '\r')) out += '\r';
+            out += from[i];
+        }
+        return out;
+    };
+    for (std::size_t k = 0; k < edits.size(); ++k) {
+        std::string old = edits[k].before, replacement = edits[k].after;
+        // A script saved with Windows line ends, edited with text copied
+        // without them (as a caller usually has it).
+        if (text.find(old) == std::string::npos && old.find('\n') != std::string::npos &&
+            old.find('\r') == std::string::npos && text.find("\r\n") != std::string::npos) {
+            old = crlf(old);
+            replacement = crlf(replacement);
+        }
+        const std::string path = "/edits/" + std::to_string(k) + "/old";
+        const std::string which = "edit " + std::to_string(k) + "'s old text";
+        const std::size_t at = text.find(old);
+        if (at == std::string::npos) {
+            // The longest start of it that the script has, to say where it
+            // parts, when that start is in one place.
+            std::size_t lo = 0, hi = old.size();
+            while (lo < hi) {
+                const std::size_t mid = (lo + hi + 1) / 2;
+                if (text.find(old.data(), 0, mid) != std::string::npos)
+                    lo = mid;
+                else
+                    hi = mid - 1;
+            }
+            std::string message = which + " is not in the script";
+            const std::size_t from = lo > 0 ? text.find(old.data(), 0, lo) : std::string::npos;
+            if (from != std::string::npos &&
+                text.find(old.data(), from + 1, lo) == std::string::npos) {
+                message += ": its first " + std::to_string(lo) + " characters are, at line " +
+                           std::to_string(lineAt(text, from)) + ", where the script goes on \"" +
+                           excerpt(text, from + lo) + "\" and old with \"" + excerpt(old, lo) +
+                           "\"";
+            }
+            return Error("dsp.edit", message, path,
+                         "dsp.get gives the script as it stands; copy old from it exactly, "
+                         "spaces and line breaks included");
+        }
+        if (text.find(old, at + 1) != std::string::npos) {
+            std::string lines;
+            std::size_t count = 0;
+            for (std::size_t p = at; p != std::string::npos; p = text.find(old, p + 1))
+                if (++count <= 5)
+                    lines += (lines.empty() ? "" : ", ") + std::to_string(lineAt(text, p));
+            return Error("dsp.edit",
+                         which + " is in the script " + std::to_string(count) +
+                             " times (at lines " + lines + (count > 5 ? ", ..." : "") + ")",
+                         path, "give old more of the text around the place, so it is in one place");
+        }
+        text.replace(at, old.size(), replacement);
+    }
+    return text;
+}
+
+// Saves `source` as the library's script `name` and compiles it: what
+// dsp.write and dsp.edit return. `path` is the argument the source came from.
+template <class Host>
+Result<WriteResult> saveScript(Host& owner, const std::string& name, const std::string& source,
+                               const std::string& path) {
+    if (source.size() > kMaxScriptBytes)
+        return Error("dsp.size",
+                     "the script is " + std::to_string(source.size()) + " bytes, more than 1 MiB",
+                     path, "split it up");
+    const fs::path file = scriptPath(owner, name);
+    Compiled compiled = compile(source);
+    if (compiled.plugin) SUPPLE_TRY(uniqueId(owner, compiled.plugin->id, name, path));
+    SUPPLE_TRY(writeFileAtomic(file, source));
+    WriteResult out{name,
+                    file.string(),
+                    compiled.ok,
+                    std::move(compiled.diagnostics),
+                    std::move(compiled.plugin),
+                    false};
+    if (out.plugin) {
+        // The player lists the library afresh at each scan.
+        auto found = owner.plugins(true);
+        if (found)
+            out.listed = std::any_of(found->begin(), found->end(),
+                                     [&](const auto& p) { return p.id == out.plugin->id; });
+    }
+    return out;
+}
+
 inline schema::Schema<Diagnostic> diagnosticSchema() {
     return schema::object<Diagnostic>("dsp_diagnostic")
         .field("severity", &Diagnostic::severity, schema::string().doc("error or warning"))
@@ -283,6 +400,19 @@ inline schema::Schema<PluginSummary> pluginSchema() {
                schema::arrayOf(file).doc(
                    "the script's files (AudioFile, Convolver), when it has any: give each an "
                    "absolute path in a patch, {\"properties\": {\"<key>\": \"/path.wav\"}}"))
+        .build();
+}
+
+inline schema::Schema<WriteResult> writeResultSchema() {
+    return schema::object<WriteResult>("dsp_write_result")
+        .field("name", &WriteResult::name, schema::string())
+        .field("path", &WriteResult::path, schema::string())
+        .field("ok", &WriteResult::ok, schema::boolean().doc("it compiled"))
+        .field("diagnostics", &WriteResult::diagnostics, schema::arrayOf(diagnosticSchema()))
+        .field("plugin", &WriteResult::plugin, pluginSchema())
+        .field("listed", &WriteResult::listed,
+               schema::boolean().doc("plugin.list shows it (the script player is on the plugin "
+                                     "path)"))
         .build();
 }
 
@@ -334,17 +464,7 @@ void registerDspCommands(cmd::Registry& registry) {
                      .field("source", &WriteArgs::source,
                             schema::string().minLength(1).doc("the whole C++ file"))
                      .build();
-        c.result = schema::object<WriteResult>("dsp_write_result")
-                       .field("name", &WriteResult::name, schema::string())
-                       .field("path", &WriteResult::path, schema::string())
-                       .field("ok", &WriteResult::ok, schema::boolean().doc("it compiled"))
-                       .field("diagnostics", &WriteResult::diagnostics,
-                              schema::arrayOf(diagnosticSchema()))
-                       .field("plugin", &WriteResult::plugin, pluginSchema())
-                       .field("listed", &WriteResult::listed,
-                              schema::boolean().doc("plugin.list shows it (the script player is on "
-                                                    "the plugin path)"))
-                       .build();
+        c.result = writeResultSchema();
         c.errors = {{"dsp.name", "not a script name", "use lower-case letters, digits, _ or -"},
                     {"dsp.size", "the script is longer than 1 MiB", "split it up"},
                     {"dsp.id_taken", "another script in the library has its id; not saved",
@@ -354,32 +474,55 @@ void registerDspCommands(cmd::Registry& registry) {
                              "plugin":"<any>","listed":"<any>"})"),
                        "empty"}};
         c.run = [app](const WriteArgs& a, Context& ctx) -> Result<WriteResult> {
-            Host& owner = app(ctx);
             SUPPLE_TRY(validName(a.name, "/name"));
-            if (a.source.size() > kMaxScriptBytes)
-                return Error(
-                    "dsp.size",
-                    "the script is " + std::to_string(a.source.size()) + " bytes, more than 1 MiB",
-                    "/source", "split it up");
-            const fs::path file = scriptPath(owner, a.name);
-            Compiled compiled = compile(a.source);
-            if (compiled.plugin)
-                SUPPLE_TRY(uniqueId(owner, compiled.plugin->id, a.name, "/source"));
-            SUPPLE_TRY(writeFileAtomic(file, a.source));
-            WriteResult out{a.name,
-                            file.string(),
-                            compiled.ok,
-                            std::move(compiled.diagnostics),
-                            std::move(compiled.plugin),
-                            false};
-            if (out.plugin) {
-                // The player lists the library afresh at each scan.
-                auto found = owner.plugins(true);
-                if (found)
-                    out.listed = std::any_of(found->begin(), found->end(),
-                                             [&](const auto& p) { return p.id == out.plugin->id; });
-            }
-            return out;
+            return saveScript(app(ctx), a.name, a.source, "/source");
+        };
+        registry.add(std::move(c));
+    }
+    {
+        Command<EditArgs, WriteResult> c;
+        c.name = "dsp.edit";
+        c.kind = Kind::Action;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Change part of a library script by replacing text; compile it, as dsp.write.";
+        c.description =
+            "For a change to part of a script, instead of sending all of it to dsp.write. Each "
+            "edit replaces old, which must be in the script exactly once, with new (empty "
+            "deletes it). The edits apply in order, each to the script as the ones before left "
+            "it, and all or none: when one fails, nothing is saved and the error says where old "
+            "and the script part. Then as dsp.write: it saves the script, compiles it and "
+            "returns the diagnostics; instances playing it follow within half a second.";
+        c.tags = {"dsp"};
+        auto replacement =
+            schema::object<Replacement>("dsp_edit")
+                .field("old", &Replacement::before,
+                       schema::string().minLength(1).doc("text the script has in one place"))
+                .field("new", &Replacement::after, schema::string().doc("what replaces it"))
+                .build();
+        c.args = schema::object<EditArgs>("dsp_edit_args")
+                     .field("name", &EditArgs::name, schema::string().minLength(1))
+                     .field("edits", &EditArgs::edits,
+                            schema::arrayOf(replacement).minItems(1).maxItems(256))
+                     .build();
+        c.result = writeResultSchema();
+        c.errors = {{"dsp.unknown", "no such script", "dsp.list names the library's scripts"},
+                    {"dsp.edit", "an edit's old text is not in the script, or in several places",
+                     "copy old exactly from dsp.get's source, with enough around it to be unique"},
+                    {"dsp.size", "the script would be longer than 1 MiB", "split it up"},
+                    {"dsp.id_taken", "another script in the library has its id; not saved",
+                     "give Info.id a value no other script has"}};
+        c.examples = {{"Widen a parameter's range",
+                       j(R"({"name":"gain","edits":[{"old":"-24, 24, 0","new":"-36, 36, 0"}]})"),
+                       j(R"({"name":"gain","path":"<any>","ok":true,"diagnostics":[],
+                             "plugin":"<any>","listed":"<any>"})"),
+                       "dsp_script"}};
+        c.run = [app](const EditArgs& a, Context& ctx) -> Result<WriteResult> {
+            Host& owner = app(ctx);
+            auto text = readScript(owner, a.name, "/name");
+            if (!text) return std::move(text).error();
+            auto edited = applyEdits(std::move(*text), a.edits);
+            if (!edited) return std::move(edited).error();
+            return saveScript(owner, a.name, *edited, "/edits");
         };
         registry.add(std::move(c));
     }

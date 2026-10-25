@@ -423,8 +423,8 @@ instructions are in `docs/guides/installing.md`.
   compiled as C++). So does the player (`plugins/suite/player`, built from
   `plugins/template`, staged with the stock plugins): one plugin per script
   in the script library, with the semantic-params extension, reloading a
-  script when its file changes. `dsp.write`, `dsp.check`, `dsp.get` and
-  `dsp.list` write and compile scripts (the app's library is
+  script when its file changes. `dsp.write`, `dsp.edit` (text replaced in
+  place), `dsp.check`, `dsp.get` and `dsp.list` write and compile scripts (the app's library is
   `<data>/<slug>/scripts`, shared with the sandbox), `dsp.test` measures
   one with standard signals or an audio file at any sample rate (and, when
   asked, parameter automation, a timed sidechain key or a note sequence)

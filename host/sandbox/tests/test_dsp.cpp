@@ -475,6 +475,49 @@ TEST_CASE("dsp.test gives what a script traced, interval by interval, and says w
     CHECK(result["problems"].at(0).asString().find("\"broken\"") != std::string::npos);
 }
 
+TEST_CASE("dsp.edit replaces text in a script in order, and saves nothing when an edit misses") {
+    Harness h;
+    h.write("gain", script("Gain", "com.example.edit",
+                           "    Param gain = decibels(\"Gain\", -24, 24, 0);\n"
+                           "    void process(Block& io) {}"));
+    auto edit = [&](std::string_view edits) {
+        auto args = json::Value::object();
+        args["name"] = "gain";
+        args["edits"] = json::parse(edits).value();
+        return h.bus->execute({"dsp.edit", args, kTest});
+    };
+    // The second edit sees what the first left.
+    auto edited = edit(R"([{"old":"-24, 24, 0","new":"-36, 36, 0"},
+                           {"old":"\"Gain\", -36","new":"\"Level\", -36"}])");
+    REQUIRE_MESSAGE(edited, (edited ? "" : edited.error().toString()));
+    CHECK((*edited)["ok"].asBool());
+    json::Value param = (*edited)["plugin"]["params"].at(0);
+    CHECK(param["min"].asDouble() == -36.0);
+    const fs::path file = (*edited)["path"].asString();
+    const std::string after = readTextFile(file).value();
+    CHECK(after.find("decibels(\"Level\", -36, 36, 0)") != std::string::npos);
+    // Text that is nowhere, or in two places: an error at the edit, and the
+    // script as it was, though the edit before it matched.
+    auto missing = edit(R"([{"old":"void process","new":"void process "},
+                            {"old":"decibels(\"Level\", -36, 24","new":"x"}])");
+    REQUIRE_FALSE(missing);
+    CHECK(missing.error().code == "dsp.edit");
+    CHECK(missing.error().path == "/args/edits/1/old");
+    CHECK(missing.error().message.find("at line 5") != std::string::npos);
+    auto twice = edit(R"([{"old":"36","new":"48"}])");
+    REQUIRE_FALSE(twice);
+    CHECK(twice.error().message.find("2 times") != std::string::npos);
+    CHECK(readTextFile(file).value() == after);
+    // A script saved with Windows line ends takes text copied without them,
+    // and keeps its own.
+    std::string windows;
+    for (char ch : after) windows += ch == '\n' ? std::string("\r\n") : std::string(1, ch);
+    REQUIRE(writeFileAtomic(file, windows));
+    auto lines = edit(R"([{"old":"36, 0);\n    void process","new":"36, 6);\n    void process"}])");
+    REQUIRE_MESSAGE(lines, (lines ? "" : lines.error().toString()));
+    CHECK(readTextFile(file).value().find("36, 6);\r\n    void process") != std::string::npos);
+}
+
 TEST_CASE("every patch in the synth guide plays on Marram") {
     if (!fs::exists(kStock / "Marram.clap")) {
         MESSAGE("skipped: no Marram in " << kStock.string());

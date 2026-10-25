@@ -705,3 +705,11 @@ drawing helpers) hides the base one, as in C++.
 `file` signal, with `audio_file`): material a generator cannot make, a
 recorded instrument or a drum loop, now goes through the harness and its
 measurements instead of a render and a separate read of the meters.
+
+### Editing in place (2026-10-24)
+
+`dsp.edit` replaces text in a library script (each `old` in exactly one
+place, in order, all or none) and then does what `dsp.write` does. An agent
+with only the MCP tools changed a line of a long script by sending all of
+it back, which costs the whole file each time and can lose code to a slip
+in the copy.

@@ -1122,6 +1122,208 @@ Result:
 
 ```
 
+## `dsp.edit@1`
+
+Change part of a library script by replacing text; compile it, as dsp.write.
+
+For a change to part of a script, instead of sending all of it to dsp.write. Each edit replaces old, which must be in the script exactly once, with new (empty deletes it). The edits apply in order, each to the script as the ones before left it, and all or none: when one fails, nothing is saved and the error says where old and the script part. Then as dsp.write: it saves the script, compiles it and returns the diagnostics; instances playing it follow within half a second.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `name` | string |  |  |  |  |
+| `edits` | array |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "dsp_write_result",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "it compiled"
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "dsp_diagnostic",
+        "properties": {
+          "severity": {
+            "type": "string",
+            "description": "error or warning"
+          },
+          "code": {
+            "type": "string",
+            "description": "script.<area>.<what>"
+          },
+          "message": {
+            "type": "string"
+          },
+          "hint": {
+            "type": "string",
+            "description": "what to write instead"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "column": {
+            "type": "integer"
+          }
+        },
+        "required": ["severity", "code", "message", "hint", "line", "column"],
+        "additionalProperties": false
+      }
+    },
+    "plugin": {
+      "type": "object",
+      "title": "dsp_plugin",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "description": "effect (audio in, audio out) or instrument (notes in)"
+        },
+        "params": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "dsp_param",
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "the patch key"
+              },
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "description": "continuous, integer, choice or toggle"
+              },
+              "unit": {
+                "type": "string",
+                "description": "dB, Hz, ms, % ..."
+              },
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "default": {
+                "type": "number"
+              },
+              "choices": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "meter": {
+                "type": "boolean",
+                "description": "an output the plugin reports"
+              }
+            },
+            "required": ["key", "name", "kind", "min", "max", "default", "choices", "meter"],
+            "additionalProperties": false
+          }
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "dsp_file",
+            "properties": {
+              "key": {
+                "type": "string",
+                "description": "the patch's properties key"
+              },
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "description": "audio (a sample) or impulse (a Convolver's response)"
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "required": ["key", "name", "kind"],
+            "additionalProperties": false
+          },
+          "description": "the script's files (AudioFile, Convolver), when it has any: give each an absolute path in a patch, {\"properties\": {\"<key>\": \"/path.wav\"}}"
+        }
+      },
+      "required": ["id", "name", "kind", "params"],
+      "additionalProperties": false
+    },
+    "listed": {
+      "type": "boolean",
+      "description": "plugin.list shows it (the script player is on the plugin path)"
+    }
+  },
+  "required": ["name", "path", "ok", "diagnostics", "listed"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `dsp.unknown`: no such script Hint: dsp.list names the library's scripts
+- `dsp.edit`: an edit's old text is not in the script, or in several places Hint: copy old exactly from dsp.get's source, with enough around it to be unique
+- `dsp.size`: the script would be longer than 1 MiB Hint: split it up
+- `dsp.id_taken`: another script in the library has its id; not saved Hint: give Info.id a value no other script has
+
+### Examples
+
+**Widen a parameter's range** (`dsp_script`)
+
+```json
+{
+  "name": "gain",
+  "edits": [
+    {
+      "old": "-24, 24, 0",
+      "new": "-36, 36, 0"
+    }
+  ]
+}
+
+```
+
+Result:
+
+```json
+{
+  "name": "gain",
+  "path": "<any>",
+  "ok": true,
+  "diagnostics": [],
+  "plugin": "<any>",
+  "listed": "<any>"
+}
+
+```
+
 ## `dsp.export@1`
 
 Export a DSP script as a plugin for other DAWs: a CLAP file, or C++ source.
