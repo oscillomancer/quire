@@ -695,9 +695,9 @@ offers it as the player does; it works only while the plugin is inactive,
 so the audio thread's writes and the host's reads never meet and the audio
 code needs no lock. While nothing traces, a call is one atomic load. The
 compiler holds a script to 16 names, a trace's limit, so none is dropped
-while it runs, and a stock script ships with none left in (its catalog
-check). A script's own member named `trace` (Sorrel's and Gorse's
-drawing helpers) hides the base one, as in C++.
+while it runs. A stock script ships with none left in (`plugins/AGENTS.md`).
+A script's own member named `trace` hides the base one, as in C++, so a
+script that has one cannot trace.
 
 ### Files through dsp.test (2026-10-24)
 

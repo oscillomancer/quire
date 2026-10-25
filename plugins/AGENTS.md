@@ -63,6 +63,10 @@ copies.
   over after `reset()` (each plugin's reset test checks this).
 - **Real time.** `process` and everything it calls follow the root rule:
   no allocation, locks or I/O; the script compiler enforces it for scripts.
+- **No traces left in.** `trace()` is for debugging with `dsp.test`; a
+  committed stock script calls it nowhere, and has no member of its own
+  named `trace` (one would hide the built-in, so the script could not be
+  traced).
 
 ## Specs and guides
 
