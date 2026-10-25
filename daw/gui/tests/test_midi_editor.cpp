@@ -524,7 +524,7 @@ TEST_CASE("MIDI editor: the grid's menu copies, pastes there, cuts and duplicate
     pick(4);  // Duplicate: right after themselves
     CHECK(s.notes.size() == 8);
     rightClick(f.at(6.5, 60));  // on the duplicated (selected) pair
-    pick(2);  // Cut
+    pick(2);                    // Cut
     CHECK(s.notes.size() == 6);
     rightClick(f.at(0.5, 60));
     pick(3);  // Paste the cut pair back, at beat 0
