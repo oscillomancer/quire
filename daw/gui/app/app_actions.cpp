@@ -221,6 +221,20 @@ AppActions::AppActions(const cmd::Registry& registry, cmd::Dispatcher& dispatche
         return json::Value::object();
     };
     registry_.add(removeTracks);
+    actions::Action duplicateTracks;
+    duplicateTracks.id = "track.duplicate:selected";
+    duplicateTracks.name = "Track: duplicate selected";
+    duplicateTracks.description =
+        "Duplicate every selected channel and buss with its FX, items, sends and automation, "
+        "one undo step; the copies become the selection.";
+    duplicateTracks.builtin = [this](const actions::Context&) -> Result<json::Value> {
+        if (ui_.selectedTracks.empty()) return Error("action.selection", "select tracks first");
+        auto copies = gui::duplicateTracks(dispatcher_, app_.head(), ui_.selectedTracks);
+        if (!copies) return std::move(copies).error();
+        if (!copies->empty()) ui_.selectedTracks = std::move(*copies);
+        return json::Value::object();
+    };
+    registry_.add(duplicateTracks);
     // Delete: what was selected last, tracks (TCP, mixer) or items (arrange).
     actions::Action remove;
     remove.id = "edit.delete";

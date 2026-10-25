@@ -96,6 +96,7 @@ class Mixer {
         ui::Point pos;
         ui::Rect source, marker;  // the dragged item; the insertion bar or target strip
         std::string target;       // Copy: the strip dropped on
+        bool chain = false;       // Copy: the plug-in's whole chain (Ctrl held)
         std::size_t index = 0;    // Reorder: the track.move / fx.move index
     };
     const DragView& drag() const { return *drag_; }
@@ -108,7 +109,10 @@ class Mixer {
     void rebuild();
     void update();
     void dragStrip(const std::string& track, DragPhase phase, ui::Point p);
-    void dragFx(const std::string& track, model::Id fx, DragPhase phase, ui::Point p);
+    void dragFx(const std::string& track, model::Id fx, DragPhase phase, ui::Point p,
+                unsigned mods);
+    void openFxMenu(model::Id fx, const ui::Rect& slot, ui::Point at);
+    void openFxRename(model::Id fx, const ui::Rect& slot);
     void dragSend(const std::string& track, DragPhase phase, ui::Point p);
     void endDrag(bool commit);
     void resolveStripDrop();

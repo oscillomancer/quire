@@ -70,6 +70,7 @@ class DragTracker {
   public:
     using Phase = Mixer::DragPhase;
     std::function<void(Phase, ui::Point)> notify;
+    unsigned mods = 0;  // the latest pointer event's modifiers
     bool down() const { return down_; }
     bool dragging() const { return dragging_; }
     void press(ui::Point p) {
@@ -119,6 +120,7 @@ class DragButton : public ui::Button {
             return Button::onPointer(e);
         }
         const bool left = e.button == 1;
+        drag.mods = e.mods;
         if (e.type == ui::PointerEvent::Type::Down && left) drag.press(e.pos);
         if (e.type == ui::PointerEvent::Type::Move && drag.move(e.pos)) return true;
         if (e.type == ui::PointerEvent::Type::Up && left && drag.release(e.pos)) {
@@ -139,17 +141,23 @@ class DragButton : public ui::Button {
 };
 
 // A plug-in in a strip's chain: a click opens its editor (a button), a drag
-// reorders it within the chain or copies it onto another strip.
+// reorders it within the chain or copies it onto another strip (with Ctrl,
+// the whole chain), a right-click opens its own menu.
 class FxSlot : public DragButton {
   public:
     FxSlot(std::string id, std::string text, std::function<void()> click, std::size_t at)
         : DragButton(std::move(id), std::move(text), std::move(click)), chainIndex(at) {}
-    const std::size_t chainIndex;  // its place in the track's chain
-    std::function<void()> remove;  // Alt+click
+    const std::size_t chainIndex;         // its place in the track's chain
+    std::function<void()> remove;         // Alt+click
+    std::function<void(ui::Point)> menu;  // a right-click (not the track's menu)
     bool onPointer(const ui::PointerEvent& e) override {
         if (e.type == ui::PointerEvent::Type::Down && e.button == 1 && (e.mods & ui::kAlt) &&
             remove) {
             remove();  // the press goes no further: no click, no drag
+            return true;
+        }
+        if (e.type == ui::PointerEvent::Type::Down && e.button == 3 && menu) {
+            menu(e.pos);
             return true;
         }
         return DragButton::onPointer(e);
@@ -529,11 +537,16 @@ Mixer::Mixer(ui::Root& root, AppActions& actions, cmd::Dispatcher& dispatcher,
       app_(app),
       meters_(meters),
       selectionEdit_(dispatcher, app, actions.ui()),
-      trackMenu_{root, dispatcher, app,
+      trackMenu_{root,
+                 dispatcher,
+                 app,
                  [this](const std::string& e) {
                      if (actions_.onError) actions_.onError(e);
                  },
-                 [this] { return actions_.ui().selectedTracks; }} {
+                 [this] { return actions_.ui().selectedTracks; },
+                 [this](std::vector<std::string> tracks) {
+                     actions_.ui().selectedTracks = std::move(tracks);
+                 }} {
     actions_.addUi("ui.mixer", "View: mixer", [this] { toggle(); });
 }
 
@@ -794,8 +807,11 @@ void Mixer::rebuild() {
                     run("ui.fx.editor", std::move(args));
                 },
                 at);
-            slot->drag.notify = [this, tid, fx](DragPhase phase, ui::Point p) {
-                dragFx(tid, fx, phase, p);
+            slot->drag.notify = [this, tid, fx, s = slot.get()](DragPhase phase, ui::Point p) {
+                dragFx(tid, fx, phase, p, s->drag.mods);
+            };
+            slot->menu = [this, fx, s = slot.get()](ui::Point p) {
+                openFxMenu(fx, s->bounds(), p);
             };
             slot->remove = [this, fx] {
                 json::Value args = json::Value::object();
@@ -981,7 +997,8 @@ void Mixer::dragStrip(const std::string& track, DragPhase phase, ui::Point p) {
     root_.requestAnimationFrame();
 }
 
-void Mixer::dragFx(const std::string& track, model::Id fx, DragPhase phase, ui::Point p) {
+void Mixer::dragFx(const std::string& track, model::Id fx, DragPhase phase, ui::Point p,
+                   unsigned mods) {
     DragView& d = *drag_;
     if (phase == DragPhase::Cancel) return endDrag(false);
     if (phase == DragPhase::Begin) {
@@ -990,12 +1007,19 @@ void Mixer::dragFx(const std::string& track, model::Id fx, DragPhase phase, ui::
         d.active = true;
         d.track = track;
         d.fx = fx.str();
-        if (ui::Node* slot = root_.find("mixer.fx." + d.fx)) d.label = slot->valueText();
         ghost_ = root_.addOverlay(std::make_unique<DragGhost>(drag_));
     }
     if (d.kind != DragView::Kind::Fx) return;
     d.pos = p;
     resolveFxDrop();
+    // Ctrl onto another strip carries the whole chain; the chip says so.
+    const auto id = model::Id::parse(track);
+    const model::Track* t = id ? app_.head().tracks.find(*id) : nullptr;
+    d.chain = (mods & ui::kCtrl) && d.drop == DragView::Drop::Copy && t;
+    if (d.chain)
+        d.label = "chain (" + std::to_string(t->chain.size()) + ")";
+    else if (ui::Node* slot = root_.find("mixer.fx." + d.fx))
+        d.label = slot->valueText();
     if (phase == DragPhase::End) return endDrag(true);
     root_.requestAnimationFrame();
 }
@@ -1125,6 +1149,45 @@ void Mixer::resolveFxDrop() {
     d.drop = DragView::Drop::Reorder;
 }
 
+// A plug-in's own menu (a right-click on it in the chain).
+void Mixer::openFxMenu(model::Id fx, const ui::Rect& slot, ui::Point at) {
+    if (!app_.head().fx.find(fx)) return;
+    ui::MenuItem rename;
+    rename.label = "Rename…";
+    rename.run = [this, fx, slot] { openFxRename(fx, slot); };
+    std::vector<ui::MenuItem> items;
+    items.push_back(std::move(rename));
+    root_.openPopup(
+        ui::makeMenu("mixer.fxmenu." + fx.str(), std::move(items), [this] { root_.closePopup(); }),
+        ui::Rect{at.x, at.y, 0, 0}, ui::Placement::Below);
+}
+
+// A name for this instance over its slot; an empty one goes back to the
+// plug-in's own name (fx.set label).
+void Mixer::openFxRename(model::Id fx, const ui::Rect& slot) {
+    const model::FxInstance* f = app_.head().fx.find(fx);
+    if (!f) return;
+    const std::string shown = f->label.empty() ? f->plugin.name : f->label;
+    auto field = std::make_unique<ui::TextField>("mixer.fxrename." + fx.str(), shown);
+    ui::TextField* edit = field.get();
+    edit->layout.width = ui::SizeRule::fixed(std::max(slot.w, 160.0f));
+    edit->layout.height = ui::SizeRule::fixed(24);
+    edit->onSubmit = [this, fx](const std::string& text) {
+        json::Value args = json::Value::object();
+        args["fx"] = fx.str();
+        args["label"] = text;  // a copy: closing destroys the field and its text
+        ui::Root& r = root_;
+        if (auto done = dispatcher_.execute({"fx.set", std::move(args), kOrigin});
+            !done && actions_.onError)
+            actions_.onError("mixer: " + done.error().message);
+        r.closePopup();  // last: it destroys this lambda's field
+    };
+    edit->onCancel = [this] { root_.closePopup(); };
+    root_.openPopup(std::move(field), ui::Rect{slot.x, slot.y, slot.w, 0});
+    edit->selectAll();
+    root_.focus(edit);
+}
+
 // The drag is over: drop it (one command, one undo step) or let it go.
 void Mixer::endDrag(bool commit) {
     const DragView done = *drag_;
@@ -1143,6 +1206,22 @@ void Mixer::endDrag(bool commit) {
         command = "track.move";
         args["track"] = done.track;
         args["index"] = static_cast<std::int64_t>(done.index);
+    } else if (done.drop == DragView::Drop::Copy && done.chain) {
+        // The whole chain, in order, after the target's own plug-ins.
+        const auto id = model::Id::parse(done.track);
+        const model::Track* t = id ? app_.head().tracks.find(*id) : nullptr;
+        const std::vector<model::Id> chain = t ? t->chain : std::vector<model::Id>{};
+        auto r = dispatcher_.transact("Copy FX chain", kOrigin, [&]() -> Result<json::Value> {
+            for (const model::Id fx : chain) {
+                json::Value one = json::Value::object();
+                one["fx"] = fx.str();
+                one["track"] = done.target;
+                SUPPLE_TRY(dispatcher_.execute({"fx.copy", std::move(one), kOrigin}));
+            }
+            return json::Value::object();
+        });
+        if (!r && actions_.onError) actions_.onError("mixer: " + r.error().message);
+        return;
     } else if (done.drop == DragView::Drop::Copy) {
         command = "fx.copy";
         args["fx"] = done.fx;

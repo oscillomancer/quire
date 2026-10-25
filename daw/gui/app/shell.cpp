@@ -144,11 +144,13 @@ std::unique_ptr<ui::Node> Shell::build(ui::Root& root, AppActions& actions) {
     tcp.envelopes = [this](const model::Id& track, const ui::Rect& anchor) {
         openEnvelopeMenu(track, anchor);
     };
-    trackMenu_ = std::make_unique<TrackMenu>(TrackMenu{root, dispatcher_, app_,
-                                                       [this](const std::string& e) {
-                                                           if (onError) onError(e);
-                                                       },
-                                                       [this] { return ui_.selectedTracks; }});
+    trackMenu_ = std::make_unique<TrackMenu>(TrackMenu{
+        root, dispatcher_, app_,
+        [this](const std::string& e) {
+            if (onError) onError(e);
+        },
+        [this] { return ui_.selectedTracks; },
+        [this](std::vector<std::string> tracks) { ui_.selectedTracks = std::move(tracks); }});
     tcp.mixer = [&actions] { (void)actions.run("ui.mixer"); };
     tcp.menu = [this](const model::Id& track, const ui::Rect& anchor,
                       std::function<void()> rename) {

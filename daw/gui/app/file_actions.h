@@ -62,13 +62,18 @@ class FileActions {
     void openPath(const std::filesystem::path& path);
     void saveAs(const std::filesystem::path& path);  // in projectFolderPath()
     void import(const std::vector<std::filesystem::path>& files);
-    // Project templates (File > Save template… / Load template…): a name
-    // prompt, and a list where a click starts a new project from a template
-    // and a right click offers to delete it.
-    void openSaveTemplate();
-    void openTemplateList();
-    void saveTemplate(const std::string& name);  // the prompt's Save
-    void loadTemplate(const std::string& name);  // after confirmDiscard
+    // Templates — of the project (File > Save template… / Load template…) or
+    // of one strip (Track > …, the first selected track): a name prompt, and a
+    // list where a click starts a new project from a template, or adds a
+    // track template's strip and selects it, and a right click offers to
+    // delete it.
+    enum class Template { Project, Track };
+    void openSaveTemplate(Template kind = Template::Project);
+    void openTemplateList(Template kind = Template::Project);
+    void saveTemplate(const std::string& name,
+                      Template kind = Template::Project);  // the prompt's Save
+    void loadTemplate(const std::string& name);            // after confirmDiscard
+    void loadTrackTemplate(const std::string& name);
     // The system's folder dialog, starting at `start`; `done` runs on the UI
     // thread with the chosen folder.
     void chooseFolder(const std::filesystem::path& start,

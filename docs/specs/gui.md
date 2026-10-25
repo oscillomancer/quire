@@ -376,6 +376,9 @@ extends from the last click in that view's order; a right-click on a selected
 track keeps the selection. The track menu's Delete (and the Delete key, when
 tracks were selected after items) removes every selected track as one undo
 step (`track.remove:selected`; the main master stays; children before folders).
+Its Duplicate (and Track > duplicate selected) copies every selected channel
+and buss right after its original as one undo step (`track.duplicate`, see
+session-model.md) and selects the copies.
 Commands: `track.*`, `route.*`, `fx.*` (bypass/offline), transport.
 
 ### 4.3 Arrange view
@@ -544,7 +547,10 @@ restores the default, which fits five plug-ins. The height is clamped like the
 MIDI editor's (what the center column leaves less a strip of the shell) and
 saved in the UI sidecar's `mixer` section. Dragging a plug-in within its chain
 reorders it (`fx.move`); dropping it on any part of another strip copies it, with
-its live settings, last in that strip's chain (`fx.copy`). Dragging a strip's
+its live settings, last in that strip's chain (`fx.copy`); with Ctrl held the
+drop copies the plug-in's whole chain, in order (the chip reads "chain (N)").
+A right-click on a plug-in opens its own menu: Rename… names that instance
+over its slot (`fx.set label`; an empty name goes back to the plug-in's). Dragging a strip's
 empty part moves it among the strips of its own type only (`track.move`, an
 index among its parent's children; `views::reorderIndex` in `track_layout.h` computes it, shared
 with the TCP). A drag shows an insertion bar or a target outline; Escape or a
@@ -802,6 +808,13 @@ starts a new, unsaved project from one (after the unsaved-changes question)
 with its own copy of the template's audio, and a right click offers
 Delete.
 
+**Track templates** keep one strip — its settings and both FX chains, not
+its items or routing — by name in `<config>/<slug>/track-templates/`
+(track.template.*): Track > Save as template… asks for a name for the first
+selected channel or buss, as above; Track > Add from template… lists them, a
+click adds that strip last under the master and selects it, and a right click
+offers Delete.
+
 ## 5. Agent panel (removed)
 
 The app has no built-in agent (ADR-0043). Agents drive it from an external
@@ -1033,8 +1046,8 @@ Quire's own character, not a REAPER clone or a generic dark theme
 - **Track colours, for organizing:** a small set (red, orange, yellow, green,
   teal, blue, violet, grey; `track.set {color}` also takes "#rrggbb") drawn as
   a stripe down the TCP row's left edge and under the mixer strip's name.
-  Picked from the track's right-click menu (Rename, Color…, Delete; the same
-  in the TCP and the mixer) or Track > color…. A pick colours every selected
+  Picked from the track's right-click menu (Rename, Color…, Duplicate,
+  Delete; the same in the TCP and the mixer) or Track > color…. A pick colours every selected
   track when the track is one of them (Track > color… always works on the
   selection), as one undo step.
 - **Calm by default:** colour reserved for state (armed, clipping, selected,

@@ -658,6 +658,59 @@ TEST_CASE("file actions: project templates save, start a new project and delete"
     CHECK(list->count() == 1);
 }
 
+TEST_CASE("file actions: track templates save the selected track, add it back and delete") {
+    App a;
+    if (!a.ok) return;
+    gui::FileActions files(*a.root, *a.actions, *a.dispatcher, *a.app, a.ui, a.window->sdl(),
+                           [](std::function<void()> f) { f(); });
+    const auto dir = paths::config() / std::string(product::kSlug) / "track-templates";
+    std::string error;
+    a.actions->onError = [&](const std::string& message) { error = message; };
+    // Nothing selected: nothing to save.
+    a.ui.selectedTracks.clear();
+    REQUIRE(a.actions->run("ui.track.template.save"));
+    CHECK_FALSE(a.root->popupOpen());
+    CHECK(error.find("select a channel or buss") != std::string::npos);
+    auto added = a.dispatcher->execute({"track.add",
+                                        json::parse(R"({"name":"Bass"})").value(),
+                                        {cmd::Origin::Type::Ui, "test", {}}});
+    REQUIRE(added);
+    const std::string track = (*added)["track"].asString();
+    a.ui.selectedTracks = {track};
+    REQUIRE(a.actions->run("ui.track.template.save"));
+    a.root->frame(false);
+    CHECK(a.root->focused()->id() == "track.template.name");
+    a.root->text("Low end");
+    REQUIRE(a.root->click("track.template.commit"));
+    CHECK(std::filesystem::exists(dir / "Low end.json"));
+    CHECK_FALSE(a.root->popupOpen());
+    // Track > Add from template…: a click adds its strip, selected.
+    const std::size_t tracks = a.tracks();
+    REQUIRE(a.actions->run("ui.track.template.load"));
+    a.root->frame(false);
+    auto* list = dynamic_cast<ui::List*>(a.root->find("track.template.list"));
+    REQUIRE(list);
+    CHECK(list->count() == 1);
+    const ui::Point first{list->bounds().x + 10, list->bounds().y + 8};
+    a.root->pointer({ui::PointerEvent::Type::Down, first, 1});
+    a.root->pointer({ui::PointerEvent::Type::Up, first, 1});
+    a.root->frame(false);
+    CHECK(a.tracks() == tracks + 1);
+    REQUIRE(a.ui.selectedTracks.size() == 1);
+    CHECK(a.ui.selectedTracks[0] != track);
+    CHECK(a.app->head().tracks.find(*model::Id::parse(a.ui.selectedTracks[0]))->name == "Bass");
+    // A right click deletes it; the empty list closes.
+    REQUIRE(a.actions->run("ui.track.template.load"));
+    a.root->frame(false);
+    a.root->pointer({ui::PointerEvent::Type::Down, first, 3});
+    a.root->pointer({ui::PointerEvent::Type::Up, first, 3});
+    a.root->frame(false);
+    REQUIRE(a.root->click("file.template.context"));
+    a.root->frame(false);
+    CHECK_FALSE(std::filesystem::exists(dir / "Low end.json"));
+    CHECK_FALSE(a.root->popupOpen());
+}
+
 TEST_CASE("actions list: keys after a click on a row, overriding defaults, and a reset") {
     App a;
     if (!a.ok) return;
