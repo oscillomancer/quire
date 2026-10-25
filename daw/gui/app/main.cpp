@@ -581,9 +581,8 @@ int main(int argc, char** argv) {
     gui::AudioDeviceDialog audioDevice(
         root, dispatcher, **app, prefs.audio,
         [&](const gui::AudioDeviceSettings& audio) { return preferences.setAudioDevice(audio); });
-    audioDevice.onError = [&shell](const std::string& message) {
+    audioDevice.onError = [](const std::string& message) {
         std::fprintf(stderr, "%s\n", message.c_str());
-        if (shell.onError) shell.onError(message);
     };
     preferences.onAudioDevice = [&] { audioDevice.open(); };
     preferences.audioSummary = [&] { return audioDevice.summary(); };
@@ -801,8 +800,12 @@ int main(int argc, char** argv) {
                          started.error().toString().c_str());
     } else if (o.audio.empty() && !o.offscreen && o.frames == 0) {
         if (auto started = audioDevice.start(true); !started)
-            audioDevice.onError("audio: " + started.error().message +
-                                " (choose a device in Edit > Audio device)");
+            std::fprintf(stderr, "audio: %s (choose a device in Edit > Audio device)\n",
+                         started.error().toString().c_str());
+        // Launched from Finder or a desktop entry, stderr goes nowhere: a
+        // refused device (or the fallback to the default) opens the dialog,
+        // which says why and offers the others.
+        if (!audioDevice.lastError().empty()) audioDevice.open();
     }
 
     // Per-project UI state (gui.md §1.2).

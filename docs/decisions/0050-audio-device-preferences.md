@@ -44,8 +44,9 @@ the hard rules exclude.
    `force_graph`. Older files load with the defaults. Edit > Audio device…
    (and a Preferences row) edit it; each change is saved and a running engine
    restarts with it at once. At app start the saved choice is started; if it
-   is refused, the defaults of the same backend are tried and the user is
-   told, and the saved choice is kept for when the device returns. `--audio`
+   is refused, the defaults of the same backend are tried and the saved
+   choice is kept for when the device returns; a failed start or that
+   fallback opens the dialog, whose status says why. `--audio`
    still picks a backend with its defaults; offscreen and finite runs still
    start nothing.
 2. **The GUI's default backend is the device**: JACK on Linux (unchanged),

@@ -1075,8 +1075,9 @@ Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
   Restart audio and Stop audio buttons follow. Each choice is saved, then a
   running engine (or one whose start failed) restarts with it at once; a
   stopped one stays stopped. The native input opens all its channels up to
-  32. At app start a refused saved choice retries the backend's defaults and
-  reports it; the saved choice is kept. engine.start receives the mapping
+  32. At app start a refused saved choice retries the backend's defaults; the
+  saved choice is kept. A failed start, or that fallback, opens the dialog,
+  whose status says why (stderr is not seen from Finder or a desktop entry). engine.start receives the mapping
   (`engineStartArgs`): an explicit rate, or for the native device the output
   device's own rate; for JACK, `force_graph` only when forcing.
 
