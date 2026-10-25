@@ -63,6 +63,11 @@ copies.
   over after `reset()` (each plugin's reset test checks this).
 - **Real time.** `process` and everything it calls follow the root rule:
   no allocation, locks or I/O; the script compiler enforces it for scripts.
+- **Extension headers in pairs.** Each CLAP extension header lives in
+  `common/include/supple/clap/` (the host's) and, byte for byte, in
+  `suite/semantic/include/supple/clap/` (the plugins' and source
+  exports'); change both together. `semantic-params-abi.copies` fails
+  otherwise.
 - **No traces left in.** `trace()` is for debugging with `dsp.test`; a
   committed stock script calls it nowhere, and has no member of its own
   named `trace` (one would hide the built-in, so the script could not be
