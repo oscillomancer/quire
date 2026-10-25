@@ -6653,6 +6653,61 @@ Result:
 
 ```
 
+## `midi.merge@1`
+
+Merge MIDI items on one track, or one item's MIDI takes, into one item.
+
+Several items (on one track): one item from the first start to the last end, with what each item's heard take plays, gaps left empty and overlaps layered; the others are removed. One item: its takes' notes layered into one take. The MIDI is what plays (looped passes unrolled, notes ending by their item's end); the result keeps the earliest item's settings, take name and take FX, and its id. One undo step.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `items` | array |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "midi_merge_result",
+  "properties": {
+    "item": {
+      "type": "string"
+    }
+  },
+  "required": ["item"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `midi.merge`: nothing to merge, items on different tracks or not MIDI Hint: give MIDI items on one track, or one item with several MIDI takes
+
+### Examples
+
+**Layer an item's takes** (`song_with_takes`)
+
+```json
+{
+  "items": ["it_1"]
+}
+
+```
+
+Result:
+
+```json
+{
+  "item": "it_1"
+}
+
+```
+
 ## `midi.notes@1`
 
 List a MIDI item's notes and CC points (beats from the item's start).
