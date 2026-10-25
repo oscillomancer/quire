@@ -57,7 +57,8 @@ class FxWindow {
     std::optional<model::Id> take() const { return take_; }
     // The `ui.fx.chain` action: a track id in `prompt`, else the selected track.
     Status openFor(const UiState& ui, const json::Value& prompt);
-    // The plugin browser alone, adding to that track's chain (ui.fx.add).
+    // The plugin browser alone, adding to that track's chain, or with no
+    // track given to every selected track's (ui.fx.add).
     Status openToAdd(const UiState& ui, const json::Value& prompt);
     void close();
     bool isOpen() const { return page_ != nullptr; }
@@ -124,7 +125,7 @@ class FxWindow {
     void dragRow(model::Id fx, int phase, ui::Point p);  // phase: Row::Phase
     void openBrowser(bool input = false);
     void addFx(const std::string& pluginId);
-    void addFxTo(model::Id track, const std::string& pluginId);
+    void addFxTo(const std::vector<model::Id>& tracks, const std::string& pluginId);
     void promptSaveChain();
     void hideSavePrompt();
     void saveChain();

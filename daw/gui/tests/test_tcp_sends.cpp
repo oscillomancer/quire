@@ -507,7 +507,9 @@ TEST_CASE("TCP: the right-click menu renames, colours and deletes a track (one u
         f.sync();
     };
     const std::string menu = "track.menu." + f.a.str();
-    // Color… opens the swatches; teal is the fifth.
+    // Color… opens the swatches; teal is the fifth. A selected track's
+    // colour goes to the whole selection.
+    f.state.selectedTracks = {f.a.str(), f.b.str()};
     rightClick();
     REQUIRE(f.root->find(menu));
     auto before = f.history();
@@ -515,7 +517,9 @@ TEST_CASE("TCP: the right-click menu renames, colours and deletes a track (one u
     REQUIRE(f.root->find("track.color." + f.a.str()));
     pickRow("track.color." + f.a.str(), 4);
     CHECK(f.app->head().tracks.find(f.a)->color == "teal");
+    CHECK(f.app->head().tracks.find(f.b)->color == "teal");
     CHECK(f.history() == before + 1);
+    f.state.selectedTracks = {f.a.str()};
     // Rename edits the name in place.
     rightClick();
     pickRow(menu, 0);

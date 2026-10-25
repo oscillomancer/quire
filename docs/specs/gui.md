@@ -558,7 +558,8 @@ former centred popup (18% down the main client area, clamped to its edges).
 The minimum size is 800 × 360. Content fills the client area on resize.
 Its Add plugin browser, chain/preset/pins menus and parameter MIDI learn
 dialog belong to its own root. A strip's standalone "+" / `ui.fx.add` browser
-belongs to the main root. Both browsers reload shared favourites on open and
+belongs to the main root; the strip's "+" adds to its own track, Track > add
+plugin… to every selected track (one undo step). Neither asks for a track. Both browsers reload shared favourites on open and
 immediately before applying a toggle, preserving edits from another still-open
 browser. A failed reload reports an error and does not overwrite the file.
 For MIDI learn's "when focused" gate, the FX OS window must have keyboard
@@ -1033,7 +1034,9 @@ Quire's own character, not a REAPER clone or a generic dark theme
   teal, blue, violet, grey; `track.set {color}` also takes "#rrggbb") drawn as
   a stripe down the TCP row's left edge and under the mixer strip's name.
   Picked from the track's right-click menu (Rename, Color…, Delete; the same
-  in the TCP and the mixer) or Track > color….
+  in the TCP and the mixer) or Track > color…. A pick colours every selected
+  track when the track is one of them (Track > color… always works on the
+  selection), as one undo step.
 - **Calm by default:** colour reserved for state (armed, clipping, selected,
   agent-changed), meters and waveforms in ink tones; motion only for
   feedback. The TCP keeps its boxed toggles.

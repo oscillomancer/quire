@@ -103,12 +103,29 @@ void TrackMenu::open(const model::Id& track, const ui::Rect& anchor,
 Status TrackMenu::openColors(const model::Id& track, const ui::Rect& anchor) const {
     const model::Track* tr = app.head().tracks.find(track);
     if (!tr) return Error("track.unknown", "no track " + track.str(), "/track", "use track.list");
+    // The whole selection when the track is part of it, as one undo step.
+    std::vector<std::string> tracks{track.str()};
+    if (selection) {
+        auto selected = selection();
+        if (std::find(selected.begin(), selected.end(), track.str()) != selected.end())
+            tracks = std::move(selected);
+    }
     std::vector<ui::MenuItem> items;
-    auto pick = [this, track](std::string colour) {
-        json::Value args = json::Value::object();
-        args["track"] = track.str();
-        args["color"] = std::move(colour);
-        commit("track.set", std::move(args));
+    auto pick = [this, tracks](std::string colour) {
+        const cmd::Origin origin{cmd::Origin::Type::Ui, "gui", {}};
+        auto r = dispatcher.transact("Track color", origin, [&]() -> Result<json::Value> {
+            for (const std::string& id : tracks) {
+                const auto parsed = model::Id::parse(id);
+                if (!parsed || !app.head().tracks.find(*parsed)) continue;  // gone meanwhile
+                json::Value args = json::Value::object();
+                args["track"] = id;
+                args["color"] = colour;
+                auto one = dispatcher.execute({"track.set", std::move(args), origin});
+                if (!one) return one;
+            }
+            return json::Value::object();
+        });
+        if (!r && onError) onError(r.error().message);
     };
     for (std::string_view name : model::kTrackColors) {
         ui::MenuItem m;

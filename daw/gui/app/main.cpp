@@ -483,22 +483,24 @@ int main(int argc, char** argv) {
         (*app)->onControl = nullptr;
         (*app)->learnGate = nullptr;
     });
-    appActions.addUi("ui.fx.chain", "FX: chain…", "track",
-                     [&](const json::Value& v) -> Status { return fxWindow.openFor(uiState, v); });
-    appActions.addUi("ui.track.color", "Track: color…", "track",
-                     [&](const json::Value& v) -> Status {
-                         std::string text = v.isString() ? v.asString() : std::string{};
-                         if (text.empty() && !uiState.selectedTracks.empty())
-                             text = uiState.selectedTracks.front();
-                         const auto id = model::Id::parse(text);
-                         if (!id)
-                             return Error("gui.track", "no track given and nothing is selected",
-                                          "/track", "select a track, or give an id like tr_1");
-                         return shell.openColorMenu(*id, {});
-                     });
-    appActions.addUi("ui.fx.add", "FX: add plugin…", "track", [&](const json::Value& v) -> Status {
-        return fxWindow.openToAdd(uiState, v);
+    appActions.addUiFor("ui.fx.chain", "FX: chain…", "track", [&](const json::Value& v) -> Status {
+        return fxWindow.openFor(uiState, v);
     });
+    // The colour menu on the first selected track colours every selected one.
+    appActions.addUiFor("ui.track.color", "Track: color…", "track",
+                        [&](const json::Value& v) -> Status {
+                            std::string text = v.isString() ? v.asString() : std::string{};
+                            if (text.empty() && !uiState.selectedTracks.empty())
+                                text = uiState.selectedTracks.front();
+                            const auto id = model::Id::parse(text);
+                            if (!id)
+                                return Error("gui.track", "no track given and nothing is selected",
+                                             "/track", "select a track first");
+                            return shell.openColorMenu(*id, {});
+                        });
+    appActions.addUiFor(
+        "ui.fx.add", "FX: add plugin…", "track",
+        [&](const json::Value& v) -> Status { return fxWindow.openToAdd(uiState, v); });
     gui::RenderDialog renderDialog(**app, dispatcher, root);
     appActions.addUi("ui.render", "File: render…", [&] { renderDialog.open(); });
     appActions.onPrompt = [&](const actions::Action& action) {

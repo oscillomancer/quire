@@ -76,6 +76,11 @@ class AppActions {
     // A built-in with one prompted argument (the actions list asks for it).
     void addUi(std::string id, std::string name, std::string prompt,
                std::function<Status(const json::Value& value)> run);
+    // A built-in that acts on the selection and is never prompted: a caller
+    // (a strip's own button) may aim it elsewhere with a value under `key`,
+    // which `run` receives (null when none was given).
+    void addUiFor(std::string id, std::string name, std::string key,
+                  std::function<Status(const json::Value& value)> run);
     // Shown by the app (status line): the last action's error, if any.
     std::function<void(const std::string&)> onError;
     std::string keysFor(std::string_view action) const;  // "Ctrl+Z", or ""

@@ -889,6 +889,30 @@ TEST_CASE("the plugin browser names the plugin's file and marks a shadowed copy"
     browser.close();
 }
 
+TEST_CASE("the plugin browser with no track given adds to every selected track") {
+    Fixture f;
+    if (!f.ok) return;
+    const model::Id one = f.addTrack("One"), two = f.addTrack("Two");
+    gui::UiState selection;
+    selection.selectedTracks = {one.str(), two.str()};
+    const auto before = f.historyCount();
+    REQUIRE(f.fx->openToAdd(selection, json::Value()));
+    f.frame();
+    CHECK(f.uiRoot().find("browser.title")->valueText() == "Add plugin to 2 tracks");
+    f.type("Hickory");
+    f.key("Return");
+    CHECK(f.app->head().tracks.find(one)->chain.size() == 1);
+    CHECK(f.app->head().tracks.find(two)->chain.size() == 1);
+    CHECK(f.historyCount() == before + 1);
+    // A strip's own "+" names its track: only that one.
+    REQUIRE(f.fx->openToAdd(selection, json::Value(two.str())));
+    f.frame();
+    f.type("Hickory");
+    f.key("Return");
+    CHECK(f.app->head().tracks.find(one)->chain.size() == 1);
+    CHECK(f.app->head().tracks.find(two)->chain.size() == 2);
+}
+
 TEST_CASE("the plugin browser finds a stock plugin by what it is") {
     Fixture f;
     if (!f.ok) return;
