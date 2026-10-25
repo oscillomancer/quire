@@ -125,7 +125,8 @@ void List::scrollTo(std::size_t row) {
     if (top < scroll_)
         setScroll(top);
     else if (top + rowHeight > scroll_ + bounds().h)
-        setScroll(top + rowHeight - bounds().h);
+        // A view shorter than a row (or not laid out yet) shows the row's top.
+        setScroll(std::min(top, top + rowHeight - bounds().h));
 }
 
 void List::setScroll(float s) {

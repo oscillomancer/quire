@@ -109,6 +109,17 @@ TEST_CASE("a list shorter than one row pages by one row") {
     CHECK(list.selected() == 0);
 }
 
+TEST_CASE("a list selected before its first layout shows its first row") {
+    REQUIRE_GL();
+    const Theme theme = Theme::dark();
+    Canvas canvas(fixture().window->vg(), fixture().fonts, theme);
+    List list("early-list");
+    list.setCount(20);
+    list.select(0);
+    list.arrange(canvas, {0, 0, 100, 280});
+    CHECK(list.scroll() == 0);
+}
+
 TEST_CASE("root dispatch defers deletion and resolves targets after callbacks") {
     REQUIRE_GL();
     struct Reactive : Node {
