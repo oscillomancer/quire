@@ -5,6 +5,12 @@ target_link_libraries(semantic-params-abi INTERFACE supple::clap)
 add_library(supple::semantic-params-abi ALIAS semantic-params-abi)
 
 if(SUPPLE_BUILD_TESTS)
+  # The extension headers' two copies (host and plugins) stay the same.
+  add_test(NAME semantic-params-abi.copies
+    COMMAND ${CMAKE_COMMAND} -DHOST=${CMAKE_CURRENT_SOURCE_DIR}/include/supple/clap
+            -DPLUGIN=${CMAKE_CURRENT_SOURCE_DIR}/../suite/semantic/include/supple/clap
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tools/header_copies.cmake)
+
   if(UNIX AND NOT APPLE)
     add_executable(clap-unload-probe tools/clap_unload_probe.cpp)
     target_link_libraries(clap-unload-probe PRIVATE supple::clap ${CMAKE_DL_LIBS})
