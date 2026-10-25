@@ -185,6 +185,7 @@ q = nil
 ---@field seconds? number (default: 1.0)
 ---@field sample_rate? number|string default: the session's or project's rate Quantity strings are range-checked by the server.
 ---@field save? boolean (default: false)
+---@field trace_points? integer intervals the signal's traces are kept in (default: 100)
 
 ---@class Quire.dsp_test_result
 ---@field plugin string

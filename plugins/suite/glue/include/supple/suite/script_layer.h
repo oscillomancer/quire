@@ -8,14 +8,16 @@
 // spent its budget and was stopped, an index outside an array -- and the
 // editor of a script that draws its own (script_editor.h; the product's,
 // the automatic one, otherwise, with a list of the modulation routes when
-// the script has any: route_list.h). The player's layer derives from it to
-// follow the script's file. Main thread only.
+// the script has any: route_list.h), and what the script's trace() calls
+// record for a host that traces it (com.suppleaudio.trace/1). The player's
+// layer derives from it to follow the script's file. Main thread only.
 #pragma once
 
 #include <cstdint>
 #include <memory>
 
 #include "supple/clap/plugin_status.h"
+#include "supple/clap/trace.h"
 #include "supple/suite/script_definition.h"
 #include "supple/suite/script_processor.h"
 #include "supple/suite/semantic_layer.h"
@@ -30,6 +32,9 @@ class ScriptLayer : public SemanticLayer {
     void redefined() override;
     const void* extension(const char* id) override;
     bool getStatus(const clap_ostream_t* out);
+    // com.suppleaudio.trace/1's start and read.
+    bool startTrace(uint32_t interval, uint32_t bins);
+    bool readTrace(const clap_ostream_t* out);
 #if SUPPLE_WITH_GUI
     std::unique_ptr<gui::EditorBase> createEditor(gui::EditorHost& host) override;
 #endif
@@ -55,6 +60,7 @@ class ScriptLayer : public SemanticLayer {
     std::shared_ptr<json::Value> editorProblems_ =
         std::make_shared<json::Value>(json::Value::array());
     std::shared_ptr<const script::detail::Code> editorProblemsCode_;
+    std::unique_ptr<script::detail::TraceLog> trace_;
 };
 
 }  // namespace supple::suite

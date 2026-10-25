@@ -93,6 +93,7 @@ struct TestArgs {
     double seconds = 1.0;
     std::optional<double> sampleRate;
     bool save = false;
+    int tracePoints = 100;
 };
 struct ResponsePoint {
     double hz = 0.0, db = 0.0;
@@ -103,6 +104,13 @@ struct AutomationResult {
 struct SidechainResult {
     double rmsDbfs = -200.0, referenceRmsDbfs = -200.0;
     json::Value gainChangeDb;  // null when either measurement is below -120 dBFS
+};
+// One name a script traced: per interval, the last value given and the least
+// and greatest, null where it gave none.
+struct TraceResult {
+    std::string name;
+    json::Value last, low, high;
+    std::int64_t nonFinite = 0;
 };
 struct SignalResult {
     std::string signal;
@@ -115,6 +123,8 @@ struct SignalResult {
     std::optional<AutomationResult> automation;
     std::optional<SidechainResult> sidechain;
     std::optional<json::Value> meters;  // read-only parameters by key, physical
+    std::optional<double> traceIntervalS;
+    std::optional<std::vector<TraceResult>> traces;
 };
 struct TestResult {
     std::string plugin;
@@ -530,6 +540,49 @@ inline SignalResult measure(Signal s, const audio::AudioData& out, std::size_t i
     return r;
 }
 
+// A trace's numbers to six significant digits: what a reader needs, and short.
+inline json::Value sixDigits(const json::Value& values) {
+    json::Value out = json::Value::array();
+    if (!values.isArray()) return out;
+    for (const auto& v : values.asArray()) {
+        if (!v.isNumber()) {
+            out.push_back(json::Value());
+            continue;
+        }
+        char text[32];
+        std::snprintf(text, sizeof text, "%.6g", v.asDouble());
+        out.push_back(std::strtod(text, nullptr));
+    }
+    return out;
+}
+
+// What the plugin traced in a render, as the result gives it; problems for
+// what it could not keep.
+inline std::vector<TraceResult> traceResults(const json::Value& doc,
+                                             std::vector<std::string>& problems,
+                                             const std::string& signal) {
+    std::vector<TraceResult> out;
+    if (const auto* traces = doc.find("traces"); traces && traces->isArray())
+        for (const auto& t : traces->asArray()) {
+            TraceResult r;
+            if (const auto* n = t.find("name"); n && n->isString()) r.name = n->asString();
+            if (const auto* v = t.find("last")) r.last = sixDigits(*v);
+            if (const auto* v = t.find("low")) r.low = sixDigits(*v);
+            if (const auto* v = t.find("high")) r.high = sixDigits(*v);
+            if (const auto* v = t.find("non_finite"); v && v->isNumber())
+                r.nonFinite = static_cast<std::int64_t>(v->asDouble());
+            if (r.nonFinite > 0)
+                problems.push_back("trace \"" + r.name + "\" was given NaN or infinity " +
+                                   std::to_string(r.nonFinite) + " times with the " + signal +
+                                   " (look for a division by zero or a log of 0 there)");
+            out.push_back(std::move(r));
+        }
+    if (const auto* d = doc.find("dropped"); d && d->isNumber() && d->asDouble() > 0)
+        problems.push_back("trace() was given more than 16 names with the " + signal +
+                           "; the values under the rest were dropped");
+    return out;
+}
+
 inline std::string fixed(double v, int digits = 1) {
     char text[32];
     std::snprintf(text, sizeof text, "%.*f", digits, v);
@@ -584,7 +637,10 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
         "project's (DAW); latency is in samples at the rate used, which sample_rate in the "
         "result reports. meters gives a semantic plugin's read-only parameters (its meters "
         "and readouts) by patch key in physical units, as they stood when the signal ended "
-        "(the tail after it does not move them).";
+        "(the tail after it does not move them). traces gives what a script's trace(name, "
+        "value) calls recorded over the signal, in trace_points intervals of "
+        "trace_interval_s: for each name, the last value in each interval and the lowest and "
+        "highest, null where none was given.";
     c.tags = {"dsp", "analysis"};
     auto automationEvent = schema::object<AutomationEvent>("dsp_automation_event")
                                .field("param", &AutomationEvent::param,
@@ -663,6 +719,10 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                             .doc("default: the session's or project's rate"))
                  .field("save", &TestArgs::save, schema::boolean())
                  .defaultValue(false)
+                 .field("trace_points", &TestArgs::tracePoints,
+                        schema::integerOf<int>().range(1, 4096).doc(
+                            "intervals the signal's traces are kept in"))
+                 .defaultValue(100)
                  .build();
     auto point = schema::object<ResponsePoint>("dsp_response_point")
                      .field("hz", &ResponsePoint::hz, schema::number())
@@ -692,6 +752,16 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
             .field("reference_rms_dbfs", &SidechainResult::referenceRmsDbfs, schema::number())
             .field("gain_change_db", &SidechainResult::gainChangeDb, nullableNumber)
             .build();
+    auto traceResult =
+        schema::object<TraceResult>("dsp_trace_result")
+            .field("name", &TraceResult::name, schema::string())
+            .field("last", &TraceResult::last,
+                   schema::any().doc("each interval's last value, or null"))
+            .field("low", &TraceResult::low, schema::any().doc("each interval's lowest"))
+            .field("high", &TraceResult::high, schema::any().doc("each interval's highest"))
+            .field("non_finite", &TraceResult::nonFinite,
+                   schema::integer().min(0).doc("NaN or infinity given, not kept"))
+            .build();
     auto signal = schema::object<SignalResult>("dsp_signal_result")
                       .field("signal", &SignalResult::signal, schema::string())
                       .field("peak_dbfs", &SignalResult::peakDbfs, schema::number())
@@ -713,6 +783,10 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                       .field("meters", &SignalResult::meters,
                              schema::any().doc("read-only parameters (meters) by patch key, "
                                                "physical, as of the signal's end"))
+                      .field("trace_interval_s", &SignalResult::traceIntervalS,
+                             schema::number().doc("each trace interval's length"))
+                      .field("traces", &SignalResult::traces,
+                             schema::arrayOf(traceResult).doc("what trace() recorded, by name"))
                       .build();
     c.result = schema::object<TestResult>("dsp_test_result")
                    .field("plugin", &TestResult::plugin, schema::string())
@@ -935,8 +1009,14 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
         }
         std::set<std::string> logged;
         double rendered = 0.0, spent = 0.0;
-        auto renderPass =
-            [&](const sandbox::RenderRequest& request) -> Result<sandbox::RenderResult> {
+        // The traces' intervals: each signal's frames in trace_points of them.
+        const auto traceBins = static_cast<std::uint32_t>(std::clamp(a.tracePoints, 1, 4096));
+        std::uint32_t traceInterval = 1;
+        // A pass on a fresh instance; with `trace`, what its trace() calls
+        // recorded over `traceFrames` frames, read once it is deactivated.
+        auto renderPass = [&](const sandbox::RenderRequest& request,
+                              std::optional<json::Value>* trace =
+                                  nullptr) -> Result<sandbox::RenderResult> {
             auto fresh = host::Instance::create(*info, Traits::identity(s));
             if (!fresh) return std::move(fresh).error();
             if (a.patch) {
@@ -944,12 +1024,20 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                     (*fresh)->setPatch(json::writeCompact(*a.patch), CLAP_SUPPLE_SET_MERGE);
                 if (!applied) return patchError(std::move(applied).error());
             }
+            const bool tracing = trace && (*fresh)->traces();
+            if (tracing) SUPPLE_TRY((*fresh)->startTrace(traceInterval, traceBins));
             host::Instance* chain[] = {fresh->get()};
             const auto start = std::chrono::steady_clock::now();
             auto result = sandbox::render(chain, settings, request);
             spent +=
                 std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             if (result) rendered += result->audio.seconds();
+            if (result && tracing) {
+                (*fresh)->deactivate();
+                auto read = (*fresh)->readTrace();
+                if (!read) return std::move(read).error();
+                *trace = std::move(*read);
+            }
             return result;
         };
         auto diagnose = [&](Signal sig, const sandbox::RenderResult& r, const SignalResult& m,
@@ -1003,6 +1091,8 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
             const std::size_t inputFrames =
                 instrument ? static_cast<std::size_t>(std::llround(a.seconds * settings.sampleRate))
                            : input.frames();
+            traceInterval = static_cast<std::uint32_t>(std::max<std::size_t>(
+                1, (std::max<std::size_t>(inputFrames, 1) + traceBins - 1) / traceBins));
             sandbox::RenderRequest request;
             if (instrument) {
                 request.lengthSamples = static_cast<std::int64_t>(inputFrames);
@@ -1026,11 +1116,20 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                                                 : rank(x.event.kind) < rank(y.event.kind);
                 });
             if (a.sidechain) request.sidechain = &key;
-            auto r = renderPass(request);
+            std::optional<json::Value> traced;
+            auto r = renderPass(request, &traced);
             if (!r) return std::move(r).error();
             out.latency = r->latency;
             SignalResult m = measure(sig, r->audio, inputFrames, a, releasedAt);
             m.meters = meterValues(*r);
+            if (traced) {
+                auto kept = traceResults(*traced, out.problems, m.signal);
+                if (!kept.empty()) {
+                    m.traceIntervalS =
+                        rounded(static_cast<double>(traceInterval) / settings.sampleRate, 6);
+                    m.traces = std::move(kept);
+                }
+            }
             diagnose(sig, *r, m, "");
             if (a.automation) {
                 auto baselineRequest = request;

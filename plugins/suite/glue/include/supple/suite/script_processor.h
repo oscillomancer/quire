@@ -339,6 +339,15 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     }
 
     void process(Block& block) {
+        // A trace counts the frames processed since it began, whatever
+        // returns early below.
+        struct Advance {
+            D::TraceLog* log;
+            int frames;
+            ~Advance() {
+                if (log) log->at += frames;
+            }
+        } advance{instance_.trace.load(std::memory_order_acquire), block.frames};
         if (block.offline != instance_.offline) {
             instance_.offline = block.offline;
             offlineNow_.store(block.offline, std::memory_order_relaxed);
@@ -417,6 +426,9 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
 
     // The script's runtime record: its sample rate and block size, and its status.
     const D::Instance& instance() const { return instance_; }
+    // Where trace() records from the next block on (null: nowhere). Main
+    // thread, while the plugin is inactive; `log` outlives its use here.
+    void trace(D::TraceLog* log) { instance_.trace.store(log, std::memory_order_release); }
 
     // What an editor opened now shows: the newest code (the one playing, or
     // one swap() offered), and the channel its Shared members arrive by.

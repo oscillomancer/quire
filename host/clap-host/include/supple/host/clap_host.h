@@ -31,6 +31,7 @@
 #include "supple/clap/editor_picture.h"
 #include "supple/clap/plugin_status.h"
 #include "supple/clap/semantic_params.h"
+#include "supple/clap/trace.h"
 #include "supple/host/editor_frame.h"
 #include "supple/json/value.h"
 
@@ -324,6 +325,14 @@ class Instance {
     Result<Picture> drawEditor(double scale,
                                std::span<const clap_supple_pointer_input_t> input = {});
 
+    // --- what the plugin's code traces (com.suppleaudio.trace/1, in process) ---
+    bool traces() const { return extTrace_ != nullptr && !remote_; }
+    // While inactive: from the first block processed next, each traced name
+    // in `bins` bins of `interval` frames (bins 0 stops).
+    Status startTrace(std::uint32_t interval, std::uint32_t bins);
+    // While inactive: the trace as the plugin wrote it (supple.trace/1.0).
+    Result<json::Value> readTrace();
+
     // --- state (main thread) ---
     // Inactive saves flush acknowledged main-thread edits into component state.
     // Active saves require those edits to have been delivered by the audio consumer.
@@ -472,6 +481,7 @@ class Instance {
     const clap_plugin_supple_editor_picture_t* extPicture_ = nullptr;
     const clap_plugin_audio_ports_activation_t* extPortsActivation_ = nullptr;
     const clap_plugin_supple_plugin_status_t* extStatus_ = nullptr;
+    const clap_plugin_supple_trace_t* extTrace_ = nullptr;
     const clap_plugin_gui_t* extGui_ = nullptr;
     const clap_plugin_posix_fd_support_t* extFd_ = nullptr;
     bool editorOpen_ = false;

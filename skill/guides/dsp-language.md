@@ -208,6 +208,14 @@ tempo, is `setTail(samples)` (`-1` forever) from `prepare()`, `update()` or
 `process()`: the host hears of each change, and a render ends when it has
 passed.
 
+**Tracing.** `trace("name", value)` in `prepare()`, `update()`, `process()`
+or a voice hook records a value at the block's start, `trace("name", value,
+i)` at its frame `i`, for whoever is debugging: `dsp_test` returns each
+name's last, lowest and highest values over the signal (`traces`), and says
+when one was NaN. The name is a string literal of up to 47 characters, at
+most 16 names a plugin. While nothing traces, a call costs a check, so a
+trace left in is harmless, but take them out before the plugin ships.
+
 Saving a script while it plays swaps the new code in with a 10 ms crossfade
 when the plugin is otherwise the same. When a save changes what the plugin
 says of itself (its name, parameters, keys, help, patches, buses, latency or

@@ -442,6 +442,39 @@ TEST_CASE("dsp.test plays a file through an effect, at the render's rate, as the
     CHECK(relative.error().code == "dsp.file");
 }
 
+TEST_CASE("dsp.test gives what a script traced, interval by interval, and says what was NaN") {
+    Harness h;
+    // Every frame's count since prepare(), at that frame: each interval's
+    // last is the frame before the next interval starts.
+    h.write("counter", script("Counter", "com.example.counter",
+                              "    int n = 0;\n"
+                              "    void prepare() { n = 0; }\n"
+                              "    void process(Block& io) {\n"
+                              "        for (int i = 0; i < io.frames; ++i) {\n"
+                              "            trace(\"frame\", n, i);\n"
+                              "            n += 1;\n"
+                              "        }\n"
+                              "        trace(\"broken\", 0.0 / (n - n));\n"
+                              "    }"));
+    auto result = h.measured(
+        R"({"script":"counter","signals":["sine"],"seconds":0.5,"sample_rate":48000,"trace_points":5})");
+    json::Value signal = result["signals"].at(0);
+    CHECK(signal["trace_interval_s"].asDouble() == doctest::Approx(0.1));
+    json::Value traces = signal["traces"];
+    REQUIRE(traces.size() == 2);
+    json::Value frame = traces.at(0), broken = traces.at(1);
+    CHECK(frame["name"].asString() == "frame");
+    for (size_t k = 0; k < 5; ++k) {
+        CHECK(frame["last"].at(k).asDouble() == 4800.0 * static_cast<double>(k + 1) - 1);
+        CHECK(frame["low"].at(k).asDouble() == 4800.0 * static_cast<double>(k));
+    }
+    CHECK(broken["name"].asString() == "broken");
+    CHECK(broken["last"].at(0).isNull());
+    CHECK(broken["non_finite"].asInt() > 0);
+    REQUIRE(result["problems"].size() == 1);
+    CHECK(result["problems"].at(0).asString().find("\"broken\"") != std::string::npos);
+}
+
 TEST_CASE("every patch in the synth guide plays on Marram") {
     if (!fs::exists(kStock / "Marram.clap")) {
         MESSAGE("skipped: no Marram in " << kStock.string());

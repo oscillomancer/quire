@@ -182,6 +182,21 @@ notes. Each signal still gets a fresh instance.
 With automation or a sounding key, THD and the impulse response are left
 out: they describe a plugin that holds still.
 
+## See inside it while it runs
+
+When a number comes out wrong and you cannot tell why, trace the values on
+the way to it rather than guessing: `trace("envelope", env, i)` in the
+per-frame loop, `trace("beat", beat)` once a block, then `dsp_test`. Each
+signal's `traces` gives every name's `last`, `low` and `high` value in each
+of `trace_points` intervals (100 by default) of `trace_interval_s`, `null`
+where it was not traced; a NaN is counted (`non_finite`) and named in
+`problems`. Use few points to see a trend, more (up to 4096) to find the
+moment something jumps, and `audio_file` to trace what real material does.
+
+```json
+{"script": "tilt_eq", "signals": ["sweep"], "trace_points": 20}
+```
+
 ## Follow the stock plugins
 
 Scripted plugins are controlled by agents through their patches, so they
