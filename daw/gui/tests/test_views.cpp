@@ -349,7 +349,7 @@ TEST_CASE(
     CHECK(arrange->timeAt(600) == doctest::Approx(time).epsilon(0.001));
     arrange->setPlayhead(50);
     const float playhead = arrange->playheadX();
-    REQUIRE(arrange->onKey({SDLK_EQUALS}));
+    arrange->zoomStep(true);
     CHECK(arrange->playheadX() == doctest::Approx(static_cast<double>(playhead)));
 }
 
@@ -386,8 +386,8 @@ TEST_CASE("zooming back in returns the anchor to where the timeline's start pull
     CHECK(arrange->viewport().pixelsPerSecond == doctest::Approx(40));
     CHECK(arrange->playheadX() == doctest::Approx(static_cast<double>(cursorX)).epsilon(0.001));
     // The keys hold the same anchor.
-    for (int i = 0; i < 10; ++i) REQUIRE(arrange->onKey({SDLK_MINUS}));
-    for (int i = 0; i < 10; ++i) REQUIRE(arrange->onKey({SDLK_EQUALS}));
+    for (int i = 0; i < 10; ++i) arrange->zoomStep(false);
+    for (int i = 0; i < 10; ++i) arrange->zoomStep(true);
     CHECK(arrange->playheadX() == doctest::Approx(static_cast<double>(cursorX)).epsilon(0.001));
     // Anything else that moves the view in time starts afresh: out to the
     // wall again, a scroll right and back, and the cursor stays where it now is.
@@ -740,23 +740,19 @@ TEST_CASE("the playhead overlay moves without damaging the content") {
     CHECK(arrange->playhead() == doctest::Approx(7.5));
 }
 
-TEST_CASE("keyboard zoom keeps the playhead's time in place; Home and End belong to the keymap") {
+TEST_CASE("the zoom keys' step keeps the playhead's time in place") {
     Gl& g = gl();
     if (!g.ok) return;
     ui::Root root(*g.window, g.fonts, ui::Theme::dark());
     views::ArrangeView* arrange = mount(root);
-    root.focus(arrange);
     arrange->setViewport({10, 40, 0});
     arrange->setPlayhead(12.0);
     const float x = arrange->playheadX();
-    root.key(SDLK_PLUS);
+    arrange->zoomStep(true);
     CHECK(arrange->viewport().pixelsPerSecond == doctest::Approx(50));
     CHECK(arrange->playheadX() == doctest::Approx(static_cast<double>(x)));
-    root.key(SDLK_MINUS);
+    arrange->zoomStep(false);
     CHECK(arrange->viewport().pixelsPerSecond == doctest::Approx(40));
-    // The view does not take Home/End: the keymap's transport.seek:start/end
-    // keep them, so they must reach Root::onUnhandledKey.
-    for (int key : {SDLK_HOME, SDLK_END}) CHECK_FALSE(arrange->onKey(ui::KeyEvent{key, 0, false}));
 }
 
 TEST_CASE("the arrangement renders a frame with 1000 generated tracks") {

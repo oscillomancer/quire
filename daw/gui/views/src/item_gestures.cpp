@@ -886,17 +886,87 @@ Status ItemGestures::deleteSelection() {
     return {};
 }
 
+bool ItemGestures::canMerge() const {
+    const model::Session& s = view_.session();
+    std::optional<model::Id> track;
+    for (model::Id id : selection_) {
+        const model::Item* it = itemOf(s, id);
+        if (!it || (track && it->track != *track)) return false;
+        track = it->track;
+        if (selection_.size() == 1) {
+            if (it->takes.size() < 2) return false;
+            for (model::Id take : it->takes)
+                if (!isMidi(s.takes.find(take))) return false;
+        } else if (!isMidi(activeTake(s, *it))) {
+            return false;
+        }
+    }
+    return track.has_value();
+}
+
+Status ItemGestures::mergeSelection() {
+    if (!canMerge() || !run) return {};
+    json::Value ids = json::Value::array();
+    for (model::Id id : selection_) ids.push_back(id.str());
+    json::Value args = json::Value::object();
+    args["items"] = std::move(ids);
+    auto r = run(selection_.size() == 1 ? "Merge takes" : "Merge MIDI items",
+                 {{"midi.merge", std::move(args)}});
+    if (!r) return std::move(r).error();
+    if (const auto kept = model::Id::parse((*r)["item"].asString())) selection_ = {*kept};
+    changed();
+    return {};
+}
+
+void ItemGestures::addEditItems(std::vector<ui::MenuItem>& items, ui::Point at, bool onItem) {
+    auto add = [&](std::string label, const char* action, bool enabled,
+                   std::function<Status()> act) {
+        ui::MenuItem m;
+        m.label = std::move(label);
+        if (keysFor) m.shortcut = keysFor(action);
+        m.enabled = enabled;
+        m.run = [this, act = std::move(act)] {
+            if (auto r = act(); !r && onError) onError(r.error());
+        };
+        items.push_back(std::move(m));
+    };
+    // Paste lands where the menu was opened: that beat (on the grid), that channel.
+    std::optional<model::Id> track;
+    if (const auto row = rowAt(at.y);
+        row && view_.trackLayout().rows()[*row].type == model::StripType::Channel)
+        track = view_.trackLayout().rows()[*row].track;
+    const double beat = std::max(0.0, snap(beatAtX(at.x), false));
+    const std::size_t n = selection_.size();
+    const std::string count = n == 1 ? "" : " " + std::to_string(n) + " items";
+    if (onItem) {
+        add("Cut" + count, "ui.item.cut", true, [this] { return cutSelection(); });
+        add("Copy" + count, "ui.item.copy", true, [this] {
+            copySelection();
+            return Status{};
+        });
+    }
+    add("Paste", "ui.item.paste", canPaste(), [this, beat, track] { return paste(beat, track); });
+    if (!onItem) return;
+    add("Duplicate" + count, "ui.item.duplicate", true, [this] { return duplicateSelection(); });
+    add("Delete" + count, "edit.delete", true, [this] { return deleteSelection(); });
+    // Always listed (greyed when it does not apply), so the rows keep their places.
+    add(n == 1 ? "Merge takes" : "Merge MIDI items", "ui.item.merge", canMerge(),
+        [this] { return mergeSelection(); });
+}
+
+void ItemGestures::openSpaceMenu(ui::Point at) {
+    if (!root_) return;
+    std::vector<ui::MenuItem> items;
+    addEditItems(items, at, false);
+    root_->openPopup(
+        ui::makeMenu("arrange.space.menu", std::move(items), [this] { root_->closePopup(); }),
+        {at.x, at.y, 0, 0}, ui::Placement::Below);
+}
+
 void ItemGestures::openItemMenu(ui::Point at) {
     if (!root_ || selection_.empty()) return;
     std::vector<ui::MenuItem> items;
-    ui::MenuItem del;
-    del.label = selection_.size() == 1 ? "Delete"
-                                       : "Delete " + std::to_string(selection_.size()) + " items";
-    del.shortcut = "Delete";
-    del.run = [this] {
-        if (auto r = deleteSelection(); !r && onError) onError(r.error());
-    };
-    items.push_back(std::move(del));
+    addEditItems(items, at, true);
     // Timebase: what the selection follows when the tempo changes (item.set
     // timebase, one step; the items keep their place now).
     ui::MenuItem rule;
@@ -1213,6 +1283,10 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
                 changed();
             }
             openItemMenu(e.pos);
+            return;
+        }
+        if (state_.drag == Drag::Marquee && e.button == 3 && view_.lanesRect().contains(e.pos)) {
+            openSpaceMenu(e.pos);  // empty space
             return;
         }
         if (state_.drag == Drag::Marquee) {

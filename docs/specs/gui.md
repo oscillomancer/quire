@@ -241,7 +241,8 @@ counting in), circling arrows, [●], a metronome and →| with the bar count;
 each is lit in its colour while on — green playing, red recording, accent for
 loop, punch, metronome and count-in — and keeps its state word as its value
 text; position in bars|beats and
-time, tempo/meter, CPU/xrun/anticipation readouts from engine telemetry);
+time, tempo/meter, CPU/xrun/anticipation readouts from engine telemetry; the
+rate and buffer readout shows the device's period, e.g. the JACK quantum);
 toolbar (actions, §6: only what the transport bar does not already have —
 undo, redo, add channel, the actions list by default); the arrange area (track control panel + timeline);
 bottom docks for the mixer and MIDI editor, and a history dock; separate
@@ -372,9 +373,17 @@ and selects it; a right-click there opens the same Channel / Buss / Master menu
 at the pointer. Track selection is shared by the TCP and the mixer: a click on
 a row's or strip's empty part selects it alone, Ctrl+click toggles, Shift+click
 extends from the last click in that view's order; a right-click on a selected
-track keeps the selection. The track menu's Delete (and the Delete key, when
+track keeps the selection, and so does a plain press on one, so a drag from
+it moves every selected track of its parent and type together, in their
+order, as one undo step (`views::reorderMoves`, track.move steps); released
+without a drag, it selects that track alone. The track menu's Delete (and the Delete key, when
 tracks were selected after items) removes every selected track as one undo
 step (`track.remove:selected`; the main master stays; children before folders).
+Its Duplicate (and Track > duplicate selected) copies every selected channel
+and buss right after its original as one undo step (`track.duplicate`, see
+session-model.md) and selects the copies. Track > channels of the first
+selected… opens the same Channels menu as the track menu's, for the first
+selected track only.
 Commands: `track.*`, `route.*`, `fx.*` (bypass/offline), transport.
 
 ### 4.3 Arrange view
@@ -403,7 +412,8 @@ cancels the gesture. Wheel zoom holds the **project cursor** (the playhead,
 the transport position the position display shows) still by default, or the
 mouse pointer when the mouse setting `wheel.zoom` is `mouse_pointer` (Edit >
 Mouse modifiers); a cursor outside the visible
-lanes falls back to the pointer. Keyboard zoom anchors at the playhead. The
+lanes falls back to the pointer. Keyboard zoom (`ui.arrange.zoom_in/out`:
+= or Shift+= or Keypad +, - or Keypad -) anchors at the playhead. The
 timeline's start stops the view, so zooming out near it pulls the anchor left
 on screen; zooming back in returns it to where it was, as each step holds
 the anchor where the first step of the run found it. The run ends when anything
@@ -451,6 +461,14 @@ its own clipboard unit. Empty lanes use the saved scalar as their fallback
 and redraw when that scalar changes. The lane display range is independent
 of the transport knob's per-project display range. In the staged engine the
 curve is editable and saved, but audio application remains pending.
+
+**Menus.** A right-click on an item opens its menu: **Cut**, **Copy**,
+**Paste** (at the pointer's beat on the grid and its channel), **Duplicate**
+(after the selection), **Delete**, **Merge MIDI items** (several MIDI items
+on one channel; with one item selected, **Merge takes** layers its MIDI
+takes; `midi.merge`, greyed otherwise), then the timebases and the take
+entries below. A right-click on empty lane space opens a menu with Paste.
+The keys each action has are shown beside it.
 
 **Takes.** An item with several takes shows each in a lane under its name
 bar when the row is tall enough (at least 14 units a lane), the heard one
@@ -543,7 +561,10 @@ restores the default, which fits five plug-ins. The height is clamped like the
 MIDI editor's (what the center column leaves less a strip of the shell) and
 saved in the UI sidecar's `mixer` section. Dragging a plug-in within its chain
 reorders it (`fx.move`); dropping it on any part of another strip copies it, with
-its live settings, last in that strip's chain (`fx.copy`). Dragging a strip's
+its live settings, last in that strip's chain (`fx.copy`); with Ctrl held the
+drop copies the plug-in's whole chain, in order (the chip reads "chain (N)").
+A right-click on a plug-in opens its own menu: Rename… names that instance
+over its slot (`fx.set label`; an empty name goes back to the plug-in's). Dragging a strip's
 empty part moves it among the strips of its own type only (`track.move`, an
 index among its parent's children; `views::reorderIndex` in `track_layout.h` computes it, shared
 with the TCP). A drag shows an insertion bar or a target outline; Escape or a
@@ -557,7 +578,8 @@ former centred popup (18% down the main client area, clamped to its edges).
 The minimum size is 800 × 360. Content fills the client area on resize.
 Its Add plugin browser, chain/preset/pins menus and parameter MIDI learn
 dialog belong to its own root. A strip's standalone "+" / `ui.fx.add` browser
-belongs to the main root. Both browsers reload shared favourites on open and
+belongs to the main root; the strip's "+" adds to its own track, Track > add
+plugin… to every selected track (one undo step). Neither asks for a track. Both browsers reload shared favourites on open and
 immediately before applying a toggle, preserving edits from another still-open
 browser. A failed reload reports an error and does not overwrite the file.
 For MIDI learn's "when focused" gate, the FX OS window must have keyboard
@@ -620,8 +642,9 @@ after its name, from its first CLAP feature after the main category
 ("Ghyll (reverb)", "Yarrow (eq)", "Marram (synth)"), and the search matches
 that too; the browser also opens on its own from a
 strip's "+", titled with the track and with its own Close), reorder by
-dragging a row (an insertion bar; Escape cancels; Alt+Up/Down on a focused
-row too; no arrow buttons), bypass vs offline
+dragging a row (an insertion bar; Escape cancels; Alt+Up/Down, the
+`fx` section's `ui.fx.move_up/down`, move the selected effect; no arrow
+buttons), bypass vs offline
 (distinct, `reaper-ux.md` addendum), a double click on a row opens that
 effect's own GUI; a left double click on empty chain space (including the
 "No effects yet" message or below the last row) opens Add plugin, as in the
@@ -724,6 +747,16 @@ LLM-native differentiator: the same text an agent writes is visible and
 editable by the human. The event list edits notes and CC events;
 double-click editing requires a row hit and edits that row. Roll gesture
 anchors use exact model timing rather than the rounded `midi.notes` query.
+A right-click on the grid (on a note: that note joins or is the selection)
+opens **Delete**, **Copy**, **Cut**, **Paste** (at the pointer's beat on the
+grid, pitches as copied) and **Duplicate** for the selected notes; the same
+actions (`ui.midi.notes.*`) have the arrange view's keys in the `midi`
+section: Delete, Backspace and Alt+C, Ctrl+C, Ctrl+X, Ctrl+V (at the
+playhead), Ctrl+D and Ctrl+A. The rest of the editor's keys are actions in
+that section too: Up/Down transpose the selection a semitone (Shift: an
+octave), Left/Right move it a grid step, Q quantizes it (every note when
+none is selected), Escape clears it. With the event list shown, the delete
+action removes its selected rows, notes and CC events alike.
 
 The panel's top border is a drag handle: dragging resizes the panel (up is
 taller; up to nearly the whole window, always leaving the transport and a strip
@@ -800,6 +833,13 @@ starts a new, unsaved project from one (after the unsaved-changes question)
 with its own copy of the template's audio, and a right click offers
 Delete.
 
+**Track templates** keep one strip — its settings and both FX chains, not
+its items or routing — by name in `<config>/<slug>/track-templates/`
+(track.template.*): Track > Save as template… asks for a name for the first
+selected channel or buss, as above; Track > Add from template… lists them, a
+click adds that strip last under the master and selects it, and a right click
+offers Delete.
+
 ## 5. Agent panel (removed)
 
 The app has no built-in agent (ADR-0043). Agents drive it from an external
@@ -823,7 +863,8 @@ Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
   context-dependent arguments resolve from the selection ("selected
   tracks") at invocation.
 - **Actions list** (`?`): fuzzy search over names, descriptions and
-  commands; shows bound keys; runs, binds (Ctrl+B, then the chord), adds to
+  commands; shows every key bound to an action (menus show only the
+  first); runs, binds (Ctrl+B, then the chord), adds to
   toolbar/menu (Ctrl+T, Ctrl+M), and learns a MIDI control for it (Ctrl+L:
   the learn dialog of §4.5 with the CC mode and input choice). The list shows
   a bound control after the keys. A press (note on, CC above 0, program
@@ -851,14 +892,20 @@ Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
   features: explode onto tracks or in sequence, render with FX as a new take
   or in place, delete the heard take, show all takes (`ui.item.takes`).
 - **Keymaps:** per context section (global, arrange, MIDI editor, mixer,
-  text field), chords allowed, conflicts shown in the editor. A key looks in
-  `text` while a text field has focus, in `midi` or `mixer` while the focus
-  is inside that panel, then in `arrange` (its defaults edit the shared
-  selection) and `global`, innermost first. Stored as
+  FX window, text field), chords allowed, conflicts shown in the editor. A
+  key looks in `text` while a text field has focus, in `midi`, `mixer` or
+  `fx` while the pointer is over that panel (else while the focus is inside
+  it: the pointer is over the bars or outside the window), then in `arrange` (its defaults
+  edit the shared selection) and `global`, innermost first
+  (`gui::keySections`). So a key acts on what is under the pointer: Delete
+  over the arrange view removes the selected items even while the MIDI
+  editor has the focus. Stored as
   canonical JSON in user config; defaults close to REAPER's common keys
   where they are not proprietary assets (key choices are not copyrightable
   expression; no REAPER files are copied). Among the defaults: Space
-  play/stop, R record (also Ctrl+R), L loop, Ctrl+M or Alt+D the mixer,
+  play/stop, R record (also Ctrl+R), L loop, Delete or Alt+C deletes the
+  selection (items, tracks or points; notes over the MIDI editor), Ctrl+M or
+  Alt+D the mixer,
   Alt+E the MIDI editor on the item it had last (else the selected or first
   MIDI item; nothing without one). Space is never a button's: buttons and
   toggles take Enter, so Space after a click still plays or stops, and a
@@ -1031,8 +1078,10 @@ Quire's own character, not a REAPER clone or a generic dark theme
 - **Track colours, for organizing:** a small set (red, orange, yellow, green,
   teal, blue, violet, grey; `track.set {color}` also takes "#rrggbb") drawn as
   a stripe down the TCP row's left edge and under the mixer strip's name.
-  Picked from the track's right-click menu (Rename, Color…, Delete; the same
-  in the TCP and the mixer) or Track > color….
+  Picked from the track's right-click menu (Rename, Color…, Duplicate,
+  Delete; the same in the TCP and the mixer) or Track > color…. A pick colours every selected
+  track when the track is one of them (Track > color… always works on the
+  selection), as one undo step.
 - **Calm by default:** colour reserved for state (armed, clipping, selected,
   agent-changed), meters and waveforms in ink tones; motion only for
   feedback. The TCP keeps its boxed toggles.
@@ -1040,7 +1089,11 @@ Quire's own character, not a REAPER clone or a generic dark theme
 ## 8. Commands and UI state
 
 Every GUI action is a command or a UI action in the actions list
-(`app_actions.h`); the GUI never edits the session any other way. State that
+(`app_actions.h`); the GUI never edits the session any other way. A panel
+keeps only the keys of a gesture in progress or a focused control (Escape
+cancels a drag, Enter confirms a dialog, a list's arrows move its
+selection); every other key is a keymap binding of an action, so it shows
+in the actions list and can be rebound. State that
 is not the session's (selection, zoom and scroll, panel sizes, screensets,
 plug-in editor placements) lives in the UI sidecar (§1.2); `gui.selection`
 exposes the selection to agents.

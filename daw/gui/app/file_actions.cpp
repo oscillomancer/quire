@@ -43,10 +43,10 @@ const SDL_DialogFileFilter kAudioFilter[] = {{"Audio", "wav;flac;mp3"}, {"All fi
 // click offers to delete it (`remove` is true when the file is gone).
 class TemplateList : public ui::List {
   public:
-    TemplateList(ui::Root& root, std::vector<std::string> names,
+    TemplateList(std::string id, ui::Root& root, std::vector<std::string> names,
                  std::function<void(const std::string&)> load,
                  std::function<bool(const std::string&)> remove)
-        : List("file.template.list"),
+        : List(std::move(id)),
           root_(root),
           names_(std::move(names)),
           load_(std::move(load)),
@@ -100,6 +100,24 @@ class TemplateList : public ui::List {
     std::function<void(const std::string&)> load_;
     std::function<bool(const std::string&)> remove_;
 };
+
+// The ids (and commands) of a kind of template's prompt and list.
+std::string templateIds(FileActions::Template kind) {
+    return kind == FileActions::Template::Track ? "track.template" : "file.template";
+}
+std::string templateCommand(FileActions::Template kind) {
+    return kind == FileActions::Template::Track ? "track.template" : "project.template";
+}
+
+// The track a track template is saved from: the first selected one but a master.
+std::optional<model::Id> templateTrack(const model::Session& s, const UiState& ui) {
+    for (const std::string& text : ui.selectedTracks) {
+        const auto id = model::Id::parse(text);
+        const model::Track* t = id ? s.tracks.find(*id) : nullptr;
+        if (t && t->type != model::StripType::Master) return id;
+    }
+    return std::nullopt;
+}
 
 }  // namespace
 
@@ -171,6 +189,10 @@ FileActions::FileActions(ui::Root& root, AppActions& actions, cmd::Dispatcher& d
     });
     actions_.addUi("ui.file.template.save", "File: save template…", [this] { openSaveTemplate(); });
     actions_.addUi("ui.file.template.load", "File: load template…", [this] { openTemplateList(); });
+    actions_.addUi("ui.track.template.save", "Track: save as template…",
+                   [this] { openSaveTemplate(Template::Track); });
+    actions_.addUi("ui.track.template.load", "Track: add from template…",
+                   [this] { openTemplateList(Template::Track); });
     actions_.addUi("ui.file.import", "File: import audio…", [this] {
         auto* req = new DialogRequest{dialogs_.guard(post_, [this](auto paths) { import(paths); })};
         SDL_ShowOpenFileDialog(onDialog, req, window_, kAudioFilter, 2, nullptr, true);
@@ -286,47 +308,59 @@ void FileActions::chooseFolder(const std::filesystem::path& start,
                              false);
 }
 
-void FileActions::openSaveTemplate() {
+void FileActions::openSaveTemplate(Template kind) {
     if (root_.popupOpen()) root_.closePopups();
     replaceTemplate_.clear();
-    auto form = std::make_unique<ui::Node>("file.template.save");
+    const std::string ids = templateIds(kind);
+    std::string title = "Save project template";
+    if (kind == Template::Track) {
+        const auto track = templateTrack(app_.head(), ui_);
+        if (!track) return showError("Save track template: select a channel or buss first");
+        title = "Save " + model::trackLabel(app_.head(), *track) + " as a track template";
+    }
+    auto form = std::make_unique<ui::Node>(ids + ".save");
     form->layout.dir = ui::Layout::Dir::Column;
     form->layout.width = ui::SizeRule::fixed(420);
     form->layout.height = ui::SizeRule::content();
     form->layout.padding = ui::Insets::all(14);
     form->layout.gap = 8;
-    form->emplace<ui::Label>("file.template.title", "Save project template", ui::Font::UiBold,
-                             "body");
-    auto& row = form->emplace<ui::Node>("file.template.row");
+    form->emplace<ui::Label>(ids + ".title", title, ui::Font::UiBold, "body");
+    auto& row = form->emplace<ui::Node>(ids + ".row");
     row.layout.dir = ui::Layout::Dir::Row;
     row.layout.height = ui::SizeRule::fixed(28);
     row.layout.gap = 8;
-    auto& name = row.emplace<ui::TextField>("file.template.name", "", "Template name");
+    auto& name = row.emplace<ui::TextField>(ids + ".name", "", "Template name");
     name.layout.width = ui::SizeRule::fraction();
-    name.onSubmit = [this](const std::string& text) { saveTemplate(text); };
+    name.onSubmit = [this, kind](const std::string& text) { saveTemplate(text, kind); };
     name.onCancel = [this] { root_.closePopup(); };
-    row.emplace<ui::Button>("file.template.commit", "Save",
-                            [this, &name] { saveTemplate(name.text()); });
-    row.emplace<ui::Button>("file.template.cancel", "Cancel", [this] { root_.closePopup(); });
-    form->emplace<ui::Label>("file.template.status", "", ui::Font::Ui, "small", "ink-quiet")
+    row.emplace<ui::Button>(ids + ".commit", "Save",
+                            [this, kind, &name] { saveTemplate(name.text(), kind); });
+    row.emplace<ui::Button>(ids + ".cancel", "Cancel", [this] { root_.closePopup(); });
+    form->emplace<ui::Label>(ids + ".status", "", ui::Font::Ui, "small", "ink-quiet")
         .layout.height = ui::SizeRule::fixed(18);
     root_.openPopup(std::move(form), {}, ui::Placement::Center);
     root_.focus(&name);
 }
 
-void FileActions::saveTemplate(const std::string& name) {
-    auto* status = dynamic_cast<ui::Label*>(root_.find("file.template.status"));
+void FileActions::saveTemplate(const std::string& name, Template kind) {
+    const std::string ids = templateIds(kind), command = templateCommand(kind) + ".save";
+    auto* status = dynamic_cast<ui::Label*>(root_.find(ids + ".status"));
     json::Value args = json::Value::object();
+    if (kind == Template::Track) {
+        const auto track = templateTrack(app_.head(), ui_);
+        if (!track) return showError(command + ": select a channel or buss first");
+        args["track"] = track->str();
+    }
     args["name"] = name;
     args["replace"] = !name.empty() && name == replaceTemplate_;
-    auto saved = dispatcher_.execute({"project.template.save", std::move(args), kOrigin});
+    auto saved = dispatcher_.execute({command, std::move(args), kOrigin});
     if (saved) {
         replaceTemplate_.clear();
-        if (root_.find("file.template.save")) root_.closePopup();
-        showSaveWarnings("project.template.save", *saved);
+        if (root_.find(ids + ".save")) root_.closePopup();
+        if (kind == Template::Project) showSaveWarnings(command, *saved);
         return;
     }
-    if (!status) return showError("project.template.save: " + saved.error().message);
+    if (!status) return showError(command + ": " + saved.error().message);
     if (saved.error().code == "template.exists") {
         replaceTemplate_ = name;
         status->setText("\"" + name + "\" exists. Save again to replace it.");
@@ -336,41 +370,55 @@ void FileActions::saveTemplate(const std::string& name) {
     root_.damageAll();
 }
 
-void FileActions::openTemplateList() {
+void FileActions::openTemplateList(Template kind) {
     if (root_.popupOpen()) root_.closePopups();
-    auto listed = exec("project.template.list", json::Value::object());
+    const bool track = kind == Template::Track;
+    const std::string ids = templateIds(kind), command = templateCommand(kind);
+    auto listed = exec(command + ".list", json::Value::object());
     if (!listed) return;
     std::vector<std::string> names;
     for (const json::Value& t : (*listed)["templates"].asArray())
         names.push_back(t.find("name")->asString());
-    auto form = std::make_unique<ui::Node>("file.templates");
+    auto form = std::make_unique<ui::Node>(ids + "s");
     form->layout.dir = ui::Layout::Dir::Column;
     form->layout.width = ui::SizeRule::fixed(384);
     form->layout.height = ui::SizeRule::content();
     form->layout.padding = ui::Insets::all(12);
     form->layout.gap = 8;
-    form->emplace<ui::Label>("file.templates.title", "Load project template", ui::Font::UiBold,
-                             "body");
+    form->emplace<ui::Label>(ids + "s.title",
+                             track ? "Add track from template" : "Load project template",
+                             ui::Font::UiBold, "body");
     if (names.empty())
-        form->emplace<ui::Label>("file.templates.none",
-                                 "No templates yet: File > Save template… saves one.", ui::Font::Ui,
-                                 "small", "ink-quiet");
+        form->emplace<ui::Label>(ids + "s.none",
+                                 track ? "No track templates yet: Track > Save as template… "
+                                         "saves the selected track."
+                                       : "No templates yet: File > Save template… saves one.",
+                                 ui::Font::Ui, "small", "ink-quiet");
     else
         form->emplace<TemplateList>(
-            root_, std::move(names),
-            [this](const std::string& name) {
+            ids + ".list", root_, std::move(names),
+            [this, track](const std::string& name) {
+                if (track) return loadTrackTemplate(name);
                 confirmDiscard("Start a new project from \"" + name + "\"?",
                                [this, name] { loadTemplate(name); });
             },
-            [this](const std::string& name) {
+            [this, command](const std::string& name) {
                 json::Value args = json::Value::object();
                 args["name"] = name;
-                return exec("project.template.delete", std::move(args)).ok();
+                return exec(command + ".delete", std::move(args)).ok();
             });
-    if (form->find("file.template.list"))
-        form->emplace<ui::Label>("file.templates.hint", "Right-click a template to delete it.",
+    if (form->find(ids + ".list"))
+        form->emplace<ui::Label>(ids + "s.hint", "Right-click a template to delete it.",
                                  ui::Font::Ui, "caption", "ink-quiet");
     root_.openPopup(std::move(form), {}, ui::Placement::Center);
+}
+
+// A track template's strip goes last under the master, selected.
+void FileActions::loadTrackTemplate(const std::string& name) {
+    json::Value args = json::Value::object();
+    args["name"] = name;
+    if (auto added = exec("track.template.load", std::move(args)))
+        ui_.selectedTracks = {(*added)["track"].asString()};
 }
 
 void FileActions::loadTemplate(const std::string& name) {

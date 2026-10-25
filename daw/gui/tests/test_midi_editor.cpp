@@ -10,6 +10,7 @@
 
 #include <array>
 #include <filesystem>
+#include <set>
 #include <thread>
 
 #include "app_actions.h"
@@ -93,6 +94,10 @@ struct Fixture {
         frame->emplace<ui::Node>("arrange").layout.height = ui::SizeRule::fraction();
         frame->add(editor->build());
         root->setContent(std::move(frame));
+        root->onUnhandledKey = [this](const ui::KeyEvent& e) {  // as the app routes them
+            const bool typing = root->focused() && root->focused()->role() == ui::Role::TextField;
+            return actions->key(e.key, e.mods, typing, gui::keySections(*root));
+        };
         auto t = exec("track.add", R"({"name":"Keys"})");
         auto it =
             exec("item.add", R"({"track":")" + t["track"].asString() +
@@ -478,6 +483,73 @@ TEST_CASE("MIDI editor: closing cancels velocity and CC previews before reopenin
     f.pointer(ui::PointerEvent::Type::Move, f.at(2, 60));
     f.pointer(ui::PointerEvent::Type::Up, f.at(2, 60));
     CHECK(f.app->head().version == version);
+}
+
+TEST_CASE("MIDI editor: the grid's menu copies, pastes there, cuts and duplicates notes") {
+    Fixture f;
+    if (!f.ok) return;
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    auto& s = f.editor->state();
+    REQUIRE(s.notes.size() == 4);  // C4 E4 G4 C5, a beat each
+    auto rightClick = [&](ui::Point p) {
+        ui::PointerEvent e;
+        e.type = ui::PointerEvent::Type::Down;
+        e.pos = p;
+        e.button = 3;
+        f.root->pointer(e);
+        e.type = ui::PointerEvent::Type::Up;
+        f.root->pointer(e);
+        f.frame();
+    };
+    auto pick = [&](int row) {  // Delete, Copy, Cut, Paste, Duplicate
+        auto* menu = dynamic_cast<ui::List*>(f.root->find("midi.menu"));
+        REQUIRE(menu);
+        auto activate = menu->onActivate;  // closes (destroys) the menu
+        activate(static_cast<std::size_t>(row));
+        f.frame();
+    };
+    s.selected = {0, 1};
+    rightClick(f.at(0.5, 60));  // on a selected note: the selection stays
+    CHECK(s.selected == std::set<std::size_t>{0, 1});
+    pick(1);                    // Copy
+    rightClick(f.at(4.1, 72));  // empty grid, at beat 4: the copy lands there
+    pick(3);                    // Paste
+    REQUIRE(s.notes.size() == 6);
+    REQUIRE(s.selected.size() == 2);  // the pasted notes
+    std::vector<double> starts;
+    for (std::size_t i : s.selected) starts.push_back(s.notes[i].start);
+    CHECK(starts == std::vector<double>{4, 5});
+    rightClick(f.at(4.5, 60));
+    pick(4);  // Duplicate: right after themselves
+    CHECK(s.notes.size() == 8);
+    rightClick(f.at(6.5, 60));  // on the duplicated (selected) pair
+    pick(2);                    // Cut
+    CHECK(s.notes.size() == 6);
+    rightClick(f.at(0.5, 60));
+    pick(3);  // Paste the cut pair back, at beat 0
+    CHECK(s.notes.size() == 8);
+}
+
+TEST_CASE("keys act where the pointer is: Alt+C deletes notes over the editor, items elsewhere") {
+    Fixture f;
+    if (!f.ok) return;
+    REQUIRE(f.editor->open(f.item));
+    f.frame();
+    auto& s = f.editor->state();
+    s.selected = {0};
+    f.ui.selectedItems = {f.item};
+    f.pointer(ui::PointerEvent::Type::Move, f.at(8, 40));  // over the editor
+    f.root->key(SDLK_C, ui::kAlt);
+    f.frame();
+    CHECK(f.notes().size() == 3);
+    CHECK(f.app->head().items.size() == 1);
+    // Over the arrange view (the focus still in the editor): the selected item goes.
+    const ui::Rect arrange = f.root->find("arrange")->bounds();
+    f.pointer(ui::PointerEvent::Type::Move, {arrange.x + 40, arrange.y + 20});
+    f.root->key(SDLK_C, ui::kAlt);
+    f.frame();
+    CHECK(f.app->head().items.empty());
 }
 
 TEST_CASE("MIDI editor: open, draw, select, move, resize, transpose, delete, velocity") {

@@ -47,6 +47,28 @@ std::vector<model::Id> displayChildren(const model::Session& session, const mode
 std::optional<std::size_t> reorderIndex(const model::Session& session, model::Id track,
                                         std::optional<model::Id> before);
 
+// The same for several selected tracks dragged together: `track` (the dragged
+// one) and the other selected tracks of its parent and type (`selected`), in
+// their order, land together in front of `before` (else after the last sibling
+// of that type). The track.move steps that do it, in order, each an index as
+// the command reads it then; empty when the order would not change.
+struct TrackMove {
+    model::Id track;
+    std::size_t index = 0;
+};
+std::vector<TrackMove> reorderMoves(const model::Session& session, model::Id track,
+                                    const std::function<bool(model::Id)>& selected,
+                                    std::optional<model::Id> before);
+// The tracks reorderMoves would move: `track` and the selected siblings of its
+// type, in their order (`track` alone when it is not selected itself).
+std::vector<model::Id> reorderGroup(const model::Session& session, model::Id track,
+                                    const std::function<bool(model::Id)>& selected);
+
+// A select callback's flag for a plain press on a selected track: the
+// selection stays (a drag from there moves all of it) and the press still
+// focuses the tracks; a release without a drag selects the track alone.
+inline constexpr unsigned kSelectKeep = 1u << 8;
+
 // The arrange view's horizontal viewport and vertical scroll (gui.md §1.2:
 // zoom and scroll are UI state).
 struct Viewport {

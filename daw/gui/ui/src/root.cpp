@@ -352,6 +352,7 @@ void Root::forget(Node* node) {
 
 void Root::pointer(PointerEvent e) {
     Dispatch dispatch(*this);
+    if (e.type != PointerEvent::Type::Cancel) lastPointer_ = e.pos;
     // A press outside every popup closes them and goes no further.
     if (e.type == PointerEvent::Type::Down && !popups_.empty() && !captured_) {
         const bool inside = std::any_of(popups_.begin(), popups_.end(),

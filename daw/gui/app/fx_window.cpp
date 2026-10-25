@@ -35,13 +35,12 @@ bool draggingSlider(const ui::Node& node) {
 
 // A chain row: paints its selection, selects the effect on a left press
 // (with the press's modifiers and click count), and reorders by dragging
-// (onDrag) or with Alt+Up / Alt+Down (fx.move).
+// (onDrag; the keys are the ui.fx.move_up/down actions).
 class Row : public ui::Node {
   public:
     enum class Phase { Move, Drop, Cancel };
-    Row(std::string id, std::function<void(unsigned mods, int clicks)> onSelect,
-        std::function<void(int)> onMove = {})
-        : Node(std::move(id)), onSelect_(std::move(onSelect)), onMove_(std::move(onMove)) {
+    Row(std::string id, std::function<void(unsigned mods, int clicks)> onSelect)
+        : Node(std::move(id)), onSelect_(std::move(onSelect)) {
         interactive = true;
         focusable = true;
         layout.dir = ui::Layout::Dir::Column;
@@ -98,23 +97,11 @@ class Row : public ui::Node {
             if (auto callback = onDrag) callback(Phase::Cancel, {});
             return true;
         }
-        if (!onMove_ || !(e.mods & ui::kAlt)) return false;
-        if (e.key == SDLK_UP) {
-            auto callback = onMove_;
-            callback(-1);
-            return true;
-        }
-        if (e.key == SDLK_DOWN) {
-            auto callback = onMove_;
-            callback(1);
-            return true;
-        }
         return false;
     }
 
   private:
     std::function<void(unsigned, int)> onSelect_;
-    std::function<void(int)> onMove_;
     std::optional<ui::Point> pressAt_;
     bool moving_ = false;
 };
@@ -616,43 +603,63 @@ Status FxWindow::openFor(const UiState& ui, const json::Value& prompt) {
     return open(*id);
 }
 
-// The plugin browser on its own (the strips' "+"): what it adds goes last in
-// the track's chain; a chain window open on that track shows it.
+// The plugin browser on its own: what it adds goes last in the chain of the
+// track given (a strip's "+"), else of every selected track; a chain window
+// open on one of them shows it.
 Status FxWindow::openToAdd(const UiState& ui, const json::Value& prompt) {
     std::string text;
     if (prompt.isString()) text = prompt.asString();
     if (const json::Value* t = prompt.isObject() ? prompt.find("track") : nullptr;
         t && t->isString())
         text = t->asString();
-    if (text.empty() && !ui.selectedTracks.empty()) text = ui.selectedTracks.front();
-    const auto id = model::Id::parse(text);
-    if (!id || !app_.head().tracks.find(*id))
-        return Error("gui.track",
-                     text.empty() ? "no track given and nothing is selected" : "no track " + text,
-                     "/track", "select a track, or give a track id like tr_1");
-    const model::Id track = *id;
-    mainBrowser_->open([this, track](const std::string& pluginId) { addFxTo(track, pluginId); },
-                       "Add plugin to " + model::trackLabel(app_.head(), track));
+    const model::Session& s = app_.head();
+    std::vector<model::Id> tracks;
+    if (!text.empty()) {
+        const auto id = model::Id::parse(text);
+        if (!id || !s.tracks.find(*id))
+            return Error("gui.track", "no track " + text, "/track", "give a track id like tr_1");
+        tracks.push_back(*id);
+    } else {
+        for (const std::string& selected : ui.selectedTracks)
+            if (const auto id = model::Id::parse(selected); id && s.tracks.find(*id))
+                tracks.push_back(*id);
+        if (tracks.empty())
+            return Error("gui.track", "nothing is selected", "/track", "select a track first");
+    }
+    mainBrowser_->open([this, tracks](const std::string& pluginId) { addFxTo(tracks, pluginId); },
+                       tracks.size() == 1
+                           ? "Add plugin to " + model::trackLabel(s, tracks.front())
+                           : "Add plugin to " + std::to_string(tracks.size()) + " tracks");
     return {};
 }
 
-void FxWindow::addFxTo(model::Id track, const std::string& pluginId) {
-    json::Value args = json::Value::object();
-    args["track"] = track.str();
-    args["plugin"] = pluginId;
-    auto result = dispatcher_.execute({"fx.add", std::move(args), kUiOrigin});
+// One undo step however many tracks it goes on.
+void FxWindow::addFxTo(const std::vector<model::Id>& tracks, const std::string& pluginId) {
+    std::optional<model::Id> shown;  // the new instance on the track the window shows
+    auto add = [&]() -> Result<json::Value> {
+        for (const model::Id& track : tracks) {
+            json::Value args = json::Value::object();
+            args["track"] = track.str();
+            args["plugin"] = pluginId;
+            auto made = dispatcher_.execute({"fx.add", std::move(args), kUiOrigin});
+            if (!made) return made;
+            if (const json::Value* fx = made->find("fx"); track == track_ && fx && fx->isString())
+                shown = model::Id::parse(fx->asString());
+        }
+        return json::Value::object();
+    };
+    auto result = tracks.size() == 1 ? add() : dispatcher_.transact("Add FX", kUiOrigin, add);
     if (!result) {
         const std::string message = "fx.add: " + result.error().message;
         if (page_) setStatus(message);
         if (hooks_.onError) hooks_.onError(message);
         return;
     }
-    if (!page_ || track_ != track || take_) return;
-    if (const json::Value* made = result->find("fx"); made && made->isString())
-        if (auto made_id = model::Id::parse(made->asString())) {
-            selected_ = *made_id;
-            picked_.clear();
-        }
+    if (!page_ || take_ || std::find(tracks.begin(), tracks.end(), track_) == tracks.end()) return;
+    if (shown) {
+        selected_ = *shown;
+        picked_.clear();
+    }
     setStatus("added " + pluginId);
     refresh();
 }
@@ -1004,9 +1011,7 @@ void FxWindow::buildRow(ui::Node& body, model::Id fx, std::size_t index, bool in
     const std::string prefix = input ? "ifx." : "fx.";
     const std::string id = fx.str();
     auto& row = body.emplace<Row>(
-        prefix + "row." + id, [this, fx](unsigned mods, int clicks) { press(fx, mods, clicks); },
-        input ? std::function<void(int)>{}
-              : std::function<void(int)>{[this, fx](int delta) { moveFx(fx, delta); }});
+        prefix + "row." + id, [this, fx](unsigned mods, int clicks) { press(fx, mods, clicks); });
     row.selected = picked(fx);
     if (!input)  // drag the row to reorder the chain
         row.onDrag = [this, fx](Row::Phase phase, ui::Point p) {
@@ -1297,15 +1302,16 @@ void FxWindow::dragRow(model::Id fx, int phase, ui::Point p) {
     if (dispatch("fx.move", std::move(args))) refresh();
 }
 
-void FxWindow::moveFx(model::Id fx, int delta) {
+void FxWindow::moveSelected(int delta) {
+    if (!isOpen() || !hasSelected()) return;
     const std::vector<model::Id> c = chain();
-    auto it = std::find(c.begin(), c.end(), fx);
+    auto it = std::find(c.begin(), c.end(), selected_);
     if (it == c.end()) return;
     const auto from = static_cast<std::ptrdiff_t>(it - c.begin());
     const auto to = from + delta;
     if (to < 0 || to >= static_cast<std::ptrdiff_t>(c.size())) return;
     json::Value args = json::Value::object();
-    args["fx"] = fx.str();
+    args["fx"] = selected_.str();
     args["index"] = static_cast<std::int64_t>(to);
     if (dispatch("fx.move", std::move(args))) refresh();
 }

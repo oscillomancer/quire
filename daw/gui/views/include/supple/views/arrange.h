@@ -144,8 +144,11 @@ class ArrangeView : public ui::Node {
     // The session's length plus a margin (the horizontal scrollbar's extent).
     double totalSeconds() const;
 
+    // The zoom keys (ui.arrange.zoom_in/out): one 1.25x step, holding the
+    // playhead's time in place.
+    void zoomStep(bool in);
+
     bool onPointer(const ui::PointerEvent& e) override;
-    bool onKey(const ui::KeyEvent& e) override;
 
   private:
     void damageViews();

@@ -146,8 +146,9 @@ refuses the save (`media.missing`). project.template.load opens it as a new
 project with no file and copies the template's media into that project's
 own media folder, so neither depends on the other afterwards. An older
 single-file template (`templates/<name>.json`, absolute media paths) still
-loads. fx.chain.delete and project.template.delete remove a preset or
-template by name; none of these file actions changes the history.
+loads. fx.chain.delete, track.template.delete and project.template.delete
+remove a preset or template by name; none of these file actions changes the
+history.
 
 ### 1.5 Items and takes
 
@@ -520,7 +521,13 @@ and naming. All `edit` unless marked (q) query or (a) action.
   `time.convert {from, to, value}` (q).
 - **tracks**: `track.add {name, type: channel|buss|master, parent, index, channels, template?}`,
   `track.remove`, `track.move {parent, index}`, `track.set {fields}`,
-  `track.duplicate`, `track.list` (q).
+  `track.duplicate {tracks}` (each copy right after its original: settings,
+  both chains with live settings, items and takes — unpooled MIDI copied —,
+  sends, record input, and the envelopes on the track, its plug-ins, sends and
+  takes; not a folder's children, sends into it or item groups; masters are
+  refused), `track.list` (q); templates `track.template.save {track, name}`
+  (a), `track.template.load {name}` (a new strip under the master),
+  `track.template.list` (q), `track.template.delete` (a).
 - **items/takes**: `item.add {track, position, length, source|midi|notation}`,
   `item.remove`, `item.move`, `item.set`, `item.split {at}`,
   `item.duplicate`, `item.glue` (a+edit), `take.add`, `take.remove`,
@@ -539,7 +546,11 @@ and naming. All `edit` unless marked (q) query or (a) action.
   indices edit each original note once. Tick conversions and all resulting
   starts, ends, lengths and sequence lengths are checked before publication;
   out-of-range arithmetic returns structured `midi.range` with a repair hint,
-  leaving the session unchanged.
+  leaving the session unchanged. `midi.merge {items}`: MIDI
+  items on one track into one item from the first start to the last end
+  (what each heard take plays: looped passes unrolled, notes ending by their
+  item's end; gaps empty, overlaps layered), or one item's MIDI takes layered
+  into one take; the earliest item, its settings and take FX are kept.
 - **FX**: `fx.add {chain_owner, plugin, index, patch?}`, `fx.remove`,
   `fx.move`, `fx.copy {fx, track, index?, chain?}` (live settings), `fx.set {bypass, offline, wet, isolation, oversampling,
   parallel, pins, …}`, `fx.param.set {fx, values: {key|id: value}}`,

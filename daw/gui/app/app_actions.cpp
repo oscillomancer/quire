@@ -10,12 +10,15 @@
 #include <cmath>
 #include <cstdio>
 #include <utility>
+#include <vector>
 
 #include "supple/engine/midi_control.h"
 #include "supple/json/parse.h"
 #include "supple/schema/schema.h"
 #include "supple/ui/controls.h"
 #include "supple/ui/node.h"
+#include "supple/ui/root.h"
+#include "supple/views/track_layout.h"
 
 namespace supple::gui {
 
@@ -24,7 +27,9 @@ void selectTrack(UiState& ui, const std::string& track, unsigned mods,
     auto& sel = ui.selectedTracks;
     ui.tracksFocused = true;
     ui.envelopeFocused = false;
-    if (mods & ui::kShift) {  // extend from the anchor, in the view's order
+    if ((mods & views::kSelectKeep) && std::find(sel.begin(), sel.end(), track) != sel.end()) {
+        ui.trackAnchor = track;      // a press that may drag the selection: it stays
+    } else if (mods & ui::kShift) {  // extend from the anchor, in the view's order
         const std::string from = ui.trackAnchor.value_or(track);
         auto a = std::find(order.begin(), order.end(), from);
         auto b = std::find(order.begin(), order.end(), track);
@@ -46,6 +51,28 @@ void selectTrack(UiState& ui, const std::string& track, unsigned mods,
         sel = {track};
         ui.trackAnchor = track;
     }
+}
+
+std::vector<std::string> keySections(const ui::Root& root) {
+    const bool typing = root.focused() && root.focused()->role() == ui::Role::TextField;
+    std::vector<std::string> sections;
+    if (typing) sections.push_back("text");
+    const ui::Node* context = root.focused();
+    if (const auto at = root.lastPointer(); at && !typing)
+        for (const char* panel : {"midi.editor", "mixer", "fx", "arrange"})
+            if (const ui::Node* n = root.find(panel);
+                n && n->visible && n->bounds().contains(*at)) {
+                context = n;
+                break;
+            }
+    for (const ui::Node* n = context; n; n = n->parent())
+        if (n->id() == "midi.editor" || n->id() == "mixer" || n->id() == "fx") {
+            sections.push_back(n->id() == "midi.editor" ? "midi" : n->id());
+            break;
+        }
+    sections.push_back("arrange");
+    sections.push_back("global");
+    return sections;
 }
 
 bool trackSelected(const UiState& ui, const std::string& track) {
@@ -221,6 +248,20 @@ AppActions::AppActions(const cmd::Registry& registry, cmd::Dispatcher& dispatche
         return json::Value::object();
     };
     registry_.add(removeTracks);
+    actions::Action duplicateTracks;
+    duplicateTracks.id = "track.duplicate:selected";
+    duplicateTracks.name = "Track: duplicate selected";
+    duplicateTracks.description =
+        "Duplicate every selected channel and buss with its FX, items, sends and automation, "
+        "one undo step; the copies become the selection.";
+    duplicateTracks.builtin = [this](const actions::Context&) -> Result<json::Value> {
+        if (ui_.selectedTracks.empty()) return Error("action.selection", "select tracks first");
+        auto copies = gui::duplicateTracks(dispatcher_, app_.head(), ui_.selectedTracks);
+        if (!copies) return std::move(copies).error();
+        if (!copies->empty()) ui_.selectedTracks = std::move(*copies);
+        return json::Value::object();
+    };
+    registry_.add(duplicateTracks);
     // Delete: what was selected last, tracks (TCP, mixer) or items (arrange).
     actions::Action remove;
     remove.id = "edit.delete";
@@ -377,6 +418,20 @@ void AppActions::addUi(std::string id, std::string name, std::string prompt,
     a.prompts = {prompt};
     a.builtin = [prompt, run = std::move(run)](const actions::Context& c) -> Result<json::Value> {
         const json::Value* v = c.prompted.find(prompt);
+        auto r = run(v ? *v : json::Value());
+        if (!r) return std::move(r).error();
+        return json::Value::object();
+    };
+    registry_.add(std::move(a));
+}
+
+void AppActions::addUiFor(std::string id, std::string name, std::string key,
+                          std::function<Status(const json::Value& value)> run) {
+    actions::Action a;
+    a.id = std::move(id);
+    a.name = std::move(name);
+    a.builtin = [key, run = std::move(run)](const actions::Context& c) -> Result<json::Value> {
+        const json::Value* v = c.prompted.isObject() ? c.prompted.find(key) : nullptr;
         auto r = run(v ? *v : json::Value());
         if (!r) return std::move(r).error();
         return json::Value::object();
@@ -557,12 +612,18 @@ void AppActions::control(const std::vector<engine::EngineApp::ControlEvent>& eve
     }
 }
 
-std::string AppActions::keysFor(std::string_view action) const {
-    const auto bindings = keymap_.bindingsFor(action);
-    if (bindings.empty()) return {};
+std::string AppActions::keysFor(std::string_view action, bool all) const {
+    std::vector<std::string> shown;
+    for (const actions::Binding& b : keymap_.bindingsFor(action)) {
+        std::string keys;
+        for (const actions::Chord& c : b.keys)
+            keys += (keys.empty() ? "" : " ") + actions::describe(c);
+        // The same keys bound in another section show once.
+        if (std::find(shown.begin(), shown.end(), keys) == shown.end()) shown.push_back(keys);
+        if (!all) break;
+    }
     std::string out;
-    for (const actions::Chord& c : bindings.front().keys)
-        out += (out.empty() ? "" : " ") + actions::describe(c);
+    for (const std::string& keys : shown) out += (out.empty() ? "" : ", ") + keys;
     return out;
 }
 

@@ -677,6 +677,9 @@ class EngineApp : public cmd::Host {
 // have a new source/offset; `shift` clips its item-relative envelopes for a split.
 Result<model::Id> copyTake(const model::Session& source, model::EditTxn& txn, model::Id original,
                            model::Take copy, double shift = 0);
+// A copied take gets its own copy of an unpooled MIDI source; audio and
+// pooled MIDI stay shared.
+void unpoolCopiedSource(model::Take& take, const model::Session& s, model::EditTxn& txn);
 
 // Registers the engine's command catalogue (session-model §7): project.*,
 // track.*, item.*, midi.*, fx.*, render.mix, history.*, session.describe, …

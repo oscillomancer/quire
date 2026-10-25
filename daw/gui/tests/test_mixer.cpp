@@ -164,23 +164,26 @@ struct Fixture {
         const ui::Rect b = n->bounds();
         return {b.x + b.w / 2, b.y + b.h / 2};
     }
-    void pointer(ui::PointerEvent::Type type, ui::Point p, int clicks = 1) {
+    void pointer(ui::PointerEvent::Type type, ui::Point p, int clicks = 1, unsigned mods = 0,
+                 int button = 1) {
         ui::PointerEvent e;
         e.type = type;
         e.pos = p;
-        e.button = type == ui::PointerEvent::Type::Move ? 0 : 1;
+        e.button = type == ui::PointerEvent::Type::Move ? 0 : button;
         e.clicks = clicks;
+        e.mods = mods;
         root->pointer(e);
         root->frame(false);
     }
     // Down, a few moves, up: a drag the way SDL would deliver it.
-    void drag(ui::Point from, ui::Point to, bool release = true) {
-        pointer(ui::PointerEvent::Type::Down, from);
+    void drag(ui::Point from, ui::Point to, bool release = true, unsigned mods = 0) {
+        pointer(ui::PointerEvent::Type::Down, from, 1, mods);
         for (int i = 1; i <= 4; ++i)
             pointer(ui::PointerEvent::Type::Move,
                     {from.x + (to.x - from.x) * static_cast<float>(i) / 4,
-                     from.y + (to.y - from.y) * static_cast<float>(i) / 4});
-        if (release) pointer(ui::PointerEvent::Type::Up, to);
+                     from.y + (to.y - from.y) * static_cast<float>(i) / 4},
+                    1, mods);
+        if (release) pointer(ui::PointerEvent::Type::Up, to, 1, mods);
     }
     // A point on a strip no control uses: its name.
     ui::Point empty(const std::string& track) { return centre(node("mixer.name." + track)); }
@@ -382,7 +385,7 @@ TEST_CASE("mixer: strips select like the TCP's rows, and the menu deletes the se
     ui::Node* menu = f.root->find("track.menu." + c);
     REQUIRE(menu);
     const auto before = f.steps();
-    const ui::Point del{menu->bounds().x + 40, menu->bounds().y + 5 * 26 + 13};
+    const ui::Point del{menu->bounds().x + 40, menu->bounds().y + 6 * 26 + 13};
     f.pointer(ui::PointerEvent::Type::Move, del);
     f.pointer(ui::PointerEvent::Type::Down, del);
     f.pointer(ui::PointerEvent::Type::Up, del);
@@ -565,6 +568,90 @@ TEST_CASE(
     f.snapshot("mixer-chain.png");
 }
 
+TEST_CASE("mixer: Ctrl+dragging a plug-in onto another strip copies its whole chain") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto a = f.addTrack("channel", "A");
+    const auto b = f.addTrack("channel", "B");
+    const auto p1 = f.addFx(a, "Hickory");
+    const auto p2 = f.addFx(a, "Hickory");
+    const auto b1 = f.addFx(b, "Hickory");
+    f.exec("fx.set", R"({"fx":")" + p2 + R"(","label":"Second"})");
+    f.refresh();
+    const auto before = f.steps();
+    const ui::Point to = f.centre(f.node("mixer.faderrow." + b));
+    f.drag(f.centre(f.node("mixer.fx." + p1)), to, false, ui::kCtrl);
+    CHECK(f.mixer->drag().drop == gui::Mixer::DragView::Drop::Copy);
+    CHECK(f.mixer->drag().chain);
+    CHECK(f.mixer->drag().label == "chain (2)");
+    f.pointer(ui::PointerEvent::Type::Up, to, 1, ui::kCtrl);
+    REQUIRE(f.chain(b).size() == 3);  // its own first, then the chain in order
+    CHECK(f.chain(b)[0] == b1);
+    CHECK(f.app->head().fx.find(*model::Id::parse(f.chain(b)[2]))->label == "Second");
+    CHECK(f.chain(a) == std::vector<std::string>{p1, p2});
+    CHECK(f.steps() == before + 1);
+    CHECK(f.errors.empty());
+}
+
+TEST_CASE("mixer: a plug-in's right-click menu renames that instance") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto a = f.addTrack("channel", "A");
+    const auto p1 = f.addFx(a, "Hickory");
+    f.refresh();
+    const ui::Point at = f.centre(f.node("mixer.fx." + p1));
+    f.pointer(ui::PointerEvent::Type::Down, at, 1, 0, 3);
+    f.pointer(ui::PointerEvent::Type::Up, at, 1, 0, 3);
+    CHECK_FALSE(f.root->find("track.menu." + a));  // its own menu, not the track's
+    ui::Node* menu = f.node("mixer.fxmenu." + p1);
+    const ui::Point rename{menu->bounds().x + 40, menu->bounds().y + 13};
+    f.pointer(ui::PointerEvent::Type::Move, rename);
+    f.pointer(ui::PointerEvent::Type::Down, rename);
+    f.pointer(ui::PointerEvent::Type::Up, rename);
+    auto* field = dynamic_cast<ui::TextField*>(f.node("mixer.fxrename." + p1));
+    REQUIRE(field);
+    CHECK(field->text() == "Hickory");
+    field->setText("Lead trim");
+    f.root->key(SDLK_RETURN);
+    f.refresh();
+    CHECK(f.app->head().fx.find(*model::Id::parse(p1))->label == "Lead trim");
+    CHECK(f.node("mixer.fx." + p1)->valueText() == "Lead trim");
+    CHECK(f.errors.empty());
+}
+
+TEST_CASE("mixer: the track menu duplicates the selected strips, and selects the copies") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto a = f.addTrack("channel", "A");
+    const auto b = f.addTrack("channel", "B");
+    const auto c = f.addTrack("channel", "C");
+    f.addFx(a, "Hickory");
+    f.refresh();
+    f.ui.selectedTracks = {a, c};
+    f.refresh();
+    const ui::Point at = f.empty(c);
+    f.pointer(ui::PointerEvent::Type::Down, at, 1, 0, 3);
+    f.pointer(ui::PointerEvent::Type::Up, at, 1, 0, 3);
+    ui::Node* menu = f.node("track.menu." + c);
+    const auto before = f.steps();
+    const ui::Point dup{menu->bounds().x + 40, menu->bounds().y + 5 * 26 + 13};
+    f.pointer(ui::PointerEvent::Type::Move, dup);
+    f.pointer(ui::PointerEvent::Type::Down, dup);
+    f.pointer(ui::PointerEvent::Type::Up, dup);
+    f.refresh();
+    const auto kids = f.children("tr_0");
+    REQUIRE(kids.size() == 5);  // each copy right after its original
+    CHECK(kids[0] == a);
+    CHECK(kids[2] == b);
+    CHECK(kids[3] == c);
+    CHECK(f.track(kids[1]).name == "A");
+    CHECK(f.chain(kids[1]).size() == 1);
+    CHECK(f.track(kids[4]).name == "C");
+    CHECK(f.ui.selectedTracks == std::vector<std::string>{kids[1], kids[4]});
+    CHECK(f.steps() == before + 1);
+    CHECK(f.errors.empty());
+}
+
 TEST_CASE("mixer: dragging a strip's empty part reorders it among its own kind, in the model") {
     Fixture f;
     if (!f.ok) return;
@@ -616,6 +703,29 @@ TEST_CASE("mixer: dragging a strip's empty part reorders it among its own kind, 
     CHECK(f.children(master) == std::vector<std::string>{b, c, a, bus});
     f.exec("history.undo", "{}");
     CHECK(f.children(master) == std::vector<std::string>{a, b, c, bus});
+    CHECK(f.errors.empty());
+}
+
+TEST_CASE("mixer: dragging one of several selected strips moves them all, one undo step") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto a = f.addTrack("channel", "A");
+    const auto b = f.addTrack("channel", "B");
+    const auto c = f.addTrack("channel", "C");
+    f.refresh();
+    f.ui.selectedTracks = {a, b};
+    f.refresh();
+    const auto before = f.steps();
+    const ui::Rect last = f.strip(c).node->bounds();
+    f.drag(f.empty(a), {last.right() - 10, last.y + 200});
+    f.refresh();
+    CHECK(f.children("tr_0") == std::vector<std::string>{c, a, b});
+    CHECK(f.steps() == before + 1);
+    CHECK(f.ui.selectedTracks == std::vector<std::string>{a, b});
+    // A click without a drag selects the strip alone.
+    f.pointer(ui::PointerEvent::Type::Down, f.empty(b));
+    f.pointer(ui::PointerEvent::Type::Up, f.empty(b));
+    CHECK(f.ui.selectedTracks == std::vector<std::string>{b});
     CHECK(f.errors.empty());
 }
 

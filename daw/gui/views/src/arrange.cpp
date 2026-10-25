@@ -1379,23 +1379,9 @@ void ArrangeView::zoomBy(double factor, double seconds, float offset, bool curso
     zoomHold_ = ZoomHold{seconds, offset, given, cursor};
 }
 
-// Only the view's own zoom; Home/End belong to the keymap
-// (transport.seek:start/end), which the app routes through Root::onUnhandledKey.
-bool ArrangeView::onKey(const ui::KeyEvent& e) {
+void ArrangeView::zoomStep(bool in) {
     const double zoom = 1.25;
-    switch (e.key) {
-        case SDLK_PLUS:
-        case SDLK_EQUALS:
-        case SDLK_KP_PLUS:
-            zoomBy(zoom, playhead_, playheadX() - lanesRect().x, true);
-            return true;
-        case SDLK_MINUS:
-        case SDLK_KP_MINUS:
-            zoomBy(1 / zoom, playhead_, playheadX() - lanesRect().x, true);
-            return true;
-        default:
-            return false;
-    }
+    zoomBy(in ? zoom : 1 / zoom, playhead_, playheadX() - lanesRect().x, true);
 }
 
 std::string_view followName(Follow f) {

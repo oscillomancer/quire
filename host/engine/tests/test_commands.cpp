@@ -2363,6 +2363,110 @@ TEST_CASE("track templates preserve channel count and accept legacy stereo templ
           2);
 }
 
+TEST_CASE("track.duplicate copies a strip after itself with its FX, items, sends and automation") {
+    Workdir dir;
+    AppOptions options;
+    options.workdir = dir.path;
+    options.pluginPath = {FIXTURE_CLAP_PATH};
+    auto created = EngineApp::create(options, {.console9 = false});
+    REQUIRE(created);
+    auto app = std::move(*created);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Bass"})");                // tr_1
+    run(bus, "track.add", R"({"name":"Keys"})");                // tr_2
+    run(bus, "track.add", R"({"type":"buss","name":"Verb"})");  // tr_3
+    run(bus, "route.add", R"({"from":"tr_1","to":"tr_3","volume_db":-9})");
+    run(bus, "fx.add",
+        R"({"track":"tr_1","plugin":"com.suppleaudio.test.gain","patch":{"params":{"gain":-6}}})");
+    run(bus, "item.add", R"({"track":"tr_1","bar":1,"notation":"voice bass; 1: C2:q r:*"})");
+    run(bus, "env.add",
+        R"({"fx":"fx_1","param":"gain","points":[{"beat":0,"value":-12},{"beat":4,"value":0}]})");
+    const auto made = run(bus, "track.duplicate", R"({"tracks":["tr_1"]})");
+    const model::Id copy = *model::Id::parse(made.find("tracks")->asArray().front().asString());
+    const model::Session& s = app->head();
+    const model::Id one = *model::Id::parse("tr_1");
+    CHECK(s.tracks.find(model::kMaster)->children ==
+          std::vector<model::Id>{one, copy, *model::Id::parse("tr_2"), *model::Id::parse("tr_3")});
+    const model::Track& t = *s.tracks.find(copy);
+    CHECK(t.name == "Bass");
+    // Its own plugin, with the original's settings, and the automation on it.
+    REQUIRE(t.chain.size() == 1);
+    const model::Id fx = t.chain[0];
+    CHECK(fx != s.tracks.find(one)->chain[0]);
+    CHECK(json::writeCanonical(*s.fx.find(fx)->patch) ==
+          json::writeCanonical(*s.fx.find(s.tracks.find(one)->chain[0])->patch));
+    int lanes = 0;
+    for (const auto& e : s.envelopes)
+        if (e.value->target.object == fx) {
+            ++lanes;
+            CHECK(e.value->points.size() == 2);
+        }
+    CHECK(lanes == 1);
+    // Its own item and MIDI, and the send.
+    std::vector<const model::Item*> items;
+    for (const auto& e : s.items)
+        if (e.value->track == copy) items.push_back(e.value.get());
+    REQUIRE(items.size() == 1);
+    const model::Take& take = *s.takes.find(*items[0]->activeTake);
+    CHECK(take.source != s.takes.find(*model::Id::parse("tk_1"))->source);
+    int sends = 0;
+    for (const auto& e : s.routes)
+        if (e.value->from.track == copy && e.value->to.track == model::Id::parse("tr_3")) {
+            ++sends;
+            CHECK(e.value->volumeDb == -9);
+        }
+    CHECK(sends == 1);
+    CHECK(model::parseProject(model::serializeProject(s)));
+    // One undo step; a master is refused.
+    run(bus, "history.undo", "{}");
+    CHECK_FALSE(app->head().tracks.find(copy));
+    const auto master = bus.execute({"track.duplicate", j(R"({"tracks":["tr_0"]})"), kOrigin});
+    REQUIRE_FALSE(master);
+    CHECK(master.error().code == "track.strip_type");
+}
+
+TEST_CASE("midi.merge joins MIDI items across a gap, and layers an item's takes") {
+    Workdir dir;
+    AppOptions options;
+    options.workdir = dir.path;
+    auto created = EngineApp::create(options, {.console9 = false});
+    REQUIRE(created);
+    auto app = std::move(*created);
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    cmd::Dispatcher bus(registry, *app);
+    run(bus, "track.add", R"({"name":"Keys"})");
+    run(bus, "item.add", R"({"track":"tr_1","bar":1,"notation":"voice keys; 1: C2:q r:*"})");
+    run(bus, "item.add", R"({"track":"tr_1","bar":5,"notation":"voice keys; 1: E2:q r:*"})");
+    const auto merged = run(bus, "midi.merge", R"({"items":["it_1","it_2"]})");
+    CHECK(merged.find("item")->asString() == "it_1");
+    CHECK_FALSE(app->head().items.find(*model::Id::parse("it_2")));
+    auto notes = run(bus, "midi.notes", R"({"item":"it_1"})");
+    CHECK(notes.find("length")->asDouble() == doctest::Approx(20));
+    const auto& list = notes.find("notes")->asArray();
+    REQUIRE(list.size() == 2);
+    CHECK(list[0].find("pitch")->asInt() == 36);
+    CHECK(list[0].find("start")->asDouble() == doctest::Approx(0));
+    CHECK(list[1].find("pitch")->asInt() == 40);
+    CHECK(list[1].find("start")->asDouble() == doctest::Approx(16));
+    // Two takes of one item become one take with both.
+    run(bus, "take.add", R"({"item":"it_1","from":"tk_3"})");
+    run(bus, "midi.write", R"({"item":"it_1","notation":"voice keys; 1: G2:q r:*"})");
+    REQUIRE(app->head().items.find(*model::Id::parse("it_1"))->takes.size() == 2);
+    run(bus, "midi.merge", R"({"items":["it_1"]})");
+    CHECK(app->head().items.find(*model::Id::parse("it_1"))->takes.size() == 1);
+    notes = run(bus, "midi.notes", R"({"item":"it_1"})");
+    CHECK(notes.find("notes")->asArray().size() == 3);
+    // Items on different tracks are refused.
+    run(bus, "track.add", R"({"name":"Bass"})");
+    run(bus, "item.add", R"({"track":"tr_2","bar":1,"notation":"voice bass; 1: C2:q r:*"})");
+    const auto apart = bus.execute({"midi.merge", j(R"({"items":["it_1","it_3"]})"), kOrigin});
+    REQUIRE_FALSE(apart);
+    CHECK(apart.error().code == "midi.merge");
+}
+
 TEST_CASE("render filters respect pipes and braces inside quoted replacements") {
     RenderPatternContext context;
     context.track = "A|{B},C";

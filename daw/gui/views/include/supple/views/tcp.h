@@ -135,8 +135,10 @@ class TcpPanel : public ui::Node {
         model::Id track;
         ui::Point press{};
         bool moved = false;
-        std::optional<std::size_t> index;  // track.move's index, when the drop would change it
-        float markerY = 0;                 // the insertion marker, in window coordinates
+        // The track.move steps the drop would take (the dragged track and the
+        // selected tracks of its parent and type), empty when it changes nothing.
+        std::vector<TrackMove> moves;
+        float markerY = 0;  // the insertion marker, in window coordinates
     };
     void beginReorder(const model::Id& track, ui::Point press);
     void moveReorder(ui::Point p);

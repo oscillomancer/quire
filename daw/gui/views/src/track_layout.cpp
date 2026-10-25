@@ -65,6 +65,71 @@ std::optional<std::size_t> reorderIndex(const model::Session& session, model::Id
     return at;
 }
 
+std::vector<model::Id> reorderGroup(const model::Session& session, model::Id track,
+                                    const std::function<bool(model::Id)>& selected) {
+    const model::Track* t = session.tracks.find(track);
+    const model::Track* parent = t && t->parent ? session.tracks.find(*t->parent) : nullptr;
+    if (!parent || !selected || !selected(track)) return {track};
+    std::vector<model::Id> group;
+    for (model::Id id : parent->children)
+        if (const model::Track* s = session.tracks.find(id);
+            s && s->type == t->type && (id == track || selected(id)))
+            group.push_back(id);
+    return group;
+}
+
+std::vector<TrackMove> reorderMoves(const model::Session& session, model::Id track,
+                                    const std::function<bool(model::Id)>& selected,
+                                    std::optional<model::Id> before) {
+    const model::Track* t = session.tracks.find(track);
+    if (!t || t->type == model::StripType::Master || !t->parent) return {};
+    const model::Track* parent = session.tracks.find(*t->parent);
+    if (!parent) return {};
+    const std::vector<model::Id> group = reorderGroup(session, track, selected);
+    auto inGroup = [&](model::Id id) {
+        return std::find(group.begin(), group.end(), id) != group.end();
+    };
+    if (before && inGroup(*before)) return {};
+    std::vector<model::Id> rest;
+    for (model::Id id : parent->children)
+        if (!inGroup(id)) rest.push_back(id);
+    std::optional<std::size_t> at;
+    if (before) {
+        const model::Track* b = session.tracks.find(*before);
+        if (!b || b->type != t->type || b->parent != t->parent) return {};
+        if (const auto found = std::find(rest.begin(), rest.end(), *before); found != rest.end())
+            at = static_cast<std::size_t>(found - rest.begin());
+    } else {  // after the last sibling of this type
+        for (std::size_t i = 0; i < rest.size(); ++i)
+            if (const model::Track* s = session.tracks.find(rest[i]); s && s->type == t->type)
+                at = i + 1;
+    }
+    if (!at) return {};
+    std::vector<model::Id> order = rest;
+    order.insert(order.begin() + static_cast<std::ptrdiff_t>(*at), group.begin(), group.end());
+    auto sameType = [&](const std::vector<model::Id>& ids) {
+        std::vector<model::Id> out;
+        for (model::Id id : ids)
+            if (const model::Track* s = session.tracks.find(id); s && s->type == t->type)
+                out.push_back(id);
+        return out;
+    };
+    if (sameType(order) == sameType(parent->children)) return {};  // the same order: no move
+    // Last first, each in front of what follows it in the new order: the
+    // tracks after it are already where they end up.
+    std::vector<TrackMove> moves;
+    std::vector<model::Id> now = parent->children;
+    for (auto g = group.rbegin(); g != group.rend(); ++g) {
+        const auto next = std::find(order.begin(), order.end(), *g) + 1;
+        std::erase(now, *g);
+        const auto to = next == order.end() ? now.end() : std::find(now.begin(), now.end(), *next);
+        const auto index = static_cast<std::size_t>(to - now.begin());
+        now.insert(now.begin() + static_cast<std::ptrdiff_t>(index), *g);
+        moves.push_back({*g, index});
+    }
+    return moves;
+}
+
 bool TrackLayout::show(const model::Session& session, const std::vector<model::Change>* changes,
                        std::uint64_t generation) {
     const bool replaced = generation != generation_;

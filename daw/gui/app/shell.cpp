@@ -144,11 +144,13 @@ std::unique_ptr<ui::Node> Shell::build(ui::Root& root, AppActions& actions) {
     tcp.envelopes = [this](const model::Id& track, const ui::Rect& anchor) {
         openEnvelopeMenu(track, anchor);
     };
-    trackMenu_ = std::make_unique<TrackMenu>(TrackMenu{root, dispatcher_, app_,
-                                                       [this](const std::string& e) {
-                                                           if (onError) onError(e);
-                                                       },
-                                                       [this] { return ui_.selectedTracks; }});
+    trackMenu_ = std::make_unique<TrackMenu>(TrackMenu{
+        root, dispatcher_, app_,
+        [this](const std::string& e) {
+            if (onError) onError(e);
+        },
+        [this] { return ui_.selectedTracks; },
+        [this](std::vector<std::string> tracks) { ui_.selectedTracks = std::move(tracks); }});
     tcp.mixer = [&actions] { (void)actions.run("ui.mixer"); };
     tcp.menu = [this](const model::Id& track, const ui::Rect& anchor,
                       std::function<void()> rename) {
@@ -422,6 +424,14 @@ void Shell::addStrip(std::string_view type) {
 Status Shell::openColorMenu(const model::Id& track, const ui::Rect& anchor) {
     if (!trackMenu_) return Error("gui.root", "the window is not ready");
     return trackMenu_->openColors(track, anchor);
+}
+
+Status Shell::openChannelsMenu(const model::Id& track, const ui::Rect& anchor) {
+    if (!trackMenu_) return Error("gui.root", "the window is not ready");
+    if (!app_.head().tracks.find(track))
+        return Error("track.unknown", "no track " + track.str(), "/track", "select a track");
+    trackMenu_->openChannels(track, anchor);
+    return {};
 }
 
 void Shell::openInputMenu(const model::Id& track, const ui::Rect& anchor) {

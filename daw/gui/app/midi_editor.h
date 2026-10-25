@@ -127,10 +127,23 @@ class MidiEditor {
     Status edit(json::Value ops, std::optional<std::uint64_t> expectedVersion =
                                      {});  // midi.edit on the open item, keeping the selection
     void selectAll();
+    void selectNone();
     void quantize();
     void transpose(int semitones);
+    void nudge(int steps);  // the selected notes, by grid steps
+    // The selected notes; with the event list shown, its selected rows.
     void removeSelected();
     void duplicate();
+    // The note clipboard: copies keep the notes' pitches and their places
+    // from the earliest; a paste puts the earliest at `itemBeat` (default: the
+    // playhead, in the item) and selects what it added.
+    void copySelected();
+    void cutSelected();
+    void paste(std::optional<double> itemBeat = {});
+    bool canPaste() const { return !clipboard_.empty(); }
+    // The grid's right-click menu at a window point (`itemBeat` under it):
+    // Delete, Copy, Cut, Paste (there), Duplicate.
+    void openNoteMenu(ui::Point at, double itemBeat);
 
   private:
     Status reload();
@@ -149,7 +162,8 @@ class MidiEditor {
     engine::EngineApp& app_;
     UiState& ui_;
     RollState state_;
-    std::string lastItem_;  // the item opened last (ui.midi.toggle reopens it)
+    std::string lastItem_;             // the item opened last (ui.midi.toggle reopens it)
+    std::vector<RollNote> clipboard_;  // starts from the earliest copied note
     float height_ = kDefaultHeight;
     const views::MouseMap* mouse_ = nullptr;
     ui::Node* panel_ = nullptr;

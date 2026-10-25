@@ -113,7 +113,7 @@ std::optional<Chord> parseChord(std::string_view text);  // inverse of describe
 
 struct Binding {
     std::vector<Chord> keys;  // one chord, or a two-chord sequence
-    std::string section;      // "global", "arrange", "midi", "mixer"
+    std::string section;      // "global", "arrange", "midi", "mixer", "fx"
     std::string action;
     bool operator==(const Binding&) const = default;
 };

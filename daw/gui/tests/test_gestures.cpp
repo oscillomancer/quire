@@ -922,10 +922,10 @@ ui::Point laneAt(Fixture& f, model::Id it, std::size_t lane) {
     const ui::Rect l = views::Lanes::takeLaneRect(r, f.item(it).takes.size(), lane);
     return onItem(f, it, l.y + l.h / 2);
 }
-// Item menu rows: Delete, rule, four timebases, rule, Take FX, three take
-// envelopes, rule, then (several takes) Show all takes, the two explodes and
-// Delete take, then the two renders.
-constexpr int kShowAll = 12, kExplodeTracks = 13, kExplodeSerial = 14, kDeleteTake = 15;
+// Item menu rows: Cut, Copy, Paste, Duplicate, Delete, Merge, rule, four
+// timebases, rule, Take FX, three take envelopes, rule, then (several takes)
+// Show all takes, the two explodes and Delete take, then the two renders.
+constexpr int kShowAll = 17, kExplodeTracks = 18, kExplodeSerial = 19, kDeleteTake = 20;
 }  // namespace
 
 TEST_CASE("takes: show all takes spreads them out; a lane is heard, deleted from its menu") {
@@ -1027,7 +1027,7 @@ TEST_CASE("takes: explode onto new tracks; render an item with FX as a new take"
     REQUIRE(f.item(audio).takes.size() == 1);
     const ui::Rect ra = f.rectOf(audio);
     rightClick(f, onItem(f, audio, ra.y + ra.h / 2));
-    pick(f, 13);  // Render with FX as a new take
+    pick(f, 18);  // Render with FX as a new take
     REQUIRE(f.item(audio).takes.size() == 2);
     const model::Take& made = *f.app->head().takes.find(*f.item(audio).activeTake);
     CHECK(made.name.ends_with("(FX)"));
@@ -1066,7 +1066,7 @@ TEST_CASE(
     ui::Node* menu = f.root->find("item.menu");
     REQUIRE(menu);
     const auto before = f.steps();
-    f.menuRow("item.menu", 0);  // Delete
+    f.menuRow("item.menu", 4);  // Delete
     f.sync();
     CHECK_FALSE(f.app->head().items.find(midi));
     CHECK(f.app->head().items.find(audio));
@@ -1078,7 +1078,7 @@ TEST_CASE(
     const ui::Rect ra = f.rectOf(a);
     rightClick({ra.x + ra.w / 2, ra.y + ra.h / 2});
     REQUIRE(f.root->find("item.menu"));
-    f.menuRow("item.menu", 0);
+    f.menuRow("item.menu", 4);
     f.sync();
     CHECK_FALSE(f.app->head().items.find(a));
     CHECK_FALSE(f.app->head().items.find(b));
@@ -1088,6 +1088,57 @@ TEST_CASE(
     f.drag({lanes.x + 4, f.view->rowRect(0).y + 4},
            {lanes.x + 200, f.view->rowRect(1).bottom() - 4}, 0, 3);
     CHECK_FALSE(f.root->find("item.menu"));
+}
+
+TEST_CASE("arrange gestures: the menus paste where they open; Merge joins MIDI items") {
+    Fixture f;
+    if (!f.ok) return;
+    auto& g = f.view->gestures();
+    auto rightClick = [&](ui::Point p) {
+        f.pointer(ui::PointerEvent::Type::Down, p, 3);
+        f.pointer(ui::PointerEvent::Type::Up, p, 3);
+        f.sync();
+    };
+    // Two MIDI items four bars apart on a new channel.
+    auto exec = [&](const char* command, const char* args) {
+        auto r = f.dispatcher->execute({command, json::parse(args).value(), kUi});
+        REQUIRE(r);
+        return *r;
+    };
+    const std::string track = exec("track.add", R"({"name":"Keys"})")["track"].asString();
+    const std::string add =
+        R"({"track":")" + track + R"(","bar":1,"notation":"voice k; 1: C4:q r:*"})";
+    const model::Id one = *model::Id::parse(exec("item.add", add.c_str())["item"].asString());
+    const std::string later =
+        R"({"track":")" + track + R"(","bar":5,"notation":"voice k; 1: E4:q r:*"})";
+    const model::Id two = *model::Id::parse(exec("item.add", later.c_str())["item"].asString());
+    f.sync();
+    // Copy the first, then Paste from the menu on empty space: at that beat, that track.
+    const ui::Rect r1 = f.rectOf(one);
+    rightClick({r1.x + 4, r1.y + r1.h / 2});
+    REQUIRE(f.root->find("item.menu"));
+    f.menuRow("item.menu", 1);  // Copy
+    const ui::Rect r2 = f.rectOf(two);
+    const ui::Point gap{r1.right() + (r2.x - r1.right()) / 2, r1.y + r1.h / 2};
+    rightClick(gap);
+    REQUIRE(f.root->find("arrange.space.menu"));
+    f.menuRow("arrange.space.menu", 0);  // Paste, its one row
+    REQUIRE(g.selection().size() == 1);
+    const model::Id pasted = g.selection().front();
+    CHECK(pasted != one);
+    CHECK(f.item(pasted).track.str() == track);
+    CHECK(f.item(pasted).position > f.item(one).position);
+    // Merge: the three, one item from the first start to the last end.
+    exec("item.remove", (R"({"item":")" + pasted.str() + R"("})").c_str());
+    g.setSelection({one, two});
+    f.sync();
+    const auto steps = f.steps();
+    rightClick({r1.x + 4, r1.y + r1.h / 2});
+    f.menuRow("item.menu", 5);  // Merge MIDI items
+    CHECK(f.steps() == steps + 1);
+    CHECK_FALSE(f.app->head().items.find(two));
+    CHECK(g.selection() == std::vector<model::Id>{one});
+    CHECK(model::itemLengthBeats(f.app->head(), f.item(one)) == doctest::Approx(20));
 }
 
 TEST_CASE("arrange gestures: the item menu sets what items follow; a time item moves by beats") {
@@ -1102,7 +1153,7 @@ TEST_CASE("arrange gestures: the item menu sets what items follow; a time item m
     f.sync();
     REQUIRE(f.root->find("item.menu"));
     const double startSec = model::itemSpan(f.app->head(), f.item(audio)).startSec;
-    f.menuRow("item.menu", 3);  // Delete, rule, beat, time
+    f.menuRow("item.menu", 8);  // Cut … Merge, rule, beat, time
     CHECK(f.item(audio).timebase == model::ItemTimebase::Time);
     CHECK(f.item(audio).position == doctest::Approx(startSec));  // seconds now, same place
     CHECK(g.selection() == std::vector<model::Id>{audio});
@@ -1140,10 +1191,10 @@ TEST_CASE("arrange gestures: take FX and a take envelope drawn and edited on its
     };
     // Rows: Delete, rule, four timebases, rule, Take FX…, volume, pan, mute.
     rightClick();
-    f.menuRow("item.menu", 7);
+    f.menuRow("item.menu", 12);
     CHECK(takeFx == std::vector<model::Id>{take});
     rightClick();
-    f.menuRow("item.menu", 8);
+    f.menuRow("item.menu", 13);
     auto envelope = [&]() -> const model::Envelope* {
         for (const auto& e : f.app->head().envelopes)
             if (e.value->target.object == take && e.value->target.param == "volume")
@@ -1180,7 +1231,7 @@ TEST_CASE("arrange gestures: take FX and a take envelope drawn and edited on its
     CHECK(envelope()->points.size() == 1);
     // Hidden from the menu, its line no longer takes the press: the item moves instead.
     rightClick();
-    f.menuRow("item.menu", 8);
+    f.menuRow("item.menu", 13);
     CHECK_FALSE(envelope()->visible);
     CHECK_FALSE(g.takeEnvelopeAt(audio, {mid.x, lineY}));
 }

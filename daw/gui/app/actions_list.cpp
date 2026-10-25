@@ -92,7 +92,7 @@ class ActionsPanel : public ui::Node {
             const ui::Theme& t = c.theme();
             const actions::Action& a = *matches_[i];
             // Keys in the mono face; a MIDI control (its "·" needs the UI face) after them.
-            const std::string keys = actions_.keysFor(a.id);
+            const std::string keys = actions_.keysFor(a.id, true);
             const std::string midi = actions_.controlsFor(a.id);
             const float midiW =
                 midi.empty() ? 0 : c.textWidth(midi, ui::Font::Ui, t.type("caption")) + 12;

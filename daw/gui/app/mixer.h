@@ -22,6 +22,7 @@
 #include "meter_feed.h"
 #include "selection_edit.h"
 #include "supple/ui/root.h"
+#include "supple/views/track_layout.h"
 #include "track_menu.h"
 
 namespace supple::ui {
@@ -96,7 +97,11 @@ class Mixer {
         ui::Point pos;
         ui::Rect source, marker;  // the dragged item; the insertion bar or target strip
         std::string target;       // Copy: the strip dropped on
-        std::size_t index = 0;    // Reorder: the track.move / fx.move index
+        bool chain = false;       // Copy: the plug-in's whole chain (Ctrl held)
+        std::size_t index = 0;    // Reorder: the track.move (masters) / fx.move index
+        // Reorder of channels or busses: the track.move steps (the dragged strip
+        // and the selected strips of its parent and type move together).
+        std::vector<views::TrackMove> moves;
     };
     const DragView& drag() const { return *drag_; }
 
@@ -108,7 +113,10 @@ class Mixer {
     void rebuild();
     void update();
     void dragStrip(const std::string& track, DragPhase phase, ui::Point p);
-    void dragFx(const std::string& track, model::Id fx, DragPhase phase, ui::Point p);
+    void dragFx(const std::string& track, model::Id fx, DragPhase phase, ui::Point p,
+                unsigned mods);
+    void openFxMenu(model::Id fx, const ui::Rect& slot, ui::Point at);
+    void openFxRename(model::Id fx, const ui::Rect& slot);
     void dragSend(const std::string& track, DragPhase phase, ui::Point p);
     void endDrag(bool commit);
     void resolveStripDrop();

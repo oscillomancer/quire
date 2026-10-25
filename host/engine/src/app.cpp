@@ -374,6 +374,12 @@ Result<std::string> EngineApp::describeFx(const model::FxInstance& fx, bool chan
     return in.describe(changedOnly);
 }
 
+void unpoolCopiedSource(model::Take& take, const model::Session& s, model::EditTxn& txn) {
+    if (!take.source || take.source->kind != model::Kind::Midi) return;
+    const model::MidiSource* source = s.midi.find(*take.source);
+    if (source && !source->pooled) take.source = txn.create(*source);
+}
+
 Result<model::Id> copyTake(const model::Session& source, model::EditTxn& txn, model::Id original,
                            model::Take copy, double shift) {
     std::map<model::Id, model::Id> ids;

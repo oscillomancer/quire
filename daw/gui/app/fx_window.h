@@ -57,7 +57,8 @@ class FxWindow {
     std::optional<model::Id> take() const { return take_; }
     // The `ui.fx.chain` action: a track id in `prompt`, else the selected track.
     Status openFor(const UiState& ui, const json::Value& prompt);
-    // The plugin browser alone, adding to that track's chain (ui.fx.add).
+    // The plugin browser alone, adding to that track's chain, or with no
+    // track given to every selected track's (ui.fx.add).
     Status openToAdd(const UiState& ui, const json::Value& prompt);
     void close();
     bool isOpen() const { return page_ != nullptr; }
@@ -91,6 +92,9 @@ class FxWindow {
     // Engine-reported failures (engine.status failed_fx), by effect id.
     const std::set<std::string>& failed() const { return failed_; }
     void select(model::Id fx);  // alone: any multi-selection ends
+    // The selected effect, `delta` places along the track's chain (fx.move;
+    // ui.fx.move_up/down, Alt+Up/Down).
+    void moveSelected(int delta);
     // Every selected effect, top to bottom (Ctrl/Shift+click select several;
     // their bypass, offline and remove act on all of them).
     std::vector<model::Id> selection() const;
@@ -120,11 +124,10 @@ class FxWindow {
     std::vector<model::Id> targets(model::Id fx) const;
     Status setEach(model::Id fx, const char* field, bool value);
     std::string latencyOf(model::Id fx);
-    void moveFx(model::Id fx, int delta);
     void dragRow(model::Id fx, int phase, ui::Point p);  // phase: Row::Phase
     void openBrowser(bool input = false);
     void addFx(const std::string& pluginId);
-    void addFxTo(model::Id track, const std::string& pluginId);
+    void addFxTo(const std::vector<model::Id>& tracks, const std::string& pluginId);
     void promptSaveChain();
     void hideSavePrompt();
     void saveChain();

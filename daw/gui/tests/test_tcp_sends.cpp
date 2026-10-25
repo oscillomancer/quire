@@ -448,7 +448,7 @@ TEST_CASE("TCP: a selection survives a right-click; Delete removes all of it in 
     ui::Node* m = f.root->find(menu);
     REQUIRE(m);
     const auto before = f.history();
-    const ui::Point del{m->bounds().x + 40, m->bounds().y + 5 * 26 + 13};  // Delete
+    const ui::Point del{m->bounds().x + 40, m->bounds().y + 6 * 26 + 13};  // Delete
     f.pointer(Pointer::Move, del);
     f.pointer(Pointer::Down, del);
     f.pointer(Pointer::Up, del);
@@ -496,7 +496,8 @@ TEST_CASE("TCP: the right-click menu renames, colours and deletes a track (one u
         f.root->pointer(e);
         f.root->frame(false);
     };
-    // Menu rows are 26 px: Rename, Color…, Timebase…, Channels…, (separator), Delete.
+    // Menu rows are 26 px: Rename, Color…, Timebase…, Channels…, (separator),
+    // Duplicate, Delete.
     auto pickRow = [&](const std::string& menu, int index) {
         ui::Node* m = f.root->find(menu);
         REQUIRE(m);
@@ -507,7 +508,9 @@ TEST_CASE("TCP: the right-click menu renames, colours and deletes a track (one u
         f.sync();
     };
     const std::string menu = "track.menu." + f.a.str();
-    // Color… opens the swatches; teal is the fifth.
+    // Color… opens the swatches; teal is the fifth. A selected track's
+    // colour goes to the whole selection.
+    f.state.selectedTracks = {f.a.str(), f.b.str()};
     rightClick();
     REQUIRE(f.root->find(menu));
     auto before = f.history();
@@ -515,7 +518,9 @@ TEST_CASE("TCP: the right-click menu renames, colours and deletes a track (one u
     REQUIRE(f.root->find("track.color." + f.a.str()));
     pickRow("track.color." + f.a.str(), 4);
     CHECK(f.app->head().tracks.find(f.a)->color == "teal");
+    CHECK(f.app->head().tracks.find(f.b)->color == "teal");
     CHECK(f.history() == before + 1);
+    f.state.selectedTracks = {f.a.str()};
     // Rename edits the name in place.
     rightClick();
     pickRow(menu, 0);
@@ -545,7 +550,7 @@ TEST_CASE("TCP: the right-click menu renames, colours and deletes a track (one u
     // Delete removes it.
     before = f.history();
     rightClick();
-    pickRow(menu, 5);
+    pickRow(menu, 6);
     CHECK_FALSE(f.app->head().tracks.find(f.a));
     CHECK(f.history() == before + 1);
 }
@@ -775,6 +780,31 @@ TEST_CASE("TCP: dragging a row's empty part reorders it among its own type, one 
     f.pointer(Pointer::Up, above(f, c));
     f.sync();
     CHECK(trackRows(f) == std::vector<model::Id>{c, d, f.a, e, f.b});
+    CHECK(f.errors.empty());
+}
+
+TEST_CASE("TCP: dragging one of several selected tracks moves them all, one undo step") {
+    SendsFixture f;  // A channel, B buss
+    const model::Id c = f.add("channel", "C");
+    const model::Id d = f.add("channel", "D");
+    f.sync();
+    REQUIRE(trackRows(f) == std::vector<model::Id>{f.a, c, d, f.b});
+    f.state.selectedTracks = {f.a.str(), c.str()};
+    f.sync();
+    const auto before = f.history();
+    // The press keeps the selection; the drop puts both after D, in order.
+    f.pointer(Pointer::Down, emptyPartOf(f, f.a));
+    CHECK(f.state.selectedTracks == std::vector<std::string>{f.a.str(), c.str()});
+    f.pointer(Pointer::Move, below(f, d));
+    f.pointer(Pointer::Up, below(f, d));
+    f.sync();
+    CHECK(trackRows(f) == std::vector<model::Id>{d, f.a, c, f.b});
+    CHECK(f.history() == before + 1);
+    // A click without a drag selects the track alone.
+    f.pointer(Pointer::Down, emptyPartOf(f, c));
+    f.pointer(Pointer::Up, emptyPartOf(f, c));
+    f.sync();
+    CHECK(f.state.selectedTracks == std::vector<std::string>{c.str()});
     CHECK(f.errors.empty());
 }
 

@@ -20,6 +20,10 @@
 #include "supple/actions/actions.h"
 #include "supple/engine/app.h"
 
+namespace supple::ui {
+class Root;
+}  // namespace supple::ui
+
 namespace supple::gui {
 
 // Per-project UI state (gui.md §1.2); persisted later to <project>.ui.json.
@@ -38,6 +42,15 @@ struct UiState {
 void selectTrack(UiState& ui, const std::string& track, unsigned mods,
                  const std::vector<std::string>& order);
 bool trackSelected(const UiState& ui, const std::string& track);
+
+// The keymap's sections for a key on `root`, innermost first: "text" in a
+// text field, the MIDI editor or the mixer when the pointer is over it (else
+// when the focus is inside it: the pointer is elsewhere, over the bars or out
+// of the window), then the arrange view (its defaults edit the selection,
+// shared by every panel) and global bindings. So Delete over the arrange view
+// removes items even while the MIDI editor has the focus, and over the editor
+// removes notes.
+std::vector<std::string> keySections(const ui::Root& root);
 
 // GUI-only commands: `gui.selection` (read-only selection for agents, §1.2).
 void registerGuiCommands(cmd::Registry& registry, const UiState& ui);
@@ -76,9 +89,16 @@ class AppActions {
     // A built-in with one prompted argument (the actions list asks for it).
     void addUi(std::string id, std::string name, std::string prompt,
                std::function<Status(const json::Value& value)> run);
+    // A built-in that acts on the selection and is never prompted: a caller
+    // (a strip's own button) may aim it elsewhere with a value under `key`,
+    // which `run` receives (null when none was given).
+    void addUiFor(std::string id, std::string name, std::string key,
+                  std::function<Status(const json::Value& value)> run);
     // Shown by the app (status line): the last action's error, if any.
     std::function<void(const std::string&)> onError;
-    std::string keysFor(std::string_view action) const;  // "Ctrl+Z", or ""
+    // The action's first key binding ("Ctrl+Z", or ""), for menus; with
+    // all, every binding ("Ctrl+Shift+Z, Ctrl+Y"), for the actions list.
+    std::string keysFor(std::string_view action, bool all = false) const;
 
     // MIDI learn for actions (ADR-0027): the controls bound to them, saved
     // in controlsFile() (nothing is saved without one).

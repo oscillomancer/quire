@@ -678,6 +678,12 @@ q = nil
 ---@class Quire.midi_get_result
 ---@field text string
 
+---@class Quire.midi_merge_args
+---@field items string[]
+
+---@class Quire.midi_merge_result
+---@field item string
+
 ---@class Quire.midi_notes_args
 ---@field item string
 
@@ -1074,6 +1080,12 @@ q = nil
 ---@class Quire.track_add_result
 ---@field track string
 
+---@class Quire.track_duplicate_args
+---@field tracks string[]
+
+---@class Quire.track_duplicate_result
+---@field tracks string[]
+
 ---@class Quire.track_list_result
 ---@field tracks table[]
 
@@ -1106,6 +1118,12 @@ q = nil
 ---@field parent_send? boolean The implicit send to the parent buss/master (off: only explicit sends leave the strip)
 ---@field timebase? "project"|"time"|"beats"|"beats_position" What this channel's items follow when the tempo changes (those that inherit it): project, beats, time or beats_position; they keep their place now
 ---@field channels? integer 1-2: the strip's main pair; up to 128 adds auxiliary channels 3-128 for routes and plug-in pins (a detector on 3/4, a multi-out instrument's outputs), outside the fader, pan and parent send
+
+---@class Quire.track_template_delete_args
+---@field name string
+
+---@class Quire.track_template_delete_result
+---@field path string
 
 ---@class Quire.track_template_list_result
 ---@field templates table[]
@@ -1376,6 +1394,7 @@ q = nil
 ---@class Quire.midi
 ---@field edit fun(args: Quire.midi_edit_args): table Edit a MIDI item's notes and CCs: add, remove, move, resize, velocity, quantize.
 ---@field get fun(args: Quire.midi_get_args): Quire.midi_get_result Read an item's MIDI as notation.
+---@field merge fun(args: Quire.midi_merge_args): Quire.midi_merge_result Merge MIDI items on one track, or one item's MIDI takes, into one item.
 ---@field notes fun(args: Quire.midi_notes_args): table List a MIDI item's notes and CC points (beats from the item's start).
 ---@field write fun(args: Quire.midi_write_args): table Replace an item's MIDI with notation (the item keeps its position and length).
 
@@ -1453,12 +1472,14 @@ q = nil
 
 ---@class Quire.track
 ---@field add fun(args?: Quire.track_add_args): Quire.track_add_result Add a channel, buss or master strip and return its id.
+---@field duplicate fun(args: Quire.track_duplicate_args): Quire.track_duplicate_result Duplicate channels or busses with their FX, items, sends and automation.
 ---@field list fun(): Quire.track_list_result List tracks in tree order with their level, mute/solo, fx and items.
 ---@field move fun(args: Quire.track_move_args): table Move a track under another track or reorder it among its siblings.
 ---@field remove fun(args: Quire.track_remove_args): table Remove a track with its items, fx, routes and envelopes (not a folder).
 ---@field set fun(args: Quire.track_set_args): table Set track fields: name, type, volume, pan, mute, solo, polarity, mono, arming.
 
 ---@class Quire.track.template
+---@field delete fun(args: Quire.track_template_delete_args): Quire.track_template_delete_result Delete a saved track template by name.
 ---@field list fun(): Quire.track_template_list_result List saved track templates by name, path and effect count.
 ---@field load fun(args?: Quire.track_template_load_args): Quire.track_template_load_result Add a strip from a track template (settings and FX) in one undo step.
 ---@field save fun(args: Quire.track_template_save_args): Quire.track_template_save_result Save a strip (settings and FX chains) as a named track template.

@@ -12,6 +12,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <set>
 #include <tuple>
 
@@ -301,6 +302,26 @@ Status captureLiveState(EngineApp& app, Id id, model::FxInstance& fx,
 Result<json::Value> invoke(const char* name, json::Value args, cmd::Context& ctx) {
     return ctx.service<const cmd::Registry>().find(name)->invoke(args, ctx);
 }
+// Removes a saved preset or template file by name (fx.chain.delete,
+// track.template.delete, project.template.delete); the file's own directory is never removed.
+Status removeNamed(const fs::path& path, const char* code, const std::string& what) {
+    std::error_code ec;
+    if (!fs::is_regular_file(fs::symlink_status(path, ec)))
+        return Error(code, "no saved " + what + " " + path.stem().string(), "/name",
+                     "use a name the list command returns");
+    if (!fs::remove(path, ec) || ec)
+        return Error(code, "cannot delete " + path.string() + ": " + ec.message(), "/name",
+                     "check the directory permissions");
+    return {};
+}
+
+struct NameArgs {
+    std::string name;
+};
+struct PathResult {
+    std::string path;
+};
+
 // --- track templates ----------------------------------------------------------------------
 
 constexpr std::string_view kTemplateSchema = "supple.track-template/1.0";
@@ -540,19 +561,31 @@ void registerTemplateCommands(cmd::Registry& registry) {
         };
         registry.add(std::move(c));
     }
-}
-
-// Removes a saved preset or template file by name (fx.chain.delete,
-// project.template.delete); the file's own directory is never removed.
-Status removeNamed(const fs::path& path, const char* code, const std::string& what) {
-    std::error_code ec;
-    if (!fs::is_regular_file(fs::symlink_status(path, ec)))
-        return Error(code, "no saved " + what + " " + path.stem().string(), "/name",
-                     "use a name the list command returns");
-    if (!fs::remove(path, ec) || ec)
-        return Error(code, "cannot delete " + path.string() + ": " + ec.message(), "/name",
-                     "check the directory permissions");
-    return {};
+    {
+        cmd::Command<NameArgs, PathResult> c;
+        c.name = "track.template.delete";
+        c.kind = cmd::Kind::Action;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Delete a saved track template by name.";
+        c.tags = {"track", "presets"};
+        c.args = schema::object<NameArgs>("track_template_delete_args")
+                     .field("name", &NameArgs::name, schema::string().minLength(1))
+                     .build();
+        c.result = schema::object<PathResult>("track_template_delete_result")
+                       .field("path", &PathResult::path, schema::string())
+                       .build();
+        c.errors = {{"template.unknown", "no template has that name",
+                     "use a name from track.template.list"}};
+        c.examples = {{"Delete the bass strip", j(R"({"name":"Bass"})"), j(R"({"path":"<any>"})"),
+                       "song_with_saved_template"}};
+        c.run = [](const NameArgs& a, cmd::Context& ctx) -> Result<PathResult> {
+            auto path = templatePath(ctx.service<EngineApp>(), a.name);
+            if (!path) return std::move(path).error();
+            SUPPLE_TRY(removeNamed(*path, "template.unknown", "track template"));
+            return PathResult{path->string()};
+        };
+        registry.add(std::move(c));
+    }
 }
 
 // --- project templates ----------------------------------------------------------------------
@@ -625,15 +658,9 @@ Status publishProjectTemplate(EngineApp& app, const TemplateLocation& at, bool r
     return {};
 }
 
-struct NameArgs {
-    std::string name;
-};
 struct ProjectTemplateSaveArgs {
     std::string name;
     bool replace = false;
-};
-struct PathResult {
-    std::string path;
 };
 struct TemplateSaveResult {
     std::string path;
@@ -1267,6 +1294,13 @@ void registerPresetCommands(cmd::Registry& registry) {
 
 }  // namespace
 
+struct DuplicateArgs {
+    std::vector<std::string> tracks;
+};
+struct DuplicateResult {
+    std::vector<std::string> tracks;
+};
+
 void registerChainCommands(cmd::Registry& registry) {
     registerPresetCommands(registry);
     {
@@ -1545,6 +1579,132 @@ void registerChainCommands(cmd::Registry& registry) {
             });
             CopyResult result{id.str(), {}};
             for (Id f : chain) result.chain.push_back(f.str());
+            return result;
+        };
+        registry.add(std::move(c));
+    }
+    {
+        cmd::Command<DuplicateArgs, DuplicateResult> c;
+        c.name = "track.duplicate";
+        c.kind = cmd::Kind::Edit;
+        c.exposure = cmd::Exposure::McpTool;
+        c.summary = "Duplicate channels or busses with their FX, items, sends and automation.";
+        c.description =
+            "Each copy goes right after its original, under the same parent, with the same "
+            "settings and name; its main and input chains (each plugin's settings as it sounds "
+            "now, as fx.copy), items and takes (unpooled MIDI copied, audio media shared), sends "
+            "and record input, and the envelopes on the track, its plugins, sends and takes. Not "
+            "copied: a folder's children, sends into the track, and item groups. Masters cannot "
+            "be duplicated. One undo step; the copies' ids in the order given.";
+        c.tags = {"track"};
+        c.args = schema::object<DuplicateArgs>("track_duplicate_args")
+                     .field("tracks", &DuplicateArgs::tracks,
+                            schema::arrayOf(schema::string().pattern("^tr_[0-9]+$", "track id"))
+                                .minItems(1))
+                     .build();
+        c.result = schema::object<DuplicateResult>("track_duplicate_result")
+                       .field("tracks", &DuplicateResult::tracks, schema::arrayOf(schema::string()))
+                       .build();
+        c.errors = {
+            {"track.unknown", "no such track", "use a live id from track.list"},
+            {"track.strip_type", "a master cannot be duplicated", "duplicate channels and busses"}};
+        c.examples = {{"Duplicate a track with its plugins, item and automation",
+                       j(R"({"tracks":["tr_1"]})"), j(R"({"tracks":["tr_2"]})"), "song_with_env"}};
+        c.run = [](const DuplicateArgs& a, cmd::Context& ctx) -> Result<DuplicateResult> {
+            auto& app = ctx.service<EngineApp>();
+            const auto s = app.view();
+            std::vector<Id> sources;
+            for (std::size_t i = 0; i < a.tracks.size(); ++i) {
+                auto id = trackOf(s, a.tracks[i]);
+                if (!id) return std::move(id).error().at("/tracks/" + std::to_string(i));
+                if (s.tracks.find(*id)->type == model::StripType::Master)
+                    return Error("track.strip_type", "a master cannot be duplicated",
+                                 "/tracks/" + std::to_string(i), "duplicate channels and busses");
+                if (std::find(sources.begin(), sources.end(), *id) == sources.end())
+                    sources.push_back(*id);
+            }
+            auto& txn = app.txn();
+            DuplicateResult result;
+            for (const Id source : sources) {
+                const model::Track& original = *s.tracks.find(source);
+                std::map<Id, Id> ids;  // the original's objects to their copies
+                model::Track copy = original;
+                copy.children.clear();
+                auto chain = [&](const std::vector<Id>& from) -> Result<std::vector<Id>> {
+                    std::vector<Id> out;
+                    for (const Id fx : from) {
+                        const model::FxInstance* f = s.fx.find(fx);
+                        if (!f) continue;
+                        Prepared p{*f, {}};
+                        SUPPLE_TRY(captureLiveState(app, fx, p.fx, p.blob));
+                        if (p.blob) txn.putBlob(*p.fx.state, p.blob);
+                        ids[fx] = txn.create(std::move(p.fx));
+                        out.push_back(ids[fx]);
+                    }
+                    return out;
+                };
+                auto main = chain(original.chain);
+                if (!main) return std::move(main).error();
+                auto input = chain(original.inputChain);
+                if (!input) return std::move(input).error();
+                copy.chain = std::move(*main);
+                copy.inputChain = std::move(*input);
+                copy.record.input.reset();
+                const Id fresh = txn.create(copy);
+                ids[source] = fresh;
+                txn.modify<model::Track>(*original.parent, [&](model::Track& parent) {
+                    const auto at =
+                        std::find(parent.children.begin(), parent.children.end(), source);
+                    parent.children.insert(at == parent.children.end() ? at : at + 1, fresh);
+                });
+                // Its sends and outputs, and the input it records from; a send
+                // into one of its own plugins goes to the copy's.
+                for (const auto& r : s.routes) {
+                    const bool out = r.value->from.track == source;
+                    const bool recorded = original.record.input == r.id;
+                    if (!out && !recorded) continue;
+                    model::Route route = *r.value;
+                    if (out) route.from.track = fresh;
+                    if (route.to.track == source) route.to.track = fresh;
+                    if (route.to.fx && ids.contains(*route.to.fx)) route.to.fx = ids[*route.to.fx];
+                    ids[r.id] = txn.create(std::move(route));
+                    if (recorded)
+                        txn.modify<model::Track>(
+                            fresh, [&](model::Track& t) { t.record.input = ids[r.id]; });
+                }
+                for (const auto& e : s.items) {
+                    if (e.value->track != source) continue;
+                    model::Item item = *e.value;
+                    item.track = fresh;
+                    item.group.reset();  // a group would tie the copy to the original
+                    item.takes.clear();
+                    for (const Id take : e.value->takes) {
+                        const model::Take* tk = s.takes.find(take);
+                        if (!tk) continue;
+                        model::Take t = *tk;
+                        unpoolCopiedSource(t, s, txn);
+                        auto cloned = copyTake(s, txn, take, std::move(t));
+                        if (!cloned) return std::move(cloned).error();
+                        item.takes.push_back(*cloned);
+                        if (e.value->activeTake == take) item.activeTake = *cloned;
+                    }
+                    txn.create(std::move(item));
+                }
+                for (const auto& e : s.envelopes) {
+                    const auto to = ids.find(e.value->target.object);
+                    if (to == ids.end()) continue;
+                    model::Envelope env = *e.value;
+                    env.target.object = to->second;
+                    const Id lane = txn.create(std::move(env));
+                    for (const auto& ai : s.autoItems)
+                        if (ai.value->envelope == e.id) {
+                            model::AutomationItem item = *ai.value;
+                            item.envelope = lane;
+                            txn.create(std::move(item));
+                        }
+                }
+                result.tracks.push_back(fresh.str());
+            }
             return result;
         };
         registry.add(std::move(c));

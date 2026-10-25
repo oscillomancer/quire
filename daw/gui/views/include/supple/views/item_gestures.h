@@ -16,11 +16,12 @@
 // lane (snapped; Shift frees), Alt+click deletes one, a right-click opens the lane's menu (points,
 // automation items, the envelope). Ctrl-drag below the name bar of an item with several takes takes
 // that take (the one under the pointer, else the heard one) out into an item of its own, on any
-// channel. A right-click on an item (without dragging) opens its menu: Delete, timebase, take FX
+// channel. A right-click on an item (without dragging) opens its menu: Cut, Copy, Paste (at the
+// pointer), Duplicate, Delete, Merge MIDI items, timebase, take FX
 // and envelopes, and for several takes: show all takes, explode them onto tracks or along the
 // track, delete the take under the pointer; and rendering the item through its FX (MIDI to audio)
-// in place or as a new take. Each gesture previews as a ghost on the root's overlay and commits ONE
-// transaction on release.
+// in place or as a new take; on empty lane space, a menu with Paste. Each gesture previews as a
+// ghost on the root's overlay and commits ONE transaction on release.
 #pragma once
 
 #include <filesystem>
@@ -73,6 +74,8 @@ class ItemGestures {
     std::function<void(model::Id take)> onTakeFx;  // the item menu's Take FX… (the app's FX window)
     std::function<void(double seconds)> onSeek;    // a click on empty space
     std::function<void(const Error&)> onError;     // a refused gesture (status line)
+    // The keys bound to an app action ("Ctrl+C"), shown in the menus.
+    std::function<std::string(std::string_view action)> keysFor;
     // REAPER's default: a move, copy or trim that makes two items overlap on a
     // track fades both over the overlap (in the same transaction).
     bool autoCrossfade = true;
@@ -111,6 +114,10 @@ class ItemGestures {
     Status duplicateSelection();  // right after the selection, on the same tracks
     // Removes the selected items (one undo step): the item menu's Delete.
     Status deleteSelection();
+    // MIDI items on one track (or one item's MIDI takes) into one item
+    // (midi.merge, one undo step), which becomes the selection.
+    bool canMerge() const;
+    Status mergeSelection();
     bool canPaste() const {
         return !clipboard_.items.empty() &&
                (!projectGeneration || projectGeneration() == clipboard_.generation);
@@ -232,6 +239,9 @@ class ItemGestures {
     double beatAtX(float x) const;
     // A right-click on an item (no drag): selection deletion/timebase and active take FX/envelopes.
     void openItemMenu(ui::Point at);
+    void openSpaceMenu(ui::Point at);
+    // The clipboard and merge entries both menus start with.
+    void addEditItems(std::vector<ui::MenuItem>& items, ui::Point at, bool onItem);
     // A right-click on an automation lane: its points (insert, select, copy,
     // paste, delete, shape), automation items (insert, or edit the one under
     // the pointer) and the envelope (bypass, hide, remove).

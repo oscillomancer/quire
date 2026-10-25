@@ -484,12 +484,6 @@ schema::Schema<model::FadeShape> fadeShapeSchema() {
                                                   {model::FadeShape::Exp, "exp"}});
 }
 
-void unpoolCopiedSource(model::Take& take, const model::Session& s, model::EditTxn& txn) {
-    if (!take.source || take.source->kind != model::Kind::Midi) return;
-    const model::MidiSource* source = s.midi.find(*take.source);
-    if (source && !source->pooled) take.source = txn.create(*source);
-}
-
 template <class T, bool Region, bool WithId>
 schema::Schema<T> rulerArgsSchema(const char* name) {
     auto b = schema::object<T>(name);

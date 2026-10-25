@@ -178,8 +178,20 @@ instructions are in `docs/guides/installing.md`.
   `~/Documents/<slug>-media` (the render folder is choosable), each project
   in a folder of its own with its own media; imports are copied into the
   project by default, and Save as into another folder copies the media. FX
-  chain presets and project templates (with a copy of their audio) are
-  saved, loaded and deleted in the app. Each effect's row in the FX chain
+  chain presets, track templates (a strip and its chains) and project
+  templates (with a copy of their audio) are saved, loaded and deleted in
+  the app. Tracks duplicate from either right-click menu with their chains,
+  items, sends and automation (`track.duplicate`), the whole selection at
+  once. In the mixer, Ctrl dragging a plug-in onto another strip copies its
+  whole chain, and a plug-in's right-click menu renames that instance.
+  Dragging one of several selected tracks (TCP or mixer) moves them all.
+  Keys act on the panel under the pointer (Delete or Alt+C removes items
+  over the arrange view, notes over the MIDI editor). Every key that is not
+  part of a gesture or a focused control is a rebindable action, and the
+  actions list shows all of an action's keys. The arrange view's
+  right-click menus cut, copy, paste at the pointer, duplicate, delete and
+  merge MIDI items (`midi.merge`, also an item's MIDI takes); the MIDI
+  editor's grid menu deletes, copies, cuts, pastes and duplicates notes. Each effect's row in the FX chain
   has a presets menu: the plugin's factory presets, read-only, and the
   user's own, saved and deleted there (`fx.preset.*`, the sandbox's preset
   format, kept per plugin in the configuration folder). Takes: show all takes in lanes,

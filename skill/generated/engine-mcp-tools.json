@@ -5191,6 +5191,43 @@
     }
   },
   {
+    "name": "midi_merge",
+    "title": "Merge MIDI items on one track, or one item's MIDI takes, into one item.",
+    "description": "Merge MIDI items on one track, or one item's MIDI takes, into one item. Several items (on one track): one item from the first start to the last end, with what each item's heard take plays, gaps left empty and overlaps layered; the others are removed. One item: its takes' notes layered into one take. The MIDI is what plays (looped passes unrolled, notes ending by their item's end); the result keeps the earliest item's settings, take name and take FX, and its id. One undo step. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "midi_merge_args",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^it_[0-9]+$"
+          },
+          "minItems": 1
+        }
+      },
+      "required": ["items"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "midi_merge_result",
+      "properties": {
+        "item": {
+          "type": "string"
+        }
+      },
+      "required": ["item"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
     "name": "midi_notes",
     "title": "List a MIDI item's notes and CC points (beats from the item's start).",
     "description": "List a MIDI item's notes and CC points (beats from the item's start). Notes are in a fixed order (by start, then pitch); midi.edit refers to them by their position in this list. start/length/beat are in beats from the item's start; channel is 1-16 (omitted for 1). pooled: other items share this MIDI, and edits change them too. For writing whole phrases, midi.write with notation is usually better. See describe for errors and examples.",
@@ -7962,6 +7999,46 @@
     }
   },
   {
+    "name": "track_duplicate",
+    "title": "Duplicate channels or busses with their FX, items, sends and automation.",
+    "description": "Duplicate channels or busses with their FX, items, sends and automation. Each copy goes right after its original, under the same parent, with the same settings and name; its main and input chains (each plugin's settings as it sounds now, as fx.copy), items and takes (unpooled MIDI copied, audio media shared), sends and record input, and the envelopes on the track, its plugins, sends and takes. Not copied: a folder's children, sends into the track, and item groups. Masters cannot be duplicated. One undo step; the copies' ids in the order given. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "track_duplicate_args",
+      "properties": {
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^tr_[0-9]+$"
+          },
+          "minItems": 1
+        }
+      },
+      "required": ["tracks"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "track_duplicate_result",
+      "properties": {
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["tracks"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "track_list",
     "title": "List tracks in tree order with their level, mute/solo, fx and items.",
     "description": "List tracks in tree order with their level, mute/solo, fx and items.  See describe for errors and examples.",
@@ -8238,6 +8315,39 @@
       "readOnlyHint": false,
       "destructiveHint": false,
       "idempotentHint": true
+    }
+  },
+  {
+    "name": "track_template_delete",
+    "title": "Delete a saved track template by name.",
+    "description": "Delete a saved track template by name.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "track_template_delete_args",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "track_template_delete_result",
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": ["path"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
     }
   },
   {

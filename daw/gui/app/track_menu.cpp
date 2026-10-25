@@ -45,6 +45,26 @@ Status removeTracks(cmd::Dispatcher& dispatcher, const model::Session& session,
     return {};
 }
 
+Result<std::vector<std::string>> duplicateTracks(cmd::Dispatcher& dispatcher,
+                                                 const model::Session& session,
+                                                 const std::vector<std::string>& tracks) {
+    json::Value ids = json::Value::array();
+    for (const std::string& text : tracks) {
+        const auto id = model::Id::parse(text);
+        const model::Track* t = id ? session.tracks.find(*id) : nullptr;
+        if (t && t->type != model::StripType::Master) ids.push_back(text);
+    }
+    std::vector<std::string> copies;
+    if (ids.asArray().empty()) return copies;
+    json::Value args = json::Value::object();
+    args["tracks"] = std::move(ids);
+    auto r = dispatcher.execute(
+        {"track.duplicate", std::move(args), {cmd::Origin::Type::Ui, "gui", {}}});
+    if (!r) return std::move(r).error();
+    for (const json::Value& id : (*r)["tracks"].asArray()) copies.push_back(id.asString());
+    return copies;
+}
+
 void TrackMenu::commit(std::string_view command, json::Value args) const {
     auto r = dispatcher.execute(
         {std::string(command), std::move(args), {cmd::Origin::Type::Ui, "gui", {}}});
@@ -79,13 +99,32 @@ void TrackMenu::open(const model::Id& track, const ui::Rect& anchor,
     m.run = [this, track, anchor] { openChannels(track, anchor); };
     items.push_back(std::move(m));
     items.push_back({"", "", {}, true, true});  // separator
-    // Delete: the whole selection when the track is part of it.
+    // Duplicate and Delete: the whole selection when the track is part of it.
     std::vector<std::string> doomed{track.str()};
     if (selection) {
         auto selected = selection();
         if (std::find(selected.begin(), selected.end(), track.str()) != selected.end())
             doomed = std::move(selected);
     }
+    std::vector<std::string> copied = doomed;
+    std::erase_if(copied, [&](const std::string& text) {
+        const auto id = model::Id::parse(text);
+        const model::Track* t = id ? app.head().tracks.find(*id) : nullptr;
+        return !t || t->type == model::StripType::Master;
+    });
+    m = {};
+    m.label =
+        copied.size() > 1 ? "Duplicate " + std::to_string(copied.size()) + " tracks" : "Duplicate";
+    m.enabled = !copied.empty();  // masters are not duplicated
+    m.run = [this, copied] {
+        auto r = duplicateTracks(dispatcher, app.head(), copied);
+        if (!r) {
+            if (onError) onError(r.error().message);
+        } else if (select) {
+            select(std::move(*r));
+        }
+    };
+    items.push_back(std::move(m));
     std::erase(doomed, model::kMaster.str());
     m = {};
     m.label = doomed.size() > 1 ? "Delete " + std::to_string(doomed.size()) + " tracks" : "Delete";
@@ -103,12 +142,29 @@ void TrackMenu::open(const model::Id& track, const ui::Rect& anchor,
 Status TrackMenu::openColors(const model::Id& track, const ui::Rect& anchor) const {
     const model::Track* tr = app.head().tracks.find(track);
     if (!tr) return Error("track.unknown", "no track " + track.str(), "/track", "use track.list");
+    // The whole selection when the track is part of it, as one undo step.
+    std::vector<std::string> tracks{track.str()};
+    if (selection) {
+        auto selected = selection();
+        if (std::find(selected.begin(), selected.end(), track.str()) != selected.end())
+            tracks = std::move(selected);
+    }
     std::vector<ui::MenuItem> items;
-    auto pick = [this, track](std::string colour) {
-        json::Value args = json::Value::object();
-        args["track"] = track.str();
-        args["color"] = std::move(colour);
-        commit("track.set", std::move(args));
+    auto pick = [this, tracks](std::string colour) {
+        const cmd::Origin origin{cmd::Origin::Type::Ui, "gui", {}};
+        auto r = dispatcher.transact("Track color", origin, [&]() -> Result<json::Value> {
+            for (const std::string& id : tracks) {
+                const auto parsed = model::Id::parse(id);
+                if (!parsed || !app.head().tracks.find(*parsed)) continue;  // gone meanwhile
+                json::Value args = json::Value::object();
+                args["track"] = id;
+                args["color"] = colour;
+                auto one = dispatcher.execute({"track.set", std::move(args), origin});
+                if (!one) return one;
+            }
+            return json::Value::object();
+        });
+        if (!r && onError) onError(r.error().message);
     };
     for (std::string_view name : model::kTrackColors) {
         ui::MenuItem m;

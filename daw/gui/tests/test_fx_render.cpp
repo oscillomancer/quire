@@ -101,7 +101,7 @@ struct Fixture {
             *platform, *window, *root, SUPPLE_GUI_FONTS_DIR, "FX", 840, 560, 800, 360);
         panel->onUnhandledKey = [this](const ui::KeyEvent& e, ui::Root& source) {
             const bool typing = source.focused() && source.focused()->role() == ui::Role::TextField;
-            return actions->key(e.key, e.mods, typing);
+            return actions->key(e.key, e.mods, typing, gui::keySections(source));
         };
         fx = std::make_unique<gui::FxWindow>(*app, *dispatcher, *root, *panel,
                                              gui::FxWindow::Hooks{},
@@ -110,6 +110,8 @@ struct Fixture {
         actions->addUi("ui.fx.chain", "FX: chain…", "track",
                        [this](const json::Value& v) -> Status { return fx->openFor(ui, v); });
         actions->addUi("ui.render", "File: render…", [this] { render->open(); });
+        actions->addUi("ui.fx.move_up", "FX: move up", [this] { fx->moveSelected(-1); });
+        actions->addUi("ui.fx.move_down", "FX: move down", [this] { fx->moveSelected(1); });
         root->onUnhandledKey = [this](const ui::KeyEvent& e) {
             const bool typing = root->focused() && root->focused()->role() == ui::Role::TextField;
             return actions->key(e.key, e.mods, typing);
@@ -453,7 +455,9 @@ TEST_CASE("the FX chain: browser, bypass/offline, reorder, remove, parameters, f
     dragRow(fx2, fx1, false);
     CHECK(f.fx->chain()[0] == fx1);
 
-    // Reorder by keyboard too (Alt+Down / Alt+Up on a focused row).
+    // Reorder by keyboard too: Alt+Down / Alt+Up (the keymap's fx section)
+    // move the selected effect.
+    f.fx->select(fx1);
     f.uiRoot().focus(f.uiRoot().find("fx.row." + fx1.str()));
     f.key("Alt+Down");
     CHECK(f.fx->chain()[0] == fx2);
@@ -887,6 +891,30 @@ TEST_CASE("the plugin browser names the plugin's file and marks a shadowed copy"
     list->select(*shadowedRow == 0 ? 1 : 0, true);
     CHECK(browser.detail().find(dup.string()) != std::string::npos);
     browser.close();
+}
+
+TEST_CASE("the plugin browser with no track given adds to every selected track") {
+    Fixture f;
+    if (!f.ok) return;
+    const model::Id one = f.addTrack("One"), two = f.addTrack("Two");
+    gui::UiState selection;
+    selection.selectedTracks = {one.str(), two.str()};
+    const auto before = f.historyCount();
+    REQUIRE(f.fx->openToAdd(selection, json::Value()));
+    f.frame();
+    CHECK(f.uiRoot().find("browser.title")->valueText() == "Add plugin to 2 tracks");
+    f.type("Hickory");
+    f.key("Return");
+    CHECK(f.app->head().tracks.find(one)->chain.size() == 1);
+    CHECK(f.app->head().tracks.find(two)->chain.size() == 1);
+    CHECK(f.historyCount() == before + 1);
+    // A strip's own "+" names its track: only that one.
+    REQUIRE(f.fx->openToAdd(selection, json::Value(two.str())));
+    f.frame();
+    f.type("Hickory");
+    f.key("Return");
+    CHECK(f.app->head().tracks.find(one)->chain.size() == 1);
+    CHECK(f.app->head().tracks.find(two)->chain.size() == 2);
 }
 
 TEST_CASE("the plugin browser finds a stock plugin by what it is") {
