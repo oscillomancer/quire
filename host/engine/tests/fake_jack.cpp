@@ -78,7 +78,7 @@ std::atomic<Frames> g_bufferSizeRequest{0};
 std::atomic<int> g_connections{0};
 std::atomic<bool> g_failCapture{false};
 std::atomic<float> g_inputValue{0.0f};
-std::string g_latencyEnv;
+std::string g_latencyEnv, g_rateEnv, g_propsEnv;
 std::mutex g_midiMutex;  // (not g_mutex: fakejack_stall holds that while the loop idles)
 std::vector<std::pair<int, MidiMessage>> g_midiQueue;  // (our MIDI port index, message)
 
@@ -152,8 +152,13 @@ Client* jack_client_open(const char* name, int, int* status, ...) {
         if (status) *status = 0x11;  // failure | server failed
         return nullptr;
     }
-    const char* env = std::getenv("PIPEWIRE_LATENCY");
-    g_latencyEnv = env ? env : "";
+    auto env = [](const char* name) {
+        const char* value = std::getenv(name);
+        return std::string(value ? value : "");
+    };
+    g_latencyEnv = env("PIPEWIRE_LATENCY");
+    g_rateEnv = env("PIPEWIRE_RATE");
+    g_propsEnv = env("PIPEWIRE_PROPS");
     g_appliedPeriod = g_period.load();
     g_cycles = 0;
     g_started = false;
@@ -354,6 +359,8 @@ void fakejack_midi(int port, Frames time, int status, int data1, int data2) {
                              static_cast<unsigned char>(data2)}}});
 }
 const char* fakejack_latency_env() { return g_latencyEnv.c_str(); }
+const char* fakejack_rate_env() { return g_rateEnv.c_str(); }
+const char* fakejack_props_env() { return g_propsEnv.c_str(); }
 // The peak so far on one output port, or on all of them for "".
 float fakejack_output_peak(const char* port) {
     std::lock_guard lock(g_mutex);

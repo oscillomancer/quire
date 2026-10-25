@@ -10,7 +10,12 @@
 // from PipeWire as the client's latency (PIPEWIRE_LATENCY, a per-client
 // request the graph honours if no other client needs a larger period);
 // `forceBufferSize` sets the graph period for everyone (jack_set_buffer_size)
-// and is for benchmarks. Rate changes and server shutdown are reported in
+// and is for benchmarks. `requestRate` suggests a graph rate (PIPEWIRE_RATE,
+// node.rate: applied only while the devices are idle and the rate is one the
+// server allows); `forceGraph` instead forces the block as the quantum, and
+// the requested rate, for as long as this client is active (node.force-*
+// through PIPEWIRE_PROPS). Variables the user set win over all three
+// requests. Plain JACK servers ignore them. Rate changes and server shutdown are reported in
 // stats() for the owner to restart the engine; nothing is handled on the
 // audio thread beyond counting.
 #pragma once
@@ -29,6 +34,8 @@ struct JackOptions {
     bool connectOutputs = true;    // connect our outputs to the physical playback ports
     bool requestLatency = true;    // ask PipeWire for a period of blockSize
     bool forceBufferSize = false;  // jack_set_buffer_size: the whole graph's period
+    double requestRate = 0;        // > 0: suggest this graph rate to PipeWire
+    bool forceGraph = false;       // force the block (and requestRate) while active
     double stopTimeoutSeconds = 2.0;
     BenchProbe* benchProbe = nullptr;  // benchmark only; whole JACK period, outlives stop()
 };

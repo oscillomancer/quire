@@ -19,11 +19,33 @@
 #include <cstdlib>
 #include <map>
 #include <mutex>
+#include <string>
 #include <thread>
+#include <vector>
 
 namespace supple::engine {
 
 namespace {
+
+// PipeWire requests read when the client opens (pipewire-jack's variables),
+// set for that call only. A variable the user set is left as it is.
+class ClientEnvironment {
+  public:
+    ClientEnvironment() = default;
+    ClientEnvironment(const ClientEnvironment&) = delete;
+    ClientEnvironment& operator=(const ClientEnvironment&) = delete;
+    ~ClientEnvironment() {
+        for (const char* name : set_) ::unsetenv(name);
+    }
+    void request(const char* name, const std::string& value) {
+        if (std::getenv(name)) return;
+        ::setenv(name, value.c_str(), 0);
+        set_.push_back(name);
+    }
+
+  private:
+    std::vector<const char*> set_;
+};
 
 // The part of the JACK API we use, declared from its documentation: opaque
 // handles, frame counts, flags and callback signatures.
@@ -316,6 +338,10 @@ Status JackBackend::start(const BackendConfig& config, Callback callback) {
     if (!std::isfinite(config.sampleRate) || config.sampleRate < 1 || config.sampleRate > 768000)
         return Error("backend.config", "invalid requested sample rate", "/sample_rate",
                      "use a finite rate from 1 to 768000 Hz");
+    if (!std::isfinite(options_.requestRate) || options_.requestRate < 0 ||
+        options_.requestRate > 768000)
+        return Error("backend.config", "invalid requested graph rate", "/rate",
+                     "use a finite rate from 1 to 768000 Hz, or 0 for the graph's own rate");
     if (config.blockSize == 0 || config.outputs == 0 || config.outputs > Impl::kMaxPorts ||
         config.inputs > Impl::kMaxPorts)
         return Error("backend.config",
@@ -336,17 +362,23 @@ Status JackBackend::start(const BackendConfig& config, Callback callback) {
     impl->outputs = config.outputs;
     impl->block = config.blockSize;
 
-    // The latency request is read when the client opens; restore the
-    // environment afterwards. A value the user set wins.
-    const bool setLatency = options_.requestLatency && !std::getenv("PIPEWIRE_LATENCY");
-    if (setLatency) {
-        const std::string request = std::to_string(config.blockSize) + "/" +
-                                    std::to_string(static_cast<long>(config.sampleRate));
-        ::setenv("PIPEWIRE_LATENCY", request.c_str(), 0);
-    }
+    // The block as the client's latency, and any rate, are requests to the
+    // graph read when the client opens; forcing makes both hold while we run.
     int status = 0;
-    impl->client = api->clientOpen(options_.clientName.c_str(), kNoStartServer, &status);
-    if (setLatency) ::unsetenv("PIPEWIRE_LATENCY");
+    {
+        ClientEnvironment environment;
+        const auto block = std::to_string(config.blockSize);
+        const auto rate = std::to_string(
+            static_cast<long>(options_.requestRate > 0 ? options_.requestRate : config.sampleRate));
+        if (options_.requestLatency) environment.request("PIPEWIRE_LATENCY", block + "/" + rate);
+        if (options_.requestRate > 0) environment.request("PIPEWIRE_RATE", "1/" + rate);
+        if (options_.forceGraph)
+            environment.request("PIPEWIRE_PROPS",
+                                "{ node.force-quantum=" + block +
+                                    (options_.requestRate > 0 ? " node.force-rate=" + rate : "") +
+                                    " }");
+        impl->client = api->clientOpen(options_.clientName.c_str(), kNoStartServer, &status);
+    }
     if (!impl->client)
         return Error("backend.open",
                      "could not connect to the JACK server (" + statusText(status) + ")", {},

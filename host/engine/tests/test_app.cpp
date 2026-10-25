@@ -351,8 +351,15 @@ TEST_CASE("an LLM plays the song in real time over the bus (a stand-in libjack)"
     fake.setRate(44100);
     auto other = call("engine.start", "{}");
     CHECK(other["sample_rate"].asDouble() == 44100.0);
+    CHECK(std::string(fake.rateEnv()).empty());  // no rate given: nothing asked of the graph
     call("engine.stop", "{}");
     CHECK(fake.open() == 0);
+
+    // A rate given is asked of the graph; force_graph holds it and the block.
+    call("engine.start", R"({"rate": 96000, "block": 128, "force_graph": true})");
+    CHECK(std::string(fake.rateEnv()) == "1/96000");
+    CHECK(std::string(fake.propsEnv()) == "{ node.force-quantum=128 node.force-rate=96000 }");
+    call("engine.stop", "{}");
     fake.reset();
 }
 

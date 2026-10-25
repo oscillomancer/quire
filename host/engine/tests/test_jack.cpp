@@ -169,6 +169,71 @@ TEST_CASE("a user's PIPEWIRE_LATENCY wins; forceBufferSize asks for the period")
     fake.reset();
 }
 
+TEST_CASE("a requested rate is a suggestion; forcing holds the quantum and rate while active") {
+    FakeJack& fake = fakeJack();
+    fake.reset(1024);
+    for (const char* name : {"PIPEWIRE_LATENCY", "PIPEWIRE_RATE", "PIPEWIRE_PROPS"})
+        ::unsetenv(name);
+    Recorder rec;
+    BackendConfig cfg;
+    cfg.blockSize = 128;
+    {
+        auto o = fakeOptions();
+        o.requestRate = 44100;
+        JackBackend backend(o);
+        REQUIRE(backend.start(cfg, rec.callback()));
+        CHECK(std::string(fake.latencyEnv()) == "128/44100");
+        CHECK(std::string(fake.rateEnv()) == "1/44100");
+        CHECK(std::string(fake.propsEnv()).empty());
+        // The graph keeps its own rate: the backend runs at what it was given.
+        CHECK(backend.config().sampleRate == 48000.0);
+        backend.stop();
+    }
+    {
+        auto o = fakeOptions();
+        o.requestRate = 96000;
+        o.forceGraph = true;
+        JackBackend backend(o);
+        REQUIRE(backend.start(cfg, rec.callback()));
+        CHECK(std::string(fake.rateEnv()) == "1/96000");
+        CHECK(std::string(fake.propsEnv()) == "{ node.force-quantum=128 node.force-rate=96000 }");
+        backend.stop();
+    }
+    {
+        auto o = fakeOptions();
+        o.forceGraph = true;  // no rate: only the quantum is forced
+        JackBackend backend(o);
+        REQUIRE(backend.start(cfg, rec.callback()));
+        CHECK(std::string(fake.rateEnv()).empty());
+        CHECK(std::string(fake.propsEnv()) == "{ node.force-quantum=128 }");
+        backend.stop();
+    }
+    for (const char* name : {"PIPEWIRE_LATENCY", "PIPEWIRE_RATE", "PIPEWIRE_PROPS"})
+        CHECK(std::getenv(name) == nullptr);
+    {
+        // The user's own properties win over forcing.
+        ::setenv("PIPEWIRE_PROPS", "{ node.latency=64/48000 }", 1);
+        auto o = fakeOptions();
+        o.forceGraph = true;
+        JackBackend backend(o);
+        REQUIRE(backend.start(cfg, rec.callback()));
+        CHECK(std::string(fake.propsEnv()) == "{ node.latency=64/48000 }");
+        backend.stop();
+        CHECK(std::string(std::getenv("PIPEWIRE_PROPS")) == "{ node.latency=64/48000 }");
+        ::unsetenv("PIPEWIRE_PROPS");
+    }
+    {
+        auto o = fakeOptions();
+        o.requestRate = -1;
+        JackBackend backend(o);
+        auto refused = backend.start(cfg, rec.callback());
+        REQUIRE_FALSE(refused);
+        CHECK(refused.error().code == "backend.config");
+        CHECK(refused.error().path == "/rate");
+    }
+    fake.reset();
+}
+
 TEST_CASE("inputs reach the callback") {
     FakeJack& fake = fakeJack();
     fake.reset(128);

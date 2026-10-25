@@ -217,6 +217,9 @@ Status PortAudioBackend::start(const BackendConfig& config, Callback callback) {
         parameters.sampleFormat = paFloat32 | paNonInterleaved;
         parameters.suggestedLatency =
             isInput ? info->defaultLowInputLatency : info->defaultLowOutputLatency;
+        parameters.hostApiSpecificStreamInfo =
+            api.streamInfo ? api.streamInfo(hostInfo->type, self.options.changeDeviceRate)
+                           : nullptr;
         if (isInput) self.inputName = info->name;
         return okStatus();
     };

@@ -896,6 +896,13 @@ harness. See the tooling README for schemas, limits and invocation details.
   the graph honours unless another client needs a longer period;
   `PIPEWIRE_QUANTUM` is not used because pipewire-jack maps it to
   `node.force-quantum` + `node.force-rate` (the whole graph).
+  An explicit rate (`JackOptions::requestRate`, engine.start's `rate`) is
+  suggested as `PIPEWIRE_RATE=1/<rate>` (`node.rate`: applied only while the
+  devices are idle and the rate is allowed). `forceGraph` (engine.start's
+  `force_graph`) sets `PIPEWIRE_PROPS={ node.force-quantum=<block>
+  node.force-rate=<rate> }` (the rate only when given), forcing both on the
+  graph while the client is active (ADR-0050). Every variable is set only
+  for the `jack_client_open` call, and one the user set wins.
   `forceBufferSize` (`jack_set_buffer_size`) is the opt-in for benchmarks.
   The granted rate is the engine's rate, read once the client has run its
   first cycle (at most 1 s after activation): before that pipewire-jack
@@ -919,7 +926,7 @@ harness. See the tooling README for schemas, limits and invocation details.
   `SUPPLE_AUDIO_DEVICE_TEST=1 engine.tests -tc='real JACK*'` (2 s of silence
   at a 64-frame block). First run on this machine: 48 kHz, period 128 for a
   64-frame request, 0 xruns, final callback on the JACK thread.
-- **Control:** `engine.start {backend: jack|dummy, block}`, `engine.stop`,
+- **Control:** `engine.start {backend: jack|dummy, block, rate, force_graph}`, `engine.stop`,
   `engine.status`, `transport.play|pause|stop|seek|get`. Transport actions
   wait (≤ 1 s) for two audio cycles so their answer is the new state;
   `transport.stop` returns to where play started. `<slug>-engine play FILE`
@@ -1357,7 +1364,13 @@ but never builds or initializes the PortAudio library.
 `input_device`, `output_device`, `rate` (1..768000), `inputs` (0..64) and `outputs`
 (2..64). Native stream audio inputs default to zero, outputs to two;
 engine.start enables native MIDI inputs (ADR-0042). JACK keeps its capture/MIDI behavior. Native default backend stays
-dummy; Linux's existing default stays JACK. The CLI play command forwards these
+dummy (the GUI starts the saved device instead, ADR-0050); Linux's existing
+default stays JACK. An explicit `rate` sets `PortAudioOptions::changeDeviceRate`:
+CoreAudio switches the device's nominal rate (`paMacCoreChangeDeviceParameters`,
+converting what it cannot run). WASAPI shared mode always requests Windows'
+rate conversion (`paWinWasapiAutoConvert`). These go through the optional
+`PortAudioApi::streamInfo` hook (null in the fake driver), for both stream
+directions. The CLI play command forwards these
 fields through --host-api, --input-device, --output-device, --rate, --inputs and
 --outputs. Device recovery retains them alongside block/anticipative settings.
 

@@ -256,6 +256,36 @@ TEST_CASE("PortAudio failed selection and stream startup release resources") {
     CHECK_FALSE(backend.start({.inputs = 3}, [](auto, auto, auto) {}));
     CHECK(driver.initialized == 0);
 }
+TEST_CASE("host-specific stream settings follow the host API and an explicit device rate") {
+    Driver driver;
+    static PaHostApiTypeId seenType;
+    static bool seenChange;
+    static int settings;
+    auto api = Driver::api;
+    api.streamInfo = [](PaHostApiTypeId type, bool changeRate) -> void* {
+        seenType = type;
+        seenChange = changeRate;
+        return &settings;
+    };
+    for (const bool change : {false, true}) {
+        PortAudioOptions options;
+        options.changeDeviceRate = change;
+        PortAudioBackend backend(options, api);
+        REQUIRE(backend.start({.sampleRate = 96000, .inputs = 2}, [](auto, auto, auto) {}));
+        CHECK(seenType == paCoreAudio);
+        CHECK(seenChange == change);
+        // Duplex streams pass the same settings for input and output.
+        CHECK(driver.input.hostApiSpecificStreamInfo == &settings);
+        CHECK(driver.output.hostApiSpecificStreamInfo == &settings);
+        backend.stop();
+    }
+    // Without the hook (Linux, older drivers) PortAudio's defaults apply.
+    PortAudioBackend plain({}, Driver::api);
+    REQUIRE(plain.start({}, [](auto, auto, auto) {}));
+    CHECK(driver.output.hostApiSpecificStreamInfo == nullptr);
+    plain.stop();
+}
+
 TEST_CASE("PortAudio fake device output is bit-identical to offline in both executors") {
     const auto model = session();
     auto offlinePool = pool();

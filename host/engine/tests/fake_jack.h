@@ -39,6 +39,8 @@ struct FakeJack {
     void (*midi)(int, std::uint32_t, int, int,
                  int) = fn<void (*)(int, std::uint32_t, int, int, int)>("fakejack_midi");
     const char* (*latencyEnv)() = fn<const char* (*)()>("fakejack_latency_env");
+    const char* (*rateEnv)() = fn<const char* (*)()>("fakejack_rate_env");
+    const char* (*propsEnv)() = fn<const char* (*)()>("fakejack_props_env");
     float (*outputPeak)(const char*) = fn<float (*)(const char*)>("fakejack_output_peak");
 
     // Back to a healthy server at 48 kHz with the given period.

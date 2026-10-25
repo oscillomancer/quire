@@ -45,6 +45,11 @@ struct PortAudioApi {
     Result<std::shared_ptr<AudioWorkgroup>> (*workgroup)(PaStream*) = nullptr;
     // False (fake drivers only): helpers skip the OS scheduling policy.
     bool osThreadPolicy = true;
+    // Optional host-specific stream settings for a host API, or null for
+    // PortAudio's defaults; the pointer stays valid for the process. WASAPI
+    // shared mode converts any rate; CoreAudio switches the device's nominal
+    // rate when `changeRate` (and converts what the device cannot run).
+    void* (*streamInfo)(PaHostApiTypeId type, bool changeRate) = nullptr;
 };
 const PortAudioApi* nativePortAudioApi();
 #if defined(__APPLE__)

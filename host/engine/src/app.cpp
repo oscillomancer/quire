@@ -915,6 +915,8 @@ Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, boo
         JackOptions o;
         o.clientName = std::string(product::kSlug);
         o.library = options_.jackLibrary;
+        o.requestRate = device.rate;  // an explicit rate is asked of the graph
+        o.forceGraph = device.forceGraph;
         // One input per physical capture port (at least the first pair, at
         // most 32), so any device input can feed a track.
         if (auto names = JackBackend::captureNames(o); names && !names->empty())
@@ -928,7 +930,9 @@ Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, boo
     } else if (backend == "portaudio") {
         config.inputs = device.inputs;
         config.outputs = device.outputs;
-        ownedBackend_ = std::make_unique<PortAudioBackend>(device.native);
+        PortAudioOptions native = device.native;
+        native.changeDeviceRate = device.rate > 0;  // an explicit rate is asked of the device
+        ownedBackend_ = std::make_unique<PortAudioBackend>(native);
     } else if (backend == "dummy") {
         ownedBackend_ = std::make_unique<DummyBackend>(
             DummyBackend::Options{.mode = DummyBackend::Mode::Thread, .paced = true});

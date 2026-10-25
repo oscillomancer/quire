@@ -236,6 +236,7 @@ q = nil
 ---@field outputs? integer
 ---@field block? integer
 ---@field anticipative? boolean
+---@field force_graph? boolean
 
 ---@class Quire.engine_start_result
 ---@field running boolean

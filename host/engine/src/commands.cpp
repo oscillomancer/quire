@@ -177,7 +177,7 @@ struct EngineStartArgs {
     std::optional<double> rate;
     std::optional<std::int64_t> inputs, outputs;
     std::optional<std::int64_t> block;
-    std::optional<bool> anticipative;
+    std::optional<bool> anticipative, forceGraph;
 };
 struct SeekArgs {
     std::optional<double> seconds, beat;
@@ -3756,7 +3756,12 @@ void registerEngineCommands(cmd::Registry& registry) {
             "(default "
             "elsewhere, no device). For portaudio, host_api, input_device and output_device "
             "select exact names from engine.devices. inputs defaults to 0 (playback only); "
-            "outputs defaults to 2. rate defaults to the project rate. PortAudio opens up to "
+            "outputs defaults to 2. rate defaults to the project rate; a rate given is asked of "
+            "the device (CoreAudio switches the device's rate when it can, WASAPI converts) or, "
+            "with JACK on PipeWire, suggested to the graph (node.rate: applied only while the "
+            "devices are idle and the rate is allowed). force_graph (JACK on PipeWire, default "
+            "false) instead forces block as the graph's quantum, and rate if given, while the "
+            "engine runs. PortAudio opens up to "
             "16 native MIDI inputs; engine.inputs lists their names. Dummy is paced like a device. "
             "block: the device block in frames "
             "(default 256); the device's "
@@ -3786,6 +3791,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                      .field("outputs", &EngineStartArgs::outputs, schema::integer().range(2, 64))
                      .field("block", &EngineStartArgs::block, schema::integer().range(16, 4096))
                      .field("anticipative", &EngineStartArgs::anticipative, schema::boolean())
+                     .field("force_graph", &EngineStartArgs::forceGraph, schema::boolean())
                      .build();
         c.result = engineStatusSchema();
         c.errors = {
@@ -3830,6 +3836,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             device.rate = a.rate.value_or(0);
             device.inputs = static_cast<std::uint32_t>(a.inputs.value_or(0));
             device.outputs = static_cast<std::uint32_t>(a.outputs.value_or(2));
+            device.forceGraph = a.forceGraph.value_or(false);
             SUPPLE_TRY(app.startEngine(backend == BackendArg::Dummy  ? "dummy"
                                        : backend == BackendArg::Jack ? "jack"
                                                                      : "portaudio",

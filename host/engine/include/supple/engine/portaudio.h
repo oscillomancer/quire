@@ -10,6 +10,9 @@ class MidiSource;
 struct PortAudioOptions {
     // Exact names. Empty selects the platform's default host API/device.
     std::string hostApi, inputDevice, outputDevice;
+    // The requested rate is the device's to run (CoreAudio switches the
+    // device's nominal rate); otherwise the host API converts as needed.
+    bool changeDeviceRate = false;
     double stopTimeoutSeconds = 2.0;
 };
 struct AudioDevice {

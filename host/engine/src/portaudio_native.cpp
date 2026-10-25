@@ -20,6 +20,7 @@
 
 #include <asio.h>
 #include <avrt.h>
+#include <pa_win_wasapi.h>
 #endif
 namespace supple::engine::detail {
 #if defined(__APPLE__) || defined(_WIN32)
@@ -43,6 +44,16 @@ double deviceRate(PaStream* stream, PaDeviceIndex) {
     UInt32 size = sizeof(rate);
     return AudioObjectGetPropertyData(device, &address, 0, nullptr, &size, &rate) == noErr ? rate
                                                                                            : 0;
+}
+void* streamInfo(PaHostApiTypeId type, bool changeRate) {
+    if (type != paCoreAudio || !changeRate) return nullptr;
+    // Input and output share these flags, as PortAudio requires for duplex.
+    static PaMacCoreStreamInfo info = [] {
+        PaMacCoreStreamInfo setup{};
+        PaMacCore_SetupStreamInfo(&setup, paMacCoreChangeDeviceParameters);
+        return setup;
+    }();
+    return &info;
 }
 // One thread joins at most one device workgroup; its token lives with the
 // thread so leave() needs nothing but the thread.
@@ -109,6 +120,19 @@ double deviceRate(PaStream*, PaDeviceIndex device) {
     ASIOSampleRate rate = 0;
     return host && host->type == paASIO && ASIOGetSampleRate(&rate) == ASE_OK ? rate : 0;
 }
+void* streamInfo(PaHostApiTypeId type, bool) {
+    if (type != paWASAPI) return nullptr;
+    // Shared mode runs at the mix format's rate: let Windows convert any other.
+    static PaWasapiStreamInfo info = [] {
+        PaWasapiStreamInfo setup{};
+        setup.size = sizeof(setup);
+        setup.hostApiType = paWASAPI;
+        setup.version = 1;
+        setup.flags = paWinWasapiAutoConvert;
+        return setup;
+    }();
+    return &info;
+}
 #endif
 const PortAudioApi api{initialize,
                        terminate,
@@ -130,10 +154,12 @@ const PortAudioApi api{initialize,
                        true,
                        true,
 #if defined(__APPLE__)
-                       deviceWorkgroup};
+                       deviceWorkgroup,
 #else
-                       nullptr};
+                       nullptr,
 #endif
+                       true,
+                       streamInfo};
 #if defined(_WIN32)
 thread_local HANDLE mmcss = nullptr;
 #endif

@@ -182,8 +182,9 @@ struct MeterReading {
 
 struct EngineDeviceOptions {
     PortAudioOptions native;
-    double rate = 0;  // zero: project rate
+    double rate = 0;  // zero: project rate; otherwise asked of the device or graph
     std::uint32_t inputs = 0, outputs = 2;
+    bool forceGraph = false;  // JACK on PipeWire: force the block and rate while running
 };
 
 class EngineApp : public cmd::Host {
