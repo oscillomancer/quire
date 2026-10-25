@@ -61,7 +61,7 @@ constexpr int kRust = 0xC8653E;   // well off
 constexpr int kLinen = 0xE6D9C0;
 
 constexpr double kW = 780;
-constexpr double kH = 564;
+constexpr double kH = 572;
 
 struct Sedge : Effect {
     static constexpr Info info = {
@@ -603,12 +603,15 @@ struct Sedge : Effect {
     static constexpr double bladeW = 16, bladeGap = 8, bladeBase = ry + 204, bladeTall = 64;
     static constexpr double rowX = rx + 24, rowW = rw - 48, rowY = ry + 228, rowH = 88;
     static constexpr double midW = 84, cellGap = 6;
-    // The settings.
-    static constexpr double sx = 16, sy = 416, sw = 748, sh = 132;
-    // The two rows' names centred one over the other, each row's pills after its name.
-    static constexpr double tempY = sy + 40, keyY = sy + 84, nameX = sx + 56;
-    static constexpr double tempX0 = sx + 94, keyX0 = sx + 80;
-    static constexpr double knobR = 22, knobY = sy + 74;
+    // The settings, two panels side by side: tuning (the temperament, its
+    // key and A4) and listening (the window, threshold and tolerance). Each
+    // row of pills has its name over it, both rows the same width.
+    static constexpr double sy = 416, sh = 140;
+    static constexpr double tx = 16, tw = 496;
+    static constexpr double lx = tx + tw + 12, lw = rx + rw - lx;
+    static constexpr double pillX = tx + 16, tempW = 62, tempStep = 66, keyW = 29, keyStep = 33;
+    static constexpr double tempY = sy + 50, keyY = sy + 98;
+    static constexpr double knobR = 22, knobY = sy + 75;
 
     // The editor's own.
     int dragging = 0;  // 1 a knob, 2 the threshold
@@ -1032,15 +1035,18 @@ struct Sedge : Effect {
 
     // --- the settings -------------------------------------------------------------------------
 
-    // 0 A4, 1 window, 2 threshold, 3 tolerance.
-    double knobX(int k) const { return sx + sw - 224 + 64 * k; }
-    double tempX(int k) const { return tempX0 + 66 * k; }
-    double keyX(int k) const { return keyX0 + 34 * k; }
+    // 0 A4, at the tuning panel's end; 1 window, 2 threshold, 3 tolerance,
+    // across the listening panel.
+    double knobX(int k) const { return k == 0 ? tx + tw - 44 : lx + 50 + 70 * (k - 1); }
+    double tempX(int k) const { return pillX + tempStep * k; }
+    double keyX(int k) const { return pillX + keyStep * k; }
 
     void drawSettings(Canvas& g) {
-        panel(g, sx, sy, sw, sh);
-        heading(g, "Tuning", sx + 16, sy + 18);
-        label(g, "TEMPERAMENT", nameX, tempY + pillH * 0.5, TextAlign::Center);
+        panel(g, tx, sy, tw, sh);
+        heading(g, "Tuning", tx + 16, sy + 18);
+        panel(g, lx, sy, lw, sh);
+        heading(g, "Listening", lx + 16, sy + 18);
+        label(g, "TEMPERAMENT", pillX, tempY - 8, TextAlign::Left);
         const int t = temperament.index();
         for (int k = 0; k < 6; ++k) {
             const char* name = "EQUAL";
@@ -1049,10 +1055,10 @@ struct Sedge : Effect {
             if (k == 3) name = "MEANTONE";
             if (k == 4) name = "WERCK. III";
             if (k == 5) name = "VALLOTTI";
-            pill(g, tempX(k), tempY, 60, pillH, name, t == k, kSedge,
-                 hovering(tempX(k), tempY, 60, pillH), false);
+            pill(g, tempX(k), tempY, tempW, pillH, name, t == k, kSedge,
+                 hovering(tempX(k), tempY, tempW, pillH), false);
         }
-        label(g, "KEY", nameX, keyY + pillH * 0.5, TextAlign::Center);
+        label(g, "KEY", pillX, keyY - 8, TextAlign::Left);
         const int k0 = key.index();
         for (int k = 0; k < 12; ++k) {
             const char* name = "C";
@@ -1067,8 +1073,8 @@ struct Sedge : Effect {
             if (k == 9) name = "A";
             if (k == 10) name = "Bb";
             if (k == 11) name = "B";
-            pill(g, keyX(k), keyY, 30, pillH, name, k0 == k && t != 0, kSeed,
-                 hovering(keyX(k), keyY, 30, pillH), t == 0);
+            pill(g, keyX(k), keyY, keyW, pillH, name, k0 == k && t != 0, kSeed,
+                 hovering(keyX(k), keyY, keyW, pillH), t == 0);
         }
         // Lit from concert pitch, 440 Hz, along the knob's logarithmic travel.
         const double concert = log(440.0 / 415.0) / log(466.0 / 415.0);
@@ -1200,12 +1206,12 @@ struct Sedge : Effect {
             return;
         }
         for (int m = 0; m < 6; ++m)
-            if (p.over(tempX(m), tempY, 60, pillH)) {
+            if (p.over(tempX(m), tempY, tempW, pillH)) {
                 temperament.edit(m);
                 return;
             }
         for (int m = 0; m < 12; ++m)
-            if (p.over(keyX(m), keyY, 30, pillH)) {
+            if (p.over(keyX(m), keyY, keyW, pillH)) {
                 key.edit(m);
                 return;
             }

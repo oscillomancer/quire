@@ -1879,7 +1879,7 @@ agent (`fx.meters`, `dsp.test`'s `meters`) read the same note.
   100 ms window); the work of each reading is spread over the frames before
   the next.
 
-Editor (780 × 564): in the header, the input's level with `threshold` on it
+Editor (780 × 572): in the header, the input's level with `threshold` on it
 (dragged, wheeled) and Mute. The reading: the note large, with its octave
 and a flat or sharp, in the blades' green while in tune; the cents to the
 left, coloured by how far off (green within `tolerance`, amber within
@@ -1890,10 +1890,11 @@ tallest in the middle, those within `tolerance` tinted; the one nearest the
 pitch lights, with an arrow past the end beyond 10 cents. Below, the
 coarse row across ±50 cents: a wide middle cell for the tolerance and
 eight a side sharing the rest, the one the pitch is in lit, and under it a
-mark at the pitch exactly. Everything dims while the display holds. The
-tuning panel: the temperament and key as pills (the keys dimmed under
-equal), the key's name centred under the temperament's, and knobs for A4
-(in tenths of a hertz), the window, the threshold and the tolerance. The mark is a tuft of sedge with a seed spike.
+mark at the pitch exactly. Everything dims while the display holds.
+Under it two panels. Tuning: the temperament and the key as two rows of
+pills of one width, each named above (the keys dimmed under equal), and A4
+(in tenths of a hertz). Listening: the window, the threshold and the
+tolerance. The mark is a tuft of sedge with a seed spike.
 
 Factory patches: Concert A440, A442, Baroque A415, Bass (a 100 ms
 window), Stage, Muted, Werckmeister III, Vallotti, Meantone.
