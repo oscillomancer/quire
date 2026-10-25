@@ -63,7 +63,7 @@ def main():
                 for notice in ("LICENSE.txt", "NOTICES.txt"):
                     assert (plugin / "Contents/Resources" / notice).is_file(), "CLAP bundle lost embedded notices"
             assert plugin.resolve() in discovered, f"{plugin.name} not discovered from the packaged location"
-        assert len(list(plugins.glob("*.clap"))) == 14
+        assert len(list(plugins.glob("*.clap"))) == product["stock_plugins"]
         # A unique absent socket/instance must produce an actionable failure.
         result = execute("-mcp", "--instance", "package-smoke-absent", expected=1)
         assert "running" in result.stderr
@@ -71,7 +71,8 @@ def main():
             assert (binary_dir / f"{slug}{suffix}{ext}").is_file()
         assert (data / "skill/SKILL.md").is_file()
         assert (data / "fonts/Inter-Regular.ttf").is_file()
-    print("Packaged smoke: GUI help/snapshot, 14 plugins, MCP failure, helpers, skill, fonts passed")
+    print(f"Packaged smoke: GUI help/snapshot, {product['stock_plugins']} plugins, MCP failure, "
+          "helpers, skill, fonts passed")
 
 
 if __name__ == "__main__":

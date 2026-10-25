@@ -104,7 +104,7 @@ foreach(i RANGE ${last})
     DESTINATION "${doc_dest}/third-party/${name}" COMPONENT Runtime)
 endforeach()
 if(SUPPLE_BUILD_PLUGINS)
-  # The player is a development tool, not one of the fourteen stock products.
+  # The player is a development tool, not one of the stock products.
   get_property(products GLOBAL PROPERTY SUPPLE_STAGED_PLUGINS)
   list(REMOVE_ITEM products "Script Player")
   foreach(product IN LISTS products)
@@ -142,9 +142,11 @@ elseif(NOT WIN32)
     install(PROGRAMS "${package_dir}/${script}.sh" DESTINATION . COMPONENT Runtime)
   endforeach()
 endif()
-# A machine-readable handoff avoids duplicating identity in packaging scripts.
+# A machine-readable handoff avoids duplicating identity (and the number of
+# stock plugins the package checks expect) in packaging scripts.
+list(LENGTH products stock_plugins)
 file(WRITE "${package_dir}/product.json"
-  "{\"name\":\"${PRODUCT_NAME}\",\"slug\":\"${PRODUCT_SLUG}\",\"vendor\":\"${PRODUCT_VENDOR}\",\"version\":\"${PRODUCT_VERSION}\",\"vendor_id\":\"${PRODUCT_VENDOR_ID}\"}\n")
+  "{\"name\":\"${PRODUCT_NAME}\",\"slug\":\"${PRODUCT_SLUG}\",\"vendor\":\"${PRODUCT_VENDOR}\",\"version\":\"${PRODUCT_VERSION}\",\"vendor_id\":\"${PRODUCT_VENDOR_ID}\",\"stock_plugins\":${stock_plugins}}\n")
 set(package_targets ${PRODUCT_SLUG} ${PRODUCT_SLUG}-engine ${PRODUCT_SLUG}-mcp
                     ${PRODUCT_SLUG}-bridge ${PRODUCT_SLUG}-scanner skill-tree)
 if(SUPPLE_BUILD_PLUGINS)

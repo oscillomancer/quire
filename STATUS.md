@@ -72,7 +72,7 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
 
 Packaging (ADR-0048) has CMake install components, a relocatable Linux tarball
 and user-space installer, an Apple Silicon app/dmg and Windows per-user NSIS
-installer, with portable zip alternatives. The five helpers/programs, fourteen
+installer, with portable zip alternatives. The five helpers/programs, fifteen
 stock CLAPs, agent skill, fonts and license texts ship together. Package CI is
 manual and tests installed artifacts; optional release upload creates drafts
 only. Linux package builds now use hidden static C++ runtimes (ADR-0049), preserving

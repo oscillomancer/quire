@@ -3,7 +3,7 @@
 ADR-0048 and ADR-0049 define the layouts and rationale. Product identity comes exclusively
 from `cmake/Product.cmake`. `cmake --install` exposes components `Runtime`
 (five programs, SDL3, resources, licenses, desktop integration sources) and
-`Plugins` (fourteen stock CLAPs plus license/notices; no Script Player).
+`Plugins` (the stock CLAPs, fifteen today, plus license/notices; no Script Player).
 `package-runtime` builds exactly the needed distribution targets.
 
 The executable-relative stock-plugin and skill lookup is public host API.

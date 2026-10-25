@@ -65,14 +65,14 @@ def main():
 
         install('old', 0, '/PLUGINS')
         inventory = (installed / '.installed-files').read_bytes()
-        assert len(list(plugins.glob('*.clap'))) == 14
+        assert len(list(plugins.glob('*.clap'))) == product['stock_plugins']
         (plugins / 'notes.txt').write_text('user plugin notes')
         (installed / 'unrelated-project.json').write_text('user project')
 
         def old_intact():
             assert (installed / 'version-marker.txt').read_text() == 'old'
             assert (installed / '.installed-files').read_bytes() == inventory
-            assert len(list(plugins.glob('*.clap'))) == 14
+            assert len(list(plugins.glob('*.clap'))) == product['stock_plugins']
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, registry) as key:
                 assert winreg.QueryValueEx(key, 'StockPlugins')[0] == 1
 
@@ -98,7 +98,7 @@ def main():
         assert (installed / 'version-marker.txt').read_text() == 'new'
         assert (plugins / 'notes.txt').read_text() == 'user plugin notes'
         assert (plugins / 'UpgradeExtra-NOTICES.txt').read_text() == 'new plugin notice'
-        assert len(list(plugins.glob('*.clap'))) == 14
+        assert len(list(plugins.glob('*.clap'))) == product['stock_plugins']
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, registry) as key:
             assert winreg.QueryValueEx(key, 'StockPlugins')[0] == 1
 
