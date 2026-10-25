@@ -47,8 +47,8 @@ machine, but file formats and commands can still change.
 - **Stock plugins.** Marram (synth), Yarrow (EQ), Sundew (compressor),
   Treeline (limiter), Gorse (transient shaper), Hickory (stereo utility),
   Sorrel (gate and expander), Teasel (saturation), Bracken (delay), Ghyll
-  (reverb), Withy (chorus), Pollia (phaser), Umber (tape) and Lichen
-  (analyzer), as CLAP plugins usable in any host. Each has JSON patches and exposes its
+  (reverb), Withy (chorus), Pollia (phaser), Umber (tape), Lichen
+  (analyzer) and Sedge (tuner), as CLAP plugins usable in any host. Each has JSON patches and exposes its
   parameters in physical units through a CLAP extension. All are written as
   DSP scripts and compiled into plugins of their own (`plugins/<name>`).
 - **Text formats.** Projects, patches and FX chains are canonical JSON; MIDI

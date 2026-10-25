@@ -24,6 +24,7 @@ player, and every check the other stock plugins have.
 | `withy` | Withy, the chorus | `com.suppleaudio.withy` |
 | `pollia` | Pollia, the phaser | `com.suppleaudio.pollia` |
 | `umber` | Umber, the tape machine | `com.suppleaudio.umber` |
+| `sedge` | Sedge, the chromatic tuner | `com.suppleaudio.sedge` |
 
 ## Files
 

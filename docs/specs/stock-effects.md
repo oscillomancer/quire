@@ -1799,7 +1799,107 @@ Fat Bass, Saturated, Warm Electronics, Underbiased, Cassette, Worn
 Machine, Warped, Clean Transfer; on a test mix within 0.9 LU of the dry
 signal, on drums down to −1.7 LU for the heaviest.
 
-## 14. Acceptance
+## 14. Tuner — "Sedge" [`sedge`]
+
+A chromatic tuner, written as a DSP script (ADR-0047:
+`plugins/sedge/script/sedge.cpp`). It passes every sample through as it
+came (host-smoke checks it bit for bit as a transparent product) unless
+`mute` is on, which silences the output to tune on stage. Main stereo or
+mono, the channels' mean is what it listens to; no latency, no tail. What
+it hears is reported as read-only parameters, so the editor, a host and an
+agent (`fx.meters`, `dsp.test`'s `meters`) read the same note.
+
+| key | type | range | curve | default |
+|---|---|---|---|---|
+| `reference` | Hz | 415..466: the pitch of A4 | log | 440 |
+| `temperament` | enum | `equal`, `just`, `pythagorean`, `meantone`, `werckmeister3`, `vallotti` | | `equal` |
+| `key` | enum | `c`, `d_flat`, `d`, `e_flat`, `e`, `f`, `f_sharp`, `g`, `a_flat`, `a`, `b_flat`, `b`: the note the temperament is built on; applies unless `equal` | | `c` |
+| `window` | ms | 10..200: how much sound each reading listens to | log | 40 |
+| `tolerance` | ct | 1..10: within this either way the note is in tune | linear | 3 |
+| `threshold` | dBFS | −90..−20: below this input peak nothing is read | linear | −60 |
+| `mute` | bool | silence, faded over 10 ms | | false |
+| `note` | enum | readonly: `none` until a note is heard, then `c` … `b` as `key`'s | | |
+| `octave` | int | readonly, 0..8: the note's octave (A4 is the A above middle C) | | |
+| `cents` | ct | readonly, −50..50: the pitch against the note, positive sharp | | |
+| `frequency` | Hz | readonly, 0..4000: the pitch heard; 0 until one is | | |
+
+- **One detector.** Each reading takes the last `window` of the input
+  (DC removed, low-passed by an eighth-order Butterworth at 2.4 kHz) and
+  finds the lag where it best repeats: McLeod's normalised square
+  difference, over lags for 25 Hz to 2.2 kHz (A0 to C7) at about 6 kHz
+  (the sample rate divided by a whole number). The period is the first
+  key maximum (the highest point of each rise above zero after the curve
+  first dips below it) within 0.9 of the highest; its parabolic top
+  refines it. The stretch is then copied at the full rate, low-passed by
+  an eighth-order Butterworth at 1.25 times the pitch found (from rest,
+  with up to four periods before it to settle), and the period refined
+  there, a lag at a time to the highest and a parabola through the three
+  about it. Reading the fundamental alone matters: a string's overtones
+  run sharp of it and fade first, so a period read from all of them reads
+  sharp and sags as the note dies (on test strings 1 to 3 cents sharp,
+  2 to 5 cents of sag over a note; with the fundamental alone 0.2 and
+  about 1, the attack's own sharpness settling).
+- **When a reading counts.** Readings come every 15 ms, or a quarter of the
+  window when that is longer. One counts when the input's peak (falling
+  20 dB/s) is at or above `threshold`, the curve's peak at the period is
+  at least 0.85, and the sound is still sounding at the window's end: its
+  newest whole periods, an eighth of the window or more, hold at least half
+  the power of all the reading compares. A pluck's scrape, silence, a note
+  dying into noise and a window a note stops in do not count, and the
+  display holds what it showed. (Without the last test, what the display
+  held after a note was cut off depended on where the cut fell: −6 to −14
+  cents for a string at −6.7; with it, within 0.7 of the string, rarely
+  2 to 4 on a bass's B0.) A reading of the note shown
+  (within half a semitone) moves the display toward it with a 50 ms time
+  constant; a reading of another note is shown once the next agrees with
+  it (within 0.3 semitones), so one stray reading (an octave on a string
+  with a weak fundamental) never shows as a note.
+- **Notes.** The pitch is placed against the nearest note as `temperament`
+  tunes it on `key`, with A4 at `reference` in every temperament (the
+  others' offsets are moved so A's is 0). Just: 5-limit ratios from the
+  key (16/15, 9/8, 6/5, 5/4, 4/3, 45/32, 3/2, 8/5, 5/3, 9/5, 15/8).
+  Pythagorean: eleven pure fifths, the wolf on the ninth from the key
+  (G♯–E♭ on C). Meantone: quarter-comma, fifths a quarter of the syntonic
+  comma narrow, the wolf there too. Werckmeister III: the fifths from the
+  key to the sixth degree's (C–G, G–D, D–A on C) and the seventh's
+  (B–F♯) a quarter of the Pythagorean comma narrow. Vallotti: the six
+  from the fourth (F–C to E–B on C) a sixth of it narrow. Notes are named
+  with flats but F♯.
+- **Measured** on synthetic plucked strings at 44.1, 48 and 96 kHz
+  (overtones stretched and fading first, the attack 4 cents sharp, pick
+  noise): with the default window a new note shows 30 to 60 ms after it is
+  plucked (guitar E2 to E4), 80 ms where the fundamental is 15 dB under the
+  second harmonic, 95 to 125 ms for a bass's B0 and E1; a pluck of the note
+  shown keeps it at once; settled, within 0.3 cents of the fundamental; no
+  wrong note shown on any. A string swept 35 cents in 3 s is followed
+  0.5 cents behind. A 200 ms window on a bass takes 230 ms to show a new
+  note and smears a re-pluck for a few hundred milliseconds: the window
+  trades answering soon for listening long.
+- **Cost:** 0.85 % of a core at 48 kHz in the release build (1.3 % with a
+  100 ms window); the work of each reading is spread over the frames before
+  the next.
+
+Editor (780 × 572): in the header, the input's level with `threshold` on it
+(dragged, wheeled) and Mute. The reading: the note large, with its octave
+and a flat or sharp, in the blades' green while in tune; the cents to the
+left, coloured by how far off (green within `tolerance`, amber within
+three times it or 10 cents, rust past that), and the hertz to the right;
+under the note "in tune", "flat", "sharp" or "holding the last note". Then
+the cells. Above, a tuft of 21 fine cells a cent apart from −10 to +10,
+tallest in the middle, those within `tolerance` tinted; the one nearest the
+pitch lights, with an arrow past the end beyond 10 cents. Below, the
+coarse row across ±50 cents: a wide middle cell for the tolerance and
+eight a side sharing the rest, the one the pitch is in lit, and under it a
+mark at the pitch exactly. Everything dims while the display holds.
+Under it two panels. Tuning: the temperament and the key as two rows of
+pills of one width, each named above (the keys dimmed under equal), and A4
+(in tenths of a hertz). Listening: the window, the threshold and the
+tolerance. The mark is a tuft of sedge with a seed spike.
+
+Factory patches: Concert A440, A442, Baroque A415, Bass (a 100 ms
+window), Stage, Muted, Werckmeister III, Vallotti, Meantone.
+
+## 15. Acceptance
 
 A plugin is done when its tests, the CLAP validator, the RT sanitizer run,
 a REAPER load and automation check, and its skill page exist.

@@ -230,8 +230,8 @@ instructions are in `docs/guides/installing.md`.
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
   the LLM evaluation harness (`tools/eval-harness`).
 - **Stock plugins** (ADR-0011, ADR-0047): Marram, Yarrow, Sundew, Treeline,
-  Gorse, Hickory, Sorrel, Teasel, Bracken, Ghyll, Lichen, Withy, Pollia
-  and Umber, each passing clap-validator, a reset determinism check, an unload
+  Gorse, Hickory, Sorrel, Teasel, Bracken, Ghyll, Lichen, Withy, Pollia,
+  Umber and Sedge, each passing clap-validator, a reset determinism check, an unload
   test and the headless REAPER check;
   JSON patches and the semantic-parameters extension.
   Yarrow, the EQ, is the first written as a DSP script
@@ -427,6 +427,21 @@ instructions are in `docs/guides/installing.md`.
   draw stars; dragged for drive and bias), the response quiet and hot,
   and the transport's displacement. Thirteen factory patches, Mastering
   among them for the subtle rounding of a mix's peaks.
+  Sedge, the chromatic tuner (`plugins/sedge`), has no predecessor and is
+  kept simple: one detector (McLeod's normalised square difference over
+  the last `window`, 10 to 200 ms, found at about 6 kHz and refined at the
+  full rate on the fundamental alone, so a string's sharp overtones
+  neither bias it nor make it sag), a reading every 15 ms that counts only
+  above the threshold, when clearly pitched and while the note still sounds
+  at the window's end, the display holding otherwise, a 50 ms smoothing on one note and a new note shown once two
+  readings agree. Equal temperament or just, Pythagorean, quarter-comma
+  meantone, Werckmeister III or Vallotti on a key, A4 at 415 to 466 Hz.
+  It reads out the note, octave, cents and frequency. Its editor is cells,
+  as a tuner's lights: a coarse row across ±50 cents with a wide middle
+  cell for the tolerance, a tuft of fine cells a cent apart above it, and
+  a mark under the row at the exact pitch. Measured only on synthetic
+  plucked strings so far; the user's recordings of real ones are still to
+  check it against.
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The

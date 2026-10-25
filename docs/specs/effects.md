@@ -25,6 +25,7 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 | `withy` (`plugins/withy`) | Withy | `com.suppleaudio.withy` | `aSho` (the player's for the id) | `Wthy` | audio-effect, chorus |
 | `pollia` (`plugins/pollia`) | Pollia | `com.suppleaudio.pollia` | `EGJQ` (the player's for the id) | `Poll` | audio-effect, phaser |
 | `umber` (`plugins/umber`) | Umber | `com.suppleaudio.umber` | `auff` (the player's for the id) | `Umbr` | audio-effect, distortion, tape |
+| `sedge` (`plugins/sedge`) | Sedge | `com.suppleaudio.sedge` | `RkzT` (the player's for the id) | `Sedg` | audio-effect, analyzer |
 
 Marram is an instrument; its spec, implementation notes included, is
 `docs/specs/marram.md`.
@@ -772,6 +773,47 @@ plugin with no predecessor. Notes for maintainers:
   60 Hz and 0 with `head_bump` 0, the VU at 0 for a sine at reference
   level, the third harmonic about 0.1% there and 3% at +12.5 dB, and a
   10 kHz sine 12 dB over reference down about 3 dB (the highs' ceiling).
+
+## 16. Tuner — Sedge [`sedge`] (`stock-effects.md` §14)
+
+A DSP script (ADR-0047), `plugins/sedge/script/sedge.cpp`. A new stock
+plugin with no predecessor. Notes for maintainers:
+
+- **Kept simple on purpose.** An earlier tuner (Lodestone, never shipped)
+  wandered on plucked strings and had a polyphonic mode that did not work
+  well; the user asked for one that behaves as REAPER's ReaTune does: one
+  detector, a window to trade answering soon for listening long, and the
+  display holding while nothing is pitched. No onset detection, median
+  filters or adaptive smoothing. Three things were added only once tests
+  showed the need: the fundamental's low-pass before the fine stage (the
+  overtones made every note read sharp and sag), the second agreeing
+  reading before a new note shows (without it a string with a weak
+  fundamental flashed octave errors), and the test that the sound still
+  sounds at the window's end (without it the note held after a stop was
+  off by up to 7 cents). That test measures whole periods: an eighth of a
+  40 ms window is shorter than a period of B0, and a slice that short is
+  quiet or loud by its phase (B0 took 1.4 s to show). Add machinery only
+  for a failure seen on real or test strings.
+- **It writes the block only to mute.** `PRODUCT_TRANSPARENT` makes
+  host-smoke demand output equal to input with Mute off; the mute ramp
+  touches `io` only while it is below 1.
+- **The work is spread.** A reading runs as steps (copy, one coarse lag,
+  pick, copy, filter, the fine lags), each frame doing up to a share sized
+  so a reading finishes in about half a hop, and none more than about
+  50 000 loop turns: the player's budget is 65 536 a frame, and a block may
+  be one frame. The copy runs in chunks of 8192 for 192 kHz.
+- **Readings are frame-counted.** Hops and steps count frames, not blocks,
+  so the readouts are the same at any block size; `report()` runs at the
+  end of each block from what is shown.
+- **The editor reads `Shared` values**, not the readouts, which reach
+  hosts at their meter cadence; the shared ones arrive about 120 times a
+  second.
+- **Tests.** The suite every stock plugin has, and
+  `plugin.sedge.response`: a 445 Hz sine passes at 0.0 dB and reads A4
+  +19.55 cents at 445.00 Hz; an equal-tempered E4 under Werckmeister III on
+  C reads −1.98 cents (the temperament's E is 1.955 above equal with A at
+  0). Plucked-string measurements (§14 of the spec) were made with
+  synthetic strings in a scratch harness, not kept as tests.
 
 ## 6. Engine and benchmark use
 
