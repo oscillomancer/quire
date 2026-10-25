@@ -10176,6 +10176,65 @@ Result:
 
 ```
 
+## `track.duplicate@1`
+
+Duplicate channels or busses with their FX, items, sends and automation.
+
+Each copy goes right after its original, under the same parent, with the same settings and name; its main and input chains (each plugin's settings as it sounds now, as fx.copy), items and takes (unpooled MIDI copied, audio media shared), sends and record input, and the envelopes on the track, its plugins, sends and takes. Not copied: a folder's children, sends into the track, and item groups. Masters cannot be duplicated. One undo step; the copies' ids in the order given.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `tracks` | array |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "track_duplicate_result",
+  "properties": {
+    "tracks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["tracks"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `track.unknown`: no such track Hint: use a live id from track.list
+- `track.strip_type`: a master cannot be duplicated Hint: duplicate channels and busses
+
+### Examples
+
+**Duplicate a track with its plugins, item and automation** (`song_with_env`)
+
+```json
+{
+  "tracks": ["tr_1"]
+}
+
+```
+
+Result:
+
+```json
+{
+  "tracks": ["tr_2"]
+}
+
+```
+
 ## `track.list@1`
 
 List tracks in tree order with their level, mute/solo, fx and items.
@@ -10526,6 +10585,61 @@ Result:
 
 ```json
 {}
+
+```
+
+## `track.template.delete@1`
+
+Delete a saved track template by name.
+
+
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `name` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "track_template_delete_result",
+  "properties": {
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `template.unknown`: no template has that name Hint: use a name from track.template.list
+
+### Examples
+
+**Delete the bass strip** (`song_with_saved_template`)
+
+```json
+{
+  "name": "Bass"
+}
+
+```
+
+Result:
+
+```json
+{
+  "path": "<any>"
+}
 
 ```
 

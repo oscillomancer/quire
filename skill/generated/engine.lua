@@ -1074,6 +1074,12 @@ q = nil
 ---@class Quire.track_add_result
 ---@field track string
 
+---@class Quire.track_duplicate_args
+---@field tracks string[]
+
+---@class Quire.track_duplicate_result
+---@field tracks string[]
+
 ---@class Quire.track_list_result
 ---@field tracks table[]
 
@@ -1106,6 +1112,12 @@ q = nil
 ---@field parent_send? boolean The implicit send to the parent buss/master (off: only explicit sends leave the strip)
 ---@field timebase? "project"|"time"|"beats"|"beats_position" What this channel's items follow when the tempo changes (those that inherit it): project, beats, time or beats_position; they keep their place now
 ---@field channels? integer 1-2: the strip's main pair; up to 128 adds auxiliary channels 3-128 for routes and plug-in pins (a detector on 3/4, a multi-out instrument's outputs), outside the fader, pan and parent send
+
+---@class Quire.track_template_delete_args
+---@field name string
+
+---@class Quire.track_template_delete_result
+---@field path string
 
 ---@class Quire.track_template_list_result
 ---@field templates table[]
@@ -1453,12 +1465,14 @@ q = nil
 
 ---@class Quire.track
 ---@field add fun(args?: Quire.track_add_args): Quire.track_add_result Add a channel, buss or master strip and return its id.
+---@field duplicate fun(args: Quire.track_duplicate_args): Quire.track_duplicate_result Duplicate channels or busses with their FX, items, sends and automation.
 ---@field list fun(): Quire.track_list_result List tracks in tree order with their level, mute/solo, fx and items.
 ---@field move fun(args: Quire.track_move_args): table Move a track under another track or reorder it among its siblings.
 ---@field remove fun(args: Quire.track_remove_args): table Remove a track with its items, fx, routes and envelopes (not a folder).
 ---@field set fun(args: Quire.track_set_args): table Set track fields: name, type, volume, pan, mute, solo, polarity, mono, arming.
 
 ---@class Quire.track.template
+---@field delete fun(args: Quire.track_template_delete_args): Quire.track_template_delete_result Delete a saved track template by name.
 ---@field list fun(): Quire.track_template_list_result List saved track templates by name, path and effect count.
 ---@field load fun(args?: Quire.track_template_load_args): Quire.track_template_load_result Add a strip from a track template (settings and FX) in one undo step.
 ---@field save fun(args: Quire.track_template_save_args): Quire.track_template_save_result Save a strip (settings and FX chains) as a named track template.
