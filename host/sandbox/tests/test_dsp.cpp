@@ -397,6 +397,51 @@ TEST_CASE("dsp.test reports meters as they stood when the signal ended") {
     CHECK(meters->find("level")->asDouble() == doctest::Approx(-12.0).epsilon(0.01));
 }
 
+TEST_CASE("dsp.test plays a file through an effect, at the render's rate, as the only signal") {
+    Harness h;
+    h.write("peak", script("Peak", "com.example.peak",
+                           "    Param level = decibels(\"Level\", -60, 0, -60).meter();\n"
+                           "    Param right = decibels(\"Right\", -60, 0, -60).meter();\n"
+                           "    void process(Block& io) {\n"
+                           "        double l = 0.0, r = 0.0;\n"
+                           "        for (int i = 0; i < io.frames; ++i) {\n"
+                           "            l = max(l, abs(io[0][i]));\n"
+                           "            r = max(r, abs(io[1][i]));\n"
+                           "        }\n"
+                           "        level.set(max(-60.0, gainToDb(l)));\n"
+                           "        right.set(max(-60.0, gainToDb(r)));\n"
+                           "    }"));
+    // A mono 44.1 kHz file of half a second at -6 dBFS: it plays on both
+    // channels at 48 kHz.
+    audio::AudioData tone;
+    tone.sampleRate = 44100.0;
+    tone.channels.assign(1, std::vector<float>(22050, 0.0f));
+    for (size_t i = 0; i < 22050; ++i)
+        tone.channels[0][i] = static_cast<float>(
+            0.5 * std::sin(2.0 * std::numbers::pi * 220.0 * static_cast<double>(i) / 44100.0));
+    const fs::path file = h.root.path / "tone.wav";
+    REQUIRE(audio::writeWav(file, tone));
+    auto args = json::Value::object();
+    args["script"] = "peak";
+    args["audio_file"] = file.string();
+    args["sample_rate"] = 48000;
+    auto result = h.measured(json::writeCompact(args));
+    REQUIRE(result["signals"].size() == 1);
+    json::Value signal = result["signals"].at(0);
+    CHECK(signal["signal"].asString() == "file");
+    CHECK(signal["meters"]["level"].asDouble() == doctest::Approx(-6.02).epsilon(0.01));
+    CHECK(signal["meters"]["right"].asDouble() == doctest::Approx(-6.02).epsilon(0.01));
+    CHECK(json::writeCompact(result["log"]).find("resampled to 48000 Hz") != std::string::npos);
+    // The file signal needs its file.
+    auto missing = h.test(R"({"script":"peak","signals":["file"]})");
+    REQUIRE(!missing);
+    CHECK(missing.error().code == "dsp.file");
+    // A relative path would name a file wherever the host happens to run.
+    auto relative = h.test(R"({"script":"peak","audio_file":"tone.wav"})");
+    REQUIRE(!relative);
+    CHECK(relative.error().code == "dsp.file");
+}
+
 TEST_CASE("every patch in the synth guide plays on Marram") {
     if (!fs::exists(kStock / "Marram.clap")) {
         MESSAGE("skipped: no Marram in " << kStock.string());

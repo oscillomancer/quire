@@ -168,6 +168,11 @@ notes. Each signal still gets a fresh instance.
   session's. Anything sized or tuned from `sampleRate()` (filters, delays,
   latency) should measure the same at every rate; `latency` is in samples
   at the rate used.
+- `audio_file`: play a WAV, FLAC or MP3 (its absolute path) through an
+  effect (the `file` signal, the only one unless `signals` lists others):
+  a recorded instrument, a drum loop, anything a generator cannot make. It
+  is resampled to the render's rate and plays its own length (60 s at
+  most; a file over 10 minutes is refused); `dsp_preview` takes it too.
 
 ```json
 {"script": "compressor", "signals": ["sine"], "level_db": -30,

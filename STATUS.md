@@ -426,9 +426,10 @@ instructions are in `docs/guides/installing.md`.
   script when its file changes. `dsp.write`, `dsp.check`, `dsp.get` and
   `dsp.list` write and compile scripts (the app's library is
   `<data>/<slug>/scripts`, shared with the sandbox), `dsp.test` measures
-  one with standard signals at any sample rate (and, when asked, parameter
-  automation, a timed sidechain key or a note sequence) and reports its
-  meters as of each signal's end; a script tells the host a tail that
+  one with standard signals or an audio file at any sample rate (and, when
+  asked, parameter automation, a timed sidechain key or a note sequence)
+  and reports its meters as of each signal's end; `dsp.preview` plays a
+  file too; a script tells the host a tail that
   follows its settings and the tempo (`setTail`), and a script that compiles is loaded
   and set like a stock plugin (`skill/guides/dsp-workflow.md`).
   `fx.describe` and the sandbox's `plugin.describe` report a live

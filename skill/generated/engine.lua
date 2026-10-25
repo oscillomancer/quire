@@ -154,7 +154,8 @@ q = nil
 ---@field plugin? string
 ---@field script? string
 ---@field patch? any
----@field signal? "sine"|"sweep"|"impulse"|"noise"|"silence"|"notes"|"note"
+---@field signal? "sine"|"sweep"|"impulse"|"noise"|"silence"|"notes"|"note"|"file"
+---@field audio_file? string the absolute path of a WAV, FLAC or MP3 (10 minutes at most) the file signal plays through an effect
 ---@field level_db? number|string Quantity strings are range-checked by the server. (default: -12.0)
 ---@field frequency_hz? number|string Quantity strings are range-checked by the server. (default: 1000.0)
 ---@field seconds? number (default: 1.0)
@@ -174,7 +175,8 @@ q = nil
 ---@field plugin? string
 ---@field script? string
 ---@field patch? any
----@field signals? "sine"|"sweep"|"impulse"|"noise"|"silence"|"notes"|"note"[] default: effects five; instruments three, or notes and silence with custom notes
+---@field signals? "sine"|"sweep"|"impulse"|"noise"|"silence"|"notes"|"note"|"file"[] default: effects five, or file with audio_file; instruments three, or notes and silence with custom notes
+---@field audio_file? string the absolute path of a WAV, FLAC or MP3 (10 minutes at most) the file signal plays through an effect
 ---@field automation? table[] discrete physical-value changes on every signal
 ---@field sidechain? table timed generated key input
 ---@field notes? table[] instrument sequence replacing the notes stimulus

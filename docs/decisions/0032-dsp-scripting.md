@@ -680,3 +680,10 @@ writes through the patch codec, so it makes only what a patch can. The
 automatic editor takes it through a generic hook of the template's,
 `AutoPanel` (framework 1.30.0), a panel a layer draws after the parameters;
 a plugin with no routes has no panel, so having routes is the switch.
+
+### Files through dsp.test (2026-10-24)
+
+`dsp.test` and `dsp.preview` play an audio file through an effect (the
+`file` signal, with `audio_file`): material a generator cannot make, a
+recorded instrument or a drum loop, now goes through the harness and its
+measurements instead of a render and a separate read of the meters.
