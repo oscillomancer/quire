@@ -401,8 +401,7 @@ void HelpActions::select(help::Harness harness) {
                            ? std::string("No home folder was found, so Connect cannot link the "
                                          "skill. Use Help > Download skill link instead.")
                            : "Connect also links the skill as " +
-                                 pathText(folders.front() / std::string(product::kSlug)) +
-                                 ", unless a skill of that name is installed already.");
+                                 pathText(folders.front() / std::string(product::kSlug)) + ".");
     }
     std::string note = "Connect runs this command in the background.";
     if (harness == help::Harness::Hermes) note += " Hermes enables all discovered tools.";
