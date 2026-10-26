@@ -9,8 +9,8 @@ This page covers the process around them.
 Open an issue with:
 
 - what you did, what you expected and what happened;
-- the Quire commit you built, your distribution, and your audio setup
-  (PipeWire or JACK, buffer size, sample rate);
+- the Quire version or commit, your operating system, and your audio setup
+  (JACK or PipeWire, Core Audio, WASAPI or ASIO; buffer size, sample rate);
 - the smallest project file that shows it, when one does (Quire projects
   are JSON, with their media in the `media/` folder beside them);
 - for crashes, the terminal output and a backtrace if you can get one.
@@ -46,8 +46,8 @@ responsible for every line, and you must have run what you claim works.
 
 Contributions use the license of the component they change: GPL-3.0-or-later
 for the DAW, MIT for plugins and their shared libraries (ADR-0033).
-Contributions must be original and must never include code copied from GPL
-or AGPL projects, or from REAPER (see `AGENTS.md`). The vendored ASIO SDK
+Contributions must be original: no code copied from GPL or AGPL projects,
+and no code or assets from proprietary software (see `AGENTS.md`). The vendored ASIO SDK
 is the sanctioned exception for Windows DAW integration.
 
 ## Continuous integration
@@ -238,8 +238,7 @@ It requires Apple Silicon, hdiutil, ditto, install_name_tool and codesign;
 signing is ad hoc without an account. On Windows use the `windows` preset
 with `-DCMAKE_BUILD_TYPE=Release -DSUPPLE_BUILD_TESTS=OFF -DSUPPLE_PACKAGE_ONLY=ON`, build `package-runtime`, then
 `python tools/package/windows.py --build-dir build/windows`. Install NSIS
-in the build environment first (Zlib compressor only); never change the
-working audio workstation's system packages for packaging.
+in the build environment first (Zlib compressor only).
 
 `gh workflow run package.yml --ref <branch> -f platforms=all` manually builds
 and smokes packages on native runners (Linux in an Ubuntu 22.04 container).

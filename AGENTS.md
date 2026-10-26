@@ -16,18 +16,23 @@ Read before designing anything:
    cites (`docs/decisions/`). Specs are the contracts; ADRs say why.
 3. `STATUS.md`: what works, known limits and open items in that area.
 
+User-facing guides are in `docs/guides/`: `installing.md` (the packages),
+`building.md` (building from source on each platform) and `manual.md`
+(using the app, plugins and agents).
+
 When code, a spec and an ADR disagree, do not silently pick one. Find out
 which is right (tests and git history usually tell), fix the others in the
 same change, and say what you found.
 
-## Hard rules
+## Rules
 
 1. **Licensing.** First-party DAW code is GPL-3.0-or-later; `plugins/`
    and the plugin-linked libraries remain MIT (ADR-0033). All first-party
-   code is original. Never copy code from
-   Ardour or any other GPL/AGPL project, and do not read GPL source while
-   implementing; notes about GPL software are prose in `docs/research/`,
-   and someone else implements from them. Dependencies must be MIT,
+   code and assets are original: never copy code from GPL/AGPL projects
+   such as Ardour, or code, themes, icons or other assets from proprietary
+   software. Do not read GPL source while implementing; notes about GPL
+   software are prose in `docs/research/`, and someone else implements from
+   them. Dependencies must be MIT,
    BSD-2/3, ISC, Zlib, Apache-2.0, BSL-1.0, CC0/public domain or Unlicense
    (fonts: OFL-1.1), vendored under `third_party/` with their license file,
    declared in `third_party/manifest.json` and listed in `THIRD_PARTY.md`.
@@ -35,34 +40,28 @@ same change, and say what you found.
    only, never plugins; its source may be read for that integration.
    `tools/license-check` fails the build otherwise. LGPL and MPL code needs
    the maintainer's explicit approval first.
-2. **REAPER is proprietary.** Quire follows its workflow, studied only by
-   using it, reading its project and configuration files and its public
-   scripting documentation. Never decompile it or copy its themes, icons or
-   other assets.
-3. **Real-time safety is absolute.** Audio-path code never allocates,
+2. **Real-time safety is absolute.** Audio-path code never allocates,
    frees, locks, blocks, logs synchronously, throws, or touches files or
    the network. State reaches it through lock-free queues and atomic
    pointer swaps. Audio-path entry points are marked `SUPPLE_RT` and their
    tests run under RealtimeSanitizer (the `rtsan` preset).
-4. **The product name lives in one place.** `cmake/Product.cmake` defines
+3. **The product name lives in one place.** `cmake/Product.cmake` defines
    it, and C++ reads it from the generated `supple/product.h`
    (`supple::product::kName`, `kSlug`, …). Never hard-code "Quire" or
    "quire" in code, binary names, paths, socket names or UI strings. C++
    lives in namespace `supple::` (the vendor). Docs may say "Quire".
-5. **No system configuration changes.** No sudo, no package installs
-   outside user space, no PipeWire, WirePlumber, kernel, udev or rtirq
-   edits, nothing under the user's own DAW or audio configuration. Report
-   environment problems instead.
-6. **Be gentle with the machine.** Development happens on a working audio
-   workstation: build with at most `-j6` (the presets already cap jobs and
-   tests at 6), leave no processes running, and open the audio device only
-   in tests that need it (`--audio dummy` for the app otherwise).
-7. **Stock plugins keep the template's shared stack.** The stock plugins
+4. **Quire leaves the user's system alone.** The app and its installers
+   change no system-wide configuration: no audio server settings, drivers,
+   services or file associations. What affects other software lasts only
+   while Quire runs (ADR-0050's PipeWire requests end with the engine), and
+   anything written outside Quire's own folders, such as the agent
+   registration and skill link from Help, happens only when the user asks.
+5. **Stock plugins keep the template's shared stack.** The stock plugins
    are instances of Supple Audio's plugin template. Their shared
    infrastructure (GUI stack, wrapper patches, `host_contract.h`,
    `Telemetry.h`, probes) stays byte-identical to the template apart from
    naming; see `plugins/AGENTS.md`.
-8. **Every change works on Linux, macOS and Windows.** Quire ships on all
+6. **Every change works on Linux, macOS and Windows.** Quire ships on all
    three, and you are probably working on only one of them. A fix or
    feature covers every platform: when the code you touch has
    platform-specific paths (`_WIN32`, `__APPLE__`, `__linux__`,
@@ -70,8 +69,8 @@ same change, and say what you found.
    in the same change. Look for the same class of bug on the others:
    assumptions about environment variables, paths, sockets, file sharing,
    threads, audio/MIDI APIs or windowing rarely carry over unchanged.
-   Verify with native CI (see Build and test) before calling the work done;
-   a local Linux run says nothing about macOS or Windows. A gap you cannot
+   A local Linux run says nothing about macOS or Windows; native CI (see
+   Build and test) proves them before the work merges. A gap you cannot
    close goes in `STATUS.md` and in your hand-back report.
 
 ## Making a change
@@ -108,7 +107,9 @@ same change, and say what you found.
   `docs/specs/gui.md`; update it with the change.
 - **Docs.** Update the spec, and `STATUS.md` when a feature lands, a known
   limit appears or one is lifted. Keep `STATUS.md` a picture of the present,
-  not a log; history is in git.
+  not a log; history is in git. When something a user sees changes (a
+  menu, a dialog, a default, a file location, a build requirement or a
+  package), update the guide in `docs/guides/` that describes it.
 
 ## Build and test
 
@@ -119,22 +120,26 @@ tools/ci/run-all.sh              # full local CI: license, format and every pres
 tools/ci/clean-clone.sh          # fresh offline clone of HEAD: build and test (dev)
 ```
 
-Presets: `dev`, `release`, `gcc`, `asan`, `ubsan`, `tsan`, `rtsan`. Build
-the whole `gcc` preset when checking GCC, not only test targets: warnings
-such as `-Wshadow` show up in the app sources. `run-all.sh` prints a
-summary table and exits non-zero on any failure; read both. A full run takes
-about half an hour. `clean-clone.sh` tests committed files only, from scratch
-and with downloads disabled: run it before a release and after adding files
-or dependencies. Keep `TMPDIR` short; socket tests fail when their path
-exceeds the 108-byte Unix socket limit.
+`docs/guides/building.md` lists each platform's requirements. Presets:
+`dev`, `release`, `gcc`, `asan`, `ubsan`, `tsan`, `rtsan` (Linux), `macos`
+and `windows`. Build the whole `gcc` preset when checking GCC, not only test
+targets: warnings such as `-Wshadow` show up in the app sources.
+`run-all.sh` prints a summary table and exits non-zero on any failure; read
+both. A full run takes about half an hour. `clean-clone.sh` tests committed
+files only, from scratch and with downloads disabled: run it before a
+release and after adding files or dependencies. Keep `TMPDIR` short; socket
+tests fail when their path exceeds the 108-byte Unix socket limit.
 
 Native CI (`.github/workflows/build.yml`) builds and tests Linux, macOS arm64
-and Windows (clang-cl) on GitHub, on demand only. Push the branch, then
+and Windows (clang-cl) on GitHub, on demand only. It is slow, so run it for
+finished work rather than for each change: once a batch of related changes
+is complete and about to merge, on the platforms it can affect. When more
+changes are likely to follow, leave it for the end and say in the hand-back
+that it has not run. Follow the maintainer's lead when they ask for a run
+or ask you to wait. To run it, push the branch, then
 `gh workflow run build.yml --ref <branch> -f platforms=<linux|macos|windows|all>`
 and `gh run watch <id> --exit-status` (`gh run view <id> --log-failed` for
-failures). Run it for every change that touches shared or platform-specific
-code, limited to the platforms the change can affect; `CONTRIBUTING.md` has
-the details.
+failures); `CONTRIBUTING.md` has the details.
 
 Code conventions: C++20, CMake and Ninja, warning-clean with
 `-Wall -Wextra -Wpedantic` on Clang and GCC; `.clang-format` at the root
@@ -149,11 +154,14 @@ CTest labels: `rt` (audio-path tests, run everywhere), `tsan-skip`
 run in `dev`, `gcc` and `asan` only). A test that depends on wall-clock time
 must not decide pass or fail by it.
 
-Opt-in tests, skipped unless their variable is exactly `1`:
-`SUPPLE_AUDIO_DEVICE_TEST` opens the real JACK device (two seconds of
-silence); `SUPPLE_GUI_DISPLAY_TEST` opens plugin editor windows on the
-native display; `SUPPLE_MIDI_DEVICE_TEST` opens native MIDI inputs on macOS/Windows
-(with a fake audio driver, so no audio device is opened).
+Ordinary tests never open real devices or desktop windows: they use the
+dummy audio backend and offscreen rendering, and so should manual runs of
+the app that do not need sound (`--audio dummy`). Opt-in tests, skipped
+unless their variable is exactly `1`: `SUPPLE_AUDIO_DEVICE_TEST` opens the
+real audio device (two seconds of silence); `SUPPLE_GUI_DISPLAY_TEST` opens
+plugin editor windows on the native display; `SUPPLE_MIDI_DEVICE_TEST` opens
+native MIDI inputs on macOS/Windows (with a fake audio driver, so no audio
+device is opened).
 
 Other checks, run on demand: `tools/validator/build.sh` and
 `tools/validator/run.sh <plugin.clap>` (clap-validator 0.4.1, built in the
@@ -171,10 +179,12 @@ A review looks for, in this order:
 4. A test that fails without the change (for fixes) or covers the new
    behaviour (for features), at the right layer.
 5. Structured, actionable errors at the command and file boundaries.
-6. The spec, ADRs, generated files and `STATUS.md` updated with the code.
+6. The spec, ADRs, guides, generated files and `STATUS.md` updated with the
+   code.
 7. No new license exposure, no hard-coded product name.
-8. The change holds on Linux, macOS and Windows, and native CI ran where it
-   touches shared or platform-specific code.
+8. The change holds on Linux, macOS and Windows, and native CI has run, or
+   is due before the merge, where it touches shared or platform-specific
+   code.
 
 Report findings with file and line, what goes wrong, and how to see it.
 Separate findings from suggestions.
@@ -188,10 +198,10 @@ changes in their own commit. `main` moves only on a green `run-all.sh`.
 
 ## Definition of done
 
-The code, its tests and its docs are updated; the relevant presets pass
-locally and native CI passes on every platform the change can affect;
-`STATUS.md` reflects the change; there are no new license issues; and
-someone other than the author has reviewed it. Never report something as
+The code, its tests and its docs are updated; the relevant local presets
+pass; native CI has passed on every platform the change can affect before it
+merges; `STATUS.md` reflects the change; there are no new license issues;
+and someone other than the author has reviewed it. Never report something as
 working that you did not run. When you hand work back, list the files
 changed, the exact commands you ran with their results, and the open
-questions.
+questions, including any native CI still to run.
