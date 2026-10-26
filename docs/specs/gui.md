@@ -144,7 +144,11 @@ only what the DAW needs, designed for virtualized, data-heavy views.
   its subtree (`Root::releaseWithin`), sending `Cancel` to the captured
   control. Continuous edits end as one undo step; uncommitted drag previews
   and pending button clicks are discarded. Focus and capture outside the
-  subtree are preserved. A closing popup restores focus only to a node
+  subtree are preserved. A press outside the topmost popup closes every
+  popup above the one it lands in (all of them when it lands in none) and
+  reaches nothing else, so a dialog's menu button, or any other spot in the
+  dialog, closes the open menu rather than opening a second one. A closing
+  popup restores focus only to a node
   still in the tree, visible through all ancestors and enabled through all
   ancestors; otherwise it restores no focus.
   Normalized round knobs share slider gesture/default, wheel and keyboard

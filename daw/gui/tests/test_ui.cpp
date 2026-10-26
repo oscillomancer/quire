@@ -507,6 +507,37 @@ TEST_CASE("popups: menus run items, outside clicks and Escape close them, focus 
     root.openPopup(makeMenu("menu3", items, [&] { root.closePopup(); }), button.bounds());
     root.key(SDLK_ESCAPE);
     CHECK_FALSE(root.popupOpen());
+    // In a dialog, a press outside its menu closes only the menu, and the
+    // button under it does not open another.
+    auto dialog = std::make_unique<Node>("dialog");
+    dialog->layout.dir = Layout::Dir::Row;  // the menu below "a" leaves "b" clear
+    dialog->layout.width = SizeRule::fixed(300);
+    dialog->layout.height = SizeRule::fixed(200);
+    int menus = 0;
+    for (const char* id : {"a", "b"})
+        dialog->emplace<Button>(id, id, [&, id] {
+            ++menus;
+            root.openPopup(makeMenu(std::string(id) + ".menu", items, [&] { root.closePopup(); }),
+                           root.find(id)->bounds());
+        });
+    root.openPopup(std::move(dialog), {}, Placement::Center);
+    root.frame(false);
+    root.click("a");
+    root.frame(false);
+    CHECK(menus == 1);
+    CHECK(root.find("a.menu"));
+    root.click("a");  // the same button closes its menu
+    CHECK(menus == 1);
+    CHECK_FALSE(root.find("a.menu"));
+    CHECK(root.find("dialog"));
+    root.click("a");
+    root.frame(false);
+    root.click("b");  // another button closes it too, without opening its own
+    CHECK(menus == 2);
+    CHECK_FALSE(root.find("a.menu"));
+    CHECK_FALSE(root.find("b.menu"));
+    CHECK(root.find("dialog"));
+    root.closePopups();
 }
 
 TEST_CASE("a scroll bar pages on track clicks and reports drags") {

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 // Popups on the overlay tree (menus, the actions list, pickers): placed next
-// to an anchor and kept inside the window; a click outside or Escape closes
-// the topmost one; focus moves into the popup and returns on close.
+// to an anchor and kept inside the window; Escape closes the topmost one, and
+// a click outside it closes every popup above the one clicked (all of them
+// outside every popup); focus moves into the popup and returns on close.
 #pragma once
 
 #include <functional>

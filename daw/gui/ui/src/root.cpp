@@ -353,12 +353,15 @@ void Root::forget(Node* node) {
 void Root::pointer(PointerEvent e) {
     Dispatch dispatch(*this);
     if (e.type != PointerEvent::Type::Cancel) lastPointer_ = e.pos;
-    // A press outside every popup closes them and goes no further.
+    // A press outside the topmost popup closes every popup above the one it
+    // lands in (all of them when it lands in none) and goes no further, so a
+    // dialog's menu button closes its own menu instead of opening another.
     if (e.type == PointerEvent::Type::Down && !popups_.empty() && !captured_) {
-        const bool inside = std::any_of(popups_.begin(), popups_.end(),
-                                        [&](const Node* p) { return p->bounds().contains(e.pos); });
-        if (!inside) {
-            closePopups();
+        const auto hit = std::find_if(popups_.rbegin(), popups_.rend(),
+                                      [&](const Node* p) { return p->bounds().contains(e.pos); });
+        if (hit != popups_.rbegin()) {
+            const auto keep = static_cast<std::size_t>(popups_.rend() - hit);
+            while (popups_.size() > keep) closePopup();
             return;
         }
     }
