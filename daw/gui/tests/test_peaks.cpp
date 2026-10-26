@@ -137,7 +137,7 @@ TEST_CASE("the peak service builds once off-thread, caches on disk and loads the
         std::vector<std::string> ready;
         service.onReady = [&](const std::string& h) { ready.push_back(h); };
         CHECK(service.get(hash, wav) == nullptr);  // queued, never blocks
-        CHECK(service.get(hash, wav) == nullptr);  // queued once
+        service.get(hash, wav);  // asked again, while queued or once built: built once
         REQUIRE(drainUntil([&] { return !ready.empty(); }));
         CHECK(ready == std::vector<std::string>{hash});
         auto p = service.get(hash, wav);
