@@ -91,6 +91,7 @@ class AudioDeviceDialog {
     cmd::Dispatcher& dispatcher_;
     engine::EngineApp& app_;
     AudioDeviceSettings settings_;
+    AudioDeviceSettings running_;  // what the engine last started with (a fallback differs)
     Save save_;
     std::vector<engine::AudioDevice> devices_;
     std::string enumerateError_, lastError_;

@@ -254,6 +254,7 @@ Status AudioDeviceDialog::start(bool fallback) {
             effectiveBackend(s) == "portaudio" ? devices(true) : std::vector<engine::AudioDevice>{};
         auto started = startEngine(engineStartArgs(s, listed));
         if (!started) return std::move(started).error();
+        running_ = s;
         return {};
     };
     Status st = attempt(settings_);
@@ -296,8 +297,11 @@ Status AudioDeviceDialog::apply(AudioDeviceSettings next) {
 }
 
 void AudioDeviceDialog::choose(AudioDeviceSettings next) {
-    if (auto st = apply(std::move(next)); !st && onError)
-        onError("audio device: " + message(st.error()));
+    // The status lines show a failure too: stderr is not seen from Finder.
+    if (auto st = apply(std::move(next)); !st) {
+        lastError_ = message(st.error());
+        if (onError) onError("audio device: " + lastError_);
+    }
     if (isOpen()) build(false);  // rows depend on the audio system
 }
 
@@ -549,7 +553,7 @@ void AudioDeviceDialog::refresh() {
     if (app_.backend()) {
         const engine::EngineStatus status = app_.engineStatus();
         const std::string name = status.backend == "jack"        ? "JACK"
-                                 : status.backend == "portaudio" ? hostApiName()
+                                 : status.backend == "portaudio" ? resolvedHost(running_, devices_)
                                                                  : status.backend;
         char line[160];
         std::snprintf(line, sizeof line,
