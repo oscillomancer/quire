@@ -33,11 +33,8 @@
     { "name": "gcc", "inherits": "base", "displayName": "GCC Debug",
       "cacheVariables": { "CMAKE_C_COMPILER": "gcc", "CMAKE_CXX_COMPILER": "g++",
                           "CMAKE_BUILD_TYPE": "Debug", "SUPPLE_WERROR": "ON" } },
-    { "name": "asan", "inherits": "base", "displayName": "Clang ASan",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "SUPPLE_SANITIZE": "address",
-                          "SUPPLE_BUILD_GUI": "OFF" } },
-    { "name": "ubsan", "inherits": "base", "displayName": "Clang UBSan",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "SUPPLE_SANITIZE": "undefined",
+    { "name": "asan", "inherits": "base", "displayName": "Clang ASan + UBSan",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "SUPPLE_SANITIZE": "address,undefined",
                           "SUPPLE_BUILD_GUI": "OFF" } },
     { "name": "tsan", "inherits": "base", "displayName": "Clang TSan",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "SUPPLE_SANITIZE": "thread",
@@ -89,7 +86,6 @@
     { "name": "linux-package", "configurePreset": "linux-package", "jobs": 6 },
     { "name": "gcc", "configurePreset": "gcc", "jobs": 6 },
     { "name": "asan", "configurePreset": "asan", "jobs": 6 },
-    { "name": "ubsan", "configurePreset": "ubsan", "jobs": 6 },
     { "name": "tsan", "configurePreset": "tsan", "jobs": 6 },
     { "name": "rtsan", "configurePreset": "rtsan", "jobs": 6 },
     {
@@ -108,12 +104,12 @@
       "execution": { "jobs": 6, "timeout": 600, "noTestsAction": "error" } },
     { "name": "dev", "inherits": "base", "configurePreset": "dev" },
     { "name": "release", "inherits": "base", "configurePreset": "release" },
-    { "name": "gcc", "inherits": "base", "configurePreset": "gcc" },
+    { "name": "gcc", "inherits": "base", "configurePreset": "gcc",
+      "filter": { "exclude": { "name": "^plugin\\.export\\.source$" } } },
     { "name": "asan", "inherits": "base", "configurePreset": "asan",
-      "environment": { "ASAN_OPTIONS": "detect_leaks=0:abort_on_error=1" } },
-    { "name": "ubsan", "inherits": "base", "configurePreset": "ubsan",
-      "environment": { "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1" },
-      "filter": { "exclude": { "label": "slow" } } },
+      "environment": { "ASAN_OPTIONS": "detect_leaks=0:abort_on_error=1",
+                       "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1" },
+      "filter": { "exclude": { "name": "^plugin\\.export\\.source$" } } },
     { "name": "tsan", "inherits": "base", "configurePreset": "tsan",
       "environment": { "TSAN_OPTIONS": "halt_on_error=1" },
       "filter": { "exclude": { "label": "tsan-skip|slow" } } },
@@ -140,8 +136,6 @@
       { "type": "configure", "name": "gcc" }, { "type": "build", "name": "gcc" }, { "type": "test", "name": "gcc" } ] },
     { "name": "asan", "steps": [
       { "type": "configure", "name": "asan" }, { "type": "build", "name": "asan" }, { "type": "test", "name": "asan" } ] },
-    { "name": "ubsan", "steps": [
-      { "type": "configure", "name": "ubsan" }, { "type": "build", "name": "ubsan" }, { "type": "test", "name": "ubsan" } ] },
     { "name": "tsan", "steps": [
       { "type": "configure", "name": "tsan" }, { "type": "build", "name": "tsan" }, { "type": "test", "name": "tsan" } ] },
     { "name": "rtsan", "steps": [

@@ -122,7 +122,8 @@ Audio uses WASAPI by default, with ASIO available in **Edit > Audio device…**.
 | `dev` | Linux | Clang Debug, the everyday development build |
 | `release` | Linux | Clang Release, warnings as errors |
 | `gcc` | Linux | GCC Debug, for GCC-only warnings |
-| `asan`, `ubsan`, `tsan` | Linux | Address, undefined-behaviour and thread sanitizers |
+| `asan` | Linux | AddressSanitizer with UndefinedBehaviorSanitizer |
+| `tsan` | Linux | ThreadSanitizer |
 | `rtsan` | Linux | RealtimeSanitizer over the audio-path tests |
 | `macos` | macOS | Apple Clang, arm64, Debug by default |
 | `windows` | Windows | clang-cl with vcpkg, Debug by default |

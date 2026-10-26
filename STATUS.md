@@ -6,7 +6,7 @@ history is in git.
 
 Quire 0.2.0 runs on Linux (X11 or XWayland, JACK through PipeWire or a JACK
 server) and is used for real sessions. Full local CI (`tools/ci/run-all.sh`:
-license, format, dev, release, gcc, asan, ubsan, tsan, rtsan) passes on
+license, format, dev, release, gcc, asan, tsan, rtsan) passes on
 `main`.
 
 The port branch has on-demand Linux/macOS/Windows CI and portable presets

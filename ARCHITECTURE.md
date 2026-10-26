@@ -334,7 +334,7 @@ harness; the app has no built-in agent (ADR-0043).
 ## 11. Quality gates
 
 RealtimeSanitizer on audio-path tests (a self-check proves the gate fires);
-ASan, UBSan, TSan presets; golden renders with tolerance-aware null tests;
+ASan with UBSan, and TSan presets; golden renders with tolerance-aware null tests;
 fuzzing of every parser and of command-bus inputs; plugin validators;
 benchmarks tracked in `docs/benchmarks/`; the license gate on every build.
 Definition of done: code, tests, docs, `STATUS.md`, no license issues, and

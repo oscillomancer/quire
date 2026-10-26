@@ -14,7 +14,7 @@ if(SUPPLE_BUILD_TESTS)
   # the preset's 600 s default was reached at 612 s under UBSan on a loaded
   # machine, which reads as a failure. Give them room whenever ASan or UBSan is
   # on (the test's own TIMEOUT wins over the preset's default).
-  if(SUPPLE_SANITIZE STREQUAL "address" OR SUPPLE_SANITIZE STREQUAL "undefined")
+  if(SUPPLE_SANITIZE MATCHES "address|undefined")
     set_tests_properties(core-analysis.tests PROPERTIES TIMEOUT 1800)
   endif()
 endif()

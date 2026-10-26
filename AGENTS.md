@@ -121,8 +121,8 @@ tools/ci/clean-clone.sh          # fresh offline clone of HEAD: build and test (
 ```
 
 `docs/guides/building.md` lists each platform's requirements. Presets:
-`dev`, `release`, `gcc`, `asan`, `ubsan`, `tsan`, `rtsan` (Linux), `macos`
-and `windows`. Build the whole `gcc` preset when checking GCC, not only test
+`dev`, `release`, `gcc`, `asan` (with UBSan), `tsan`, `rtsan` (Linux),
+`macos` and `windows`. Build the whole `gcc` preset when checking GCC, not only test
 targets: warnings such as `-Wshadow` show up in the app sources.
 `run-all.sh` prints a summary table and exits non-zero on any failure; read
 both. A full run takes about half an hour. `clean-clone.sh` tests committed
@@ -146,9 +146,10 @@ small and documented. Text formats are canonical: identical content
 serializes to identical bytes.
 
 CTest labels: `rt` (audio-path tests, run everywhere), `tsan-skip`
-(timing-heavy tests excluded from `tsan`), `slow` (end-to-end tests that
-run in `dev`, `gcc` and `asan` only). A test that depends on wall-clock time
-must not decide pass or fail by it.
+(timing-heavy tests excluded from `tsan`), `slow` (end-to-end tests left
+out of `tsan` and `rtsan`; `plugin.export.source` also skips `gcc` and
+`asan`, where its unsanitized nested builds would repeat `dev`). A test
+that depends on wall-clock time must not decide pass or fail by it.
 
 Ordinary tests never open real devices or desktop windows: they use the
 dummy audio backend and offscreen rendering, and so should manual runs of

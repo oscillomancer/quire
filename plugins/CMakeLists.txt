@@ -27,7 +27,7 @@ if(SUPPLE_BUILD_PLUGINS)
       list(APPEND plugin_output_args "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_${plugin_config}=${plugin_build}/plugins")
     endif()
     # As for the stock plugins: instrumented for tsan and rtsan, whose hosts
-    # are, and not for asan or ubsan.
+    # are, and not for asan.
     if(SUPPLE_SANITIZE STREQUAL "realtime" OR SUPPLE_SANITIZE STREQUAL "thread")
       set(plugin_sanitize ${SUPPLE_SANITIZE})
     else()
