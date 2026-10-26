@@ -35,10 +35,11 @@ restarts the running engine at once.
 
 - **Linux:** the rate and buffer size are requests to PipeWire, which shares
   the graph with other apps. It changes the rate only while no other client
-  is playing, and only to a rate it allows. Choose **Force while the engine
-  runs** to hold both on the whole graph for as long as Quire's engine runs.
-  Other apps then run at Quire's rate and buffer size too.
-- **macOS:** a chosen rate switches the device's own rate. The buffer size is
+  is playing, and only to a rate it allows. Choose **Force** to hold both on
+  the whole graph while Quire's engine runs. Other apps then run at Quire's
+  rate and buffer size too, and the device can keep them after Quire quits.
+- **macOS:** a chosen rate switches the device's own rate, which it keeps
+  after Quire quits. The buffer size is
   the device's I/O size. Allow microphone access when macOS asks, so that
   recording can use your input.
 - **Windows:** WASAPI shares the device with other apps and converts other

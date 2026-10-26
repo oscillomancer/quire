@@ -52,9 +52,9 @@ same change, and say what you found.
    lives in namespace `supple::` (the vendor). Docs may say "Quire".
 4. **Quire leaves the user's system alone.** The app and its installers
    change no system-wide configuration: no audio server settings, drivers,
-   services or file associations. What affects other software lasts only
-   while Quire runs (ADR-0050's PipeWire requests end with the engine), and
-   anything written outside Quire's own folders, such as the agent
+   services or file associations. A rate or buffer size the user chooses
+   is applied to the device, which may keep it after Quire quits (ADR-0050).
+   Anything written outside Quire's own folders, such as the agent
    registration and skill link from Help, happens only when the user asks.
 5. **Stock plugins keep the template's shared stack.** The stock plugins
    are instances of Supple Audio's plugin template. Their shared

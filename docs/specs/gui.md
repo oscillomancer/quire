@@ -1088,8 +1088,7 @@ Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
   input also None (playback only); ASIO uses the output device both ways),
   **Sample rate** (the device's or graph's own rate, or 44.1–192 kHz),
   **Buffer size** (32–2048 frames, with milliseconds) and, for JACK,
-  **PipeWire graph** (Request, shared with other apps, or Force while the
-  engine runs). A short note says what the choices mean on that system, and
+  **PipeWire graph** (Request, shared with other apps, or Force). A short note says what the choices mean on that system, and
   status lines show the running backend, rate, block, device period and
   output latency, a needed restart, or why the engine is not running.
   Restart audio and Stop audio buttons follow. Each choice is saved, then a

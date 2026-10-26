@@ -87,6 +87,10 @@ settings pass through an optional `PortAudioApi::streamInfo` hook, null in
 the fake driver, so the selection and lifecycle tests are unchanged and a new
 test checks that the hook's settings reach both stream directions.
 
+*(Note 2026-10-26: the device, or PipeWire's graph, can keep a chosen rate
+or buffer size after the engine stops, until something else changes it.
+Quire does not restore the earlier setting, as other DAWs do not.)*
+
 ## Validation and limits
 
 Fake libjack tests check each variable reaching the client, the user's

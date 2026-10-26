@@ -496,13 +496,11 @@ void AudioDeviceDialog::build(bool reload) {
     });
     if (backend == "jack")
         button("audio.graph", "PipeWire graph",
-               settings_.forceGraph ? "Force while the engine runs" : "Request (shared with apps)",
-               [this] {
+               settings_.forceGraph ? "Force" : "Request (shared with apps)", [this] {
                    std::vector<ui::MenuItem> items;
                    for (const bool force : {false, true}) {
                        ui::MenuItem item;
-                       item.label =
-                           force ? "Force while the engine runs" : "Request (shared with apps)";
+                       item.label = force ? "Force" : "Request (shared with apps)";
                        item.checked = settings_.forceGraph == force;
                        item.run = [this, force] {
                            AudioDeviceSettings next = settings_;
@@ -518,7 +516,7 @@ void AudioDeviceDialog::build(bool reload) {
     std::vector<std::string> notes;
     if (backend == "jack") {
         notes = {"Rate and buffer size are requests: PipeWire changes rate only while idle",
-                 "and allowed. Force holds both on the whole graph while the engine runs."};
+                 "and allowed. Force holds both on the whole graph."};
     } else if (backend == "dummy") {
         notes = {"No device: a timer paces the engine and nothing is heard or recorded."};
     } else if (isAsio(host)) {
