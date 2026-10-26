@@ -95,18 +95,8 @@ unrelated files in the external plugin folder. A conflicting new payload path
 refuses the upgrade before removing the existing version. Restore any replaced
 payload directory links/junctions before uninstalling; the remover refuses them.
 
-## Connecting an agent
+## Next
 
-Register the installed `quire-mcp` executable using an absolute path. For
-example, on Linux:
-
-```sh
-claude mcp add -s user quire -- "$HOME/.local/bin/quire-mcp"
-```
-
-On macOS the helper is `/Applications/Quire.app/Contents/MacOS/quire-mcp`;
-on Windows it is `%LOCALAPPDATA%\Programs\Quire\quire-mcp.exe`. Start the
-app first. The bundled skill is `share/quire/skill` under the Linux tree,
-`Contents/Resources/skill` in the macOS app, or `skill` on Windows. Link it
-into your agent's skills folder, or give it `SKILL.md` as instructions.
-[Running Quire](running.md) covers MCP clients and headless use.
+The [manual](manual.md) covers audio devices, projects, plugins and
+connecting an AI agent. To build Quire from source instead, see [Building
+Quire](building.md).

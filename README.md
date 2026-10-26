@@ -65,16 +65,15 @@ Downloads for [Quire 0.2.0](https://github.com/oscillomancer/quire/releases/tag/
 | Windows (x86_64) | [quire-0.2.0-windows-x86_64.exe](https://github.com/oscillomancer/quire/releases/download/v0.2.0/quire-0.2.0-windows-x86_64.exe) (per user, no admin) | [zip](https://github.com/oscillomancer/quire/releases/download/v0.2.0/quire-0.2.0-windows-x86_64.zip) |
 
 The packages are unsigned. [Installing Quire](docs/guides/installing.md)
-covers user-space installation, unsigned first-launch steps, optional stock
-plugins for other hosts and the bundled MCP helper/skill.
+covers user-space installation, unsigned first-launch steps and optional stock
+plugins for other hosts. The [manual](docs/guides/manual.md) covers audio
+devices, projects, plugins and connecting an agent over MCP.
 
 ## Building
 
-Requirements: Linux, CMake 3.25+, Ninja, Clang (GCC also builds), Python 3,
-and the development packages for SDL3, OpenGL and zlib. All other
-dependencies are vendored under `third_party/`, so builds work offline.
-Audio runs through JACK (PipeWire's JACK works); the GUI is an X11 window and
-runs under XWayland.
+Quire builds with CMake, Ninja and Clang on Linux, macOS and Windows; every
+dependency but SDL3, OpenGL and zlib is vendored under `third_party/`. On
+Linux:
 
 ```sh
 cmake --preset release
@@ -84,8 +83,8 @@ build/release/daw/gui/quire              # a new project
 build/release/daw/gui/quire song.json    # open a project
 ```
 
-[docs/guides/running.md](docs/guides/running.md) covers plugin paths,
-unsaved projects and connecting an agent over MCP.
+[Building Quire](docs/guides/building.md) lists the requirements and steps for
+each platform.
 
 ## Repository
 

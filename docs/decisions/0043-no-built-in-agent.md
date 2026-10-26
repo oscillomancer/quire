@@ -38,5 +38,5 @@ What the panel had beyond the tools, and where it goes:
 
 About 2,800 lines of code and tests, the libcurl dependency and the
 owner-only secret storage are gone. Users who want an agent install a harness
-and register the MCP server (`docs/guides/running.md`). UI files with
+and register the MCP server (`docs/guides/manual.md`). UI files with
 `panels.agent` still load; the key is ignored.
