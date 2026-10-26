@@ -131,15 +131,11 @@ release and after adding files or dependencies. Keep `TMPDIR` short; socket
 tests fail when their path exceeds the 108-byte Unix socket limit.
 
 Native CI (`.github/workflows/build.yml`) builds and tests Linux, macOS arm64
-and Windows (clang-cl) on GitHub, on demand only. It is slow, so run it for
-finished work rather than for each change: once a batch of related changes
-is complete and about to merge, on the platforms it can affect. When more
-changes are likely to follow, leave it for the end and say in the hand-back
-that it has not run. Follow the maintainer's lead when they ask for a run
-or ask you to wait. To run it, push the branch, then
-`gh workflow run build.yml --ref <branch> -f platforms=<linux|macos|windows|all>`
+and Windows (clang-cl) on GitHub, on demand only. To run it, push the branch,
+then `gh workflow run build.yml --ref <branch> -f platforms=<linux|macos|windows|all>`
 and `gh run watch <id> --exit-status` (`gh run view <id> --log-failed` for
-failures); `CONTRIBUTING.md` has the details.
+failures); `CONTRIBUTING.md` has the details. It must pass before a branch
+merges to `main`.
 
 Code conventions: C++20, CMake and Ninja, warning-clean with
 `-Wall -Wextra -Wpedantic` on Clang and GCC; `.clang-format` at the root
