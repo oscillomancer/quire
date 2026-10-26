@@ -3,6 +3,7 @@
 #include "help_support.h"
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -540,5 +541,81 @@ Result<fs::path> exportSkill(const fs::path& source, const fs::path& parent, boo
         }
     }
     return target;
+}
+std::vector<fs::path> skillFolders(Harness harness, Platform platform,
+                                   const std::function<std::string(const char*)>& env) {
+    // Decided by spelling rather than fs::path, so either platform's rules can be checked anywhere.
+    const auto absolute = [platform](const std::string& text) {
+        if (platform == Platform::Posix) return text.starts_with('/');
+        const auto separator = [](char c) { return c == '\\' || c == '/'; };
+        return (text.size() >= 3 && std::isalpha(static_cast<unsigned char>(text[0])) &&
+                text[1] == ':' && separator(text[2])) ||
+               (text.size() >= 2 && separator(text[0]) && separator(text[1]));
+    };
+    const auto variable = [&](const char* name) {
+        auto value = env(name);
+        return absolute(value) ? fromUtf8(value) : fs::path();
+    };
+    const auto home = variable(platform == Platform::Windows ? "USERPROFILE" : "HOME");
+    const auto below = [&](const char* name, const fs::path& fallback) -> fs::path {
+        if (auto dir = variable(name); !dir.empty()) return dir / "skills";
+        return fallback.empty() ? fs::path() : fallback / "skills";
+    };
+    std::vector<fs::path> folders;
+    const auto add = [&](fs::path folder) {
+        if (!folder.empty()) folders.push_back(std::move(folder));
+    };
+    switch (harness) {
+        case Harness::Claude:
+            add(below("CLAUDE_CONFIG_DIR", home.empty() ? home : home / ".claude"));
+            break;
+        case Harness::Codex:
+            if (!home.empty()) add(home / ".agents" / "skills");
+            add(below("CODEX_HOME", home.empty() ? home : home / ".codex"));
+            break;
+        case Harness::Hermes: {
+            auto root = home.empty() ? home : home / ".hermes";
+            if (platform == Platform::Windows) {
+                const auto local = variable("LOCALAPPDATA");
+                root = !local.empty() ? local / "hermes"
+                       : home.empty() ? home
+                                      : home / "AppData" / "Local" / "hermes";
+            }
+            add(below("HERMES_HOME", root));
+            break;
+        }
+    }
+    return folders;
+}
+std::vector<fs::path> skillFolders(Harness harness) {
+    return skillFolders(harness, nativePlatform(), [](const char* name) { return env(name); });
+}
+Result<SkillLinkResult> linkSkill(const fs::path& source, const std::vector<fs::path>& folders) {
+    if (folders.empty())
+        return Error("help.home", "no home folder to install the skill in", "/skill",
+                     "set HOME (USERPROFILE on Windows), or use Help > Download skill link");
+    const std::string slug(product::kSlug);
+    for (const auto& folder : folders) {
+        const auto target = folder / slug;
+        switch (inspectTarget(target)) {
+            case Target::Missing:
+                continue;
+            case Target::Link: {
+                std::error_code ec;
+                const bool current = fs::equivalent(target, source, ec);
+                return SkillLinkResult{current ? SkillLink::Current : SkillLink::Other, target};
+            }
+            case Target::Skill:
+                return SkillLinkResult{SkillLink::Other, target};
+            case Target::Refuse:
+                return SkillLinkResult{SkillLink::Occupied, target};
+        }
+    }
+    std::error_code ec;
+    fs::create_directories(folders.front(), ec);
+    if (ec) return failure(ec.message(), folders.front());
+    auto linked = exportSkill(source, folders.front(), true, false);
+    if (!linked) return linked.error();
+    return SkillLinkResult{SkillLink::Created, *linked};
 }
 }  // namespace supple::gui::help

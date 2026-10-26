@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Supple Audio
 #include <doctest/doctest.h>
 #include <fstream>
+#include <map>
 #include "chrome.h"
 #include "help_support.h"
 #include "supple/product.h"
@@ -286,4 +287,80 @@ TEST_CASE("Help cleans staged links after a failed publication without following
         }
         CHECK(entries == (previous ? 1 : 0));
     }
+}
+TEST_CASE("Help finds each harness's user skill folders on both platforms") {
+    std::map<std::string, std::string> vars;
+    const auto env = [&vars](const char* name) {
+        const auto found = vars.find(name);
+        return found == vars.end() ? std::string() : found->second;
+    };
+    const auto folders = [&](help::Harness harness, help::Platform platform) {
+        return help::skillFolders(harness, platform, env);
+    };
+    const auto p = [](const char* text) { return fs::path(text); };
+    using H = help::Harness;
+    const auto posix = help::Platform::Posix, windows = help::Platform::Windows;
+    vars = {{"HOME", "/home/me"}, {"USERPROFILE", "C:\\Users\\me"}};
+    CHECK(folders(H::Claude, posix) == std::vector{p("/home/me") / ".claude" / "skills"});
+    CHECK(folders(H::Codex, posix) ==
+          std::vector{p("/home/me") / ".agents" / "skills", p("/home/me") / ".codex" / "skills"});
+    CHECK(folders(H::Hermes, posix) == std::vector{p("/home/me") / ".hermes" / "skills"});
+    CHECK(folders(H::Claude, windows) == std::vector{p("C:\\Users\\me") / ".claude" / "skills"});
+    CHECK(folders(H::Hermes, windows) ==
+          std::vector{p("C:\\Users\\me") / "AppData" / "Local" / "hermes" / "skills"});
+    vars["LOCALAPPDATA"] = "D:/Local";
+    CHECK(folders(H::Hermes, windows) == std::vector{p("D:/Local") / "hermes" / "skills"});
+    // Each harness's own override wins; relative values are ignored, as unpredictable.
+    vars["CLAUDE_CONFIG_DIR"] = "/config/claude";
+    vars["CODEX_HOME"] = "relative/codex";
+    vars["HERMES_HOME"] = "\\\\server\\hermes";
+    CHECK(folders(H::Claude, posix) == std::vector{p("/config/claude") / "skills"});
+    CHECK(folders(H::Claude, windows) == std::vector{p("C:\\Users\\me") / ".claude" / "skills"});
+    CHECK(folders(H::Codex, posix)[1] == p("/home/me") / ".codex" / "skills");
+    CHECK(folders(H::Hermes, windows) == std::vector{p("\\\\server\\hermes") / "skills"});
+    CHECK(folders(H::Hermes, posix) == std::vector{p("/home/me") / ".hermes" / "skills"});
+    vars = {{"HOME", "relative"}};
+    CHECK(folders(H::Claude, posix).empty());
+    CHECK(folders(H::Codex, posix).empty());
+    vars["CODEX_HOME"] = "/codex";
+    CHECK(folders(H::Codex, posix) == std::vector{p("/codex") / "skills"});
+}
+TEST_CASE("Help links a harness skill once and never replaces what is there") {
+    Folder f;
+    f.write("source/SKILL.md");
+    const auto source = f.path / "source";
+    const auto primary = f.path / "home/.agents/skills", legacy = f.path / "home/.codex/skills";
+    const std::string slug(product::kSlug);
+    CHECK_FALSE(help::linkSkill(source, {}));
+    // The folder is created; a second run recognises the link instead of adding another.
+    auto result = help::linkSkill(source, {primary, legacy});
+    REQUIRE(result);
+    CHECK(result->outcome == help::SkillLink::Created);
+    CHECK(help::inspectTarget(primary / slug) == help::Target::Link);
+    CHECK(fs::equivalent(primary / slug, source));
+    result = help::linkSkill(source, {primary, legacy});
+    REQUIRE(result);
+    CHECK(result->outcome == help::SkillLink::Current);
+    REQUIRE(help::removeExportTree(primary / slug));
+    // A skill in a later folder the harness also scans counts as installed.
+    f.write(fs::path("home/.codex/skills") / slug / "SKILL.md", "older copy");
+    result = help::linkSkill(source, {primary, legacy});
+    REQUIRE(result);
+    CHECK(result->outcome == help::SkillLink::Other);
+    CHECK(result->target == legacy / slug);
+    CHECK(help::inspectTarget(primary / slug) == help::Target::Missing);
+    f.write("elsewhere/SKILL.md");
+    REQUIRE(help::exportSkill(f.path / "elsewhere", primary, true, false));
+    result = help::linkSkill(source, {primary, legacy});
+    REQUIRE(result);
+    CHECK(result->outcome == help::SkillLink::Other);
+    CHECK(fs::equivalent(primary / slug, f.path / "elsewhere"));
+    REQUIRE(help::removeExportTree(primary / slug));
+    REQUIRE(help::removeExportTree(legacy / slug));
+    f.write(fs::path("home/.agents/skills") / slug / "notes.txt", "keep");
+    result = help::linkSkill(source, {primary, legacy});
+    REQUIRE(result);
+    CHECK(result->outcome == help::SkillLink::Occupied);
+    CHECK(fs::is_regular_file(primary / slug / "notes.txt"));
+    CHECK(help::inspectTarget(legacy / slug) == help::Target::Missing);
 }

@@ -59,14 +59,22 @@ includes the exit status and output. If the name is already registered, review
 its path in your agent before replacing it. Restart or reconnect your agent
 after registering. Windows copied commands are for PowerShell.
 
+Connect also links the bundled skill into that agent's user skills folder, as
+`quire/`: `~/.claude/skills` for Claude Code (or `$CLAUDE_CONFIG_DIR/skills`),
+`~/.agents/skills` for Codex, and `~/.hermes/skills` for Hermes (or
+`$HERMES_HOME/skills`; `%LOCALAPPDATA%\hermes\skills` on Windows). The dialog
+shows the path before you click. If a skill of that name is already there, or in
+Codex's older `~/.codex/skills`, Connect leaves it as it is and says so; use
+**Download skill link…** to replace it.
+
 **Help > MCP server…** shows this copy's absolute paths, a headless command and
 general stdio/JSON instructions for any MCP client. **Help > Download skill…**
 copies the bundled skill into a folder you choose, under `quire/`; **Download
 skill link…** creates a symlink (Linux/macOS) or directory junction (Windows),
 which follows updates to that installation. Existing skills or links require
-confirmation; unrelated folders and files are protected. Add the resulting
-folder to your agent's skills separately. Keep the installation in place when
-using a link.
+confirmation; unrelated folders and files are protected. Use these for other
+agents, or to replace a skill Connect left in place. Keep the installation in
+place when using a link.
 
 For a development build, the manual commands below remain useful.
 

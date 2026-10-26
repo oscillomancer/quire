@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cctype>
+#include <optional>
 #include <sstream>
 #include "supple/host/clap_host.h"
 #include "supple/json/write.h"
@@ -14,12 +15,23 @@
 
 namespace supple::gui {
 namespace {
+// Popups measure their content at the window's width; text inside the panel
+// measures at the panel's inner width so it wraps as it paints.
+constexpr float kPanelWidth = 720, kPanelPadding = 18,
+                kPanelInner = kPanelWidth - 2 * kPanelPadding;
+class Paragraph : public ui::TextBlock {
+  public:
+    using TextBlock::TextBlock;
+    ui::Size measure(const ui::Canvas& c, ui::Size available) override {
+        return TextBlock::measure(c, {std::min(available.w, kPanelInner), available.h});
+    }
+};
 std::string pathText(const std::filesystem::path& p) {
     const auto s = p.u8string();
     return {s.begin(), s.end()};
 }
 void paragraph(ui::Node& parent, const std::string& id, const std::string& text) {
-    parent.emplace<ui::TextBlock>(id, text, ui::Font::Ui, "small", "ink-quiet");
+    parent.emplace<Paragraph>(id, text, ui::Font::Ui, "small", "ink-quiet");
 }
 ui::Node& row(ui::Node& parent, const std::string& id) {
     auto& r = parent.emplace<ui::Node>(id);
@@ -64,7 +76,7 @@ class OutputScroll : public ui::ScrollView {
     float maxHeight = 210;
     ui::Size measure(const ui::Canvas& c, ui::Size available) override {
         const auto size = content().measure(
-            c, {std::min(available.w, 684.0f) - ui::ScrollBar::kThickness, available.h});
+            c, {std::min(available.w, kPanelInner) - ui::ScrollBar::kThickness, available.h});
         return {available.w, std::min(size.h, maxHeight)};
     }
 };
@@ -78,6 +90,31 @@ void SDLCALL folderResult(void* userdata, const char* const* files, int) {
     if (*files)
         request->done(
             {std::filesystem::path(std::u8string_view(reinterpret_cast<const char8_t*>(*files)))});
+}
+std::string skillOutcome(const std::optional<std::filesystem::path>& source,
+                         help::Harness harness) {
+    if (!source)
+        return "Skill not linked: the bundled skill was not found. Restore this installation's "
+               "skill folder, then connect again.";
+    const auto result = help::linkSkill(*source, help::skillFolders(harness));
+    if (!result) return "Skill not linked: " + result.error().toString();
+    const auto target = pathText(result->target);
+    switch (result->outcome) {
+        case help::SkillLink::Created:
+            return "Skill linked at " + target + " → " + pathText(*source) +
+                   ". Start a new agent session to load it.";
+        case help::SkillLink::Current:
+            return "Skill already installed at " + target + ".";
+        case help::SkillLink::Other:
+            return "A skill named " + std::string(product::kSlug) + " is already installed at " +
+                   target +
+                   "; left as it is. To point it at this copy, use Help > Download skill link.";
+        case help::SkillLink::Occupied:
+            return target +
+                   " exists but is not a skill; left as it is. Move it away and connect again to "
+                   "link the skill.";
+    }
+    return {};
 }
 }  // namespace
 HelpActions::HelpActions(ui::Root& root, AppActions& actions, SDL_Window* window,
@@ -104,9 +141,9 @@ std::unique_ptr<ui::Node> HelpActions::panel(const std::string& title) {
     root_.closePopups();
     auto form = std::make_unique<ui::Node>("help.panel");
     form->layout.dir = ui::Layout::Dir::Column;
-    form->layout.width = ui::SizeRule::fixed(720);
+    form->layout.width = ui::SizeRule::fixed(kPanelWidth);
     form->layout.height = ui::SizeRule::content();
-    form->layout.padding = ui::Insets::all(18);
+    form->layout.padding = ui::Insets::all(kPanelPadding);
     form->layout.gap = 12;
     form->emplace<ui::Label>("help.title", title, ui::Font::UiBold, "body");
     return form;
@@ -299,7 +336,8 @@ void HelpActions::mcp() {
     row(content, "help.mcp.json.buttons")
         .emplace<ui::Button>("help.mcp.json.copy", "Copy JSON", [this, text] { copy(text); });
     paragraph(content, "help.mcp.skill",
-              "Add the skill separately with Help > Download skill or Download skill link.");
+              "Help > Connect an agent also links the skill for Claude Code, Codex and Hermes. "
+              "For other clients, use Help > Download skill or Download skill link.");
     paragraph(*form, "help.status", "");
     form->find("help.status")->visible = false;
     row(*form, "help.buttons").emplace<ui::Button>("help.close", "Close", [this] {
@@ -314,7 +352,8 @@ void HelpActions::agents() {
     const std::string name(product::kName);
     paragraph(*form, "help.agent.intro",
               "Adds " + name +
-                  "'s MCP server to your agent's settings so the agent can operate this copy of " +
+                  "'s MCP server to your agent's settings and links the bundled skill into its "
+                  "skills folder, so the agent can operate this copy of " +
                   name + ". Start " + name + " before you use the agent.");
     auto& choices = row(*form, "help.agent.choices");
     choices
@@ -330,8 +369,7 @@ void HelpActions::agents() {
                              [this](bool) { select(help::Harness::Hermes); })
         .layout.width = ui::SizeRule::content();
     paragraph(*form, "help.agent.command", "");
-    paragraph(*form, "help.agent.skill",
-              "The skill is added separately via Help > Download skill / Download skill link.");
+    paragraph(*form, "help.agent.skill", "");
     auto& scroll = form->emplace<OutputScroll>("help.agent.output");
     paragraph(scroll.content(), "help.status", "");
     auto& buttons = row(*form, "help.agent.buttons");
@@ -357,6 +395,15 @@ void HelpActions::select(help::Harness harness) {
         label->setText(help::commandText(
             help::harnessCommand(harness),
             help::registrationArgs(harness, pathText(executables_.mcp)), help::nativePlatform()));
+    if (auto* label = dynamic_cast<ui::TextBlock*>(root_.find("help.agent.skill"))) {
+        const auto folders = help::skillFolders(harness);
+        label->setText(folders.empty()
+                           ? std::string("No home folder was found, so Connect cannot link the "
+                                         "skill. Use Help > Download skill link instead.")
+                           : "Connect also links the skill as " +
+                                 pathText(folders.front() / std::string(product::kSlug)) +
+                                 ", unless a skill of that name is installed already.");
+    }
     std::string note = "Connect runs this command in the background.";
     if (harness == help::Harness::Hermes) note += " Hermes enables all discovered tools.";
     if (help::nativePlatform() == help::Platform::Windows)
@@ -378,7 +425,10 @@ void HelpActions::connect() {
                    ". Restore this installation before connecting.";
         const auto result = help::registerHarness(harness, exe, pathText(mcp),
                                                   [state] { return state->cancelled.load(); });
-        if (!result) return std::string("Connection command failed: ") + result.error().toString();
+        // The skill is linked whatever the registration outcome; each reports separately.
+        const auto skill = skillOutcome(host::skillDir(), harness);
+        if (!result)
+            return "Connection command failed: " + result.error().toString() + "\n" + skill;
         std::string text = result->text;
         std::string lower = text;
         std::transform(lower.begin(), lower.end(), lower.begin(),
@@ -394,7 +444,8 @@ void HelpActions::connect() {
             outcome =
                 "A server with this name is already registered. Check its path in the agent before "
                 "replacing it";
-        return outcome + " (exit " + std::to_string(result->exitCode) + ").\n" + text;
+        return outcome + " (exit " + std::to_string(result->exitCode) + ").\n" + skill + "\n" +
+               text;
     });
 }
 }  // namespace supple::gui

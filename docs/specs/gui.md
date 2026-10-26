@@ -964,10 +964,26 @@ Windows retain Control shortcuts. No custom native menu hierarchy is supplied.
   Connect. The panels explain how to move the app to Applications and restart.
   JSON preserves its copied indentation; command tokens are quoted only when
   the platform shell needs it.
+  Connect also links the bundled skill as `<slug>` in the harness's user skill
+  folder, shown in the dialog before Connect: Claude Code
+  `<$CLAUDE_CONFIG_DIR or ~/.claude>/skills`; Codex `~/.agents/skills`, also
+  checking its deprecated `<$CODEX_HOME or ~/.codex>/skills`; Hermes
+  `<$HERMES_HOME or ~/.hermes>/skills`, `%LOCALAPPDATA%\hermes\skills` on
+  Windows. The variables come from the app's own environment (a Finder or
+  desktop launch may not see ones set only in a shell profile); relative values
+  are ignored. The folder is created when missing. An existing `<slug>` entry
+  in any of those folders is never replaced: a link to this copy's skill
+  reports "Skill already installed"; another skill or link, or a non-skill
+  entry, is reported and left in place (Download skill link replaces it). The
+  link is made like Download skill link's and is attempted whatever the
+  registration outcome, but not when the harness CLI is missing. Help
+  paragraphs measure at the panel's inner width, so wrapped lines keep the
+  buttons inside the panel.
   Panels fit their contents; longer operation output scrolls. The dialog reports
-  exit status and an output excerpt, including existing-registration outcomes;
-  a missing harness leaves the command available to copy. Skills are installed
-  separately through the two Download actions.
+  exit status, the skill outcome and an output excerpt, including
+  existing-registration outcomes; a missing harness leaves the command
+  available to copy. Other clients get the skill through the two Download
+  actions.
 - **Mouse modifiers:** a map per context — item drag
   (move, copy, slip; each also off the grid), item edge (trim, stretch), item
   click (select, toggle, extend), automation item edge (stretch, loop), fade

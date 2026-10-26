@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-10-25. This file describes the present: what works, what is
+Updated 2026-10-26. This file describes the present: what works, what is
 known not to, and what is planned. Keep it current with each change; the
 history is in git.
 
@@ -171,7 +171,8 @@ instructions are in `docs/guides/installing.md`.
   light, preferences, and tap tempo in the tempo form. Help exports the bundled
   skill as a copy or link, shows this copy's MCP commands and JSON, and registers
   its running-app server with Claude Code, Codex or Hermes on a background
-  worker. Downloads open the native folder picker directly and report the result
+  worker, linking the skill into that agent's user skills folder unless one of
+  that name is already there. Downloads open the native folder picker directly and report the result
   in a compact notice. Temporary macOS translocation paths block registration
   and skill links; independent skill copies remain available.
   Saved menu layouts that predate Help retain access to it. The transport has a

@@ -58,4 +58,27 @@ Result<std::filesystem::path> exportSkill(
     const std::filesystem::path& source, const std::filesystem::path& parent, bool link,
     bool replace,
     std::function<Status(const std::filesystem::path&, const std::filesystem::path&)> publish = {});
+
+// The user-level skill folders a harness scans, the first being where Connect
+// links the skill. Claude Code: <$CLAUDE_CONFIG_DIR or ~/.claude>/skills.
+// Codex: ~/.agents/skills, then its deprecated <$CODEX_HOME or ~/.codex>/skills.
+// Hermes: <$HERMES_HOME or ~/.hermes>/skills; %LOCALAPPDATA%\hermes on Windows.
+// Relative variable values are ignored. Empty when no home folder is known.
+std::vector<std::filesystem::path> skillFolders(Harness harness, Platform platform,
+                                                const std::function<std::string(const char*)>& env);
+std::vector<std::filesystem::path> skillFolders(Harness harness);
+enum class SkillLink {
+    Created,   // a new link to the bundled skill
+    Current,   // already a link to the bundled skill
+    Other,     // another skill or link of that name, left as it is
+    Occupied,  // something that is not a skill, left as it is
+};
+struct SkillLinkResult {
+    SkillLink outcome = SkillLink::Created;
+    std::filesystem::path target;
+};
+// Links source as <first folder>/<product slug>, creating the folder, unless
+// any of the folders already holds that name. Never replaces an existing entry.
+Result<SkillLinkResult> linkSkill(const std::filesystem::path& source,
+                                  const std::vector<std::filesystem::path>& folders);
 }  // namespace supple::gui::help

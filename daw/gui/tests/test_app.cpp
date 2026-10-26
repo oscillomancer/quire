@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include "test_support.h"
 
@@ -1995,6 +1996,73 @@ TEST_CASE("Help identifies only the missing MCP helper") {
           16);
     a.snapshot("help-missing-helper.png");
 }
+
+#if !defined(_WIN32)
+TEST_CASE("Help connect links the skill once beside the MCP registration") {
+    App a(1400, 900);
+    REQUIRE(a.ok);
+    // A fake claude first on PATH, and a private Claude Code config folder.
+    const auto bin = a.dir / "bin", config = a.dir / "claude-config";
+    std::filesystem::create_directories(bin);
+    REQUIRE(writeFileAtomic(bin / "claude", "#!/bin/sh\necho \"Added stdio MCP server $5\"\n"));
+    std::filesystem::permissions(bin / "claude", std::filesystem::perms::owner_all);
+    struct Restore {
+        std::string name;
+        std::optional<std::string> value;
+        ~Restore() {
+            if (value)
+                ::setenv(name.c_str(), value->c_str(), 1);
+            else
+                ::unsetenv(name.c_str());
+        }
+    };
+    const auto saved = [](const char* name) {
+        const char* value = std::getenv(name);
+        return Restore{name, value ? std::optional<std::string>(value) : std::nullopt};
+    };
+    const Restore path = saved("PATH"), claude = saved("CLAUDE_CONFIG_DIR");
+    ::setenv("PATH", (bin.string() + ":" + path.value.value_or("/usr/bin:/bin")).c_str(), 1);
+    ::setenv("CLAUDE_CONFIG_DIR", config.string().c_str(), 1);
+    std::mutex mutex;
+    std::condition_variable ready;
+    std::vector<std::function<void()>> posted;
+    auto post = [&](std::function<void()> task) {
+        std::lock_guard lock(mutex);
+        posted.push_back(std::move(task));
+        ready.notify_one();
+    };
+    auto pump = [&] {
+        std::function<void()> task;
+        {
+            std::unique_lock lock(mutex);
+            ready.wait(lock, [&] { return !posted.empty(); });
+            task = std::move(posted.front());
+            posted.erase(posted.begin());
+        }
+        task();
+    };
+    gui::HelpActions help(*a.root, *a.actions, a.window->sdl(), post, gui::help::ownExecutable());
+    const auto target = config / "skills" / std::string(product::kSlug);
+    REQUIRE(a.actions->run("ui.help.agent"));
+    a.root->frame(false);
+    CHECK(a.root->find("help.agent.skill")->valueText().find(target.string()) != std::string::npos);
+    for (const auto* expected : {"Skill linked at ", "Skill already installed at "}) {
+        REQUIRE(a.root->click("help.agent.connect"));
+        pump();
+        a.root->frame(false);
+        const auto status = a.root->find("help.status")->valueText();
+        CHECK(status.find(expected) != std::string::npos);
+        CHECK(status.find("Added stdio MCP server") != std::string::npos);
+        CHECK(gui::help::inspectTarget(target) == gui::help::Target::Link);
+        CHECK(std::filesystem::is_regular_file(target / "SKILL.md"));
+        // Wrapped lines are measured at the panel's width: the buttons stay inside it.
+        CHECK(a.root->find("help.close")->bounds().bottom() <=
+              a.root->find("help.panel")->bounds().bottom());
+    }
+    a.snapshot("help-agent-connected.png");
+    REQUIRE(a.root->click("help.close"));
+}
+#endif
 
 TEST_CASE("floating panels own their events, resize, sleep and persist placement") {
     App f;
