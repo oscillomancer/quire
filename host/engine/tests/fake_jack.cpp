@@ -152,8 +152,8 @@ Client* jack_client_open(const char* name, int, int* status, ...) {
         if (status) *status = 0x11;  // failure | server failed
         return nullptr;
     }
-    auto env = [](const char* name) {
-        const char* value = std::getenv(name);
+    auto env = [](const char* var) {
+        const char* value = std::getenv(var);
         return std::string(value ? value : "");
     };
     g_latencyEnv = env("PIPEWIRE_LATENCY");
