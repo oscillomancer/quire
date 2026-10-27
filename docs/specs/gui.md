@@ -610,7 +610,9 @@ fresh child-owned window; the other editor paths retain their SDL container.
 Cocoa bridge placement is remembered like any editor's, in
 the UI file's `plugin_windows` section: the bridge reports its window's content
 frame (points, top-left origin of the primary display, the space SDL positions
-use) as it moves or resizes and when it closes; `PluginWindows` stores it per
+use) as it moves or resizes and when it closes. A host-requested close stores
+the final reply before removing the editor entry, including when no service
+pass has observed its frame yet. `PluginWindows` stores it per
 effect, arms a UI-file check when it changes, and on reopen sends it back with
 the open request when `restoredEditorFrame` finds it still on a display (else the
 bridge places the window itself; a size is sent only for a resizable editor). The

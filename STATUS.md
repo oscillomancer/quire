@@ -663,6 +663,8 @@ Session and editing:
   squashed steps keep large invocation arguments.
 
 GUI:
+- Cocoa bridged editor placement is saved after the final close reply. Its
+  immediate-close regression requires the macOS display opt-in and is pending.
 - FX multi-selection deselects the active row on Ctrl-click and drops effects
   moved out of the displayed chains. Offline Linux regression coverage passes;
   native macOS/Windows validation remains pending.
