@@ -656,6 +656,11 @@ class Compiler {
                             "Write each bar once in increasing order.");
                     std::vector<Token> row;
                     for (std::size_t i = 1; i <= t.size(); ++i) {
+                        if (bar > 100000) {
+                            add("syntax", "Inline bar exceeds the supported bar range.", t[i - 1],
+                                "Use bar numbers up to 100000.");
+                            break;
+                        }
                         if (i == t.size() || t[i].text == "|") {
                             currentVoice->bars[bar].rows.push_back(row);
                             currentVoice->bars[bar].line = t[0].line;

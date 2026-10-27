@@ -104,6 +104,15 @@ TEST_CASE("notation round trips the final supported bar boundary") {
     CHECK(compiled->sequence == sequence);
 }
 
+TEST_CASE("notation inline bars respect the supported bar limit") {
+    REQUIRE(compile("voice a; 99999: r:* | r:*"));
+    for (const auto text : {"voice a; 100000: r:* | r:*", "voice a; 100000: r:* | 100001: r:*"}) {
+        auto result = compile(text);
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == "notation.syntax");
+    }
+}
+
 TEST_CASE("valid notation corpus matches event listings") {
     const auto root = std::filesystem::path(NOTATION_CORPUS_DIR) / "valid";
     int count = 0;
