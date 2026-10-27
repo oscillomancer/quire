@@ -1,9 +1,9 @@
 # Corrective mixing
 
 Mixing in Quire is measurement-driven: render the mix, analyze it, change one
-thing, render again, `compare`. The stock EQ and dynamics plugins are in
-development; until they ship, this guide covers what the engine does today —
-levels, panning, muting/soloing, rendering, and measuring loudness and
+thing, render again, `compare`. Use the stock EQ and dynamics plugins for
+corrective processing; their guides describe the controls. This guide covers
+levels, panning, muting/soloing, routing, rendering, and measuring loudness and
 masking.
 
 To measure a point in an FX chain (loudness, peaks, tonal balance, stereo,
@@ -26,15 +26,14 @@ guide](analyzer.md). `fx.meters` reads any plugin's readouts the same way
    worst bands.
 4. Fix with the smallest move: level (`track.set {track, volume_db}`), pan
    (`track.set {track, pan}`), a different octave or voicing (edit the MIDI),
-   or — when the EQ ships — a cut in the masked band on the less important
-   part.
+   or a cut with Yarrow in the masked band on the less important part.
 5. Render again and `analyze.compare {reference, test}` with the two render ids.
 
 Group a change and its render in one `batch`: one undo step, atomic.
 
 ## Sends and buses
 
-Use `route.add {"from":"tr_1","to":"tr_2","tap":"post_fader","volume_db":"-6 dB"}` to feed a bus track; place bus processing in that track's FX chain and use `route.list` to inspect sends. `route.set` changes a send's level, pan, tap, endpoints, or mute; `route.remove` deletes it. The destination must not feed the source, including through folder parent sends. Hardware endpoints and channel maps are not available through these commands yet.
+Use `route.add {"from":"tr_1","to":"tr_2","tap":"post_fader","volume_db":"-6 dB"}` to feed a bus track; place bus processing in that track's FX chain and use `route.list` to inspect sends. `route.set` changes a send's level, pan, tap, endpoints, or mute; `route.remove` deletes it. The destination must not feed the source, including through folder parent sends. The `channels` argument maps one-based source channels to destination channels, for example `{"from":[3,4],"to":[1,2]}`. Hardware endpoints are not available through these commands yet.
 
 To sidechain, route into the plugin's key: `route.add {"from":"tr_kick","fx":"fx_3","tap":"post_fader"}` (fx_3 is the compressor on the bass track; `fx.describe` shows `sidechain_channels` when a plugin has a key input, otherwise the route fails with `route.no_sidechain`). The key is delay-compensated, follows the source's mute at a post-fader tap, and keeps sounding when another track is soloed.
 

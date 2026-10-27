@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-10-26. This file describes the present: what works, what is
+Updated 2026-10-27. This file describes the present: what works, what is
 known not to, and what is planned. Keep it current with each change; the
 history is in git.
 
@@ -9,10 +9,10 @@ server) and is used for real sessions. Full local CI (`tools/ci/run-all.sh`:
 license, format, dev, release, gcc, asan, tsan, rtsan) passes on
 `main`.
 
-The port branch has on-demand Linux/macOS/Windows CI and portable presets
-(ADR-0034). Linux dev passes all 144 tests including the 12 CLAP validators.
+The repository has on-demand Linux/macOS/Windows CI and portable presets
+(ADR-0034), including stock-plugin CLAP validation.
 Native headless services, hosting/scanning, bridge, stock wrappers, device
-backend builds and GUI tests pass Windows CI (102 tests) and macOS arm64
+backend builds and GUI tests have passed Windows CI and macOS arm64
 CI (ADR-0036/0037/0038/0039).
 Windows executables run with the UTF-8 process code page, so non-ASCII
 paths work whatever the system locale; the minimum is Windows 10 1903
@@ -69,6 +69,9 @@ checks remain explicit opt-ins. Source-export player/factory/audio conformance
 runs natively, including binary exports: Windows retains the module trailer;
 macOS uses a bundle resource and ad-hoc signing. The lifecycle and thirteen
 source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows.
+Failed MCP initialization closes the evaluation client's pipes and process tree;
+its standalone unit fixtures also run before configuring a build. The new
+cleanup regression passes locally on Linux; macOS/Windows CI is pending.
 
 Packaging (ADR-0048) has CMake install components, a relocatable Linux tarball
 and user-space installer, an Apple Silicon app/dmg and Windows per-user NSIS
@@ -734,4 +737,4 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
   renderer cheaper, then keep refining capacity in both modes.
 - Track groups, stretch markers, MIDI outputs, a background media cache.
 - Lua ergonomics (a script library path, hot reload).
-- Hardening and ports beyond Linux.
+- Native audio/MIDI hardware validation and GUI hardening on macOS and Windows.

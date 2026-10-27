@@ -176,7 +176,7 @@ commands: it renders, but has no window.
 
 Any MCP client can use the same server. Give agents without skill support
 `skill/SKILL.md` as instructions; it lists the guides to read when needed.
-The tool list is large (about 130 tools). If you run a local model behind a
+The tool list is large (over 140 tools). If you run a local model behind a
 harness that sends every tool with each request, give the model a context of
 32k tokens or more. llama.cpp's `llama-server` needs `--jinja` to accept
 tools.

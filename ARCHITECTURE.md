@@ -125,8 +125,8 @@ control-side monitor wakes the owner for device recovery. Device callbacks keep
 the same chunked, allocation-free engine contract as JACK. Owned helpers apply
 MMCSS Pro Audio or device-derived Mach time constraints on themselves before
 work, through a startup barrier; on macOS the live helpers then join the
-device's CoreAudio workgroup (ADR-0038). GUI embedding remains a separate gate;
-real-device validation remains opt-in.
+device's CoreAudio workgroup (ADR-0038). Native GUI embedding is implemented
+(ADR-0040); real-device validation remains opt-in.
 Native in-process hosting and supervised scanning are separate from that bridge
 (ADR-0036). clap-host owns a reusable ChildProcess tree/capture helper and
 a standalone scanner. The bridge uses that helper on every platform for
@@ -321,8 +321,9 @@ form. Project files follow the same rules (`specs/session-model.md` §5).
 
 ## 10. GUI (ADR-0005)
 
-An X11 main window (XWayland on Wayland desktops) so third-party plugin GUIs
-embed as X11 children. A custom retained-mode toolkit drawn with NanoVG on GL3,
+SDL3 supplies native windows on Linux, macOS and Windows. Linux uses X11
+(XWayland on Wayland desktops) so third-party plugin GUIs embed as X11
+children. A custom retained-mode toolkit drawn with NanoVG on OpenGL,
 sharing rendering technology with the plugins' editors; REAPER's workflow
 model (arrange, TCP, mixer, FX chains, routing matrix, MIDI editor, render
 dialog, actions list with bindable keys and macros, customizable toolbars

@@ -7,7 +7,7 @@ description: Operate the Quire DAW and its stock plugins (synth, EQ, dynamics, e
 
 Quire is a DAW whose every action is a typed command. You drive it through
 MCP tools (in the sandbox: `plugin_*`, `patch_*`, `render`, `analyze`, …; in
-the DAW: a dozen tools plus `describe` / `exec` / `query` for the rest).
+the DAW: dedicated command tools plus `describe` / `exec` / `query` for the rest).
 Humans use the same commands through the GUI, so anything you do shows up in
 their undo history and can be reviewed.
 
