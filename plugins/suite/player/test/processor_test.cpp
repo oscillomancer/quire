@@ -572,6 +572,23 @@ TEST(script_reads_are_bounded_and_reject_io_errors) {
     std::filesystem::remove(path);
 }
 
+TEST(library_script_names_preserve_native_unicode_paths) {
+    const auto root = std::filesystem::temp_directory_path() /
+                      ("supple-script-names-" + std::to_string(processId()));
+    const auto name = files::fromUtf8("\xe9\x9f\xb3\xe6\xa5\xbd-\xf0\x9f\x8e\xb5");
+    auto filename = name;
+    filename += ".cpp";
+    const auto script = root / name / filename;
+    std::filesystem::create_directories(script.parent_path());
+    {
+        std::ofstream out(script, std::ios::binary);
+    }
+    const auto found = libraryScripts(root);
+    CHECK(found.size() == 1);
+    if (found.size() == 1) CHECK(found[0] == script);
+    std::filesystem::remove_all(root);
+}
+
 TEST(the_library_lists_a_plugin_per_script_that_compiles) {
     const std::vector<DefinitionPtr> plugins = catalog().list();
     CHECK(plugins.size() == 3);
