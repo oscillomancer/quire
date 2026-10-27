@@ -173,6 +173,9 @@ instructions are in `docs/guides/installing.md`.
   with native macOS/Windows validation pending.
   VST3 parameter metadata preserves the automatable flag in the shared CLAP
   flag representation; its Linux regression passes, with native CI pending.
+  Sandbox rendering rechecks negotiated bus widths after activation, refusing
+  VST3 instances that switch to mono before audio starts. Local and bridged
+  Linux regressions pass; native macOS/Windows validation is pending.
   CLAP descriptor dispatch ignores registrations removed by an earlier
   callback in the same readiness snapshot, as VST3 dispatch already does;
   the Linux regression passes and macOS validation is pending.

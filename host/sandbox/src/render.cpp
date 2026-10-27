@@ -209,12 +209,7 @@ Result<RenderResult> render(std::span<host::Instance* const> chain, const Render
         (settings.denominator & (settings.denominator - 1)))
         return Error("render.transport", "tempo or time signature out of range", {},
                      "use tempo 1 .. 999 and a valid time signature");
-    for (std::size_t i = 0; i < chain.size(); ++i) {
-        if (!chain[i] || chain[i]->processing() ||
-            std::find(chain.begin(), chain.begin() + static_cast<std::ptrdiff_t>(i), chain[i]) !=
-                chain.begin() + static_cast<std::ptrdiff_t>(i))
-            return Error("render.chain", "chain contains a null, processing or repeated instance");
-        host::Instance& in = *chain[i];
+    const auto validateLayout = [](const host::Instance& in, std::size_t i) -> Status {
         if (in.audioOutputChannels() != 2)
             return Error("render.layout", in.info().name + " does not have a stereo output", {},
                          "the sandbox renders stereo chains");
@@ -222,6 +217,14 @@ Result<RenderResult> render(std::span<host::Instance* const> chain, const Render
             return Error("render.layout",
                          in.info().name + " cannot follow another plugin (no stereo input)", {},
                          "instruments go first in the chain");
+        return okStatus();
+    };
+    for (std::size_t i = 0; i < chain.size(); ++i) {
+        if (!chain[i] || chain[i]->processing() ||
+            std::find(chain.begin(), chain.begin() + static_cast<std::ptrdiff_t>(i), chain[i]) !=
+                chain.begin() + static_cast<std::ptrdiff_t>(i))
+            return Error("render.chain", "chain contains a null, processing or repeated instance");
+        SUPPLE_TRY(validateLayout(*chain[i], i));
     }
     if (!(settings.tailLimitSeconds >= 0 && settings.tailLimitSeconds <= 600))
         return Error("render.tail", "tail limit out of range", {}, "0 .. 600 seconds");
@@ -271,7 +274,8 @@ Result<RenderResult> render(std::span<host::Instance* const> chain, const Render
     }
 
     // Main-thread preparation: (re)activate, service pending restarts.
-    for (host::Instance* in : chain) {
+    for (std::size_t i = 0; i < chain.size(); ++i) {
+        host::Instance* in = chain[i];
         in->serviceMainThread();
         if (in == chain.front() && in->sidechainActive() != (request.sidechain != nullptr)) {
             if (in->active()) in->deactivate();
@@ -281,6 +285,9 @@ Result<RenderResult> render(std::span<host::Instance* const> chain, const Render
             (in->sampleRate() != settings.sampleRate || in->maxFrames() < settings.blockSize))
             in->deactivate();
         if (!in->active()) SUPPLE_TRY(in->activate(settings.sampleRate, 1, settings.blockSize));
+        // VST3 may settle on a different layout during activation. Check the
+        // negotiated buses before any audio starts, as the engine does.
+        SUPPLE_TRY(validateLayout(*in, i));
     }
 
     Job j;

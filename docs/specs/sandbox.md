@@ -354,6 +354,8 @@ or an audio file resampled to the session rate with the audio-file
 resampler), then runs the chain offline:
 
 - activate all chain instances at the session rate with `[1, blockSize]`;
+- recheck the negotiated main buses before starting audio: every output and
+  each input after the first stage must still be stereo (`render.layout`);
 - set the transport (tempo, meter; playing = true; bar/beat positions
   advanced per block);
 - process fixed-size blocks (the last block may be short); note events and
