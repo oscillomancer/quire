@@ -49,6 +49,10 @@ Each run writes `<label>.json` (full per-run records plus the aggregate) and
 per-run JSONL into `build/optimize-bench/<label>.jsonl`. Both modes × three
 seeds × ten tasks at 300 evaluations takes roughly 10 minutes at `--jobs 4`;
 `--evaluations` and `--tasks` are the dials for a quick iteration.
+Task failures remain in the JSON and Markdown reports and make the command
+exit nonzero. A completed search that misses its loss target is still a valid
+measurement, as are the documented not-applicable and no-parameter skips.
+Comparison tables label each mode and use the median for any number of seeds.
 
 A variant is a code change in the product: rebuild only the sandbox
 (`cmake --build --preset dev --target quire-sandbox -j6`) and run with a new
