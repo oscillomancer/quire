@@ -1011,7 +1011,9 @@ std::vector<ParamInfo> Instance::params() const {
     for (uint32_t i = 0; i < n; ++i) {
         clap_param_info_t p{};
         if (!extParams_->get_info(plugin_, i, &p)) continue;
-        out.push_back({p.id, p.name, p.module, p.min_value, p.max_value, p.default_value, p.flags});
+        out.push_back({p.id, std::string(p.name, ::strnlen(p.name, sizeof p.name)),
+                       std::string(p.module, ::strnlen(p.module, sizeof p.module)), p.min_value,
+                       p.max_value, p.default_value, p.flags});
     }
     return out;
 }
@@ -1031,7 +1033,7 @@ Result<std::string> Instance::paramText(std::uint32_t id, double clapValue) cons
     char buf[256] = {};
     if (!extParams_ || !extParams_->value_to_text(plugin_, id, clapValue, buf, sizeof(buf)))
         return Error("host.param", "the plugin has no text for parameter " + std::to_string(id));
-    return std::string(buf);
+    return std::string(buf, ::strnlen(buf, sizeof buf));
 }
 
 Result<double> Instance::paramFromText(std::uint32_t id, std::string_view text) const {

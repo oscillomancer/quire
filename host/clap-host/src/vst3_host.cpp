@@ -505,6 +505,7 @@ Result<std::unique_ptr<Vst3Instance>> Vst3Instance::create(const PluginInfo& inf
         for (Steinberg::int32 b = 0; b < count; ++b) {
             vst::BusInfo bus{};
             const bool ok = s.component->getBusInfo(vst::kAudio, dir, b, bus) == kResultOk;
+            bus.name[std::size(bus.name) - 1] = 0;
             if (ok && (bus.channelCount < 0 || bus.channelCount > 64))
                 return Error("host.layout", "VST3 audio bus exceeds 64 channels");
             channels->push_back(ok ? static_cast<std::uint32_t>(std::max(bus.channelCount, 0)) : 0);
@@ -523,6 +524,7 @@ Result<std::unique_ptr<Vst3Instance>> Vst3Instance::create(const PluginInfo& inf
         for (Steinberg::int32 i = 0; i < count; ++i) {
             vst::ParameterInfo p{};
             if (s.controller->getParameterInfo(i, p) != kResultOk) continue;
+            p.title[std::size(p.title) - 1] = 0;
             std::uint32_t flags = 0;
             if (p.stepCount > 0) flags |= CLAP_PARAM_IS_STEPPED;
             if (p.flags & vst::ParameterInfo::kIsList) flags |= CLAP_PARAM_IS_ENUM;
@@ -691,6 +693,7 @@ Result<std::string> Vst3Instance::paramText(std::uint32_t id, double plain) cons
     const double normalized = state_->controller->plainParamToNormalized(id, plain);
     if (state_->controller->getParamStringByValue(id, normalized, text) != kResultOk)
         return Error("host.param", "VST3 has no text for parameter " + std::to_string(id));
+    text[std::size(text) - 1] = 0;
     return vst::StringConvert::convert(text);
 }
 Result<double> Vst3Instance::paramFromText(std::uint32_t id, std::string_view text) const {

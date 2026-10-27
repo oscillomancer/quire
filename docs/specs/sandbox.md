@@ -92,6 +92,11 @@ thread synchronously: audio-thread log calls go to a lock-free ring),
 host side (records `changed` flags). `request_restart`/`request_process`/
 `request_callback` set flags the app services on the main thread.
 
+Fixed-size CLAP parameter names, modules and value text are read only within
+their buffers, even if a plugin omits the terminating null. VST3 bus names,
+parameter titles and value text are terminated within their 128-code-unit
+buffers before UTF-8 conversion.
+
 Local and remote instances can install core-base's `supple::MainThreadWake` (public
 header `supple/base/main_thread_wake.h`, core-base spec, ADR-0029) with
 `setMainThreadWake(MainThreadWake&)` on main. Remote subscriptions are

@@ -10,6 +10,7 @@
 #include <limits>
 #include <thread>
 #include <vector>
+#include "../src/platform.h"
 #include "supple/clap/semantic_params.h"
 #include "supple/host/clap_host.h"
 #include "supple/json/json.h"
@@ -596,4 +597,50 @@ TEST_CASE("a VST3 state its controller rejects leaves the plug-in as it was") {
     const auto after = (*made)->paramValue(1);
     REQUIRE(after);
     CHECK(*after == doctest::Approx(*before));
+}
+
+TEST_CASE("CLAP parameter strings stay within their fixed buffers") {
+    auto made = Instance::create(find("com.suppleaudio.test.edge"), {});
+    REQUIRE(made);
+    const std::array<std::uint8_t, 4> config{51, 0, 0, 0};
+    REQUIRE((*made)->loadState(config));
+    const auto params = (*made)->params();
+    REQUIRE(params.size() == 2);
+    CHECK(params[0].name == std::string(CLAP_NAME_SIZE, 'N'));
+    CHECK(params[0].module == std::string(CLAP_PATH_SIZE, 'M'));
+    const auto text = (*made)->paramText(7, 0);
+    REQUIRE(text);
+    CHECK(*text == std::string(256, 'V'));
+}
+
+TEST_CASE("VST3 parameter and bus strings stay within their fixed buffers") {
+    auto module = platform::openLibrary(FIXTURE_VST3_MODULE);
+    REQUIRE(module);
+    struct ModuleGuard {
+        void* module;
+        void (*mode)(bool);
+        ~ModuleGuard() {
+            if (mode) mode(false);
+            platform::closeLibrary(module);
+        }
+    } guard{*module,
+            reinterpret_cast<void (*)(bool)>(platform::symbol(*module, "fixtureUnterminatedText"))};
+    REQUIRE(guard.mode);
+    guard.mode(true);
+    auto list = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(list);
+    const auto info = std::find_if(list->begin(), list->end(),
+                                   [](const auto& p) { return p.name == "Test VST3 Multi-Out"; });
+    REQUIRE(info != list->end());
+    auto made = Instance::create(*info, {});
+    REQUIRE(made);
+    const auto params = (*made)->params();
+    REQUIRE(params.size() == 1);
+    CHECK(params[0].name == std::string(127, 'N'));
+    const auto ports = (*made)->auxOutputPorts();
+    REQUIRE(ports.size() == 1);
+    CHECK(ports[0].name == std::string(127, 'B'));
+    const auto text = (*made)->paramText(1, 0);
+    REQUIRE(text);
+    CHECK(*text == std::string(127, 'V'));
 }

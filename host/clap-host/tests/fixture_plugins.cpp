@@ -704,6 +704,10 @@ bool CLAP_ABI edgeParamInfo(const clap_plugin_t* pl, uint32_t index, clap_param_
     info->flags = E(pl)->config[0] >= 11 && E(pl)->config[0] != 33 ? CLAP_PARAM_IS_AUTOMATABLE
                                                                    : CLAP_PARAM_IS_READONLY;
     std::snprintf(info->name, sizeof(info->name), index == 0 ? "Flushes" : "Editor parent");
+    if (E(pl)->config[0] == 51) {
+        std::memset(info->name, 'N', sizeof(info->name));
+        std::memset(info->module, 'M', sizeof(info->module));
+    }
     info->max_value = index == 0 ? 1e9 : 1e15;
     return true;
 }
@@ -729,7 +733,12 @@ bool CLAP_ABI edgeParamValue(const clap_plugin_t* pl, clap_id id, double* out) {
     *out = E(pl)->config[0] >= 30 ? E(pl)->editorValue.load() : E(pl)->flushes.load();
     return true;
 }
-bool CLAP_ABI edgeValueToText(const clap_plugin_t*, clap_id, double v, char* out, uint32_t size) {
+bool CLAP_ABI edgeValueToText(const clap_plugin_t* pl, clap_id, double v, char* out,
+                              uint32_t size) {
+    if (E(pl)->config[0] == 51) {
+        std::memset(out, 'V', size);
+        return true;
+    }
     std::snprintf(out, size, "%d", static_cast<int>(v));
     return true;
 }

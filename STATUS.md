@@ -164,6 +164,9 @@ instructions are in `docs/guides/installing.md`.
   CLAP/VST3 requests use core-base's audio-safe coalesced wake relay
   (ADR-0029), and timers run without an open editor; remote changes/death
   wake the app without editor or audio idle polling (ADR-0031).
+  Fixed-size CLAP parameter strings and VST3 bus/parameter strings are bounded
+  even when a plugin omits their null terminators; Linux regressions pass,
+  with native macOS/Windows validation pending.
 - **GUI** (`specs/gui.md`): arrange view, track panel, mixer, FX chains and
   the plugin browser, routing matrix, MIDI editor, render dialog, history
   dock with branches, actions list with key bindings and macros, editable
