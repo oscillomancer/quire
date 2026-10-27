@@ -248,6 +248,7 @@ bool NativeControl::read(void* data, std::size_t size,
                          std::chrono::steady_clock::time_point deadline) {
     auto* dst = static_cast<char*>(data);
     while (size) {
+        if (std::chrono::steady_clock::now() >= deadline) return false;
         arm();
         if (pending_) {
             DWORD count = 0;

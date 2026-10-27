@@ -245,6 +245,24 @@ TEST_CASE("native idle process death wakes every subscribed parent") {
     CHECK((*second)->failed());
 }
 #if defined(_WIN32)
+TEST_CASE("Windows bridge reads enforce deadlines even with buffered input") {
+    bridge::Resource pair[2];
+    REQUIRE(bridge::controlPair(pair));
+    bridge::NativeControl parent(reinterpret_cast<HANDLE>(pair[0]));
+    bridge::NativeControl child(reinterpret_cast<HANDLE>(pair[1]), true);
+    const std::array<char, 2> sent{'a', 'b'};
+    REQUIRE(child.write(sent.data(), sent.size(), bridge::deadlineAfter(1000)));
+    char received = 0;
+    REQUIRE(parent.read(&received, 1, bridge::deadlineAfter(1000)));
+    CHECK(received == 'a');
+    // The second byte is already buffered: expiry must not depend on whether
+    // the next native read would block. No elapsed-time assertion is needed.
+    CHECK_FALSE(parent.read(&received, 1, bridge::Deadline::min()));
+    CHECK(received == 'a');
+    REQUIRE(parent.read(&received, 1, bridge::deadlineAfter(1000)));
+    CHECK(received == 'b');
+}
+
 TEST_CASE("a numeric handle in an untrusted bridge reply never closes a parent handle") {
     bridge::Resource pair[2];
     REQUIRE(bridge::controlPair(pair));
