@@ -105,7 +105,9 @@ instructions are in `docs/guides/installing.md`.
   commands with JSON Schema, units, examples run as tests and structured
   errors; `batch` transactions; events; the JSON-RPC socket; the MCP adapter
   (in process or as a proxy to the running app); Lua scripts on the bus
-  (ADR-0006). The skill's command reference is generated and drift-tested.
+  (ADR-0006). Lua structured-error expansion has the same value/text budget
+  as returned values, including repeated references to shared details.
+  The skill's command reference is generated and drift-tested.
 - **Engine** (`specs/engine.md`): deterministic offline renders with
   real-time output bit-identical to them; anticipative rendering for
   non-live tracks (ADR-0012) and a live region for monitored tracks

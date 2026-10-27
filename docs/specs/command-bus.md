@@ -450,7 +450,10 @@ transaction refuse, and the failure state is cleared at transaction end. Scoped
 dispatch admission applies to nested batch/Lua invocations too.
 
 Lua initialization, host JSON pushes and structured error decoding are protected
-against memory/stack failures; error fields are read raw. Once the instruction
+against memory/stack failures; error fields are read raw. Error decoding also
+bounds expansion into host memory to 1,000,000 values and 16 MiB of text,
+counting shared details once per use, and returns `script.value_too_large`
+when that budget is exceeded. Once the instruction
 budget expires, every subsequent hook check raises until the outermost run returns.
 The time budget measures the script's own work: time spent inside the commands
 it calls does not count, while event handlers those commands run in the same

@@ -563,6 +563,21 @@ TEST_CASE("Lua error tables are read raw without executing metamethods") {
     CHECK(failed.error().message.find("metamethod ran") == std::string::npos);
 }
 
+TEST_CASE("Lua error decoding bounds repeated detail expansion outside the allocator") {
+    Scene scene;
+    auto failed = scene.run(R"(
+        local e = {code = 'custom', message = string.rep('x', 65536)}
+        for i = 1, 10 do e = {code = 'custom', details = {e, e}} end
+        error(e)
+    )");
+    REQUIRE_FALSE(failed);
+    CHECK(failed.error().code == "script.value_too_large");
+    CHECK(failed.error().details.empty());
+    auto healthy = scene.run("return 42");
+    REQUIRE(healthy);
+    CHECK(healthy->result == 42);
+}
+
 TEST_CASE("named arrays resolve JSON pointer refs and preserve an empty Lua array") {
     struct Arrays {
         std::vector<std::int64_t> values;
