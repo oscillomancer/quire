@@ -1098,7 +1098,10 @@ class Compiler {
             if (havePrevious && tick > previousTick && shape != "step") {
                 const auto interval = std::max(1, result_.sequence.ppq / 16);
                 int lastValue = previousValue;
-                for (auto when = previousTick + interval; when < tick; when += interval) {
+                // Check the remaining distance before advancing: a pickup
+                // can put this segment within one interval of INT64_MAX.
+                for (auto when = previousTick; tick - when > interval;) {
+                    when += interval;
                     double phase = double(when - previousTick) / double(tick - previousTick);
                     if (shape == "slow")
                         phase *= phase;
