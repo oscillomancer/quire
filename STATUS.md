@@ -576,6 +576,8 @@ Engine and hosting:
 - Audio backends: Linux JACK, dummy, and native PortAudio (CoreAudio on macOS;
   WASAPI/ASIO on Windows), with selection, latency/xruns and restart notifications.
   Fake-device output equals offline in both executors, with native CI coverage.
+  The engine writes stereo; additional opened device outputs are silenced by
+  both native and JACK backends.
   Hardware latency, disconnect behavior and scheduling benefit are unmeasured.
   Edit > Audio device (ADR-0050) chooses and saves the audio system, devices,
   sample rate and buffer size, restarting a running engine; the GUI starts the

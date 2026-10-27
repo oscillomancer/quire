@@ -35,8 +35,10 @@ struct Driver {
     std::atomic<unsigned> rateQueries{0};
     std::mutex rateQueryMutex;
     std::vector<std::thread::id> rateQueryThreads;
-    std::array<std::array<float, 4096>, 2> in{}, out{};
-    std::array<float*, 2> inputs{in[0].data(), in[1].data()}, outputs{out[0].data(), out[1].data()};
+    std::array<std::array<float, 4096>, 2> in{};
+    std::array<std::array<float, 4096>, 4> out{};
+    std::array<float*, 2> inputs{in[0].data(), in[1].data()};
+    std::array<float*, 4> outputs{out[0].data(), out[1].data(), out[2].data(), out[3].data()};
     Driver() { current = this; }
     ~Driver() {
         if (audio.joinable()) audio.join();
@@ -189,6 +191,25 @@ TEST_CASE("PortAudio selection, planar chunks, latency and callback status witho
     CHECK(driver.initialized == 0);
     CHECK(driver.closed == 1);
 }
+TEST_CASE("unused native device outputs are silent for the stereo engine") {
+    Driver driver;
+    driver.devices[1].maxOutputChannels = 4;
+    for (auto& channel : driver.out) channel.fill(0.5f);
+    PortAudioBackend backend({}, Driver::api);
+    REQUIRE(backend.start({.blockSize = 64, .outputs = 4},
+                          [](auto, float* const* out, std::uint32_t n) {
+                              if (!n) return;
+                              for (unsigned c = 0; c < 2; ++c) std::fill_n(out[c], n, 0.25f);
+                          }));
+    driver.drive(211);
+    for (unsigned c = 0; c < 4; ++c) {
+        CHECK(std::all_of(driver.out[c].begin(), driver.out[c].begin() + 211,
+                          [c](float x) { return x == (c < 2 ? 0.25f : 0.f); }));
+        CHECK(driver.out[c][211] == 0.5f);
+    }
+    backend.stop();
+}
+
 TEST_CASE("native rate queries stay on the monitor and publish rate changes to status") {
     Driver driver;
     auto api = Driver::api;

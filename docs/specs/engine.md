@@ -1366,6 +1366,8 @@ but never builds or initializes the PortAudio library.
 `engine.start` accepts backend `jack|portaudio|dummy` and optional `host_api`,
 `input_device`, `output_device`, `rate` (1..768000), `inputs` (0..64) and `outputs`
 (2..64). Native stream audio inputs default to zero, outputs to two;
+the engine writes the first stereo pair. Both native and JACK backends clear
+any additional opened output channels to silence before invoking the engine.
 engine.start enables native MIDI inputs (ADR-0042). JACK keeps its capture/MIDI behavior. Native default backend stays
 dummy (the GUI starts the saved device instead, ADR-0050); Linux's existing
 default stays JACK. An explicit `rate` sets `PortAudioOptions::changeDeviceRate`:

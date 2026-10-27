@@ -85,6 +85,8 @@ struct PortAudioBackend::Impl {
             return paComplete;
         }
         const auto n = static_cast<std::uint32_t>(std::min<unsigned long>(frames, UINT32_MAX));
+        // The engine writes stereo; other opened device channels must stay silent.
+        for (std::uint32_t c = 2; c < self.config.outputs; ++c) std::fill_n(out[c], frames, 0.0f);
         bool changed = self.period.exchange(n, std::memory_order_relaxed) != n;
         if (flags & (paInputUnderflow | paInputOverflow | paOutputUnderflow | paOutputOverflow)) {
             self.xruns.fetch_add(1, std::memory_order_relaxed);
