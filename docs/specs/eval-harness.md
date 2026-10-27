@@ -147,6 +147,8 @@ profile. Export the isolated sessions using `hermes sessions export ... --redact
 Record version, actual model/provider from usage, git hash and dirty flag, task
 and skill hashes, tool calls/results, wall time, tokens and estimated cost
 (including auxiliary usage). Unknown cost stays explicitly unknown, never zero.
+Unreadable or truncated usage files mark that attempt as an error with unknown
+usage; the local report retains the attempt and any earlier failure diagnostic.
 
 Limits: per-task MCP calls and minutes. The relay rejects the first excess call
 and stops; the last completed capture survives. A process-tree deadline

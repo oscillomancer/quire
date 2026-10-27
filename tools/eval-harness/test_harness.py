@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import HERE, ROOT, SYNTH, Mcp, PluginProvenanceError, capture, check_plugin_provenance, evaluation_profile, load_tasks, read_json, sandbox_command, setup, slug, validate_task, write_json
 from relay import Recorder, invocations
 from runners import default_model, dry, isolated_config, preamble, preflight
-from run import render_patch, score_final, unpublishable
+from run import main, render_patch, score_final, unpublishable
 from scoring import notation_score, transcript_metrics
 from process_tree import spawn_group, stop_group
 from pipe_ready import wait_pipe
@@ -288,6 +288,27 @@ class PluginProvenance(unittest.TestCase):
 
 
 class Publishing(unittest.TestCase):
+    def test_truncated_usage_keeps_the_attempt_report(self):
+        task = load_tasks("synth-descriptive", ["sub-bass"])[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            def interrupted_runner(task, directory, binary):
+                (directory / "usage.json").write_text('{"total_tokens":', encoding="utf-8")
+                raise TimeoutError("attempt interrupted")
+
+            with mock.patch("run.ROOT", root), mock.patch("run.load_tasks", return_value=[task]), \
+                    mock.patch("run.skill_hash", return_value="test"), \
+                    mock.patch("run.subprocess.check_output", return_value="test"), \
+                    mock.patch("run.signal.signal"), mock.patch("run.runners.dry", interrupted_runner):
+                self.assertEqual(main([]), 1)
+            report = read_json(next((root / "build/eval").glob("*/report.json")))
+            record = report["tasks"][0]
+            self.assertIn("attempt interrupted", record["error"])
+            self.assertIn("usage.json", record["error"])
+            self.assertEqual(record["usage"], {})
+            self.assertFalse(report["usage_totals"]["cost_known"])
+
     def test_outages_are_not_measurements(self):
         usage = {"total_tokens": 27367}
         broken = {"usage_totals": usage, "tasks": [{"incomplete": True}, {"error": "HTTP 402"}]}
