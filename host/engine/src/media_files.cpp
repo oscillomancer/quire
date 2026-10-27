@@ -60,8 +60,9 @@ Status copyNew(const fs::path& from, const fs::path& to) {
     fs::copy_file(from, temp, fs::copy_options::none, ec);
 #endif
     if (ec) {
+        const auto reason = ec.message();
         fs::remove(temp, ec);
-        return copyError(from, to, ec.message());
+        return copyError(from, to, reason);
     }
     const int linked = files::publishNew(temp, to);
     const int error = errno;

@@ -428,6 +428,8 @@ default), item.add copies an imported audio file into the media folder (a
 same-named file with other bytes gets `-2`, `-3`…; the same bytes are
 reused) instead of naming it where it is. The GUI gives each project a
 folder of its own (gui.md §4.11).
+Copy failures retain the underlying filesystem error even when temporary-file
+cleanup succeeds, so `media.copy` identifies the cause of a failed import or save.
 
 The engine app writes autosaves from main-thread service (engine.md §6,
 ADR-0030), only when a named project's head changed since the last one and
