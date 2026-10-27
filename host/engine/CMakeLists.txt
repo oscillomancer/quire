@@ -116,6 +116,9 @@ endif()
 
 if(SUPPLE_BUILD_TESTS)
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  add_test(NAME engine.cli-numbers
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cli.py
+            $<TARGET_FILE:${PRODUCT_SLUG}-engine>)
   add_test(NAME engine.mcp-stdio
     COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/integration/mcp_client.py
             $<TARGET_FILE:${PRODUCT_SLUG}-engine> session_describe)

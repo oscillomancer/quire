@@ -690,6 +690,12 @@ instance).
 
 ## 6. Control surface
 
+The headless `play` CLI parses each numeric option completely and rejects
+malformed, overflowing or non-finite numbers with `cli.number`, the option's
+field path and a corrective hint before loading a project or opening a device.
+`--seconds` accepts finite nonnegative durations; integer options require whole
+decimal integers. Command schemas still validate the device/transport ranges.
+
 The engine registers the session-model §7 command catalogue on the command
 bus and exposes it through the control protocol (Unix socket), Lua and MCP (proxy or in-process). Engine-specific commands:
 `engine.start {backend, device, rate, block}`, `engine.stop`,

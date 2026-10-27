@@ -627,6 +627,8 @@ Engine and hosting:
   are).
 
 Session and editing:
+- Headless playback rejects malformed/non-finite numeric options before opening
+  a project or device; its duration must be finite and nonnegative.
 - Autosave discovery and rotation match the whole numbered filename, preserve
   backup names, and handle index exhaustion without overflow or pruning.
 - Master playrate 0.25..4x and its tr_0 envelope persist in schema 2.1.

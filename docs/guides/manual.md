@@ -171,6 +171,10 @@ pass `--instance NAME` to `quire-mcp`.
 
 Without the GUI, `quire-engine --mcp` is a headless MCP server with the same
 commands: it renders, but has no window.
+`quire-engine play FILE --seconds 10` plays a saved project for ten seconds;
+add `--backend dummy` to run without an audio device. Numeric options must be
+complete numbers, and `--seconds` must be finite and nonnegative. Invalid values
+report the option and how to correct it before playback starts.
 
 ### Other clients and local models
 
