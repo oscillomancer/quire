@@ -14,8 +14,7 @@ parameters, so Marram gives every slot a type with an `off` and says which
 parameters apply with the script's activity conditions (amendment of
 2026-10-21 to `semantic-params-extension.md`): an agent's description and
 the editor show only what the patch uses. Effects are not part of it:
-delay, reverb and EQ are the stock effects after it in a chain (a chorus is
-planned).
+delay, reverb, EQ and chorus are stock effects after it in a chain.
 
 ## 1. Signal flow (per voice)
 

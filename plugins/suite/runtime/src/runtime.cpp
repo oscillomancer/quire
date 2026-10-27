@@ -3,7 +3,7 @@
 //
 // The script runtime's implementation: the one copy of every built-in. A
 // source export compiles this file; the JIT calls the same functions through
-// the thunks in thunks.cpp. The DSP itself is the plugin framework's
+// the thunks in compiler/src/builtins.cpp. The DSP itself is the plugin framework's
 // (framework/dsp); this file only gives it script-facing names and finds the
 // sample rate.
 #include <algorithm>
