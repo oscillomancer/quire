@@ -134,6 +134,7 @@ class Generation {
         D::CurrentScope scope(instance);
         instance->budget = std::int64_t{1} << 40;
         if (auto hook = program_->prepare()) hook(instance, self_);
+        preparedTail = instance->tail;
         if (!reset_) reset_ = program_->create();
         program_->copy(reset_, self_);
     }
@@ -150,6 +151,8 @@ class Generation {
         int limit = -1;
     };
     VoiceSettings preparedVoices;
+    // setTail() writes the runtime record, outside the copied script struct.
+    int preparedTail = D::Instance::kInfoTail;
 
     // The runtime record its code runs with, in the struct and its copy.
     void bindInstance(D::Instance* instance) {
@@ -255,6 +258,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         if (instrument_) voices_.reset(*this);
         resetControllers();
         current_->reset();  // which restores the files prepare() saw
+        instance_.tail = current_->preparedTail;
         bindFiles(*current_);
         for (D::FileContents* f : files_)
             if (f) f->reset();
@@ -576,8 +580,8 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         const bool stopped = stopped_;
         instance_.status.clear();
         budgetSeen_ = 0;
-        // Info's tail until the new code sets its own.
-        instance_.tail = D::Instance::kInfoTail;
+        // Preserve what the replacement set while preparing on its own record.
+        instance_.tail = next->preparedTail;
         // Its values are the running one's; it starts from them, snapped.
         for (size_t i = 0; i < next->paramCount() && i < current_->paramCount(); ++i)
             if (S::Param* p = next->param(i); p && current_->param(i))

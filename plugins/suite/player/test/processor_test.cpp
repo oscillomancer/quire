@@ -928,6 +928,43 @@ struct T : Effect {
     CHECK(engine.tail() == UINT32_MAX);  // set in process(): forever
 }
 
+TEST(a_prepared_tail_survives_reset_and_replacement) {
+    const std::string source = R"(#include <supple/script.h>
+struct T : Effect {
+    static constexpr Info info = {.name = "T", .id = "com.example.tail", .tail = 100};
+    void prepare() { setTail(200); }
+    void process(Block& io) { if (io[0][0] > 0) setTail(-1); }
+};
+)";
+    const auto d = compileText(source);
+    if (!d) return;
+    Engine engine(d);
+    engine.activate(48000.0, 64, 2, 2);
+    CHECK(engine.tail() == 200);
+    double left[64]{1.0}, right[64]{};
+    double* io[] = {left, right};
+    engine.process<double>(io, io, 64);
+    CHECK(engine.tail() == UINT32_MAX);
+    engine.reset();
+    CHECK(engine.processor().tailSamples() == 200);
+    left[0] = 0.0;
+    engine.process<double>(io, io, 64);
+    CHECK(engine.tail() == 200);
+
+    std::string changed = source;
+    changed.replace(changed.find("setTail(200)"), 12, "setTail(300)");
+    const auto next = compileText(changed);
+    if (!next) return;
+    ParamValues values(d->params());
+    CHECK(engine.processor().swap(next->code(), values));
+    left[0] = 0.0;
+    engine.process<double>(io, io, 64);
+    CHECK(engine.tail() == 300);
+    engine.reset();
+    CHECK(engine.tail() == 300);
+    engine.processor().collect();
+}
+
 TEST(a_parameter_that_restarts_sets_the_latency_of_the_next_activation) {
     const auto d = compileText(R"(#include <supple/script.h>
 struct L : Effect {
