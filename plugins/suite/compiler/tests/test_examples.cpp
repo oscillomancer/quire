@@ -661,6 +661,52 @@ TEST_CASE("lvalues preserve C++ sequencing and reference storage") {
     }
 }
 
+TEST_CASE("out-of-range enum array writes are discarded in every backend") {
+    enum class Mode { Off, On };
+    script::Array<Mode, 1> modes;
+    const auto writePastEnd = [&]()
+#if defined(__clang__) && __has_cpp_attribute(clang::nonblocking)
+                                  [[clang::nonblocking]]
+#endif
+    {
+        modes[0] = Mode::On;
+        modes[1] = Mode::On;
+        return modes[-1];
+    };
+    CHECK(writePastEnd() == Mode::Off);
+    CHECK(modes[-1] == Mode::Off);
+    CHECK(modes[1] == Mode::Off);
+    CHECK(modes[0] == Mode::On);
+
+    const std::string source = R"(
+#include <supple/script.h>
+struct Test : Effect {
+    static constexpr Info info = {.name = "Test", .id = "com.example.test"};
+    enum class Mode { Off, On };
+    Array<Mode, 1> modes;
+    void process(Block& io) {
+        modes[0] = Mode::On;
+        modes[1] = Mode::On;
+        io[0][0] = static_cast<int>(modes[-1]);
+        io[0][1] = static_cast<int>(modes[1]);
+        io[0][2] = static_cast<int>(modes[0]);
+    }
+};
+)";
+    for (bool interpret : {false, true}) {
+        INFO(interpret);
+        scriptc::Options options;
+        options.interpret = interpret;
+        auto result = scriptc::compile(source, options);
+        REQUIRE_MESSAGE(result.program, scriptc::toText(result.diagnostics));
+        JitRunner run(result.program);
+        Audio actual(1, 3);
+        run.process(actual);
+        CHECK(actual.data[0] == std::vector<double>{0, 0, 1});
+        CHECK(run.instance.status.outOfRange.load() == 3);
+    }
+}
+
 TEST_CASE("a script compiled as C++ has the sources and routes the compiler sees") {
     std::ifstream in(std::filesystem::path(__FILE__).parent_path() / "routes.h");
     REQUIRE(in.good());

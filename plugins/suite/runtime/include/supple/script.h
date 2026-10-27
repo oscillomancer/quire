@@ -120,7 +120,7 @@ struct Array {
     T& operator[](int i) {
         if (static_cast<unsigned>(i) < static_cast<unsigned>(N)) return items_[i];
         detail::outOfRange(0);
-        if constexpr (std::is_arithmetic_v<T>) spare_ = T();
+        if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T>) spare_ = T();
         return spare_;
     }
     const T& operator[](int i) const { return const_cast<Array&>(*this)[i]; }

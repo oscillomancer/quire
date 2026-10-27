@@ -620,7 +620,8 @@ A script cannot do what C++ leaves undefined. The compiler refuses:
   at run time wrap.
 
 At run time: an index outside an `Array`, `Buffer` or channel reads 0 and a
-write to it goes nowhere, and the host's log names the line. Each hook has a
+write to it goes nowhere, and the host's log names the line. For an enum
+element, zero means the enum value with underlying integer 0. Each hook has a
 budget of loop iterations and calls (65,536 per frame in `process`); a
 script that spends it is stopped and silent until it is reset or reloaded,
 and the log names the line.
