@@ -107,6 +107,9 @@ counted reliably, so notation submission must use `render` or an explicit
 `render@1` count as render attempts and submissions in the same order as
 unversioned calls, including failures. Unknown compilation status is not a
 success.
+Versioned batches are unpacked before selecting the final notation. Rejected
+non-object arguments and malformed batch steps remain counted tool errors;
+they do not crash transcript scoring or invent notation submissions.
 
 ## 2. Runners and isolation
 

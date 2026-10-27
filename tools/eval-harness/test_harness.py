@@ -112,6 +112,25 @@ class Scoring(unittest.TestCase):
         self.assertTrue(attempts[0]["compiled"])
         self.assertFalse(attempts[1]["compiled"])
 
+    def test_versioned_batches_keep_the_final_notation(self):
+        entry = {"name": "exec", "arguments": {"command": "batch@1", "args": {"steps": [
+            {"command": "render@1", "args": {"notation": "final phrase"}}]}},
+                 "response": {"result": {"structuredContent": {}}}}
+        metrics = transcript_metrics([entry])
+        self.assertEqual(metrics["batches"], 1)
+        attempts = metrics["notation_attempts"]
+        self.assertEqual([attempt["notation"] for attempt in attempts], ["final phrase"])
+
+    def test_malformed_calls_count_as_errors_without_crashing_scoring(self):
+        for name, arguments in (("batch", None), ("exec", []), ("exec", None), (42, {}),
+                                ("batch", {"steps": None}), ("batch", {"steps": [None, 42]}),
+                                ("exec", {"command": "render", "args": "bad"})):
+            with self.subTest(name=name, arguments=arguments):
+                result = transcript_metrics([{"name": name, "arguments": arguments,
+                                              "response": {"error": {"code": -32602}}}])
+                self.assertEqual(result["errors"], 1)
+                self.assertEqual(result["notation_attempts"], [])
+
 
 class Isolation(unittest.TestCase):
     def test_failed_initialization_closes_the_sandbox(self):

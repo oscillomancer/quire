@@ -35,8 +35,14 @@ def transcript_metrics(entries):
         result = response.get("result", {})
         error = result.get("isError", False) or "error" in response
         errors += int(error)
-        steps = invocations(entry["name"], entry.get("arguments", {}))
-        batches += int(entry["name"] == "batch" or "batch" in entry.get("arguments", {}))
+        arguments = entry.get("arguments", {})
+        steps = invocations(entry["name"], arguments)
+        arguments = arguments if isinstance(arguments, dict) else {}
+        name = entry["name"].split("@", 1)[0] if isinstance(entry["name"], str) else ""
+        command = arguments.get("command", "")
+        command = command.split("@", 1)[0] if isinstance(command, str) else ""
+        batches += int(name == "batch" or name in ("exec", "query") and
+                       ("batch" in arguments or command == "batch"))
         merges += sum(name == "patch.merge" for name, _ in steps)
         for name, args in steps:
             if name == "render" and "notation" in args:
