@@ -169,6 +169,9 @@ instructions are in `docs/guides/installing.md`.
   Fixed-size CLAP parameter strings and VST3 bus/parameter strings are bounded
   even when a plugin omits their null terminators; Linux regressions pass,
   with native macOS/Windows validation pending.
+  CLAP descriptor dispatch ignores registrations removed by an earlier
+  callback in the same readiness snapshot, as VST3 dispatch already does;
+  the Linux regression passes and macOS validation is pending.
 - **GUI** (`specs/gui.md`): arrange view, track panel, mixer, FX chains and
   the plugin browser, routing matrix, MIDI editor, render dialog, history
   dock with branches, actions list with key bindings and macros, editable

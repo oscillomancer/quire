@@ -1046,12 +1046,16 @@ uint32_t CLAP_ABI edgeLatency(const clap_plugin_t* pl) {
 }
 const clap_plugin_latency_t kEdgeLatency = {edgeLatency};
 
+void CLAP_ABI edgeFd(const clap_plugin_t* pl, int, clap_posix_fd_flags_t) { ++E(pl)->mainCalls; }
+const clap_plugin_posix_fd_support_t kEdgeFd = {edgeFd};
+
 const void* CLAP_ABI edgeExt(const clap_plugin_t* pl, const char* id) {
     if (!std::strcmp(id, "supple.test.edge-host")) return E(pl)->host;
     if (!std::strcmp(id, CLAP_EXT_NOTE_PORTS)) return &kSineNotes;
     if (!std::strcmp(id, "supple.test.edge-control")) return &kEdgeControl;
     if (!std::strcmp(id, CLAP_EXT_LATENCY)) return &kEdgeLatency;
     if (!std::strcmp(id, CLAP_EXT_TIMER_SUPPORT)) return &kEdgeTimer;
+    if (!std::strcmp(id, CLAP_EXT_POSIX_FD_SUPPORT)) return &kEdgeFd;
     if (!std::strcmp(id, CLAP_EXT_GUI)) return &kEdgeGui;
     if (!std::strcmp(id, CLAP_EXT_PARAMS)) return &kEdgeParams;
     if (!std::strcmp(id, CLAP_EXT_TAIL)) return &kEdgeTail;

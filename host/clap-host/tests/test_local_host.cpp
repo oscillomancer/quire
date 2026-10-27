@@ -644,3 +644,25 @@ TEST_CASE("VST3 parameter and bus strings stay within their fixed buffers") {
     REQUIRE(text);
     CHECK(*text == std::string(127, 'V'));
 }
+
+#if !defined(_WIN32)
+TEST_CASE("CLAP descriptor readiness is ignored after unregistration") {
+    auto made = Instance::create(find("com.suppleaudio.test.edge"), {});
+    REQUIRE(made);
+    const auto* plugin = (*made)->raw();
+    const auto* host =
+        static_cast<const clap_host_t*>(plugin->get_extension(plugin, "supple.test.edge-host"));
+    REQUIRE(host);
+    const auto* fds = static_cast<const clap_host_posix_fd_support_t*>(
+        host->get_extension(host, CLAP_EXT_POSIX_FD_SUPPORT));
+    REQUIRE(fds);
+    // Simulate a readiness snapshot invalidated by an earlier callback in
+    // the same batch. No actual descriptor is polled by this unit test.
+    REQUIRE(fds->register_fd(host, 42, CLAP_POSIX_FD_READ));
+    (*made)->onFd(42, CLAP_POSIX_FD_READ);
+    CHECK(*(*made)->paramValue(10) == 1);
+    REQUIRE(fds->unregister_fd(host, 42));
+    (*made)->onFd(42, CLAP_POSIX_FD_READ);
+    CHECK(*(*made)->paramValue(10) == 1);
+}
+#endif

@@ -1937,7 +1937,12 @@ std::vector<std::pair<int, std::uint32_t>> Instance::watchedFds() const {
 
 void Instance::onFd(int fd, std::uint32_t flags) {
     if (vst3_) return vst3_->onFd(fd);
-    if (extFd_ && plugin_) extFd_->on_fd(plugin_, fd, flags);
+    if (!extFd_ || !plugin_) return;
+    // Another callback from the same readiness snapshot may have unregistered
+    // and closed this descriptor. Only its current owner may service it.
+    const auto& fds = hostState_->fds;
+    if (std::any_of(fds.begin(), fds.end(), [fd](const auto& entry) { return entry.first == fd; }))
+        extFd_->on_fd(plugin_, fd, flags);
 }
 
 int Instance::nextTimerMs() const {

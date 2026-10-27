@@ -127,7 +127,8 @@ nearest remaining duration rounded up to milliseconds and saturated at
 `INT_MAX`. Timers and registered descriptors remain serviceable with no editor
 open; registrations are main-thread operations, so the loop rebuilds its
 watches and deadlines after callbacks and control requests. Local timer and FD
-registration/modification/removal also notify the subscribed relay. Idle output
+registration/modification/removal also notify the subscribed relay. Callbacks
+for descriptors removed since the readiness snapshot are ignored. Idle output
 publication (or overflow) notifies after updating its queue/counter. The engine
 app subscribes persistent instances and probes to its one relay and includes
 all local subscriptions in its service deadline/FD snapshot (ADR-0030).
