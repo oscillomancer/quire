@@ -227,5 +227,6 @@ readiness is bounded on POSIX and Windows, and all text files use UTF-8. Windows
 credential hard links preserve file identity and ACLs without copying bytes;
 cross-volume link failures stay explicit. Process-tree tests check descendant
 cleanup after normal leader exit, and an echo subprocess checks stdio framing.
+Failed MCP initialization also closes the client pipes and reaps its process tree.
 The three real-sandbox scorer tests keep the exact SUPPLE_EVAL_INTEGRATION=1
 opt-in on every platform; model quality runs require an explicitly invoked runner.

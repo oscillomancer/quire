@@ -114,20 +114,41 @@ class Scoring(unittest.TestCase):
 
 
 class Isolation(unittest.TestCase):
+    def test_failed_initialization_closes_the_sandbox(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code = ("import json,sys; "
+                    "[print(json.dumps({'id': json.loads(line)['id'], "
+                    "'error': {'message': 'initialization refused'}}), flush=True) "
+                    "for line in sys.stdin]")
+            client = Mcp([sys.executable, '-u', '-c', code], directory)
+            try:
+                with self.assertRaisesRegex(ValueError, "initialization refused"):
+                    with client:
+                        self.fail("Initialization must fail before entering the body")
+                self.assertIsNotNone(client.process.poll())
+                self.assertTrue(client.process.stdin.closed)
+                self.assertTrue(client.process.stdout.closed)
+                self.assertTrue(client.stderr.closed)
+            finally:
+                stop_group(client.process)
+                client.process.stdin.close()
+                client.process.stdout.close()
+                client.stderr.close()
+
     def test_dedicated_profile_without_default_fallback(self):
         self.assertEqual(evaluation_profile(), Path.home() / ".hermes/profiles" / (slug() + "-eval"))
-        with tempfile.TemporaryDirectory(dir=ROOT / "build") as directory:
+        with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(FileNotFoundError):
                 default_model(Path(directory) / "missing/config.yaml")
 
     def test_default_identity_excludes_secrets_and_other_config(self):
-        with tempfile.TemporaryDirectory(dir=ROOT / "build") as directory:
+        with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "source.yaml"
             path.write_text('model:\n  default: cheap/model\n  provider: openrouter\n  api_key: private\nmcp_servers:\n  unrelated: bad\n', encoding="utf-8")
             self.assertEqual(default_model(path), {"default": "cheap/model", "provider": "openrouter"})
 
     def test_isolation_reference_and_tool_restriction(self):
-        with tempfile.TemporaryDirectory(dir=ROOT / "build") as directory:
+        with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             credential = root / "external.env"
             credential.write_text("OPENROUTER_API_KEY=FAKE-UNIT-TEST\n", encoding="utf-8")
