@@ -99,7 +99,9 @@ instructions are in `docs/guides/installing.md`.
   versions with stable ids, per-branch undo, branches with object-level diff
   and merge by replay (field-level conflicts, id remapping), A/B renders of
   two branches, a command log with origins, a history budget that squashes
-  the oldest steps. Project format `supple.project/2.1` with migration from
+  the oldest steps. Undo to an FX's initial unsaved settings restores its factory
+  state while retaining the previous processing instance until plan retirement.
+  Project format `supple.project/2.1` with migration from
   1.x, autosave, crash recovery of recordings, a per-project UI sidecar.
 - **Command bus** (`specs/command-bus.md`, ADR-0007): about 120 typed
   commands with JSON Schema, units, examples run as tests and structured

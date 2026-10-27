@@ -806,6 +806,25 @@ TEST_CASE("a new state blob for a processing instance goes to a fresh instance (
     CHECK(b->tail() == 3);
 }
 
+TEST_CASE("rendering an initial FX version after an edit restores identical audio") {
+    auto pool = makePool();
+    model::EditTxn add(model::Session::create({.console9 = false}), 1);
+    const Id tr = addTrack(add, "Synth");
+    addFx(add, tr, kSine);
+    const Id fx = addFx(add, tr, kGain);
+    addNote(add, tr, 0, 1);
+    const auto initial = commit(add);
+    const auto expected = render(initial, pool, 0.1).audio.channels;
+    model::EditTxn edit(initial, 2);
+    edit.modify<model::FxInstance>(fx, [](auto& f) {
+        f.patch =
+            json::parse(R"({"schema":"supple.test-gain-patch/1.0","params":{"gain":-12}})").value();
+    });
+    const auto changed = commit(edit);
+    CHECK(render(changed, pool, 0.1).audio.channels != expected);
+    CHECK(render(initial, pool, 0.1).audio.channels == expected);
+}
+
 TEST_CASE("plugin parameter automation: sample-accurate steps, ramps in the curve domain") {
     auto pool = makePool();
     auto build = [](std::string param, std::vector<model::EnvPoint> points) {

@@ -125,7 +125,12 @@ Result<host::Instance*> InstancePool::get(Id id, const model::FxInstance& fx,
     // patches are designed for live changes and stay in place).
     const bool freshForState = e.instance && !fx.patch && fx.state && desired != e.appliedState &&
                                e.instance->processing();
-    if (!e.instance || e.pluginId != fx.plugin.id || e.isolation != fx.isolation || freshForState) {
+    // Undo can return to the just-added FX, before it had any saved settings.
+    // No state document exists to load in that case; recreate its defaults,
+    // keeping any processing instance alive until its old plan is retired.
+    const bool freshForDefaults = e.instance && desired.empty() && !e.appliedState.empty();
+    if (!e.instance || e.pluginId != fx.plugin.id || e.isolation != fx.isolation || freshForState ||
+        freshForDefaults) {
         // The plan playing now may still use the old instance: keep it alive
         // until prune() says every plan that could use it is gone.
         if (e.instance) retire(std::move(e.instance));

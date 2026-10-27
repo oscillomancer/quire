@@ -164,6 +164,9 @@ edge delay histories carry when source, destination, tap, kind and delay length
 match; changed lengths start empty. New plugins are
 instantiated and activated on the main thread before the swap; parameter
 changes on existing instances become param events rather than rebuilds.
+Returning to a version with neither patch nor state after applying saved FX
+settings recreates the factory-default instance. The old instance remains alive
+until both executors release its plan, as with a changed opaque state.
 The swap: `std::atomic<const RenderPlan*>` exchanged by the model thread;
 the RT thread picks up the new pointer at the next cycle start and
 acknowledges via an epoch counter; the model thread destroys the old plan
