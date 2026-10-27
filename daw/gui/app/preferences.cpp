@@ -61,7 +61,9 @@ std::filesystem::path Preferences::defaultFile(std::string_view slug) {
 
 Result<Preferences> Preferences::load(const std::filesystem::path& file) {
     Preferences out;
-    if (file.empty() || !std::filesystem::exists(file)) return out;
+    if (file.empty()) return out;
+    std::error_code ec;
+    if (!std::filesystem::exists(file, ec) && !ec) return out;
     auto bytes = readFile(file);
     if (!bytes) return std::move(bytes).error();
     auto doc =

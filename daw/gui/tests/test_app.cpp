@@ -27,6 +27,8 @@
 #include "learn_dialog.h"
 #include "mixer.h"
 #include "mouse_dialog.h"
+#include "plugin_browser.h"
+#include "preferences.h"
 #include "screensets.h"
 #include "shell.h"
 #include "supple/audio/audio_file.h"
@@ -48,6 +50,28 @@
 #include "ui_persistence.h"
 
 using namespace supple;
+
+TEST_CASE("GUI settings report filesystem lookup errors without throwing") {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-gui-lookup-" + std::to_string(testProcessId()));
+    std::filesystem::create_directories(dir);
+    const auto file = dir / (std::string(256, 'x') + ".json");
+    std::error_code ec;
+    (void)std::filesystem::exists(file, ec);
+    REQUIRE(ec);
+    auto check = [&](auto load) {
+        CHECK(load({}));
+        CHECK(load(dir / "missing.json"));
+        CHECK_FALSE(load(file));
+    };
+    CHECK_NOTHROW(check(actions::Keymap::load));
+    CHECK_NOTHROW(check(views::MouseMap::load));
+    CHECK_NOTHROW(check(gui::ChromeLayout::load));
+    CHECK_NOTHROW(check(gui::Preferences::load));
+    CHECK_NOTHROW(check(gui::ControlMap::load));
+    CHECK_NOTHROW(check(gui::Favourites::load));
+    std::filesystem::remove_all(dir);
+}
 
 namespace {
 

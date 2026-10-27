@@ -98,6 +98,11 @@ sidecar; absent files or sections retain those defaults. Sidecars use
 `supple.ui/1.0`; a file without a `schema` reads as 1.x, and a different
 schema major is treated as absent and its file is left untouched. Save As preserves the current layout and copies it to
 the new sidecar, subject to the same schema protection.
+Filesystem lookup or read errors likewise leave the sidecar untouched and use
+the default layout on project replacement, without throwing from the GUI loop.
+User-setting loaders (keymaps, mouse maps, menus, preferences, MIDI controls and
+plug-in favourites) return file errors for failed lookups; only genuinely absent
+files select defaults.
 
 Any input event (including editor geometry) or command processed on main arms
 one compare/write check about a second later. Continued input coalesces into

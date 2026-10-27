@@ -223,7 +223,9 @@ Result<MouseMap> MouseMap::fromJson(const json::Value& doc) {
 }
 
 Result<MouseMap> MouseMap::load(const std::filesystem::path& file) {
-    if (file.empty() || !std::filesystem::exists(file)) return MouseMap{};
+    if (file.empty()) return MouseMap{};
+    std::error_code ec;
+    if (!std::filesystem::exists(file, ec) && !ec) return MouseMap{};
     auto bytes = readFile(file);
     if (!bytes) return std::move(bytes).error();
     auto doc =

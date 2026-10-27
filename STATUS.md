@@ -663,6 +663,10 @@ Session and editing:
   squashed steps keep large invocation arguments.
 
 GUI:
+- Settings loaders return file errors for failed filesystem lookups; sidecar
+  lookup failures preserve the file and fall back to default layout without
+  throwing. Linux regression tests cover overlong filenames; native macOS and
+  Windows validation of this error path remains pending.
 - The opt-in native popup-focus regression passes on Hyprland/XWayland,
   including typing and Escape after a forwarded floating-window shortcut.
   Opening a popup in an already-key owner skips raising it, preserving Cocoa
