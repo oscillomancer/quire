@@ -80,7 +80,7 @@ def default_model(source):
         model = json.loads(text)["model"]
         result = {key: value for key, value in model.items() if key in keys}
     else:
-        block = re.search(r"(?m)^model:\s*\n((?:[ \t]+[^\n]*\n|\n)*)", text)
+        block = re.search(r"(?m)^model:\s*\n((?:[ \t]+[^\n]*\n|\n)*)", text + "\n")
         if not block:
             raise ValueError("Hermes model config needs a simple model mapping, or --model-config JSON")
         result = {}

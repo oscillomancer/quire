@@ -147,6 +147,15 @@ class Isolation(unittest.TestCase):
             path.write_text('model:\n  default: cheap/model\n  provider: openrouter\n  api_key: private\nmcp_servers:\n  unrelated: bad\n', encoding="utf-8")
             self.assertEqual(default_model(path), {"default": "cheap/model", "provider": "openrouter"})
 
+    def test_model_yaml_accepts_eof_without_newline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.yaml"
+            for ending in ("", "\n", "\r\n"):
+                with self.subTest(ending=repr(ending)):
+                    path.write_text("model:\n  default: test/model\n  provider: test" + ending,
+                                    encoding="utf-8")
+                    self.assertEqual(default_model(path), {"default": "test/model", "provider": "test"})
+
     def test_isolation_reference_and_tool_restriction(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
