@@ -693,6 +693,11 @@ GUI:
   mixer strips but not onto track-panel rows.
 
 Plugins:
+- Ghyll, Pollia and Withy discard non-finite inputs before their recursive
+  state. Their mono/stereo regressions and the script runtime's enum bounds
+  and prepared-tail lifecycle fixes pass focused Linux dev/RTSan checks.
+  Native macOS/Windows CI remains pending for these changes and the player's
+  Unicode library filename discovery fix.
 - DSP source exports require a visible, automatable parameter with a plain
   name for their host tests and do not retain the JIT's loop budget (a loop
   that never ends hangs a native export). Exports include declared factory

@@ -1490,8 +1490,10 @@ struct Ghyll : Effect {
             highW = hc < 19500.0 ? min(1.0, highW + cutStep) : max(0.0, highW - cutStep);
             retune(lc, hc);
 
-            const double l = io[0][i];
-            const double r = chans > 1 ? io[1][i] : l;
+            double l = io[0][i];
+            double r = chans > 1 ? io[1][i] : l;
+            if (!isFinite(l)) l = 0.0;
+            if (!isFinite(r)) r = 0.0;
             const double open = 1.0 - frozenW;
             bands.push(0.5 * (l + r) * open);
 

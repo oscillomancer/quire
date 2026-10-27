@@ -630,6 +630,8 @@ struct Pollia : Effect {
         double lastFb = 2.0, lastMix = -1.0, lastDb = 25.0;
         double level = 1.0, outGain = 1.0;
         for (int i = 0; i < io.frames; ++i) {
+            for (int c = 0; c < chans; ++c)
+                if (!isFinite(io[c][i])) io[c][i] = 0.0;
             // The motion: the left's cycle position, the right's ahead of it.
             const double pos = cyclePos(io, i);
             if (locked) {
