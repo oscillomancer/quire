@@ -208,7 +208,7 @@ Result<std::vector<std::uint8_t>> encodeWav(const AudioData& data, const WavOpti
                      "got " + std::to_string(channels));
     for (const auto& c : data.channels)
         if (c.size() != frames) return Error("audio.encode", "channels have different lengths");
-    if (!(data.sampleRate > 0) || data.sampleRate > 768000)
+    if (!std::isfinite(data.sampleRate) || data.sampleRate < 1 || data.sampleRate > 768000)
         return Error("audio.encode", "invalid sample rate", {}, "use 1 .. 768000 Hz");
 
     drwav_data_format format{};
