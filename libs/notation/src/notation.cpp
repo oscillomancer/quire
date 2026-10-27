@@ -79,35 +79,32 @@ std::vector<Statement> lex(std::string_view input) {
     return result;
 }
 
-int distance(std::string_view a, std::string_view b) {
-    const int n = static_cast<int>(a.size()), m = static_cast<int>(b.size());
-    std::vector<std::vector<int>> d(static_cast<std::size_t>(n + 1),
-                                    std::vector<int>(static_cast<std::size_t>(m + 1)));
-    for (int i = 0; i <= n; ++i) d[static_cast<std::size_t>(i)][0] = i;
-    for (int j = 0; j <= m; ++j) d[0][static_cast<std::size_t>(j)] = j;
-    for (int i = 1; i <= n; ++i)
-        for (int j = 1; j <= m; ++j) {
-            auto& cell = d[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)];
-            cell = std::min(
-                {d[static_cast<std::size_t>(i - 1)][static_cast<std::size_t>(j)] + 1,
-                 d[static_cast<std::size_t>(i)][static_cast<std::size_t>(j - 1)] + 1,
-                 d[static_cast<std::size_t>(i - 1)][static_cast<std::size_t>(j - 1)] +
-                     (a[static_cast<std::size_t>(i - 1)] != b[static_cast<std::size_t>(j - 1)])});
-            if (i > 1 && j > 1 &&
-                a[static_cast<std::size_t>(i - 1)] == b[static_cast<std::size_t>(j - 2)] &&
-                a[static_cast<std::size_t>(i - 2)] == b[static_cast<std::size_t>(j - 1)])
-                cell = std::min(
-                    cell, d[static_cast<std::size_t>(i - 2)][static_cast<std::size_t>(j - 2)] + 1);
+std::size_t distance(std::string_view a, std::string_view b) {
+    std::vector<std::size_t> older(b.size() + 1), previous(b.size() + 1), row(b.size() + 1);
+    for (std::size_t j = 0; j <= b.size(); ++j) previous[j] = j;
+    for (std::size_t i = 1; i <= a.size(); ++i) {
+        row[0] = i;
+        for (std::size_t j = 1; j <= b.size(); ++j) {
+            row[j] = std::min(
+                {previous[j] + 1, row[j - 1] + 1, previous[j - 1] + (a[i - 1] != b[j - 1])});
+            if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1])
+                row[j] = std::min(row[j], older[j - 2] + 1);
         }
-    return d[static_cast<std::size_t>(n)][static_cast<std::size_t>(m)];
+        older.swap(previous);
+        previous.swap(row);
+    }
+    return previous[b.size()];
 }
 
-// Swap this one call for supple::base::closestMatch when core-base supplies it.
+// Notation hints use case-sensitive transpositions and declaration-order ties.
 std::string closest(std::string_view input, const std::vector<std::string>& choices) {
     std::string answer;
-    int best = 100000;
+    std::size_t best = 100000;
     for (const auto& choice : choices) {
-        const int cost = distance(input, choice);
+        const auto difference = input.size() > choice.size() ? input.size() - choice.size()
+                                                             : choice.size() - input.size();
+        if (difference >= best) continue;
+        const auto cost = distance(input, choice);
         if (cost < best) {
             best = cost;
             answer = choice;
