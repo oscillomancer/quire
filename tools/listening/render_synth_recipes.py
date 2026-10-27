@@ -9,6 +9,8 @@ Defaults: build/release binaries and the stock synth, renders/listening/synth-re
 import argparse, json, os, re, shutil, subprocess, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+with open(os.path.join(ROOT, "cmake/Product.cmake"), encoding="utf-8") as product:
+    PRODUCT_SLUG = re.search(r'set\(PRODUCT_SLUG\s+"([a-z0-9-]+)"\)', product.read())[1]
 
 # A phrase per recipe (by its bold title in the guide): what exercises it.
 PHRASES = {
@@ -70,7 +72,7 @@ def recipes():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--sandbox", default=os.path.join(ROOT, "build/release/host/sandbox/quire-sandbox"))
+    ap.add_argument("--sandbox", default=os.path.join(ROOT, "build/release/host/sandbox", PRODUCT_SLUG + "-sandbox"))
     ap.add_argument("--plugin", default=os.path.join(ROOT, "build/release/plugins/clap/Marram.clap"))
     ap.add_argument("--out", default=os.path.join(ROOT, "renders/listening/synth-recipes"))
     a = ap.parse_args()

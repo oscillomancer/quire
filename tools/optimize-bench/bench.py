@@ -25,7 +25,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 sys.path.insert(0, str(ROOT / "tools/eval-harness"))
 
-from common import SYNTH_NAME, Mcp, load_tasks, sandbox_command, setup, write_json  # noqa: E402
+from common import SYNTH_NAME, Mcp, load_tasks, sandbox_command, setup, slug, write_json  # noqa: E402
 
 DEFAULT_MODES = ("auto", "module")
 
@@ -239,7 +239,7 @@ def main(argv=None):
     records.sort(key=lambda r: r["task"])
     summary = summarize(records, options)
     summary["wall_seconds"] = round(time.monotonic() - started, 1)
-    summary["sandbox"] = str(options.sandbox or (ROOT / "build/dev/host/sandbox" / "quire-sandbox"))
+    summary["sandbox"] = str(options.sandbox or (ROOT / "build/dev/host/sandbox" / (slug() + "-sandbox")))
 
     options.out_dir.mkdir(parents=True, exist_ok=True)
     json_path = options.out_dir / f"{options.label}.json"
