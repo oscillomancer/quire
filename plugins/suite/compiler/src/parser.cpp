@@ -726,7 +726,7 @@ class Parser {
             error(loc, "script.unsupported.c_array",
                   "C arrays are not checked, so the subset leaves them out",
                   "write Array<" + elem + ", " + (n.empty() ? "N" : n) + "> " + name +
-                      ";  (an out-of-range index reads 0 and is reported)");
+                      ";  (an out-of-range index uses a spare element and is reported)");
             while (atPunct("[")) {
                 while (!atPunct("]") && !at(Tok::End)) advance();
                 accept("]");

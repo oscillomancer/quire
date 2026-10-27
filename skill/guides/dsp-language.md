@@ -621,16 +621,30 @@ A script cannot do what C++ leaves undefined. The compiler refuses:
 - constant int arithmetic that overflows (`2147483647 + 1`); values computed
   at run time wrap.
 
-At run time: an index outside an `Array`, `Buffer` or channel reads 0 and a
-write to it goes nowhere, and the host's log names the line. For an enum
-element, zero means the enum value with underlying integer 0. Each hook has a
+At run time, invalid indices are reported with their source line. An index
+outside a numeric `Array`, `Buffer` or channel reads 0; enum elements read
+the value with underlying integer 0. An `Array` of trivially copyable
+aggregates (plain structs of numbers/enums, including nested arrays) resets
+its spare element to the type's default-constructed value on **each invalid
+access**, including declared member defaults. Writes affect only that spare
+and are discarded by the next invalid access. A reference to the spare
+aliases it and observes the next reset too.
+
+An `Array` whose elements hold resources (`Buffer`, `DelayLine`,
+`Oversampler`, `Stft`, or structs containing them) instead keeps a persistent
+spare: invalid accesses share its state, including earlier writes. Resetting
+such an element could allocate or free on the audio thread. Valid elements
+are never touched by invalid accesses. These rules are identical in native,
+JIT and interpreter execution.
+
+Each hook has a
 budget of loop iterations and calls (65,536 per frame in `process`); a
 script that spends it is stopped and silent until it is reset or reloaded,
 and the log names the line.
 
 These guards are the player's. A source export (`dsp_export` with
-`format: "source"`) is ordinary C++: an invalid index still reads 0 and is
-reported without a line, but there is no budget, so a loop that never ends
+`format: "source"`) is ordinary C++: invalid indices follow the same spare
+rules and are reported without a line, but there is no budget, so a loop that never ends
 hangs the plugin. Test a script in the player before exporting its source.
 
 Inspect a loaded instance with `fx_describe` (DAW) or `plugin_describe`

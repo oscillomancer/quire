@@ -58,8 +58,10 @@ The suite's `ScriptLayer` exposes:
 
 - `script.runtime.budget`: the hook budget was exceeded, with its first
   source line and actual stopped/silent state.
-- `script.runtime.index`: an index was out of range; the read returned zero
-  or the write was discarded. It does not itself silence the plugin.
+- `script.runtime.index`: an index was out of range. Numeric/enum spares
+  reset to zero and trivially copyable aggregate spares to their declared
+  defaults on each invalid access; resource-bearing spares retain state.
+  It does not itself silence the plugin (see `skill/guides/dsp-language.md`).
 - `script.editor.budget` / `script.editor.index`: observations from a
   script editor that has run, including offscreen pictures, scoped to the
   editor and never marked audio-silent.

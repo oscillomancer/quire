@@ -89,8 +89,10 @@ plugin. The language: `guides/dsp-language.md` (read it first; it is short).
    `fx_describe {fx}` in the DAW, `plugin_describe {instance}` in the sandbox.
    `status_available: true` adds structured `problems` with `code`, `message`,
    `scope`, `line` when known, `hint` and `silent`. Follow the hint: a loop
-   budget stops the audio; an array index outside its bounds reads zero and
-   drops writes; a failed saved edit keeps the older code loaded. Fix and
+   budget stops the audio; an invalid numeric index reads zero. Plain
+   aggregate array elements reset to their defaults on each invalid access;
+   resource-bearing elements share a persistent spare that retains writes
+   (see `dsp-language.md`). A failed saved edit keeps the older code loaded. Fix and
    save again, then inspect again. Editor problems have `scope: "editor"`
    and do not mean the audio is silent. `status_available: false` means no
    report is available (the DAW needs a live instance), not that it is healthy.

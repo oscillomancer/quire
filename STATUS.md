@@ -694,7 +694,7 @@ GUI:
 
 Plugins:
 - Ghyll, Pollia and Withy discard non-finite inputs before their recursive
-  state. Their mono/stereo regressions and the script runtime's enum bounds
+  state. Their mono/stereo regressions and the script runtime's scalar/aggregate bounds
   and prepared-tail lifecycle fixes pass focused Linux dev/RTSan checks.
   Native macOS/Windows CI remains pending for these changes and the player's
   Unicode library filename discovery fix.

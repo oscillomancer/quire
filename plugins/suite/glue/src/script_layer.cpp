@@ -119,11 +119,10 @@ bool ScriptLayer::getStatus(const clap_ostream_t* out) {
                                    s.budgetLine.load(std::memory_order_relaxed),
                                    s.silent.load(std::memory_order_relaxed)));
     if (s.outOfRange.load(std::memory_order_relaxed))
-        problems.push_back(
-            problem("script.runtime.index",
-                    "An index was outside an array; reads returned zero and writes were discarded.",
-                    "audio", "Check the index and array size, then save the script again.",
-                    s.outOfRangeLine.load(std::memory_order_relaxed), false));
+        problems.push_back(problem(
+            "script.runtime.index", "An index was outside an array; it accessed the spare element.",
+            "audio", "Check the index and array size, then save the script again.",
+            s.outOfRangeLine.load(std::memory_order_relaxed), false));
     for (const auto& p : editorProblems_->asArray()) problems.push_back(p);
     if (!reloadProblem_.isNull()) problems.push_back(reloadProblem_);
     doc["problems"] = std::move(problems);
@@ -198,7 +197,7 @@ void ScriptLayer::reportStatus() {
     if (range != 0 && outOfRangeReported_ == 0) {
         instance().log(CLAP_LOG_INFO, "the script indexed outside an array" +
                                           at(status.outOfRangeLine) +
-                                          " (it read 0 there; a write went nowhere)");
+                                          " (it accessed the spare element)");
     }
     outOfRangeReported_ = range;
 }

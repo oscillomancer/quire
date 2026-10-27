@@ -18,6 +18,7 @@
 #pragma once
 
 #include <initializer_list>
+#include <new>
 #include <type_traits>
 
 namespace supple::script {
@@ -110,8 +111,9 @@ void declareShared(void* member, int bytes);
 }  // namespace detail
 
 // A fixed-size array. Indexing is checked: an index outside 0..N-1 refers to
-// a spare element instead (for numbers it reads 0, and what is written to it
-// is lost), and the script's status reports the line. It starts zeroed, or
+// a spare element instead, reset to T{} on each invalid access when T is
+// trivially copyable; resource-bearing elements keep their spare's state.
+// The script's status reports the line. It starts zeroed, or
 // from a list: Array<float, 4> taps = {0.1f, 0.2f, 0.3f, 0.4f};
 template <class T, int N>
 struct Array {
@@ -120,7 +122,8 @@ struct Array {
     T& operator[](int i) {
         if (static_cast<unsigned>(i) < static_cast<unsigned>(N)) return items_[i];
         detail::outOfRange(0);
-        if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T>) spare_ = T();
+        // Construct in place: a large aggregate needs no audio-stack temporary.
+        if constexpr (std::is_trivially_copyable_v<T>) ::new (static_cast<void*>(&spare_)) T();
         return spare_;
     }
     const T& operator[](int i) const { return const_cast<Array&>(*this)[i]; }

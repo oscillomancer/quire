@@ -222,6 +222,7 @@ struct Registrar {
 
     template <class T>
     void lifetime(BuiltinClass* c) {
+        c->triviallyCopyable = std::is_trivially_copyable_v<T>;
         c->construct = +[](void* p) { new (p) T(); };
         c->destroy = +[](void* p) { static_cast<T*>(p)->~T(); };
         c->copy = +[](void* d, const void* s) { *static_cast<T*>(d) = *static_cast<const T*>(s); };
