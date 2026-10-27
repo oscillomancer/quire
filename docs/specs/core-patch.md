@@ -82,7 +82,8 @@ Same major and minor ≤ current: strict (unknown members are errors). Same
 major, newer minor: unknown members ignored with warnings. Older major:
 migrations applied in order, then parsed at the current version. Newer
 major: `patch.too_new`. Malformed schema string: `patch.bad_schema_id` with
-the expected form.
+the expected form. The major version must be positive and the minor
+version nonnegative.
 
 ## 3. Flat-parameter patches
 

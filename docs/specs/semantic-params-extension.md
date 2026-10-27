@@ -278,8 +278,9 @@ patch as a chunk.
   `VALIDATE_ONLY` included, must be absolute and name an existing file of
   one of those types that the plugin can read (the script player opens it
   with its decoder); otherwise the call fails with `properties.file` at
-  `/properties/<key>`, saying why, and nothing changes. `""` means none. A
-  path the plugin already holds passes as it is, found or not, so a patch
+  `/properties/<key>`, saying why, and nothing changes. `""` means none.
+  A file path containing NUL is invalid, including a path already held.
+  Any other path the plugin already holds passes as it is, found or not, so a patch
   read and set again still applies; loading state never refuses a missing
   file (the framework relocates a moved one, or reports it missing).
   `set_patch` returns once the file is loaded, so the next block, offline
