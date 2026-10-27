@@ -201,3 +201,5 @@ RT-safe conversions inside a `SUPPLE_RT` function.
   normalization never overflows.
 - OffAtMin accepts `off`, `-inf`, `-inf dB`, `-∞` (and `-∞ dB`); a bare `inf`
   is no longer an alias for off.
+- Bipolar midpoint arithmetic halves the endpoints before adding when their
+  sum overflows; ordinary ranges retain their existing rounding.

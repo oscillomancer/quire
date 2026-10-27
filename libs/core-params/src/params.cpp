@@ -150,6 +150,12 @@ bool withinRange(const ParamSpec& p, double v) {
     const double hi = 1e-9 * std::max(1.0, std::fabs(p.max));
     return v >= p.min - lo && v <= p.max + hi;
 }
+
+double midpoint(const ParamSpec& p) {
+    const double sum = p.min + p.max;
+    // Preserve ordinary rounding; halve first only when the sum overflows.
+    return std::isfinite(sum) ? 0.5 * sum : 0.5 * p.min + 0.5 * p.max;
+}
 }  // namespace
 
 Status validateTable(Table table) {
@@ -275,7 +281,7 @@ double toNormalized(const ParamSpec& p, double physical) SUPPLE_RT {
                 n = std::pow((v - p.min) / (p.max - p.min), 1.0 / p.curve.k);
                 break;
             case CurveKind::Bipolar: {
-                const double mid = 0.5 * (p.min + p.max);
+                const double mid = midpoint(p);
                 const double half = 0.5 * (p.max - p.min);
                 const double u = (v - mid) / half;
                 const double t = std::copysign(std::pow(std::fabs(u), 1.0 / p.curve.k), u);
@@ -305,7 +311,7 @@ double fromNormalized(const ParamSpec& p, double normalized) SUPPLE_RT {
             v = p.min + (p.max - p.min) * std::pow(n, p.curve.k);
             break;
         case CurveKind::Bipolar: {
-            const double mid = 0.5 * (p.min + p.max);
+            const double mid = midpoint(p);
             const double half = 0.5 * (p.max - p.min);
             const double t = 2.0 * n - 1.0;
             v = mid + half * std::copysign(std::pow(std::fabs(t), p.curve.k), t);
