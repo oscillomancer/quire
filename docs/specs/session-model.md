@@ -436,7 +436,11 @@ ADR-0030), only when a named project's head changed since the last one and
 60 s of monotonic service time have passed. Unchanged/unnamed projects have no
 autosave deadline; an overdue edit arms immediate service. A failed write
 waits 60 s before retrying. History timestamps still use wall time, and
-`<n>` counts up from the highest present. `project.open` of a file that has
+`<n>` is a positive unsigned 64-bit decimal index and counts up from the highest
+present. Discovery and rotation ignore names with nonnumeric or out-of-range
+suffixes (such as `autosave-1-backup.json`). An exhausted index reports
+`autosave.index` without writing or pruning, and retries after the same interval.
+`project.open` of a file that has
 a newer autosave next to it reports `autosave_available` and loads nothing
 from it; opening the autosave file itself is how it comes back.
 

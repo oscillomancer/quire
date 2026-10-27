@@ -627,6 +627,8 @@ Engine and hosting:
   are).
 
 Session and editing:
+- Autosave discovery and rotation match the whole numbered filename, preserve
+  backup names, and handle index exhaustion without overflow or pruning.
 - Master playrate 0.25..4x and its tr_0 envelope persist in schema 2.1.
   Tape and pitch-preserving source conversion run before take FX/live mixing;
   MIDI, automation, plugin tempo, loops and transport share the fractional clock
