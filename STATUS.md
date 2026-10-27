@@ -72,6 +72,8 @@ source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows
 Failed MCP initialization closes the evaluation client's pipes and process tree;
 its standalone unit fixtures also run before configuring a build. The new
 cleanup regression passes locally on Linux; macOS/Windows CI is pending.
+The offscreen mockup tool uses the shared native pipe-readiness helper and
+closes its MCP streams. Its Linux transport fixture passes; native runs are pending.
 
 Packaging (ADR-0048) has CMake install components, a relocatable Linux tarball
 and user-space installer, an Apple Silicon app/dmg and Windows per-user NSIS

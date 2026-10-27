@@ -17,7 +17,6 @@ import argparse
 import json
 import os
 import re
-import select
 import subprocess
 import sys
 from pathlib import Path
@@ -25,6 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests" / "integration"))
 from mcp_arrangement import BASS, LEAD, PAD  # noqa: E402
+from pipe_ready import wait_pipe  # noqa: E402
 
 SYNTH = "com.suppleaudio.marram"
 ARP = {"schema": "supple.marram-patch/1.0", "name": "Glass arp",
@@ -77,7 +77,7 @@ class Mcp:
         if notify:
             return None
         while b"\n" not in self.pending:
-            if not select.select([self.process.stdout], [], [], 300)[0]:
+            if not wait_pipe(self.process.stdout, 300):
                 raise RuntimeError("MCP server timed out")
             chunk = os.read(self.process.stdout.fileno(), 1 << 16)
             if not chunk:
@@ -95,8 +95,15 @@ class Mcp:
         return result["structuredContent"]
 
     def close(self):
-        self.process.stdin.close()
-        self.process.wait(timeout=30)
+        try:
+            self.process.stdin.close()
+            self.process.wait(timeout=30)
+        finally:
+            if self.process.poll() is None:
+                self.process.kill()
+                self.process.wait(timeout=5)
+            self.process.stdout.close()
+            self.process.stderr.close()
 
 
 def step(command, args, key=None):
@@ -171,6 +178,7 @@ def build_session(engine, plugin_dir, workdir):
         if mcp.process.poll() is None:
             mcp.process.kill()
             mcp.process.wait(timeout=5)
+        mcp.close()
     return {"bass-item": ids["bass_item_1"]["item"], "lead-item": ids["lead_item_9"]["item"],
             "bass-track": ids["bass"]["track"]}
 
