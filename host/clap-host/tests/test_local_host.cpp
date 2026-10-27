@@ -11,6 +11,7 @@
 #include <thread>
 #include <vector>
 #include "../src/platform.h"
+#include "../src/unicode.h"
 #include "supple/clap/semantic_params.h"
 #include "supple/host/clap_host.h"
 #include "supple/json/json.h"
@@ -60,6 +61,24 @@ double gainClap(double db) {
 
 }  // namespace
 
+TEST_CASE("host Unicode conversion bounds and validates plugin text") {
+    const char16_t text[] = {u'A', 0x00e9, 0xd83d, 0xde00, u'Z', 0};
+    const std::string utf8 = "A\xc3\xa9\xf0\x9f\x98\x80Z";
+    CHECK(unicode::toUtf8(text) == utf8);
+    std::array<char16_t, 6> decoded{};
+    REQUIRE(unicode::toUtf16(utf8, decoded));
+    CHECK(std::equal(decoded.begin(), decoded.end(), std::begin(text)));
+    const char16_t malformed[] = {0xd800, u'x', 0xdc00, 0xd800};
+    CHECK(unicode::toUtf8(malformed) == "\xef\xbf\xbdx\xef\xbf\xbd\xef\xbf\xbd");
+    for (const std::string bad : {"\x80", "\xc0\x80", "\xe0\x80\x80", "\xed\xa0\x80",
+                                  "\xf4\x90\x80\x80", "\xe2\x82", "\xc2x"})
+        CHECK_FALSE(unicode::toUtf16(bad, decoded));
+    CHECK_FALSE(unicode::toUtf16(utf8, std::span(decoded).first(5)));
+    CHECK(unicode::toUtf16("", decoded));
+    CHECK(decoded[0] == 0);
+    CHECK_FALSE(unicode::toUtf16("", {}));
+}
+
 TEST_CASE("VST3 fixture scans, processes, and restores state") {
     auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
     REQUIRE(found);
@@ -82,6 +101,9 @@ TEST_CASE("VST3 fixture scans, processes, and restores state") {
     auto parsed = instance.paramFromText(1, *text);
     REQUIRE(parsed);
     CHECK(*parsed == doctest::Approx(0.25));
+    auto invalid = instance.paramFromText(1, "\xed\xa0\x80");
+    REQUIRE_FALSE(invalid);
+    CHECK(invalid.error().code == "host.param_text");
     auto state = instance.saveState();
     REQUIRE_MESSAGE(state, (state ? "" : state.error().message));
     REQUIRE(instance.setParam(1, 0.75));

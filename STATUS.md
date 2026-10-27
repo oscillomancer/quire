@@ -636,11 +636,9 @@ Engine and hosting:
 - A bridged plug-in's tail is read once when a sandbox render starts, so a
   tail it changes during that render is not followed (in-process plug-ins'
   are).
-- The vendored VST3 SDK's string converters share mutable state: concurrent
-  host calls on different instances race (confirmed by a standalone Linux
-  TSan reproduction). Invalid UTF-16 from a plugin can also throw through
-  the converter. Host-side bounds checks prevent overreads but do not fix
-  these SDK conversion issues; native-platform verification is pending.
+- VST3 host text conversion uses bounded, per-call Unicode conversion instead
+  of the SDK's shared converter. Unpaired UTF-16 surrogates become U+FFFD;
+  malformed UTF-8 parameter input is refused. Native verification is pending.
 
 Session and editing:
 - Master playrate 0.25..4x and its tr_0 envelope persist in schema 2.1.

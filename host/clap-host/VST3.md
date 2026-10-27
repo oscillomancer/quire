@@ -13,6 +13,11 @@ when available, then falls back to factory metadata. IDs are `vst3:` followed
 by the class's 32 hexadecimal digits. `PluginInfo::format` selects the VST3
 backing of `host::Instance`, and the bridge forwards that format unchanged.
 
+Host names and bus/parameter text use host-local, bounded UTF-8/UTF-16
+conversion with no shared state or conversion exceptions. Unpaired UTF-16
+surrogates become U+FFFD; malformed UTF-8 passed to `paramFromText` is refused
+with `host.param_text` before calling the plugin.
+
 VST3 parameter queries and setters use plain values; process events use
 normalized values. Input and output event/parameter arenas have
 fixed capacities and are allocated before processing. The SDK's

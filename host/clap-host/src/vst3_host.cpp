@@ -5,6 +5,7 @@
 #include "main_thread_wake.h"
 #include "pending_edits.h"
 #include "platform.h"
+#include "unicode.h"
 
 #include <algorithm>
 #include <array>
@@ -37,7 +38,6 @@
 #include "public.sdk/source/vst/hosting/hostclasses.h"
 #include "public.sdk/source/vst/hosting/module.h"
 #include "public.sdk/source/vst/utility/memoryibstream.h"
-#include "public.sdk/source/vst/utility/stringconvert.h"
 #include "supple/base/spsc.h"
 #include "supple/json/json.h"
 
@@ -237,8 +237,8 @@ class HostContext : public vst::HostApplication {
   public:
     explicit HostContext(std::string name) : name_(std::move(name)) {}
     Steinberg::tresult PLUGIN_API getName(vst::String128 name) override {
-        return vst::StringConvert::convert(name_, name) ? Steinberg::kResultTrue
-                                                        : Steinberg::kInternalError;
+        return unicode::toUtf16(name_, std::span(name, 128)) ? Steinberg::kResultTrue
+                                                             : Steinberg::kInternalError;
     }
 
   private:
@@ -510,7 +510,7 @@ Result<std::unique_ptr<Vst3Instance>> Vst3Instance::create(const PluginInfo& inf
                 return Error("host.layout", "VST3 audio bus exceeds 64 channels");
             channels->push_back(ok ? static_cast<std::uint32_t>(std::max(bus.channelCount, 0)) : 0);
             if (dir == vst::kOutput)
-                s.outBusNames.push_back(ok ? vst::StringConvert::convert(bus.name) : std::string());
+                s.outBusNames.push_back(ok ? unicode::toUtf8(bus.name) : std::string());
             if (ok && dir == vst::kInput && b > 0 && bus.busType == vst::kAux && s.keyBus < 0 &&
                 bus.channelCount > 0)
                 s.keyBus = b;
@@ -533,8 +533,7 @@ Result<std::unique_ptr<Vst3Instance>> Vst3Instance::create(const PluginInfo& inf
             if (p.flags & vst::ParameterInfo::kIsHidden) flags |= CLAP_PARAM_IS_HIDDEN;
             if (p.flags & vst::ParameterInfo::kIsBypass) flags |= CLAP_PARAM_IS_BYPASS;
             s.parameters.push_back(
-                {p.id, vst::StringConvert::convert(p.title), "",
-                 s.controller->normalizedParamToPlain(p.id, 0),
+                {p.id, unicode::toUtf8(p.title), "", s.controller->normalizedParamToPlain(p.id, 0),
                  s.controller->normalizedParamToPlain(p.id, 1),
                  s.controller->normalizedParamToPlain(p.id, p.defaultNormalizedValue), flags});
         }
@@ -696,13 +695,12 @@ Result<std::string> Vst3Instance::paramText(std::uint32_t id, double plain) cons
     if (state_->controller->getParamStringByValue(id, normalized, text) != kResultOk)
         return Error("host.param", "VST3 has no text for parameter " + std::to_string(id));
     text[std::size(text) - 1] = 0;
-    return vst::StringConvert::convert(text);
+    return unicode::toUtf8(text);
 }
 Result<double> Vst3Instance::paramFromText(std::uint32_t id, std::string_view text) const {
     if (!state_->controller) return Error("host.param_text", "VST3 has no controller");
     vst::String128 utf16{};
-    if (!vst::StringConvert::convert(std::string(text), utf16))
-        return Error("host.param_text", "invalid parameter text");
+    if (!unicode::toUtf16(text, utf16)) return Error("host.param_text", "invalid parameter text");
     vst::ParamValue normalized = 0;
     if (state_->controller->getParamValueByString(id, utf16, normalized) != kResultOk)
         return Error("host.param_text", "VST3 could not read parameter text");
