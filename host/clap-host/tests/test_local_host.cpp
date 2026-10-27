@@ -74,6 +74,7 @@ TEST_CASE("VST3 fixture scans, processes, and restores state") {
     REQUIRE(made);
     auto& instance = **made;
     REQUIRE(instance.params().size() == 1);
+    CHECK((instance.params()[0].flags & CLAP_PARAM_IS_AUTOMATABLE) != 0);
     REQUIRE(instance.setParam(1, 0.25));
     CHECK(*instance.paramValue(1) == doctest::Approx(0.25));
     auto text = instance.paramText(1, 0.25);

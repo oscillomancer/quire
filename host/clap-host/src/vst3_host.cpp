@@ -527,6 +527,7 @@ Result<std::unique_ptr<Vst3Instance>> Vst3Instance::create(const PluginInfo& inf
             p.title[std::size(p.title) - 1] = 0;
             std::uint32_t flags = 0;
             if (p.stepCount > 0) flags |= CLAP_PARAM_IS_STEPPED;
+            if (p.flags & vst::ParameterInfo::kCanAutomate) flags |= CLAP_PARAM_IS_AUTOMATABLE;
             if (p.flags & vst::ParameterInfo::kIsList) flags |= CLAP_PARAM_IS_ENUM;
             if (p.flags & vst::ParameterInfo::kIsReadOnly) flags |= CLAP_PARAM_IS_READONLY;
             if (p.flags & vst::ParameterInfo::kIsHidden) flags |= CLAP_PARAM_IS_HIDDEN;

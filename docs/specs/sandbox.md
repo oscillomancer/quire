@@ -82,6 +82,9 @@ an output event sink (param gestures/values the plugin emits), transport
 (tempo, beat position, bar start, time signature, playing flag), and a
 steady-time sample counter.
 
+`ParamInfo::flags` uses CLAP parameter bits for both formats. In particular,
+VST3 `kCanAutomate` maps to `CLAP_PARAM_IS_AUTOMATABLE`.
+
 The host implements: `clap.log` (to the host log, never on the audio
 thread synchronously: audio-thread log calls go to a lock-free ring),
 `clap.params` (rescan/clear/request_flush), `clap.state` (mark_dirty),
