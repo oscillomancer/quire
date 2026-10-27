@@ -13,8 +13,8 @@ when available, then falls back to factory metadata. IDs are `vst3:` followed
 by the class's 32 hexadecimal digits. `PluginInfo::format` selects the VST3
 backing of `host::Instance`, and the bridge forwards that format unchanged.
 
-VST3 parameters cross the host API in plain values. The backing normalizes
-them for VST3 process queues. Input and output event/parameter arenas have
+VST3 parameter queries and setters use plain values; process events use
+normalized values. Input and output event/parameter arenas have
 fixed capacities and are allocated before processing. The SDK's
 `ParameterChanges` helper is deliberately not used on the audio thread: its
 point vectors grow during `addPoint`. `EventList` uses storage allocated at
@@ -51,7 +51,7 @@ flush (no audio buses), then saves component and separate controller state.
 active saves require the audio consumer to have delivered queued edits first.
 The fixture includes a separate-controller gain to exercise this distinction.
 
-Audio layouts are bounded at 16 buses per direction and 64 channels per bus;
+Audio layouts are bounded at 128 buses per direction and 64 channels per bus;
 oversized declared or negotiated layouts fail with `host.layout`. Main widths
 are reported accurately; bridged main/key buses have a further 16-channel cap.
 Notes are tracked with counts and note ids in a bounded arena. Wildcard note
@@ -63,4 +63,4 @@ commit `a3911a4615dabbfdfd9d181ee26b05c70c289a95`, the submodule pinned by
 SDK commit `9fad977`. macOS builds module_mac.mm with Cocoa/CoreFoundation;
 Windows builds module_win32.cpp with shell32/ole32/uuid. The in-tree fixture
 uses native bundle binary paths and entry points. See sandbox.md for search
-paths, scanning and the temporary non-Linux bridge/editor errors.
+paths, supervised scanning and native bridge/editor behavior on all three platforms.

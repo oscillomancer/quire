@@ -225,7 +225,7 @@ requires the separate port-gui integration.
 ADR-0037 extends the subscription to native WakeEvent signal targets:
 Linux eventfd (unchanged), a nonblocking write-only pipe on macOS, and a
 manual-reset event duplicated into the child on Windows. POSIX negotiates
-version 17; Windows negotiates native version 18. Invalid resource types,
+version 19; Windows negotiates native version 20. Invalid resource types,
 counts, versions and duplicate subscriptions remain structured errors.
 The Windows control channel transfers recipient-owned handle values; the
 parent rejects handle-bearing replies without acting on the claimed value.
@@ -254,7 +254,7 @@ objects above implement the same publication and lifetime contracts.
 
 Before Create, the Linux parent sends process-level `SubscribeNotifications` with
 instance id 0, exactly one dedicated nonblocking eventfd via SCM_RIGHTS, and
-`u32 version = 15`; the reply is `u32 version = 15`. The descriptor is checked
+`u32 version = 19`; the reply is `u32 version = 19`. The descriptor is checked
 for eventfd type, read/write access and O_NONBLOCK; received copies are CLOEXEC.
 Missing, wrong-type, extra or duplicate descriptors, duplicate subscriptions,
 wrong versions/instance ids and trailing payloads are rejected with structured

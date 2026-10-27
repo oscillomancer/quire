@@ -161,7 +161,7 @@ instructions are in `docs/guides/installing.md`.
   beyond 4 GiB) and FLAC; render jobs and a queue; per-file analysis.
 - **Plugin hosting** (ADR-0013, ADR-0017, ADR-0018): CLAP and VST3,
   in-process or isolated in shared or dedicated bridge processes (a crash
-  fails only that plugin), supervised scanning with a cache, editors
+  fails the instances in that bridge), supervised scanning with a cache, editors
   embedded in process and from bridges, editor windows that remember their
   place per effect, plugin state saved with the project. Bridge main loops
   park until socket/descriptor/request activity or the nearest plug-in timer;

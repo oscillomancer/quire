@@ -568,7 +568,8 @@ Status Vst3Instance::activate(double rate, std::uint32_t maxFrames, bool sidecha
     if (s.active) return okStatus();
     // One arrangement per bus: the main buses stereo or mono, auxiliary buses
     // as the plugin has them (a partial list is refused, and the plugin then
-    // outputs silence). Only the main buses are activated.
+    // outputs silence). Main and auxiliary outputs are activated below;
+    // the key input is activated only while connected.
     auto arrangements = [&](vst::BusDirection dir, const std::vector<std::uint32_t>& channels,
                             std::uint32_t main) {
         std::vector<vst::SpeakerArrangement> out;
