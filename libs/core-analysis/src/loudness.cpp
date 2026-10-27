@@ -29,7 +29,8 @@ double LoudnessMeter::loudness(double energy) {
     return energy > 0 ? offset + 10 * std::log10(energy) : negInf;
 }
 int LoudnessMeter::bin(double lu) {
-    return std::clamp(static_cast<int>(std::floor((lu + 120) * 100 + 0.5)), 0, kBins - 1);
+    return static_cast<int>(
+        std::clamp(std::floor((lu + 120) * 100 + 0.5), 0.0, static_cast<double>(kBins - 1)));
 }
 void LoudnessMeter::prepare(double sampleRate, Layout layout, Mode mode, double maxSeconds) {
     channels_ = channels(layout);
