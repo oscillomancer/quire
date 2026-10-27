@@ -57,6 +57,17 @@ TEST_CASE("bridge lookup resolves the platform executable suffix") {
     }
     setBridgeExecutable(BRIDGE_PATH);
 }
+#if defined(_WIN32)
+TEST_CASE("Windows bridge initializes DPI awareness before creating plugins") {
+    setBridgeExecutable(BRIDGE_PATH);
+    const auto info = nativePlugin(FIXTURE_CLAP_PATH, "com.suppleaudio.test.edge");
+    auto made = Instance::create(info, {}, true);
+    REQUIRE(made);
+    const auto aware = (*made)->paramValue(13);
+    REQUIRE(aware);
+    CHECK(*aware == 1);
+}
+#endif
 #if !defined(_WIN32)
 TEST_CASE("native bridge launch uses the helper private process group") {
     setBridgeExecutable(BRIDGE_PATH);

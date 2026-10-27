@@ -21,6 +21,13 @@
 #include <clap/clap.h>
 #if defined(_WIN32)
 #include <io.h>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 
 #else
 #include <unistd.h>
@@ -669,6 +676,10 @@ const clap_host_t* gEditorHost = nullptr;
 struct Edge {
     clap_plugin_t plugin{};
     const clap_host_t* host = nullptr;
+#if defined(_WIN32)
+    bool dpiAwareOnCreate = AreDpiAwarenessContextsEqual(
+        GetThreadDpiAwarenessContext(), DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+#endif
     // Loaded on the main thread while the audio thread may flush or process
     // (both allowed by CLAP), so each byte is atomic.
     std::atomic<std::uint8_t> config[4] = {0, 0, 0, 0};
@@ -712,6 +723,12 @@ bool CLAP_ABI edgeParamInfo(const clap_plugin_t* pl, uint32_t index, clap_param_
     return true;
 }
 bool CLAP_ABI edgeParamValue(const clap_plugin_t* pl, clap_id id, double* out) {
+#if defined(_WIN32)
+    if (id == 13) {
+        *out = E(pl)->dpiAwareOnCreate ? 1 : 0;
+        return true;
+    }
+#endif
     if (id == 8) {
         *out = E(pl)->config[0] >= 30 ? E(pl)->hostDeliveries.load()
                                       : static_cast<double>(E(pl)->guiParent);

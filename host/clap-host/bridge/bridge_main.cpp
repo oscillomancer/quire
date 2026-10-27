@@ -755,6 +755,10 @@ struct Bridge {
 
 #if defined(_WIN32)
 int bridgeMain(int argc, char** argv) {
+    if (auto initialized = initializeEditorPlatform(); !initialized) {
+        std::fprintf(stderr, "%s\n", initialized.error().message.c_str());
+        return 1;
+    }
     if (argc == 3 && std::string_view(argv[1]) == "--scan") {
         // Preserve binary protocol bytes while plugin printf/cout goes to NUL.
         const int saved = _dup(_fileno(stdout));

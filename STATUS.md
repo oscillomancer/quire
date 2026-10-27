@@ -61,6 +61,8 @@ change (monitor move, system scale) is passed to open Linux/Windows editors, loc
 or bridged, CLAP or VST3, and resizes them; hermetic tests cover the rule, the
 visual result is unchecked without a desktop with mixed scales. Windows child
 keyboard behavior is plugin-dependent.
+The Windows bridge initializes Per Monitor v2 DPI awareness before loading
+plugins; the display-free startup regression awaits native Windows CI.
 
 Evaluation harness fixtures now run on Windows as well as POSIX: executable
 fixtures use Python, credential references can use Windows hard links, and
