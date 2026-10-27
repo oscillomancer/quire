@@ -21,8 +21,9 @@ import pathlib
 import re
 import sys
 
-FIRST_PARTY_DIRS = ["cmake", "libs", "host", "plugins", "daw", "mcp", "tools", "tests", "skill", "docs"]
-SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hh", ".m", ".mm", ".py", ".lua", ".cmake"}
+FIRST_PARTY_DIRS = ["cmake", "libs", "host", "plugins", "daw", "mcp", "tools", "tests", "skill", "docs", ".github"]
+SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hh", ".m", ".mm", ".py", ".lua", ".cmake",
+                   ".sh", ".ps1", ".nsi", ".yml", ".yaml"}
 # Keep GPL approvals separate from the permissive dependency allow-list.
 GPL_LICENSES = {"GPL-3.0-only", "GPL-3.0-or-later"}
 MIT_LIBRARIES = {"core-base", "core-json", "core-schema", "core-params",
@@ -184,7 +185,8 @@ def main() -> int:
 
     for p in first_party_files(root):
         rel = p.relative_to(root)
-        if p.suffix in SOURCE_SUFFIXES or p.name == "CMakeLists.txt" or p.name.endswith((".h.in", ".cpp.in")):
+        suffix = p.with_suffix("").suffix if p.suffix == ".in" else p.suffix
+        if suffix in SOURCE_SUFFIXES or p.name == "CMakeLists.txt":
             try:
                 text = p.read_text(errors="replace")
             except OSError:

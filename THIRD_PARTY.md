@@ -6,6 +6,8 @@ expression, version, upstream, pinned commit, purpose, linkage).
 `tools/license-check/check.py` runs as part of every build and fails when
 anything is undeclared, not on the allow-list, missing its license file, or
 not described here. Policy: [ADR-0003](docs/decisions/0003-toolchain-and-dependencies.md).
+The gate also checks existing SPDX tags in first-party source, build and
+installer scripts, their templates, and GitHub workflows.
 
 Allowed for bundled code: MIT, MIT-0, BSD-2/3-Clause, ISC, Zlib, Apache-2.0,
 BSL-1.0, CC0, Unlicense (OFL-1.1 for fonts). The ASIO SDK is the sanctioned GPL-3.0-only exception, Windows DAW only,
