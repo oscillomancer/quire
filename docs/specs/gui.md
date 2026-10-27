@@ -145,7 +145,9 @@ only what the DAW needs, designed for virtualized, data-heavy views.
   Keyboard: focus chain, Tab navigation, shortcuts resolved by the actions
   system (§6) with context sections (arrange, MIDI editor, mixer, text
   field). Text input through SDL3 text-input events (IME composition shown
-  inline). Hiding a dock or panel releases focus and pointer capture within
+  inline). Replacing multiline editor text preserves the caret's line and
+  code-point column (clamped to the new text); diagnostic columns remain byte
+  offsets. Hiding a dock or panel releases focus and pointer capture within
   its subtree (`Root::releaseWithin`), sending `Cancel` to the captured
   control. Continuous edits end as one undo step; uncommitted drag previews
   and pending button clicks are discarded. Focus and capture outside the

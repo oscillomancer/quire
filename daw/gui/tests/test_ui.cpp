@@ -615,6 +615,17 @@ TEST_CASE("a text area edits across lines: vertical motion, indentation, undo, m
     CHECK(area.lineCount() == 4);
 }
 
+TEST_CASE("text area replacement preserves the UTF-8 caret column") {
+    TextArea area("text", "é界Z\nold");
+    REQUIRE(area.onKey({SDLK_RIGHT, 0}));
+    REQUIRE(area.onKey({SDLK_RIGHT, 0}));
+    CHECK(area.caretLineColumn() == std::pair{1, 6});  // byte column after two code points
+    area.setText("é界Z\nnew");
+    CHECK(area.caretLineColumn() == std::pair{1, 6});
+    area.setText("abcd\nnew");
+    CHECK(area.caretLineColumn() == std::pair{1, 3});  // same code-point column
+}
+
 TEST_CASE("mixer controls: fader taper and gestures, pan, meter hold and clip, toggle") {
     // The taper round-trips over its range; -inf at the bottom.
     for (double db = -60; db <= 12; db += 0.5)
