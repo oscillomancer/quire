@@ -663,6 +663,9 @@ Session and editing:
   squashed steps keep large invocation arguments.
 
 GUI:
+- FX multi-selection deselects the active row on Ctrl-click and drops effects
+  moved out of the displayed chains. Offline Linux regression coverage passes;
+  native macOS/Windows validation remains pending.
 - Settings loaders return file errors for failed filesystem lookups; sidecar
   lookup failures preserve the file and fall back to default layout without
   throwing. Linux regression tests cover overlong filenames; native macOS and

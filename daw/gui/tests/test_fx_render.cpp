@@ -658,6 +658,48 @@ TEST_CASE(
     CHECK(f.fx->selection() == std::vector<model::Id>{fx4});
 }
 
+TEST_CASE("FX selection drops toggled and moved effects") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto track = f.addTrack("Source"), other = f.addTrack("Destination");
+    auto transaction = f.app->beginTransaction(kTestOrigin, "Offline FX fixture");
+    REQUIRE(transaction);
+    model::FxInstance effect;
+    effect.plugin.id = "com.suppleaudio.test.unavailable";
+    effect.offline = true;
+    const auto first = f.app->txn().create(effect), second = f.app->txn().create(effect);
+    f.app->txn().modify<model::Track>(track, [&](auto& t) { t.chain = {first, second}; });
+    REQUIRE(f.app->commitTransaction(*transaction));
+    REQUIRE(f.fx->open(track));
+
+    f.fx->press(second, 0);
+    f.fx->press(first, ui::kCtrl);
+    REQUIRE(f.fx->selection() == std::vector<model::Id>{first, second});
+    f.fx->press(first, ui::kCtrl);
+    CHECK(f.fx->selection() == std::vector<model::Id>{second});
+    CHECK(f.fx->selected() == second);
+
+    f.fx->press(first, ui::kCtrl);
+    REQUIRE(f.run("fx.move", f.args({{"fx", first.str()}, {"track", other.str()}, {"index", 0}})));
+    f.fx->tick();
+    CHECK(f.fx->selected() == second);
+    CHECK(f.fx->selection() == std::vector<model::Id>{second});
+    f.fx->press(second, ui::kCtrl);
+    CHECK(f.fx->selection().empty());
+    CHECK(f.fx->selected().n == 0);
+
+    // A queued row event can precede the next refresh after agent deletion.
+    REQUIRE(f.run("fx.move", f.args({{"fx", first.str()}, {"track", track.str()}, {"index", 0}})));
+    f.fx->refresh();
+    f.fx->press(second, 0);
+    f.fx->press(first, ui::kCtrl);
+    REQUIRE(f.run("fx.remove", f.args({{"fx", first.str()}})));
+    REQUIRE(f.run("fx.remove", f.args({{"fx", second.str()}})));
+    f.fx->press(first, ui::kCtrl);
+    CHECK(f.fx->selection().empty());
+    CHECK(f.fx->selected().n == 0);
+}
+
 TEST_CASE("the FX window's MIDI button learns a controller for a parameter (fx.learn.set)") {
     Fixture f;
     if (!f.ok) {

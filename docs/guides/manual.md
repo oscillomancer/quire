@@ -93,6 +93,9 @@ for other hosts is listed as shadowed and never loaded. `--plugin-path P`
 To add an effect or instrument, use the **fx** button on a track (it opens
 the plugin browser when the track has no effects, the chain otherwise),
 **+ FX** in the mixer, or **Track > FX: add plugin…**.
+In the chain window, Ctrl-click (Cmd-click on macOS) toggles a row in the
+selection, including the active row. Effects moved to another track leave
+that window’s selection.
 
 ## Agents (MCP)
 

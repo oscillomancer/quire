@@ -898,7 +898,11 @@ void FxWindow::press(model::Id fx, unsigned mods, int clicks) {
     } else {
         if (picked_.empty() && hasSelected()) picked_.insert(selected_.str());
         if (picked_.erase(fx.str()) != 0) {
-            if (selected_ == fx) selected_ = picked_.empty() ? model::Id{} : selection().front();
+            if (selected_ == fx) {
+                selected_ = {};
+                const auto remaining = selection();
+                if (!remaining.empty()) selected_ = remaining.front();
+            }
         } else {
             picked_.insert(fx.str());
             selected_ = fx;
@@ -948,10 +952,14 @@ void FxWindow::refresh() {
         panel_.setTitle(title_->text());
     }
     body_->clear();
-    if (hasSelected() && !app_.head().fx.find(selected_)) selected_ = {};
+    const auto order = rowOrder();
+    const auto inChain = [&](model::Id fx) {
+        return std::find(order.begin(), order.end(), fx) != order.end();
+    };
+    if (hasSelected() && !inChain(selected_)) selected_ = {};
     for (auto it = picked_.begin(); it != picked_.end();) {
         const auto id = model::Id::parse(*it);
-        it = id && app_.head().fx.find(*id) ? std::next(it) : picked_.erase(it);
+        it = id && inChain(*id) ? std::next(it) : picked_.erase(it);
     }
     if (!hasSelected()) {
         const auto main = chain(), input = inputChain();

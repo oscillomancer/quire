@@ -659,7 +659,8 @@ effect's own GUI; a left double click on empty chain space (including the
 "No effects yet" message or below the last row) opens Add plugin, as in the
 mixer. The input section's empty area adds input FX; a take adds take FX.
 Single and right clicks on empty space do not open the browser. Ctrl+click adds a row to the selection (or takes it out)
-and Shift+click selects the rows from the last one clicked; on a row of a
+including the active row; effects moved out of the displayed track/take chains
+leave the selection. Shift+click selects the rows from the last one clicked; on a row of a
 multi-selection, bypass, offline and Remove act on every selected effect in
 one undo step (the editor button and a double click open only that row's
 editor), wet/dry, per-FX latency and CPU, preset
