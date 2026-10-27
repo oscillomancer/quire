@@ -395,6 +395,11 @@ Result<model::Id> copyTake(const model::Session& source, model::EditTxn& txn, mo
             return Error("item.fx", "the copied take FX is missing", "/take",
                          "recopy the item from a version that still contains its take FX, or undo "
                          "their removal");
+        // The source may be a retained clipboard version whose opaque state
+        // does not exist in the destination after undo or a branch switch.
+        if (fx->state)
+            if (const auto blob = source.blobs.find(*fx->state); blob != source.blobs.end())
+                txn.putBlob(blob->first, blob->second);
         const auto fresh = txn.create(*fx);
         ids[id] = fresh;
         copy.chain.push_back(fresh);

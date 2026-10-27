@@ -537,6 +537,9 @@ and naming. All `edit` unless marked (q) query or (a) action.
 - **items/takes**: `item.add {track, position, length, source|midi|notation}`,
   `item.remove`, `item.move`, `item.set`, `item.split {at}`,
   `item.duplicate`, `item.glue` (a+edit), `take.add`, `take.remove`,
+  `item.paste {version?, items: [{item, track, position}]}` copies the retained
+  version's takes and their FX, including referenced opaque state blobs when
+  the current session no longer contains them (for example after undo),
   `take.set`, `take.activate`, `take.remove` (the item goes with its last
   take), `take.extract {take, track, position}` (into an item of its own),
   `item.explode-takes {item, mode: tracks|serial}` (recording order: the

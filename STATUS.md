@@ -627,6 +627,8 @@ Engine and hosting:
   are).
 
 Session and editing:
+- Pasting takes from retained history brings their opaque FX state blobs along,
+  including after undo to a version from before that state existed.
 - Headless playback rejects malformed/non-finite numeric options before opening
   a project or device; its duration must be finite and nonnegative.
 - Autosave discovery and rotation match the whole numbered filename, preserve
