@@ -581,6 +581,9 @@ index among its parent's children; `views::reorderIndex` in `track_layout.h` com
 with the TCP). A drag shows an insertion bar or a target outline; Escape or a
 drop outside the strips cancels; each is one undo step.
 
+A strip reorder ignores destination strips removed from the model before the
+next mixer sync; stale displayed rows cannot become drop targets.
+
 ### 4.5 FX chain and plugins
 
 The single FX window switches track/take in place and raises when opened

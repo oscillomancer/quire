@@ -663,6 +663,9 @@ Session and editing:
   squashed steps keep large invocation arguments.
 
 GUI:
+- Mixer strip reorders ignore tracks removed before the next view sync, avoiding
+  a stale-destination dereference. Linux regression coverage passes; native
+  macOS/Windows validation remains pending.
 - Multiline text refresh preserves the caret by Unicode code-point column;
   diagnostic positions still use bytes. The portable regression passes on Linux;
   macOS/Windows validation remains pending.

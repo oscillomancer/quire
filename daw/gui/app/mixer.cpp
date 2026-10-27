@@ -1077,8 +1077,10 @@ void Mixer::resolveStripDrop() {
     std::vector<model::Id> ids;
     for (const Strip& st : strips_) {
         if (st.type != std::string(model::stripTypeName(track->type))) continue;
+        const auto id = model::Id::parse(st.track);
+        if (!id || !s.tracks.contains(*id)) continue;  // removed before the next sync
         group.push_back(&st);
-        ids.push_back(*model::Id::parse(st.track));
+        ids.push_back(*id);
         if (st.track == d.track)
             d.source = st.node->bounds().intersect(st.node->parent()->bounds());
     }
