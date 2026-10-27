@@ -530,6 +530,16 @@ capacity reports retain their original revision/settings.
 
 ## Known limits
 
+Library boundaries:
+- Lua's base `load` still accepts binary chunks, bypassing the top-level
+  source-only loader. Host-side script logs have a line-count limit but no
+  byte budget and are outside the Lua allocator cap; repeated large lines
+  can retain much more memory than that cap.
+- Replacing invalid UTF-8 bytes in JSON object keys can make distinct keys
+  collide; the writer then emits duplicate keys that its parser rejects.
+- The control client's timeout covers response reads, but its blocking
+  connect and request writes have no deadline if a peer stops accepting data.
+
 Engine and hosting:
 - The headless platform layer (ADR-0035) has natively tested macOS/Windows
   address waits, wake sources, control socket/MCP paths and user directory roots.
