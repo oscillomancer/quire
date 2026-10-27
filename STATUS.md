@@ -83,8 +83,10 @@ third-party plugin runtime independence; the audit rejects shared C++ runtimes.
 Both installers upgrade their own previous version and preserve unrelated
 files; both preflight ownership before removing an old installation and remember
 external-plugin opt-in. Removers refuse linked private payload directories;
-tests cover upgrade collisions, directory links and icon-directory ownership. Package CI
-checks installed native artifacts, upgrades and uninstall cleanup separately
+tests cover upgrade collisions, directory links and icon-directory ownership.
+Linux uninstall also preflights all ownership paths and refuses parent traversal
+before deleting any files; the local installer regression covers malformed records.
+Package CI checks installed native artifacts, upgrades and uninstall cleanup separately
 from the native regression suite. macOS finalization keeps notices in bundle
 resources and signs nested code before the app. Bundled SDL resolves package-manager
 symlinks into private library files. Windows stages the resolved DLL set and

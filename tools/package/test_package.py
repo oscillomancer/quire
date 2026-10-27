@@ -176,6 +176,30 @@ class Installer(unittest.TestCase):
         self.assertFalse((self.root / "bin-elsewhere/example").exists())
         self.assertFalse((self.root / ".clap-elsewhere/Stock.clap").exists())
 
+    def test_uninstall_validates_all_manifest_paths_before_removal(self):
+        self.assertEqual(self.install().returncode, 0)
+        app = self.prefix / "opt/example"
+        foreign = self.prefix / "private-project.json"
+        foreign.write_text("user project")
+        manifest = app / ".installed-files"
+        directories = app / ".installed-dirs"
+        original_files = manifest.read_text()
+        original_dirs = directories.read_text()
+        for target, entry in ((manifest, str(app / "../../private-project.json")),
+                              (manifest, str(foreign)),
+                              (directories, str(app / "../../empty-project"))):
+            with self.subTest(entry=entry):
+                target.write_text(target.read_text() + entry + "\n")
+                result = subprocess.run([str(app / "uninstall.sh"), "--prefix", str(self.prefix)],
+                                        env=self.env, capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue((app / "bin/example").is_file(), "Refusal must precede any removal")
+                self.assertEqual(foreign.read_text(), "user project")
+                self.assertTrue(manifest.is_file())
+                self.assertTrue(directories.is_file())
+                manifest.write_text(original_files)
+                directories.write_text(original_dirs)
+
 
 class Dependencies(unittest.TestCase):
     def check(self, output, symbols="", filename="app"):

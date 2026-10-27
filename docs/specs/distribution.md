@@ -52,6 +52,8 @@ selects the optional component for silent installation. Uninstall refuses
 reparse points in private app/plugin directory chains before any deletion.
 Linux similarly refuses symlinked private payload ancestors, keeping the
 manifest on refusal; external bin/desktop/icon/CLAP entries remain path-based.
+Linux validates every ownership file/directory record before removal and rejects
+parent traversal outside the recorded installation roots.
 Windows DLL staging resolves PE dependencies, excludes OS API sets/OpenGL,
 and audits the exact staged root set against the resolved inventory. Both SDL
 and zlib runtime notices ship, with zlib's configured version recorded.
