@@ -569,10 +569,6 @@ Library boundaries:
   on Linux, and native macOS/Windows CI has not run on it.
 
 Engine and hosting:
-- Read-ahead PDC and its portable monitoring/alignment regressions await native
-  macOS/Windows CI and independent implementation review. The main-master
-  schedule is shared by realtime and offline rendering; old forward-padding
-  noise/state phase is not preserved (ADR-0051).
 - The headless platform layer (ADR-0035) has natively tested macOS/Windows
   address waits, wake sources, control socket/MCP paths and user directory roots.
   Both native engines run with dummy/offline audio and native RT/offline
