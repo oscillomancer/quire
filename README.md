@@ -15,7 +15,7 @@ The workflow follows REAPER: arrange view, track panel, mixer, FX chains,
 routing matrix, MIDI editor, render dialog, actions list. The architecture
 underneath is Quire's own.
 
-Quire is pre-release (0.3.0). It is used for real work on its author's
+Quire is pre-release (0.3.1). It is used for real work on its author's
 machine, but file formats and commands can still change.
 
 ## What it does
@@ -56,13 +56,13 @@ machine, but file formats and commands can still change.
 
 ## Installing
 
-Downloads for [Quire 0.3.0](https://github.com/oscillomancer/quire/releases/tag/v0.3.0):
+Downloads for [Quire 0.3.1](https://github.com/oscillomancer/quire/releases/tag/v0.3.1):
 
 | Platform | Installer | Portable |
 | --- | --- | --- |
-| Linux (x86_64) | [quire-0.3.0-linux-x86_64.tar.xz](https://github.com/oscillomancer/quire/releases/download/v0.3.0/quire-0.3.0-linux-x86_64.tar.xz) (runs in place, or `./install.sh` for your user) | the same tarball |
-| macOS (Apple Silicon) | [quire-0.3.0-macos-arm64.dmg](https://github.com/oscillomancer/quire/releases/download/v0.3.0/quire-0.3.0-macos-arm64.dmg) | [zip](https://github.com/oscillomancer/quire/releases/download/v0.3.0/quire-0.3.0-macos-arm64.zip) |
-| Windows (x86_64) | [quire-0.3.0-windows-x86_64.exe](https://github.com/oscillomancer/quire/releases/download/v0.3.0/quire-0.3.0-windows-x86_64.exe) (per user, no admin) | [zip](https://github.com/oscillomancer/quire/releases/download/v0.3.0/quire-0.3.0-windows-x86_64.zip) |
+| Linux (x86_64) | [quire-0.3.1-linux-x86_64.tar.xz](https://github.com/oscillomancer/quire/releases/download/v0.3.1/quire-0.3.1-linux-x86_64.tar.xz) (runs in place, or `./install.sh` for your user) | the same tarball |
+| macOS (Apple Silicon) | [quire-0.3.1-macos-arm64.dmg](https://github.com/oscillomancer/quire/releases/download/v0.3.1/quire-0.3.1-macos-arm64.dmg) | [zip](https://github.com/oscillomancer/quire/releases/download/v0.3.1/quire-0.3.1-macos-arm64.zip) |
+| Windows (x86_64) | [quire-0.3.1-windows-x86_64.exe](https://github.com/oscillomancer/quire/releases/download/v0.3.1/quire-0.3.1-windows-x86_64.exe) (per user, no admin) | [zip](https://github.com/oscillomancer/quire/releases/download/v0.3.1/quire-0.3.1-windows-x86_64.zip) |
 
 The packages are unsigned. [Installing Quire](docs/guides/installing.md)
 covers user-space installation, unsigned first-launch steps and optional stock
