@@ -78,8 +78,12 @@ Status validateTable(Table);
 
 Checks: ids unique; keys unique and well-formed; `min < max` (Float/Int);
 `def` within range; Log with `min > 0`; Pow/Bipolar finite `k > 0`; Int ranges
-integral; Enum has ≥ 2 choices with unique well-formed keys and integral
-`def`; Bool range exactly 0..1; unit is the canonical unit of its dimension
+integral and within ±(2^53−1), including the default
+(`params.table.int_precision` otherwise); this keeps all accepted integer
+values exact in the double-valued parameter model and signed 64-bit JSON
+storage. `fromDescription` enforces the same integer domain before decoding
+or clamping a default. Enum has ≥ 2 choices with unique well-formed keys and
+integral `def`; Bool range exactly 0..1; unit is the canonical unit of its dimension
 (core-base rule); tags from the vocabulary or `stage:`/`macro`; readonly
 params not modulatable; at most one `kBypass`. Every plugin runs this in a
 unit test.

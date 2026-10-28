@@ -425,6 +425,57 @@ TEST_CASE("bipolar conversions preserve finite extreme midpoints") {
     }
 }
 
+TEST_CASE("integer parameters stay in the exact JSON double integer domain") {
+    constexpr double limit = 9007199254740991.0;
+    ParamSpec p{.id = 0,
+                .key = "integer",
+                .name = "Integer",
+                .type = Type::Int,
+                .min = -limit,
+                .max = limit,
+                .def = 0};
+    REQUIRE(validateTable(Table(&p, 1)));
+    for (double value : {-limit, limit}) {
+        p.def = value;
+        REQUIRE(validateTable(Table(&p, 1)));
+        auto decoded = fromJson(p, toJson(p, value));
+        REQUIRE(decoded);
+        CHECK(*decoded == value);
+        auto described = fromDescription(p.key, describeParamJson(p));
+        REQUIRE(described);
+        CHECK((*described)->spec.def == value);
+    }
+    p.def = 0;
+    for (auto member : {&ParamSpec::min, &ParamSpec::max, &ParamSpec::def}) {
+        for (double invalid : {-1e100, -limit - 1, limit + 1, 1e100}) {
+            auto bad = p;
+            bad.*member = invalid;
+            auto result = validateTable(Table(&bad, 1));
+            REQUIRE_FALSE(result);
+            const auto& error = result.error();
+            bool found = error.code == "params.table.int_precision";
+            for (const auto& detail : error.details)
+                if (detail.code == "params.table.int_precision") {
+                    CHECK(detail.path == "/params/0");
+                    CHECK_FALSE(detail.hint.empty());
+                    found = true;
+                }
+            CHECK(found);
+        }
+    }
+    auto oversized =
+        json::parse(R"({"id":0,"name":"Integer","type":"int","min":0,"max":1e100,"default":1e99})");
+    REQUIRE(oversized);
+    auto invalidDescription = fromDescription("integer", *oversized);
+    REQUIRE_FALSE(invalidDescription);
+    CHECK(invalidDescription.error().code == "params.table.int_precision");
+    CHECK(invalidDescription.error().path == "/integer/max");
+    (*oversized)["max"] = limit;
+    invalidDescription = fromDescription("integer", *oversized);
+    REQUIRE_FALSE(invalidDescription);
+    CHECK(invalidDescription.error().path == "/integer/default");
+}
+
 TEST_CASE("review fixes: boundary-local range slack, log range limit, no bare inf") {
     // A wide range must not widen the slack at the other boundary.
     constexpr ParamSpec wide{.id = 0, .key = "wide", .name = "Wide", .min = 0, .max = 1e9};

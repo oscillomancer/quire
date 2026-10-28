@@ -27,6 +27,9 @@ constexpr std::string_view kRoles[] = {
     "level",  "gain",    "mix",       "brightness", "resonance", "time",      "rate",
     "depth",  "pitch",   "width",     "pan",        "drive",     "threshold", "ratio",
     "attack", "release", "frequency", "q",          "mode",      "enable",    "seed"};
+constexpr double kExactIntegerLimit = 9007199254740991.0;
+
+bool inIntegerDomain(double v) { return std::isfinite(v) && std::fabs(v) <= kExactIntegerLimit; }
 
 bool validKey(std::string_view key) {
     // [a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*
@@ -196,6 +199,9 @@ Status validateTable(Table table) {
                 if (!(p.min < p.max)) fail("range", "min must be below max");
                 if (!isInteger(p.min) || !isInteger(p.max) || !isInteger(p.def))
                     fail("int_range", "int parameters need integral min, max and default");
+                if (!inIntegerDomain(p.min) || !inIntegerDomain(p.max) || !inIntegerDomain(p.def))
+                    fail("int_precision", "int range and default exceed the exact integer domain",
+                         "use min, max and default within -9007199254740991..9007199254740991");
                 if (p.curve.kind != CurveKind::Linear)
                     fail("int_curve", "int parameters are linear");
                 break;
@@ -728,6 +734,19 @@ Result<std::unique_ptr<DescribedParam>> fromDescription(std::string_view key,
                        : flag == "periodic"    ? kPeriodic
                                                : 0u;
         }
+    if (p.type == Type::Int) {
+        const auto* fallback = e.find("default");
+        const std::pair<std::string_view, double> values[] = {
+            {"min", p.min},
+            {"max", p.max},
+            {"default", fallback && fallback->isNumber() ? fallback->asDouble() : p.min}};
+        for (const auto& [field, value] : values)
+            if (!inIntegerDomain(value))
+                return Error("params.table.int_precision",
+                             "int range and default exceed the exact integer domain",
+                             json::pointerJoin(json::pointerJoin("", out->key), field),
+                             "use min, max and default within -9007199254740991..9007199254740991");
+    }
     if (const json::Value* d = e.find("default")) {
         auto v = fromJson(p, *d, false);
         p.def = v ? *v : p.min;

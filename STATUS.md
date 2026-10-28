@@ -535,10 +535,6 @@ Library boundaries:
   collide; the writer then emits duplicate keys that its parser rejects.
 - The control client's timeout covers response reads, but its blocking
   connect and request writes have no deadline if a peer stops accepting data.
-- Integer parameter tables can currently pass validation with values outside
-  signed 64-bit JSON storage; serializing such a table can invoke an
-  out-of-range floating-to-integer conversion. The supported integer domain
-  needs to be bounded consistently across descriptions and patch I/O.
 
 Engine and hosting:
 - The headless platform layer (ADR-0035) has natively tested macOS/Windows
