@@ -496,7 +496,7 @@ int main(int argc, char** argv) {
     appActions.addUi("ui.fx.move_down", "FX: move the selected plugin down the chain",
                      [&] { fxWindow.moveSelected(1); });
     // How many channels the first selected track has (one track: the count is its own).
-    appActions.addUi("ui.track.channels", "Track: channels of the first selected…", [&] {
+    appActions.addUi("ui.track.channels", "Track: channels…", [&] {
         const auto id = uiState.selectedTracks.empty()
                             ? std::nullopt
                             : model::Id::parse(uiState.selectedTracks.front());

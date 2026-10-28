@@ -240,8 +240,8 @@ AppActions::AppActions(const cmd::Registry& registry, cmd::Dispatcher& dispatche
     registry_.add(dropTake);
     actions::Action removeTracks;
     removeTracks.id = "track.remove:selected";
-    removeTracks.name = "Track: remove selected";
-    removeTracks.description = "Remove every selected track (not the main master), one undo step.";
+    removeTracks.name = "Track: delete selected";
+    removeTracks.description = "Delete every selected track (not the main master), one undo step.";
     removeTracks.builtin = [this](const actions::Context&) -> Result<json::Value> {
         if (ui_.selectedTracks.empty()) return Error("action.selection", "select tracks first");
         SUPPLE_TRY(gui::removeTracks(dispatcher_, app_.head(), ui_.selectedTracks));
