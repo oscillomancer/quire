@@ -21,6 +21,7 @@
 #include <io.h>
 #endif
 
+#include <supple/base/chars.h>
 #include <supple/base/paths.h>
 #include <supple/mcp/server.h>
 #include <supple/rpc/model_loop.h>
@@ -34,6 +35,7 @@
 #include <iostream>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 #include <supple/product.h>
@@ -110,8 +112,13 @@ engine::AppOptions cliOptions() {
 
 template <class T>
 bool parseNumber(std::string_view text, T& value) {
-    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
-    return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size() &&
+    const char* end = text.data() + text.size();
+    std::from_chars_result parsed{};
+    if constexpr (std::is_floating_point_v<T>)
+        parsed = fromChars(text.data(), end, value);  // Apple's libc++ has no floating from_chars
+    else
+        parsed = std::from_chars(text.data(), end, value);
+    return parsed.ec == std::errc{} && parsed.ptr == end &&
            std::isfinite(static_cast<double>(value));
 }
 
