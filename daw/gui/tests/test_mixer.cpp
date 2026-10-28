@@ -622,7 +622,7 @@ TEST_CASE("mixer: a plug-in's right-click menu renames that instance") {
     CHECK(f.errors.empty());
 }
 
-TEST_CASE("mixer: a plug-in's right-click menu duplicates it after itself or removes it") {
+TEST_CASE("mixer: a plug-in's right-click menu duplicates it after itself or deletes it") {
     Fixture f;
     if (!f.ok) return;
     const auto a = f.addTrack("channel", "A");
@@ -630,7 +630,7 @@ TEST_CASE("mixer: a plug-in's right-click menu duplicates it after itself or rem
     const auto p2 = f.addFx(a, "Hickory");
     f.exec("fx.set", R"({"fx":")" + p1 + R"(","label":"First"})");
     f.refresh();
-    // Menu rows are 26 px: Rename…, Duplicate, Remove.
+    // Menu rows are 26 px: Rename…, Duplicate, Delete.
     auto choose = [&](const std::string& fx, int row) {
         const ui::Point at = f.centre(f.node("mixer.fx." + fx));
         f.pointer(ui::PointerEvent::Type::Down, at, 1, 0, 3);
