@@ -1166,7 +1166,7 @@ void Mixer::openFxMenu(model::Id fx, const ui::Rect& slot, ui::Point at) {
     items[0].run = [this, fx, slot] { openFxRename(fx, slot); };
     items[1].label = "Duplicate";
     items[1].run = [this, fx] { duplicateFx(fx); };
-    items[2].label = "Remove";
+    items[2].label = "Delete";
     items[2].run = [this, fx] { removeFx(fx); };
     root_.openPopup(
         ui::makeMenu("mixer.fxmenu." + fx.str(), std::move(items), [this] { root_.closePopup(); }),
@@ -1190,7 +1190,7 @@ void Mixer::duplicateFx(model::Id fx) {
         actions_.onError("mixer: " + r.error().message);
 }
 
-// Alt+click on a plug-in, or Remove in its menu (one undo step).
+// Alt+click on a plug-in, or Delete in its menu (one undo step).
 void Mixer::removeFx(model::Id fx) {
     json::Value args = json::Value::object();
     args["fx"] = fx.str();

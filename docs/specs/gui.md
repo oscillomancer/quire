@@ -570,7 +570,7 @@ drop copies the plug-in's whole chain, in order (the chip reads "chain (N)").
 A right-click on a plug-in opens its own menu: Rename… names that instance
 over its slot (`fx.set label`; an empty name goes back to the plug-in's);
 Duplicate copies it, with its live settings, right after itself (`fx.copy`);
-Remove takes it out, as Alt+click does (`fx.remove`). Dragging a strip's
+Delete takes it out, as Alt+click does (`fx.remove`). Dragging a strip's
 empty part moves it among the strips of its own type only (`track.move`, an
 index among its parent's children; `views::reorderIndex` in `track_layout.h` computes it, shared
 with the TCP). A drag shows an insertion bar or a target outline; Escape or a
