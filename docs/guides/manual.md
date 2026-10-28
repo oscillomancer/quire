@@ -176,6 +176,11 @@ add `--backend dummy` to run without an audio device. Numeric options must be
 complete numbers, and `--seconds` must be finite and nonnegative. Invalid values
 report the option and how to correct it before playback starts.
 
+For headless recording, stop the transport and save the project before closing
+an MCP connection or stopping the socket server. Shutdown finishes capture but
+does not save the project. Unsaved audio files can be recovered; unsaved MIDI
+recordings and other session edits are lost when the process exits.
+
 ### Other clients and local models
 
 Any MCP client can use the same server. Give agents without skill support

@@ -504,6 +504,16 @@ first use, and no plug-in code runs early to warm it.
   decide — and fills the hash with the bytes now on disk, so such a project
   converges instead of growing a second source for one file. A file is hashed
   the same way when it is recorded.
+- **Recording shutdown**: `Engine::stop()` joins the audio executors and writer,
+  retaining finalized audio and MIDI takes for one subsequent `stopRecording()`
+  call. `EngineApp::stopEngine()` (including device restart and destruction)
+  retrieves and commits them as one record undo step after the engine is gone;
+  commit failures emit structured `record.error`. Headless MCP EOF/error and
+  socket-loop shutdown explicitly stop the engine while the session and bus
+  still exist. This does not save a project: clients must stop recording and
+  save before disconnecting to retain MIDI/session edits across process exit.
+  Audio WAVs and placement sidecars remain recoverable; MIDI has no recovery
+  sidecar. Forced termination cannot execute this shutdown path.
 - **Recording**: RT thread writes input frames into large preallocated SPSC
   rings (≥ 10 s); an I/O thread writes them to WAV/RF64 files incrementally,
   rewriting the header every 5 s so a crash leaves a valid file up to the last

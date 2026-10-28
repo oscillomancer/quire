@@ -65,8 +65,8 @@ EngineApp::EngineApp(AppOptions options) : options_(std::move(options)) {
 }
 
 EngineApp::~EngineApp() {
-    stopJobs();
     stopEngine();
+    stopJobs();
     scratch_.clear();
 }
 
@@ -963,8 +963,21 @@ Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, boo
 void EngineApp::haltEngine() {
     if (engine_) {
         engine_->stop();
+        auto takes = engine_->stopRecording();
         engine_->service();
         engine_.reset();
+        recordingFiles_.clear();
+        if (takes) {
+            if (auto committed = commitTakes(*takes); !committed) {
+                const auto& error = committed.error();
+                auto event = json::Value::object();
+                event["code"] = error.code;
+                event["message"] = error.message;
+                event["path"] = error.path;
+                event["hint"] = error.hint;
+                emit("record.error", std::move(event));
+            }
+        }
         pool_->prune(head());  // nothing processes now: replaced instances can go
     }
     protections_->stop();

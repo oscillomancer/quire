@@ -627,6 +627,10 @@ Engine and hosting:
   are).
 
 Session and editing:
+- Engine stop/device restart retains finished audio and MIDI takes and commits
+  them before app teardown. Headless exit does not save the project; clients
+  must stop and save first to preserve MIDI and other session edits. Audio
+  WAVs/sidecars remain recoverable; MIDI has no crash-recovery file.
 - Known merge bug: after a merge remaps colliding object IDs, continuing the
   source branch and merging it again can silently apply edits to the wrong
   destination object. Continued merges after ID remapping are unsafe until
