@@ -197,7 +197,7 @@ it is allowed.
 version}`, `label` (instance name), `bypass` (processing skipped, latency
 kept), `offline` (unloaded; audio passes through), `wet` % (dry/wet),
 `isolation` (`inherit|in_process|shared_bridge|dedicated`), `oversampling`
-(1, 2, 4, 8), `pins` `{in: [l, r], out: [l, r], key: [l, r]}` — the track
+(integer 1, 2, 4 or 8 only), `pins` `{in: [l, r], out: [l, r], key: [l, r]}` — the track
 channels (1-based) a track-chain plug-in reads, writes and keys from (a
 detector on 3/4); one entry feeds both pins (in, key) or takes the left output
 (out); empty: 1/2 in and out, the key from key routes only (ADR-0020); `out`
@@ -221,6 +221,14 @@ MIDI input's name; empty: any)}, mode: absolute|relative1|relative2|
 relative3|toggle, soft_takeover, when_selected, when_focused,
 when_visible}` (defaults omitted). It is copied with the effect (fx.copy,
 chain presets, templates).
+
+The FX schema exports oversampling as the integer enum `[1, 2, 4, 8]`.
+Project loading rejects other integer factors with `fx.oversampling` at
+`/fx/<id>/oversampling`; its message and hint list the allowed values. Chain
+files use the same check and retain `chain.invalid` at the effect's
+`oversampling` field. The project schema version is unchanged: supported
+factors still round-trip identically; unsupported factors were never written
+by Quire.
 
 Chains are arrays of fx ids on tracks (`chain`, `input_chain`), takes
 (`chain`) and the master's monitoring chain (`project.monitor_chain`, not

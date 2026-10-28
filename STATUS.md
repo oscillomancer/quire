@@ -631,9 +631,9 @@ Session and editing:
   implemented: starting recording with an armed output-mode track fails with
   `record.output_unsupported` before creating files. Switch that track to input
   mode to record; existing project files still load.
-- Project files accept FX oversampling 3/5/6/7, which the renderer silently
-  treats as 1x; chain loading correctly accepts only 1/2/4/8. File-load rejection
-  versus warning/normalization remains to be resolved.
+- Project and chain files share FX oversampling validation: only 1, 2, 4 and 8
+  are accepted. Unsupported factors report a field-specific error listing
+  the allowed values instead of silently rendering at 1x.
 - Saved FX parameter IDs reject signs, whitespace, embedded-NUL suffixes and
   unsigned 32-bit overflow consistently across platforms.
 - Engine stop/device restart retains finished audio and MIDI takes and commits

@@ -7,6 +7,7 @@
 #include "supple/base/files.h"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <cstdio>
@@ -27,6 +28,25 @@ ObjectBuilder<T>& dflt(ObjectBuilder<T>& b, M value) {
 }
 
 Schema<int> intS() { return schema::integerOf<int>(); }
+Schema<int> oversamplingSchema() {
+    const auto integer = intS();
+    const std::array allowed{1, 2, 4, 8};
+    auto spec = integer.jsonSchema();
+    spec["enum"] = json::Value::array();
+    for (const int factor : allowed) spec["enum"].asArray().push_back(factor);
+    return {"oversampling",
+            [integer, allowed](const json::Value& v, int& out, schema::DecodeCtx& ctx,
+                               const std::string& path) {
+                if (!integer.decodeInto(v, out, ctx, path)) return false;
+                if (std::find(allowed.begin(), allowed.end(), out) == allowed.end()) {
+                    ctx.error("fx.oversampling", "oversampling must be 1, 2, 4 or 8", path,
+                              "set oversampling to one of 1, 2, 4 or 8");
+                    return false;
+                }
+                return true;
+            },
+            [integer](int v) { return integer.encode(v); }, spec};
+}
 Schema<double> num() { return schema::number(); }
 Schema<std::string> str() { return schema::string(); }
 Schema<bool> boolean() { return schema::boolean(); }
@@ -834,7 +854,7 @@ const Schema<FxInstance>& schemaOf<FxInstance>() {
                                {Isolation::SharedBridge, "shared_bridge"},
                                {Isolation::Dedicated, "dedicated"}}));
         dflt(b, d.isolation);
-        b.field("oversampling", &FxInstance::oversampling, intS().range(1, 8));
+        b.field("oversampling", &FxInstance::oversampling, oversamplingSchema());
         dflt(b, d.oversampling);
         b.field("parallel", &FxInstance::parallel, boolean());
         dflt(b, d.parallel);

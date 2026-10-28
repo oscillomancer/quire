@@ -13,6 +13,45 @@
 using namespace supple;
 using namespace supple::model;
 
+TEST_CASE("project FX oversampling accepts only 1 2 4 or 8") {
+    json::Value valid;
+    Id fxId;
+    for (const int factor : {1, 2, 4, 8}) {
+        CAPTURE(factor);
+        EditTxn txn(Session::create(), 1);
+        FxInstance fx;
+        fx.plugin = {"clap", "test.oversampling", "", "", ""};
+        fx.oversampling = factor;
+        fxId = txn.create(fx);
+        txn.modify<Track>(kMaster, [&](auto& track) { track.chain.push_back(fxId); });
+        auto session = txn.commit();
+        REQUIRE(session);
+        const auto saved = serializeProject(*session);
+        auto reopened = parseProject(saved);
+        REQUIRE(reopened);
+        CHECK(reopened->fx.find(fxId)->oversampling == factor);
+        CHECK(serializeProject(*reopened) == saved);
+        valid = projectToJson(*reopened);
+    }
+    for (const int factor : {3, 5, 6, 7, 0, 9}) {
+        CAPTURE(factor);
+        auto bad = valid;
+        bad["fx"][fxId.str()]["oversampling"] = factor;
+        auto loaded = parseProject(json::writeCanonical(bad));
+        CHECK_FALSE(loaded);
+        if (!loaded) {
+            CHECK(loaded.error().code == "fx.oversampling");
+            CHECK(loaded.error().path == "/fx/" + fxId.str() + "/oversampling");
+            CHECK(loaded.error().message.find("1, 2, 4 or 8") != std::string::npos);
+            CHECK(loaded.error().hint.find("1, 2, 4 or 8") != std::string::npos);
+        }
+    }
+    const auto exported = schemaOf<FxInstance>().jsonSchema();
+    const auto* choices = exported.find("properties")->find("oversampling")->find("enum");
+    REQUIRE(choices);
+    CHECK(*choices == *json::parse("[1,2,4,8]"));
+}
+
 TEST_CASE("FX parameter keys are complete unsigned 32-bit decimal ids") {
     FxInstance fx;
     fx.plugin = {"clap", "test.params", "", "", ""};

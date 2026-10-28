@@ -55,6 +55,8 @@ latency.
 ## Projects
 
 A project is a JSON file. Its media lives in the `media/` folder beside it.
+Project and FX chain files accept oversampling factors 1, 2, 4 or 8. If a
+hand-edited file uses another factor, loading reports the field and allowed values.
 
 Until a project is saved, its recordings go to a folder of its own under the
 data folder (below), in `unsaved/<start time>-<pid>/media/rec`. The first
