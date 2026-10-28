@@ -5,6 +5,7 @@
 
 #include <supple/model/schemas.h>
 #include <supple/model/session.h>
+#include <supple/model/versions.h>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -12,6 +13,21 @@
 
 using namespace supple;
 using namespace supple::model;
+
+TEST_CASE("render matrix remaps region keys and track cells but preserves text") {
+    const auto project = json::parse(R"({"name":"tr_1","render":{"pattern":"rg_1",
+        "matrix":{"rg_1":["tr_1","tr_0","tr_3"],"project":["tr_1"]}}})")
+                             .value();
+    const auto expected = json::parse(R"({"name":"tr_1","render":{"pattern":"rg_1",
+        "matrix":{"rg_2":["tr_2","tr_0","tr_3"],"project":["tr_2"]}}})")
+                              .value();
+    const std::map<Id, Id> remap{{*Id::parse("tr_1"), *Id::parse("tr_2")},
+                                 {*Id::parse("rg_1"), *Id::parse("rg_2")}};
+    CHECK(remapIds(project, schemaOf<Project>().jsonSchema(), remap) == expected);
+    auto decoded = schemaOf<Project>().decode(project);
+    REQUIRE(decoded);
+    CHECK(toJson(*decoded) == project);
+}
 
 TEST_CASE("project FX oversampling accepts only 1 2 4 or 8") {
     json::Value valid;

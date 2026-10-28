@@ -66,6 +66,21 @@ double peak(const fs::path& path) {
 }
 }  // namespace
 
+TEST_CASE("project.set schema remaps render matrix references") {
+    cmd::Registry registry;
+    registerEngineCommands(registry);
+    const auto* command = registry.find("project.set");
+    REQUIRE(command);
+    const auto args = j(R"({"render":{"pattern":"tr_1",
+        "matrix":{"rg_1":["tr_1","tr_0"],"project":["tr_1"]}}})");
+    const auto expected = j(R"({"render":{"pattern":"tr_1",
+        "matrix":{"rg_2":["tr_2","tr_0"],"project":["tr_2"]}}})");
+    const std::map<model::Id, model::Id> remap{
+        {*model::Id::parse("tr_1"), *model::Id::parse("tr_2")},
+        {*model::Id::parse("rg_1"), *model::Id::parse("rg_2")}};
+    CHECK(model::remapIds(args, command->argsSchema, remap) == expected);
+}
+
 TEST_CASE("render patterns reject embedded NUL bytes before planning files") {
     Workdir dir;
     auto app = makeApp(dir.path);

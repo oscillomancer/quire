@@ -779,7 +779,7 @@ q = nil
 ---@field notes? string
 ---@field console9? boolean
 ---@field history_budget_bytes? integer Estimated retained history byte budget; default 1 GiB. Leases and branch boundaries may exceed it.
----@field render? any
+---@field render? table
 ---@field timebase? "time"|"beats"|"beats_position"
 
 ---@class Quire.project_template_delete_args

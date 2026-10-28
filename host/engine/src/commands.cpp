@@ -946,6 +946,17 @@ void registerEngineCommands(cmd::Registry& registry) {
             "timebase: what items follow when the tempo changes, for items and tracks that "
             "inherit it — beats (default), time or beats_position; they keep their place now.";
         c.tags = {"project"};
+        // Share the model's ID metadata for merge replay, while retaining the
+        // state-aware checks and repair hints in run().
+        auto renderSchema = model::schemaOf<model::Project>().jsonSchema()["properties"]["render"];
+        renderSchema.asObject().erase("default");  // omission leaves existing settings unchanged
+        const schema::Schema<json::Value> renderArgs{
+            "render settings",
+            [](const json::Value& v, json::Value& out, schema::DecodeCtx&, const std::string&) {
+                out = v;
+                return true;
+            },
+            [](const json::Value& v) { return v; }, std::move(renderSchema)};
         c.args = schema::object<ProjectSetArgs>("project_set_args")
                      .field("name", &ProjectSetArgs::name, schema::string())
                      .field("title", &ProjectSetArgs::title, schema::string())
@@ -956,7 +967,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                             schema::integerOf<std::uint64_t>().min(1).doc(
                                 "Estimated retained history byte budget; default 1 GiB. Leases and "
                                 "branch boundaries may exceed it."))
-                     .field("render", &ProjectSetArgs::render, schema::any())
+                     .field("render", &ProjectSetArgs::render, renderArgs)
                      .field("timebase", &ProjectSetArgs::timebase, model::timebaseSchema())
                      .build();
         c.result = emptySchema();

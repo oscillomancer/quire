@@ -305,6 +305,12 @@ dither), `sample_rate`, `channels`, `normalize` (`none` | `{mode: lufs_i|
 lufs_s|lufs_m|peak|true_peak|rms, target, limit_true_peak_db?}`), `tail_ms`,
 `pattern` (file-name pattern, §7.3), `secondary` format, `matrix`
 (`{rg id or "project": [track/master ids, e.g. "tr_0"]}`).
+Both the project schema and `project.set` argument schema mark matrix row keys
+as region IDs (with `project` as a literal alternative in `propertyNames`) and
+array cells as track IDs. Merge replay and conflict checks remap these references;
+the `project` key and free text such as `pattern` remain unchanged. This describes
+the existing file shape; the project schema version and runtime validation are
+unchanged.
 
 ### 1.11 Blobs
 
