@@ -138,6 +138,20 @@ double stepped(double x) {
     return e * e * (3.0 - 2.0 * e);
 }
 
+// The sparse digital frames' (8 to 11) harmonic i (0: none) and its level.
+int sparseHarmonic(int f, int i) {
+    if (i == 0) return 1;
+    if (f == 8) return i == 1 ? 7 : i == 2 ? 11 : 0;
+    if (f == 9) return i == 1 ? 9 : i == 2 ? 13 : i == 3 ? 14 : 0;
+    if (f == 10) return i == 1 ? 11 : i == 2 ? 17 : i == 3 ? 19 : i == 4 ? 23 : 0;
+    return i == 1 ? 13 : i == 2 ? 21 : i == 3 ? 22 : i == 4 ? 29 : i == 5 ? 31 : 0;
+}
+double sparseLevel(int f, int i) {
+    if (i == 0) return f == 10 ? 0.8 : f == 11 ? 0.7 : 1.0;
+    if (i == 2) return f == 8 ? 0.6 : 0.7;
+    return i == 1 ? 0.8 : i == 3 ? 0.5 : i == 4 ? 0.4 : 0.3;
+}
+
 // The digital table's frame f (1..15) as the steps of one cycle, into v; how
 // many there are. Frame 0 is the saw. Four of each kind: the saw held on 8,
 // 5 and 3 steps; a sine and two bent waves crushed to a few levels; sparse
@@ -153,15 +167,13 @@ int digitalSteps(int f, Array<double, 64>& v) {
     if (f == 13) {
         // A maximal-length sequence of 15: every harmonic below the 15th as
         // strong as the others.
-        const Array<double, 15> bits = {1, -1, -1, 1, 1, -1, 1, -1, 1, 1, 1, 1, -1, -1, -1};
-        for (int j = 0; j < 15; ++j) v[j] = bits[j];
+        int bits = 3929;  // the sequence, first step in the lowest bit
+        for (int j = 0; j < 15; ++j) {
+            v[j] = bits % 2 == 1 ? 1.0 : -1.0;
+            bits = bits / 2;
+        }
         return 15;
     }
-    // Harmonic and level pairs of the sparse frames, 8 to 11.
-    const Array<double, 48> sparse = {1, 1,  7,  0.8, 11, 0.6, 0,  0,   0,  0,   0,  0,
-                                      1, 1,  9,  0.8, 13, 0.7, 14, 0.5, 0,  0,   0,  0,
-                                      1, .8, 11, 0.8, 17, 0.7, 19, 0.5, 23, 0.4, 0,  0,
-                                      1, .7, 13, 0.8, 21, 0.7, 22, 0.5, 29, 0.4, 31, 0.3};
     const int n = f >= 7 && f <= 11 ? 64 : 32;
     double most = 0.0;
     for (int j = 0; j < n; ++j) {
@@ -176,8 +188,7 @@ int digitalSteps(int f, Array<double, 64>& v) {
         else if (f == 7)
             x = sin(w) + 0.9 * sin(4.0 * w + 0.7) >= 0.0 ? 1.0 : -1.0;
         else if (f <= 11) {
-            for (int i = 0; i < 6; ++i)
-                x += sparse[(f - 8) * 12 + i * 2 + 1] * sin(sparse[(f - 8) * 12 + i * 2] * w);
+            for (int i = 0; i < 6; ++i) x += sparseLevel(f, i) * sin(sparseHarmonic(f, i) * w);
             most = max(most, abs(x));
         } else if (f == 12)
             x = sin(w) + 0.8 * sin(6.0 * w + 1.1) >= 0.0 ? 1.0 : -1.0;
