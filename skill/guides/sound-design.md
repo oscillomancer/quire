@@ -6,7 +6,9 @@ three LFOs, four macros and the player's own controllers to move them. Its
 patch is `supple.marram-patch/1.0`: physical values under `params`, flat
 keys (`filter1.cutoff`), and `routes` for modulation. The exact keys, units
 and ranges come from `plugin_describe` (sandbox) or `fx_describe` (DAW); this
-guide is about *how to get to a sound*.
+guide is about *how to get to a sound*. The workflow below uses sandbox
+tools; in the DAW use `fx_*` patch tools and `render_mix` / `analyze_compare`
+(see the host table in `SKILL.md`). The optimizer is sandbox-only.
 
 Effects are not part of it. Put the stock effects after it in the chain:
 Bracken for echoes (`guides/delay.md`), Ghyll for space
@@ -22,7 +24,9 @@ parameters. The **optimizer** tunes the continuous numbers against a
 target. You are good at the first and bad at nudging twenty coupled knobs;
 the optimizer is the opposite. So: start from the factory sound nearest to
 what you want, change its structure, measure, and hand the numbers to
-`optimize_start`.
+`optimize_start`. It accepts only active float parameters whose flags include
+`modulatable` and exclude `readonly`; check `plugin_describe` with
+`detail: "full"`. Fixed envelope amounts and unison detune are set manually.
 
 ## Anatomy in one screen
 
@@ -65,9 +69,10 @@ what you want, change its structure, measure, and hand the numbers to
   (copies of each analog, wavetable and FM oscillator) with `unison_detune`
   and `unison_spread`, `drift` (slow pitch and cutoff wander), `quality`.
 
-Omitted keys keep their values; a merge changes only what it names. A
-parameter that does not apply (filter 2's cutoff while filter 2 is off) is
-kept and listed under `inactive`: switch its module on first.
+In `patch_merge`, omitted keys keep their values; a merge changes only what
+it names. `patch_set` replaces the patch, resetting omitted parameters to
+defaults. A parameter that does not apply (filter 2's cutoff while filter 2
+is off) is kept and listed under `inactive`: switch its module on first.
 
 ## Routes
 
@@ -96,8 +101,9 @@ to scale it by a second source (vibrato under the mod wheel).
 
 ## Start from a factory sound
 
-`preset_load {instance, name, source: "factory"}`, then `patch_get {detail:
-"changed"}` to see what it sets. Each measures −15 to −18 LUFS.
+`preset_load {instance, name, source: "factory"}`, then
+`patch_get {instance, detail: "changed"}` to see what it sets. Measure loudness
+with your phrase: its notes, velocity and duration affect the result.
 
 | Factory sound | Structure worth borrowing |
 |---|---|
@@ -128,10 +134,12 @@ to scale it by a second source (vibrato under the mod wheel).
    `optimize_start` minimizes (lower is closer to the reference).
 4. When the structure is right, run `optimize_start` with the 3–8 parameters
    that matter (`filter1.cutoff`, `env2.decay`) and a target: a reference
-   render or file, or a profile of descriptor ranges. `job_wait`, then
-   `patch_merge` the result's `patch`.
-5. `patch_get {"detail": "changed"}` is the short form to report; `describe`
-   gives a prose summary for the human, routes included.
+   render or file, or a profile of descriptor ranges. Wait with
+   `exec {command: "job.wait", args: {job}}`; once `status` is `"done"`, use
+   `patch_merge {instance, patch: <result.patch>}`.
+5. `patch_get {instance, detail: "changed"}` is the short form to report;
+   `plugin_describe {instance, detail: "summary"}` gives a prose summary for
+   the human, routes included.
 
 ## Which knob moves which number
 
@@ -198,7 +206,8 @@ Optimize: `filter1.cutoff`, `env2.attack`, `env2.decay`, `amp.attack`.
    "amp.release": "120 ms", "amp.velocity": "60 %", "env2.decay": "250 ms",
    "env2.sustain": "0 %", "env2.release": "200 ms"}}
 ```
-Optimize: `filter1.cutoff`, `filter1.resonance`, `filter1.env`, `env2.decay`, `amp.decay`.
+Optimize: `filter1.cutoff`, `filter1.resonance`, `env2.decay`, `amp.decay`.
+Set `filter1.env` manually.
 
 **Acid bass (legato, glide, resonant snap)** (Acid Line)
 ```json
@@ -210,7 +219,8 @@ Optimize: `filter1.cutoff`, `filter1.resonance`, `filter1.env`, `env2.decay`, `a
    "drive.amount": "9 dB", "amp.decay": "300 ms", "amp.sustain": "70 %",
    "amp.release": "60 ms", "env2.decay": "220 ms", "env2.sustain": "0 %"}}
 ```
-Optimize: `filter1.cutoff`, `filter1.env`, `env2.decay`, `drive.amount`.
+Optimize: `filter1.cutoff`, `env2.decay`, `drive.amount`.
+Set `filter1.env` manually.
 
 **Sub bass (a clean fundamental)** (Sub Bass)
 ```json
@@ -233,7 +243,7 @@ Optimize: usually nothing; `"drive.type": "soft"` adds audible harmonics.
    "env2.decay": "800 ms", "env2.sustain": "40 %"},
  "routes": {"modwheel>filter1.cutoff": {"amount": "+2 oct"}}}
 ```
-Optimize: `voice.unison_detune`, `filter1.cutoff`.
+Optimize: `filter1.cutoff`. Set `voice.unison_detune` manually.
 
 **Metallic bell (inharmonic partials)** (Glass Bell)
 ```json
@@ -312,4 +322,4 @@ Optimize: `filter1.vowel`, `lfo2.rate`.
  "routes": {"lfo1>voice.tune": {"amount": "+10 ct"},
             "modwheel>filter1.cutoff": {"amount": "+1 oct"}}}
 ```
-Optimize: `filter1.cutoff`, `amp.attack`, `voice.unison_detune`.
+Optimize: `filter1.cutoff`, `amp.attack`. Set `voice.unison_detune` manually.

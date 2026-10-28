@@ -52,6 +52,17 @@ class BuildFiles(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("SPDX identifier", errors)
 
+    def test_script_and_workflow_licenses_are_checked(self):
+        for filename in ("tools/package/install.sh.in", "tools/package/windows.nsi",
+                         "tools/ci/example.sh", "tools/ci/example.ps1",
+                         ".github/workflows/example.yml", ".github/workflows/example.yaml",
+                         ".github/scripts/example.sh", "plugins/common/example.sh"):
+            with self.subTest(filename=filename):
+                result, errors = self.check_fixture(
+                    filename, "# SPDX-License-" + "Identifier: AGPL-3.0-only\n")
+                self.assertEqual(result, 1)
+                self.assertIn("SPDX identifier", errors)
+
     def test_only_the_named_file_may_name_a_gpl_tag(self):
         tag = 'string(REPLACE "SPDX-License-' + 'Identifier: MIT" "SPDX-License-' + 'Identifier: GPL-3.0-or-later")\n'
         result, errors = self.check_fixture("plugins/template/framework/tools/new_product.cmake", tag)

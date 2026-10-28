@@ -13,14 +13,20 @@ from common import (Mcp, PluginProvenanceError, capture, check_plugin_provenance
 
 def invocations(name, args):
     """Flatten explicit batches for efficiency/notation accounting."""
+    if not isinstance(name, str) or not isinstance(args, dict):
+        return []  # Rejected tool arguments are errors, not typed submissions.
+    name = name.split("@", 1)[0]
     if name in ("exec", "query"):
         if "batch" in args:
             return invocations("batch", args["batch"])
         return invocations(args.get("command", ""), args.get("args", {}))
     if name == "batch":
-        return [entry for step in args.get("steps", [])
+        steps = args.get("steps", [])
+        if not isinstance(steps, list):
+            return []
+        return [entry for step in steps if isinstance(step, dict)
                 for entry in invocations(step.get("command", ""), step.get("args", {}))]
-    return [(name.split("@", 1)[0].replace("_", "."), args)]
+    return [(name.replace("_", "."), args)]
 
 
 class Recorder:

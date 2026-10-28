@@ -9,6 +9,8 @@ Defaults: build/release binaries and the stock synth, renders/listening/synth-re
 import argparse, json, os, re, shutil, subprocess, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+with open(os.path.join(ROOT, "cmake/Product.cmake"), encoding="utf-8") as product:
+    PRODUCT_SLUG = re.search(r'set\(PRODUCT_SLUG\s+"([a-z0-9-]+)"\)', product.read())[1]
 
 # A phrase per recipe (by its bold title in the guide): what exercises it.
 PHRASES = {
@@ -29,9 +31,13 @@ class Mcp:
     def __init__(self, cmd):
         self.p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
         self.id = 0
-        self.call_rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
-                                      "clientInfo": {"name": "listening-renders", "version": "1"}})
-        self.send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        try:
+            self.call_rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                                          "clientInfo": {"name": "listening-renders", "version": "1"}})
+            self.send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        except BaseException:
+            self.close()
+            raise
 
     def send(self, msg):
         self.p.stdin.write(json.dumps(msg) + "\n")
@@ -54,8 +60,18 @@ class Mcp:
         return r.get("structuredContent", {})
 
     def close(self):
-        self.p.stdin.close()
-        self.p.wait(timeout=30)
+        try:
+            try:
+                self.p.stdin.close()
+            except BrokenPipeError:
+                pass
+            try:
+                self.p.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                self.p.kill()
+                self.p.wait()
+        finally:
+            self.p.stdout.close()
 
 
 def recipes():
@@ -70,28 +86,30 @@ def recipes():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--sandbox", default=os.path.join(ROOT, "build/release/host/sandbox/quire-sandbox"))
+    ap.add_argument("--sandbox", default=os.path.join(ROOT, "build/release/host/sandbox", PRODUCT_SLUG + "-sandbox"))
     ap.add_argument("--plugin", default=os.path.join(ROOT, "build/release/plugins/clap/Marram.clap"))
     ap.add_argument("--out", default=os.path.join(ROOT, "renders/listening/synth-recipes"))
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     work = os.path.join(a.out, ".work")
     mcp = Mcp([a.sandbox, "--mcp", "--workdir", work, "--plugin-path", a.plugin])
-    loaded = mcp.tool("plugin_load", {"plugin": a.plugin})
-    instance = loaded["instance"]
     done = 0
-    for i, (title, patch) in enumerate(recipes(), 1):
-        phrase, tail = PHRASES[title]
-        mcp.tool("patch_set", {"instance": instance, "patch": patch})
-        r = mcp.tool("render", {"notation": "notation 1\ntempo 100\n" + phrase, "tail_s": tail,
-                                "name": title, "analyze": "summary"})
-        slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
-        dst = os.path.join(a.out, "%02d-%s.wav" % (i, slug))
-        shutil.copyfile(r["path"] if "path" in r else r["wav"], dst)
-        loud = r.get("analysis", {}).get("loudness", {}).get("integrated_lufs")
-        print("%-34s %s  %s LUFS" % (title, os.path.relpath(dst, ROOT), loud))
-        done += 1
-    mcp.close()
+    try:
+        loaded = mcp.tool("plugin_load", {"plugin": a.plugin})
+        instance = loaded["instance"]
+        for i, (title, patch) in enumerate(recipes(), 1):
+            phrase, tail = PHRASES[title]
+            mcp.tool("patch_set", {"instance": instance, "patch": patch})
+            r = mcp.tool("render", {"notation": "notation 1\ntempo 100\n" + phrase, "tail_s": tail,
+                                    "name": title, "analyze": "summary"})
+            slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+            dst = os.path.join(a.out, "%02d-%s.wav" % (i, slug))
+            shutil.copyfile(r["path"] if "path" in r else r["wav"], dst)
+            loud = r.get("analysis", {}).get("loudness", {}).get("integrated_lufs")
+            print("%-34s %s  %s LUFS" % (title, os.path.relpath(dst, ROOT), loud))
+            done += 1
+    finally:
+        mcp.close()
     shutil.rmtree(work, ignore_errors=True)
     return 0 if done == len(PHRASES) else 1
 

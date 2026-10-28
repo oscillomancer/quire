@@ -5,7 +5,16 @@
 `supple.analysis-report/1.0`: numbers that stand in for your ears. This page
 says what each one measures, what normal values look like, and what moves it.
 Definitions are exact in `docs/specs/core-analysis.md`; the summary detail is
-what you usually get.
+what you usually get. Field names below are relative to their section
+(`loudness`, `spectral`, `harmonic`, `envelope`, `stereo`). Typical values are
+heuristics for choosing a starting point, not guaranteed classifications.
+
+Request `detail: "standard"` on `analyze.render` or `analyze.track` for the
+statistics, band objects and LTAS described below. In the sandbox, use
+`analyze {source: <render id or file>, detail: "standard"}`. Summary detail
+reduces centroid/rolloff/flatness/flux to scalar medians and bands to scalar
+relative levels: `spectral.bands.low`, not `spectral.bands.low.level_db`.
+It omits band widths and LTAS.
 
 ## Loudness (EBU R128 / ITU-R BS.1770)
 
@@ -17,8 +26,9 @@ what you usually get.
 | `true_peak_dbtp` | inter-sample peak | keep ≤ −1 dBTP for delivery |
 | `plr_lu` | peak-to-loudness ratio: punch vs density | squashed < 8, dynamic > 12 |
 
-Loudness is not quality. Compare sounds at matched loudness — `compare`
-level-matches timbre terms for you.
+Loudness is not quality. Both hosts remove the average level offset when
+comparing LTAS shape. The sandbox's `compare` also returns a level-matched
+optimizer loss; the DAW's `analyze.compare` returns descriptor differences.
 
 ## Spectrum
 
@@ -43,21 +53,23 @@ level-matches timbre terms for you.
 
 - `pitched`, `f0_hz`, `note` (`G3+4c`), `stability_cents` (vibrato/drift),
   `voiced_pct`.
-- `harmonics_db` — harmonics 1..8 relative to the fundamental. A saw falls
-  about 6 dB per octave (h2 ≈ −6, h4 ≈ −12), a square has weak even
+- `harmonics_db` — harmonics 1..8 (1..16 in full detail) relative to the
+  fundamental. A saw falls about 6 dB per octave (h2 ≈ −6, h4 ≈ −12), a square has weak even
   harmonics, a sine has none. Drive raises them; a low-pass cuts the upper
   ones.
 - `inharmonicity` — 0 for harmonic sounds; bells, FM with non-integer ratios
   and stiff strings read higher (0.01–0.1+).
 - `hnr_db` — harmonics-to-noise ratio: clean tones > 30, breathy/noisy < 10.
 
-Unpitched sounds (drums, noise) report `pitched: false` and omit these.
+Unpitched sounds (drums, noise) retain `pitched: false` and `voiced_pct`,
+and omit the remaining harmonic fields.
 
 ## Envelope (render one note to measure it)
 
 - `attack_ms` — 10 % → 90 % of the peak. Plucks < 5, pads 200+.
 - `decay20_ms` — peak to −20 dB: how fast it fades after the hit.
-- `release_ms` (when the note-off is known) — note-off to −60 dB.
+- `release_ms` (when measurable and the note-off is known) — note-off to
+  −60 dB. `release_extrapolated: true` marks an estimate from the decay slope.
 - `crest_db` — peak over RMS: transient spikiness.
 - `onsets_per_s` — note/transient density.
 
@@ -75,7 +87,8 @@ Multi-note phrases blur envelope numbers; measure envelopes on a single note.
 `analyze.compare {reference, test}` lists the descriptors that changed notably
 (score ≥ 1 means beyond the usual threshold for that descriptor), the LTAS
 RMS difference in dB (< 1 dB: very close, > 3 dB: clearly different
-timbre), and the loudness difference it removed before comparing. Use it
+timbre). Only LTAS has its average level offset removed; notable descriptor
+deltas retain loudness changes. There is no removed-gain field. Use it
 after every change: it tells you exactly what your change did.
 
 `branch.render-ab {a, b, end_beat}` renders two branch heads over the same

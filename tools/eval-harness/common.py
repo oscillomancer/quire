@@ -204,7 +204,12 @@ class Mcp:
             self.stderr.close()
 
     def __enter__(self):
-        self.initialize()
+        try:
+            self.initialize()
+        except BaseException:
+            # Python does not call __exit__ when __enter__ fails.
+            self.close()
+            raise
         return self
 
     def __exit__(self, *_):

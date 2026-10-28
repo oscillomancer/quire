@@ -11,6 +11,7 @@ Run:  python3 tools/optimize-bench/summary.py docs/benchmarks/optimizer/2026-10-
 
 import argparse
 import json
+import statistics
 import sys
 from pathlib import Path
 
@@ -38,7 +39,8 @@ def task_table(reports):
     """Median best loss of the three seeds per task and mode, one row per task."""
     lines = []
     for mode in sorted({mode for report in reports for mode in report["summary"]["modes"]}):
-        lines += [f"| Task | Tier | {' | '.join('`' + r['label'] + '`' for r in reports)} |",
+        lines += [f"### {mode}", "",
+                  f"| Task | Tier | {' | '.join('`' + r['label'] + '`' for r in reports)} |",
                   f"|---|---:|{'---:|' * len(reports)}"]
         tasks = sorted({task for report in reports for task in report["tasks"]})
         for task in tasks:
@@ -55,7 +57,7 @@ def task_table(reports):
                 if not runs:
                     row.append(record.get("not_applicable") and "n/a" or "—")
                 else:
-                    row.append(f"{sorted(runs)[len(runs) // 2]:.3f}")
+                    row.append(f"{statistics.median(runs):.3f}")
             lines.append(f"| {task} | {tier} | {' | '.join(row)} |")
         lines.append("")
     return lines

@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import HERE, ROOT, SYNTH, Mcp, PluginProvenanceError, capture, check_plugin_provenance, evaluation_profile, load_tasks, read_json, sandbox_command, setup, slug, validate_task, write_json
 from relay import Recorder, invocations
 from runners import default_model, dry, isolated_config, preamble, preflight
-from run import render_patch, score_final, unpublishable
+from run import main, render_patch, score_final, unpublishable
 from scoring import notation_score, transcript_metrics
 from process_tree import spawn_group, stop_group
 from pipe_ready import wait_pipe
@@ -112,22 +112,71 @@ class Scoring(unittest.TestCase):
         self.assertTrue(attempts[0]["compiled"])
         self.assertFalse(attempts[1]["compiled"])
 
+    def test_versioned_batches_keep_the_final_notation(self):
+        entry = {"name": "exec", "arguments": {"command": "batch@1", "args": {"steps": [
+            {"command": "render@1", "args": {"notation": "final phrase"}}]}},
+                 "response": {"result": {"structuredContent": {}}}}
+        metrics = transcript_metrics([entry])
+        self.assertEqual(metrics["batches"], 1)
+        attempts = metrics["notation_attempts"]
+        self.assertEqual([attempt["notation"] for attempt in attempts], ["final phrase"])
+
+    def test_malformed_calls_count_as_errors_without_crashing_scoring(self):
+        for name, arguments in (("batch", None), ("exec", []), ("exec", None), (42, {}),
+                                ("batch", {"steps": None}), ("batch", {"steps": [None, 42]}),
+                                ("exec", {"command": "render", "args": "bad"})):
+            with self.subTest(name=name, arguments=arguments):
+                result = transcript_metrics([{"name": name, "arguments": arguments,
+                                              "response": {"error": {"code": -32602}}}])
+                self.assertEqual(result["errors"], 1)
+                self.assertEqual(result["notation_attempts"], [])
+
 
 class Isolation(unittest.TestCase):
+    def test_failed_initialization_closes_the_sandbox(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code = ("import json,sys; "
+                    "[print(json.dumps({'id': json.loads(line)['id'], "
+                    "'error': {'message': 'initialization refused'}}), flush=True) "
+                    "for line in sys.stdin]")
+            client = Mcp([sys.executable, '-u', '-c', code], directory)
+            try:
+                with self.assertRaisesRegex(ValueError, "initialization refused"):
+                    with client:
+                        self.fail("Initialization must fail before entering the body")
+                self.assertIsNotNone(client.process.poll())
+                self.assertTrue(client.process.stdin.closed)
+                self.assertTrue(client.process.stdout.closed)
+                self.assertTrue(client.stderr.closed)
+            finally:
+                stop_group(client.process)
+                client.process.stdin.close()
+                client.process.stdout.close()
+                client.stderr.close()
+
     def test_dedicated_profile_without_default_fallback(self):
         self.assertEqual(evaluation_profile(), Path.home() / ".hermes/profiles" / (slug() + "-eval"))
-        with tempfile.TemporaryDirectory(dir=ROOT / "build") as directory:
+        with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(FileNotFoundError):
                 default_model(Path(directory) / "missing/config.yaml")
 
     def test_default_identity_excludes_secrets_and_other_config(self):
-        with tempfile.TemporaryDirectory(dir=ROOT / "build") as directory:
+        with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "source.yaml"
             path.write_text('model:\n  default: cheap/model\n  provider: openrouter\n  api_key: private\nmcp_servers:\n  unrelated: bad\n', encoding="utf-8")
             self.assertEqual(default_model(path), {"default": "cheap/model", "provider": "openrouter"})
 
+    def test_model_yaml_accepts_eof_without_newline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.yaml"
+            for ending in ("", "\n", "\r\n"):
+                with self.subTest(ending=repr(ending)):
+                    path.write_text("model:\n  default: test/model\n  provider: test" + ending,
+                                    encoding="utf-8")
+                    self.assertEqual(default_model(path), {"default": "test/model", "provider": "test"})
+
     def test_isolation_reference_and_tool_restriction(self):
-        with tempfile.TemporaryDirectory(dir=ROOT / "build") as directory:
+        with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             credential = root / "external.env"
             credential.write_text("OPENROUTER_API_KEY=FAKE-UNIT-TEST\n", encoding="utf-8")
@@ -239,6 +288,27 @@ class PluginProvenance(unittest.TestCase):
 
 
 class Publishing(unittest.TestCase):
+    def test_truncated_usage_keeps_the_attempt_report(self):
+        task = load_tasks("synth-descriptive", ["sub-bass"])[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            def interrupted_runner(task, directory, binary):
+                (directory / "usage.json").write_text('{"total_tokens":', encoding="utf-8")
+                raise TimeoutError("attempt interrupted")
+
+            with mock.patch("run.ROOT", root), mock.patch("run.load_tasks", return_value=[task]), \
+                    mock.patch("run.skill_hash", return_value="test"), \
+                    mock.patch("run.subprocess.check_output", return_value="test"), \
+                    mock.patch("run.signal.signal"), mock.patch("run.runners.dry", interrupted_runner):
+                self.assertEqual(main([]), 1)
+            report = read_json(next((root / "build/eval").glob("*/report.json")))
+            record = report["tasks"][0]
+            self.assertIn("attempt interrupted", record["error"])
+            self.assertIn("usage.json", record["error"])
+            self.assertEqual(record["usage"], {})
+            self.assertFalse(report["usage_totals"]["cost_known"])
+
     def test_outages_are_not_measurements(self):
         usage = {"total_tokens": 27367}
         broken = {"usage_totals": usage, "tasks": [{"incomplete": True}, {"error": "HTTP 402"}]}

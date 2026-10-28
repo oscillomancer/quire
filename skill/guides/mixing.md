@@ -1,9 +1,9 @@
 # Corrective mixing
 
 Mixing in Quire is measurement-driven: render the mix, analyze it, change one
-thing, render again, `compare`. The stock EQ and dynamics plugins are in
-development; until they ship, this guide covers what the engine does today —
-levels, panning, muting/soloing, rendering, and measuring loudness and
+thing, render again, `analyze.compare`. Use the stock EQ and dynamics plugins for
+corrective processing; their guides describe the controls. This guide covers
+levels, panning, muting/soloing, routing, rendering, and measuring loudness and
 masking.
 
 To measure a point in an FX chain (loudness, peaks, tonal balance, stereo,
@@ -26,19 +26,18 @@ guide](analyzer.md). `fx.meters` reads any plugin's readouts the same way
    worst bands.
 4. Fix with the smallest move: level (`track.set {track, volume_db}`), pan
    (`track.set {track, pan}`), a different octave or voicing (edit the MIDI),
-   or — when the EQ ships — a cut in the masked band on the less important
-   part.
+   or a cut with Yarrow in the masked band on the less important part.
 5. Render again and `analyze.compare {reference, test}` with the two render ids.
 
 Group a change and its render in one `batch`: one undo step, atomic.
 
 ## Sends and buses
 
-Use `route.add {"from":"tr_1","to":"tr_2","tap":"post_fader","volume_db":"-6 dB"}` to feed a bus track; place bus processing in that track's FX chain and use `route.list` to inspect sends. `route.set` changes a send's level, pan, tap, endpoints, or mute; `route.remove` deletes it. The destination must not feed the source, including through folder parent sends. Hardware endpoints and channel maps are not available through these commands yet.
+Use `route.add {"from":"tr_1","to":"tr_2","tap":"post_fader","volume_db":"-6 dB"}` to feed a bus track; place bus processing in that track's FX chain and use `route.list` to inspect sends. `route.set` changes a send's level, pan, tap, endpoints, or mute; `route.remove` deletes it. The destination must not feed the source, including through folder parent sends. The `channels` argument maps one-based source channels to destination channels, for example `{"from":[3,4],"to":[1,2]}`. Hardware endpoints are not available through these commands yet.
 
-To sidechain, route into the plugin's key: `route.add {"from":"tr_kick","fx":"fx_3","tap":"post_fader"}` (fx_3 is the compressor on the bass track; `fx.describe` shows `sidechain_channels` when a plugin has a key input, otherwise the route fails with `route.no_sidechain`). The key is delay-compensated, follows the source's mute at a post-fader tap, and keeps sounding when another track is soloed.
+To sidechain, route into the plugin's key: `route.add {"from":"tr_1","fx":"fx_3","tap":"post_fader"}` (tr_1 is the kick track and fx_3 is the compressor on the bass track; `fx.describe` shows `sidechain_channels` when a plugin has a key input, otherwise the route fails with `route.no_sidechain`). The key is delay-compensated, follows the source's mute at a post-fader tap, and keeps sounding when another track is soloed.
 
-Use `plugin.list` to find an FX id, `plugin.scan` to refresh the catalogue, `fx.move` to reorder a chain, `fx.patch.get/set` for a semantic patch, and `fx.param.get` for one value. For arrangement edits, `item.set/split/duplicate` and `take.list/add/set/activate` change clips and takes; `marker.*` and `region.*` label the timeline, while `time.convert` maps seconds, beats, and bars.
+Use `plugin.list` to find a plugin id for `fx.add`; the returned `fx` (also shown by `session.describe`) identifies the loaded instance. Use `plugin.scan` to refresh the catalogue, `fx.move` to reorder a chain, `fx.patch.get/set` for a semantic patch, and `fx.param.get` for one value. For arrangement edits, `item.set/split/duplicate` and `take.list/add/set/activate` change clips and takes; `marker.*` and `region.*` label the timeline, while `time.convert` maps seconds, beats, and bars.
 
 ## Exporting and comparing versions
 
@@ -62,13 +61,15 @@ region renders to measure the first pass and apply gain on the second.
 
 | goal | measure | target |
 |---|---|---|
-| streaming-ready level | `integrated_lufs` | −14 (±1) |
-| no inter-sample clipping | `true_peak_dbtp` | ≤ −1.0 |
-| mono-safe low end | `bands.low.width`, `bands.sub.width` | < 0.1 |
-| no mud | `bands.low_mid.level_db` | not the loudest band unless intended |
-| not harsh | `bands.high_mid.level_db`, `tilt_db_per_oct` | tilt −3..−6 for full mixes |
+| streaming-ready level | `loudness.integrated_lufs` | −14 (±1) |
+| no inter-sample clipping | `loudness.true_peak_dbtp` | ≤ −1.0 |
+| mono-safe low end | `spectral.bands.low.width`, `spectral.bands.sub.width` | < 0.1 |
+| no mud | `spectral.bands.low_mid.level_db` | not the loudest band unless intended |
+| not harsh | `spectral.bands.high_mid.level_db`, `spectral.tilt_db_per_oct` | tilt −3..−6 for full mixes |
 | mono compatibility | `stereo.mono_loss_lu` | < 1.5 LU |
 
+Request `detail: "standard"` with `analyze.render` for band level objects and
+widths; summary detail provides scalar band levels and omits widths.
 These are starting points, not rules; genre and intent win. When a target
 conflicts with the sound the human wants, say so and ask.
 
@@ -97,14 +98,14 @@ Mixer targets: track `volume` (dB), `pan` (%), `mute`;
 route `volume`, `pan`, `mute`. Plugin targets: the semantic keys
 `fx.describe` lists (values in their unit; a cutoff sweep moves evenly in
 pitch), or a CLAP id/name for other plugins. `env.points.set` replaces
-points (or a beat range of them); `env.set {active: false}` bypasses an
-envelope; render and `compare` to hear what it did.
+points (or a beat range of them); `env.set {env, active: false}` bypasses an
+envelope; render and `analyze.compare` to hear what it did.
 
 Use [Hickory, the stereo utility](utility.md) for gain staging, channel checks, bass mono and lining up multi-miked tracks; its `correlation` and `side_level` readouts say what the stereo image is doing. Render and compare after width or polarity changes.
 For track and bus compression, external-key ducking, upward compression and peak catching, see [Sundew, the compressor](comp.md).
 For a true-peak ceiling on the master and loudness against a LUFS target, see [Treeline, the limiter](limiter.md).
 Use [Yarrow, the stock EQ](eq.md) for measured rumble, masking and harshness cuts, de-essing and dynamic or mid/side bands.
-Use [Sorrel, the gate](gate.md) to reduce between-hit spill or noise between phrases; its `suggested_threshold`, `noise_floor` and `openings` readouts say where to set it and whether it chatters.
+Use [Sorrel, the gate](gate.md) to reduce between-hit spill or noise between phrases; its `suggested`, `noise_floor` and `openings` readouts say where to set it and whether it chatters.
 Use [Teasel, the saturation](drive.md) for colour and distortion; set it by its `thd` and `even` readouts, and drive only a band, the mid or the side when the rest should stay clean.
 For onset punch, softened attacks and shorter or longer decays, see [Gorse, the transient shaper](transient.md).
 For echoes, in time or free, ping-pong and ducked throws, see [Bracken, the delay](delay.md); its `echo_time` and `decay` readouts say when the echoes come and how long they last.

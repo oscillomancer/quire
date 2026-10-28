@@ -23,7 +23,11 @@ keeps a `daw/gui/<slug>` symlink for existing launch commands; CTest uses the
 actual executable target path.
 
 Artifacts are `<slug>-<version>-<platform>-<arch>.<ext>`: Linux x86_64 tar.xz,
-macOS arm64 dmg/zip, Windows x86_64 exe/zip. Linux packages use the `linux-package` preset's hidden static C++ runtimes
+macOS arm64 dmg/zip, Windows x86_64 exe/zip. Draft-release creation and updates
+require a successful all-platform run. An existing draft must target the exact
+commit being built; a different revision requires deleting the draft or bumping
+the version and rebuilding all platforms. Published releases are never modified.
+Linux packages use the `linux-package` preset's hidden static C++ runtimes
 for all five programs and the stock CLAPs; the parent forwards configure
 flags without modifying shared plugin-template files. Release CI uses Clang 22
 with GCC 12 libstdc++ on Ubuntu 22.04. Package audit rejects
@@ -52,6 +56,8 @@ selects the optional component for silent installation. Uninstall refuses
 reparse points in private app/plugin directory chains before any deletion.
 Linux similarly refuses symlinked private payload ancestors, keeping the
 manifest on refusal; external bin/desktop/icon/CLAP entries remain path-based.
+Linux validates every ownership file/directory record before removal and rejects
+parent traversal outside the recorded installation roots.
 Windows DLL staging resolves PE dependencies, excludes OS API sets/OpenGL,
 and audits the exact staged root set against the resolved inventory. Both SDL
 and zlib runtime notices ship, with zlib's configured version recorded.

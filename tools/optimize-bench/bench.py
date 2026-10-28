@@ -25,7 +25,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 sys.path.insert(0, str(ROOT / "tools/eval-harness"))
 
-from common import SYNTH_NAME, Mcp, load_tasks, sandbox_command, setup, write_json  # noqa: E402
+from common import SYNTH_NAME, Mcp, load_tasks, sandbox_command, setup, slug, write_json  # noqa: E402
 
 DEFAULT_MODES = ("auto", "module")
 
@@ -172,6 +172,9 @@ def markdown(records, summary, options):
     if summary["not_applicable"]:
         lines += [f"Not applicable: {', '.join(summary['not_applicable'])} "
                   f"(tier 3 starts from an empty patch — a structure task).", ""]
+    for record in records:
+        if record.get("error"):
+            lines += [f"Task `{record['task']}` failed: {record['error']}", ""]
     lines += ["| Mode | Runs | Median best | Min | Max | Pass (≤ max_loss) | Median evals | "
               "Median s | Skipped | Failed candidates | Dim |",
               "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
@@ -239,7 +242,7 @@ def main(argv=None):
     records.sort(key=lambda r: r["task"])
     summary = summarize(records, options)
     summary["wall_seconds"] = round(time.monotonic() - started, 1)
-    summary["sandbox"] = str(options.sandbox or (ROOT / "build/dev/host/sandbox" / "quire-sandbox"))
+    summary["sandbox"] = str(options.sandbox or (ROOT / "build/dev/host/sandbox" / (slug() + "-sandbox")))
 
     options.out_dir.mkdir(parents=True, exist_ok=True)
     json_path = options.out_dir / f"{options.label}.json"
@@ -256,7 +259,9 @@ def main(argv=None):
     print("\nwrote:")
     for path in (json_path, md_path, raw):
         print(f"  {path}")
-    return 0
+    return int(any(record.get("error") or any(
+        "best" not in run and not str(run.get("error", "")).startswith("no tunable parameters")
+        for run in record["runs"]) for record in records))
 
 
 if __name__ == "__main__":

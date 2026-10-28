@@ -6,6 +6,8 @@ expression, version, upstream, pinned commit, purpose, linkage).
 `tools/license-check/check.py` runs as part of every build and fails when
 anything is undeclared, not on the allow-list, missing its license file, or
 not described here. Policy: [ADR-0003](docs/decisions/0003-toolchain-and-dependencies.md).
+The gate also checks existing SPDX tags in first-party source, build and
+installer scripts, their templates, and GitHub workflows.
 
 Allowed for bundled code: MIT, MIT-0, BSD-2/3-Clause, ISC, Zlib, Apache-2.0,
 BSL-1.0, CC0, Unlicense (OFL-1.1 for fonts). The ASIO SDK is the sanctioned GPL-3.0-only exception, Windows DAW only,
@@ -96,7 +98,8 @@ names, branding of incompatible products or offensive associations. It says
 logo non-compliance does not affect GPL rights but may violate trademarks.
 The license recommends those guidelines. No logo artwork is bundled here.
 The two license files, README, proprietary agreement and usage guidelines
-are preserved alongside the subset. CMake integration is still pending.
+are preserved alongside the subset. `cmake/PortAudio.cmake` integrates the
+subset into the Windows DAW's PortAudio backend.
 
 PortAudio v19.7.0 (2021-04-06), commit
 147dd722548358763a8b649b3e4b41dfffbcfbb6, has its unmodified native source/header subset vendored under

@@ -5,7 +5,9 @@
 set -euo pipefail
 
 tag=0.4.1
-cache_base="${XDG_CACHE_HOME:-${HOME}/.cache}/quire-tools/clap-validator/${tag}"
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+slug=$(sed -n 's/^set(PRODUCT_SLUG "\(.*\)").*/\1/p' "$root/cmake/Product.cmake")
+cache_base="${XDG_CACHE_HOME:-${HOME}/.cache}/${slug}-tools/clap-validator/${tag}"
 source_dir="${cache_base}/source"
 exe=""
 case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*)

@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-10-26. This file describes the present: what works, what is
+Updated 2026-10-27. This file describes the present: what works, what is
 known not to, and what is planned. Keep it current with each change; the
 history is in git.
 
@@ -9,10 +9,10 @@ server) and is used for real sessions. Full local CI (`tools/ci/run-all.sh`:
 license, format, dev, release, gcc, asan, tsan, rtsan) passes on
 `main`.
 
-The port branch has on-demand Linux/macOS/Windows CI and portable presets
-(ADR-0034). Linux dev passes all 144 tests including the 12 CLAP validators.
+The repository has on-demand Linux/macOS/Windows CI and portable presets
+(ADR-0034), including stock-plugin CLAP validation.
 Native headless services, hosting/scanning, bridge, stock wrappers, device
-backend builds and GUI tests pass Windows CI (102 tests) and macOS arm64
+backend builds and GUI tests have passed Windows CI and macOS arm64
 CI (ADR-0036/0037/0038/0039).
 Windows executables run with the UTF-8 process code page, so non-ASCII
 paths work whatever the system locale; the minimum is Windows 10 1903
@@ -69,19 +69,27 @@ checks remain explicit opt-ins. Source-export player/factory/audio conformance
 runs natively, including binary exports: Windows retains the module trailer;
 macOS uses a bundle resource and ad-hoc signing. The lifecycle and thirteen
 source/binary export conformance cases pass CI on Linux, macOS arm64 and Windows.
+Failed MCP initialization closes the evaluation client's pipes and process tree;
+its standalone unit fixtures also run before configuring a build. The new
+cleanup regression passes locally on Linux; macOS/Windows CI is pending.
+The offscreen mockup tool uses the shared native pipe-readiness helper and
+closes its MCP streams. Its Linux transport fixture passes; native runs are pending.
 
 Packaging (ADR-0048) has CMake install components, a relocatable Linux tarball
 and user-space installer, an Apple Silicon app/dmg and Windows per-user NSIS
 installer, with portable zip alternatives. The five helpers/programs, fifteen
 stock CLAPs, agent skill, fonts and license texts ship together. Package CI is
 manual and tests installed artifacts; optional release upload creates drafts
-only. Linux package builds now use hidden static C++ runtimes (ADR-0049), preserving
+only, from all-platform runs at one commit; existing drafts reject a different
+target revision. Linux package builds now use hidden static C++ runtimes (ADR-0049), preserving
 third-party plugin runtime independence; the audit rejects shared C++ runtimes.
 Both installers upgrade their own previous version and preserve unrelated
 files; both preflight ownership before removing an old installation and remember
 external-plugin opt-in. Removers refuse linked private payload directories;
-tests cover upgrade collisions, directory links and icon-directory ownership. Package CI
-checks installed native artifacts, upgrades and uninstall cleanup separately
+tests cover upgrade collisions, directory links and icon-directory ownership.
+Linux uninstall also preflights all ownership paths and refuses parent traversal
+before deleting any files; the local installer regression covers malformed records.
+Package CI checks installed native artifacts, upgrades and uninstall cleanup separately
 from the native regression suite. macOS finalization keeps notices in bundle
 resources and signs nested code before the app. Bundled SDL resolves package-manager
 symlinks into private library files. Windows stages the resolved DLL set and
@@ -673,6 +681,10 @@ Session and editing:
 GUI:
 - Automation-item point editing requires an amplitude magnitude above 0.000000001; restore
   the amplitude before editing a flattened item.
+- Plan compilation (including media decoding/resampling), Lua execution and
+  some project/file operations still run synchronously on the model/UI thread.
+  The 2 ms responsiveness target is not a bound on these operations; Lua's
+  instruction budget excludes time spent inside commands.
 - The opt-in native popup-focus regression passes on Hyprland/XWayland,
   including typing and Escape after a forwarded floating-window shortcut.
   Opening a popup in an already-key owner skips raising it, preserving Cocoa
@@ -744,4 +756,4 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
   renderer cheaper, then keep refining capacity in both modes.
 - Track groups, stretch markers, MIDI outputs, a background media cache.
 - Lua ergonomics (a script library path, hot reload).
-- Hardening and ports beyond Linux.
+- Native audio/MIDI hardware validation and GUI hardening on macOS and Windows.

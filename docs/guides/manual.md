@@ -5,8 +5,9 @@ Quire](installing.md)) or built ([Building Quire](building.md)): starting
 the app, audio devices, projects, plugins, and connecting an AI agent.
 
 The workflow follows REAPER's, so most of the arrange view, mixer, FX chains,
-routing and actions list will feel familiar from it. Every command the app
-runs is also listed in the actions list (`Shift+/` or `Ctrl+Shift+P`).
+routing and actions list will feel familiar from it. The actions list includes
+the public commands and GUI actions (`Shift+/` or `Ctrl+Shift+P`,
+`Cmd+Shift+P` on macOS).
 
 ## Starting Quire
 
@@ -100,18 +101,20 @@ Quire hosts CLAP and VST3 plugins. It looks for them in this order:
 
 1. its own stock plugins, installed privately with the app (in a build tree,
    `build/<preset>/plugins/clap`);
-2. `CLAP_PATH`, then the user and system CLAP folders (`~/.clap` on Linux,
-   `~/Library/Audio/Plug-Ins/CLAP` on macOS, `%LOCALAPPDATA%\Programs\Common\CLAP`
-   and `%COMMONPROGRAMFILES%\CLAP` on Windows);
-3. the VST3 folders.
+2. `CLAP_PATH`, then the standard CLAP folders: user before system on Linux
+   (`~/.clap`, `/usr/lib/clap`, `/usr/local/lib/clap`) and macOS
+   (`~/Library/Audio/Plug-Ins/CLAP`, `/Library/Audio/Plug-Ins/CLAP`);
+   system before user on Windows (`%COMMONPROGRAMFILES%\CLAP`,
+   `%LOCALAPPDATA%\Programs\Common\CLAP`);
+3. `VST3_PATH`, then the standard VST3 folders in the same platform order.
 
 The first copy of a plugin id wins. An older copy of a stock plugin installed
 for other hosts is listed as shadowed and never loaded. `--plugin-path P`
 (repeatable) replaces the whole list.
 
-To add an effect or instrument, use the **fx** button on a track (it opens
-the plugin browser when the track has no effects, the chain otherwise),
-**+ FX** in the mixer, or **Track > FX: add plugin…**.
+To add an effect or instrument, use the **+** beside **fx** on a track or
+mixer strip, or **Track > FX: add plugin…**. The **fx** button opens the
+track's FX chain, including when it is empty.
 In the chain window, Ctrl-click (Cmd-click on macOS) toggles a row in the
 selection, including the active row. Effects moved to another track leave
 that window’s selection.
@@ -146,8 +149,8 @@ Connect also links the bundled skill into the agent's user skills folder, as
 | Hermes | `~/.hermes/skills` (or `$HERMES_HOME/skills`; `%LOCALAPPDATA%\hermes\skills` on Windows) |
 
 The dialog shows the path before you click. If a skill of that name is
-already there, or in Codex's older `~/.codex/skills`, Connect leaves it as
-it is and says so.
+already there, or in Codex's older `~/.codex/skills` (or `$CODEX_HOME/skills`),
+Connect leaves it as it is and says so.
 
 **Help > MCP server…** shows this copy's absolute paths, a headless command
 and stdio/JSON instructions for any MCP client. **Help > Download skill…**
@@ -176,10 +179,12 @@ The installed MCP adapter and skill are here:
 | Build tree | `build/<preset>/mcp/quire-mcp` | `skill/` in the repository |
 
 Register the adapter by its absolute path, and link the skill into the
-agent's skills folder. For a build tree, from the repository root:
+agent's skills folder. For a build tree, from the repository root in a
+POSIX shell (Linux or macOS):
 
 ```sh
 claude mcp add -s user quire -- "$PWD/build/release/mcp/quire-mcp"
+mkdir -p ~/.claude/skills
 ln -s "$PWD/skill" ~/.claude/skills/quire
 
 codex mcp add quire -- "$PWD/build/release/mcp/quire-mcp"
@@ -191,14 +196,18 @@ Quire restarts while the agent runs, the next tool call reconnects by itself.
 To drive a second running copy, start it with `quire --instance NAME` and
 pass `--instance NAME` to `quire-mcp`.
 
-Without the GUI, `quire-engine --mcp` is a headless MCP server with the same
-commands: it renders, but has no window.
+Replace `release` with your build preset (`macos` on macOS). On Windows,
+use the app's **Copy command** button for a PowerShell command with this
+installation's paths.
+
+Without the GUI, `quire-engine --mcp` serves the engine's project and audio
+commands and can render offline. GUI-only state and actions require the app.
 
 ### Other clients and local models
 
 Any MCP client can use the same server. Give agents without skill support
 `skill/SKILL.md` as instructions; it lists the guides to read when needed.
-The tool list is large (about 130 tools). If you run a local model behind a
+The tool list is large (over 140 tools). If you run a local model behind a
 harness that sends every tool with each request, give the model a context of
 32k tokens or more. llama.cpp's `llama-server` needs `--jinja` to accept
 tools.

@@ -240,7 +240,15 @@ def main(argv=None):
             raise
         except (ValueError, KeyError, OSError, RuntimeError, TimeoutError, subprocess.SubprocessError) as error:
             record.update(valid_patch=False, error=str(error))
-        record["usage"] = read_json(directory / "usage.json") if (directory / "usage.json").exists() else {}
+        try:
+            record["usage"] = read_json(directory / "usage.json") if (directory / "usage.json").exists() else {}
+        except (ValueError, OSError) as error:
+            # A timeout may interrupt the runner while it writes usage. Keep the
+            # attempt and its original error instead of losing the entire run.
+            record["usage"] = {}
+            record["error"] = (record.get("error", "") + "; invalid usage.json: " + str(error)).lstrip("; ")
+            if "score" in record:
+                record["score"]["pass"] = False
         record["wall_seconds"] = round(time.monotonic() - begin, 3)
         print(f"{task['id']} repeat {repeat + 1}: {'PASS' if record.get('score', {}).get('pass') else 'FAIL'}"
               f" ({record['wall_seconds']:.2f}s)" + (f" — {record['error']}" if record.get("error") else ""), flush=True)

@@ -107,6 +107,9 @@ counted reliably, so notation submission must use `render` or an explicit
 `render@1` count as render attempts and submissions in the same order as
 unversioned calls, including failures. Unknown compilation status is not a
 success.
+Versioned batches are unpacked before selecting the final notation. Rejected
+non-object arguments and malformed batch steps remain counted tool errors;
+they do not crash transcript scoring or invent notation submissions.
 
 ## 2. Runners and isolation
 
@@ -144,6 +147,8 @@ profile. Export the isolated sessions using `hermes sessions export ... --redact
 Record version, actual model/provider from usage, git hash and dirty flag, task
 and skill hashes, tool calls/results, wall time, tokens and estimated cost
 (including auxiliary usage). Unknown cost stays explicitly unknown, never zero.
+Unreadable or truncated usage files mark that attempt as an error with unknown
+usage; the local report retains the attempt and any earlier failure diagnostic.
 
 Limits: per-task MCP calls and minutes. The relay rejects the first excess call
 and stops; the last completed capture survives. A process-tree deadline
@@ -227,5 +232,6 @@ readiness is bounded on POSIX and Windows, and all text files use UTF-8. Windows
 credential hard links preserve file identity and ACLs without copying bytes;
 cross-volume link failures stay explicit. Process-tree tests check descendant
 cleanup after normal leader exit, and an echo subprocess checks stdio framing.
+Failed MCP initialization also closes the client pipes and reaps its process tree.
 The three real-sandbox scorer tests keep the exact SUPPLE_EVAL_INTEGRATION=1
 opt-in on every platform; model quality runs require an explicitly invoked runner.

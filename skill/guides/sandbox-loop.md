@@ -2,8 +2,8 @@
 
 The sandbox is a headless host: load a plugin, set it in real units, play a
 phrase through it offline, and read an analysis report. Renders are
-deterministic — the same patch and phrase always produce the same audio, so
-differences you measure are differences you made.
+deterministic for the stock plugins with the same patch, phrase and session
+settings. Third-party plugins may introduce their own randomness.
 
 ## The loop
 
@@ -34,14 +34,18 @@ differences you measure are differences you made.
    exactly what moved.
 6. **When the structure is right but the numbers aren't**, stop nudging and
    run `optimize_start` with the few parameters that matter and a target
-   (a reference render/file, or a profile of descriptor ranges). Poll with
-   `job_wait`. Apply the result with `patch_merge` (or `"apply": true`).
-7. **Save** with `preset_save {name, tags, notes}` and tell the human what
+   (a reference render/file, or a profile of descriptor ranges). Parameters
+   must be active floats with `modulatable` and without `readonly` in their
+   flags (`plugin_describe` with `detail: "full"`). Poll with
+   `exec {command: "job.wait", args: {job}}` (each wait is at most 30 seconds).
+   When `status` is `"done"`, apply `result.patch` with
+   `patch_merge {instance, patch: <result.patch>}`; the optimizer does not apply it.
+7. **Save** with `preset_save {instance, name, tags, notes}` and tell the human what
    you aimed for, what the numbers show, and which render to listen to.
 
 ## Habits
 
-- Read `patch_get {detail: "changed"}` before editing; it is short.
+- Read `patch_get {instance, detail: "changed"}` before editing; it is short.
 - Batch a merge and its render: one `batch` call, atomic, fewer round trips.
 - Keep render names meaningful (`"name": "pluck-v3-shorter-decay"`) — the
   human will listen to them.
