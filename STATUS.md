@@ -631,9 +631,8 @@ Session and editing:
   source branch and merging it again can silently apply edits to the wrong
   destination object. Continued merges after ID remapping are unsafe until
   merge history retains that identity correspondence.
-- Save As into a subdirectory of the source media folder can traverse its own
-  new destination and duplicate copied files. Keep the destination outside the
-  source media folder until nested destinations are handled explicitly.
+- Save As into a subdirectory of the source media folder skips its destination
+  subtree, including resolved symlink aliases, so copied files are not copied again.
 - Pasting takes from retained history brings their opaque FX state blobs along,
   including after undo to a version from before that state existed.
 - Headless playback rejects malformed/non-finite numeric options before opening
