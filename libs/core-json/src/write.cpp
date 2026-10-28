@@ -6,6 +6,8 @@
 #include <cassert>
 #include <charconv>
 #include <cmath>
+#include <optional>
+#include <set>
 namespace supple::json {
 std::string formatDouble(double d) {
     if (d == 0) return "0.0";
@@ -68,18 +70,48 @@ void quote(std::string& out, std::string_view s) {
 }
 class Writer {
   public:
-    explicit Writer(const WriteOptions& o) : opt_(o) {}
+    // keepFirst: of keys that write the same, keep the first member instead of failing.
+    explicit Writer(const WriteOptions& o, bool keepFirst = false)
+        : opt_(o), keepFirst_(keepFirst) {}
     Result<std::string> run(const Value& v) {
         if (!emit(v, 0))
-            return Error("json.write.not_finite", "cannot write NaN or infinity", {},
-                         "use a finite number");
+            return error_ ? *error_
+                          : Error("json.write.not_finite", "cannot write NaN or infinity", {},
+                                  "use a finite number");
         if (opt_.pretty) out_ += '\n';
         return out_;
     }
 
   private:
     const WriteOptions& opt_;
+    const bool keepFirst_;
+    std::optional<Error> error_;
     std::string out_;
+    // Keys that differ only in bytes that are not UTF-8 can write the same
+    // (each such byte becomes U+FFFD), which would not parse back.
+    bool distinctKeys(std::vector<const Member*>& members) {
+        if (std::none_of(members.begin(), members.end(), [](const Member* m) {
+                return firstInvalidUtf8(m->key) != std::string_view::npos;
+            }))
+            return true;
+        std::set<std::string> written;
+        std::vector<const Member*> kept;
+        for (const Member* m : members) {
+            std::string key;
+            quote(key, m->key);
+            if (written.insert(key).second) {
+                kept.push_back(m);
+            } else if (!keepFirst_) {
+                error_ = Error("json.write.duplicate_key",
+                               "two keys both write as " + key +
+                                   " once their bytes that are not UTF-8 are replaced",
+                               {}, "make the keys UTF-8, or distinct in their UTF-8 parts");
+                return false;
+            }
+        }
+        members = std::move(kept);
+        return true;
+    }
     void spaces(int n) { out_.append(static_cast<std::size_t>(std::max(0, n)), ' '); }
     bool emit(const Value& v, int depth) {
         switch (v.type()) {
@@ -112,7 +144,7 @@ class Writer {
                 bool inlineArray = !opt_.pretty || scalar;
                 if (opt_.pretty && scalar) {
                     WriteOptions compactOptions{false, false, opt_.indent, opt_.maxLineWidth};
-                    Writer compact(compactOptions);
+                    Writer compact(compactOptions, keepFirst_);
                     auto trial = compact.run(v);
                     // The one-line pretty form is the compact form plus one space
                     // after each of the (size - 1) separating commas. The opening
@@ -152,6 +184,7 @@ class Writer {
                 }
                 std::vector<const Member*> members;
                 for (const auto& m : o) members.push_back(&m);
+                if (!distinctKeys(members)) return false;
                 if (opt_.sortKeys)
                     std::sort(members.begin(), members.end(),
                               [](const Member* a, const Member* b) { return a->key < b->key; });
@@ -190,16 +223,14 @@ Value finiteOrNull(const Value& input) {
     }
     return input;
 }
+// writeCompact's and writeCanonical's: whatever they write parses back.
+std::string writeAnyway(const Value& v, const WriteOptions& o) {
+    auto r = Writer(o, true).run(v);
+    assert(r);  // only a non-finite number fails it
+    return r ? *r : *Writer(o, true).run(finiteOrNull(v));
+}
 }  // namespace
 Result<std::string> write(const Value& v, const WriteOptions& o) { return Writer(o).run(v); }
-std::string writeCompact(const Value& v) {
-    auto r = write(v, {false});
-    assert(r);
-    return r ? *r : *write(finiteOrNull(v), {false});
-}
-std::string writeCanonical(const Value& v) {
-    auto r = write(v);
-    assert(r);
-    return r ? *r : *write(finiteOrNull(v));
-}
+std::string writeCompact(const Value& v) { return writeAnyway(v, {false}); }
+std::string writeCanonical(const Value& v) { return writeAnyway(v, {}); }
 }  // namespace supple::json

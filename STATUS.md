@@ -562,8 +562,6 @@ capacity reports retain their original revision/settings.
 ## Known limits
 
 Library boundaries:
-- Replacing invalid UTF-8 bytes in JSON object keys can make distinct keys
-  collide; the writer then emits duplicate keys that its parser rejects.
 - The control client's timeout covers response reads, but its blocking
   connect and request writes have no deadline if a peer stops accepting data.
 

@@ -149,7 +149,7 @@ struct WriteOptions {
     int indent = 2;
     int maxLineWidth = 100;      // for the scalar-array one-line rule
 };
-Result<std::string> write(const Value&, const WriteOptions& = {});  // error only for NaN/Inf
+Result<std::string> write(const Value&, const WriteOptions& = {});  // error: NaN/Inf, colliding keys
 std::string writeCompact(const Value&);    // pretty=false
 std::string writeCanonical(const Value&);  // pretty, insertion order, ADR-0009 rules
 // writeCompact/writeCanonical require finite numbers (callers validate
@@ -171,7 +171,12 @@ needed), `-0.0` prints `0.0`, exponent form as `to_chars` produces it (e.g.
 A string or key holding bytes that are not UTF-8 is written with U+FFFD for
 each byte that does not start a valid sequence, so everything written
 parses; `supple/json/utf8.h` (`utf8SequenceLength`, `firstInvalidUtf8`)
-lets callers refuse such text before it reaches a `Value` (Lua does).
+lets callers refuse such text before it reaches a `Value` (Lua does). Two
+keys of one object that write the same once repaired (`"\x80"` and
+`"\x81"`, or either and U+FFFD itself) would not parse back:
+`write()` refuses them with `json.write.duplicate_key`, and
+`writeCompact`/`writeCanonical` write only the first of them, in insertion
+order. *(Amended 2026-10-27.)*
 
 **Invariant (tested, fuzzed):** for any `v` that writes successfully and
 whose strings are UTF-8, `identical(parse(writeCanonical(v)), v)` (same

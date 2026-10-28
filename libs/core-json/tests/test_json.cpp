@@ -324,3 +324,29 @@ TEST_CASE("the writer replaces bytes that are not UTF-8, so its output parses ba
                                                 "b")))) == Value("a\xef\xbf\xbd"
                                                                  "b"));
 }
+
+TEST_CASE("keys that write the same once repaired are refused, or the first kept") {
+    using namespace supple::json;
+    Value object = Value::object();
+    object["\x80"] = 1;
+    object["\x81"] = 2;
+    object["\xef\xbf\xbd"] = 3;  // U+FFFD itself
+    Value nested = Value::array();
+    nested.push_back(object);
+    for (const Value& v : {object, nested}) {
+        auto refused = write(v);
+        REQUIRE_FALSE(refused);
+        CHECK(refused.error().code == "json.write.duplicate_key");
+        CHECK(!refused.error().hint.empty());
+    }
+    auto compact = parse(writeCompact(object));
+    REQUIRE(compact);
+    CHECK(compact->asObject().size() == 1);
+    CHECK(compact->find("\xef\xbf\xbd")->asInt() == 1);
+    CHECK(parse(writeCanonical(nested)));
+    Value distinct = Value::object();  // repaired, these stay apart
+    distinct["a\x80"] = 1;
+    distinct["b\x80"] = 2;
+    REQUIRE(write(distinct));
+    CHECK(parse(*write(distinct))->asObject().size() == 2);
+}
