@@ -385,9 +385,9 @@ tracks were selected after items) removes every selected track as one undo
 step (`track.remove:selected`; the main master stays; children before folders).
 Its Duplicate (and Track > duplicate selected) copies every selected channel
 and buss right after its original as one undo step (`track.duplicate`, see
-session-model.md) and selects the copies. Track > channels of the first
-selected… opens the same Channels menu as the track menu's, for the first
-selected track only.
+session-model.md) and selects the copies. Track > Channels… opens the same
+Channels menu as the track menu's, for the first selected track only; Track >
+Delete selected is the track menu's Delete.
 Commands: `track.*`, `route.*`, `fx.*` (bypass/offline), transport.
 
 ### 4.3 Arrange view
