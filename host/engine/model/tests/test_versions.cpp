@@ -167,6 +167,200 @@ TEST_CASE("merge by replay remaps IDs created on both sides") {
     CHECK(track(vs, "main", "tr_2")->volumeDb == 0.0);
 }
 
+TEST_CASE("a branch merged again keeps the IDs its earlier merge remapped") {
+    auto setup = [] {
+        VersionStore vs(Session::create());
+        REQUIRE(vs.createBranch("topic", "main"));
+        run(vs, {inv("track.add", R"({"name": "Main track"})")});  // tr_1 on main
+        REQUIRE(vs.switchBranch("topic"));
+        run(vs, {inv("track.add", R"({"name": "Branch track"})")});            // tr_1 on the branch
+        REQUIRE(vs.merge("topic", "main", apply, schemas).conflicts.empty());  // now tr_2
+        return vs;
+    };
+    {
+        VersionStore vs = setup();
+        run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -9})")});
+        auto m = vs.merge("topic", "main", apply, schemas);
+        REQUIRE_MESSAGE(m.conflicts.empty(), (m.conflicts.empty() ? "" : m.conflicts[0].message));
+        CHECK(m.remap.at(*Id::parse("tr_1")) == *Id::parse("tr_2"));
+        CHECK(track(vs, "main", "tr_1")->volumeDb == 0.0);
+        CHECK(track(vs, "main", "tr_2")->volumeDb == -9.0);
+    }
+    {
+        VersionStore vs = setup();  // the target's own edit to the merged track conflicts
+        REQUIRE(vs.switchBranch("main"));
+        run(vs, {inv("track.set", R"({"track": "tr_2", "volume_db": -1})")});
+        REQUIRE(vs.switchBranch("topic"));
+        run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -9})")});
+        auto m = vs.merge("topic", "main", apply, schemas);
+        REQUIRE(m.conflicts.size() == 1);
+        CHECK(m.conflicts[0].object == Id::parse("tr_2"));
+        CHECK(track(vs, "main", "tr_2")->volumeDb == -1.0);
+    }
+    {
+        VersionStore vs = setup();  // a branch of the branch merged in between
+        REQUIRE(vs.createBranch("topic2", "topic"));
+        REQUIRE(vs.switchBranch("topic2"));
+        run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -5})")});
+        REQUIRE(vs.merge("topic2", "main", apply, schemas).conflicts.empty());
+        CHECK(track(vs, "main", "tr_2")->volumeDb == -5.0);
+        REQUIRE(vs.switchBranch("topic"));
+        run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -7})")});
+        auto m = vs.merge("topic", "main", apply, schemas);
+        REQUIRE(m.conflicts.size() == 1);  // both changed the volume since the fork
+        CHECK(track(vs, "main", "tr_2")->volumeDb == -5.0);
+    }
+}
+
+TEST_CASE("a later merge compares against the branch's own fork state") {
+    VersionStore vs(Session::create());
+    run(vs, {inv("track.add", R"({"name": "Shared"})")});
+    REQUIRE(vs.createBranch("topic", "main"));
+    run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -1})")});  // main only
+    REQUIRE(vs.switchBranch("topic"));
+    run(vs, {inv("track.add", R"({"name": "Branch track"})")});
+    REQUIRE(vs.merge("topic", "main", apply, schemas).conflicts.empty());
+    run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -9})")});
+    CHECK(vs.merge("topic", "main", apply, schemas).conflicts.size() == 1);
+    CHECK(track(vs, "main", "tr_1")->volumeDb == -1.0);
+}
+
+TEST_CASE("merging a branch into a branch that merged it through another keeps identities") {
+    VersionStore vs(Session::create());
+    REQUIRE(vs.createBranch("topic", "main"));
+    REQUIRE(vs.createBranch("target", "main"));
+    run(vs, {inv("track.add", R"({"name": "Main track"})")});  // tr_1 on main
+    REQUIRE(vs.switchBranch("topic"));
+    run(vs, {inv("track.add", R"({"name": "Branch track"})")});  // tr_1 here, tr_2 on main
+    REQUIRE(vs.merge("topic", "main", apply, schemas).conflicts.empty());
+    REQUIRE(vs.switchBranch("target"));
+    run(vs, {inv("track.set", R"({"track": "tr_0", "mute": true})")});
+    REQUIRE(vs.merge("main", "target", apply, schemas).conflicts.empty());
+    REQUIRE(vs.switchBranch("topic"));
+    run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -7})")});
+    REQUIRE(vs.merge("topic", "target", apply, schemas).conflicts.empty());
+    CHECK(track(vs, "target", "tr_1")->volumeDb == 0.0);
+    CHECK(track(vs, "target", "tr_2")->volumeDb == -7.0);
+}
+
+TEST_CASE("a merge continues after replayed steps that survived an undo") {
+    VersionStore vs(Session::create());
+    REQUIRE(vs.createBranch("topic", "main"));
+    run(vs, {inv("track.add", R"({"name": "Main track"})")});
+    REQUIRE(vs.switchBranch("topic"));
+    run(vs, {inv("track.add", R"({"name": "Branch track"})")});
+    run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -3})")});
+    REQUIRE(vs.merge("topic", "main", apply, schemas).conflicts.empty());
+    REQUIRE(vs.switchBranch("main"));
+    REQUIRE(vs.undo());  // the volume step only: the replayed track stays
+    REQUIRE(vs.merge("topic", "main", apply, schemas).conflicts.empty());
+    CHECK(vs.head("main")->tracks.size() == 3);  // no second copy of the track
+    CHECK(track(vs, "main", "tr_2")->volumeDb == -3.0);
+}
+
+TEST_CASE("a merge finds the IDs of replayed steps that budget squashing combined") {
+    Project project;
+    project.historyBudgetBytes = 1;
+    VersionStore vs(Session::create(project));
+    REQUIRE(vs.createBranch("topic", "main"));
+    run(vs, {inv("track.add", R"({"name": "Main track"})")});
+    REQUIRE(vs.switchBranch("topic"));
+    const auto created = run(vs, {inv("track.add", R"({"name": "Branch track"})")});
+    REQUIRE(vs.createBranch("leaf", "topic"));
+    const auto lease = vs.pin(run(vs, {inv("track.set", R"({"track": "tr_1", "name": "B"})")}));
+    run(vs, {inv("track.set", R"({"track": "tr_1", "mute": true})")});
+    REQUIRE(vs.merge("topic", "main", apply, schemas).conflicts.empty());
+    bool combined = true;  // the replayed creation step is gone, its effect is not
+    vs.forEachVersion([&](const Version& v) { combined = combined && v.replayOf != created; });
+    CHECK(combined);
+    REQUIRE(vs.switchBranch("main"));
+    REQUIRE(vs.undo());  // the merge node: the leaf's fork is now held only as squashed
+    REQUIRE(vs.switchBranch("leaf"));
+    run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -9})")});
+    const auto later = vs.merge("leaf", "main", apply, schemas);
+    REQUIRE_MESSAGE(later.conflicts.empty(),
+                    (later.conflicts.empty() ? "" : later.conflicts[0].message));
+    CHECK(vs.head("main")->tracks.size() == 3);  // no second copy of the branch track
+    CHECK(track(vs, "main", "tr_1")->volumeDb == 0.0);
+    CHECK(track(vs, "main", "tr_2")->volumeDb == -9.0);
+}
+
+TEST_CASE("a squashed step reached through a merge of a merge keeps the branch's IDs") {
+    Project project;
+    project.historyBudgetBytes = 1;
+    VersionStore vs(Session::create(project));
+    REQUIRE(vs.createBranch("topic", "main"));
+    REQUIRE(vs.createBranch("target", "main"));
+    run(vs, {inv("track.add", R"({"name": "Main track"})")});
+    REQUIRE(vs.switchBranch("topic"));
+    run(vs, {inv("track.add", R"({"name": "Branch track"})")});
+    REQUIRE(vs.createBranch("leaf", "topic"));
+    const auto lease = vs.pin(run(vs, {inv("track.set", R"({"track": "tr_1", "name": "B"})")}));
+    run(vs, {inv("track.set", R"({"track": "tr_1", "mute": true})")});
+    REQUIRE(vs.merge("topic", "main", apply, schemas).conflicts.empty());  // tr_1 -> tr_2
+    REQUIRE(vs.switchBranch("target"));
+    run(vs, {inv("track.set", R"({"track": "tr_0", "volume_db": -1})")});
+    REQUIRE(vs.merge("main", "target", apply, schemas).conflicts.empty());
+    REQUIRE(vs.switchBranch("leaf"));
+    run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -9})")});
+    const auto later = vs.merge("leaf", "target", apply, schemas);
+    REQUIRE_MESSAGE(later.conflicts.empty(),
+                    (later.conflicts.empty() ? "" : later.conflicts[0].message));
+    CHECK(track(vs, "target", "tr_1")->volumeDb == 0.0);
+    CHECK(track(vs, "target", "tr_2")->volumeDb == -9.0);
+}
+
+TEST_CASE("an older branch still finds the target ID of an object removed since") {
+    Project project;
+    project.historyBudgetBytes = 1;
+    VersionStore vs(Session::create(project));
+    REQUIRE(vs.createBranch("topic", "main"));
+    const auto mainLease = vs.pin(run(vs, {inv("track.add", R"({"name": "Main track"})")}));
+    REQUIRE(vs.switchBranch("topic"));
+    run(vs, {inv("track.add", R"({"name": "Branch track"})")});
+    REQUIRE(vs.createBranch("leaf", "topic"));
+    const auto lease = vs.pin(run(vs, {inv("track.set", R"({"track": "tr_1", "name": "B"})")}));
+    run(vs, {inv("track.set", R"({"track": "tr_1", "mute": true})")});
+    REQUIRE(vs.merge("topic", "main", apply, schemas).conflicts.empty());  // tr_1 -> tr_2
+    run(vs, {inv("track.remove", R"({"track": "tr_1"})")});
+    REQUIRE(vs.merge("topic", "main", apply, schemas).conflicts.empty());
+    run(vs, {inv("track.set", R"({"track": "tr_0", "volume_db": -2})")});
+    REQUIRE(vs.merge("topic", "main", apply, schemas).conflicts.empty());
+    REQUIRE(vs.switchBranch("leaf"));
+    run(vs, {inv("track.set", R"({"track": "tr_1", "volume_db": -9})")});
+    CHECK(vs.merge("leaf", "main", apply, schemas).conflicts.size() == 1);  // removed on main
+    CHECK(track(vs, "main", "tr_1")->volumeDb == 0.0);
+}
+
+TEST_CASE("merges compare names as text and remove unchanged remapped objects") {
+    auto setup = [] {
+        VersionStore vs(Session::create());
+        REQUIRE(vs.createBranch("topic", "main"));
+        run(vs, {inv("track.add", R"({"name": "Main track"})")});  // tr_1 on main
+        REQUIRE(vs.switchBranch("topic"));
+        run(vs, {inv("track.add", R"({"name": "tr_1"})")});  // tr_2 on main, named tr_1
+        REQUIRE(vs.merge("topic", "main", apply, schemas).conflicts.empty());
+        return vs;
+    };
+    {
+        VersionStore vs = setup();
+        REQUIRE(vs.switchBranch("main"));
+        run(vs, {inv("track.set", R"({"track": "tr_2", "name": "tr_2"})")});
+        REQUIRE(vs.switchBranch("topic"));
+        run(vs, {inv("track.set", R"({"track": "tr_1", "name": "Renamed"})")});
+        CHECK(vs.merge("topic", "main", apply, schemas).conflicts.size() == 1);
+        CHECK(track(vs, "main", "tr_2")->name == "tr_2");
+    }
+    {
+        VersionStore vs = setup();
+        run(vs, {inv("track.remove", R"({"track": "tr_1"})")});
+        const auto m = vs.merge("topic", "main", apply, schemas);
+        REQUIRE_MESSAGE(m.conflicts.empty(), (m.conflicts.empty() ? "" : m.conflicts[0].message));
+        CHECK(track(vs, "main", "tr_1"));
+        CHECK_FALSE(track(vs, "main", "tr_2"));
+    }
+}
+
 TEST_CASE("merge conflicts: same field, removed object, failed replay; target untouched") {
     auto setup = [] {
         VersionStore vs(Session::create());

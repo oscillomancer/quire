@@ -121,6 +121,49 @@ json::Value objectJson(const Session& s, Id id) {
     }
 }
 
+// The JSON Schema of an object's encoding: it marks the ID fields.
+template <class T>
+const json::Value& schemaFor(const IdMap<T>&) {
+    static const json::Value schema = schemaOf<T>().jsonSchema();
+    return schema;
+}
+const json::Value* objectSchema(const Session& s, Id id) {
+    switch (id.kind) {
+        case Kind::Project: {
+            static const json::Value schema = schemaOf<Project>().jsonSchema();
+            return &schema;
+        }
+        case Kind::Track:
+            return &schemaFor(s.tracks);
+        case Kind::Item:
+            return &schemaFor(s.items);
+        case Kind::Take:
+            return &schemaFor(s.takes);
+        case Kind::Media:
+            return &schemaFor(s.media);
+        case Kind::Midi:
+            return &schemaFor(s.midi);
+        case Kind::Fx:
+            return &schemaFor(s.fx);
+        case Kind::Route:
+            return &schemaFor(s.routes);
+        case Kind::Envelope:
+            return &schemaFor(s.envelopes);
+        case Kind::AutoItem:
+            return &schemaFor(s.autoItems);
+        case Kind::Marker:
+            return &schemaFor(s.markers);
+        case Kind::Region:
+            return &schemaFor(s.regions);
+        case Kind::TempoPoint:
+            return &schemaFor(s.tempo);
+        case Kind::Meter:
+            return &schemaFor(s.meters);
+        default:
+            return nullptr;
+    }
+}
+
 // Structural lists that a replayed command recomputes on the target (a track
 // added on each side appends to the parent's children on both): never a
 // conflict by themselves.
@@ -129,8 +172,7 @@ bool structural(const std::string& field) {
            field == "input_chain" || field == "takes" || field == "items";
 }
 
-std::set<std::string> changedFields(const Session& before, const Session& after, Id id) {
-    const json::Value a = objectJson(before, id), b = objectJson(after, id);
+std::set<std::string> changedFields(const json::Value& a, const json::Value& b) {
     std::set<std::string> out;
     std::set<std::string> keys;
     if (a.isObject())
@@ -143,6 +185,10 @@ std::set<std::string> changedFields(const Session& before, const Session& after,
         if ((!x) != (!y) || (x && y && !(*x == *y))) out.insert(k);
     }
     return out;
+}
+
+std::set<std::string> changedFields(const Session& before, const Session& after, Id id) {
+    return changedFields(objectJson(before, id), objectJson(after, id));
 }
 
 }  // namespace
@@ -163,6 +209,19 @@ std::string remapped(const std::string& text, const std::map<Id, Id>& remap) {
     if (auto id = Id::parse(text))
         if (auto it = remap.find(*id); it != remap.end()) return it->second.str();
     return text;
+}
+
+// `inner` (A's IDs -> B's) followed by `outer` (B's IDs -> C's): A's IDs -> C's.
+// An ID that `inner` keeps names the same object on B.
+std::map<Id, Id> compose(const std::map<Id, Id>& inner, const std::map<Id, Id>& outer) {
+    std::map<Id, Id> out;
+    for (const auto& [a, b] : inner) {
+        const auto c = outer.find(b);
+        out.emplace(a, c == outer.end() ? b : c->second);
+    }
+    for (const auto& [b, c] : outer)
+        if (!inner.count(b)) out.emplace(b, c);
+    return out;
 }
 
 bool typeMatches(const json::Value& v, const json::Value& schema) {
@@ -242,6 +301,18 @@ json::Value remapIds(const json::Value& args, const json::Value& schema,
     if (remap.empty()) return args;
     return remapWalk(args, &schema, {}, remap, 0);
 }
+
+namespace {
+
+// An object of `s` as JSON, its ID fields (not names or other text) rewritten
+// through `remap`: a branch object as it reads with the target's IDs.
+json::Value withTargetIds(const Session& s, Id id, const std::map<Id, Id>& remap) {
+    const json::Value* schema = objectSchema(s, id);
+    json::Value object = objectJson(s, id);
+    return schema ? remapIds(object, *schema, remap) : object;
+}
+
+}  // namespace
 
 VersionStore::VersionStore(Session initial) {
     const std::uint64_t id = initial.version;
@@ -432,6 +503,7 @@ struct RetainedSize {
             metadata += sizeof(id) + sizeof(fields);
             for (const auto& field : fields) metadata += sizeof(field) + field.size();
         }
+        metadata += v.mergeRemap.size() * sizeof(std::pair<const Id, Id>);
         add(v.id, &v, metadata);
         add(v.id, s.project.get(), objectBytes(*s.project));
         map(v.id, s.tempo);
@@ -696,20 +768,33 @@ std::vector<std::string> VersionStore::branches() const {
     return out;
 }
 
+std::set<std::uint64_t> VersionStore::ancestors(std::uint64_t start) const {
+    std::set<std::uint64_t> seen;
+    std::vector<std::uint64_t> stack{start};
+    while (!stack.empty()) {
+        const std::uint64_t id = stack.back();
+        stack.pop_back();
+        if (!seen.insert(id).second) continue;
+        auto it = versions_.find(id);
+        if (it == versions_.end()) continue;
+        for (std::uint64_t p : it->second.parents) stack.push_back(p);
+    }
+    return seen;
+}
+
+bool VersionStore::descends(std::uint64_t from, std::uint64_t ancestor) const {
+    // First parents only: along them a lineage keeps its IDs, while a merge's
+    // source parent has IDs of its own (parents are older, smaller IDs).
+    for (std::uint64_t id = from; id >= ancestor;) {
+        if (id == ancestor) return true;
+        const auto it = versions_.find(id);
+        if (it == versions_.end() || it->second.parents.empty()) return false;
+        id = it->second.parents.front();
+    }
+    return false;
+}
+
 std::uint64_t VersionStore::forkPoint(std::uint64_t a, std::uint64_t b) const {
-    auto ancestors = [&](std::uint64_t start) {
-        std::set<std::uint64_t> seen;
-        std::vector<std::uint64_t> stack{start};
-        while (!stack.empty()) {
-            const std::uint64_t id = stack.back();
-            stack.pop_back();
-            if (!seen.insert(id).second) continue;
-            auto it = versions_.find(id);
-            if (it == versions_.end()) continue;
-            for (std::uint64_t p : it->second.parents) stack.push_back(p);
-        }
-        return seen;
-    };
     const auto ofA = ancestors(a), ofB = ancestors(b);
     std::uint64_t best = 0;
     bool found = false;
@@ -764,8 +849,73 @@ MergeOutcome VersionStore::merge(std::string_view from, std::string_view into,
     }
     std::reverse(path.begin(), path.end());
 
-    const Session& forkState = *versions_.at(fork).session;
+    // The source versions the target already holds: on its own first-parent
+    // history, or replayed there by earlier merges (also through merges of
+    // merges), each with the remap from that version's IDs to the target's.
+    // Replay continues after the newest one on the path, or after the fork.
+    std::map<std::uint64_t, std::map<Id, Id>> held;
+    std::set<std::uint64_t> replayed;  // held through a replay, not on the target itself
+    for (std::uint64_t id = dst.head;;) {
+        const Version& v = versions_.at(id);
+        held.try_emplace(id);
+        std::map<Id, Id> remap = v.mergeRemap;
+        for (std::uint64_t of = v.replayOf; of;) {
+            const auto it = versions_.find(of);
+            if (it == versions_.end()) break;
+            if (held.try_emplace(of, remap).second) replayed.insert(of);
+            remap = compose(it->second.mergeRemap, remap);
+            of = it->second.replayOf;
+        }
+        if (v.parents.empty()) break;
+        id = v.parents.front();
+    }
+    // A version also counts as held when a replayed step the target holds
+    // descends from it on the same lineage: that replay applied it too, even
+    // if budget squashing has since combined its own step into a later one.
+    auto heldRemap = [&](std::uint64_t source) -> const std::map<Id, Id>* {
+        if (const auto found = held.find(source); found != held.end()) return &found->second;
+        for (auto it = held.rbegin(); it != held.rend(); ++it)
+            if (it->first > source && replayed.count(it->first) && descends(it->first, source))
+                return &it->second;
+        return nullptr;
+    };
+    std::uint64_t base = fork;
+    const std::map<Id, Id>* seed = nullptr;
+    for (std::size_t k = path.size(); k-- > 0 && !seed;)
+        if ((seed = heldRemap(path[k]->id))) {
+            base = path[k]->id;
+            path.erase(path.begin(), path.begin() + static_cast<std::ptrdiff_t>(k) + 1);
+        }
+    if (!seed) seed = heldRemap(fork);
+    const Session& forkState = *versions_.at(base).session;
+    if (seed) {
+        // Whole, including objects since removed: an older branch may still
+        // hold one. An entry another lineage made for an ID this branch
+        // allocates again is replaced when the replay creates that object.
+        out.remap = *seed;
+    } else {
+        // The fork reached the target only through history that is gone:
+        // safe if no merge on the way gave any object another ID.
+        for (std::uint64_t id : ancestors(dst.head))
+            if (const Version* v = version(id); v && !v->mergeRemap.empty()) {
+                out.conflicts.push_back(
+                    {Conflict::Kind::Invalid, 0, src->head, std::nullopt,
+                     "cannot match " + std::string(from) + "'s objects on " + std::string(into) +
+                         ": the history of its earlier merge is no longer kept; continue on a "
+                         "new branch from " +
+                         std::string(into)});
+                return out;
+            }
+    }
+    if (path.empty()) {
+        out.upToDate = true;  // every step is already on the target
+        return out;
+    }
     const Session& targetHead = *versions_.at(dst.head).session;
+    auto onTargetId = [&](Id id) {
+        const auto found = out.remap.find(id);
+        return found == out.remap.end() ? id : found->second;
+    };
     std::shared_ptr<const Session> state = head(into);
     std::vector<Version> staged;
     std::uint64_t nextId = next_;
@@ -780,23 +930,29 @@ MergeOutcome VersionStore::merge(std::string_view from, std::string_view into,
             if (c.op == Change::Op::Add) continue;
             const auto atFork = entryInfo(forkState, c.id);
             if (!atFork.exists) continue;  // created on the branch itself
-            const auto onTarget = entryInfo(targetHead, c.id);
-            if (onTarget.exists && onTarget.rev == atFork.rev) continue;  // untouched on target
+            const Id target = onTargetId(c.id);
+            const auto onTarget = entryInfo(targetHead, target);
+            if (target == c.id && onTarget.exists && onTarget.rev == atFork.rev)
+                continue;  // untouched on target
             std::string why;
+            const auto theirs = onTarget.exists
+                                    ? changedFields(withTargetIds(forkState, c.id, out.remap),
+                                                    objectJson(targetHead, target))
+                                    : std::set<std::string>{};
             if (!onTarget.exists) {
                 why = " was removed on " + std::string(into) + " since the fork";
             } else if (c.op == Change::Op::Remove) {
+                if (theirs.empty()) continue;  // as at the fork
                 why = " was changed on " + std::string(into) + " since the fork";
             } else {
                 auto mine = changedFields(before, *v.session, c.id);
                 if (auto touched = v.squashedFields.find(c.id); touched != v.squashedFields.end())
                     mine.insert(touched->second.begin(), touched->second.end());
-                const auto theirs = changedFields(forkState, targetHead, c.id);
                 std::string both;
                 for (const auto& f : mine)
                     if (!structural(f) && theirs.count(f)) {
                         const auto mineValue = objectJson(*v.session, c.id);
-                        const auto theirsValue = objectJson(targetHead, c.id);
+                        const auto theirsValue = objectJson(targetHead, target);
                         const auto* x = mineValue.find(f);
                         const auto* y = theirsValue.find(f);
                         if (c.id != kProject || !x || !y || *x != *y)
@@ -806,7 +962,7 @@ MergeOutcome VersionStore::merge(std::string_view from, std::string_view into,
                 why = ": both branches changed " + both;
             }
             out.conflicts.push_back(
-                {Conflict::Kind::ConcurrentEdit, step, v.id, c.id, c.id.str() + why});
+                {Conflict::Kind::ConcurrentEdit, step, v.id, target, target.str() + why});
         }
         if (!out.conflicts.empty()) {
             out.head = dst.head;
@@ -826,7 +982,10 @@ MergeOutcome VersionStore::merge(std::string_view from, std::string_view into,
             }
             for (Id fresh : next->created) {
                 const Id original = v.created[result.created.size()];
-                if (original != fresh) out.remap[original] = fresh;
+                if (original != fresh)
+                    out.remap[original] = fresh;
+                else
+                    out.remap.erase(original);
                 result.created.push_back(fresh);
             }
             result.changes = coalesce(result.changes, next->changes);
@@ -842,12 +1001,15 @@ MergeOutcome VersionStore::merge(std::string_view from, std::string_view into,
         nv.id = nextId++;
         nv.parents = {parent};
         nv.txn = v.txn;
+        nv.txn.coalesceKey.clear();  // a later edit never folds into a merged step
         nv.squashedSteps = v.squashedSteps;
         for (const auto& [object, fields] : v.squashedFields) {
             const auto remappedId = out.remap.find(object);
             nv.squashedFields[remappedId == out.remap.end() ? object : remappedId->second] = fields;
         }
         nv.txn.invocations = std::move(inv);
+        nv.replayOf = v.id;
+        nv.mergeRemap = out.remap;
         nv.changes = std::move(result.changes);
         nv.created = std::move(result.created);
         nv.timeMs = timeMs;
