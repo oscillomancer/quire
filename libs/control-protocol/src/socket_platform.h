@@ -116,10 +116,30 @@ inline int recv(Socket fd, char* data, std::size_t size) {
     const int result = ::recv(fd, data, static_cast<int>(std::min<std::size_t>(size, INT_MAX)), 0);
     return result == SOCKET_ERROR ? failed() : result;
 }
+// On a nonblocking socket a connect still under way fails with EINPROGRESS:
+// poll for POLLOUT, then connectError() says how it ended.
 inline int connect(Socket fd, const sockaddr_un& address) {
-    return ::connect(fd, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == 0
-               ? 0
-               : failed();
+    if (::connect(fd, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == 0) return 0;
+    switch (WSAGetLastError()) {
+        case WSAEWOULDBLOCK:
+        case WSAEALREADY:
+            errno = EINPROGRESS;
+            return -1;
+        case WSAEISCONN:
+            errno = EISCONN;
+            return -1;
+        default:
+            return failed();
+    }
+}
+inline int connectError(Socket fd) {
+    int error = 0;
+    int size = sizeof(error);
+    if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&error), &size) != 0)
+        return failed();
+    if (error == 0) return 0;
+    WSASetLastError(error);
+    return failed();
 }
 inline int bind(Socket fd, const sockaddr_un& address) {
     return ::bind(fd, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == 0 ? 0
@@ -175,8 +195,19 @@ inline auto send(Socket fd, const char* data, std::size_t size) {
 #endif
 }
 inline auto recv(Socket fd, char* data, std::size_t size) { return ::recv(fd, data, size, 0); }
+// On a nonblocking socket a connect still under way fails with EINPROGRESS:
+// poll for POLLOUT, then connectError() says how it ended. Linux fails with
+// EAGAIN instead while the listener's backlog is full: try again.
 inline int connect(Socket fd, const sockaddr_un& address) {
     return ::connect(fd, reinterpret_cast<const sockaddr*>(&address), sizeof(address));
+}
+inline int connectError(Socket fd) {
+    int error = 0;
+    socklen_t size = sizeof(error);
+    if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &size) != 0) return -1;
+    if (error == 0) return 0;
+    errno = error;
+    return -1;
 }
 inline int bind(Socket fd, const sockaddr_un& address) {
     return ::bind(fd, reinterpret_cast<const sockaddr*>(&address), sizeof(address));

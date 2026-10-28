@@ -562,8 +562,9 @@ capacity reports retain their original revision/settings.
 ## Known limits
 
 Library boundaries:
-- The control client's timeout covers response reads, but its blocking
-  connect and request writes have no deadline if a peer stops accepting data.
+- The control client bounds connecting and sending, as well as the
+  response, by its timeout through nonblocking sockets; that path is tested
+  on Linux, and native macOS/Windows CI has not run on it.
 
 Engine and hosting:
 - The headless platform layer (ADR-0035) has natively tested macOS/Windows

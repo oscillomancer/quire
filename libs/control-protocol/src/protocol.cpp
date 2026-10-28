@@ -583,12 +583,19 @@ Status Client::connect(const std::filesystem::path& path, std::string client, st
     hello["mcp"] = mcp;
     path_ = path;
     hello_ = std::move(hello);
-    return open();
+    return open(std::chrono::steady_clock::now() + timeout_);
 }
-Status Client::open() {
+Status Client::open(Deadline deadline) {
     drop();
     fd_ = static_cast<std::intptr_t>(net::open());
     if (fd_ == -1) return Error("rpc.socket", std::strerror(errno));
+    // Nonblocking, so that no wait outlasts the deadline: a server that stops
+    // accepting connections or reading requests would otherwise block forever.
+    if (net::nonblocking(static_cast<net::Socket>(fd_)) != 0) {
+        auto message = std::strerror(errno);
+        drop();
+        return Error("rpc.socket", message);
+    }
     sockaddr_un address{};
     address.sun_family = AF_UNIX;
     auto pathString = net::pathName(path_);
@@ -597,12 +604,37 @@ Status Client::open() {
         return Error("rpc.path", "socket path is too long", pathString);
     }
     std::memcpy(address.sun_path, pathString.c_str(), pathString.size() + 1);
-    if (net::connect(static_cast<net::Socket>(fd_), address) != 0) {
-        auto message = std::strerror(errno);
+    const auto socket = static_cast<net::Socket>(fd_);
+    auto refused = [&](std::string message) -> Status {
         drop();
-        return Error("rpc.connect", message, pathString);
+        return Error("rpc.connect", std::move(message), pathString);
+    };
+    using clock = std::chrono::steady_clock;
+    constexpr const char* kUnaccepted = "timed out waiting for the server to accept";
+    while (net::connect(socket, address) != 0) {
+        if (errno == EINTR) continue;
+        if (errno == EISCONN) break;  // an interrupted connect() finished meanwhile
+        if (errno == EAGAIN) {
+            // A full backlog (Linux): the server has not accepted the ones before.
+            const auto remaining = deadline - clock::now();
+            if (remaining <= clock::duration::zero()) return refused(kUnaccepted);
+            std::this_thread::sleep_for(
+                std::min<clock::duration>(remaining, std::chrono::milliseconds(5)));
+            continue;
+        }
+        if (errno != EINPROGRESS && errno != EALREADY) return refused(std::strerror(errno));
+        // Under way: over when the socket can be written.
+        int ready;
+        do {
+            net::PollFd pfd{socket, POLLOUT, 0};
+            ready = net::poll(&pfd, 1, detail::waitMilliseconds(deadline - clock::now()));
+        } while (ready < 0 && errno == EINTR);
+        if (ready < 0) return refused(std::strerror(errno));
+        if (ready == 0) return refused(kUnaccepted);
+        if (net::connectError(socket) != 0) return refused(std::strerror(errno));
+        break;
     }
-    auto result = exchange("rpc.hello", *hello_);
+    auto result = exchange("rpc.hello", *hello_, deadline);
     if (result) return {};
     drop();  // a connection without a handshake cannot serve calls
     return result.error();
@@ -623,21 +655,23 @@ void Client::setTimeout(std::chrono::milliseconds timeout) {
                           std::chrono::milliseconds(std::chrono::hours(24)));
 }
 Result<json::Value> Client::call(std::string_view method, const json::Value& params) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout_;
     if (fd_ == -1) {
         if (!hello_)
             return Error("rpc.connect", "client is not connected", "", "call connect() first");
-        if (auto reopened = open(); !reopened) {
+        if (auto reopened = open(deadline); !reopened) {
             Error error("rpc.connect", "could not reconnect: " + reopened.error().message,
                         path_.string(), "start the app, then retry the call");
             error.details.push_back(reopened.error());
             return error;
         }
     }
-    auto result = exchange(method, params);
+    auto result = exchange(method, params, deadline);
     if (result && method == "rpc.hello") hello_ = params;
     return result;
 }
-Result<json::Value> Client::exchange(std::string_view method, const json::Value& params) {
+Result<json::Value> Client::exchange(std::string_view method, const json::Value& params,
+                                     Deadline deadline) {
     // Any transport failure leaves the stream in an unknown state (a partial
     // request, or a response still on its way): close it.
     auto fail = [this](Error error) -> Result<json::Value> {
@@ -651,16 +685,31 @@ Result<json::Value> Client::exchange(std::string_view method, const json::Value&
     request["method"] = std::string(method);
     request["params"] = params;
     auto output = line(request);
+    using clock = std::chrono::steady_clock;
+    const auto busy = [] { return errno == EAGAIN || errno == EWOULDBLOCK; };
     std::size_t sent = 0;
     while (sent < output.size()) {
         auto n =
             net::send(static_cast<net::Socket>(fd_), output.data() + sent, output.size() - sent);
         if (n < 0 && errno == EINTR) continue;
+        if (n < 0 && busy()) {
+            // A line the server never received in full is never run.
+            const auto remaining = deadline - clock::now();
+            if (remaining <= clock::duration::zero())
+                return fail(Error("rpc.timeout", "timed out sending the request", "",
+                                  "the server stopped reading, so the call did not run; retry "
+                                  "once the app responds"));
+            net::PollFd pfd{static_cast<net::Socket>(fd_), POLLOUT, 0};
+            const int ready = net::poll(&pfd, 1, detail::waitMilliseconds(remaining));
+            if (ready < 0 && errno == EINTR)
+                return fail(Error("rpc.interrupted", "a signal interrupted sending the request", "",
+                                  "the call did not run; repeat it if it is still wanted"));
+            if (ready < 0) return fail(Error("rpc.write", std::strerror(errno)));
+            continue;
+        }
         if (n <= 0) return fail(Error("rpc.write", std::strerror(errno)));
         sent += static_cast<std::size_t>(n);
     }
-    using clock = std::chrono::steady_clock;
-    const auto deadline = clock::now() + timeout_;
     std::size_t scanned = 0;  // input_ before this offset holds no newline
     while (true) {
         auto newline = input_.find('\n', scanned);
@@ -702,7 +751,7 @@ Result<json::Value> Client::exchange(std::string_view method, const json::Value&
         if (ready == 0) continue;  // the deadline check above decides
         char bytes[8192];
         auto n = net::recv(static_cast<net::Socket>(fd_), bytes, sizeof(bytes));
-        if (n < 0 && errno == EINTR) continue;
+        if (n < 0 && (errno == EINTR || busy())) continue;
         if (n <= 0) return fail(Error("rpc.read", "socket closed while waiting for response"));
         input_.append(bytes, static_cast<std::size_t>(n));
     }

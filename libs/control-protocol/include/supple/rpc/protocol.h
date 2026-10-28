@@ -45,7 +45,7 @@ class Server {
 // off the model thread when connected to a server using that same thread.
 //
 // Recovery: a call that fails in transport (write or read error, timeout, a
-// signal interrupting the wait, an oversized or unreadable response frame, a
+// signal interrupting a wait, an oversized or unreadable response frame, a
 // response with another id) closes the connection, so a late response can
 // never answer a later call. The client keeps the endpoint given to connect()
 // until close(): the next call reconnects first and repeats the last accepted
@@ -66,16 +66,21 @@ class Client {
                    bool mcp = false);
     // Disconnects and forgets the endpoint; later calls fail with rpc.connect.
     void close();
-    // How long a call waits for its response, clamped to [1 ms, 24 h];
-    // 30 s by default.
+    // How long connect() or a call may take in all -- connecting (a call's
+    // reconnect included), the handshake, sending the request and waiting
+    // for the response -- clamped to [1 ms, 24 h]; 30 s by default. A peer
+    // that stops accepting data ends it with rpc.timeout, or rpc.connect
+    // while connecting.
     void setTimeout(std::chrono::milliseconds timeout);
     Result<json::Value> call(std::string_view method,
                              const json::Value& params = json::Value::object());
 
   private:
-    Status open();
+    using Deadline = std::chrono::steady_clock::time_point;
+    Status open(Deadline deadline);
     void drop();
-    Result<json::Value> exchange(std::string_view method, const json::Value& params);
+    Result<json::Value> exchange(std::string_view method, const json::Value& params,
+                                 Deadline deadline);
     std::intptr_t fd_ = -1;
     std::uint64_t nextId_ = 1;
     std::string input_;

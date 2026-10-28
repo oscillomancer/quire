@@ -606,6 +606,81 @@ TEST_CASE("an oversized response frame is refused before parsing and the client 
     CHECK(script);
 }
 
+// A raw listener at `path`, never accepting unless the test does.
+int fakeListener(const std::filesystem::path& path, int backlog) {
+    std::filesystem::create_directories(path.parent_path());
+    std::filesystem::remove(path);
+    int listener = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    auto name = path.string();
+    std::memcpy(address.sun_path, name.c_str(), name.size() + 1);
+    if (listener < 0 || ::bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) ||
+        ::listen(listener, backlog)) {
+        if (listener >= 0) ::close(listener);
+        return -1;
+    }
+    return listener;
+}
+
+TEST_CASE("a server that stops reading ends a call's write at its timeout") {
+    auto path = testSocket("stalled");
+    int listener = fakeListener(path, 4);
+    REQUIRE(listener >= 0);
+    std::promise<void> done;
+    auto finished = done.get_future();
+    std::thread fake([&] {
+        int peer = ::accept(listener, nullptr, nullptr);
+        if (peer < 0) return;
+        std::string pending;
+        if (auto hello = readLine(peer, pending))
+            (void)sendAll(peer, R"({"jsonrpc":"2.0","id":)" + std::to_string(frameId(*hello)) +
+                                    R"(,"result":{}})" + "\n");
+        finished.wait();  // reading nothing more
+        ::close(peer);
+    });
+    rpc::Client client;
+    REQUIRE(client.connect(path, "stalled-client"));
+    client.setTimeout(std::chrono::milliseconds(100));
+    json::Value params = json::Value::object();
+    params["data"] = std::string(8 << 20, 'x');  // far more than the socket buffers hold
+    auto stalled = client.call("counter.blob", params);
+    done.set_value();
+    fake.join();
+    REQUIRE_FALSE(stalled);
+    CHECK(stalled.error().code == "rpc.timeout");
+    CHECK(stalled.error().message.find("sending") != std::string::npos);
+    ::close(listener);
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("a server that accepts no connections ends a connect at its timeout") {
+    auto path = testSocket("backlog");
+    int listener = fakeListener(path, 0);
+    REQUIRE(listener >= 0);
+    // Fill the backlog: the listener accepts nothing.
+    std::vector<int> waiting;
+    for (int i = 0; i < 64; ++i) {
+        int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+        sockaddr_un address{};
+        address.sun_family = AF_UNIX;
+        auto name = path.string();
+        std::memcpy(address.sun_path, name.c_str(), name.size() + 1);
+        const bool queued =
+            ::connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0;
+        waiting.push_back(fd);
+        if (!queued) break;
+    }
+    rpc::Client client;
+    client.setTimeout(std::chrono::milliseconds(100));
+    auto refused = client.connect(path, "late-client");
+    REQUIRE_FALSE(refused);
+    CHECK(refused.error().code == "rpc.connect");
+    for (int fd : waiting) ::close(fd);
+    ::close(listener);
+    std::filesystem::remove(path);
+}
+
 // Embedded in another loop (the GUI's): pump() runs what is due without
 // blocking and reports the next deadline; the waker fires for posts and timer
 // changes from any thread, so the owner's wait can be interrupted.
