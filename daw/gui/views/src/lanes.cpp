@@ -8,6 +8,8 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <utility>
+#include <vector>
 
 #include "supple/model/fade_shape.h"
 #include "supple/model/source_mapping.h"
@@ -40,6 +42,14 @@ class LaneLabels : public ui::Node {
     void paint(ui::Canvas& c) override {
         const ui::Theme& t = c.theme();
         const model::Session& s = lanes_.layout_.session();
+        // The visible take envelopes by take, in the session's order within
+        // one, gathered once: each item then finds its own without a scan.
+        takeEnvelopes_.clear();
+        for (const auto& e : s.envelopes)
+            if (e.value->visible && e.value->target.object.kind == model::Kind::Take)
+                takeEnvelopes_.push_back({e.value->target.object, &*e.value});
+        std::stable_sort(takeEnvelopes_.begin(), takeEnvelopes_.end(),
+                         [](const auto& a, const auto& b) { return a.first < b.first; });
         for (std::size_t i = 0; i < lanes_.layout_.rowCount(); ++i) {
             const ui::Rect row = lanes_.rowRect(i).intersect(bounds());
             if (row.empty()) continue;
@@ -129,9 +139,11 @@ class LaneLabels : public ui::Node {
         if (x1 <= x0) return;
         c.save();
         c.clip(full);
-        for (const auto& e : s.envelopes) {
-            const model::Envelope& env = *e.value;
-            if (env.target.object != *item.activeTake || !env.visible) continue;
+        const auto [first, last] = std::equal_range(
+            takeEnvelopes_.begin(), takeEnvelopes_.end(), std::pair{*item.activeTake, nullptr},
+            [](const auto& a, const auto& b) { return a.first < b.first; });
+        for (auto e = first; e != last; ++e) {
+            const model::Envelope& env = *e->second;
             const auto scale = envScale(env);
             if (!scale) continue;
             const ui::Color ink = t.color(env.target.param == "volume" ? "accent"
@@ -162,6 +174,7 @@ class LaneLabels : public ui::Node {
     }
 
     Lanes& lanes_;
+    std::vector<std::pair<model::Id, const model::Envelope*>> takeEnvelopes_;
 };
 
 Lanes::Lanes(peaks::PeakService& peaks, Resolve resolve, const TrackLayout& rowLayout,
