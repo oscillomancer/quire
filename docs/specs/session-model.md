@@ -211,7 +211,9 @@ parallel with the previous instance in the chain, outputs summed), `pdc`
 **state**: for plugins with the semantic extension, `patch` (canonical patch
 JSON, diffable); otherwise `state` = blob ref (content hash) plus `params`
 (last known CLAP values by param id, for display/diff only — the blob is
-authoritative). `learn` (ADR-0027, omitted when empty): MIDI learn, one
+authoritative). Parameter-map keys must be complete unsigned 32-bit decimal
+integers; signs, whitespace, trailing bytes and overflow report `schema.key`
+consistently on every platform. `learn` (ADR-0027, omitted when empty): MIDI learn, one
 binding per parameter, sorted by `param` — `{param (semantic key, or a
 plain parameter's id as text), midi: {kind: cc|note|pitch_bend|program,
 channel 1..16, number 0..127 (0 for pitch_bend), device (a substring of the

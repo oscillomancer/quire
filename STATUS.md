@@ -627,6 +627,8 @@ Engine and hosting:
   are).
 
 Session and editing:
+- Saved FX parameter IDs reject signs, whitespace, embedded-NUL suffixes and
+  unsigned 32-bit overflow consistently across platforms.
 - Engine stop/device restart retains finished audio and MIDI takes and commits
   them before app teardown. Headless exit does not save the project; clients
   must stop and save first to preserve MIDI and other session edits. Audio

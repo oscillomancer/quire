@@ -377,13 +377,14 @@ Schema<std::map<std::uint32_t, double>> paramValuesSchema() {
         std::map<std::string, double> tmp;
         if (!inner.decodeInto(v, tmp, c, p)) return false;
         for (const auto& [k, x] : tmp) {
-            char* end = nullptr;
-            const unsigned long id = std::strtoul(k.c_str(), &end, 10);
-            if (k.empty() || *end || id > 0xffffffffUL) {
-                c.error("schema.key", "parameter keys are CLAP ids", json::pointerJoin(p, k));
+            std::uint32_t id = 0;
+            const auto [end, ec] = std::from_chars(k.data(), k.data() + k.size(), id);
+            if (ec != std::errc{} || end != k.data() + k.size()) {
+                c.error("schema.key", "parameter keys are unsigned 32-bit decimal ids",
+                        json::pointerJoin(p, k), "use decimal digits from 0 to 4294967295");
                 return false;
             }
-            out[static_cast<std::uint32_t>(id)] = x;
+            out[id] = x;
         }
         return true;
     };

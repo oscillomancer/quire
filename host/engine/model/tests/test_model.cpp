@@ -13,6 +13,34 @@
 using namespace supple;
 using namespace supple::model;
 
+TEST_CASE("FX parameter keys are complete unsigned 32-bit decimal ids") {
+    FxInstance fx;
+    fx.plugin = {"clap", "test.params", "", "", ""};
+    auto object = toJson(fx);
+    for (const std::string& key :
+         {std::string("-0"), std::string("+1"), std::string(" 1"), std::string("1\0suffix", 8),
+          std::string("4294967296"), std::string("18446744073709551616")}) {
+        CAPTURE(key);
+        object["params"] = json::Value::object();
+        object["params"][key] = 0.5;
+        auto decoded = schemaOf<FxInstance>().decode(object);
+        REQUIRE_FALSE(decoded);
+        CHECK(decoded.error().toString().find("schema.key") != std::string::npos);
+    }
+    fx.params = {{0, 0.25}, {UINT32_MAX, 0.75}};
+    auto decoded = schemaOf<FxInstance>().decode(toJson(fx));
+    REQUIRE(decoded);
+    CHECK(decoded->params == fx.params);
+    EditTxn txn(Session::create(), 1);
+    const auto id = txn.create(fx);
+    txn.modify<Track>(kMaster, [&](auto& track) { track.chain.push_back(id); });
+    auto session = txn.commit();
+    REQUIRE(session);
+    auto reopened = parseProject(serializeProject(*session));
+    REQUIRE(reopened);
+    CHECK(reopened->fx.find(id)->params == fx.params);
+}
+
 namespace {
 
 Id addTrack(EditTxn& t, std::string name, Id parent = kMaster) {
