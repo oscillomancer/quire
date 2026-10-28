@@ -108,6 +108,17 @@ for osc1, **off** for the others).
   saw (RMS), its peak within 2, so sweeping the position holds the level.
   The bell's partials are in eighths of the note and the organ's on
   harmonics of half the note.
+- **Harmonic ramp** and **digital** start at the analog saw itself: below
+  their second frame (6.7 %) they play the analog saw's own samples,
+  crossfading into the table, so at 0 % they null against it. The
+  harmonic ramp then rolls the saw off to a sine (harmonic k at
+  k^−(1 + 8p²)). Digital holds each frame and jumps to the next over the
+  middle quarter of the way between them, through four kinds of four
+  frames: the saw held on 8, 5 and 3 steps; a sine and two bent waves
+  crushed to a few levels on 32 steps; sparse high harmonics (up to the
+  31st) at 4 bits on 64 steps; and 1-bit patterns (three from sines,
+  one a 15-step maximal-length sequence). Each frame's harmonics are those
+  of its steps exactly, cut at the band level's top like any table's.
 - **FM** is phase modulation by the source oscillator's waveform before
   its level: a modulator at the minimum level is silent and still
   modulates. Oscillators are computed from osc4 down, so a higher

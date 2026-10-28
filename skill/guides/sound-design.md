@@ -46,7 +46,9 @@ what you want, change its structure, measure, and hand the numbers to
 - **Oscillators** `osc1`..`osc4`, each `oscN.type`: `analog` (`wave` saw,
   square, pulse with `width`, triangle, sine; osc2..4 can `sync` to osc1),
   `wavetable` (`table`: harmonic_ramp, pwm, formant, bell, organ, digital,
-  spectral_comb; `position` sweeps its 16 frames), `fm` (a sine operator:
+  spectral_comb; `position` sweeps its 16 frames; harmonic_ramp and
+  digital are the analog saw at 0 %, digital then jumping through crushed,
+  sparse and 1-bit waves), `fm` (a sine operator:
   `ratio`, `feedback`), `noise` (`color`), `sub` (`octave` −1 or −2), or
   `off`. Osc 1 starts as an analog saw, the others off. `oscN.to` sends it to
   `filter1`, `filter2`, `both` or `direct` (around the filters).

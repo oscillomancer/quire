@@ -131,6 +131,67 @@ double rise(double x, double c) {
 }
 double fall(double x, double c) { return 1.0 - rise(1.0 - x, c); }
 
+// The digital table's way between two frames (x 0..1): it holds one, then
+// jumps to the next over the middle quarter.
+double stepped(double x) {
+    const double e = clamp((x - 0.375) * 4.0, 0.0, 1.0);
+    return e * e * (3.0 - 2.0 * e);
+}
+
+// The digital table's frame f (1..15) as the steps of one cycle, into v; how
+// many there are. Frame 0 is the saw. Four of each kind: the saw held on 8,
+// 5 and 3 steps; a sine and two bent waves crushed to a few levels; sparse
+// high harmonics at 4 bits; and 1-bit patterns. Each wave is read in the
+// middle of its steps, never on a level's edge, so every machine makes it
+// alike.
+int digitalSteps(int f, Array<double, 64>& v) {
+    if (f <= 3) {
+        const int n = f == 1 ? 8 : f == 2 ? 5 : 3;
+        for (int j = 0; j < n; ++j) v[j] = (2.0 * j + 1.0) / n - 1.0;
+        return n;
+    }
+    if (f == 13) {
+        // A maximal-length sequence of 15: every harmonic below the 15th as
+        // strong as the others.
+        const Array<double, 15> bits = {1, -1, -1, 1, 1, -1, 1, -1, 1, 1, 1, 1, -1, -1, -1};
+        for (int j = 0; j < 15; ++j) v[j] = bits[j];
+        return 15;
+    }
+    // Harmonic and level pairs of the sparse frames, 8 to 11.
+    const Array<double, 48> sparse = {1, 1,  7,  0.8, 11, 0.6, 0,  0,   0,  0,   0,  0,
+                                      1, 1,  9,  0.8, 13, 0.7, 14, 0.5, 0,  0,   0,  0,
+                                      1, .8, 11, 0.8, 17, 0.7, 19, 0.5, 23, 0.4, 0,  0,
+                                      1, .7, 13, 0.8, 21, 0.7, 22, 0.5, 29, 0.4, 31, 0.3};
+    const int n = f >= 7 && f <= 11 ? 64 : 32;
+    double most = 0.0;
+    for (int j = 0; j < n; ++j) {
+        const double w = twoPi * (j + 0.5) / n;
+        double x = 0.0;
+        if (f == 4)
+            x = round(sin(w) * 3.0) / 3.0;
+        else if (f == 5)
+            x = round((0.6 * sin(w) + 0.5 * sin(2.0 * w)) * 2.0) / 2.0;
+        else if (f == 6)
+            x = round(sin(w + 1.2 * sin(3.0 * w)));
+        else if (f == 7)
+            x = sin(w) + 0.9 * sin(4.0 * w + 0.7) >= 0.0 ? 1.0 : -1.0;
+        else if (f <= 11) {
+            for (int i = 0; i < 6; ++i)
+                x += sparse[(f - 8) * 12 + i * 2 + 1] * sin(sparse[(f - 8) * 12 + i * 2] * w);
+            most = max(most, abs(x));
+        } else if (f == 12)
+            x = sin(w) + 0.8 * sin(6.0 * w + 1.1) >= 0.0 ? 1.0 : -1.0;
+        else if (f == 14)
+            x = sin(w) + sin(10.0 * w + 0.3) >= 0.0 ? 1.0 : -1.0;
+        else
+            x = sin(w) + 0.7 * sin(2.0 * w + 0.5) + 0.6 * sin(9.0 * w + 1.0) >= 0.0 ? 1.0 : -1.0;
+        v[j] = x;
+    }
+    if (most > 0.0)
+        for (int j = 0; j < n; ++j) v[j] = round(v[j] / most * 8.0) / 8.0;
+    return n;
+}
+
 // The drive's curves (soft, tape, fold, hard), each with its resting point
 // taken off so a bias adds no offset.
 double tapeCurve(double v) { return v >= 0.0 ? fastTanh(v * 1.2) / 1.2 : fastTanh(v * 0.8) / 0.8; }
@@ -390,6 +451,7 @@ struct Voice {
     Array<int, 4> base1;
     Array<int, 4> size;
     Array<double, 4> blend;
+    Array<bool, 4> saw;  // between a table's first two frames, and the first is the saw
     Array<double, 4> mult;
     Array<Noise, 4> noises;
 
@@ -625,7 +687,8 @@ struct Marram : Instrument {
             .activeWhen(o1Type, {"wavetable"})
             .help(
                 "The table: a saw rolling off to a sine, a narrowing pulse, sung vowels, a bell, "
-                "organ drawbars, a coarsening digital ramp, or a comb through the harmonics.");
+                "organ drawbars, a saw falling into crushed and 1-bit waves, or a comb through the "
+                "harmonics.");
     Param o1Position = percent("Osc 1 Position", 0)
                            .withKey("osc1.position")
                            .polyModulated()
@@ -752,7 +815,8 @@ struct Marram : Instrument {
             .activeWhen(o2Type, {"wavetable"})
             .help(
                 "The table: a saw rolling off to a sine, a narrowing pulse, sung vowels, a bell, "
-                "organ drawbars, a coarsening digital ramp, or a comb through the harmonics.");
+                "organ drawbars, a saw falling into crushed and 1-bit waves, or a comb through the "
+                "harmonics.");
     Param o2Position = percent("Osc 2 Position", 0)
                            .withKey("osc2.position")
                            .polyModulated()
@@ -879,7 +943,8 @@ struct Marram : Instrument {
             .activeWhen(o3Type, {"wavetable"})
             .help(
                 "The table: a saw rolling off to a sine, a narrowing pulse, sung vowels, a bell, "
-                "organ drawbars, a coarsening digital ramp, or a comb through the harmonics.");
+                "organ drawbars, a saw falling into crushed and 1-bit waves, or a comb through the "
+                "harmonics.");
     Param o3Position = percent("Osc 3 Position", 0)
                            .withKey("osc3.position")
                            .polyModulated()
@@ -1006,7 +1071,8 @@ struct Marram : Instrument {
             .activeWhen(o4Type, {"wavetable"})
             .help(
                 "The table: a saw rolling off to a sine, a narrowing pulse, sung vowels, a bell, "
-                "organ drawbars, a coarsening digital ramp, or a comb through the harmonics.");
+                "organ drawbars, a saw falling into crushed and 1-bit waves, or a comb through the "
+                "harmonics.");
     Param o4Position = percent("Osc 4 Position", 0)
                            .withKey("osc4.position")
                            .polyModulated()
@@ -2146,14 +2212,16 @@ struct Marram : Instrument {
 
     // A wavetable oscillator's band level (the most harmonics that stay
     // under the limit at this pitch) and its two frames either side of the
-    // position.
+    // position. The first frame of the harmonic ramp and of the digital
+    // table is the analog saw itself, so at 0 % they are that saw exactly.
     void table(Voice& s, int o, int which, double position, double inc) {
         const double x = kTop * inc / limit;
         int level = x <= 1.0 ? 0 : ceilToInt(log2(x));
         level = clamp(level, 0, kLevels - 1);
         const double at = clamp(position, 0.0, 1.0) * (kFrames - 1);
         const int f0 = min(floorToInt(at), kFrames - 2);
-        s.blend[o] = at - f0;
+        s.blend[o] = which == 5 ? stepped(at - f0) : at - f0;
+        s.saw[o] = f0 == 0 && (which == 0 || which == 5);
         s.size[o] = levelSize[level];
         s.base0[o] = (which * kFrames + f0) * kPerFrame + levelAt[level];
         s.base1[o] = s.base0[o] + kPerFrame;
@@ -2289,7 +2357,7 @@ struct Marram : Instrument {
                                            s.width[o]);
                         } else if (type == kWavetable) {
                             const double tp = pm == 0.0 ? ph : wrap01(ph + pm / s.mult[o]);
-                            y = wave(s, o, tp);
+                            y = wave(s, o, tp, dt);
                         } else if (type == kFm) {
                             const double self = s.feedback[o] * 0.5 * pi * (s.fb1[x] + s.fb2[x]);
                             y = sin(twoPi * (ph + pm) + self);
@@ -2353,16 +2421,18 @@ struct Marram : Instrument {
         }
     }
 
-    // A wavetable's sample at table phase tp: between two samples of each
-    // frame, and between the frames.
-    double wave(Voice& s, int o, double tp) {
+    // A wavetable's sample at table phase tp (dt its step): between two
+    // samples of each frame, and between the frames.
+    double wave(Voice& s, int o, double tp, double dt) {
         const int n = s.size[o];
         const double x = tp * n;
         const int i = min(floorToInt(x), n - 1);
         const double a = x - i;
         const int at0 = s.base0[o] + i;
         const int at1 = s.base1[o] + i;
-        const double v0 = tables[at0] + a * (tables[at0 + 1] - tables[at0]);
+        const double v0 = s.saw[o] ? analogWave(0, tp, dt, 0.5)
+                                   : tables[at0] + a * (tables[at0 + 1] - tables[at0]);
+        if (s.blend[o] == 0.0) return v0;
         const double v1 = tables[at1] + a * (tables[at1 + 1] - tables[at1]);
         return v0 + s.blend[o] * (v1 - v0);
     }
@@ -2528,7 +2598,10 @@ struct Marram : Instrument {
         }
         for (int t = 0; t < kTables; ++t)
             for (int f = 0; f < kFrames; ++f) {
-                recipe(t, f / (kFrames - 1.0));
+                if (t == 5)
+                    digital(f, amp, phs, kTop);
+                else
+                    harmonics(t, f / (kFrames - 1.0), amp, phs, kTop);
                 const int base = (t * kFrames + f) * kPerFrame;
                 // One gain for every level of a frame, from the full band, so
                 // the levels match: as loud as a saw (an RMS of 0.577), so a
@@ -2614,40 +2687,44 @@ struct Marram : Instrument {
         }
     }
 
-    // Table t at position p (0..1): its harmonics into amp and phs.
-    void recipe(int t, double p) {
-        if (t != 5) {
-            harmonics(t, p, amp, phs, kTop);
+    // The digital table's frame f: the saw's harmonics, or those of the
+    // frame's steps, exactly (each step held for its share of the cycle), so
+    // the table keeps them band-limited as it does any other's.
+    void digital(int f, Array<double, 257>& a, Array<double, 257>& ph, int top) {
+        a.fill(0.0);
+        ph.fill(0.0);
+        if (f == 0) {
+            for (int k = 1; k <= top; ++k) {
+                a[k] = 2.0 / (pi * k);
+                ph[k] = pi;
+            }
             return;
         }
-        // Digital: a ramp through a sample-and-hold and a quantizer that
-        // coarsen along the table (5 to 3 bits, 16 to 6 steps a cycle).
-        amp.fill(0.0);
-        phs.fill(0.0);
-        const double levels = exp2(4.0 - 2.0 * p);
-        const int steps = roundToInt(exp2(4.0 - 1.415 * p));
-        const int hold = idiv(kFft, max(1, steps));
-        double mean = 0.0;
-        for (int i = 0; i < kFft; ++i) {
-            const double x = 2.0 * (idiv(i, hold) * hold) / kFft - 1.0;
-            re[i] = round(x * levels) / levels;
-            im[i] = 0.0;
-            mean += re[i];
-        }
-        for (int i = 0; i < kFft; ++i) re[i] -= mean / kFft;
-        // The forward transform is the inverse's conjugate.
-        transform(kFft);
-        for (int k = 1; k <= kTop; ++k) {
-            const double cr = re[k] * 2.0 / kFft;
-            const double ci = -im[k] * 2.0 / kFft;
-            amp[k] = sqrt(cr * cr + ci * ci);
-            phs[k] = atan2(ci, cr) + pi / 2.0;
+        Array<double, 64> v;
+        const int n = digitalSteps(f, v);
+        for (int k = 1; k <= top; ++k) {
+            // The steps' sum of v e^(-2 pi i k j / n), times one step's
+            // (1 - e^(-2 pi i k / n)) / (2 pi i k).
+            double sr = 0.0;
+            double si = 0.0;
+            for (int j = 0; j < n; ++j) {
+                const double w = twoPi * imod(k * j, n) / n;
+                sr += v[j] * cos(w);
+                si -= v[j] * sin(w);
+            }
+            const double w = twoPi * k / n;
+            const double dr = sin(w) / (twoPi * k);
+            const double di = (cos(w) - 1.0) / (twoPi * k);
+            const double cr = sr * dr - si * di;
+            const double ci = sr * di + si * dr;
+            a[k] = 2.0 * sqrt(cr * cr + ci * ci);
+            ph[k] = atan2(ci, cr) + 0.5 * pi;
         }
     }
 
-    // The harmonics 1 .. top of table t (not the digital one, which recipe()
-    // makes in time) at position p, into a and ph: the tables' and the
-    // editor's picture of them.
+    // The harmonics 1 .. top of table t (not the digital one, which digital()
+    // makes) at position p, into a and ph: the tables' and the editor's
+    // picture of them.
     void harmonics(int t, double p, Array<double, 257>& a, Array<double, 257>& ph, int top) {
         a.fill(0.0);
         ph.fill(0.0);
@@ -2942,9 +3019,14 @@ struct Marram : Instrument {
     Array<int, 96> buttonCode, buttonValue, buttonStyle, buttonColour;
     Array<double, 96> buttonX, buttonY, buttonW, buttonH;
     int buttons = 0;
-    // A wavetable frame's harmonics, for its picture.
+    // A wavetable frame's harmonics, for its picture; the digital table's
+    // two frames as steps (none: the saw) and the way between them.
     Array<double, 257> frameAmp;
     Array<double, 257> framePhase;
+    Array<double, 64> stepsA, stepsB;
+    int stepsInA = 0;
+    int stepsInB = 0;
+    double stepsBlend = 0.0;
 
     void editor(Editor& e) {
         e.size(kW, kH);
@@ -5358,12 +5440,15 @@ struct Marram : Instrument {
         if (type == kWavetable) {
             const int table = choiceOf(oc(o, oTable));
             if (table == 5) {
-                // Digital: the stepped ramp itself.
-                const double p = valueOf(oc(o, oPosition));
-                const double levels = exp2(4.0 - 2.0 * p);
-                const int steps = roundToInt(exp2(4.0 - 1.415 * p));
-                const double x = 2.0 * floor(wrap01(t) * steps) / steps - 1.0;
-                return round(x * levels) / levels;
+                // Digital: the steps themselves.
+                const double u = wrap01(t);
+                const double a = stepsInA == 0
+                                     ? 2.0 * u - 1.0
+                                     : stepsA[min(floorToInt(u * stepsInA), stepsInA - 1)];
+                const double b = stepsInB == 0
+                                     ? 2.0 * u - 1.0
+                                     : stepsB[min(floorToInt(u * stepsInB), stepsInB - 1)];
+                return a + stepsBlend * (b - a);
             }
             double y = 0.0;
             for (int k = 1; k <= 48; ++k) y += frameAmp[k] * sin(twoPi * k * t + framePhase[k]);
@@ -5381,6 +5466,19 @@ struct Marram : Instrument {
         if (colour == 1) return 0.55 * (a + b) * 0.8 + 0.3 * c;
         if (colour == 2) return 0.85 * c + 0.12 * a;
         return 0.9 * (a - b);
+    }
+
+    // Table t's frame at position p, for wavePoint().
+    void pictureOf(int t, double p) {
+        if (t != 5) {
+            harmonics(t, p, frameAmp, framePhase, 48);
+            return;
+        }
+        const double at = clamp(p, 0.0, 1.0) * (kFrames - 1);
+        const int f0 = min(floorToInt(at), kFrames - 2);
+        stepsInA = f0 == 0 ? 0 : digitalSteps(f0, stepsA);
+        stepsInB = digitalSteps(f0 + 1, stepsB);
+        stepsBlend = stepped(at - f0);
     }
 
     void drawWave(Canvas& g) {
@@ -5403,12 +5501,12 @@ struct Marram : Instrument {
         const double gain = 0.42 * h * min(1.0, sqrt(dbToGain(valueOf(oc(o, oLevel))) * 2.0));
         const double cycles = 2.0;
         double peak = 1.0;
-        if (type == kWavetable && choiceOf(oc(o, oTable)) != 5) {
+        if (type == kWavetable) {
             // The other frames faintly behind this one.
             g.save();
             g.clip(x + 2, y + 2, w - 4, h - 4);
             for (int f = 0; f <= 4; ++f) {
-                harmonics(choiceOf(oc(o, oTable)), f / 4.0, frameAmp, framePhase, 48);
+                pictureOf(choiceOf(oc(o, oTable)), f / 4.0);
                 double most = 0.0;
                 for (int i = 0; i <= 60; ++i)
                     most = max(most, abs(wavePoint(o, type, i / 60.0, i)));
@@ -5428,7 +5526,7 @@ struct Marram : Instrument {
             }
             g.globalAlpha(1.0);
             g.restore();
-            harmonics(choiceOf(oc(o, oTable)), valueOf(oc(o, oPosition)), frameAmp, framePhase, 48);
+            pictureOf(choiceOf(oc(o, oTable)), valueOf(oc(o, oPosition)));
             peak = 0.0;
             for (int i = 0; i <= 120; ++i) peak = max(peak, abs(wavePoint(o, type, i / 120.0, i)));
             peak = max(peak, 1e-6);
