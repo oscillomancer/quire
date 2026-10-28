@@ -39,37 +39,38 @@ decisions behind it are in `docs/decisions/` (ADRs) and the contracts in
                      hardware
 ```
 
-Everything that changes state goes through the command bus. The GUI is a
-client of the bus like any other; it has no private mutation path. That
-single rule gives undo, replay, audit, macros, scripting and agent control
-for free, and guarantees that anything a human can do an agent can do.
+Project edits go through the command bus. The GUI, scripts and agents use
+the same validated edits, undo history and audit log. Window layout,
+selection and application preferences are separate UI state; local actions
+such as opening dialogs are not all engine commands.
 
 ## 2. Components
 
 | Layer | Component | Role | Spec / ADR |
 |---|---|---|---|
-| base | `libs/core-base` | `Error`, `Result<T>`, `SUPPLE_RT`, RT primitives | ADR-0003, `specs/core-base.md` |
-| data | `libs/core-json` | JSON value, precise-error parser, canonical writer, JSON Pointer, merge patch | ADR-0009, `specs/core-json.md` |
-| data | `libs/core-schema` | typed schema DSL: JSON ⇄ C++ binding, validation with hints, JSON Schema export | `specs/core-json.md` |
-| params | `libs/core-params` | semantic parameter definitions, units, curves, text I/O, normalization | ADR-0010, `specs/core-params.md` |
-| patch | `libs/core-patch` | patch/preset documents: schema, validate, merge, canonical form, prose describe | ADR-0009, `specs/core-patch.md` |
-| music | `libs/midi`, `libs/notation` | MIDI model + SMF I/O; the text notation compiler/decompiler | `specs/notation.md` |
-| time | `libs/timeline` | tempo and meter maps, ramps, bar/beat conversion | `specs/session-model.md` |
+| base | `libs/core-base` | `Error`, `Result<T>`, `SUPPLE_RT`, RT primitives | ADR-0003, `docs/specs/core-base.md` |
+| data | `libs/core-json` | JSON value, precise-error parser, canonical writer, JSON Pointer, merge patch | ADR-0009, `docs/specs/core-json.md` |
+| data | `libs/core-schema` | typed schema DSL: JSON ⇄ C++ binding, validation with hints, JSON Schema export | `docs/specs/core-json.md` |
+| params | `libs/core-params` | semantic parameter definitions, units, curves, text I/O, normalization | ADR-0010, `docs/specs/core-params.md` |
+| patch | `libs/core-patch` | patch/preset documents: schema, validate, merge, canonical form, prose describe | ADR-0009, `docs/specs/core-patch.md` |
+| music | `libs/midi`, `libs/notation` | MIDI model + SMF I/O; the text notation compiler/decompiler | `docs/specs/notation.md` |
+| time | `libs/timeline` | tempo and meter maps, ramps, bar/beat conversion | `docs/specs/session-model.md` |
 | audio | `libs/audio-file`, `libs/core-dsp` | file I/O, resampling; shared DSP blocks | — |
 | audio | `libs/console9` | Console 9 encode/decode, fader/pan, deterministic dither; reference null test | ADR-0019 |
-| perception | `libs/core-analysis` | loudness (BS.1770/R128), spectral, harmonic, envelope, stereo, comparison, masking; compact reports | `specs/core-analysis.md` |
-| tuning | `libs/optimize` | CMA-ES for the patch optimizer | `specs/optimizer.md` |
-| control | `libs/command-bus`, `libs/control-protocol`, `mcp/` | registry and dispatch; JSON-RPC over Unix socket; MCP adapter | ADR-0007, `specs/command-bus.md` |
+| perception | `libs/core-analysis` | loudness (BS.1770/R128), spectral, harmonic, envelope, stereo, comparison, masking; compact reports | `docs/specs/core-analysis.md` |
+| tuning | `libs/optimize` | CMA-ES for the patch optimizer | `docs/specs/optimizer.md` |
+| control | `libs/command-bus`, `libs/control-protocol`, `mcp/` | registry and dispatch; JSON-RPC over Unix socket; MCP adapter | ADR-0007, `docs/specs/command-bus.md` |
 | scripting | `libs/lua-bus` (vendored PUC Lua 5.4) | sandboxed Lua scripts on the bus: generated bindings, `q.batch` transactions, `q.on` subscriptions; `script.run` | ADR-0006 |
-| hosting | `host/clap-host` | CLAP and VST3 hosting, the semantic-params extension, the bridge process (`bridge/`) | ADR-0013, ADR-0017, `specs/semantic-params-extension.md` |
-| sandbox | `host/sandbox`, `host/analysis-commands` | headless plugin sandbox (library, CLI, MCP); analysis commands shared with the engine | `specs/sandbox.md` |
-| engine | `host/engine` | session model (`model/`), commands, render plans, real-time engine, JACK backend, renders | `specs/session-model.md`, `specs/engine.md` |
+| hosting | `host/clap-host` | CLAP and VST3 hosting, the semantic-params extension, the bridge process (`host/clap-host/bridge/`) | ADR-0013, ADR-0017, `docs/specs/semantic-params-extension.md` |
+| sandbox | `host/sandbox`, `host/analysis-commands` | headless plugin sandbox (library, CLI, MCP); analysis commands shared with the engine | `docs/specs/sandbox.md` |
+| engine | `host/engine` | session model (`host/engine/model/`), commands, render plans, real-time engine, JACK and native PortAudio backends, renders | `docs/specs/session-model.md`, `docs/specs/engine.md` |
 | plugins | `plugins/*` | stock plugins (template-derived, or DSP scripts in `plugins/<name>`) + shared extension code and the script suite | ADR-0011, ADR-0047, ADR-0032 |
-| app | `daw/gui` | the GUI application | ADR-0005, `specs/gui.md` |
+| app | `daw/gui` | the GUI application | ADR-0005, `docs/specs/gui.md` |
 | agents | `skill/` | bundled LLM skill: generated reference + guides | — |
 
-Dependency direction is strictly downward in that table: libs never depend on
-host, daw or plugins; plugins use only header-light libs.
+Runtime libraries under `libs/` do not depend on host, daw or plugin products.
+Stock plugins share the MIT libraries and template infrastructure; hosting
+probes and conformance tests also link host libraries.
 
 ## 3. Threads and real-time safety
 
@@ -95,7 +96,7 @@ host, daw or plugins; plugins use only header-light libs.
   executor runs each node, plug-ins included, with FTZ and DAZ set and the
   thread's MXCSR restored afterwards, so a node computes alike on any thread,
   in real time and offline; owned audio threads prefault their stacks before
-  their first job (ADR-0025). Under a real-time callback the live helpers
+  their first job (ADR-0025). On Linux, under a real-time callback the live helpers
   share its priority, while the renderer, the background helpers and bridge
   audio threads run SCHED_FIFO 10, below the kernel's interrupt threads
   (ADR-0026). The renderer waits until the next stopped block is due or
@@ -109,8 +110,8 @@ host, daw or plugins; plugins use only header-light libs.
   plugin main-thread callbacks (CLAP's "main thread" is this thread), owns
   plugin GUIs in-process. In the GUI app it is the UI thread; headless it runs
   an event loop for the control socket and timers.
-- **I/O threads** — recording writers (never drop a sample: large
-  preallocated buffers, crash-readable files), peak building, media hashing,
+- **I/O threads** — recording writers (preallocated buffers and crash-readable
+  WAV files; overflow is counted and missing audio is padded with silence), peak building, media hashing,
   analysis jobs, renders. Playback media is decoded and resampled into an
   in-memory cache when a plan is compiled; a background, disk-backed cache is
   planned.
@@ -137,10 +138,11 @@ Windows handles with delete sharing, exclusive recording creation and atomic
 render publication; recording writes remain on the I/O thread.
 
 `core-base` provides `supple::MainThreadWake`, a coalesced notification relay
-(ADR-0029). Producers publish atomics and wake a private futex; its parked
-non-RT thread writes a pollable eventfd. The bridge uses it for plug-in main
+(ADR-0029). Producers publish atomics and wake an address waiter; its parked
+non-RT thread signals a native `WakeEvent` (eventfd on Linux, a pipe on macOS,
+an event handle on Windows). The bridge uses it for plug-in main
 requests. EngineApp subscribes its local instances, engine, backend and jobs to
-one relay that outlives all producers. Headless socket/MCP loops poll that fd,
+one relay that outlives all producers. Headless socket/MCP loops wait on that source,
 local plug-in descriptors and the nearest monotonic service deadline (ADR-0030).
 Audio callbacks notify for published work/state transitions and one-shot output
 consumption targets, not unchanged blocks. Job/post notifications run outside
@@ -181,12 +183,13 @@ Participation is bounded by graph dependencies and departure is joined
 explicitly (ADR-0023); this pool does not participate in live callback execution.
 
 **Main-thread budget.** The main thread is the UI thread, the model writer
-and CLAP's plugin main thread (plugin GUIs require it). It stays responsive
-because nothing long runs on it synchronously: edit commands are pure and
-fast; `RenderPlan` compilation, rendering, analysis, file I/O, peak building,
-plugin scanning and Lua scripts run on worker threads and commit results back
-as ordered commands; the target is no synchronous main-thread task over
-2 ms (`docs/benchmarks/gui.md`).
+and CLAP's plugin main thread (plugin GUIs require it). Render/analysis jobs,
+browser rescans, peak building and recording writes use workers and post
+completion back. Plan compilation and its media decoding/resampling, Lua
+execution, and some project/file operations still run synchronously on the
+model thread. Lua has an instruction budget; time inside commands is excluded.
+The target of no synchronous UI-thread task over 2 ms is a responsiveness
+goal, not a bound on every operation (`docs/benchmarks/gui.md`, `STATUS.md`).
 
 **Event delivery to clients.** Every event carries a per-topic sequence
 number. A subscriber whose queue overflows receives one `event.dropped`
@@ -216,9 +219,10 @@ Commands are declared once in C++ with typed argument structs bound through
 core-schema. Each has a dotted name (`track.add`), version, kind
 (`query`/`edit`/`action`), docs, argument/result schemas with units and
 examples, error codes with hints, and an MCP exposure class. Examples double
-as tests. The registry exports JSON Schema from which MCP tools, the skill's
-reference, Lua bindings/annotations, the GUI action list and the protocol
-method table are generated — and committed, with a drift test.
+as tests. The registry supplies MCP tools, Lua bindings, the GUI's public
+command actions and protocol dispatch at runtime. The skill's command
+references, MCP tool schemas and Lua annotations are generated and committed,
+with drift tests.
 
 Agents are expected to use `batch` (atomic, one undo step, labelled). Object
 references accept IDs or selectors (`{"name": "Bass"}`), resolved and logged
@@ -255,11 +259,14 @@ recheck before parking; Windows process-local address waits are not used for
 bridge audio. These mechanisms retain the background-only wait exception.
 
 **Runtime latency changes.** CLAP only lets an active plugin change latency
-via `request_restart`. The engine then prepares a new plan on a worker thread
-(the plugin reactivated with its new latency, all delay-compensation lines
-recomputed) while the old plan keeps playing, and swaps at a block boundary
-with a short crossfade (default 10 ms) on affected paths. Offline renders are
-unaffected (plans are fixed per render). Full contract: `specs/engine.md`.
+via `request_restart`. Model-thread service first publishes a plan that takes
+the instance out of both audio executors and passes its stage through with
+compensation. Once the executors have adopted that plan, the instance restarts
+with its state retained. A changed latency triggers a model-thread plan rebuild
+with new delay compensation; plans are adopted at audio boundaries. Mix-control
+smoothing and Console 9 mode crossfades use 10 ms; structural plugin changes do
+not yet have crossfades. Offline renders are
+unaffected (plans are fixed per render). Full contract: `docs/specs/engine.md`.
 Plugin GUIs embed as native X11 children, NSViews or HWNDs (ADR-0040).
 Windows/X11 bridge editors use the same parent across processes; Cocoa bridges
 own floating NSWindows because NSView pointers are process-local. Native bridge
@@ -317,7 +324,7 @@ Strict JSON with a `"schema": "supple.<type>/<major>.<minor>"` first member,
 canonical serialization (byte-identical for identical content), ID-keyed
 collections, RFC 7396 merge patches, strict validation with "did you mean"
 hints. The MIDI notation is its own line-oriented format with a canonical
-form. Project files follow the same rules (`specs/session-model.md` §5).
+form. Project files follow the same rules (`docs/specs/session-model.md` §5).
 
 ## 10. GUI (ADR-0005)
 
@@ -336,7 +343,8 @@ harness; the app has no built-in agent (ADR-0043).
 
 RealtimeSanitizer on audio-path tests (a self-check proves the gate fires);
 ASan with UBSan, and TSan presets; golden renders with tolerance-aware null tests;
-fuzzing of every parser and of command-bus inputs; plugin validators;
+opt-in fuzz targets for JSON, notation, command-bus inputs, projects and history;
+plugin validators;
 benchmarks tracked in `docs/benchmarks/`; the license gate on every build.
 Definition of done: code, tests, docs, `STATUS.md`, no license issues, and
 review by someone other than the author. Nothing is "done" that was not run.

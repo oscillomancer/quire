@@ -671,6 +671,10 @@ Session and editing:
   squashed steps keep large invocation arguments.
 
 GUI:
+- Plan compilation (including media decoding/resampling), Lua execution and
+  some project/file operations still run synchronously on the model/UI thread.
+  The 2 ms responsiveness target is not a bound on these operations; Lua's
+  instruction budget excludes time spent inside commands.
 - The opt-in native popup-focus regression passes on Hyprland/XWayland,
   including typing and Escape after a forwarded floating-window shortcut.
   Opening a popup in an already-key owner skips raising it, preserving Cocoa
