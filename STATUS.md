@@ -276,7 +276,7 @@ instructions are in `docs/guides/installing.md`.
   the LLM evaluation harness (`tools/eval-harness`).
 - **Stock plugins** (ADR-0011, ADR-0047): Marram, Yarrow, Sundew, Treeline,
   Gorse, Hickory, Sorrel, Teasel, Bracken, Ghyll, Lichen, Withy, Pollia,
-  Umber and Sedge, each passing clap-validator, a reset determinism check, an unload
+  Umber, Sedge and Gain, each passing clap-validator, a reset determinism check, an unload
   test and the headless REAPER check;
   JSON patches and the semantic-parameters extension.
   Yarrow, the EQ, is the first written as a DSP script
@@ -487,6 +487,11 @@ instructions are in `docs/guides/installing.md`.
   a mark under the row at the exact pitch. Measured only on synthetic
   plucked strings so far; the user's recordings of real ones are still to
   check it against.
+  Gain (`plugins/gain`), the simplest, is one knob: a level change of
+  −32 to +32 dB, glided by the framework's 20 ms smoothing in dB, mono or
+  stereo, no latency, and at 0 dB the input bit for bit. Its editor is
+  the knob and its value. It is the one stock plugin not named after
+  the natural world (ADR-0047).
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The

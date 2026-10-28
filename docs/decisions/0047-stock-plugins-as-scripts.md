@@ -85,6 +85,9 @@ plugins ship as CLAP (and VST3, AU) files of their own that other hosts load.
    (2026-10-25) The fifteenth is Sedge, the chromatic tuner
    (`com.suppleaudio.sedge`), with no predecessor; sedges are grass-like
    plants of wet ground, which its mark and its fine cells draw as a tuft.
+   (2026-10-28) The sixteenth is Gain, a level change
+   (`com.suppleaudio.gain`), with no predecessor: one knob, named for
+   what it does by the maintainer's choice, the one exception to item 6.
 6. **Names and look.** A stock plugin is named after a plant or something
    else of the natural world, not after its effect type (Yarrow, the EQ;
    Sundew, the compressor; Treeline, the limiter; Gorse, the transient
@@ -92,6 +95,8 @@ plugins ship as CLAP (and VST3, AU) files of their own that other hosts load.
    saturation; Bracken, the delay; Canopy, the reverb; Lichen, the
    analyzer; Marram, the synthesizer; (2026-10-22) Withy, the chorus;
    Pollia, the phaser; Umber, the tape machine; Sedge, the tuner).
+   (2026-10-28) Gain, a level change of one knob, is the exception: the
+   maintainer named it for what it does.
    Every stock script draws with the scripts' palette (`kScriptTheme` in
    `plugins/suite/glue`): warm and earthy, set apart from the host's
    graphite (walnut panels, a soil-dark floor under graphs, parchment

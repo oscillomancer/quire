@@ -110,7 +110,7 @@ and finite decoded samples. The reader handles PCM 8/16/24/32 and IEEE float
 than asserting the plugin's internal floating-point safety.
 
 Default output must be non-silent. Instrument bypass must be silent. Hickory,
-Lichen, Sedge, neutral Gorse, Yarrow (every band off), Treeline (no gain, the
+Lichen, Sedge, Gain, neutral Gorse, Yarrow (every band off), Treeline (no gain, the
 signal under its ceiling) and Sorrel (the fixture above its threshold) must
 match bypass sample-for-sample; other defaults must differ. Dynamics differences may
 include startup ramps.
@@ -132,6 +132,7 @@ include startup ramps.
 | `withy` | Withy | Output | 0 / −12 dB | −12 ±1 dB |
 | `umber` | Umber | Output | 0 / −12 dB | −12 ±1 dB |
 | `sedge` | Sedge | Tolerance | 1 / 10 ct | envelope reload + unchanged audio |
+| `gain` | Gain | Gain | 0 / −12 dB | −12 ±1 dB |
 
 Continuous values use ADR-0010's normalized CLAP domain. The table keeps those
 values explicit. Add a plugin in a few lines in `CASES`

@@ -1903,7 +1903,47 @@ tolerance. The mark is a tuft of sedge with a seed spike.
 Factory patches: Concert A440, A442, Baroque A415, Bass (a 100 ms
 window), Stage, Muted, Werckmeister III, Vallotti, Meantone.
 
-## 15. Acceptance
+## 15. Gain — "Gain" [`gain`]
+
+A level change and nothing else, written as a DSP script (ADR-0047:
+`plugins/gain/script/gain.cpp`), for the point in a chain a fader cannot
+reach. Named for what it does, the one stock plugin that is not named
+after the natural world (ADR-0047). Main stereo or mono in and out, the
+same gain on every channel; no latency, no tail.
+
+| key | type | range | curve | default |
+|---|---|---|---|---|
+| `gain` | dB | −32..+32, smoothed 20 ms | linear | 0 |
+
+- **Smoothing.** The framework's glide (`.smoothed(20)`): a one-pole in
+  dB with a 20 ms time constant, run per sample, starting at the sample a
+  change arrives (automation events split the block), and snapping to the
+  target once within a billionth of the range of it. Every stock level
+  glides this way (Hickory's `gain`, the `output`s), so the plugins agree
+  with each other. The engine's fader instead ramps linearly in amplitude
+  over 10 ms for a live move and follows automation's curve per sample
+  without a ramp, since its automation is a continuous curve; a plugin's
+  automation arrives as discrete values from any host, so it must glide
+  through them. In dB a glide moves evenly to the ear, from −32 to +32 as
+  from −6 to 0: a 64 dB jump steps a 50 Hz sine at most 0.0041 between two
+  samples at 48 kHz (its own slope at +32 dB), against about 0.6 sent
+  straight through.
+- At 0 dB the input passes as it came, bit for bit: the block is written
+  only while the gain is not exactly 1. Non-finite samples are multiplied
+  like any other (Gain keeps no state for them to reach).
+- Not a transparent product for host-smoke (`PRODUCT_TRANSPARENT`): its
+  smoke parameter is `gain` itself, which host-smoke moves off 0 dB.
+
+Editor (180 × 186): the knob, lit from 0 dB at the top to the value, with
+a notch over 0 dB, and its value under it in Plex Mono, the "dB" smaller
+and muted (`+6.0 dB`); no name or labels. A drag anywhere in the window turns it (200 units the whole
+range, Shift a fifth of that), the wheel by 0.5 dB a notch, a double click
+returns it to 0 dB.
+
+No factory patches: 0 dB is its only neutral setting, and any other is a
+number an agent or a user types.
+
+## 16. Acceptance
 
 A plugin is done when its tests, the CLAP validator, the RT sanitizer run,
 a REAPER load and automation check, and its skill page exist.

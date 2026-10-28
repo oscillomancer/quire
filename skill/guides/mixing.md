@@ -102,6 +102,7 @@ points (or a beat range of them); `env.set {env, active: false}` bypasses an
 envelope; render and `analyze.compare` to hear what it did.
 
 Use [Hickory, the stereo utility](utility.md) for gain staging, channel checks, bass mono and lining up multi-miked tracks; its `correlation` and `side_level` readouts say what the stereo image is doing. Render and compare after width or polarity changes.
+For a level change at one point in an FX chain, to drive a plugin harder or trim after one, see [Gain](gain.md): one knob, ±32 dB.
 For track and bus compression, external-key ducking, upward compression and peak catching, see [Sundew, the compressor](comp.md).
 For a true-peak ceiling on the master and loudness against a LUFS target, see [Treeline, the limiter](limiter.md).
 Use [Yarrow, the stock EQ](eq.md) for measured rumble, masking and harshness cuts, de-essing and dynamic or mid/side bands.
