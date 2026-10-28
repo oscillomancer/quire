@@ -76,5 +76,10 @@ if(Python3_FOUND)
     add_test(NAME eval-harness.tests
              COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_SOURCE_DIR}/tools/eval-harness)
     set_tests_properties(eval-harness.tests PROPERTIES LABELS "eval")
+    foreach(tool IN ITEMS listening optimize-bench gui reaper-check)
+      add_test(NAME tools.${tool}.tests
+               COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_SOURCE_DIR}/tools/${tool}
+                       -p "test_*.py")
+    endforeach()
   endif()
 endif()
