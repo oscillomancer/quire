@@ -840,6 +840,12 @@ all dispatch the same `ui.quit` action. An open popup only gates interactive
 Quit when recording or unsaved changes require a decision; a clean, idle
 project can quit immediately. Hidden/finite runs still stop recording, even
 though they suppress the prompt and ignore the popup gate.
+Discard decisions capture the session version and branch. Save, Don't save,
+Save As completion and the final continuation recheck recording and that
+revision. A recording started while the prompt/dialog was open is stopped;
+a Stop error aborts. If recording was stopped or the version/branch changed,
+a fresh prompt replaces the old decision before saving or continuing, even
+if an intervening save made the new revision clean.
 Native file/folder results capture the project generation and are dropped with
 a short notice if the project was replaced before delivery. Open rechecks the
 session version and branch after the dialog; changes require a fresh discard

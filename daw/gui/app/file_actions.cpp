@@ -153,14 +153,16 @@ std::function<void(DialogLifetime::Paths)> DialogLifetime::guard(
 }
 
 FileActions::FileActions(ui::Root& root, AppActions& actions, cmd::Dispatcher& dispatcher,
-                         engine::EngineApp& app, UiState& ui, SDL_Window* window, Post post)
+                         engine::EngineApp& app, UiState& ui, SDL_Window* window, Post post,
+                         SaveDialog saveDialog)
     : root_(root),
       actions_(actions),
       dispatcher_(dispatcher),
       app_(app),
       ui_(ui),
       window_(window),
-      post_(std::move(post)) {
+      post_(std::move(post)),
+      saveDialog_(std::move(saveDialog)) {
     markSaved();
     actions_.addUi("ui.file.new", "File: new project", [this] {
         confirmDiscard("Start a new project?", [this] {
@@ -180,12 +182,8 @@ FileActions::FileActions(ui::Root& root, AppActions& actions, cmd::Dispatcher& d
         if (app_.projectPath().empty()) return (void)actions_.run("ui.file.save_as");
         if (exec("project.save", json::Value::object())) markSaved();
     });
-    actions_.addUi("ui.file.save_as", "File: save as…", [this] {
-        auto* req = new DialogRequest{guardDialog([this](auto paths) { saveAs(paths.front()); })};
-        const std::string start = dialogStart();
-        SDL_ShowSaveFileDialog(onDialog, req, window_, kProjectFilter, 2,
-                               start.empty() ? nullptr : start.c_str());
-    });
+    actions_.addUi("ui.file.save_as", "File: save as…",
+                   [this] { chooseSave([this](auto paths) { saveAs(paths.front()); }); });
     actions_.addUi("ui.file.template.save", "File: save template…", [this] { openSaveTemplate(); });
     actions_.addUi("ui.file.template.load", "File: load template…", [this] { openTemplateList(); });
     actions_.addUi("ui.track.template.save", "Track: save as template…",
@@ -328,6 +326,15 @@ std::string FileActions::dialogStart() const {
     std::error_code ec;
     std::filesystem::create_directories(home, ec);  // a dialog cannot start in a missing folder
     return ec ? std::string() : home.string() + "/";
+}
+
+void FileActions::chooseSave(std::function<void(DialogLifetime::Paths)> done) {
+    const std::string start = dialogStart();
+    auto guarded = guardDialog(std::move(done));
+    if (saveDialog_) return saveDialog_(start, std::move(guarded));
+    auto* req = new DialogRequest{std::move(guarded)};
+    SDL_ShowSaveFileDialog(onDialog, req, window_, kProjectFilter, 2,
+                           start.empty() ? nullptr : start.c_str());
 }
 
 void FileActions::chooseFolder(const std::filesystem::path& start,
@@ -491,6 +498,26 @@ void FileActions::import(const std::vector<std::filesystem::path>& files) {
     if (!imported) showError("import: " + imported.error().message);
 }
 
+struct FileActions::DiscardRequest {
+    std::string what;
+    std::function<void()> then;
+    std::uint64_t version;
+    std::string branch;
+};
+
+bool FileActions::revalidateDiscard(const std::shared_ptr<DiscardRequest>& request) {
+    const bool recording = app_.engine() && app_.engine()->recording();
+    if (recording && !exec("transport.stop", json::Value::object())) return false;
+    if (recording || app_.head().version != request->version ||
+        app_.versions().branch() != request->branch) {
+        // The old decision did not cover these takes/edits. Ask even if an
+        // intervening save made this revision clean, or capture was empty.
+        showDiscard(request->what, request->then);
+        return false;
+    }
+    return true;
+}
+
 void FileActions::confirmDiscard(const std::string& what, std::function<void()> then, bool prompt) {
     // Recording is not a version until Stop commits its takes. Decide whether
     // anything would be lost only after the same command as the Stop button.
@@ -498,6 +525,12 @@ void FileActions::confirmDiscard(const std::string& what, std::function<void()> 
         !exec("transport.stop", json::Value::object()))
         return;
     if (!prompt || !dirty()) return then();
+    showDiscard(what, std::move(then));
+}
+
+void FileActions::showDiscard(const std::string& what, std::function<void()> then) {
+    auto request = std::make_shared<DiscardRequest>(
+        DiscardRequest{what, std::move(then), app_.head().version, app_.versions().branch()});
     auto form = std::make_unique<ui::Node>("file.confirm");
     form->layout.dir = ui::Layout::Dir::Column;
     form->layout.width = ui::SizeRule::fixed(420);
@@ -511,31 +544,30 @@ void FileActions::confirmDiscard(const std::string& what, std::function<void()> 
     row.layout.dir = ui::Layout::Dir::Row;
     row.layout.height = ui::SizeRule::fixed(28);
     row.layout.gap = 8;
-    auto shared = std::make_shared<std::function<void()>>(std::move(then));
     // Each button copies what it needs first: closePopup destroys the button.
-    row.emplace<ui::Button>("file.confirm.save", "Save", [this, shared] {
-        auto keep = shared;
+    row.emplace<ui::Button>("file.confirm.save", "Save", [this, request] {
+        auto keep = request;
         root_.closePopup();
+        if (!revalidateDiscard(keep)) return;
         if (app_.projectPath().empty()) {
             // Save as first; continue after the dialog answers.
-            auto* req = new DialogRequest{guardDialog([this, keep](auto paths) {
+            chooseSave([this, keep](auto paths) {
+                if (!revalidateDiscard(keep)) return;
                 saveAs(paths.front());
-                if (!dirty()) (*keep)();
-            })};
-            const std::string start = dialogStart();
-            SDL_ShowSaveFileDialog(onDialog, req, window_, kProjectFilter, 2,
-                                   start.empty() ? nullptr : start.c_str());
+                if (!dirty() && revalidateDiscard(keep)) keep->then();
+            });
             return;
         }
         if (exec("project.save", json::Value::object())) {
             markSaved();
-            (*keep)();
+            if (revalidateDiscard(keep)) keep->then();
         }
     });
-    row.emplace<ui::Button>("file.confirm.discard", "Don't save", [this, shared] {
-        auto keep = shared;
+    row.emplace<ui::Button>("file.confirm.discard", "Don't save", [this, request] {
+        auto keep = request;
         root_.closePopup();
-        (*keep)();
+        if (!revalidateDiscard(keep)) return;
+        keep->then();
     });
     row.emplace<ui::Button>("file.confirm.cancel", "Cancel", [this] { root_.closePopup(); });
     root_.openPopup(std::move(form), {}, ui::Placement::Center);
