@@ -628,9 +628,9 @@ Engine and hosting:
 
 Session and editing:
 - Project files accept `record.mode: output`, but output capture is not
-  implemented: recording currently captures input. Commands expose only input,
-  midi_overdub and midi_replace. Unsupported file-loaded output mode needs an
-  explicit recording failure or an implementation before it can be relied on.
+  implemented: starting recording with an armed output-mode track fails with
+  `record.output_unsupported` before creating files. Switch that track to input
+  mode to record; existing project files still load.
 - Project files accept FX oversampling 3/5/6/7, which the renderer silently
   treats as 1x; chain loading correctly accepts only 1/2/4/8. File-load rejection
   versus warning/normalization remains to be resolved.

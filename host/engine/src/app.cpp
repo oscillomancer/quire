@@ -1438,6 +1438,11 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
         std::vector<RecordTarget> targets;
         for (const auto& e : s.tracks) {
             const model::Track& tr = *e.value;
+            if (tr.record.armed && tr.record.mode == model::RecordMode::Output)
+                return Error("record.output_unsupported", "output recording is not supported yet",
+                             "/tracks/" + e.id.str() + "/record/mode",
+                             "output recording is not supported yet; use track.set {track: \"" +
+                                 e.id.str() + "\", record_mode: \"input\"}");
             if (!tr.record.armed || !tr.record.input) continue;
             const model::Route* in = s.routes.find(*tr.record.input);
             if (in && in->from.midiDevice) {  // MIDI (ADR-0016): events, no file

@@ -120,7 +120,7 @@ Fields:
 | `mute`, `solo` | bool / enum (`off`, `on`, `in_place`, `defeat`) | mute ramps the fader to −inf before the encode |
 | `phase_invert`, `mono` | bool | the main pair's polarity flip and mono sum, after the inserts and before the fader (ADR-0022), ramped like mute |
 | `parent_send` | `{enabled}` | the encoded main pair into the parent (no level or channel map of its own) |
-| `record` | `{armed, input: route id or null, monitor: off|on|auto, mode: input|output|midi_overdub|midi_replace}` | channels only; `output` is accepted in project files but output capture is not implemented (it currently captures input); commands expose the other three modes |
+| `record` | `{armed, input: route id or null, monitor: off|on|auto, mode: input|output|midi_overdub|midi_replace}` | channels only; `output` still loads from project files, but an armed output-mode track prevents recording with `record.output_unsupported` before any file is created; use input mode instead |
 | `timebase` | enum or `project` | default for its items (channels) |
 | `chain`, `input_chain` | [fx id] | §1.7; `input_chain` on channels only |
 | `lanes` | `{mode: none|fixed|comp, lanes: [ln id], comp: …}` | channels only |

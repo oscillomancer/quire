@@ -514,6 +514,11 @@ first use, and no plug-in code runs early to warm it.
   save before disconnecting to retain MIDI/session edits across process exit.
   Audio WAVs and placement sidecars remain recoverable; MIDI has no recovery
   sidecar. Forced termination cannot execute this shutdown path.
+- **Recording admission**: an armed track with `record.mode: output` fails
+  `transport.record` with `record.output_unsupported`, its `/tracks/<id>/record/mode`
+  path, and a hint to select input mode. This check runs before any recording
+  files are created, including files for other armed tracks. Existing projects
+  with output-mode settings still load; output recording is not supported yet.
 - **Recording**: RT thread writes input frames into large preallocated SPSC
   rings (≥ 10 s); an I/O thread writes them to WAV/RF64 files incrementally,
   rewriting the header every 5 s so a crash leaves a valid file up to the last

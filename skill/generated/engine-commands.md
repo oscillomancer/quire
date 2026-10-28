@@ -11818,7 +11818,7 @@ Result:
 
 Play and record every armed track's input.
 
-Recording requires saved master rate 1 and no active master rate envelope that leaves 1 anywhere, including automation items. Non-unity recording is refused before opening files.
+Recording requires saved master rate 1 and no active master rate envelope that leaves 1 anywhere, including automation items. Non-unity recording and an armed track with unsupported output record mode are refused before opening files.
 
 Kind: `action`. Exposure: `mcp-tool`.
 
@@ -11963,6 +11963,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 - `record.nothing_armed`: no armed track has an input Hint: track.set {armed: true, record_input: [1, 2]}
 - `record.busy`: the audio callback did not return for 2 s (still recording) Hint: stop again, or engine.stop (the files stay recoverable)
 - `record.playrate`: master playrate can leave unity Hint: set rate to 1 and disable non-unity master playrate automation
+- `record.output_unsupported`: output recording is not supported yet Hint: use track.set {record_mode: input} on the reported track
 
 ### Examples
 

@@ -181,6 +181,10 @@ an MCP connection or stopping the socket server. Shutdown finishes capture but
 does not save the project. Unsaved audio files can be recovered; unsaved MIDI
 recordings and other session edits are lost when the process exits.
 
+Output recording is not supported yet. If a loaded project has an armed track
+in output record mode, recording fails before creating any files. Switch that
+track to input mode with `track.set {track: "tr_1", record_mode: "input"}`.
+
 ### Other clients and local models
 
 Any MCP client can use the same server. Give agents without skill support
