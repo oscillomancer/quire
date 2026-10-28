@@ -106,7 +106,13 @@ void UiPersistence::tick(const std::filesystem::path& project, std::uint64_t gen
         written_.clear();
         json::Value state = json::Value::object();
         const auto file = fileFor(project);
-        if (!file.empty() && std::filesystem::exists(file)) {
+        std::error_code ec;
+        const bool exists = !file.empty() && std::filesystem::exists(file, ec);
+        if (ec) {
+            protectedFile_ = true;  // a failed lookup is not an absent sidecar
+            std::fprintf(stderr, "ui: cannot inspect %s: %s\n", file.string().c_str(),
+                         ec.message().c_str());
+        } else if (exists) {
             if (auto bytes = readFile(file)) {
                 const std::string text(bytes->begin(), bytes->end());
                 auto doc = json::parse(text);

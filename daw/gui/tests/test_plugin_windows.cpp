@@ -607,6 +607,23 @@ TEST_CASE("an effect's editor reopens where it was moved and at its size (needs 
             REQUIRE(saved.find(fx->str()));
             CHECK(saved.find(fx->str())->find("x")->asInt() == x2);
             windows.closeAll();
+#if defined(__APPLE__)
+            // A bridge-owned window can close before service() ever observes
+            // its frame. The close reply alone must establish its placement.
+            json::Value isolated = json::Value::object();
+            isolated["fx"] = fx->str();
+            isolated["isolation"] = "dedicated";
+            run("fx.set", std::move(isolated));
+            REQUIRE((*app)->instanceOf(*fx));
+            REQUIRE((*app)->instanceOf(*fx)->isolated());
+            windows.loadLayout(json::Value::object());
+            REQUIRE(windows.open(*fx));
+            windows.close(*fx);
+            const auto closed = windows.saveLayout();
+            REQUIRE(closed.find(fx->str()));
+            CHECK(closed.find(fx->str())->find("x"));
+            CHECK(closed.find(fx->str())->find("y"));
+#endif
         }
     }
     run("engine.stop", json::Value::object());

@@ -98,6 +98,11 @@ sidecar; absent files or sections retain those defaults. Sidecars use
 `supple.ui/1.0`; a file without a `schema` reads as 1.x, and a different
 schema major is treated as absent and its file is left untouched. Save As preserves the current layout and copies it to
 the new sidecar, subject to the same schema protection.
+Filesystem lookup or read errors likewise leave the sidecar untouched and use
+the default layout on project replacement, without throwing from the GUI loop.
+User-setting loaders (keymaps, mouse maps, menus, preferences, MIDI controls and
+plug-in favourites) return file errors for failed lookups; only genuinely absent
+files select defaults.
 
 Any input event (including editor geometry) or command processed on main arms
 one compare/write check about a second later. Continued input coalesces into
@@ -140,7 +145,9 @@ only what the DAW needs, designed for virtualized, data-heavy views.
   Keyboard: focus chain, Tab navigation, shortcuts resolved by the actions
   system (§6) with context sections (arrange, MIDI editor, mixer, text
   field). Text input through SDL3 text-input events (IME composition shown
-  inline). Hiding a dock or panel releases focus and pointer capture within
+  inline). Replacing multiline editor text preserves the caret's line and
+  code-point column (clamped to the new text); diagnostic columns remain byte
+  offsets. Hiding a dock or panel releases focus and pointer capture within
   its subtree (`Root::releaseWithin`), sending `Cancel` to the captured
   control. Continuous edits end as one undo step; uncommitted drag previews
   and pending button clicks are discarded. Focus and capture outside the
@@ -402,7 +409,10 @@ MIDI editor selection clears on external version changes, and a gesture
 cannot commit against a different project generation or version from the
 one where it started. An automation point drag (on an envelope or an
 automation item) is dropped, with an `env.changed` message, when the points
-changed elsewhere between the press and the release.
+changed elsewhere between the press and the release. Automation-item point,
+move and resize drags also compare the press-time amplitude, baseline, position,
+length, source length, loop state, envelope and pool. A change cancels the drag
+with `env.changed`; it does not rebase the draft onto the changed item.
 
 Gestures (P0, `reaper-ux.md` 8–13): drop files onto tracks/timeline, move,
 trim edges, split (S), duplicate, slip (Alt-drag), stretch (with the rate
@@ -525,7 +535,9 @@ Points pasted into an envelope of another kind (volume into pan) keep their
 height on the lane. An automation item's header moves it; dragging its right
 edge stretches its shape with it (its points and the span they repeat over,
 for every item of its pool), and Alt-drag extends or shortens it by
-repeating the shape instead.
+repeating the shape instead. Point edits inside an automation item are refused
+when its amplitude has magnitude at most `1e-9`; the message asks the user to
+restore the amplitude first. Its source points remain unchanged.
 
 Commands: `item.*`, `take.*`, `fade.*` (as named in session-model §7),
 `envelope.*`, `marker.*`, `region.*`, `tempo.*`, `transport.*`.
@@ -574,6 +586,9 @@ index among its parent's children; `views::reorderIndex` in `track_layout.h` com
 with the TCP). A drag shows an insertion bar or a target outline; Escape or a
 drop outside the strips cancels; each is one undo step.
 
+A strip reorder ignores destination strips removed from the model before the
+next mixer sync; stale displayed rows cannot become drop targets.
+
 ### 4.5 FX chain and plugins
 
 The single FX window switches track/take in place and raises when opened
@@ -605,7 +620,9 @@ fresh child-owned window; the other editor paths retain their SDL container.
 Cocoa bridge placement is remembered like any editor's, in
 the UI file's `plugin_windows` section: the bridge reports its window's content
 frame (points, top-left origin of the primary display, the space SDL positions
-use) as it moves or resizes and when it closes; `PluginWindows` stores it per
+use) as it moves or resizes and when it closes. A host-requested close stores
+the final reply before removing the editor entry, including when no service
+pass has observed its frame yet. `PluginWindows` stores it per
 effect, arms a UI-file check when it changes, and on reopen sends it back with
 the open request when `restoredEditorFrame` finds it still on a display (else the
 bridge places the window itself; a size is sent only for a resizable editor). The
@@ -654,7 +671,8 @@ effect's own GUI; a left double click on empty chain space (including the
 "No effects yet" message or below the last row) opens Add plugin, as in the
 mixer. The input section's empty area adds input FX; a take adds take FX.
 Single and right clicks on empty space do not open the browser. Ctrl+click adds a row to the selection (or takes it out)
-and Shift+click selects the rows from the last one clicked; on a row of a
+including the active row; effects moved out of the displayed track/take chains
+leave the selection. Shift+click selects the rows from the last one clicked; on a row of a
 multi-selection, bypass, offline and Remove act on every selected effect in
 one undo step (the editor button and a double click open only that row's
 editor), wet/dry, per-FX latency and CPU, preset
@@ -813,7 +831,16 @@ leave the head version unchanged.
 
 File > New, Open…, Save, Save as… and Import audio… use the system's file
 dialogs (asynchronous; results run on the UI thread), and ask Save / Don't
-save / Cancel before unsaved changes are lost. A save (or project template)
+save / Cancel before unsaved changes are lost. Before New, Open or Quit checks
+for unsaved changes, active recording is stopped through `transport.stop`:
+recorded takes become an undoable version, then the normal prompt runs. If
+Stop fails, the error is shown and the requested action does not continue.
+Hidden/finite runs still stop recording, even though they suppress the prompt.
+Native file/folder results capture the project generation and are dropped with
+a short notice if the project was replaced before delivery. Open rechecks the
+session version and branch after the dialog; changes require a fresh discard
+decision. Recording started meanwhile is stopped before that decision too.
+A save (or project template)
 that comes back with warnings (a plug-in whose state could not be read keeps
 its earlier state) opens a popup listing them. Open and Save as start in the
 project's own file, else in the media folder `~/Documents/<slug>-media`
@@ -1163,6 +1190,11 @@ exposes the selection to agents.
   logs any task over 2 ms with its command name).
 
 ## 10. Testing
+
+`gui-app.tests` stages its agent skill tree, MCP helper and, when stock plugins
+are enabled, eight stock modules covering the named FX/browser fixtures and
+editor-capability checks as explicit build dependencies. Building this test
+target alone supplies those prerequisites.
 
 Unit tests for layout, input routing, damage, theme loading and the peak
 pyramid; golden images for widgets and each view in fixed states (offscreen,

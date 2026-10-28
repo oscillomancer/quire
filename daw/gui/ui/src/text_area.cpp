@@ -101,11 +101,11 @@ std::pair<int, int> TextArea::caretLineColumn() const {
 
 void TextArea::setText(std::string text) {
     if (text == text_) return;
-    const auto [line, column] = caretLineColumn();
+    const int line = lineOf(caret_), column = columnOf(caret_);
     text_ = std::move(text);
     composing_.clear();
     reindex();
-    caret_ = anchor_ = byteAt(line - 1, column - 1);
+    caret_ = anchor_ = byteAt(line, column);
     undo_.clear();
     redo_.clear();
     typingBurst_ = false;

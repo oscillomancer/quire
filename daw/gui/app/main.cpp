@@ -1124,10 +1124,9 @@ int main(int argc, char** argv) {
             if (e.type == SDL_EVENT_QUIT || (e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
                                              SDL_GetWindowFromEvent(&e) == (*window)->sdl())) {
                 // Hidden test windows cannot answer an interactive discard prompt.
-                if (o.offscreen || o.frames > 0 || !fileActions.dirty())
-                    quit = true;
-                else if (!root.popupOpen())
-                    fileActions.confirmDiscard("Quit?", [&] { quit = true; });
+                const bool prompt = !o.offscreen && o.frames <= 0;
+                if (!prompt || !root.popupOpen())
+                    fileActions.confirmDiscard("Quit?", [&] { quit = true; }, prompt);
             } else if (e.type == SDL_EVENT_DROP_FILE && e.drop.data) {
                 dropped.emplace_back(e.drop.data);
                 dropAt = {e.drop.x / (*window)->inputScale(), e.drop.y / (*window)->inputScale()};

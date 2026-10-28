@@ -27,6 +27,8 @@
 #include "learn_dialog.h"
 #include "mixer.h"
 #include "mouse_dialog.h"
+#include "plugin_browser.h"
+#include "preferences.h"
 #include "screensets.h"
 #include "shell.h"
 #include "supple/audio/audio_file.h"
@@ -35,6 +37,7 @@
 #include "supple/base/paths.h"
 #include "supple/engine/app.h"
 #include "supple/gui/png.h"
+#include "supple/host/clap_host.h"
 #include "supple/json/parse.h"
 #include "supple/peaks/peaks.h"
 #include "supple/ui/controls.h"
@@ -48,6 +51,42 @@
 #include "ui_persistence.h"
 
 using namespace supple;
+
+TEST_CASE("GUI app test runtime prerequisites are staged") {
+    const auto skill = host::skillDir();
+    REQUIRE(skill);
+    CHECK(std::filesystem::is_regular_file(*skill / "SKILL.md"));
+    const auto helpers =
+        gui::help::executables(gui::help::ownExecutable(), gui::help::nativePlatform());
+    CHECK(std::filesystem::is_regular_file(helpers.mcp));
+#ifdef SUPPLE_GUI_TEST_STOCK_PLUGINS
+    for (const char* plugin : {"Hickory.clap", "Yarrow.clap", "Ghyll.clap", "Sundew.clap",
+                               "Gorse.clap", "Treeline.clap", "Sorrel.clap", "Teasel.clap"})
+        CHECK(std::filesystem::exists(std::filesystem::path(SUPPLE_CLAP_DIR) / plugin));
+#endif
+}
+
+TEST_CASE("GUI settings report filesystem lookup errors without throwing") {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-gui-lookup-" + std::to_string(testProcessId()));
+    std::filesystem::create_directories(dir);
+    const auto file = dir / (std::string(256, 'x') + ".json");
+    std::error_code ec;
+    (void)std::filesystem::exists(file, ec);
+    REQUIRE(ec);
+    auto check = [&](auto load) {
+        CHECK(load({}));
+        CHECK(load(dir / "missing.json"));
+        CHECK_FALSE(load(file));
+    };
+    CHECK_NOTHROW(check(actions::Keymap::load));
+    CHECK_NOTHROW(check(views::MouseMap::load));
+    CHECK_NOTHROW(check(gui::ChromeLayout::load));
+    CHECK_NOTHROW(check(gui::Preferences::load));
+    CHECK_NOTHROW(check(gui::ControlMap::load));
+    CHECK_NOTHROW(check(gui::Favourites::load));
+    std::filesystem::remove_all(dir);
+}
 
 namespace {
 
@@ -496,6 +535,135 @@ TEST_CASE("the appearance: warm and dark by default, saved and read back, palett
     CHECK_FALSE(warm.trackColor("pink"));
     CHECK_FALSE(warm.trackColor(""));
     std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("file dialogs: completions belong to their project and discard revision") {
+    App a;
+    if (!a.ok) return;
+    std::vector<std::function<void()>> posted;
+    std::string notice;
+    a.actions->onError = [&](const std::string& text) { notice = text; };
+    gui::FileActions files(*a.root, *a.actions, *a.dispatcher, *a.app, a.ui, a.window->sdl(),
+                           [&](auto task) { posted.push_back(std::move(task)); });
+    int delivered = 0;
+    auto result = files.guardDialog([&](auto) { ++delivered; }, true);
+    auto deliver = [&] {
+        result({a.dir / "chosen.json"});
+        REQUIRE(posted.size() == 1);
+        posted.front()();
+        posted.clear();
+    };
+    auto replace = [&] {
+        REQUIRE(a.dispatcher->execute(
+            {"project.new", json::Value::object(), {cmd::Origin::Type::Ui, "gui", {}}}));
+    };
+    SUBCASE("unchanged revision delivers without a second prompt") {
+        deliver();
+        CHECK(delivered == 1);
+        CHECK_FALSE(a.root->popupOpen());
+    }
+    SUBCASE("replacement before the posted completion drops any dialog result") {
+        result = files.guardDialog([&](auto) { ++delivered; });  // Save/import/folder too
+        result({a.dir / "chosen.json"});
+        replace();
+        REQUIRE(posted.size() == 1);
+        posted.front()();
+        CHECK(delivered == 0);
+        CHECK(notice.find("project changed") != std::string::npos);
+    }
+    SUBCASE("Open asks again for edits after the first discard decision") {
+        a.key("Ctrl+T");
+        deliver();
+        CHECK(delivered == 0);
+        a.root->frame(false);
+        REQUIRE(a.root->click("file.confirm.cancel"));
+        CHECK(delivered == 0);
+    }
+    SUBCASE("a fresh discard decision permits Open") {
+        a.key("Ctrl+T");
+        deliver();
+        a.root->frame(false);
+        REQUIRE(a.root->click("file.confirm.discard"));
+        CHECK(delivered == 1);
+    }
+    SUBCASE("replacement during the renewed prompt still drops Open") {
+        a.key("Ctrl+T");
+        deliver();
+        replace();
+        a.root->frame(false);
+        REQUIRE(a.root->click("file.confirm.discard"));
+        CHECK(delivered == 0);
+        CHECK(notice.find("project changed") != std::string::npos);
+    }
+}
+
+TEST_CASE("file actions: recording is finalized before discard decisions") {
+    engine::DummyBackend backend({.mode = engine::DummyBackend::Mode::Manual});
+    App a;
+    if (!a.ok) return;
+    REQUIRE(a.app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2},
+                               {.anticipative = false}));
+    const cmd::Origin origin{cmd::Origin::Type::Ui, "gui", {}};
+    auto exec = [&](const char* command, const char* args = "{}") {
+        auto result = a.dispatcher->execute({command, json::parse(args).value(), origin});
+        REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
+        return *result;
+    };
+    exec("track.add", R"({"name":"Recorded"})");
+    exec("track.set", R"({"track":"tr_1","armed":true,"record_input":[1,2]})");
+    gui::FileActions files(*a.root, *a.actions, *a.dispatcher, *a.app, a.ui, a.window->sdl(),
+                           [](std::function<void()> f) { f(); });
+    files.saveAs(a.dir / "recorded");
+    REQUIRE_FALSE(files.dirty());
+    exec("transport.record");
+    backend.run(2);  // deterministic input, no device or wall-clock deadline
+    REQUIRE(a.app->engine()->recording());
+    REQUIRE_FALSE(files.dirty());
+    bool continued = false;
+    SUBCASE("Stop errors prevent the continuation and are shown") {
+        std::string error;
+        a.actions->onError = [&](const std::string& text) { error = text; };
+        REQUIRE(a.dispatcher->guarded(
+            [](const cmd::Invocation& invocation) -> Status {
+                if (invocation.command == "transport.stop")
+                    return Error("test.stop", "cannot stop the recording");
+                return {};
+            },
+            [&]() -> Result<json::Value> {
+                files.confirmDiscard("Quit?", [&] { continued = true; });
+                return json::Value::object();
+            }));
+        CHECK_FALSE(continued);
+        CHECK_FALSE(a.root->popupOpen());
+        CHECK(error.find("cannot stop the recording") != std::string::npos);
+        CHECK(a.app->engine()->recording());
+        exec("transport.stop");
+    }
+    SUBCASE("Quit commits one undoable take and Cancel retains it") {
+        files.confirmDiscard("Quit?", [&] { continued = true; });
+        CHECK_FALSE(continued);
+        CHECK_FALSE(a.app->engine()->recording());
+        CHECK(files.dirty());
+        CHECK(a.app->head().items.size() == 1);
+        a.root->frame(false);
+        REQUIRE(a.root->click("file.confirm.cancel"));
+        CHECK_FALSE(continued);
+        exec("history.undo");
+        CHECK(a.app->head().items.empty());
+        CHECK_FALSE(files.dirty());
+    }
+    SUBCASE("New stops and prompts before replacing the project") {
+        const auto generation = a.app->projectGeneration();
+        REQUIRE(a.actions->run("ui.file.new"));
+        CHECK_FALSE(a.app->engine()->recording());
+        CHECK(a.app->head().items.size() == 1);
+        CHECK(a.app->projectGeneration() == generation);
+        a.root->frame(false);
+        REQUIRE(a.root->click("file.confirm.discard"));
+        CHECK(a.app->projectGeneration() != generation);
+        CHECK(a.app->head().items.empty());
+    }
+    a.app->stopEngine();  // the borrowed backend outlives the running engine
 }
 
 TEST_CASE(

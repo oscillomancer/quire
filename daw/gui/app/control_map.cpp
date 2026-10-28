@@ -31,7 +31,9 @@ std::filesystem::path ControlMap::defaultFile(std::string_view slug) {
 
 Result<ControlMap> ControlMap::load(const std::filesystem::path& file) {
     ControlMap out;
-    if (file.empty() || !std::filesystem::exists(file)) return out;
+    if (file.empty()) return out;
+    std::error_code ec;
+    if (!std::filesystem::exists(file, ec) && !ec) return out;
     auto text = readTextFile(file);
     if (!text) return std::move(text).error();
     auto doc = json::parse(*text);

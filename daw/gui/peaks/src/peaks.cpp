@@ -137,8 +137,8 @@ Pyramid Pyramid::build(const audio::AudioData& audio) {
         for (std::size_t i = 0; i < level.buckets.size(); ++i)
             level.buckets[i].rms = q15(static_cast<float>(std::sqrt(ms[i])));
     };
-    std::vector<double> prevSquares = meanSquares;
     finish(fine, meanSquares);
+    std::vector<double> prevSquares = std::move(meanSquares);
     p.levels_.push_back(std::move(fine));
 
     // Coarser levels: each bucket combines four of the level below.

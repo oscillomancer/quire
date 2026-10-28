@@ -386,7 +386,6 @@ bool PluginWindows::rescale(Editor& ed) {
 
 void PluginWindows::drop(std::size_t index) {
     Editor& e = editors_[index];
-    remember(e);
     // The instance may already be gone (the engine replaced it): only close the
     // editor of the instance that is still the effect's.
     if (!e.fx || app_.instanceOf(*e.fx) == e.instance) {
@@ -395,6 +394,8 @@ void PluginWindows::drop(std::size_t index) {
         if (!e.window)
             if (const auto last = e.instance->takeClosedEditorFrame()) noteFrame(e, *last);
     }
+    // closeEditor may supply a newer Cocoa frame than the last service pass.
+    remember(e);
     editors_.erase(editors_.begin() + static_cast<std::ptrdiff_t>(index));
     restoreContext();
 }

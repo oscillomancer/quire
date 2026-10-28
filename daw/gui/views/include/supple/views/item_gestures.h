@@ -196,6 +196,8 @@ class ItemGestures {
         // holds them as played, in the loop pass `envOffset` beats in), or the
         // item moved by its header / resized by its right edge (deltaBeats).
         std::optional<model::Id> autoItem;
+        // Retain the immutable press-time item without copying its point buffer.
+        std::shared_ptr<const model::AutomationItem> autoBase;
         double envOffset = 0;
         // Several selected points dragged together: the selection as drafted.
         std::vector<model::EnvPoint> envMoved;
@@ -272,6 +274,7 @@ class ItemGestures {
                   std::optional<AutoHit> autoItem = std::nullopt);
     void envDrag(const ui::PointerEvent& e);
     void commitEnv(const std::string& label);
+    bool checkAutoItem() const;
     double snap(double beat, bool free) const;
     void commit(const ui::PointerEvent& e);
     void changed();

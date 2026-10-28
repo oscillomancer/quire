@@ -1497,3 +1497,106 @@ TEST_CASE("automation points: select, move together, marquee, menu, clipboard, s
     f.click({f.view->lanesRect().x + 5, f.view->lanesRect().bottom() - 5});
     CHECK_FALSE(g.pointEnvelope());
 }
+
+TEST_CASE("automation item point edits require an invertible amplitude") {
+    Fixture f;
+    if (!f.ok) return;
+    auto exec = [&](const char* name, const std::string& text) {
+        auto result = f.dispatcher->execute({name, json::parse(text).value(), kUi});
+        REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
+        return *result;
+    };
+    const auto env = exec("env.add", R"({"track":"tr_1","param":"pan"})")["env"].asString();
+    const auto id =
+        exec(
+            "autoitem.add",
+            "{\"env\":\"" + env +
+                R"(","position":4,"length":8,"points":[{"beat":2,"value":-50},{"beat":6,"value":50}]})")
+            ["id"]
+                .asString();
+    std::string error;
+    f.view->gestures().onError = [&](const Error& e) { error = e.toString(); };
+    for (const char* amplitude :
+         {"0", "0.0000000001", "0.000000001", "-0.0000000001", "-0.000000001"}) {
+        exec("autoitem.set", "{\"item\":\"" + id + "\",\"amplitude\":" + amplitude + "}");
+        f.sync();
+        const auto lane = f.view->trackLayout().indexOfEnv(*model::Id::parse(env));
+        REQUIRE(lane);
+        const auto area = views::Lanes::envArea(f.view->rowRect(*lane));
+        const auto version = f.app->head().version;
+        const auto point = [&](double beat) {
+            return ui::Point{f.view->xAt(f.app->head().timeMap->secondsAt(beat)),
+                             area.y + area.h * 0.5f};
+        };
+        f.click(point(8));  // insertion in the body
+        CHECK(error.find("restore the amplitude") != std::string::npos);
+        error.clear();
+        f.click(point(6), ui::kAlt);  // deletion of an existing played point
+        CHECK(error.find("restore the amplitude") != std::string::npos);
+        CHECK(f.app->head().version == version);
+        const auto* item = f.app->head().autoItems.find(*model::Id::parse(id));
+        REQUIRE(item->points.size() == 2);
+        CHECK(item->points.front().value == -50);
+        CHECK(item->points.back().value == 50);
+    }
+}
+
+TEST_CASE("automation item drags reject concurrent transform and geometry edits") {
+    Fixture f;
+    if (!f.ok) return;
+    auto exec = [&](const char* name, const std::string& text) {
+        auto result = f.dispatcher->execute({name, json::parse(text).value(), kUi});
+        REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
+        return *result;
+    };
+    const auto env = exec("env.add", R"({"track":"tr_1","param":"pan"})")["env"].asString();
+    const auto id =
+        exec(
+            "autoitem.add",
+            "{\"env\":\"" + env +
+                R"(","position":4,"length":8,"points":[{"beat":0,"value":-50},{"beat":8,"value":50}]})")
+            ["id"]
+                .asString();
+    std::string error;
+    f.view->gestures().onError = [&](const Error& e) { error = e.code; };
+    using Drag = views::ItemGestures::Drag;
+    for (const auto drag : {Drag::EnvPoint, Drag::AutoItemMove, Drag::AutoItemLength}) {
+        for (const char* edit : {"\"amplitude\":0.5", "\"baseline\":10", "\"position\":5",
+                                 "\"length\":10", "\"source_length\":4", "\"loop\":false"}) {
+            CAPTURE(static_cast<int>(drag));
+            CAPTURE(std::string(edit));
+            exec(
+                "autoitem.set",
+                "{\"item\":\"" + id +
+                    R"(","position":4,"length":8,"source_length":8,"loop":true,"amplitude":1,"baseline":0,"points":[{"beat":0,"value":-50},{"beat":8,"value":50}]})");
+            f.sync();
+            const auto lane = f.view->trackLayout().indexOfEnv(*model::Id::parse(env));
+            REQUIRE(lane);
+            const auto rect = f.view->rowRect(*lane);
+            const auto area = views::Lanes::envArea(rect);
+            const ui::Point press{f.view->xAt(f.app->head().timeMap->secondsAt(
+                                      drag == Drag::AutoItemLength ? 12 : 8)),
+                                  drag == Drag::AutoItemMove ? rect.y + 3 : area.y + area.h * 0.6f};
+            f.pointer(ui::PointerEvent::Type::Down, press);
+            REQUIRE(f.view->gestures().state().autoItem == model::Id::parse(id));
+            const ui::Point release{press.x + (drag != Drag::EnvPoint ? 16 : 0), press.y};
+            if (drag != Drag::EnvPoint) f.pointer(ui::PointerEvent::Type::Move, release);
+            exec("autoitem.set", "{\"item\":\"" + id + "\"," + edit + "}");
+            f.sync();
+            const auto version = f.app->head().version;
+            error.clear();
+            if (drag != Drag::EnvPoint) {
+                f.pointer(ui::PointerEvent::Type::Move, release);
+                CHECK(f.view->gestures().state().drag == Drag::None);
+            }
+            f.pointer(ui::PointerEvent::Type::Up, release);
+            f.sync();
+            CHECK(error == "env.changed");
+            CHECK(f.app->head().version == version);
+            const auto* item = f.app->head().autoItems.find(*model::Id::parse(id));
+            CHECK(item->points.size() == 2);
+            CHECK(item->points.front().value == -50);
+            CHECK(item->points.back().value == 50);
+        }
+    }
+}

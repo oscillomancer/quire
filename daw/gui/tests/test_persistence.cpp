@@ -9,6 +9,25 @@
 #include "ui_persistence.h"
 using namespace supple;
 
+TEST_CASE("UI sidecar lookup errors leave the file protected without throwing") {
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("supple-ui-lookup-" + std::to_string(testProcessId()));
+    std::filesystem::create_directories(dir);
+    // A sidecar name can exceed the filesystem's component limit even when
+    // the project name fits (250 bytes plus .json is 255; .ui.json is 258).
+    const auto project = dir / (std::string(250, 'x') + ".json");
+    std::error_code ec;
+    (void)std::filesystem::exists(gui::UiPersistence::fileFor(project), ec);
+    REQUIRE(ec);
+    {
+        gui::UiPersistence p;
+        CHECK_NOTHROW(p.tick(project));
+        CHECK_FALSE(p.nextDeadline());
+        CHECK(p.flush(project));  // protected, so no write is attempted
+    }
+    std::filesystem::remove_all(dir);
+}
+
 TEST_CASE("UI state is saved beside the project and restored when it is opened") {
     const auto dir = std::filesystem::temp_directory_path() /
                      ("supple-ui-state-" + std::to_string(testProcessId()));

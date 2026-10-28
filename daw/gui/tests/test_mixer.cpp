@@ -655,6 +655,27 @@ TEST_CASE("mixer: the track menu duplicates the selected strips, and selects the
     CHECK(f.errors.empty());
 }
 
+TEST_CASE("mixer: a strip drag tolerates a deleted destination before refresh") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto a = f.addTrack("channel", "A"), b = f.addTrack("channel", "B"),
+               c = f.addTrack("channel", "C");
+    f.refresh();
+    const auto from = f.empty(c);
+    const auto to = f.empty(b);
+    f.pointer(ui::PointerEvent::Type::Down, from);
+    // A model edit earlier in the input batch can leave the old strip nodes
+    // visible until Mixer::sync. The deleted B is the candidate after the gap.
+    f.exec("track.remove", "{\"track\":\"" + b + "\"}");
+    f.pointer(ui::PointerEvent::Type::Move, {to.x - 8, to.y});
+    CHECK(f.mixer->drag().active);
+    f.pointer(ui::PointerEvent::Type::Up, {to.x - 8, to.y});
+    CHECK(f.children("tr_0") == std::vector<std::string>{a, c});
+    CHECK(f.errors.empty());
+    f.refresh();
+    CHECK_FALSE(f.mixer->drag().active);
+}
+
 TEST_CASE("mixer: dragging a strip's empty part reorders it among its own kind, in the model") {
     Fixture f;
     if (!f.ok) return;

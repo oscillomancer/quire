@@ -156,7 +156,15 @@ if(SUPPLE_BUILD_TESTS)
                              FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>"
                              SUPPLE_GUI_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/golden"
                              SUPPLE_SKILL_DIR="${PROJECT_SOURCE_DIR}/skill")
-  add_dependencies(gui-app.tests clap-host-fixtures)
+  # These cases load stock modules and discover the build-tree agent skill.
+  # Building the test target alone must stage its runtime prerequisites.
+  add_dependencies(gui-app.tests clap-host-fixtures skill-tree ${PRODUCT_SLUG}-mcp)
+  if(SUPPLE_BUILD_PLUGINS)
+    # Named FX/browser fixtures plus eight modules for editor-capability checks.
+    add_dependencies(gui-app.tests plugin-hickory plugin-yarrow plugin-ghyll plugin-sundew
+                     plugin-gorse plugin-treeline plugin-sorrel plugin-teasel)
+    target_compile_definitions(gui-app.tests PRIVATE SUPPLE_GUI_TEST_STOCK_PLUGINS=1)
+  endif()
   target_compile_definitions(gui-app.tests PRIVATE SUPPLE_BRIDGE_PATH="$<TARGET_FILE:${PRODUCT_SLUG}-bridge>")
   add_dependencies(gui-app.tests ${PRODUCT_SLUG}-bridge)
   set_tests_properties(gui-app.tests PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")

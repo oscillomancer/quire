@@ -62,6 +62,15 @@ save moves them into `media/` beside the project file. Quitting, or starting
 another project, without saving deletes that folder after the app has asked.
 A crashed run leaves its folder behind, recordings included.
 
+New, Open and Quit first stop an active recording and add its takes to the
+project, then ask whether to save the changes. Cancel keeps the recorded takes;
+Undo removes that recording. If stopping fails, the error is shown and the
+requested action does not continue.
+
+If another project replaces the current one while a file or folder dialog is
+open, its result is ignored with a notice; open the dialog again. If edits arrive
+while Open is waiting, Quire asks about unsaved changes again before opening.
+
 Renders go to `~/Documents/quire-media` unless you choose another folder in
 the render dialog. The folder you choose is remembered.
 
@@ -74,6 +83,16 @@ the render dialog. The folder you choose is remembered.
 | Windows | `%APPDATA%\quire` | `%APPDATA%\quire` |
 
 Uninstalling Quire leaves these folders and your projects in place.
+
+## Automation
+
+To edit an automation item's points, its amplitude magnitude must be greater than
+0.000000001. If it is zero or too small to invert, the app asks you to restore
+the amplitude first; the source curve is preserved.
+
+If another edit changes an automation item's amplitude, baseline or geometry
+while you drag its points, header or edge, the drag is cancelled with a message.
+Start the drag again using the updated item.
 
 ## Plugins
 
@@ -93,6 +112,9 @@ for other hosts is listed as shadowed and never loaded. `--plugin-path P`
 To add an effect or instrument, use the **fx** button on a track (it opens
 the plugin browser when the track has no effects, the chain otherwise),
 **+ FX** in the mixer, or **Track > FX: add plugin…**.
+In the chain window, Ctrl-click (Cmd-click on macOS) toggles a row in the
+selection, including the active row. Effects moved to another track leave
+that window’s selection.
 
 ## Agents (MCP)
 

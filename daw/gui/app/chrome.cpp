@@ -123,7 +123,9 @@ std::filesystem::path ChromeLayout::defaultFile(std::string_view slug) {
 
 Result<ChromeLayout> ChromeLayout::load(const std::filesystem::path& file) {
     ChromeLayout l = defaults();
-    if (file.empty() || !std::filesystem::exists(file)) return l;
+    if (file.empty()) return l;
+    std::error_code ec;
+    if (!std::filesystem::exists(file, ec) && !ec) return l;
     auto bytes = readFile(file);
     if (!bytes) return std::move(bytes).error();
     auto doc =

@@ -188,7 +188,9 @@ std::filesystem::path Keymap::defaultFile(std::string_view slug) {
 
 Result<Keymap> Keymap::load(const std::filesystem::path& file) {
     Keymap k = defaults();
-    if (file.empty() || !std::filesystem::exists(file)) return k;
+    if (file.empty()) return k;
+    std::error_code ec;
+    if (!std::filesystem::exists(file, ec) && !ec) return k;
     auto bytes = readFile(file);
     if (!bytes) return std::move(bytes).error();
     auto doc =
