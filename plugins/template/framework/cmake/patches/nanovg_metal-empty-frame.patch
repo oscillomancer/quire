@@ -1,0 +1,11 @@
+--- a/src/nanovg_mtl.m
++++ b/src/nanovg_mtl.m
+@@ -1459,7 +1459,7 @@
+   if (_renderEncoder == nil) {
+     return;
+   }
+-  MNVGcall* call = &buffers.calls[0];
++  MNVGcall* call = buffers.calls;  // null until a frame has a call
+   for (int i = buffers.ncalls; i--; ++call) {
+     MNVGblend* blend = &call->blendFunc;
+     [self updateRenderPipelineStatesForBlend:blend

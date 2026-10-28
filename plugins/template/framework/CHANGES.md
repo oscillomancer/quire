@@ -4,6 +4,17 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.31.6
+
+What a product must do: nothing.
+
+- **An empty Metal frame is defined behaviour.** nanovg_metal's
+  `renderFlush` took `&calls[0]` before any call had allocated the array,
+  so a frame with nothing drawn applied an offset to a null pointer, which
+  the asan preset's UBSan stops on (macOS `ui-tests`). A patch
+  (`nanovg_metal-empty-frame`) starts from the array pointer itself; the
+  loop over zero calls never reads it.
+
 ## 1.31.5
 
 What a product must do: nothing.

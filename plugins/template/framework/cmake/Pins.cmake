@@ -54,6 +54,7 @@ set(SUPPLE_PATCHES_clap-wrapper
     clap-wrapper-auv2-bypass-sync.patch clap-wrapper-auv2-rescan-race.patch
     clap-wrapper-auv2-parameter-queue.patch)
 set(SUPPLE_PATCHES_pugl pugl-win-module-class.patch pugl-mac-drop-location.patch pugl-reject-offer.patch)
+set(SUPPLE_PATCHES_nanovg_metal nanovg_metal-empty-frame.patch)
 
 # What a vendored checkout records about itself (tools/vendor.cmake writes
 # it, Dependencies.cmake compares it): the repository and the pin.

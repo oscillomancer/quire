@@ -251,6 +251,9 @@ if (SUPPLE_BUILD_GUI)
     if (SUPPLE_METAL)
         supple_declare(nanovg_metal)
         FetchContent_MakeAvailable(nanovg_metal)
+        # A frame with no draw calls took &calls[0] of a null array, which
+        # UBSan stops on in the asan preset.
+        supple_apply_patches(nanovg_metal)
     endif()
 
     # Objective-C has one flat, process-wide class namespace, and pugl and
