@@ -514,6 +514,20 @@ source branch's transactions (in order) onto `into`'s head:
 3. Before applying, compare the `rev` of every object the invocation touches
    against the fork point: if `into` changed that object since the fork,
    it is a **conflict** of kind `concurrent_edit`.
+   A branch merged before reaches `into` only as replayed steps, so its
+   objects may have other IDs there. Each replayed step records which branch
+   version it replays and the remap reached so far, including objects removed
+   since. A later merge continues after the newest step of the branch that
+   `into` already holds: directly, through merges of merges (whose remaps
+   compose), or because a held replayed step descends from it along first
+   parents (budget squashing may have combined its own step). It starts from
+   that remap. Conflicts compare the branch's state there, its ID fields
+   rewritten through the remap by the object schemas (names and other text
+   stay as written), with `into`'s head; a removal conflicts only if `into`'s
+   copy differs. If the fork reached `into` only through history that is no
+   longer kept and some merge on the way remapped IDs, the merge stops with an
+   `invalid` conflict asking for a new branch. Replayed steps never coalesce
+   with later edits.
 4. On conflicts, the merge stops without changing `into` and returns the list
    `[{step, invocation, kind, object, into_value, branch_value}]`. The human
    (or agent, on request) resolves by editing either branch and merging
@@ -673,7 +687,8 @@ eviction; blob dedup.
   `{version, branch}`, like an edit. Per-lineage ID high-water counters survive
   undo; adding after undo cannot reuse an ID. Independent branches may allocate
   overlapping IDs; merge remaps each creation before replaying the next command,
-  including commands in the same batch.
+  including commands in the same batch, and a later merge of the same branch
+  keeps the earlier merge's remap (§6.4).
 - Project fields are represented in changes/diffs by the singleton `project`.
   Concurrent changes to the same project field conflict only when their new
   values differ; disjoint fields replay normally.

@@ -52,6 +52,11 @@ struct Version {
     std::uint64_t squashedSteps = 0;  // represented by one earlier-history step
     // Fields touched by the combined steps, including edits later reverted.
     std::map<Id, std::set<std::string>> squashedFields;
+    // On the steps a merge replays: the source version this step replays,
+    // and source ID -> target ID for every object the merge (and the earlier
+    // merge it continued) has given a different ID so far.
+    std::uint64_t replayOf = 0;
+    std::map<Id, Id> mergeRemap;
 };
 
 struct Conflict {
@@ -68,7 +73,7 @@ struct MergeOutcome {
     bool upToDate = false;   // nothing to merge
     std::uint64_t head = 0;  // the target's head afterwards (unchanged on conflicts)
     std::vector<Conflict> conflicts;
-    std::map<Id, Id> remap;  // branch ID -> ID on the target
+    std::map<Id, Id> remap;  // branch ID -> ID on the target, including earlier merges'
 };
 
 // Re-executes a transaction's invocations on `base` (the command layer
@@ -141,6 +146,8 @@ class VersionStore {
     };
     Result<Branch*> find(std::string_view name);
     const Branch* lookup(std::string_view name) const;
+    std::set<std::uint64_t> ancestors(std::uint64_t start) const;     // including start
+    bool descends(std::uint64_t from, std::uint64_t ancestor) const;  // by first parents
     std::uint64_t forkPoint(std::uint64_t a, std::uint64_t b) const;
 
     std::map<std::uint64_t, Version> versions_;
