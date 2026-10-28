@@ -374,34 +374,46 @@ int rawField(lua_State* L, int table, const char* name) {
     return lua_rawget(L, table);
 }
 
-std::string stringAt(lua_State* L, int index) {
+std::string stringAt(lua_State* L, int index, Budget& budget, bool& exhausted) {
     std::size_t length = 0;
     const char* text = lua_tolstring(L, index, &length);
+    if (!budget.take(0, length, {})) {
+        exhausted = true;
+        return {};
+    }
     return text ? std::string(text, length) : std::string();
 }
 
 // Runs in protected mode (errorFromLua): reads only raw fields and strings,
 // so no Lua code runs.
-Error errorFromLuaAt(lua_State* L, int index, int depth) {
+Error errorFromLuaAt(lua_State* L, int index, int depth, Budget& budget, bool& exhausted) {
+    if (!budget.take(1, 0, {})) {
+        exhausted = true;
+        return {};
+    }
     if (depth > 64 || !lua_checkstack(L, 4))
         return Error("script.error", "error details exceed the nesting limit", {},
                      "use an acyclic error table with at most 64 levels");
     index = lua_absindex(L, index);
     if (lua_type(L, index) == LUA_TTABLE) {
         Error error;
-        if (rawField(L, index, "code") == LUA_TSTRING) error.code = stringAt(L, -1);
+        if (rawField(L, index, "code") == LUA_TSTRING)
+            error.code = stringAt(L, -1, budget, exhausted);
         lua_pop(L, 1);
-        if (rawField(L, index, "message") == LUA_TSTRING) error.message = stringAt(L, -1);
+        if (rawField(L, index, "message") == LUA_TSTRING)
+            error.message = stringAt(L, -1, budget, exhausted);
         lua_pop(L, 1);
-        if (rawField(L, index, "path") == LUA_TSTRING) error.path = stringAt(L, -1);
+        if (rawField(L, index, "path") == LUA_TSTRING)
+            error.path = stringAt(L, -1, budget, exhausted);
         lua_pop(L, 1);
-        if (rawField(L, index, "hint") == LUA_TSTRING) error.hint = stringAt(L, -1);
+        if (rawField(L, index, "hint") == LUA_TSTRING)
+            error.hint = stringAt(L, -1, budget, exhausted);
         lua_pop(L, 1);
         if (rawField(L, index, "details") == LUA_TTABLE) {
             const std::size_t count = lua_rawlen(L, -1);
-            for (std::size_t i = 1; i <= count; ++i) {
+            for (std::size_t i = 1; i <= count && !exhausted; ++i) {
                 lua_rawgeti(L, -1, static_cast<lua_Integer>(i));
-                error.details.push_back(errorFromLuaAt(L, -1, depth + 1));
+                error.details.push_back(errorFromLuaAt(L, -1, depth + 1, budget, exhausted));
                 lua_pop(L, 1);
             }
         }
@@ -412,7 +424,8 @@ Error errorFromLuaAt(lua_State* L, int index, int depth) {
         }
         return Error("script.error", "the script raised a table error with no code or message");
     }
-    if (lua_type(L, index) == LUA_TSTRING) return Error("script.error", stringAt(L, index));
+    if (lua_type(L, index) == LUA_TSTRING)
+        return Error("script.error", stringAt(L, index, budget, exhausted));
     return Error("script.error", "the script raised a non-string, non-table error value");
 }
 
@@ -425,7 +438,16 @@ Error errorFromLua(lua_State* L, int index) {
     if (!lua_checkstack(L, 1)) return out;
     lua_pushvalue(L, index);
     auto decode = [&out](lua_State* S) -> int {
-        out = errorFromLuaAt(S, 1, 0);
+        // Error details can share tables too: protect host allocations after
+        // the Lua instruction hook has stopped, just as for returned values.
+        Budget budget;
+        bool exhausted = false;
+        out = errorFromLuaAt(S, 1, 0, budget, exhausted);
+        if (exhausted)
+            out = Error("script.value_too_large",
+                        "the error exceeds the conversion limit of 1,000,000 values and "
+                        "16 MiB of text",
+                        {}, "raise a smaller error (a shared detail counts once per use)");
         return 0;
     };
     (void)protectedCall(L, 1, 0, decode);

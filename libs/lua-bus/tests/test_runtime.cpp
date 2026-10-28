@@ -59,6 +59,7 @@ TEST_CASE("script.run runs Lua on the bus and records lua:<name>") {
     CHECK((*out)["script"] == "tidier");
     CHECK((*out)["log"].size() == 1);
     CHECK((*out)["log"].at(0) == "added");
+    CHECK((*out)["log_dropped"] == 0);
     CHECK((*out)["instructions"].isInt());
     CHECK((*out)["instructions"].asInt() > 0);
     CHECK(scene.host.toy.origin == "lua:tidier");

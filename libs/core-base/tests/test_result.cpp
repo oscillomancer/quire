@@ -67,3 +67,14 @@ TEST_CASE("base units and closest match") {
     const std::string_view names[] = {"cutoff", "resonance"};
     CHECK(closestMatch("cuttoff", names) == "cutoff");
 }
+
+TEST_CASE("closest match preserves prefixes and ties when lengths differ") {
+    using supple::closestMatch;
+    const std::string_view names[] = {"cutoff", "cutoff_extended", "cut"};
+    CHECK(closestMatch("cutoff_extende", names) == "cutoff_extended");
+    CHECK(closestMatch("CUTOFF_extended_suffix", names) == "cutoff_extended");
+    CHECK(closestMatch("", names) == "cut");
+    CHECK(closestMatch(std::string(8192, 'z'), names).empty());
+    const std::string_view tied[] = {"abc", "a"};
+    CHECK(closestMatch("ab", tied) == "abc");
+}

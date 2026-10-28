@@ -995,6 +995,7 @@ q = nil
 ---@class Quire.script_run_result
 ---@field result any What the script returned (null if it returned nothing).
 ---@field log string[] What the script printed.
+---@field log_dropped integer Cumulative lines evicted from this script's retained log.
 ---@field script string The name it ran under.
 ---@field instructions integer Lua instructions the run executed.
 

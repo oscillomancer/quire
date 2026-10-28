@@ -27,6 +27,9 @@ constexpr std::string_view kRoles[] = {
     "level",  "gain",    "mix",       "brightness", "resonance", "time",      "rate",
     "depth",  "pitch",   "width",     "pan",        "drive",     "threshold", "ratio",
     "attack", "release", "frequency", "q",          "mode",      "enable",    "seed"};
+constexpr double kExactIntegerLimit = 9007199254740991.0;
+
+bool inIntegerDomain(double v) { return std::isfinite(v) && std::fabs(v) <= kExactIntegerLimit; }
 
 bool validKey(std::string_view key) {
     // [a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*
@@ -150,6 +153,12 @@ bool withinRange(const ParamSpec& p, double v) {
     const double hi = 1e-9 * std::max(1.0, std::fabs(p.max));
     return v >= p.min - lo && v <= p.max + hi;
 }
+
+double midpoint(const ParamSpec& p) {
+    const double sum = p.min + p.max;
+    // Preserve ordinary rounding; halve first only when the sum overflows.
+    return std::isfinite(sum) ? 0.5 * sum : 0.5 * p.min + 0.5 * p.max;
+}
 }  // namespace
 
 Status validateTable(Table table) {
@@ -190,6 +199,9 @@ Status validateTable(Table table) {
                 if (!(p.min < p.max)) fail("range", "min must be below max");
                 if (!isInteger(p.min) || !isInteger(p.max) || !isInteger(p.def))
                     fail("int_range", "int parameters need integral min, max and default");
+                if (!inIntegerDomain(p.min) || !inIntegerDomain(p.max) || !inIntegerDomain(p.def))
+                    fail("int_precision", "int range and default exceed the exact integer domain",
+                         "use min, max and default within -9007199254740991..9007199254740991");
                 if (p.curve.kind != CurveKind::Linear)
                     fail("int_curve", "int parameters are linear");
                 break;
@@ -275,7 +287,7 @@ double toNormalized(const ParamSpec& p, double physical) SUPPLE_RT {
                 n = std::pow((v - p.min) / (p.max - p.min), 1.0 / p.curve.k);
                 break;
             case CurveKind::Bipolar: {
-                const double mid = 0.5 * (p.min + p.max);
+                const double mid = midpoint(p);
                 const double half = 0.5 * (p.max - p.min);
                 const double u = (v - mid) / half;
                 const double t = std::copysign(std::pow(std::fabs(u), 1.0 / p.curve.k), u);
@@ -305,7 +317,7 @@ double fromNormalized(const ParamSpec& p, double normalized) SUPPLE_RT {
             v = p.min + (p.max - p.min) * std::pow(n, p.curve.k);
             break;
         case CurveKind::Bipolar: {
-            const double mid = 0.5 * (p.min + p.max);
+            const double mid = midpoint(p);
             const double half = 0.5 * (p.max - p.min);
             const double t = 2.0 * n - 1.0;
             v = mid + half * std::copysign(std::pow(std::fabs(t), p.curve.k), t);
@@ -722,6 +734,19 @@ Result<std::unique_ptr<DescribedParam>> fromDescription(std::string_view key,
                        : flag == "periodic"    ? kPeriodic
                                                : 0u;
         }
+    if (p.type == Type::Int) {
+        const auto* fallback = e.find("default");
+        const std::pair<std::string_view, double> values[] = {
+            {"min", p.min},
+            {"max", p.max},
+            {"default", fallback && fallback->isNumber() ? fallback->asDouble() : p.min}};
+        for (const auto& [field, value] : values)
+            if (!inIntegerDomain(value))
+                return Error("params.table.int_precision",
+                             "int range and default exceed the exact integer domain",
+                             json::pointerJoin(json::pointerJoin("", out->key), field),
+                             "use min, max and default within -9007199254740991..9007199254740991");
+    }
     if (const json::Value* d = e.find("default")) {
         auto v = fromJson(p, *d, false);
         p.def = v ? *v : p.min;

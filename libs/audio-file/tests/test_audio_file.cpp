@@ -203,6 +203,24 @@ TEST_CASE("clipping at full scale, invalid inputs rejected") {
     CHECK(readAudio(fs::path("/nonexistent/x.wav")).error().code == "audio.open");
 }
 
+TEST_CASE("WAV encoding rejects rates below the header minimum") {
+    AudioData data;
+    data.channels = {{0.f}};
+    for (double rate : {0.25, 0.75, 0.0, -1.0, std::numeric_limits<double>::quiet_NaN(),
+                        std::numeric_limits<double>::infinity()}) {
+        data.sampleRate = rate;
+        auto encoded = encodeWav(data);
+        REQUIRE_FALSE(encoded);
+        CHECK(encoded.error().code == "audio.encode");
+    }
+    data.sampleRate = 1.0;
+    auto encoded = encodeWav(data);
+    REQUIRE(encoded);
+    auto decoded = readAudio(*encoded);
+    REQUIRE(decoded);
+    CHECK(decoded->sampleRate == 1.0);
+}
+
 TEST_CASE("FLAC and MP3 fixtures decode") {
     auto flac = readAudio(kData / "sine440.flac");
     REQUIRE(flac);

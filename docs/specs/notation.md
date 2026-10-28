@@ -123,6 +123,7 @@ checked bar by bar.
 - UTF-8 text, one statement per line. `;` also ends a statement (handy in
   one-line JSON strings). `#` starts a comment to end of line.
 - Tokens are separated by spaces/tabs. Keywords are lowercase.
+- Bar numbers are limited to 100000, including bars introduced by `|`.
 - Pitch names are case-insensitive on input (`c#4` = `C#4`); the canonical
   form is uppercase letter + accidentals.
 

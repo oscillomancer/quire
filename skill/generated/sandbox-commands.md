@@ -3201,6 +3201,10 @@ Kind: `action`. Exposure: `mcp-exec`.
       },
       "description": "What the script printed."
     },
+    "log_dropped": {
+      "type": "integer",
+      "description": "Cumulative lines evicted from this script's retained log."
+    },
     "script": {
       "type": "string",
       "description": "The name it ran under."
@@ -3210,7 +3214,7 @@ Kind: `action`. Exposure: `mcp-exec`.
       "description": "Lua instructions the run executed."
     }
   },
-  "required": ["result", "log", "script", "instructions"],
+  "required": ["result", "log", "log_dropped", "script", "instructions"],
   "additionalProperties": false
 }
 
@@ -3245,6 +3249,7 @@ Result:
     "steps": [1, 2, 3, 4]
   },
   "log": [],
+  "log_dropped": 0,
   "script": "<any>",
   "instructions": "<any>"
 }

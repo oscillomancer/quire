@@ -350,3 +350,15 @@ TEST_CASE("unprepared loudness meter safely ignores processing") {
     meter.process(input, 1);
     CHECK(std::isinf(meter.integrated()));
 }
+
+TEST_CASE("histogram loudness bounds an infinite bin before integer conversion") {
+    LoudnessMeter meter;
+    meter.prepare(48000, Layout::Mono, LoudnessMeter::Mode::Histogram);
+    std::vector<float> samples(19200, 0);
+    samples.back() = std::numeric_limits<float>::infinity();
+    const float* input[] = {samples.data()};
+    meter.process(input, static_cast<int>(samples.size()));
+    CHECK(meter.blockCount() == 1);
+    CHECK(meter.momentary() == std::numeric_limits<double>::infinity());
+    CHECK(meter.truePeak() == std::numeric_limits<double>::infinity());
+}

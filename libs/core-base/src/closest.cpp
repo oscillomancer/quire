@@ -16,6 +16,14 @@ std::string closestMatch(std::string_view input, std::span<const std::string_vie
     std::string out;
     for (auto choice : choices) {
         auto b = lower(choice);
+        const bool prefix = a.starts_with(b) || b.starts_with(a);
+        const auto lengthDifference =
+            a.size() > b.size() ? a.size() - b.size() : b.size() - a.size();
+        // Edits cannot change length by more than one. Skip candidates that
+        // cannot qualify or beat the current match before walking the input.
+        if (lengthDifference >= static_cast<std::size_t>(best) ||
+            (!prefix && lengthDifference > std::max<std::size_t>(2, a.size() / 3)))
+            continue;
         std::vector<int> prev(b.size() + 1), cur(b.size() + 1), prevprev(b.size() + 1);
         for (std::size_t j = 0; j <= b.size(); ++j) prev[j] = static_cast<int>(j);
         for (std::size_t i = 1; i <= a.size(); ++i) {
@@ -30,7 +38,6 @@ std::string closestMatch(std::string_view input, std::span<const std::string_vie
             prev.swap(cur);
         }
         int d = prev[b.size()];
-        bool prefix = a.starts_with(b) || b.starts_with(a);
         if ((d <= std::max(2, static_cast<int>(a.size() / 3)) || prefix) && d < best) {
             best = d;
             out = std::string(choice);

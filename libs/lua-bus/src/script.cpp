@@ -11,6 +11,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstdlib>
+#include <deque>
 #include <string_view>
 
 #include "conversion.h"
@@ -35,9 +36,9 @@ struct ScriptImpl {
     std::uint64_t instructions = 0;
     int messageHandlerRef = LUA_NOREF;
     bool running = false;
-    // Log ring: log holds at most logLimitLines lines, logStart its oldest.
-    std::vector<std::string> log;
-    std::size_t logStart = 0;
+    // Retained lines, oldest first; bounded by both line count and text bytes.
+    std::deque<std::string> log;
+    std::size_t logBytes = 0;
     std::uint64_t logTotal = 0;
     std::string chunkName;
 
@@ -70,6 +71,19 @@ struct ScriptImpl {
 namespace {
 
 constexpr const char* kErrorHint = "the bus reports the call that failed; see registry.describe";
+constexpr std::size_t kLogLineBytes = 64 * 1024;
+constexpr std::size_t kLogBytes = 1024 * 1024;
+
+std::string boundedLogLine(std::string line, std::size_t totalBytes) {
+    if (totalBytes <= kLogLineBytes) return line;
+    std::string marker;
+    for (;;) {
+        const auto retained = kLogLineBytes - marker.size();
+        auto next = " ... [truncated " + std::to_string(totalBytes - retained) + " bytes]";
+        if (next.size() == marker.size()) return line.substr(0, retained) + next;
+        marker = std::move(next);
+    }
+}
 
 // --- memory -------------------------------------------------------------------
 
@@ -310,15 +324,20 @@ int offCall(lua_State* L) {
 int logCall(lua_State* L) {
     ScriptImpl* impl = implOf(L);
     std::string line;
+    std::size_t totalBytes = 0;
+    auto append = [&](std::string_view text) {
+        totalBytes += text.size();
+        line.append(text.substr(0, kLogLineBytes - line.size()));
+    };
     const int count = lua_gettop(L);
     for (int i = 1; i <= count; ++i) {
         std::size_t length = 0;
         const char* text = luaL_tolstring(L, i, &length);
-        if (i > 1) line += '\t';
-        if (text) line.append(text, length);
+        if (i > 1) append("\t");
+        if (text) append({text, length});
         lua_pop(L, 1);
     }
-    impl->appendLog(std::move(line));
+    impl->appendLog(boundedLogLine(std::move(line), totalBytes));
     return 0;
 }
 
@@ -416,9 +435,29 @@ int safeSetMetatable(lua_State* L) {
     return 1;
 }
 
+int textLoad(lua_State* L) {
+    const char* mode = luaL_optstring(L, 3, "t");
+    if (std::string_view(mode).find('b') != std::string_view::npos) {
+        lua_pushnil(L);
+        lua_pushliteral(L, "binary chunks are disabled; use text-only mode 't'");
+        return 2;
+    }
+    const int arguments = lua_gettop(L) >= 4 ? 4 : 3;
+    lua_settop(L, arguments);
+    lua_pushliteral(L, "t");
+    lua_replace(L, 3);
+    lua_pushvalue(L, lua_upvalueindex(1));
+    lua_insert(L, 1);
+    lua_call(L, arguments, LUA_MULTRET);
+    return lua_gettop(L);
+}
+
 void openSandbox(lua_State* L, ScriptImpl& impl) {
     luaL_requiref(L, LUA_GNAME, luaopen_base, 1);
     lua_pop(L, 1);
+    lua_getglobal(L, "load");
+    lua_pushcclosure(L, textLoad, 1);
+    lua_setglobal(L, "load");
     lua_getglobal(L, "setmetatable");
     lua_pushcclosure(L, safeSetMetatable, 1);
     lua_setglobal(L, "setmetatable");
@@ -465,26 +504,19 @@ Error syntaxError(const std::string& chunkName, const std::string& message) {
 // --- ScriptImpl ---------------------------------------------------------------------
 
 void ScriptImpl::appendLog(std::string line) {
+    const auto totalBytes = line.size();
+    line = boundedLogLine(std::move(line), totalBytes);
     const std::size_t limit = std::max<std::size_t>(options.logLimitLines, 1);
-    if (log.size() < limit)
-        log.push_back(std::move(line));
-    else {
-        log[logStart] = std::move(line);
-        logStart = (logStart + 1) % limit;
+    while (!log.empty() && (log.size() >= limit || logBytes + line.size() > kLogBytes)) {
+        logBytes -= log.front().size();
+        log.pop_front();
     }
+    logBytes += line.size();
+    log.push_back(std::move(line));
     ++logTotal;
 }
 
-std::vector<std::string> ScriptImpl::lines() const {
-    std::vector<std::string> out;
-    out.reserve(log.size());
-    if (log.size() < std::max<std::size_t>(options.logLimitLines, 1)) {
-        out = log;
-        return out;
-    }
-    for (std::size_t i = 0; i < log.size(); ++i) out.push_back(log[(logStart + i) % log.size()]);
-    return out;
-}
+std::vector<std::string> ScriptImpl::lines() const { return {log.begin(), log.end()}; }
 
 Status ScriptImpl::ensureState() {
     if (L) return okStatus();
@@ -606,6 +638,7 @@ Result<ScriptResult> Script::run(std::string_view source, double budgetMs,
         result.result = std::move(*converted);
         result.script = impl.options.name;
         result.instructions = impl.instructions;
+        result.logDropped = impl.logTotal - impl.log.size();
         std::vector<std::string> all = impl.lines();
         const auto count =
             static_cast<std::size_t>(std::min<std::uint64_t>(impl.logTotal - logFrom, all.size()));

@@ -40,7 +40,8 @@ struct ScriptOptions {
     // deterministic where the time budget is not; either one spent ends the
     // run with `script.budget`, and pcall cannot resume after it.
     std::uint64_t instructionLimit = 0;
-    // Log lines kept per script (the oldest are dropped).
+    // Log lines kept per script (also capped at 1 MiB of text, oldest dropped).
+    // Each line is at most 64 KiB, including a visible truncation marker.
     std::size_t logLimitLines = 1000;
 };
 
@@ -49,6 +50,7 @@ struct ScriptResult {
     std::vector<std::string> log;    // what this run printed
     std::string script;              // the name the run was recorded under
     std::uint64_t instructions = 0;  // Lua instructions the run executed (exact at hookCount 1)
+    std::uint64_t logDropped = 0;    // cumulative lines evicted from this script's log
 };
 
 struct ScriptImpl;
@@ -87,7 +89,7 @@ class Script {
     void publish(std::string_view topic, const json::Value& payload);
 
     // Every line the script has printed, oldest first (the most recent
-    // logLimitLines of them).
+    // logLimitLines of them, also limited to 1 MiB of text).
     std::vector<std::string> log() const;
     // Subscriptions currently live (tests, diagnostics).
     std::size_t subscriptionCount() const;

@@ -45,6 +45,16 @@ TEST_CASE("notation rejects overflowing positions and invalid compile contexts")
     CHECK_FALSE(compile("lane cc 1 ch 1; 1.1+9223372036854775807t 80"));
 }
 
+TEST_CASE("notation lane ramps near the tick limit reject without overflowing") {
+    const auto pickup = std::to_string(std::numeric_limits<std::int64_t>::max() - 1000);
+    for (const auto shape : {"lin", "slow", "fast"}) {
+        auto result =
+            compile("pickup " + pickup + "t; lane cc 1 ch 1; 1.1 0; 1.2+30t 127 " + shape);
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == "notation.bad_duration");
+    }
+}
+
 TEST_CASE("notation decompiler validates event ranges and every used meter") {
     supple::midi::Sequence sequence;
     sequence.length = 7680;
@@ -92,6 +102,15 @@ TEST_CASE("notation round trips the final supported bar boundary") {
     auto compiled = compile(*written);
     REQUIRE(compiled);
     CHECK(compiled->sequence == sequence);
+}
+
+TEST_CASE("notation inline bars respect the supported bar limit") {
+    REQUIRE(compile("voice a; 99999: r:* | r:*"));
+    for (const auto text : {"voice a; 100000: r:* | r:*", "voice a; 100000: r:* | 100001: r:*"}) {
+        auto result = compile(text);
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == "notation.syntax");
+    }
 }
 
 TEST_CASE("valid notation corpus matches event listings") {

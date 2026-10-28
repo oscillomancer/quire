@@ -396,6 +396,9 @@ namespace {
 double rtConvert(const ParamSpec& p, double v) SUPPLE_RT {
     return fromClap(p, toClap(p, v)) + fromNormalized(p, toNormalized(p, v)) + clampPhysical(p, v);
 }
+double rtNormalizedRoundTrip(const ParamSpec& p, double n) SUPPLE_RT {
+    return toNormalized(p, fromNormalized(p, n));
+}
 }  // namespace
 
 TEST_CASE("conversions are real-time safe" * doctest::description("rt")) {
@@ -403,6 +406,74 @@ TEST_CASE("conversions are real-time safe" * doctest::description("rt")) {
     for (const ParamSpec& p : kT)
         for (int i = 0; i < 100; ++i) sum += rtConvert(p, p.min + (p.max - p.min) * i / 99.0);
     CHECK(std::isfinite(sum));
+}
+
+TEST_CASE("bipolar conversions preserve finite extreme midpoints") {
+    for (const double sign : {-1.0, 1.0}) {
+        ParamSpec p{.id = 0,
+                    .key = "extreme",
+                    .name = "Extreme",
+                    .min = sign < 0 ? -1.6e308 : 1e308,
+                    .max = sign < 0 ? -1e308 : 1.6e308,
+                    .def = sign * 1.3e308,
+                    .curve = {CurveKind::Bipolar, 2.0}};
+        REQUIRE(validateTable(Table(&p, 1)));
+        CHECK(toNormalized(p, p.def) == doctest::Approx(0.5));
+        CHECK(fromNormalized(p, 0.5) / p.def == doctest::Approx(1.0));
+        for (const double n : {0.0, 0.25, 0.5, 0.75, 1.0})
+            CHECK(rtNormalizedRoundTrip(p, n) == doctest::Approx(n));
+    }
+}
+
+TEST_CASE("integer parameters stay in the exact JSON double integer domain") {
+    constexpr double limit = 9007199254740991.0;
+    ParamSpec p{.id = 0,
+                .key = "integer",
+                .name = "Integer",
+                .type = Type::Int,
+                .min = -limit,
+                .max = limit,
+                .def = 0};
+    REQUIRE(validateTable(Table(&p, 1)));
+    for (double value : {-limit, limit}) {
+        p.def = value;
+        REQUIRE(validateTable(Table(&p, 1)));
+        auto decoded = fromJson(p, toJson(p, value));
+        REQUIRE(decoded);
+        CHECK(*decoded == value);
+        auto described = fromDescription(p.key, describeParamJson(p));
+        REQUIRE(described);
+        CHECK((*described)->spec.def == value);
+    }
+    p.def = 0;
+    for (auto member : {&ParamSpec::min, &ParamSpec::max, &ParamSpec::def}) {
+        for (double invalid : {-1e100, -limit - 1, limit + 1, 1e100}) {
+            auto bad = p;
+            bad.*member = invalid;
+            auto result = validateTable(Table(&bad, 1));
+            REQUIRE_FALSE(result);
+            const auto& error = result.error();
+            bool found = error.code == "params.table.int_precision";
+            for (const auto& detail : error.details)
+                if (detail.code == "params.table.int_precision") {
+                    CHECK(detail.path == "/params/0");
+                    CHECK_FALSE(detail.hint.empty());
+                    found = true;
+                }
+            CHECK(found);
+        }
+    }
+    auto oversized =
+        json::parse(R"({"id":0,"name":"Integer","type":"int","min":0,"max":1e100,"default":1e99})");
+    REQUIRE(oversized);
+    auto invalidDescription = fromDescription("integer", *oversized);
+    REQUIRE_FALSE(invalidDescription);
+    CHECK(invalidDescription.error().code == "params.table.int_precision");
+    CHECK(invalidDescription.error().path == "/integer/max");
+    (*oversized)["max"] = limit;
+    invalidDescription = fromDescription("integer", *oversized);
+    REQUIRE_FALSE(invalidDescription);
+    CHECK(invalidDescription.error().path == "/integer/default");
 }
 
 TEST_CASE("review fixes: boundary-local range slack, log range limit, no bare inf") {

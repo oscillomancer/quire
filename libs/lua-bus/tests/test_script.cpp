@@ -93,6 +93,43 @@ TEST_CASE("the sandbox has the five libraries and nothing else") {
     CHECK(out->result["name"] == "");
 }
 
+TEST_CASE("sandbox load accepts only text and preserves chunk names and environments") {
+    Scene scene;
+    auto out = scene.run(R"(
+        local binary = string.dump(function() return 42 end)
+        local f, err = load(binary)
+        assert(f == nil and err:find('binary'))
+        for _, mode in ipairs({'b', 'bt'}) do
+            f, err = load('return 42', 'chunk', mode)
+            assert(f == nil and err:find('binary'))
+            f, err = load(binary, 'chunk', mode)
+            assert(f == nil and err:find('binary'))
+            f, err = load(function() return binary end, 'chunk', mode)
+            assert(f == nil and err:find('binary'))
+        end
+        local once = false
+        f, err = load(function()
+            if once then return nil end
+            once = true
+            return binary
+        end)
+        assert(f == nil and err:find('binary'))
+        assert(assert(load('return 42'))() == 42)
+        assert(assert(load('return value', '=named', 't', {value=17}))() == 17)
+        local pieces = {'return ', 'value'}
+        local i = 0
+        f = assert(load(function() i = i + 1; return pieces[i] end,
+                        '=reader', nil, {value=23}))
+        assert(f() == 23)
+        f, err = load('return +', '=named')
+        assert(f == nil and err:find('named:1:', 1, true))
+        assert(dofile == nil and loadfile == nil and require == nil and package == nil)
+        return true
+    )");
+    REQUIRE_MESSAGE(out, (out ? "" : out.error().toString()));
+    CHECK(out->result.asBool());
+}
+
 TEST_CASE("print and q.log go to the script's log") {
     Scene scene;
     auto out = scene.run("print('hello', 42)\nq.log('bye')\nprint({})");
@@ -103,6 +140,52 @@ TEST_CASE("print and q.log go to the script's log") {
     CHECK(out->log[2].rfind("table: ", 0) == 0);  // Lua uses the platform's %p spelling
     CHECK(out->log[2].size() > std::string("table: ").size());
     CHECK(scene.script.log().size() == 3);  // the log outlives the run
+}
+
+TEST_CASE("script logs bound each line and report truncated bytes") {
+    Scene scene;
+    auto out = scene.run("print(string.rep('x', 65536)); q.log(string.rep('y', 70000), 'end')");
+    REQUIRE(out);
+    REQUIRE(out->log.size() == 2);
+    CHECK(out->log[0] == std::string(65536, 'x'));
+    const auto& line = out->log[1];
+    CHECK(line.size() == 65536);
+    const auto marker = line.find(" ... [truncated ");
+    REQUIRE(marker != std::string::npos);
+    CHECK(line.substr(marker) == " ... [truncated " + std::to_string(70004 - marker) + " bytes]");
+    CHECK(out->logDropped == 0);
+}
+
+TEST_CASE("script logs evict oldest lines by bytes and by line count") {
+    Scene scene;
+    auto out = scene.run(R"(
+        local text = string.rep('x', 65533)
+        for i=1,17 do print(string.format('%02d', i), text) end
+    )");
+    REQUIRE(out);
+    REQUIRE(out->log.size() == 16);
+    CHECK(out->log.front().starts_with("02\t"));
+    CHECK(out->log.back().starts_with("17\t"));
+    std::size_t bytes = 0;
+    for (const auto& line : scene.script.log()) bytes += line.size();
+    CHECK(bytes == 1024 * 1024);
+    CHECK(out->logDropped == 1);
+    out = scene.run("print('next')");
+    REQUIRE(out);
+    REQUIRE(out->log.size() == 1);
+    CHECK(out->log[0] == "next");
+    CHECK(out->logDropped == 2);
+    CHECK(scene.script.log().front().starts_with("03\t"));
+
+    ScriptOptions options;
+    options.logLimitLines = 2;
+    Scene shortLog(options);
+    auto shortOut = shortLog.run("print('a'); print('b'); print('c')");
+    REQUIRE(shortOut);
+    REQUIRE(shortOut->log.size() == 2);
+    CHECK(shortOut->log[0] == "b");
+    CHECK(shortOut->log[1] == "c");
+    CHECK(shortOut->logDropped == 1);
 }
 
 TEST_CASE("the instruction budget stops a runaway script") {
@@ -561,6 +644,21 @@ TEST_CASE("Lua error tables are read raw without executing metamethods") {
         scene.run("error(setmetatable({}, {__index=function() error('metamethod ran') end}))");
     REQUIRE_FALSE(failed);
     CHECK(failed.error().message.find("metamethod ran") == std::string::npos);
+}
+
+TEST_CASE("Lua error decoding bounds repeated detail expansion outside the allocator") {
+    Scene scene;
+    auto failed = scene.run(R"(
+        local e = {code = 'custom', message = string.rep('x', 65536)}
+        for i = 1, 10 do e = {code = 'custom', details = {e, e}} end
+        error(e)
+    )");
+    REQUIRE_FALSE(failed);
+    CHECK(failed.error().code == "script.value_too_large");
+    CHECK(failed.error().details.empty());
+    auto healthy = scene.run("return 42");
+    REQUIRE(healthy);
+    CHECK(healthy->result == 42);
 }
 
 TEST_CASE("named arrays resolve JSON pointer refs and preserve an empty Lua array") {
