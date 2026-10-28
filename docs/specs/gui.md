@@ -1177,6 +1177,10 @@ exposes the selection to agents.
 
 ## 10. Testing
 
+`gui-app.tests` stages its agent skill tree and, when stock plugins are enabled,
+the Hickory, Yarrow and Ghyll modules used by its cases as explicit build
+dependencies. Building this test target alone supplies those prerequisites.
+
 Unit tests for layout, input routing, damage, theme loading and the peak
 pyramid; golden images for widgets and each view in fixed states (offscreen,
 tolerance-aware); scripted UI tests that drive views by node id and assert

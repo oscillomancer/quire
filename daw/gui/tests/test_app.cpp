@@ -37,6 +37,7 @@
 #include "supple/base/paths.h"
 #include "supple/engine/app.h"
 #include "supple/gui/png.h"
+#include "supple/host/clap_host.h"
 #include "supple/json/parse.h"
 #include "supple/peaks/peaks.h"
 #include "supple/ui/controls.h"
@@ -50,6 +51,16 @@
 #include "ui_persistence.h"
 
 using namespace supple;
+
+TEST_CASE("GUI app test runtime prerequisites are staged") {
+    const auto skill = host::skillDir();
+    REQUIRE(skill);
+    CHECK(std::filesystem::is_regular_file(*skill / "SKILL.md"));
+#ifdef SUPPLE_GUI_TEST_STOCK_PLUGINS
+    for (const char* plugin : {"Hickory.clap", "Yarrow.clap", "Ghyll.clap"})
+        CHECK(std::filesystem::exists(std::filesystem::path(SUPPLE_CLAP_DIR) / plugin));
+#endif
+}
 
 TEST_CASE("GUI settings report filesystem lookup errors without throwing") {
     const auto dir = std::filesystem::temp_directory_path() /
