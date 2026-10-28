@@ -443,6 +443,13 @@ on the same rendering setup. Native editor windows are independent.
 `/patch` (the command boundary adds `/args`), for example
 `/args/patch/params/gain`, preserving the plugin's code and corrective hint.
 
+Saved WAV/PNG artifact names use up to 64 bytes of the plugin ID, retaining
+ASCII letters, digits, `.`, `_` and `-`, and replacing other bytes with `_`.
+An altered or truncated ID gains `-` and the 16 lowercase hexadecimal digits
+of its full UTF-8 ID's FNV-1a 64-bit hash. The usual `dsp-test-`/`dsp-preview-`
+prefix and signal/extension suffix remain. The result's `plugin` field keeps
+the full ID; callers use the returned `path` to find the artifact.
+
 `dsp.edit {name, edits: [{old, new}]}` changes part of a library script:
 each edit replaces `old`, which must be in the script exactly once, with
 `new`, in order, each on the script as the edits before left it. All or
