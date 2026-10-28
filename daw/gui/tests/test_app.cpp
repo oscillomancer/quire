@@ -533,6 +533,75 @@ TEST_CASE("the appearance: warm and dark by default, saved and read back, palett
     std::filesystem::remove_all(dir);
 }
 
+TEST_CASE("file actions: recording is finalized before discard decisions") {
+    engine::DummyBackend backend({.mode = engine::DummyBackend::Mode::Manual});
+    App a;
+    if (!a.ok) return;
+    REQUIRE(a.app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2},
+                               {.anticipative = false}));
+    const cmd::Origin origin{cmd::Origin::Type::Ui, "gui", {}};
+    auto exec = [&](const char* command, const char* args = "{}") {
+        auto result = a.dispatcher->execute({command, json::parse(args).value(), origin});
+        REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
+        return *result;
+    };
+    exec("track.add", R"({"name":"Recorded"})");
+    exec("track.set", R"({"track":"tr_1","armed":true,"record_input":[1,2]})");
+    gui::FileActions files(*a.root, *a.actions, *a.dispatcher, *a.app, a.ui, a.window->sdl(),
+                           [](std::function<void()> f) { f(); });
+    files.saveAs(a.dir / "recorded");
+    REQUIRE_FALSE(files.dirty());
+    exec("transport.record");
+    backend.run(2);  // deterministic input, no device or wall-clock deadline
+    REQUIRE(a.app->engine()->recording());
+    REQUIRE_FALSE(files.dirty());
+    bool continued = false;
+    SUBCASE("Stop errors prevent the continuation and are shown") {
+        std::string error;
+        a.actions->onError = [&](const std::string& text) { error = text; };
+        REQUIRE(a.dispatcher->guarded(
+            [](const cmd::Invocation& invocation) -> Status {
+                if (invocation.command == "transport.stop")
+                    return Error("test.stop", "cannot stop the recording");
+                return {};
+            },
+            [&]() -> Result<json::Value> {
+                files.confirmDiscard("Quit?", [&] { continued = true; });
+                return json::Value::object();
+            }));
+        CHECK_FALSE(continued);
+        CHECK_FALSE(a.root->popupOpen());
+        CHECK(error.find("cannot stop the recording") != std::string::npos);
+        CHECK(a.app->engine()->recording());
+        exec("transport.stop");
+    }
+    SUBCASE("Quit commits one undoable take and Cancel retains it") {
+        files.confirmDiscard("Quit?", [&] { continued = true; });
+        CHECK_FALSE(continued);
+        CHECK_FALSE(a.app->engine()->recording());
+        CHECK(files.dirty());
+        CHECK(a.app->head().items.size() == 1);
+        a.root->frame(false);
+        REQUIRE(a.root->click("file.confirm.cancel"));
+        CHECK_FALSE(continued);
+        exec("history.undo");
+        CHECK(a.app->head().items.empty());
+        CHECK_FALSE(files.dirty());
+    }
+    SUBCASE("New stops and prompts before replacing the project") {
+        const auto generation = a.app->projectGeneration();
+        REQUIRE(a.actions->run("ui.file.new"));
+        CHECK_FALSE(a.app->engine()->recording());
+        CHECK(a.app->head().items.size() == 1);
+        CHECK(a.app->projectGeneration() == generation);
+        a.root->frame(false);
+        REQUIRE(a.root->click("file.confirm.discard"));
+        CHECK(a.app->projectGeneration() != generation);
+        CHECK(a.app->head().items.empty());
+    }
+    a.app->stopEngine();  // the borrowed backend outlives the running engine
+}
+
 TEST_CASE(
     "file actions: dirty tracking, save as, import (one undo step), confirm before discarding, "
     "open") {

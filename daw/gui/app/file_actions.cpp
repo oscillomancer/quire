@@ -458,8 +458,13 @@ void FileActions::import(const std::vector<std::filesystem::path>& files) {
     if (!imported) showError("import: " + imported.error().message);
 }
 
-void FileActions::confirmDiscard(const std::string& what, std::function<void()> then) {
-    if (!dirty()) return then();
+void FileActions::confirmDiscard(const std::string& what, std::function<void()> then, bool prompt) {
+    // Recording is not a version until Stop commits its takes. Decide whether
+    // anything would be lost only after the same command as the Stop button.
+    if (app_.engine() && app_.engine()->recording() &&
+        !exec("transport.stop", json::Value::object()))
+        return;
+    if (!prompt || !dirty()) return then();
     auto form = std::make_unique<ui::Node>("file.confirm");
     form->layout.dir = ui::Layout::Dir::Column;
     form->layout.width = ui::SizeRule::fixed(420);

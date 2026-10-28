@@ -826,7 +826,12 @@ leave the head version unchanged.
 
 File > New, Open…, Save, Save as… and Import audio… use the system's file
 dialogs (asynchronous; results run on the UI thread), and ask Save / Don't
-save / Cancel before unsaved changes are lost. A save (or project template)
+save / Cancel before unsaved changes are lost. Before New, Open or Quit checks
+for unsaved changes, active recording is stopped through `transport.stop`:
+recorded takes become an undoable version, then the normal prompt runs. If
+Stop fails, the error is shown and the requested action does not continue.
+Hidden/finite runs still stop recording, even though they suppress the prompt.
+A save (or project template)
 that comes back with warnings (a plug-in whose state could not be read keeps
 its earlier state) opens a popup listing them. Open and Save as start in the
 project's own file, else in the media folder `~/Documents/<slug>-media`

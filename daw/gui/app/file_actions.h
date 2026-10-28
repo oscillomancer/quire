@@ -55,9 +55,10 @@ class FileActions {
                 engine::EngineApp& app, UiState& ui, SDL_Window* window, Post post);
 
     bool dirty() const;  // changes since the last save/open/new
-    // Runs `then` now if nothing would be lost; otherwise asks Save / Don't
-    // save / Cancel first.
-    void confirmDiscard(const std::string& what, std::function<void()> then);
+    // Finalizes recording through Stop, then runs `then` if nothing would be
+    // lost; otherwise asks Save / Don't save / Cancel. A Stop error aborts.
+    // Hidden/finite test runs suppress the prompt, but still finalize recording.
+    void confirmDiscard(const std::string& what, std::function<void()> then, bool prompt = true);
     // For tests: what a dialog would have returned.
     void openPath(const std::filesystem::path& path);
     void saveAs(const std::filesystem::path& path);  // in projectFolderPath()
