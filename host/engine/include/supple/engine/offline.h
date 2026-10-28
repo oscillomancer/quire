@@ -3,13 +3,14 @@
 // Offline rendering of a session version (spec: docs/specs/engine.md §1, §3).
 //
 // The session is compiled into a plan: tracks in topological order (sources
-// before the tracks they feed, the master last), each track summing its
+// before the tracks they feed), each track summing its
 // inputs (routes and children's parent sends, in a fixed order), playing its
 // MIDI items into its FX chain, then its typed Console 9 strip stages and
 // fader/pan/mute (ADR-0019). Routes tap pre-FX, pre-fader or post-fader. Plugin delay
-// compensation aligns every track's inputs by delaying edges, shifts a
-// track's own item events by its input latency, and discards the master's
-// total latency, so the output lines up with the timeline to the sample.
+// compensation schedules sources by their downstream latency, with edge
+// padding at fan-outs (ADR-0051). Items, controls and plugin transport share
+// that schedule. Trimming the output tap's timeline shift aligns the render
+// with the timeline to the sample.
 //
 // Deterministic: fixed summation order, independent of worker scheduling.
 #pragma once
@@ -189,7 +190,9 @@ struct OfflineResult {
     std::vector<std::string> warnings;  // e.g. missing plugins rendered as pass-through
     std::vector<std::string> log;       // plugin log lines
     // The compiled graph, one line per track in processing order:
-    // "tr_3 in=[tr_2 pre_fader d0 g0.707/0.707] lat_in=0 lat_chain=0" (engine.graph).
+    // "tr_3 in=[tr_2 pre_fader d0 g0.707/0.707] lat_in=0 lat_chain=0 timeline_shift=0".
+    // lat_in is the forward arrival diagnostic; timeline_shift schedules the
+    // node input at processing position - timeline_shift (ADR-0051).
     std::vector<std::string> graph;
     // Each plugin's read-only values (meters, readouts) as the render ended,
     // by FX id, for the plugins that have any (instanceReadouts).

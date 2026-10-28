@@ -470,8 +470,9 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
         for (Node& node : p.nodes) node.soloSilenced = false;
     }
     const auto outputLatency =
-        opt.track ? selected->latIn + (opt.tap == model::Tap::PreFx ? 0 : selected->latChain)
-                  : selected->latIn + selected->latChain;
+        opt.track
+            ? selected->timelineShift + (opt.tap == model::Tap::PreFx ? 0 : selected->latChain)
+            : selected->timelineShift + selected->latChain;
     const std::int64_t timelineLength =
         time::samplesAt(opt.endSeconds, p.rate) - time::samplesAt(opt.startSeconds, p.rate);
     const auto tailFrames = time::samplesAt(opt.tailSeconds, p.rate);
@@ -608,6 +609,7 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
                     kTaps[static_cast<int>(e.tap)] + g;
         }
         line += "] lat_in=" + std::to_string(n.latIn) + " lat_chain=" + std::to_string(n.latChain);
+        line += " timeline_shift=" + std::to_string(n.timelineShift);
         r.graph.push_back(std::move(line));
     }
     r.outputLatency = static_cast<std::uint32_t>(outputLatency);

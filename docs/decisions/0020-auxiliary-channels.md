@@ -5,6 +5,11 @@ count, routes to 3/4) and #31 (FX pin maps, detector input on 3/4). Builds on
 ADR-0018 (key routes), ADR-0019 (typed strips with Console 9 summing) and
 ADR-0012/0014 (executors, the live region).
 
+**Amendment, 2026-10-28:**
+[ADR-0051](0051-read-ahead-latency-compensation.md) replaces decision 4's
+forward input-latency solve with backwards read-ahead constraints for every
+auxiliary link. Executor restrictions remain.
+
 ## Context
 
 REAPER users reach a compressor's detector by giving a bus four channels,

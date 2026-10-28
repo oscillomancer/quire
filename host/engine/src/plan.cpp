@@ -19,8 +19,8 @@ namespace supple::engine::detail {
 
 namespace {
 
-std::int64_t latTap(const Node& n, model::Tap tap) {
-    return tap == model::Tap::PreFx ? n.latIn : n.latIn + n.latChain;
+std::int64_t tapOffset(const Node& n, model::Tap tap) {
+    return tap == model::Tap::PreFx ? 0 : n.latChain;
 }
 
 double fadeCurve(model::FadeShape shape, double curve, double t) {
@@ -873,48 +873,80 @@ Status prepare(Plan& p, const Session& s) {
     // Inactive, or waiting for a restart it asked for: no executor runs it (the
     // executors stop it on adopting this plan), so the restart can happen.
     std::erase_if(p.instances, [&](auto* in) { return !in->active() || p.pool->restarting(in); });
-    // Latency compensation, in topological order. A key lines up with its
-    // stage's input: the node's input latency plus the stages before it.
+    // Each input constraint joins a source tap to a destination stage. Aux
+    // channels leave after the chain even when the main pair uses a pre-FX tap.
+    auto inputs = [&](std::size_t target, auto&& visit) {
+        Node& n = p.nodes[target];
+        for (std::size_t ei : n.in) {
+            Edge& e = p.edges[ei];
+            const Node& source = p.nodes[e.from];
+            const auto before = e.stage < 0 ? 0 : n.chain[static_cast<std::size_t>(e.stage)].before;
+            if (!e.auxOnly) visit(e.from, tapOffset(source, e.tap), before, e.delay);
+            if (e.stage < 0)
+                for (auto& link : e.auxLinks)
+                    visit(e.from, tapOffset(source, link.from >= 2 ? model::Tap::PostFader : e.tap),
+                          0, link.delay);
+        }
+    };
+    // Retain the forward arrivals as diagnostics and the main output's startup
+    // anchor. Actual source timing and edge padding come from the reverse solve.
     for (std::size_t i = 0; i < p.nodes.size(); ++i) {
         Node& n = p.nodes[i];
-        auto at = [&](const Edge& ed) {
-            return ed.stage < 0 ? std::int64_t{0}
-                                : n.chain[static_cast<std::size_t>(ed.stage)].before;
-        };
-        // An auxiliary link reads a source's aux channel after its chain, a
-        // main channel at the route's tap (ADR-0020).
-        auto linkLatency = [&](const Edge& ed, const Edge::AuxLink& link) {
-            return latTap(p.nodes[ed.from], link.from >= 2 ? model::Tap::PostFader : ed.tap);
-        };
         n.latIn = 0;
-        for (std::size_t e : n.in) {
-            const Edge& ed = p.edges[e];
-            if (!ed.auxOnly) n.latIn = std::max(n.latIn, latTap(p.nodes[ed.from], ed.tap) - at(ed));
-            if (ed.stage < 0)
-                for (const Edge::AuxLink& link : ed.auxLinks)
-                    n.latIn = std::max(n.latIn, linkLatency(ed, link));
+        inputs(i, [&](std::size_t from, std::int64_t tap, std::int64_t before, auto&) {
+            n.latIn = std::max(n.latIn, p.nodes[from].latIn + tap - before);
+        });
+        n.timelineShift = INT64_MAX;
+    }
+    Node& master = p.nodes[p.mainMaster];
+    p.outputLatency = master.latIn + master.latChain;
+    master.timelineShift = master.latIn;
+    // ADR-0051: S = outputLatency - downstreamLatency. Schedule every source
+    // as late as its downstream paths permit, leaving padding only at splits.
+    // Classification/monitoring never enters this solve. The main master is
+    // the same anchor in offline and realtime plans (also for selected taps).
+    for (std::size_t i = p.nodes.size(); i-- > 0;) {
+        const Node& n = p.nodes[i];
+        if (n.timelineShift == INT64_MAX) continue;
+        inputs(i, [&](std::size_t from, std::int64_t tap, std::int64_t before, auto&) {
+            auto& shift = p.nodes[from].timelineShift;
+            shift = std::min(shift, n.timelineShift + before - tap);
+        });
+    }
+    for (std::size_t i = 0; i < p.nodes.size(); ++i) {
+        Node& n = p.nodes[i];
+        // Nodes not upstream of main follow their already scheduled sources;
+        // an unused master must not constrain the audible monitoring path.
+        if (n.timelineShift == INT64_MAX) {
+            n.timelineShift = n.latIn;
+            inputs(i, [&](std::size_t from, std::int64_t tap, std::int64_t before, auto&) {
+                n.timelineShift =
+                    std::max(n.timelineShift, p.nodes[from].timelineShift + tap - before);
+            });
         }
-        for (std::size_t e : n.in) {
-            Edge& ed = p.edges[e];
-            ed.delay.init(
-                std::max<std::int64_t>(0, n.latIn + at(ed) - latTap(p.nodes[ed.from], ed.tap)));
-            ed.tmp.init(block);
-            if (ed.encode) ed.encoded.init(block);
-            for (Edge::AuxLink& link : ed.auxLinks)
-                link.delay.init(n.latIn - linkLatency(ed, link));
-            ed.auxTmp.assign(ed.auxLinks.empty() ? 0 : block, 0.0f);
+        assert(n.timelineShift >= n.latIn);
+        inputs(i, [&](std::size_t from, std::int64_t tap, std::int64_t before, auto& line) {
+            const auto delay = n.timelineShift + before - p.nodes[from].timelineShift - tap;
+            assert(delay >= 0);
+            line.init(delay);
+        });
+        for (std::size_t ei : n.in) {
+            Edge& e = p.edges[ei];
+            e.tmp.init(block);
+            if (e.encode) e.encoded.init(block);
+            e.auxTmp.assign(e.auxLinks.empty() ? 0 : block, 0.0f);
         }
     }
-    const Node& master = p.nodes[p.mainMaster];
-    p.outputLatency = master.latIn + master.latChain;
     // Automation lines up with the signal where it is applied: the fader sees
     // the track's input and chain latency, a route's gain its target's input.
     for (Node& n : p.nodes) {
-        const std::int64_t at = n.latIn + n.latChain;
+        const std::int64_t at = n.timelineShift + n.latChain;
         for (Automation* a : {&n.autoVolume, &n.autoPan, &n.autoMute}) a->shift(at);
         for (std::size_t ei : n.in) {
             Edge& e = p.edges[ei];
-            auto shift = e.encode ? latTap(p.nodes[e.from], e.tap) : n.latIn;
+            auto shift = e.encode
+                             ? (p.nodes[e.from].timelineShift + tapOffset(p.nodes[e.from], e.tap))
+                             : n.timelineShift;
             if (e.stage >= 0) shift += n.chain[static_cast<std::size_t>(e.stage)].before;
             for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute, &e.stripVolume,
                                   &e.stripPan, &e.stripMute})
@@ -923,14 +955,14 @@ Status prepare(Plan& p, const Session& s) {
         // A plugin's parameters: its input is the track's, delayed by the
         // stages before it.
         for (Stage& st : n.chain) {
-            st.inputLatency = n.latIn + st.before;
+            st.inputLatency = n.timelineShift + st.before;
             for (ParamLane& ln : st.lanes) ln.curve.shift(st.inputLatency);
         }
         // A take chain's output lines up with the track's input; its stages
         // run its latency ahead of it.
         for (TakeChain& tc : n.takeChains) {
-            for (Automation* a : {&tc.volume, &tc.pan, &tc.mute}) a->shift(n.latIn);
-            const std::int64_t ahead = n.latIn - tc.latency;
+            for (Automation* a : {&tc.volume, &tc.pan, &tc.mute}) a->shift(n.timelineShift);
+            const std::int64_t ahead = n.timelineShift - tc.latency;
             for (Stage& st : tc.chain) {
                 st.inputLatency = ahead + st.before;
                 for (ParamLane& ln : st.lanes) ln.curve.shift(st.inputLatency);
@@ -944,8 +976,8 @@ Status prepare(Plan& p, const Session& s) {
             const model::Take& take = *s.takes.find(tc.take);
             const model::ItemSpan span = model::itemSpan(s, it);
             const std::int64_t origin = time::samplesAt(p.startSeconds, p.rate);
-            tc.start = time::samplesAt(span.startSec, p.rate) - origin + n.latIn;
-            tc.end = time::samplesAt(span.endSec, p.rate) - origin + n.latIn;
+            tc.start = time::samplesAt(span.startSec, p.rate) - origin + n.timelineShift;
+            tc.end = time::samplesAt(span.endSec, p.rate) - origin + n.timelineShift;
             const double g =
                 dbToGain(it.gainDb) * dbToGain(take.gainDb) * (take.phaseInvert ? -1.0 : 1.0);
             const auto [pl, pr] =
@@ -959,7 +991,7 @@ Status prepare(Plan& p, const Session& s) {
             tc.fadeInCurve = it.fadeIn.curve;
             tc.fadeOutCurve = it.fadeOut.curve;
         }
-    // Audio items, like events shifted by the track's input latency.
+    // Audio items and events share the track input's solved timeline shift.
     for (Node& n : p.nodes) {
         for (const auto& e : s.items) {
             const model::Item& it = *e.value;
@@ -1002,9 +1034,9 @@ Status prepare(Plan& p, const Session& s) {
             Clip c;
             c.item = e.id;
             c.take = *it.activeTake;
-            c.deviceShift = n.latIn;
+            c.deviceShift = n.timelineShift;
             c.data = *data;
-            c.start = time::samplesAt(span.startSec, p.rate) - origin + n.latIn;
+            c.start = time::samplesAt(span.startSec, p.rate) - origin + n.timelineShift;
             c.length =
                 time::samplesAt(span.endSec, p.rate) - time::samplesAt(span.startSec, p.rate);
             // The item's source offset is in source seconds; the variant is
@@ -1036,7 +1068,7 @@ Status prepare(Plan& p, const Session& s) {
             n.clips.push_back(std::move(c));
         }
     }
-    // Events, shifted by each track's input latency so its own notes stay
+    // Events, shifted by each track's solved timeline shift so its own notes stay
     // aligned with what arrives from upstream.
     for (Node& n : p.nodes) {
         // A MIDI take whose chain holds an instrument plays it there, not on the track's.
@@ -1047,9 +1079,9 @@ Status prepare(Plan& p, const Session& s) {
                 tc.events = trackEvents(s, n.id, p.startSeconds, p.rate,
                                         [&](Id item) { return item == tc.item; });
                 for (auto& ev : tc.events)  // its input runs the chain's latency ahead
-                    ev.sample = p.rateEnabled
-                                    ? ev.sample + n.latIn - tc.latency
-                                    : std::max<std::int64_t>(0, ev.sample + n.latIn - tc.latency);
+                    ev.sample = p.rateEnabled ? ev.sample + n.timelineShift - tc.latency
+                                              : std::max<std::int64_t>(
+                                                    0, ev.sample + n.timelineShift - tc.latency);
             }
             // Reserve every block's events (processing never allocates): notes
             // and their releases for its instrument, parameter automation.
@@ -1068,7 +1100,7 @@ Status prepare(Plan& p, const Session& s) {
             return std::find(ownInstrument.begin(), ownInstrument.end(), item) ==
                    ownInstrument.end();
         });
-        for (auto& ev : n.events) ev.sample += n.latIn;
+        for (auto& ev : n.events) ev.sample += n.timelineShift;
         // Reserve the most events any block-long window holds (events are
         // sorted; after a seek, blocks start anywhere), so processBlock never
         // allocates.
@@ -1197,12 +1229,14 @@ Status prepare(Plan& p, const Session& s) {
             points.push_back({double(pt.sample), pt.value, pt.shape, pt.tension});
         p.rateDeviceMargin = p.outputLatency + p.rateBackendLatency;
         for (const auto& node : p.nodes) {
-            p.rateDeviceMargin = std::max(p.rateDeviceMargin, node.latIn + node.latChain);
-            p.rateSourceBehind = std::max(p.rateSourceBehind, node.latIn);
+            p.rateDeviceMargin = std::max(p.rateDeviceMargin, node.timelineShift + node.latChain);
+            p.rateSourceBehind = std::max(p.rateSourceBehind, node.timelineShift);
             for (const auto& take : node.takeChains) {
-                p.rateDeviceMargin = std::max(p.rateDeviceMargin, take.latency + node.latIn);
-                p.rateSourceAhead = std::max(p.rateSourceAhead, take.latency - node.latIn);
-                p.rateSourceBehind = std::max(p.rateSourceBehind, node.latIn - take.latency);
+                p.rateDeviceMargin =
+                    std::max(p.rateDeviceMargin, take.latency + node.timelineShift);
+                p.rateSourceAhead = std::max(p.rateSourceAhead, take.latency - node.timelineShift);
+                p.rateSourceBehind =
+                    std::max(p.rateSourceBehind, node.timelineShift - take.latency);
             }
             forEachStage(node, [&](const Stage& stage) {
                 p.rateDeviceMargin = std::max(p.rateDeviceMargin, std::abs(stage.inputLatency));
@@ -1757,15 +1791,14 @@ bool runStage(Plan& p, Stage& st, Stereo& sum, std::uint32_t n, const host::Tran
     }
     b.frames = n * os;
     b.events = st.blockEvents;
-    host::Transport mappedTransport = transport;
+    host::Transport mappedTransport = transportAt(p, pos - st.inputLatency, nullptr, st.rateLive);
+    mappedTransport.playing = transport.playing;
+    mappedTransport.loopActive = transport.loopActive;
+    mappedTransport.loopStartSeconds = transport.loopStartSeconds;
+    mappedTransport.loopEndSeconds = transport.loopEndSeconds;
+    mappedTransport.loopStartBeat = transport.loopStartBeat;
+    mappedTransport.loopEndBeat = transport.loopEndBeat;
     if (p.rateEnabled) {
-        mappedTransport = transportAt(p, pos - st.inputLatency, nullptr, st.rateLive);
-        mappedTransport.playing = transport.playing;
-        mappedTransport.loopActive = transport.loopActive;
-        mappedTransport.loopStartSeconds = transport.loopStartSeconds;
-        mappedTransport.loopEndSeconds = transport.loopEndSeconds;
-        mappedTransport.loopStartBeat = transport.loopStartBeat;
-        mappedTransport.loopEndBeat = transport.loopEndBeat;
         const auto control =
             pos - static_cast<std::int64_t>(static_cast<std::uint64_t>(pos - p.rateOrigin) & 63) -
             st.inputLatency;
@@ -1984,14 +2017,15 @@ bool processTake(Plan& p, Node& node, TakeChain& tc, std::int64_t pos, std::uint
     if (p.rateEnabled && transport.playing && tc.clip >= 0)
         playClip(p, node.clips[static_cast<std::size_t>(tc.clip)], tc.buf, pos, n, tc.latency,
                  node.live);
-    const double inputEnd = mappedAt(p, node.live, pos + n + tc.latency, node.latIn);
-    const double outputStart = mappedAt(p, node.live, pos, node.latIn);
+    const double inputEnd = mappedAt(p, node.live, pos + n + tc.latency, node.timelineShift);
+    const double outputStart = mappedAt(p, node.live, pos, node.timelineShift);
     bool intersects = inputEnd > double(tc.start) && outputStart < double(tc.end);
     if (p.rateEnabled) {
         const auto& clock = *p.timelines[node.live ? 1 : 0];
-        const double from = clock.phase(pos - node.latIn);
-        const double to = clock.phase(pos + n + tc.latency - node.latIn);
-        const double start = double(tc.start - node.latIn), end = double(tc.end - node.latIn);
+        const double from = clock.phase(pos - node.timelineShift);
+        const double to = clock.phase(pos + n + tc.latency - node.timelineShift);
+        const double start = double(tc.start - node.timelineShift),
+                     end = double(tc.end - node.timelineShift);
         const double firstEnd = clock.looping() ? std::min(end, clock.loopEnd()) : end;
         intersects = start < firstEnd && to > start && from < firstEnd;
         if (!intersects && clock.looping() && end > clock.loopStart() && start < clock.loopEnd()) {
@@ -2027,18 +2061,18 @@ bool processTake(Plan& p, Node& node, TakeChain& tc, std::int64_t pos, std::uint
             releaseVoices(tc.chain[static_cast<std::size_t>(tc.noteTarget)], true);
             tc.held.fill(0);
         } else
-            releaseVoices(
-                tc.chain[static_cast<std::size_t>(tc.noteTarget)], true, true,
-                static_cast<std::int64_t>(mappedAt(p, node.live, pos, node.latIn - tc.latency)));
+            releaseVoices(tc.chain[static_cast<std::size_t>(tc.noteTarget)], true, true,
+                          static_cast<std::int64_t>(
+                              mappedAt(p, node.live, pos, node.timelineShift - tc.latency)));
         if (p.rateEnabled)
             rateEvents(p, node.live, tc.events, tc.chain[static_cast<std::size_t>(tc.noteTarget)],
-                       pos, n, node.latIn - tc.latency, tc.rateEventFresh);
+                       pos, n, node.timelineShift - tc.latency, tc.rateEventFresh);
         while (!p.rateEnabled && tc.nextEvent < tc.events.size() &&
                double(tc.events[tc.nextEvent].sample) <
-                   mappedAt(p, node.live, pos + n, node.latIn - tc.latency)) {
+                   mappedAt(p, node.live, pos + n, node.timelineShift - tc.latency)) {
             const TimedEvent& te = tc.events[tc.nextEvent++];
             host::Event e = te.event;
-            e.time = eventOffset(p, node.live, pos, n, node.latIn - tc.latency, te.sample);
+            e.time = eventOffset(p, node.live, pos, n, node.timelineShift - tc.latency, te.sample);
             if (target.size() < target.capacity()) target.push_back(e);  // never allocate here
         }
     }
@@ -2055,7 +2089,8 @@ bool processTake(Plan& p, Node& node, TakeChain& tc, std::int64_t pos, std::uint
         const auto* clock = p.rateEnabled ? p.timelines[node.live ? 1 : 0].get() : nullptr;
         const double origin = clock ? clock->origin() : 0;
         const double mapped =
-            clock ? clock->absolutePosition(t - node.latIn) + double(node.latIn) : double(t);
+            clock ? clock->absolutePosition(t - node.timelineShift) + double(node.timelineShift)
+                  : double(t);
         const double start = double(tc.start) + origin, end = double(tc.end) + origin;
         if (mapped < start || mapped >= end) continue;
         const double k = mapped - start;
@@ -2187,18 +2222,18 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
         node.held.fill(0);
     } else if (node.noteTarget >= 0) {
         releaseVoices(node.chain[static_cast<std::size_t>(node.noteTarget)], true, true,
-                      static_cast<std::int64_t>(mappedAt(p, node.live, pos, node.latIn)));
+                      static_cast<std::int64_t>(mappedAt(p, node.live, pos, node.timelineShift)));
     }
     if (p.rateEnabled && transport.playing && node.noteTarget >= 0)
         rateEvents(p, node.live, node.events, node.chain[static_cast<std::size_t>(node.noteTarget)],
-                   pos, n, node.latIn, node.rateEventFresh);
+                   pos, n, node.timelineShift, node.rateEventFresh);
     while (!p.rateEnabled && transport.playing && node.nextEvent < node.events.size() &&
            double(node.events[node.nextEvent].sample) <
-               mappedAt(p, node.live, pos + n, node.latIn)) {
+               mappedAt(p, node.live, pos + n, node.timelineShift)) {
         const TimedEvent& te = node.events[node.nextEvent++];
         if (node.noteTarget < 0) continue;
         host::Event e = te.event;
-        e.time = eventOffset(p, node.live, pos, n, node.latIn, te.sample);
+        e.time = eventOffset(p, node.live, pos, n, node.timelineShift, te.sample);
         auto& target = node.chain[static_cast<std::size_t>(node.noteTarget)].blockEvents;
         if (target.size() < target.capacity()) target.push_back(e);  // never allocate here
     }

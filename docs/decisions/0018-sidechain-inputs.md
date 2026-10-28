@@ -4,6 +4,11 @@
 tracks, sends, sidechains, busses, and master". Builds on ADR-0012/0014
 (executors, the live region), ADR-0013 (the bridge), ADR-0017 (VST3).
 
+**Amendment, 2026-10-28:**
+[ADR-0051](0051-read-ahead-latency-compensation.md) replaces decision 3's
+forward arrival-time solve with backwards read-ahead constraints, retaining
+alignment at the keyed stage's input.
+
 ## Context
 
 Compressors, gates and vocoders take a second audio input (the key). CLAP

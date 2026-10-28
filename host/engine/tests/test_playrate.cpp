@@ -1161,7 +1161,10 @@ TEST_CASE("master playrate edits: inserting multi-second latent FX preserves pla
                     CHECK(engine.outputLatency() == (takeFx ? 0 : latency));
                     CHECK(engine.processErrors() == 0);
                     CHECK(engine.warnings().empty());
-                    if (seconds == 3 && !(takeFx && preserve))
+                    // Read-ahead moves the sibling source when track FX latency
+                    // grows too. Stretch phase needs the existing fresh-history
+                    // recovery for either kind of compensated source move.
+                    if (seconds == 3 && !preserve)
                         CHECK(engine.meterClock().epoch == epoch);
                     else
                         CHECK(engine.meterClock().epoch == epoch + 1);
