@@ -663,21 +663,6 @@ Session and editing:
   squashed steps keep large invocation arguments.
 
 GUI:
-- Mixer strip reorders ignore tracks removed before the next view sync, avoiding
-  a stale-destination dereference. Linux regression coverage passes; native
-  macOS/Windows validation remains pending.
-- Multiline text refresh preserves the caret by Unicode code-point column;
-  diagnostic positions still use bytes. The portable regression passes on Linux;
-  macOS/Windows validation remains pending.
-- Cocoa bridged editor placement is saved after the final close reply. Its
-  immediate-close regression requires the macOS display opt-in and is pending.
-- FX multi-selection deselects the active row on Ctrl-click and drops effects
-  moved out of the displayed chains. Offline Linux regression coverage passes;
-  native macOS/Windows validation remains pending.
-- Settings loaders return file errors for failed filesystem lookups; sidecar
-  lookup failures preserve the file and fall back to default layout without
-  throwing. Linux regression tests cover overlong filenames; native macOS and
-  Windows validation of this error path remains pending.
 - The opt-in native popup-focus regression passes on Hyprland/XWayland,
   including typing and Escape after a forwarded floating-window shortcut.
   Opening a popup in an already-key owner skips raising it, preserving Cocoa
