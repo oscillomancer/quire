@@ -532,7 +532,9 @@ Points pasted into an envelope of another kind (volume into pan) keep their
 height on the lane. An automation item's header moves it; dragging its right
 edge stretches its shape with it (its points and the span they repeat over,
 for every item of its pool), and Alt-drag extends or shortens it by
-repeating the shape instead.
+repeating the shape instead. Point edits inside an automation item are refused
+when its amplitude has magnitude at most `1e-9`; the message asks the user to
+restore the amplitude first. Its source points remain unchanged.
 
 Commands: `item.*`, `take.*`, `fade.*` (as named in session-model §7),
 `envelope.*`, `marker.*`, `region.*`, `tempo.*`, `transport.*`.

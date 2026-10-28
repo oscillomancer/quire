@@ -1499,6 +1499,14 @@ bool ItemGestures::envPress(model::Id envId, const ui::PointerEvent& e,
     // Inside an automation item the press edits the item's points (as played,
     // in the loop pass under the pointer); elsewhere the envelope's own.
     if (const model::AutomationItem* ai = autoItem ? s.autoItems.find(autoItem->item) : nullptr) {
+        if (std::abs(ai->amplitude) <= 1e-9) {
+            state_ = State{};
+            if (onError)
+                onError(Error("autoitem.amplitude", "restore the amplitude before editing points",
+                              {},
+                              "set the automation item's amplitude magnitude above 0.000000001"));
+            return true;
+        }
         state_.autoItem = autoItem->item;
         state_.envOffset = autoItem->passStart;
         frame->offsetBeats += autoItem->passStart;

@@ -84,6 +84,12 @@ the render dialog. The folder you choose is remembered.
 
 Uninstalling Quire leaves these folders and your projects in place.
 
+## Automation
+
+To edit an automation item's points, its amplitude magnitude must be greater than
+0.000000001. If it is zero or too small to invert, the app asks you to restore
+the amplitude first; the source curve is preserved.
+
 ## Plugins
 
 Quire hosts CLAP and VST3 plugins. It looks for them in this order:

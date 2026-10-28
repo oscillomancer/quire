@@ -1497,3 +1497,46 @@ TEST_CASE("automation points: select, move together, marquee, menu, clipboard, s
     f.click({f.view->lanesRect().x + 5, f.view->lanesRect().bottom() - 5});
     CHECK_FALSE(g.pointEnvelope());
 }
+
+TEST_CASE("automation item point edits require an invertible amplitude") {
+    Fixture f;
+    if (!f.ok) return;
+    auto exec = [&](const char* name, const std::string& text) {
+        auto result = f.dispatcher->execute({name, json::parse(text).value(), kUi});
+        REQUIRE_MESSAGE(result, (result ? "" : result.error().toString()));
+        return *result;
+    };
+    const auto env = exec("env.add", R"({"track":"tr_1","param":"pan"})")["env"].asString();
+    const auto id =
+        exec(
+            "autoitem.add",
+            "{\"env\":\"" + env +
+                R"(","position":4,"length":8,"points":[{"beat":2,"value":-50},{"beat":6,"value":50}]})")
+            ["id"]
+                .asString();
+    std::string error;
+    f.view->gestures().onError = [&](const Error& e) { error = e.toString(); };
+    for (const char* amplitude :
+         {"0", "0.0000000001", "0.000000001", "-0.0000000001", "-0.000000001"}) {
+        exec("autoitem.set", "{\"item\":\"" + id + "\",\"amplitude\":" + amplitude + "}");
+        f.sync();
+        const auto lane = f.view->trackLayout().indexOfEnv(*model::Id::parse(env));
+        REQUIRE(lane);
+        const auto area = views::Lanes::envArea(f.view->rowRect(*lane));
+        const auto version = f.app->head().version;
+        const auto point = [&](double beat) {
+            return ui::Point{f.view->xAt(f.app->head().timeMap->secondsAt(beat)),
+                             area.y + area.h * 0.5f};
+        };
+        f.click(point(8));  // insertion in the body
+        CHECK(error.find("restore the amplitude") != std::string::npos);
+        error.clear();
+        f.click(point(6), ui::kAlt);  // deletion of an existing played point
+        CHECK(error.find("restore the amplitude") != std::string::npos);
+        CHECK(f.app->head().version == version);
+        const auto* item = f.app->head().autoItems.find(*model::Id::parse(id));
+        REQUIRE(item->points.size() == 2);
+        CHECK(item->points.front().value == -50);
+        CHECK(item->points.back().value == 50);
+    }
+}
