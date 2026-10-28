@@ -48,6 +48,31 @@ double energy(const std::vector<float>& v, std::size_t from, std::size_t to) {
 
 }  // namespace
 
+TEST_CASE("renderer refuses a VST3 layout that becomes mono during activation") {
+    host::setBridgeExecutable(BRIDGE_PATH);
+    const std::filesystem::path module = FIXTURE_VST3_PATH;
+    auto found = host::scan(std::span(&module, 1));
+    REQUIRE(found);
+    const auto plugin = std::find_if(found->begin(), found->end(), [](const auto& info) {
+        return info.name == "Test VST3 Mono Adapter";
+    });
+    REQUIRE(plugin != found->end());
+    for (bool isolated : {false, true}) {
+        auto made = host::Instance::create(*plugin, {}, isolated);
+        REQUIRE(made);
+        REQUIRE((*made)->audioOutputChannels() == 2);
+        host::Instance* chain[] = {made->get()};
+        RenderSettings settings;
+        settings.tailLimitSeconds = 0;
+        RenderRequest request;
+        request.lengthSamples = 64;
+        auto result = render(chain, settings, request);
+        REQUIRE_FALSE(result);
+        CHECK(result.error().code == "render.layout");
+        CHECK_FALSE((*made)->processing());
+    }
+}
+
 TEST_CASE("instrument render: notes at exact samples, silent tail detection" *
           doctest::description("rt")) {
     auto sine = make("com.suppleaudio.test.sine");

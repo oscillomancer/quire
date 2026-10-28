@@ -10,6 +10,8 @@
 #include <limits>
 #include <thread>
 #include <vector>
+#include "../src/platform.h"
+#include "../src/unicode.h"
 #include "supple/clap/semantic_params.h"
 #include "supple/host/clap_host.h"
 #include "supple/json/json.h"
@@ -59,6 +61,24 @@ double gainClap(double db) {
 
 }  // namespace
 
+TEST_CASE("host Unicode conversion bounds and validates plugin text") {
+    const char16_t text[] = {u'A', 0x00e9, 0xd83d, 0xde00, u'Z', 0};
+    const std::string utf8 = "A\xc3\xa9\xf0\x9f\x98\x80Z";
+    CHECK(unicode::toUtf8(text) == utf8);
+    std::array<char16_t, 6> decoded{};
+    REQUIRE(unicode::toUtf16(utf8, decoded));
+    CHECK(std::equal(decoded.begin(), decoded.end(), std::begin(text)));
+    const char16_t malformed[] = {0xd800, u'x', 0xdc00, 0xd800};
+    CHECK(unicode::toUtf8(malformed) == "\xef\xbf\xbdx\xef\xbf\xbd\xef\xbf\xbd");
+    for (const std::string bad : {"\x80", "\xc0\x80", "\xe0\x80\x80", "\xed\xa0\x80",
+                                  "\xf4\x90\x80\x80", "\xe2\x82", "\xc2x"})
+        CHECK_FALSE(unicode::toUtf16(bad, decoded));
+    CHECK_FALSE(unicode::toUtf16(utf8, std::span(decoded).first(5)));
+    CHECK(unicode::toUtf16("", decoded));
+    CHECK(decoded[0] == 0);
+    CHECK_FALSE(unicode::toUtf16("", {}));
+}
+
 TEST_CASE("VST3 fixture scans, processes, and restores state") {
     auto found = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
     REQUIRE(found);
@@ -73,6 +93,7 @@ TEST_CASE("VST3 fixture scans, processes, and restores state") {
     REQUIRE(made);
     auto& instance = **made;
     REQUIRE(instance.params().size() == 1);
+    CHECK((instance.params()[0].flags & CLAP_PARAM_IS_AUTOMATABLE) != 0);
     REQUIRE(instance.setParam(1, 0.25));
     CHECK(*instance.paramValue(1) == doctest::Approx(0.25));
     auto text = instance.paramText(1, 0.25);
@@ -80,6 +101,9 @@ TEST_CASE("VST3 fixture scans, processes, and restores state") {
     auto parsed = instance.paramFromText(1, *text);
     REQUIRE(parsed);
     CHECK(*parsed == doctest::Approx(0.25));
+    auto invalid = instance.paramFromText(1, "\xed\xa0\x80");
+    REQUIRE_FALSE(invalid);
+    CHECK(invalid.error().code == "host.param_text");
     auto state = instance.saveState();
     REQUIRE_MESSAGE(state, (state ? "" : state.error().message));
     REQUIRE(instance.setParam(1, 0.75));
@@ -597,3 +621,71 @@ TEST_CASE("a VST3 state its controller rejects leaves the plug-in as it was") {
     REQUIRE(after);
     CHECK(*after == doctest::Approx(*before));
 }
+
+TEST_CASE("CLAP parameter strings stay within their fixed buffers") {
+    auto made = Instance::create(find("com.suppleaudio.test.edge"), {});
+    REQUIRE(made);
+    const std::array<std::uint8_t, 4> config{51, 0, 0, 0};
+    REQUIRE((*made)->loadState(config));
+    const auto params = (*made)->params();
+    REQUIRE(params.size() == 2);
+    CHECK(params[0].name == std::string(CLAP_NAME_SIZE, 'N'));
+    CHECK(params[0].module == std::string(CLAP_PATH_SIZE, 'M'));
+    const auto text = (*made)->paramText(7, 0);
+    REQUIRE(text);
+    CHECK(*text == std::string(256, 'V'));
+}
+
+TEST_CASE("VST3 parameter and bus strings stay within their fixed buffers") {
+    auto module = platform::openLibrary(FIXTURE_VST3_MODULE);
+    REQUIRE(module);
+    struct ModuleGuard {
+        void* module;
+        void (*mode)(bool);
+        ~ModuleGuard() {
+            if (mode) mode(false);
+            platform::closeLibrary(module);
+        }
+    } guard{*module,
+            reinterpret_cast<void (*)(bool)>(platform::symbol(*module, "fixtureUnterminatedText"))};
+    REQUIRE(guard.mode);
+    guard.mode(true);
+    auto list = scan(std::span<const std::filesystem::path>(&kVst3Fixture, 1));
+    REQUIRE(list);
+    const auto info = std::find_if(list->begin(), list->end(),
+                                   [](const auto& p) { return p.name == "Test VST3 Multi-Out"; });
+    REQUIRE(info != list->end());
+    auto made = Instance::create(*info, {});
+    REQUIRE(made);
+    const auto params = (*made)->params();
+    REQUIRE(params.size() == 1);
+    CHECK(params[0].name == std::string(127, 'N'));
+    const auto ports = (*made)->auxOutputPorts();
+    REQUIRE(ports.size() == 1);
+    CHECK(ports[0].name == std::string(127, 'B'));
+    const auto text = (*made)->paramText(1, 0);
+    REQUIRE(text);
+    CHECK(*text == std::string(127, 'V'));
+}
+
+#if !defined(_WIN32)
+TEST_CASE("CLAP descriptor readiness is ignored after unregistration") {
+    auto made = Instance::create(find("com.suppleaudio.test.edge"), {});
+    REQUIRE(made);
+    const auto* plugin = (*made)->raw();
+    const auto* host =
+        static_cast<const clap_host_t*>(plugin->get_extension(plugin, "supple.test.edge-host"));
+    REQUIRE(host);
+    const auto* fds = static_cast<const clap_host_posix_fd_support_t*>(
+        host->get_extension(host, CLAP_EXT_POSIX_FD_SUPPORT));
+    REQUIRE(fds);
+    // Simulate a readiness snapshot invalidated by an earlier callback in
+    // the same batch. No actual descriptor is polled by this unit test.
+    REQUIRE(fds->register_fd(host, 42, CLAP_POSIX_FD_READ));
+    (*made)->onFd(42, CLAP_POSIX_FD_READ);
+    CHECK(*(*made)->paramValue(10) == 1);
+    REQUIRE(fds->unregister_fd(host, 42));
+    (*made)->onFd(42, CLAP_POSIX_FD_READ);
+    CHECK(*(*made)->paramValue(10) == 1);
+}
+#endif

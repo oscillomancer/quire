@@ -8,6 +8,10 @@
 #if !defined(_WIN32)
 #include <unistd.h>
 #endif
+#if defined(__linux__)
+#include <fcntl.h>
+#include <cerrno>
+#endif
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -48,6 +52,33 @@ void awaitWake(MainThreadWake& wake) {
     REQUIRE(wake.drain());
 }
 }  // namespace
+#if defined(__linux__)
+TEST_CASE("Linux bridge memory cannot shrink or grow but remains writable") {
+    struct Memory {
+        bridge::Resource fd = bridge::createMemory(4096);
+        void* map = nullptr;
+        ~Memory() {
+            bridge::unmapMemory(map, 4096);
+            bridge::closeResource(fd);
+        }
+    } memory;
+    REQUIRE(memory.fd != bridge::noResource);
+    const int seals = ::fcntl(memory.fd, F_GET_SEALS);
+    REQUIRE(seals >= 0);
+    CHECK((seals & (F_SEAL_SHRINK | F_SEAL_GROW)) == (F_SEAL_SHRINK | F_SEAL_GROW));
+    CHECK(::ftruncate(memory.fd, 0) == -1);
+    CHECK(errno == EPERM);
+    CHECK(::ftruncate(memory.fd, 8192) == -1);
+    CHECK(errno == EPERM);
+    memory.map = bridge::mapMemory(memory.fd, 4096);
+    REQUIRE(memory.map);
+    auto* bytes = static_cast<unsigned char*>(memory.map);
+    bytes[0] = 17;
+    bytes[4095] = 23;
+    CHECK(bytes[0] == 17);
+    CHECK(bytes[4095] == 23);
+}
+#endif
 TEST_CASE("bridge lookup resolves the platform executable suffix") {
     for (const std::filesystem::path& executable :
          {std::filesystem::path(BRIDGE_PATH), std::filesystem::path(SCANNER_PATH)}) {
@@ -57,6 +88,17 @@ TEST_CASE("bridge lookup resolves the platform executable suffix") {
     }
     setBridgeExecutable(BRIDGE_PATH);
 }
+#if defined(_WIN32)
+TEST_CASE("Windows bridge initializes DPI awareness before creating plugins") {
+    setBridgeExecutable(BRIDGE_PATH);
+    const auto info = nativePlugin(FIXTURE_CLAP_PATH, "com.suppleaudio.test.edge");
+    auto made = Instance::create(info, {}, true);
+    REQUIRE(made);
+    const auto aware = (*made)->paramValue(13);
+    REQUIRE(aware);
+    CHECK(*aware == 1);
+}
+#endif
 #if !defined(_WIN32)
 TEST_CASE("native bridge launch uses the helper private process group") {
     setBridgeExecutable(BRIDGE_PATH);
@@ -234,6 +276,24 @@ TEST_CASE("native idle process death wakes every subscribed parent") {
     CHECK((*second)->failed());
 }
 #if defined(_WIN32)
+TEST_CASE("Windows bridge reads enforce deadlines even with buffered input") {
+    bridge::Resource pair[2];
+    REQUIRE(bridge::controlPair(pair));
+    bridge::NativeControl parent(reinterpret_cast<HANDLE>(pair[0]));
+    bridge::NativeControl child(reinterpret_cast<HANDLE>(pair[1]), true);
+    const std::array<char, 2> sent{'a', 'b'};
+    REQUIRE(child.write(sent.data(), sent.size(), bridge::deadlineAfter(1000)));
+    char received = 0;
+    REQUIRE(parent.read(&received, 1, bridge::deadlineAfter(1000)));
+    CHECK(received == 'a');
+    // The second byte is already buffered: expiry must not depend on whether
+    // the next native read would block. No elapsed-time assertion is needed.
+    CHECK_FALSE(parent.read(&received, 1, bridge::Deadline::min()));
+    CHECK(received == 'a');
+    REQUIRE(parent.read(&received, 1, bridge::deadlineAfter(1000)));
+    CHECK(received == 'b');
+}
+
 TEST_CASE("a numeric handle in an untrusted bridge reply never closes a parent handle") {
     bridge::Resource pair[2];
     REQUIRE(bridge::controlPair(pair));

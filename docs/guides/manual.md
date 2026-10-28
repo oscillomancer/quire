@@ -121,6 +121,12 @@ that window’s selection.
 
 ## Agents (MCP)
 
+Saved `dsp.test` audio and `dsp.preview` pictures use readable, shortened
+filenames with a hash when a plugin ID needs escaping or truncation, or ends
+in the reserved `-` plus 16 hexadecimal digits suffix. Stock plugin filenames
+stay the same. Use the returned `path` to open them; the `plugin` field retains
+the full plugin ID.
+
 Quire is built to be driven by an AI agent as well as by hand. `quire-mcp`
 serves the running app's commands as MCP tools over stdio. What an agent
 does lands in the same undo history as your own edits. The bundled skill

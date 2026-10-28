@@ -17,6 +17,7 @@
 #include <sstream>
 #include <string>
 
+#include "../../dsp-commands/artifact_name.h"
 #include "../../dsp-commands/dsp_export_platform.h"
 #include "supple/audio/audio_file.h"
 #include "supple/base/files.h"
@@ -82,6 +83,42 @@ struct Harness {
 };
 
 }  // namespace
+
+TEST_CASE("DSP artifact names are bounded and distinguish altered plugin IDs") {
+    using dsp_commands::artifactId;
+    CHECK(artifactId("com.example-safe_1.0") == "com.example-safe_1.0");
+    CHECK(artifactId("com.suppleaudio.marram") == "com.suppleaudio.marram");
+    CHECK(artifactId("com.example:g") == "com.example_g-cc81f5fbfb637d01");
+    CHECK(artifactId("com.example:g") != artifactId("com.example_g-cc81f5fbfb637d01"));
+    CHECK(artifactId("x-0123456789ABCDEF") != "x-0123456789ABCDEF");
+    CHECK(artifactId("x-0123456789abcdeg") == "x-0123456789abcdeg");
+    CHECK(artifactId("x-0123456789abcde") == "x-0123456789abcde");
+    CHECK(artifactId("a/b") != artifactId("a_b"));
+    CHECK(artifactId("a/b") != artifactId("a\\b"));
+    const std::string prefix(64, 'a');
+    CHECK(artifactId(prefix + "b") != artifactId(prefix + "c"));
+    for (const std::string id : {"vst3:abc", "../../escape", "caf\xc3\xa9", ""}) {
+        const auto name = artifactId(id);
+        CHECK(name.size() <= 81);
+        CHECK(name.find_first_not_of(
+                  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-") ==
+              std::string::npos);
+        CHECK(artifactId(id) == name);
+    }
+}
+
+TEST_CASE("DSP saved artifacts retain long plugin IDs only in metadata") {
+    Harness h;
+    const std::string id = "com.example." + std::string(240, 'a');
+    h.write("long_id", script("LongId", id, "void process(Block& io) {}"));
+    auto result =
+        h.measured(R"({"script":"long_id","signals":["silence"],"seconds":0.1,"save":true})");
+    CHECK(result["plugin"].asString() == id);
+    const fs::path saved = result["signals"].at(0).find("path")->asString();
+    CHECK(saved.parent_path() == h.root.path / "renders");
+    CHECK(saved.filename().string().size() < 120);
+    CHECK(fs::is_regular_file(saved));
+}
 
 TEST_CASE("DSP render commands locate invalid patch values inside the patch argument") {
     Harness h;

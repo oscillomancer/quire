@@ -67,7 +67,7 @@ Resource createMemory(std::size_t size) {
     return map ? reinterpret_cast<Resource>(map) : noResource;
 #else
 #if defined(__linux__)
-    const int fd = ::memfd_create("supple-bridge", MFD_CLOEXEC);
+    const int fd = ::memfd_create("supple-bridge", MFD_CLOEXEC | MFD_ALLOW_SEALING);
 #else
     const auto name = "/" + uniqueName();
     const int fd = ::shm_open(name.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
@@ -85,6 +85,12 @@ Resource createMemory(std::size_t size) {
         ::close(fd);
         return noResource;
     }
+#if defined(__linux__)
+    if (::fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW) != 0) {
+        ::close(fd);
+        return noResource;
+    }
+#endif
     return fd;
 #endif
 }
@@ -248,6 +254,7 @@ bool NativeControl::read(void* data, std::size_t size,
                          std::chrono::steady_clock::time_point deadline) {
     auto* dst = static_cast<char*>(data);
     while (size) {
+        if (std::chrono::steady_clock::now() >= deadline) return false;
         arm();
         if (pending_) {
             DWORD count = 0;

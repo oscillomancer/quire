@@ -135,7 +135,7 @@ struct Event {
     double velocity = 1.0;  // 0..1
     // params
     std::uint32_t paramId = 0;
-    double value = 0.0;  // CLAP value or VST3 plain value
+    double value = 0.0;  // CLAP value or VST3 normalized value
     // MIDI 1.0
     std::uint8_t midi[3] = {0, 0, 0};
 };

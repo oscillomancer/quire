@@ -21,6 +21,13 @@
 #include <clap/clap.h>
 #if defined(_WIN32)
 #include <io.h>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 
 #else
 #include <unistd.h>
@@ -669,6 +676,10 @@ const clap_host_t* gEditorHost = nullptr;
 struct Edge {
     clap_plugin_t plugin{};
     const clap_host_t* host = nullptr;
+#if defined(_WIN32)
+    bool dpiAwareOnCreate = AreDpiAwarenessContextsEqual(
+        GetThreadDpiAwarenessContext(), DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+#endif
     // Loaded on the main thread while the audio thread may flush or process
     // (both allowed by CLAP), so each byte is atomic.
     std::atomic<std::uint8_t> config[4] = {0, 0, 0, 0};
@@ -704,10 +715,20 @@ bool CLAP_ABI edgeParamInfo(const clap_plugin_t* pl, uint32_t index, clap_param_
     info->flags = E(pl)->config[0] >= 11 && E(pl)->config[0] != 33 ? CLAP_PARAM_IS_AUTOMATABLE
                                                                    : CLAP_PARAM_IS_READONLY;
     std::snprintf(info->name, sizeof(info->name), index == 0 ? "Flushes" : "Editor parent");
+    if (E(pl)->config[0] == 51) {
+        std::memset(info->name, 'N', sizeof(info->name));
+        std::memset(info->module, 'M', sizeof(info->module));
+    }
     info->max_value = index == 0 ? 1e9 : 1e15;
     return true;
 }
 bool CLAP_ABI edgeParamValue(const clap_plugin_t* pl, clap_id id, double* out) {
+#if defined(_WIN32)
+    if (id == 13) {
+        *out = E(pl)->dpiAwareOnCreate ? 1 : 0;
+        return true;
+    }
+#endif
     if (id == 8) {
         *out = E(pl)->config[0] >= 30 ? E(pl)->hostDeliveries.load()
                                       : static_cast<double>(E(pl)->guiParent);
@@ -729,7 +750,12 @@ bool CLAP_ABI edgeParamValue(const clap_plugin_t* pl, clap_id id, double* out) {
     *out = E(pl)->config[0] >= 30 ? E(pl)->editorValue.load() : E(pl)->flushes.load();
     return true;
 }
-bool CLAP_ABI edgeValueToText(const clap_plugin_t*, clap_id, double v, char* out, uint32_t size) {
+bool CLAP_ABI edgeValueToText(const clap_plugin_t* pl, clap_id, double v, char* out,
+                              uint32_t size) {
+    if (E(pl)->config[0] == 51) {
+        std::memset(out, 'V', size);
+        return true;
+    }
     std::snprintf(out, size, "%d", static_cast<int>(v));
     return true;
 }
@@ -1020,12 +1046,16 @@ uint32_t CLAP_ABI edgeLatency(const clap_plugin_t* pl) {
 }
 const clap_plugin_latency_t kEdgeLatency = {edgeLatency};
 
+void CLAP_ABI edgeFd(const clap_plugin_t* pl, int, clap_posix_fd_flags_t) { ++E(pl)->mainCalls; }
+const clap_plugin_posix_fd_support_t kEdgeFd = {edgeFd};
+
 const void* CLAP_ABI edgeExt(const clap_plugin_t* pl, const char* id) {
     if (!std::strcmp(id, "supple.test.edge-host")) return E(pl)->host;
     if (!std::strcmp(id, CLAP_EXT_NOTE_PORTS)) return &kSineNotes;
     if (!std::strcmp(id, "supple.test.edge-control")) return &kEdgeControl;
     if (!std::strcmp(id, CLAP_EXT_LATENCY)) return &kEdgeLatency;
     if (!std::strcmp(id, CLAP_EXT_TIMER_SUPPORT)) return &kEdgeTimer;
+    if (!std::strcmp(id, CLAP_EXT_POSIX_FD_SUPPORT)) return &kEdgeFd;
     if (!std::strcmp(id, CLAP_EXT_GUI)) return &kEdgeGui;
     if (!std::strcmp(id, CLAP_EXT_PARAMS)) return &kEdgeParams;
     if (!std::strcmp(id, CLAP_EXT_TAIL)) return &kEdgeTail;

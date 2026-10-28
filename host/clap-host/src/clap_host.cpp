@@ -1011,7 +1011,9 @@ std::vector<ParamInfo> Instance::params() const {
     for (uint32_t i = 0; i < n; ++i) {
         clap_param_info_t p{};
         if (!extParams_->get_info(plugin_, i, &p)) continue;
-        out.push_back({p.id, p.name, p.module, p.min_value, p.max_value, p.default_value, p.flags});
+        out.push_back({p.id, std::string(p.name, ::strnlen(p.name, sizeof p.name)),
+                       std::string(p.module, ::strnlen(p.module, sizeof p.module)), p.min_value,
+                       p.max_value, p.default_value, p.flags});
     }
     return out;
 }
@@ -1031,7 +1033,7 @@ Result<std::string> Instance::paramText(std::uint32_t id, double clapValue) cons
     char buf[256] = {};
     if (!extParams_ || !extParams_->value_to_text(plugin_, id, clapValue, buf, sizeof(buf)))
         return Error("host.param", "the plugin has no text for parameter " + std::to_string(id));
-    return std::string(buf);
+    return std::string(buf, ::strnlen(buf, sizeof buf));
 }
 
 Result<double> Instance::paramFromText(std::uint32_t id, std::string_view text) const {
@@ -1935,7 +1937,12 @@ std::vector<std::pair<int, std::uint32_t>> Instance::watchedFds() const {
 
 void Instance::onFd(int fd, std::uint32_t flags) {
     if (vst3_) return vst3_->onFd(fd);
-    if (extFd_ && plugin_) extFd_->on_fd(plugin_, fd, flags);
+    if (!extFd_ || !plugin_) return;
+    // Another callback from the same readiness snapshot may have unregistered
+    // and closed this descriptor. Only its current owner may service it.
+    const auto& fds = hostState_->fds;
+    if (std::any_of(fds.begin(), fds.end(), [fd](const auto& entry) { return entry.first == fd; }))
+        extFd_->on_fd(plugin_, fd, flags);
 }
 
 int Instance::nextTimerMs() const {

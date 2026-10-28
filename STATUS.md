@@ -40,6 +40,9 @@ All platforms launch and clean up through the shared ChildProcess helper, with
 explicit IPC inheritance and process-group/Job ownership. Linux retains its
 memfd/futex transport and pidfd death watch. Bridge stderr retains plug-in
 diagnostics; scanner stderr remains suppressed.
+Linux bridge memfds are sealed against shrinking and growing after sizing;
+their mappings stay writable. The bridge isolates ordinary plugin crashes,
+not hostile plugins with the user's process privileges.
 Bridge targets and portable fixture tests are enabled and pass native CI on
 macOS and Windows. Engine fixtures cover shared/dedicated crash and deadline
 failures, structured errors and restart ownership. Sandbox rendering verifies
@@ -61,6 +64,10 @@ change (monitor move, system scale) is passed to open Linux/Windows editors, loc
 or bridged, CLAP or VST3, and resizes them; hermetic tests cover the rule, the
 visual result is unchecked without a desktop with mixed scales. Windows child
 keyboard behavior is plugin-dependent.
+The Windows bridge initializes Per Monitor v2 DPI awareness before loading
+plugins; the display-free startup regression awaits native Windows CI.
+Windows control reads check their absolute deadline before consuming buffered
+input too; its regression also awaits native Windows CI.
 
 Evaluation harness fixtures now run on Windows as well as POSIX: executable
 fixtures use Python, credential references can use Windows hard links, and
@@ -167,13 +174,24 @@ instructions are in `docs/guides/installing.md`.
   beyond 4 GiB) and FLAC; render jobs and a queue; per-file analysis.
 - **Plugin hosting** (ADR-0013, ADR-0017, ADR-0018): CLAP and VST3,
   in-process or isolated in shared or dedicated bridge processes (a crash
-  fails only that plugin), supervised scanning with a cache, editors
+  fails the instances in that bridge), supervised scanning with a cache, editors
   embedded in process and from bridges, editor windows that remember their
   place per effect, plugin state saved with the project. Bridge main loops
   park until socket/descriptor/request activity or the nearest plug-in timer;
   CLAP/VST3 requests use core-base's audio-safe coalesced wake relay
   (ADR-0029), and timers run without an open editor; remote changes/death
   wake the app without editor or audio idle polling (ADR-0031).
+  Fixed-size CLAP parameter strings and VST3 bus/parameter strings are bounded
+  even when a plugin omits their null terminators; Linux regressions pass,
+  with native macOS/Windows validation pending.
+  VST3 parameter metadata preserves the automatable flag in the shared CLAP
+  flag representation; its Linux regression passes, with native CI pending.
+  Sandbox rendering rechecks negotiated bus widths after activation, refusing
+  VST3 instances that switch to mono before audio starts. Local and bridged
+  Linux regressions pass; native macOS/Windows validation is pending.
+  CLAP descriptor dispatch ignores registrations removed by an earlier
+  callback in the same readiness snapshot, as VST3 dispatch already does;
+  the Linux regression passes and macOS validation is pending.
 - **GUI** (`specs/gui.md`): arrange view, track panel, mixer, FX chains and
   the plugin browser, routing matrix, MIDI editor, render dialog, history
   dock with branches, actions list with key bindings and macros, editable
@@ -482,6 +500,9 @@ instructions are in `docs/guides/installing.md`.
   and reports its meters as of each signal's end and what its
   `trace(name, value)` calls recorded over each signal
   (`docs/specs/trace-extension.md`); `dsp.preview` plays a file too; a
+  saved test or preview uses a bounded, filesystem-safe ID component with a
+  stable hash when changed or ending in the reserved hash suffix, so raw IDs
+  cannot impersonate encoded names; result metadata retains the full ID. A
   script tells the host a tail that
   follows its settings and the tempo (`setTail`), and a script that compiles is loaded
   and set like a stock plugin (`skill/guides/dsp-workflow.md`).
@@ -637,6 +658,9 @@ Engine and hosting:
 - A bridged plug-in's tail is read once when a sandbox render starts, so a
   tail it changes during that render is not followed (in-process plug-ins'
   are).
+- VST3 host text conversion uses bounded, per-call Unicode conversion instead
+  of the SDK's shared converter. Unpaired UTF-16 surrogates become U+FFFD;
+  malformed UTF-8 parameter input is refused. Native verification is pending.
 
 Session and editing:
 - Master playrate 0.25..4x and its tr_0 envelope persist in schema 2.1.

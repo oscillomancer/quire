@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "artifact_name.h"
 #include "dsp_test.h"
 #include "png.h"
 #include "supple/json/merge.h"
@@ -368,7 +369,7 @@ void registerDspPreview(cmd::Registry& registry) {
             out.log.push_back(info->name + ": " + line);
         }
         const std::filesystem::path file =
-            Traits::outputDir(s) / ("dsp-preview-" + info->id + ".png");
+            Traits::outputDir(s) / ("dsp-preview-" + artifactId(info->id) + ".png");
         SUPPLE_TRY(png::write(file, picture->width, picture->height, picture->rgba));
         out.path = file.string();
         out.width = picture->width;

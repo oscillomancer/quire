@@ -24,6 +24,7 @@
 #include <string>
 #include <vector>
 
+#include "artifact_name.h"
 #include "dsp_shared.h"
 #include "supple/audio/audio_file.h"
 #include "supple/clap/semantic_params.h"
@@ -1173,8 +1174,8 @@ void registerDspTest(cmd::Registry& registry, const std::string& exampleEffect) 
                 m.sidechain = metric;
             }
             if (a.save) {
-                const fs::path saved =
-                    Traits::outputDir(s) / ("dsp-test-" + info->id + "-" + m.signal + ".wav");
+                const fs::path saved = Traits::outputDir(s) / ("dsp-test-" + artifactId(info->id) +
+                                                               "-" + m.signal + ".wav");
                 SUPPLE_TRY(audio::writeWav(saved, r->audio));
                 m.path = saved.string();
             }

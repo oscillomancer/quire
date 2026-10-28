@@ -82,6 +82,9 @@ an output event sink (param gestures/values the plugin emits), transport
 (tempo, beat position, bar start, time signature, playing flag), and a
 steady-time sample counter.
 
+`ParamInfo::flags` uses CLAP parameter bits for both formats. In particular,
+VST3 `kCanAutomate` maps to `CLAP_PARAM_IS_AUTOMATABLE`.
+
 The host implements: `clap.log` (to the host log, never on the audio
 thread synchronously: audio-thread log calls go to a lock-free ring),
 `clap.params` (rescan/clear/request_flush), `clap.state` (mark_dirty),
@@ -91,6 +94,13 @@ thread synchronously: audio-thread log calls go to a lock-free ring),
 `clap.thread-pool` (not provided), and `com.suppleaudio.semantic-params/1`
 host side (records `changed` flags). `request_restart`/`request_process`/
 `request_callback` set flags the app services on the main thread.
+
+Fixed-size CLAP parameter names, modules and value text are read only within
+their buffers, even if a plugin omits the terminating null. VST3 bus names,
+parameter titles and value text are terminated within their 128-code-unit
+buffers before UTF-8 conversion. VST3 host text conversion has no shared state;
+unpaired UTF-16 surrogates become U+FFFD and invalid UTF-8 parameter input
+returns `host.param_text`, without conversion exceptions.
 
 Local and remote instances can install core-base's `supple::MainThreadWake` (public
 header `supple/base/main_thread_wake.h`, core-base spec, ADR-0029) with
@@ -122,7 +132,8 @@ nearest remaining duration rounded up to milliseconds and saturated at
 `INT_MAX`. Timers and registered descriptors remain serviceable with no editor
 open; registrations are main-thread operations, so the loop rebuilds its
 watches and deadlines after callbacks and control requests. Local timer and FD
-registration/modification/removal also notify the subscribed relay. Idle output
+registration/modification/removal also notify the subscribed relay. Callbacks
+for descriptors removed since the readiness snapshot are ignored. Idle output
 publication (or overflow) notifies after updating its queue/counter. The engine
 app subscribes persistent instances and probes to its one relay and includes
 all local subscriptions in its service deadline/FD snapshot (ADR-0030).
@@ -213,10 +224,17 @@ requires the separate port-gui integration.
 
 ### Bridge notifications (POSIX v19, Windows v20; notification design ADR-0031)
 
+The bridge isolates crashes of ordinary plugins; it is not a security sandbox
+against hostile plugins. A shared bridge crash affects every instance in that
+process. Linux shared-memory memfds are sealed against shrink and grow after
+initial sizing, while their mapped contents remain writable. This does not
+change the wire protocol. Windows mappings already have fixed extents; macOS
+continues to use its existing shared-memory backing.
+
 ADR-0037 extends the subscription to native WakeEvent signal targets:
 Linux eventfd (unchanged), a nonblocking write-only pipe on macOS, and a
 manual-reset event duplicated into the child on Windows. POSIX negotiates
-version 17; Windows negotiates native version 18. Invalid resource types,
+version 19; Windows negotiates native version 20. Invalid resource types,
 counts, versions and duplicate subscriptions remain structured errors.
 The Windows control channel transfers recipient-owned handle values; the
 parent rejects handle-bearing replies without acting on the claimed value.
@@ -245,7 +263,7 @@ objects above implement the same publication and lifetime contracts.
 
 Before Create, the Linux parent sends process-level `SubscribeNotifications` with
 instance id 0, exactly one dedicated nonblocking eventfd via SCM_RIGHTS, and
-`u32 version = 15`; the reply is `u32 version = 15`. The descriptor is checked
+`u32 version = 19`; the reply is `u32 version = 19`. The descriptor is checked
 for eventfd type, read/write access and O_NONBLOCK; received copies are CLOEXEC.
 Missing, wrong-type, extra or duplicate descriptors, duplicate subscriptions,
 wrong versions/instance ids and trailing payloads are rejected with structured
@@ -345,6 +363,8 @@ or an audio file resampled to the session rate with the audio-file
 resampler), then runs the chain offline:
 
 - activate all chain instances at the session rate with `[1, blockSize]`;
+- recheck the negotiated main buses before starting audio: every output and
+  each input after the first stage must still be stereo (`render.layout`);
 - set the transport (tempo, meter; playing = true; bar/beat positions
   advanced per block);
 - process fixed-size blocks (the last block may be short); note events and
@@ -429,6 +449,17 @@ on the same rendering setup. Native editor windows are independent.
 `dsp.test` and `dsp.preview` locate patch validation errors beneath
 `/patch` (the command boundary adds `/args`), for example
 `/args/patch/params/gain`, preserving the plugin's code and corrective hint.
+
+Saved WAV/PNG artifact names use up to 64 bytes of the plugin ID, retaining
+ASCII letters, digits, `.`, `_` and `-`, and replacing other bytes with `_`.
+An ID stays unchanged only if it is nonempty, safe, at most 64 bytes, and
+does not end in `-` followed by exactly 16 hexadecimal digits (either case).
+All other IDs gain `-` and the 16 lowercase hexadecimal digits of their full
+UTF-8 ID's FNV-1a 64-bit hash; reserving that suffix keeps raw IDs distinct
+from encoded names. Stock plugin IDs keep their existing names. The usual
+`dsp-test-`/`dsp-preview-` prefix and signal/extension suffix remain.
+The result's `plugin` field keeps
+the full ID; callers use the returned `path` to find the artifact.
 
 `dsp.edit {name, edits: [{old, new}]}` changes part of a library script:
 each edit replaces `old`, which must be in the script exactly once, with

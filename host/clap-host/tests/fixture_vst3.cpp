@@ -44,6 +44,7 @@ constexpr double kTau = 6.28318530717958647692;
 // test can assert there are none.
 std::atomic<int> gControllerCallsOffThread{0};
 std::atomic<int> gLayoutMode{0};
+std::atomic<bool> gUnterminatedText{false};
 
 std::atomic<int> gRunLoopRemovedCalls{0}, gRunLoopTimerCalls{0}, gRunLoopFdCalls{0};
 std::atomic<int> gNoteOffs{0}, gWildcardOffs{0};
@@ -194,7 +195,21 @@ class Fixture final : public SingleComponentEffect {
                                   BusInfo& bus) override {
         auto result = SingleComponentEffect::getBusInfo(type, dir, index, bus);
         if (result == kResultOk && type == kAudio && gLayoutMode.load() == 1) bus.channelCount = 65;
+        if (result == kResultOk && gUnterminatedText) std::fill_n(bus.name, 128, u'B');
         return result;
+    }
+    tresult PLUGIN_API getParameterInfo(int32 index, ParameterInfo& info) override {
+        const auto result = SingleComponentEffect::getParameterInfo(index, info);
+        if (result == kResultOk && gUnterminatedText) std::fill_n(info.title, 128, u'N');
+        return result;
+    }
+    tresult PLUGIN_API getParamStringByValue(ParamID id, ParamValue value,
+                                             String128 text) override {
+        if (gUnterminatedText) {
+            std::fill_n(text, 128, u'V');
+            return kResultOk;
+        }
+        return SingleComponentEffect::getParamStringByValue(id, value, text);
     }
     IPlugView* PLUGIN_API createView(FIDString name) override {
         return controller_ && std::strcmp(name, ViewType::kEditor) == 0 ? new TestView : nullptr;
@@ -477,6 +492,7 @@ extern "C" int fixtureNoteOffs(int id) {
 }
 
 extern "C" void fixtureLayoutMode(int mode) { gLayoutMode = mode; }
+extern "C" void fixtureUnterminatedText(bool on) { gUnterminatedText = on; }
 
 #if defined(__APPLE__)
 extern "C" bool bundleEntry(void*) { return true; }
