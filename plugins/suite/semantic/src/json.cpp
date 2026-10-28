@@ -9,8 +9,17 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <set>
 
 namespace supple::suite::json {
+
+// Only the parser may append without searching: it has already checked
+// uniqueness in its local key set. Public Object::set still replaces keys.
+struct ParserObjectAccess {
+    static void append(Object& object, std::string key, Value value) {
+        object.members_.emplace_back(std::move(key), std::move(value));
+    }
+};
 
 // --- values ---------------------------------------------------------------------------
 
@@ -294,6 +303,7 @@ class Parser {
     bool object(Value& out, size_t depth) {
         ++i_;
         Object o;
+        std::set<std::string> keys;
         skipSpace();
         if (i_ < s_.size() && s_[i_] == '}') return ++i_, out = Value(std::move(o)), true;
         for (;;) {
@@ -310,7 +320,7 @@ class Parser {
             }
             std::string key;
             if (!string(key)) return false;
-            if (o.find(key))
+            if (!keys.insert(key).second)
                 return fail("json.parse.duplicate_key", "\"" + key + "\" appears twice",
                             "keep one of them");
             skipSpace();
@@ -321,7 +331,7 @@ class Parser {
             skipSpace();
             Value v;
             if (!value(v, depth + 1)) return false;
-            o.set(std::move(key), std::move(v));
+            ParserObjectAccess::append(o, std::move(key), std::move(v));
             skipSpace();
             if (i_ < s_.size() && s_[i_] == ',') {
                 ++i_;

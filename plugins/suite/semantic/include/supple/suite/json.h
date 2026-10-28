@@ -122,6 +122,7 @@ class Object {
     std::vector<Member>::iterator end() { return members_.end(); }
 
   private:
+    friend struct ParserObjectAccess;
     std::vector<Member> members_;
 };
 
