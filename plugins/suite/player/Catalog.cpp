@@ -70,7 +70,9 @@ std::vector<std::filesystem::path> libraryScripts(const std::filesystem::path& f
     for (std::filesystem::directory_iterator it(folder, ec), end; !ec && it != end;
          it.increment(ec)) {
         if (!it->is_directory(ec)) continue;
-        const std::filesystem::path script = it->path() / (it->path().filename().string() + ".cpp");
+        auto filename = it->path().filename();
+        filename += ".cpp";
+        const std::filesystem::path script = it->path() / filename;
         if (std::filesystem::is_regular_file(script, ec)) out.push_back(script);
     }
     std::sort(out.begin(), out.end());

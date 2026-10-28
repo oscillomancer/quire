@@ -84,6 +84,16 @@ enum class VK { I, F, D };
 
 constexpr int kBudgetOffset = static_cast<int>(offsetof(D::Instance, budget));
 
+bool triviallyCopyable(const Type* t) {
+    if (t->isScalar()) return true;
+    if (t->kind == TypeKind::Array) return !t->shared && triviallyCopyable(t->element);
+    if (t->kind == TypeKind::Object) return t->builtin->triviallyCopyable;
+    if (t->kind != TypeKind::Struct) return false;
+    for (const FieldDecl* f : t->structDecl->fields)
+        if (!f->isStatic && !triviallyCopyable(f->qt.type)) return false;
+    return true;
+}
+
 }  // namespace
 
 class Codegen {
@@ -462,7 +472,7 @@ Codegen::Place Codegen::placeOf(Expr* e) {
                 emit(MIR_ADD, reg(spare), reg(addr),
                      imm(static_cast<std::int64_t>(ot->count) * ot->element->size));
                 return checkedElement(addr, index, ot->count, 0, ot->element->size, spare,
-                                      ot->element, x->loc.line, ot->element->isScalar());
+                                      ot->element, x->loc.line, true);
             }
             if (ot->kind == TypeKind::Buffer) {
                 Place base = placeOf(x->object);
@@ -594,8 +604,8 @@ void Codegen::initialize(MIR_reg_t address, const Type* t, Expr* init, int line)
 }
 
 // Bounds-checked element address: count >= 0 is a constant size, otherwise
-// countReg holds it. Out of range: the spare element (cleared first for a
-// number), and the line reported.
+// countReg holds it. Out of range: the spare element (reset to its defaults
+// first when trivially copyable), and the line reported.
 Codegen::Place Codegen::checkedElement(MIR_reg_t base, MIR_reg_t index, int count,
                                        MIR_reg_t countReg, int elementSize, MIR_reg_t spare,
                                        const Type* elementType, int line, bool clearSpare) {
@@ -612,8 +622,7 @@ Codegen::Place Codegen::checkedElement(MIR_reg_t base, MIR_reg_t index, int coun
     place(bad);
     callC(reinterpret_cast<void*>(&supple_script_oob), {Abi::Void, Abi::I32}, {imm(line)});
     emit(MIR_MOV, reg(addr), reg(spare));
-    if (clearSpare && elementType->isScalar())
-        store(elementType, Place{false, addr, 0}, zero(kindOf(elementType)));
+    if (clearSpare && triviallyCopyable(elementType)) initialize(addr, elementType, nullptr, line);
     place(done);
     return Place{false, addr, 0};
 }

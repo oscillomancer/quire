@@ -22,6 +22,9 @@
 // The examples, as a source export includes a script: inside the runtime's
 // namespace, after <supple/script.h>.
 namespace supple::script {
+namespace ex_array_bounds {
+#include "array_bounds.h"
+}
 namespace ex_lvalues {
 #include "lvalues.h"
 }
@@ -658,6 +661,93 @@ TEST_CASE("lvalues preserve C++ sequencing and reference storage") {
         Audio actual(2, 12);
         run.process(actual);
         CHECK(actual == expected);
+    }
+}
+
+TEST_CASE("out-of-range aggregate spares have the same lifetime in every backend") {
+    using T = script::ex_array_bounds::ArrayBounds;
+    static_assert(std::is_trivially_copyable_v<T::Cell>);
+    static_assert(!std::is_trivially_copyable_v<T::Resource>);
+    std::ifstream in(std::filesystem::path(__FILE__).parent_path() / "array_bounds.h");
+    REQUIRE(in.good());
+    std::stringstream source;
+    source << in.rdbuf();
+    NativeRunner<T> native;
+    Audio expected(1, 9);
+    double* data[] = {expected.data[0].data()};
+    double spare = 0.0;
+    script::Block block;
+    block.channels = 1;
+    block.frames = 9;
+    block.data_ = data;
+    block.spare_ = &spare;
+    const auto process = [&]()
+#if defined(__clang__) && __has_cpp_attribute(clang::nonblocking)
+                             [[clang::nonblocking]]
+#endif
+    { native.plugin().process(block); };
+    script::detail::CurrentScope scope(&native.instance);
+    process();
+    CHECK(expected.data[0] == std::vector<double>{3.5, 1, 4, 3.5, 7, 9, 11, 3.5, 3.5});
+    CHECK(native.instance.status.outOfRange.load() == 12);
+    for (bool interpret : {false, true}) {
+        INFO(interpret);
+        scriptc::Options options;
+        options.interpret = interpret;
+        auto result = scriptc::compile(source.str(), options);
+        REQUIRE_MESSAGE(result.program, scriptc::toText(result.diagnostics));
+        JitRunner run(result.program);
+        Audio actual(1, 9);
+        run.process(actual);
+        CHECK(actual.data[0] == std::vector<double>{3.5, 1, 4, 3.5, 7, 9, 11, 3.5, 3.5});
+        CHECK(actual == expected);
+        CHECK(run.instance.status.outOfRange.load() == 12);
+    }
+}
+
+TEST_CASE("out-of-range enum array writes are discarded in every backend") {
+    enum class Mode { Off, On };
+    script::Array<Mode, 1> modes;
+    const auto writePastEnd = [&]()
+#if defined(__clang__) && __has_cpp_attribute(clang::nonblocking)
+                                  [[clang::nonblocking]]
+#endif
+    {
+        modes[0] = Mode::On;
+        modes[1] = Mode::On;
+        return modes[-1];
+    };
+    CHECK(writePastEnd() == Mode::Off);
+    CHECK(modes[-1] == Mode::Off);
+    CHECK(modes[1] == Mode::Off);
+    CHECK(modes[0] == Mode::On);
+
+    const std::string source = R"(
+#include <supple/script.h>
+struct Test : Effect {
+    static constexpr Info info = {.name = "Test", .id = "com.example.test"};
+    enum class Mode { Off, On };
+    Array<Mode, 1> modes;
+    void process(Block& io) {
+        modes[0] = Mode::On;
+        modes[1] = Mode::On;
+        io[0][0] = static_cast<int>(modes[-1]);
+        io[0][1] = static_cast<int>(modes[1]);
+        io[0][2] = static_cast<int>(modes[0]);
+    }
+};
+)";
+    for (bool interpret : {false, true}) {
+        INFO(interpret);
+        scriptc::Options options;
+        options.interpret = interpret;
+        auto result = scriptc::compile(source, options);
+        REQUIRE_MESSAGE(result.program, scriptc::toText(result.diagnostics));
+        JitRunner run(result.program);
+        Audio actual(1, 3);
+        run.process(actual);
+        CHECK(actual.data[0] == std::vector<double>{0, 0, 1});
+        CHECK(run.instance.status.outOfRange.load() == 3);
     }
 }
 

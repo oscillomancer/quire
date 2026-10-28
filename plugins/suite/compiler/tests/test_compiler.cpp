@@ -4,9 +4,11 @@
 // The compiler end to end: scripts compile, run and compute what C++ would;
 // what the subset refuses is refused with the diagnostic that teaches it.
 #include <doctest/doctest.h>
+#include <clocale>
 
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <sstream>
 
 #include "runner.h"
@@ -711,6 +713,61 @@ TEST_CASE("literals must have the same spelling and type as C++") {
     }
     CHECK(firstError(script("1; // comment \\\n io[0][0] = 2")) == "script.lex.continuation");
     CHECK(firstError(script("1; const char* text = \"\\012\"")) == "script.lex.escape");
+}
+
+TEST_CASE("floating literals retain direct rounding and underflow behavior") {
+    const auto result = compileOk(R"(#include <supple/script.h>
+struct T : Effect {
+    static constexpr Info info = {.name = "T", .id = "com.example.t"};
+    void process(Block& io) {
+        io[0][0] = 1e-400;
+        io[0][1] = 1e-50f;
+        io[0][2] = 1e-45f;
+        io[0][3] = 5e-324;
+        io[0][4] = 1.0000000596046447753906250000000000000000000000000000000001f;
+    }
+};)");
+    JitRunner runner(result.program);
+    Audio audio(1, 5);
+    runner.process(audio);
+    CHECK(audio.data[0] ==
+          std::vector<double>{0, 0, static_cast<double>(std::numeric_limits<float>::denorm_min()),
+                              std::numeric_limits<double>::denorm_min(),
+                              static_cast<double>(std::nextafter(1.0f, 2.0f))});
+    for (const char* literal : {"1e400", "1e50f"})
+        CHECK(firstError("#include <supple/script.h>\nstruct T : Effect { double x = " +
+                         std::string(literal) + "; void process(Block& io) {} };") ==
+              "script.lex.range");
+}
+
+TEST_CASE("numeric literals ignore the host decimal separator") {
+    const std::string original = std::setlocale(LC_NUMERIC, nullptr);
+    struct Restore {
+        const std::string& locale;
+        ~Restore() { std::setlocale(LC_NUMERIC, locale.c_str()); }
+    } restore{original};
+    bool available = false;
+    for (const char* locale : {"de_DE.UTF-8", "de_DE.utf8", "German_Germany.1252"})
+        if (std::setlocale(LC_NUMERIC, locale)) {
+            available = true;
+            break;
+        }
+    if (!available) {
+        MESSAGE("No comma-decimal locale installed; locale-specific check skipped");
+        return;
+    }
+    const auto result = compileOk(R"(#include <supple/script.h>
+struct T : Effect {
+    static constexpr Info info = {.name = "T", .id = "com.example.t"};
+    void process(Block& io) {
+        io[0][0] = 1.25;
+        io[0][1] = 1.25f;
+    }
+};)");
+    JitRunner runner(result.program);
+    Audio audio(1, 2);
+    runner.process(audio);
+    CHECK(audio.data[0] == std::vector<double>{1.25, 1.25});
 }
 
 TEST_CASE("sidechain views return zero outside their bounds") {

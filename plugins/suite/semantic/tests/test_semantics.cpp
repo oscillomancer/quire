@@ -290,6 +290,8 @@ TEST_CASE("a file property takes an existing file by absolute path, or none") {
     CHECK(set("kick.wav").rfind("properties.file 'sample': the path is not absolute", 0) == 0);
     CHECK(set((folder / "none.wav").string()).find("there is no file there") != std::string::npos);
     CHECK(set(text).find("it takes wav ") != std::string::npos);
+    CHECK(set(wav + std::string(1, '\0') + ".wav").find("NUL") != std::string::npos);
+    CHECK_FALSE(s.hasProperty[2]);
     CHECK(set(wav).empty());
     CHECK(s.property[2] == wav);
     // The file check has the last word; a path it holds stays, found or not.
@@ -352,6 +354,15 @@ TEST_CASE("a bad patch changes nothing, and every error says where and how to fi
     errors.clear();
     CHECK_FALSE(codec.apply(parsed(R"({"params": {}})"), false, s, env, errors));
     CHECK(errors.at(0).code == "patch.missing_schema");
+    for (const char* version : {"1.-1", "0.0", "-1.0"}) {
+        json::Value malformed = json::Value::object();
+        malformed["schema"] = std::string("supple.fixture-patch/") + version;
+        errors.clear();
+        CHECK_FALSE(codec.apply(malformed, false, s, env, errors));
+        REQUIRE_FALSE(errors.empty());
+        CHECK(errors.at(0).code == "patch.bad_schema_id");
+        CHECK(s.host == before);
+    }
     // A newer minor version's additions are ignored.
     errors.clear();
     CHECK(codec.apply(parsed(R"({"schema": "supple.fixture-patch/1.3", "future": true})"), false, s,

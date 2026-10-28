@@ -47,6 +47,8 @@ struct Tilt : Effect {
   parameters; `prepare()`, `update()` and `process(Block&)` are the hooks.
 - Every member has a starting value (`double phase = 0.0;`), or is an object
   that starts empty (`Biquad`, `DelayLine`, `Array<...>`).
+- Numeric literals use a decimal point (`1.25`, `1.25f`) regardless of the
+  host's locale. Float literals round directly to float; underflow can give zero.
 
 ## Identity: `Info`
 
@@ -180,7 +182,9 @@ that scales audio directly (levels, mix) so that moving it does not click.
 | `void editor(Editor& e)`, `void draw(Canvas& g)`, `void pointer(const Pointer& p)` | The editor's (optional) | Its controls, its drawing, and what the pointer does to the drawing: see The editor |
 
 There is no `reset()` to write: the runtime returns every member to what
-`prepare()` left, by itself. The script never calls a hook. Values that
+`prepare()` left, by itself, including the tail set there. A hot reload also
+keeps the new code's prepared tail until `update()` or `process()` changes it.
+The script never calls a hook. Values that
 glide or fade of the script's own should jump to where they are going until
 the first block plays (a `bool unplayed = true;` set in `prepare()` and
 cleared at the top of `process()`): a host sets a fresh instance's values
@@ -619,15 +623,30 @@ A script cannot do what C++ leaves undefined. The compiler refuses:
 - constant int arithmetic that overflows (`2147483647 + 1`); values computed
   at run time wrap.
 
-At run time: an index outside an `Array`, `Buffer` or channel reads 0 and a
-write to it goes nowhere, and the host's log names the line. Each hook has a
+At run time, invalid indices are reported with their source line. An index
+outside a numeric `Array`, `Buffer` or channel reads 0; enum elements read
+the value with underlying integer 0. An `Array` of trivially copyable
+aggregates (plain structs of numbers/enums, including nested arrays) resets
+its spare element to the type's default-constructed value on **each invalid
+access**, including declared member defaults. Writes affect only that spare
+and are discarded by the next invalid access. A reference to the spare
+aliases it and observes the next reset too.
+
+An `Array` whose elements hold resources (`Buffer`, `DelayLine`,
+`Oversampler`, `Stft`, or structs containing them) instead keeps a persistent
+spare: invalid accesses share its state, including earlier writes. Resetting
+such an element could allocate or free on the audio thread. Valid elements
+are never touched by invalid accesses. These rules are identical in native,
+JIT and interpreter execution.
+
+Each hook has a
 budget of loop iterations and calls (65,536 per frame in `process`); a
 script that spends it is stopped and silent until it is reset or reloaded,
 and the log names the line.
 
 These guards are the player's. A source export (`dsp_export` with
-`format: "source"`) is ordinary C++: an invalid index still reads 0 and is
-reported without a line, but there is no budget, so a loop that never ends
+`format: "source"`) is ordinary C++: invalid indices follow the same spare
+rules and are reported without a line, but there is no budget, so a loop that never ends
 hangs the plugin. Test a script in the player before exporting its source.
 
 Inspect a loaded instance with `fx_describe` (DAW) or `plugin_describe`

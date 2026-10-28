@@ -48,6 +48,36 @@ TEST_CASE("doubles are the shortest text that reads back exactly") {
     CHECK(parsed(formatDouble(0.30000000000000004)).asDouble() == 0.30000000000000004);
 }
 
+TEST_CASE("wide objects preserve insertion order and reject decoded duplicate keys") {
+    std::string compact = "{", canonical = "{\n";
+    for (int i = 4095; i >= 0; --i) {
+        const std::string member = "\"key" + std::to_string(i) + "\"";
+        compact += (i == 4095 ? "" : ",") + member + ":" + std::to_string(i);
+        canonical += "  " + member + ": " + std::to_string(i) + (i == 0 ? "\n" : ",\n");
+    }
+    compact += "}";
+    canonical += "}\n";
+    const Value wide = parsed(compact);
+    CHECK(wide.size() == 4096);
+    CHECK(writeCompact(wide) == compact);
+    CHECK(writeCanonical(wide) == canonical);
+    CHECK(writeCanonical(parsed(canonical)) == canonical);
+    compact.pop_back();
+    // The first key repeated through a JSON escape, before even a colon:
+    // duplicate-key errors take precedence over missing-colon errors.
+    compact += ",\"\\u006bey4095\"}";
+    Value out(42);
+    Error e;
+    CHECK_FALSE(parse(compact, out, e));
+    CHECK(e.code == "json.parse.duplicate_key");
+    CHECK(e.hint == "keep one of them");
+    CHECK(e.line == 1);
+    CHECK(e.column == static_cast<int>(compact.size()));
+    CHECK(out == Value(42));
+    CHECK(writeCompact(parsed(R"({"key": {"key": 1}, "next": {"key": 2}})")) ==
+          R"({"key":{"key":1},"next":{"key":2}})");
+}
+
 TEST_CASE("the mistakes people and models make get their own errors") {
     CHECK(errorCode("{\"a\": 1,}") == "json.parse.trailing_comma");
     CHECK(errorCode("[1, 2,]") == "json.parse.trailing_comma");

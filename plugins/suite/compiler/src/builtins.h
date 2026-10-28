@@ -99,6 +99,7 @@ struct BuiltinClass {
     // Owns memory: only a member (never a local, never copied), and its
     // allocating methods only in prepare().
     bool resource = false;
+    bool triviallyCopyable = false;  // may reset an invalid Array access from a prototype
     // Scripts may declare one (a local or a member). Block, Param and the
     // channel views are the runtime's to make.
     bool declarable = true;

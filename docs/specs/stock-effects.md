@@ -38,6 +38,10 @@
 - **Latency-changing parameters** (lookahead, oversampling, linear phase)
   are stepped, not automatable, and follow the template's restart contract
   (`request_restart`, reactivate with the new latency).
+- **Non-finite inputs:** Bracken, Ghyll, Pollia, Umber and Withy replace NaN and infinities
+  with zero before their detectors, filters and delay lines, so one bad
+  sample cannot poison subsequent audio. `stock-nonfinite.tests` checks
+  mono and stereo against the same input with those samples zeroed.
 - **`reset()` clears processing state and keeps the parameter values** (CLAP's
   contract). The sandbox and the engine reuse one instance across renders and
   across seeks, so a render must depend only on the state set for it:

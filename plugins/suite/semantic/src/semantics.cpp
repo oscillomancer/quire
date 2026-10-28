@@ -359,7 +359,7 @@ bool splitType(const std::string& type, std::string& plugin, int& major, int& mi
     const auto a = std::from_chars(type.data() + slash + 1, type.data() + dot, major);
     const auto b = std::from_chars(type.data() + dot + 1, type.data() + type.size(), minor);
     return a.ec == std::errc() && a.ptr == type.data() + dot && b.ec == std::errc() &&
-           b.ptr == type.data() + type.size() && !plugin.empty();
+           b.ptr == type.data() + type.size() && major >= 1 && minor >= 0 && !plugin.empty();
 }
 
 // --- routes ---------------------------------------------------------------------------------
@@ -1063,6 +1063,10 @@ bool PatchCodec::fileUsable(size_t index, const std::string& path, const state::
                             std::string& why) const {
     const PropertyDef& def = definition_.properties().at(index);
     if (!def.isFile() || path.empty()) return true;
+    if (path.find('\0') != std::string::npos) {
+        why = "the path contains NUL";
+        return false;
+    }
     const std::string held = current.hasProperty[index] ? current.property[index] : def.def;
     if (path == held) return true;
     const std::filesystem::path p = pathOf(path);

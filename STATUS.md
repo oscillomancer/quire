@@ -753,6 +753,20 @@ GUI:
   mixer strips but not onto track-panel rows.
 
 Plugins:
+- Bracken, Ghyll, Pollia, Umber and Withy discard non-finite inputs before their recursive
+  state. Their mono/stereo regressions and the script runtime's scalar/aggregate bounds
+  and prepared-tail lifecycle fixes pass focused Linux dev/RTSan checks.
+  Marram's free-running LFOs use whole-frame phase anchors so their routed
+  modulation remains bit-identical across host block sizes, including rate changes.
+  Native macOS/Windows CI remains pending for these changes and the player's
+  Unicode library filename discovery fix.
+- Marram's playing-transport LFO sync uses whole-frame phase anchors and
+  ignores host beat rounding within 1e-9 beats. Seeks, loop jumps, division
+  changes and transport restarts re-anchor; tempo-only changes keep phase
+  continuous. Wobble Bass passes exact 128/511-frame partition and native/JIT
+  comparisons, including transport changes and sample-offset division automation.
+- Script numeric literals use locale-independent parsing, including float
+  rounding and underflow, so comma-decimal host locales accept the same source.
 - DSP source exports require a visible, automatable parameter with a plain
   name for their host tests and do not retain the JIT's loop budget (a loop
   that never ends hangs a native export). Exports include declared factory

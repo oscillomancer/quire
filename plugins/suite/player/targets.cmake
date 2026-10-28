@@ -28,6 +28,7 @@ add_library(suite-compiler STATIC
 target_include_directories(suite-compiler PUBLIC ${SUPPLE_SUITE}/compiler/include
                                           PRIVATE ${SUPPLE_SUITE}/compiler/src)
 target_include_directories(suite-compiler SYSTEM PRIVATE ${SUPPLE_FRAMEWORK})
+target_include_directories(suite-compiler SYSTEM PRIVATE ${suite_fast_float}/include)
 target_link_libraries(suite-compiler PUBLIC suite-runtime PRIVATE suite-mir)
 supple_defaults(suite-compiler)
 
@@ -46,6 +47,10 @@ if (SUPPLE_BUILD_TESTS AND COMMAND supple_test)
     if (TARGET processor-tests)
         target_include_directories(processor-tests PRIVATE ${SUPPLE_SUITE}/compiler/tests ${SUPPLE_SUITE}/examples)
         target_compile_definitions(processor-tests PRIVATE SUPPLE_SCRIPT_EXAMPLES="${SUPPLE_SUITE}/examples")
+        if(EXISTS "${SUPPLE_SUITE}/../marram/script/marram.cpp")
+            target_compile_definitions(processor-tests PRIVATE
+                SUPPLE_MARRAM_SCRIPT="${SUPPLE_SUITE}/../marram/script/marram.cpp")
+        endif()
         # The examples compiled as C++, as source exports build them.
         if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             target_compile_options(processor-tests PRIVATE /clang:-ffp-contract=off /clang:-fwrapv)

@@ -945,8 +945,10 @@ struct Withy : Effect {
             tick = tick + 1;
             if (tick >= 16) tick = 0;
 
-            const double xl = io[0][i];
-            const double xr = chans > 1 ? io[1][i] : xl;
+            double xl = io[0][i];
+            double xr = chans > 1 ? io[1][i] : xl;
+            if (!isFinite(xl)) xl = 0.0;
+            if (!isFinite(xr)) xr = 0.0;
             const double peak = max(abs(xl), abs(xr));
             peakIn0 = max(abs(xl), peakIn0 * fall);
             peakIn1 = max(abs(xr), peakIn1 * fall);

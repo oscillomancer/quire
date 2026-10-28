@@ -14,8 +14,7 @@ parameters, so Marram gives every slot a type with an `off` and says which
 parameters apply with the script's activity conditions (amendment of
 2026-10-21 to `semantic-params-extension.md`): an agent's description and
 the editor show only what the patch uses. Effects are not part of it:
-delay, reverb and EQ are the stock effects after it in a chain (a chorus is
-planned).
+delay, reverb, EQ and chorus are stock effects after it in a chain.
 
 ## 1. Signal flow (per voice)
 
@@ -36,7 +35,18 @@ normal 2x, high 4x); the voices are summed and brought down once
 is computed every 16 samples of a voice's life and glided between, so
 renders do not depend on the block size; every random choice (free-running
 phases, unison and drift, noise) is seeded by the order of the notes, so a
-render is the same every time. Sixteen voices (`voice.polyphony` plays
+render is the same every time. Free-running LFOs count whole frames from
+the last rate change, preserving phase without block-dependent rounding.
+Free LFOs synced to a playing song also count whole frames from an anchor.
+Host beat differences of at most **1e-9 beats** from the predicted position
+are treated as rounding noise, so continuous playback is independent of
+host block splits. Starting playback, enabling sync, changing division,
+or a larger beat difference (a seek or loop jump) re-anchors to the song's
+position. A tempo-only change preserves the current phase and advances
+from it at the new tempo; a simultaneous seek or division change instead
+takes the song's phase. Stopping playback invalidates the song anchor
+and resumes the free-running clock; restarting takes the host position.
+Sixteen voices (`voice.polyphony` plays
 fewer); a stolen voice fades out over a few milliseconds. Its tail (CLAP's
 `tail`, what a host waits for after the last key is up) is the longest amp
 release, a voice's routes included, plus 20 ms. A safety limit leaves the output untouched below
