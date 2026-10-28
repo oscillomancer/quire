@@ -2,8 +2,9 @@
 
 On-demand Linux REAPER load, offline render, automation and state checks for
 stock CLAP artifacts, with an optional floating-editor check. Python 3.10+, standard library only. REAPER is a local
-runtime requirement, **not a build dependency**. This tool is deliberately
-not registered with CTest or `tools/ci/run-all.sh`.
+runtime requirement, **not a build dependency**. The check itself is deliberately
+not registered with CTest or `tools/ci/run-all.sh`; its helper and process
+tests, which need no REAPER, run in CTest on Linux as `tools.reaper-check.tests`.
 
 ```sh
 cmake --preset dev

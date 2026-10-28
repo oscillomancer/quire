@@ -78,7 +78,11 @@ if(SUPPLE_BUILD_TESTS)
   add_test(NAME eval-harness.tests
            COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_SOURCE_DIR}/tools/eval-harness)
   set_tests_properties(eval-harness.tests PROPERTIES LABELS "eval")
-  foreach(tool IN ITEMS listening optimize-bench gui reaper-check)
+  set(tools listening optimize-bench gui)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    list(APPEND tools reaper-check)  # a Linux-only tool (process groups, shebang fakes)
+  endif()
+  foreach(tool IN LISTS tools)
     add_test(NAME tools.${tool}.tests
              COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_SOURCE_DIR}/tools/${tool}
                      -p "test_*.py")

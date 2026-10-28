@@ -11,6 +11,7 @@ from pathlib import Path
 import struct
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 import wave
@@ -227,8 +228,17 @@ class ProcessIsolation(unittest.TestCase):
             pid = int(marker.read_text())
             proc = Path(f"/proc/{pid}/stat")
             # An orphan killed child may await init's reaping; it is not running.
-            if proc.exists():
-                self.assertEqual(proc.read_text().split(")", 1)[1].split()[0], "Z")
+            # A signalled child can still show R until it is next scheduled.
+            state = None
+            for _ in range(100):
+                try:
+                    state = proc.read_text().split(")", 1)[1].split()[0]
+                except (FileNotFoundError, ProcessLookupError):
+                    state = None
+                if state in (None, "Z", "X"):
+                    break
+                time.sleep(.05)
+            self.assertIn(state, (None, "Z", "X"))
             self.assertEqual(json.loads((logs / "timeout.config-before.json").read_text()),
                              json.loads((logs / "timeout.config-after.json").read_text()))
 
