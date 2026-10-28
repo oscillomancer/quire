@@ -18,6 +18,9 @@ Open an issue with:
 Plugin problems are easier to pin down with the plugin's name, format
 (CLAP or VST3), version and isolation mode.
 
+Security problems are the exception: report them privately, as `SECURITY.md`
+describes, not in an issue.
+
 ## Proposing a change
 
 For anything larger than a fix, open an issue first and describe the

@@ -109,7 +109,8 @@ Start with [ARCHITECTURE.md](ARCHITECTURE.md). Design decisions are in
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). The engineering rules, for people and
-coding agents alike, are in [AGENTS.md](AGENTS.md).
+coding agents alike, are in [AGENTS.md](AGENTS.md). Report security problems
+privately, as [SECURITY.md](SECURITY.md) describes.
 
 ## License
 
