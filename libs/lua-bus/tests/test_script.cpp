@@ -93,6 +93,43 @@ TEST_CASE("the sandbox has the five libraries and nothing else") {
     CHECK(out->result["name"] == "");
 }
 
+TEST_CASE("sandbox load accepts only text and preserves chunk names and environments") {
+    Scene scene;
+    auto out = scene.run(R"(
+        local binary = string.dump(function() return 42 end)
+        local f, err = load(binary)
+        assert(f == nil and err:find('binary'))
+        for _, mode in ipairs({'b', 'bt'}) do
+            f, err = load('return 42', 'chunk', mode)
+            assert(f == nil and err:find('binary'))
+            f, err = load(binary, 'chunk', mode)
+            assert(f == nil and err:find('binary'))
+            f, err = load(function() return binary end, 'chunk', mode)
+            assert(f == nil and err:find('binary'))
+        end
+        local once = false
+        f, err = load(function()
+            if once then return nil end
+            once = true
+            return binary
+        end)
+        assert(f == nil and err:find('binary'))
+        assert(assert(load('return 42'))() == 42)
+        assert(assert(load('return value', '=named', 't', {value=17}))() == 17)
+        local pieces = {'return ', 'value'}
+        local i = 0
+        f = assert(load(function() i = i + 1; return pieces[i] end,
+                        '=reader', nil, {value=23}))
+        assert(f() == 23)
+        f, err = load('return +', '=named')
+        assert(f == nil and err:find('named:1:', 1, true))
+        assert(dofile == nil and loadfile == nil and require == nil and package == nil)
+        return true
+    )");
+    REQUIRE_MESSAGE(out, (out ? "" : out.error().toString()));
+    CHECK(out->result.asBool());
+}
+
 TEST_CASE("print and q.log go to the script's log") {
     Scene scene;
     auto out = scene.run("print('hello', 42)\nq.log('bye')\nprint({})");

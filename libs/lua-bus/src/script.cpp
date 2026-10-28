@@ -416,9 +416,29 @@ int safeSetMetatable(lua_State* L) {
     return 1;
 }
 
+int textLoad(lua_State* L) {
+    const char* mode = luaL_optstring(L, 3, "t");
+    if (std::string_view(mode).find('b') != std::string_view::npos) {
+        lua_pushnil(L);
+        lua_pushliteral(L, "binary chunks are disabled; use text-only mode 't'");
+        return 2;
+    }
+    const int arguments = lua_gettop(L) >= 4 ? 4 : 3;
+    lua_settop(L, arguments);
+    lua_pushliteral(L, "t");
+    lua_replace(L, 3);
+    lua_pushvalue(L, lua_upvalueindex(1));
+    lua_insert(L, 1);
+    lua_call(L, arguments, LUA_MULTRET);
+    return lua_gettop(L);
+}
+
 void openSandbox(lua_State* L, ScriptImpl& impl) {
     luaL_requiref(L, LUA_GNAME, luaopen_base, 1);
     lua_pop(L, 1);
+    lua_getglobal(L, "load");
+    lua_pushcclosure(L, textLoad, 1);
+    lua_setglobal(L, "load");
     lua_getglobal(L, "setmetatable");
     lua_pushcclosure(L, safeSetMetatable, 1);
     lua_setglobal(L, "setmetatable");

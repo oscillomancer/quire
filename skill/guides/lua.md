@@ -32,7 +32,10 @@ the bus rejected and how to fix it.
 The sandbox is strict: `string`, `table`, `math`, `utf8`, `coroutine` and the
 base library only. There is no `io`, `os`, `debug`, `package`, `require`,
 `dofile` or `loadfile` — a script cannot touch the filesystem, the clock or the
-process. `budget_ms` (default 250 ms) stops a script that runs away with
+process. `load` accepts text only, including chunks supplied by a reader
+function; binary chunks and explicit `b`/`bt` modes return `nil` and an error.
+Chunk names and custom environments still work.
+`budget_ms` (default 250 ms) stops a script that runs away with
 `script.budget`; a memory cap stops one that allocates too much with
 `script.memory`. A value passed to a command or returned is converted to JSON
 with at most 1,000,000 values and 16 MiB of text (`script.value_too_large`);

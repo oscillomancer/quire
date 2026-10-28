@@ -531,8 +531,7 @@ capacity reports retain their original revision/settings.
 ## Known limits
 
 Library boundaries:
-- Lua's base `load` still accepts binary chunks, bypassing the top-level
-  source-only loader. Host-side script logs have a line-count limit but no
+- Host-side script logs have a line-count limit but no
   byte budget and are outside the Lua allocator cap; repeated large lines
   can retain much more memory than that cap.
 - Replacing invalid UTF-8 bytes in JSON object keys can make distinct keys

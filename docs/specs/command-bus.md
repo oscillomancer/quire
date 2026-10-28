@@ -449,7 +449,11 @@ rollback retains this error in its details. Subsequent calls in a poisoned
 transaction refuse, and the failure state is cleared at transaction end. Scoped
 dispatch admission applies to nested batch/Lua invocations too.
 
-Lua initialization, host JSON pushes and structured error decoding are protected
+Lua dynamic loading uses a text-only `load` wrapper for string and reader-function
+chunks; explicit modes containing `b` return `nil` and an explanatory error.
+Chunk names and custom environments retain Lua's behavior. `dofile`, `loadfile`,
+`require` and `package` are unavailable. Lua initialization, host JSON pushes
+and structured error decoding are protected
 against memory/stack failures; error fields are read raw. Error decoding also
 bounds expansion into host memory to 1,000,000 values and 16 MiB of text,
 counting shared details once per use, and returns `script.value_too_large`
