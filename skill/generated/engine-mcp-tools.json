@@ -6069,7 +6069,24 @@
           "minimum": 1.0,
           "description": "Estimated retained history byte budget; default 1 GiB. Leases and branch boundaries may exceed it."
         },
-        "render": {},
+        "render": {
+          "type": "object",
+          "properties": {
+            "matrix": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^tr_[0-9]+$"
+                }
+              },
+              "propertyNames": {
+                "pattern": "^project$|^rg_[0-9]+$"
+              }
+            }
+          }
+        },
         "timebase": {
           "type": "string",
           "enum": ["time", "beats", "beats_position"]

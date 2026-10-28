@@ -178,6 +178,12 @@ Schema<json::Value> renderSettings() {
     };
     auto ex = json::Value::object();
     ex["type"] = "object";
+    // The ID-shaped alternative must remain visible to the merge schema walker;
+    // the literal project row is not an ID and is left unchanged.
+    ex["properties"]["matrix"] =
+        schema::mapOf(schema::arrayOf(schema::string().pattern("^tr_[0-9]+$", "track id")))
+            .keyPattern("^project$|^rg_[0-9]+$", "region id or project")
+            .jsonSchema();
     return {"render settings", decode, [](const json::Value& v) { return v; }, ex};
 }
 

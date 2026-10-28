@@ -7873,7 +7873,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `notes` | string |  |  |  |  |
 | `console9` | boolean |  |  |  |  |
 | `history_budget_bytes` | integer |  | 1.0.. |  | Estimated retained history byte budget; default 1 GiB. Leases and branch boundaries may exceed it. |
-| `render` | value |  |  |  |  |
+| `render` | object |  |  |  |  |
 | `timebase` | string |  |  |  |  |
 
 ### Result
