@@ -640,10 +640,6 @@ Session and editing:
   them before app teardown. Headless exit does not save the project; clients
   must stop and save first to preserve MIDI and other session edits. Audio
   WAVs/sidecars remain recoverable; MIDI has no crash-recovery file.
-- Known merge bug: after a merge remaps colliding object IDs, continuing the
-  source branch and merging it again can silently apply edits to the wrong
-  destination object. Continued merges after ID remapping are unsafe until
-  merge history retains that identity correspondence.
 - Save As into a subdirectory of the source media folder skips its destination
   subtree, including resolved symlink aliases, so copied files are not copied again.
 - Pasting takes from retained history brings their opaque FX state blobs along,
