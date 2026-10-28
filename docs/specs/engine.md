@@ -117,9 +117,12 @@ never by concurrent accumulation — so results are thread-count independent.
   Old forward-padding render bytes are not preserved: Console noise/dither,
   per-frame state, parameter-grid phase and corrected unity-rate plugin
   transport may change (ADR-0051).
-- `fx.pdc = ignore` excludes an instance from compensation (for low-latency
-  monitoring chains): its own wet/dry and pin delays still match it, but
-  its chain reports none of its latency, so its track arrives late.
+- `fx.pdc = ignore` (set in the project file; no command or GUI control sets
+  it) excludes an instance from compensation: its own wet/dry and pin delays
+  still match it, but its chain reports none of its latency, so its track
+  arrives late by that much. The plug-in still delays its own audio, so a
+  monitored input through it is not heard any sooner; only padding added
+  elsewhere to align with it goes away.
 - An oversampled stage's latency is the resamplers' round trip (72/80/83
   samples at 2/4/8x; an instrument's output crosses only the downward half)
   plus the plug-in's own latency at the high rate, padded at the high rate to
