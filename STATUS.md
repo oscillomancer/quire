@@ -700,6 +700,8 @@ Plugins:
   modulation remains bit-identical across host block sizes, including rate changes.
   Native macOS/Windows CI remains pending for these changes and the player's
   Unicode library filename discovery fix.
+- Script numeric literals use locale-independent parsing, including float
+  rounding and underflow, so comma-decimal host locales accept the same source.
 - DSP source exports require a visible, automatable parameter with a plain
   name for their host tests and do not retain the JIT's loop budget (a loop
   that never ends hangs a native export). Exports include declared factory

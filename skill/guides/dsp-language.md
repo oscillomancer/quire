@@ -47,6 +47,8 @@ struct Tilt : Effect {
   parameters; `prepare()`, `update()` and `process(Block&)` are the hooks.
 - Every member has a starting value (`double phase = 0.0;`), or is an object
   that starts empty (`Biquad`, `DelayLine`, `Array<...>`).
+- Numeric literals use a decimal point (`1.25`, `1.25f`) regardless of the
+  host's locale. Float literals round directly to float; underflow can give zero.
 
 ## Identity: `Info`
 

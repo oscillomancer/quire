@@ -25,7 +25,7 @@ add_library(script-compiler STATIC
   compiler/src/compiler.cpp)
 target_include_directories(script-compiler PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/compiler/include
                                            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/compiler/src)
-target_link_libraries(script-compiler PUBLIC supple::script-runtime PRIVATE supple::mir)
+target_link_libraries(script-compiler PUBLIC supple::script-runtime PRIVATE supple::mir supple::fast-float)
 set_target_properties(script-compiler PROPERTIES POSITION_INDEPENDENT_CODE ON)
 supple_target_defaults(script-compiler)
 add_library(supple::script-compiler ALIAS script-compiler)

@@ -28,6 +28,7 @@ add_library(suite-compiler STATIC
 target_include_directories(suite-compiler PUBLIC ${SUPPLE_SUITE}/compiler/include
                                           PRIVATE ${SUPPLE_SUITE}/compiler/src)
 target_include_directories(suite-compiler SYSTEM PRIVATE ${SUPPLE_FRAMEWORK})
+target_include_directories(suite-compiler SYSTEM PRIVATE ${suite_fast_float}/include)
 target_link_libraries(suite-compiler PUBLIC suite-runtime PRIVATE suite-mir)
 supple_defaults(suite-compiler)
 

@@ -5,10 +5,10 @@
 // rules so it has the value and type a C++ compiler would give it, and what
 // the subset has no use for (unsigned and long literals, raw strings, macros)
 // is reported where it is written.
-#include <cerrno>
 #include <cmath>
-#include <cstdlib>
 #include <string>
+
+#include <fast_float/fast_float.h>
 
 #include "ast.h"
 
@@ -284,17 +284,18 @@ class Lexer {
                                  "write a decimal number such as 1.5, 2e-3 or 0.25f");
                     return;
                 }
-            // strtod reads C's decimal form exactly as C++ does: correctly
-            // rounded to double. A float literal is rounded once more, to
-            // float, as C++ rounds the literal's value (from the decimal,
-            // directly): strtof, not (float)strtod, to avoid double rounding.
-            errno = 0;
-            char* end = nullptr;
+            // C++ literals always use a dot, regardless of the host's locale.
+            // Parse float literals directly to float to avoid double rounding.
+            // fast_float retains zero/infinity on range errors: underflow to
+            // zero is valid here, while infinity is diagnosed below.
+            const char* end = nullptr;
             if (t.floatSuffix) {
-                const float f = std::strtof(body.c_str(), &end);
+                float f = 0.0f;
+                end = fast_float::from_chars(body.data(), body.data() + body.size(), f).ptr;
                 t.floatValue = static_cast<double>(f);
             } else {
-                t.floatValue = std::strtod(body.c_str(), &end);
+                end = fast_float::from_chars(body.data(), body.data() + body.size(), t.floatValue)
+                          .ptr;
             }
             if (end != body.c_str() + body.size())
                 diags_.error(t.loc, "script.lex.number", "'" + t.text + "' is not a number",
