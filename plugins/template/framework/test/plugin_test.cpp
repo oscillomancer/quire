@@ -1532,6 +1532,19 @@ TEST(trouble_on_the_audio_thread_is_logged_from_the_main_thread_once) {
     CHECK(i.host.logged.size() == 2 && i.host.logged[1].first == CLAP_LOG_WARNING);
 }
 
+TEST(a_stream_that_claims_more_than_it_was_asked_for_is_refused) {
+    Instance i;
+    clap_istream_t reads{nullptr, [](const clap_istream_t*, void* p, uint64_t n) -> int64_t {
+                             std::memset(p, 0, static_cast<size_t>(n));
+                             return static_cast<int64_t>(n) + 1;
+                         }};
+    CHECK(!i.state->load(i.plugin, &reads));
+    clap_ostream_t writes{nullptr, [](const clap_ostream_t*, const void*, uint64_t n) -> int64_t {
+                              return static_cast<int64_t>(n) + 1;
+                          }};
+    CHECK(!i.state->save(i.plugin, &writes));
+}
+
 TEST(an_offline_mode_hears_the_hosts_render_mode_and_no_other_product_claims_one) {
     Instance i;
     const auto* render = extension<clap_plugin_render_t>(i, CLAP_EXT_RENDER);

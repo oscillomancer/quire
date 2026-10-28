@@ -852,11 +852,12 @@ TEST(each_split_sees_the_transport_where_it_starts) {
 
 namespace {
 
-// A delay's tail: one beat at the tempo it last heard.
+// A delay's tail: one beat at the tempo it last heard, none once reset.
 class TempoTail : public ProcessorBase<TempoTail> {
   public:
     void prepare(const ProcessSetup&, const ParamValues&) {}
     void update(const ParamValues&) {}
+    void reset() { tail = 0; }
     void process(Block& b) {
         if (b.transport) tail = static_cast<uint32_t>(48000.0 * 60.0 / b.transport->tempo);
     }
@@ -885,6 +886,22 @@ TEST(a_tail_that_changes_as_the_processor_plays_reaches_the_host) {
     t.tempo = 60.0;
     engine->process<double>(io, io, 256, none, &t);
     CHECK(engine->tail() == 48000);
+    CHECK(engine->takeTailChange());
+}
+
+TEST(a_reset_tail_reaches_the_host_before_the_next_block) {
+    auto engine = std::make_unique<BasicEngine<TempoTail>>();
+    engine->activate(48000.0, 512, 2, 2);
+    Transport t;
+    t.hasTempo = true;
+    t.tempo = 120.0;
+    std::vector<double> l(256), r(256);
+    double* io[] = {l.data(), r.data()};
+    NoEvents none;
+    engine->process<double>(io, io, 256, none, &t);
+    CHECK(engine->takeTailChange());
+    engine->reset();
+    CHECK(engine->tail() == 0);
     CHECK(engine->takeTailChange());
 }
 

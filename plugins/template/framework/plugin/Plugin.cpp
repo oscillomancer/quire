@@ -1489,7 +1489,7 @@ bool writeAll(const clap_ostream_t* stream, const std::vector<uint8_t>& bytes) {
     size_t written = 0;
     while (written < bytes.size()) {
         const int64_t n = stream->write(stream, bytes.data() + written, bytes.size() - written);
-        if (n <= 0) return false;
+        if (n <= 0 || static_cast<uint64_t>(n) > bytes.size() - written) return false;
         written += static_cast<size_t>(n);
     }
     return true;
@@ -1499,7 +1499,7 @@ bool readAll(const clap_istream_t* stream, std::vector<uint8_t>& bytes) {
     uint8_t chunk[4096];
     for (;;) {
         const int64_t n = stream->read(stream, chunk, sizeof(chunk));
-        if (n < 0) return false;
+        if (n < 0 || n > static_cast<int64_t>(sizeof(chunk))) return false;  // more than it was given room for
         if (n == 0) return true;
         bytes.insert(bytes.end(), chunk, chunk + n);
         if (bytes.size() > state::kMaxBytes) return false;  // not ours, whatever it is

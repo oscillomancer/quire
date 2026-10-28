@@ -712,12 +712,14 @@ class BasicEngine {
         }
     }
 
+    // After the processor's reset: its tail may have gone with its history.
     void reinitialize() {
         values_.markAll();
         values_.setInitial(true);
         retargetGlides(true);
         processor_.update(values_);
         values_.clearChanges();
+        rereadTail();
     }
 
     // --- smoothing ------------------------------------------------------------

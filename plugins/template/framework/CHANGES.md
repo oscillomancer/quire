@@ -4,6 +4,21 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.31.5
+
+What a product must do: nothing.
+
+- **A reset tells the host the tail it leaves.** `Engine::reset()` (and the
+  safety resets after a non-finite block) re-read the processor's
+  `tailSamples()` only at the next block, so a host asking right after a
+  reset saw the tail from before it. The engine reads it again as it
+  reinitializes, and announces a change as it does after a block.
+- **State streams are held to what they were asked.** A host stream whose
+  `read` reported more bytes than the 4096 it was given made `readAll` copy
+  past the end of its buffer, and a `write` that reported more than it was
+  given made `writeAll` count bytes it never wrote. Both now refuse the
+  stream, and the load or save fails.
+
 ## 1.31.4
 
 What a product must do: nothing.
