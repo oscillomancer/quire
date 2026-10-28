@@ -87,6 +87,12 @@ struct Harness {
 TEST_CASE("DSP artifact names are bounded and distinguish altered plugin IDs") {
     using dsp_commands::artifactId;
     CHECK(artifactId("com.example-safe_1.0") == "com.example-safe_1.0");
+    CHECK(artifactId("com.suppleaudio.marram") == "com.suppleaudio.marram");
+    CHECK(artifactId("com.example:g") == "com.example_g-cc81f5fbfb637d01");
+    CHECK(artifactId("com.example:g") != artifactId("com.example_g-cc81f5fbfb637d01"));
+    CHECK(artifactId("x-0123456789ABCDEF") != "x-0123456789ABCDEF");
+    CHECK(artifactId("x-0123456789abcdeg") == "x-0123456789abcdeg");
+    CHECK(artifactId("x-0123456789abcde") == "x-0123456789abcde");
     CHECK(artifactId("a/b") != artifactId("a_b"));
     CHECK(artifactId("a/b") != artifactId("a\\b"));
     const std::string prefix(64, 'a');

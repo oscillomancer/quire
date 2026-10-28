@@ -491,7 +491,8 @@ instructions are in `docs/guides/installing.md`.
   `trace(name, value)` calls recorded over each signal
   (`docs/specs/trace-extension.md`); `dsp.preview` plays a file too; a
   saved test or preview uses a bounded, filesystem-safe ID component with a
-  stable hash when changed, while result metadata retains the full ID. A
+  stable hash when changed or ending in the reserved hash suffix, so raw IDs
+  cannot impersonate encoded names; result metadata retains the full ID. A
   script tells the host a tail that
   follows its settings and the tempo (`setTail`), and a script that compiles is loaded
   and set like a stock plugin (`skill/guides/dsp-workflow.md`).

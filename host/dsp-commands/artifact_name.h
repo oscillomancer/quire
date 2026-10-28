@@ -9,7 +9,12 @@
 namespace supple::dsp_commands {
 inline std::string artifactId(std::string_view id) {
     std::string readable;
-    bool altered = id.size() > 64;
+    // Reserve the encoded suffix shape so a raw ID cannot impersonate it.
+    bool reserved = id.size() >= 17 && id[id.size() - 17] == '-';
+    if (reserved)
+        for (const char c : id.substr(id.size() - 16))
+            reserved &= (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+    bool altered = id.size() > 64 || reserved;
     std::uint64_t hash = 14695981039346656037ull;  // FNV-1a, stable across platforms
     for (const unsigned char c : id) {
         hash = (hash ^ c) * 1099511628211ull;

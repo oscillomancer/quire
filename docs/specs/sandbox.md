@@ -452,9 +452,13 @@ on the same rendering setup. Native editor windows are independent.
 
 Saved WAV/PNG artifact names use up to 64 bytes of the plugin ID, retaining
 ASCII letters, digits, `.`, `_` and `-`, and replacing other bytes with `_`.
-An altered or truncated ID gains `-` and the 16 lowercase hexadecimal digits
-of its full UTF-8 ID's FNV-1a 64-bit hash. The usual `dsp-test-`/`dsp-preview-`
-prefix and signal/extension suffix remain. The result's `plugin` field keeps
+An ID stays unchanged only if it is nonempty, safe, at most 64 bytes, and
+does not end in `-` followed by exactly 16 hexadecimal digits (either case).
+All other IDs gain `-` and the 16 lowercase hexadecimal digits of their full
+UTF-8 ID's FNV-1a 64-bit hash; reserving that suffix keeps raw IDs distinct
+from encoded names. Stock plugin IDs keep their existing names. The usual
+`dsp-test-`/`dsp-preview-` prefix and signal/extension suffix remain.
+The result's `plugin` field keeps
 the full ID; callers use the returned `path` to find the artifact.
 
 `dsp.edit {name, edits: [{old, new}]}` changes part of a library script:
