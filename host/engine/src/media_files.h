@@ -22,7 +22,8 @@ Result<std::string> copyIntoFolder(const std::filesystem::path& file,
 // Every file under `from` to the same place under `to` (an absent `from`
 // copies nothing). A file already there with the same bytes is kept; one
 // with other bytes is an error, and nothing is overwritten. A destination
-// within `from` is excluded from traversal, including resolved symlink aliases.
+// strictly within `from` is excluded from traversal, including resolved symlink
+// aliases. An ancestor destination receives the source files normally.
 Status copyFolder(const std::filesystem::path& from, const std::filesystem::path& to);
 
 }  // namespace supple::engine::detail

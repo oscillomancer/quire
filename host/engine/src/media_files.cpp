@@ -105,20 +105,28 @@ Status copyFolder(const fs::path& from, const fs::path& to) {
     std::error_code ec;
     if (!fs::is_directory(from, ec)) return {};
     if (fs::exists(to, ec) && fs::equivalent(from, to, ec)) return {};
+    const auto source = fs::canonical(from, ec);
+    if (ec) return copyError(from, to, ec.message());
     const auto absolute = fs::absolute(to, ec);
     if (ec) return copyError(from, to, ec.message());
     const auto destination = fs::weakly_canonical(absolute, ec);
     if (ec) return copyError(from, to, ec.message());
+    const auto relativeDestination = destination.lexically_relative(source);
+    const bool excludeDestination = !relativeDestination.empty() && relativeDestination != "." &&
+                                    *relativeDestination.begin() != "..";
     for (auto it = fs::recursive_directory_iterator(from, ec); !ec && it != fs::end(it);
          it.increment(ec)) {
         // Save As may put the destination inside the old media folder, including
-        // through a symlink. Never traverse or copy files from that subtree.
-        const auto resolved = fs::weakly_canonical(it->path(), ec);
-        if (ec) break;
-        const auto inside = resolved.lexically_relative(destination);
-        if (!inside.empty() && *inside.begin() != "..") {
-            it.disable_recursion_pending();
-            continue;
+        // through a symlink. Exclude it only then: an ancestor destination must
+        // still receive every source file when saving back to the old project.
+        if (excludeDestination) {
+            const auto resolved = fs::weakly_canonical(it->path(), ec);
+            if (ec) break;
+            const auto inside = resolved.lexically_relative(destination);
+            if (!inside.empty() && *inside.begin() != "..") {
+                it.disable_recursion_pending();
+                continue;
+            }
         }
         if (!it->is_regular_file(ec)) continue;
         const fs::path rel = it->path().lexically_relative(from);

@@ -59,4 +59,10 @@ TEST_CASE("media folder copy excludes its destination subtree and resolved alias
     CHECK_FALSE(fs::exists(destination / "new"));
     CHECK(fs::file_size(destination / "tone.wav") == 4);
     CHECK(fs::file_size(destination / "rec" / "take.wav") == 4);
+    // Record in the nested project, then Save As back to the original folder.
+    // An ancestor destination must receive new media, not exclude the source.
+    std::ofstream(destination / "rec" / "new-take.wav") << "new take";
+    REQUIRE(detail::copyFolder(target, source));
+    REQUIRE(fs::exists(source / "rec" / "new-take.wav"));
+    CHECK(fs::file_size(source / "rec" / "new-take.wav") == 8);
 }

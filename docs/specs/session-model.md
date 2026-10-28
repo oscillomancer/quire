@@ -440,10 +440,11 @@ reused) instead of naming it where it is. The GUI gives each project a
 folder of its own (gui.md §4.11).
 Copy failures retain the underlying filesystem error even when temporary-file
 cleanup succeeds, so `media.copy` identifies the cause of a failed import or save.
-If the destination is inside the source media folder, the recursive copy skips
-that destination subtree, comparing resolved paths so symlink aliases are also
-excluded. Existing destination files stay there; copied files are never read back
-as new source media.
+Only if the resolved destination is a strict descendant of the resolved source
+media folder does the recursive copy skip that destination subtree, including
+symlink aliases. Existing destination files stay there; copied files are never
+read back as new source media. An ancestor destination is copied to normally,
+so saving back to the original project folder includes newly recorded media.
 
 The engine app writes autosaves from main-thread service (engine.md §6,
 ADR-0030), only when a named project's head changed since the last one and
