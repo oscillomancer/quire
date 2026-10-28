@@ -82,13 +82,41 @@ never by concurrent accumulation — so results are thread-count independent.
   their latency (compensated bypass); offline instances report 0.
 - A chain's latency: sum over serial stages, max over a parallel group
   (shorter branches delayed to match inside the chain program).
-- For every node, `arrival(e) = latency(source up to tap(e)) + edge delay`
-  must be equal for all inputs; the compiler solves this by giving each edge
-  `delay(e) = max_in − latency_at_tap(e)`, recursively from sources to the
-  master, then shifts the transport so the master output is aligned (the
-  plan's `output_latency`). Items on a track are read `latency` samples
-  early so they line up at the output. Pre-FX taps from a track with
-  latency get delayed like any other.
+- **Read-ahead (ADR-0051):** retain the forward arrival `A(n)` and the
+  main output's startup shift `L = A(main) + chain(main)`. Solve backwards
+  from main for each node's downstream latency `D` and timeline shift
+  `S = L - D`. Known timeline material is evaluated at processing position
+  minus `S`: it runs `D` samples ahead of the audible main-output position.
+  For an edge from `u` to `v`, source tap offset `a` and destination offset
+  `b`, `S(u) = min(S(v) + b - a)` and
+  `delay = S(v) + b - S(u) - a`. Pre-FX taps have offset zero, other main
+  taps and auxiliary source channels use the source chain latency. Key
+  destinations use `stage.before`; main sums and auxiliary destinations use
+  zero. Each auxiliary link participates separately. Padding remains on
+  shorter fan-out paths; independent sources arrive at a sum aligned without
+  padding the faster source. Parallel FX retain their internal alignment.
+- The same main-master anchor is used in realtime and offline plans. Nodes
+  not upstream of main keep a forward schedule against already solved source
+  shifts, no earlier than their forward arrival. Alternate master/stem renders
+  trim at the selected tap's own `S + tapOffset`, after preparation. Main
+  `output_latency` retains its startup/playhead meaning.
+- Clips, take output spans/fades/envelopes and track MIDI use `S`. A take's
+  input uses `S - take.latency`. Track/take stage parameters, output-event
+  timestamps and plugin transport use that input shift plus `stage.before`,
+  at unity rate as well as under playrate. Fader controls use `S + chain`;
+  send encoders use their source tap's shift, and unencoded key controls
+  use their destination stage's. Device audio/MIDI are never read ahead.
+- The solve is independent of live/arm/monitor classification. Frontier rings
+  retain matching monotonic stream-frame coordinates between executors; source
+  read-ahead is relative to the retained startup shift, not an additional
+  request into a future ring position. Latency exceeding the 200 ms renderer
+  horizon therefore needs no renderer-lead fallback. All preparation/storage
+  allocation remains off the audio path.
+- Timeline material stays sample-aligned, renders deterministic, and realtime
+  output bit-identical to offline output of the same plan in both executors.
+  Old forward-padding render bytes are not preserved: Console noise/dither,
+  per-frame state, parameter-grid phase and corrected unity-rate plugin
+  transport may change (ADR-0051).
 - `fx.pdc = ignore` excludes an instance from compensation (for low-latency
   monitoring chains): its own wet/dry and pin delays still match it, but
   its chain reports none of its latency, so its track arrives late.
@@ -96,9 +124,13 @@ never by concurrent accumulation — so results are thread-count independent.
   samples at 2/4/8x; an instrument's output crosses only the downward half)
   plus the plug-in's own latency at the high rate, padded at the high rate to
   a whole number of plan samples, so compensation stays exact.
-- Input monitoring paths are not delayed to align with playback (they are
-  live); recorded material is offset by the backend's reported input latency
-  plus the monitored chain's latency so it lands where it was played.
+- Input monitoring incurs only its own downstream compensated path latency
+  (including fan-out alignment), input FX, ignored FX's physical latency and
+  device latency. Unrelated playback latency adds no padding at a common sum.
+  Recording starts at callback play position minus the plan's output latency
+  and the backend's output plus input latency; ordinary monitored track/bus/
+  master latency is not subtracted separately. Input-FX capture is corrected
+  separately as below.
 - Input FX (a channel's `input_chain`) process its record input whenever
   the channel is armed with an audio input, monitored or not: such a channel
   is live (the device input exists only in the callback). Monitoring hears
@@ -715,9 +747,12 @@ The engine registers the session-model §7 command catalogue on the command
 bus and exposes it through the control protocol (Unix socket), Lua and MCP (proxy or in-process). Engine-specific commands:
 `engine.start {backend, device, rate, block}`, `engine.stop`,
 `engine.status` (q: backend, rate, block, load, xruns, anticipation
-misses, meter drops), `engine.graph` (q: nodes, live/anticipative classification,
-latencies, CPU per node), `engine.settings.set {render_ahead_ms,
+misses, meter drops), `engine.settings.set {render_ahead_ms,
 worker_threads, automation_resolution, …}`.
+`OfflineResult::graph` supplies compiled graph text: input edges and residual
+padding, `lat_in` (the forward arrival diagnostic), `lat_chain` (compensated
+chain latency), and `timeline_shift` (processing position minus node-input
+timeline position). There is no registered `engine.graph` command.
 Events: `transport.changed`, `engine.xrun`, `engine.stats` (1 Hz),
 `meters` (rate-limited, subscribe per track), `fx.failed`,
 `record.progress`.
@@ -901,8 +936,9 @@ harness. See the tooling README for schemas, limits and invocation details.
   thread), and the engine stops every plugin there — no timeout, no stop from
   the main thread however long the device's period. Pause and
   seek `reset()` the plugins (no hanging notes); seek re-locates event and
-  automation cursors and clears delay lines. The live output lags the
-  render position by the plan's output latency.
+  automation cursors and clears delay lines. Timeline output lags the
+  processing position by the plan's output latency; monitored input incurs
+  its own downstream path latency (ADR-0051).
 - **Mixing decisions:** instruments add their output to the track's input;
   effects mix wet/dry against the input delayed by their latency; bypass is
   compensated (a delay of the stage's latency); the pan law applies to tracks,
@@ -996,8 +1032,9 @@ harness. See the tooling README for schemas, limits and invocation details.
   point (in time order; unchanged values are not resent). A block-start value
   is sent only to initialize a lane after prepare, locate, seek or loop wrap,
   merged into its sorted event list by an allocation-free insertion sort,
-  within capacity reserved at prepare. Lanes shift by the latency ahead of
-  the stage; seeks reset them and resend. Real-time output equals the
+  within capacity reserved at prepare. Lanes shift by the node's solved
+  timeline shift plus the stages before them (minus take latency for take
+  FX); seeks reset them and resend. Real-time output equals the
   offline render. Commands: `env.add`, `env.points.set`, `env.set`,
   `env.remove`, `env.list` (values in the parameter's unit; text like
   "800 Hz" for plugins). Write/touch/latch recording uses the envelope's own
@@ -1111,7 +1148,8 @@ normal plan-adoption boundaries, including the anticipative edit horizon.
 `Engine::takePluginOutputs()` is main-thread only. Each record contains FX id,
 plan generation, transport epoch, timeline sample, stream sample, the entire
 `host::OutputEvent`, and idle/anticipative markers. Timeline coordinates subtract
-the stage's input PDC; idle flush records use the service-time play position.
+the stage's input timeline shift (§1.3); idle flush records use the service-time
+play position.
 Parameter values and gesture boundaries are copied after worker tasks finish,
 into separate preallocated 4096-entry SPSC rings for renderer and callback.
 Publishing a batch (or a drop) notifies main after queue publication. Outputs
@@ -1646,7 +1684,9 @@ only read prepared windows. Device/stream frames remain monotonic through loops;
 timeline position wraps. Accumulation uses absolute project samples, including
 for nonzero offline range starts, so a fresh seek and a render of the same range
 make identical source phase decisions. PDC shifts **device** coordinates before
-the clock lookup.
+the clock lookup, using the backwards-solved `timelineShift` rather than forward
+arrival. Source-ahead/behind and clock margins use that same shift, including
+take latency and stage offsets (ADR-0051).
 All source converters share a 64-frame grid in compensated source time, including
 preroll: two identical sources with different take-chain latencies remain aligned.
 Looping retains converter history and reseeding occurs only for a fresh seek epoch.

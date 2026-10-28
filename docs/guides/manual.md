@@ -53,6 +53,11 @@ Audio device dialog then opens and says why. Choose another device, or
 what is running: the backend, rate, buffer size, device period and output
 latency.
 
+When monitoring an armed input, the latency comes from the device, input FX,
+and effects on that input's route to the master. Effects on unrelated playback
+tracks do not delay it. If the input feeds both a direct path and a bus with
+latency, the shorter path is delayed so the two stay aligned.
+
 ## Projects
 
 A project is a JSON file. Its media lives in the `media/` folder beside it.

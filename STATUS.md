@@ -141,8 +141,10 @@ instructions are in `docs/guides/installing.md`.
   below a real-time callback when permitted, with a warning and normal
   scheduling otherwise, reported per thread class in `engine.status`
   (ADR-0026);
-  plugin delay compensation (with per-FX
-  `pdc: ignore`); parallel FX groups; per-FX oversampling (2/4/8x); input
+  read-ahead plugin delay compensation (ADR-0051, with per-FX
+  `pdc: ignore`): unrelated playback tracks no longer delay monitored input,
+  fan-out stays aligned and arming does not change the timing solution;
+  parallel FX groups; per-FX oversampling (2/4/8x); input
   FX on armed channels, monitored and recorded; plugins keep
   running while the transport is stopped; renderer deadline/event waits
   (ADR-0028); headless main-thread service driven by notifications and
@@ -567,6 +569,10 @@ Library boundaries:
   on Linux, and native macOS/Windows CI has not run on it.
 
 Engine and hosting:
+- Read-ahead PDC and its portable monitoring/alignment regressions await native
+  macOS/Windows CI and independent implementation review. The main-master
+  schedule is shared by realtime and offline rendering; old forward-padding
+  noise/state phase is not preserved (ADR-0051).
 - The headless platform layer (ADR-0035) has natively tested macOS/Windows
   address waits, wake sources, control socket/MCP paths and user directory roots.
   Both native engines run with dummy/offline audio and native RT/offline
@@ -702,7 +708,9 @@ Session and editing:
   reserve four additional seconds for latency changes; history exhaustion or late
   preparation recovers automatically through a prepared locate at the consumed
   position, with the same state reset/preroll as a seek. Moving a compensated
-  stretch source uses this recovery too, preserving phase alignment.
+  stretch source uses this recovery too, preserving phase alignment. Under
+  read-ahead PDC, inserting track latency can move sibling sources and trigger
+  this same recovery, even when the clock window itself has enough history.
   Render-command budgets conservatively use the minimum curve value; a long
   varying-rate range may need splitting even when its exact duration would fit
   the output budget.

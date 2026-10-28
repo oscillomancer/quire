@@ -66,4 +66,4 @@ current state.
 | [0048](0048-packaging-and-distribution.md) | Packaging and distribution | Accepted |
 | [0049](0049-isolated-linux-package-runtimes.md) | Isolated C++ runtimes in Linux packages | Accepted |
 | [0050](0050-audio-device-preferences.md) | Audio device preferences and per-client graph requests | Accepted |
-| [0051](0051-read-ahead-latency-compensation.md) | Latency compensation by read-ahead | Proposed |
+| [0051](0051-read-ahead-latency-compensation.md) | Latency compensation by read-ahead | Accepted |

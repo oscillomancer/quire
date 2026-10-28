@@ -334,7 +334,7 @@ struct Stage {
     std::vector<ParamLane> lanes;
     bool bypass = false, instrument = false;
     bool autoBypassOnSilence = false, sleeping = false, processed = false;
-    std::int64_t inputLatency = 0;  // output event timeline correction
+    std::int64_t inputLatency = 0;  // stage input's timeline shift, also corrects output events
     bool rateLive = false;
     bool callbackBypass = false;  // synchronous bridges never run on the device thread
     double wet = 1.0;
@@ -494,7 +494,10 @@ struct Node {
     std::vector<int> recordInputs;  // device channels, 0-based (one = mono to both)
     std::int64_t inputLatency = 0;
     Stereo inputBuf;
-    std::int64_t latIn = 0, latChain = 0;
+    std::int64_t latIn = 0, latChain = 0;  // forward arrival (diagnostic), compensated chain
+    // Timeline at this node input is processing position - timelineShift.
+    // For paths to main: downstream latency = Plan::outputLatency - timelineShift.
+    std::int64_t timelineShift = 0;
     Stereo sum, preFx, preFader, post, postKey;
     std::vector<TimedEvent> events;
     std::size_t nextEvent = 0;
