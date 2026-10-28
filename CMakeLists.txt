@@ -58,28 +58,27 @@ if(WIN32)
   supple_windows_utf8_manifests("${PROJECT_SOURCE_DIR}")
 endif()
 
-# License gate: fails the build when a dependency is not declared.
-find_package(Python3 COMPONENTS Interpreter)
-if(Python3_FOUND)
-  add_custom_target(license-check ALL
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/license-check/check.py --root ${CMAKE_SOURCE_DIR}
-    COMMENT "Checking third-party licenses"
-    VERBATIM)
-  if(TARGET package-runtime)
-    add_dependencies(package-runtime license-check)
-  endif()
-  if(SUPPLE_BUILD_TESTS)
-    add_test(NAME license-check
-             COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/license-check/check.py --root ${CMAKE_SOURCE_DIR})
-    add_test(NAME license-check.tests
-             COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_SOURCE_DIR}/tools/license-check)
-    add_test(NAME eval-harness.tests
-             COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_SOURCE_DIR}/tools/eval-harness)
-    set_tests_properties(eval-harness.tests PROPERTIES LABELS "eval")
-    foreach(tool IN ITEMS listening optimize-bench gui reaper-check)
-      add_test(NAME tools.${tool}.tests
-               COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_SOURCE_DIR}/tools/${tool}
-                       -p "test_*.py")
-    endforeach()
-  endif()
+# License gate: fails the build when a dependency is not declared. Python is
+# required (building.md lists it on every platform), so the gate is never skipped.
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_custom_target(license-check ALL
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/license-check/check.py --root ${CMAKE_SOURCE_DIR}
+  COMMENT "Checking third-party licenses"
+  VERBATIM)
+if(TARGET package-runtime)
+  add_dependencies(package-runtime license-check)
+endif()
+if(SUPPLE_BUILD_TESTS)
+  add_test(NAME license-check
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/license-check/check.py --root ${CMAKE_SOURCE_DIR})
+  add_test(NAME license-check.tests
+           COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_SOURCE_DIR}/tools/license-check)
+  add_test(NAME eval-harness.tests
+           COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_SOURCE_DIR}/tools/eval-harness)
+  set_tests_properties(eval-harness.tests PROPERTIES LABELS "eval")
+  foreach(tool IN ITEMS listening optimize-bench gui reaper-check)
+    add_test(NAME tools.${tool}.tests
+             COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_SOURCE_DIR}/tools/${tool}
+                     -p "test_*.py")
+  endforeach()
 endif()
