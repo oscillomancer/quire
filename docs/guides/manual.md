@@ -67,12 +67,14 @@ window) first stop an active recording and add its takes to the
 project, then ask whether to save the changes. Cancel keeps the recorded takes;
 Undo removes that recording. If stopping fails, the error is shown and the
 requested action does not continue. If an agent starts another recording or
-changes the project while that question or its Save As dialog is open, the app
-stops the new recording and asks again before saving or leaving. A changed
-branch also requires a new decision.
+edits the current project while that question or its Save As dialog is open,
+the app stops the new recording and asks again before saving or leaving.
+A changed branch also requires a new decision.
 
-If another project replaces the current one while a file or folder dialog is
-open, its result is ignored with a notice; open the dialog again. If edits arrive
+If another project replaces the current one while the save-changes question is
+open, any button cancels the old request with a notice, leaving the replacement
+project untouched. File and folder dialog results are also ignored with a notice
+if the project was replaced; open the dialog again. If edits arrive
 while Open is waiting, Quire asks about unsaved changes again before opening.
 
 Renders go to `~/Documents/quire-media` unless you choose another folder in

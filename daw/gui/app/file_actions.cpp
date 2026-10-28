@@ -204,6 +204,12 @@ void FileActions::registerQuit(std::function<void()> quit, bool prompt) {
     });
 }
 
+bool FileActions::currentProject(std::uint64_t generation) {
+    if (app_.projectGeneration() == generation) return true;
+    showError("The project changed while the dialog was open. Please try again.");
+    return false;
+}
+
 std::function<void(DialogLifetime::Paths)> FileActions::guardDialog(
     std::function<void(DialogLifetime::Paths)> done, bool opening) {
     const auto generation = app_.projectGeneration();
@@ -212,11 +218,7 @@ std::function<void(DialogLifetime::Paths)> FileActions::guardDialog(
     return dialogs_.guard(
         post_, [this, generation, version, branch, opening, done = std::move(done)](auto paths) {
             if (paths.empty()) return;
-            auto current = [this, generation] {
-                if (app_.projectGeneration() == generation) return true;
-                showError("The project changed while the dialog was open. Please try again.");
-                return false;
-            };
+            auto current = [this, generation] { return currentProject(generation); };
             if (!current()) return;
             auto complete = [current, done, paths = std::move(paths)] {
                 // A replacement can also happen while the renewed prompt is open.
@@ -501,11 +503,13 @@ void FileActions::import(const std::vector<std::filesystem::path>& files) {
 struct FileActions::DiscardRequest {
     std::string what;
     std::function<void()> then;
-    std::uint64_t version;
+    std::uint64_t generation, version;
     std::string branch;
 };
 
 bool FileActions::revalidateDiscard(const std::shared_ptr<DiscardRequest>& request) {
+    // A stale request must not even stop recording in the replacement project.
+    if (!currentProject(request->generation)) return false;
     const bool recording = app_.engine() && app_.engine()->recording();
     if (recording && !exec("transport.stop", json::Value::object())) return false;
     if (recording || app_.head().version != request->version ||
@@ -530,7 +534,8 @@ void FileActions::confirmDiscard(const std::string& what, std::function<void()> 
 
 void FileActions::showDiscard(const std::string& what, std::function<void()> then) {
     auto request = std::make_shared<DiscardRequest>(
-        DiscardRequest{what, std::move(then), app_.head().version, app_.versions().branch()});
+        DiscardRequest{what, std::move(then), app_.projectGeneration(), app_.head().version,
+                       app_.versions().branch()});
     auto form = std::make_unique<ui::Node>("file.confirm");
     form->layout.dir = ui::Layout::Dir::Column;
     form->layout.width = ui::SizeRule::fixed(420);
@@ -569,7 +574,11 @@ void FileActions::showDiscard(const std::string& what, std::function<void()> the
         if (!revalidateDiscard(keep)) return;
         keep->then();
     });
-    row.emplace<ui::Button>("file.confirm.cancel", "Cancel", [this] { root_.closePopup(); });
+    row.emplace<ui::Button>("file.confirm.cancel", "Cancel", [this, request] {
+        const auto generation = request->generation;
+        root_.closePopup();
+        (void)currentProject(generation);
+    });
     root_.openPopup(std::move(form), {}, ui::Placement::Center);
 }
 

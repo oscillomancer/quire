@@ -597,6 +597,74 @@ TEST_CASE("file dialogs: completions belong to their project and discard revisio
     }
 }
 
+TEST_CASE("file actions: stale discard buttons cannot affect a replacement project") {
+    engine::DummyBackend backend({.mode = engine::DummyBackend::Mode::Manual});
+    App a;
+    REQUIRE(a.ok);
+    const char* button = "file.confirm.discard";
+    bool saveAsCompletion = false, recording = false;
+    SUBCASE("Save") { button = "file.confirm.save"; }
+    SUBCASE("Don't save") {}
+    SUBCASE("Cancel") { button = "file.confirm.cancel"; }
+    SUBCASE("Save As completion") { saveAsCompletion = true; }
+    SUBCASE("a stale decision must not stop the replacement's recording") { recording = true; }
+    std::vector<std::function<void()>> posted;
+    std::function<void(gui::DialogLifetime::Paths)> saveAnswer;
+    gui::FileActions files(
+        *a.root, *a.actions, *a.dispatcher, *a.app, a.ui, a.window->sdl(),
+        [&](auto task) { posted.push_back(std::move(task)); },
+        [&](const auto&, auto done) { saveAnswer = std::move(done); });
+    auto exec = [&](const char* name, const char* args = "{}") {
+        REQUIRE(a.dispatcher->execute({name, json::parse(args).value(), {}}));
+    };
+    a.key("Ctrl+T");
+    const auto version = a.app->head().version;
+    REQUIRE(a.actions->run("ui.file.new"));
+    if (saveAsCompletion) {
+        a.root->frame(false);
+        REQUIRE(a.root->click("file.confirm.save"));
+        REQUIRE(saveAnswer);
+    }
+    exec("project.new");
+    exec("track.add", R"({"name":"Replacement"})");
+    // Reused version/branch values must not disguise the new project.
+    REQUIRE(a.app->head().version == version);
+    const auto generation = a.app->projectGeneration();
+    files.saveAs(a.dir / "replacement");
+    const auto path = a.app->projectPath();
+    REQUIRE_FALSE(path.empty());
+    REQUIRE(writeFileAtomic(path, "external contents"));
+    if (recording) {
+        REQUIRE(a.app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2},
+                                   {.anticipative = false}));
+        exec("track.set", R"({"track":"tr_1","armed":true,"record_input":[1,2]})");
+        exec("transport.record");
+        backend.run(2);
+    }
+    std::string notice;
+    a.actions->onError = [&](const auto& message) { notice = message; };
+    a.root->frame(false);
+    if (saveAsCompletion) {
+        saveAnswer({a.dir / "stale-save"});
+        REQUIRE(posted.size() == 1);
+        posted.front()();
+        CHECK_FALSE(std::filesystem::exists(a.dir / "stale-save"));
+    } else {
+        REQUIRE(a.root->click(button));
+    }
+    CHECK(a.app->projectGeneration() == generation);
+    CHECK(a.tracks() == 2);
+    REQUIRE(readTextFile(path));
+    CHECK(*readTextFile(path) == "external contents");
+    CHECK(notice == "The project changed while the dialog was open. Please try again.");
+    CHECK_FALSE(a.root->popupOpen());
+    if (recording) {
+        CHECK(a.app->engine()->recording());
+        exec("transport.stop");
+        a.app->stopEngine();
+    }
+}
+
 TEST_CASE("file actions: a late recording renews the discard decision before saving or leaving") {
     engine::DummyBackend backend({.mode = engine::DummyBackend::Mode::Manual});
     App a;

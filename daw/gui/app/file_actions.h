@@ -95,6 +95,7 @@ class FileActions {
 
   private:
     struct DiscardRequest;
+    bool currentProject(std::uint64_t generation);
     void showDiscard(const std::string& what, std::function<void()> then);
     bool revalidateDiscard(const std::shared_ptr<DiscardRequest>& request);
     void chooseSave(std::function<void(DialogLifetime::Paths)> done);
