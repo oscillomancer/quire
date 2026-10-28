@@ -158,9 +158,11 @@ if(SUPPLE_BUILD_TESTS)
                              SUPPLE_SKILL_DIR="${PROJECT_SOURCE_DIR}/skill")
   # These cases load stock modules and discover the build-tree agent skill.
   # Building the test target alone must stage its runtime prerequisites.
-  add_dependencies(gui-app.tests clap-host-fixtures skill-tree)
+  add_dependencies(gui-app.tests clap-host-fixtures skill-tree ${PRODUCT_SLUG}-mcp)
   if(SUPPLE_BUILD_PLUGINS)
-    add_dependencies(gui-app.tests plugin-hickory plugin-yarrow plugin-ghyll)
+    # Named FX/browser fixtures plus eight modules for editor-capability checks.
+    add_dependencies(gui-app.tests plugin-hickory plugin-yarrow plugin-ghyll plugin-sundew
+                     plugin-gorse plugin-treeline plugin-sorrel plugin-teasel)
     target_compile_definitions(gui-app.tests PRIVATE SUPPLE_GUI_TEST_STOCK_PLUGINS=1)
   endif()
   target_compile_definitions(gui-app.tests PRIVATE SUPPLE_BRIDGE_PATH="$<TARGET_FILE:${PRODUCT_SLUG}-bridge>")

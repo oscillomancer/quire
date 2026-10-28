@@ -1182,9 +1182,10 @@ exposes the selection to agents.
 
 ## 10. Testing
 
-`gui-app.tests` stages its agent skill tree and, when stock plugins are enabled,
-the Hickory, Yarrow and Ghyll modules used by its cases as explicit build
-dependencies. Building this test target alone supplies those prerequisites.
+`gui-app.tests` stages its agent skill tree, MCP helper and, when stock plugins
+are enabled, eight stock modules covering the named FX/browser fixtures and
+editor-capability checks as explicit build dependencies. Building this test
+target alone supplies those prerequisites.
 
 Unit tests for layout, input routing, damage, theme loading and the peak
 pyramid; golden images for widgets and each view in fixed states (offscreen,

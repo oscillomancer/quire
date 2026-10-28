@@ -134,7 +134,8 @@ preset, about half an hour in all. Pass `-DSUPPLE_BUILD_TESTS=OFF` at
 configure time to build only the app and its helpers.
 
 `cmake --build --preset dev -j3 --target gui-app.tests` also stages the
-stock plugins its cases use (when plugins are enabled) and the agent skill tree.
+stock plugins its cases use (when plugins are enabled), the MCP helper and the
+agent skill tree.
 Run it with `ctest --preset dev -R '^gui-app\.tests$'`.
 
 Tests that open real hardware are skipped unless you opt in:

@@ -56,8 +56,12 @@ TEST_CASE("GUI app test runtime prerequisites are staged") {
     const auto skill = host::skillDir();
     REQUIRE(skill);
     CHECK(std::filesystem::is_regular_file(*skill / "SKILL.md"));
+    const auto helpers =
+        gui::help::executables(gui::help::ownExecutable(), gui::help::nativePlatform());
+    CHECK(std::filesystem::is_regular_file(helpers.mcp));
 #ifdef SUPPLE_GUI_TEST_STOCK_PLUGINS
-    for (const char* plugin : {"Hickory.clap", "Yarrow.clap", "Ghyll.clap"})
+    for (const char* plugin : {"Hickory.clap", "Yarrow.clap", "Ghyll.clap", "Sundew.clap",
+                               "Gorse.clap", "Treeline.clap", "Sorrel.clap", "Teasel.clap"})
         CHECK(std::filesystem::exists(std::filesystem::path(SUPPLE_CLAP_DIR) / plugin));
 #endif
 }
