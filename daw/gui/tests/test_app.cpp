@@ -73,6 +73,14 @@ TEST_CASE("GUI settings report filesystem lookup errors without throwing") {
     const auto file = dir / (std::string(256, 'x') + ".json");
     std::error_code ec;
     (void)std::filesystem::exists(file, ec);
+#ifdef _WIN32
+    // Windows reports an overlong name as missing rather than failing the lookup.
+    if (!ec) {
+        MESSAGE("skipped: Windows reports an overlong name as missing");
+        std::filesystem::remove_all(dir);
+        return;
+    }
+#endif
     REQUIRE(ec);
     auto check = [&](auto load) {
         CHECK(load({}));

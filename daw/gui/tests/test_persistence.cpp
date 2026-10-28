@@ -18,6 +18,14 @@ TEST_CASE("UI sidecar lookup errors leave the file protected without throwing") 
     const auto project = dir / (std::string(250, 'x') + ".json");
     std::error_code ec;
     (void)std::filesystem::exists(gui::UiPersistence::fileFor(project), ec);
+#ifdef _WIN32
+    // Windows reports an overlong name as missing rather than failing the lookup.
+    if (!ec) {
+        MESSAGE("skipped: Windows reports an overlong name as missing");
+        std::filesystem::remove_all(dir);
+        return;
+    }
+#endif
     REQUIRE(ec);
     {
         gui::UiPersistence p;
