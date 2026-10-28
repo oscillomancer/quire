@@ -14,7 +14,11 @@ parameters, so Marram gives every slot a type with an `off` and says which
 parameters apply with the script's activity conditions (amendment of
 2026-10-21 to `semantic-params-extension.md`): an agent's description and
 the editor show only what the patch uses. Effects are not part of it:
-delay, reverb, EQ and chorus are stock effects after it in a chain.
+saturation, delay, reverb, EQ and chorus are stock effects after it in a
+chain. Its only saturation is the ladder filter's (§2.3); the drive
+section it had after the filters (`drive.type`, `drive.amount`,
+`drive.bias`, `drive.mix`) was removed on 2026-10-28, and those keys are
+never reused.
 
 ## 1. Signal flow (per voice)
 
@@ -22,7 +26,7 @@ delay, reverb, EQ and chorus are stock effects after it in a chain.
  note ── osc1..osc4 ──(each: filter 1, filter 2, both, or direct)──┐
         (unison copies, FM between them, hard sync to osc1)         │
                                                                     ▼
-          filter 1 ─┬─ serial: into filter 2 ─┬─ drive ── amp (env, velocity, pan) ── voices summed
+          filter 1 ─┬─ serial: into filter 2 ─┬─ amp (env, velocity, pan) ── voices summed
           filter 2 ─┘  parallel: summed       ┘
  env2 (the mod envelope): cutoffs, pitch and FM depth, by fixed amounts
  routes (§3): amp, env2, env3, lfo1..3, macro1..4 and an instrument's own sources,
@@ -164,14 +168,10 @@ into filter 2; oscillators sent to filter 2 join after filter 1) or
   bandwidths 80/90/120 Hz widened to a Q of at most 6, keytrack moving
   them with the note.
 
-### 2.4 `drive`, `amp`, `env2`, `env3`, `output`
+### 2.4 `amp`, `env2`, `env3`, `output`
 
 | key | unit / options | range | default | applies |
 |---|---|---|---|---|
-| `drive.type` | `off`, `soft`, `tape`, `fold`, `hard` | | **off** | |
-| `drive.amount` | dB, output compensated by 1/√gain | 0..36 | **6** | not off |
-| `drive.bias` | % | −100..100 | **0** | not off |
-| `drive.mix` | % | 0..100 | **100** | not off |
 | `amp.attack` | ms | 0..30000 | **2** | |
 | `amp.decay` | ms | 1..30000 | **600** | |
 | `amp.sustain` | % | 0..100 | **80** | |
@@ -220,7 +220,7 @@ optionally through a second source:
   "lfo1>voice.tune":     {"amount": "20 ct", "via": "modwheel"},
   "env3>osc2.fine":      {"amount": "+24 st"},
   "velocity>filter1.cutoff": {"amount": "+1 oct"},
-  "macro1>drive.amount": {"amount": "12 dB"}
+  "macro1>filter1.drive": {"amount": "12 dB"}
 }
 ```
 
@@ -232,8 +232,8 @@ optionally through a second source:
 **Destinations** (every one per voice): `voice.tune`; each oscillator's
 `level`, `pan`, `fine` (reaching ±4800 ct), `width`, `position`, `ratio`,
 `feedback` and `fm`; each filter's `cutoff`, `resonance`, `feedback`,
-`damping`, `vowel`, `shift` and `drive`; `drive.amount`, `drive.bias`,
-`drive.mix`; `amp.level`, `amp.pan`, and the attack, decay and release of
+`damping`, `vowel`, `shift` and `drive`; `amp.level`, `amp.pan`, and the
+attack, decay and release of
 the amp, Env 2 and Env 3; each LFO's `rate`. Choices, switches, unison,
 glide and the output are not routed.
 
@@ -276,7 +276,6 @@ places as `Shared` members.
 - **Envelopes** (amp, Env 2, Env 3): the shape with a handle per stage to
   drag, and where the newest note is in it.
 - **LFOs**: the shape with its delay's fade and the newest note's phase.
-- **Drive**: the type's transfer curve at the current drive.
 - **Modulation**: the route list (`e.routes()`), the same as the automatic
   editor's for any script with routes.
 - **Voice**: quality, mode, polyphony, glide, bend range, tuning, unison
@@ -288,5 +287,5 @@ double click.
 ## 6. Performance
 
 Release build, one core, 48 kHz: 8 notes of a pad with two saws and a sub,
-3 unison copies, a 24 dB ladder and tape drive at normal quality, 4.1 %
+3 unison copies, a 24 dB ladder and the tape drive Marram then had (2026-10-21) at normal quality, 4.1 %
 with or without routes (Orrery's equivalent: 3.1 %).

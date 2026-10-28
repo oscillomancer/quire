@@ -77,8 +77,8 @@ filter cutoff, sub-bass amp release). Tier 2: bell, e-piano and acid bass with
 three changed modules (an oscillator and two envelopes). Tier 3: noise snare,
 formant lead and strings, from a fresh default patch, with no starting patch
 provided; their hidden patches change the recipe's filter, envelope and voice
-or drive settings, so the suite exercises analog, sub, FM, noise, the
-ladder/SVF/formant filters, drive, envelopes, LFOs, routes and unison.
+settings, so the suite exercises analog, sub, FM, noise, the
+ladder/SVF/formant filters, filter drive, envelopes, LFOs, routes and unison.
 `changed_modules` names the groups changed (`filter1`, `amp`).
 
 The harness renders the hidden patch before inference in a separate directory.

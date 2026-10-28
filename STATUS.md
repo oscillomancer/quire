@@ -399,7 +399,7 @@ instructions are in `docs/guides/installing.md`.
   oscillators (analog with sync, wavetables from Orrery's recipes, FM
   operators, noise, sub; FM between any two), unison up to 8 copies, two
   filters (ladder, state-variable, comb, formant; serial or parallel),
-  drive, amp and mod envelopes with fixed amounts (cutoff, pitch, FM depth),
+  amp and mod envelopes with fixed amounts (cutoff, pitch, FM depth),
   velocity and key tracking, drift, glide, Poly/Mono/Legato with a
   polyphony limit, oversampled 1x/2x/4x; modulation routes from a third
   envelope, three LFOs (per note or free, synced or not, seven shapes),
@@ -408,7 +408,7 @@ instructions are in `docs/guides/installing.md`.
   agent sees only the oscillators and filters a patch uses. Its editor
   draws each oscillator's wave (the wavetables' own frames), the filters'
   response with a node to drag, the envelopes and LFOs with handles and
-  the newest note's place, the drive curve, the voices playing and the
+  the newest note's place, the voices playing and the
   route list. It passes the stock checks and the REAPER check.
   Withy, the chorus (`plugins/withy`), is a stock plugin with no
   predecessor. Five styles lay out its voices: classic (two in anti-phase,

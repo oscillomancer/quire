@@ -18,7 +18,6 @@
 //                (12 or 24 dB, saturating), a state-variable filter, a tuned
 //                comb, or a bank of vowel formants. Each oscillator goes to
 //                one, both, or past them.
-//   Drive        soft, tape, fold or hard, after the filters.
 //   Amp          its own envelope, with velocity and pan.
 //
 // The mod envelope (Env 2) moves each filter's cutoff, the pitch and the
@@ -201,19 +200,6 @@ int digitalSteps(int f, Array<double, 64>& v) {
     if (most > 0.0)
         for (int j = 0; j < n; ++j) v[j] = round(v[j] / most * 8.0) / 8.0;
     return n;
-}
-
-// The drive's curves (soft, tape, fold, hard), each with its resting point
-// taken off so a bias adds no offset.
-double tapeCurve(double v) { return v >= 0.0 ? fastTanh(v * 1.2) / 1.2 : fastTanh(v * 0.8) / 0.8; }
-double driveTransfer(int type, double u) {
-    if (type == 1) return fastTanh(u);
-    if (type == 2) return tapeCurve(u);
-    if (type == 3) return sin(0.5 * pi * u);
-    return clamp(u, -1.0, 1.0);
-}
-double driveCurve(int type, double u, double bias) {
-    return driveTransfer(type, u + bias) - driveTransfer(type, bias);
 }
 
 // A value from -1 to 1 for each whole number n and seed, the same everywhere:
@@ -479,14 +465,9 @@ struct Voice {
     int lfoSeed = 0;
     double age = 0.0;
     // As the routes leave them at the last tick: each oscillator's pulse
-    // width and FM feedback, and the drive.
+    // width and FM feedback.
     Array<double, 4> width;
     Array<double, 4> feedback;
-    double driveGain = 1.0;
-    double driveBias = 0.0;
-    double driveMix = 1.0;
-    double driveZero = 0.0;
-    double driveScale = 1.0;
     double ampL = 0.0;
     double ampLStep = 0.0;
     double ampR = 0.0;
@@ -578,7 +559,7 @@ struct Marram : Instrument {
         .vendor = "Supple Audio",
         .description =
             "Synthesizer: four oscillators (analog, wavetable, FM, noise, sub) with unison, two "
-            "filters (ladder, state-variable, comb, formant), drive, three envelopes, three LFOs "
+            "filters (ladder, state-variable, comb, formant), three envelopes, three LFOs "
             "and four macros, connected by modulation routes.",
         .features = {"synthesizer"},
         .voices = kVoices};
@@ -1338,32 +1319,7 @@ struct Marram : Instrument {
                             "Serial runs filter 1 into filter 2; parallel runs them side by side "
                             "and mixes them.");
 
-    // --- Drive, amp, envelopes ------------------------------------------------------------
-
-    Param driveType = choice("Drive", {"Off", "Soft", "Tape", "Fold", "Hard"}, 0)
-                          .withKey("drive.type")
-                          .in("Drive")
-                          .help(
-                              "Saturation after the filters: soft and tape round off, fold turns "
-                              "the wave back on itself, hard clips.");
-    Param driveAmount = decibels("Drive Amount", 0, 36, 6)
-                            .withKey("drive.amount")
-                            .polyModulated()
-                            .in("Drive")
-                            .activeUnless(driveType, {"off"})
-                            .help("Gain into the curve; the level out is held about even.");
-    Param driveBias = percent("Drive Bias", 0, -100, 100)
-                          .withKey("drive.bias")
-                          .polyModulated()
-                          .in("Drive")
-                          .activeUnless(driveType, {"off"})
-                          .help("Leans the curve to one side, for even harmonics.");
-    Param driveMix = percent("Drive Mix", 100)
-                         .withKey("drive.mix")
-                         .polyModulated()
-                         .in("Drive")
-                         .activeUnless(driveType, {"off"})
-                         .help("How much of the driven sound is heard against the clean.");
+    // --- Amp, envelopes ------------------------------------------------------------------
 
     Param ampAttack = milliseconds("Amp Attack", 0, 30000, 2)
                           .withKey("amp.attack")
@@ -2058,11 +2014,6 @@ struct Marram : Instrument {
             n.damping = r.damping;
             if (c.type == kFormant) formants(n, r.vowel, r.shift + 12.0 * keyOct * c.keytrack);
         }
-        if (driveType.index() != 0) {
-            s.driveGain = dbToGain(driveAmount.forVoice(v));
-            s.driveBias = driveBias.forVoice(v);
-            s.driveMix = driveMix.forVoice(v);
-        }
 
         // Stereo: a voice whose oscillators all sit in the centre filters one
         // channel and copies it.
@@ -2288,30 +2239,13 @@ struct Marram : Instrument {
         return filterOne(s.filter[2 + c], filt[1], s.now[1], one + b) + d;
     }
 
-    // The bias offset and gain compensation are fixed between control ticks.
-    void driveAt(Voice& s, int type) {
-        s.driveZero = driveTransfer(type, s.driveBias);
-        s.driveScale = sqrt(max(1.0, s.driveGain));
-    }
-
-    double shape(double x, int type, const Voice& s) {
-        const double y =
-            (driveTransfer(type, x * s.driveGain + s.driveBias) - s.driveZero) / s.driveScale;
-        return x + (y - x) * s.driveMix;
-    }
-
     void play(int v, int frames) {
         Voice& s = voice[v];
-        const int dtype = driveType.index();
-        // A type change may split a block inside a tick. Refresh for that
-        // type here as well as when control() reads new routed settings.
-        if (dtype != 0 && s.tickLeft != 0) driveAt(s, dtype);
         for (int i = 0; i < frames; ++i) {
             if (s.tickLeft == 0) {
                 control(v, i);
                 s.tickLeft = kTick;
                 if (s.done) return;
-                if (dtype != 0) driveAt(s, dtype);
             }
             --s.tickLeft;
             // Noise is made at the plugin's rate and held across the
@@ -2407,17 +2341,13 @@ struct Marram : Instrument {
                         }
                     }
                 }
-                double yL = filters(s, 0, aL, bL, dL);
-                double yR = s.narrow ? yL : filters(s, 1, aR, bR, dR);
+                const double yL = filters(s, 0, aL, bL, dL);
+                const double yR = s.narrow ? yL : filters(s, 1, aR, bR, dR);
                 for (int f = 0; f < 2; ++f) {
                     FilterNow& n = s.now[f];
                     n.g += n.gStep;
                     n.k += n.kStep;
                     n.delay += n.delayStep;
-                }
-                if (dtype != 0) {
-                    yL = shape(yL, dtype, s);
-                    yR = s.narrow ? yL : shape(yR, dtype, s);
                 }
                 s.ampL += s.ampLStep;
                 s.ampR += s.ampRStep;
@@ -2857,8 +2787,8 @@ struct Marram : Instrument {
     // --- The editor ---------------------------------------------------------------------------
     //
     // A header with the macros, the voices and the level; the oscillators
-    // and the filters, a tab each; the envelopes, the LFOs and the drive;
-    // the routes (e.routes) and the voice. Every control is drawn here and
+    // and the filters, a tab each; the envelopes and the LFOs; the routes
+    // (e.routes) and the voice. Every control is drawn here and
     // answers in pointer(): a dial drags up and down (Shift finely), turns
     // with the wheel and goes back to its default on a double click; a
     // button sets its choice; the filter's curve and the envelope's shape
@@ -2880,12 +2810,8 @@ struct Marram : Instrument {
     static constexpr double envH = 216;
     static constexpr double lfoX = 498;
     static constexpr double lfoY = 424;
-    static constexpr double lfoW = 380;
+    static constexpr double lfoW = 726;
     static constexpr double lfoH = 216;
-    static constexpr double drvX = 890;
-    static constexpr double drvY = 424;
-    static constexpr double drvW = 334;
-    static constexpr double drvH = 216;
     static constexpr double modX = 16;
     static constexpr double modY = 652;
     static constexpr double modW = 760;
@@ -2910,10 +2836,6 @@ struct Marram : Instrument {
     static constexpr double cycleY = lfoY + 78;
     static constexpr double cycleW = 200;
     static constexpr double cycleH = 74;
-    static constexpr double bendX = drvX + 16;  // the drive's curve
-    static constexpr double bendY = drvY + 76;
-    static constexpr double bendW = 124;
-    static constexpr double bendH = 124;
 
     // The palette: the theme's, and the dune's.
     static constexpr int kInk = 0x1A1411;
@@ -2928,7 +2850,7 @@ struct Marram : Instrument {
     static constexpr int kMeterHigh = 0xD8CE9C;
     static constexpr int kGrass = 0xA9BC72;     // the oscillators: marram's blades
     static constexpr int kSand = 0xDDBA80;      // the filters: the dune
-    static constexpr int kSeaGlass = 0x8FB3AC;  // the drive and the voice
+    static constexpr int kSeaGlass = 0x8FB3AC;  // the voice
     static constexpr int kStem = 0x8C7553;
 
     // Parameter codes: what a dial or a button edits. The oscillators' are
@@ -2947,10 +2869,6 @@ struct Marram : Instrument {
     static constexpr int cDrift = 9;
     static constexpr int cQuality = 10;
     static constexpr int cRouting = 11;
-    static constexpr int cDriveType = 12;
-    static constexpr int cDriveAmount = 13;
-    static constexpr int cDriveBias = 14;
-    static constexpr int cDriveMix = 15;
     static constexpr int cAmp = 20;   // attack, decay, sustain, release, velocity, level, pan
     static constexpr int cEnv2 = 30;  // attack, decay, sustain, release, pitch, fm
     static constexpr int cEnv3 = 40;  // attack, decay, sustain, release
@@ -3092,14 +3010,6 @@ struct Marram : Instrument {
                 return readOn(quality, how);
             case 11:
                 return readOn(routing, how);
-            case 12:
-                return readOn(driveType, how);
-            case 13:
-                return readOn(driveAmount, how);
-            case 14:
-                return readOn(driveBias, how);
-            case 15:
-                return readOn(driveMix, how);
             case 20:
                 return readOn(ampAttack, how);
             case 21:
@@ -3421,18 +3331,6 @@ struct Marram : Instrument {
                 return;
             case 11:
                 editOn(routing, how, v);
-                return;
-            case 12:
-                editOn(driveType, how, v);
-                return;
-            case 13:
-                editOn(driveAmount, how, v);
-                return;
-            case 14:
-                editOn(driveBias, how, v);
-                return;
-            case 15:
-                editOn(driveMix, how, v);
                 return;
             case 20:
                 editOn(ampAttack, how, v);
@@ -3894,18 +3792,6 @@ struct Marram : Instrument {
                 return;
             case 11:
                 g.fillText(routing.text(), x, y);
-                return;
-            case 12:
-                g.fillText(driveType.text(), x, y);
-                return;
-            case 13:
-                g.fillText(driveAmount.text(), x, y);
-                return;
-            case 14:
-                g.fillText(driveBias.text(), x, y);
-                return;
-            case 15:
-                g.fillText(driveMix.text(), x, y);
                 return;
             case 20:
                 g.fillText(ampAttack.text(), x, y);
@@ -4379,7 +4265,6 @@ struct Marram : Instrument {
         layoutFilter();
         layoutEnv();
         layoutLfo();
-        layoutDrive();
         layoutVoice();
     }
 
@@ -4496,14 +4381,6 @@ struct Marram : Instrument {
         dial(lc(l, synced ? lDivision : lRate), a, lfoY + 112, 18, Theme::modulation, true);
         dial(lc(l, lPhase), b, lfoY + 112, 18, Theme::modulation, true);
         dial(lc(l, lDelay), a, lfoY + 182, 18, Theme::modulation, true);
-    }
-
-    void layoutDrive() {
-        row(cDriveType, 0, 5, drvX + 16, drvY + 44, drvW - 32, 22, kSeaGlass);
-        if (choiceOf(cDriveType) == 0) return;
-        dial(cDriveAmount, drvX + 204, drvY + 116, 24, kSeaGlass, true);
-        dial(cDriveBias, drvX + 286, drvY + 116, 18, kSeaGlass, true);
-        dial(cDriveMix, drvX + 245, drvY + 186, 18, kSeaGlass, true);
     }
 
     void layoutVoice() {
@@ -4651,26 +4528,6 @@ struct Marram : Instrument {
         }
         if (code == cRouting) {
             g.fillText(value == 0 ? "SERIAL" : "PARALLEL", x, y);
-            return;
-        }
-        if (code == cDriveType) {
-            if (value == 1) {
-                g.fillText("SOFT", x, y);
-                return;
-            }
-            if (value == 2) {
-                g.fillText("TAPE", x, y);
-                return;
-            }
-            if (value == 3) {
-                g.fillText("FOLD", x, y);
-                return;
-            }
-            if (value == 4) {
-                g.fillText("HARD", x, y);
-                return;
-            }
-            g.fillText("OFF", x, y);
             return;
         }
         if (code >= 200) {
@@ -4907,18 +4764,6 @@ struct Marram : Instrument {
             g.fillText("DRIFT", x, y);
             return;
         }
-        if (code == cDriveAmount) {
-            g.fillText("AMOUNT", x, y);
-            return;
-        }
-        if (code == cDriveBias) {
-            g.fillText("BIAS", x, y);
-            return;
-        }
-        if (code == cDriveMix) {
-            g.fillText("MIX", x, y);
-            return;
-        }
         if (code >= cAmp && code < cEnv3 + 4) {
             const int k = imod(code - cAmp, 10);
             if (k == 0) {
@@ -5074,8 +4919,7 @@ struct Marram : Instrument {
 
     // Whether a dial lights from its middle.
     bool bipolar(int code) const {
-        if (code == cTune || code == cDriveBias || code == cAmp + 6 || code == cEnv2 + 4)
-            return true;
+        if (code == cTune || code == cAmp + 6 || code == cEnv2 + 4) return true;
         if (code >= 200) {
             const int field = imod(code - 200, 20);
             return field == fFeedback || field == fShift || field == fEnv;
@@ -5966,49 +5810,6 @@ struct Marram : Instrument {
         }
     }
 
-    // --- the drive ----------------------------------------------------------------------------
-
-    void drawDrivePanel(Canvas& g) {
-        panel(g, drvX, drvY, drvW, drvH);
-        heading(g, "Drive", drvX + 18, drvY + 24);
-        aside(g, "after the filters", drvX + drvW - 18, drvY + 24, TextAlign::Right);
-        well(g, bendX, bendY, bendW, bendH);
-        const double cx = bendX + bendW * 0.5, cy = bendY + bendH * 0.5, half = bendW * 0.5 - 10;
-        g.strokeStyle(Theme::line);
-        g.lineWidth(1);
-        g.beginPath();
-        g.moveTo(bendX + 10, cy);
-        g.lineTo(bendX + bendW - 10, cy);
-        g.moveTo(cx, bendY + 10);
-        g.lineTo(cx, bendY + bendH - 10);
-        g.moveTo(bendX + 10, bendY + bendH - 10);
-        g.lineTo(bendX + bendW - 10, bendY + 10);
-        g.stroke();
-        const int type = choiceOf(cDriveType);
-        if (type == 0) {
-            aside(g, "off: the filters go", drvX + 245, drvY + 120, TextAlign::Center);
-            aside(g, "straight to the amp", drvX + 245, drvY + 136, TextAlign::Center);
-            return;
-        }
-        const double gain = dbToGain(valueOf(cDriveAmount));
-        const double bias = valueOf(cDriveBias);
-        const double mix = valueOf(cDriveMix);
-        g.beginPath();
-        for (int i = 0; i <= 80; ++i) {
-            const double x = -1.0 + 2.0 * i / 80.0;
-            const double wet = driveCurve(type, x * gain, bias) / sqrt(max(1.0, gain));
-            const double y = clamp(x + (wet - x) * mix, -1.2, 1.2);
-            if (i == 0)
-                g.moveTo(cx + x * half, cy - y * half);
-            else
-                g.lineTo(cx + x * half, cy - y * half);
-        }
-        g.strokeStyle(kSeaGlass);
-        g.lineWidth(1.8);
-        g.lineJoin(LineJoin::Round);
-        g.stroke();
-    }
-
     // --- the routes and the voice -------------------------------------------------------------
 
     void drawModPanel(Canvas& g) {
@@ -6032,7 +5833,6 @@ struct Marram : Instrument {
         drawFilterPanel(g);
         drawEnvPanel(g);
         drawLfoPanel(g);
-        drawDrivePanel(g);
         drawModPanel(g);
         drawVoicePanel(g);
         for (int k = 0; k < buttons; ++k) drawButton(g, k);
@@ -6254,8 +6054,12 @@ struct Marram : Instrument {
             .set(f1Velocity, 1)
             .set(envDecay, 220)
             .set(envSustain, 0)
-            .set(driveType, "soft")
-            .set(driveAmount, 9)
+            .set(f2Type, "ladder")
+            .set(f2Cutoff, 20000)
+            .set(f2Resonance, 0)
+            .set(f2Slope, "db12")
+            .set(f2Drive, 9)
+            .set(ampLevel, 1.2)
             .set(ampDecay, 300)
             .set(ampSustain, 70)
             .set(ampRelease, 60)
@@ -6411,10 +6215,12 @@ struct Marram : Instrument {
             .set(o1Table, "organ")
             .set(o1Position, 70)
             .set(o1Level, -12)
-            .set(f1Type, "off")
+            .set(f1Cutoff, 20000)
+            .set(f1Resonance, 0)
+            .set(f1Slope, "db12")
+            .set(f1Env, 0)
+            .set(f1Drive, 4)
             .set(drift, 15)
-            .set(driveType, "tape")
-            .set(driveAmount, 4)
             .set(ampAttack, 4)
             .set(ampDecay, 1)
             .set(ampSustain, 100)
@@ -6435,8 +6241,12 @@ struct Marram : Instrument {
             .set(f1Cutoff, 180)
             .set(f1Resonance, 45)
             .set(f1Env, 0)
-            .set(driveType, "soft")
-            .set(driveAmount, 8)
+            .set(f2Type, "ladder")
+            .set(f2Cutoff, 20000)
+            .set(f2Resonance, 0)
+            .set(f2Slope, "db12")
+            .set(f2Drive, 8)
+            .set(ampLevel, 1)
             .set(ampDecay, 1)
             .set(ampSustain, 100)
             .set(ampRelease, 80)

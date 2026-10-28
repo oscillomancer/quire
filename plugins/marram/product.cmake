@@ -13,7 +13,7 @@
 set(PRODUCT_NAME        "Marram")
 set(PRODUCT_ID          "com.suppleaudio.marram")
 set(PRODUCT_VERSION     "1.0.0")
-set(PRODUCT_DESCRIPTION "Synthesizer: four oscillators (analog, wavetable, FM, noise, sub) with unison, two filters (ladder, state-variable, comb, formant), drive, three envelopes, three LFOs and four macros, connected by modulation routes.")
+set(PRODUCT_DESCRIPTION "Synthesizer: four oscillators (analog, wavetable, FM, noise, sub) with unison, two filters (ladder, state-variable, comb, formant), three envelopes, three LFOs and four macros, connected by modulation routes.")
 set(PRODUCT_VENDOR      "Supple Audio")
 set(PRODUCT_URL         "")
 set(PRODUCT_COPYRIGHT   "Copyright (c) 2026 Supple Audio")
