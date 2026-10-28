@@ -631,23 +631,12 @@ Session and editing:
   implemented: starting recording with an armed output-mode track fails with
   `record.output_unsupported` before creating files. Switch that track to input
   mode to record; existing project files still load.
-- Project and chain files share FX oversampling validation: only 1, 2, 4 and 8
-  are accepted. Unsupported factors report a field-specific error listing
-  the allowed values instead of silently rendering at 1x.
-- Saved FX parameter IDs reject signs, whitespace, embedded-NUL suffixes and
-  unsigned 32-bit overflow consistently across platforms.
 - Engine stop/device restart retains finished audio and MIDI takes and commits
   them before app teardown. Headless exit does not save the project; clients
   must stop and save first to preserve MIDI and other session edits. Audio
   WAVs/sidecars remain recoverable; MIDI has no crash-recovery file.
 - Save As into a subdirectory of the source media folder skips its destination
   subtree, including resolved symlink aliases, so copied files are not copied again.
-- Pasting takes from retained history brings their opaque FX state blobs along,
-  including after undo to a version from before that state existed.
-- Headless playback rejects malformed/non-finite numeric options before opening
-  a project or device; its duration must be finite and nonnegative.
-- Autosave discovery and rotation match the whole numbered filename, preserve
-  backup names, and handle index exhaustion without overflow or pruning.
 - Master playrate 0.25..4x and its tr_0 envelope persist in schema 2.1.
   Tape and pitch-preserving source conversion run before take FX/live mixing;
   MIDI, automation, plugin tempo, loops and transport share the fractional clock
