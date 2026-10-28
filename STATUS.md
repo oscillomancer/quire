@@ -627,6 +627,13 @@ Engine and hosting:
   are).
 
 Session and editing:
+- Project files accept `record.mode: output`, but output capture is not
+  implemented: recording currently captures input. Commands expose only input,
+  midi_overdub and midi_replace. Unsupported file-loaded output mode needs an
+  explicit recording failure or an implementation before it can be relied on.
+- Project files accept FX oversampling 3/5/6/7, which the renderer silently
+  treats as 1x; chain loading correctly accepts only 1/2/4/8. File-load rejection
+  versus warning/normalization remains to be resolved.
 - Saved FX parameter IDs reject signs, whitespace, embedded-NUL suffixes and
   unsigned 32-bit overflow consistently across platforms.
 - Engine stop/device restart retains finished audio and MIDI takes and commits

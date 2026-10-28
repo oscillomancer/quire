@@ -119,8 +119,8 @@ Fields:
 | `pan` | % −100..100 | C9 Channel Pan (sin/cos, −3 dB centre) on channels/busses; balance on masters (0 dB centre) |
 | `mute`, `solo` | bool / enum (`off`, `on`, `in_place`, `defeat`) | mute ramps the fader to −inf before the encode |
 | `phase_invert`, `mono` | bool | the main pair's polarity flip and mono sum, after the inserts and before the fader (ADR-0022), ramped like mute |
-| `parent_send` | `{enabled, channels: {from: [..], to: [..]}}` | the encoded output into the parent (no level of its own) |
-| `record` | `{armed, input: route id or null, monitor: off|on|auto, mode: input|output|midi_overdub|midi_replace|...}` | channels only |
+| `parent_send` | `{enabled}` | the encoded main pair into the parent (no level or channel map of its own) |
+| `record` | `{armed, input: route id or null, monitor: off|on|auto, mode: input|output|midi_overdub|midi_replace}` | channels only; `output` is accepted in project files but output capture is not implemented (it currently captures input); commands expose the other three modes |
 | `timebase` | enum or `project` | default for its items (channels) |
 | `chain`, `input_chain` | [fx id] | §1.7; `input_chain` on channels only |
 | `lanes` | `{mode: none|fixed|comp, lanes: [ln id], comp: …}` | channels only |
@@ -566,9 +566,12 @@ and naming. All `edit` unless marked (q) query or (a) action.
   (what each heard take plays: looped passes unrolled, notes ending by their
   item's end; gaps empty, overlaps layered), or one item's MIDI takes layered
   into one take; the earliest item, its settings and take FX are kept.
-- **FX**: `fx.add {chain_owner, plugin, index, patch?}`, `fx.remove`,
-  `fx.move`, `fx.copy {fx, track, index?, chain?}` (live settings), `fx.set {bypass, offline, wet, isolation, oversampling,
-  parallel, pins, …}`, `fx.param.set {fx, values: {key|id: value}}`,
+- **FX**: `fx.add {track?|take?, plugin, index?, patch?, chain?}`
+  (exactly one of track or take), `fx.remove`,
+  `fx.move`, `fx.copy {fx, track, index?, chain?}` (live settings),
+  `fx.set {fx, bypass?, offline?, wet?, label?, isolation?, pins?}`
+  (oversampling, parallel and PDC are model fields, not `fx.set` arguments),
+  `fx.param.set {fx, values: {key|id: value}}`,
   `fx.param.get` (q), `fx.meters {fx, from: live|render}` (q: the read-only
   values of the playing instance, or as the last `render.mix` ended),
   `fx.patch.get` (q), `fx.patch.set`, `fx.patch.merge`,
