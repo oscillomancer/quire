@@ -105,7 +105,9 @@ Status copyFolder(const fs::path& from, const fs::path& to) {
     std::error_code ec;
     if (!fs::is_directory(from, ec)) return {};
     if (fs::exists(to, ec) && fs::equivalent(from, to, ec)) return {};
-    const auto destination = fs::weakly_canonical(to, ec);
+    const auto absolute = fs::absolute(to, ec);
+    if (ec) return copyError(from, to, ec.message());
+    const auto destination = fs::weakly_canonical(absolute, ec);
     if (ec) return copyError(from, to, ec.message());
     for (auto it = fs::recursive_directory_iterator(from, ec); !ec && it != fs::end(it);
          it.increment(ec)) {

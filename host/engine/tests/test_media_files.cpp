@@ -17,8 +17,10 @@ TEST_CASE("media folder copy excludes its destination subtree and resolved alias
                        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     struct Cleanup {
         fs::path path;
+        fs::path cwd = fs::current_path();
         ~Cleanup() {
             std::error_code ec;
+            fs::current_path(cwd, ec);
             fs::remove_all(path, ec);
         }
     } cleanup{root};
@@ -33,6 +35,10 @@ TEST_CASE("media folder copy excludes its destination subtree and resolved alias
         std::ofstream(destination / "existing.wav") << "keep";
     }
     SUBCASE("destination created during copying") {}
+    SUBCASE("relative destination with no existing path components") {
+        fs::current_path(source);
+        target = fs::path("new") / "media";
+    }
     SUBCASE("destination through a directory symlink") {
         std::error_code ec;
         fs::create_directory_symlink(source, root / "alias", ec);
