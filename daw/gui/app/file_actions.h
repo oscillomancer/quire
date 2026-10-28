@@ -51,9 +51,15 @@ std::filesystem::path projectFolderPath(std::filesystem::path chosen,
 class FileActions {
   public:
     using Post = std::function<void(std::function<void()>)>;
+    // Injectable native Save As boundary; completions still use the UI/lifetime guard.
+    using SaveDialog =
+        std::function<void(const std::string&, std::function<void(DialogLifetime::Paths)>)>;
     FileActions(ui::Root& root, AppActions& actions, cmd::Dispatcher& dispatcher,
-                engine::EngineApp& app, UiState& ui, SDL_Window* window, Post post);
+                engine::EngineApp& app, UiState& ui, SDL_Window* window, Post post,
+                SaveDialog saveDialog = {});
 
+    // Menu/shortcut and native window-close requests share the registered action.
+    void registerQuit(std::function<void()> quit, bool prompt = true);
     bool dirty() const;  // changes since the last save/open/new
     // Finalizes recording through Stop, then runs `then` if nothing would be
     // lost; otherwise asks Save / Don't save / Cancel. A Stop error aborts.
@@ -88,6 +94,11 @@ class FileActions {
     void showSaveWarnings(const std::string& command, const json::Value& result);
 
   private:
+    struct DiscardRequest;
+    bool currentProject(std::uint64_t generation);
+    void showDiscard(const std::string& what, std::function<void()> then);
+    bool revalidateDiscard(const std::shared_ptr<DiscardRequest>& request);
+    void chooseSave(std::function<void(DialogLifetime::Paths)> done);
     std::string dialogStart() const;  // the project's file, else mediaHome()
     Result<json::Value> exec(const std::string& command, json::Value args);
     void markSaved();
@@ -99,6 +110,7 @@ class FileActions {
     UiState& ui_;
     SDL_Window* window_;
     Post post_;
+    SaveDialog saveDialog_;
     DialogLifetime dialogs_;
     std::uint64_t savedVersion_ = 0;
     std::uint64_t projectGeneration_ = ~std::uint64_t{0};

@@ -413,7 +413,6 @@ int main(int argc, char** argv) {
     };
     appActions.addUi("ui.actions", "View: actions list",
                      [&] { gui::openActionsList(root, appActions, &chrome); });
-    appActions.addUi("ui.quit", "File: quit", [&] { quit = true; });
     // The look: switching repaints at once and is saved (not in offscreen runs).
     auto applyLook = [&] {
         root.setTheme(look.theme());
@@ -451,6 +450,7 @@ int main(int argc, char** argv) {
     gui::HistoryPanel history(root, appActions, dispatcher, **app);
     gui::FileActions fileActions(root, appActions, dispatcher, **app, uiState, (*window)->sdl(),
                                  [&](std::function<void()> f) { loop.post(std::move(f)); });
+    fileActions.registerQuit([&] { quit = true; }, !o.offscreen && o.frames <= 0);
     gui::HelpActions helpActions(
         root, appActions, (*window)->sdl(),
         [&](std::function<void()> f) { loop.post(std::move(f)); }, gui::help::ownExecutable());
@@ -1123,13 +1123,7 @@ int main(int argc, char** argv) {
                 pluginWindows.appActivated();
             if (e.type == SDL_EVENT_QUIT || (e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
                                              SDL_GetWindowFromEvent(&e) == (*window)->sdl())) {
-                // Hidden test windows cannot answer an interactive discard prompt.
-                const bool prompt = !o.offscreen && o.frames <= 0;
-                // With nothing to finalize or lose, an open popup does not hold the quit.
-                const bool idle =
-                    !((*app)->engine() && (*app)->engine()->recording()) && !fileActions.dirty();
-                if (!prompt || idle || !root.popupOpen())
-                    fileActions.confirmDiscard("Quit?", [&] { quit = true; }, prompt);
+                (void)appActions.run("ui.quit");
             } else if (e.type == SDL_EVENT_DROP_FILE && e.drop.data) {
                 dropped.emplace_back(e.drop.data);
                 dropAt = {e.drop.x / (*window)->inputScale(), e.drop.y / (*window)->inputScale()};

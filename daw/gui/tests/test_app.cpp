@@ -597,6 +597,217 @@ TEST_CASE("file dialogs: completions belong to their project and discard revisio
     }
 }
 
+TEST_CASE("file actions: stale discard buttons cannot affect a replacement project") {
+    engine::DummyBackend backend({.mode = engine::DummyBackend::Mode::Manual});
+    App a;
+    REQUIRE(a.ok);
+    const char* button = "file.confirm.discard";
+    bool saveAsCompletion = false, recording = false;
+    SUBCASE("Save") { button = "file.confirm.save"; }
+    SUBCASE("Don't save") {}
+    SUBCASE("Cancel") { button = "file.confirm.cancel"; }
+    SUBCASE("Save As completion") { saveAsCompletion = true; }
+    SUBCASE("a stale decision must not stop the replacement's recording") { recording = true; }
+    std::vector<std::function<void()>> posted;
+    std::function<void(gui::DialogLifetime::Paths)> saveAnswer;
+    gui::FileActions files(
+        *a.root, *a.actions, *a.dispatcher, *a.app, a.ui, a.window->sdl(),
+        [&](auto task) { posted.push_back(std::move(task)); },
+        [&](const auto&, auto done) { saveAnswer = std::move(done); });
+    auto exec = [&](const char* name, const char* args = "{}") {
+        REQUIRE(a.dispatcher->execute({name, json::parse(args).value(), {}}));
+    };
+    a.key("Ctrl+T");
+    const auto version = a.app->head().version;
+    REQUIRE(a.actions->run("ui.file.new"));
+    if (saveAsCompletion) {
+        a.root->frame(false);
+        REQUIRE(a.root->click("file.confirm.save"));
+        REQUIRE(saveAnswer);
+    }
+    exec("project.new");
+    exec("track.add", R"({"name":"Replacement"})");
+    // Reused version/branch values must not disguise the new project.
+    REQUIRE(a.app->head().version == version);
+    const auto generation = a.app->projectGeneration();
+    files.saveAs(a.dir / "replacement");
+    const auto path = a.app->projectPath();
+    REQUIRE_FALSE(path.empty());
+    REQUIRE(writeFileAtomic(path, "external contents"));
+    if (recording) {
+        REQUIRE(a.app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2},
+                                   {.anticipative = false}));
+        exec("track.set", R"({"track":"tr_1","armed":true,"record_input":[1,2]})");
+        exec("transport.record");
+        backend.run(2);
+    }
+    std::string notice;
+    a.actions->onError = [&](const auto& message) { notice = message; };
+    a.root->frame(false);
+    if (saveAsCompletion) {
+        saveAnswer({a.dir / "stale-save"});
+        REQUIRE(posted.size() == 1);
+        posted.front()();
+        CHECK_FALSE(std::filesystem::exists(a.dir / "stale-save"));
+    } else {
+        REQUIRE(a.root->click(button));
+    }
+    CHECK(a.app->projectGeneration() == generation);
+    CHECK(a.tracks() == 2);
+    REQUIRE(readTextFile(path));
+    CHECK(*readTextFile(path) == "external contents");
+    CHECK(notice == "The project changed while the dialog was open. Please try again.");
+    CHECK_FALSE(a.root->popupOpen());
+    if (recording) {
+        CHECK(a.app->engine()->recording());
+        exec("transport.stop");
+        a.app->stopEngine();
+    }
+}
+
+TEST_CASE("file actions: a late recording renews the discard decision before saving or leaving") {
+    engine::DummyBackend backend({.mode = engine::DummyBackend::Mode::Manual});
+    App a;
+    REQUIRE(a.ok);
+    const char* button = "file.confirm.save";
+    bool stopFails = false, saveAsCompletion = false;
+    SUBCASE("Save") {}
+    SUBCASE("Don't save") { button = "file.confirm.discard"; }
+    SUBCASE("a Stop error aborts") { stopFails = true; }
+    SUBCASE("Save As completion") { saveAsCompletion = true; }
+    REQUIRE(a.app->startEngine(backend, {.sampleRate = 48000, .blockSize = 256, .inputs = 2},
+                               {.anticipative = false}));
+    auto exec = [&](const char* name, const char* args = "{}") {
+        auto result = a.dispatcher->execute(
+            {name, json::parse(args).value(), {cmd::Origin::Type::Ui, "gui", {}}});
+        REQUIRE(result);
+    };
+    exec("track.add", R"({"name":"Recorded"})");
+    exec("track.set", R"({"track":"tr_1","armed":true,"record_input":[1,2]})");
+    std::function<void(gui::DialogLifetime::Paths)> saveAnswer;
+    std::vector<std::function<void()>> posted;
+    gui::FileActions files(
+        *a.root, *a.actions, *a.dispatcher, *a.app, a.ui, a.window->sdl(),
+        [&](auto task) { posted.push_back(std::move(task)); },
+        [&](const auto&, auto done) { saveAnswer = std::move(done); });
+    auto answerSave = [&] {
+        saveAnswer({a.dir / "recorded"});
+        REQUIRE(posted.size() == 1);
+        auto task = std::move(posted.back());
+        posted.clear();
+        task();
+    };
+    if (!saveAsCompletion) files.saveAs(a.dir / "recorded");
+    exec("track.set", R"({"track":"tr_1","name":"Changed"})");
+    bool quit = false;
+    files.registerQuit([&] { quit = true; });
+    REQUIRE(a.actions->run("ui.quit"));
+    REQUIRE(a.root->popupOpen());
+    if (saveAsCompletion) {
+        a.root->frame(false);
+        REQUIRE(a.root->click("file.confirm.save"));
+        REQUIRE(saveAnswer);
+    }
+    exec("transport.record");
+    backend.run(2);
+    a.root->frame(false);
+    std::string error;
+    a.actions->onError = [&](const auto& text) { error = text; };
+    REQUIRE(a.dispatcher->guarded(
+        [&](const cmd::Invocation& call) -> Status {
+            if (stopFails && call.command == "transport.stop")
+                return Error("test.stop", "cannot stop recording");
+            return {};
+        },
+        [&]() -> Result<json::Value> {
+            if (saveAsCompletion)
+                answerSave();
+            else
+                REQUIRE(a.root->click(button));
+            return json::Value::object();
+        }));
+    CHECK_FALSE(quit);
+    if (stopFails) {
+        CHECK(a.app->engine()->recording());
+        CHECK(error.find("cannot stop recording") != std::string::npos);
+        exec("transport.stop");
+    } else {
+        CHECK_FALSE(a.app->engine()->recording());
+        CHECK(a.app->head().items.size() == 1);
+        REQUIRE(a.root->find("file.confirm"));
+        if (saveAsCompletion) {
+            CHECK(a.app->projectPath().empty());
+            CHECK_FALSE(std::filesystem::exists(a.dir / "recorded" / "recorded.json"));
+        }
+        a.root->frame(false);
+        REQUIRE(a.root->click(button));
+        if (saveAsCompletion) answerSave();
+        CHECK(quit);
+        if (std::string_view(button) == "file.confirm.save") {
+            const auto saved = readTextFile(a.app->projectPath());
+            REQUIRE(saved);
+            CHECK(json::parse(*saved).value()["items"].size() == 1);
+        }
+    }
+    a.app->stopEngine();
+}
+
+TEST_CASE("file actions: changed versions and branches renew the discard decision") {
+    App a;
+    REQUIRE(a.ok);
+    gui::FileActions files(*a.root, *a.actions, *a.dispatcher, *a.app, a.ui, a.window->sdl(),
+                           [](auto task) { task(); });
+    a.key("Ctrl+T");
+    bool continued = false;
+    files.confirmDiscard("Quit?", [&] { continued = true; });
+    SUBCASE("an edit followed by a save still changes the decision") {
+        REQUIRE(a.dispatcher->execute(
+            {"track.add", json::parse(R"({"name":"Late edit"})").value(), {}}));
+        files.saveAs(a.dir / "saved");
+        REQUIRE_FALSE(files.dirty());
+    }
+    SUBCASE("a branch switch can leave the head version unchanged") {
+        const auto version = a.app->head().version;
+        REQUIRE(a.dispatcher->execute(
+            {"branch.create", json::parse(R"({"name":"same-head"})").value(), {}}));
+        CHECK(a.app->head().version == version);
+    }
+    a.root->frame(false);
+    REQUIRE(a.root->click("file.confirm.discard"));
+    CHECK_FALSE(continued);
+    REQUIRE(a.root->find("file.confirm"));
+    a.root->frame(false);
+    REQUIRE(a.root->click("file.confirm.discard"));
+    CHECK(continued);
+}
+
+TEST_CASE("file actions: registered Quit shares the popup and prompt policy") {
+    App a;
+    REQUIRE(a.ok);
+    gui::FileActions files(*a.root, *a.actions, *a.dispatcher, *a.app, a.ui, a.window->sdl(),
+                           [](auto task) { task(); });
+    bool quit = false;
+    files.registerQuit([&] { quit = true; });
+    SUBCASE("a clean project quits with an open popup") {
+        a.root->openPopup(std::make_unique<ui::Node>("other.popup"), {});
+        REQUIRE(a.actions->run("ui.quit"));
+        CHECK(quit);
+    }
+    SUBCASE("unsaved work waits for an open popup and then asks") {
+        a.key("Ctrl+T");
+        a.root->openPopup(std::make_unique<ui::Node>("other.popup"), {});
+        REQUIRE(a.actions->run("ui.quit"));
+        CHECK_FALSE(quit);
+        CHECK(a.root->find("other.popup"));
+        a.root->closePopup();
+        REQUIRE(a.actions->run("ui.quit"));
+        CHECK_FALSE(quit);
+        a.root->frame(false);
+        REQUIRE(a.root->click("file.confirm.cancel"));
+        CHECK_FALSE(quit);
+    }
+}
+
 TEST_CASE("file actions: recording is finalized before discard decisions") {
     engine::DummyBackend backend({.mode = engine::DummyBackend::Mode::Manual});
     App a;
@@ -639,8 +850,9 @@ TEST_CASE("file actions: recording is finalized before discard decisions") {
         CHECK(a.app->engine()->recording());
         exec("transport.stop");
     }
-    SUBCASE("Quit commits one undoable take and Cancel retains it") {
-        files.confirmDiscard("Quit?", [&] { continued = true; });
+    SUBCASE("registered Quit commits one undoable take and Cancel retains it") {
+        files.registerQuit([&] { continued = true; });
+        REQUIRE(a.actions->run("ui.quit"));
         CHECK_FALSE(continued);
         CHECK_FALSE(a.app->engine()->recording());
         CHECK(files.dirty());
@@ -651,6 +863,15 @@ TEST_CASE("file actions: recording is finalized before discard decisions") {
         exec("history.undo");
         CHECK(a.app->head().items.empty());
         CHECK_FALSE(files.dirty());
+    }
+    SUBCASE("hidden Quit still finalizes recording with an open popup") {
+        files.registerQuit([&] { continued = true; }, false);
+        a.root->openPopup(std::make_unique<ui::Node>("other.popup"), {});
+        REQUIRE(a.actions->run("ui.quit"));
+        CHECK(continued);
+        CHECK_FALSE(a.app->engine()->recording());
+        CHECK(a.app->head().items.size() == 1);
+        CHECK_FALSE(a.root->find("file.confirm"));
     }
     SUBCASE("New stops and prompts before replacing the project") {
         const auto generation = a.app->projectGeneration();
