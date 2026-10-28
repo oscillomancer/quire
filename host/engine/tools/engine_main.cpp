@@ -25,7 +25,9 @@
 #include <supple/mcp/server.h>
 #include <supple/rpc/model_loop.h>
 #include <atomic>
+#include <charconv>
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -106,6 +108,13 @@ engine::AppOptions cliOptions() {
     return options;
 }
 
+template <class T>
+bool parseNumber(std::string_view text, T& value) {
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+    return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size() &&
+           std::isfinite(static_cast<double>(value));
+}
+
 int play(cmd::Registry& registry, const std::vector<std::string>& args) {
     if (args.size() < 2) return usage();
     const fs::path project = fs::absolute(args[1]);
@@ -115,13 +124,28 @@ int play(cmd::Registry& registry, const std::vector<std::string>& args) {
     std::optional<double> seconds;
     for (std::size_t i = 2; i < args.size(); ++i) {
         if (i + 1 >= args.size()) return usage();
-        if (args[i] == "--bar")
-            bar = std::atoll(args[++i].c_str());
-        else if (args[i] == "--seconds")
-            seconds = std::atof(args[++i].c_str());
-        else if (args[i] == "--block")
-            start["block"] = std::int64_t{std::atoll(args[++i].c_str())};
-        else if (args[i] == "--backend")
+        const std::string& option = args[i];
+        if (option == "--bar" || option == "--block" || option == "--inputs" ||
+            option == "--outputs" || option == "--seconds" || option == "--rate") {
+            const std::string key = option.substr(2);
+            const std::string& text = args[++i];
+            const bool integer = option != "--seconds" && option != "--rate";
+            std::int64_t whole = 0;
+            double real = 0;
+            if (!(integer ? parseNumber(text, whole) : parseNumber(text, real)) ||
+                (option == "--seconds" && real < 0)) {
+                print(errorJson(Error("cli.number", "invalid number for " + option, "/" + key,
+                                      integer ? "provide a complete decimal integer"
+                                              : "provide a complete finite nonnegative number")));
+                return 2;
+            }
+            if (option == "--bar")
+                bar = whole;
+            else if (option == "--seconds")
+                seconds = real;
+            else
+                start[key] = integer ? json::Value(whole) : json::Value(real);
+        } else if (args[i] == "--backend")
             start["backend"] = args[++i];
         else if (args[i] == "--host-api")
             start["host_api"] = args[++i];
@@ -129,12 +153,6 @@ int play(cmd::Registry& registry, const std::vector<std::string>& args) {
             start["input_device"] = args[++i];
         else if (args[i] == "--output-device")
             start["output_device"] = args[++i];
-        else if (args[i] == "--rate")
-            start["rate"] = std::atof(args[++i].c_str());
-        else if (args[i] == "--inputs")
-            start["inputs"] = std::int64_t{std::atoll(args[++i].c_str())};
-        else if (args[i] == "--outputs")
-            start["outputs"] = std::int64_t{std::atoll(args[++i].c_str())};
         else if (args[i] == "--plugin-path")
             options.pluginPath.emplace_back(args[++i]);
         else
@@ -295,6 +313,8 @@ int main(int argc, char** argv) {
             wake.cancel();
             deadline.cancel();
             pluginWatches.clear();
+            (*app)->stopEngine();  // commit captured takes while the session/bus still exist
+            publishEvents();
             server.stop();
             return 0;
         }
@@ -318,6 +338,7 @@ int main(int argc, char** argv) {
         };
         tick.fn();
         auto status = server.serve(inputDescriptor(), std::cout, tick);
+        (*app)->stopEngine();  // EOF/error still finishes audio and MIDI takes on the model thread
         if (!status) {
             std::fprintf(stderr, "%s\n", status.error().toString().c_str());
             return 1;

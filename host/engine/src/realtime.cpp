@@ -381,7 +381,10 @@ void Engine::stop() {
     backend_->stop();
     liveWorkersReady_.store(nullptr, std::memory_order_release);
     liveWorkers_.reset();
-    if (recorderOwned_) (void)recorderOwned_->finish(readLoop());  // no callback now: keep files
+    if (recorderOwned_) {  // no callback now: retain MIDI as well as the closed audio files
+        auto takes = recorderOwned_->finish(readLoop());
+        for (auto& take : takes) stoppedTakes_.push_back(std::move(take));
+    }
     recorderOwned_.reset();
     // A backend that broke its stop() contract has already joined its
     // thread, so nothing else touches the plugins: recover here.
@@ -1716,10 +1719,12 @@ Status Engine::startRecording(std::vector<RecordTarget> targets) {
 }
 
 Result<std::vector<RecordedTake>> Engine::stopRecording() {
-    if (!recorderOwned_)
+    if (!recorderOwned_) {
+        if (!stoppedTakes_.empty()) return std::exchange(stoppedTakes_, {});
         return Error(
             "record.stopped", "not recording", {},
             "start recording with transport.record after arming a track and assigning its input");
+    }
     recorder_.store(nullptr);
     // A callback that entered before the store may still hold the recorder;
     // one that enters after it sees null. (seq_cst on both sides.)
@@ -1735,7 +1740,8 @@ Result<std::vector<RecordedTake>> Engine::stopRecording() {
     }
     auto takes = recorderOwned_->finish(readLoop());
     recorderOwned_.reset();
-    return takes;
+    for (auto& take : takes) stoppedTakes_.push_back(std::move(take));
+    return std::exchange(stoppedTakes_, {});
 }
 
 std::uint64_t Engine::relocate(std::uint64_t previous) {

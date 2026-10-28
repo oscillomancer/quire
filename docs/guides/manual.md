@@ -56,6 +56,8 @@ latency.
 ## Projects
 
 A project is a JSON file. Its media lives in the `media/` folder beside it.
+Project and FX chain files accept oversampling factors 1, 2, 4 or 8. If a
+hand-edited file uses another factor, loading reports the field and allowed values.
 
 Until a project is saved, its recordings go to a folder of its own under the
 data folder (below), in `unsaved/<start time>-<pid>/media/rec`. The first
@@ -208,6 +210,19 @@ installation's paths.
 
 Without the GUI, `quire-engine --mcp` serves the engine's project and audio
 commands and can render offline. GUI-only state and actions require the app.
+`quire-engine play FILE --seconds 10` plays a saved project for ten seconds;
+add `--backend dummy` to run without an audio device. Numeric options must be
+complete numbers, and `--seconds` must be finite and nonnegative. Invalid values
+report the option and how to correct it before playback starts.
+
+For headless recording, stop the transport and save the project before closing
+an MCP connection or stopping the socket server. Shutdown finishes capture but
+does not save the project. Unsaved audio files can be recovered; unsaved MIDI
+recordings and other session edits are lost when the process exits.
+
+Output recording is not supported yet. If a loaded project has an armed track
+in output record mode, recording fails before creating any files. Switch that
+track to input mode with `track.set {track: "tr_1", record_mode: "input"}`.
 
 ### Other clients and local models
 

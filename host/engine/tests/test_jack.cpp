@@ -150,6 +150,21 @@ TEST_CASE("the backend runs the engine in blocks, whatever the graph's period") 
     fake.reset();
 }
 
+TEST_CASE("unused JACK device outputs are silent for the stereo engine") {
+    FakeJack& fake = fakeJack();
+    fake.reset(300);
+    JackBackend backend(fakeOptions());
+    Recorder rec;
+    REQUIRE(backend.start({.blockSize = 64, .outputs = 4}, rec.callback()));
+    REQUIRE(waitFor([&] { return fake.cycles() >= 10; }));
+    CHECK(fake.outputPeak("supple:out_1") == 0.25f);
+    CHECK(fake.outputPeak("supple:out_2") == 0.25f);
+    CHECK(fake.outputPeak("supple:out_3") == 0.f);
+    CHECK(fake.outputPeak("supple:out_4") == 0.f);
+    backend.stop();
+    fake.reset();
+}
+
 TEST_CASE("a user's PIPEWIRE_LATENCY wins; forceBufferSize asks for the period") {
     FakeJack& fake = fakeJack();
     fake.reset(1024);

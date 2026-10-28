@@ -124,10 +124,12 @@ Result<Document> readDocument(const fs::path& path) {
     for (std::size_t i = 0; i < decoded->effects.size(); ++i) {
         auto fx = model::schemaOf<model::FxInstance>().decode(decoded->effects[i]);
         const std::string at = "/effects/" + std::to_string(i);
-        if (!fx) return std::move(fx).error().at(at);
-        if ((fx->oversampling & (fx->oversampling - 1)) != 0)
-            return Error("chain.invalid", "oversampling must be 1, 2, 4 or 8", at + "/oversampling",
-                         "set oversampling to one of 1, 2, 4 or 8");
+        if (!fx) {
+            auto error = std::move(fx).error();
+            if (error.code == "fx.oversampling") error.code = "chain.invalid";
+            error.path.insert(0, at);
+            return error;
+        }
         if (fx->patch.has_value() == fx->state.has_value())
             return Error("chain.invalid", "effect needs exactly one patch or state", at + "/state",
                          "provide patch for a semantic plugin or base64 state for a plain plugin; "

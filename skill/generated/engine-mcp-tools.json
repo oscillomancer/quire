@@ -9232,7 +9232,7 @@
   {
     "name": "transport_record",
     "title": "Play and record every armed track's input.",
-    "description": "Play and record every armed track's input. Recording requires saved master rate 1 and no active master rate envelope that leaves 1 anywhere, including automation items. Non-unity recording is refused before opening files. See describe for errors and examples.",
+    "description": "Play and record every armed track's input. Recording requires saved master rate 1 and no active master rate envelope that leaves 1 anywhere, including automation items. Non-unity recording and an armed track with unsupported output record mode are refused before opening files. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "no_args",

@@ -203,6 +203,8 @@ struct JackBackend::Impl {
             in[c] = static_cast<const float*>(api->portGetBuffer(inPorts[c], n));
         const int s = state.load(std::memory_order_acquire);
         if (s == kRunning) {
+            // The engine writes stereo; other opened device ports must stay silent.
+            for (std::uint32_t c = 2; c < outputs; ++c) std::fill_n(out[c], n, 0.0f);
             collectMidi(n);
             std::array<float*, kMaxPorts> o;
             std::array<const float*, kMaxPorts> i;

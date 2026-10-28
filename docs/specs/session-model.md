@@ -119,8 +119,8 @@ Fields:
 | `pan` | % −100..100 | C9 Channel Pan (sin/cos, −3 dB centre) on channels/busses; balance on masters (0 dB centre) |
 | `mute`, `solo` | bool / enum (`off`, `on`, `in_place`, `defeat`) | mute ramps the fader to −inf before the encode |
 | `phase_invert`, `mono` | bool | the main pair's polarity flip and mono sum, after the inserts and before the fader (ADR-0022), ramped like mute |
-| `parent_send` | `{enabled, channels: {from: [..], to: [..]}}` | the encoded output into the parent (no level of its own) |
-| `record` | `{armed, input: route id or null, monitor: off|on|auto, mode: input|output|midi_overdub|midi_replace|...}` | channels only |
+| `parent_send` | `{enabled}` | the encoded main pair into the parent (no level or channel map of its own) |
+| `record` | `{armed, input: route id or null, monitor: off|on|auto, mode: input|output|midi_overdub|midi_replace}` | channels only; `output` still loads from project files, but an armed output-mode track prevents recording with `record.output_unsupported` before any file is created; use input mode instead |
 | `timebase` | enum or `project` | default for its items (channels) |
 | `chain`, `input_chain` | [fx id] | §1.7; `input_chain` on channels only |
 | `lanes` | `{mode: none|fixed|comp, lanes: [ln id], comp: …}` | channels only |
@@ -197,7 +197,7 @@ it is allowed.
 version}`, `label` (instance name), `bypass` (processing skipped, latency
 kept), `offline` (unloaded; audio passes through), `wet` % (dry/wet),
 `isolation` (`inherit|in_process|shared_bridge|dedicated`), `oversampling`
-(1, 2, 4, 8), `pins` `{in: [l, r], out: [l, r], key: [l, r]}` — the track
+(integer 1, 2, 4 or 8 only), `pins` `{in: [l, r], out: [l, r], key: [l, r]}` — the track
 channels (1-based) a track-chain plug-in reads, writes and keys from (a
 detector on 3/4); one entry feeds both pins (in, key) or takes the left output
 (out); empty: 1/2 in and out, the key from key routes only (ADR-0020); `out`
@@ -211,7 +211,9 @@ parallel with the previous instance in the chain, outputs summed), `pdc`
 **state**: for plugins with the semantic extension, `patch` (canonical patch
 JSON, diffable); otherwise `state` = blob ref (content hash) plus `params`
 (last known CLAP values by param id, for display/diff only — the blob is
-authoritative). `learn` (ADR-0027, omitted when empty): MIDI learn, one
+authoritative). Parameter-map keys must be complete unsigned 32-bit decimal
+integers; signs, whitespace, trailing bytes and overflow report `schema.key`
+consistently on every platform. `learn` (ADR-0027, omitted when empty): MIDI learn, one
 binding per parameter, sorted by `param` — `{param (semantic key, or a
 plain parameter's id as text), midi: {kind: cc|note|pitch_bend|program,
 channel 1..16, number 0..127 (0 for pitch_bend), device (a substring of the
@@ -219,6 +221,14 @@ MIDI input's name; empty: any)}, mode: absolute|relative1|relative2|
 relative3|toggle, soft_takeover, when_selected, when_focused,
 when_visible}` (defaults omitted). It is copied with the effect (fx.copy,
 chain presets, templates).
+
+The FX schema exports oversampling as the integer enum `[1, 2, 4, 8]`.
+Project loading rejects other integer factors with `fx.oversampling` at
+`/fx/<id>/oversampling`; its message and hint list the allowed values. Chain
+files use the same check and retain `chain.invalid` at the effect's
+`oversampling` field. The project schema version is unchanged: supported
+factors still round-trip identically; unsupported factors were never written
+by Quire.
 
 Chains are arrays of fx ids on tracks (`chain`, `input_chain`), takes
 (`chain`) and the master's monitoring chain (`project.monitor_chain`, not
@@ -428,13 +438,24 @@ default), item.add copies an imported audio file into the media folder (a
 same-named file with other bytes gets `-2`, `-3`…; the same bytes are
 reused) instead of naming it where it is. The GUI gives each project a
 folder of its own (gui.md §4.11).
+Copy failures retain the underlying filesystem error even when temporary-file
+cleanup succeeds, so `media.copy` identifies the cause of a failed import or save.
+Only if the resolved destination is a strict descendant of the resolved source
+media folder does the recursive copy skip that destination subtree, including
+symlink aliases. Existing destination files stay there; copied files are never
+read back as new source media. An ancestor destination is copied to normally,
+so saving back to the original project folder includes newly recorded media.
 
 The engine app writes autosaves from main-thread service (engine.md §6,
 ADR-0030), only when a named project's head changed since the last one and
 60 s of monotonic service time have passed. Unchanged/unnamed projects have no
 autosave deadline; an overdue edit arms immediate service. A failed write
 waits 60 s before retrying. History timestamps still use wall time, and
-`<n>` counts up from the highest present. `project.open` of a file that has
+`<n>` is a positive unsigned 64-bit decimal index and counts up from the highest
+present. Discovery and rotation ignore names with nonnumeric or out-of-range
+suffixes (such as `autosave-1-backup.json`). An exhausted index reports
+`autosave.index` without writing or pruning, and retries after the same interval.
+`project.open` of a file that has
 a newer autosave next to it reports `autosave_available` and loads nothing
 from it; opening the autosave file itself is how it comes back.
 
@@ -531,6 +552,9 @@ and naming. All `edit` unless marked (q) query or (a) action.
 - **items/takes**: `item.add {track, position, length, source|midi|notation}`,
   `item.remove`, `item.move`, `item.set`, `item.split {at}`,
   `item.duplicate`, `item.glue` (a+edit), `take.add`, `take.remove`,
+  `item.paste {version?, items: [{item, track, position}]}` copies the retained
+  version's takes and their FX, including referenced opaque state blobs when
+  the current session no longer contains them (for example after undo),
   `take.set`, `take.activate`, `take.remove` (the item goes with its last
   take), `take.extract {take, track, position}` (into an item of its own),
   `item.explode-takes {item, mode: tracks|serial}` (recording order: the
@@ -551,9 +575,12 @@ and naming. All `edit` unless marked (q) query or (a) action.
   (what each heard take plays: looped passes unrolled, notes ending by their
   item's end; gaps empty, overlaps layered), or one item's MIDI takes layered
   into one take; the earliest item, its settings and take FX are kept.
-- **FX**: `fx.add {chain_owner, plugin, index, patch?}`, `fx.remove`,
-  `fx.move`, `fx.copy {fx, track, index?, chain?}` (live settings), `fx.set {bypass, offline, wet, isolation, oversampling,
-  parallel, pins, …}`, `fx.param.set {fx, values: {key|id: value}}`,
+- **FX**: `fx.add {track?|take?, plugin, index?, patch?, chain?}`
+  (exactly one of track or take), `fx.remove`,
+  `fx.move`, `fx.copy {fx, track, index?, chain?}` (live settings),
+  `fx.set {fx, bypass?, offline?, wet?, label?, isolation?, pins?}`
+  (oversampling, parallel and PDC are model fields, not `fx.set` arguments),
+  `fx.param.set {fx, values: {key|id: value}}`,
   `fx.param.get` (q), `fx.meters {fx, from: live|render}` (q: the read-only
   values of the playing instance, or as the last `render.mix` ended),
   `fx.patch.get` (q), `fx.patch.set`, `fx.patch.merge`,

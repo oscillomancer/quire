@@ -65,8 +65,8 @@ EngineApp::EngineApp(AppOptions options) : options_(std::move(options)) {
 }
 
 EngineApp::~EngineApp() {
-    stopJobs();
     stopEngine();
+    stopJobs();
     scratch_.clear();
 }
 
@@ -395,6 +395,11 @@ Result<model::Id> copyTake(const model::Session& source, model::EditTxn& txn, mo
             return Error("item.fx", "the copied take FX is missing", "/take",
                          "recopy the item from a version that still contains its take FX, or undo "
                          "their removal");
+        // The source may be a retained clipboard version whose opaque state
+        // does not exist in the destination after undo or a branch switch.
+        if (fx->state)
+            if (const auto blob = source.blobs.find(*fx->state); blob != source.blobs.end())
+                txn.putBlob(blob->first, blob->second);
         const auto fresh = txn.create(*fx);
         ids[id] = fresh;
         copy.chain.push_back(fresh);
@@ -958,8 +963,21 @@ Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, boo
 void EngineApp::haltEngine() {
     if (engine_) {
         engine_->stop();
+        auto takes = engine_->stopRecording();
         engine_->service();
         engine_.reset();
+        recordingFiles_.clear();
+        if (takes) {
+            if (auto committed = commitTakes(*takes); !committed) {
+                const auto& error = committed.error();
+                auto event = json::Value::object();
+                event["code"] = error.code;
+                event["message"] = error.message;
+                event["path"] = error.path;
+                event["hint"] = error.hint;
+                emit("record.error", std::move(event));
+            }
+        }
         pool_->prune(head());  // nothing processes now: replaced instances can go
     }
     protections_->stop();
@@ -1194,6 +1212,20 @@ fs::path EngineApp::autosaveDir() const {
     return projectPath_.parent_path() / (projectPath_.filename().string() + "-data");
 }
 
+namespace {
+std::optional<std::uint64_t> autosaveIndex(std::string_view name) {
+    constexpr std::string_view prefix = "autosave-", suffix = ".json";
+    if (!name.starts_with(prefix) || !name.ends_with(suffix)) return std::nullopt;
+    name.remove_prefix(prefix.size());
+    name.remove_suffix(suffix.size());
+    std::uint64_t index = 0;
+    const auto parsed = std::from_chars(name.data(), name.data() + name.size(), index);
+    if (parsed.ec != std::errc{} || parsed.ptr != name.data() + name.size() || index == 0)
+        return std::nullopt;
+    return index;
+}
+}  // namespace
+
 fs::path EngineApp::newerAutosave(const fs::path& project) const {
     if (project.empty()) return {};
     std::error_code ec;
@@ -1206,8 +1238,7 @@ fs::path EngineApp::newerAutosave(const fs::path& project) const {
     for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
         const fs::path& candidate = it->path();
         const std::string name = candidate.filename().string();
-        if (!std::string_view(name).starts_with("autosave-") || candidate.extension() != ".json")
-            continue;
+        if (!autosaveIndex(name)) continue;
         if (!fs::is_regular_file(candidate, ec)) continue;
         const auto time = fs::last_write_time(candidate, ec);
         if (ec) break;
@@ -1273,17 +1304,24 @@ void EngineApp::autosave() {
     const fs::path dir = autosaveDir();
     if (dir.empty()) return;
     // Rotate: the next free index, then the oldest files over the keep count go.
-    int next = 1;
-    std::vector<std::pair<int, fs::path>> existing;
+    std::uint64_t next = 1;
+    std::vector<std::pair<std::uint64_t, fs::path>> existing;
     std::error_code ec;
     for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
         const std::string name = it->path().filename().string();
-        if (!std::string_view(name).starts_with("autosave-") || it->path().extension() != ".json")
-            continue;
-        const int n = std::atoi(name.c_str() + 9);
-        if (n < 1) continue;
-        next = std::max(next, n + 1);
-        existing.push_back({n, it->path()});
+        const auto n = autosaveIndex(name);
+        if (!n) continue;
+        if (*n == UINT64_MAX) {
+            emit(
+                "engine.error",
+                json::Value(Error("autosave.index", "autosave numbering is exhausted", dir.string(),
+                                  "move the highest numbered autosave to a backup name and retry")
+                                .toString()));
+            autosaveMs_ = serviceClockMs();
+            return;
+        }
+        next = std::max(next, *n + 1);
+        existing.push_back({*n, it->path()});
     }
     const fs::path file = dir / ("autosave-" + std::to_string(next) + ".json");
     if (auto st = writeFileAtomic(file, model::serializeProject(head())); !st) {
@@ -1400,6 +1438,11 @@ Result<TransportInfo> EngineApp::transport(std::string_view action, std::optiona
         std::vector<RecordTarget> targets;
         for (const auto& e : s.tracks) {
             const model::Track& tr = *e.value;
+            if (tr.record.armed && tr.record.mode == model::RecordMode::Output)
+                return Error("record.output_unsupported", "output recording is not supported yet",
+                             "/tracks/" + e.id.str() + "/record/mode",
+                             "output recording is not supported yet; use track.set {track: \"" +
+                                 e.id.str() + "\", record_mode: \"input\"}");
             if (!tr.record.armed || !tr.record.input) continue;
             const model::Route* in = s.routes.find(*tr.record.input);
             if (in && in->from.midiDevice) {  // MIDI (ADR-0016): events, no file

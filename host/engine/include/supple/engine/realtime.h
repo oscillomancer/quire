@@ -417,6 +417,7 @@ class Engine {
     // Recording (main thread): capture starts with the first played cycle,
     // placed where the performer heard it (device and plan latency).
     Status startRecording(std::vector<RecordTarget> targets);
+    // Also retrieves takes finalized by stop(), once, after the device stopped.
     Result<std::vector<RecordedTake>> stopRecording();
     bool recording() const { return recorderOwned_ != nullptr; }
     // Tests: while held, the renderer renders nothing. Wait for its
@@ -751,6 +752,7 @@ class Engine {
     // odd while a callback runs (seq_cst with recorder_, so stopRecording
     // knows when no callback can still hold the recorder).
     std::unique_ptr<detail::Recorder> recorderOwned_;
+    std::vector<RecordedTake> stoppedTakes_;  // main thread; retained until stopRecording()
     std::atomic<detail::Recorder*> recorder_{nullptr};
     std::atomic<std::uint64_t> cycleSeq_{0};
 };

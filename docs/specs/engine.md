@@ -164,6 +164,9 @@ edge delay histories carry when source, destination, tap, kind and delay length
 match; changed lengths start empty. New plugins are
 instantiated and activated on the main thread before the swap; parameter
 changes on existing instances become param events rather than rebuilds.
+Returning to a version with neither patch nor state after applying saved FX
+settings recreates the factory-default instance. The old instance remains alive
+until both executors release its plan, as with a changed opaque state.
 The swap: `std::atomic<const RenderPlan*>` exchanged by the model thread;
 the RT thread picks up the new pointer at the next cycle start and
 acknowledges via an epoch counter; the model thread destroys the old plan
@@ -501,6 +504,21 @@ first use, and no plug-in code runs early to warm it.
   decide — and fills the hash with the bytes now on disk, so such a project
   converges instead of growing a second source for one file. A file is hashed
   the same way when it is recorded.
+- **Recording shutdown**: `Engine::stop()` joins the audio executors and writer,
+  retaining finalized audio and MIDI takes for one subsequent `stopRecording()`
+  call. `EngineApp::stopEngine()` (including device restart and destruction)
+  retrieves and commits them as one record undo step after the engine is gone;
+  commit failures emit structured `record.error`. Headless MCP EOF/error and
+  socket-loop shutdown explicitly stop the engine while the session and bus
+  still exist. This does not save a project: clients must stop recording and
+  save before disconnecting to retain MIDI/session edits across process exit.
+  Audio WAVs and placement sidecars remain recoverable; MIDI has no recovery
+  sidecar. Forced termination cannot execute this shutdown path.
+- **Recording admission**: an armed track with `record.mode: output` fails
+  `transport.record` with `record.output_unsupported`, its `/tracks/<id>/record/mode`
+  path, and a hint to select input mode. This check runs before any recording
+  files are created, including files for other armed tracks. Existing projects
+  with output-mode settings still load; output recording is not supported yet.
 - **Recording**: RT thread writes input frames into large preallocated SPSC
   rings (≥ 10 s); an I/O thread writes them to WAV/RF64 files incrementally,
   rewriting the header every 5 s so a crash leaves a valid file up to the last
@@ -686,6 +704,12 @@ instance).
   real-time capture around the crash shows only that node going silent.
 
 ## 6. Control surface
+
+The headless `play` CLI parses each numeric option completely and rejects
+malformed, overflowing or non-finite numbers with `cli.number`, the option's
+field path and a corrective hint before loading a project or opening a device.
+`--seconds` accepts finite nonnegative durations; integer options require whole
+decimal integers. Command schemas still validate the device/transport ranges.
 
 The engine registers the session-model §7 command catalogue on the command
 bus and exposes it through the control protocol (Unix socket), Lua and MCP (proxy or in-process). Engine-specific commands:
@@ -1363,6 +1387,8 @@ but never builds or initializes the PortAudio library.
 `engine.start` accepts backend `jack|portaudio|dummy` and optional `host_api`,
 `input_device`, `output_device`, `rate` (1..768000), `inputs` (0..64) and `outputs`
 (2..64). Native stream audio inputs default to zero, outputs to two;
+the engine writes the first stereo pair. Both native and JACK backends clear
+any additional opened output channels to silence before invoking the engine.
 engine.start enables native MIDI inputs (ADR-0042). JACK keeps its capture/MIDI behavior. Native default backend stays
 dummy (the GUI starts the saved device instead, ADR-0050); Linux's existing
 default stays JACK. An explicit `rate` sets `PortAudioOptions::changeDeviceRate`:

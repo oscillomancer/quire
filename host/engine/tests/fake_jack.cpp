@@ -227,6 +227,8 @@ Port* jack_port_register(Client* c, const char* name, const char* type, unsigned
     p->name = c->name + ":" + name;
     p->output = (flags & 0x2) != 0;
     p->midi = type && std::strcmp(type, "8 bit raw midi") == 0;
+    // Device output buffers need not arrive silent.
+    if (p->output && !p->midi) std::fill(p->buffer.begin(), p->buffer.end(), 0.5f);
     c->ports.push_back(p);
     return p;
 }

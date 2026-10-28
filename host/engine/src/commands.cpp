@@ -4123,9 +4123,13 @@ void registerEngineCommands(cmd::Registry& registry) {
             c.description =
                 "Recording requires saved master rate 1 and no active master rate "
                 "envelope that leaves 1 anywhere, including automation items. "
-                "Non-unity recording is refused before opening files.";
+                "Non-unity recording and an armed track with unsupported output record mode "
+                "are refused before opening files.";
             c.errors.push_back({"record.playrate", "master playrate can leave unity",
                                 "set rate to 1 and disable non-unity master playrate automation"});
+            c.errors.push_back({"record.output_unsupported",
+                                "output recording is not supported yet",
+                                "use track.set {record_mode: input} on the reported track"});
         }
         c.examples = {{"While the engine runs", obj("{}"),
                        obj(std::string(R"({"playing": )") + (playing ? "true" : "false") +

@@ -7,6 +7,7 @@
 #include "supple/base/files.h"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <cstdio>
@@ -27,6 +28,25 @@ ObjectBuilder<T>& dflt(ObjectBuilder<T>& b, M value) {
 }
 
 Schema<int> intS() { return schema::integerOf<int>(); }
+Schema<int> oversamplingSchema() {
+    const auto integer = intS();
+    const std::array allowed{1, 2, 4, 8};
+    auto spec = integer.jsonSchema();
+    spec["enum"] = json::Value::array();
+    for (const int factor : allowed) spec["enum"].asArray().push_back(factor);
+    return {"oversampling",
+            [integer, allowed](const json::Value& v, int& out, schema::DecodeCtx& ctx,
+                               const std::string& path) {
+                if (!integer.decodeInto(v, out, ctx, path)) return false;
+                if (std::find(allowed.begin(), allowed.end(), out) == allowed.end()) {
+                    ctx.error("fx.oversampling", "oversampling must be 1, 2, 4 or 8", path,
+                              "set oversampling to one of 1, 2, 4 or 8");
+                    return false;
+                }
+                return true;
+            },
+            [integer](int v) { return integer.encode(v); }, spec};
+}
 Schema<double> num() { return schema::number(); }
 Schema<std::string> str() { return schema::string(); }
 Schema<bool> boolean() { return schema::boolean(); }
@@ -377,13 +397,14 @@ Schema<std::map<std::uint32_t, double>> paramValuesSchema() {
         std::map<std::string, double> tmp;
         if (!inner.decodeInto(v, tmp, c, p)) return false;
         for (const auto& [k, x] : tmp) {
-            char* end = nullptr;
-            const unsigned long id = std::strtoul(k.c_str(), &end, 10);
-            if (k.empty() || *end || id > 0xffffffffUL) {
-                c.error("schema.key", "parameter keys are CLAP ids", json::pointerJoin(p, k));
+            std::uint32_t id = 0;
+            const auto [end, ec] = std::from_chars(k.data(), k.data() + k.size(), id);
+            if (ec != std::errc{} || end != k.data() + k.size()) {
+                c.error("schema.key", "parameter keys are unsigned 32-bit decimal ids",
+                        json::pointerJoin(p, k), "use decimal digits from 0 to 4294967295");
                 return false;
             }
-            out[static_cast<std::uint32_t>(id)] = x;
+            out[id] = x;
         }
         return true;
     };
@@ -833,7 +854,7 @@ const Schema<FxInstance>& schemaOf<FxInstance>() {
                                {Isolation::SharedBridge, "shared_bridge"},
                                {Isolation::Dedicated, "dedicated"}}));
         dflt(b, d.isolation);
-        b.field("oversampling", &FxInstance::oversampling, intS().range(1, 8));
+        b.field("oversampling", &FxInstance::oversampling, oversamplingSchema());
         dflt(b, d.oversampling);
         b.field("parallel", &FxInstance::parallel, boolean());
         dflt(b, d.parallel);

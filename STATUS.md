@@ -114,7 +114,9 @@ instructions are in `docs/guides/installing.md`.
   versions with stable ids, per-branch undo, branches with object-level diff
   and merge by replay (field-level conflicts, id remapping), A/B renders of
   two branches, a command log with origins, a history budget that squashes
-  the oldest steps. Project format `supple.project/2.1` with migration from
+  the oldest steps. Undo to an FX's initial unsaved settings restores its factory
+  state while retaining the previous processing instance until plan retirement.
+  Project format `supple.project/2.1` with migration from
   1.x, autosave, crash recovery of recordings, a per-project UI sidecar.
 - **Command bus** (`specs/command-bus.md`, ADR-0007): about 120 typed
   commands with JSON Schema, units, examples run as tests and structured
@@ -611,6 +613,8 @@ Engine and hosting:
 - Audio backends: Linux JACK, dummy, and native PortAudio (CoreAudio on macOS;
   WASAPI/ASIO on Windows), with selection, latency/xruns and restart notifications.
   Fake-device output equals offline in both executors, with native CI coverage.
+  The engine writes stereo; additional opened device outputs are silenced by
+  both native and JACK backends.
   Hardware latency, disconnect behavior and scheduling benefit are unmeasured.
   Edit > Audio device (ADR-0050) chooses and saves the audio system, devices,
   sample rate and buffer size, restarting a running engine; the GUI starts the
@@ -663,6 +667,16 @@ Engine and hosting:
   malformed UTF-8 parameter input is refused. Native verification is pending.
 
 Session and editing:
+- Project files accept `record.mode: output`, but output capture is not
+  implemented: starting recording with an armed output-mode track fails with
+  `record.output_unsupported` before creating files. Switch that track to input
+  mode to record; existing project files still load.
+- Engine stop/device restart retains finished audio and MIDI takes and commits
+  them before app teardown. Headless exit does not save the project; clients
+  must stop and save first to preserve MIDI and other session edits. Audio
+  WAVs/sidecars remain recoverable; MIDI has no crash-recovery file.
+- Save As into a subdirectory of the source media folder skips its destination
+  subtree, including resolved symlink aliases, so copied files are not copied again.
 - Master playrate 0.25..4x and its tr_0 envelope persist in schema 2.1.
   Tape and pitch-preserving source conversion run before take FX/live mixing;
   MIDI, automation, plugin tempo, loops and transport share the fractional clock

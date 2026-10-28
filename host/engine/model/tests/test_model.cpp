@@ -13,6 +13,73 @@
 using namespace supple;
 using namespace supple::model;
 
+TEST_CASE("project FX oversampling accepts only 1 2 4 or 8") {
+    json::Value valid;
+    Id fxId;
+    for (const int factor : {1, 2, 4, 8}) {
+        CAPTURE(factor);
+        EditTxn txn(Session::create(), 1);
+        FxInstance fx;
+        fx.plugin = {"clap", "test.oversampling", "", "", ""};
+        fx.oversampling = factor;
+        fxId = txn.create(fx);
+        txn.modify<Track>(kMaster, [&](auto& track) { track.chain.push_back(fxId); });
+        auto session = txn.commit();
+        REQUIRE(session);
+        const auto saved = serializeProject(*session);
+        auto reopened = parseProject(saved);
+        REQUIRE(reopened);
+        CHECK(reopened->fx.find(fxId)->oversampling == factor);
+        CHECK(serializeProject(*reopened) == saved);
+        valid = projectToJson(*reopened);
+    }
+    for (const int factor : {3, 5, 6, 7, 0, 9}) {
+        CAPTURE(factor);
+        auto bad = valid;
+        bad["fx"][fxId.str()]["oversampling"] = factor;
+        auto loaded = parseProject(json::writeCanonical(bad));
+        CHECK_FALSE(loaded);
+        if (!loaded) {
+            CHECK(loaded.error().code == "fx.oversampling");
+            CHECK(loaded.error().path == "/fx/" + fxId.str() + "/oversampling");
+            CHECK(loaded.error().message.find("1, 2, 4 or 8") != std::string::npos);
+            CHECK(loaded.error().hint.find("1, 2, 4 or 8") != std::string::npos);
+        }
+    }
+    const auto exported = schemaOf<FxInstance>().jsonSchema();
+    const auto* choices = exported.find("properties")->find("oversampling")->find("enum");
+    REQUIRE(choices);
+    CHECK(*choices == *json::parse("[1,2,4,8]"));
+}
+
+TEST_CASE("FX parameter keys are complete unsigned 32-bit decimal ids") {
+    FxInstance fx;
+    fx.plugin = {"clap", "test.params", "", "", ""};
+    auto object = toJson(fx);
+    for (const std::string& key :
+         {std::string("-0"), std::string("+1"), std::string(" 1"), std::string("1\0suffix", 8),
+          std::string("4294967296"), std::string("18446744073709551616")}) {
+        CAPTURE(key);
+        object["params"] = json::Value::object();
+        object["params"][key] = 0.5;
+        auto decoded = schemaOf<FxInstance>().decode(object);
+        REQUIRE_FALSE(decoded);
+        CHECK(decoded.error().toString().find("schema.key") != std::string::npos);
+    }
+    fx.params = {{0, 0.25}, {UINT32_MAX, 0.75}};
+    auto decoded = schemaOf<FxInstance>().decode(toJson(fx));
+    REQUIRE(decoded);
+    CHECK(decoded->params == fx.params);
+    EditTxn txn(Session::create(), 1);
+    const auto id = txn.create(fx);
+    txn.modify<Track>(kMaster, [&](auto& track) { track.chain.push_back(id); });
+    auto session = txn.commit();
+    REQUIRE(session);
+    auto reopened = parseProject(serializeProject(*session));
+    REQUIRE(reopened);
+    CHECK(reopened->fx.find(id)->params == fx.params);
+}
+
 namespace {
 
 Id addTrack(EditTxn& t, std::string name, Id parent = kMaster) {
