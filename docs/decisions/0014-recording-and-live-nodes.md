@@ -8,6 +8,12 @@
 playrate with a shared timeline clock and source conversion in device-time
 graphs; model/command support precedes DSP integration.
 
+**Proposed amendment, 2026-10-28:**
+[ADR-0051](0051-read-ahead-latency-compensation.md) replaces decision 6's
+unimplemented monitoring-latency promise with a backwards read-ahead solve
+and clarifies actual recording placement. The current forward solve still
+delays live paths to match playback; implementation awaits review.
+
 ## Context
 
 Everything renders ahead today (ADR-0012). Recording needs the device's
