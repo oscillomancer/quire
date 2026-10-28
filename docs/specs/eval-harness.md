@@ -97,8 +97,10 @@ zero loss in dry validation.
 Two-bar bass riff with rests; four-bar 3/4 waltz; one-bar triplet lead;
 two-bar triads; two-bar channel-10 snare pattern. Scored dimensions: compile on
 first attempted typed render, exact bars, every bar's meter, inclusive pitch
-range, note attacks per bar (including each chord note). Density is attacks/bar,
-not duration occupancy; tied notes count once. Task examples must compile and
+range, note attacks in every bar (including each chord note). Density is each
+bar's own count of attacks, by that bar's meter, within the task's range: not the
+phrase's average and not duration occupancy. A tied note counts once, in the bar
+it starts. Task examples must compile and
 meet their own constraints. The final answer is the **last submitted notation**,
 not prose or the last successful submission. First-attempt failure remains a
 failed dimension after repair. Requests hidden inside arbitrary Lua cannot be

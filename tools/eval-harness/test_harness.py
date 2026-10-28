@@ -71,15 +71,19 @@ class Tasks(unittest.TestCase):
 class Scoring(unittest.TestCase):
     def midi(self):
         return {"ppq": 960, "length_ticks": 7680, "meter": "4/4", "bar_meters": ["4/4", "4/4"],
-                "notes": [{"pitch": 60}, {"pitch": 64}, {"pitch": 67}, {"pitch": 72}]}
+                "notes": [{"pitch": 60, "start": 0}, {"pitch": 64, "start": 1920},
+                          {"pitch": 67, "start": 3840}, {"pitch": 72, "start": 5760}]}
 
     def test_notation_success_and_every_failure(self):
         target = {"bars": 2, "meter": "4/4", "pitch_range": [60, 72], "notes_per_bar": [2, 2]}
         attempts = [{"compiled": True}]
         self.assertTrue(notation_score(self.midi(), target, attempts)["pass"])
         cases = [("bars", {"length_ticks": 3840}), ("meter", {"bar_meters": ["4/4", "3/4"]}),
-                 ("pitch_range", {"notes": [{"pitch": 59}, {"pitch": 64}, {"pitch": 67}, {"pitch": 72}]}),
-                 ("density", {"notes": [{"pitch": 60}]})]
+                 ("pitch_range", {"notes": [dict(n, pitch=59 if n["pitch"] == 60 else n["pitch"])
+                                            for n in self.midi()["notes"]]}),
+                 ("density", {"notes": [{"pitch": 60, "start": 0}]}),
+                 # The phrase's average is right, but every attack is in bar 1.
+                 ("density", {"notes": [dict(n, start=i * 960) for i, n in enumerate(self.midi()["notes"])]})]
         for key, change in cases:
             with self.subTest(key=key):
                 result = notation_score(dict(self.midi(), **change), target, attempts)
