@@ -5,6 +5,7 @@
 // what the subset refuses is refused with the diagnostic that teaches it.
 #include <doctest/doctest.h>
 #include <clocale>
+#include <cstdlib>
 
 #include <cmath>
 #include <fstream>
@@ -747,12 +748,16 @@ TEST_CASE("numeric literals ignore the host decimal separator") {
         ~Restore() { std::setlocale(LC_NUMERIC, locale.c_str()); }
     } restore{original};
     bool available = false;
-    for (const char* locale : {"de_DE.UTF-8", "de_DE.utf8", "German_Germany.1252"})
+    for (const char* locale :
+         {"de_DE.UTF-8", "de_DE.utf8", "fr_FR.UTF-8", "fr_FR.utf8", "de-DE", "German_Germany.1252"})
         if (std::setlocale(LC_NUMERIC, locale)) {
             available = true;
             break;
         }
     if (!available) {
+        // CI installs one and sets this, so the check cannot pass there unexercised.
+        CHECK_MESSAGE(!std::getenv("SUPPLE_REQUIRE_COMMA_LOCALE"),
+                      "no comma-decimal locale is installed");
         MESSAGE("No comma-decimal locale installed; locale-specific check skipped");
         return;
     }

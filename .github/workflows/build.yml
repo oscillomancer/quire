@@ -32,6 +32,8 @@ env:
   CTEST_OUTPUT_ON_FAILURE: '1'
   CMAKE_BUILD_PARALLEL_LEVEL: '6'
   SUPPLE_REQUIRE_OFFSCREEN: '1'
+  # The script compiler's comma-decimal locale test fails instead of skipping.
+  SUPPLE_REQUIRE_COMMA_LOCALE: '1'
 
 jobs:
   plan:
@@ -99,7 +101,8 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y ninja-build ccache libx11-dev libxcursor-dev libxrandr-dev libxext-dev \
             libgl1-mesa-dev libegl1-mesa-dev zlib1g-dev \
-            libasound2-dev libwayland-dev libxkbcommon-dev xvfb xauth
+            libasound2-dev libwayland-dev libxkbcommon-dev xvfb xauth locales
+          sudo locale-gen de_DE.UTF-8
           wget -q https://apt.llvm.org/llvm.sh -O "$RUNNER_TEMP/llvm.sh"
           sudo bash "$RUNNER_TEMP/llvm.sh" 22
           echo /usr/lib/llvm-22/bin >> "$GITHUB_PATH"
