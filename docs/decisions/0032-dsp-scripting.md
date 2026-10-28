@@ -14,7 +14,7 @@ buildable C++ project on the plugin template (the graduation path).
 
 Constraints found while surveying the code:
 
-- The template's framework (`/home/nate/Projects/audio-plugins/template`,
+- The template's framework ([oscillomancer/template](https://github.com/oscillomancer/template),
   1.15.3) binds a product at compile time: `product::kParams` is included
   by about 700 lines of framework code, and `product::info` (identity, kind,
   buses) by about 230. Nothing can host a parameter table or a plugin kind
