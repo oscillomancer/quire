@@ -1584,9 +1584,12 @@ struct Marram : Instrument {
     int quiet = 0;
     int tail = 0;  // the tail last reported, in samples
     bool tablesMade = false;
-    // The free LFOs, at the block's start, and the song as the block began.
+    // Free LFO phase anchors and whole frames since the last rate change.
+    // Summing fractional phase once per block would depend on block size.
     Array<double, 3> freePhase;
     Array<int, 3> freeCycle;
+    Array<double, 3> freeFrames;
+    Array<double, 3> freeRate;
     double tempo = 120.0;
     double beats = 0.0;
     bool playing = false;
@@ -1633,6 +1636,8 @@ struct Marram : Instrument {
         reportTail(false);
         freePhase.fill(0.0);
         freeCycle.fill(0);
+        freeFrames.fill(0.0);
+        freeRate.fill(0.0);
         if (!tablesMade) makeTables();
         tablesMade = true;
     }
@@ -2019,8 +2024,8 @@ struct Marram : Instrument {
                     (beats + i * tempo / 60.0 / sampleRate()) / divisionBeats(division.index()) +
                     phase / 360.0;
             } else {
-                total = freePhase[n] + (sync.on() ? beatHz : rate.value()) * i / sampleRate() +
-                        phase / 360.0;
+                total =
+                    freePhase[n] + freeRate[n] * (freeFrames[n] + i) / sampleRate() + phase / 360.0;
                 cycle = freeCycle[n];
             }
             const double whole = floor(total);
@@ -2039,13 +2044,17 @@ struct Marram : Instrument {
         return lfoWave(shape.index(), t, cycle, seed) * fade;
     }
 
-    // A free LFO's phase, a block on.
-    void freeOn(int n, int frames, const Param& sync, const Param& rate, const Param& division) {
+    // Anchor at a rate change, keeping phase continuous. Between changes,
+    // whole-frame counts give the same phase regardless of block partition.
+    void freeOn(int n, const Param& sync, const Param& rate, const Param& division) {
         const double hz = sync.on() ? tempo / 60.0 / divisionBeats(division.index()) : rate.value();
-        const double total = freePhase[n] + hz * frames / sampleRate();
+        if (hz == freeRate[n]) return;
+        const double total = freePhase[n] + freeRate[n] * freeFrames[n] / sampleRate();
         const double whole = floor(total);
         freePhase[n] = total - whole;
         freeCycle[n] += toInt(whole);
+        freeFrames[n] = 0.0;
+        freeRate[n] = hz;
     }
 
     // An oscillator's settings for voice v, with their routes: only those
@@ -2322,6 +2331,9 @@ struct Marram : Instrument {
         tempo = io.transport.tempo;
         beats = io.transport.beats;
         playing = io.transport.playing;
+        freeOn(0, l1Sync, l1Rate, l1Division);
+        freeOn(1, l2Sync, l2Rate, l2Division);
+        freeOn(2, l3Sync, l3Rate, l3Division);
         macro1.set(m1);
         macro2.set(m2);
         macro3.set(m3);
@@ -2392,9 +2404,7 @@ struct Marram : Instrument {
         for (int v = 0; v < voiceCount(); ++v)
             if (voice[v].sounding && voicePlaying(v)) sounding = true;
         reportTail(sounding);
-        freeOn(0, io.frames, l1Sync, l1Rate, l1Division);
-        freeOn(1, io.frames, l2Sync, l2Rate, l2Division);
-        freeOn(2, io.frames, l3Sync, l3Rate, l3Division);
+        for (int n = 0; n < 3; ++n) freeFrames[n] += io.frames;
     }
 
     // How long the output goes on once the keys are up: the longest amp

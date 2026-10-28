@@ -696,6 +696,8 @@ Plugins:
 - Ghyll, Pollia and Withy discard non-finite inputs before their recursive
   state. Their mono/stereo regressions and the script runtime's scalar/aggregate bounds
   and prepared-tail lifecycle fixes pass focused Linux dev/RTSan checks.
+  Marram's free-running LFOs use whole-frame phase anchors so their routed
+  modulation remains bit-identical across host block sizes, including rate changes.
   Native macOS/Windows CI remains pending for these changes and the player's
   Unicode library filename discovery fix.
 - DSP source exports require a visible, automatable parameter with a plain

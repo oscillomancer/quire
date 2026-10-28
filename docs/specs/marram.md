@@ -35,7 +35,9 @@ normal 2x, high 4x); the voices are summed and brought down once
 is computed every 16 samples of a voice's life and glided between, so
 renders do not depend on the block size; every random choice (free-running
 phases, unison and drift, noise) is seeded by the order of the notes, so a
-render is the same every time. Sixteen voices (`voice.polyphony` plays
+render is the same every time. Free-running LFOs count whole frames from
+the last rate change, preserving phase without block-dependent rounding.
+Sixteen voices (`voice.polyphony` plays
 fewer); a stolen voice fades out over a few milliseconds. Its tail (CLAP's
 `tail`, what a host waits for after the last key is up) is the longest amp
 release, a voice's routes included, plus 20 ms. A safety limit leaves the output untouched below
