@@ -49,11 +49,12 @@ void process(T& plugin, Audio& audio, int channels)
 }
 
 template <class T>
-void checkNonfinite() {
+void checkNonfinite(void (*configure)(T&) = nullptr) {
     const D::NativeCode<T> code;
     for (int channels : {1, 2}) {
         CAPTURE(channels);
         D::Instance instance;
+        instance.sampleRate = 48000.0;
         instance.channels = channels;
         instance.maxBlockSize = kFrames;
         D::CurrentScope scope(&instance);
@@ -66,6 +67,7 @@ void checkNonfinite() {
                 const double value = p.unit == D::ParamModel::Unit::Percent ? p.def * 0.01 : p.def;
                 D::ParamBinding::setValue(*param, value, true);
             }
+            if (configure) configure(*plugin);
             plugin->prepare();
             plugin->update();
             return plugin;
@@ -108,7 +110,12 @@ TEST_CASE("Withy keeps non-finite input out of recursive state") {
     checkNonfinite<S::test_withy::Withy>();
 }
 TEST_CASE("Bracken keeps non-finite input out of recursive state") {
-    checkNonfinite<S::test_bracken::Bracken>();
+    checkNonfinite<S::test_bracken::Bracken>([](S::test_bracken::Bracken& plugin) {
+        // The first echo arrives at frame 4800, inside the second block,
+        // so cleaning only the immediate output cannot hide poisoned history.
+        D::ParamBinding::setValue(plugin.sync, 0, true);
+        D::ParamBinding::setValue(plugin.time, 100, true);
+    });
 }
 TEST_CASE("Umber keeps non-finite input out of recursive state") {
     checkNonfinite<S::test_umber::Umber>();
