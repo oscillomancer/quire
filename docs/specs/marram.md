@@ -37,6 +37,10 @@ renders do not depend on the block size; every random choice (free-running
 phases, unison and drift, noise) is seeded by the order of the notes, so a
 render is the same every time. Free-running LFOs count whole frames from
 the last rate change, preserving phase without block-dependent rounding.
+Known implementation gap: a free LFO synced to a playing song instead
+derives its phase from the host's beat position. Rounding at block boundaries
+can cause tiny output differences across block sizes; the exact-identity
+requirement is not yet met in this mode (tracked in `STATUS.md`).
 Sixteen voices (`voice.polyphony` plays
 fewer); a stolen voice fades out over a few milliseconds. Its tail (CLAP's
 `tail`, what a host waits for after the last key is up) is the longest amp
