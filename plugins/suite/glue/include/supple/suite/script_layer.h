@@ -47,15 +47,20 @@ class ScriptLayer : public SemanticLayer {
     // The status is for code now running: what was reported is forgotten.
     void statusRestarted() {
         budgetReported_ = outOfRangeReported_ = 0;
+        memoryReported_ = false;
         reloadResolved();
     }
     void reloadResolved() { reloadProblem_ = json::Value(); }
     void reloadFailed(std::string message, std::string hint, int line = 0);
+    // What a script refused memory in prepare() is told, and how to fix it.
+    static std::string memoryLimitMessage();
+    static std::string memoryLimitHint();
 
   private:
     void reportStatus();
 
     uint32_t budgetReported_ = 0, outOfRangeReported_ = 0;
+    bool memoryReported_ = false;
     json::Value reloadProblem_;
     std::shared_ptr<json::Value> editorProblems_ =
         std::make_shared<json::Value>(json::Value::array());

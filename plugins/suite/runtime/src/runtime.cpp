@@ -189,6 +189,17 @@ void outOfRange(int line) {
                                         std::memory_order_relaxed);
 }
 
+bool reserve(std::int64_t bytes) {
+    Instance* in = current();
+    if (!in || in->memory < 0) return true;
+    if (bytes > Instance::kMemoryLimit - in->memory) {
+        in->status.memoryRefused.store(true, std::memory_order_relaxed);
+        return false;
+    }
+    in->memory += bytes;
+    return true;
+}
+
 static double rate() {
     const Instance* found = current();
     const Instance* in = found ? found : &gDefault;
@@ -294,6 +305,9 @@ void Buffer<T>::resize(int size) {
     // a plugin needs, and keeps a mistaken size from exhausting memory.
     constexpr int kMax = 1 << 26;
     size = size < 0 ? 0 : (size > kMax ? kMax : size);
+    // Counted before the size is compared: a second prepare() resizes to what it already has.
+    if (!detail::reserve(static_cast<std::int64_t>(size) * static_cast<std::int64_t>(sizeof(T))))
+        return;
     if (size == size_) return;
     T* grown = size > 0 ? static_cast<T*>(std::calloc(static_cast<std::size_t>(size), sizeof(T)))
                         : nullptr;
@@ -612,7 +626,12 @@ DelayLine& DelayLine::operator=(const DelayLine& other) {
 }
 DelayLine::~DelayLine() { delete &line(line_); }
 void DelayLine::prepare(int maxDelaySamples) {
-    line(line_).prepare(maxDelaySamples < 0 ? 0 : maxDelaySamples);
+    if (maxDelaySamples < 0) maxDelaySamples = 0;
+    // The framework's ring: a power of two, four samples longer than the delay.
+    std::int64_t ring = 4;
+    while (ring < std::int64_t{maxDelaySamples} + 4) ring <<= 1;
+    if (!detail::reserve(ring * static_cast<std::int64_t>(sizeof(double)))) return;
+    line(line_).prepare(maxDelaySamples);
 }
 void DelayLine::push(double x) { line(line_).push(x); }
 double DelayLine::read(double delaySamples) const {
@@ -649,6 +668,8 @@ Oversampler& Oversampler::operator=(const Oversampler& other) {
 Oversampler::~Oversampler() { delete &over(state_); }
 void Oversampler::prepare(int factor) { prepare(factor, Phase::Minimum); }
 void Oversampler::prepare(int factor, Phase phase) {
+    // Its filters, at any factor, hold less than this.
+    if (!detail::reserve(std::int64_t{16} << 10)) return;
     OversamplerState& o = over(state_);
     // 1 passes samples through: a restart to 1x needs no code of its own.
     o.over.prepare(1, 1, std::clamp(factor, 1, 16),
@@ -726,6 +747,9 @@ std::complex<double>* binOf(void* p, int k) {
     if (!s.ready || k < 0 || k >= s.stft.bins()) return nullptr;
     return s.stft.spectrum(0) + k;
 }
+// What a transform of `size` holds, counted: its rings, window, frame and FFT
+// come to less than 64 bytes a sample and a kilobyte.
+bool reserveStft(int size) { return detail::reserve(std::int64_t{64} * size + 1024); }
 }  // namespace
 Stft::Stft() : state_(new StftState()) {}
 Stft::Stft(const Stft& other) : state_(new StftState(stft(other.state_))) {}
@@ -736,14 +760,18 @@ Stft& Stft::operator=(const Stft& other) {
 }
 Stft::~Stft() { delete &stft(state_); }
 void Stft::prepare(int size, int overlap) {
+    size = std::clamp(size, 16, 32768);
+    if (!reserveStft(size)) return;
     StftState& s = stft(state_);
-    s.stft.prepare(1, std::clamp(size, 16, 32768), overlap);
+    s.stft.prepare(1, size, overlap);
     s.prepared = true;
     s.ready = false;
 }
 void Stft::prepareAnalysis(int size, int overlap) {
+    size = std::clamp(size, 16, 32768);
+    if (!reserveStft(size)) return;
     StftState& s = stft(state_);
-    s.stft.prepare(1, std::clamp(size, 16, 32768), overlap, dsp::Stft::Mode::Analyse);
+    s.stft.prepare(1, size, overlap, dsp::Stft::Mode::Analyse);
     s.prepared = true;
     s.ready = false;
 }

@@ -644,16 +644,28 @@ budget of loop iterations and calls (65,536 per frame in `process`); a
 script that spends it is stopped and silent until it is reset or reloaded,
 and the log names the line.
 
+What `prepare()` sizes may hold 1 GiB per instance, all resources together:
+a `Buffer` its elements, a `DelayLine` its ring (the delay rounded up to a
+power of two, in doubles), an `Stft` 64 bytes per sample of its size, an
+`Oversampler` 16 KiB. That is far beyond any delay, table or transform a
+plugin needs (a 10-second stereo delay at 192 kHz is about 34 MB). A
+request past it is refused before anything is allocated, and the script is
+stopped and silent (`script.runtime.memory`) until it is prepared again; a
+saved revision that asks for more is not loaded, and the previous version
+keeps playing.
+
 These guards are the player's. A source export (`dsp_export` with
 `format: "source"`) is ordinary C++: invalid indices follow the same spare
 rules and are reported without a line, but there is no budget, so a loop that never ends
 hangs the plugin. Test a script in the player before exporting its source.
 
 Inspect a loaded instance with `fx_describe` (DAW) or `plugin_describe`
-(sandbox): its `problems` report loop budgets, invalid indices and failed
-reloads with a source line when known and a corrective hint. `silent: true`
-means that problem stopped the audio. Audio observations clear on reset,
-activation or adoption of replacement code; reads never clear them.
+(sandbox): its `problems` report loop budgets, memory refused in
+`prepare()`, invalid indices and failed reloads with a source line when
+known and a corrective hint. `silent: true` means that problem stopped the
+audio. Audio observations clear on reset, activation or adoption of
+replacement code (refused memory only on the last two); reads never clear
+them.
 
 ## Real time
 

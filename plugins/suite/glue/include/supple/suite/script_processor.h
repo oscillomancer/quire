@@ -15,9 +15,14 @@
 //     compiled counts them; C++ does not). A script that spends it is
 //     stopped where it was, and stays silent until its next prepare or
 //     replacement; its status says where (Instance::status).
+//   - What prepare() sizes (Buffers, DelayLines, Oversamplers, Stfts) may
+//     hold Instance::kMemoryLimit together. Past it a resource is left as
+//     it was and the script is stopped, silent through resets until it is
+//     prepared again (Status::memoryRefused).
 //   - A new compile of the same script, with the same parameters, replaces
 //     the running one without the host noticing (swap()): prepared on the
-//     main thread (refused if its prepare() reports another latency), taken
+//     main thread (refused if its prepare() reports another latency or is
+//     refused memory), taken
 //     at the start of a block, crossfaded over 10 ms. The
 //     one it replaced goes back to the main thread to be freed (collect()).
 //     What the old code observes while it fades out (an index out of range,
@@ -133,7 +138,10 @@ class Generation {
     void prepare(D::Instance* instance) {
         D::CurrentScope scope(instance);
         instance->budget = std::int64_t{1} << 40;
+        instance->status.memoryRefused.store(false, std::memory_order_relaxed);
+        instance->memory = 0;
         if (auto hook = program_->prepare()) hook(instance, self_);
+        instance->memory = -1;
         preparedTail = instance->tail;
         if (!reset_) reset_ = program_->create();
         program_->copy(reset_, self_);
@@ -227,7 +235,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         running_ = current_.get();
         current_->prepare(&instance_);
         applyVoiceLimit();
-        stopped_ = false;
+        stopped_ = refusedMemory();
         const size_t channels = static_cast<size_t>(std::max(setup.channels, 0));
         const size_t frames = static_cast<size_t>(std::max(setup.maxBlockSize, 1));
         fadeBuffer_.assign(channels, std::vector<double>(frames, 0.0));
@@ -263,7 +271,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         for (D::FileContents* f : files_)
             if (f) f->reset();
         if (fading_) retire(std::move(fading_));
-        stopped_ = false;
+        stopped_ = refusedMemory();
     }
 
     // Files: what loadFile() made of a file property's file, at the start of
@@ -444,6 +452,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     // the first prepare. False, offering nothing, when its prepare() reports
     // another latency than the host was told: that needs a restart.
     bool swap(std::shared_ptr<const D::Code> code, const ParamValues& values) {
+        swapRefusedMemory_ = false;
         auto next =
             std::make_unique<Generation>(code, *table_, definition_->properties(), &instance_);
         load(*next, values, true);
@@ -462,6 +471,10 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         next->bindInstance(&own);
         next->prepare(&own);
         next->bindInstance(&instance_);
+        if (own.status.memoryRefused.load(std::memory_order_relaxed)) {
+            swapRefusedMemory_ = true;
+            return false;
+        }
         const int latency = own.latency >= 0 ? own.latency : std::max(0, code->info().latency);
         if (latency != latencySamples()) return false;
         editorCode_ = code;
@@ -469,6 +482,10 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         delete incoming_.exchange(next.release(), std::memory_order_acq_rel);
         return true;
     }
+
+    // Whether the last swap() was refused because the new code's prepare()
+    // asked for more memory than a script may hold (no restart helps).
+    bool swapRefusedMemory() const { return swapRefusedMemory_; }
 
     // Frees what the audio thread let go of.
     void collect() {
@@ -579,6 +596,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         // Old code its budget stopped stays silent through the fade.
         const bool stopped = stopped_;
         instance_.status.clear();
+        instance_.status.memoryRefused.store(false, std::memory_order_relaxed);
         budgetSeen_ = 0;
         // Preserve what the replacement set while preparing on its own record.
         instance_.tail = next->preparedTail;
@@ -892,6 +910,14 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         if (!retired_.push(raw)) fading_.reset(raw);
     }
 
+    // A script whose prepare() was refused memory stays stopped until it is
+    // prepared again.
+    bool refusedMemory() {
+        const bool refused = instance_.status.memoryRefused.load(std::memory_order_relaxed);
+        if (refused) instance_.status.silent.store(true, std::memory_order_relaxed);
+        return refused;
+    }
+
     void checkBudget() {
         const uint32_t exceeded = instance_.status.budgetExceeded.load(std::memory_order_relaxed);
         if (exceeded != budgetSeen_) {
@@ -943,6 +969,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     int fadeLength_ = 480, fadeDone_ = 0;
     double spare_ = 0.0;
     bool stopped_ = false;
+    bool swapRefusedMemory_ = false;
     bool fadingStopped_ = false;  // the old code ran out of budget: it fades from silence
     uint32_t budgetSeen_ = 0;
     int latency_ = 0;

@@ -767,6 +767,11 @@ Plugins:
   comparisons, including transport changes and sample-offset division automation.
 - Script numeric literals use locale-independent parsing, including float
   rounding and underflow, so comma-decimal host locales accept the same source.
+- What a script's `prepare()` sizes (Buffers, DelayLines, Stfts,
+  Oversamplers) may hold 1 GiB per instance together; a request past it is
+  refused before allocating and the script stops with
+  `script.runtime.memory`, and a hot reload that asks for more keeps the
+  previous version. Its reset copy holds as much again.
 - DSP source exports require a visible, automatable parameter with a plain
   name for their host tests and do not retain the JIT's loop budget (a loop
   that never ends hangs a native export). Exports include declared factory

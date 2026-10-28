@@ -430,6 +430,42 @@ TEST(runtime_problems_have_lines_and_reload_clears_them) {
     }
 }
 
+TEST(a_script_refused_memory_says_so_and_a_reload_refused_it_keeps_the_last) {
+    const std::string process = "    void process(Block& io) {";
+    const std::string huge =
+        "    DelayLine line;\n    void prepare() { line.prepare(2147483647); }\n" + process;
+    {
+        Library library("smoke");
+        library.edit("smoke", process, huge, 2);
+        Instance a("com.suppleaudio.script-player");
+        CHECK(a.plugin != nullptr);
+        a.activate();
+        CHECK(a.play() == 0.0f);
+        const json::Value status = parsed(a.status());
+        CHECK(status.find("problems")->size() == 1);
+        const auto& p = status.find("problems")->asArray().at(0);
+        CHECK(p.find("code")->asString() == "script.runtime.memory");
+        CHECK(p.find("scope")->asString() == "prepare");
+        CHECK(p.find("silent")->asBool());
+        CHECK(!p.find("hint")->asString().empty());
+    }
+    Library library("smoke");
+    Instance a("com.suppleaudio.script-player");
+    a.activate();
+    for (int i = 0; i < 4; ++i) a.play();
+    CHECK(std::fabs(a.play() - 0.5f) < 1e-6f);
+    library.edit("smoke", process, huge, 2);
+    a.tick(15);
+    CHECK(a.host.restarts == 0);
+    CHECK(a.host.loggedContaining("not reloaded"));
+    CHECK(std::fabs(a.play() - 0.5f) < 1e-6f);
+    const json::Value status = parsed(a.status());
+    CHECK(status.find("problems")->size() == 1);
+    const auto& p = status.find("problems")->asArray().at(0);
+    CHECK(p.find("code")->asString() == "script.reload.failed");
+    CHECK(p.find("message")->asString().find("GiB") != std::string::npos);
+}
+
 TEST(a_trace_starts_and_is_read_only_while_the_plugin_is_inactive) {
     Library library("smoke");
     const std::string good = "io[c][i] *= dbToGain(gain.at(i));";

@@ -118,6 +118,10 @@ bool ScriptLayer::getStatus(const clap_ostream_t* out) {
                                    "Fix the loop and save the script again, or restart the plugin.",
                                    s.budgetLine.load(std::memory_order_relaxed),
                                    s.silent.load(std::memory_order_relaxed)));
+    if (s.memoryRefused.load(std::memory_order_relaxed))
+        problems.push_back(problem("script.runtime.memory",
+                                   memoryLimitMessage() + " and was stopped.", "prepare",
+                                   memoryLimitHint(), 0, true));
     if (s.outOfRange.load(std::memory_order_relaxed))
         problems.push_back(problem(
             "script.runtime.index", "An index was outside an array; it accessed the spare element.",
@@ -127,6 +131,18 @@ bool ScriptLayer::getStatus(const clap_ostream_t* out) {
     if (!reloadProblem_.isNull()) problems.push_back(reloadProblem_);
     doc["problems"] = std::move(problems);
     return writeAll(out, json::writeCanonical(doc));
+}
+
+std::string ScriptLayer::memoryLimitMessage() {
+    return "The script's prepare() asked for more than " +
+           std::to_string(script::detail::Instance::kMemoryLimit >> 30) + " GiB of memory";
+}
+
+std::string ScriptLayer::memoryLimitHint() {
+    return "Size its Buffers, DelayLines and Stfts for what the plugin needs (they count "
+           "together, up to " +
+           std::to_string(script::detail::Instance::kMemoryLimit >> 30) +
+           " GiB), then save the script again.";
 }
 
 void ScriptLayer::reloadFailed(std::string message, std::string hint, int line) {
@@ -193,6 +209,12 @@ void ScriptLayer::reportStatus() {
                                              "reloaded or the host restarts it");
     }
     budgetReported_ = budget;
+    const bool memory = status.memoryRefused.load(std::memory_order_relaxed);
+    if (memory && !memoryReported_)
+        instance().log(CLAP_LOG_WARNING, memoryLimitMessage() +
+                                             "; it is silent until it is reloaded or the host "
+                                             "restarts it");
+    memoryReported_ = memory;
     const uint32_t range = status.outOfRange.load(std::memory_order_relaxed);
     if (range != 0 && outOfRangeReported_ == 0) {
         instance().log(CLAP_LOG_INFO, "the script indexed outside an array" +

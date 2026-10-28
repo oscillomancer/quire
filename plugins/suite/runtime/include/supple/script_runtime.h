@@ -23,6 +23,9 @@ struct Status {
     std::atomic<std::uint32_t> budgetExceeded{0};
     std::atomic<std::uint32_t> budgetLine{0};
     std::atomic<bool> silent{false};
+    // prepare() asked for more than Instance::kMemoryLimit and the script is
+    // stopped. The next prepare() decides it again; clear() leaves it.
+    std::atomic<bool> memoryRefused{false};
 
     // The hook-owning thread clears observations when code is replaced/reset.
     void clear() {
@@ -216,6 +219,12 @@ struct Instance {
     bool offline = false;
     // Back-edges a hook may take before it is stopped (audio hooks only).
     std::int64_t budget = std::int64_t{1} << 31;
+    // What the resources prepare() sizes may hold together: far beyond any
+    // delay, table or transform a plugin needs, and short of what would take
+    // the host down. While prepare() runs, `memory` counts what they hold so
+    // far; -1 at other times, when nothing is counted.
+    static constexpr std::int64_t kMemoryLimit = std::int64_t{1} << 30;
+    std::int64_t memory = -1;
     Status status;
     VoiceBank* voices = nullptr;  // an instrument's
     RouteHost* routes = nullptr;  // a plugin with routes'
@@ -248,6 +257,11 @@ class CurrentScope {
 
 // Reports an out-of-range index at `line` (0: unknown) to the current instance.
 void outOfRange(int line);
+
+// Counts `bytes` a resource is about to hold against the current instance's
+// kMemoryLimit while its prepare() runs: false, counting nothing and marking
+// the instance refused, when they would pass it.
+bool reserve(std::int64_t bytes);
 
 // Where the runtime classes keep what generated code reads directly.
 struct Layout {

@@ -58,6 +58,10 @@ The suite's `ScriptLayer` exposes:
 
 - `script.runtime.budget`: the hook budget was exceeded, with its first
   source line and actual stopped/silent state.
+- `script.runtime.memory` (scope `prepare`, always silent): the resources
+  `prepare()` sized asked for more than the per-instance limit (1 GiB
+  together). The request past it was refused before allocating, and the
+  script stays stopped through resets until it is prepared again.
 - `script.runtime.index`: an index was out of range. Numeric/enum spares
   reset to zero and trivially copyable aggregate spares to their declared
   defaults on each invalid access; resource-bearing spares retain state.
@@ -68,10 +72,11 @@ The suite's `ScriptLayer` exposes:
 - `script.reload.failed`: a saved revision could not replace the loaded
   code. The previous version stays loaded; the first compiler error and
   its line/hint are included when available. ID changes and unreadable or
-  refused replacements also report a corrective hint.
+  refused replacements (one whose `prepare()` asks for more memory than the
+  limit among them) also report a corrective hint.
 
 Audio observations clear when replacement code is adopted, on reset or on
-activation. Replacement code always crossfades from the old generation.
+activation; `script.runtime.memory` clears only on the first and last. Replacement code always crossfades from the old generation.
 What the old generation observes while it fades out (an index out of range,
 its budget spent) is discarded, so its faults are never reported for, and
 cannot stop, the new generation. An old generation its budget stopped is

@@ -99,6 +99,16 @@ class PlayerLayer final : public suite::ScriptLayer {
                 instance().rebuildEditor();
                 return;
             }
+            if (processor().swapRefusedMemory()) {
+                reloadFailed(
+                    "The latest save was not loaded; the previous version is still "
+                    "loaded. " +
+                        memoryLimitMessage() + ".",
+                    memoryLimitHint());
+                instance().log(CLAP_LOG_WARNING,
+                               "the script was not reloaded: " + memoryLimitMessage());
+                return;
+            }
         }
         if (!instance().redefine(next)) {
             reloadFailed(

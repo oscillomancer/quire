@@ -303,6 +303,46 @@ TEST(a_script_that_spins_is_stopped_and_silent_and_says_where) {
     CHECK(std::fabs(render(engine, 256).back()) > 0.0);
 }
 
+TEST(a_script_whose_prepare_asks_for_too_much_memory_is_stopped_and_not_swapped_in) {
+    const std::string fits = R"(#include <supple/script.h>
+struct Big : Effect {
+    static constexpr Info info = {.name = "Big", .id = "com.example.big"};
+    Buffer<double> table;
+    DelayLine line;
+    void prepare() {
+        table.resize(1 << 20);
+        line.prepare(1000);
+    }
+    void process(Block& io) {
+        for (int c = 0; c < io.channels; ++c)
+            for (int i = 0; i < io.frames; ++i) io[c][i] *= 0.5;
+    }
+};
+)";
+    // A line of 2^27 samples is the limit on its own; after the table it
+    // passes it, and is refused before anything is allocated.
+    std::string tooBig = fits;
+    tooBig.replace(tooBig.find("line.prepare(1000)"), 18, "line.prepare((1 << 27) - 4)");
+    const auto good = compileText(fits), bad = compileText(tooBig);
+    Engine stopped(bad);
+    stopped.activate(48000.0, 64, 2, 2);
+    const auto& status = stopped.processor().instance().status;
+    CHECK(status.memoryRefused.load());
+    CHECK(status.silent.load());
+    CHECK(render(stopped, 256).back() == 0.0);
+    stopped.reset();
+    CHECK(render(stopped, 256).back() == 0.0);  // until it is prepared again
+
+    Engine running(good);
+    running.activate(48000.0, 64, 2, 2);
+    CHECK(!running.processor().instance().status.memoryRefused.load());
+    CHECK(std::fabs(render(running, 256).back()) > 0.0);
+    CHECK(!running.processor().swap(bad->code(), ParamValues(good->params())));
+    CHECK(running.processor().swapRefusedMemory());
+    CHECK(!running.processor().instance().status.memoryRefused.load());
+    CHECK(std::fabs(render(running, 256).back()) > 0.0);
+}
+
 TEST(a_new_compile_replaces_the_running_one_with_a_crossfade) {
     // Stateless, so the new code's output is the reference's exactly.
     const std::string level = R"(#include <supple/script.h>
