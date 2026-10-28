@@ -28,6 +28,7 @@ struct RunResult {
     std::vector<std::string> log;
     std::string script;
     std::int64_t instructions = 0;
+    std::int64_t log_dropped = 0;
 };
 }  // namespace
 
@@ -144,6 +145,8 @@ void registerScriptCommands(cmd::Registry& registry) {
             .field("result", &RunResult::result,
                    any().doc("What the script returned (null if it returned nothing)."))
             .field("log", &RunResult::log, arrayOf(string()).doc("What the script printed."))
+            .field("log_dropped", &RunResult::log_dropped,
+                   integer().doc("Cumulative lines evicted from this script's retained log."))
             .field("script", &RunResult::script, string().doc("The name it ran under."))
             .field("instructions", &RunResult::instructions,
                    integer().doc("Lua instructions the run executed."))
@@ -188,6 +191,7 @@ void registerScriptCommands(cmd::Registry& registry) {
     for (int i = 1; i <= 4; ++i) returned["steps"].push_back(i);
     exampleResult["result"] = std::move(returned);
     exampleResult["log"] = json::Value::array();
+    exampleResult["log_dropped"] = 0;
     exampleResult["script"] = "<any>";
     exampleResult["instructions"] = "<any>";
     command.examples = {{"A script that computes, with no commands", std::move(exampleArgs),
@@ -207,6 +211,7 @@ void registerScriptCommands(cmd::Registry& registry) {
         out.log = outcome->log;
         out.script = outcome->script;
         out.instructions = static_cast<std::int64_t>(outcome->instructions);
+        out.log_dropped = static_cast<std::int64_t>(outcome->logDropped);
         return out;
     };
     registry.add(std::move(command));

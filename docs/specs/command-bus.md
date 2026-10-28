@@ -462,6 +462,15 @@ budget expires, every subsequent hook check raises until the outermost run retur
 The time budget measures the script's own work: time spent inside the commands
 it calls does not count, while event handlers those commands run in the same
 script do.
+`print` and `q.log` retain at most 64 KiB per line, including a visible
+` ... [truncated N bytes]` suffix counting omitted source bytes. The retained
+log holds at most 1 MiB of text and the configured line limit (1000 by default),
+evicting oldest lines until both limits hold. `script.run.log` contains the
+retained lines printed by that run; `log_dropped` is the cumulative number
+of lines evicted from this named script's log, including prior runs and event
+handlers. It resets when the script state is discarded. Truncated lines are
+not counted as evicted. These host-owned text limits are separate from the
+Lua allocator cap.
 A deterministic instruction cap is available to embedding tests. Schema `$ref`s
 use bounded root JSON Pointer resolution (with the schema library's local `$defs`
 compatibility); named arrays convert as arrays. LuaLS types use the same references

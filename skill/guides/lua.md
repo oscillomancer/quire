@@ -41,6 +41,13 @@ Chunk names and custom environments still work.
 with at most 1,000,000 values and 16 MiB of text (`script.value_too_large`);
 a table used twice counts twice.
 
+Log lines are capped at 64 KiB each, including a visible
+` ... [truncated N bytes]` marker. The script keeps at most 1 MiB of log text
+and 1000 lines by default, dropping the oldest lines first. The `log` result
+contains the retained lines printed by this run. `log_dropped` counts all
+lines evicted since this named script state was created, including previous
+runs and event handlers; a truncated line does not count as dropped.
+
 Editor support: `skill/generated/engine.lua` (and `sandbox.lua`) are LuaLS
 annotations generated from the registry — point `lua-language-server` at them
 and `q.track.add{` autocompletes with typed, documented members.

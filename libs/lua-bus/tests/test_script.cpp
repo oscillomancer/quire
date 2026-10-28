@@ -142,6 +142,52 @@ TEST_CASE("print and q.log go to the script's log") {
     CHECK(scene.script.log().size() == 3);  // the log outlives the run
 }
 
+TEST_CASE("script logs bound each line and report truncated bytes") {
+    Scene scene;
+    auto out = scene.run("print(string.rep('x', 65536)); q.log(string.rep('y', 70000), 'end')");
+    REQUIRE(out);
+    REQUIRE(out->log.size() == 2);
+    CHECK(out->log[0] == std::string(65536, 'x'));
+    const auto& line = out->log[1];
+    CHECK(line.size() == 65536);
+    const auto marker = line.find(" ... [truncated ");
+    REQUIRE(marker != std::string::npos);
+    CHECK(line.substr(marker) == " ... [truncated " + std::to_string(70004 - marker) + " bytes]");
+    CHECK(out->logDropped == 0);
+}
+
+TEST_CASE("script logs evict oldest lines by bytes and by line count") {
+    Scene scene;
+    auto out = scene.run(R"(
+        local text = string.rep('x', 65533)
+        for i=1,17 do print(string.format('%02d', i), text) end
+    )");
+    REQUIRE(out);
+    REQUIRE(out->log.size() == 16);
+    CHECK(out->log.front().starts_with("02\t"));
+    CHECK(out->log.back().starts_with("17\t"));
+    std::size_t bytes = 0;
+    for (const auto& line : scene.script.log()) bytes += line.size();
+    CHECK(bytes == 1024 * 1024);
+    CHECK(out->logDropped == 1);
+    out = scene.run("print('next')");
+    REQUIRE(out);
+    REQUIRE(out->log.size() == 1);
+    CHECK(out->log[0] == "next");
+    CHECK(out->logDropped == 2);
+    CHECK(scene.script.log().front().starts_with("03\t"));
+
+    ScriptOptions options;
+    options.logLimitLines = 2;
+    Scene shortLog(options);
+    auto shortOut = shortLog.run("print('a'); print('b'); print('c')");
+    REQUIRE(shortOut);
+    REQUIRE(shortOut->log.size() == 2);
+    CHECK(shortOut->log[0] == "b");
+    CHECK(shortOut->log[1] == "c");
+    CHECK(shortOut->logDropped == 1);
+}
+
 TEST_CASE("the instruction budget stops a runaway script") {
     ScriptOptions options;
     options.instructionLimit = 1000;
