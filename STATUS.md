@@ -245,6 +245,8 @@ instructions are in `docs/guides/installing.md`.
   repaints on demand and follows theme switches. The main window
   waits on app/local plug-in/ModelLoop notifications and demand-driven
   deadlines; stopped transport and stationary meters have no refresh timer.
+  Frames are capped near the display rate (at most 120 fps) even where
+  vsync is off.
   Input/commands coalesce UI sidecar checks, and writer completion wakes main.
   TCP rows keep their full top line at a 24-unit minimum; older sidecars
   clamp on load. Alt+wheel anywhere over the arrange view, and Ctrl+wheel

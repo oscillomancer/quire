@@ -160,6 +160,22 @@ void Root::setTheme(Theme theme) {
 
 bool Root::wantsFrame() const { return !damage_.empty() || layoutPending_ || animate_; }
 
+std::chrono::steady_clock::duration minFrameInterval(float refreshHz) {
+    const double hz = refreshHz > 0 ? static_cast<double>(refreshHz) : 60.0;
+    const double rate = hz / std::ceil(hz / 120.0);
+    return std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<double>(0.75 / rate));
+}
+
+bool Root::frameReady(std::chrono::steady_clock::time_point now) const {
+    return wantsFrame() && (!presented_ || now - *presented_ >= frameInterval_);
+}
+
+std::optional<std::chrono::steady_clock::time_point> Root::frameDeadline() const {
+    if (!wantsFrame() || !presented_) return std::nullopt;
+    return *presented_ + frameInterval_;
+}
+
 void Root::damage(const Rect& area) {
     const Rect r = area.intersect({0, 0, window_.width(), window_.height()});
     if (r.empty()) return;
@@ -311,7 +327,11 @@ void Root::frame(bool present) {
     }
     animate_ = false;
     ++stats_.frames;
-    if (present) window_.present();
+    if (present) {
+        window_.present();
+        presented_ = std::chrono::steady_clock::now();
+        frameInterval_ = minFrameInterval(window_.refreshRate());
+    }
 }
 
 gui::Image Root::readBack() const {

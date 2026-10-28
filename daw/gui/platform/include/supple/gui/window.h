@@ -77,7 +77,8 @@ class Window {
     float width() const;
     float height() const;
     float pixelRatio() const;
-    float inputScale() const;  // SDL window coordinates per design unit
+    float inputScale() const;   // SDL window coordinates per design unit
+    float refreshRate() const;  // of the window's display in Hz; 0 when unknown
     // Borrowed native editor parent; unavailable for Linux offscreen windows.
     NativeWindow nativeParent() const;
     // Compatibility accessor for existing X11 callers.

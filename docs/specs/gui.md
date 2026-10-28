@@ -58,7 +58,15 @@ CLAP main-thread callbacks and hosts plugin GUIs. Consequences:
   Visible moving/decaying meters have a 33 ms frame deadline, including their
   1.5 s peak hold; at rest the feed arms/rechecks one audio activity wake at
   its -60 dB display floor. Clip latches alone do not animate. Idle with no
-  work or deadlines blocks indefinitely. FD service failure is reported and
+  work or deadlines blocks indefinitely. Every window swaps with vsync and
+  presents frames at least `ui::minFrameInterval` apart: three quarters of
+  the frame period, where the frame rate is the display's refresh rate
+  divided by the smallest whole number that brings it to 120 Hz or below
+  (60 fps at 60 Hz, 72 at 144 Hz, 120 at 240 Hz; 60 Hz when SDL reports no
+  rate). A frame held back by it is a wait deadline, so the cap bounds drags
+  and animation where vsync is off without adding a poll. The main window of
+  a benchmark run (`--frames`) and snapshots are not capped. A window whose swap interval
+  cannot be set logs `no vsync`. FD service failure is reported and
   ends the app loop rather than adding a fallback poll. Offscreen idle
   measurements use the same service/watch/deadline path with a finite end bound.
 

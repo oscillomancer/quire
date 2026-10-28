@@ -259,6 +259,29 @@ TEST_CASE("damage repaints only what changed") {
     CHECK(pixelDistance(partial, root.readBack()) == 0);
 }
 
+TEST_CASE("presented frames are at least the minimum frame interval apart") {
+    using std::chrono::microseconds;
+    auto us = [](float hz) {
+        return std::chrono::duration_cast<microseconds>(minFrameInterval(hz)).count();
+    };
+    CHECK(us(60) == 12500);
+    CHECK(us(0) == 12500);    // unknown: as 60 Hz
+    CHECK(us(144) == 10416);  // 72 fps, every second refresh
+    CHECK(us(240) == 6250);   // 120 fps
+    REQUIRE_GL();
+    Root root(*fixture().window, fixture().fonts, Theme::dark());
+    root.setContent(std::make_unique<Node>("root"));
+    CHECK(root.frameReady({}));  // the first frame is never held back
+    CHECK_FALSE(root.frameDeadline());
+    root.frame();
+    CHECK_FALSE(root.frameDeadline());  // nothing wanted
+    root.requestAnimationFrame();
+    const auto deadline = root.frameDeadline();
+    REQUIRE(deadline);
+    CHECK_FALSE(root.frameReady(*deadline - microseconds(1)));
+    CHECK(root.frameReady(*deadline));
+}
+
 TEST_CASE("clicks, focus traversal and keys reach the right nodes") {
     REQUIRE_GL();
     Root root(*fixture().window, fixture().fonts, Theme::dark());

@@ -1034,6 +1034,9 @@ int main(int argc, char** argv) {
         include(renderDialog.nextDeadline());
         include(shell.nextDeadline());
         include(meterFrame);
+        include(root.frameDeadline());  // a frame held back by the frame cap
+        include(fxPanel.frameDeadline());
+        include(routingPanel.frameDeadline());
         // The playhead has a frame deadline only during playback/recording.
         if (shell.arrange()->playing()) include(now + std::chrono::milliseconds(16));
         if (auto error = pluginWindows.fdError()) {
@@ -1081,7 +1084,7 @@ int main(int argc, char** argv) {
         fxPanel.frame();
         routingPanel.frame();
         if (o.frames > 0) root.requestAnimationFrame();  // benchmark runs draw every pass
-        if (root.wantsFrame()) {
+        if (o.frames > 0 ? root.wantsFrame() : root.frameReady(Clock::now())) {
             const double cpu0 = gui::threadCpuMs();
             root.frame();
             const double cpu = gui::threadCpuMs() - cpu0;
@@ -1144,7 +1147,7 @@ int main(int argc, char** argv) {
             const int next = service();
             fxPanel.frame();
             routingPanel.frame();
-            if (root.wantsFrame()) root.frame();
+            if (root.frameReady(Clock::now())) root.frame();
             SDL_Event e;
             const double left = o.idleSeconds * 1000 - (gui::wallMs() - w0);
             const int deadline = waitUntil(next);

@@ -23,6 +23,7 @@
 #include <nanovg_gl.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <tuple>
@@ -131,7 +132,10 @@ Result<std::unique_ptr<Window>> Window::open(const Platform& platform,
     w->context_ = SDL_GL_CreateContext(w->window_);
     if (!w->context_) return sdlError("gui.window", "SDL_GL_CreateContext");
     SDL_GL_MakeCurrent(w->window_, static_cast<SDL_GLContext>(w->context_));
-    SDL_GL_SetSwapInterval(1);  // event-driven: frames only when something changed
+    // Event-driven: frames only when something changed, paced by vsync and,
+    // where vsync is unavailable, by ui::Root's minimum frame interval.
+    if (!SDL_GL_SetSwapInterval(1) && platform.driver() == Platform::Driver::Native)
+        std::fprintf(stderr, "no vsync (%s): frames are paced by a timer\n", SDL_GetError());
 #if defined(_WIN32)
     if (!suppleLoadGl()) return sdlError("gui.gl", "loading OpenGL entry points");
 #endif
@@ -267,6 +271,11 @@ float Window::pixelRatio() const {
     SDL_GetWindowSize(window_, &w, &h);
     SDL_GetWindowSizeInPixels(window_, &pw, &ph);
     return w > 0 ? static_cast<float>(pw) / static_cast<float>(w) * inputScale() : 1.0f;
+}
+
+float Window::refreshRate() const {
+    const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window_));
+    return mode ? mode->refresh_rate : 0.0f;
 }
 
 NativeWindow Window::nativeParent() const {

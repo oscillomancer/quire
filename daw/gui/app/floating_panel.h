@@ -3,6 +3,7 @@
 // A lazily created utility window, with its own retained tree and GL resources.
 #pragma once
 
+#include <chrono>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -26,6 +27,7 @@ class FloatingPanel {
     bool isOpen() const { return open_; }
     bool handle(const SDL_Event& event);  // consumes only this window's events
     void frame(bool present = true);
+    std::optional<std::chrono::steady_clock::time_point> frameDeadline() const;
     void setTheme(const ui::Theme& theme);
     void setTitle(std::string title);
     bool hasFocus() const;

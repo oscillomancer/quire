@@ -171,7 +171,14 @@ bool FloatingPanel::handle(const SDL_Event& event) {
 }
 
 void FloatingPanel::frame(bool present) {
-    if (open_ && root_->wantsFrame()) root_->frame(present);  // Root binds with forceCurrent
+    if (!open_) return;
+    const bool due =
+        present ? root_->frameReady(std::chrono::steady_clock::now()) : root_->wantsFrame();
+    if (due) root_->frame(present);  // Root binds with forceCurrent
+}
+
+std::optional<std::chrono::steady_clock::time_point> FloatingPanel::frameDeadline() const {
+    return open_ ? root_->frameDeadline() : std::nullopt;
 }
 
 void FloatingPanel::setTheme(const ui::Theme& theme) {

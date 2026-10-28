@@ -7,6 +7,7 @@
 // and presents.
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -22,6 +23,13 @@
 union SDL_Event;
 
 namespace supple::ui {
+
+// The shortest time between two presented frames on a display of `refreshHz`
+// (60 when unknown): three quarters of the frame period, the frame rate being
+// the refresh rate divided by the smallest whole number that brings it to
+// 120 Hz or below. Vsync still paces frames; this bounds them where vsync is
+// off, and keeps high-refresh displays at <= 120 fps with even frame times.
+std::chrono::steady_clock::duration minFrameInterval(float refreshHz);
 
 class Root {
   public:
@@ -62,6 +70,10 @@ class Root {
     // Lays out if needed, repaints damage into the cache, blits it, paints the
     // overlays. present=false composes a snapshot for readBack().
     void frame(bool present = true);
+    // wantsFrame(), and minFrameInterval() has passed since the last presented
+    // frame. frameDeadline() is when a wanted frame may draw, for the wait.
+    bool frameReady(std::chrono::steady_clock::time_point now) const;
+    std::optional<std::chrono::steady_clock::time_point> frameDeadline() const;
     gui::Image readBack() const;
 
     // --- damage and layout
@@ -143,6 +155,8 @@ class Root {
     Node* captured_ = nullptr;
     std::vector<Rect> damage_;
     bool layoutPending_ = true, animate_ = false;
+    std::optional<std::chrono::steady_clock::time_point> presented_;
+    std::chrono::steady_clock::duration frameInterval_{};
     Size laidOut_{};
     float ratio_ = 1;  // of the frame being painted
     struct Cache;
