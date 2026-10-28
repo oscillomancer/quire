@@ -1,9 +1,10 @@
 # Building Quire
 
-Quire builds with CMake and Ninja on Linux, macOS and Windows. Apart from the
-compiler, three system libraries are needed (SDL3, OpenGL and zlib). Every
-other dependency is vendored under `third_party/`, so once those are installed
-the build works offline.
+Quire builds with CMake and Ninja on Linux, macOS and Windows. The GUI needs
+SDL3, OpenGL and zlib; Linux also needs the X11 and EGL development libraries.
+The other library dependencies are vendored under `third_party/`. Once the
+platform's build tools and system dependencies are installed (including the
+first vcpkg install on Windows), the normal build works offline.
 
 Binary names follow `PRODUCT_SLUG` in `cmake/Product.cmake` (`quire` today).
 Each preset builds into `build/<preset>/`. The examples use `release` on
@@ -121,6 +122,7 @@ Audio uses WASAPI by default, with ASIO available in **Edit > Audio device…**.
 | --- | --- | --- |
 | `dev` | Linux | Clang Debug, the everyday development build |
 | `release` | Linux | Clang Release, warnings as errors |
+| `linux-package` | Linux | Release distribution targets with isolated static C++ runtimes; tests off |
 | `gcc` | Linux | GCC Debug, for GCC-only warnings |
 | `asan` | Linux | AddressSanitizer with UndefinedBehaviorSanitizer |
 | `tsan` | Linux | ThreadSanitizer |
@@ -128,10 +130,14 @@ Audio uses WASAPI by default, with ASIO available in **Edit > Audio device…**.
 | `macos` | macOS | Apple Clang, arm64, Debug by default |
 | `windows` | Windows | clang-cl with vcpkg, Debug by default |
 
-`cmake --workflow --preset <name>` configures, builds and tests in one step.
-`tools/ci/run-all.sh` runs the license check, the format check and every Linux
-preset, about half an hour in all. Pass `-DSUPPLE_BUILD_TESTS=OFF` at
-configure time to build only the app and its helpers.
+`cmake --workflow --preset <name>` configures, builds and tests in one step
+for every preset above except `linux-package`, which has no test or workflow
+preset. `tools/ci/run-all.sh` runs the license check, the format check and the
+six Linux test presets (`dev`, `release`, `gcc`, `asan`, `tsan`, `rtsan`), about
+half an hour in all. Pass `-DSUPPLE_BUILD_TESTS=OFF` at configure time to omit
+tests; the app, helpers and stock plugins still build. The sanitizer presets
+disable the GUI; `gcc` and `asan` exclude the nested source-export test, and
+`tsan`/`rtsan` exclude slow tests (`tsan` also excludes `tsan-skip`).
 
 Tests that open real hardware are skipped unless you opt in:
 `SUPPLE_AUDIO_DEVICE_TEST=1` (the audio device), `SUPPLE_MIDI_DEVICE_TEST=1`
