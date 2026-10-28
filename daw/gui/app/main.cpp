@@ -1125,7 +1125,10 @@ int main(int argc, char** argv) {
                                              SDL_GetWindowFromEvent(&e) == (*window)->sdl())) {
                 // Hidden test windows cannot answer an interactive discard prompt.
                 const bool prompt = !o.offscreen && o.frames <= 0;
-                if (!prompt || !root.popupOpen())
+                // With nothing to finalize or lose, an open popup does not hold the quit.
+                const bool idle =
+                    !((*app)->engine() && (*app)->engine()->recording()) && !fileActions.dirty();
+                if (!prompt || idle || !root.popupOpen())
                     fileActions.confirmDiscard("Quit?", [&] { quit = true; }, prompt);
             } else if (e.type == SDL_EVENT_DROP_FILE && e.drop.data) {
                 dropped.emplace_back(e.drop.data);
