@@ -242,8 +242,10 @@ shared bridge process, dedicated process (ADR-0013). Bridged plugins
 exchange audio and events with the engine through shared memory. The
 caller (the anticipative renderer, or an offline render) writes the block's
 input, wakes the bridge and waits for its output up to a deadline; a bridge
-that dies or misses the deadline fails that plugin alone (silence and an
-error event) and the session survives. Synchronous bridge calls never run in
+that dies or misses the deadline fails the plugins it hosts (one in a
+dedicated process, every instance in a shared one: silence and an error
+event) and the session survives. Bridges isolate crashes of ordinary plugins;
+they are not a security sandbox against hostile ones. Synchronous bridge calls never run in
 the device callback, so a bridged plugin on a live (monitored) node is
 passed through with a warning; a pipelined mode for live nodes is future
 work.
