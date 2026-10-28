@@ -537,6 +537,66 @@ TEST_CASE("the appearance: warm and dark by default, saved and read back, palett
     std::filesystem::remove_all(dir);
 }
 
+TEST_CASE("file dialogs: completions belong to their project and discard revision") {
+    App a;
+    if (!a.ok) return;
+    std::vector<std::function<void()>> posted;
+    std::string notice;
+    a.actions->onError = [&](const std::string& text) { notice = text; };
+    gui::FileActions files(*a.root, *a.actions, *a.dispatcher, *a.app, a.ui, a.window->sdl(),
+                           [&](auto task) { posted.push_back(std::move(task)); });
+    int delivered = 0;
+    auto result = files.guardDialog([&](auto) { ++delivered; }, true);
+    auto deliver = [&] {
+        result({a.dir / "chosen.json"});
+        REQUIRE(posted.size() == 1);
+        posted.front()();
+        posted.clear();
+    };
+    auto replace = [&] {
+        REQUIRE(a.dispatcher->execute(
+            {"project.new", json::Value::object(), {cmd::Origin::Type::Ui, "gui", {}}}));
+    };
+    SUBCASE("unchanged revision delivers without a second prompt") {
+        deliver();
+        CHECK(delivered == 1);
+        CHECK_FALSE(a.root->popupOpen());
+    }
+    SUBCASE("replacement before the posted completion drops any dialog result") {
+        result = files.guardDialog([&](auto) { ++delivered; });  // Save/import/folder too
+        result({a.dir / "chosen.json"});
+        replace();
+        REQUIRE(posted.size() == 1);
+        posted.front()();
+        CHECK(delivered == 0);
+        CHECK(notice.find("project changed") != std::string::npos);
+    }
+    SUBCASE("Open asks again for edits after the first discard decision") {
+        a.key("Ctrl+T");
+        deliver();
+        CHECK(delivered == 0);
+        a.root->frame(false);
+        REQUIRE(a.root->click("file.confirm.cancel"));
+        CHECK(delivered == 0);
+    }
+    SUBCASE("a fresh discard decision permits Open") {
+        a.key("Ctrl+T");
+        deliver();
+        a.root->frame(false);
+        REQUIRE(a.root->click("file.confirm.discard"));
+        CHECK(delivered == 1);
+    }
+    SUBCASE("replacement during the renewed prompt still drops Open") {
+        a.key("Ctrl+T");
+        deliver();
+        replace();
+        a.root->frame(false);
+        REQUIRE(a.root->click("file.confirm.discard"));
+        CHECK(delivered == 0);
+        CHECK(notice.find("project changed") != std::string::npos);
+    }
+}
+
 TEST_CASE("file actions: recording is finalized before discard decisions") {
     engine::DummyBackend backend({.mode = engine::DummyBackend::Mode::Manual});
     App a;

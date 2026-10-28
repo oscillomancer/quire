@@ -170,7 +170,7 @@ FileActions::FileActions(ui::Root& root, AppActions& actions, cmd::Dispatcher& d
     actions_.addUi("ui.file.open", "File: open project…", [this] {
         confirmDiscard("Open another project?", [this] {
             auto* req = new DialogRequest{
-                dialogs_.guard(post_, [this](auto paths) { openPath(paths.front()); })};
+                guardDialog([this](auto paths) { openPath(paths.front()); }, true)};
             const std::string start = dialogStart();
             SDL_ShowOpenFileDialog(onDialog, req, window_, kProjectFilter, 2,
                                    start.empty() ? nullptr : start.c_str(), false);
@@ -181,8 +181,7 @@ FileActions::FileActions(ui::Root& root, AppActions& actions, cmd::Dispatcher& d
         if (exec("project.save", json::Value::object())) markSaved();
     });
     actions_.addUi("ui.file.save_as", "File: save as…", [this] {
-        auto* req =
-            new DialogRequest{dialogs_.guard(post_, [this](auto paths) { saveAs(paths.front()); })};
+        auto* req = new DialogRequest{guardDialog([this](auto paths) { saveAs(paths.front()); })};
         const std::string start = dialogStart();
         SDL_ShowSaveFileDialog(onDialog, req, window_, kProjectFilter, 2,
                                start.empty() ? nullptr : start.c_str());
@@ -194,9 +193,35 @@ FileActions::FileActions(ui::Root& root, AppActions& actions, cmd::Dispatcher& d
     actions_.addUi("ui.track.template.load", "Track: add from template…",
                    [this] { openTemplateList(Template::Track); });
     actions_.addUi("ui.file.import", "File: import audio…", [this] {
-        auto* req = new DialogRequest{dialogs_.guard(post_, [this](auto paths) { import(paths); })};
+        auto* req = new DialogRequest{guardDialog([this](auto paths) { import(paths); })};
         SDL_ShowOpenFileDialog(onDialog, req, window_, kAudioFilter, 2, nullptr, true);
     });
+}
+
+std::function<void(DialogLifetime::Paths)> FileActions::guardDialog(
+    std::function<void(DialogLifetime::Paths)> done, bool opening) {
+    const auto generation = app_.projectGeneration();
+    const auto version = app_.head().version;
+    const auto branch = app_.versions().branch();
+    return dialogs_.guard(
+        post_, [this, generation, version, branch, opening, done = std::move(done)](auto paths) {
+            if (paths.empty()) return;
+            auto current = [this, generation] {
+                if (app_.projectGeneration() == generation) return true;
+                showError("The project changed while the dialog was open. Please try again.");
+                return false;
+            };
+            if (!current()) return;
+            auto complete = [current, done, paths = std::move(paths)] {
+                // A replacement can also happen while the renewed prompt is open.
+                if (current()) done(paths);
+            };
+            if (opening && (app_.head().version != version || app_.versions().branch() != branch ||
+                            (app_.engine() && app_.engine()->recording())))
+                confirmDiscard("Open another project?", std::move(complete));
+            else
+                complete();
+        });
 }
 
 Result<json::Value> FileActions::exec(const std::string& command, json::Value args) {
@@ -300,7 +325,7 @@ std::string FileActions::dialogStart() const {
 void FileActions::chooseFolder(const std::filesystem::path& start,
                                std::function<void(std::filesystem::path)> done) {
     auto* req = new DialogRequest{
-        dialogs_.guard(post_, [done = std::move(done)](auto paths) { done(paths.front()); })};
+        guardDialog([done = std::move(done)](auto paths) { done(paths.front()); })};
     std::error_code ec;
     std::string where;
     if (!start.empty() && std::filesystem::is_directory(start, ec)) where = start.string() + "/";
@@ -485,7 +510,7 @@ void FileActions::confirmDiscard(const std::string& what, std::function<void()> 
         root_.closePopup();
         if (app_.projectPath().empty()) {
             // Save as first; continue after the dialog answers.
-            auto* req = new DialogRequest{dialogs_.guard(post_, [this, keep](auto paths) {
+            auto* req = new DialogRequest{guardDialog([this, keep](auto paths) {
                 saveAs(paths.front());
                 if (!dirty()) (*keep)();
             })};

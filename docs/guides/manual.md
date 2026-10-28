@@ -67,6 +67,10 @@ project, then ask whether to save the changes. Cancel keeps the recorded takes;
 Undo removes that recording. If stopping fails, the error is shown and the
 requested action does not continue.
 
+If another project replaces the current one while a file or folder dialog is
+open, its result is ignored with a notice; open the dialog again. If edits arrive
+while Open is waiting, Quire asks about unsaved changes again before opening.
+
 Renders go to `~/Documents/quire-media` unless you choose another folder in
 the render dialog. The folder you choose is remembered.
 

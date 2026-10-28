@@ -59,6 +59,10 @@ class FileActions {
     // lost; otherwise asks Save / Don't save / Cancel. A Stop error aborts.
     // Hidden/finite test runs suppress the prompt, but still finalize recording.
     void confirmDiscard(const std::string& what, std::function<void()> then, bool prompt = true);
+    // Native results belong to the project that opened the dialog. For Open,
+    // changed revisions require a fresh discard decision before delivery.
+    std::function<void(DialogLifetime::Paths)> guardDialog(
+        std::function<void(DialogLifetime::Paths)> done, bool opening = false);
     // For tests: what a dialog would have returned.
     void openPath(const std::filesystem::path& path);
     void saveAs(const std::filesystem::path& path);  // in projectFolderPath()

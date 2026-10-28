@@ -831,6 +831,10 @@ for unsaved changes, active recording is stopped through `transport.stop`:
 recorded takes become an undoable version, then the normal prompt runs. If
 Stop fails, the error is shown and the requested action does not continue.
 Hidden/finite runs still stop recording, even though they suppress the prompt.
+Native file/folder results capture the project generation and are dropped with
+a short notice if the project was replaced before delivery. Open rechecks the
+session version and branch after the dialog; changes require a fresh discard
+decision. Recording started meanwhile is stopped before that decision too.
 A save (or project template)
 that comes back with warnings (a plug-in whose state could not be read keeps
 its earlier state) opens a popup listing them. Open and Save as start in the
