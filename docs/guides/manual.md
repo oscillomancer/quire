@@ -92,7 +92,10 @@ for other hosts is listed as shadowed and never loaded. `--plugin-path P`
 
 To add an effect or instrument, use the **fx** button on a track (it opens
 the plugin browser when the track has no effects, the chain otherwise),
-**+ FX** in the mixer, or **Track > FX: add plugin…**.
+**+ FX** in the mixer, or **Track > FX: add plugin…**. In the mixer,
+right-click a plugin to rename, duplicate or remove it; a duplicate keeps the
+plugin's current settings and goes right after it. Alt-click (Option-click on
+macOS) also removes a plugin.
 
 ## Agents (MCP)
 

@@ -622,6 +622,39 @@ TEST_CASE("mixer: a plug-in's right-click menu renames that instance") {
     CHECK(f.errors.empty());
 }
 
+TEST_CASE("mixer: a plug-in's right-click menu duplicates it after itself or removes it") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto a = f.addTrack("channel", "A");
+    const auto p1 = f.addFx(a, "Hickory");
+    const auto p2 = f.addFx(a, "Hickory");
+    f.exec("fx.set", R"({"fx":")" + p1 + R"(","label":"First"})");
+    f.refresh();
+    // Menu rows are 26 px: Rename…, Duplicate, Remove.
+    auto choose = [&](const std::string& fx, int row) {
+        const ui::Point at = f.centre(f.node("mixer.fx." + fx));
+        f.pointer(ui::PointerEvent::Type::Down, at, 1, 0, 3);
+        f.pointer(ui::PointerEvent::Type::Up, at, 1, 0, 3);
+        ui::Node* menu = f.node("mixer.fxmenu." + fx);
+        const ui::Point item{menu->bounds().x + 40, menu->bounds().y + row * 26 + 13};
+        f.pointer(ui::PointerEvent::Type::Move, item);
+        f.pointer(ui::PointerEvent::Type::Down, item);
+        f.pointer(ui::PointerEvent::Type::Up, item);
+        f.refresh();
+    };
+    const auto before = f.steps();
+    choose(p1, 1);
+    REQUIRE(f.chain(a).size() == 3);
+    const auto copy = f.chain(a)[1];
+    CHECK(f.chain(a) == std::vector<std::string>{p1, copy, p2});
+    CHECK(f.app->head().fx.find(*model::Id::parse(copy))->label == "First");
+    CHECK(f.steps() == before + 1);
+    choose(p1, 2);
+    CHECK(f.chain(a) == std::vector<std::string>{copy, p2});
+    CHECK(f.steps() == before + 2);
+    CHECK(f.errors.empty());
+}
+
 TEST_CASE("mixer: the track menu duplicates the selected strips, and selects the copies") {
     Fixture f;
     if (!f.ok) return;

@@ -117,6 +117,8 @@ class Mixer {
                 unsigned mods);
     void openFxMenu(model::Id fx, const ui::Rect& slot, ui::Point at);
     void openFxRename(model::Id fx, const ui::Rect& slot);
+    void duplicateFx(model::Id fx);
+    void removeFx(model::Id fx);
     void dragSend(const std::string& track, DragPhase phase, ui::Point p);
     void endDrag(bool commit);
     void resolveStripDrop();
