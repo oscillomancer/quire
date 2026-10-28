@@ -100,8 +100,8 @@ parameters are automated with envelopes, not CC lanes.
 The most common mistakes, in order:
 
 1. **A bar that doesn't add up.** Count beats per bar, especially with dotted
-   notes and triplets (a triplet group must be complete: three `e3` =
-   one beat). When in doubt, end the bar with `r:*`.
+   notes and triplets (three `e3` = one beat; individual triplet durations
+   may be combined with other durations). When in doubt, end the bar with `r:*`.
 2. **A long note crossing a bar line without `~`.** Split it and tie.
 3. **Wrong grid length.** `grid s` in 4/4 is exactly 16 steps per bar.
 4. **Octave slips.** Bass usually lives in octaves 1–2, melodies 4–5,
