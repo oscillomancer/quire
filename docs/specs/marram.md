@@ -272,7 +272,14 @@ places as `Shared` members.
   do not apply are dimmed, as the parameters' activity says.
 - **Filters**: the two filters' combined response, computed from their
   parameters, with a node per filter to drag (cutoff across, resonance
-  up); their routing; each filter's controls.
+  up); their routing; each filter's controls in a grid of four columns:
+  the top row the type's own (cutoff and resonance with the ladder's
+  slope or the state-variable's mode; the comb's pitch, feedback, damping
+  and polarity, + all harmonics or − odd ones, which sets the feedback's
+  sign; the formants' vowel, shift and a to u), the bottom row every
+  type's (keytrack, Env 2, velocity, drive).
+- The panels sit in two columns, the same in every row: oscillators,
+  envelopes and routes on the left; filters, LFOs and voice on the right.
 - **Envelopes** (amp, Env 2, Env 3): the shape with a handle per stage to
   drag, and where the newest note is in it.
 - **LFOs**: the shape with its delay's fade and the newest note's phase.

@@ -2796,6 +2796,9 @@ struct Marram : Instrument {
 
     static constexpr double kW = 1240;
     static constexpr double kH = 880;
+    // Two columns, the same in every row: the oscillators, the envelopes
+    // and the routes on the left; the filters, the LFOs and the voice on
+    // the right.
     static constexpr double oscX = 16;  // the panels
     static constexpr double oscY = 76;
     static constexpr double oscW = 604;
@@ -2806,19 +2809,19 @@ struct Marram : Instrument {
     static constexpr double filH = 336;
     static constexpr double envX = 16;
     static constexpr double envY = 424;
-    static constexpr double envW = 470;
+    static constexpr double envW = 604;
     static constexpr double envH = 216;
-    static constexpr double lfoX = 498;
+    static constexpr double lfoX = 632;
     static constexpr double lfoY = 424;
-    static constexpr double lfoW = 726;
+    static constexpr double lfoW = 592;
     static constexpr double lfoH = 216;
     static constexpr double modX = 16;
     static constexpr double modY = 652;
-    static constexpr double modW = 760;
+    static constexpr double modW = 604;
     static constexpr double modH = 212;
-    static constexpr double voiX = 788;
+    static constexpr double voiX = 632;
     static constexpr double voiY = 652;
-    static constexpr double voiW = 436;
+    static constexpr double voiW = 592;
     static constexpr double voiH = 212;
     static constexpr double waveX = oscX + 16;  // the oscillator's picture
     static constexpr double waveY = oscY + 124;
@@ -2826,16 +2829,16 @@ struct Marram : Instrument {
     static constexpr double waveH = 118;
     static constexpr double curveX = filX + 16;  // the filter's response
     static constexpr double curveY = filY + 124;
-    static constexpr double curveW = 316;
-    static constexpr double curveH = 134;
+    static constexpr double curveW = 262;
+    static constexpr double curveH = 160;
     static constexpr double shapeX = envX + 16;  // the envelope
     static constexpr double shapeY = envY + 44;
-    static constexpr double shapeW = 300;
+    static constexpr double shapeW = 380;
     static constexpr double shapeH = 98;
     static constexpr double cycleX = lfoX + 16;  // the LFO
     static constexpr double cycleY = lfoY + 78;
-    static constexpr double cycleW = 200;
-    static constexpr double cycleH = 74;
+    static constexpr double cycleW = 350;
+    static constexpr double cycleH = 122;
 
     // The palette: the theme's, and the dune's.
     static constexpr int kInk = 0x1A1411;
@@ -2917,6 +2920,7 @@ struct Marram : Instrument {
     static constexpr int eEnvTab = -3;
     static constexpr int eLfoTab = -4;
     static constexpr int eTableStep = -5;
+    static constexpr int eCombSign = -6;  // the comb's feedback: + all harmonics, - odd ones
     // A button's look.
     static constexpr int bChoice = 0;  // lit while its parameter holds its value
     static constexpr int bToggle = 1;  // lit while its parameter is on
@@ -4312,6 +4316,15 @@ struct Marram : Instrument {
             button(oc(o, oSync), 0, oscX + oscW - 124, by, 48, 22, bToggle, kGrass);
     }
 
+    // The filter's controls: a grid of four columns. The top row is the
+    // type's own (two or three dials, then its choices: the ladder's slope,
+    // the state-variable's mode, the comb's polarity, the formants' vowel);
+    // the bottom row is every type's: keytrack, Env 2, velocity, drive.
+    static constexpr double fCol = filX + 310;
+    static constexpr double fStep = 76;
+    static constexpr double fRow1 = filY + 172;
+    static constexpr double fRow2 = filY + 268;
+
     void layoutFilter() {
         const int f = filterTab;
         button(cRouting, 0, filX + filW - 146, filY + 13, 62, 22, bChoice, kSand);
@@ -4321,30 +4334,47 @@ struct Marram : Instrument {
         row(fc(f, fType), 0, 5, filX + 16, filY + 92, filW - 32, 22, kSand);
         const int type = choiceOf(fc(f, fType));
         if (type == kOff) return;
-        const double sx = curveX, sy = curveY + curveH + 24;
-        if (type == kLadder) row(fc(f, fSlope), 0, 2, sx, sy, 150, 22, kSand);
-        if (type == kSvf) row(fc(f, fMode), 0, 4, sx, sy, curveW, 22, kSand);
-        if (type == kFormant) row(fc(f, fVowel), 0, 5, sx, sy, curveW, 22, kSand);
-        const double c0 = filX + 384, step = 76, r1 = filY + 150, r2 = filY + 222;
-        const double r = 19;
+        const double r = 21;
+        // The choices take the third and fourth columns (the comb's the
+        // fourth), level with the dials' names above and values below.
+        const double bx = fCol + 2 * fStep - 34, bw = fStep + 68;
+        const double half = (bw - 5) * 0.5;
         if (type == kFormant) {
-            dial(fc(f, fVowel), c0, r1, r, kSand, true);
-            dial(fc(f, fShift), c0 + step, r1, r, kSand, true);
+            dial(fc(f, fVowel), fCol, fRow1, r, kSand, true);
+            dial(fc(f, fShift), fCol + fStep, fRow1, r, kSand, true);
+            row(fc(f, fVowel), 0, 5, bx, fRow1 - 11, bw, 22, kSand);
         } else {
-            dial(fc(f, fCutoff), c0, r1, r, kSand, true);
-            dial(fc(f, type == kComb ? fFeedback : fResonance), c0 + step, r1, r, kSand, true);
+            dial(fc(f, fCutoff), fCol, fRow1, r, kSand, true);
+            dial(fc(f, type == kComb ? fFeedback : fResonance), fCol + fStep, fRow1, r, kSand,
+                 true);
         }
-        dial(fc(f, type == kComb ? fDamping : fDrive), c0 + 2 * step, r1, r, kSand, true);
-        dial(fc(f, fKeytrack), c0, r2, r, kSand, true);
-        dial(fc(f, fEnv), c0 + step, r2, r, kSand, true);
-        dial(fc(f, fVelocity), c0 + 2 * step, r2, r, kSand, true);
-        if (type == kComb) dial(fc(f, fDrive), c0, filY + 294, r, kSand, true);
+        if (type == kLadder) row(fc(f, fSlope), 0, 2, bx, fRow1 - 11, bw, 22, kSand);
+        if (type == kSvf)
+            for (int k = 0; k < 4; ++k)
+                button(fc(f, fMode), k, bx + imod(k, 2) * (half + 5), fRow1 - 18 + idiv(k, 2) * 26,
+                       half, 22, bChoice, kSand);
+        if (type == kComb) {
+            dial(fc(f, fDamping), fCol + 2 * fStep, fRow1, r, kSand, true);
+            button(eCombSign, 1, fCol + 3 * fStep - 30, fRow1 - 18, 60, 22, bChoice, kSand);
+            button(eCombSign, -1, fCol + 3 * fStep - 30, fRow1 + 8, 60, 22, bChoice, kSand);
+        }
+        dial(fc(f, fKeytrack), fCol, fRow2, r, kSand, true);
+        dial(fc(f, fEnv), fCol + fStep, fRow2, r, kSand, true);
+        dial(fc(f, fVelocity), fCol + 2 * fStep, fRow2, r, kSand, true);
+        dial(fc(f, fDrive), fCol + 3 * fStep, fRow2, r, kSand, true);
     }
 
     int envColour(int k) const {
         return k == 0 ? Theme::accent : k == 1 ? kSand : Theme::modulation;
     }
     int envBase(int k) const { return k == 0 ? cAmp : k == 1 ? cEnv2 : cEnv3; }
+
+    // The envelope's shape with its four times under it; beside them, its
+    // levels in two columns, the lower row level with the times.
+    static constexpr double eColA = envX + 456;
+    static constexpr double eColB = envX + 544;
+    static constexpr double eRow1 = envY + 88;
+    static constexpr double eRow2 = envY + 180;
 
     void layoutEnv() {
         for (int k = 0; k < 3; ++k)
@@ -4353,39 +4383,49 @@ struct Marram : Instrument {
         const int base = envBase(envTab);
         const int colour = envColour(envTab);
         for (int k = 0; k < 4; ++k)
-            dial(base + k, envX + 53 + 75 * k, envY + 180, 16, colour, true);
-        const double a = envX + 360, b = envX + 428;
+            dial(base + k, shapeX + shapeW * (2 * k + 1) / 8.0, eRow2, 17, colour, true);
         if (envTab == 0) {
-            dial(cAmp + 4, a, envY + 80, 17, colour, true);
-            dial(cAmp + 5, b, envY + 80, 17, colour, true);
-            dial(cAmp + 6, a, envY + 160, 17, colour, true);
+            dial(cAmp + 4, eColA, eRow1, 17, colour, true);
+            dial(cAmp + 5, eColB, eRow1, 17, colour, true);
+            dial(cAmp + 6, (eColA + eColB) * 0.5, eRow2, 17, colour, true);
         } else if (envTab == 1) {
-            dial(cEnv2 + 4, a, envY + 80, 17, colour, true);
-            dial(cEnv2 + 5, b, envY + 80, 17, colour, true);
+            dial(cEnv2 + 4, eColA, eRow1, 17, colour, true);
+            dial(cEnv2 + 5, eColB, eRow1, 17, colour, true);
         }
     }
 
+    // The LFO's shapes over its picture; beside them its rate (or
+    // division), phase and delay, and under those how it runs.
     void layoutLfo() {
         const int l = lfoTab;
         for (int k = 0; k < 3; ++k)
             button(eLfoTab, k, lfoX + lfoW - 112 + k * 32, lfoY + 13, 28, 22, bSmallTab,
                    Theme::modulation);
+        const double each = (cycleW - 6 * 5.0) / 7.0;
         for (int k = 0; k < 7; ++k)
-            button(lc(l, lShape), k, lfoX + 16 + k * 50, lfoY + 44, 46, 26, bShape,
+            button(lc(l, lShape), k, cycleX + k * (each + 5), lfoY + 44, each, 26, bShape,
                    Theme::modulation);
-        const double by = cycleY + cycleH + 10;
-        row(lc(l, lMode), 0, 2, cycleX, by, 118, 22, Theme::modulation);
-        button(lc(l, lSync), 0, cycleX + 126, by, 74, 22, bToggle, Theme::modulation);
+        const double x0 = cycleX + cycleW + 16, w = lfoX + lfoW - 16 - x0;
         const bool synced = valueOf(lc(l, lSync)) > 0.5;
-        const double a = lfoX + 266, b = lfoX + 336;
-        dial(lc(l, synced ? lDivision : lRate), a, lfoY + 112, 18, Theme::modulation, true);
-        dial(lc(l, lPhase), b, lfoY + 112, 18, Theme::modulation, true);
-        dial(lc(l, lDelay), a, lfoY + 182, 18, Theme::modulation, true);
+        const double y = lfoY + 112;
+        dial(lc(l, synced ? lDivision : lRate), x0 + w / 6.0, y, 19, Theme::modulation, true);
+        dial(lc(l, lPhase), x0 + w * 0.5, y, 19, Theme::modulation, true);
+        dial(lc(l, lDelay), x0 + w * 5.0 / 6.0, y, 19, Theme::modulation, true);
+        const double by = cycleY + cycleH - 22;
+        const double third = (w - 10) / 3.0;
+        row(lc(l, lMode), 0, 2, x0, by, 2 * third + 5, 22, Theme::modulation);
+        button(lc(l, lSync), 0, x0 + 2 * (third + 5), by, third, 22, bToggle, Theme::modulation);
     }
 
+    // How the voices play (mode, quality) on the left; the dials in two
+    // rows: playing (voices, glide, bend, tune) and thickening (unison,
+    // detune, spread, drift).
+    static constexpr double vRow1 = voiY + 80;
+    static constexpr double vRow2 = voiY + 164;
+
     void layoutVoice() {
-        row(cMode, 0, 3, voiX + 16, voiY + 52, 210, 22, kSeaGlass);
-        row(cQuality, 0, 3, voiX + voiW - 196, voiY + 13, 180, 22, kSeaGlass);
+        row(cMode, 0, 3, voiX + 16, vRow1 - 11, 210, 22, kSeaGlass);
+        row(cQuality, 0, 3, voiX + 16, vRow2 - 11, 210, 22, kSeaGlass);
         const int many = roundToInt(valueOf(cUnison));
         for (int k = 0; k < 8; ++k) {
             const int code = k == 0   ? cPolyphony
@@ -4397,7 +4437,7 @@ struct Marram : Instrument {
                              : k == 6 ? cSpread
                                       : cDrift;
             const bool live = (k != 0 || choiceOf(cMode) == 0) && ((k != 5 && k != 6) || many > 1);
-            dial(code, voiX + 36 + 52 * k, voiY + 150, 16, kSeaGlass, live);
+            dial(code, voiX + 298 + 80 * imod(k, 4), k < 4 ? vRow1 : vRow2, 17, kSeaGlass, live);
         }
     }
 
@@ -4518,6 +4558,10 @@ struct Marram : Instrument {
             return;
         }
         if (code == eTableStep) return;
+        if (code == eCombSign) {
+            g.fillText(value > 0 ? "+ ALL" : "- ODD", x, y);
+            return;
+        }
         if (code == cMode) {
             g.fillText(value == 0 ? "POLY" : value == 1 ? "MONO" : "LEGATO", x, y);
             return;
@@ -5043,6 +5087,7 @@ struct Marram : Instrument {
         if (code == eFilterTab) return value == filterTab;
         if (code == eEnvTab) return value == envTab;
         if (code == eLfoTab) return value == lfoTab;
+        if (code == eCombSign) return (valueOf(fc(filterTab, fFeedback)) < 0.0) == (value < 0);
         if (code < 0) return false;
         if (buttonStyle[k] == bToggle) return valueOf(code) > 0.5;
         if (code >= 200 && imod(code - 200, 20) == fVowel) return abs(valueOf(code) - value) < 0.5;
@@ -5657,9 +5702,16 @@ struct Marram : Instrument {
         g.strokeStyle(kSand);
         g.lineWidth(2);
         g.stroke();
-        if (type == kComb)
+        // The names over the choices, as a dial's.
+        const double cx = fCol + 2.5 * fStep;
+        if (type == kLadder) label(g, "SLOPE", cx, fRow1 - 30, TextAlign::Center);
+        if (type == kSvf) label(g, "MODE", cx, fRow1 - 30, TextAlign::Center);
+        if (type == kFormant) label(g, "VOWEL", cx, fRow1 - 30, TextAlign::Center);
+        if (type == kComb) {
+            label(g, "POLARITY", fCol + 3 * fStep, fRow1 - 30, TextAlign::Center);
             aside(g, "a comb tuned to its pitch: keytrack 100 % plays the note",
-                  curveX + curveW * 0.5, curveY + curveH + 35, TextAlign::Center);
+                  curveX + curveW * 0.5, curveY + curveH + 34, TextAlign::Center);
+        }
     }
 
     // --- the envelopes ------------------------------------------------------------------------
@@ -5745,12 +5797,14 @@ struct Marram : Instrument {
             g.fill();
         }
         if (envTab == 1) {
-            aside(g, "it moves each cutoff", envX + 393, envY + 152, TextAlign::Center);
-            aside(g, "by its filter's Env 2", envX + 393, envY + 168, TextAlign::Center);
+            const double mid = (eColA + eColB) * 0.5;
+            aside(g, "it moves each cutoff", mid, eRow2 - 8, TextAlign::Center);
+            aside(g, "by its filter's Env 2", mid, eRow2 + 8, TextAlign::Center);
         }
         if (envTab == 2) {
-            aside(g, "a source for routes alone:", envX + 393, envY + 80, TextAlign::Center);
-            aside(g, "route env3 to anything", envX + 393, envY + 96, TextAlign::Center);
+            const double mid = (eColA + eColB) * 0.5;
+            aside(g, "a source for routes alone:", mid, eRow1 - 8, TextAlign::Center);
+            aside(g, "route env3 to anything", mid, eRow1 + 8, TextAlign::Center);
         }
     }
 
@@ -5822,6 +5876,8 @@ struct Marram : Instrument {
     void drawVoicePanel(Canvas& g) {
         panel(g, voiX, voiY, voiW, voiH);
         heading(g, "Voice", voiX + 18, voiY + 24);
+        label(g, "MODE", voiX + 121, vRow1 - 26, TextAlign::Center);
+        label(g, "QUALITY", voiX + 121, vRow2 - 26, TextAlign::Center);
     }
 
     void draw(Canvas& g) {
@@ -5963,6 +6019,10 @@ struct Marram : Instrument {
         if (code == eTableStep) {
             const int table = oc(oscTab, oTable);
             editParam(table, 0, clamp(choiceOf(table) + value, 0, 6));
+        }
+        if (code == eCombSign) {
+            const int feedback = fc(filterTab, fFeedback);
+            editParam(feedback, 0, value * abs(valueOf(feedback)));
         }
         if (code < 0) return;
         if (buttonStyle[b] == bToggle) {
