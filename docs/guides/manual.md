@@ -90,6 +90,10 @@ To edit an automation item's points, its amplitude magnitude must be greater tha
 0.000000001. If it is zero or too small to invert, the app asks you to restore
 the amplitude first; the source curve is preserved.
 
+If another edit changes an automation item's amplitude, baseline or geometry
+while you drag its points, header or edge, the drag is cancelled with a message.
+Start the drag again using the updated item.
+
 ## Plugins
 
 Quire hosts CLAP and VST3 plugins. It looks for them in this order:

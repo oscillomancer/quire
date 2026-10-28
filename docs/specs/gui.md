@@ -409,7 +409,10 @@ MIDI editor selection clears on external version changes, and a gesture
 cannot commit against a different project generation or version from the
 one where it started. An automation point drag (on an envelope or an
 automation item) is dropped, with an `env.changed` message, when the points
-changed elsewhere between the press and the release.
+changed elsewhere between the press and the release. Automation-item point,
+move and resize drags also compare the press-time amplitude, baseline, position,
+length, source length, loop state, envelope and pool. A change cancels the drag
+with `env.changed`; it does not rebase the draft onto the changed item.
 
 Gestures (P0, `reaper-ux.md` 8–13): drop files onto tracks/timeline, move,
 trim edges, split (S), duplicate, slip (Alt-drag), stretch (with the rate

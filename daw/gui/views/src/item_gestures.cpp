@@ -640,6 +640,7 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
             if (ai && ai->zone != Drag::EnvPoint) {
                 state_.drag = ai->zone;
                 state_.autoItem = ai->item;
+                state_.autoBase = s.autoItems.entry(ai->item)->value;
                 if (ai->zone == Drag::AutoItemLength) {  // its shape stretches, or repeats
                     const std::string_view b = mouse.behaviour("autoitem.edge", e.mods);
                     state_.stretch = b.starts_with("stretch");
@@ -723,6 +724,15 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
             }
         }
         if (root_) root_->capture(&view_);
+        return true;
+    }
+    if (e.type == T::Move && state_.autoItem && !checkAutoItem()) {
+        state_ = State{};
+        moved_ = false;
+        if (root_) {
+            root_->capture(nullptr);
+            root_->requestAnimationFrame();
+        }
         return true;
     }
     if (e.type == T::Move &&
@@ -1155,6 +1165,7 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
     }
     if ((state_.drag == Drag::AutoItemMove || state_.drag == Drag::AutoItemLength) &&
         state_.autoItem && moved_ && std::abs(state_.deltaBeats) > 1e-9) {
+        if (!checkAutoItem()) return;
         if (const model::AutomationItem* ai = s.autoItems.find(*state_.autoItem)) {
             json::Value args = json::Value::object();
             args["item"] = state_.autoItem->str();
@@ -1508,6 +1519,7 @@ bool ItemGestures::envPress(model::Id envId, const ui::PointerEvent& e,
             return true;
         }
         state_.autoItem = autoItem->item;
+        state_.autoBase = s.autoItems.entry(autoItem->item)->value;
         state_.envOffset = autoItem->passStart;
         frame->offsetBeats += autoItem->passStart;
         state_.envDraft = state_.envBase = ai->points;
@@ -2059,13 +2071,28 @@ Status ItemGestures::shapePoints(model::PointShape shape) {
     return setPoints(edits, "Envelope point shape");
 }
 
+bool ItemGestures::checkAutoItem() const {
+    const auto* now = state_.autoItem ? view_.session().autoItems.find(*state_.autoItem) : nullptr;
+    const auto* before = state_.autoBase.get();
+    if (!now || !before) return false;
+    if (now->amplitude == before->amplitude && now->baseline == before->baseline &&
+        now->position == before->position && now->length == before->length &&
+        now->sourceLength == before->sourceLength && now->loop == before->loop &&
+        now->envelope == before->envelope && now->pool == before->pool)
+        return true;
+    if (onError)
+        onError(Error("env.changed", "the automation changed while you were dragging", {},
+                      "drag the item or point again"));
+    return false;
+}
+
 void ItemGestures::commitEnv(const std::string& label) {
     if (!run || !state_.env) return;
     if (!view_.session().envelopes.contains(*state_.env)) return;
     json::Value args = json::Value::object(), points = json::Value::array();
     const model::AutomationItem* ai =
         state_.autoItem ? view_.session().autoItems.find(*state_.autoItem) : nullptr;
-    if (state_.autoItem && !ai) return;
+    if (state_.autoItem && !checkAutoItem()) return;
     // The draft replaces every point: if another client changed them since the
     // press, applying it would undo that change, so the drag is dropped.
     auto same = [](const std::vector<model::EnvPoint>& x, const std::vector<model::EnvPoint>& y) {
