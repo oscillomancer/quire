@@ -23,7 +23,11 @@ keeps a `daw/gui/<slug>` symlink for existing launch commands; CTest uses the
 actual executable target path.
 
 Artifacts are `<slug>-<version>-<platform>-<arch>.<ext>`: Linux x86_64 tar.xz,
-macOS arm64 dmg/zip, Windows x86_64 exe/zip. Linux packages use the `linux-package` preset's hidden static C++ runtimes
+macOS arm64 dmg/zip, Windows x86_64 exe/zip. Draft-release creation and updates
+require a successful all-platform run. An existing draft must target the exact
+commit being built; a different revision requires deleting the draft or bumping
+the version and rebuilding all platforms. Published releases are never modified.
+Linux packages use the `linux-package` preset's hidden static C++ runtimes
 for all five programs and the stock CLAPs; the parent forwards configure
 flags without modifying shared plugin-template files. Release CI uses Clang 22
 with GCC 12 libstdc++ on Ubuntu 22.04. Package audit rejects

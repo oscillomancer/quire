@@ -80,7 +80,8 @@ and user-space installer, an Apple Silicon app/dmg and Windows per-user NSIS
 installer, with portable zip alternatives. The five helpers/programs, fifteen
 stock CLAPs, agent skill, fonts and license texts ship together. Package CI is
 manual and tests installed artifacts; optional release upload creates drafts
-only. Linux package builds now use hidden static C++ runtimes (ADR-0049), preserving
+only, from all-platform runs at one commit; existing drafts reject a different
+target revision. Linux package builds now use hidden static C++ runtimes (ADR-0049), preserving
 third-party plugin runtime independence; the audit rejects shared C++ runtimes.
 Both installers upgrade their own previous version and preserve unrelated
 files; both preflight ownership before removing an old installation and remember

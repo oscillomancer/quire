@@ -244,8 +244,11 @@ in the build environment first (Zlib compressor only).
 and smokes packages on native runners (Linux in an Ubuntu 22.04 container).
 `-f draft_release=true` additionally attaches downloads to a **draft**
 `v<version>` release; it never publishes or modifies a published release.
-Re-running it replaces the draft's files and moves its target to the commit
-just built, so the tag created on publication matches the downloads.
+Creating or updating a draft requires `platforms=all`. Re-running it replaces
+the draft's files only when its target is the exact commit being built. To
+release a different revision, delete the draft (or bump the product version),
+then run all platforms from one commit. Partial-platform runs can still produce
+workflow artifacts with `draft_release=false`.
 Run `build.yml` separately for native regression coverage. CI smokes installed
 artifacts with dummy audio, isolated preferences and no real agent registration.
 
