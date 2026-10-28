@@ -198,6 +198,14 @@ FileActions::FileActions(ui::Root& root, AppActions& actions, cmd::Dispatcher& d
     });
 }
 
+void FileActions::registerQuit(std::function<void()> quit, bool prompt) {
+    actions_.addUi("ui.quit", "File: quit", [this, quit = std::move(quit), prompt] {
+        // A popup only holds interactive quits that may need a discard decision.
+        const bool idle = !(app_.engine() && app_.engine()->recording()) && !dirty();
+        if (!prompt || idle || !root_.popupOpen()) confirmDiscard("Quit?", quit, prompt);
+    });
+}
+
 std::function<void(DialogLifetime::Paths)> FileActions::guardDialog(
     std::function<void(DialogLifetime::Paths)> done, bool opening) {
     const auto generation = app_.projectGeneration();

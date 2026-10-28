@@ -597,6 +597,33 @@ TEST_CASE("file dialogs: completions belong to their project and discard revisio
     }
 }
 
+TEST_CASE("file actions: registered Quit shares the popup and prompt policy") {
+    App a;
+    REQUIRE(a.ok);
+    gui::FileActions files(*a.root, *a.actions, *a.dispatcher, *a.app, a.ui, a.window->sdl(),
+                           [](auto task) { task(); });
+    bool quit = false;
+    files.registerQuit([&] { quit = true; });
+    SUBCASE("a clean project quits with an open popup") {
+        a.root->openPopup(std::make_unique<ui::Node>("other.popup"), {});
+        REQUIRE(a.actions->run("ui.quit"));
+        CHECK(quit);
+    }
+    SUBCASE("unsaved work waits for an open popup and then asks") {
+        a.key("Ctrl+T");
+        a.root->openPopup(std::make_unique<ui::Node>("other.popup"), {});
+        REQUIRE(a.actions->run("ui.quit"));
+        CHECK_FALSE(quit);
+        CHECK(a.root->find("other.popup"));
+        a.root->closePopup();
+        REQUIRE(a.actions->run("ui.quit"));
+        CHECK_FALSE(quit);
+        a.root->frame(false);
+        REQUIRE(a.root->click("file.confirm.cancel"));
+        CHECK_FALSE(quit);
+    }
+}
+
 TEST_CASE("file actions: recording is finalized before discard decisions") {
     engine::DummyBackend backend({.mode = engine::DummyBackend::Mode::Manual});
     App a;
@@ -639,8 +666,9 @@ TEST_CASE("file actions: recording is finalized before discard decisions") {
         CHECK(a.app->engine()->recording());
         exec("transport.stop");
     }
-    SUBCASE("Quit commits one undoable take and Cancel retains it") {
-        files.confirmDiscard("Quit?", [&] { continued = true; });
+    SUBCASE("registered Quit commits one undoable take and Cancel retains it") {
+        files.registerQuit([&] { continued = true; });
+        REQUIRE(a.actions->run("ui.quit"));
         CHECK_FALSE(continued);
         CHECK_FALSE(a.app->engine()->recording());
         CHECK(files.dirty());
@@ -651,6 +679,15 @@ TEST_CASE("file actions: recording is finalized before discard decisions") {
         exec("history.undo");
         CHECK(a.app->head().items.empty());
         CHECK_FALSE(files.dirty());
+    }
+    SUBCASE("hidden Quit still finalizes recording with an open popup") {
+        files.registerQuit([&] { continued = true; }, false);
+        a.root->openPopup(std::make_unique<ui::Node>("other.popup"), {});
+        REQUIRE(a.actions->run("ui.quit"));
+        CHECK(continued);
+        CHECK_FALSE(a.app->engine()->recording());
+        CHECK(a.app->head().items.size() == 1);
+        CHECK_FALSE(a.root->find("file.confirm"));
     }
     SUBCASE("New stops and prompts before replacing the project") {
         const auto generation = a.app->projectGeneration();

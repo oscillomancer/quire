@@ -54,6 +54,8 @@ class FileActions {
     FileActions(ui::Root& root, AppActions& actions, cmd::Dispatcher& dispatcher,
                 engine::EngineApp& app, UiState& ui, SDL_Window* window, Post post);
 
+    // Menu/shortcut and native window-close requests share the registered action.
+    void registerQuit(std::function<void()> quit, bool prompt = true);
     bool dirty() const;  // changes since the last save/open/new
     // Finalizes recording through Stop, then runs `then` if nothing would be
     // lost; otherwise asks Save / Don't save / Cancel. A Stop error aborts.

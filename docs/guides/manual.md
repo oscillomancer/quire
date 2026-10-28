@@ -62,7 +62,8 @@ save moves them into `media/` beside the project file. Quitting, or starting
 another project, without saving deletes that folder after the app has asked.
 A crashed run leaves its folder behind, recordings included.
 
-New, Open and Quit first stop an active recording and add its takes to the
+New, Open and Quit (including File > Quit, Cmd+Q on macOS and closing the main
+window) first stop an active recording and add its takes to the
 project, then ask whether to save the changes. Cancel keeps the recorded takes;
 Undo removes that recording. If stopping fails, the error is shown and the
 requested action does not continue.

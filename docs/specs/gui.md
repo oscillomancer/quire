@@ -835,7 +835,11 @@ save / Cancel before unsaved changes are lost. Before New, Open or Quit checks
 for unsaved changes, active recording is stopped through `transport.stop`:
 recorded takes become an undoable version, then the normal prompt runs. If
 Stop fails, the error is shown and the requested action does not continue.
-Hidden/finite runs still stop recording, even though they suppress the prompt.
+File > Quit, its shortcut (Cmd+Q on macOS), SDL quit and main-window close
+all dispatch the same `ui.quit` action. An open popup only gates interactive
+Quit when recording or unsaved changes require a decision; a clean, idle
+project can quit immediately. Hidden/finite runs still stop recording, even
+though they suppress the prompt and ignore the popup gate.
 Native file/folder results capture the project generation and are dropped with
 a short notice if the project was replaced before delivery. Open rechecks the
 session version and branch after the dialog; changes require a fresh discard
