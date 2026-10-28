@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Supple Audio
 # Compares the sandbox's generator output with the files committed under
 # skill/generated/. Regenerate with tools/gen/update-generated.sh.
 if(NOT DEFINED PREFIX)

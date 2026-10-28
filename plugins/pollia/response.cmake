@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # Pollia, measured through the built plugin (dsp.test), whose 1 kHz sine
 # peaks at -12 dBFS on both channels. Dry (mix 0) it passes unchanged; two
 # stages held at 1 kHz cancel it (a notch exactly at their corner), and with

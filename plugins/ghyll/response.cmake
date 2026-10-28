@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # Ghyll, measured through the built plugin (dsp.test), whose sine peaks at
 # -12 dBFS on both channels. Dry (mix 0) it passes unchanged and output trims
 # what leaves. The readouts follow the room as set: the distance between two

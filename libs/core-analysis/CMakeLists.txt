@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 supple_add_library(core-analysis
   SOURCES src/loudness.cpp src/analysis.cpp src/compare.cpp
   DEPS supple::core-base supple::core-dsp supple::core-json)

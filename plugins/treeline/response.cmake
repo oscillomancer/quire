@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # Treeline's ceiling, measured through the built plugin (dsp.test): driven
 # 12 dB into a -3 dB ceiling at 44.1, 48 and 96 kHz, a sine, a sweep, noise
 # and an impulse each peak at the ceiling and not above it; below the

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Supple Audio
 # Shared target helpers. Every first-party target goes through
 # supple_target_defaults(); third-party targets never do.
 

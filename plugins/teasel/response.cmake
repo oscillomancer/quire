@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # Teasel, measured through the built plugin (dsp.test), whose sine peaks at
 # -12 dBFS on both channels. Dry (mix 0) it passes unchanged through the
 # oversampling; a curve driven only gently, with auto gain, keeps the level;

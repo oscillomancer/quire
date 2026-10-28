@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # Source-export conformance, factory patches and player/native audio
 # equivalence (ADR-0032).
 # EXAMPLES runs every example, then SCRIPT/PATCH (the library tilt regression),

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: @LICENSE@
+# Copyright (c) @YEAR@ @HOLDER@
 # The suite (suite/suite.cmake), and the script compiled as the script
 # player's compiler runs it: integers wrap, and no fused multiply-adds. An Array may start from single braces (= {1.0, 0.5}), as
 # the language allows, without a warning.

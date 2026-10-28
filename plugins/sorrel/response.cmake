@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # Sorrel, measured through the built plugin (dsp.test), whose sine peaks at
 # -12 dBFS on both channels. Above the threshold it passes unchanged (with
 # or without lookahead, which the test compensates); under it, the range

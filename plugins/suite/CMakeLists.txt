@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # The suite layer (ADR-0032): what turns a product of the plugin template
 # into a member of the suite. Here: the DSP script runtime and the script
 # compiler. Both build without the rest of the monorepo, as the player and

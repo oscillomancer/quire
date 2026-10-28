@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Supple Audio
 supple_add_library(audio-file
   SOURCES src/audio_file.cpp src/flac_encode.cpp src/resample.cpp src/wav_stream.cpp src/inspect.cpp src/dr_impl.c
   DEPS supple::core-base supple::core-dsp

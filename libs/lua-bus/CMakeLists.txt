@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Supple Audio
 # Embedded Lua scripting on the command bus (ADR-0006). Model thread only; the
 # Lua state is vendored (third_party/lua-5.4.9) and statically linked.
 supple_add_library(lua-bus

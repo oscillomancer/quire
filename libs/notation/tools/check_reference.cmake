@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Supple Audio
 execute_process(COMMAND ${TOOL} OUTPUT_VARIABLE generated RESULT_VARIABLE status)
 if(NOT status EQUAL 0)
   message(FATAL_ERROR "notation-ref failed (${status})")

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # Sedge, measured through the built plugin (dsp.test): a sine passes
 # unchanged and reads as its note, octave, cents and frequency, in equal
 # temperament and in Werckmeister III. (host-smoke checks that every sample

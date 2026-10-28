@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Supple Audio
 find_package(SDL3 REQUIRED CONFIG)
 find_package(X11 REQUIRED)
 find_package(OpenGL REQUIRED)

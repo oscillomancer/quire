@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # The suite in a player build (the folder above this one, Quire's
 # plugins/suite: suite.cmake), and the script compiler with MIR, whose
 # sources are in SUPPLE_MIR_DIR (Quire's third_party/mir-1.0.0).

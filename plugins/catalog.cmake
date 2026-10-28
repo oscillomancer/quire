@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # A stock script's Catalog.cpp is the one generated file in its folder: the
 # patch key of each Param member, which a source export works out from the
 # script (C++ cannot see member names). This checks it against a fresh

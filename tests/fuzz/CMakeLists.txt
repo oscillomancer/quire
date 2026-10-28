@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Supple Audio
 add_library(core-json-fuzzlib STATIC
   ${PROJECT_SOURCE_DIR}/libs/core-json/src/value.cpp
   ${PROJECT_SOURCE_DIR}/libs/core-json/src/parse.cpp

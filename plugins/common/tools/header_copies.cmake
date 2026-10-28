@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # The CLAP extension headers are kept twice: include/supple/clap/ here, which
 # the host compiles against, and plugins/suite/semantic/include/supple/clap/,
 # which plugins and source exports compile against. Each side compiles

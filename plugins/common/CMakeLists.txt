@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # The semantic-params extension ABI (C header), shared by plugins and hosts.
 add_library(semantic-params-abi INTERFACE)
 target_include_directories(semantic-params-abi INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)

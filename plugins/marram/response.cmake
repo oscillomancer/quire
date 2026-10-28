@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # Marram, measured through the built plugin (dsp.test's A4 note and silence):
 # every pitched oscillator type, a unison stack and every quality play the
 # note in tune (a sub an octave down), routes from a global source (a macro)

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # Lichen, measured through the built plugin (dsp.test): a 1 kHz sine peaking
 # at -12 dBFS on both channels for 2 s passes unchanged, and the readings
 # are what the standards and the definitions give for it. (host-smoke checks

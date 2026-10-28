@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # Gorse, measured through the built plugin (dsp.test). A sine that starts
 # from silence is a hit with an onset and no tail: with Attack +6 dB its
 # onset peaks 6 dB higher, from its first sample, at any level and at 44.1,

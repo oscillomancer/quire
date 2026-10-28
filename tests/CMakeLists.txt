@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Supple Audio
 # Cross-library tests: rt-safety gate, integration, fuzz, golden renders.
 if(SUPPLE_BUILD_TESTS AND SUPPLE_SANITIZE MATCHES "realtime")
   add_executable(rtsan-selfcheck rt-safety/rtsan_selfcheck.cpp)

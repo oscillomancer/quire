@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # The player: the plugin that runs DSP scripts (Quire's ADR-0032). Its
 # plugins are the scripts it finds (product/Catalog.cpp); it is a run-time
 # product of the plugin template with the suite's layer. It builds from the

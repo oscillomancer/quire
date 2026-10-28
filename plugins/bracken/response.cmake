@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # Bracken, measured through the built plugin (dsp.test), whose sine peaks at
 # -12 dBFS on both channels. Dry (mix 0) it passes unchanged; a single echo
 # a millisecond late, alone, is the sine at its own level; ducking takes 12

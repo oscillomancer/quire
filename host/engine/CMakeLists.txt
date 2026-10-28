@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Supple Audio
 add_subdirectory(model)
 
 # dsp.preview writes PNGs with the system zlib (host/dsp-commands/png.h).

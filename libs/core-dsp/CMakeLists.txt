@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 supple_add_library(core-dsp SOURCES src/dsp.cpp src/oversampler.cpp DEPS supple::core-base PRIVATE_DEPS supple::pocketfft)
 # The analysis suites and optimizer runs spend most of their time in this
 # library's filters and true-peak upsampler: unoptimized, core-analysis.tests

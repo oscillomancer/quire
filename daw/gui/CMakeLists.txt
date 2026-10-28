@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Supple Audio
 # Phase 5 GUI (docs/specs/gui.md, ADR-0005): SDL3 windows (X11 driver; the
 # offscreen driver for tests and benchmarks), OpenGL 3.3 core, NanoVG GL3.
 find_package(SDL3 REQUIRED CONFIG)

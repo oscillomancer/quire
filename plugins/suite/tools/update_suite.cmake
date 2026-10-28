@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # Replaces this product's suite/ with a newer one, so a fix made in the
 # suite reaches a source export unchanged. FROM is a folder with the newer
 # suite/ in it: a newer source export, or the export kit a newer script host

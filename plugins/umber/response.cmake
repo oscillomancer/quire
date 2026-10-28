@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # Umber, measured through the built plugin (dsp.test), wow and flutter off.
 # Quiet sines come back at their own level at any frequency (playback undoes
 # the record equalisation) but for the head bump; the drive's gain shows

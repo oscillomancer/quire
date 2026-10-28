@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Supple Audio
 supple_add_library(clap-host
   SOURCES src/clap_host.cpp src/vst3_host.cpp src/platform.cpp src/scan.cpp
   DEPS supple::core-base supple::core-json supple::clap supple::semantic-params-abi supple::vst3-host

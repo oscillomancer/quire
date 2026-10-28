@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 add_subdirectory(common)
 add_subdirectory(suite)
 

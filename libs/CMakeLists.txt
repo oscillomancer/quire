@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Supple Audio
 # Shared core libraries. Order matters only for readability; CMake resolves
 # targets lazily.
 add_subdirectory(core-base)

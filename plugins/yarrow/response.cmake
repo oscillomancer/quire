@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # Yarrow's filters, measured through the built plugin (dsp.test's impulse
 # response at octave centres): a bell lands on its gain, a bell near the top
 # octave is not cramped, and a cut is -3 dB at its corner and falls at its

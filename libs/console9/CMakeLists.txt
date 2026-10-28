@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Supple Audio
 supple_add_library(console9 SOURCES src/console9.cpp DEPS supple::core-base)
 
 if(SUPPLE_BUILD_TESTS)

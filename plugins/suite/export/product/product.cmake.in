@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: @LICENSE@
+# Copyright (c) @YEAR@ @HOLDER@
 # @NAME@: the DSP script in product/script/ as a plugin of its own,
 # compiled as C++ and run by the suite's glue (suite/) as the script player
 # runs it. The plugin is what the script declares (product/Catalog.cpp): its

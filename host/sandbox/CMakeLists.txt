@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Supple Audio
 # The offline renderer on its own, so that the engine's dsp.test renders as the
 # sandbox does (host/dsp-commands/dsp_test.h).
 supple_add_library(sandbox-render

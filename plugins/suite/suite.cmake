@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # The suite in a plugin of the template, included from a product's
 # targets.cmake with SUPPLE_SUITE set to this folder: the script runtime,
 # the semantic-params documents and layer, and the glue that runs scripts,

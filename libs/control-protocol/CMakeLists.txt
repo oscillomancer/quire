@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Supple Audio
 supple_add_library(control-protocol SOURCES src/protocol.cpp src/model_loop.cpp
   DEPS supple::command-bus supple::product-info)
 if(WIN32)

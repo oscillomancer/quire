@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Supple Audio
 cmake_minimum_required(VERSION 3.25)
 
 include(cmake/Product.cmake)

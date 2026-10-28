@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # Hickory, measured through the built plugin (dsp.test), whose test signals
 # are the same on both channels. At rest a sine passes unchanged; Gain sets
 # its level exactly, and its minimum is silence; the side of identical

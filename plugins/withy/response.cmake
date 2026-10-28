@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 # Withy, measured through the built plugin (dsp.test), whose sine peaks at
 # -12 dBFS on both channels. Dry (mix 0) it passes unchanged; output trims
 # what leaves; one voice held still (vibrato at no depth) is the sine at its

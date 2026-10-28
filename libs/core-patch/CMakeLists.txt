@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Supple Audio
 supple_add_library(core-patch
   SOURCES src/patch.cpp
   DEPS supple::core-base supple::core-json supple::core-schema supple::core-params)
