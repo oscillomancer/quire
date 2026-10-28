@@ -117,3 +117,17 @@ TEST_CASE("Windows processes use UTF-8 for narrow paths and environment variable
     CHECK(std::wstring(inherited) == wide);
 }
 #endif
+
+TEST_CASE("an ID's folder is portable, distinct and stable") {
+    using supple::paths::idFolder;
+    using supple::paths::legacyIdFolder;
+    // Kept: presets already live under these names.
+    CHECK(idFolder("com.example/a") == "com.example_a-a2dc87e2");
+    CHECK(idFolder("com.example_a") == "com.example_a-1c9f81be");
+    CHECK(legacyIdFolder("com.example/a") == legacyIdFolder("com.example_a"));
+    CHECK(idFolder("com.Example.A") != idFolder("com.example.a"));
+    CHECK(idFolder(".hidden").front() == '_');
+    CHECK(idFolder("").front() == '_');
+    CHECK(idFolder(std::string(1000, 'x')).size() == 109);
+    CHECK(idFolder("caf\xc3\xa9/../x").find_first_of("/\\\x80\xc3") == std::string::npos);
+}

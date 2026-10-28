@@ -8,10 +8,13 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <optional>
 #include <set>
+#include <tuple>
 
 #include "supple/base/closest.h"
 #include "supple/base/files.h"
+#include "supple/base/paths.h"
 #include "supple/clap/semantic_params.h"
 
 namespace supple::sandbox {
@@ -76,13 +79,16 @@ bool validPresetName(std::string_view n) {
     });
 }
 
-std::string safeDirName(std::string_view pluginId) {
-    std::string s(pluginId);
-    for (char& c : s)
-        if (!std::isalnum(static_cast<unsigned char>(c)) && c != '.' && c != '-' && c != '_')
-            c = '_';
-    if (s.empty() || s.front() == '.') s.insert(s.begin(), '_');
-    return s;
+// A preset in the folder earlier versions used for `plugin` (which other
+// plugins' IDs could share), when the file there is that plugin's.
+std::optional<fs::path> legacyPreset(const fs::path& root, const std::string& plugin,
+                                     std::string_view name) {
+    const fs::path path = root / paths::legacyIdFolder(plugin) / (std::string(name) + ".json");
+    auto text = readTextFile(path, 16u << 20);
+    auto doc = text ? json::parse(*text) : Result<json::Value>(text.error());
+    const json::Value* id = doc && doc->isObject() ? doc->find("plugin") : nullptr;
+    if (!id || !id->isString() || id->asString() != plugin) return std::nullopt;
+    return path;
 }
 
 std::string closestHint(std::string_view input, const std::vector<std::string>& names,
@@ -687,8 +693,14 @@ Result<fs::path> Session::presetSave(std::string_view id, std::string_view name,
         doc["state"] = base64Encode(*s);
     }
     const fs::path path =
-        options_.presetDir / safeDirName(l.info.id) / (std::string(name) + ".json");
+        options_.presetDir / paths::idFolder(l.info.id) / (std::string(name) + ".json");
     SUPPLE_TRY(writeFileAtomic(path, json::writeCanonical(doc) + "\n"));
+    // A copy of the same name in the older folder would shadow nothing, but
+    // would still be listed.
+    if (auto older = legacyPreset(options_.presetDir, l.info.id, name)) {
+        std::error_code ec;
+        fs::remove(*older, ec);
+    }
     return path;
 }
 
@@ -718,9 +730,13 @@ Result<std::string> Session::presetLoad(std::string_view id, std::string_view na
     if (!validPresetName(name))
         return Error("sandbox.preset_name", "invalid preset name '" + std::string(name) + "'",
                      "/name", "see preset.list");
-    const fs::path path =
-        options_.presetDir / safeDirName(l.info.id) / (std::string(name) + ".json");
+    fs::path path = options_.presetDir / paths::idFolder(l.info.id) / (std::string(name) + ".json");
     auto text = readTextFile(path, 16u << 20);
+    if (!text)
+        if (auto older = legacyPreset(options_.presetDir, l.info.id, name)) {
+            path = *older;
+            text = readTextFile(path, 16u << 20);
+        }
     if (!text) {
         auto list = presetList(l.info.id);
         std::vector<std::string> names;
@@ -798,7 +814,9 @@ Result<std::vector<PresetInfo>> Session::presetList(std::string_view plugin, boo
     if (!fs::is_directory(options_.presetDir, ec)) return out;
     for (const auto& dir : fs::directory_iterator(options_.presetDir, ec)) {
         if (!dir.is_directory()) continue;
-        if (!plugin.empty() && dir.path().filename() != safeDirName(plugin)) continue;
+        if (!plugin.empty() && dir.path().filename() != paths::idFolder(plugin) &&
+            dir.path().filename() != paths::legacyIdFolder(plugin))
+            continue;
         for (const auto& f : fs::directory_iterator(dir.path(), ec)) {
             if (f.path().extension() != ".json") continue;
             auto text = readTextFile(f.path(), 16u << 20);
@@ -819,9 +837,18 @@ Result<std::vector<PresetInfo>> Session::presetList(std::string_view plugin, boo
             out.push_back(std::move(p));
         }
     }
-    std::sort(out.begin(), out.end(), [](const PresetInfo& a, const PresetInfo& b) {
-        return a.plugin != b.plugin ? a.plugin < b.plugin : a.name < b.name;
+    // A plugin's own folder before the older one it may share with others.
+    const auto older = [](const PresetInfo& p) {
+        return p.path.parent_path().filename() != paths::idFolder(p.plugin);
+    };
+    std::sort(out.begin(), out.end(), [&](const PresetInfo& a, const PresetInfo& b) {
+        return std::tuple(a.plugin, a.name, older(a)) < std::tuple(b.plugin, b.name, older(b));
     });
+    out.erase(std::unique(out.begin(), out.end(),
+                          [](const PresetInfo& a, const PresetInfo& b) {
+                              return a.plugin == b.plugin && a.name == b.name;
+                          }),
+              out.end());
     return out;
 }
 

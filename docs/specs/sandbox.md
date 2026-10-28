@@ -733,7 +733,9 @@ pivot 800 Hz, output 0 dB.
   CLAP values or `{"text": …}`; semantic plugins' params go through
   `set_patch` merges so the plugin validates units and ranges (error paths are
   rebased from `/params/…` to `/values/…`). Presets live in
-  `<presetDir>/<plugin id>/<name>.json`. IDs are never reused, even after a
+  `<presetDir>/<plugin folder>/<name>.json`, the folder named as the DAW's
+  (session-model.md: the safe ID and a hash of it; the older bare folder is
+  still read when the preset there is the plugin's). IDs are never reused, even after a
   rollback.
 
 

@@ -885,7 +885,7 @@ Status validPresetName(const std::string& name) {
                  "not starting or ending with a space or a dot");
 }
 
-Result<fs::path> presetDir(const EngineApp& app, const model::PluginRef& plugin) {
+Result<fs::path> presetRoot(const EngineApp& app) {
     fs::path root = app.options().presetDir;
     if (root.empty()) {
         root = paths::config();
@@ -894,12 +894,14 @@ Result<fs::path> presetDir(const EngineApp& app, const model::PluginRef& plugin)
                          "set AppOptions::presetDir to an explicit writable directory");
         root = root / product::kSlug / "presets";
     }
-    std::string folder = plugin.id;
-    for (char& ch : folder)
-        if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '.' && ch != '-' && ch != '_')
-            ch = '_';
-    if (folder.empty() || folder.front() == '.') folder.insert(folder.begin(), '_');
-    return root / folder;
+    return root;
+}
+
+// Where the plugin's presets are saved: a folder no other plugin ID shares.
+Result<fs::path> presetDir(const EngineApp& app, const model::PluginRef& plugin) {
+    auto root = presetRoot(app);
+    if (!root) return root;
+    return *root / paths::idFolder(plugin.id);
 }
 
 const model::FxInstance* presetFx(const model::Session& s, const std::string& fx, Id& id) {
@@ -926,21 +928,21 @@ Result<std::vector<std::string>> factoryNames(EngineApp& app, Id id, const model
     return names;
 }
 
-// The user's presets for fx's plugin, sorted by name; documents for another
-// plugin or that do not parse are skipped with a warning.
+// The user's presets for fx's plugin, sorted by name, those in its folder
+// before those of the same name in the folder earlier versions used (which
+// other plugins' IDs could share); documents for another plugin or that do
+// not parse are skipped with a warning.
 struct UserPreset {
     std::string name;
     fs::path path;
     PresetDocument doc;
+    bool legacy = false;
 };
-Result<std::vector<UserPreset>> userPresets(const EngineApp& app, const model::FxInstance& fx,
-                                            cmd::Context* ctx) {
-    auto dir = presetDir(app, fx.plugin);
-    if (!dir) return std::move(dir).error();
-    std::vector<UserPreset> rows;
+Status readPresets(const fs::path& dir, const model::FxInstance& fx, bool legacy, cmd::Context* ctx,
+                   std::vector<UserPreset>& rows) {
     std::error_code ec;
-    if (!fs::exists(*dir, ec)) return rows;
-    fs::directory_iterator it(*dir, ec), end;
+    if (!fs::exists(dir, ec)) return {};
+    fs::directory_iterator it(dir, ec), end;
     while (!ec && it != end) {
         const auto entry = *it;
         it.increment(ec);
@@ -960,13 +962,22 @@ Result<std::vector<UserPreset>> userPresets(const EngineApp& app, const model::F
                 ctx->warn("fx.preset_invalid", entry.path().string() + ": " + doc.error().message);
             continue;
         }
-        rows.push_back({doc->name, entry.path(), std::move(*doc)});
+        rows.push_back({doc->name, entry.path(), std::move(*doc), legacy});
     }
     if (ec)
-        return Error("fx.preset_directory", "cannot list " + dir->string() + ": " + ec.message(),
-                     {}, "check the directory permissions");
+        return Error("fx.preset_directory", "cannot list " + dir.string() + ": " + ec.message(), {},
+                     "check the directory permissions");
+    return {};
+}
+Result<std::vector<UserPreset>> userPresets(const EngineApp& app, const model::FxInstance& fx,
+                                            cmd::Context* ctx) {
+    auto root = presetRoot(app);
+    if (!root) return std::move(root).error();
+    std::vector<UserPreset> rows;
+    SUPPLE_TRY(readPresets(*root / paths::idFolder(fx.plugin.id), fx, false, ctx, rows));
+    SUPPLE_TRY(readPresets(*root / paths::legacyIdFolder(fx.plugin.id), fx, true, ctx, rows));
     std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) {
-        return std::tie(a.name, a.path) < std::tie(b.name, b.path);
+        return std::tie(a.name, a.legacy, a.path) < std::tie(b.name, b.legacy, b.path);
     });
     return rows;
 }
@@ -1035,7 +1046,10 @@ void registerPresetCommands(cmd::Registry& registry) {
             if (!user) return std::move(user).error();
             PresetListResult result;
             for (auto& name : *factory) result.presets.push_back({std::move(name), "factory", {}});
-            for (auto& p : *user) result.presets.push_back({p.name, "user", p.path.string()});
+            for (auto& p : *user)
+                if (result.presets.empty() || result.presets.back().source != "user" ||
+                    result.presets.back().name != p.name)
+                    result.presets.push_back({p.name, "user", p.path.string()});
             return result;
         };
         registry.add(std::move(c));
@@ -1217,6 +1231,12 @@ void registerPresetCommands(cmd::Registry& registry) {
                 else
                     doc.state = entry.find("state")->asString();
             }
+            auto user = userPresets(app, *fx, &ctx);
+            if (!user) return std::move(user).error();
+            const auto taken = [&](const UserPreset& p) { return p.name == a.name; };
+            if (!a.replace && std::any_of(user->begin(), user->end(), taken))
+                return Error("fx.preset_exists", "a user preset named '" + a.name + "' exists",
+                             "/name", "choose another name or set replace: true");
             auto dir = presetDir(app, fx->plugin);
             if (!dir) return std::move(dir).error();
             std::error_code ec;
@@ -1237,6 +1257,9 @@ void registerPresetCommands(cmd::Registry& registry) {
                                  "/name", "choose another name or set replace: true");
                 return e;
             }
+            // A copy of the same name in the older folder would come back.
+            for (const auto& p : *user)
+                if (p.legacy && taken(p)) fs::remove(p.path, ec);
             return PathResult{path.string()};
         };
         registry.add(std::move(c));
@@ -1273,6 +1296,8 @@ void registerPresetCommands(cmd::Registry& registry) {
             if (!fx) return unknownFx(a.fx);
             auto user = userPresets(app, *fx, &ctx);
             if (!user) return std::move(user).error();
+            // Every copy: one in the older folder would come back.
+            std::optional<std::string> deleted;
             for (const auto& p : *user)
                 if (p.name == a.name) {
                     std::error_code ec;
@@ -1280,8 +1305,9 @@ void registerPresetCommands(cmd::Registry& registry) {
                         return Error("fx.preset_delete",
                                      "cannot delete " + p.path.string() + ": " + ec.message(),
                                      "/name", "check the presets folder's permissions");
-                    return PathResult{p.path.string()};
+                    if (!deleted) deleted = p.path.string();
                 }
+            if (deleted) return PathResult{*deleted};
             auto factory = factoryNames(app, id, *fx);
             if (factory && std::find(factory->begin(), factory->end(), a.name) != factory->end())
                 return Error("fx.preset_factory",

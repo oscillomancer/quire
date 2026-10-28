@@ -12,6 +12,7 @@
 #include <thread>
 
 #include <supple/base/files.h>
+#include <supple/base/paths.h>
 #include <supple/sandbox/session.h>
 
 using namespace supple;
@@ -275,6 +276,34 @@ TEST_CASE("presets: save, list, load restores; names and plugins are checked") {
     const std::string sine = s->load(kSine).value();
     REQUIRE(s->presetSave(sine, "x"));
     REQUIRE(s->presetLoad(sine, "x"));
+}
+
+TEST_CASE("presets: older folders still load; another plugin's there never does") {
+    TempDir dir("presets-legacy");
+    auto s = openSession(dir);
+    const std::string g = s->load(kGain).value();
+    auto saved = s->presetSave(g, "Old");
+    REQUIRE(saved);
+    CHECK(saved->parent_path().filename() == paths::idFolder(kGain));
+    const fs::path older = saved->parent_path().parent_path() / paths::legacyIdFolder(kGain);
+    fs::create_directories(older);
+    fs::rename(*saved, older / "Old.json");
+    // A file there that is another plugin's: IDs such as com.example/a and
+    // com.example_a shared one.
+    auto text = readTextFile(older / "Old.json").value();
+    const std::string plugin = std::string("\"") + kGain + "\"";
+    text.replace(text.find(plugin), plugin.size(), "\"com.suppleaudio.test/gain\"");
+    REQUIRE(writeFileAtomic(older / "Theirs.json", text));
+    auto list = s->presetList(kGain);
+    REQUIRE(list);
+    REQUIRE(list->size() == 1);
+    CHECK(list->front().name == "Old");
+    REQUIRE(s->presetLoad(g, "Old"));
+    CHECK(s->presetLoad(g, "Theirs").error().code == "sandbox.unknown_preset");
+    REQUIRE(s->presetSave(g, "Old"));  // moves it to the plugin's own folder
+    CHECK(fs::exists(*saved));
+    CHECK(!fs::exists(older / "Old.json"));
+    CHECK(s->presetList(kGain).value().size() == 1);
 }
 
 TEST_CASE("render: notes through instrument + effect, WAV written, deterministic" *

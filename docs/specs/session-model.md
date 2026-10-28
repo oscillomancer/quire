@@ -136,8 +136,12 @@ field defaults to stereo (2) for older templates. Its strip-type bounds match
 
 Presets and templates live in the user's configuration folder: FX chain
 presets (`supple.fx-chain/1.0`) in `<config>/<slug>/chains`, a plugin's own
-presets in `presets/<plugin id>/<name>.json` (`supple.preset/1.0`, the
-sandbox's preset document, sandbox.md), track templates in
+presets in `presets/<plugin folder>/<name>.json` (`supple.preset/1.0`, the
+sandbox's preset document, sandbox.md; the folder is the plugin ID made
+safe for file names, then `-` and the first 8 hex digits of the ID's
+SHA-256, so no two IDs share one; presets in the bare safe-name folder
+earlier versions used still list and load when the file is that plugin's,
+and a save or delete of the same name removes that copy), track templates in
 `track-templates`, and project templates in `templates`. A project
 template is a folder, `templates/<name>/`, holding `project.json` (an
 ordinary project file, §5, of the head without history) and `media/` with a

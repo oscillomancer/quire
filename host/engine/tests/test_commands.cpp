@@ -10,6 +10,7 @@
 
 #include <supple/audio/audio_file.h>
 #include <supple/base/files.h>
+#include <supple/base/paths.h>
 #include <supple/base/sha256.h>
 #include <supple/engine/app.h>
 #include <supple/model/schemas.h>
@@ -899,6 +900,37 @@ TEST_CASE("a plugin's user presets save, load in one edit and delete; other plug
     CHECK(f.run("fx.preset.list", R"({"fx":"fx_1"})")["presets"].size() == 0);
     CHECK(fails(*f.bus, "fx.preset.delete", R"({"fx":"fx_2","name":"Quiet"})") ==
           "fx.unknown_preset");
+}
+
+TEST_CASE("presets in the folder earlier versions used still list, load and go") {
+    ChainFixture f;
+    f.run("track.add", R"({"name":"Source"})");
+    f.run("fx.add", R"({"track":"tr_1","plugin":"Test Gain","patch":{"params":{"gain":-9}}})");
+    const fs::path saved =
+        f.run("fx.preset.save", R"({"fx":"fx_1","name":"Quiet"})")["path"].asString();
+    CHECK(saved.parent_path().filename() == paths::idFolder("com.suppleaudio.test.gain"));
+    const fs::path older =
+        f.dir / "presets" / paths::legacyIdFolder("com.suppleaudio.test.gain") / "Quiet.json";
+    const auto moveBack = [&] {
+        fs::create_directories(older.parent_path());
+        fs::rename(saved, older);
+    };
+    moveBack();
+    auto listed = f.run("fx.preset.list", R"({"fx":"fx_1"})");
+    REQUIRE(listed["presets"].size() == 1);
+    CHECK(listed["presets"].at(0).find("path")->asString() == older.string());
+    f.run("fx.preset.load", R"({"fx":"fx_1","name":"Quiet"})");
+    CHECK(fails(*f.bus, "fx.preset.save", R"({"fx":"fx_1","name":"Quiet"})") == "fx.preset_exists");
+    // Replaced, it moves to the plugin's own folder.
+    f.run("fx.preset.save", R"({"fx":"fx_1","name":"Quiet","replace":true})");
+    CHECK(fs::exists(saved));
+    CHECK(!fs::exists(older));
+    CHECK(f.run("fx.preset.list", R"({"fx":"fx_1"})")["presets"].size() == 1);
+    // Deleted, no copy of it is left to come back.
+    fs::copy_file(saved, older);
+    f.run("fx.preset.delete", R"({"fx":"fx_1","name":"Quiet"})");
+    CHECK(!fs::exists(saved));
+    CHECK(!fs::exists(older));
 }
 
 TEST_CASE("fx.copy puts a copy of a plugin and its settings last in another track's chain") {

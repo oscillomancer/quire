@@ -151,7 +151,8 @@ std::string quantity(double v, units::Unit u, int digits = 3);   // units::forma
 ## 6. Presets
 
 A preset file is a patch document saved with extension `.json` under
-`<data dir>/<slug>/presets/<plugin>/` (factory presets ship read-only beside
+`<config>/<slug>/presets/<plugin folder>/` (session-model.md names the
+folder; factory presets ship read-only beside
 the plugin). The file name is the slugified `name`. Nothing else is needed:
 presets and patches are the same format.
 

@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Supple Audio
 #include "supple/base/paths.h"
 #include <cstdlib>
+#include "supple/base/sha256.h"
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -119,5 +120,20 @@ std::filesystem::path runtime() {
     std::error_code error;
     auto temporary = std::filesystem::temp_directory_path(error);
     return error ? std::filesystem::path{} : temporary;
+}
+
+std::string legacyIdFolder(std::string_view id) {
+    std::string folder(id);
+    for (char& c : folder)
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+              c == '.' || c == '-' || c == '_'))
+            c = '_';
+    if (folder.empty() || folder.front() == '.') folder.insert(folder.begin(), '_');
+    return folder;
+}
+
+std::string idFolder(std::string_view id) {
+    std::string folder = legacyIdFolder(id.substr(0, 100));
+    return folder + "-" + sha256Hex(id).substr(0, 8);
 }
 }  // namespace supple::paths
