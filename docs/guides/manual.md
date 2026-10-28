@@ -122,7 +122,10 @@ for other hosts is listed as shadowed and never loaded. `--plugin-path P`
 
 To add an effect or instrument, use the **+** beside **fx** on a track or
 mixer strip, or **Track > FX: add plugin…**. The **fx** button opens the
-track's FX chain, including when it is empty.
+track's FX chain, including when it is empty. In the mixer, right-click a
+plugin to rename, duplicate or remove it; a duplicate keeps the plugin's
+current settings and goes right after it. Alt-click (Option-click on macOS)
+also removes a plugin.
 In the chain window, Ctrl-click (Cmd-click on macOS) toggles a row in the
 selection, including the active row. Effects moved to another track leave
 that window’s selection.

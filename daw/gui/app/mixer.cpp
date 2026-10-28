@@ -822,13 +822,7 @@ void Mixer::rebuild() {
             slot->menu = [this, fx, s = slot.get()](ui::Point p) {
                 openFxMenu(fx, s->bounds(), p);
             };
-            slot->remove = [this, fx] {
-                json::Value args = json::Value::object();
-                args["fx"] = fx.str();
-                if (auto r = dispatcher_.execute({"fx.remove", std::move(args), kOrigin});
-                    !r && actions_.onError)
-                    actions_.onError(r.error().message);
-            };
+            slot->remove = [this, fx] { removeFx(fx); };
             chain.addSlot(std::move(slot));
         }
         frame->select = [this, tid](unsigned mods) {
@@ -1169,14 +1163,42 @@ void Mixer::resolveFxDrop() {
 // A plug-in's own menu (a right-click on it in the chain).
 void Mixer::openFxMenu(model::Id fx, const ui::Rect& slot, ui::Point at) {
     if (!app_.head().fx.find(fx)) return;
-    ui::MenuItem rename;
-    rename.label = "Rename…";
-    rename.run = [this, fx, slot] { openFxRename(fx, slot); };
-    std::vector<ui::MenuItem> items;
-    items.push_back(std::move(rename));
+    std::vector<ui::MenuItem> items(3);
+    items[0].label = "Rename…";
+    items[0].run = [this, fx, slot] { openFxRename(fx, slot); };
+    items[1].label = "Duplicate";
+    items[1].run = [this, fx] { duplicateFx(fx); };
+    items[2].label = "Remove";
+    items[2].run = [this, fx] { removeFx(fx); };
     root_.openPopup(
         ui::makeMenu("mixer.fxmenu." + fx.str(), std::move(items), [this] { root_.closePopup(); }),
         ui::Rect{at.x, at.y, 0, 0}, ui::Placement::Below);
+}
+
+// A copy of the plug-in with its live settings, right after it in its chain
+// (fx.copy, one undo step).
+void Mixer::duplicateFx(model::Id fx) {
+    const auto& s = app_.head();
+    const auto track = model::trackOfFx(s, fx);
+    const model::Track* t = track ? s.tracks.find(*track) : nullptr;
+    if (!t) return;
+    const auto at = std::find(t->chain.begin(), t->chain.end(), fx);
+    if (at == t->chain.end()) return;  // an input-chain plug-in: not shown here
+    json::Value args = json::Value::object();
+    args["fx"] = fx.str();
+    args["track"] = track->str();
+    args["index"] = static_cast<std::int64_t>(at - t->chain.begin() + 1);
+    if (auto r = dispatcher_.execute({"fx.copy", std::move(args), kOrigin}); !r && actions_.onError)
+        actions_.onError("mixer: " + r.error().message);
+}
+
+// Alt+click on a plug-in, or Remove in its menu (one undo step).
+void Mixer::removeFx(model::Id fx) {
+    json::Value args = json::Value::object();
+    args["fx"] = fx.str();
+    if (auto r = dispatcher_.execute({"fx.remove", std::move(args), kOrigin});
+        !r && actions_.onError)
+        actions_.onError("mixer: " + r.error().message);
 }
 
 // A name for this instance over its slot; an empty one goes back to the
