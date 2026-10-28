@@ -224,6 +224,13 @@ requires the separate port-gui integration.
 
 ### Bridge notifications (POSIX v19, Windows v20; notification design ADR-0031)
 
+The bridge isolates crashes of ordinary plugins; it is not a security sandbox
+against hostile plugins. A shared bridge crash affects every instance in that
+process. Linux shared-memory memfds are sealed against shrink and grow after
+initial sizing, while their mapped contents remain writable. This does not
+change the wire protocol. Windows mappings already have fixed extents; macOS
+continues to use its existing shared-memory backing.
+
 ADR-0037 extends the subscription to native WakeEvent signal targets:
 Linux eventfd (unchanged), a nonblocking write-only pipe on macOS, and a
 manual-reset event duplicated into the child on Windows. POSIX negotiates

@@ -40,6 +40,9 @@ All platforms launch and clean up through the shared ChildProcess helper, with
 explicit IPC inheritance and process-group/Job ownership. Linux retains its
 memfd/futex transport and pidfd death watch. Bridge stderr retains plug-in
 diagnostics; scanner stderr remains suppressed.
+Linux bridge memfds are sealed against shrinking and growing after sizing;
+their mappings stay writable. The bridge isolates ordinary plugin crashes,
+not hostile plugins with the user's process privileges.
 Bridge targets and portable fixture tests are enabled and pass native CI on
 macOS and Windows. Engine fixtures cover shared/dedicated crash and deadline
 failures, structured errors and restart ownership. Sandbox rendering verifies

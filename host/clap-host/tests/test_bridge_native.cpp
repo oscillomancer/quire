@@ -8,6 +8,10 @@
 #if !defined(_WIN32)
 #include <unistd.h>
 #endif
+#if defined(__linux__)
+#include <fcntl.h>
+#include <cerrno>
+#endif
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -48,6 +52,33 @@ void awaitWake(MainThreadWake& wake) {
     REQUIRE(wake.drain());
 }
 }  // namespace
+#if defined(__linux__)
+TEST_CASE("Linux bridge memory cannot shrink or grow but remains writable") {
+    struct Memory {
+        bridge::Resource fd = bridge::createMemory(4096);
+        void* map = nullptr;
+        ~Memory() {
+            bridge::unmapMemory(map, 4096);
+            bridge::closeResource(fd);
+        }
+    } memory;
+    REQUIRE(memory.fd != bridge::noResource);
+    const int seals = ::fcntl(memory.fd, F_GET_SEALS);
+    REQUIRE(seals >= 0);
+    CHECK((seals & (F_SEAL_SHRINK | F_SEAL_GROW)) == (F_SEAL_SHRINK | F_SEAL_GROW));
+    CHECK(::ftruncate(memory.fd, 0) == -1);
+    CHECK(errno == EPERM);
+    CHECK(::ftruncate(memory.fd, 8192) == -1);
+    CHECK(errno == EPERM);
+    memory.map = bridge::mapMemory(memory.fd, 4096);
+    REQUIRE(memory.map);
+    auto* bytes = static_cast<unsigned char*>(memory.map);
+    bytes[0] = 17;
+    bytes[4095] = 23;
+    CHECK(bytes[0] == 17);
+    CHECK(bytes[4095] == 23);
+}
+#endif
 TEST_CASE("bridge lookup resolves the platform executable suffix") {
     for (const std::filesystem::path& executable :
          {std::filesystem::path(BRIDGE_PATH), std::filesystem::path(SCANNER_PATH)}) {
