@@ -37,10 +37,15 @@ renders do not depend on the block size; every random choice (free-running
 phases, unison and drift, noise) is seeded by the order of the notes, so a
 render is the same every time. Free-running LFOs count whole frames from
 the last rate change, preserving phase without block-dependent rounding.
-Known implementation gap: a free LFO synced to a playing song instead
-derives its phase from the host's beat position. Rounding at block boundaries
-can cause tiny output differences across block sizes; the exact-identity
-requirement is not yet met in this mode (tracked in `STATUS.md`).
+Free LFOs synced to a playing song also count whole frames from an anchor.
+Host beat differences of at most **1e-9 beats** from the predicted position
+are treated as rounding noise, so continuous playback is independent of
+host block splits. Starting playback, enabling sync, changing division,
+or a larger beat difference (a seek or loop jump) re-anchors to the song's
+position. A tempo-only change preserves the current phase and advances
+from it at the new tempo; a simultaneous seek or division change instead
+takes the song's phase. Stopping playback invalidates the song anchor
+and resumes the free-running clock; restarting takes the host position.
 Sixteen voices (`voice.polyphony` plays
 fewer); a stolen voice fades out over a few milliseconds. Its tail (CLAP's
 `tail`, what a host waits for after the last key is up) is the longest amp

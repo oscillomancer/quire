@@ -700,11 +700,11 @@ Plugins:
   modulation remains bit-identical across host block sizes, including rate changes.
   Native macOS/Windows CI remains pending for these changes and the player's
   Unicode library filename discovery fix.
-- Marram's free LFOs synced to a playing transport still derive phase from
-  each block's host beat position. Floating-point rounding can break exact
-  block-size identity (Wobble Bass differs by about 2.6e-15 in a 48 kHz,
-  120 BPM comparison). A phase-anchor policy must preserve seeks and tempo
-  changes before this determinism gap can be closed.
+- Marram's playing-transport LFO sync uses whole-frame phase anchors and
+  ignores host beat rounding within 1e-9 beats. Seeks, loop jumps, division
+  changes and transport restarts re-anchor; tempo-only changes keep phase
+  continuous. Wobble Bass passes exact 128/511-frame partition and native/JIT
+  comparisons, including transport changes and sample-offset division automation.
 - Script numeric literals use locale-independent parsing, including float
   rounding and underflow, so comma-decimal host locales accept the same source.
 - DSP source exports require a visible, automatable parameter with a plain

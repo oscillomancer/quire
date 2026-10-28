@@ -47,6 +47,10 @@ if (SUPPLE_BUILD_TESTS AND COMMAND supple_test)
     if (TARGET processor-tests)
         target_include_directories(processor-tests PRIVATE ${SUPPLE_SUITE}/compiler/tests ${SUPPLE_SUITE}/examples)
         target_compile_definitions(processor-tests PRIVATE SUPPLE_SCRIPT_EXAMPLES="${SUPPLE_SUITE}/examples")
+        if(EXISTS "${SUPPLE_SUITE}/../marram/script/marram.cpp")
+            target_compile_definitions(processor-tests PRIVATE
+                SUPPLE_MARRAM_SCRIPT="${SUPPLE_SUITE}/../marram/script/marram.cpp")
+        endif()
         # The examples compiled as C++, as source exports build them.
         if (MSVC AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             target_compile_options(processor-tests PRIVATE /clang:-ffp-contract=off /clang:-fwrapv)

@@ -1590,6 +1590,14 @@ struct Marram : Instrument {
     Array<int, 3> freeCycle;
     Array<double, 3> freeFrames;
     Array<double, 3> freeRate;
+    // Playing-transport anchors: host beats detect jumps, phase stays
+    // continuous across tempo changes, and whole frames avoid block drift.
+    Array<bool, 3> syncActive;
+    Array<double, 3> syncBeats;
+    Array<double, 3> syncPhase;
+    Array<double, 3> syncFrames;
+    Array<double, 3> syncTempo;
+    Array<double, 3> syncDivision;
     double tempo = 120.0;
     double beats = 0.0;
     bool playing = false;
@@ -1638,6 +1646,12 @@ struct Marram : Instrument {
         freeCycle.fill(0);
         freeFrames.fill(0.0);
         freeRate.fill(0.0);
+        syncActive.fill(false);
+        syncBeats.fill(0.0);
+        syncPhase.fill(0.0);
+        syncFrames.fill(0.0);
+        syncTempo.fill(120.0);
+        syncDivision.fill(1.0);
         if (!tablesMade) makeTables();
         tablesMade = true;
     }
@@ -2020,9 +2034,7 @@ struct Marram : Instrument {
             // start, or synced to a playing song, from the song's position.
             double total = 0.0;
             if (sync.on() && playing) {
-                total =
-                    (beats + i * tempo / 60.0 / sampleRate()) / divisionBeats(division.index()) +
-                    phase / 360.0;
+                total = syncedPhase(n, i) + phase / 360.0;
             } else {
                 total =
                     freePhase[n] + freeRate[n] * (freeFrames[n] + i) / sampleRate() + phase / 360.0;
@@ -2055,6 +2067,34 @@ struct Marram : Instrument {
         freeCycle[n] += toInt(whole);
         freeFrames[n] = 0.0;
         freeRate[n] = hz;
+    }
+
+    double syncedPhase(int n, int i) {
+        return syncPhase[n] +
+               (syncFrames[n] + i) * syncTempo[n] / 60.0 / sampleRate() / syncDivision[n];
+    }
+
+    void syncOn(int n, const Param& sync, const Param& division) {
+        if (!playing || !sync.on()) {
+            syncActive[n] = false;
+            return;
+        }
+        const double span = divisionBeats(division.index());
+        const double predicted = syncBeats[n] + syncFrames[n] * syncTempo[n] / 60.0 / sampleRate();
+        // Ignore host rounding below a billionth of a beat. A larger
+        // difference is a seek or loop jump and takes the host's phase.
+        const bool jump = !syncActive[n] || abs(beats - predicted) > 1e-9;
+        if (jump || span != syncDivision[n] || tempo != syncTempo[n]) {
+            // Carry the predicted beat through continuous changes too: a
+            // division automation event may split a differently sized block.
+            const double anchorBeat = jump ? beats : predicted;
+            syncPhase[n] = jump || span != syncDivision[n] ? anchorBeat / span : syncedPhase(n, 0);
+            syncBeats[n] = anchorBeat;
+            syncTempo[n] = tempo;
+            syncDivision[n] = span;
+            syncFrames[n] = 0.0;
+        }
+        syncActive[n] = true;
     }
 
     // An oscillator's settings for voice v, with their routes: only those
@@ -2334,6 +2374,9 @@ struct Marram : Instrument {
         freeOn(0, l1Sync, l1Rate, l1Division);
         freeOn(1, l2Sync, l2Rate, l2Division);
         freeOn(2, l3Sync, l3Rate, l3Division);
+        syncOn(0, l1Sync, l1Division);
+        syncOn(1, l2Sync, l2Division);
+        syncOn(2, l3Sync, l3Division);
         macro1.set(m1);
         macro2.set(m2);
         macro3.set(m3);
@@ -2404,7 +2447,10 @@ struct Marram : Instrument {
         for (int v = 0; v < voiceCount(); ++v)
             if (voice[v].sounding && voicePlaying(v)) sounding = true;
         reportTail(sounding);
-        for (int n = 0; n < 3; ++n) freeFrames[n] += io.frames;
+        for (int n = 0; n < 3; ++n) {
+            freeFrames[n] += io.frames;
+            if (syncActive[n]) syncFrames[n] += io.frames;
+        }
     }
 
     // How long the output goes on once the keys are up: the longest amp

@@ -42,6 +42,11 @@ namespace supple::script::native_sampler {
 namespace supple::script::native_reverb {
 #include "reverb.cpp"
 }  // namespace supple::script::native_reverb
+#ifdef SUPPLE_MARRAM_SCRIPT
+namespace supple::script::native_marram {
+#include SUPPLE_MARRAM_SCRIPT
+}  // namespace supple::script::native_marram
+#endif
 
 using namespace supple;
 using namespace supple::player;
@@ -1047,5 +1052,96 @@ TEST(embedded_payloads_are_bounded_and_validate_the_schema) {
     CHECK(std::filesystem::is_regular_file(ownModule()));
     std::filesystem::remove_all(folder);
 }
+
+#ifdef SUPPLE_MARRAM_SCRIPT
+TEST(marram_synced_factory_patch_is_identical_across_transport_block_splits) {
+    std::ifstream in(SUPPLE_MARRAM_SCRIPT);
+    std::stringstream text;
+    text << in.rdbuf();
+    const auto jit = compileText(text.str());
+    using Native = supple::script::native_marram::Marram;
+    using Code = supple::script::detail::NativeCode<Native>;
+    const auto native = makeScriptDefinition(std::make_shared<const Code>(
+        std::vector<Code::Key>{}, std::vector<Code::FileKey>{{&Native::lfo1, "lfo1"},
+                                                             {&Native::lfo2, "lfo2"},
+                                                             {&Native::lfo3, "lfo3"},
+                                                             {&Native::macro1, "macro1"},
+                                                             {&Native::macro2, "macro2"},
+                                                             {&Native::macro3, "macro3"},
+                                                             {&Native::macro4, "macro4"}}));
+    CHECK(jit && native);
+    if (!jit || !native) return;
+    const auto play = [&](const std::shared_ptr<const ScriptDefinition>& d, int partition,
+                          bool changes) {
+        Engine engine(d);
+        bool found = false;
+        for (const auto& patch : d->presets()) {
+            if (patch.name != "Wobble Bass") continue;
+            found = true;
+            for (const auto& [id, value] : patch.values) setPlain(engine, id, value);
+            for (const auto& [id, value] : patch.texts)
+                engine.setProperty(d->properties().indexOf(id), value);
+        }
+        CHECK(found);
+        engine.activate(48000.0, 512, 0, 2);
+        constexpr int segmentFrames = 2048;
+        constexpr int segments = 7;
+        std::vector<double> left(segmentFrames * segments), right(left.size());
+        std::vector<std::pair<int, EngineEvent>> notes;
+        for (auto [at, key] : {std::pair{100, 48}, std::pair{900, 55}}) {
+            EngineEvent event;
+            event.type = EngineEvent::Type::Note;
+            event.note.key = static_cast<int16_t>(key);
+            event.note.velocity = 0.8;
+            notes.emplace_back(at, event);
+        }
+        if (changes) {
+            EngineEvent event;
+            event.type = EngineEvent::Type::Value;
+            event.index = d->params().indexOf(supple::script::detail::keyId("lfo1.division"));
+            event.value = toHost(d->params().at(static_cast<size_t>(event.index)), 6);
+            notes.emplace_back(6 * segmentFrames + 333, event);
+        }
+        double beat = 0.125;
+        double bpm = 120.0;
+        for (int segment = 0; segment < segments; ++segment) {
+            bool playing = true;
+            if (changes) {
+                if (segment == 1) bpm = 180.0;
+                if (segment == 2) beat = 4.2;  // seek
+                if (segment == 3) beat = 0.1;  // loop
+                if (segment == 4) playing = false;
+                if (segment == 5) beat = 0.35;  // restart
+            }
+            for (int at = 0; at < segmentFrames; at += partition) {
+                const int n = std::min(partition, segmentFrames - at);
+                const int pos = segment * segmentFrames + at;
+                double* out[] = {left.data() + pos, right.data() + pos};
+                BlockEvents events{&notes, pos, n};
+                supple::Transport transport;
+                transport.playing = playing;
+                transport.hasTempo = transport.hasBeats = true;
+                transport.tempo = bpm;
+                transport.beats = beat + (playing ? at * bpm / 60.0 / 48000.0 : 0.0);
+                engine.process<double>(nullptr, out, n, events, &transport);
+            }
+            if (playing) beat += segmentFrames * bpm / 60.0 / 48000.0;
+        }
+        CHECK(engine.processor().instance().status.outOfRange.load() == 0);
+        CHECK(engine.processor().instance().status.budgetExceeded.load() == 0);
+        CHECK(std::any_of(left.begin(), left.end(), [](double x) { return std::abs(x) > 0.01; }));
+        left.insert(left.end(), right.begin(), right.end());
+        CHECK(std::all_of(left.begin(), left.end(), [](double x) { return std::isfinite(x); }));
+        return left;
+    };
+    for (bool changes : {false, true}) {
+        const auto a = play(native, 128, changes);
+        CHECK(a == play(native, 511, changes));
+        const auto b = play(jit, 128, changes);
+        CHECK(b == play(jit, 511, changes));
+        CHECK(a == b);
+    }
+}
+#endif
 
 SUPPLE_TEST_MAIN
