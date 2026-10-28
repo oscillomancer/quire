@@ -38,7 +38,7 @@
 - **Latency-changing parameters** (lookahead, oversampling, linear phase)
   are stepped, not automatable, and follow the template's restart contract
   (`request_restart`, reactivate with the new latency).
-- **Non-finite inputs:** Ghyll, Pollia and Withy replace NaN and infinities
+- **Non-finite inputs:** Bracken, Ghyll, Pollia, Umber and Withy replace NaN and infinities
   with zero before their detectors, filters and delay lines, so one bad
   sample cannot poison subsequent audio. `stock-nonfinite.tests` checks
   mono and stereo against the same input with those samples zeroed.

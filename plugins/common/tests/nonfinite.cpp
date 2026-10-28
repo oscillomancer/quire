@@ -10,6 +10,12 @@
 
 #include "supple/script_native.h"
 
+namespace supple::script::test_bracken {
+#include "../../bracken/script/bracken.cpp"
+}
+namespace supple::script::test_umber {
+#include "../../umber/script/umber.cpp"
+}
 namespace supple::script::test_ghyll {
 #include "../../ghyll/script/ghyll.cpp"
 }
@@ -100,4 +106,10 @@ TEST_CASE("Pollia keeps non-finite input out of recursive state") {
 }
 TEST_CASE("Withy keeps non-finite input out of recursive state") {
     checkNonfinite<S::test_withy::Withy>();
+}
+TEST_CASE("Bracken keeps non-finite input out of recursive state") {
+    checkNonfinite<S::test_bracken::Bracken>();
+}
+TEST_CASE("Umber keeps non-finite input out of recursive state") {
+    checkNonfinite<S::test_umber::Umber>();
 }

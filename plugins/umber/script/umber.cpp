@@ -1616,7 +1616,8 @@ struct Umber : Effect {
             bool loud = false;
             for (int c = 0; c < channels; ++c) {
                 Track& t = track[c];
-                const double x = io[c][i];
+                double x = io[c][i];
+                if (!isFinite(x)) x = 0.0;
                 if (abs(x) > 1e-5) loud = true;
                 const double rec = x * driveGain;
                 if (c == 0) scopeIn = rec;

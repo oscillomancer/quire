@@ -693,7 +693,7 @@ GUI:
   mixer strips but not onto track-panel rows.
 
 Plugins:
-- Ghyll, Pollia and Withy discard non-finite inputs before their recursive
+- Bracken, Ghyll, Pollia, Umber and Withy discard non-finite inputs before their recursive
   state. Their mono/stereo regressions and the script runtime's scalar/aggregate bounds
   and prepared-tail lifecycle fixes pass focused Linux dev/RTSan checks.
   Marram's free-running LFOs use whole-frame phase anchors so their routed

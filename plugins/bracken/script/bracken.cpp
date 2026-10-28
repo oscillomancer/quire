@@ -1186,8 +1186,10 @@ struct Bracken : Effect {
             const double inGain = in <= -47.99 ? 0.0 : dbToGain(in) * (1.0 - frozenW);
 
             // The input.
-            const double l = io[0][i];
-            const double r = chans > 1 ? io[1][i] : l;
+            double l = io[0][i];
+            double r = chans > 1 ? io[1][i] : l;
+            if (!isFinite(l)) l = 0.0;
+            if (!isFinite(r)) r = 0.0;
             const double mono = 0.5 * (l + r);
 
             // Ducking: the input's peak, fully ducking 30 dB above the floor;
