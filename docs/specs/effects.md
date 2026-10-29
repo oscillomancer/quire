@@ -29,9 +29,11 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 | `gain` (`plugins/gain`) | Gain | `com.suppleaudio.gain` | `sRvm` (the player's for the id) | `Gain` | audio-effect, utility |
 | `hornbeam` (`plugins/hornbeam`) | Hornbeam | `com.suppleaudio.hornbeam` | `hCbo` (the player's for the id) | `Hrnb` | audio-effect, distortion, amp-simulator |
 | `coppice` (`plugins/coppice`) | Coppice | `com.suppleaudio.coppice` | `Idrr` (the player's for the id) | `Cpce` | instrument, sampler |
+| `pollard` (`plugins/pollard`) | Pollard | `com.suppleaudio.pollard` | `ntDE` (the player's for the id) | `Plrd` | instrument, drum-machine, sampler |
 
-Marram and Coppice are instruments; their specs, implementation notes
-included, are `docs/specs/marram.md` and `docs/specs/coppice.md`.
+Marram, Coppice and Pollard are instruments; their specs, implementation
+notes included, are `docs/specs/marram.md`, `docs/specs/coppice.md` and
+`docs/specs/pollard.md`.
 
 ## 1. The shape every effect shares
 

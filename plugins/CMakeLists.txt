@@ -260,6 +260,14 @@ if(SUPPLE_BUILD_PLUGINS)
   supple_add_stock_script(gain Gain com.suppleaudio.gain)
   supple_add_stock_script(hornbeam Hornbeam com.suppleaudio.hornbeam)
   supple_add_stock_script(coppice Coppice com.suppleaudio.coppice)
+  supple_add_stock_script(pollard Pollard com.suppleaudio.pollard)
+  if(SUPPLE_BUILD_TESTS)
+    # Pollard plays its pads with Coppice's engine, kept in both scripts.
+    add_test(NAME plugin.pollard.engine-copy
+      COMMAND ${CMAKE_COMMAND} -DCOPPICE=${CMAKE_CURRENT_SOURCE_DIR}/coppice/script/coppice.cpp
+              -DPOLLARD=${CMAKE_CURRENT_SOURCE_DIR}/pollard/script/pollard.cpp
+              -P ${CMAKE_CURRENT_SOURCE_DIR}/pollard/engine-copy.cmake)
+  endif()
 
   # A plugin taken out of the suite leaves its staged files behind, and the
   # app loads every plugin in plugins/clap: keep only what this build makes.

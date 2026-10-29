@@ -278,7 +278,7 @@ instructions are in `docs/guides/installing.md`.
   validated against EBU Tech 3341/3342, spectral, pitch, envelope, stereo,
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
   the LLM evaluation harness (`tools/eval-harness`).
-- **Stock plugins** (ADR-0011, ADR-0047): Marram, Coppice, Yarrow, Sundew,
+- **Stock plugins** (ADR-0011, ADR-0047): Marram, Coppice, Pollard, Yarrow, Sundew,
   Treeline, Gorse, Hickory, Sorrel, Teasel, Bracken, Ghyll, Lichen, Withy,
   Pollia, Umber, Sedge, Gain and Hornbeam, each passing clap-validator, a reset determinism check, an unload
   test and the headless REAPER check;
@@ -536,6 +536,18 @@ instructions are in `docs/guides/installing.md`.
   layers, time-stretching, a file's root or `smpl` loop points, and free
   zoom of the waveform. The script player has no factory files: a script
   that defaults to one plays nothing there until a file is chosen.
+  Pollard, the drum sampler (`plugins/pollard`, `docs/specs/pollard.md`),
+  has no predecessor. Sixteen pads on the GM keys from C2, each a file or
+  one of twenty-four factory hits rendered from Marram (CC0, 0.6 MB), played
+  by Coppice's engine (the two scripts share it as identical text, checked
+  by `plugin.pollard.engine-copy`): a region, forward or reversed,
+  one-shot or gated, an envelope, a state-variable filter, level, pan;
+  eight choke groups; variation per hit (pitch, level, start), the same in
+  every render; the main output and eight more, which make Quire's track
+  18 channels. Its editor plays a pad where it is pressed (an instrument's
+  `pointer()` may call `playNote`). Seven factory kits. 0.48 % of a core at the defaults. Not yet:
+  velocity layers and round robin across several files, and sends or
+  effects per pad.
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The

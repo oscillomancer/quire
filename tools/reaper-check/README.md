@@ -135,6 +135,7 @@ include startup ramps.
 | `gain` | Gain | Gain | 0 / −12 dB | −12 ±1 dB |
 | `hornbeam` | Hornbeam | Output | 0 / −12 dB | −12 ±1 dB |
 | `coppice` | Coppice | Output | 0 / −12 dB | −12 ±1 dB |
+| `pollard` | Pollard | Output | 0 / −12 dB | −12 ±1 dB |
 
 Continuous values use ADR-0010's normalized CLAP domain. The table keeps those
 values explicit. Add a plugin in a few lines in `CASES`
