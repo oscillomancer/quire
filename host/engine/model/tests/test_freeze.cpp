@@ -69,5 +69,9 @@ TEST_CASE("freeze model: mix controls stay live and timing and sound stay locked
     CHECK_FALSE(tempo.commit());
     EditTxn unfreeze(s, 3);
     unfreeze.modify<Track>(track, [](auto& t) { t.freeze.reset(); });
-    REQUIRE(unfreeze.commit());
+    // A batch may unfreeze the final frozen track before changing global timing.
+    unfreeze.modify<TempoPointObj>(Id{Kind::TempoPoint, 1}, [](auto& t) { t.bpm = 80; });
+    auto unfrozen = unfreeze.commit();
+    REQUIRE(unfrozen);
+    CHECK(unfrozen->timeMap->bpmAt(0) == 80);
 }

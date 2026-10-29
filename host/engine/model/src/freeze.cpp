@@ -160,7 +160,7 @@ Status validateFrozenState(const Session& s) {
 Status validateFrozenTransition(const Session& before, const Session& after) {
     std::string frozen;
     for (const auto& e : before.tracks)
-        if (e.value->freeze) {
+        if (const auto* next = after.tracks.find(e.id); e.value->freeze && next && next->freeze) {
             if (!frozen.empty()) frozen += ", ";
             frozen += trackLabel(before, e.id) + " (" + e.id.str() + ")";
         }

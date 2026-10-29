@@ -373,7 +373,7 @@ routes: sd_1 tr_2 → tr_6 ch 1/2→3/4 pre-fader −6 dB (sidechain)
 markers: mk_1 "Verse" bar 1 · regions: rg_1 "Chorus" bars 9–17
 ```
 
-## 5. Project file (`supple.project/2.1`)
+## 5. Project file (`supple.project/2.2`)
 
 ### 5.1 Shape
 
@@ -758,7 +758,8 @@ version. A changed project/branch/media directory also refuses completion.
 Frozen channels reject captured-content edits, including indirect pooled edits,
 new incoming dependencies and arm/monitor. Fader/pan/mute/solo, their envelopes,
 outgoing sends and parent routing remain editable. Tempo/meter/master-rate and
-sample-rate edits require unfreezing all frozen tracks. Deletion remains undoable.
+sample-rate edits require unfreezing all frozen tracks; those unfreezes may precede
+the timing edit in the same batch. Deletion remains undoable.
 Published cache files stay on disk across unfreeze and history reclamation,
 because saved projects, autosaves and replay logs may still need them. First save,
 Save As and project templates carry frozen media like other media sources.
