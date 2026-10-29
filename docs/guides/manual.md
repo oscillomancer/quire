@@ -246,3 +246,38 @@ The tool list is large (over 140 tools). If you run a local model behind a
 harness that sends every tool with each request, give the model a context of
 32k tokens or more. llama.cpp's `llama-server` needs `--jinja` to accept
 tools.
+
+### Freezing a channel
+
+Choose **Freeze** from a track header or mixer strip's context menu to record its
+items, take effects and complete insert chain to project media. The job reports
+progress through the existing job system (`job.get`, `job.cancel`). When it
+finishes the channel shows **[Frozen]**, its items are dimmed and marked, and its
+plugins are released. Fader, pan, mute, solo, their automation, sends and parent
+routing remain available. To change the sound inside the recording, choose
+**Unfreeze** from the same menu. Each completed operation is one undo step.
+
+Agents use `track.freeze {"track":"tr_1","job":true}` and
+`track.unfreeze {"track":"tr_1"}`. `track.list` reports frozen state and cache
+metadata; `session.describe` marks frozen channels. Work on other tracks can
+continue during a freeze. Completion refuses if the source sound, input files,
+project/branch or latency schedule changed; submit the freeze again.
+
+Disarm the channel and remove external audio, sidechain/key or MIDI inputs first.
+V1 requires unity master playrate without an active rate envelope. Tempo, meter,
+project sample rate and master-rate edits name the frozen tracks that must be
+unfrozen first. Missing plugins or unavailable media must be repaired before
+unfreezing. Infinite or unsettled tails refuse capture; finite reported tails
+and a one-second quiet window are retained, up to ten minutes of tail. A bridge
+that discovers a longer tail after rendering asks for in-process isolation.
+
+Freeze keeps a particular offline performance. A random or transport-sensitive
+plugin may sound different on a fresh pass, seek or loop; internal live DSP
+memory cannot be restored by a saved patch. Keep plugin binaries and plugin-owned sample files stable
+during capture. Audio after an unreported delay longer than the quiet window
+cannot be predicted. Playback at a different device rate resamples the cache.
+
+Frozen files are kept like recorded media, including after unfreeze, because
+undo, branches, autosaves and saved projects can still refer to them. Save and
+Save As carry them with the project. Do not manually edit or remove those files
+while any saved project or history still needs them.

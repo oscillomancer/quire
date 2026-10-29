@@ -68,7 +68,16 @@ class LaneLabels : public ui::Node {
                                   take->preservePitch ? "" : " varispeed");
                     name += rate;
                 }
-                const float alpha = item->mute ? 0.45f : 0.85f;
+                const auto* owner = s.tracks.find(item->track);
+                const bool frozen = owner && owner->freeze;
+                if (frozen) {
+                    name = "[Frozen] " + name;
+                    c.fillRect(r, t.color("panel").withAlpha(.3f));
+                    for (float x = r.x + 4; x < r.right(); x += 12)
+                        c.fillRect({x, r.bottom() - 3, std::min(6.f, r.right() - x), 2},
+                                   t.color("ink-quiet").withAlpha(.5f));
+                }
+                const float alpha = item->mute || frozen ? 0.45f : 0.85f;
                 // An item that does not follow the beat says what it follows: a
                 // tempo change leaves "time" items at their seconds, and "pos"
                 // items keep their length in seconds (their start follows).

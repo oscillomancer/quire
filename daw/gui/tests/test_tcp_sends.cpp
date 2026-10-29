@@ -448,7 +448,7 @@ TEST_CASE("TCP: a selection survives a right-click; Delete removes all of it in 
     ui::Node* m = f.root->find(menu);
     REQUIRE(m);
     const auto before = f.history();
-    const ui::Point del{m->bounds().x + 40, m->bounds().y + 6 * 26 + 13};  // Delete
+    const ui::Point del{m->bounds().x + 40, m->bounds().y + 7 * 26 + 13};  // Delete
     f.pointer(Pointer::Move, del);
     f.pointer(Pointer::Down, del);
     f.pointer(Pointer::Up, del);
@@ -542,7 +542,7 @@ TEST_CASE("TCP: the right-click menu renames, colours and deletes a track (one u
     // Channels…: four gives it aux channels 3/4 (the third choice).
     before = f.history();
     rightClick();
-    pickRow(menu, 3);
+    pickRow(menu, 4);
     REQUIRE(f.root->find("track.channels." + f.a.str()));
     pickRow("track.channels." + f.a.str(), 2);
     CHECK(f.app->head().tracks.find(f.a)->channels == 4);
@@ -550,7 +550,7 @@ TEST_CASE("TCP: the right-click menu renames, colours and deletes a track (one u
     // Delete removes it.
     before = f.history();
     rightClick();
-    pickRow(menu, 6);
+    pickRow(menu, 7);
     CHECK_FALSE(f.app->head().tracks.find(f.a));
     CHECK(f.history() == before + 1);
 }

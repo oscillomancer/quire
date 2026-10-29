@@ -8,6 +8,7 @@
 #include <map>
 #include <tuple>
 
+#include "supple/model/freeze.h"
 #include "supple/ui/canvas.h"
 #include "supple/ui/popup.h"
 #include "supple/ui/root.h"
@@ -652,6 +653,12 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
             return envPress(env, e, ai);
         }
         const auto h = hit(e.pos);
+        if (h && e.button == 1)
+            if (const auto owner = model::frozenOwner(s, h->item)) {
+                setSelection({h->item});
+                if (e.clicks >= 2 && onError) onError(model::frozenError(s, *owner, "/item"));
+                return true;
+            }
         // A take envelope drawn on the item takes the press near its line.
         if (e.button == 1 && h && e.clicks < 2)
             if (const auto env = takeEnvelopeAt(h->item, e.pos)) {

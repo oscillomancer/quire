@@ -388,7 +388,7 @@ TEST_CASE("mixer: strips select like the TCP's rows, and the menu deletes the se
     ui::Node* menu = f.root->find("track.menu." + c);
     REQUIRE(menu);
     const auto before = f.steps();
-    const ui::Point del{menu->bounds().x + 40, menu->bounds().y + 6 * 26 + 13};
+    const ui::Point del{menu->bounds().x + 40, menu->bounds().y + 7 * 26 + 13};
     f.pointer(ui::PointerEvent::Type::Move, del);
     f.pointer(ui::PointerEvent::Type::Down, del);
     f.pointer(ui::PointerEvent::Type::Up, del);
@@ -670,7 +670,7 @@ TEST_CASE("mixer: the track menu duplicates the selected strips, and selects the
     f.pointer(ui::PointerEvent::Type::Up, at, 1, 0, 3);
     ui::Node* menu = f.node("track.menu." + c);
     const auto before = f.steps();
-    const ui::Point dup{menu->bounds().x + 40, menu->bounds().y + 5 * 26 + 13};
+    const ui::Point dup{menu->bounds().x + 40, menu->bounds().y + 6 * 26 + 13};
     f.pointer(ui::PointerEvent::Type::Move, dup);
     f.pointer(ui::PointerEvent::Type::Down, dup);
     f.pointer(ui::PointerEvent::Type::Up, dup);
@@ -1484,4 +1484,38 @@ TEST_CASE(
     CHECK_FALSE(prefs.setPreventDeepIdle(false));
     CHECK(prefs.preferences().preventDeepIdle);
     CHECK(f.app->cpuIdleLatencyStatus().requested);
+}
+
+TEST_CASE("mixer: freeze and unfreeze use the track menu and keep the name visible") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto id = f.addTrack("channel", "Keys");
+    f.exec("item.add", R"({"track":"tr_1","notation":"1: r:w"})");
+    f.refresh();
+    auto freezeRow = [&] {
+        const auto at = f.empty(id);
+        f.pointer(ui::PointerEvent::Type::Down, at, 1, 0, 3);
+        f.pointer(ui::PointerEvent::Type::Up, at, 1, 0, 3);
+        const auto* menu = f.node("track.menu." + id);
+        const ui::Point pick{menu->bounds().x + 40, menu->bounds().y + 3 * 26 + 13};
+        f.pointer(ui::PointerEvent::Type::Move, pick);
+        f.pointer(ui::PointerEvent::Type::Down, pick);
+        f.pointer(ui::PointerEvent::Type::Up, pick);
+    };
+    const auto before = f.steps();
+    freezeRow();
+    f.exec("job.wait", R"({"job":"jb_1","timeout_s":30})");
+    f.refresh();
+    REQUIRE(f.track(id).freeze);
+    CHECK(f.steps() == before + 1);
+    CHECK(f.root->find("mixer.frozen." + id));
+    CHECK(f.strip(id).name->text() == "Keys");
+    CHECK_FALSE(f.strip(id).addFx->enabled);
+    freezeRow();
+    f.refresh();
+    CHECK_FALSE(f.track(id).freeze);
+    CHECK_FALSE(f.root->find("mixer.frozen." + id));
+    CHECK(f.strip(id).addFx->enabled);
+    CHECK(f.steps() == before + 2);
+    CHECK(f.errors.empty());
 }

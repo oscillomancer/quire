@@ -68,7 +68,7 @@ Result<std::vector<std::string>> duplicateTracks(cmd::Dispatcher& dispatcher,
 void TrackMenu::commit(std::string_view command, json::Value args) const {
     auto r = dispatcher.execute(
         {std::string(command), std::move(args), {cmd::Origin::Type::Ui, "gui", {}}});
-    if (!r && onError) onError(r.error().message);
+    if (!r && onError) onError(r.error().toString());
 }
 
 void TrackMenu::open(const model::Id& track, const ui::Rect& anchor,
@@ -92,6 +92,18 @@ void TrackMenu::open(const model::Id& track, const ui::Rect& anchor,
         m = {};
         m.label = "Timebase…";
         m.run = [this, track, anchor] { openTimebase(track, anchor); };
+        items.push_back(std::move(m));
+    }
+    if (const auto* t = app.head().tracks.find(track); t->type == model::StripType::Channel) {
+        m = {};
+        const bool frozen = t->freeze.has_value();
+        m.label = frozen ? "Unfreeze" : "Freeze";
+        m.run = [this, track, frozen] {
+            auto args = json::Value::object();
+            args["track"] = track.str();
+            if (!frozen) args["job"] = true;
+            commit(frozen ? "track.unfreeze" : "track.freeze", std::move(args));
+        };
         items.push_back(std::move(m));
     }
     m = {};
@@ -164,7 +176,7 @@ Status TrackMenu::openColors(const model::Id& track, const ui::Rect& anchor) con
             }
             return json::Value::object();
         });
-        if (!r && onError) onError(r.error().message);
+        if (!r && onError) onError(r.error().toString());
     };
     for (std::string_view name : model::kTrackColors) {
         ui::MenuItem m;

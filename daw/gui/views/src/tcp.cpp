@@ -347,10 +347,11 @@ void TcpPanel::Row::refresh(const model::Session& session) {
         depth_ = panel_.layout_.rows()[*row].depth;
     const std::string name =
         tr->name.empty() ? std::string(model::stripTypeName(tr->type)) : tr->name;
-    name_->setText(name);
+    name_->setText((tr->freeze ? "[Frozen] " : "") + name);
     if (!renaming_) rename_->setText(name);
     mute_->setOn(tr->mute);
     solo_->setOn(tr->solo != model::Solo::Off);
+    polarity_->enabled = mono_->enabled = arm_->enabled = monitor_->enabled = !tr->freeze;
     polarity_->setOn(tr->phaseInvert);
     mono_->setOn(tr->mono);
     arm_->setOn(tr->record.armed);
@@ -604,7 +605,10 @@ void TcpPanel::Row::startRename() {
     if (!track_) return;
     renameTrack_ = track_;
     renaming_ = true;
-    rename_->setText(name_->text());
+    const auto* tr = panel_.session_.tracks.find(*track_);
+    rename_->setText(
+        tr ? (tr->name.empty() ? std::string(model::stripTypeName(tr->type)) : tr->name)
+           : name_->text());
     rename_->selectAll();
     rename_->visible = true;
     name_->visible = false;
