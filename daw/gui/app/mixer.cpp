@@ -408,6 +408,18 @@ class ColorStripe : public ui::Node {
     std::string colour_;
 };
 
+// A frozen channel's mark: a snowflake under the strip's name.
+class FrozenMark : public ui::Node {
+  public:
+    explicit FrozenMark(std::string id) : Node(std::move(id)) {
+        layout.height = ui::SizeRule::fixed(14);
+    }
+    void paint(ui::Canvas& c) override {
+        const ui::Rect b = bounds();
+        ui::drawSnowflake(c, {b.x + 9, b.y + b.h / 2}, 6.0f, c.theme().color("ink"));
+    }
+};
+
 // A strip's background: the type's colour along the top; a right-click anywhere
 // on it opens the track menu, and a drag from a part no control uses moves the
 // strip among its own kind.
@@ -788,11 +800,7 @@ void Mixer::rebuild() {
         st.addFx->layout.width = ui::SizeRule::fixed(16);
         st.addFx->layout.height = ui::SizeRule::fixed(15);
         frame->emplace<ColorStripe>("mixer.color." + tid, t.color);
-        if (t.freeze) {
-            auto& marker = frame->emplace<ui::Label>("mixer.frozen." + tid, "[Frozen]",
-                                                     ui::Font::Ui, "caption", "ink-quiet");
-            marker.layout.height = ui::SizeRule::fixed(14);
-        }
+        if (t.freeze) frame->emplace<FrozenMark>("mixer.frozen." + tid);
         // The plug-in chain (a click opens or closes the plug-in's editor); the
         // one section that takes the room the panel's height gives.
         auto& chain = frame->emplace<FxList>("mixer.fx." + tid);

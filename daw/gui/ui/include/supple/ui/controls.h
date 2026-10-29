@@ -177,6 +177,9 @@ class ArmButton : public Toggle {
     void paint(Canvas& canvas) override;
 };
 
+// A frozen track's mark: a six-armed snowflake of `radius` around `centre`.
+void drawSnowflake(Canvas& c, Point centre, float radius, Color ink);
+
 // Input monitoring (off, on, auto): a small speaker, an outline when off,
 // solid when on, green when auto. A click runs onClick (the owner cycles it).
 class MonitorButton : public Node {

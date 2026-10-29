@@ -252,7 +252,7 @@ tools.
 Choose **Freeze** from a track header or mixer strip's context menu to record its
 items, take effects and complete insert chain to project media. The job reports
 progress through the existing job system (`job.get`, `job.cancel`). When it
-finishes the channel shows **[Frozen]**, its items are dimmed and marked, and its
+finishes the channel shows a small snowflake, its items are dimmed and marked, and its
 plugins are released. Fader, pan, mute, solo, their automation, sends and parent
 routing remain available. To change the sound inside the recording, choose
 **Unfreeze** from the same menu. Each completed operation is one undo step.

@@ -720,6 +720,23 @@ void MonitorButton::setMode(Mode mode) {
     invalidate();
 }
 
+void drawSnowflake(Canvas& c, Point centre, float radius, Color ink) {
+    // Three strokes through the centre, each arm with a small V near its tip.
+    for (int k = 0; k < 6; ++k) {
+        const float a = static_cast<float>(k) * 3.14159265f / 3;
+        const Point dir{std::cos(a), std::sin(a)};
+        const Point tip{centre.x + dir.x * radius, centre.y + dir.y * radius};
+        c.line(centre, tip, ink, 1.0f);
+        const Point fork{centre.x + dir.x * radius * 0.62f, centre.y + dir.y * radius * 0.62f};
+        for (float side : {-1.0f, 1.0f}) {
+            const float b = a + side * 0.75f;
+            c.line(fork,
+                   {fork.x + std::cos(b) * radius * 0.32f, fork.y + std::sin(b) * radius * 0.32f},
+                   ink, 1.0f);
+        }
+    }
+}
+
 void MonitorButton::paint(Canvas& c) {
     const Theme& t = c.theme();
     const Rect b = bounds();

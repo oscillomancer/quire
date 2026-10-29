@@ -1290,8 +1290,9 @@ embeds the multi-size ICO resource for Explorer and Start-menu shortcuts.
 Track-header and mixer context menus offer **Freeze** for channels and
 **Unfreeze** while frozen. Freeze starts a background job through the command
 bus; the existing job display supplies progress/cancellation. Headers and mixer
-strips show `[Frozen]`; original items remain visible, dimmed with a small hatch
-and frozen text. Existing fader/pan/mute/solo/send controls remain live. FX slots,
+strips show a small snowflake (before the header's name, under the strip's name);
+original items remain visible, dimmed with a small hatch and a snowflake before
+their label. Existing fader/pan/mute/solo/send controls remain live. FX slots,
 add-FX, polarity, mono, arm and monitor controls are disabled while frozen.
 Frozen items can be selected; gestures cannot edit or move their content, and
 opening an editor explains `track.unfreeze`. Commands enforce the same rule for
