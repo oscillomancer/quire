@@ -729,8 +729,6 @@ Engine and hosting:
   malformed UTF-8 parameter input is refused. Native verification is pending.
 
 Session and editing:
-- Zero-crossing splits require current prepared playback sources; pending audio
-  reports a retryable error. Native macOS/Windows validation is pending.
 - Project files accept `record.mode: output`, but output capture is not
   implemented: starting recording with an armed output-mode track fails with
   `record.output_unsupported` before creating files. Switch that track to input

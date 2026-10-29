@@ -312,14 +312,10 @@ selected audio and MIDI items at the edit cursor. Items outside the cursor stay
 whole; the menu's pointer position does not set the split point. Undo restores
 the entire selection edit in one step.
 
-**Split item at prior zero crossing** searches up to 100 ms backward in the
-active audio take as played, including its offset, rate/pitch and warp. It uses
-the louder stereo channel after the take's channel mode (left on ties), before
-fades, gain and FX. Silence keeps the cursor; if there is no crossing, the split
-stays at the cursor. MIDI items are skipped, and the entry is disabled for a
-MIDI-only selection. If audio is still preparing, wait and retry. Linked items
-split together at the initiating item's chosen time. This reduces source clicks
-but cannot guarantee a zero in every channel or after FX.
+**Split item at prior zero crossing** moves the split back to the last point,
+at most 100 ms before the cursor, where the item's audio crosses zero, which
+avoids a click at the cut. If there is none, it splits at the cursor. It does
+nothing to MIDI items. Linked items split together at the same point.
 
 Right-click selected audio items and choose **Detect hits** to show candidate
 attacks. Drag a dim hit to create a stretch marker, or drag a solid marker handle
