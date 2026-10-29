@@ -169,7 +169,7 @@ TEST_CASE("freeze: job permits unrelated edits and rejects changed sound") {
             cv.wait(lock, [&] { return finished; });
         }
         f.bus->flushJobEvents();
-        auto state = f.bus->jobs().status(job["job"].asString());
+        auto state = f.bus->jobs().status(job.find("job")->asString());
         REQUIRE(state);
         CHECK((*state)["status"].asString() == (stale ? "failed" : "done"));
         if (stale) CHECK((*state)["error"]["code"].asString() == "freeze.stale_target");
@@ -199,7 +199,13 @@ TEST_CASE("freeze: virtual latency preserves Console mix and auxiliary output" *
     settings.threads = 1;
     auto reference = f.app->renderSession(f.app->head(), settings);
     REQUIRE(reference);
+    DummyBackend captureBackend({.mode = DummyBackend::Mode::Manual});
+    REQUIRE(f.app->startEngine(captureBackend, {.sampleRate = 48000, .blockSize = 128},
+                               {.anticipative = false, .workers = 1}));
     f.run("track.freeze", R"({"track":"tr_1"})");
+    f.app->stopEngine();
+    // Capturing the live opaque state creates and retains its actual content hash.
+    CHECK(f.app->head().fx.find(fx)->state != hash);
     REQUIRE(f.app->head().tracks.find(track)->freeze);
     CHECK(f.app->head().tracks.find(track)->freeze->latencyFrames == 37);
     auto rendered = f.app->renderSession(f.app->head(), settings);
@@ -221,6 +227,10 @@ TEST_CASE("freeze: virtual latency preserves Console mix and auxiliary output" *
                              reference->audio.channels[c].end(),
                              backend.capture().channels[c].begin() + reference->outputLatency));
     }
+    f.run("track.unfreeze", R"({"track":"tr_1"})");
+    auto restored = f.app->renderSession(f.app->head(), settings);
+    REQUIRE(restored);
+    CHECK(restored->audio.channels == reference->audio.channels);
 }
 
 TEST_CASE("freeze: branch replay reuses cache and remaps new media IDs") {
@@ -394,7 +404,7 @@ TEST_CASE("freeze: cancellation and a branch switch cannot publish a finished jo
         }
         f.bus->flushJobEvents();
         CHECK_FALSE(f.app->head().tracks.find(track)->freeze);
-        auto state = f.bus->jobs().status(job["job"].asString());
+        auto state = f.bus->jobs().status(job.find("job")->asString());
         REQUIRE(state);
         CHECK((*state)["status"].asString() == (cancel ? "cancelled" : "failed"));
         for (const auto& entry : std::filesystem::directory_iterator(f.app->mediaDir()))
@@ -426,6 +436,7 @@ TEST_CASE("freeze: external inputs and armed channels refuse; outgoing sends rem
     REQUIRE_FALSE(refused);
     CHECK(refused.error().code == "track.frozen");
     CHECK(refused.error().message.find("tr_1") != std::string::npos);
+    CHECK(refused.error().hint.find("Frozen source (tr_1)") != std::string::npos);
 }
 
 TEST_CASE("freeze: reopen plays without plugins and failed unfreeze keeps the cache") {
@@ -464,4 +475,38 @@ TEST_CASE("freeze: branches switch between independently frozen performances") {
     CHECK(f.app->head().tracks.find(track)->freeze->source == original);
     f.run("branch.switch", R"({"name":"main"})");
     CHECK(f.app->head().tracks.find(track)->freeze->source == revised);
+}
+
+TEST_CASE("freeze: Save As excludes a completed but unpublished artifact") {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool finished = false;
+    AppOptions options;
+    options.jobFinishedHook = [&] {
+        std::lock_guard lock(mutex);
+        finished = true;
+        cv.notify_all();
+    };
+    Fixture f(options);
+    REQUIRE(f.app->save(f.dir / "original" / "song.project"));
+    const auto originalMedia = f.app->mediaDir();
+    const auto job = f.run("track.freeze", R"({"track":"tr_1","job":true})");
+    {
+        std::unique_lock lock(mutex);
+        cv.wait(lock, [&] { return finished; });
+    }
+    REQUIRE(std::filesystem::exists(originalMedia / ".freeze-pending"));
+    REQUIRE(f.app->save(f.dir / "copy" / "song.project"));
+    f.bus->flushJobEvents();
+    CHECK_FALSE(f.app->head().tracks.find(track)->freeze);
+    const auto state = f.bus->jobs().status(job.find("job")->asString());
+    REQUIRE(state);
+    CHECK(state->find("status")->asString() == "failed");
+    for (const auto& directory : {originalMedia, f.app->mediaDir()}) {
+        if (!std::filesystem::exists(directory)) continue;
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(directory)) {
+            CHECK(entry.path().filename() != ".freeze-pending");
+            CHECK_FALSE(entry.path().filename().string().starts_with("freeze-"));
+        }
+    }
 }

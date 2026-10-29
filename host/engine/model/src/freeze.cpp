@@ -162,11 +162,11 @@ Status validateFrozenTransition(const Session& before, const Session& after) {
     for (const auto& e : before.tracks)
         if (e.value->freeze) {
             if (!frozen.empty()) frozen += ", ";
-            frozen += e.id.str();
+            frozen += trackLabel(before, e.id) + " (" + e.id.str() + ")";
         }
     if (!frozen.empty() && timing(before) != timing(after))
         return Error("track.frozen", "timing is locked by frozen tracks: " + frozen, "/project",
-                     "use track.unfreeze for each named track before changing timing");
+                     "use track.unfreeze on " + frozen + " before changing timing");
     for (const auto& e : before.tracks) {
         const auto* next = after.tracks.find(e.id);
         if (!e.value->freeze || !next || !next->freeze) continue;

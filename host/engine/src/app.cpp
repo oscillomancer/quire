@@ -2874,6 +2874,7 @@ struct Gain : Effect {
         run("fx.patch.merge", R"({"fx": "fx_2", "patch": {"params": {"gain": -12}}})");
         run("fx.preset.save", R"({"fx": "fx_2", "name": "Quiet"})");
     }
+    if (fixture == "song_frozen") run("track.freeze", R"({"track":"tr_1"})");
     if (fixture == "song_with_render") run("render.mix", R"({"name":"example"})");
     if (fixture == "render_queued")  // + q1: the mix of the first beat
         run("render.queue.add",

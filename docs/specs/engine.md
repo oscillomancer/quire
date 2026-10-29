@@ -1843,8 +1843,8 @@ The captured latency remains in the normal solve, including live automation
 alignment. No cache work, allocation, locks or files occur in the callback.
 Frozen FX ignore MIDI parameter moves and queued editor output.
 Original live instances are pruned only after both executor epochs release the
-old plans. Dedicated bridges exit; a shared bridge stays while unrelated instances
-need it. A frozen FX description reads stored state without creating a plugin.
+old plans. Dedicated bridges exit; a shared bridge removes the frozen instances and
+keeps its process for unrelated instances and later reuse. A frozen FX description reads stored state without creating a plugin.
 
 Publication is one private typed `track.freeze.commit` edit, not a head-version
 compare. It checks project generation, branch and media directory, recomputes the
@@ -1852,7 +1852,9 @@ sound-dependency hash at the current head, verifies input file hashes, and probe
 the full head graph for unchanged target scheduling quantities. Unrelated edits
 can therefore complete while rendering. The replay record contains the captured
 states and verified cache metadata; redo/merge reuse that file. Unpublished job
-artifacts are removed on cancellation/failure. Published files remain as ordinary
+artifacts live in the reserved `.freeze-pending` media subdirectory, excluded
+from Save As copies. Publication renames into media before committing the
+reference; cancellation/failure removes the pending artifact. Published files remain as ordinary
 media for undo, branches, autosaves and Save As.
 
 V1 accepts disarmed channel strips at unity master rate with no active master-rate
@@ -1861,7 +1863,7 @@ channel is inactive and allowed. Freeze locks tempo, meter, project sample rate,
 master-rate and captured content (including pooled edits). Mixing and outgoing
 routing stay live. This captures an offline performance, not transient plugin
 DSP memory: random plugins, transport-sensitive state, new seeks and repeated
-loops can differ from running the original plugins. Plugin-owned external files
+loops can differ from running the original plugins. Plugin binaries, plugin-owned external files
 and private state absent from its exported patch/blob cannot be hashed by the
 host; keep those assets stable during capture. Cached playback itself uses the
 same reader offline and in both RT executors. At another device rate it resamples

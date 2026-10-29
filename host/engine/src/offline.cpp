@@ -190,10 +190,6 @@ void InstancePool::prune(const Session& session, std::uint64_t liveGeneration) {
                  ? std::next(it)
                  : instances_.erase(it);
     std::erase_if(retired_, [&](const auto& r) { return r.first <= liveGeneration; });
-    if (retired_.empty() && std::none_of(instances_.begin(), instances_.end(), [](const auto& e) {
-            return e.second.isolation == model::Isolation::SharedBridge;
-        }))
-        sharedBridge_.reset();
 }
 
 void InstancePool::retire(std::unique_ptr<host::Instance> instance) {

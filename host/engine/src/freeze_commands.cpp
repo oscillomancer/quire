@@ -58,6 +58,8 @@ struct Artifact {
         if (!published) {
             std::error_code ec;
             std::filesystem::remove(path, ec);
+            if (path.parent_path().filename() == ".freeze-pending")
+                std::filesystem::remove(path.parent_path(), ec);
         }
     }
 };
@@ -66,7 +68,7 @@ struct Work {
     Commit commit;
     OfflineSettings settings;
     RenderTarget target;
-    std::filesystem::path directory;
+    std::filesystem::path directory, output;
     std::shared_ptr<Artifact> artifact;
     bool named = false;
     std::int64_t shift = 0;
@@ -156,10 +158,11 @@ Result<Work> prepare(EngineApp& app, Id track) {
     work.snapshot = std::move(*snapshot);
     work.artifact = std::make_shared<Artifact>();
     static std::atomic<std::uint64_t> serial{0};
-    work.artifact->path =
+    work.output =
         work.directory /
         ("freeze-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
          "-" + std::to_string(serial.fetch_add(1)) + ".wav");
+    work.artifact->path = work.directory / ".freeze-pending" / work.output.filename();
     return work;
 }
 
@@ -182,7 +185,7 @@ Status render(Work& work, const std::vector<host::PluginInfo>& catalogue,
                 return Error("freeze.render", "non-finite plugin output", "/track",
                              "repair or replace the affected plugin");
     std::error_code ec;
-    std::filesystem::create_directories(work.directory, ec);
+    std::filesystem::create_directories(work.artifact->path.parent_path(), ec);
     if (ec)
         return Error("freeze.media", ec.message(), work.directory.string(),
                      "choose a writable project folder");
@@ -190,7 +193,7 @@ Status render(Work& work, const std::vector<host::PluginInfo>& catalogue,
     auto hash = sha256File(work.artifact->path);
     if (!hash) return hash.error();
     auto& c = work.commit;
-    c.media = {work.named ? work.artifact->path.filename().string() : work.artifact->path.string(),
+    c.media = {work.named ? work.output.filename().string() : work.output.string(),
                *hash,
                "wav",
                rendered->audio.sampleRate,
@@ -244,6 +247,18 @@ Result<json::Value> publish(EngineApp& app, cmd::Dispatcher& dispatcher, Work& w
         probe->freezeLatency != work.commit.freeze.latencyFrames)
         return Error("freeze.stale_target", "the track's latency schedule changed during rendering",
                      "/track", "retry track.freeze after latency or routing changes");
+    // Keep pending renders out of Save As copies until the model can attach them.
+    std::error_code ec;
+    if (std::filesystem::exists(work.output, ec))
+        return Error("freeze.media", "freeze filename already exists", work.output.string(),
+                     "retry track.freeze to choose a new filename");
+    const auto staging = work.artifact->path.parent_path();
+    std::filesystem::rename(work.artifact->path, work.output, ec);
+    if (ec)
+        return Error("freeze.media", ec.message(), work.output.string(),
+                     "check project-folder permissions and free space");
+    work.artifact->path = work.output;
+    std::filesystem::remove(staging, ec);  // succeeds only when no other render is pending
     auto committed =
         dispatcher.execute({"track.freeze.commit", commitSchema().encode(work.commit), origin});
     if (committed) work.artifact->published = true;
@@ -341,7 +356,7 @@ void registerFreezeCommands(cmd::Registry& registry) {
             {"Freeze the channel", *json::parse(R"({"track":"tr_1"})"),
              *json::parse(
                  R"({"track":"tr_1","frozen":true,"source":"<any>","path":"<any>","frames":"<any>","tail_frames":"<any>"})"),
-             "song"}};
+             "song_with_fx"}};
         c.run = [](const Args& a, cmd::Context& ctx) -> Result<json::Value> {
             auto& app = ctx.service<EngineApp>();
             if (const auto* t = app.view().tracks.find(a.track); t && t->freeze)
@@ -405,7 +420,7 @@ void registerFreezeCommands(cmd::Registry& registry) {
                      .build();
         c.result = schema::any();
         c.examples = {{"Unfreeze the channel", *json::parse(R"({"track":"tr_1"})"),
-                       *json::parse(R"({"track":"tr_1","frozen":false})"), "song"}};
+                       *json::parse(R"({"track":"tr_1","frozen":false})"), "song_frozen"}};
         c.run = [](const Args& a, cmd::Context& ctx) -> Result<json::Value> {
             auto& app = ctx.service<EngineApp>();
             const auto s = app.view();
