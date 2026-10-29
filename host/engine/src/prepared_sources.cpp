@@ -81,6 +81,7 @@ Result<std::shared_ptr<const PreparedSources>> MediaCache::prepareSources(
         if (const auto* t = s.takes.find(id))
             needed.insert(t->warpPeers.begin(), t->warpPeers.end());
     double estimate = 0;
+    std::set<std::string> decoded, variants;
     for (auto id : needed) {
         const auto* take = s.takes.find(id);
         const auto* md = take && take->source ? s.media.find(*take->source) : nullptr;
@@ -89,11 +90,21 @@ Result<std::shared_ptr<const PreparedSources>> MediaCache::prepareSources(
         const MediaVariant variant{take->playrate, take->pitch, take->preservePitch,
                                    take->pitchMode};
         const auto span = model::itemSpan(s, *item);
-        const double outputFrames =
-            model::activeWarp(*take) && !item->loop
-                ? (span.endSec - span.startSec) * rate
-                : static_cast<double>(md->frames) * rate / md->sampleRate / variant.speed();
-        estimate += (static_cast<double>(md->frames) + outputFrames) * md->channels;
+        const auto identity =
+            md->hash.empty() ? sourcePath(s, *md, dir).generic_string() : md->hash;
+        if (decoded.insert(identity).second)
+            estimate += static_cast<double>(md->frames) * md->channels;
+        if (model::activeWarp(*take) && !item->loop)
+            estimate += (span.endSec - span.startSec) * rate * md->channels;
+        else {
+            const bool stretch = variant.stretch();
+            const auto variantKey =
+                identity + (stretch ? "|s" : "|r") + json::formatDouble(variant.playrate) + "|" +
+                json::formatDouble(stretch || !variant.preservePitch ? variant.pitch : 0.);
+            if (variants.insert(variantKey).second)
+                estimate += static_cast<double>(md->frames) * rate / md->sampleRate /
+                            variant.speed() * md->channels;
+        }
         if (!(estimate >= 0 && estimate <= (std::int64_t{1} << 28)))
             return Error("media.budget", "prepared sources exceed the in-memory sample budget", {},
                          "use shorter source files, fewer channels or a faster playback rate");

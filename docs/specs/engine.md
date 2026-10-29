@@ -1854,7 +1854,9 @@ Exact duplicate and polarity-reversed input relationships are restored from the
 canonical channel after synthesis, avoiding low-energy phase fallback differences.
 At most 128 channels and 2^28 aggregate packed-input-plus-output sample values are
 allowed per bundle. A complete preparation request also limits its estimated decoded
-plus output samples to 2^28 before decoding. Source/out-of-file regions are zero padded. No marker lookup,
+plus output samples to 2^28 before decoding. Shared decoded sources and scalar
+variants count once, so repeated clips do not multiply their storage estimate.
+Source/out-of-file regions are zero padded. No marker lookup,
 analysis, stretching, allocation, file access, cache access or worker wait runs in
 an audio executor.
 

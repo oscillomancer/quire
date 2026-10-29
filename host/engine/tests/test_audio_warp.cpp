@@ -489,3 +489,26 @@ TEST_CASE("a warped stem retains its bundle inputs and ignores unrelated missing
     CHECK(cache.sources()->takes.contains({model::Kind::Take, 2}));
     CHECK_FALSE(cache.sources()->takes.contains(tk));
 }
+
+TEST_CASE("source budgets count shared scalar media once across repeated clips") {
+    WarpHost h;
+    const auto original = h.app->head();
+    model::EditTxn edit(original, original.version + 1);
+    const auto take = *original.takes.find({model::Kind::Take, 1});
+    auto item = *original.items.find({model::Kind::Item, 1});
+    model::Id last{};
+    for (int i = 0; i < 800; ++i) {
+        last = edit.create(take);
+        item.takes = {last};
+        item.activeTake = last;
+        item.position = double(i + 1) * 4;
+        edit.create(item);
+    }
+    auto session = edit.commit();
+    REQUIRE(session);
+    MediaCache cache;
+    auto sources = cache.prepareSources(*session, h.app->projectDir(), 48000);
+    REQUIRE_MESSAGE(sources, (sources ? "" : sources.error().toString()));
+    CHECK((*sources)->takes.size() == 801);
+    CHECK((*sources)->takes.at(last).data == (*sources)->takes.at({model::Kind::Take, 1}).data);
+}
