@@ -51,8 +51,11 @@ TEST_CASE("child timeout and output overflow are structured and clean up the chi
         const std::array<std::string, 1> args{mode};
         auto child = ChildProcess::spawn(CHILD_FIXTURE_PATH, args);
         REQUIRE(child);
-        auto output = (*child)->collect(
-            std::chrono::steady_clock::now() + std::chrono::milliseconds(500), 64);
+        // The flood ends at the output limit, so its deadline only has to
+        // outlast a slow child start (a loaded Windows runner took 500 ms).
+        auto output = (*child)->collect(std::chrono::steady_clock::now() +
+                                            std::chrono::milliseconds(mode == "hang" ? 500 : 30000),
+                                        64);
         REQUIRE_FALSE(output);
         CHECK(output.error().code == (mode == "hang" ? "child.timeout" : "child.output_limit"));
         CHECK_FALSE(output.error().path.empty());
