@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include <algorithm>
+#include <map>
 #include <set>
 #include "stretch.h"
 #include "supple/dsp/dsp.h"
@@ -20,11 +21,16 @@ std::filesystem::path sourcePath(const model::Session& s, const model::MediaSour
     }
     return path;
 }
-const model::Item* owner(const model::Session& s, model::Id id) {
+// Each take's item, found once rather than by a search per take.
+std::map<model::Id, const model::Item*> takeOwners(const model::Session& s) {
+    std::map<model::Id, const model::Item*> owners;
     for (const auto& e : s.items)
-        if (std::find(e.value->takes.begin(), e.value->takes.end(), id) != e.value->takes.end())
-            return e.value.get();
-    return nullptr;
+        for (model::Id take : e.value->takes) owners.emplace(take, e.value.get());
+    return owners;
+}
+const model::Item* ownerOf(const std::map<model::Id, const model::Item*>& owners, model::Id id) {
+    const auto found = owners.find(id);
+    return found == owners.end() ? nullptr : found->second;
 }
 }  // namespace
 Result<std::string> sourcePreparationKey(const model::Session& s, const std::filesystem::path& dir,
@@ -32,10 +38,11 @@ Result<std::string> sourcePreparationKey(const model::Session& s, const std::fil
     json::Value key = json::Value::array();
     key.push_back(dir.generic_string());
     key.push_back(rate);
+    const auto owners = takeOwners(s);
     for (const auto& e : s.takes) {
         const auto& t = *e.value;
         const auto* md = t.source ? s.media.find(*t.source) : nullptr;
-        const auto* it = owner(s, e.id);
+        const auto* it = ownerOf(owners, e.id);
         if (!md || !it) continue;
         // Only source-affecting fields: gain/FX/mute and hit overlays do not
         // re-run preparation. File metadata catches unhashed external changes.
@@ -74,6 +81,7 @@ Result<std::shared_ptr<const PreparedSources>> MediaCache::prepareSources(
     if (prepared_ && prepared_->key == *key) return prepared_;
     auto out = std::make_shared<PreparedSources>();
     out->key = *key;
+    const auto owners = takeOwners(s);
     std::set<model::Id> needed;
     for (const auto& e : s.items)
         if (e.value->activeTake) needed.insert(*e.value->activeTake);
@@ -85,7 +93,7 @@ Result<std::shared_ptr<const PreparedSources>> MediaCache::prepareSources(
     for (auto id : needed) {
         const auto* take = s.takes.find(id);
         const auto* md = take && take->source ? s.media.find(*take->source) : nullptr;
-        const auto* item = owner(s, id);
+        const auto* item = ownerOf(owners, id);
         if (!md || !item || md->sampleRate <= 0) continue;
         const MediaVariant variant{take->playrate, take->pitch, take->preservePitch,
                                    take->pitchMode};
@@ -115,7 +123,7 @@ Result<std::shared_ptr<const PreparedSources>> MediaCache::prepareSources(
             return Error("job.cancelled", "source preparation cancelled", {},
                          "retry for the current version");
         const auto* t = s.takes.find(id);
-        const auto* it = owner(s, id);
+        const auto* it = ownerOf(owners, id);
         const auto* md = t && t->source ? s.media.find(*t->source) : nullptr;
         if (!t || !md || !it) continue;
         if (!model::activeWarp(*t) || it->loop) {

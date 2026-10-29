@@ -2563,12 +2563,22 @@ void EngineApp::headChanged() {
     }
     mainWake_.notify();
     if (!engine_) return;
-    auto sourceKey = sourcePreparationKey(head(), projectDir(), engine_->config().sampleRate);
-    if (!sourceKey) {
-        preparationError_ = sourceKey.error().toString();
-        emit("engine.error", preparationError_);
-        return;
+    const model::Session& s = head();
+    const double rate = engine_->config().sampleRate;
+    const auto& memo = sourceKeyMemo_;
+    if (!memo || !memo->items.sameStorage(s.items) || !memo->takes.sameStorage(s.takes) ||
+        !memo->media.sameStorage(s.media) || memo->project != s.project ||
+        memo->timeMap != s.timeMap || memo->dir != projectDir() || memo->rate != rate) {
+        auto key = sourcePreparationKey(s, projectDir(), rate);
+        if (!key) {
+            preparationError_ = key.error().toString();
+            emit("engine.error", preparationError_);
+            return;
+        }
+        sourceKeyMemo_ = SourceKeyMemo{s.items,   s.takes,      s.media, s.project,
+                                       s.timeMap, projectDir(), rate,    *key};
     }
+    const std::string* sourceKey = &sourceKeyMemo_->key;
     if (!media_.sources() || media_.sources()->key != *sourceKey || !pendingSourceKey_.empty()) {
         if (pendingSourceKey_ != *sourceKey) {
             if (!sourcePreparation_)

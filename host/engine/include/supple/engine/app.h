@@ -589,6 +589,20 @@ class EngineApp : public cmd::Host {
                             const std::function<Status()>& publish);
     std::unique_ptr<SourcePreparation> sourcePreparation_;
     std::string pendingSourceKey_, preparationError_;
+    // The last source key and what it was computed from: most edits (a fader,
+    // a plug-in parameter) share these collections, so the key is reused. An
+    // unhashed file changed on disk is noticed at the next edit to them.
+    struct SourceKeyMemo {
+        model::IdMap<model::Item> items;
+        model::IdMap<model::Take> takes;
+        model::IdMap<model::MediaSource> media;
+        std::shared_ptr<const model::Project> project;
+        std::shared_ptr<const time::TimeMap> timeMap;
+        std::filesystem::path dir;
+        double rate = 0;
+        std::string key;
+    };
+    std::optional<SourceKeyMemo> sourceKeyMemo_;
     std::shared_ptr<const model::Session> loadedHead_;
     std::unique_ptr<Engine> engine_;
     Backend* backend_ = nullptr;
