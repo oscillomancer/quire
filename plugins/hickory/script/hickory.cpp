@@ -942,7 +942,7 @@ struct Hickory : Effect {
         if (k == 3) return tx + 196;
         return tx + 480;
     }
-    double knobY(int k) const { return k < 2 ? ly + 84 : ty + 128; }
+    double knobY(int k) const { return k < 2 ? ly + 78 : ty + 128; }
     double knobR(int k) const { return k < 2 ? 30 : 34; }
 
     double knobValue(int k) const {
@@ -995,7 +995,7 @@ struct Hickory : Effect {
         if (delay.value() >= 0.005) {
             g.fillStyle(Theme::textFaint);
             g.monoFont(8.5);
-            g.fillText(format("%d samples", delaySamples.get()), knobX(1), knobY(1) + 44);
+            g.fillText(format("%d samples", delaySamples.get()), knobX(1), knobY(1) + 55);
         }
         const double bx = lx + 210;
         pill(g, bx, ly + 52, 72, 24, "MUTE", mute.on(), Theme::alert,
