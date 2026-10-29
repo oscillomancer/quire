@@ -6,14 +6,14 @@
 #include "supple/model/schemas.h"
 
 namespace supple::gui {
-// UI-only continuation: detection commits first; quantize remains a pure edit.
+// UI continuations/status for detection/quantize and background consolidation.
 class AudioEdit {
   public:
     AudioEdit(engine::EngineApp& app, cmd::Dispatcher& dispatcher)
         : app_(app), dispatcher_(dispatcher) {}
     void run(const std::vector<model::Id>& selected, const std::string& operation, double grid) {
-        if (pending_) {
-            report("Audio edit is already detecting hits");
+        if (pending_ || consolidation_) {
+            report("An audio edit is already running");
             return;
         }
         const auto s = app_.head();
@@ -57,7 +57,38 @@ class AudioEdit {
         } else
             execute("audio.quantize", args);
     }
+    void consolidate(const std::vector<model::Id>& selected) {
+        if (pending_ || consolidation_) {
+            report("An audio edit is already running");
+            return;
+        }
+        auto args = json::Value::object();
+        args["items"] = json::Value::array();
+        for (auto id : selected) args["items"].push_back(id.str());
+        auto job = dispatcher_.execute({"item.consolidate", args, origin_});
+        if (!job) {
+            report(job.error().toString());
+            return;
+        }
+        consolidation_ = job->find("job")->asString();
+        report("Consolidating items…");
+    }
     void poll() {
+        if (consolidation_) {
+            auto job = dispatcher_.jobs().status(*consolidation_);
+            if (!job) {
+                report(job.error().toString());
+                consolidation_.reset();
+            } else if (job->find("status")->asString() != "running") {
+                if (job->find("status")->asString() == "done")
+                    report("Items consolidated");
+                else if (const auto* error = job->find("error"))
+                    report(json::writeCanonical(*error));
+                else
+                    report("Consolidation cancelled");
+                consolidation_.reset();
+            }
+        }
         if (!pending_) return;
         auto args = json::Value::object();
         args["job"] = pending_->job;
@@ -128,5 +159,6 @@ class AudioEdit {
     cmd::Dispatcher& dispatcher_;
     const cmd::Origin origin_{cmd::Origin::Type::Ui, "gui", {}};
     std::optional<Pending> pending_;
+    std::optional<std::string> consolidation_;
 };
 }  // namespace supple::gui

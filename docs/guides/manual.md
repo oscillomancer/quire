@@ -307,21 +307,26 @@ while any saved project or history still needs them.
 
 ## Timing audio with hits and stretch markers
 
-Agents can use `item.consolidate {items:[...]}` to combine material per track.
+Right-click selected items and choose **Consolidate items** to combine material
+per track.
 Audio and MIDI remain separate. Audio uses active takes and bakes their item
 controls, timing, take FX and envelopes into a new WAV; track processing stays
-live. Gaps stay silent. MIDI keeps the existing merge behavior. Follow the
-returned job with `job.get`; all results publish together in one undo step.
+live. Gaps stay silent. MIDI keeps the existing merge behavior. Progress appears
+in the status line; all results publish together in one undo step.
 Select complete linked/warp bundles on matching lanes and groups. Undo retains
 the original takes; the new media stays available to history and project saves.
+Agents use `item.consolidate {items:[...]}` and follow the returned job with `job.get`.
 
-`item.heal {items:[...]}` joins compatible audio pieces without making a new file.
+**Heal splits**, beside Consolidate items, joins compatible audio pieces without
+making a new file. Agents use `item.heal {items:[...]}`.
 Select consecutive unchanged pieces from the same source on each track, including
 any linked/warp peers. Healing keeps all corresponding takes, the outer fades and
 the full source/warp mapping, removing generated internal slice fades. Source
 settings and stored take FX must match; moved pieces, changed fades and nonlinear
 envelope seams that cannot be restored need consolidation instead. Each track
 becomes one item and the operation is one undo step.
+Both menu entries are greyed when the selection cannot use them. For a single
+multi-take MIDI item, **Merge takes** remains available to layer its alternatives.
 
 Right-click an item and choose **Split item at cursor**, or press S, to split
 selected audio and MIDI items at the edit cursor. Items outside the cursor stay

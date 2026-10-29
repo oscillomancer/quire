@@ -486,12 +486,23 @@ curve is editable and saved, but audio application remains pending.
 
 **Menus.** A right-click on an item opens its menu: **Cut**, **Copy**,
 **Paste** (at the pointer's beat on the grid and its channel), **Duplicate**
-(after the selection), **Delete**, **Merge MIDI items** (several MIDI items
-on one channel; with one item selected, **Merge takes** layers its MIDI
-takes; `midi.merge`, greyed otherwise), **Split item at cursor** (S),
+(after the selection), **Delete**, **Consolidate items**, **Heal splits**,
+and, for one multi-take MIDI item, **Merge takes** (layers its MIDI takes via
+`midi.merge`), **Split item at cursor** (S),
 **Split item at prior zero crossing**, then the timebases and the take
 entries below. A right-click on empty lane space opens a menu with Paste.
 The keys each action has are shown beside it.
+Consolidate items and Heal splits sit beside each other and use the engine's
+shared read-only selection planners for enablement. Consolidate captures active
+audio with item/take processing and take FX into new media, while track processing
+stays live; MIDI and audio partition separately per track. Its background job
+reports through the existing status line and publishes all results as one undo
+step. Heal is a pure edit for compatible consecutive audio pieces, including the
+narrow unchanged Slice-at-hits overlap case; it keeps the surviving items selected.
+Both entries are disabled for invalid/incomplete/locked/frozen selections. A sole
+MIDI partition has nothing to consolidate; use Merge takes for its alternatives.
+`ui.item.consolidate` and `ui.item.heal` are key-bindable actions. Engine details
+and exact heal/FX/envelope eligibility are in engine.md; no new dialog or setting.
 Both split entries use the project/edit cursor, independent of the menu position,
 and skip selected items whose interior does not contain it. The ordinary entry
 and S share the same one-transaction selection edit. The zero-crossing entry
