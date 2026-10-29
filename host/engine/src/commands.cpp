@@ -18,6 +18,7 @@
 #include "supple/audio/audio_file.h"
 #include "supple/base/sha256.h"
 #include "supple/engine/app.h"
+#include "supple/model/groups.h"
 #include "supple/model/schemas.h"
 #include "supple/notation/notation.h"
 #include "supple/params/params.h"
@@ -25,6 +26,7 @@
 namespace supple::engine {
 
 void registerExtraCommands(cmd::Registry& registry);
+void registerGroupCommands(cmd::Registry& registry);
 void registerMidiCommands(cmd::Registry& registry);
 void registerChainCommands(cmd::Registry& registry);
 void registerTakeCommands(cmd::Registry& registry);
@@ -372,7 +374,7 @@ struct EnvPointArg {
     std::optional<double> tension;
 };
 struct EnvAddArgs {
-    std::optional<std::string> track, fx, route, take;
+    std::optional<std::string> track, fx, route, take, group;
     std::string param;
     std::optional<std::vector<EnvPointArg>> points;
 };
@@ -607,6 +609,7 @@ struct TrackRef {
 };
 struct TrackSetArgs {
     std::string track;
+    bool bypassGroups = false;
     std::optional<std::string> name, color, notes;
     std::optional<double> volumeDb, pan;
     std::optional<model::StripType> type;
@@ -630,6 +633,12 @@ struct TrackEntry {
     bool mute = false;
     std::string solo;
     std::vector<std::string> fx, items;
+    std::vector<Id> groups, vcas;
+    double requestedEffective = 0, effective = 0, at = 0;
+    bool effectiveMute = false, soloSilenced = false;
+};
+struct TrackListArgs {
+    std::optional<double> at;
 };
 struct TrackList {
     std::vector<TrackEntry> tracks;
@@ -652,9 +661,11 @@ struct ItemAddResult {
     std::optional<std::vector<std::string>> warnings;
 };
 struct ItemRef {
+    bool bypassGroups = false;
     std::string item;
 };
 struct ItemMoveArgs {
+    bool bypassGroups = false;
     std::string item;
     std::optional<double> position;
     std::optional<std::int64_t> bar;
@@ -905,6 +916,7 @@ Result<std::pair<model::MidiSource, double>> compileNotation(const model::Sessio
 
 void registerEngineCommands(cmd::Registry& registry) {
     registerExtraCommands(registry);
+    registerGroupCommands(registry);
     registerMidiCommands(registry);
     registerChainCommands(registry);
     registerTakeCommands(registry);
@@ -1510,6 +1522,11 @@ void registerEngineCommands(cmd::Registry& registry) {
                     p.children.erase(std::remove(p.children.begin(), p.children.end(), id),
                                      p.children.end());
                 });
+            for (const auto& g : s.groups)
+                if (std::find(g.value->members.begin(), g.value->members.end(), id) !=
+                    g.value->members.end())
+                    t.modify<model::TrackGroup>(
+                        g.id, [&](auto& group) { std::erase(group.members, id); });
             t.remove<model::Track>(id);
             return Empty{};
         };
@@ -1536,6 +1553,8 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.tags = {"track", "mixer"};
         c.args =
             schema::object<TrackSetArgs>("track_set_args")
+                .field("bypass_groups", &TrackSetArgs::bypassGroups, schema::boolean())
+                .defaultValue(false)
                 .field("track", &TrackSetArgs::track, idArg("tr", "Track"))
                 .field("type", &TrackSetArgs::type, model::stripTypeSchema())
                 .field("name", &TrackSetArgs::name, schema::string())
@@ -1730,6 +1749,50 @@ void registerEngineCommands(cmd::Registry& registry) {
                     });
                 }
             }
+            // Expand each linked attribute once from the pre-edit snapshot. Selection
+            // editing uses bypassed explicit targets, so overlaps never multiply a drag.
+            if (!a.bypassGroups) {
+                const auto& source = *s.tracks.find(*id);
+                auto spread = [&](std::string_view attribute, auto change) {
+                    for (Id member : model::linkedTracks(s, *id, attribute)) {
+                        if (member == *id) continue;
+                        const auto& old = *s.tracks.find(member);
+                        if ((attribute == "armed" || attribute == "monitor") &&
+                            old.type != model::StripType::Channel)
+                            continue;
+                        app.txn().modify<model::Track>(member, [&](auto& tr) { change(tr, old); });
+                        const auto tr = *app.view().tracks.find(member);
+                        if (attribute == "volume")
+                            app.recordAutomation(member, "volume", tr.volumeDb);
+                        if (attribute == "pan") app.recordAutomation(member, "pan", tr.pan);
+                        if (attribute == "mute")
+                            app.recordAutomation(member, "mute", tr.mute ? 1 : 0);
+                    }
+                };
+                if (a.volumeDb)
+                    spread("volume", [&](auto& tr, const auto& old) {
+                        if (*a.volumeDb <= model::kSilenceDb)
+                            tr.volumeDb = model::kSilenceDb;
+                        else if (source.volumeDb > model::kSilenceDb &&
+                                 old.volumeDb > model::kSilenceDb)
+                            tr.volumeDb = std::clamp(old.volumeDb + *a.volumeDb - source.volumeDb,
+                                                     model::kSilenceDb, 12.0);
+                    });
+                if (a.pan)
+                    spread("pan", [&](auto& tr, const auto& old) {
+                        tr.pan = std::clamp(old.pan + *a.pan - source.pan, -100.0, 100.0);
+                    });
+                if (a.mute) spread("mute", [&](auto& tr, const auto&) { tr.mute = *a.mute; });
+                if (a.solo) {
+                    const auto value = app.view().tracks.find(*id)->solo;
+                    spread("solo", [&](auto& tr, const auto&) { tr.solo = value; });
+                }
+                if (a.armed)
+                    spread("armed", [&](auto& tr, const auto&) { tr.record.armed = *a.armed; });
+                if (a.monitor)
+                    spread("monitor",
+                           [&](auto& tr, const auto&) { tr.record.monitor = *a.monitor; });
+            }
             // Touch/latch/write envelopes record the change while the transport plays.
             if (a.volumeDb) app.recordAutomation(*id, "volume", *a.volumeDb);
             if (a.pan) app.recordAutomation(*id, "pan", *a.pan);
@@ -1757,13 +1820,15 @@ void registerEngineCommands(cmd::Registry& registry) {
     }
     // ---------------------------------------------------------------- track.list
     {
-        Command<NoArgs, TrackList> c;
+        Command<TrackListArgs, TrackList> c;
         c.name = "track.list";
         c.kind = Kind::Query;
         c.exposure = cmd::Exposure::McpTool;
         c.summary = "List tracks in tree order with their level, mute/solo, fx and items.";
         c.tags = {"track"};
-        c.args = schema::object<NoArgs>("no_args").build();
+        c.args = schema::object<TrackListArgs>("track_list_args")
+                     .field("at", &TrackListArgs::at, schema::number().min(0))
+                     .build();
         auto entry = schema::object<TrackEntry>("track_entry")
                          .field("id", &TrackEntry::id, schema::string())
                          .field("name", &TrackEntry::name, schema::string())
@@ -1775,12 +1840,20 @@ void registerEngineCommands(cmd::Registry& registry) {
                          .field("solo", &TrackEntry::solo, schema::string())
                          .field("fx", &TrackEntry::fx, schema::arrayOf(schema::string()))
                          .field("items", &TrackEntry::items, schema::arrayOf(schema::string()))
+                         .field("groups", &TrackEntry::groups, schema::arrayOf(model::idSchema()))
+                         .field("vcas", &TrackEntry::vcas, schema::arrayOf(model::idSchema()))
+                         .field("requested_effective_volume_db", &TrackEntry::requestedEffective,
+                                schema::number())
+                         .field("effective_volume_db", &TrackEntry::effective, schema::number())
+                         .field("at", &TrackEntry::at, schema::number())
+                         .field("effective_mute", &TrackEntry::effectiveMute, schema::boolean())
+                         .field("solo_silenced", &TrackEntry::soloSilenced, schema::boolean())
                          .build();
         c.result = schema::object<TrackList>("track_list")
                        .field("tracks", &TrackList::tracks, schema::arrayOf(entry))
                        .build();
         c.examples = {{"List", obj("{}"), obj(R"({"tracks": "<any>"})"), "song"}};
-        c.run = [](const NoArgs&, Context& ctx) -> Result<TrackList> {
+        c.run = [](const TrackListArgs& args, Context& ctx) -> Result<TrackList> {
             const model::Session s = A(ctx).view();
             TrackList out;
             static constexpr const char* kSolo[] = {"off", "on", "in_place", "defeat"};
@@ -1793,6 +1866,14 @@ void registerEngineCommands(cmd::Registry& registry) {
                 e.parent = t.parent ? t.parent->str() : "";
                 e.depth = depth;
                 e.volumeDb = t.volumeDb;
+                e.at = args.at.value_or(A(ctx).engine() ? A(ctx).engine()->transport().seconds : 0);
+                e.groups = model::trackGroups(s, id);
+                e.vcas = model::vcaControllers(s, id);
+                const auto level = model::effectiveTrackLevel(s, id, e.at);
+                e.requestedEffective = level.requestedDb;
+                e.effective = level.appliedDb;
+                e.effectiveMute = level.mute;
+                e.soloSilenced = level.soloSilenced;
                 e.mute = t.mute;
                 e.solo = kSolo[static_cast<int>(t.solo)];
                 for (Id f : t.chain) e.fx.push_back(f.str());
@@ -1954,6 +2035,8 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.summary = "Remove an item with its takes (unpooled sources go too).";
         c.tags = {"item"};
         c.args = schema::object<ItemRef>("item_ref")
+                     .field("bypass_groups", &ItemRef::bypassGroups, schema::boolean())
+                     .defaultValue(false)
                      .field("item", &ItemRef::item, idArg("it", "Item"))
                      .build();
         c.result = emptySchema();
@@ -1979,6 +2062,8 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.summary = "Move an item in time (position in beats or bar) and/or to another track.";
         c.tags = {"item"};
         c.args = schema::object<ItemMoveArgs>("item_move_args")
+                     .field("bypass_groups", &ItemMoveArgs::bypassGroups, schema::boolean())
+                     .defaultValue(false)
                      .field("item", &ItemMoveArgs::item, idArg("it", "Item"))
                      .field("position", &ItemMoveArgs::position, schema::number().min(0))
                      .field("bar", &ItemMoveArgs::bar,
@@ -3138,7 +3223,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.summary = "Automate a parameter: a track's or route's mixer control, or a plugin's.";
         c.description =
             "Target one of track (param volume|pan|mute; playrate only on tr_0), route "
-            "(volume|pan|mute) or "
+            "(volume|pan|mute), group (VCA volume|mute), or "
             "fx (a semantic key such as \"gain\" or \"filter1.cutoff\", or for other plugins a "
             "CLAP id or parameter name). points: [{beat|bar|seconds, value, shape?, tension?}]; "
             "values in the parameter's unit (dB, %, Hz… — text like \"800 Hz\" works for "
@@ -3154,6 +3239,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.args = schema::object<EnvAddArgs>("env_add_args")
                      .field("track", &EnvAddArgs::track, idArg("tr", "Track"))
                      .field("take", &EnvAddArgs::take, idArg("tk", "Take"))
+                     .field("group", &EnvAddArgs::group, idArg("gr", "VCA group"))
                      .field("fx", &EnvAddArgs::fx, idArg("fx", "Plugin instance"))
                      .field("route", &EnvAddArgs::route, idArg("sd", "Route"))
                      .field("param", &EnvAddArgs::param, schema::string())
@@ -3179,9 +3265,10 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.run = [](const EnvAddArgs& a, Context& ctx) -> Result<EnvAddResult> {
             EngineApp& app = A(ctx);
             const model::Session s = app.view();
-            if (a.track.has_value() + a.fx.has_value() + a.route.has_value() + a.take.has_value() !=
+            if (a.track.has_value() + a.fx.has_value() + a.route.has_value() + a.take.has_value() +
+                    a.group.has_value() !=
                 1)
-                return Error("env.target", "give one of track, fx, route or take", "",
+                return Error("env.target", "give one of track, fx, route, take or group", "",
                              "e.g. {\"fx\": \"fx_1\", \"param\": \"filter1.cutoff\"}");
             model::Envelope env;
             if (a.take) {
@@ -3200,6 +3287,13 @@ void registerEngineCommands(cmd::Registry& registry) {
                                      "fx.add {take, plugin: an instrument} first, or automate "
                                      "the track");
                 }
+                env.target.object = *id;
+            } else if (a.group) {
+                auto id = existing<model::TrackGroup>(s, *a.group, "/group");
+                if (!id) return id.error();
+                if (!s.groups.find(*id)->vca || (a.param != "volume" && a.param != "mute"))
+                    return Error("env.target", "VCA target must be volume or mute", "/group",
+                                 "add a VCA with vca.add and choose volume or mute");
                 env.target.object = *id;
             } else if (a.track) {
                 auto id = existing<model::Track>(s, *a.track, "/track");

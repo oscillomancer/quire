@@ -207,6 +207,7 @@ struct TimeResult {
 };
 
 struct ItemSetArgs {
+    bool bypassGroups = false;
     std::string item;
     std::optional<double> position, length, gainDb, fadeIn, fadeOut;
     std::optional<model::FadeShape> fadeInShape, fadeOutShape;
@@ -215,7 +216,12 @@ struct ItemSetArgs {
     std::optional<std::string> name, color;
     std::optional<model::ItemTimebase> timebase;
 };
+struct ItemDuplicateResult {
+    std::string id;
+    std::vector<std::string> linked;
+};
 struct ItemDuplicateArgs {
+    bool bypassGroups = false;
     std::string item;
     std::optional<double> to;
 };
@@ -231,11 +237,13 @@ struct ItemPasteResult {
     std::vector<std::string> items;
 };
 struct ItemSplitArgs {
+    bool bypassGroups = false;
     std::string item;
     double at = 0;
 };
 struct SplitResult {
     std::string left, right;
+    std::vector<std::string> linkedLeft, linkedRight;
 };
 struct TakeActivateArgs {
     std::string item;
@@ -1287,6 +1295,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             "length stays in seconds) or track (inherit); the item keeps its place now.";
         c.tags = {"item"};
         c.args = schema::object<ItemSetArgs>("item_set_args")
+                     .field("bypass_groups", &ItemSetArgs::bypassGroups, schema::boolean())
+                     .defaultValue(false)
                      .field("item", &ItemSetArgs::item, idSchema("it"))
                      .field("position", &ItemSetArgs::position, schema::number().min(0))
                      .field("bar", &ItemSetArgs::bar,
@@ -1362,7 +1372,7 @@ void registerExtraCommands(cmd::Registry& registry) {
         addChecked(registry, std::move(c));
     }
     {
-        Command<ItemDuplicateArgs, IdResult> c;
+        Command<ItemDuplicateArgs, ItemDuplicateResult> c;
         c.name = "item.duplicate";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
@@ -1370,12 +1380,20 @@ void registerExtraCommands(cmd::Registry& registry) {
             "Copy an item and its takes to a new beat position (default: immediately after).";
         c.tags = {"item"};
         c.args = schema::object<ItemDuplicateArgs>("item_duplicate_args")
+                     .field("bypass_groups", &ItemDuplicateArgs::bypassGroups, schema::boolean())
+                     .defaultValue(false)
                      .field("item", &ItemDuplicateArgs::item, idSchema("it"))
                      .field("to", &ItemDuplicateArgs::to, schema::number().min(0))
                      .build();
-        c.result = idResultSchema();
+        c.result =
+            schema::object<ItemDuplicateResult>("item_duplicate_result")
+                .field("id", &ItemDuplicateResult::id, schema::string())
+                .field("linked", &ItemDuplicateResult::linked, schema::arrayOf(schema::string()))
+                .defaultValue(std::vector<std::string>{})
+                .omitIfDefault()
+                .build();
         c.examples = {{"Repeat", j(R"({"item":"it_1"})"), j(R"({"id":"it_2"})"), "song_with_item"}};
-        c.run = [](const ItemDuplicateArgs& a, Context& ctx) -> Result<IdResult> {
+        c.run = [](const ItemDuplicateArgs& a, Context& ctx) -> Result<ItemDuplicateResult> {
             const auto s = app(ctx).view();
             auto id = require<model::Item>(s, a.item, "/item");
             if (!id) return std::move(id).error();
@@ -1395,7 +1413,7 @@ void registerExtraCommands(cmd::Registry& registry) {
                 copy.takes.push_back(fresh);
                 if (s.items.find(*id)->activeTake == oldId) copy.activeTake = fresh;
             }
-            return IdResult{txn.create(std::move(copy)).str()};
+            return ItemDuplicateResult{txn.create(std::move(copy)).str(), {}};
         };
         addChecked(registry, std::move(c));
     }
@@ -1518,13 +1536,22 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.summary = "Split an audio or MIDI item at a beat, keeping take source positions aligned.";
         c.tags = {"item"};
         c.args = schema::object<ItemSplitArgs>("item_split_args")
+                     .field("bypass_groups", &ItemSplitArgs::bypassGroups, schema::boolean())
+                     .defaultValue(false)
                      .field("item", &ItemSplitArgs::item, idSchema("it"))
                      .field("at", &ItemSplitArgs::at, schema::number().min(0))
                      .build();
-        c.result = schema::object<SplitResult>("item_split_result")
-                       .field("left", &SplitResult::left, schema::string())
-                       .field("right", &SplitResult::right, schema::string())
-                       .build();
+        c.result =
+            schema::object<SplitResult>("item_split_result")
+                .field("left", &SplitResult::left, schema::string())
+                .field("right", &SplitResult::right, schema::string())
+                .field("linked_left", &SplitResult::linkedLeft, schema::arrayOf(schema::string()))
+                .defaultValue(std::vector<std::string>{})
+                .omitIfDefault()
+                .field("linked_right", &SplitResult::linkedRight, schema::arrayOf(schema::string()))
+                .defaultValue(std::vector<std::string>{})
+                .omitIfDefault()
+                .build();
         c.examples = {{"Split halfway", j(R"({"item":"it_1","at":2})"),
                        j(R"({"left":"it_1","right":"it_2"})"), "song_with_item"}};
         c.run = [](const ItemSplitArgs& a, Context& ctx) -> Result<SplitResult> {
@@ -1591,7 +1618,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             }
             txn.put<model::Item>(*id, std::move(left));
             Id fresh = txn.create(std::move(right));
-            return SplitResult{id->str(), fresh.str()};
+            return SplitResult{id->str(), fresh.str(), {}, {}};
         };
         addChecked(registry, std::move(c));
     }

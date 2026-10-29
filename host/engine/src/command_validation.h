@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "supple/engine/app.h"
+#include "supple/model/groups.h"
 #include "supple/model/numeric.h"
 
 namespace supple::engine {
@@ -38,10 +39,85 @@ void addChecked(cmd::Registry& registry, cmd::Command<Args, Output> command) {
         // Shared, not copied: commands are copied with their closures, and a
         // schema copy is a deep copy of its JSON and field closures.
         auto args = std::make_shared<const decltype(command.args)>(command.args);
-        command.run = [run = std::move(run), args](const Args& a,
-                                                   cmd::Context& ctx) -> Result<Output> {
+        const auto commandName = command.name;
+        command.run = [run = std::move(run), args, commandName](
+                          const Args& a, cmd::Context& ctx) -> Result<Output> {
+            auto& owner = ctx.service<EngineApp>();
+            const auto before = owner.view();
+            std::vector<model::Id> linked;
+            if constexpr (requires {
+                              a.item;
+                              a.bypassGroups;
+                          }) {
+                if (!a.bypassGroups &&
+                    (commandName == "item.set" || commandName == "item.move" ||
+                     commandName == "item.split" || commandName == "item.remove" ||
+                     commandName == "item.duplicate")) {
+                    if (auto id = model::Id::parse(a.item); id && before.items.contains(*id)) {
+                        linked = model::linkedItems(before, *id);
+                        std::erase(linked, *id);
+                        if constexpr (requires { a.track; })
+                            if (!linked.empty() && a.track &&
+                                *a.track != before.items.find(*id)->track.str())
+                                return Error("group.edit_destination",
+                                             "linked items require explicit destination mapping",
+                                             "/track",
+                                             "move on the same track or set bypass_groups true");
+                        if (commandName == "item.set") {
+                            const auto fields = args->encode(a);
+                            if (!(fields.find("position") || fields.find("bar") ||
+                                  fields.find("length") || fields.find("mute") ||
+                                  fields.find("fade_in") || fields.find("fade_out") ||
+                                  fields.find("fade_in_shape") || fields.find("fade_out_shape")))
+                                linked.clear();
+                        }
+                        if (commandName != "item.duplicate")
+                            for (auto peer : linked) SUPPLE_TRY(checkUnlocked(before, peer));
+                    }
+                }
+            }
             auto result = run(a, ctx);
             if (!result) return result.error();
+            if constexpr (requires {
+                              a.item;
+                              a.bypassGroups;
+                          }) {
+                auto fields = args->encode(a);
+                // An explicit same-track destination describes only the source;
+                // each matching item keeps its own track.
+                if (commandName == "item.move") fields.asObject().erase("track");
+                if (commandName == "item.set") {
+                    // Presentation/content fields belong to the explicit item only.
+                    for (const char* key :
+                         {"name", "color", "locked", "gain_db", "loop", "timebase"})
+                        fields.asObject().erase(key);
+                    const bool edits =
+                        fields.find("position") || fields.find("bar") || fields.find("length") ||
+                        fields.find("mute") || fields.find("fade_in") || fields.find("fade_out") ||
+                        fields.find("fade_in_shape") || fields.find("fade_out_shape");
+                    if (!edits) linked.clear();
+                }
+                for (auto peer : linked) {
+                    fields["item"] = peer.str();
+                    fields["bypass_groups"] = true;
+                    auto each = args->decode(fields);
+                    if (!each) return each.error();
+                    auto changed = run(*each, ctx);
+                    if (!changed) return changed.error();
+                    if constexpr (requires {
+                                      result->linkedLeft;
+                                      result->linkedRight;
+                                  }) {
+                        result->linkedLeft.push_back(changed->left);
+                        result->linkedRight.push_back(changed->right);
+                    }
+                    if constexpr (requires {
+                                      result->linked;
+                                      changed->id;
+                                  })
+                        result->linked.push_back(changed->id);
+                }
+            }
             auto& app = ctx.service<EngineApp>();
             auto session = app.view();
             if (auto* engine = app.engine();
@@ -58,6 +134,7 @@ void addChecked(cmd::Registry& registry, cmd::Command<Args, Output> command) {
                 if (args->encode(a).find(field)) error.path = "/" + field;
                 return error;
             }
+            SUPPLE_TRY(model::validateGroups(session));
             return result;
         };
     }

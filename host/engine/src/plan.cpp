@@ -3,6 +3,7 @@
 #include "plan.h"
 #include "live_workers.h"
 #include "supple/model/fade_shape.h"
+#include "supple/model/groups.h"
 #include "supple/model/source_mapping.h"
 
 #include <algorithm>
@@ -503,6 +504,9 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
         for (const auto& e : s.tracks)
             if (e.value->solo == model::Solo::On || e.value->solo == model::Solo::InPlace)
                 soloed.insert(e.id);
+        for (const auto& e : s.tracks)
+            for (Id controller : model::vcaControllers(s, e.id))
+                if (s.groups.find(controller)->vca->solo) soloed.insert(e.id);
         if (!soloed.empty()) {
             std::map<Id, std::vector<Id>> down, up;  // signal flow
             for (const auto& e : s.tracks)
@@ -591,6 +595,8 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
                                              : nullptr;
                 }
             if (!slot) continue;  // an inactive take's, or not one the engine plays
+        } else if (o.kind == Kind::Group) {
+            continue;  // compiled below as per-consumer VCA controls
         } else if (o.kind == Kind::Fx) {
             continue;  // resolved after servicing/activation in prepare()
         }
@@ -661,6 +667,39 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
                     }
         }
     }
+    // Compile each control once, then copy its curves to independent consumers.
+    std::map<Id, VcaControl> controls;
+    for (const auto& e : s.groups) {
+        if (!e.value->vca) continue;
+        VcaControl v;
+        v.volumeDb = e.value->vca->volumeDb;
+        v.mute = e.value->vca->mute;
+        for (const auto& lane : s.envelopes) {
+            if (lane.value->target.object != e.id || !lane.value->active) continue;
+            const auto points = model::effectivePoints(s, lane.id);
+            if (points.empty()) continue;
+            Automation& curve = lane.value->target.param == "volume" ? v.volume : v.gate;
+            curve.points.clear();
+            for (const auto& pt : points) {
+                const double sec = lane.value->timebase == model::Timebase::Time
+                                       ? pt.pos
+                                       : s.timeMap->secondsAt(pt.pos);
+                curve.points.push_back(
+                    {time::samplesAt(sec, p.rate) - origin, pt.value, pt.shape, pt.tension});
+            }
+        }
+        controls.emplace(e.id, std::move(v));
+    }
+    std::size_t controlPoints = 0;
+    for (Node& n : p.nodes)
+        for (Id id : model::vcaControllers(s, n.id)) {
+            const auto& v = controls.at(id);
+            controlPoints += v.volume.points.size() + v.gate.points.size();
+            if (controlPoints > 1000000)
+                return Error("automation.budget", "VCA consumers exceed one million curve points",
+                             "/groups", "reduce VCA automation points or membership");
+            n.vcas.values.push_back(v);
+        }
     for (Edge& e : p.edges) {
         if (e.stage >= 0) {
             e.stripPan = p.nodes[e.from].autoPan;
@@ -673,6 +712,14 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
         if (!e.encode) continue;
         Node& source = p.nodes[e.from];
         source.out.push_back(static_cast<std::size_t>(&e - p.edges.data()));
+        if (e.tap == model::Tap::PostFader) {
+            for (const auto& v : source.vcas.values)
+                controlPoints += v.volume.points.size() + v.gate.points.size();
+            if (controlPoints > 1000000)
+                return Error("automation.budget", "VCA consumers exceed one million curve points",
+                             "/groups", "reduce VCA automation points or sends");
+            e.vcas = source.vcas;
+        }
         e.stripVolume = source.autoVolume;
         e.stripPan = source.autoPan;
         e.stripMute = source.autoMute;
@@ -826,6 +873,7 @@ Status prepare(Plan& p, const Session& s) {
         n.preFx.init(block);
         n.preFader.init(block);
         n.post.init(block);
+        if (!n.vcas.empty()) n.auxPostGain.resize(block);
         if (n.postKeyed) n.postKey.init(block);
     }
     // Parameter topology may have changed during main-thread servicing or
@@ -942,6 +990,7 @@ Status prepare(Plan& p, const Session& s) {
     for (Node& n : p.nodes) {
         const std::int64_t at = n.timelineShift + n.latChain;
         for (Automation* a : {&n.autoVolume, &n.autoPan, &n.autoMute}) a->shift(at);
+        n.vcas.shift(at);
         for (std::size_t ei : n.in) {
             Edge& e = p.edges[ei];
             auto shift = e.encode
@@ -951,6 +1000,7 @@ Status prepare(Plan& p, const Session& s) {
             for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute, &e.stripVolume,
                                   &e.stripPan, &e.stripMute})
                 a->shift(shift);
+            e.vcas.shift(shift);
         }
         // A plugin's parameters: its input is the track's, delayed by the
         // stages before it.
@@ -1259,6 +1309,7 @@ Status prepare(Plan& p, const Session& s) {
             auto* timeline = p.timelines[node.live ? 1 : 0].get();
             for (Automation* lane : {&node.autoVolume, &node.autoPan, &node.autoMute})
                 lane->timeline = timeline;
+            node.vcas.timeline(timeline);
             forEachStage(node, [&](Stage& st) {
                 st.rateLive = node.live;
                 for (auto& lane : st.lanes) lane.curve.timeline = timeline;
@@ -1279,6 +1330,7 @@ Status prepare(Plan& p, const Session& s) {
             for (Automation* lane : {&edge.autoVolume, &edge.autoPan, &edge.autoMute,
                                      &edge.stripVolume, &edge.stripPan, &edge.stripMute})
                 lane->timeline = timeline;
+            edge.vcas.timeline(timeline);
         }
     }
     return okStatus();
@@ -2193,9 +2245,12 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
             } else {
                 const Stereo& tap = e.tap == model::Tap::PreFx ? src.preFx : src.preFader;
                 from = link.from == 0 ? tap.l.data() : tap.r.data();
-                if (post) g *= src.mute || src.soloSilenced ? 0.0 : dbToGain(src.volumeDb);
+                if (post && src.vcas.empty())
+                    g *= src.mute || src.soloSilenced ? 0.0 : dbToGain(src.volumeDb);
             }
             std::copy_n(from, n, e.auxTmp.begin());
+            if (post && link.from < 2 && !src.vcas.empty())
+                for (std::uint32_t i = 0; i < n; ++i) e.auxTmp[i] *= src.auxPostGain[i];
             link.delay.process(e.auxTmp.data(), n);
             float* to = node.channel(link.to);
             const auto gain = static_cast<float>(g);
@@ -2323,24 +2378,29 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
     // Fader controls and mute act before the channel encode; masters balance decoded audio.
     for (std::uint32_t i = 0; i < n; ++i) {
         const auto at = pos + i;
-        const double db = node.autoVolume.active() ? node.autoVolume.at(at) : node.volumeDb;
+        double db = node.autoVolume.active() ? node.autoVolume.at(at) : node.volumeDb;
         const double pan = node.autoPan.active() ? node.autoPan.at(at) : node.pan;
-        const bool muted =
-            node.soloSilenced || (node.autoMute.active() ? node.autoMute.at(at) >= .5 : node.mute);
-        const double g = node.autoVolume.active()
+        bool ownMuted = node.autoMute.active() ? node.autoMute.at(at) >= .5 : node.mute;
+        node.vcas.evaluate(at, db, ownMuted);
+        if (!node.vcas.empty()) db = std::min(db, 20 * std::log10(4.0));
+        const bool muted = node.soloSilenced || ownMuted;
+        const double g = node.autoVolume.active() || !node.vcas.empty()
                              ? (node.master               ? dbToGain(db)
                                 : db <= model::kSilenceDb ? 0.0
                                                           : console9::faderGain(db))
                              : node.staticGain;
         node.fader.set(g, node.autoPan.active() ? console9::nativePan(pan) : node.staticPan, muted,
-                       node.autoVolume.active() || node.autoPan.active(), p.smoothFrames);
+                       node.autoVolume.active() || node.vcas.automated() || node.autoPan.active(),
+                       p.smoothFrames);
         const double gain = node.fader.gain.next() * node.fader.gate.next();
         const double nativePan = node.fader.pan.next();
+        if (!node.vcas.empty()) node.auxPostGain[i] = static_cast<float>(gain);
         double keyGain = 0, keyPan = nativePan;
         if (node.postKeyed) {
-            node.keyFader.set(g, node.autoPan.active() ? console9::nativePan(pan) : node.staticPan,
-                              node.autoMute.active() ? node.autoMute.at(at) >= .5 : node.mute,
-                              node.autoVolume.active() || node.autoPan.active(), p.smoothFrames);
+            node.keyFader.set(
+                g, node.autoPan.active() ? console9::nativePan(pan) : node.staticPan, ownMuted,
+                node.autoVolume.active() || node.vcas.automated() || node.autoPan.active(),
+                p.smoothFrames);
             keyGain = node.keyFader.gain.next() * node.keyFader.gate.next();
             keyPan = node.keyFader.pan.next();
         }
@@ -2393,30 +2453,36 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
         for (std::uint32_t i = 0; i < n; ++i) {
             const auto at = pos + i;
             const bool post = e.tap == model::Tap::PostFader;
-            const double sourceDb = e.stripVolume.active() ? e.stripVolume.at(at) : node.volumeDb;
+            double sourceDb = e.stripVolume.active() ? e.stripVolume.at(at) : node.volumeDb;
+            bool sourceMute = e.stripMute.active() ? e.stripMute.at(at) >= .5 : node.mute;
+            if (post) {
+                e.vcas.evaluate(at, sourceDb, sourceMute);
+                // A post-fader send starts from the member's applied level;
+                // attenuation cannot recover gain beyond the member's ceiling.
+                if (!e.vcas.empty()) sourceDb = std::min(sourceDb, 20 * std::log10(4.0));
+            }
             const double routeDb = e.autoVolume.active() ? e.autoVolume.at(at) : e.volumeDb;
             const double sourcePan = e.stripPan.active() ? e.stripPan.at(at) : node.pan;
             const double pan = e.autoPan.active() ? e.autoPan.at(at)
                                : e.followPan      ? sourcePan
                                                   : e.pan;
-            const bool muted =
-                node.soloSilenced ||
-                (post && (e.stripMute.active() ? e.stripMute.at(at) >= .5 : node.mute)) ||
-                (e.autoMute.active() ? e.autoMute.at(at) >= .5 : e.muted);
+            const bool muted = node.soloSilenced || (post && sourceMute) ||
+                               (e.autoMute.active() ? e.autoMute.at(at) >= .5 : e.muted);
             // -inf plus a send boost remains -inf.
             const double db =
                 (routeDb <= model::kSilenceDb || (post && sourceDb <= model::kSilenceDb))
                     ? model::kSilenceDb
                     : routeDb + (post ? sourceDb : 0);
-            const double g = e.autoVolume.active() || (post && e.stripVolume.active())
-                                 ? db <= model::kSilenceDb ? 0.0 : console9::faderGain(db)
-                                 : e.staticGain;
+            const double g =
+                e.autoVolume.active() || (post && (e.stripVolume.active() || !e.vcas.empty()))
+                    ? db <= model::kSilenceDb ? 0.0 : console9::faderGain(db)
+                    : e.staticGain;
             const double nativePan = e.autoPan.active() || (e.followPan && e.stripPan.active())
                                          ? console9::nativePan(pan)
                                          : e.staticPan;
             e.fader.set(g, nativePan, muted,
                         e.autoVolume.active() || e.autoPan.active() ||
-                            (post && e.stripVolume.active()) ||
+                            (post && (e.stripVolume.active() || e.vcas.automated())) ||
                             (e.followPan && e.stripPan.active()),
                         p.smoothFrames);
             float l = input.l[i], r = input.r[i];
@@ -2565,9 +2631,11 @@ void locateClass(Plan& p, std::int64_t pos, bool live, bool restartConsole) SUPP
             for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute, &e.stripVolume,
                                   &e.stripPan, &e.stripMute})
                 a->cursor = 0;
+            e.vcas.reset();
         }
         if (restartConsole && !n.releaseHeld) n.held.fill(0);
         for (Automation* a : {&n.autoVolume, &n.autoPan, &n.autoMute}) a->cursor = 0;
+        n.vcas.reset();
         for (Stage& st : n.chain) {
             if (restartConsole && !n.releaseHeld) {
                 st.voices.clear();
@@ -2623,9 +2691,11 @@ void locate(Plan& p, std::int64_t pos, bool restartConsole) SUPPLE_RT {
             for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute, &e.stripVolume,
                                   &e.stripPan, &e.stripMute})
                 a->cursor = 0;
+            e.vcas.reset();
         }
         if (restartConsole && !n.releaseHeld) n.held.fill(0);
         for (Automation* a : {&n.autoVolume, &n.autoPan, &n.autoMute}) a->cursor = 0;
+        n.vcas.reset();
         for (Stage& st : n.chain) {
             if (restartConsole && !n.releaseHeld) {
                 st.voices.clear();
@@ -2662,9 +2732,11 @@ void wrapTo(Plan& p, std::int64_t pos, int liveClass) SUPPLE_RT {
             for (Automation* a : {&e.autoVolume, &e.autoPan, &e.autoMute, &e.stripVolume,
                                   &e.stripPan, &e.stripMute})
                 a->cursor = 0;
+            e.vcas.reset();
         }
         if (!p.rateEnabled) n.releaseHeld = true;
         for (Automation* a : {&n.autoVolume, &n.autoPan, &n.autoMute}) a->cursor = 0;
+        n.vcas.reset();
         for (Stage& st : n.chain)
             for (ParamLane& ln : st.lanes) {
                 ln.curve.cursor = 0;

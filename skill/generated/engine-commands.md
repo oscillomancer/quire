@@ -3331,7 +3331,7 @@ Result:
 
 Automate a parameter: a track's or route's mixer control, or a plugin's.
 
-Target one of track (param volume|pan|mute; playrate only on tr_0), route (volume|pan|mute) or fx (a semantic key such as "gain" or "filter1.cutoff", or for other plugins a CLAP id or parameter name). points: [{beat|bar|seconds, value, shape?, tension?}]; values in the parameter's unit (dB, %, Hz… — text like "800 Hz" works for plugins); shapes linear, square, slow, fast_start, fast_end, bezier. Plugin values move along the parameter's curve (a log cutoff sweeps evenly in pitch). take (param volume|pan|mute): a take envelope, its points in beats from the item's start (it moves with the item); it shapes the take after its take FX (a MIDI take needs an instrument in its take FX). Master playrate points are finite numeric ratios 0.25..4.0; an active nonempty master curve replaces the saved scalar during playback and rendering. Audio sources convert before take FX/live mixing; MIDI and automation follow the same timeline clock.
+Target one of track (param volume|pan|mute; playrate only on tr_0), route (volume|pan|mute), group (VCA volume|mute), or fx (a semantic key such as "gain" or "filter1.cutoff", or for other plugins a CLAP id or parameter name). points: [{beat|bar|seconds, value, shape?, tension?}]; values in the parameter's unit (dB, %, Hz… — text like "800 Hz" works for plugins); shapes linear, square, slow, fast_start, fast_end, bezier. Plugin values move along the parameter's curve (a log cutoff sweeps evenly in pitch). take (param volume|pan|mute): a take envelope, its points in beats from the item's start (it moves with the item); it shapes the take after its take FX (a MIDI take needs an instrument in its take FX). Master playrate points are finite numeric ratios 0.25..4.0; an active nonempty master curve replaces the saved scalar during playback and rendering. Audio sources convert before take FX/live mixing; MIDI and automation follow the same timeline clock.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -3341,6 +3341,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | --- | --- | --- | --- | --- | --- |
 | `track` | string |  |  |  | Track id, e.g. "tr_1". |
 | `take` | string |  |  |  | Take id, e.g. "tk_1". |
+| `group` | string |  |  |  | VCA group id, e.g. "gr_1". |
 | `fx` | string |  |  |  | Plugin instance id, e.g. "fx_1". |
 | `route` | string |  |  |  | Route id, e.g. "sd_1". |
 | `param` | string |  |  |  |  |
@@ -5287,6 +5288,573 @@ Result:
 
 ```
 
+## `group.add@1`
+
+Create a named track group with optional links and members.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `name` | string |  |  |  |  |
+| `color` | string |  |  |  |  |
+| `active` | boolean |  |  |  |  |
+| `members` | array |  |  |  |  |
+| `links` | array |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "group_ref",
+  "properties": {
+    "group": {
+      "type": "string",
+      "pattern": "^gr_[0-9]+$"
+    }
+  },
+  "required": ["group"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `group.unknown`: no such group Hint: use group.list
+- `group.member`: invalid track membership Hint: use each existing track once
+- `vca.cycle`: nested VCA control is cyclic Hint: remove the cycle's follower link
+- `vca.limit`: more than 32 controlling VCAs Hint: remove a control link
+
+### Examples
+
+**Group the drums** (`song`)
+
+```json
+{
+  "name": "Drums",
+  "members": ["tr_1"]
+}
+
+```
+
+Result:
+
+```json
+{
+  "group": "gr_1"
+}
+
+```
+
+## `group.describe@1`
+
+Describe a track group's membership, links and VCA ancestry.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `group` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "group_entry",
+  "properties": {
+    "group": {
+      "type": "string",
+      "pattern": "^gr_[0-9]+$"
+    },
+    "state": {
+      "type": "object",
+      "title": "track_group",
+      "properties": {
+        "name": {
+          "type": "string",
+          "default": ""
+        },
+        "color": {
+          "type": "string",
+          "default": ""
+        },
+        "active": {
+          "type": "boolean",
+          "default": true
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{2}_[0-9]+$"
+          },
+          "default": []
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(volume|pan|mute|solo|armed|monitor|selection|edit)$"
+          },
+          "default": ["volume", "mute", "solo"]
+        },
+        "vca": {
+          "type": "object",
+          "title": "vca",
+          "properties": {
+            "volume_db": {
+              "type": "number",
+              "minimum": -150.0,
+              "maximum": 12.0,
+              "default": 0.0
+            },
+            "mute": {
+              "type": "boolean",
+              "default": false
+            },
+            "solo": {
+              "type": "boolean",
+              "default": false
+            },
+            "followers": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z]{2}_[0-9]+$"
+              },
+              "default": []
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "controllers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z]{2}_[0-9]+$"
+      }
+    }
+  },
+  "required": ["group", "state", "controllers"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `group.unknown`: no such group Hint: use group.list
+- `group.member`: invalid track membership Hint: use each existing track once
+- `vca.cycle`: nested VCA control is cyclic Hint: remove the cycle's follower link
+- `vca.limit`: more than 32 controlling VCAs Hint: remove a control link
+
+### Examples
+
+**Describe drums** (`song_with_group`)
+
+```json
+{
+  "group": "gr_1"
+}
+
+```
+
+Result:
+
+```json
+{
+  "group": "gr_1",
+  "state": "<any>",
+  "controllers": []
+}
+
+```
+
+## `group.list@1`
+
+List track groups, linked attributes and optional VCA controls.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "group_list",
+  "properties": {
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "title": "group_entry",
+        "properties": {
+          "group": {
+            "type": "string",
+            "pattern": "^gr_[0-9]+$"
+          },
+          "state": {
+            "type": "object",
+            "title": "track_group",
+            "properties": {
+              "name": {
+                "type": "string",
+                "default": ""
+              },
+              "color": {
+                "type": "string",
+                "default": ""
+              },
+              "active": {
+                "type": "boolean",
+                "default": true
+              },
+              "members": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z]{2}_[0-9]+$"
+                },
+                "default": []
+              },
+              "links": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^(volume|pan|mute|solo|armed|monitor|selection|edit)$"
+                },
+                "default": ["volume", "mute", "solo"]
+              },
+              "vca": {
+                "type": "object",
+                "title": "vca",
+                "properties": {
+                  "volume_db": {
+                    "type": "number",
+                    "minimum": -150.0,
+                    "maximum": 12.0,
+                    "default": 0.0
+                  },
+                  "mute": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "solo": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "followers": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z]{2}_[0-9]+$"
+                    },
+                    "default": []
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "controllers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z]{2}_[0-9]+$"
+            }
+          }
+        },
+        "required": ["group", "state", "controllers"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["groups"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `group.unknown`: no such group Hint: use group.list
+- `group.member`: invalid track membership Hint: use each existing track once
+- `vca.cycle`: nested VCA control is cyclic Hint: remove the cycle's follower link
+- `vca.limit`: more than 32 controlling VCAs Hint: remove a control link
+
+### Examples
+
+**List groups** (`empty`)
+
+```json
+{}
+
+```
+
+Result:
+
+```json
+{
+  "groups": []
+}
+
+```
+
+## `group.members.set@1`
+
+Replace a group's track membership; an empty array clears it.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `group` | string |  |  |  |  |
+| `members` | array |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `group.unknown`: no such group Hint: use group.list
+- `group.member`: invalid track membership Hint: use each existing track once
+- `vca.cycle`: nested VCA control is cyclic Hint: remove the cycle's follower link
+- `vca.limit`: more than 32 controlling VCAs Hint: remove a control link
+
+### Examples
+
+**Assign a track** (`song_with_group`)
+
+```json
+{
+  "group": "gr_1",
+  "members": ["tr_1"]
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+## `group.remove@1`
+
+Remove a track group and its VCA, keeping its tracks.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `group` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `group.unknown`: no such group Hint: use group.list
+- `group.member`: invalid track membership Hint: use each existing track once
+- `vca.cycle`: nested VCA control is cyclic Hint: remove the cycle's follower link
+- `vca.limit`: more than 32 controlling VCAs Hint: remove a control link
+
+### Examples
+
+**Remove** (`song_with_vca`)
+
+```json
+{
+  "group": "gr_1"
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+## `group.set@1`
+
+Change a group's name, color, links or active state.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `group` | string |  |  |  |  |
+| `name` | string |  |  |  |  |
+| `color` | string |  |  |  |  |
+| `active` | boolean |  |  |  |  |
+| `links` | array |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `group.unknown`: no such group Hint: use group.list
+- `group.member`: invalid track membership Hint: use each existing track once
+- `vca.cycle`: nested VCA control is cyclic Hint: remove the cycle's follower link
+- `vca.limit`: more than 32 controlling VCAs Hint: remove a control link
+
+### Examples
+
+**Suspend linked edits** (`song_with_group`)
+
+```json
+{
+  "group": "gr_1",
+  "active": false
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+## `group.targets@1`
+
+Resolve linked tracks or matching items for an edit or selection.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `track` | string |  |  |  |  |
+| `item` | string |  |  |  |  |
+| `attribute` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "group_targets",
+  "properties": {
+    "tracks": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z]{2}_[0-9]+$"
+      }
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z]{2}_[0-9]+$"
+      }
+    }
+  },
+  "required": ["tracks", "items"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `group.unknown`: no such group Hint: use group.list
+- `group.member`: invalid track membership Hint: use each existing track once
+- `vca.cycle`: nested VCA control is cyclic Hint: remove the cycle's follower link
+- `vca.limit`: more than 32 controlling VCAs Hint: remove a control link
+
+### Examples
+
+**Resolve volume links** (`song_with_group`)
+
+```json
+{
+  "track": "tr_1",
+  "attribute": "volume"
+}
+
+```
+
+Result:
+
+```json
+{
+  "tracks": ["tr_1"],
+  "items": []
+}
+
+```
+
 ## `history.list@1`
 
 List the current branch's recent versions (newest first).
@@ -5637,6 +6205,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
+| `bypass_groups` | boolean |  |  | false |  |
 | `item` | string |  |  |  |  |
 | `to` | number |  | 0.0.. |  |  |
 
@@ -5645,10 +6214,17 @@ Kind: `edit`. Exposure: `mcp-tool`.
 ```json
 {
   "type": "object",
-  "title": "created_id",
+  "title": "item_duplicate_result",
   "properties": {
     "id": {
       "type": "string"
+    },
+    "linked": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
     }
   },
   "required": ["id"],
@@ -5771,6 +6347,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
+| `bypass_groups` | boolean |  |  | false |  |
 | `item` | string |  |  |  | Item id, e.g. "it_1". |
 | `position` | number |  | 0.0.. |  |  |
 | `bar` | integer |  | 1.0..2147483647.0 |  |  |
@@ -5880,6 +6457,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
+| `bypass_groups` | boolean |  |  | false |  |
 | `item` | string |  |  |  | Item id, e.g. "it_1". |
 
 ### Result
@@ -5924,6 +6502,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
+| `bypass_groups` | boolean |  |  | false |  |
 | `item` | string |  |  |  |  |
 | `position` | number |  | 0.0.. |  |  |
 | `bar` | integer |  | 1.0..2147483647.0 |  |  |
@@ -6000,6 +6579,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
+| `bypass_groups` | boolean |  |  | false |  |
 | `item` | string |  |  |  |  |
 | `at` | number |  | 0.0.. |  |  |
 
@@ -6015,6 +6595,20 @@ Kind: `edit`. Exposure: `mcp-tool`.
     },
     "right": {
       "type": "string"
+    },
+    "linked_left": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "linked_right": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
     }
   },
   "required": ["left", "right"],
@@ -10237,6 +10831,127 @@ Result:
 
 ```
 
+## `track.describe@1`
+
+Describe track groups and requested/applied effective gain at a time.
+
+
+
+Kind: `query`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `track` | string |  |  |  |  |
+| `at` | number |  | 0.0.. |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "track_description",
+  "properties": {
+    "track": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["channel", "buss", "master"]
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z]{2}_[0-9]+$"
+      }
+    },
+    "vcas": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z]{2}_[0-9]+$"
+      }
+    },
+    "volume_db": {
+      "type": "number"
+    },
+    "requested_effective_volume_db": {
+      "type": "number"
+    },
+    "effective_volume_db": {
+      "type": "number"
+    },
+    "at": {
+      "type": "number"
+    },
+    "effective_mute": {
+      "type": "boolean"
+    },
+    "solo_silenced": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "track",
+    "name",
+    "type",
+    "groups",
+    "vcas",
+    "volume_db",
+    "requested_effective_volume_db",
+    "effective_volume_db",
+    "at",
+    "effective_mute",
+    "solo_silenced"
+  ],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `group.unknown`: no such group Hint: use group.list
+- `group.member`: invalid track membership Hint: use each existing track once
+- `vca.cycle`: nested VCA control is cyclic Hint: remove the cycle's follower link
+- `vca.limit`: more than 32 controlling VCAs Hint: remove a control link
+
+### Examples
+
+**Inspect effective gain** (`song`)
+
+```json
+{
+  "track": "tr_1",
+  "at": 0
+}
+
+```
+
+Result:
+
+```json
+{
+  "track": "tr_1",
+  "name": "Bass",
+  "type": "channel",
+  "groups": [],
+  "vcas": [],
+  "volume_db": 0.0,
+  "requested_effective_volume_db": 0.0,
+  "effective_volume_db": 0.0,
+  "at": 0.0,
+  "effective_mute": false,
+  "solo_silenced": false
+}
+
+```
+
 ## `track.duplicate@1`
 
 Duplicate channels or busses with their FX, items, sends and automation.
@@ -10308,6 +11023,7 @@ Kind: `query`. Exposure: `mcp-tool`.
 
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
+| `at` | number |  | 0.0.. |  |  |
 
 ### Result
 
@@ -10358,6 +11074,35 @@ Kind: `query`. Exposure: `mcp-tool`.
             "items": {
               "type": "string"
             }
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z]{2}_[0-9]+$"
+            }
+          },
+          "vcas": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z]{2}_[0-9]+$"
+            }
+          },
+          "requested_effective_volume_db": {
+            "type": "number"
+          },
+          "effective_volume_db": {
+            "type": "number"
+          },
+          "at": {
+            "type": "number"
+          },
+          "effective_mute": {
+            "type": "boolean"
+          },
+          "solo_silenced": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -10370,7 +11115,14 @@ Kind: `query`. Exposure: `mcp-tool`.
           "mute",
           "solo",
           "fx",
-          "items"
+          "items",
+          "groups",
+          "vcas",
+          "requested_effective_volume_db",
+          "effective_volume_db",
+          "at",
+          "effective_mute",
+          "solo_silenced"
         ],
         "additionalProperties": false
       }
@@ -10507,6 +11259,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 
 | Field | Type | Unit | Range | Default | Description |
 | --- | --- | --- | --- | --- | --- |
+| `bypass_groups` | boolean |  |  | false |  |
 | `track` | string |  |  |  | Track id, e.g. "tr_1". |
 | `type` | string |  |  |  |  |
 | `name` | string |  |  |  |  |
@@ -12344,5 +13097,223 @@ Result:
   "punch": "<any>",
   "counting_in": false
 }
+
+```
+
+## `vca.add@1`
+
+Add an audio-free VCA fader to a track group.
+
+VCA gain adds to member automation before the fader, capped at the Console 9 native top. Group suspension only suspends linked editing. Use vca.members.set to nest VCAs.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `group` | string |  |  |  |  |
+| `volume_db` | value | dB | -150.0..12.0 |  | Quantity strings are range-checked by the server. |
+| `mute` | boolean |  |  |  |  |
+| `solo` | boolean |  |  |  |  |
+| `followers` | array |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `group.unknown`: no such group Hint: use group.list
+- `group.member`: invalid track membership Hint: use each existing track once
+- `vca.cycle`: nested VCA control is cyclic Hint: remove the cycle's follower link
+- `vca.limit`: more than 32 controlling VCAs Hint: remove a control link
+
+### Examples
+
+**Lower the group** (`song_with_group`)
+
+```json
+{
+  "group": "gr_1",
+  "volume_db": -3
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+## `vca.members.set@1`
+
+Replace the tracks or nested VCAs controlled by a VCA.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `group` | string |  |  |  |  |
+| `tracks` | array |  |  |  |  |
+| `vcas` | array |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `group.unknown`: no such group Hint: use group.list
+- `group.member`: invalid track membership Hint: use each existing track once
+- `vca.cycle`: nested VCA control is cyclic Hint: remove the cycle's follower link
+- `vca.limit`: more than 32 controlling VCAs Hint: remove a control link
+
+### Examples
+
+**Assign tracks** (`song_with_vca`)
+
+```json
+{
+  "group": "gr_1",
+  "tracks": ["tr_1"],
+  "vcas": []
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+## `vca.remove@1`
+
+Remove a VCA and its automation, keeping the track group.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `group` | string |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `group.unknown`: no such group Hint: use group.list
+- `group.member`: invalid track membership Hint: use each existing track once
+- `vca.cycle`: nested VCA control is cyclic Hint: remove the cycle's follower link
+- `vca.limit`: more than 32 controlling VCAs Hint: remove a control link
+
+### Examples
+
+**Remove** (`song_with_vca`)
+
+```json
+{
+  "group": "gr_1"
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+## `vca.set@1`
+
+Set a VCA's level, mute or solo without moving member faders.
+
+VCA gain adds to member automation before the fader, capped at the Console 9 native top. Group suspension only suspends linked editing. Use vca.members.set to nest VCAs.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `group` | string |  |  |  |  |
+| `volume_db` | value | dB | -150.0..12.0 |  | Quantity strings are range-checked by the server. |
+| `mute` | boolean |  |  |  |  |
+| `solo` | boolean |  |  |  |  |
+| `followers` | array |  |  |  |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "empty",
+  "properties": {},
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `group.unknown`: no such group Hint: use group.list
+- `group.member`: invalid track membership Hint: use each existing track once
+- `vca.cycle`: nested VCA control is cyclic Hint: remove the cycle's follower link
+- `vca.limit`: more than 32 controlling VCAs Hint: remove a control link
+
+### Examples
+
+**Lower the group** (`song_with_vca`)
+
+```json
+{
+  "group": "gr_1",
+  "volume_db": -3
+}
+
+```
+
+Result:
+
+```json
+{}
 
 ```

@@ -1808,3 +1808,38 @@ before source preparation, files or jobs. Public `renderOffline` also checks
 finite timeline endpoints and rejects obvious expanded-duration excess before
 media preparation, then checks exact inverse-clock output length. Analysis taps
 and item-FX renders opt out of this master-rate expansion as well as conversion.
+
+## VCA gain controls (ADR-0052)
+
+Groups compile to control data, never audio nodes or latency constraints.
+At each member fader, sum its evaluated dB level and every unique controlling
+VCA's evaluated level in numeric ID order. Silence on any contributor is
+absorbing. Clamp the final effective gain to the existing Console 9 ceiling
+(gain 4, about +12.0412 dB), including VCA-controlled masters. The requested
+sum and applied level are queryable. Ordinary unassigned master behavior is
+unchanged. Mute is the OR of member and controller mute; VCA solo adds its
+transitive track members to the ordinary solo seed set, retaining solo-defeat
+and signal-path reachability. Member fader/envelope data never moves.
+
+The combined control is applied before encoding, at the member's fader.
+Post-fader send encoders first clamp the combined source/VCA level at the
+member's native ceiling, then add the route contribution before their own
+encode. Send attenuation therefore cannot recover above-ceiling source gain;
+a shared post-fader tap already contains the clamped member level. Pre-FX
+and pre-fader sends stay independent of the member fader/mute. Post-fader
+key taps include VCA volume/mute without audible-path solo suppression.
+Main-to-aux post-fader links apply the source's combined gain before their
+edge delay; auxiliary source channels themselves remain unfaded.
+
+Each node/send consumer owns its curve cursors. Curves shift by the existing
+ADR-0051 application coordinate and use the appropriate executor's fractional
+playrate clock; locates, seeks and loop wraps reset them. Compilation rejects
+more than one million copied VCA curve points before publication. No VCA graph
+traversal, allocation or locks occur on audio threads. Existing ramps and
+Console state carry across plan swaps. Offline, callback and anticipative
+execution share the same sample processing, including through bridged FX.
+Member stems retain their VCAs and existing selected-tap trimming/decoding.
+
+Through-master stems clear existing track and VCA solos before selecting the
+stem target. VCA levels and mutes still apply; an unrelated soloed group cannot
+leak into an exclusive stem. Isolated stems retain their member VCA controls.
