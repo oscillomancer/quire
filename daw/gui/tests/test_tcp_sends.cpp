@@ -448,7 +448,7 @@ TEST_CASE("TCP: a selection survives a right-click; Delete removes all of it in 
     ui::Node* m = f.root->find(menu);
     REQUIRE(m);
     const auto before = f.history();
-    const ui::Point del{m->bounds().x + 40, m->bounds().y + 7 * 26 + 13};  // Delete
+    const ui::Point del{m->bounds().x + 40, m->bounds().y + 8 * 26 + 13};  // Delete
     f.pointer(Pointer::Move, del);
     f.pointer(Pointer::Down, del);
     f.pointer(Pointer::Up, del);
@@ -496,8 +496,8 @@ TEST_CASE("TCP: the right-click menu renames, colours and deletes a track (one u
         f.root->pointer(e);
         f.root->frame(false);
     };
-    // Menu rows are 26 px: Rename, Color…, Timebase…, Channels…, (separator),
-    // Duplicate, Delete.
+    // Menu rows are 26 px: Rename, Color…, Timebase…, Freeze, Channels…,
+    // Groups…, (separator), Duplicate, Delete.
     auto pickRow = [&](const std::string& menu, int index) {
         ui::Node* m = f.root->find(menu);
         REQUIRE(m);
@@ -550,7 +550,7 @@ TEST_CASE("TCP: the right-click menu renames, colours and deletes a track (one u
     // Delete removes it.
     before = f.history();
     rightClick();
-    pickRow(menu, 7);
+    pickRow(menu, 8);
     CHECK_FALSE(f.app->head().tracks.find(f.a));
     CHECK(f.history() == before + 1);
 }

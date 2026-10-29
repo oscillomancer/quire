@@ -388,7 +388,7 @@ TEST_CASE("mixer: strips select like the TCP's rows, and the menu deletes the se
     ui::Node* menu = f.root->find("track.menu." + c);
     REQUIRE(menu);
     const auto before = f.steps();
-    const ui::Point del{menu->bounds().x + 40, menu->bounds().y + 7 * 26 + 13};
+    const ui::Point del{menu->bounds().x + 40, menu->bounds().y + 8 * 26 + 13};
     f.pointer(ui::PointerEvent::Type::Move, del);
     f.pointer(ui::PointerEvent::Type::Down, del);
     f.pointer(ui::PointerEvent::Type::Up, del);
@@ -670,7 +670,7 @@ TEST_CASE("mixer: the track menu duplicates the selected strips, and selects the
     f.pointer(ui::PointerEvent::Type::Up, at, 1, 0, 3);
     ui::Node* menu = f.node("track.menu." + c);
     const auto before = f.steps();
-    const ui::Point dup{menu->bounds().x + 40, menu->bounds().y + 6 * 26 + 13};
+    const ui::Point dup{menu->bounds().x + 40, menu->bounds().y + 7 * 26 + 13};
     f.pointer(ui::PointerEvent::Type::Move, dup);
     f.pointer(ui::PointerEvent::Type::Down, dup);
     f.pointer(ui::PointerEvent::Type::Up, dup);
