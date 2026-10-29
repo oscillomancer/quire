@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -70,12 +71,17 @@ std::shared_ptr<const ScriptDefinition> compileText(const std::string& source) {
     return d;
 }
 
+// Every test after a missing one would fail on its empty script, so this stops.
 std::string libraryScript(const char* name) {
     std::string text;
     for (const auto& folder : libraryFolders())
         if (readScript(folder / name / (std::string(name) + ".cpp"), text)) return text;
-    CHECK_MSG(false, "no script %s in the library", name);
-    return text;
+    const char* named = std::getenv("SUPPLE_SCRIPT_LIBRARY");
+    std::fprintf(stderr,
+                 "no script %s in the library folders SUPPLE_SCRIPT_LIBRARY names (%s); "
+                 "ctest sets it to the player's test/smoke and test/library\n",
+                 name, named ? named : "unset");
+    std::exit(1);
 }
 
 std::string exampleScript(const char* file) {
