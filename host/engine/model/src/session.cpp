@@ -11,6 +11,7 @@
 #include <set>
 
 #include "supple/model/env_shape.h"
+#include "supple/model/freeze.h"
 #include "supple/model/schemas.h"
 
 namespace supple::model {
@@ -207,6 +208,7 @@ Result<Session> EditTxn::commit() {
     }
     s.timeMap = std::make_shared<const time::TimeMap>(std::move(*map));
     SUPPLE_TRY(checkInvariants(s));
+    SUPPLE_TRY(validateFrozenTransition(base_, s));
     return s;
 }
 
@@ -708,7 +710,7 @@ Status checkInvariants(const Session& s) {
     c.fx();
     c.routes();
     c.envelopes();
-    if (c.errors.empty()) return okStatus();
+    if (c.errors.empty()) return validateFrozenState(s);
     if (c.errors.size() == 1) return c.errors.front();
     Error e("model.invariant", std::to_string(c.errors.size()) + " invariant violations");
     e.details = std::move(c.errors);

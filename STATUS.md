@@ -116,8 +116,11 @@ instructions are in `docs/guides/installing.md`.
   two branches, a command log with origins, a history budget that squashes
   the oldest steps. Undo to an FX's initial unsaved settings restores its factory
   state while retaining the previous processing instance until plan retirement.
-  Project format `supple.project/2.1` with migration from
+  Project format `supple.project/2.2` with migration from
   1.x, autosave, crash recovery of recordings, a per-project UI sidecar.
+- **Track freeze model** (ADR-0054): optional channel freeze descriptors retain
+  original items/FX and media references, with canonical round trips and shared
+  sound-dependency validation. Engine/command/GUI integration is in progress.
 - **Command bus** (`specs/command-bus.md`, ADR-0007): about 120 typed
   commands with JSON Schema, units, examples run as tests and structured
   errors; `batch` transactions; events; the JSON-RPC socket; the MCP adapter

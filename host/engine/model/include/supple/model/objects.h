@@ -90,6 +90,13 @@ bool validTrackColor(std::string_view color);
 // 126 auxiliary channels (a multi-out instrument's outputs), as REAPER.
 inline constexpr int kMaxTrackChannels = 128;
 
+// Whole-chain pre-fader render, with original objects retained (ADR-0054).
+struct TrackFreeze {
+    Id source;
+    std::int64_t contentFrames = 0, tailFrames = 0, latencyFrames = 0;
+    std::string dependencyHash;
+};
+
 struct Track {
     StripType type = StripType::Channel;
     std::string name, color, notes;
@@ -112,6 +119,7 @@ struct Track {
     std::vector<Id> chain, inputChain;
     // UI intent (kept in the model, ignored by merges' conflict checks).
     bool locked = false, hiddenTcp = false, hiddenMixer = false;
+    std::optional<TrackFreeze> freeze;
     int folderCompact = 0;  // 0 normal, 1 small, 2 collapsed
 };
 

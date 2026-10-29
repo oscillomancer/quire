@@ -496,7 +496,7 @@ TEST_CASE("project 1.x migration: folders and receives become busses with child 
 
 TEST_CASE("project newer minor ignores unknown fields with load warnings") {
     auto doc = projectToJson(Session::create());
-    doc["schema"] = "supple.project/2.2";
+    doc["schema"] = "supple.project/2.3";
     doc["tracks"]["tr_0"]["future"] = true;
     std::vector<schema::Warning> warnings;
     auto parsed = projectFromJson(doc, &warnings);
