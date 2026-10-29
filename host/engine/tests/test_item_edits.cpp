@@ -74,6 +74,10 @@ TEST_CASE("consolidation bakes item and take FX with silence in gaps, leaving tr
     f.run("fx.param.set", R"({"fx":"fx_1","values":{"gain":6}})");
     f.run("fx.add", R"({"take":"tk_1","plugin":"com.suppleaudio.test.gain"})");
     f.run("fx.param.set", R"({"fx":"fx_2","values":{"gain":-6}})");
+    f.run("env.add", R"({"take":"tk_1","param":"volume","points":[{"beat":0,"value":-3}]})");
+    f.run("env.add", R"({"fx":"fx_2","param":"gain","points":[{"beat":0,"value":-6}]})");
+    f.run("autoitem.add",
+          R"({"env":"en_2","position":0,"length":0.5,"points":[{"beat":0,"value":-6}]})");
     f.run("item.duplicate", R"({"item":"it_1","to":2})");
     const auto original = f.app->head();
     OfflineSettings settings{.endSeconds = 1.25,
@@ -99,6 +103,7 @@ TEST_CASE("consolidation bakes item and take FX with silence in gaps, leaving tr
     const auto& item = *f.app->head().items.find({model::Kind::Item, 1});
     const auto& take = *f.app->head().takes.find(*item.activeTake);
     CHECK(take.chain.empty());
+    CHECK(f.app->head().autoItems.empty());
     CHECK(item.fadeIn.length == 0);
     CHECK(item.gainDb == 0);
     CHECK(f.app->head().tracks.find({model::Kind::Track, 1})->chain.size() == 1);
@@ -136,4 +141,51 @@ TEST_CASE("consolidation partitions mixed items by track and active kind") {
     CHECK(f.app->head().items.size() == 3);
     CHECK(model::itemLengthBeats(f.app->head(),
                                  *f.app->head().items.find({model::Kind::Item, 2})) == 8);
+}
+
+TEST_CASE("healing restores pre-split and pre-slice audio bit for bit without take FX") {
+    Fixture f;
+    bool slice = false, warp = false;
+    SUBCASE("ordinary split") {}
+    SUBCASE("unchanged slices with generated overlaps") { slice = true; }
+    SUBCASE("warped source split") { warp = true; }
+    f.run("item.set", R"({"item":"it_1","fade_in":0.01,"fade_out":0.02,"gain_db":-3})");
+    if (warp) f.run("take.stretch.add", R"({"take":"tk_1","source_pos":0.6,"item_pos":0.5})");
+    const OfflineSettings settings{.endSeconds = 2, .threads = 1};
+    auto before = f.app->renderSession(f.app->head(), settings);
+    REQUIRE(before);
+    if (slice) {
+        f.run("take.hits.set", R"({"take":"tk_1","positions":[0.3,0.8]})");
+        f.run("audio.quantize", R"({"items":["it_1"],"grid":0.25,"mode":"slice","strength":0})");
+    } else {
+        f.run("item.split", R"({"item":"it_1","at":0.6})");
+        f.run("item.split", R"({"item":"it_2","at":1.6})");
+    }
+    const auto cut = f.app->head().version;
+    f.run("item.heal", R"({"items":["it_1","it_2","it_3"]})");
+    CHECK(f.app->head().version == cut + 1);
+    REQUIRE(f.app->head().items.size() == 1);
+    auto healed = f.app->renderSession(f.app->head(), settings);
+    REQUIRE(healed);
+    CHECK(bool(healed->audio.channels == before->audio.channels));
+    REQUIRE(f.app->undo());
+    CHECK(f.app->head().items.size() == 3);
+}
+
+TEST_CASE("healing refuses moved pieces and differing stored take FX") {
+    Fixture f;
+    bool fx = false;
+    SUBCASE("moved piece") {}
+    SUBCASE("stored FX differ") { fx = true; }
+    if (fx) f.run("fx.add", R"({"take":"tk_1","plugin":"com.suppleaudio.test.gain"})");
+    f.run("item.split", R"({"item":"it_1","at":1})");
+    if (fx)
+        f.run("fx.param.set", R"({"fx":"fx_2","values":{"gain":-6}})");
+    else
+        f.run("item.move", R"({"item":"it_2","position":1.25})");
+    auto result = f.call("item.heal", R"({"items":["it_1","it_2"]})");
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == (fx ? "item.heal_fx" : "item.heal_incompatible"));
+    CHECK_FALSE(result.error().hint.empty());
+    CHECK(f.app->head().items.size() == 2);
 }

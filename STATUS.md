@@ -180,6 +180,8 @@ instructions are in `docs/guides/installing.md`.
   transient detection, joint multitrack audio quantize and slicing,
   background `item.consolidate` for active audio with take FX baked and MIDI
   kept separate per track (one undo step, track processing stays live),
+  non-rendering `item.heal` for compatible split/slice chains, retaining outer
+  fades and full source maps while removing generated interior slice fades,
   markers, regions,
   tempo and meter maps, the item clipboard, a piano roll with velocity and
   CC lanes, an event list and a notation panel.

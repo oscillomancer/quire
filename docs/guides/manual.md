@@ -315,6 +315,14 @@ returned job with `job.get`; all results publish together in one undo step.
 Select complete linked/warp bundles on matching lanes and groups. Undo retains
 the original takes; the new media stays available to history and project saves.
 
+`item.heal {items:[...]}` joins compatible audio pieces without making a new file.
+Select consecutive unchanged pieces from the same source on each track, including
+any linked/warp peers. Healing keeps all corresponding takes, the outer fades and
+the full source/warp mapping, removing generated internal slice fades. Source
+settings and stored take FX must match; moved pieces, changed fades and nonlinear
+envelope seams that cannot be restored need consolidation instead. Each track
+becomes one item and the operation is one undo step.
+
 Right-click an item and choose **Split item at cursor**, or press S, to split
 selected audio and MIDI items at the edit cursor. Items outside the cursor stay
 whole; the menu's pointer position does not set the split point. Undo restores

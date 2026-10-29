@@ -6612,6 +6612,52 @@ Result:
 
 ```
 
+## `item.heal@1`
+
+Heal compatible consecutive audio pieces without rendering.
+
+One chain per track, complete linked/warp selection, matching stored audio/take/FX properties and continuous source maps. Accepts touching split pieces and unchanged linear Slice-at-hits overlaps up to 50 ms. Keep all left takes, outer fades and full warp maps; remove interior slice fades. Nonlinear envelope seams that cannot be recovered refuse. Stored FX states must match exactly; no live plugin queries or audio rendering. One undo step.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `items` | array |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Errors
+
+- `item.heal_*`: selection cannot be restored as a continuous source Hint: select unchanged split pieces or use item.consolidate instead
+- `item.selection`: a linked or warp peer is unselected Hint: include every affected peer or suspend the edit link
+
+### Examples
+
+**Heal an audio split** (`song_split_audio`)
+
+```json
+{
+  "items": ["it_1", "it_2"]
+}
+
+```
+
+Result:
+
+```json
+{
+  "items": ["it_1"]
+}
+
+```
+
 ## `item.move@1`
 
 Move an item in time (position in beats or bar) and/or to another track.

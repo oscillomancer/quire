@@ -2058,6 +2058,47 @@ rerendering FX. Published files remain available to history, undo and project
 copies. Errors carry paths and repair hints; source/render problems must be fixed
 before retrying. No sample processing or I/O is added to audio executors.
 
+### Healing audio splits
+
+`item.heal {items:[it...]}` is a pure edit returning surviving `items`, one per
+track, in one undo step. `model::healingGroups` is the shared read-only eligibility
+and reconstruction helper. Each selected track must have at least two consecutive
+audio pieces on one lane, with complete linked/warp selection. No source I/O,
+sample search, live-plugin queries or rendering happens in the handler.
+
+Touching pieces must meet at the same project sample boundary, without interior
+fades. The one overlap exception recognizes unchanged Slice-at-hits pre-roll:
+at most 50 ms, bounded by half the preceding logical slice, matching linear
+zero-curve interior fades, and the same global source map through the overlap.
+Gaps, moved pieces, nesting, unrelated overlaps and altered interior fades refuse.
+Healing restores continuous pre-split/pre-slice audio; removing the generated
+internal fades intentionally differs from the currently faded slice mix.
+
+Items must match lane, stored/effective timebase, loop, mute, gain, group token,
+take count/order and active index. Every corresponding take must be audio from
+the same media ID, with matching stored properties, including rate/pitch/mode,
+gain/pan/polarity/channels and original-source marker/transient metadata. Source
+offsets and complete stretch maps must represent the same rebased source map on
+the project sample grid. Keep the first item/take IDs and full authored maps,
+first fade-in and last fade-out (complete shapes/curves), and first presentation/
+snap point. Extend only the full span and remove redundant right-hand objects.
+
+Take FX chains must match their complete stored plugin/settings/patch/parameter/
+state-blob values and normalized owned automation; instance activity is irrelevant.
+No special normalization of drifting stored FX state is performed. Corresponding
+FX envelopes retain their full matching original curves/automation. Take-relative
+envelopes may join constant or linear seam continuations, with copied automation
+rebased to the original origin. An unrecoverable nonlinear seam refuses with
+`item.heal_envelope`; differing stored FX refuse with `item.heal_fx`. Other
+incompatibilities use `item.heal_incompatible`, all with a Consolidate hint.
+
+All original left-side warp peers must be represented by compatible selected
+chains. Retain their original take IDs and reciprocal ordering; right copies
+must be detached as the split command leaves them. Validate restored spans/maps
+with existing `validateAudioWarp` and group validation, without a second bundle
+alignment implementation. Removing takes also removes owned envelopes' automation
+items, so neither healing nor consolidation leaves orphaned automation blocks.
+
 ### Splitting at a prior zero crossing
 
 `item.split {item, at, snap?: none|zero_crossing, bypass_groups?: false}` keeps

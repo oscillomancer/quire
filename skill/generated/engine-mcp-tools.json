@@ -5067,6 +5067,32 @@
     }
   },
   {
+    "name": "item_heal",
+    "title": "Heal compatible consecutive audio pieces without rendering.",
+    "description": "Heal compatible consecutive audio pieces without rendering. One chain per track, complete linked/warp selection, matching stored audio/take/FX properties and continuous source maps. Accepts touching split pieces and unchanged linear Slice-at-hits overlaps up to 50 ms. Keep all left takes, outer fades and full warp maps; remove interior slice fades. Nonlinear envelope seams that cannot be recovered refuse. Stored FX states must match exactly; no live plugin queries or audio rendering. One undo step. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "item_heal_args",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{2}_[0-9]+$"
+          },
+          "minItems": 2
+        }
+      },
+      "required": ["items"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "item_move",
     "title": "Move an item in time (position in beats or bar) and/or to another track.",
     "description": "Move an item in time (position in beats or bar) and/or to another track.  See describe for errors and examples.",

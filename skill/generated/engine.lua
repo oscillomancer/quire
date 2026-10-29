@@ -668,6 +668,9 @@ q = nil
 ---@field items string[]
 ---@field tracks string[]
 
+---@class Quire.item_heal_args
+---@field items string[]
+
 ---@class Quire.item_move_args
 ---@field bypass_groups? boolean (default: false)
 ---@field item string Item id, e.g. "it_1".
@@ -1562,6 +1565,7 @@ q = nil
 ---@field consolidate fun(args: Quire.item_consolidate_args): table Consolidate selected audio and MIDI per track in a background job.
 ---@field duplicate fun(args: Quire.item_duplicate_args): Quire.item_duplicate_result Copy an item and its takes to a new beat position (default: immediately after).
 ---@field ["explode-takes"] fun(args: Quire.item_explode_takes_args): Quire.item_explode_takes_result Spread an item's takes onto new tracks, or one after another on its track.
+---@field heal fun(args: Quire.item_heal_args): table Heal compatible consecutive audio pieces without rendering.
 ---@field move fun(args: Quire.item_move_args): table Move an item in time (position in beats or bar) and/or to another track.
 ---@field paste fun(args: Quire.item_paste_args): Quire.item_paste_result Copy items as they were in a version (a clipboard) to tracks and beats.
 ---@field remove fun(args: Quire.item_remove_args): table Remove an item with its takes (unpooled sources go too).
