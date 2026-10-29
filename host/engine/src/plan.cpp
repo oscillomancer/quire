@@ -722,6 +722,11 @@ std::int64_t layoutChain(std::vector<Stage>& chain, bool allowParallel, std::siz
 
 // Activates instances, measures latencies, sizes buffers and delays.
 Status prepare(Plan& p, const Session& s) {
+    if (!p.preparedSources && p.media) {
+        auto prepared = p.media->prepareSources(s, p.projectDir, p.rate);
+        if (!prepared) return prepared.error();
+        p.preparedSources = *prepared;
+    }
     const std::size_t block = p.block;
     // One stage: activated at the plan's rate and block, buffers sized.
     auto prepareStage = [&](Stage& st) -> Status {
@@ -1013,36 +1018,42 @@ Status prepare(Plan& p, const Session& s) {
             variant.pitch = take->pitch;
             variant.preservePitch = take->preservePitch;
             variant.pitchMode = take->pitchMode;
-            auto data = p.media->get(path, p.rate, variant, src->hash);
-            if (!data) {
-                p.warnings.push_back(e.id.str() + ": " + data.error().message + " (media " +
-                                     take->source->str() + ")");
+            const auto& prepared = p.preparedSources;
+            const auto found = prepared ? prepared->takes.find(*it.activeTake)
+                                        : std::map<Id, PreparedSource>::const_iterator{};
+            if (!prepared || found == prepared->takes.end() || !found->second.data) {
+                p.warnings.push_back(
+                    e.id.str() + ": " +
+                    (prepared && found != prepared->takes.end() && found->second.error
+                         ? found->second.error->message
+                         : "source audio is not prepared"));
                 continue;
             }
+            const auto& data = found->second;
             // A resample cannot shift the pitch on its own; the stretch mode
             // can (the pitch follows the rate instead without one).
             if (!variant.stretch() && take->preservePitch && take->pitch != 0.0)
                 p.warnings.push_back(e.id.str() + ": pitch " + std::to_string(take->pitch) +
                                      " st needs pitch_mode \"signalsmith\"; it is ignored and "
                                      "the take is resampled");
-            if (!take->stretchMarkers.empty())
+            if (!take->stretchMarkers.empty() && !data.itemLocal)
                 p.warnings.push_back(e.id.str() +
-                                     ": stretch_markers are not applied yet; the "
-                                     "take plays at its playrate");
+                                     ": unsupported or invalid warp; scalar playback is active");
             const model::ItemSpan span = model::itemSpan(s, it);
             const std::int64_t origin = time::samplesAt(p.startSeconds, p.rate);
             Clip c;
             c.item = e.id;
             c.take = *it.activeTake;
             c.deviceShift = n.timelineShift;
-            c.data = *data;
+            c.data = data.data;
             c.start = time::samplesAt(span.startSec, p.rate) - origin + n.timelineShift;
             c.length =
                 time::samplesAt(span.endSec, p.rate) - time::samplesAt(span.startSec, p.rate);
             // The item's source offset is in source seconds; the variant is
             // read one frame per timeline sample, so `speed()` source seconds
             // pass per timeline second.
-            c.offset = time::samplesAt(take->startOffset, p.rate / variant.speed());
+            c.offset =
+                data.itemLocal ? 0 : time::samplesAt(take->startOffset, p.rate / variant.speed());
             c.loop = it.loop;
             c.mode = take->channelMode;
             const double g =

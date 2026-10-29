@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "command_validation.h"
+#include "supple/model/audio_warp.h"
 #include "supple/model/numeric.h"
 // Additional session edits and queries from session-model §7.
 #include <algorithm>
@@ -251,7 +252,7 @@ struct TakeAddArgs {
 };
 struct TakeSetArgs {
     std::string take;
-    std::optional<double> gainDb, pan, startOffset, playrate, pitch;
+    std::optional<double> gainDb, pan, startOffset, playrate, pitch, rebaseSeconds;
     std::optional<model::ChannelMode> channelMode;
     std::optional<std::string> name, pitchMode;
     std::optional<bool> preservePitch;
@@ -263,6 +264,8 @@ struct TakeEntry {
     double playrate = 1, pitch = 0;
     bool preservePitch = true;
     std::string pitchMode;
+    json::Value markers = json::Value::array(), hits = json::Value(), peers = json::Value::array();
+    bool hitsStale = false;
 };
 struct TakeList {
     std::vector<TakeEntry> takes;
@@ -1442,6 +1445,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             }
             const model::Session& s = *from;
             auto& txn = eng.txn();
+            std::map<Id, std::vector<Id>> copiedTakes;
             std::map<Id, Id> restored;  // audio sources brought back, by their old id
             ItemPasteResult out;
             for (std::size_t i = 0; i < a.items.size(); ++i) {
@@ -1501,10 +1505,28 @@ void registerExtraCommands(cmd::Registry& registry) {
                     auto cloned = copyTake(s, txn, oldId, std::move(tk));
                     if (!cloned) return std::move(cloned).error();
                     const Id fresh = *cloned;
+                    copiedTakes[oldId].push_back(fresh);
                     copy.takes.push_back(fresh);
                     if (original.activeTake == oldId) copy.activeTake = fresh;
                 }
                 out.items.push_back(txn.create(std::move(copy)).str());
+            }
+            for (const auto& [oldId, copies] : copiedTakes) {
+                const auto& original = *s.takes.find(oldId);
+                if (copies.size() != 1 || original.warpPeers.empty()) continue;
+                std::vector<Id> peers;
+                for (auto peer : original.warpPeers) {
+                    const auto found = copiedTakes.find(peer);
+                    if (found == copiedTakes.end() || found->second.size() != 1) {
+                        peers.clear();
+                        break;
+                    }
+                    peers.push_back(found->second.front());
+                }
+                if (peers.size() != original.warpPeers.size()) continue;
+                std::sort(peers.begin(), peers.end());
+                txn.modify<model::Take>(copies.front(),
+                                        [&](auto& take) { take.warpPeers = peers; });
             }
             return out;
         };
@@ -1581,7 +1603,10 @@ void registerExtraCommands(cmd::Registry& registry) {
                 const double delta = tk.source && tk.source->kind == model::Kind::Midi
                                          ? (a.at - startBeat) * tk.playrate
                                          : (splitSec - startSec) * tk.playrate;
-                tk.startOffset += delta;
+                if (tk.source && tk.source->kind == model::Kind::Media)
+                    model::rebaseAudioTake(tk, splitSec - startSec);
+                else
+                    tk.startOffset += delta;
                 unpoolCopiedSource(tk, s, txn);
                 auto cloned = copyTake(s, txn, oldTake, std::move(tk), a.at - startBeat);
                 if (!cloned) return std::move(cloned).error();
@@ -1714,6 +1739,9 @@ void registerExtraCommands(cmd::Registry& registry) {
                             {model::ChannelMode::Left, "left"},
                             {model::ChannelMode::Right, "right"}}))
                 .field("name", &TakeSetArgs::name, schema::string())
+                .field("rebase_seconds", &TakeSetArgs::rebaseSeconds,
+                       schema::number().doc("Rebase an audio take after trimming its item start; "
+                                            "preserves the warp map."))
                 .field("start_offset", &TakeSetArgs::startOffset,
                        schema::number().doc(
                            "Source position at the item start; negative for a late first pass."))
@@ -1753,17 +1781,26 @@ void registerExtraCommands(cmd::Registry& registry) {
             auto id = require<model::Take>(app(ctx).view(), a.take, "/take");
             if (!id) return std::move(id).error();
             SUPPLE_TRY(checkUnlockedTake(app(ctx).view(), *id, "/take"));
+            if (a.rebaseSeconds && a.startOffset)
+                return Error("take.offset", "choose one source-position edit", "/rebase_seconds",
+                             "supply rebase_seconds or start_offset, not both");
+            const auto* original = app(ctx).view().takes.find(*id);
+            const bool validWarp = !original->stretchMarkers.empty() &&
+                                   static_cast<bool>(model::validateWarpMap(*original));
             app(ctx).txn().modify<model::Take>(*id, [&](model::Take& tk) {
                 if (a.gainDb) tk.gainDb = *a.gainDb;
                 if (a.pan) tk.pan = *a.pan;
                 if (a.channelMode) tk.channelMode = *a.channelMode;
                 if (a.name) tk.name = *a.name;
-                if (a.startOffset) tk.startOffset = *a.startOffset;
-                if (a.playrate) tk.playrate = *a.playrate;
+                if (a.rebaseSeconds) model::rebaseAudioTake(tk, *a.rebaseSeconds);
+                if (a.startOffset) model::slipAudioTake(tk, *a.startOffset - tk.startOffset);
+                if (a.playrate) model::rateAudioTake(tk, *a.playrate);
                 if (a.preservePitch) tk.preservePitch = *a.preservePitch;
                 if (a.pitch) tk.pitch = *a.pitch;
                 if (a.pitchMode) tk.pitchMode = *a.pitchMode;
             });
+            if (validWarp)
+                SUPPLE_TRY(model::validateWarpMap(*app(ctx).view().takes.find(*id), "/take"));
             return Empty{};
         };
         addChecked(registry, std::move(c));
@@ -1791,6 +1828,10 @@ void registerExtraCommands(cmd::Registry& registry) {
                 .field("preserve_pitch", &TakeEntry::preservePitch, schema::boolean())
                 .field("pitch", &TakeEntry::pitch, schema::number().unit(units::Unit::st))
                 .field("pitch_mode", &TakeEntry::pitchMode, schema::string())
+                .field("stretch_markers", &TakeEntry::markers, schema::any())
+                .field("transients", &TakeEntry::hits, schema::any())
+                .field("warp_peers", &TakeEntry::peers, schema::any())
+                .field("hits_stale", &TakeEntry::hitsStale, schema::boolean())
                 .build();
         c.result = schema::object<TakeList>("take_list")
                        .field("takes", &TakeList::takes, schema::arrayOf(entry))
@@ -1810,6 +1851,13 @@ void registerExtraCommands(cmd::Registry& registry) {
                 out.takes.push_back({takeId.str(), tk.name, tk.source ? tk.source->str() : "",
                                      it.activeTake == takeId, tk.gainDb, tk.pan, tk.startOffset,
                                      tk.playrate, tk.pitch, tk.preservePitch, tk.pitchMode});
+                auto encoded = model::toJson(tk);
+                auto& entry = out.takes.back();
+                if (const auto* v = encoded.find("stretch_markers")) entry.markers = *v;
+                if (const auto* v = encoded.find("transients")) entry.hits = *v;
+                if (const auto* v = encoded.find("warp_peers")) entry.peers = *v;
+                const auto* md = tk.source ? s.media.find(*tk.source) : nullptr;
+                entry.hitsStale = tk.transients && (!md || md->hash != tk.transients->sourceHash);
             }
             return out;
         };

@@ -1083,7 +1083,7 @@ harness. See the tooling README for schemas, limits and invocation details.
   seeded, so deterministic) and transposes by `pitch`. The stretch runs at
   plan compile on the main thread (~0.3 s per source second in a debug
   build); it moves to the background decode with the disk cache.
-  `stretch_markers` are not applied yet (the compiler warns).
+  `stretch_markers` use prepared item-local warped audio (ADR-0053; see below).
 - **Live pool** (`live_workers.{h,cpp}`): callback fork-join as specified in §2.2.
 - **Not yet:** MIDI output ports, crossfades for
   structural changes (inserting or removing plugins). B1/B2 measurements:
@@ -1808,3 +1808,101 @@ before source preparation, files or jobs. Public `renderOffline` also checks
 finite timeline endpoints and rejects obvious expanded-duration excess before
 media preparation, then checks exact inverse-clock output length. Analysis taps
 and item-FX renders opt out of this master-rate expansion as well as conversion.
+
+### Prepared audio sources and take warping (ADR-0053)
+
+`PreparedSources` is an immutable complete set of `PreparedSource` buffers keyed
+by take ID. `MediaCache::prepareSources(session, directory, rate, cancelled)` performs
+file decoding, resampling, scalar variants and piecewise warping without plug-in
+instances. `adoptSources(shared_ptr<const PreparedSources>)` installs the set on the
+model thread before compilation. A plan retains the set and its audio leases. Other
+source-producing features can supply these same immutable buffers; the service has
+no freeze-specific policy. Offline renders select required takes in the full pinned
+session context, retaining every phase-bundle input even for a single-track render.
+Unrelated tracks are excluded from source preparation, so their missing media cannot
+prevent a selected stem from rendering.
+
+`sourcePreparationKey` contains source identities, sample rate, active-take selection,
+item durations and source-affecting take fields. Transient overlays, gain/pan, mute
+and FX do not change it. Unhashed files also include size and modification time.
+EngineApp source changes run on one background `SourcePreparation` worker with one
+replaceable pending request and one completion. Requests cancel obsolete work at
+DSP chunk boundaries. The worker owns a private cache; it never mutates the live
+cache. Completion wakes the existing portable model-thread relay. Recheck the latest
+source key before adopting/reloading. The prior ready plan remains audible while
+preparation is pending; no partial bundle or silently unwarped substitute is published.
+`engine.status` adds `preparing_audio`, `preparation_error`, `prepared_version`
+(last compiled model version) and `preparation_version` (pending target, zero when idle).
+The worker retains at most 2^26 sample values of reusable variants between requests;
+eviction never invalidates outstanding plan leases. Startup and explicit
+offline rendering wait for preparation. Shutdown joins the worker before releasing
+its cache or wake target. Decode calls themselves are not interruptible mid-call.
+
+An active warp is a valid nonempty piecewise-linear map on nonlooped, pitch-preserving
+Signalsmith audio. Invalid legacy maps and unsupported modes retain scalar playback
+with a plan warning. New commands refuse these modes. The stretcher uses 64-output-
+frame scheduling, seeded synthesis, explicit lookahead/history and zero padding.
+It keeps synthesis state across short marker intervals and trims preparation latency.
+An identity map with no pitch shift copies samples exactly. Prepared warped clips
+start at offset zero; take FX, fades, gain, channel mode, Console 9 and the master
+playrate converter remain downstream, with ADR-0051's original timeline shifts.
+
+Reciprocal `warp_peers` use one aligned multichannel stretch instance with canonical
+ID/channel ordering. The prepared outputs are separated back into their individual
+takes before gain/FX; per-take rendering does not run separate phase estimators.
+Exact duplicate and polarity-reversed input relationships are restored from the
+canonical channel after synthesis, avoiding low-energy phase fallback differences.
+At most 128 channels and 2^28 aggregate packed-input-plus-output sample values are
+allowed per bundle. A complete preparation request also limits its estimated decoded
+plus output samples to 2^28 before decoding. Source/out-of-file regions are zero padded. No marker lookup,
+analysis, stretching, allocation, file access, cache access or worker wait runs in
+an audio executor.
+
+### Audio hit and quantize commands
+
+- `take.hits.detect {takes:[tk], sensitivity?:0..1}` starts a job. Multichannel
+  positive log spectral flux, local thresholds, low-frequency weighting and
+  sample-envelope refinement with an energy-rise gate generate stable original-source
+  positions (the gate rejects periodic flux on sustained bass). Source
+  content is checked before/after analysis. The posted completion checks project,
+  branch, source identity and unchanged hit state, then records one atomic result
+  edit for all takes.
+  `job.get` becomes done only after that edit commits. Actions are not batchable;
+  `take.hits.set` provides the batchable result edit. Cancellation/stale results
+  commit nothing, and the log stores positions rather than rerunning the detector.
+- `take.hits.set {take, positions:[seconds], source_hash?, algorithm?, sensitivity?}`
+  replaces candidates; empty positions records analyzed silence. Positions are
+  ordered and within the original source. The default algorithm is `manual`.
+- `take.stretch.add {take, source_pos, item_pos}`, `.move {take,index,item_pos}` and
+  `.remove {take,index}` edit anchors. First add pins the item boundaries. Indices
+  are zero-based in item-time order; move/remove operate on interior anchors.
+  Linked peers receive the same source-relative edit, atomically.
+- `audio.quantize {items:[it],grid,strength?,swing?,mode?,reference?,hits?,crossfade?}`
+  consumes nonstale stored hits. Defaults: strength 1, swing 0, mode `warp`, first
+  selected item as reference, hits `reference`, crossfade .005 seconds. `hits:merged`
+  unions candidates in project time, coalescing within 5 ms. Grid is quarter-note
+  beats in 1/1024..1024; strength/swing are 0..1. Odd grid points are delayed by
+  `swing*grid/2`; nearest ties go earlier. Strength blends in project beats, then
+  the tempo map converts back to seconds. Crossed/colliding anchors or boundary
+  targets refuse the whole edit with a finer-grid/lower-strength hint.
+- Warp quantize authors one shared map for aligned item spans, rates and pitches;
+  all existing linked peers must be selected. Slice mode requires unwarped takes,
+  splits all selected items at common times, then moves them identically. Strength
+  zero splits without quantization. Short linear fades use pre-attack material;
+  gaps fade to silence rather than synthesizing or repeating attacks.
+- `audio.warp.reset {items:[it]}` removes active-take maps while preserving hits,
+  scalar rate and pitch. `audio.warp.detach {items:[it]}` explicitly detaches selected
+  active takes from phase bundles while retaining maps. Membership changes update
+  all affected peers and respect locks.
+
+`take.list` exposes `stretch_markers`, `transients`, `warp_peers`, `hits_stale`;
+`session.describe` includes hit/anchor counts. All edit commands are one history
+step, with structured errors and no source I/O in the quantization handler.
+
+`take.set` accepts `rebase_seconds` for an item-left trim: it evaluates the source
+map at the new origin and translates all anchor item times. It is mutually
+exclusive with `start_offset`, which slips the map in source time. Changing
+`playrate` scales anchor item times. `item.split` applies the same rebase to the
+right take. Clipboard copies remap a complete warp bundle to fresh take IDs;
+partial copies are independent. Edits that break a remaining bundle's alignment
+fail at transaction commit, allowing a batch to move all members together.

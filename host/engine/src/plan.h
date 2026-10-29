@@ -613,6 +613,7 @@ struct Plan {
     std::shared_ptr<const time::TimeMap> timeMap;
     std::vector<std::string> warnings;
     std::filesystem::path projectDir;
+    std::shared_ptr<const PreparedSources> preparedSources;
     MediaCache* media = nullptr;
     std::vector<host::Instance*> instances;  // every instance the plan processes, sorted
     std::unique_ptr<TaskGraph> graph;        // node dependencies, for processBlockOn

@@ -717,6 +717,8 @@ void registerMidiCommands(cmd::Registry& registry) {
             take.startOffset = 0;
             take.playrate = 1;
             take.stretchMarkers.clear();
+            take.transients.reset();
+            take.warpPeers.clear();
             auto copied = copyTake(s, txn, heard, std::move(take));
             if (!copied) return std::move(copied).error();
             model::Item item = kept;
@@ -726,7 +728,7 @@ void registerMidiCommands(cmd::Registry& registry) {
             item.fadeOut = s.items.find(last)->fadeOut;
             model::placeItem(s, item, start, end - start);
             for (const Id id : ids) {
-                for (const Id t : s.items.find(id)->takes) removeTakeObjects(txn, s, t);
+                for (const Id t : s.items.find(id)->takes) SUPPLE_TRY(removeTakeObjects(txn, s, t));
                 if (id != base) txn.remove<model::Item>(id);
             }
             txn.put<model::Item>(base, std::move(item));

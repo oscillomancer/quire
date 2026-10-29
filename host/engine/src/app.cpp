@@ -3,6 +3,7 @@
 #include "supple/engine/app.h"
 #include "media_files.h"
 #include "runtime_protection.h"
+#include "source_preparation.h"
 #include "supple/model/numeric.h"
 
 #if !defined(_WIN32)
@@ -384,6 +385,7 @@ Result<model::Id> copyTake(const model::Session& source, model::EditTxn& txn, mo
                            model::Take copy, double shift) {
     std::map<model::Id, model::Id> ids;
     copy.chain.clear();
+    copy.warpPeers.clear();
     const auto* old = source.takes.find(original);
     if (!old)
         return Error(
@@ -961,6 +963,9 @@ Status EngineApp::startEngine(std::string_view backend, std::uint32_t block, boo
 }
 
 void EngineApp::haltEngine() {
+    sourcePreparation_.reset();
+    pendingSourceKey_.clear();
+    preparationError_.clear();
     if (engine_) {
         engine_->stop();
         auto takes = engine_->stopRecording();
@@ -1008,6 +1013,18 @@ void EngineApp::tick() {
     mainWake_.drain();  // re-arm before inspecting producer queues
     std::erase_if(jobs_,
                   [](const auto& job) { return job.finished->load(std::memory_order_acquire); });
+    if (sourcePreparation_)
+        if (auto ready = sourcePreparation_->take()) {
+            pendingSourceKey_.clear();
+            if (*ready) {
+                media_.adoptSources(**ready);
+                preparationError_.clear();
+                headChanged();
+            } else {
+                preparationError_ = ready->error().toString();
+                emit("engine.error", preparationError_);
+            }
+        }
     if (clearScripts_ && scripts_ && !scripts_->active()) {
         scripts_->clear();
         clearScripts_ = false;
@@ -1351,6 +1368,10 @@ void EngineApp::restartFx(model::Id fx) {
 EngineStatus EngineApp::engineStatus() {
     checkFailures();
     EngineStatus st;
+    st.preparingAudio = !pendingSourceKey_.empty();
+    st.preparationVersion = st.preparingAudio ? head().version : 0;
+    st.preparedVersion = loadedHead_ ? loadedHead_->version : 0;
+    st.preparationError = preparationError_;
     st.memoryLock = protections_->memoryLock();
     st.cpuIdleLatency = protections_->cpuIdleLatency();
     if (st.cpuIdleLatency.error)
@@ -2542,6 +2563,23 @@ void EngineApp::headChanged() {
     }
     mainWake_.notify();
     if (!engine_) return;
+    auto sourceKey = sourcePreparationKey(head(), projectDir(), engine_->config().sampleRate);
+    if (!sourceKey) {
+        preparationError_ = sourceKey.error().toString();
+        emit("engine.error", preparationError_);
+        return;
+    }
+    if (!media_.sources() || media_.sources()->key != *sourceKey || !pendingSourceKey_.empty()) {
+        if (pendingSourceKey_ != *sourceKey) {
+            if (!sourcePreparation_)
+                sourcePreparation_ =
+                    std::make_unique<SourcePreparation>([this] { mainWake_.notify(); });
+            pendingSourceKey_ = *sourceKey;
+            preparationError_.clear();
+            sourcePreparation_->request(head(), projectDir(), engine_->config().sampleRate);
+        }
+        return;
+    }
     // Returning to a version before the first patch/state edit means defaults,
     // rather than retaining the previous version's live plugin state.
     if (loadedHead_)
@@ -2742,7 +2780,8 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
         (void)st;
         return;
     }
-    if (fixture == "song_with_audio") {  // tr_1 "Audio" + it_1/tk_1: four beats of a 0.5 tone
+    if (fixture == "song_with_audio" || fixture == "song_with_hits" ||
+        fixture == "song_with_warp") {  // tr_1 "Audio" + it_1/tk_1: four beats of a 0.5 tone
         run("track.add", R"({"name": "Audio"})");
         const fs::path file = mediaDir() / "tone.wav";
         audio::AudioData tone;
@@ -2757,6 +2796,10 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
         (void)st;
         run("item.add",
             R"({"track": "tr_1", "position": 0, "audio_file": ")" + file.string() + R"("})");
+        if (fixture == "song_with_hits")
+            run("take.hits.set", R"({"take":"tk_1","positions":[0.3,0.8]})");
+        if (fixture == "song_with_warp")
+            run("take.stretch.add", R"({"take":"tk_1","source_pos":0.3,"item_pos":0.25})");
         return;
     }
     // gain/gain.cpp in the DSP script library; dsp_player: and the script

@@ -487,6 +487,9 @@ Status Engine::load(const model::Session& session, const std::filesystem::path& 
         built->media = &media_;
         built->rateBackendLatency = backend_->status().outputLatency;
         built->rateEnabled |= rateScheduling_.load(std::memory_order_acquire);
+        auto sources = media_.prepareSources(session, projectDir, config_.sampleRate);
+        if (!sources) return sources.error();
+        built->preparedSources = *sources;
         SUPPLE_TRY(detail::prepare(*built, session));
         return built;
     };

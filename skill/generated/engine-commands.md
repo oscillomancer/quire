@@ -187,6 +187,171 @@ Result:
 
 ```
 
+## `audio.quantize@1`
+
+Quantize detected audio hits together using stretch markers or slices.
+
+Consumes stored source hits. Detect absent/stale hits with take.hits.detect. Aligned items share one timing map; warp mode jointly processes their channels. Slice mode requires unwarped input; strength 0 splits without moving hits.
+
+Kind: `edit`. Exposure: `mcp-exec`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `items` | array |  |  |  |  |
+| `grid` | number |  | 0.0009765625..1024.0 |  |  |
+| `strength` | number |  | 0.0..1.0 | 1.0 |  |
+| `swing` | number |  | 0.0..1.0 | 0.0 |  |
+| `crossfade` | number |  | 0.0..0.05 | 0.005 |  |
+| `mode` | string |  |  | "warp" |  |
+| `reference` | string |  |  | "" |  |
+| `hits` | string |  |  | "reference" |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Errors
+
+- `audio.*`: invalid, absent or stale source hits or incompatible items Hint: detect current audio hits; align item spans and use a finer grid or lower strength
+- `warp.*`: unsupported map, mode, bundle or preparation budget Hint: use nonlooped Signalsmith pitch preservation and ordered anchors; include all peers or detach
+- `item.locked`: a target item or warp peer is locked Hint: unlock the affected item with item.set
+- `take.unknown`: the take no longer exists Hint: choose a current take from take.list
+
+### Examples
+
+**Warp to sixteenths** (`song_with_hits`)
+
+```json
+{
+  "items": ["it_1"],
+  "grid": 0.25
+}
+
+```
+
+Result:
+
+```json
+"<any>"
+
+```
+
+**Split without moving** (`song_with_hits`)
+
+```json
+{
+  "items": ["it_1"],
+  "grid": 0.25,
+  "mode": "slice",
+  "strength": 0
+}
+
+```
+
+Result:
+
+```json
+"<any>"
+
+```
+
+## `audio.warp.detach@1`
+
+Detach selected items from jointly processed warp bundles.
+
+
+
+Kind: `edit`. Exposure: `mcp-exec`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `items` | array |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Errors
+
+- `audio.*`: invalid, absent or stale source hits or incompatible items Hint: detect current audio hits; align item spans and use a finer grid or lower strength
+- `warp.*`: unsupported map, mode, bundle or preparation budget Hint: use nonlooped Signalsmith pitch preservation and ordered anchors; include all peers or detach
+- `item.locked`: a target item or warp peer is locked Hint: unlock the affected item with item.set
+- `take.unknown`: the take no longer exists Hint: choose a current take from take.list
+
+### Examples
+
+**Clear warp** (`song_with_audio`)
+
+```json
+{
+  "items": ["it_1"]
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
+## `audio.warp.reset@1`
+
+Remove selected items' warping while keeping detected hits.
+
+
+
+Kind: `edit`. Exposure: `mcp-exec`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `items` | array |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Errors
+
+- `audio.*`: invalid, absent or stale source hits or incompatible items Hint: detect current audio hits; align item spans and use a finer grid or lower strength
+- `warp.*`: unsupported map, mode, bundle or preparation budget Hint: use nonlooped Signalsmith pitch preservation and ordered anchors; include all peers or detach
+- `item.locked`: a target item or warp peer is locked Hint: unlock the affected item with item.set
+- `take.unknown`: the take no longer exists Hint: choose a current take from take.list
+
+### Examples
+
+**Clear warp** (`song_with_audio`)
+
+```json
+{
+  "items": ["it_1"]
+}
+
+```
+
+Result:
+
+```json
+{}
+
+```
+
 ## `autoitem.add@1`
 
 Put an automation item on an envelope: a block that replaces it there.
@@ -2469,6 +2634,18 @@ Kind: `action`. Exposure: `mcp-tool`.
     "running": {
       "type": "boolean"
     },
+    "preparing_audio": {
+      "type": "boolean"
+    },
+    "prepared_version": {
+      "type": "integer"
+    },
+    "preparation_version": {
+      "type": "integer"
+    },
+    "preparation_error": {
+      "type": "string"
+    },
     "backend": {
       "type": "string"
     },
@@ -2752,6 +2929,10 @@ Kind: `action`. Exposure: `mcp-tool`.
   },
   "required": [
     "running",
+    "preparing_audio",
+    "prepared_version",
+    "preparation_version",
+    "preparation_error",
     "backend",
     "sample_rate",
     "block",
@@ -2822,6 +3003,10 @@ Result:
   "midi_warnings": [],
   "midi_devices_changed": false,
   "midi_devices_message": "",
+  "preparing_audio": false,
+  "preparation_error": "",
+  "prepared_version": "<any>",
+  "preparation_version": 0,
   "cycles": "<any>",
   "process_errors": 0,
   "restart_needed": false,
@@ -2873,7 +3058,7 @@ Result:
 
 Real-time engine state: backend, rate, block, device period, latency, xruns.
 
-plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. midi_devices_changed is advisory: MIDI topology changed but audio keeps running. midi_devices_message asks for an explicit engine restart to pick up the new set; existing port names stay fixed. midi_dropped: native MIDI messages/packets rejected or lost to bounded queues (zero for other backends). midi_warnings lists inputs skipped at start, with device, numeric os_error, message and corrective hint. meter_drops: entries a full ring dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, never audio. dropped/voice_dropped count lost plug-in output/voice records. memory_lock reports requested/active and an optional OS error with errno and a corrective hint, including while stopped. Bridges are excluded. cpu_idle_latency reports the owned 20 microsecond request with the same status/error fields; it affects system idle while held and leaves CPU frequency policy unchanged. live_helpers is the enabled live helper capacity. scheduling: each thread class's policy (none, normal, fifo, rr, high) and priority as applied at start: the device callback, live helpers, renderer and background helpers (real-time below a real-time callback when permitted). workgroup: whether the live helpers joined the device's audio workgroup (macOS CoreAudio; state none, ready, joined, partial or failed, with the helper counts and the last refusal's OS error, message and hint). warnings includes scheduling fallbacks and plan warnings with corrective actions. failed_errors adds structured code, message, path and hint to each failure. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them).
+preparing_audio: source preparation is pending; the previous ready plan stays audible. prepared_version is the last compiled version, preparation_version the pending target (zero when idle); preparation_error explains a failed preparation. plan_latency: the session's plugin delay in frames; device_latency: frames from the engine's outputs to the device. restart_needed: the device changed rate or went away; engine.stop and engine.start again. midi_devices_changed is advisory: MIDI topology changed but audio keeps running. midi_devices_message asks for an explicit engine restart to pick up the new set; existing port names stay fixed. midi_dropped: native MIDI messages/packets rejected or lost to bounded queues (zero for other backends). midi_warnings lists inputs skipped at start, with device, numeric os_error, message and corrective hint. meter_drops: entries a full ring dropped (the renderer's, the audio callback's) — a strip's peak/RMS missed a block, never audio. dropped/voice_dropped count lost plug-in output/voice records. memory_lock reports requested/active and an optional OS error with errno and a corrective hint, including while stopped. Bridges are excluded. cpu_idle_latency reports the owned 20 microsecond request with the same status/error fields; it affects system idle while held and leaves CPU frequency policy unchanged. live_helpers is the enabled live helper capacity. scheduling: each thread class's policy (none, normal, fifo, rr, high) and priority as applied at start: the device callback, live helpers, renderer and background helpers (real-time below a real-time callback when permitted). workgroup: whether the live helpers joined the device's audio workgroup (macOS CoreAudio; state none, ready, joined, partial or failed, with the helper counts and the last refusal's OS error, message and hint). warnings includes scheduling fallbacks and plan warnings with corrective actions. failed_errors adds structured code, message, path and hint to each failure. failed_fx: isolated plugins whose process crashed or hung (silent now; fx.restart re-creates them).
 
 Kind: `query`. Exposure: `mcp-tool`.
 
@@ -2891,6 +3076,18 @@ Kind: `query`. Exposure: `mcp-tool`.
   "properties": {
     "running": {
       "type": "boolean"
+    },
+    "preparing_audio": {
+      "type": "boolean"
+    },
+    "prepared_version": {
+      "type": "integer"
+    },
+    "preparation_version": {
+      "type": "integer"
+    },
+    "preparation_error": {
+      "type": "string"
     },
     "backend": {
       "type": "string"
@@ -3175,6 +3372,10 @@ Kind: `query`. Exposure: `mcp-tool`.
   },
   "required": [
     "running",
+    "preparing_audio",
+    "prepared_version",
+    "preparation_version",
+    "preparation_error",
     "backend",
     "sample_rate",
     "block",
@@ -3233,6 +3434,10 @@ Result:
   "midi_warnings": [],
   "midi_devices_changed": false,
   "midi_devices_message": "",
+  "preparing_audio": false,
+  "preparation_error": "",
+  "prepared_version": 0,
+  "preparation_version": 0,
   "cycles": 0,
   "process_errors": 0,
   "restart_needed": false,
@@ -9675,6 +9880,116 @@ Result:
 
 ```
 
+## `take.hits.detect@1`
+
+Detect transient candidates in audio takes, then commit one undoable edit.
+
+
+
+Kind: `action`. Exposure: `mcp-exec`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `takes` | array |  |  |  |  |
+| `sensitivity` | number |  | 0.0..1.0 | 0.5 |  |
+
+### Result
+
+```json
+{
+  "type": "object",
+  "title": "audio_job",
+  "properties": {
+    "job": {
+      "type": "string"
+    }
+  },
+  "required": ["job"],
+  "additionalProperties": false
+}
+
+```
+
+### Errors
+
+- `audio.*`: invalid, absent or stale source hits or incompatible items Hint: detect current audio hits; align item spans and use a finer grid or lower strength
+- `warp.*`: unsupported map, mode, bundle or preparation budget Hint: use nonlooped Signalsmith pitch preservation and ordered anchors; include all peers or detach
+- `item.locked`: a target item or warp peer is locked Hint: unlock the affected item with item.set
+- `take.unknown`: the take no longer exists Hint: choose a current take from take.list
+
+### Examples
+
+**Detect attacks** (`song_with_audio`)
+
+```json
+{
+  "takes": ["tk_1"]
+}
+
+```
+
+Result:
+
+```json
+{
+  "job": "<any>"
+}
+
+```
+
+## `take.hits.set@1`
+
+Replace a take's transient candidates in original source seconds.
+
+
+
+Kind: `edit`. Exposure: `mcp-exec`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `take` | string |  |  |  |  |
+| `positions` | array |  |  |  |  |
+| `source_hash` | string |  |  | "" |  |
+| `algorithm` | string |  |  | "manual" |  |
+| `sensitivity` | number |  | 0.0..1.0 | 0.5 |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Errors
+
+- `audio.*`: invalid, absent or stale source hits or incompatible items Hint: detect current audio hits; align item spans and use a finer grid or lower strength
+- `warp.*`: unsupported map, mode, bundle or preparation budget Hint: use nonlooped Signalsmith pitch preservation and ordered anchors; include all peers or detach
+- `item.locked`: a target item or warp peer is locked Hint: unlock the affected item with item.set
+- `take.unknown`: the take no longer exists Hint: choose a current take from take.list
+
+### Examples
+
+**Mark attacks** (`song_with_audio`)
+
+```json
+{
+  "take": "tk_1",
+  "positions": [0.1, 0.3]
+}
+
+```
+
+Result:
+
+```json
+"<any>"
+
+```
+
 ## `take.list@1`
 
 List the takes of an item and identify its active take.
@@ -9756,6 +10071,12 @@ Kind: `query`. Exposure: `mcp-tool`.
           },
           "pitch_mode": {
             "type": "string"
+          },
+          "stretch_markers": {},
+          "transients": {},
+          "warp_peers": {},
+          "hits_stale": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -9769,7 +10090,11 @@ Kind: `query`. Exposure: `mcp-tool`.
           "playrate",
           "preserve_pitch",
           "pitch",
-          "pitch_mode"
+          "pitch_mode",
+          "stretch_markers",
+          "transients",
+          "warp_peers",
+          "hits_stale"
         ],
         "additionalProperties": false
       }
@@ -9873,6 +10198,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `pan` | value | % | -100.0..100.0 |  | Quantity strings are range-checked by the server. |
 | `channel_mode` | string |  |  |  |  |
 | `name` | string |  |  |  |  |
+| `rebase_seconds` | number |  |  |  | Rebase an audio take after trimming its item start; preserves the warp map. |
 | `start_offset` | number |  |  |  | Source position at the item start; negative for a late first pass. |
 | `playrate` | value | x | 0.01..100.0 |  | Playback speed: 2 plays the source twice as fast. Its length in seconds is the item's, so the take runs out sooner or loops. Quantity strings are range-checked by the server. |
 | `preserve_pitch` | boolean |  |  |  | Keep the source's pitch when the playrate changes (the default). With pitch_mode "resample" the pitch follows the speed. |
@@ -9959,6 +10285,154 @@ Result:
 
 ```json
 {}
+
+```
+
+## `take.stretch.add@1`
+
+Add a pitch-preserving audio stretch marker.
+
+
+
+Kind: `edit`. Exposure: `mcp-exec`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `take` | string |  |  |  |  |
+| `source_pos` | number |  |  |  |  |
+| `item_pos` | number |  | 0.0.. |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Errors
+
+- `audio.*`: invalid, absent or stale source hits or incompatible items Hint: detect current audio hits; align item spans and use a finer grid or lower strength
+- `warp.*`: unsupported map, mode, bundle or preparation budget Hint: use nonlooped Signalsmith pitch preservation and ordered anchors; include all peers or detach
+- `item.locked`: a target item or warp peer is locked Hint: unlock the affected item with item.set
+- `take.unknown`: the take no longer exists Hint: choose a current take from take.list
+
+### Examples
+
+**Edit an anchor** (`song_with_audio`)
+
+```json
+{
+  "take": "tk_1",
+  "source_pos": 0.3,
+  "item_pos": 0.25
+}
+
+```
+
+Result:
+
+```json
+"<any>"
+
+```
+
+## `take.stretch.move@1`
+
+Move an audio stretch marker's item position.
+
+
+
+Kind: `edit`. Exposure: `mcp-exec`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `take` | string |  |  |  |  |
+| `index` | integer |  |  |  |  |
+| `item_pos` | number |  | 0.0.. |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Errors
+
+- `audio.*`: invalid, absent or stale source hits or incompatible items Hint: detect current audio hits; align item spans and use a finer grid or lower strength
+- `warp.*`: unsupported map, mode, bundle or preparation budget Hint: use nonlooped Signalsmith pitch preservation and ordered anchors; include all peers or detach
+- `item.locked`: a target item or warp peer is locked Hint: unlock the affected item with item.set
+- `take.unknown`: the take no longer exists Hint: choose a current take from take.list
+
+### Examples
+
+**Edit an anchor** (`song_with_warp`)
+
+```json
+{
+  "take": "tk_1",
+  "index": 1,
+  "item_pos": 0.26
+}
+
+```
+
+Result:
+
+```json
+"<any>"
+
+```
+
+## `take.stretch.remove@1`
+
+Remove an interior audio stretch marker.
+
+
+
+Kind: `edit`. Exposure: `mcp-exec`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `take` | string |  |  |  |  |
+| `index` | integer |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Errors
+
+- `audio.*`: invalid, absent or stale source hits or incompatible items Hint: detect current audio hits; align item spans and use a finer grid or lower strength
+- `warp.*`: unsupported map, mode, bundle or preparation budget Hint: use nonlooped Signalsmith pitch preservation and ordered anchors; include all peers or detach
+- `item.locked`: a target item or warp peer is locked Hint: unlock the affected item with item.set
+- `take.unknown`: the take no longer exists Hint: choose a current take from take.list
+
+### Examples
+
+**Edit an anchor** (`song_with_warp`)
+
+```json
+{
+  "take": "tk_1",
+  "index": 1
+}
+
+```
+
+Result:
+
+```json
+"<any>"
 
 ```
 

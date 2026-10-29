@@ -38,6 +38,7 @@
 #include "supple/model/versions.h"
 
 namespace supple::engine {
+class SourcePreparation;
 
 namespace detail {
 class RuntimeProtection;
@@ -91,6 +92,9 @@ struct EngineWorkgroup {
 
 // The real-time engine as engine.status reports it.
 struct EngineStatus {
+    bool preparingAudio = false;
+    std::uint64_t preparedVersion = 0, preparationVersion = 0;
+    std::string preparationError;
     bool running = false;
     std::string backend;
     double sampleRate = 0;
@@ -348,6 +352,8 @@ class EngineApp : public cmd::Host {
     Engine* engine() { return engine_.get(); }
     const Backend* backend() const { return backend_; }  // null while stopped
     EngineStatus engineStatus();
+    bool preparingAudio() const { return !pendingSourceKey_.empty(); }
+    const std::string& preparationError() const { return preparationError_; }
     // The meters (P5.3c): one reading per strip of the newest plan, covering
     // the audio heard since the last call. Call it from this (the model)
     // thread, the way the GUI's tick does; empty when the engine is stopped.
@@ -581,6 +587,8 @@ class EngineApp : public cmd::Host {
     std::map<std::string, std::unique_ptr<host::Instance>> scratch_;
     Status moveScratchMedia(const std::filesystem::path& dest,
                             const std::function<Status()>& publish);
+    std::unique_ptr<SourcePreparation> sourcePreparation_;
+    std::string pendingSourceKey_, preparationError_;
     std::shared_ptr<const model::Session> loadedHead_;
     std::unique_ptr<Engine> engine_;
     Backend* backend_ = nullptr;

@@ -28,6 +28,7 @@ void registerExtraCommands(cmd::Registry& registry);
 void registerMidiCommands(cmd::Registry& registry);
 void registerChainCommands(cmd::Registry& registry);
 void registerTakeCommands(cmd::Registry& registry);
+void registerAudioCommands(cmd::Registry& registry);
 void registerLearnCommands(cmd::Registry& registry);
 void registerDspCommands(cmd::Registry& registry);
 
@@ -255,6 +256,12 @@ schema::Schema<MidiInputWarning> midiInputWarningSchema() {
 schema::Schema<EngineStatus> engineStatusSchema() {
     return schema::object<EngineStatus>("engine_status")
         .field("running", &EngineStatus::running, schema::boolean())
+        .field("preparing_audio", &EngineStatus::preparingAudio, schema::boolean())
+        .field("prepared_version", &EngineStatus::preparedVersion,
+               schema::integerOf<std::uint64_t>())
+        .field("preparation_version", &EngineStatus::preparationVersion,
+               schema::integerOf<std::uint64_t>())
+        .field("preparation_error", &EngineStatus::preparationError, schema::string())
         .field("backend", &EngineStatus::backend, schema::string())
         .field("sample_rate", &EngineStatus::sampleRate, schema::number())
         .field("block", &EngineStatus::block, schema::integer())
@@ -908,6 +915,7 @@ void registerEngineCommands(cmd::Registry& registry) {
     registerMidiCommands(registry);
     registerChainCommands(registry);
     registerTakeCommands(registry);
+    registerAudioCommands(registry);
     registerLearnCommands(registry);
     registerDspCommands(registry);
     lua::registerScriptCommands(registry);
@@ -1965,7 +1973,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             if (!id) return std::move(id).error();
             SUPPLE_TRY(checkUnlocked(s, *id));
             model::EditTxn& t = app.txn();
-            for (Id tk : s.items.find(*id)->takes) removeTakeObjects(t, s, tk);
+            for (Id tk : s.items.find(*id)->takes) SUPPLE_TRY(removeTakeObjects(t, s, tk));
             t.remove<model::Item>(*id);
             return Empty{};
         };
@@ -3818,6 +3826,8 @@ void registerEngineCommands(cmd::Registry& registry) {
              obj(R"({"running": true, "backend": "dummy", "sample_rate": 48000.0, "block": 128,
                      "period": 128, "plan_latency": 0, "device_latency": 0, "xruns": 0, "midi_dropped": 0, "midi_warnings": [],
                      "midi_devices_changed": false, "midi_devices_message": "",
+                     "preparing_audio": false, "preparation_error": "",
+                     "prepared_version": "<any>", "preparation_version": 0,
                      "cycles": "<any>", "process_errors": 0, "restart_needed": false,
                      "anticipative": true, "anticipation_misses": 0, "live_helpers": "<any>",
                      "scheduling": {"callback": {"policy": "normal", "priority": 0},
@@ -3923,6 +3933,10 @@ void registerEngineCommands(cmd::Registry& registry) {
         c.exposure = cmd::Exposure::McpTool;
         c.summary = "Real-time engine state: backend, rate, block, device period, latency, xruns.";
         c.description =
+            "preparing_audio: source preparation is pending; the previous ready plan stays "
+            "audible. "
+            "prepared_version is the last compiled version, preparation_version the pending target "
+            "(zero when idle); preparation_error explains a failed preparation. "
             "plan_latency: the session's plugin delay in frames; device_latency: frames from "
             "the engine's outputs to the device. restart_needed: the device changed rate or went "
             "away; engine.stop and engine.start again. midi_devices_changed is advisory: "
@@ -3956,6 +3970,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                        obj(R"({"running": false, "backend": "", "sample_rate": 0.0, "block": 0,
                      "period": 0, "plan_latency": 0, "device_latency": 0, "xruns": 0, "midi_dropped": 0, "midi_warnings": [],
                      "midi_devices_changed": false, "midi_devices_message": "",
+                     "preparing_audio": false, "preparation_error": "",
+                     "prepared_version": 0, "preparation_version": 0,
                      "cycles": 0, "process_errors": 0, "restart_needed": false,
                      "anticipative": false, "anticipation_misses": 0, "live_helpers": 0,
                      "scheduling": {"callback": {"policy": "none", "priority": 0},
@@ -4440,6 +4456,12 @@ std::string describeSession(const model::Session& s) {
                         il += " (audio " + take->source->str() + " " +
                               (m ? fs::path(m->path).filename().string() : "") + ")";
                     }
+                }
+                if (take) {
+                    if (take->transients)
+                        il += " · " + std::to_string(take->transients->positions.size()) + " hits";
+                    if (!take->stretchMarkers.empty())
+                        il += " · " + std::to_string(take->stretchMarkers.size()) + " warp anchors";
                 }
                 if (it.mute) il += " muted";
                 out += il + "\n";

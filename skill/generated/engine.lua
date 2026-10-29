@@ -34,6 +34,22 @@ q = nil
 ---@field tap? "post_fader"|"pre_fader"|"pre_fx" (default: "post_fader")
 ---@field detail? "summary"|"standard"|"full" summary: key scalars; standard: + percentiles and spectrum; full: + time series. (default: "summary")
 
+---@class Quire.audio_quantize_args
+---@field items string[]
+---@field grid number
+---@field strength? number (default: 1.0)
+---@field swing? number (default: 0.0)
+---@field crossfade? number (default: 0.005)
+---@field mode? "warp"|"slice" (default: "warp")
+---@field reference? string (default: "")
+---@field hits? "reference"|"merged" (default: "reference")
+
+---@class Quire.audio_warp_detach_args
+---@field items string[]
+
+---@class Quire.audio_warp_reset_args
+---@field items string[]
+
 ---@class Quire.autoitem_add_args
 ---@field env string Envelope id, e.g. "en_1".
 ---@field position? number
@@ -240,6 +256,10 @@ q = nil
 
 ---@class Quire.engine_start_result
 ---@field running boolean
+---@field preparing_audio boolean
+---@field prepared_version integer
+---@field preparation_version integer
+---@field preparation_error string
 ---@field backend string
 ---@field sample_rate number
 ---@field block integer
@@ -270,6 +290,10 @@ q = nil
 
 ---@class Quire.engine_status_result
 ---@field running boolean
+---@field preparing_audio boolean
+---@field prepared_version integer
+---@field preparation_version integer
+---@field preparation_error string
 ---@field backend string
 ---@field sample_rate number
 ---@field block integer
@@ -1022,6 +1046,20 @@ q = nil
 ---@class Quire.take_extract_result
 ---@field item string
 
+---@class Quire.take_hits_detect_args
+---@field takes string[]
+---@field sensitivity? number (default: 0.5)
+
+---@class Quire.take_hits_detect_result
+---@field job string
+
+---@class Quire.take_hits_set_args
+---@field take string
+---@field positions number[]
+---@field source_hash? string (default: "")
+---@field algorithm? string (default: "manual")
+---@field sensitivity? number (default: 0.5)
+
 ---@class Quire.take_list_args
 ---@field item string
 
@@ -1041,11 +1079,26 @@ q = nil
 ---@field pan? number|string Quantity strings are range-checked by the server.
 ---@field channel_mode? "normal"|"reverse_stereo"|"mono_mix"|"left"|"right"
 ---@field name? string
+---@field rebase_seconds? number Rebase an audio take after trimming its item start; preserves the warp map.
 ---@field start_offset? number Source position at the item start; negative for a late first pass.
 ---@field playrate? number|string Playback speed: 2 plays the source twice as fast. Its length in seconds is the item's, so the take runs out sooner or loops. Quantity strings are range-checked by the server.
 ---@field preserve_pitch? boolean Keep the source's pitch when the playrate changes (the default). With pitch_mode "resample" the pitch follows the speed.
 ---@field pitch? number|string Pitch offset in semitones. Stretched when the pitch is preserved, otherwise a further speed factor of 2^(pitch/12). Quantity strings are range-checked by the server.
 ---@field pitch_mode? "resample"|"signalsmith" Time-stretch algorithm: "signalsmith" (pitch-preserving, the default) or "resample" (varispeed).
+
+---@class Quire.take_stretch_add_args
+---@field take string
+---@field source_pos number
+---@field item_pos number
+
+---@class Quire.take_stretch_move_args
+---@field take string
+---@field index integer
+---@field item_pos number
+
+---@class Quire.take_stretch_remove_args
+---@field take string
+---@field index integer
 
 ---@class Quire.tempo_set_args
 ---@field points table[]
@@ -1281,6 +1334,13 @@ q = nil
 ---@field render fun(args: Quire.analyze_render_args): table Analyze a render id or audio path: loudness, spectrum, envelope and stereo.
 ---@field track fun(args: Quire.analyze_track_args): table Render one track's output offline and analyze it.
 
+---@class Quire.audio
+---@field quantize fun(args: Quire.audio_quantize_args): table Quantize detected audio hits together using stretch markers or slices.
+
+---@class Quire.audio.warp
+---@field detach fun(args: Quire.audio_warp_detach_args): table Detach selected items from jointly processed warp bundles.
+---@field reset fun(args: Quire.audio_warp_reset_args): table Remove selected items' warping while keeping detected hits.
+
 ---@class Quire.autoitem
 ---@field add fun(args: Quire.autoitem_add_args): table Put an automation item on an envelope: a block that replaces it there.
 ---@field duplicate fun(args: Quire.autoitem_duplicate_args): table Copy an automation item (pooled by default: edits to either reach both).
@@ -1462,6 +1522,15 @@ q = nil
 ---@field remove fun(args: Quire.take_remove_args): Quire.take_remove_result Delete a take from its item (the item goes with its last take).
 ---@field set fun(args: Quire.take_set_args): table Set take gain, pan, channel mode, name, source offset, or playrate and pitch.
 
+---@class Quire.take.hits
+---@field detect fun(args: Quire.take_hits_detect_args): Quire.take_hits_detect_result Detect transient candidates in audio takes, then commit one undoable edit.
+---@field set fun(args: Quire.take_hits_set_args): table Replace a take's transient candidates in original source seconds.
+
+---@class Quire.take.stretch
+---@field add fun(args: Quire.take_stretch_add_args): table Add a pitch-preserving audio stretch marker.
+---@field move fun(args: Quire.take_stretch_move_args): table Move an audio stretch marker's item position.
+---@field remove fun(args: Quire.take_stretch_remove_args): table Remove an interior audio stretch marker.
+
 ---@class Quire.tempo
 ---@field set fun(args: Quire.tempo_set_args): Quire.tempo_set_result Replace the tempo map: points {beat, bpm, ramp?}; the first must be at beat 0.
 
@@ -1504,6 +1573,7 @@ q = nil
 
 ---@class Quire
 ---@field analyze Quire.analyze Commands named analyze.*
+---@field audio Quire.audio Commands named audio.*
 ---@field autoitem Quire.autoitem Commands named autoitem.*
 ---@field branch Quire.branch Commands named branch.*
 ---@field dsp Quire.dsp Commands named dsp.*
