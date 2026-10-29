@@ -95,7 +95,7 @@ Result<std::shared_ptr<const PreparedSources>> MediaCache::prepareSources(
         if (decoded.insert(identity).second)
             estimate += static_cast<double>(md->frames) * md->channels;
         if (model::activeWarp(*take) && !item->loop)
-            estimate += (span.endSec - span.startSec) * rate * md->channels;
+            estimate += std::ceil((span.endSec - span.startSec) * rate) * md->channels;
         else {
             const bool stretch = variant.stretch();
             const auto variantKey =
@@ -148,7 +148,9 @@ Result<std::shared_ptr<const PreparedSources>> MediaCache::prepareSources(
         const double from = std::floor((model::audioSourceAt(*base, -1) - .5) * rate) / rate;
         const double end = model::audioSourceAt(*base, duration + 1) + .5;
         const double inputFrames = std::ceil((end - from) * rate);
-        const double outputFrames = std::round(duration * rate);
+        // Clip boundaries are rounded separately on the project timeline. Their
+        // difference can be ceil(duration), so retain that last source frame.
+        const double outputFrames = std::ceil(duration * rate);
         if (!channels || channels > 128 || inputFrames < 0 || outputFrames < 0 ||
             (inputFrames + outputFrames) * static_cast<double>(channels) > (1 << 28))
             return Error("warp.budget", "warp bundle exceeds the channel-frame budget", {},

@@ -1844,8 +1844,10 @@ with a plan warning. New commands refuse these modes. The stretcher uses 64-outp
 frame scheduling, seeded synthesis, explicit lookahead/history and zero padding.
 It keeps synthesis state across short marker intervals and trims preparation latency.
 An identity map with no pitch shift copies samples exactly. Prepared warped clips
-start at offset zero; take FX, fades, gain, channel mode, Console 9 and the master
-playrate converter remain downstream, with ADR-0051's original timeline shifts.
+cover `ceil(item_duration * sample_rate)` frames so separately rounded project
+boundaries retain their final frame. They start at offset zero; take FX, fades, gain,
+channel mode, Console 9 and the master playrate converter remain downstream, with
+ADR-0051's original timeline shifts.
 
 Reciprocal `warp_peers` use one aligned multichannel stretch instance with canonical
 ID/channel ordering. The prepared outputs are separated back into their individual

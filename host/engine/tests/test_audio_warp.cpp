@@ -512,3 +512,26 @@ TEST_CASE("source budgets count shared scalar media once across repeated clips")
     CHECK((*sources)->takes.size() == 801);
     CHECK((*sources)->takes.at(last).data == (*sources)->takes.at({model::Kind::Take, 1}).data);
 }
+
+TEST_CASE("warped buffers cover separately rounded fractional item boundaries") {
+    WarpHost h;
+    model::EditTxn edit(h.app->head(), h.app->head().version + 1);
+    constexpr double duration = 10.1 / 48000;
+    edit.modify<model::Item>({model::Kind::Item, 1}, [](auto& item) {
+        item.timebase = model::ItemTimebase::Time;
+        item.position = .49 / 48000;
+        item.length = duration;
+    });
+    edit.modify<model::Take>({model::Kind::Take, 1}, [](auto& take) {
+        take.stretchMarkers = {{0, 0, 0}, {duration, duration, 0}};
+    });
+    auto s = edit.commit();
+    REQUIRE(s);
+    MediaCache cache;
+    auto sources = cache.prepareSources(*s, h.app->projectDir(), 48000);
+    REQUIRE(sources);
+    const auto& data = (*sources)->takes.at({model::Kind::Take, 1}).data;
+    REQUIRE(data);
+    REQUIRE(data->frames() == 11);
+    CHECK(std::abs(data->channels[0][10]) > .1f);
+}
