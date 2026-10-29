@@ -176,7 +176,8 @@ instructions are in `docs/guides/installing.md`.
   zero-crossing split (100 ms search, louder stereo channel, cursor fallback;
   agents use `item.split` with `snap: zero_crossing`),
   time stretch and pitch (Signalsmith Stretch), draggable audio warp
-  anchors, transient detection, joint multitrack audio quantize and slicing,
+  anchors (including identity insertion at the edit cursor from the item menu),
+  transient detection, joint multitrack audio quantize and slicing,
   markers, regions,
   tempo and meter maps, the item clipboard, a piano roll with velocity and
   CC lanes, an event list and a notation panel.

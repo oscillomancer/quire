@@ -1974,10 +1974,16 @@ an audio executor.
 - `take.hits.set {take, positions:[seconds], source_hash?, algorithm?, sensitivity?}`
   replaces candidates; empty positions records analyzed silence. Positions are
   ordered and within the original source. The default algorithm is `manual`.
-- `take.stretch.add {take, source_pos, item_pos}`, `.move {take,index,item_pos}` and
+- `take.stretch.add {take, source_pos?, item_pos}`, `.move {take,index,item_pos}` and
   `.remove {take,index}` edit anchors. First add pins the item boundaries. Indices
   are zero-based in item-time order; move/remove operate on interior anchors.
   Linked peers receive the same source-relative edit, atomically.
+  Omitting `source_pos` inserts an identity point on the current source map at
+  item-local `item_pos` seconds, including the take's offset/rate and existing warp;
+  audio timing stays unchanged until the marker moves. An identical existing point
+  succeeds without duplicating it. A conflicting point still fails map validation.
+  Warp peers receive the point once, with existing lock/freeze/mode checks;
+  ordinary item/track edit groups do not propagate take-content edits.
 - `audio.quantize {items:[it],grid,strength?,swing?,mode?,reference?,hits?,crossfade?}`
   consumes nonstale stored hits. Defaults: strength 1, swing 0, mode `warp`, first
   selected item as reference, hits `reference`, crossfade .005 seconds. `hits:merged`

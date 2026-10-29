@@ -1350,7 +1350,15 @@ item time; the source coordinate stays fixed. The overlay previews the destinati
 current grid snapping applies (Shift frees it), and release commits one command.
 A changed project/version cancels the marker gesture. Bundle anchors move together.
 
-The item menu offers Detect hits, Quantize audio, Slice at hits and Remove warping.
+The item menu offers Detect hits, Add stretch marker at cursor, Quantize audio,
+Slice at hits and Remove warping. Add stretch marker at cursor inserts an identity
+anchor into each selected audio item whose interior contains the edit cursor,
+using `take.stretch.add` without `source_pos`; existing anchors are not duplicated.
+MIDI items are skipped and the entry is disabled without selected audio. It is one
+undo step, independent of the menu pointer/grid, and preserves existing source
+timing. Warp peers receive one edit per bundle; locks, frozen items and unsupported
+loop/rate modes refuse the transaction as with other warp edits. Ordinary edit
+groups do not propagate take-content changes.
 Detect hits analyzes selected audio takes. Quantize audio uses the current arrange
 grid and full strength; Slice at hits uses strength zero (split only). Both detect
 missing or stale hits automatically, then apply the edit after the detection result

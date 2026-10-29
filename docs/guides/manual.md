@@ -323,6 +323,15 @@ to change timing while retaining pitch. Hold Shift for a move off the grid. Item
 edges stay pinned when the first marker is added. **Remove warping** returns to the
 take's original scalar rate/pitch and leaves detected hits visible.
 
+To put an anchor at a specific time, set the edit cursor there, right-click an
+item and choose **Add stretch marker at cursor**. It inserts a marker in each
+selected audio item containing the cursor, without moving its timing. Drag the
+marker to change timing later. Existing markers are not duplicated; MIDI items
+are skipped. The command is one undo step and keeps warp peers together. As with
+other warp edits, it needs nonlooped audio in Signalsmith pitch-preserving mode.
+Agents can use `take.stretch.add {take, item_pos}` with `item_pos` in seconds
+from the item's start; omitting `source_pos` preserves the current timing.
+
 **Quantize audio** moves attacks to the current arrange grid. **Slice at hits**
 splits without moving them and adds short fades. Both detect hits automatically
 when needed; undo the timing edit first, then detection if desired. Agents can

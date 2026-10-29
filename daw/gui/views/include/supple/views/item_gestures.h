@@ -122,6 +122,7 @@ class ItemGestures {
     // Menu and S: split only items containing the edit cursor, one undo step.
     // Zero-crossing mode skips items without an active audio take.
     Status splitSelection(bool zeroCrossing = false);
+    Status addStretchMarkerAtCursor();  // selected audio, one undo step; peers once
     bool canPaste() const {
         return !clipboard_.items.empty() &&
                (!projectGeneration || projectGeneration() == clipboard_.generation);

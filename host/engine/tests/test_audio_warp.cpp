@@ -131,6 +131,35 @@ TEST_CASE("audio warp commands quantize split and undo atomically") {
     REQUIRE(h.app->undo());
     CHECK(h.app->head().items.size() == 1);
 }
+TEST_CASE("stretch marker insertion keeps source timing and does not duplicate an anchor") {
+    WarpHost h;
+    h.run("take.set", R"({"take":"tk_1","start_offset":0.125})");
+    auto resolver = [](const model::PluginRef&) -> Result<host::PluginInfo> {
+        return Error("test.plugin", "no plugin");
+    };
+    InstancePool pool(resolver);
+    const OfflineSettings settings{
+        .startSeconds = 0, .endSeconds = 1, .projectDir = h.app->projectDir()};
+    auto before = renderOffline(h.app->head(), pool, settings);
+    REQUIRE(before);
+    h.run("take.stretch.add", R"({"take":"tk_1","item_pos":0.375})");
+    const model::Id take{model::Kind::Take, 1};
+    const auto& markers = h.app->head().takes.find(take)->stretchMarkers;
+    REQUIRE(markers.size() == 3);
+    CHECK(markers[1].sourcePos == .5);
+    auto after = renderOffline(h.app->head(), pool, settings);
+    REQUIRE(after);
+    CHECK(bool(before->audio.channels == after->audio.channels));
+    REQUIRE(h.app->undo());
+    CHECK(h.app->head().takes.find(take)->stretchMarkers.empty());
+    REQUIRE(h.app->redo());
+    h.run("take.stretch.add", R"({"take":"tk_1","item_pos":0.375})");
+    CHECK(h.app->head().takes.find(take)->stretchMarkers.size() == 3);
+    h.run("take.stretch.move", R"({"take":"tk_1","index":1,"item_pos":0.5})");
+    h.run("take.stretch.add", R"({"take":"tk_1","item_pos":0.25})");
+    CHECK(h.app->head().takes.find(take)->stretchMarkers[1].sourcePos == .3125);
+}
+
 TEST_CASE("short variable warp is deterministic and preserves linked channel polarity") {
     audio::AudioData input;
     input.sampleRate = 48000;

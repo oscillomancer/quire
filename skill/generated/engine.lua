@@ -1142,7 +1142,7 @@ q = nil
 
 ---@class Quire.take_stretch_add_args
 ---@field take string
----@field source_pos number
+---@field source_pos? number
 ---@field item_pos number
 
 ---@class Quire.take_stretch_move_args

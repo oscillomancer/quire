@@ -930,7 +930,7 @@ ui::Point laneAt(Fixture& f, model::Id it, std::size_t lane) {
 // Item menu rows: Cut, Copy, Paste, Duplicate, Delete, Merge, rule, four
 // timebases, rule, Take FX, three take envelopes, rule, then (several takes)
 // Show all takes, the two explodes and Delete take, then the two renders.
-constexpr int kShowAll = 23, kExplodeTracks = 24, kExplodeSerial = 25, kDeleteTake = 26;
+constexpr int kShowAll = 24, kExplodeTracks = 25, kExplodeSerial = 26, kDeleteTake = 27;
 }  // namespace
 
 TEST_CASE("arrange item menu splits at the edit cursor and disables zero crossing for MIDI") {
@@ -965,6 +965,39 @@ TEST_CASE("arrange item menu splits at the edit cursor and disables zero crossin
     pick(f, 7);
     CHECK(f.root->find("item.menu"));  // a disabled entry does not activate
     CHECK(model::serializeProject(f.app->head()) == before);
+}
+
+TEST_CASE("arrange item menu inserts a stretch marker at the cursor and skips MIDI") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto audio = f.itemOnRow(0), midi = f.itemOnRow(1, true);
+    const auto take = *f.item(audio).activeTake;
+    const auto span = model::itemSpan(f.app->head(), f.item(audio));
+    f.view->setPlayhead(span.startSec + .25);
+    auto& gestures = f.view->gestures();
+    gestures.setSelection({audio, midi});
+    rightClick(f, onItem(f, audio, f.rectOf(audio).y + f.rectOf(audio).h / 2));
+    const auto* menu = f.root->find("item.menu");
+    REQUIRE(menu);
+    const auto rows = ui::menuItems(*menu);
+    REQUIRE(rows.size() > 14);
+    CHECK(rows[14].label == "Add stretch marker at cursor");
+    CHECK(rows[14].enabled);
+    if (const char* out = std::getenv("SUPPLE_TEST_SNAPSHOTS"))
+        REQUIRE(gui::writePng(std::filesystem::path(out) / "stretch-marker-menu.png",
+                              f.root->readBack()));
+    const auto steps = f.steps();
+    pick(f, 14);
+    const auto& markers = f.app->head().takes.find(take)->stretchMarkers;
+    REQUIRE(markers.size() == 3);
+    CHECK(markers[1].itemPos == .25);
+    CHECK(f.steps() == steps + 1);
+    CHECK(f.app->head().takes.find(*f.item(midi).activeTake)->stretchMarkers.empty());
+    gestures.setSelection({midi});
+    rightClick(f, onItem(f, midi, f.rectOf(midi).y + f.rectOf(midi).h / 2));
+    menu = f.root->find("item.menu");
+    REQUIRE(menu);
+    CHECK_FALSE(ui::menuItems(*menu)[14].enabled);
 }
 
 TEST_CASE("takes: show all takes spreads them out; a lane is heard, deleted from its menu") {
@@ -1066,7 +1099,7 @@ TEST_CASE("takes: explode onto new tracks; render an item with FX as a new take"
     REQUIRE(f.item(audio).takes.size() == 1);
     const ui::Rect ra = f.rectOf(audio);
     rightClick(f, onItem(f, audio, ra.y + ra.h / 2));
-    pick(f, 24);  // Render with FX as a new take
+    pick(f, 25);  // Render with FX as a new take
     REQUIRE(f.item(audio).takes.size() == 2);
     const model::Take& made = *f.app->head().takes.find(*f.item(audio).activeTake);
     CHECK(made.name.ends_with("(FX)"));
@@ -1230,10 +1263,10 @@ TEST_CASE("arrange gestures: take FX and a take envelope drawn and edited on its
     };
     // Rows: Delete, rule, four timebases, rule, Take FX…, volume, pan, mute.
     rightClick();
-    f.menuRow("item.menu", 18);
+    f.menuRow("item.menu", 19);
     CHECK(takeFx == std::vector<model::Id>{take});
     rightClick();
-    f.menuRow("item.menu", 19);
+    f.menuRow("item.menu", 20);
     auto envelope = [&]() -> const model::Envelope* {
         for (const auto& e : f.app->head().envelopes)
             if (e.value->target.object == take && e.value->target.param == "volume")
@@ -1270,7 +1303,7 @@ TEST_CASE("arrange gestures: take FX and a take envelope drawn and edited on its
     CHECK(envelope()->points.size() == 1);
     // Hidden from the menu, its line no longer takes the press: the item moves instead.
     rightClick();
-    f.menuRow("item.menu", 19);
+    f.menuRow("item.menu", 20);
     CHECK_FALSE(envelope()->visible);
     CHECK_FALSE(g.takeEnvelopeAt(audio, {mid.x, lineY}));
 }

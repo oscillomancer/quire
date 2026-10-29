@@ -1016,6 +1016,33 @@ Status ItemGestures::splitSelection(bool zeroCrossing) {
     return {};
 }
 
+Status ItemGestures::addStretchMarkerAtCursor() {
+    if (!run) return {};
+    const auto& s = view_.session();
+    const double cursor = view_.playhead();
+    std::set<model::Id> visited;
+    std::vector<EditStep> steps;
+    for (auto id : selection_) {
+        const auto* item = s.items.find(id);
+        const auto* take = item && item->activeTake ? s.takes.find(*item->activeTake) : nullptr;
+        if (!take || !take->source || take->source->kind != model::Kind::Media ||
+            visited.contains(*item->activeTake))
+            continue;
+        const auto span = model::itemSpan(s, *item);
+        if (!(cursor > span.startSec && cursor < span.endSec)) continue;
+        visited.insert(*item->activeTake);
+        visited.insert(take->warpPeers.begin(), take->warpPeers.end());
+        auto args = json::Value::object();
+        args["take"] = item->activeTake->str();
+        args["item_pos"] = cursor - span.startSec;
+        steps.push_back({"take.stretch.add", std::move(args)});
+    }
+    if (steps.empty()) return {};
+    auto result = run("Add stretch marker at cursor", steps);
+    if (!result) return result.error();
+    return {};
+}
+
 void ItemGestures::addEditItems(std::vector<ui::MenuItem>& items, ui::Point at, bool onItem) {
     auto add = [&](std::string label, const char* action, bool enabled,
                    std::function<Status()> act) {
@@ -1104,13 +1131,18 @@ void ItemGestures::openItemMenu(ui::Point at) {
         items.push_back(std::move(m));
     }
     for (const auto& [label, op] : {std::pair{"Detect hits", "detect"},
+                                    {"Add stretch marker at cursor", "marker"},
                                     {"Quantize audio", "warp"},
                                     {"Slice at hits", "slice"},
                                     {"Remove warping", "reset"}}) {
         ui::MenuItem menu;
         menu.label = label;
         menu.run = [this, operation = std::string(op)] {
-            if (onAudioEdit) onAudioEdit(selection_, operation, gridBeats());
+            if (operation == "marker") {
+                if (auto result = addStretchMarkerAtCursor(); !result && onError)
+                    onError(result.error());
+            } else if (onAudioEdit)
+                onAudioEdit(selection_, operation, gridBeats());
         };
         menu.enabled = std::any_of(selection_.begin(), selection_.end(), [&](auto id) {
             const auto* it = s.items.find(id);

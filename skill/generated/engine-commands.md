@@ -10915,7 +10915,7 @@ Result:
 
 Add a pitch-preserving audio stretch marker.
 
-
+Omit source_pos to insert a point on the current source map at item_pos without changing its timing. An identical existing point is not duplicated. Warp peers receive the same source-relative point; ordinary edit groups stay local, as with other take edits. Requires nonlooped pitch-preserving audio.
 
 Kind: `edit`. Exposure: `mcp-exec`.
 
@@ -10949,6 +10949,23 @@ Kind: `edit`. Exposure: `mcp-exec`.
 {
   "take": "tk_1",
   "source_pos": 0.3,
+  "item_pos": 0.25
+}
+
+```
+
+Result:
+
+```json
+"<any>"
+
+```
+
+**Insert an anchor without moving audio** (`song_with_audio`)
+
+```json
+{
+  "take": "tk_1",
   "item_pos": 0.25
 }
 
