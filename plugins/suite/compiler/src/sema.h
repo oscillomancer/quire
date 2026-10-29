@@ -182,6 +182,7 @@ class Sema {
     void evaluateFile(FieldDecl* f);
     void evaluateSource(FieldDecl* f);
     void evaluateRoute(CallExpr* call, FactoryPatchModel& patch, std::set<std::string>& routed);
+    void evaluatePatchFile(CallExpr* call, FactoryPatchModel& patch);
     void evaluatePatches(FunctionDecl* f);
     void buildConstruction();
     void initialValues(const Type* type, int base, Expr* init, StructDecl* scope);

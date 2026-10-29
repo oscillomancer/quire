@@ -2,11 +2,13 @@
 // Copyright (c) 2026 Supple Audio
 //
 // The product's own claims, measured through the Engine the plugin runs:
-// the room it builds, a file's response played exactly, a missing file
-// falling back to the room, and a change of room without a click.
+// the room it builds, a file's response played exactly, the factory plate
+// played as the same file would be, a missing file falling back to the room,
+// and a change of room without a click.
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 
@@ -15,6 +17,7 @@
 #include "Processor.h"
 #include "Properties.h"
 #include "Testing.h"
+#include "core/Files.h"
 #include "dsp/AudioFile.h"
 
 using namespace supple;
@@ -105,6 +108,22 @@ TEST(a_files_response_plays_exactly_scaled_to_unit_energy_and_pre_delayed) {
     CHECK_NEAR(later[0][480], scale, 1e-6);
     CHECK_NEAR(later[0][580], 0.5 * scale, 1e-6);
     CHECK(test::peak(test::Signal{{later[0].begin(), later[0].begin() + 480}}) < 1e-9);
+}
+
+TEST(the_factory_plate_plays_as_the_same_file_on_disk_does) {
+    const assets::Asset plate = files::factoryFile("factory:plate.flac");
+    CHECK(plate);
+    if (!plate) return;
+    ResponseFile file;
+    const std::string copy = (file.folder / "plate.flac").string();
+    std::ofstream(copy, std::ios::binary).write(reinterpret_cast<const char*>(plate.data),
+                                                static_cast<std::streamsize>(plate.size));
+    test::RenderOptions factory = wetOnly(), disk = wetOnly(), room = wetOnly();
+    factory.properties = {{kImpulse, "factory:plate.flac"}};
+    disk.properties = {{kImpulse, copy}};
+    const test::Signal out = test::render(impulse(19200), factory);
+    CHECK(test::maxDifference(out, test::render(impulse(19200), disk)) == 0.0);
+    CHECK(test::maxDifference(out, test::render(impulse(19200), room)) > 0.01);
 }
 
 TEST(a_missing_file_plays_the_built_in_room) {

@@ -19,6 +19,17 @@
 // reference -- and is reported Missing until the user points at it, which
 // remembers that folder and so finds the rest of a moved library too.
 //
+// A factory reference, "factory:<name>", names one of the product's own
+// files instead (PRODUCT_ASSETS, core/Assets.h): a sample or an impulse
+// response that ships inside the binary, so every system and every host
+// finds it. A property holds one as it holds a path -- its default, a
+// factory preset or a session may set it -- and a session saves it as it
+// is. It exists while the product has that file and is never searched for.
+// Audio files read one (dsp/AudioFile.h); a product's own loadFile() reads
+// the bytes with factoryFile(). Once a product ships a factory file, its
+// name is session ABI, like a parameter ID: renaming or removing it leaves
+// sessions that use it missing, and changing its sound changes theirs.
+//
 // Paths are UTF-8 strings throughout, as properties hold them. Main thread
 // (or a worker): everything here touches the file system.
 #pragma once
@@ -28,6 +39,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "core/Assets.h"
 
 namespace supple {
 
@@ -63,7 +76,14 @@ namespace files {
 std::filesystem::path fromUtf8(std::string_view text);
 std::string toUtf8(const std::filesystem::path& path);
 
+// A file (a factory reference: one the product has) that is there.
 bool exists(std::string_view path);
+// "factory:<name>" (see above), whether or not the product has it.
+inline constexpr std::string_view kFactoryPrefix = "factory:";
+bool isFactoryReference(std::string_view path);
+// The product's file a factory reference names; empty when it is not one,
+// or names a file the product does not have.
+assets::Asset factoryFile(std::string_view path);
 // An exclusive adjacent temporary file, closed before replacing the target.
 // Concurrent writers replace whole files; the last successful replacement wins.
 bool writeAtomic(const std::filesystem::path& path, const uint8_t* bytes, size_t size);
@@ -78,7 +98,7 @@ std::string folderOf(std::string_view path);
 bool hasExtension(std::string_view path, std::string_view extensions);
 
 // Where a missing file went (see above), or "" when nowhere. A path that
-// exists is returned as it is.
+// exists is returned as it is; a factory reference is never looked for.
 std::string relocate(std::string_view path, const std::vector<std::string>& extraFolders = {});
 
 // The product's own per-user settings folder:

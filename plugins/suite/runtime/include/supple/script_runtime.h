@@ -207,6 +207,8 @@ class PatchBuilder {
     // A route ("lfo1>pitch"), its amount in the destination's unit, and the
     // source it goes through ("" for none).
     virtual void route(const char* route, double amount, const char* via) = 0;
+    // A file member's factory file ("factory:pad.flac").
+    virtual void file(const void* member, const char* factoryFile) = 0;
     virtual ~PatchBuilder() = default;
 };
 

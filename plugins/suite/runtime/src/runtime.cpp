@@ -66,6 +66,14 @@ Patches& Patches::route(const char* route, double amount, const char* via) {
     builder_->route(route, amount, via ? via : "");
     return *this;
 }
+Patches& Patches::file(const AudioFile& file, const char* factoryFile) {
+    builder_->file(&file, factoryFile ? factoryFile : "");
+    return *this;
+}
+Patches& Patches::file(const Convolver& file, const char* factoryFile) {
+    builder_->file(&file, factoryFile ? factoryFile : "");
+    return *this;
+}
 
 namespace detail {
 
@@ -82,6 +90,15 @@ std::string factoryChoiceKey(std::string_view label) {
     }
     if (!key.empty() && std::isdigit(static_cast<unsigned char>(key.front()))) key = "p" + key;
     return key;
+}
+
+bool factoryFileName(std::string_view reference) {
+    constexpr std::string_view prefix = "factory:";
+    if (reference.size() <= prefix.size() || reference.size() > 128 ||
+        reference.substr(0, prefix.size()) != prefix)
+        return false;
+    return reference.substr(prefix.size()).find_first_of(std::string_view("/\\:\0", 4)) ==
+           std::string_view::npos;
 }
 
 std::string choiceKey(const ParamModel& param, size_t k) {
@@ -868,6 +885,98 @@ double AudioFile::read(int channel, double frame) const {
     const int i = static_cast<int>(whole);
     return dsp::hermite(sample(channel, i - 1), sample(channel, i), sample(channel, i + 1),
                         sample(channel, i + 2), frame - whole);
+}
+
+double AudioFile::peak(int channel, int from, int to) const {
+    return contents_ ? contents_->peak(channel, from, to) : 0.0;
+}
+double AudioFile::rms(int channel, int from, int to) const {
+    return contents_ ? contents_->rms(channel, from, to) : 0.0;
+}
+
+void detail::FileContents::measure() {
+    levels.assign(audio.channel.size(), Levels{});
+    for (size_t c = 0; c < audio.channel.size(); ++c) {
+        const std::vector<float>& x = audio.channel[c];
+        Levels& l = levels[c];
+        const size_t blocks = (x.size() + kBlock - 1) / kBlock;
+        l.energy.assign(blocks + 1, 0.0);
+        std::vector<float> top(blocks, 0.0f);
+        for (size_t b = 0; b < blocks; ++b) {
+            double sum = 0.0;
+            float most = 0.0f;
+            for (size_t i = b * kBlock; i < std::min(x.size(), (b + 1) * kBlock); ++i) {
+                sum += static_cast<double>(x[i]) * static_cast<double>(x[i]);
+                most = std::max(most, std::abs(x[i]));
+            }
+            l.energy[b + 1] = l.energy[b] + sum;
+            top[b] = most;
+        }
+        l.peak.push_back(std::move(top));
+        while (l.peak.back().size() > kBlock) {
+            const std::vector<float>& below = l.peak.back();
+            std::vector<float> above((below.size() + kBlock - 1) / kBlock, 0.0f);
+            for (size_t i = 0; i < below.size(); ++i)
+                above[i / kBlock] = std::max(above[i / kBlock], below[i]);
+            l.peak.push_back(std::move(above));
+        }
+    }
+}
+
+namespace {
+
+// [from, to) within a channel of `frames`, or false when that holds nothing.
+bool clampRange(int from, int to, size_t frames, size_t& lo, size_t& hi) {
+    lo = static_cast<size_t>(std::max(from, 0));
+    hi = std::min(static_cast<size_t>(std::max(to, 0)), frames);
+    return lo < hi;
+}
+
+}  // namespace
+
+double detail::FileContents::peak(int channel, int from, int to) const {
+    if (channel < 0 || levels.empty()) return 0.0;
+    const size_t c = std::min(static_cast<size_t>(channel), levels.size() - 1);
+    const std::vector<float>& x = audio.channel[c];
+    size_t lo = 0, hi = 0;
+    if (!clampRange(from, to, x.size(), lo, hi)) return 0.0;
+    // The ends sample by sample to block edges, then each level's ends to
+    // its own, and the top level's middle whole.
+    float most = 0.0f;
+    while (lo < hi && lo % kBlock) most = std::max(most, std::abs(x[lo++]));
+    while (hi > lo && hi % kBlock) most = std::max(most, std::abs(x[--hi]));
+    lo /= kBlock;
+    hi /= kBlock;
+    for (const std::vector<float>& p : levels[c].peak) {
+        if (lo >= hi) break;
+        if (&p == &levels[c].peak.back()) {
+            for (size_t i = lo; i < hi; ++i) most = std::max(most, p[i]);
+            break;
+        }
+        while (lo < hi && lo % kBlock) most = std::max(most, p[lo++]);
+        while (hi > lo && hi % kBlock) most = std::max(most, p[--hi]);
+        lo /= kBlock;
+        hi /= kBlock;
+    }
+    return static_cast<double>(most);
+}
+
+double detail::FileContents::rms(int channel, int from, int to) const {
+    if (channel < 0 || levels.empty() || to <= from) return 0.0;
+    const size_t c = std::min(static_cast<size_t>(channel), levels.size() - 1);
+    const std::vector<float>& x = audio.channel[c];
+    size_t lo = 0, hi = 0;
+    double sum = 0.0;
+    if (clampRange(from, to, x.size(), lo, hi)) {
+        auto square = [&](size_t i) {
+            return static_cast<double>(x[i]) * static_cast<double>(x[i]);
+        };
+        while (lo < hi && lo % kBlock) sum += square(lo++);
+        while (hi > lo && hi % kBlock) sum += square(--hi);
+        sum += levels[c].energy[hi / kBlock] - levels[c].energy[lo / kBlock];
+    }
+    // Frames outside the file are silence, as sample() reads them.
+    return std::sqrt(std::max(sum, 0.0) / (static_cast<double>(to) - from));
 }
 
 bool Convolver::loaded() const { return contents_ && contents_->convolution; }

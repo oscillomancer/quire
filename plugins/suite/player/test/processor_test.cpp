@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -70,12 +71,17 @@ std::shared_ptr<const ScriptDefinition> compileText(const std::string& source) {
     return d;
 }
 
+// Every test after a missing one would fail on its empty script, so this stops.
 std::string libraryScript(const char* name) {
     std::string text;
     for (const auto& folder : libraryFolders())
         if (readScript(folder / name / (std::string(name) + ".cpp"), text)) return text;
-    CHECK_MSG(false, "no script %s in the library", name);
-    return text;
+    const char* named = std::getenv("SUPPLE_SCRIPT_LIBRARY");
+    std::fprintf(stderr,
+                 "no script %s in the library folders SUPPLE_SCRIPT_LIBRARY names (%s); "
+                 "ctest sets it to the player's test/smoke and test/library\n",
+                 name, named ? named : "unset");
+    std::exit(1);
 }
 
 std::string exampleScript(const char* file) {
@@ -729,6 +735,78 @@ TEST(a_sampler_plays_its_file_the_same_compiled_either_way_and_ends_with_it) {
     std::sort(jitEnded.begin(), jitEnded.end());
     CHECK(jitEnded == (std::vector<int>{60, 72}));
     for (int i = 5000; i < 24000; ++i) CHECK(a[static_cast<size_t>(i)] == 0.0);
+}
+
+TEST(a_files_peak_and_rms_over_any_range_are_what_its_samples_say) {
+    // Over three levels of blocks (64, 4096, 262144 frames): each frame of
+    // the output is a range's peak (left) and RMS (right), of ranges that
+    // start and end anywhere, run past the file's end or hold nothing.
+    const auto d = compileText(R"(#include <supple/script.h>
+struct Levels : Effect {
+    static constexpr Info info = {.name = "Levels", .id = "com.example.levels"};
+    AudioFile s = audioFile("Sample");
+    int n = 0;
+    void process(Block& io) {
+        for (int i = 0; i < io.frames; ++i) {
+            const int from = n * 1171 - 300, to = from + 200000 - n * 791;
+            io[0][i] = s.peak(0, from, to);
+            io[1][i] = s.rms(0, from, to);
+            ++n;
+        }
+    }
+};
+)");
+    CHECK(d != nullptr);
+    if (!d) return;
+    constexpr int kFrames = 300000;
+    auto shape = [](int n) {
+        return (n == 123457 ? 0.95 : 0.0) + 0.5 * std::sin(n * 0.001) * std::sin(n * 0.37);
+    };
+    const std::string path = writeWav("levels.wav", kFrames, shape);
+    Engine engine(d);
+    engine.activate(48000.0, 64, 2, 2);
+    engine.setProperty(0, path, true);
+    constexpr int kRanges = 384;
+    std::vector<double> left(kRanges, 0.0), right(kRanges, 0.0);
+    for (int start = 0; start < kRanges; start += 64) {
+        double* io[] = {left.data() + start, right.data() + start};
+        engine.process(io, io, 64);
+    }
+    std::filesystem::remove(path);
+    for (int k = 0; k < kRanges; ++k) {
+        const int from = k * 1171 - 300, to = from + 200000 - k * 791;
+        double most = 0.0, sum = 0.0;
+        for (int i = std::max(from, 0); i < std::min(to, kFrames); ++i) {
+            const double x = static_cast<float>(shape(i));
+            most = std::max(most, std::abs(x));
+            sum += x * x;
+        }
+        CHECK(left[static_cast<size_t>(k)] == most);
+        CHECK_NEAR(right[static_cast<size_t>(k)], to > from ? std::sqrt(sum / (to - from)) : 0.0,
+                   1e-9);
+    }
+}
+
+TEST(a_files_default_and_a_patchs_file_are_factory_files) {
+    const auto d = compileText(R"(#include <supple/script.h>
+struct Kit : Instrument {
+    static constexpr Info info = {.name = "Kit", .id = "com.example.kit", .voices = 4};
+    AudioFile sample = audioFile("Sample").withDefault("factory:pad.flac");
+    void factoryPatches(Patches& p) { p.add("Keys").file(sample, "factory:keys.flac"); }
+    void startVoice(int v) {}
+    void releaseVoice(int v) {}
+    void process(Block& io) {}
+};
+)");
+    CHECK(d != nullptr);
+    if (!d) return;
+    CHECK(std::string(d->properties().at(0).def) == "factory:pad.flac");
+    CHECK(d->presets().size() == 1);
+    if (d->presets().empty()) return;
+    const auto& texts = d->presets()[0].texts;
+    CHECK(std::find(texts.begin(), texts.end(),
+                    std::pair<uint32_t, std::string>{d->properties().at(0).id,
+                                                     "factory:keys.flac"}) != texts.end());
 }
 
 TEST(a_convolution_reverb_plays_its_room_the_same_compiled_either_way) {

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "core/Files.h"
 #include "dr_flac.h"
 #include "dr_wav.h"
 #include "dsp/Fir.h"
@@ -57,14 +58,25 @@ AudioReader::~AudioReader() = default;
 bool AudioReader::open(const std::string& path, std::string* error) {
     close();
     auto d = std::make_unique<Decoder>();
+    if (files::isFactoryReference(path)) {
+        // The product's own file, read where it lies in the binary.
+        const assets::Asset a = files::factoryFile(path);
+        if (!a) {
+            fail(error, "the product has no factory file of that name");
+            return false;
+        }
+        d->isWav = drwav_init_memory(&d->wav, a.data, a.size, nullptr) == DRWAV_TRUE;
+        if (!d->isWav) d->flac = drflac_open_memory(a.data, a.size, nullptr);
+    } else {
 #ifdef _WIN32
-    const std::wstring w = wide(path);
-    d->isWav = drwav_init_file_w(&d->wav, w.c_str(), nullptr) == DRWAV_TRUE;
-    if (!d->isWav) d->flac = drflac_open_file_w(w.c_str(), nullptr);
+        const std::wstring w = wide(path);
+        d->isWav = drwav_init_file_w(&d->wav, w.c_str(), nullptr) == DRWAV_TRUE;
+        if (!d->isWav) d->flac = drflac_open_file_w(w.c_str(), nullptr);
 #else
-    d->isWav = drwav_init_file(&d->wav, path.c_str(), nullptr) == DRWAV_TRUE;
-    if (!d->isWav) d->flac = drflac_open_file(path.c_str(), nullptr);
+        d->isWav = drwav_init_file(&d->wav, path.c_str(), nullptr) == DRWAV_TRUE;
+        if (!d->isWav) d->flac = drflac_open_file(path.c_str(), nullptr);
 #endif
+    }
     if (!d->isWav && !d->flac) {
         fail(error, "not a WAV, AIFF or FLAC file this can read");
         return false;

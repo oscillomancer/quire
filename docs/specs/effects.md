@@ -28,9 +28,10 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 | `sedge` (`plugins/sedge`) | Sedge | `com.suppleaudio.sedge` | `RkzT` (the player's for the id) | `Sedg` | audio-effect, analyzer |
 | `gain` (`plugins/gain`) | Gain | `com.suppleaudio.gain` | `sRvm` (the player's for the id) | `Gain` | audio-effect, utility |
 | `hornbeam` (`plugins/hornbeam`) | Hornbeam | `com.suppleaudio.hornbeam` | `hCbo` (the player's for the id) | `Hrnb` | audio-effect, distortion, amp-simulator |
+| `coppice` (`plugins/coppice`) | Coppice | `com.suppleaudio.coppice` | `Idrr` (the player's for the id) | `Cpce` | instrument, sampler |
 
-Marram is an instrument; its spec, implementation notes included, is
-`docs/specs/marram.md`.
+Marram and Coppice are instruments; their specs, implementation notes
+included, are `docs/specs/marram.md` and `docs/specs/coppice.md`.
 
 ## 1. The shape every effect shares
 

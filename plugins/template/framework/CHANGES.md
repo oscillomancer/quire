@@ -4,6 +4,22 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.32.0
+
+What a product must do: nothing. A product that wants files inside its
+binary lists them in `PRODUCT_ASSETS` and names them `factory:<name>`.
+
+- **Factory files.** A file property may hold `"factory:<name>"`, which
+  names one of the product's `PRODUCT_ASSETS` instead of a path: a sample or
+  an impulse response that ships inside the binary, so every host on every
+  system finds it and a copied plugin keeps it. `core/Files.h` adds
+  `isFactoryReference()` and `factoryFile()`; `exists()` is true while the
+  product has the file, and `relocate()` never looks for one it lacks.
+  `dsp::AudioReader` (and so `loadAudioFile()` and `DiskStream`) decodes one
+  from the binary's bytes. A property's default, a factory preset or a
+  session sets one as it sets a path, and saves it as it is. The room
+  example ships a plate (`factory:plate.flac`).
+
 ## 1.31.6
 
 What a product must do: nothing.

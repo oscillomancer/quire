@@ -812,6 +812,13 @@ TEST_CASE("a script compiled as C++ has the sources and routes the compiler sees
     using Route = script::detail::FactoryPatchModel::Route;
     CHECK(jit.factoryPatches()[0].routes ==
           std::vector<Route>{{"lfo>cutoff", "", 1.5}, {"env2>fine", "modwheel", 700}});
+    using File = std::pair<std::uint32_t, std::string>;
+    CHECK(jit.factoryPatches()[0].files ==
+          std::vector<File>{{script::detail::keyId("sample"), "factory:keys.flac"}});
+    REQUIRE(jit.files().size() == 1);
+    REQUIRE(native.files().size() == 1);
+    CHECK(jit.files()[0].def == "factory:pad.flac");
+    CHECK(native.files()[0].def == jit.files()[0].def);
 }
 
 TEST_CASE("a script compiled as C++ says when its parameters apply as the compiler does") {

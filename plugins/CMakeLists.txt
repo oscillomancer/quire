@@ -259,6 +259,7 @@ if(SUPPLE_BUILD_PLUGINS)
   supple_add_stock_script(sedge Sedge com.suppleaudio.sedge)
   supple_add_stock_script(gain Gain com.suppleaudio.gain)
   supple_add_stock_script(hornbeam Hornbeam com.suppleaudio.hornbeam)
+  supple_add_stock_script(coppice Coppice com.suppleaudio.coppice)
 
   # A plugin taken out of the suite leaves its staged files behind, and the
   # app loads every plugin in plugins/clap: keep only what this build makes.

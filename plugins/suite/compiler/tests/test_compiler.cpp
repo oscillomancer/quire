@@ -117,6 +117,33 @@ TEST_CASE("factory patches are constant checked declarations with physical value
     CHECK(patch.values[2].second == 1.0);
 }
 
+TEST_CASE("a file's default and a factory patch's file are the plugin's factory files") {
+    const auto source = [](const std::string& spec, const std::string& declarations) {
+        std::string s = kGain;
+        s.insert(s.find("    void update()"),
+                 "    AudioFile sample = audioFile(\"Sample\")" + spec +
+                     ";\n    void factoryPatches(Patches& p) { " + declarations + " }\n");
+        return s;
+    };
+    CHECK(firstError(source(".withDefault(\"/home/me/pad.flac\")", "")) == "script.file.default");
+    CHECK(firstError(source(".withDefault(\"factory:\")", "")) == "script.file.default");
+    CHECK(firstError(source(".withDefault(\"factory:a/pad.flac\")", "")) == "script.file.default");
+    CHECK(firstError(source("", "p.add(\"A\").file(sample, \"/pad.flac\");")) ==
+          "script.patch.file");
+    CHECK(firstError(source("", "p.add(\"A\").file(gain, \"factory:pad.flac\");")) ==
+          "script.patch.file");
+    CHECK(firstError(source("",
+                            "p.add(\"A\").file(sample, \"factory:a.flac\")"
+                            ".file(sample, \"factory:b.flac\");")) == "script.patch.duplicate");
+    auto compiled = compileOk(source(".withDefault(\"factory:pad.flac\")",
+                                     "p.add(\"Keys\").file(sample, \"factory:keys.flac\");"));
+    CHECK(compiled.program->files().at(0).def == "factory:pad.flac");
+    const auto& patch = compiled.program->factoryPatches().at(0);
+    REQUIRE(patch.files.size() == 1);
+    CHECK(patch.files[0].first == script::detail::keyId("sample"));
+    CHECK(patch.files[0].second == "factory:keys.flac");
+}
+
 TEST_CASE("a choice's options may have keys of their own") {
     const auto source = [](const std::string& slope, const std::string& patch = "") {
         std::string s = kGain;

@@ -126,8 +126,13 @@ struct FileModel {
     std::uint32_t id = 0;  // the property's id: keyId(key)
     Kind kind = Kind::Audio;
     std::string name, description;
-    int offset = 0;  // of the member in the plugin struct
+    std::string def;  // its default: a factory file, or "" for none
+    int offset = 0;   // of the member in the plugin struct
 };
+
+// "factory:<name>": one of the plugin's own files, inside its binary (the
+// framework's core/Files.h), by a name without separators.
+bool factoryFileName(std::string_view reference);
 
 // A Shared or SharedArray member: bytes the audio code sends the editor.
 struct SharedModel {
@@ -157,6 +162,8 @@ struct FactoryPatchModel {
         bool operator==(const Route&) const = default;
     };
     std::vector<Route> routes;
+    // Factory files for file members, by the property's id.
+    std::vector<std::pair<std::uint32_t, std::string>> files;
     bool operator==(const FactoryPatchModel&) const = default;
 };
 

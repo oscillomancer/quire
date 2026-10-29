@@ -97,6 +97,8 @@ class NativeCode final : public Code {
                 {}, static_cast<int>(static_cast<const unsigned char*>(member) - base), bytes});
         if constexpr (requires(T& t, Patches& p) { t.factoryPatches(p); }) {
             FactoryCollector builder(params_, collector.params, factoryPatches_);
+            builder.fileMembers = collector.files;
+            builder.fileModels = files_;
             Patches patches(builder);
             probe->factoryPatches(patches);
         }
@@ -193,7 +195,7 @@ class NativeCode final : public Code {
         FactoryCollector(const std::vector<ParamModel>& p, const std::vector<const Param*>& m,
                          std::vector<FactoryPatchModel>& out)
             : params(p), members(m), patches(out) {}
-        void add(const char* name) override { patches.push_back({name ? name : "", {}, {}}); }
+        void add(const char* name) override { patches.push_back({name ? name : "", {}, {}, {}}); }
         size_t index(const Param& p) const {
             for (size_t i = 0; i < members.size(); ++i)
                 if (members[i] == &p) return i;
@@ -216,6 +218,15 @@ class NativeCode final : public Code {
             if (patches.empty()) add("");
             patches.back().routes.push_back({route ? route : "", via ? via : "", amount});
         }
+        void file(const void* member, const char* reference) override {
+            if (patches.empty()) add("");
+            uint32_t id = 0;
+            for (size_t i = 0; i < fileMembers.size(); ++i)
+                if (fileMembers[i] == member) id = fileModels[i].id;
+            patches.back().files.emplace_back(id, reference ? reference : "");
+        }
+        std::vector<const void*> fileMembers;
+        std::vector<FileModel> fileModels;
     };
 
     struct Collector final : ParamRegistrar {
@@ -285,6 +296,7 @@ class NativeCode final : public Code {
             m.kind = static_cast<FileModel::Kind>(spec.kind);
             m.name = spec.name;
             m.description = spec.description;
+            m.def = spec.def ? spec.def : "";
             fileModels.push_back(std::move(m));
         }
     };

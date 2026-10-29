@@ -72,6 +72,11 @@ clap-wrapper, Pugl and NanoVG trees above (ADR-0011). The VST3 SDK hosting subse
 is vendored for the host; stock-plugin VST3 builds remain opt-in. Plugin fonts (Inter, IBM
 Plex, Fraunces; OFL-1.1) travel with each plugin copy with their license files.
 
+First-party content, not third-party: Coppice's factory samples
+(`plugins/coppice/samples/*.flac`, embedded in the plugin) are rendered
+from Marram by `tools/factory-samples/render.py` and dedicated to the public
+domain under CC0 1.0 (`plugins/coppice/samples/LICENSE`).
+
 Development tool (not linked, bundled, or used at runtime):
 `free-audio/clap-validator` 0.4.1, tag `0.4.1` at
 `152b9823e992d782c5c1fd33bca0295478b919aa`, MIT license. The source,

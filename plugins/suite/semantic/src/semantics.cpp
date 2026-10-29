@@ -844,6 +844,9 @@ json::Value PatchCodec::jsonSchema() const {
                 about += "The path of a file";
                 if (def.extensions && *def.extensions)
                     about += " (" + std::string(def.extensions) + ")";
+                for (size_t k = 0; k < factoryFiles_.size(); ++k)
+                    about += (k == 0 ? ", or one of the plugin's own: \"" : ", \"") +
+                             factoryFiles_[k] + "\"";
                 about += "; \"\" for none.";
             }
             if (!about.empty()) v["description"] = about;
@@ -1057,8 +1060,8 @@ bool hasExtension(const std::string& path, std::string_view extensions) {
 }  // namespace
 
 // A path a file property may take: "" (none), the one it holds (a session's
-// reference stays, found or not), or an existing file of its types that the
-// file check can read.
+// reference stays, found or not), one of the plugin's factory files, or an
+// existing file of its types that the file check can read.
 bool PatchCodec::fileUsable(size_t index, const std::string& path, const state::Snapshot& current,
                             std::string& why) const {
     const PropertyDef& def = definition_.properties().at(index);
@@ -1069,6 +1072,18 @@ bool PatchCodec::fileUsable(size_t index, const std::string& path, const state::
     }
     const std::string held = current.hasProperty[index] ? current.property[index] : def.def;
     if (path == held) return true;
+    if (path.rfind("factory:", 0) == 0) {
+        if (std::find(factoryFiles_.begin(), factoryFiles_.end(), path) == factoryFiles_.end()) {
+            why = factoryFiles_.empty() ? "this plugin has no factory files"
+                                        : "this plugin has no factory file of that name";
+            return false;
+        }
+        if (fileCheck_ && !fileCheck_(index, path, why)) {
+            if (why.empty()) why = "the file cannot be read";
+            return false;
+        }
+        return true;
+    }
     const std::filesystem::path p = pathOf(path);
     std::error_code ec;
     if (!p.is_absolute())
@@ -1268,7 +1283,10 @@ bool PatchCodec::apply(const json::Value& document, bool merge, state::Snapshot&
                             (properties.at(index).extensions && *properties.at(index).extensions
                                  ? std::string(properties.at(index).extensions) + " "
                                  : std::string()) +
-                            "file, or \"\" for none"));
+                            (factoryFiles_.empty()
+                                 ? std::string("file, or \"\" for none")
+                                 : "file, one of the plugin's own (\"" + factoryFiles_.front() +
+                                       "\" and the others the schema lists), or \"\" for none")));
                 } else {
                     texts[index] = m.second.asString();
                 }

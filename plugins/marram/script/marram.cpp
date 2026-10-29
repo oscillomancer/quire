@@ -2453,7 +2453,6 @@ struct Marram : Instrument {
             peakL = max(abs(io[0][i]), peakL * 0.99985);
             peakR = max(abs(io[io.channels - 1][i]), peakR * 0.99985);
         }
-        show();
         bool sounding = false;
         for (int v = 0; v < voiceCount(); ++v)
             if (voice[v].sounding && voicePlaying(v)) sounding = true;
@@ -2462,6 +2461,7 @@ struct Marram : Instrument {
             freeFrames[n] += io.frames;
             if (syncActive[n]) syncFrames[n] += io.frames;
         }
+        show();
     }
 
     // How long the output goes on once the keys are up: the longest amp
@@ -2497,15 +2497,19 @@ struct Marram : Instrument {
         stageShown[0] = on ? voice[newest].amp.stage : 0;
         stageShown[1] = on ? voice[newest].mod.stage : 0;
         stageShown[2] = on ? voice[newest].env3.stage : 0;
-        lfoShown[0] = l1Mode.index() == 1 ? wrap01(freePhase[0] + l1Phase / 360.0)
+        // A free LFO's phase now: from its anchor and the frames since.
+        lfoShown[0] = l1Mode.index() == 1 ? wrap01(freeNow(0) + l1Phase / 360.0)
                       : on                ? voice[newest].lfoPhase[0]
                                           : -1.0;
-        lfoShown[1] = l2Mode.index() == 1 ? wrap01(freePhase[1] + l2Phase / 360.0)
+        lfoShown[1] = l2Mode.index() == 1 ? wrap01(freeNow(1) + l2Phase / 360.0)
                       : on                ? voice[newest].lfoPhase[1]
                                           : -1.0;
-        lfoShown[2] = l3Mode.index() == 1 ? wrap01(freePhase[2] + l3Phase / 360.0)
+        lfoShown[2] = l3Mode.index() == 1 ? wrap01(freeNow(2) + l3Phase / 360.0)
                       : on                ? voice[newest].lfoPhase[2]
                                           : -1.0;
+    }
+    double freeNow(int n) const {
+        return freePhase[n] + freeRate[n] * freeFrames[n] / sampleRate();
     }
 
     // Untouched below -1 dBFS, then bent smoothly toward full scale.

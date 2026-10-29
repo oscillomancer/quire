@@ -31,6 +31,10 @@
 //   supple::property(kImpulse, "Impulse").audioFile(),         // WAV, AIFF, FLAC
 //   supple::property(kScale, "Scale").file("scl tun"),         // the processor's own loadFile()
 //
+// Or the product's own file, inside the binary: "factory:plate.flac" names
+// one of its PRODUCT_ASSETS (core/Files.h), as a default, in a preset or in a
+// session.
+//
 // The editor shows and picks one with Ui::fileSlot: a dialog, a drop, and
 // "Missing" when it is. A product whose files are of several kinds -- a
 // sample and an impulse response -- labels each, .ofKind(n), and its

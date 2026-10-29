@@ -199,7 +199,7 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
         // Each file member is a file property: its path, saved and set by patch.
         PropertyList::Builder files;
         for (const script::detail::FileModel& m : code->files()) {
-            PropertyDef p = property(m.id, files.text(m.name))
+            PropertyDef p = property(m.id, files.text(m.name), files.text(m.def))
                                 .audioFile()
                                 .ofKind(static_cast<uint32_t>(m.kind));
             if (!m.description.empty()) p = p.help(files.text(m.description));
@@ -255,6 +255,7 @@ std::shared_ptr<const ScriptDefinition> makeScriptDefinition(
             preset.values.emplace_back(
                 id, physical * (p->unit == ParamModel::Unit::Percent ? 0.01 : 1.0));
         }
+        for (const auto& [id, reference] : patch.files) preset.texts.emplace_back(id, reference);
         if (routes) preset.texts.emplace_back(kRoutesProperty, factoryRoutes[presets.size()]);
         presets.push_back(std::move(preset));
     }
@@ -280,7 +281,8 @@ bool sameShape(const Definition& a, const Definition& b) {
         return false;
     for (size_t i = 0; i < a.presets().size(); ++i)
         if (a.presets()[i].name != b.presets()[i].name ||
-            a.presets()[i].values != b.presets()[i].values)
+            a.presets()[i].values != b.presets()[i].values ||
+            a.presets()[i].texts != b.presets()[i].texts)
             return false;
     // A swap keeps the running Definition, so whatever it says of the plugin
     // -- names, help, keys -- must be what the new code would say too.

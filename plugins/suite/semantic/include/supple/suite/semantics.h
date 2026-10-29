@@ -231,6 +231,12 @@ class PatchCodec {
     // if not, why: for instance, whether its decoder reads it.
     using FileCheck = std::function<bool(size_t index, const std::string& path, std::string& why)>;
     void setFileCheck(FileCheck check) { fileCheck_ = std::move(check); }
+    // The plugin's own audio files, "factory:<name>" (the framework's
+    // core/Files.h): a file property may take one, and the schema lists them.
+    // The file check reads them as it reads a path.
+    void setFactoryFiles(std::vector<std::string> references) {
+        factoryFiles_ = std::move(references);
+    }
 
     // Compact prose: "Tilt: Tilt +3.0 dB; Pivot 1.20 kHz", or "default
     // settings", of the parameters that apply. With `changedOnly`, values
@@ -261,6 +267,7 @@ class PatchCodec {
     const Definition& definition_;
     Meaning meaning_;
     FileCheck fileCheck_;
+    std::vector<std::string> factoryFiles_;
 };
 
 // The patch framed as a state chunk (core-patch §4): the magic, version 2,

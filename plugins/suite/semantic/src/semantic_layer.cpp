@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "core/Files.h"
 #include "supple/clap/editor_picture.h"
 
 namespace supple::suite {
@@ -95,6 +96,14 @@ void SemanticLayer::rebuild() {
     codec->setFileCheck([this](size_t index, const std::string& path, std::string& why) {
         return fileReadable(index, path, why);
     });
+    // The product's audio among its assets: the factory files a patch may name.
+    std::vector<std::string> factory;
+    for (size_t i = 0; i < assets::count(); ++i) {
+        const std::string reference =
+            std::string(files::kFactoryPrefix) + std::string(assets::at(i).name);
+        if (files::hasExtension(reference, kAudioFileTypes)) factory.push_back(reference);
+    }
+    codec->setFactoryFiles(std::move(factory));
     codec_ = std::move(codec);
 }
 

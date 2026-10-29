@@ -2177,11 +2177,11 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                 Constant c = *base;
                 std::optional<Constant> arg;
                 if (call->args.size() == 1) arg = evaluate(call->args[0], scope);
-                if (m->member != "help" && m->member != "withKey") {
+                if (m->member != "help" && m->member != "withKey" && m->member != "withDefault") {
                     error(call->loc, "script.file.modifier",
                           "'." + m->member +
-                              "()' is a parameter's; a file takes .help() and "
-                              ".withKey()",
+                              "()' is a parameter's; a file takes .help(), .withKey() and "
+                              ".withDefault()",
                           "audioFile(\"Sample\").help(\"...\")");
                     return std::nullopt;
                 }
@@ -2190,6 +2190,18 @@ std::optional<Constant> Sema::evaluate(Expr* e, StructDecl* scope) {
                           "." + m->member + "() takes text in quotes",
                           "." + m->member + "(\"...\")");
                     return std::nullopt;
+                }
+                if (m->member == "withDefault") {
+                    if (!script::detail::factoryFileName(arg->stringValue)) {
+                        error(call->args[0]->loc, "script.file.default",
+                              "a file's default is one of the plugin's factory files, "
+                              "\"factory:<name>\"",
+                              ".withDefault(\"factory:pad.flac\"): a file the plugin's product "
+                              "lists in PRODUCT_ASSETS");
+                        return std::nullopt;
+                    }
+                    c.file.def = arg->stringValue;
+                    return c;
                 }
                 (m->member == "help" ? c.file.description : c.file.key) = arg->stringValue;
                 return c;

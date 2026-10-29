@@ -286,6 +286,19 @@ patch as a chunk.
   `set_patch` returns once the file is loaded, so the next block, offline
   renders included, plays it.
 
+- **Factory files** (2026-10-29). A file property may also hold
+  `"factory:<name>"`, one of the plugin's own audio files inside its binary
+  (the template's `PRODUCT_ASSETS`, framework 1.32.0). The schema's
+  description of the property lists those the plugin has; a `set_patch`
+  path of that form must be one of them, read by the plugin's decoder, and
+  fails with `properties.file` otherwise. It needs no file system and is
+  saved as it is, so a session refers to it the same way on every machine.
+  A script declares a default (`.withDefault()`) or a factory patch's file
+  (`Patches::file()`) as one. The script player has no factory files: there
+  a factory default is reported missing and loads nothing, and a
+  `factory:` path is refused. A factory
+  file's name is a permanent identifier once shipped.
+
 ## Amendments (2026-10-21, parameters that apply only sometimes)
 
 - **`active_when`** on a schema `params` entry says when the parameter

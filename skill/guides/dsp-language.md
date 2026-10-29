@@ -150,8 +150,9 @@ void factoryPatches(Patches& p) {
 ```
 
 Each patch is `p.add("Name")` and `.set(member, value)` calls with a
-constant, a bool or a choice's key (`.set(shape, "soft")`), and `.route()`
-calls for its routes (see Modulation); a parameter left out takes its
+constant, a bool or a choice's key (`.set(shape, "soft")`), `.route()`
+calls for its routes (see Modulation), and `.file(sample, "factory:pad.flac")`
+for a file member's factory file (see Files); a parameter left out takes its
 default. Nothing else belongs here (no loops or locals), and
 the compiler checks names, ranges and choices.
 
@@ -421,12 +422,27 @@ is false. Not in `prepare()`: files arrive after it.
 
 | Object | Use |
 |---|---|
-| `AudioFile` | `loaded()`, `channels()`, `frames()`; `sample(c, i)` (0 outside; a channel past the file's last reads its last), `read(c, position)` between samples (cubic), for playing at another speed |
+| `AudioFile` | `loaded()`, `channels()`, `frames()`; `sample(c, i)` (0 outside; a channel past the file's last reads its last), `read(c, position)` between samples (cubic), for playing at another speed; `peak(c, from, to)` and `rms(c, from, to)` of frames [from, to), measured when the file loads, so the whole file costs about what a few hundred `sample()` calls do (a waveform overview, onsets, normalizing) |
 | `Convolver` | `process(c, x)`: channel `c` through the impulse response (its first 20 s), no latency; 0 until loaded. `loaded()`, `length()` |
 
 Files are members of the plugin struct only, one per member (no arrays),
 and never assigned: read them, or keep what you need in members of your
 own.
+
+**Factory files.** A plugin built from a script (a stock plugin, or a
+source export) may carry audio inside its binary, listed in its
+`product.cmake` as `PRODUCT_ASSETS`. A file property names one as
+`"factory:<name>"` (`"factory:pad.flac"`) instead of a path, and it plays in
+any host on any system. `audioFile("Sample").withDefault("factory:pad.flac")`
+starts every new instance with it, and a factory patch picks one with
+`.file(sample, "factory:keys.flac")`; a patch or an agent may set one as it
+sets a path, and the schema lists those the plugin has. A source export
+does not add `PRODUCT_ASSETS` itself: list the files there. The script
+player carries none: there a factory default is reported missing and
+nothing loads (`loaded()` is false), a patch's `factory:` path is refused,
+and the plugin built from the script plays them. Once
+shipped, a factory file's name and sound are permanent, like a parameter's
+key: sessions keep the name and play whatever it holds.
 
 ## The editor
 

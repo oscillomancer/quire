@@ -50,6 +50,8 @@ add_custom_target(skill-tree ALL
   COMMENT "Copying the agent skill into the build tree"
   VERBATIM)
 add_subdirectory(tests)
+# The stock plugins' factory samples' encoder (tools/factory-samples/render.py).
+add_subdirectory(tools/factory-samples)
 if(SUPPLE_BUILD_SPIKES)
   add_subdirectory(tools/spikes/gui-shell)
 endif()
