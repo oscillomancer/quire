@@ -67,7 +67,9 @@ Result<std::string> sourcePreparationKey(const model::Session& s, const std::fil
             const auto size = std::filesystem::file_size(path, ec);
             key.push_back(ec ? "missing" : std::to_string(size));
             const auto stamp = std::filesystem::last_write_time(path, ec);
-            key.push_back(ec ? "missing" : std::to_string(stamp.time_since_epoch().count()));
+            key.push_back(
+                ec ? "missing"
+                   : std::to_string(static_cast<long long>(stamp.time_since_epoch().count())));
         }
     }
     return json::writeCanonical(key);
