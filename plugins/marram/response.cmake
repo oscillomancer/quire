@@ -56,7 +56,7 @@ expect("{\"osc1.type\":\"fm\",\"osc1.fm\":1.5,\"osc2.type\":\"fm\",\"osc2.ratio\
 expect("{\"osc1.type\":\"sub\",\"osc1.wave\":\"sine\",\"filter1.type\":\"off\"}" 220)
 expect("{\"voice.unison\":3,\"voice.unison_detune\":10}" 440)
 expect("{\"voice.quality\":\"eco\"}" 440)
-expect("{\"voice.quality\":\"high\",\"drive.type\":\"fold\",\"drive.amount\":12}" 440)
+expect("{\"voice.quality\":\"high\",\"filter1.drive\":24}" 440)
 # A semitone up by Macro 1 at full; 80 cents up by dsp.test's velocity, 0.8.
 expect("{\"macro1\":100}" 466 "{\"macro1>voice.tune\":{\"amount\":\"1 st\"}}")
 expect("{}" 460 "{\"velocity>voice.tune\":{\"amount\":100}}")

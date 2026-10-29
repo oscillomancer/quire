@@ -151,3 +151,28 @@ TEST_CASE("Marram transport sync follows jumps and preserves tempo-change phase"
     process(0);
     CHECK(value() == io.transport.beats / 0.5 * 2.0 - 1.0);
 }
+
+TEST_CASE("Marram's harmonic ramp and digital table start at its analog saw") {
+    namespace S = supple::script;
+    namespace D = S::detail;
+    using T = S::test_marram::Marram;
+    const D::NativeCode<T> code;
+    D::Instance instance;
+    instance.maxBlockSize = 64;
+    D::CurrentScope scope(&instance);
+    auto p = std::make_unique<T>();
+    D::Instance::bind(*p, &instance);
+    p->prepare();
+    auto& s = p->voice[0];
+    for (int table : {0, 5}) {
+        const double dt = 0.013;
+        p->table(s, 0, table, 0.0, dt);
+        for (int i = 0; i < 200; ++i) {
+            const double tp = (i + 0.37) / 200.0;
+            CHECK(p->wave(s, 0, tp, dt) == S::test_marram::analogWave(0, tp, dt, 0.5));
+        }
+        // Past 0 % it leaves the saw.
+        p->table(s, 0, table, 0.06, dt);
+        CHECK(p->wave(s, 0, 0.3, dt) != S::test_marram::analogWave(0, 0.3, dt, 0.5));
+    }
+}

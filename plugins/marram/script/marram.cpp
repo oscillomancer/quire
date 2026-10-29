@@ -18,7 +18,6 @@
 //                (12 or 24 dB, saturating), a state-variable filter, a tuned
 //                comb, or a bank of vowel formants. Each oscillator goes to
 //                one, both, or past them.
-//   Drive        soft, tape, fold or hard, after the filters.
 //   Amp          its own envelope, with velocity and pan.
 //
 // The mod envelope (Env 2) moves each filter's cutoff, the pitch and the
@@ -131,17 +130,76 @@ double rise(double x, double c) {
 }
 double fall(double x, double c) { return 1.0 - rise(1.0 - x, c); }
 
-// The drive's curves (soft, tape, fold, hard), each with its resting point
-// taken off so a bias adds no offset.
-double tapeCurve(double v) { return v >= 0.0 ? fastTanh(v * 1.2) / 1.2 : fastTanh(v * 0.8) / 0.8; }
-double driveTransfer(int type, double u) {
-    if (type == 1) return fastTanh(u);
-    if (type == 2) return tapeCurve(u);
-    if (type == 3) return sin(0.5 * pi * u);
-    return clamp(u, -1.0, 1.0);
+// The digital table's way between two frames (x 0..1): it holds one, then
+// jumps to the next over the middle quarter.
+double stepped(double x) {
+    const double e = clamp((x - 0.375) * 4.0, 0.0, 1.0);
+    return e * e * (3.0 - 2.0 * e);
 }
-double driveCurve(int type, double u, double bias) {
-    return driveTransfer(type, u + bias) - driveTransfer(type, bias);
+
+// The sparse digital frames' (8 to 11) harmonic i (0: none) and its level.
+int sparseHarmonic(int f, int i) {
+    if (i == 0) return 1;
+    if (f == 8) return i == 1 ? 7 : i == 2 ? 11 : 0;
+    if (f == 9) return i == 1 ? 9 : i == 2 ? 13 : i == 3 ? 14 : 0;
+    if (f == 10) return i == 1 ? 11 : i == 2 ? 17 : i == 3 ? 19 : i == 4 ? 23 : 0;
+    return i == 1 ? 13 : i == 2 ? 21 : i == 3 ? 22 : i == 4 ? 29 : i == 5 ? 31 : 0;
+}
+double sparseLevel(int f, int i) {
+    if (i == 0) return f == 10 ? 0.8 : f == 11 ? 0.7 : 1.0;
+    if (i == 2) return f == 8 ? 0.6 : 0.7;
+    return i == 1 ? 0.8 : i == 3 ? 0.5 : i == 4 ? 0.4 : 0.3;
+}
+
+// The digital table's frame f (1..15) as the steps of one cycle, into v; how
+// many there are. Frame 0 is the saw. Four of each kind: the saw held on 8,
+// 5 and 3 steps; a sine and two bent waves crushed to a few levels; sparse
+// high harmonics at 4 bits; and 1-bit patterns. Each wave is read in the
+// middle of its steps, never on a level's edge, so every machine makes it
+// alike.
+int digitalSteps(int f, Array<double, 64>& v) {
+    if (f <= 3) {
+        const int n = f == 1 ? 8 : f == 2 ? 5 : 3;
+        for (int j = 0; j < n; ++j) v[j] = (2.0 * j + 1.0) / n - 1.0;
+        return n;
+    }
+    if (f == 13) {
+        // A maximal-length sequence of 15: every harmonic below the 15th as
+        // strong as the others.
+        int bits = 3929;  // the sequence, first step in the lowest bit
+        for (int j = 0; j < 15; ++j) {
+            v[j] = bits % 2 == 1 ? 1.0 : -1.0;
+            bits = bits / 2;
+        }
+        return 15;
+    }
+    const int n = f >= 7 && f <= 11 ? 64 : 32;
+    double most = 0.0;
+    for (int j = 0; j < n; ++j) {
+        const double w = twoPi * (j + 0.5) / n;
+        double x = 0.0;
+        if (f == 4)
+            x = round(sin(w) * 3.0) / 3.0;
+        else if (f == 5)
+            x = round((0.6 * sin(w) + 0.5 * sin(2.0 * w)) * 2.0) / 2.0;
+        else if (f == 6)
+            x = round(sin(w + 1.2 * sin(3.0 * w)));
+        else if (f == 7)
+            x = sin(w) + 0.9 * sin(4.0 * w + 0.7) >= 0.0 ? 1.0 : -1.0;
+        else if (f <= 11) {
+            for (int i = 0; i < 6; ++i) x += sparseLevel(f, i) * sin(sparseHarmonic(f, i) * w);
+            most = max(most, abs(x));
+        } else if (f == 12)
+            x = sin(w) + 0.8 * sin(6.0 * w + 1.1) >= 0.0 ? 1.0 : -1.0;
+        else if (f == 14)
+            x = sin(w) + sin(10.0 * w + 0.3) >= 0.0 ? 1.0 : -1.0;
+        else
+            x = sin(w) + 0.7 * sin(2.0 * w + 0.5) + 0.6 * sin(9.0 * w + 1.0) >= 0.0 ? 1.0 : -1.0;
+        v[j] = x;
+    }
+    if (most > 0.0)
+        for (int j = 0; j < n; ++j) v[j] = round(v[j] / most * 8.0) / 8.0;
+    return n;
 }
 
 // A value from -1 to 1 for each whole number n and seed, the same everywhere:
@@ -390,6 +448,7 @@ struct Voice {
     Array<int, 4> base1;
     Array<int, 4> size;
     Array<double, 4> blend;
+    Array<bool, 4> saw;  // between a table's first two frames, and the first is the saw
     Array<double, 4> mult;
     Array<Noise, 4> noises;
 
@@ -406,14 +465,9 @@ struct Voice {
     int lfoSeed = 0;
     double age = 0.0;
     // As the routes leave them at the last tick: each oscillator's pulse
-    // width and FM feedback, and the drive.
+    // width and FM feedback.
     Array<double, 4> width;
     Array<double, 4> feedback;
-    double driveGain = 1.0;
-    double driveBias = 0.0;
-    double driveMix = 1.0;
-    double driveZero = 0.0;
-    double driveScale = 1.0;
     double ampL = 0.0;
     double ampLStep = 0.0;
     double ampR = 0.0;
@@ -505,7 +559,7 @@ struct Marram : Instrument {
         .vendor = "Supple Audio",
         .description =
             "Synthesizer: four oscillators (analog, wavetable, FM, noise, sub) with unison, two "
-            "filters (ladder, state-variable, comb, formant), drive, three envelopes, three LFOs "
+            "filters (ladder, state-variable, comb, formant), three envelopes, three LFOs "
             "and four macros, connected by modulation routes.",
         .features = {"synthesizer"},
         .voices = kVoices};
@@ -625,7 +679,8 @@ struct Marram : Instrument {
             .activeWhen(o1Type, {"wavetable"})
             .help(
                 "The table: a saw rolling off to a sine, a narrowing pulse, sung vowels, a bell, "
-                "organ drawbars, a coarsening digital ramp, or a comb through the harmonics.");
+                "organ drawbars, a saw falling into crushed and 1-bit waves, or a comb through the "
+                "harmonics.");
     Param o1Position = percent("Osc 1 Position", 0)
                            .withKey("osc1.position")
                            .polyModulated()
@@ -752,7 +807,8 @@ struct Marram : Instrument {
             .activeWhen(o2Type, {"wavetable"})
             .help(
                 "The table: a saw rolling off to a sine, a narrowing pulse, sung vowels, a bell, "
-                "organ drawbars, a coarsening digital ramp, or a comb through the harmonics.");
+                "organ drawbars, a saw falling into crushed and 1-bit waves, or a comb through the "
+                "harmonics.");
     Param o2Position = percent("Osc 2 Position", 0)
                            .withKey("osc2.position")
                            .polyModulated()
@@ -879,7 +935,8 @@ struct Marram : Instrument {
             .activeWhen(o3Type, {"wavetable"})
             .help(
                 "The table: a saw rolling off to a sine, a narrowing pulse, sung vowels, a bell, "
-                "organ drawbars, a coarsening digital ramp, or a comb through the harmonics.");
+                "organ drawbars, a saw falling into crushed and 1-bit waves, or a comb through the "
+                "harmonics.");
     Param o3Position = percent("Osc 3 Position", 0)
                            .withKey("osc3.position")
                            .polyModulated()
@@ -1006,7 +1063,8 @@ struct Marram : Instrument {
             .activeWhen(o4Type, {"wavetable"})
             .help(
                 "The table: a saw rolling off to a sine, a narrowing pulse, sung vowels, a bell, "
-                "organ drawbars, a coarsening digital ramp, or a comb through the harmonics.");
+                "organ drawbars, a saw falling into crushed and 1-bit waves, or a comb through the "
+                "harmonics.");
     Param o4Position = percent("Osc 4 Position", 0)
                            .withKey("osc4.position")
                            .polyModulated()
@@ -1261,32 +1319,7 @@ struct Marram : Instrument {
                             "Serial runs filter 1 into filter 2; parallel runs them side by side "
                             "and mixes them.");
 
-    // --- Drive, amp, envelopes ------------------------------------------------------------
-
-    Param driveType = choice("Drive", {"Off", "Soft", "Tape", "Fold", "Hard"}, 0)
-                          .withKey("drive.type")
-                          .in("Drive")
-                          .help(
-                              "Saturation after the filters: soft and tape round off, fold turns "
-                              "the wave back on itself, hard clips.");
-    Param driveAmount = decibels("Drive Amount", 0, 36, 6)
-                            .withKey("drive.amount")
-                            .polyModulated()
-                            .in("Drive")
-                            .activeUnless(driveType, {"off"})
-                            .help("Gain into the curve; the level out is held about even.");
-    Param driveBias = percent("Drive Bias", 0, -100, 100)
-                          .withKey("drive.bias")
-                          .polyModulated()
-                          .in("Drive")
-                          .activeUnless(driveType, {"off"})
-                          .help("Leans the curve to one side, for even harmonics.");
-    Param driveMix = percent("Drive Mix", 100)
-                         .withKey("drive.mix")
-                         .polyModulated()
-                         .in("Drive")
-                         .activeUnless(driveType, {"off"})
-                         .help("How much of the driven sound is heard against the clean.");
+    // --- Amp, envelopes ------------------------------------------------------------------
 
     Param ampAttack = milliseconds("Amp Attack", 0, 30000, 2)
                           .withKey("amp.attack")
@@ -1981,11 +2014,6 @@ struct Marram : Instrument {
             n.damping = r.damping;
             if (c.type == kFormant) formants(n, r.vowel, r.shift + 12.0 * keyOct * c.keytrack);
         }
-        if (driveType.index() != 0) {
-            s.driveGain = dbToGain(driveAmount.forVoice(v));
-            s.driveBias = driveBias.forVoice(v);
-            s.driveMix = driveMix.forVoice(v);
-        }
 
         // Stereo: a voice whose oscillators all sit in the centre filters one
         // channel and copies it.
@@ -2146,14 +2174,16 @@ struct Marram : Instrument {
 
     // A wavetable oscillator's band level (the most harmonics that stay
     // under the limit at this pitch) and its two frames either side of the
-    // position.
+    // position. The first frame of the harmonic ramp and of the digital
+    // table is the analog saw itself, so at 0 % they are that saw exactly.
     void table(Voice& s, int o, int which, double position, double inc) {
         const double x = kTop * inc / limit;
         int level = x <= 1.0 ? 0 : ceilToInt(log2(x));
         level = clamp(level, 0, kLevels - 1);
         const double at = clamp(position, 0.0, 1.0) * (kFrames - 1);
         const int f0 = min(floorToInt(at), kFrames - 2);
-        s.blend[o] = at - f0;
+        s.blend[o] = which == 5 ? stepped(at - f0) : at - f0;
+        s.saw[o] = f0 == 0 && (which == 0 || which == 5);
         s.size[o] = levelSize[level];
         s.base0[o] = (which * kFrames + f0) * kPerFrame + levelAt[level];
         s.base1[o] = s.base0[o] + kPerFrame;
@@ -2209,30 +2239,13 @@ struct Marram : Instrument {
         return filterOne(s.filter[2 + c], filt[1], s.now[1], one + b) + d;
     }
 
-    // The bias offset and gain compensation are fixed between control ticks.
-    void driveAt(Voice& s, int type) {
-        s.driveZero = driveTransfer(type, s.driveBias);
-        s.driveScale = sqrt(max(1.0, s.driveGain));
-    }
-
-    double shape(double x, int type, const Voice& s) {
-        const double y =
-            (driveTransfer(type, x * s.driveGain + s.driveBias) - s.driveZero) / s.driveScale;
-        return x + (y - x) * s.driveMix;
-    }
-
     void play(int v, int frames) {
         Voice& s = voice[v];
-        const int dtype = driveType.index();
-        // A type change may split a block inside a tick. Refresh for that
-        // type here as well as when control() reads new routed settings.
-        if (dtype != 0 && s.tickLeft != 0) driveAt(s, dtype);
         for (int i = 0; i < frames; ++i) {
             if (s.tickLeft == 0) {
                 control(v, i);
                 s.tickLeft = kTick;
                 if (s.done) return;
-                if (dtype != 0) driveAt(s, dtype);
             }
             --s.tickLeft;
             // Noise is made at the plugin's rate and held across the
@@ -2289,7 +2302,7 @@ struct Marram : Instrument {
                                            s.width[o]);
                         } else if (type == kWavetable) {
                             const double tp = pm == 0.0 ? ph : wrap01(ph + pm / s.mult[o]);
-                            y = wave(s, o, tp);
+                            y = wave(s, o, tp, dt);
                         } else if (type == kFm) {
                             const double self = s.feedback[o] * 0.5 * pi * (s.fb1[x] + s.fb2[x]);
                             y = sin(twoPi * (ph + pm) + self);
@@ -2328,17 +2341,13 @@ struct Marram : Instrument {
                         }
                     }
                 }
-                double yL = filters(s, 0, aL, bL, dL);
-                double yR = s.narrow ? yL : filters(s, 1, aR, bR, dR);
+                const double yL = filters(s, 0, aL, bL, dL);
+                const double yR = s.narrow ? yL : filters(s, 1, aR, bR, dR);
                 for (int f = 0; f < 2; ++f) {
                     FilterNow& n = s.now[f];
                     n.g += n.gStep;
                     n.k += n.kStep;
                     n.delay += n.delayStep;
-                }
-                if (dtype != 0) {
-                    yL = shape(yL, dtype, s);
-                    yR = s.narrow ? yL : shape(yR, dtype, s);
                 }
                 s.ampL += s.ampLStep;
                 s.ampR += s.ampRStep;
@@ -2353,16 +2362,18 @@ struct Marram : Instrument {
         }
     }
 
-    // A wavetable's sample at table phase tp: between two samples of each
-    // frame, and between the frames.
-    double wave(Voice& s, int o, double tp) {
+    // A wavetable's sample at table phase tp (dt its step): between two
+    // samples of each frame, and between the frames.
+    double wave(Voice& s, int o, double tp, double dt) {
         const int n = s.size[o];
         const double x = tp * n;
         const int i = min(floorToInt(x), n - 1);
         const double a = x - i;
         const int at0 = s.base0[o] + i;
         const int at1 = s.base1[o] + i;
-        const double v0 = tables[at0] + a * (tables[at0 + 1] - tables[at0]);
+        const double v0 = s.saw[o] ? analogWave(0, tp, dt, 0.5)
+                                   : tables[at0] + a * (tables[at0 + 1] - tables[at0]);
+        if (s.blend[o] == 0.0) return v0;
         const double v1 = tables[at1] + a * (tables[at1 + 1] - tables[at1]);
         return v0 + s.blend[o] * (v1 - v0);
     }
@@ -2528,7 +2539,10 @@ struct Marram : Instrument {
         }
         for (int t = 0; t < kTables; ++t)
             for (int f = 0; f < kFrames; ++f) {
-                recipe(t, f / (kFrames - 1.0));
+                if (t == 5)
+                    digital(f, amp, phs, kTop);
+                else
+                    harmonics(t, f / (kFrames - 1.0), amp, phs, kTop);
                 const int base = (t * kFrames + f) * kPerFrame;
                 // One gain for every level of a frame, from the full band, so
                 // the levels match: as loud as a saw (an RMS of 0.577), so a
@@ -2614,40 +2628,44 @@ struct Marram : Instrument {
         }
     }
 
-    // Table t at position p (0..1): its harmonics into amp and phs.
-    void recipe(int t, double p) {
-        if (t != 5) {
-            harmonics(t, p, amp, phs, kTop);
+    // The digital table's frame f: the saw's harmonics, or those of the
+    // frame's steps, exactly (each step held for its share of the cycle), so
+    // the table keeps them band-limited as it does any other's.
+    void digital(int f, Array<double, 257>& a, Array<double, 257>& ph, int top) {
+        a.fill(0.0);
+        ph.fill(0.0);
+        if (f == 0) {
+            for (int k = 1; k <= top; ++k) {
+                a[k] = 2.0 / (pi * k);
+                ph[k] = pi;
+            }
             return;
         }
-        // Digital: a ramp through a sample-and-hold and a quantizer that
-        // coarsen along the table (5 to 3 bits, 16 to 6 steps a cycle).
-        amp.fill(0.0);
-        phs.fill(0.0);
-        const double levels = exp2(4.0 - 2.0 * p);
-        const int steps = roundToInt(exp2(4.0 - 1.415 * p));
-        const int hold = idiv(kFft, max(1, steps));
-        double mean = 0.0;
-        for (int i = 0; i < kFft; ++i) {
-            const double x = 2.0 * (idiv(i, hold) * hold) / kFft - 1.0;
-            re[i] = round(x * levels) / levels;
-            im[i] = 0.0;
-            mean += re[i];
-        }
-        for (int i = 0; i < kFft; ++i) re[i] -= mean / kFft;
-        // The forward transform is the inverse's conjugate.
-        transform(kFft);
-        for (int k = 1; k <= kTop; ++k) {
-            const double cr = re[k] * 2.0 / kFft;
-            const double ci = -im[k] * 2.0 / kFft;
-            amp[k] = sqrt(cr * cr + ci * ci);
-            phs[k] = atan2(ci, cr) + pi / 2.0;
+        Array<double, 64> v;
+        const int n = digitalSteps(f, v);
+        for (int k = 1; k <= top; ++k) {
+            // The steps' sum of v e^(-2 pi i k j / n), times one step's
+            // (1 - e^(-2 pi i k / n)) / (2 pi i k).
+            double sr = 0.0;
+            double si = 0.0;
+            for (int j = 0; j < n; ++j) {
+                const double w = twoPi * imod(k * j, n) / n;
+                sr += v[j] * cos(w);
+                si -= v[j] * sin(w);
+            }
+            const double w = twoPi * k / n;
+            const double dr = sin(w) / (twoPi * k);
+            const double di = (cos(w) - 1.0) / (twoPi * k);
+            const double cr = sr * dr - si * di;
+            const double ci = sr * di + si * dr;
+            a[k] = 2.0 * sqrt(cr * cr + ci * ci);
+            ph[k] = atan2(ci, cr) + 0.5 * pi;
         }
     }
 
-    // The harmonics 1 .. top of table t (not the digital one, which recipe()
-    // makes in time) at position p, into a and ph: the tables' and the
-    // editor's picture of them.
+    // The harmonics 1 .. top of table t (not the digital one, which digital()
+    // makes) at position p, into a and ph: the tables' and the editor's
+    // picture of them.
     void harmonics(int t, double p, Array<double, 257>& a, Array<double, 257>& ph, int top) {
         a.fill(0.0);
         ph.fill(0.0);
@@ -2769,8 +2787,8 @@ struct Marram : Instrument {
     // --- The editor ---------------------------------------------------------------------------
     //
     // A header with the macros, the voices and the level; the oscillators
-    // and the filters, a tab each; the envelopes, the LFOs and the drive;
-    // the routes (e.routes) and the voice. Every control is drawn here and
+    // and the filters, a tab each; the envelopes and the LFOs; the routes
+    // (e.routes) and the voice. Every control is drawn here and
     // answers in pointer(): a dial drags up and down (Shift finely), turns
     // with the wheel and goes back to its default on a double click; a
     // button sets its choice; the filter's curve and the envelope's shape
@@ -2778,6 +2796,9 @@ struct Marram : Instrument {
 
     static constexpr double kW = 1240;
     static constexpr double kH = 880;
+    // Two columns, the same in every row: the oscillators, the envelopes
+    // and the routes on the left; the filters, the LFOs and the voice on
+    // the right.
     static constexpr double oscX = 16;  // the panels
     static constexpr double oscY = 76;
     static constexpr double oscW = 604;
@@ -2788,23 +2809,19 @@ struct Marram : Instrument {
     static constexpr double filH = 336;
     static constexpr double envX = 16;
     static constexpr double envY = 424;
-    static constexpr double envW = 470;
+    static constexpr double envW = 604;
     static constexpr double envH = 216;
-    static constexpr double lfoX = 498;
+    static constexpr double lfoX = 632;
     static constexpr double lfoY = 424;
-    static constexpr double lfoW = 380;
+    static constexpr double lfoW = 592;
     static constexpr double lfoH = 216;
-    static constexpr double drvX = 890;
-    static constexpr double drvY = 424;
-    static constexpr double drvW = 334;
-    static constexpr double drvH = 216;
     static constexpr double modX = 16;
     static constexpr double modY = 652;
-    static constexpr double modW = 760;
+    static constexpr double modW = 604;
     static constexpr double modH = 212;
-    static constexpr double voiX = 788;
+    static constexpr double voiX = 632;
     static constexpr double voiY = 652;
-    static constexpr double voiW = 436;
+    static constexpr double voiW = 592;
     static constexpr double voiH = 212;
     static constexpr double waveX = oscX + 16;  // the oscillator's picture
     static constexpr double waveY = oscY + 124;
@@ -2812,20 +2829,16 @@ struct Marram : Instrument {
     static constexpr double waveH = 118;
     static constexpr double curveX = filX + 16;  // the filter's response
     static constexpr double curveY = filY + 124;
-    static constexpr double curveW = 316;
-    static constexpr double curveH = 134;
+    static constexpr double curveW = 262;
+    static constexpr double curveH = 160;
     static constexpr double shapeX = envX + 16;  // the envelope
     static constexpr double shapeY = envY + 44;
-    static constexpr double shapeW = 300;
+    static constexpr double shapeW = 380;
     static constexpr double shapeH = 98;
     static constexpr double cycleX = lfoX + 16;  // the LFO
     static constexpr double cycleY = lfoY + 78;
-    static constexpr double cycleW = 200;
-    static constexpr double cycleH = 74;
-    static constexpr double bendX = drvX + 16;  // the drive's curve
-    static constexpr double bendY = drvY + 76;
-    static constexpr double bendW = 124;
-    static constexpr double bendH = 124;
+    static constexpr double cycleW = 350;
+    static constexpr double cycleH = 122;
 
     // The palette: the theme's, and the dune's.
     static constexpr int kInk = 0x1A1411;
@@ -2840,7 +2853,7 @@ struct Marram : Instrument {
     static constexpr int kMeterHigh = 0xD8CE9C;
     static constexpr int kGrass = 0xA9BC72;     // the oscillators: marram's blades
     static constexpr int kSand = 0xDDBA80;      // the filters: the dune
-    static constexpr int kSeaGlass = 0x8FB3AC;  // the drive and the voice
+    static constexpr int kSeaGlass = 0x8FB3AC;  // the voice
     static constexpr int kStem = 0x8C7553;
 
     // Parameter codes: what a dial or a button edits. The oscillators' are
@@ -2859,10 +2872,6 @@ struct Marram : Instrument {
     static constexpr int cDrift = 9;
     static constexpr int cQuality = 10;
     static constexpr int cRouting = 11;
-    static constexpr int cDriveType = 12;
-    static constexpr int cDriveAmount = 13;
-    static constexpr int cDriveBias = 14;
-    static constexpr int cDriveMix = 15;
     static constexpr int cAmp = 20;   // attack, decay, sustain, release, velocity, level, pan
     static constexpr int cEnv2 = 30;  // attack, decay, sustain, release, pitch, fm
     static constexpr int cEnv3 = 40;  // attack, decay, sustain, release
@@ -2911,6 +2920,7 @@ struct Marram : Instrument {
     static constexpr int eEnvTab = -3;
     static constexpr int eLfoTab = -4;
     static constexpr int eTableStep = -5;
+    static constexpr int eCombSign = -6;  // the comb's feedback: + all harmonics, - odd ones
     // A button's look.
     static constexpr int bChoice = 0;  // lit while its parameter holds its value
     static constexpr int bToggle = 1;  // lit while its parameter is on
@@ -2942,9 +2952,14 @@ struct Marram : Instrument {
     Array<int, 96> buttonCode, buttonValue, buttonStyle, buttonColour;
     Array<double, 96> buttonX, buttonY, buttonW, buttonH;
     int buttons = 0;
-    // A wavetable frame's harmonics, for its picture.
+    // A wavetable frame's harmonics, for its picture; the digital table's
+    // two frames as steps (none: the saw) and the way between them.
     Array<double, 257> frameAmp;
     Array<double, 257> framePhase;
+    Array<double, 64> stepsA, stepsB;
+    int stepsInA = 0;
+    int stepsInB = 0;
+    double stepsBlend = 0.0;
 
     void editor(Editor& e) {
         e.size(kW, kH);
@@ -2999,14 +3014,6 @@ struct Marram : Instrument {
                 return readOn(quality, how);
             case 11:
                 return readOn(routing, how);
-            case 12:
-                return readOn(driveType, how);
-            case 13:
-                return readOn(driveAmount, how);
-            case 14:
-                return readOn(driveBias, how);
-            case 15:
-                return readOn(driveMix, how);
             case 20:
                 return readOn(ampAttack, how);
             case 21:
@@ -3328,18 +3335,6 @@ struct Marram : Instrument {
                 return;
             case 11:
                 editOn(routing, how, v);
-                return;
-            case 12:
-                editOn(driveType, how, v);
-                return;
-            case 13:
-                editOn(driveAmount, how, v);
-                return;
-            case 14:
-                editOn(driveBias, how, v);
-                return;
-            case 15:
-                editOn(driveMix, how, v);
                 return;
             case 20:
                 editOn(ampAttack, how, v);
@@ -3801,18 +3796,6 @@ struct Marram : Instrument {
                 return;
             case 11:
                 g.fillText(routing.text(), x, y);
-                return;
-            case 12:
-                g.fillText(driveType.text(), x, y);
-                return;
-            case 13:
-                g.fillText(driveAmount.text(), x, y);
-                return;
-            case 14:
-                g.fillText(driveBias.text(), x, y);
-                return;
-            case 15:
-                g.fillText(driveMix.text(), x, y);
                 return;
             case 20:
                 g.fillText(ampAttack.text(), x, y);
@@ -4286,7 +4269,6 @@ struct Marram : Instrument {
         layoutFilter();
         layoutEnv();
         layoutLfo();
-        layoutDrive();
         layoutVoice();
     }
 
@@ -4334,6 +4316,15 @@ struct Marram : Instrument {
             button(oc(o, oSync), 0, oscX + oscW - 124, by, 48, 22, bToggle, kGrass);
     }
 
+    // The filter's controls: a grid of four columns. The top row is the
+    // type's own (two or three dials, then its choices: the ladder's slope,
+    // the state-variable's mode, the comb's polarity, the formants' vowel);
+    // the bottom row is every type's: keytrack, Env 2, velocity, drive.
+    static constexpr double fCol = filX + 310;
+    static constexpr double fStep = 76;
+    static constexpr double fRow1 = filY + 172;
+    static constexpr double fRow2 = filY + 268;
+
     void layoutFilter() {
         const int f = filterTab;
         button(cRouting, 0, filX + filW - 146, filY + 13, 62, 22, bChoice, kSand);
@@ -4343,30 +4334,47 @@ struct Marram : Instrument {
         row(fc(f, fType), 0, 5, filX + 16, filY + 92, filW - 32, 22, kSand);
         const int type = choiceOf(fc(f, fType));
         if (type == kOff) return;
-        const double sx = curveX, sy = curveY + curveH + 24;
-        if (type == kLadder) row(fc(f, fSlope), 0, 2, sx, sy, 150, 22, kSand);
-        if (type == kSvf) row(fc(f, fMode), 0, 4, sx, sy, curveW, 22, kSand);
-        if (type == kFormant) row(fc(f, fVowel), 0, 5, sx, sy, curveW, 22, kSand);
-        const double c0 = filX + 384, step = 76, r1 = filY + 150, r2 = filY + 222;
-        const double r = 19;
+        const double r = 21;
+        // The choices take the third and fourth columns (the comb's the
+        // fourth), level with the dials' names above and values below.
+        const double bx = fCol + 2 * fStep - 34, bw = fStep + 68;
+        const double half = (bw - 5) * 0.5;
         if (type == kFormant) {
-            dial(fc(f, fVowel), c0, r1, r, kSand, true);
-            dial(fc(f, fShift), c0 + step, r1, r, kSand, true);
+            dial(fc(f, fVowel), fCol, fRow1, r, kSand, true);
+            dial(fc(f, fShift), fCol + fStep, fRow1, r, kSand, true);
+            row(fc(f, fVowel), 0, 5, bx, fRow1 - 11, bw, 22, kSand);
         } else {
-            dial(fc(f, fCutoff), c0, r1, r, kSand, true);
-            dial(fc(f, type == kComb ? fFeedback : fResonance), c0 + step, r1, r, kSand, true);
+            dial(fc(f, fCutoff), fCol, fRow1, r, kSand, true);
+            dial(fc(f, type == kComb ? fFeedback : fResonance), fCol + fStep, fRow1, r, kSand,
+                 true);
         }
-        dial(fc(f, type == kComb ? fDamping : fDrive), c0 + 2 * step, r1, r, kSand, true);
-        dial(fc(f, fKeytrack), c0, r2, r, kSand, true);
-        dial(fc(f, fEnv), c0 + step, r2, r, kSand, true);
-        dial(fc(f, fVelocity), c0 + 2 * step, r2, r, kSand, true);
-        if (type == kComb) dial(fc(f, fDrive), c0, filY + 294, r, kSand, true);
+        if (type == kLadder) row(fc(f, fSlope), 0, 2, bx, fRow1 - 11, bw, 22, kSand);
+        if (type == kSvf)
+            for (int k = 0; k < 4; ++k)
+                button(fc(f, fMode), k, bx + imod(k, 2) * (half + 5), fRow1 - 18 + idiv(k, 2) * 26,
+                       half, 22, bChoice, kSand);
+        if (type == kComb) {
+            dial(fc(f, fDamping), fCol + 2 * fStep, fRow1, r, kSand, true);
+            button(eCombSign, 1, fCol + 3 * fStep - 30, fRow1 - 18, 60, 22, bChoice, kSand);
+            button(eCombSign, -1, fCol + 3 * fStep - 30, fRow1 + 8, 60, 22, bChoice, kSand);
+        }
+        dial(fc(f, fKeytrack), fCol, fRow2, r, kSand, true);
+        dial(fc(f, fEnv), fCol + fStep, fRow2, r, kSand, true);
+        dial(fc(f, fVelocity), fCol + 2 * fStep, fRow2, r, kSand, true);
+        dial(fc(f, fDrive), fCol + 3 * fStep, fRow2, r, kSand, true);
     }
 
     int envColour(int k) const {
         return k == 0 ? Theme::accent : k == 1 ? kSand : Theme::modulation;
     }
     int envBase(int k) const { return k == 0 ? cAmp : k == 1 ? cEnv2 : cEnv3; }
+
+    // The envelope's shape with its four times under it; beside them, its
+    // levels in two columns, the lower row level with the times.
+    static constexpr double eColA = envX + 456;
+    static constexpr double eColB = envX + 544;
+    static constexpr double eRow1 = envY + 88;
+    static constexpr double eRow2 = envY + 180;
 
     void layoutEnv() {
         for (int k = 0; k < 3; ++k)
@@ -4375,47 +4383,49 @@ struct Marram : Instrument {
         const int base = envBase(envTab);
         const int colour = envColour(envTab);
         for (int k = 0; k < 4; ++k)
-            dial(base + k, envX + 53 + 75 * k, envY + 180, 16, colour, true);
-        const double a = envX + 360, b = envX + 428;
+            dial(base + k, shapeX + shapeW * (2 * k + 1) / 8.0, eRow2, 17, colour, true);
         if (envTab == 0) {
-            dial(cAmp + 4, a, envY + 80, 17, colour, true);
-            dial(cAmp + 5, b, envY + 80, 17, colour, true);
-            dial(cAmp + 6, a, envY + 160, 17, colour, true);
+            dial(cAmp + 4, eColA, eRow1, 17, colour, true);
+            dial(cAmp + 5, eColB, eRow1, 17, colour, true);
+            dial(cAmp + 6, (eColA + eColB) * 0.5, eRow2, 17, colour, true);
         } else if (envTab == 1) {
-            dial(cEnv2 + 4, a, envY + 80, 17, colour, true);
-            dial(cEnv2 + 5, b, envY + 80, 17, colour, true);
+            dial(cEnv2 + 4, eColA, eRow1, 17, colour, true);
+            dial(cEnv2 + 5, eColB, eRow1, 17, colour, true);
         }
     }
 
+    // The LFO's shapes over its picture; beside them its rate (or
+    // division), phase and delay, and under those how it runs.
     void layoutLfo() {
         const int l = lfoTab;
         for (int k = 0; k < 3; ++k)
             button(eLfoTab, k, lfoX + lfoW - 112 + k * 32, lfoY + 13, 28, 22, bSmallTab,
                    Theme::modulation);
+        const double each = (cycleW - 6 * 5.0) / 7.0;
         for (int k = 0; k < 7; ++k)
-            button(lc(l, lShape), k, lfoX + 16 + k * 50, lfoY + 44, 46, 26, bShape,
+            button(lc(l, lShape), k, cycleX + k * (each + 5), lfoY + 44, each, 26, bShape,
                    Theme::modulation);
-        const double by = cycleY + cycleH + 10;
-        row(lc(l, lMode), 0, 2, cycleX, by, 118, 22, Theme::modulation);
-        button(lc(l, lSync), 0, cycleX + 126, by, 74, 22, bToggle, Theme::modulation);
+        const double x0 = cycleX + cycleW + 16, w = lfoX + lfoW - 16 - x0;
         const bool synced = valueOf(lc(l, lSync)) > 0.5;
-        const double a = lfoX + 266, b = lfoX + 336;
-        dial(lc(l, synced ? lDivision : lRate), a, lfoY + 112, 18, Theme::modulation, true);
-        dial(lc(l, lPhase), b, lfoY + 112, 18, Theme::modulation, true);
-        dial(lc(l, lDelay), a, lfoY + 182, 18, Theme::modulation, true);
+        const double y = lfoY + 112;
+        dial(lc(l, synced ? lDivision : lRate), x0 + w / 6.0, y, 19, Theme::modulation, true);
+        dial(lc(l, lPhase), x0 + w * 0.5, y, 19, Theme::modulation, true);
+        dial(lc(l, lDelay), x0 + w * 5.0 / 6.0, y, 19, Theme::modulation, true);
+        const double by = cycleY + cycleH - 22;
+        const double third = (w - 10) / 3.0;
+        row(lc(l, lMode), 0, 2, x0, by, 2 * third + 5, 22, Theme::modulation);
+        button(lc(l, lSync), 0, x0 + 2 * (third + 5), by, third, 22, bToggle, Theme::modulation);
     }
 
-    void layoutDrive() {
-        row(cDriveType, 0, 5, drvX + 16, drvY + 44, drvW - 32, 22, kSeaGlass);
-        if (choiceOf(cDriveType) == 0) return;
-        dial(cDriveAmount, drvX + 204, drvY + 116, 24, kSeaGlass, true);
-        dial(cDriveBias, drvX + 286, drvY + 116, 18, kSeaGlass, true);
-        dial(cDriveMix, drvX + 245, drvY + 186, 18, kSeaGlass, true);
-    }
+    // How the voices play (mode, quality) on the left; the dials in two
+    // rows: playing (voices, glide, bend, tune) and thickening (unison,
+    // detune, spread, drift).
+    static constexpr double vRow1 = voiY + 80;
+    static constexpr double vRow2 = voiY + 164;
 
     void layoutVoice() {
-        row(cMode, 0, 3, voiX + 16, voiY + 52, 210, 22, kSeaGlass);
-        row(cQuality, 0, 3, voiX + voiW - 196, voiY + 13, 180, 22, kSeaGlass);
+        row(cMode, 0, 3, voiX + 16, vRow1 - 11, 210, 22, kSeaGlass);
+        row(cQuality, 0, 3, voiX + 16, vRow2 - 11, 210, 22, kSeaGlass);
         const int many = roundToInt(valueOf(cUnison));
         for (int k = 0; k < 8; ++k) {
             const int code = k == 0   ? cPolyphony
@@ -4427,7 +4437,7 @@ struct Marram : Instrument {
                              : k == 6 ? cSpread
                                       : cDrift;
             const bool live = (k != 0 || choiceOf(cMode) == 0) && ((k != 5 && k != 6) || many > 1);
-            dial(code, voiX + 36 + 52 * k, voiY + 150, 16, kSeaGlass, live);
+            dial(code, voiX + 298 + 80 * imod(k, 4), k < 4 ? vRow1 : vRow2, 17, kSeaGlass, live);
         }
     }
 
@@ -4548,6 +4558,10 @@ struct Marram : Instrument {
             return;
         }
         if (code == eTableStep) return;
+        if (code == eCombSign) {
+            g.fillText(value > 0 ? "+ ALL" : "- ODD", x, y);
+            return;
+        }
         if (code == cMode) {
             g.fillText(value == 0 ? "POLY" : value == 1 ? "MONO" : "LEGATO", x, y);
             return;
@@ -4558,26 +4572,6 @@ struct Marram : Instrument {
         }
         if (code == cRouting) {
             g.fillText(value == 0 ? "SERIAL" : "PARALLEL", x, y);
-            return;
-        }
-        if (code == cDriveType) {
-            if (value == 1) {
-                g.fillText("SOFT", x, y);
-                return;
-            }
-            if (value == 2) {
-                g.fillText("TAPE", x, y);
-                return;
-            }
-            if (value == 3) {
-                g.fillText("FOLD", x, y);
-                return;
-            }
-            if (value == 4) {
-                g.fillText("HARD", x, y);
-                return;
-            }
-            g.fillText("OFF", x, y);
             return;
         }
         if (code >= 200) {
@@ -4814,18 +4808,6 @@ struct Marram : Instrument {
             g.fillText("DRIFT", x, y);
             return;
         }
-        if (code == cDriveAmount) {
-            g.fillText("AMOUNT", x, y);
-            return;
-        }
-        if (code == cDriveBias) {
-            g.fillText("BIAS", x, y);
-            return;
-        }
-        if (code == cDriveMix) {
-            g.fillText("MIX", x, y);
-            return;
-        }
         if (code >= cAmp && code < cEnv3 + 4) {
             const int k = imod(code - cAmp, 10);
             if (k == 0) {
@@ -4981,8 +4963,7 @@ struct Marram : Instrument {
 
     // Whether a dial lights from its middle.
     bool bipolar(int code) const {
-        if (code == cTune || code == cDriveBias || code == cAmp + 6 || code == cEnv2 + 4)
-            return true;
+        if (code == cTune || code == cAmp + 6 || code == cEnv2 + 4) return true;
         if (code >= 200) {
             const int field = imod(code - 200, 20);
             return field == fFeedback || field == fShift || field == fEnv;
@@ -5106,6 +5087,7 @@ struct Marram : Instrument {
         if (code == eFilterTab) return value == filterTab;
         if (code == eEnvTab) return value == envTab;
         if (code == eLfoTab) return value == lfoTab;
+        if (code == eCombSign) return (valueOf(fc(filterTab, fFeedback)) < 0.0) == (value < 0);
         if (code < 0) return false;
         if (buttonStyle[k] == bToggle) return valueOf(code) > 0.5;
         if (code >= 200 && imod(code - 200, 20) == fVowel) return abs(valueOf(code) - value) < 0.5;
@@ -5358,12 +5340,15 @@ struct Marram : Instrument {
         if (type == kWavetable) {
             const int table = choiceOf(oc(o, oTable));
             if (table == 5) {
-                // Digital: the stepped ramp itself.
-                const double p = valueOf(oc(o, oPosition));
-                const double levels = exp2(4.0 - 2.0 * p);
-                const int steps = roundToInt(exp2(4.0 - 1.415 * p));
-                const double x = 2.0 * floor(wrap01(t) * steps) / steps - 1.0;
-                return round(x * levels) / levels;
+                // Digital: the steps themselves.
+                const double u = wrap01(t);
+                const double a = stepsInA == 0
+                                     ? 2.0 * u - 1.0
+                                     : stepsA[min(floorToInt(u * stepsInA), stepsInA - 1)];
+                const double b = stepsInB == 0
+                                     ? 2.0 * u - 1.0
+                                     : stepsB[min(floorToInt(u * stepsInB), stepsInB - 1)];
+                return a + stepsBlend * (b - a);
             }
             double y = 0.0;
             for (int k = 1; k <= 48; ++k) y += frameAmp[k] * sin(twoPi * k * t + framePhase[k]);
@@ -5381,6 +5366,19 @@ struct Marram : Instrument {
         if (colour == 1) return 0.55 * (a + b) * 0.8 + 0.3 * c;
         if (colour == 2) return 0.85 * c + 0.12 * a;
         return 0.9 * (a - b);
+    }
+
+    // Table t's frame at position p, for wavePoint().
+    void pictureOf(int t, double p) {
+        if (t != 5) {
+            harmonics(t, p, frameAmp, framePhase, 48);
+            return;
+        }
+        const double at = clamp(p, 0.0, 1.0) * (kFrames - 1);
+        const int f0 = min(floorToInt(at), kFrames - 2);
+        stepsInA = f0 == 0 ? 0 : digitalSteps(f0, stepsA);
+        stepsInB = digitalSteps(f0 + 1, stepsB);
+        stepsBlend = stepped(at - f0);
     }
 
     void drawWave(Canvas& g) {
@@ -5403,12 +5401,12 @@ struct Marram : Instrument {
         const double gain = 0.42 * h * min(1.0, sqrt(dbToGain(valueOf(oc(o, oLevel))) * 2.0));
         const double cycles = 2.0;
         double peak = 1.0;
-        if (type == kWavetable && choiceOf(oc(o, oTable)) != 5) {
+        if (type == kWavetable) {
             // The other frames faintly behind this one.
             g.save();
             g.clip(x + 2, y + 2, w - 4, h - 4);
             for (int f = 0; f <= 4; ++f) {
-                harmonics(choiceOf(oc(o, oTable)), f / 4.0, frameAmp, framePhase, 48);
+                pictureOf(choiceOf(oc(o, oTable)), f / 4.0);
                 double most = 0.0;
                 for (int i = 0; i <= 60; ++i)
                     most = max(most, abs(wavePoint(o, type, i / 60.0, i)));
@@ -5428,7 +5426,7 @@ struct Marram : Instrument {
             }
             g.globalAlpha(1.0);
             g.restore();
-            harmonics(choiceOf(oc(o, oTable)), valueOf(oc(o, oPosition)), frameAmp, framePhase, 48);
+            pictureOf(choiceOf(oc(o, oTable)), valueOf(oc(o, oPosition)));
             peak = 0.0;
             for (int i = 0; i <= 120; ++i) peak = max(peak, abs(wavePoint(o, type, i / 120.0, i)));
             peak = max(peak, 1e-6);
@@ -5704,9 +5702,16 @@ struct Marram : Instrument {
         g.strokeStyle(kSand);
         g.lineWidth(2);
         g.stroke();
-        if (type == kComb)
+        // The names over the choices, as a dial's.
+        const double cx = fCol + 2.5 * fStep;
+        if (type == kLadder) label(g, "SLOPE", cx, fRow1 - 30, TextAlign::Center);
+        if (type == kSvf) label(g, "MODE", cx, fRow1 - 30, TextAlign::Center);
+        if (type == kFormant) label(g, "VOWEL", cx, fRow1 - 30, TextAlign::Center);
+        if (type == kComb) {
+            label(g, "POLARITY", fCol + 3 * fStep, fRow1 - 30, TextAlign::Center);
             aside(g, "a comb tuned to its pitch: keytrack 100 % plays the note",
-                  curveX + curveW * 0.5, curveY + curveH + 35, TextAlign::Center);
+                  curveX + curveW * 0.5, curveY + curveH + 34, TextAlign::Center);
+        }
     }
 
     // --- the envelopes ------------------------------------------------------------------------
@@ -5792,12 +5797,14 @@ struct Marram : Instrument {
             g.fill();
         }
         if (envTab == 1) {
-            aside(g, "it moves each cutoff", envX + 393, envY + 152, TextAlign::Center);
-            aside(g, "by its filter's Env 2", envX + 393, envY + 168, TextAlign::Center);
+            const double mid = (eColA + eColB) * 0.5;
+            aside(g, "it moves each cutoff", mid, eRow2 - 8, TextAlign::Center);
+            aside(g, "by its filter's Env 2", mid, eRow2 + 8, TextAlign::Center);
         }
         if (envTab == 2) {
-            aside(g, "a source for routes alone:", envX + 393, envY + 80, TextAlign::Center);
-            aside(g, "route env3 to anything", envX + 393, envY + 96, TextAlign::Center);
+            const double mid = (eColA + eColB) * 0.5;
+            aside(g, "a source for routes alone:", mid, eRow1 - 8, TextAlign::Center);
+            aside(g, "route env3 to anything", mid, eRow1 + 8, TextAlign::Center);
         }
     }
 
@@ -5857,49 +5864,6 @@ struct Marram : Instrument {
         }
     }
 
-    // --- the drive ----------------------------------------------------------------------------
-
-    void drawDrivePanel(Canvas& g) {
-        panel(g, drvX, drvY, drvW, drvH);
-        heading(g, "Drive", drvX + 18, drvY + 24);
-        aside(g, "after the filters", drvX + drvW - 18, drvY + 24, TextAlign::Right);
-        well(g, bendX, bendY, bendW, bendH);
-        const double cx = bendX + bendW * 0.5, cy = bendY + bendH * 0.5, half = bendW * 0.5 - 10;
-        g.strokeStyle(Theme::line);
-        g.lineWidth(1);
-        g.beginPath();
-        g.moveTo(bendX + 10, cy);
-        g.lineTo(bendX + bendW - 10, cy);
-        g.moveTo(cx, bendY + 10);
-        g.lineTo(cx, bendY + bendH - 10);
-        g.moveTo(bendX + 10, bendY + bendH - 10);
-        g.lineTo(bendX + bendW - 10, bendY + 10);
-        g.stroke();
-        const int type = choiceOf(cDriveType);
-        if (type == 0) {
-            aside(g, "off: the filters go", drvX + 245, drvY + 120, TextAlign::Center);
-            aside(g, "straight to the amp", drvX + 245, drvY + 136, TextAlign::Center);
-            return;
-        }
-        const double gain = dbToGain(valueOf(cDriveAmount));
-        const double bias = valueOf(cDriveBias);
-        const double mix = valueOf(cDriveMix);
-        g.beginPath();
-        for (int i = 0; i <= 80; ++i) {
-            const double x = -1.0 + 2.0 * i / 80.0;
-            const double wet = driveCurve(type, x * gain, bias) / sqrt(max(1.0, gain));
-            const double y = clamp(x + (wet - x) * mix, -1.2, 1.2);
-            if (i == 0)
-                g.moveTo(cx + x * half, cy - y * half);
-            else
-                g.lineTo(cx + x * half, cy - y * half);
-        }
-        g.strokeStyle(kSeaGlass);
-        g.lineWidth(1.8);
-        g.lineJoin(LineJoin::Round);
-        g.stroke();
-    }
-
     // --- the routes and the voice -------------------------------------------------------------
 
     void drawModPanel(Canvas& g) {
@@ -5912,6 +5876,8 @@ struct Marram : Instrument {
     void drawVoicePanel(Canvas& g) {
         panel(g, voiX, voiY, voiW, voiH);
         heading(g, "Voice", voiX + 18, voiY + 24);
+        label(g, "MODE", voiX + 121, vRow1 - 26, TextAlign::Center);
+        label(g, "QUALITY", voiX + 121, vRow2 - 26, TextAlign::Center);
     }
 
     void draw(Canvas& g) {
@@ -5923,7 +5889,6 @@ struct Marram : Instrument {
         drawFilterPanel(g);
         drawEnvPanel(g);
         drawLfoPanel(g);
-        drawDrivePanel(g);
         drawModPanel(g);
         drawVoicePanel(g);
         for (int k = 0; k < buttons; ++k) drawButton(g, k);
@@ -6055,6 +6020,10 @@ struct Marram : Instrument {
             const int table = oc(oscTab, oTable);
             editParam(table, 0, clamp(choiceOf(table) + value, 0, 6));
         }
+        if (code == eCombSign) {
+            const int feedback = fc(filterTab, fFeedback);
+            editParam(feedback, 0, value * abs(valueOf(feedback)));
+        }
         if (code < 0) return;
         if (buttonStyle[b] == bToggle) {
             editParam(code, 0, valueOf(code) > 0.5 ? 0.0 : 1.0);
@@ -6145,8 +6114,12 @@ struct Marram : Instrument {
             .set(f1Velocity, 1)
             .set(envDecay, 220)
             .set(envSustain, 0)
-            .set(driveType, "soft")
-            .set(driveAmount, 9)
+            .set(f2Type, "ladder")
+            .set(f2Cutoff, 20000)
+            .set(f2Resonance, 0)
+            .set(f2Slope, "db12")
+            .set(f2Drive, 9)
+            .set(ampLevel, 1.2)
             .set(ampDecay, 300)
             .set(ampSustain, 70)
             .set(ampRelease, 60)
@@ -6302,10 +6275,12 @@ struct Marram : Instrument {
             .set(o1Table, "organ")
             .set(o1Position, 70)
             .set(o1Level, -12)
-            .set(f1Type, "off")
+            .set(f1Cutoff, 20000)
+            .set(f1Resonance, 0)
+            .set(f1Slope, "db12")
+            .set(f1Env, 0)
+            .set(f1Drive, 4)
             .set(drift, 15)
-            .set(driveType, "tape")
-            .set(driveAmount, 4)
             .set(ampAttack, 4)
             .set(ampDecay, 1)
             .set(ampSustain, 100)
@@ -6326,8 +6301,12 @@ struct Marram : Instrument {
             .set(f1Cutoff, 180)
             .set(f1Resonance, 45)
             .set(f1Env, 0)
-            .set(driveType, "soft")
-            .set(driveAmount, 8)
+            .set(f2Type, "ladder")
+            .set(f2Cutoff, 20000)
+            .set(f2Resonance, 0)
+            .set(f2Slope, "db12")
+            .set(f2Drive, 8)
+            .set(ampLevel, 1)
             .set(ampDecay, 1)
             .set(ampSustain, 100)
             .set(ampRelease, 80)

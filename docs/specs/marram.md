@@ -14,7 +14,11 @@ parameters, so Marram gives every slot a type with an `off` and says which
 parameters apply with the script's activity conditions (amendment of
 2026-10-21 to `semantic-params-extension.md`): an agent's description and
 the editor show only what the patch uses. Effects are not part of it:
-delay, reverb, EQ and chorus are stock effects after it in a chain.
+saturation, delay, reverb, EQ and chorus are stock effects after it in a
+chain. Its only saturation is the ladder filter's (§2.3); the drive
+section it had after the filters (`drive.type`, `drive.amount`,
+`drive.bias`, `drive.mix`) was removed on 2026-10-28, and those keys are
+never reused.
 
 ## 1. Signal flow (per voice)
 
@@ -22,7 +26,7 @@ delay, reverb, EQ and chorus are stock effects after it in a chain.
  note ── osc1..osc4 ──(each: filter 1, filter 2, both, or direct)──┐
         (unison copies, FM between them, hard sync to osc1)         │
                                                                     ▼
-          filter 1 ─┬─ serial: into filter 2 ─┬─ drive ── amp (env, velocity, pan) ── voices summed
+          filter 1 ─┬─ serial: into filter 2 ─┬─ amp (env, velocity, pan) ── voices summed
           filter 2 ─┘  parallel: summed       ┘
  env2 (the mod envelope): cutoffs, pitch and FM depth, by fixed amounts
  routes (§3): amp, env2, env3, lfo1..3, macro1..4 and an instrument's own sources,
@@ -108,6 +112,17 @@ for osc1, **off** for the others).
   saw (RMS), its peak within 2, so sweeping the position holds the level.
   The bell's partials are in eighths of the note and the organ's on
   harmonics of half the note.
+- **Harmonic ramp** and **digital** start at the analog saw itself: below
+  their second frame (6.7 %) they play the analog saw's own samples,
+  crossfading into the table, so at 0 % they null against it. The
+  harmonic ramp then rolls the saw off to a sine (harmonic k at
+  k^−(1 + 8p²)). Digital holds each frame and jumps to the next over the
+  middle quarter of the way between them, through four kinds of four
+  frames: the saw held on 8, 5 and 3 steps; a sine and two bent waves
+  crushed to a few levels on 32 steps; sparse high harmonics (up to the
+  31st) at 4 bits on 64 steps; and 1-bit patterns (three from sines,
+  one a 15-step maximal-length sequence). Each frame's harmonics are those
+  of its steps exactly, cut at the band level's top like any table's.
 - **FM** is phase modulation by the source oscillator's waveform before
   its level: a modulator at the minimum level is silent and still
   modulates. Oscillators are computed from osc4 down, so a higher
@@ -153,14 +168,10 @@ into filter 2; oscillators sent to filter 2 join after filter 1) or
   bandwidths 80/90/120 Hz widened to a Q of at most 6, keytrack moving
   them with the note.
 
-### 2.4 `drive`, `amp`, `env2`, `env3`, `output`
+### 2.4 `amp`, `env2`, `env3`, `output`
 
 | key | unit / options | range | default | applies |
 |---|---|---|---|---|
-| `drive.type` | `off`, `soft`, `tape`, `fold`, `hard` | | **off** | |
-| `drive.amount` | dB, output compensated by 1/√gain | 0..36 | **6** | not off |
-| `drive.bias` | % | −100..100 | **0** | not off |
-| `drive.mix` | % | 0..100 | **100** | not off |
 | `amp.attack` | ms | 0..30000 | **2** | |
 | `amp.decay` | ms | 1..30000 | **600** | |
 | `amp.sustain` | % | 0..100 | **80** | |
@@ -209,7 +220,7 @@ optionally through a second source:
   "lfo1>voice.tune":     {"amount": "20 ct", "via": "modwheel"},
   "env3>osc2.fine":      {"amount": "+24 st"},
   "velocity>filter1.cutoff": {"amount": "+1 oct"},
-  "macro1>drive.amount": {"amount": "12 dB"}
+  "macro1>filter1.drive": {"amount": "12 dB"}
 }
 ```
 
@@ -221,8 +232,8 @@ optionally through a second source:
 **Destinations** (every one per voice): `voice.tune`; each oscillator's
 `level`, `pan`, `fine` (reaching ±4800 ct), `width`, `position`, `ratio`,
 `feedback` and `fm`; each filter's `cutoff`, `resonance`, `feedback`,
-`damping`, `vowel`, `shift` and `drive`; `drive.amount`, `drive.bias`,
-`drive.mix`; `amp.level`, `amp.pan`, and the attack, decay and release of
+`damping`, `vowel`, `shift` and `drive`; `amp.level`, `amp.pan`, and the
+attack, decay and release of
 the amp, Env 2 and Env 3; each LFO's `rate`. Choices, switches, unison,
 glide and the output are not routed.
 
@@ -242,8 +253,10 @@ and i, the mod wheel changes the vowel), Strings (a delayed vibrato), Noise Snar
 a rotary shimmer), Wobble Bass (an LFO in eighths of the song), Sync Lead
 (Env 3 sweeps a synced oscillator; vibrato under the mod wheel), Pulse Pad
 (two LFOs on the pulse widths) and Table Sweep (Env 3 and a drifting LFO
-through a wavetable; Macro 1 darkens it). Each measures −15.1 to −18.1 LUFS
-on `dsp.test`'s notes signal (a note, then a chord, velocity 0.8).
+through a wavetable; Macro 1 darkens it). On `dsp.test`'s notes signal
+(a note, then a chord, velocity 0.8; one second, integrated) they measure
+−11.4 (Tine Piano) to −20.2 LUFS (Dune Pad), most of them −14 to −18
+(2026-10-28).
 
 ## 5. The editor
 
@@ -261,11 +274,17 @@ places as `Shared` members.
   do not apply are dimmed, as the parameters' activity says.
 - **Filters**: the two filters' combined response, computed from their
   parameters, with a node per filter to drag (cutoff across, resonance
-  up); their routing; each filter's controls.
+  up); their routing; each filter's controls in a grid of four columns:
+  the top row the type's own (cutoff and resonance with the ladder's
+  slope or the state-variable's mode; the comb's pitch, feedback, damping
+  and polarity, + all harmonics or − odd ones, which sets the feedback's
+  sign; the formants' vowel, shift and a to u), the bottom row every
+  type's (keytrack, Env 2, velocity, drive).
+- The panels sit in two columns, the same in every row: oscillators,
+  envelopes and routes on the left; filters, LFOs and voice on the right.
 - **Envelopes** (amp, Env 2, Env 3): the shape with a handle per stage to
   drag, and where the newest note is in it.
 - **LFOs**: the shape with its delay's fade and the newest note's phase.
-- **Drive**: the type's transfer curve at the current drive.
 - **Modulation**: the route list (`e.routes()`), the same as the automatic
   editor's for any script with routes.
 - **Voice**: quality, mode, polyphony, glide, bend range, tuning, unison
@@ -277,5 +296,5 @@ double click.
 ## 6. Performance
 
 Release build, one core, 48 kHz: 8 notes of a pad with two saws and a sub,
-3 unison copies, a 24 dB ladder and tape drive at normal quality, 4.1 %
+3 unison copies, a 24 dB ladder and the tape drive Marram then had (2026-10-21) at normal quality, 4.1 %
 with or without routes (Orrery's equivalent: 3.1 %).

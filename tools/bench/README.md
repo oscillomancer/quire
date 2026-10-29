@@ -4,7 +4,7 @@ B1 builds the session through the engine command bus. B2 exports that model's
 compiled notation MIDI and the plugins' own CLAP-saved states, then uses public
 ReaScript APIs to generate and save an RPP. The recipe lives once in
 `host/engine/bench/session.json`: 120 BPM, a four-bar eight-note chord loop,
-a Marram pad (two oscillators and a sub, unison 3, a ladder, tape drive;
+a Marram pad (two oscillators and a sub, unison 3, a driven ladder;
 until 2026-10-21 Orrery's synth.md §9 patch, with its chorus and reverb) →
 non-flat four-band Yarrow → Sundew on
 N playback tracks; an additional armed stereo-input track with the same

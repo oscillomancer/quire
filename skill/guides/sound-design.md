@@ -46,7 +46,9 @@ what you want, change its structure, measure, and hand the numbers to
 - **Oscillators** `osc1`..`osc4`, each `oscN.type`: `analog` (`wave` saw,
   square, pulse with `width`, triangle, sine; osc2..4 can `sync` to osc1),
   `wavetable` (`table`: harmonic_ramp, pwm, formant, bell, organ, digital,
-  spectral_comb; `position` sweeps its 16 frames), `fm` (a sine operator:
+  spectral_comb; `position` sweeps its 16 frames; harmonic_ramp and
+  digital are the analog saw at 0 %, digital then jumping through crushed,
+  sparse and 1-bit waves), `fm` (a sine operator:
   `ratio`, `feedback`), `noise` (`color`), `sub` (`octave` −1 or −2), or
   `off`. Osc 1 starts as an analog saw, the others off. `oscN.to` sends it to
   `filter1`, `filter2`, `both` or `direct` (around the filters).
@@ -63,8 +65,10 @@ what you want, change its structure, measure, and hand the numbers to
   peak), `filterN.keytrack` (% from C4), `filterN.velocity`, `env2.pitch`
   (semitones at the peak, every oscillator), `env2.fm` (how much of every FM
   depth follows Env 2), `amp.velocity`.
-- **Drive** (`soft`, `tape`, `fold`, `hard`) after the filters; `amount` is
-  loudness-compensated.
+- **Saturation** is the ladder's: `filterN.drive` pushes it harder (its
+  level is held about even). For grit after a filter, set filter 2 to a
+  ladder wide open (`cutoff` 20 kHz, `resonance` 0 %, `slope` db12) and
+  drive it. Marram has no effects: chain Teasel, Bracken, Ghyll after it.
 - **Voice**: `mode` poly, mono or legato; `polyphony`, `glide`, `unison`
   (copies of each analog, wavetable and FM oscillator) with `unison_detune`
   and `unison_spread`, `drift` (slow pitch and cutoff wander), `quality`.
@@ -87,7 +91,7 @@ to scale it by a second source (vibrato under the mod wheel).
 - **Parameters routes move**: `voice.tune`; each oscillator's `level`, `pan`,
   `fine` (reaching ±4800 ct), `width`, `position`, `ratio`, `feedback`, `fm`;
   each filter's `cutoff`, `resonance`, `feedback`, `damping`, `vowel`,
-  `shift`, `drive`; `drive.amount`, `bias`, `mix`; `amp.level`, `amp.pan`;
+  `shift`, `drive`; `amp.level`, `amp.pan`;
   the envelopes' times; each LFO's `rate`. Choices, switches, unison, glide
   and the output are not routed.
 - **The amount is in the parameter's unit** at the source's full value:
@@ -109,7 +113,7 @@ with your phrase: its notes, velocity and duration affect the result.
 |---|---|
 | Dune Pad | two detuned saws, unison 3, slow Env 2 on a ladder, a free 0.12 Hz LFO on the cutoff; mod wheel opens it |
 | Pluck Bass | saw and a sine sub, retriggered; Env 2 snaps the cutoff (`filter1.env` +3.5 oct) |
-| Acid Line | legato with glide, ladder at 80 % resonance, soft drive |
+| Acid Line | legato with glide, ladder at 80 % resonance, an open ladder in filter 2 driving it |
 | Supersaw | unison 7 at 28 ct, 12 dB ladder; mod wheel opens it |
 | Sub Bass | one retriggered sine, no filter |
 | Tine Piano | FM: a −60 dB modulator at 1× and a quiet one at 14×; `env2.fm` decays the bark; velocity deepens it |
@@ -117,7 +121,7 @@ with your phrase: its notes, velocity and duration affect the result.
 | Vowel Lead | formant filter; a delayed vibrato on `voice.tune`; a slow LFO and the mod wheel move the vowel |
 | Strings | unison 5 with drift, saw and pulse through an SVF, delayed vibrato |
 | Noise Snare | noise through two SVFs and a triangle body whose pitch Env 2 drops |
-| Drawbar Organ | the organ wavetable, tape drive, a free LFO on pan and tune (rotary shimmer) |
+| Drawbar Organ | the organ wavetable through a driven open ladder, a free LFO on pan and tune (rotary shimmer) |
 | Wobble Bass | a synced LFO in eighths on the cutoff; mod wheel speeds it |
 | Sync Lead | osc2 synced to a silent osc1; Env 3 sweeps its pitch |
 | Pulse Pad | two pulses whose widths two LFOs move |
@@ -215,11 +219,13 @@ Set `filter1.env` manually.
  "params": {
    "voice.mode": "legato", "voice.glide": "70 ms", "osc1.level": "0 dB",
    "osc1.retrigger": true, "filter1.cutoff": "320 Hz", "filter1.resonance": "80 %",
-   "filter1.env": "+3 oct", "filter1.velocity": "+1 oct", "drive.type": "soft",
-   "drive.amount": "9 dB", "amp.decay": "300 ms", "amp.sustain": "70 %",
-   "amp.release": "60 ms", "env2.decay": "220 ms", "env2.sustain": "0 %"}}
+   "filter1.env": "+3 oct", "filter1.velocity": "+1 oct", "filter2.type": "ladder",
+   "filter2.cutoff": "20 kHz", "filter2.resonance": "0 %", "filter2.slope": "db12",
+   "filter2.drive": "9 dB", "amp.level": "+1.2 dB", "amp.decay": "300 ms",
+   "amp.sustain": "70 %", "amp.release": "60 ms", "env2.decay": "220 ms",
+   "env2.sustain": "0 %"}}
 ```
-Optimize: `filter1.cutoff`, `env2.decay`, `drive.amount`.
+Optimize: `filter1.cutoff`, `env2.decay`, `filter2.drive`.
 Set `filter1.env` manually.
 
 **Sub bass (a clean fundamental)** (Sub Bass)
@@ -230,7 +236,8 @@ Set `filter1.env` manually.
    "filter1.type": "off", "amp.attack": "3 ms", "amp.decay": "300 ms",
    "amp.sustain": "100 %", "amp.release": "120 ms", "amp.velocity": "30 %"}}
 ```
-Optimize: usually nothing; `"drive.type": "soft"` adds audible harmonics.
+Optimize: usually nothing; `"filter1.type": "ladder"` wide open with
+`filter1.drive` adds audible harmonics.
 
 **Supersaw lead** (Supersaw)
 ```json

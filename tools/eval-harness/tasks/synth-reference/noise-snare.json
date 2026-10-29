@@ -6,8 +6,6 @@
       "amp.release": "120 ms",
       "amp.sustain": "0 %",
       "amp.velocity": "60 %",
-      "drive.amount": "6 dB",
-      "drive.type": "soft",
       "env2.attack": "0 ms",
       "env2.decay": "45 ms",
       "env2.pitch": "+12 st",
