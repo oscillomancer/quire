@@ -4,6 +4,17 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.33.0
+
+What a product must do: nothing.
+
+- **A file slot's menu offers the factory files.** Its context menu (a
+  secondary click) lists, under "Factory", each of the product's
+  `PRODUCT_ASSETS` the slot's property takes, by file name, the present
+  one checked; choosing one sets `"factory:<name>"`. Until now a factory
+  file reached a slot only from a default, a preset or the host, so a
+  user could not put one back after choosing a file of their own.
+
 ## 1.32.0
 
 What a product must do: nothing. A product that wants files inside its

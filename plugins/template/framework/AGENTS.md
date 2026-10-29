@@ -498,7 +498,8 @@ your own once the product is past its sketch.
     rect)`, on while held; `textField(propertyId, rect)` for a property (its
     label is the placeholder); `fileSlot(propertyId, rect)` for a file
     property: its name and state (loading, loaded, missing), a dialog on a
-    click, a file dropped on it taken, cleared from its menu;
+    click, a file dropped on it taken, cleared from its menu, where the
+    product's own files it takes (`PRODUCT_ASSETS`) are offered too;
     `presetBar(rect)` and `presetList(rect)`;
     `list(rect, rows)` over a `ListSource` of the product's (a file
     browser); `keyboard(rect, low, high)`, which plays the processor's

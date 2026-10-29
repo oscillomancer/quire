@@ -733,12 +733,28 @@ bool Ui::pointerDown(float x, float y, int button, uint32_t mods, bool doubleCli
             endGesture();
             setFocus(i);
             const uint32_t id = controls_[static_cast<size_t>(i)].param;
-            const bool chosen = !host_.property(id).empty();
-            popup(Rect{x, y, 0.0f, 0.0f},
-                  {MenuItem::item("Choose\xE2\x80\xA6", false, files_ != nullptr), MenuItem::item("Clear", false, chosen)},
-                  [this, i, id](int row) {
+            const std::string current(host_.property(id));
+            std::vector<MenuItem> items{MenuItem::item("Choose\xE2\x80\xA6", false, files_ != nullptr),
+                                        MenuItem::item("Clear", false, !current.empty())};
+            // The product's own files the slot takes, "factory:<name>" each.
+            std::vector<std::string> factory;
+            for (size_t k = 0; k < assets::count(); ++k) {
+                const std::string name(assets::at(k).name);
+                if (files::hasExtension(name, fileProperty(id)->extensions)) factory.push_back(name);
+            }
+            if (!factory.empty()) {
+                items.push_back(MenuItem::separator());
+                items.push_back(MenuItem::header("Factory"));
+                for (const std::string& name : factory)
+                    items.push_back(MenuItem::item(name, current == std::string(files::kFactoryPrefix) + name));
+            }
+            popup(Rect{x, y, 0.0f, 0.0f}, std::move(items),
+                  [this, i, id, factory](int row) {
                       if (row == 0) chooseFile(i);
-                      else host_.setProperty(id, "");
+                      else if (row == 1) host_.setProperty(id, "");
+                      else if (row >= 4 && row - 4 < static_cast<int>(factory.size()))
+                          host_.setProperty(id, std::string(files::kFactoryPrefix) + factory[static_cast<size_t>(row - 4)]);
+                      dirty_ = true;
                   },
                   140.0f, i);
             return true;
