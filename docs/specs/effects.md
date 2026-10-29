@@ -26,6 +26,7 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 | `pollia` (`plugins/pollia`) | Pollia | `com.suppleaudio.pollia` | `EGJQ` (the player's for the id) | `Poll` | audio-effect, phaser |
 | `umber` (`plugins/umber`) | Umber | `com.suppleaudio.umber` | `auff` (the player's for the id) | `Umbr` | audio-effect, distortion, tape |
 | `sedge` (`plugins/sedge`) | Sedge | `com.suppleaudio.sedge` | `RkzT` (the player's for the id) | `Sedg` | audio-effect, analyzer |
+| `gain` (`plugins/gain`) | Gain | `com.suppleaudio.gain` | `sRvm` (the player's for the id) | `Gain` | audio-effect, utility |
 
 Marram is an instrument; its spec, implementation notes included, is
 `docs/specs/marram.md`.
@@ -814,6 +815,27 @@ plugin with no predecessor. Notes for maintainers:
   C reads −1.98 cents (the temperament's E is 1.955 above equal with A at
   0). Plucked-string measurements (§14 of the spec) were made with
   synthetic strings in a scratch harness, not kept as tests.
+
+## 17. Gain — Gain [`gain`] (`stock-effects.md` §15)
+
+A DSP script (ADR-0047), `plugins/gain/script/gain.cpp`. A new stock
+plugin with no predecessor, the simplest of them. Notes for maintainers:
+
+- **The glide is the framework's**, not the script's own: `.smoothed(20)`
+  gives `gain.at(i)` per sample, snapped on the first block after
+  `reset()` and started at each automation event's sample, so the block,
+  state and reset checks hold with no code in the script. The linear gain
+  is recomputed only while the glide moves.
+- **It writes the block only while the gain is not 1**, so 0 dB is a
+  passthrough bit for bit (the REAPER check's default matches bypass).
+  It is not a `PRODUCT_TRANSPARENT` product: host-smoke moves its one
+  parameter off 0 dB.
+- **Tests.** The suite every stock plugin has, and `plugin.gain.response`:
+  a sine's gain reads exactly 0, +6, +6.02, −12.5, +32 and −32 dB (to the
+  hundredth `dsp.test` reports), and a
+  jump from −32 to +32 dB on a 50 Hz sine at its peak stepping the output
+  no more than 0.005 between two samples (sent straight through, about
+  0.6).
 
 ## 6. Engine and benchmark use
 

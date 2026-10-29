@@ -60,6 +60,8 @@ CASES = {
     "com.suppleaudio.withy": Case("Withy", False, "Output", .5, .25, "gain"),
     "com.suppleaudio.umber": Case("Umber", False, "Output", .5, .25, "gain"),
     "com.suppleaudio.sedge": Case("Sedge", False, "Tolerance", 0, 1, "transparent", True),
+    "com.suppleaudio.gain": Case("Gain", False, "Gain",
+                               normalized(0, -32, 32), normalized(-12, -32, 32), "gain", True),
 }
 
 
