@@ -863,9 +863,9 @@ plugin with no predecessor. Notes for maintainers:
   there; on a low E at full scale its aliases stayed at the measurement's
   floor (−97.7 dBc) while its THD reached 3.8 %.
 - **Words in the editor are drawn by `words()`**, a switch on a group and an
-  index: a local `Array<const char*, N>` initialised from string literals
-  crashes the script compiler (reported; a five-line repro is an editor
-  hook with `Array<const char*, 3> names = {"A", "B", "C"};`).
+  index, written while a local `Array<const char*, N>` initialised from
+  string literals crashed the script compiler (since fixed); it stays as it
+  is.
 - **Tests.** The suite every stock plugin has, and
   `plugin.hornbeam.response`: the cabinet alone (closed 4x12, vintage,
   dynamic 2.5 cm at 30 %) at 100 Hz, 1, 3 and 8 kHz to its model's values

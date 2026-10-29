@@ -751,6 +751,33 @@ struct Test : Effect {
     }
 }
 
+TEST_CASE("a local Array of text starts from its literals in every backend") {
+    const std::string source = R"(
+#include <supple/script.h>
+struct Test : Effect {
+    static constexpr Info info = {.name = "Test", .id = "com.example.test"};
+    void process(Block& io) {}
+    void draw(Canvas& g) {
+        Array<const char*, 3> names = {"A", "B", "C"};
+        for (int k = 0; k < 3; ++k) g.fillText(names[k], k, 0);
+    }
+};
+)";
+    for (bool interpret : {false, true}) {
+        INFO(interpret);
+        scriptc::Options options;
+        options.interpret = interpret;
+        auto result = scriptc::compile(source, options);
+        REQUIRE_MESSAGE(result.program, scriptc::toText(result.diagnostics));
+        JitRunner run(result.program);
+        Recorder r;
+        run.instance.editor = &r;
+        run.draw(&r);
+        CHECK(r.calls ==
+              std::vector<std::string>{"fillText A 0 0", "fillText B 1 0", "fillText C 2 0"});
+    }
+}
+
 TEST_CASE("a script compiled as C++ has the sources and routes the compiler sees") {
     std::ifstream in(std::filesystem::path(__FILE__).parent_path() / "routes.h");
     REQUIRE(in.good());
