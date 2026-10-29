@@ -1088,6 +1088,17 @@ q = nil
 ---@class Quire.track_duplicate_result
 ---@field tracks string[]
 
+---@class Quire.track_freeze_args
+---@field track string
+---@field job? boolean (default: false)
+
+---@class Quire.track_freeze_commit_args
+---@field track string
+---@field expected string
+---@field media table
+---@field freeze table
+---@field states table[]
+
 ---@class Quire.track_list_result
 ---@field tracks table[]
 
@@ -1147,6 +1158,9 @@ q = nil
 ---@class Quire.track_template_save_result
 ---@field path string
 ---@field effects integer
+
+---@class Quire.track_unfreeze_args
+---@field track string
 
 ---@class Quire.transport_get_result
 ---@field playing boolean
@@ -1475,10 +1489,15 @@ q = nil
 ---@class Quire.track
 ---@field add fun(args?: Quire.track_add_args): Quire.track_add_result Add a channel, buss or master strip and return its id.
 ---@field duplicate fun(args: Quire.track_duplicate_args): Quire.track_duplicate_result Duplicate channels or busses with their FX, items, sends and automation.
+---@field freeze fun(args: Quire.track_freeze_args): table Freeze a channel's items and FX to pre-fader audio and release its plugins.
 ---@field list fun(): Quire.track_list_result List tracks in tree order with their level, mute/solo, fx and items.
 ---@field move fun(args: Quire.track_move_args): table Move a track under another track or reorder it among its siblings.
 ---@field remove fun(args: Quire.track_remove_args): table Remove a track with its items, fx, routes and envelopes (not a folder).
 ---@field set fun(args: Quire.track_set_args): table Set track fields: name, type, volume, pan, mute, solo, polarity, mono, arming.
+---@field unfreeze fun(args: Quire.track_unfreeze_args): table Restore a frozen channel's original items and plugin state.
+
+---@class Quire.track.freeze
+---@field commit fun(args: Quire.track_freeze_commit_args): table Attach a verified freeze artifact as one replayable edit.
 
 ---@class Quire.track.template
 ---@field delete fun(args: Quire.track_template_delete_args): Quire.track_template_delete_result Delete a saved track template by name.

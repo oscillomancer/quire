@@ -9,7 +9,7 @@ supple_add_library(engine
   SOURCES src/offline.cpp src/plan.cpp src/workers.cpp src/live_workers.cpp src/realtime.cpp src/recording.cpp
           src/stretch.cpp src/playrate_dsp.cpp src/playrate_timeline.cpp src/rate_sources.cpp src/rate_runtime.cpp src/meters.cpp src/runtime_protection.cpp src/media_files.cpp
           src/app.cpp src/plugin_outputs.cpp src/commands.cpp src/extra_commands.cpp src/midi_commands.cpp src/analysis_commands.cpp
-          src/render_commands.cpp src/chain_commands.cpp src/take_commands.cpp src/learn.cpp src/dsp_commands.cpp
+          src/freeze_commands.cpp src/render_commands.cpp src/chain_commands.cpp src/take_commands.cpp src/learn.cpp src/dsp_commands.cpp
           src/midi_control.cpp src/midi_input.cpp src/portaudio_backend.cpp src/portaudio_native.cpp
   DEPS supple::model supple::clap-host supple::audio-file supple::timeline supple::semantic-params-abi
        supple::command-bus supple::lua-bus supple::notation supple::core-params supple::core-analysis
@@ -51,7 +51,7 @@ if(SUPPLE_BUILD_TESTS AND SUPPLE_PLATFORM_LINUX)
   # no signature for -fsanitize=function to check).
   target_compile_options(engine-fake-jack PRIVATE $<$<CXX_COMPILER_ID:Clang>:-fno-sanitize=function>)
 
-  supple_add_tests(engine SOURCES tests/test_offline.cpp tests/test_instance_pool.cpp tests/test_autosave.cpp tests/test_take_copy.cpp tests/test_media_files.cpp tests/test_recording_shutdown.cpp tests/test_realtime.cpp tests/test_app.cpp
+  supple_add_tests(engine SOURCES tests/test_offline.cpp tests/test_freeze.cpp tests/test_instance_pool.cpp tests/test_autosave.cpp tests/test_take_copy.cpp tests/test_media_files.cpp tests/test_recording_shutdown.cpp tests/test_realtime.cpp tests/test_app.cpp
                    tests/test_commands.cpp tests/test_scripts.cpp tests/test_strips.cpp tests/test_playrate.cpp tests/test_pdc.cpp
                    tests/test_runtime_protection.cpp tests/test_jack.cpp tests/test_workers.cpp tests/test_live_workers.cpp tests/test_meters.cpp
                    tests/test_learn.cpp tests/test_dsp.cpp tests/test_bridge_engine.cpp LABELS rt SPLIT)
@@ -68,7 +68,7 @@ if(SUPPLE_BUILD_TESTS AND SUPPLE_PLATFORM_LINUX)
 endif()
 
 if(SUPPLE_BUILD_TESTS AND NOT SUPPLE_PLATFORM_LINUX)
-  supple_add_tests(engine SOURCES tests/test_native_engine.cpp tests/test_instance_pool.cpp tests/test_autosave.cpp tests/test_take_copy.cpp tests/test_media_files.cpp tests/test_recording_shutdown.cpp tests/test_bridge_engine.cpp tests/test_playrate.cpp tests/test_pdc.cpp LABELS rt)
+  supple_add_tests(engine SOURCES tests/test_native_engine.cpp tests/test_freeze.cpp tests/test_instance_pool.cpp tests/test_autosave.cpp tests/test_take_copy.cpp tests/test_media_files.cpp tests/test_recording_shutdown.cpp tests/test_bridge_engine.cpp tests/test_playrate.cpp tests/test_pdc.cpp LABELS rt)
   target_include_directories(engine.tests PRIVATE src)
   add_dependencies(engine.tests clap-host-fixtures ${PRODUCT_SLUG}-scanner ${PRODUCT_SLUG}-bridge)
   target_compile_definitions(engine.tests PRIVATE FIXTURE_CLAP_PATH="$<TARGET_FILE:clap-host-fixtures>" BRIDGE_PATH="$<TARGET_FILE:${PRODUCT_SLUG}-bridge>")

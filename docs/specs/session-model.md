@@ -384,7 +384,7 @@ with warnings.)*
 
 Schema 2.1 adds master playrate and its envelope target (ADR-0045).
 
-The loader accepts 1.x and 2.x documents and saves 2.1. Migration allocates
+The loader accepts 1.x and 2.x documents and saves 2.2. Migration allocates
 child channel IDs in track-ID order, inserts each child first, and moves the
 source items and record/input FX there while keeping user inserts on the
 buss. Hardware/MIDI record routes follow the new child. Legacy numeric send

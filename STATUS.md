@@ -118,9 +118,15 @@ instructions are in `docs/guides/installing.md`.
   state while retaining the previous processing instance until plan retirement.
   Project format `supple.project/2.2` with migration from
   1.x, autosave, crash recovery of recordings, a per-project UI sidecar.
-- **Track freeze model** (ADR-0054): optional channel freeze descriptors retain
-  original items/FX and media references, with canonical round trips and shared
-  sound-dependency validation. Engine/command/GUI integration is in progress.
+- **Track freeze** (ADR-0054): whole-channel pre-fader float32 capture, including
+  take FX and auxiliary channels, with virtual latency and plugin retirement.
+  Typed freeze/unfreeze, cancellable jobs, dependency-checked completion, retained
+  media for history/branches/saves, and context-menu actions with frozen markers.
+  Mixing stays live; captured edits and global timing require unfreeze. V1
+  excludes external inputs, armed tracks, non-unity master rate and partial/buss
+  freeze. Cache preparation currently uses MediaCache; a prepared-source service
+  can replace that localized path. Seek/loop/random-plugin and external plugin
+  asset limits are documented in the engine spec and manual.
 - **Command bus** (`specs/command-bus.md`, ADR-0007): about 120 typed
   commands with JSON Schema, units, examples run as tests and structured
   errors; `batch` transactions; events; the JSON-RPC socket; the MCP adapter

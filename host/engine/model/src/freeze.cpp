@@ -65,6 +65,7 @@ std::string freezeDependencyHash(const Session& s, Id track) {
     Counters counters;
     for (Id id : ids) remap[id] = Id{id.kind, ++counters[id.kind]};
     json::Value value = timing(s);
+    value["seed"] = toJson(*s.project)["seed"];
     const auto* t = s.tracks.find(track);
     if (t) {
         Track sound = *t;

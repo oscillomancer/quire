@@ -192,7 +192,7 @@ std::optional<double> EngineApp::moveParam(
     model::Id id, const std::string& param,
     const std::function<std::optional<double>(double current, double step)>& next) {
     const model::FxInstance* found = head().fx.find(id);
-    if (!found) return std::nullopt;
+    if (!found || model::frozenOwner(head(), id)) return std::nullopt;
     const model::FxInstance fx = *found;
     // Where the parameter stands now.
     Target target;
@@ -315,7 +315,7 @@ void EngineApp::commitLearned(bool all) {
         const OutputKey key = it->first;
         const LearnCommit commit = it->second;
         it = learnCommits_.erase(it);
-        if (!head().fx.contains(key.first)) continue;
+        if (!head().fx.contains(key.first) || model::frozenOwner(head(), key.first)) continue;
         host::Instance* live = pool_ ? pool_->find(key.first) : nullptr;
         if (commit.live && live && !live->failed() && engine_) {
             // As an edit in the plug-in's own editor: its state into the

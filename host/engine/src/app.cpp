@@ -3,6 +3,7 @@
 #include "supple/engine/app.h"
 #include "media_files.h"
 #include "runtime_protection.h"
+#include "supple/model/freeze.h"
 #include "supple/model/numeric.h"
 
 #if !defined(_WIN32)
@@ -138,6 +139,11 @@ Result<host::PluginInfo> EngineApp::findPlugin(std::string_view idOrName) {
 }
 
 Result<host::Instance*> EngineApp::scratch(const model::FxInstance& fx) {
+    const auto s = view();
+    for (const auto& e : s.fx)
+        if (e.value.get() == &fx)
+            if (const auto owner = model::frozenOwner(s, e.id))
+                return model::frozenError(s, *owner, "/fx");
     auto& slot = scratch_[fx.plugin.id];
     if (!slot) {
         auto info = findPlugin(fx.plugin.id);
@@ -206,6 +212,8 @@ Status restoreFx(host::Instance& instance, const model::FxInstance& fx, const mo
 }  // namespace
 
 Result<json::Value> EngineApp::setPlainParams(model::Id id, const json::Value& values) {
+    if (const auto owner = model::frozenOwner(view(), id))
+        return model::frozenError(view(), *owner, "/fx");
     if (!values.isObject())
         return Error("fx.params", "values must be an object", "/values",
                      "map parameter names or ids to numbers or plugin text");
@@ -301,6 +309,8 @@ Result<json::Value> EngineApp::setPlainParams(model::Id id, const json::Value& v
 }
 
 Result<std::uint32_t> EngineApp::fxLatencySamples(model::Id id, const model::FxInstance& fx) {
+    if (auto owner = model::frozenOwner(view(), id))
+        return model::frozenError(view(), *owner, "/fx");
     // A running instance already knows the plan's rate and block. Otherwise
     // activate a throwaway instance at the project rate: a plugin reports its
     // latency in samples, so a rate is needed even when nothing is playing.
@@ -1251,7 +1261,7 @@ fs::path EngineApp::newerAutosave(const fs::path& project) const {
 }
 
 bool EngineApp::captureFxState(model::Id id, Error* failure) {
-    if (txn_ || !pool_) return false;
+    if (txn_ || !pool_ || model::frozenOwner(head(), id)) return false;
     const model::FxInstance* fx = head().fx.find(id);
     host::Instance* instance = pool_->find(id);
     // Semantic plug-ins keep their patch in the model already.
@@ -2534,6 +2544,8 @@ PlayrateState EngineApp::playrateState() const {
 }
 
 void EngineApp::headChanged() {
+    for (const auto& e : head().fx)
+        if (model::frozenOwner(head(), e.id)) scratch_.erase(e.value->plugin.id);
     playrateEnvelope_ = model::activePlayrateEnvelope(head());
     playratePoints_.clear();
     if (playrateEnvelope_) {

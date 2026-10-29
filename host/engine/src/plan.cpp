@@ -3,6 +3,7 @@
 #include "plan.h"
 #include "live_workers.h"
 #include "supple/model/fade_shape.h"
+#include "supple/model/freeze.h"
 #include "supple/model/source_mapping.h"
 
 #include <algorithm>
@@ -262,6 +263,7 @@ Result<ResolvedLane> paramLane(host::Instance& in, const std::string& param,
 
 Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, std::uint32_t block,
                      double rate, const std::vector<model::Id>* keepLive) {
+    SUPPLE_TRY(model::validateFrozenState(s));
     Plan p;
     p.pool = &pool;
     p.linearConsole = !s.project->console9;
@@ -319,6 +321,8 @@ Result<Plan> compile(const Session& s, InstancePool& pool, double startSeconds, 
             return st;
         };
         n.auxCount = std::clamp(t.channels - 2, 0, model::kMaxTrackChannels - 2);
+        n.freeze = t.freeze;
+        if (n.freeze) continue;  // Original objects remain in the model, not this plan.
         const int channels = 2 + n.auxCount;
         for (Id fxId : t.chain) {
             Stage st = makeStage(fxId);
@@ -820,7 +824,9 @@ Status prepare(Plan& p, const Session& s) {
             }
             ++stageIndex;
         }
-        n.latChain = layoutChain(n.chain, n.auxCount == 0, block);
+        n.latChain = n.freeze ? time::samplesAt(
+                                    double(n.freeze->latencyFrames) / s.project->sampleRate, p.rate)
+                              : layoutChain(n.chain, n.auxCount == 0, block);
         n.aux.assign(static_cast<std::size_t>(n.auxCount), std::vector<float>(block, 0.0f));
         n.sum.init(block);
         n.preFx.init(block);
@@ -991,8 +997,28 @@ Status prepare(Plan& p, const Session& s) {
             tc.fadeInCurve = it.fadeIn.curve;
             tc.fadeOutCurve = it.fadeOut.curve;
         }
+    // Frozen preparation is localized here so a prepared-source service can own it later.
     // Audio items and events share the track input's solved timeline shift.
     for (Node& n : p.nodes) {
+        if (n.freeze) {
+            const auto* source = s.media.find(n.freeze->source);
+            if (!source)
+                return Error("freeze.media_missing", "frozen source is missing", "/track",
+                             "restore the frozen media or use track.unfreeze");
+            std::filesystem::path path = source->path;
+            if (path.is_relative()) {
+                const auto inMedia = p.projectDir / s.project->mediaDir / path;
+                path = std::filesystem::exists(inMedia) ? inMedia : p.projectDir / path;
+            }
+            auto data = p.media->get(path, p.rate, {}, source->hash);
+            if (!data) return data.error();
+            if ((*data)->truncated || (*data)->channelCount() != std::size_t(2 + n.auxCount))
+                return Error("freeze.media_missing",
+                             "frozen media is truncated or has wrong channels", "/track",
+                             "restore the frozen media or use track.unfreeze");
+            n.frozenAudio = *data;
+            continue;
+        }
         for (const auto& e : s.items) {
             const model::Item& it = *e.value;
             if (it.track != n.id || it.mute || !it.activeTake) continue;
@@ -2310,8 +2336,22 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
                     &node.liveHeld);
     // 3b. Polarity and mono (ADR-0022), on the main pair after the chain:
     // before the fader and the Console 9 encode, as the pre-fader taps hear it.
-    node.utility.set(node.phaseInvert, node.mono, p.smoothFrames);
-    if (!node.utility.transparent()) node.utility.process(node.sum.l.data(), node.sum.r.data(), n);
+    if (node.frozenAudio) {
+        const auto origin = time::samplesAt(p.startSeconds, p.rate);
+        for (std::uint32_t i = 0; i < n; ++i) {
+            const auto frame = origin + pos + i - node.timelineShift - node.latChain;
+            for (std::size_t c = 0; c < node.frozenAudio->channels.size(); ++c)
+                node.channel(static_cast<int>(c))[i] =
+                    transport.playing && frame >= 0 &&
+                            std::uint64_t(frame) < node.frozenAudio->frames()
+                        ? node.frozenAudio->channels[c][static_cast<std::size_t>(frame)]
+                        : 0.f;
+        }
+    } else {
+        node.utility.set(node.phaseInvert, node.mono, p.smoothFrames);
+        if (!node.utility.transparent())
+            node.utility.process(node.sum.l.data(), node.sum.r.data(), n);
+    }
     node.preFader.copyFrom(node.sum, n);
     // Metering (P5.3c): a strip's meter shows the signal before the Console 9
     // encode — after the fader and after the pan law (one multiply per channel

@@ -4,6 +4,7 @@
 
 #include "plan.h"
 #include "stretch.h"
+#include "supple/model/freeze.h"
 
 #include "file_platform.h"
 
@@ -185,8 +186,14 @@ Result<host::Instance*> InstancePool::get(Id id, const model::FxInstance& fx,
 
 void InstancePool::prune(const Session& session, std::uint64_t liveGeneration) {
     for (auto it = instances_.begin(); it != instances_.end();)
-        it = session.fx.contains(it->first) ? std::next(it) : instances_.erase(it);
+        it = session.fx.contains(it->first) && !model::frozenOwner(session, it->first)
+                 ? std::next(it)
+                 : instances_.erase(it);
     std::erase_if(retired_, [&](const auto& r) { return r.first <= liveGeneration; });
+    if (retired_.empty() && std::none_of(instances_.begin(), instances_.end(), [](const auto& e) {
+            return e.second.isolation == model::Isolation::SharedBridge;
+        }))
+        sharedBridge_.reset();
 }
 
 void InstancePool::retire(std::unique_ptr<host::Instance> instance) {
@@ -459,9 +466,10 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
         return Error("track.strip_type", "mix output must be a master", "/master",
                      "choose a master id from track.list");
     const Node* selected = &*master;
-    if (opt.track) {
+    const auto selectedTrack = opt.freezeTrack ? opt.freezeTrack : opt.track;
+    if (selectedTrack) {
         auto it = std::find_if(p.nodes.begin(), p.nodes.end(),
-                               [&](const Node& node) { return node.id == *opt.track; });
+                               [&](const Node& node) { return node.id == *selectedTrack; });
         if (it == p.nodes.end())
             return Error("track.unknown", "track is absent from the render plan", "/track",
                          "use an existing track id from track.list");
@@ -470,12 +478,49 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
         for (Node& node : p.nodes) node.soloSilenced = false;
     }
     const auto outputLatency =
-        opt.track
+        selectedTrack
             ? selected->timelineShift + (opt.tap == model::Tap::PreFx ? 0 : selected->latChain)
             : selected->timelineShift + selected->latChain;
     const std::int64_t timelineLength =
         time::samplesAt(opt.endSeconds, p.rate) - time::samplesAt(opt.startSeconds, p.rate);
-    const auto tailFrames = time::samplesAt(opt.tailSeconds, p.rate);
+    if (opt.freezeProbe) {
+        OfflineResult result;
+        result.warnings = p.warnings;
+        result.freezeLatency = selected->latChain;
+        result.freezeShift = selected->timelineShift;
+        result.outputLatency = static_cast<std::uint32_t>(outputLatency);
+        return result;
+    }
+    auto reportedTail = [&] {
+        auto chainTail = [](const std::vector<Stage>& chain) {
+            std::int64_t sum = 0;
+            for (const auto& stage : chain) {
+                if (!stage.instance || stage.bypass) continue;
+                const auto tail = stage.instance->tail();
+                if (tail == UINT32_MAX) return std::int64_t(-1);
+                sum += (std::int64_t(tail) + stage.os - 1) / stage.os;
+            }
+            return sum;
+        };
+        const auto trackTail = chainTail(selected->chain);
+        if (trackTail < 0) return std::int64_t(-1);
+        std::int64_t takeTail = 0;
+        for (const auto& take : selected->takeChains) {
+            const auto tail = chainTail(take.chain);
+            if (tail < 0) return std::int64_t(-1);
+            takeTail = std::max(takeTail, tail);
+        }
+        return trackTail + takeTail;
+    };
+    std::int64_t minimumTail = opt.freezeTail ? reportedTail() : 0;
+    if (minimumTail < 0 || minimumTail > time::samplesAt(600., p.rate))
+        return Error("freeze.tail_limit", "the track reports an infinite or excessive tail",
+                     "/track", "disable infinite hold/feedback before freezing");
+    const auto tailFrames =
+        time::samplesAt(opt.freezeTail ? std::min(600., std::max(opt.freezeTailLimitSeconds,
+                                                                 double(minimumTail) / p.rate + 1.))
+                                       : opt.tailSeconds,
+                        p.rate);
     std::int64_t contentFrames = timelineLength;
     if (p.rateEnabled) {
         // Count inverse-clock boundaries using bounded scratch/history. This
@@ -509,7 +554,16 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     if (total > (std::int64_t(1) << 28))
         return Error("engine.too_long", "render too long", {},
                      "shorten the render range or use a lower sample rate");
-    std::vector<float> outL(static_cast<std::size_t>(total)), outR(static_cast<std::size_t>(total));
+    const auto channels = opt.freezeTrack ? std::size_t(2 + selected->auxCount) : 2u;
+    if (opt.freezeTrack && std::uint64_t(total) * channels > (std::uint64_t(1) << 28))
+        return Error("render.budget", "multichannel capture exceeds the memory budget", "/track",
+                     "reduce track channels or shorten the arrangement before freezing");
+    std::vector<std::vector<float>> output(channels,
+                                           std::vector<float>(static_cast<std::size_t>(total)));
+    auto& outL = output[0];
+    auto& outR = output[1];
+    std::int64_t renderedFrames = total, quietFrames = 0;
+    bool settled = !opt.freezeTail, invalidTail = false;
     const bool decodeStem = opt.track && opt.tap == model::Tap::PostFader && !selected->master;
     ConsoleStage<console9::Buss> stemDecoder;
     stemDecoder.init(console9::seedsFor(s.project->seed, (selected->id.n << 3) | 4),
@@ -560,6 +614,33 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
                                            outL[static_cast<std::size_t>(pos) + i],
                                            outR[static_cast<std::size_t>(pos) + i]);
                 }
+                if (opt.freezeTrack)
+                    for (std::size_t c = 2; c < channels; ++c)
+                        std::copy_n(selected->aux[c - 2].begin(), n, output[c].begin() + pos);
+                if (opt.freezeTail) {
+                    const auto currentTail = reportedTail();
+                    if (currentTail < 0 || currentTail > time::samplesAt(600., p.rate)) {
+                        invalidTail = true;
+                        break;
+                    }
+                    minimumTail = std::max(minimumTail, currentTail);
+                    for (std::uint32_t i = 0; i < n; ++i) {
+                        const auto at = pos + i;
+                        if (at < contentFrames + outputLatency) continue;
+                        bool quiet = true;
+                        for (const auto& channel : output) {
+                            const float sample = channel[static_cast<std::size_t>(at)];
+                            quiet &= std::isfinite(sample) && std::abs(sample) < 1.e-6f;
+                        }
+                        quietFrames = quiet ? quietFrames + 1 : 0;
+                        if (quietFrames >= time::samplesAt(1., p.rate) &&
+                            at + 1 >= contentFrames + outputLatency + minimumTail) {
+                            settled = true;
+                            renderedFrames = at + 1;
+                            break;
+                        }
+                    }
+                }
                 const double fraction = opt.progressBase + opt.progressScale *
                                                                static_cast<double>(pos + n) /
                                                                static_cast<double>(total);
@@ -570,6 +651,7 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
                     progressAt = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
                 }
                 pos += n;
+                if (opt.freezeTail && settled) break;
             }
         }
         for (host::Instance* in : instances) in->stopProcessing();
@@ -612,6 +694,21 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
         line += " timeline_shift=" + std::to_string(n.timelineShift);
         r.graph.push_back(std::move(line));
     }
+    if (opt.freezeTail && (invalidTail || reportedTail() < 0))
+        return Error("freeze.tail_limit", "the tail became infinite while rendering", "/track",
+                     "disable infinite hold/feedback before freezing");
+    if (opt.freezeTail && settled &&
+        reportedTail() > renderedFrames - outputLatency - contentFrames)
+        return Error("freeze.tail_changed", "a bridge reported a longer tail after rendering",
+                     "/track", "use in-process isolation to capture a dynamically changing tail");
+    if (!settled)
+        return Error(tailFrames < time::samplesAt(600., p.rate) ? "freeze.tail_pending"
+                                                                : "freeze.tail_limit",
+                     "the tail did not settle within the render budget", "/track",
+                     "reduce feedback or disable continuous sound before freezing");
+    r.freezeLatency = selected->latChain;
+    r.freezeShift = selected->timelineShift;
+    r.freezeTailFrames = renderedFrames - outputLatency - contentFrames;
     r.outputLatency = static_cast<std::uint32_t>(outputLatency);
     r.warnings = std::move(p.warnings);
     for (const auto& node : p.nodes)
@@ -622,8 +719,11 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
         });
     r.audio.sampleRate = p.rate;
     const auto skip = static_cast<std::ptrdiff_t>(outputLatency);
-    r.audio.channels = {std::vector<float>(outL.begin() + skip, outL.end()),
-                        std::vector<float>(outR.begin() + skip, outR.end())};
+    for (auto& channel : output) {
+        channel.resize(static_cast<std::size_t>(renderedFrames));
+        channel.erase(channel.begin(), channel.begin() + skip);
+    }
+    r.audio.channels = std::move(output);
     return r;
 }
 
