@@ -6,7 +6,9 @@
 //
 // What this example shows: a file. The impulse response is a path, and the
 // framework does the rest -- relocates it if the session moved, loads it off
-// the audio thread with the processor's loadFile(), reports it missing.
+// the audio thread with the processor's loadFile(), reports it missing. Or
+// "factory:plate.flac": the plate response in assets/, which ships inside
+// the binary (PRODUCT_ASSETS) and so is found in any host, on any system.
 #pragma once
 
 #include <cstdint>

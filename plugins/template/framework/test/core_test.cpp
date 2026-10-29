@@ -2478,6 +2478,51 @@ TEST(file_properties_load_relocate_and_report_what_became_of_them) {
     e->process(io, io, 256);
 }
 
+TEST(factory_references_name_the_products_own_files) {
+    FileScratch s;
+    CHECK(files::isFactoryReference("factory:pad.flac"));
+    CHECK(!files::isFactoryReference("/samples/factory:pad.flac") && !files::isFactoryReference("pad.flac"));
+    // One the product lacks: missing, and never looked for, even where a
+    // file of that name lies.
+    const std::string decoy = s.wav("library/no-such-factory-file.wav");
+    files::rememberFolder(files::toUtf8(s.root / "library"));
+    CHECK(files::exists(decoy));
+    CHECK(!files::factoryFile("factory:no-such-factory-file.wav"));
+    CHECK(!files::exists("factory:no-such-factory-file.wav") && !files::exists("factory:"));
+    CHECK(files::relocate("factory:no-such-factory-file.wav").empty());
+    dsp::AudioData none;
+    std::string error;
+    CHECK(!dsp::loadAudioFile("factory:no-such-factory-file.wav", none, &error) && !error.empty());
+    // Each the product has: there, as it is.
+    std::string audio;
+    for (size_t i = 0; i < assets::count(); ++i) {
+        const std::string ref = std::string(files::kFactoryPrefix) + std::string(assets::at(i).name);
+        CHECK(files::exists(ref) && files::relocate(ref) == ref);
+        CHECK(files::factoryFile(ref).data == assets::at(i).data);
+        if (audio.empty() && files::hasExtension(ref, kAudioFileTypes)) audio = ref;
+    }
+    int k = -1;
+    for (size_t i = 0; i < properties::kCount && k < 0; ++i)
+        if (properties::at(i).isFile() && files::hasExtension(audio, properties::at(i).extensions)) k = static_cast<int>(i);
+    if (audio.empty() || k < 0) {
+        std::printf("      (no factory audio file and file property taking it in this product)\n");
+        return;
+    }
+    // Decoded as the same bytes on disk are, and loaded by a property.
+    const assets::Asset a = files::factoryFile(audio);
+    const std::filesystem::path copy = s.root / files::fileName(audio.substr(files::kFactoryPrefix.size()));
+    std::ofstream(copy, std::ios::binary).write(reinterpret_cast<const char*>(a.data), static_cast<std::streamsize>(a.size));
+    dsp::AudioData fromBinary, fromDisk;
+    CHECK(dsp::loadAudioFile(audio, fromBinary) && dsp::loadAudioFile(files::toUtf8(copy), fromDisk));
+    CHECK(fromBinary.frames() > 0 && fromBinary.channel == fromDisk.channel);
+    auto e = std::make_unique<Engine>();
+    const size_t index = static_cast<size_t>(k);
+    CHECK(e->setProperty(index, audio, true));
+    e->activate(48000.0, 256, product::info::kAudioInput ? 2 : 0, 2);
+    CHECK(e->fileStatus(index).state == FileStatus::State::Ready);
+    CHECK(e->properties().get(index) == audio);
+}
+
 TEST(a_file_loaded_while_the_audio_runs_arrives_whole) {
     int k = -1;
     for (size_t i = 0; i < properties::kCount && k < 0; ++i)

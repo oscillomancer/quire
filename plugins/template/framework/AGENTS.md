@@ -287,8 +287,15 @@ byte (`core/StateFormat.h`). There is nothing to write for it.
   remembers that folder and so finds the rest of a moved library too. The
   file is loaded off the audio thread (see DSP), and the editor shows it
   with `ui().fileSlot(id, rect)`. `SUPPLE_SETTINGS_DIR` replaces the
-  per-user settings folder the remembered folders live in, for tests. The
-  room example.
+  per-user settings folder the remembered folders live in, for tests. A
+  property may instead hold a factory reference, `"factory:<name>"`: one of
+  the product's `PRODUCT_ASSETS`, a sample or a response inside the binary,
+  which every host on every system finds. Its default, a factory preset or
+  a session may set one; audio files read it like a path, and a product's
+  own `loadFile()` reads its bytes with `files::factoryFile()`. Once
+  shipped, a factory file's name is session ABI like a parameter ID, and
+  its sound is part of every session that uses it: change either and those
+  sessions change. The room example (its plate).
 - **Factory presets** (`product/Presets.h`, needs `PRODUCT_PRESETS ON`): a
   table of name, category, parameter values in plain units as `update` reads
   them (a percent as 0..1, a choice by index, a note value by

@@ -3,7 +3,9 @@
 //
 // Audio files: WAV (and RF64, W64), AIFF and FLAC in, through David Reid's
 // dr_wav and dr_flac (MIT-0). Whole files decoded into memory, resampled to
-// the session's rate, and long ones streamed from disk instead.
+// the session's rate, and long ones streamed from disk instead. A path may
+// be a factory reference ("factory:pad.flac", core/Files.h): the product's
+// own file, read from the binary.
 //
 // All of it reads files and allocates: the main thread or a worker, never
 // the audio thread -- except DiskStream::read() and restart(), which are

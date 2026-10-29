@@ -29,6 +29,8 @@ set(PRODUCT_STATE_TAG       "RoOm")
 
 set(PRODUCT_DSP_SOURCES     "")
 set(PRODUCT_EDITOR_SOURCES  product/Editor.cpp)
+# A plate response inside the binary, for "factory:plate.flac" (core/Files.h).
+set(PRODUCT_ASSETS          product/assets/plate.flac)
 set(PRODUCT_TEST_SOURCES    product/test/processor_test.cpp)
 
 set(PRODUCT_SMOKE_PLAIN_PARAM   "Mix")

@@ -109,7 +109,17 @@ std::string toUtf8(const fs::path& path) {
     }
 }
 
-bool exists(std::string_view path) { return !path.empty() && isFile(fromUtf8(path)); }
+bool exists(std::string_view path) {
+    if (isFactoryReference(path)) return static_cast<bool>(factoryFile(path));
+    return !path.empty() && isFile(fromUtf8(path));
+}
+
+bool isFactoryReference(std::string_view path) { return path.substr(0, kFactoryPrefix.size()) == kFactoryPrefix; }
+
+assets::Asset factoryFile(std::string_view path) {
+    if (!isFactoryReference(path) || path.size() == kFactoryPrefix.size()) return {};
+    return assets::find(path.substr(kFactoryPrefix.size()));
+}
 
 bool writeAtomic(const fs::path& path, const uint8_t* bytes, size_t size) {
     static std::atomic<uint64_t> sequence{0};
@@ -190,6 +200,7 @@ bool hasExtension(std::string_view path, std::string_view extensions) {
 std::string relocate(std::string_view path, const std::vector<std::string>& extraFolders) {
     if (path.empty()) return {};
     if (exists(path)) return std::string(path);
+    if (isFactoryReference(path)) return {};
     const std::vector<std::string> parts = components(path);
     if (parts.empty()) return {};
 
