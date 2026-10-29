@@ -573,7 +573,8 @@ and naming. All `edit` unless marked (q) query or (a) action.
   (a), `track.template.load {name}` (a new strip under the master),
   `track.template.list` (q), `track.template.delete` (a).
 - **items/takes**: `item.add {track, position, length, source|midi|notation}`,
-  `item.remove`, `item.move`, `item.set`, `item.split {at}`,
+  `item.remove`, `item.move`, `item.set`, `item.split {item, at, snap?: none|zero_crossing}`
+  (default none; audio zero-crossing search and errors in engine.md),
   `item.duplicate`, `item.glue` (a+edit), `take.add`, `take.remove`,
   `item.paste {version?, items: [{item, track, position}]}` copies the retained
   version's takes and their FX, including referenced opaque state blobs when

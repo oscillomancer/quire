@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <map>
+#include <set>
 #include <tuple>
 
 #include "supple/model/freeze.h"
@@ -987,6 +988,34 @@ Status ItemGestures::mergeSelection() {
     return {};
 }
 
+Status ItemGestures::splitSelection(bool zeroCrossing) {
+    if (!run) return {};
+    const auto& s = view_.session();
+    const double seconds = view_.playhead();
+    std::set<model::Id> visited;
+    std::vector<EditStep> steps;
+    for (auto id : selection_) {
+        if (visited.contains(id)) continue;
+        const auto* item = s.items.find(id);
+        if (!item) continue;
+        const auto span = model::itemSpan(s, *item);
+        if (!(seconds > span.startSec && seconds < span.endSec)) continue;
+        const auto* take = item->activeTake ? s.takes.find(*item->activeTake) : nullptr;
+        if (zeroCrossing && (!take || !take->source || take->source->kind != model::Kind::Media))
+            continue;
+        for (auto peer : model::linkedItems(s, id)) visited.insert(peer);
+        json::Value args = json::Value::object();
+        args["item"] = id.str();
+        args["at"] = s.timeMap->beatAt(seconds);
+        if (zeroCrossing) args["snap"] = "zero_crossing";
+        steps.push_back({"item.split", std::move(args)});
+    }
+    if (steps.empty()) return {};
+    auto result = run(zeroCrossing ? "Split at prior zero crossing" : "Split at cursor", steps);
+    if (!result) return result.error();
+    return {};
+}
+
 void ItemGestures::addEditItems(std::vector<ui::MenuItem>& items, ui::Point at, bool onItem) {
     auto add = [&](std::string label, const char* action, bool enabled,
                    std::function<Status()> act) {
@@ -1021,6 +1050,15 @@ void ItemGestures::addEditItems(std::vector<ui::MenuItem>& items, ui::Point at, 
     // Always listed (greyed when it does not apply), so the rows keep their places.
     add(n == 1 ? "Merge takes" : "Merge MIDI items", "ui.item.merge", canMerge(),
         [this] { return mergeSelection(); });
+    add("Split item at cursor", "item.split:playhead", true, [this] { return splitSelection(); });
+    const auto& s = view_.session();
+    const bool audio = std::any_of(selection_.begin(), selection_.end(), [&](auto id) {
+        const auto* item = s.items.find(id);
+        const auto* take = item && item->activeTake ? s.takes.find(*item->activeTake) : nullptr;
+        return take && take->source && take->source->kind == model::Kind::Media;
+    });
+    add("Split item at prior zero crossing", "ui.item.split-zero", audio,
+        [this] { return splitSelection(true); });
 }
 
 void ItemGestures::openSpaceMenu(ui::Point at) {

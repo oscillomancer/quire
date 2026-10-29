@@ -119,6 +119,9 @@ class ItemGestures {
     // (midi.merge, one undo step), which becomes the selection.
     bool canMerge() const;
     Status mergeSelection();
+    // Menu and S: split only items containing the edit cursor, one undo step.
+    // Zero-crossing mode skips items without an active audio take.
+    Status splitSelection(bool zeroCrossing = false);
     bool canPaste() const {
         return !clipboard_.items.empty() &&
                (!projectGeneration || projectGeneration() == clipboard_.generation);

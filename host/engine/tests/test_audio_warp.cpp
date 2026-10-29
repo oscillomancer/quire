@@ -50,6 +50,59 @@ struct WarpHost {
     }
 };
 }  // namespace
+TEST_CASE("zero-crossing split uses the heard source offset and falls back on DC") {
+    WarpHost h;
+    bool dc = false;
+    double rate = 1;
+    SUBCASE("latest crossing in an offset sine") {}
+    SUBCASE("DC keeps the cursor") { dc = true; }
+    SUBCASE("double-speed source") { rate = 2; }
+    audio::AudioData signal;
+    signal.sampleRate = 48000;
+    signal.channels.assign(1, std::vector<float>(96000));
+    for (std::size_t n = 0; n < signal.frames(); ++n)
+        signal.channels[0][n] = dc ? .25f
+                                   : static_cast<float>(.5 * std::sin(2 * 3.141592653589793 * 100 *
+                                                                      (double(n) + .25) / 48000));
+    const auto path = h.root / "split.wav";
+    REQUIRE(audio::writeWav(path, signal));
+    auto args = json::Value::object();
+    args["track"] = "tr_1";
+    args["position"] = 2;
+    args["audio_file"] = path.string();
+    REQUIRE(h.bus->execute({"item.add", args, {cmd::Origin::Type::Test, "split", {}}}));
+    h.run("take.set",
+          rate == 1
+              ? R"({"take":"tk_2","start_offset":0.013})"
+              : R"({"take":"tk_2","start_offset":0.013,"playrate":2,"preserve_pitch":false})");
+    REQUIRE(h.app->media().prepareSources(h.app->head(), h.app->projectDir(), 48000));
+    const auto before = model::serializeProject(h.app->head());
+    const auto result = h.run("item.split", R"({"item":"it_2","at":2.376,"snap":"zero_crossing"})");
+    const auto rightId = *model::Id::parse(result.find("right")->asString());
+    const auto& right = *h.app->head().items.find(rightId);
+    const double expected = dc ? 1.188 : (rate == 1 ? 1.187 : 1.186);
+    CHECK(model::itemSpan(h.app->head(), right).startSec ==
+          doctest::Approx(expected).epsilon(1e-9));
+    CHECK(h.app->head().takes.find(*right.activeTake)->startOffset ==
+          doctest::Approx(.013 + (expected - 1) * rate));
+    REQUIRE(h.app->undo());
+    auto restored = h.app->head();
+    restored.next = model::parseProject(before)->next;
+    CHECK(model::serializeProject(restored) == before);
+}
+
+TEST_CASE("zero-crossing split refuses MIDI with a corrective hint") {
+    WarpHost h;
+    h.run("item.add", R"({"track":"tr_1","notation":"voice a; 1: C4:w"})");
+    const auto before = model::serializeProject(h.app->head());
+    auto result = h.call("item.split", R"({"item":"it_2","at":1,"snap":"zero_crossing"})");
+    REQUIRE_FALSE(result);
+    CHECK(result.error().code == "item.split_not_audio");
+    CHECK(result.error().path == "/args/item");
+    CHECK(result.error().hint.find("snap none") != std::string::npos);
+    CHECK(model::serializeProject(h.app->head()) == before);
+}
+
 TEST_CASE("audio warp commands quantize split and undo atomically") {
     WarpHost h;
     h.run("take.hits.set", R"({"take":"tk_1","positions":[0.3,0.8]})");

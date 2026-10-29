@@ -775,6 +775,11 @@ int main(int argc, char** argv) {
     });
     appActions.addUi("ui.item.merge", "Item: merge selected MIDI items (or one item's takes)",
                      [&] { reportEdit("merge", shell.arrange()->gestures().mergeSelection()); });
+    appActions.addUi("item.split:playhead", "Item: split selected at cursor",
+                     [&] { reportEdit("split", shell.arrange()->gestures().splitSelection()); });
+    appActions.addUi("ui.item.split-zero", "Item: split selected at prior zero crossing", [&] {
+        reportEdit("split", shell.arrange()->gestures().splitSelection(true));
+    });
     // Navigation: the previous/next marker or region start from the playhead.
     auto jump = [&](bool forward) {
         views::ArrangeView& a = *shell.arrange();

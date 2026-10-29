@@ -146,6 +146,8 @@ struct PreparedSource {
 // Complete immutable source snapshot. Preparation never owns plug-in instances.
 struct PreparedSources {
     std::string key;
+    double sampleRate = 0;
+    model::Session session;  // immutable provenance for source-dependent edits
     std::map<model::Id, PreparedSource> takes;
 };
 Result<std::string> sourcePreparationKey(const model::Session& session,

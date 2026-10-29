@@ -3,6 +3,7 @@
 #include "command_validation.h"
 #include "supple/model/audio_warp.h"
 #include "supple/model/numeric.h"
+#include "supple/time/timeline.h"
 // Additional session edits and queries from session-model §7.
 #include <algorithm>
 #include <functional>
@@ -23,6 +24,119 @@ using model::Id;
 
 EngineApp& app(Context& ctx) { return ctx.service<EngineApp>(); }
 json::Value j(std::string_view s) { return json::parse(s).value(); }
+
+// Search the same immutable source samples that playback reads. No decode,
+// stretching or cache mutation belongs in this edit handler.
+Result<double> priorZeroCrossing(EngineApp& owner, const model::Session& s, const model::Item& item,
+                                 double cursor) {
+    const auto* take = item.activeTake ? s.takes.find(*item.activeTake) : nullptr;
+    if (!take || !take->source || take->source->kind != model::Kind::Media)
+        return Error("item.split_not_audio", "zero-crossing split needs an active audio take",
+                     "/item", "use snap none to split MIDI or empty items at the cursor");
+    const auto span = model::itemSpan(s, item);
+    if (!(cursor > span.startSec && cursor < span.endSec))
+        return Error("item.split_range", "split must be inside the item", "/at",
+                     "choose a beat strictly after the start and before the end");
+    const auto& prepared = owner.media().sources();
+    const Error pending("item.split_source_pending", "current source audio is not prepared",
+                        "/item",
+                        "start the engine (engine.start with backend dummy is sufficient), "
+                        "wait for source preparation and retry");
+    if (!prepared || prepared->session.project->mediaDir != s.project->mediaDir ||
+        (owner.engine() && prepared->sampleRate != owner.engine()->config().sampleRate))
+        return pending;
+    const auto found = prepared->takes.find(*item.activeTake);
+    if (found == prepared->takes.end()) return pending;
+    const auto& source = found->second;
+    // Per-take provenance lets a batch split several items from one snapshot.
+    // Scalar variants do not depend on item placement or source offset.
+    auto matches = [&](Id id) {
+        const auto* now = s.takes.find(id);
+        const auto* was = prepared->session.takes.find(id);
+        if (!now || !was || now->source != was->source || now->playrate != was->playrate ||
+            now->pitch != was->pitch || now->preservePitch != was->preservePitch ||
+            now->pitchMode != was->pitchMode || now->stretchMarkers != was->stretchMarkers ||
+            now->warpPeers != was->warpPeers)
+            return false;
+        const auto* media = now->source ? s.media.find(*now->source) : nullptr;
+        const auto* oldMedia = was->source ? prepared->session.media.find(*was->source) : nullptr;
+        return media && oldMedia && model::toJson(*media) == model::toJson(*oldMedia) &&
+               (!source.itemLocal || now->startOffset == was->startOffset);
+    };
+    if (!matches(*item.activeTake)) return pending;
+    if (source.itemLocal) {
+        const model::Item* original = nullptr;
+        for (const auto& entry : prepared->session.items)
+            if (entry.value->activeTake == item.activeTake) original = entry.value.get();
+        if (!original || item.loop != original->loop) return pending;
+        const auto previous = model::itemSpan(prepared->session, *original);
+        if (span.endSec - span.startSec != previous.endSec - previous.startSec) return pending;
+        for (auto peer : take->warpPeers)
+            if (!matches(peer)) return pending;
+    } else if (model::activeWarp(*take) && !item.loop) {
+        return pending;
+    }
+    if (source.error)
+        return Error("item.split_source", source.error->message, "/item",
+                     "relink or repair the audio source, then retry after source preparation");
+    if (!source.data || !(prepared->sampleRate > 0)) return pending;
+    const auto& audio = *source.data;
+    const double rate = prepared->sampleRate;
+    const auto frames = static_cast<std::int64_t>(audio.frames());
+    if (audio.channels.empty() || frames == 0) return cursor;
+    const MediaVariant variant{take->playrate, take->pitch, take->preservePitch, take->pitchMode};
+    const auto offset =
+        source.itemLocal ? 0 : time::samplesAt(take->startOffset, rate / variant.speed());
+    const auto start = time::samplesAt(span.startSec, rate);
+    const auto end = time::samplesAt(span.endSec, rate);
+    const auto first =
+        std::max(start + 1, static_cast<std::int64_t>(std::ceil((cursor - .1) * rate)));
+    const auto last = std::min(end - 1, static_cast<std::int64_t>(std::floor(cursor * rate)));
+    auto sample = [&](std::int64_t frame, std::size_t channel) {
+        auto at = offset + frame - start;
+        if (item.loop) at = ((at % frames) + frames) % frames;
+        if (at < 0 || at >= frames) return 0.f;
+        const auto n = static_cast<std::size_t>(at);
+        float l = audio.channels[0][n];
+        float r = audio.channels[audio.channelCount() > 1 ? 1 : 0][n];
+        switch (take->channelMode) {
+            case model::ChannelMode::Normal:
+                break;
+            case model::ChannelMode::ReverseStereo:
+                std::swap(l, r);
+                break;
+            case model::ChannelMode::MonoMix:
+                l = r = .5f * (l + r);
+                break;
+            case model::ChannelMode::Left:
+                r = l;
+                break;
+            case model::ChannelMode::Right:
+                l = r;
+                break;
+        }
+        return channel == 0 ? l : r;
+    };
+    double energy[2]{};
+    for (auto n = first; n <= last; ++n)
+        for (std::size_t ch = 0; ch < 2; ++ch) {
+            const double x = static_cast<double>(sample(n, ch));
+            if (std::isfinite(x)) energy[ch] += x * x;
+        }
+    const std::size_t channel = energy[1] > energy[0] ? 1 : 0;
+    // A fractional cursor in silence is already at zero; keep it exact.
+    if (first <= last && sample(last, channel) == 0 && sample(last + 1, channel) == 0)
+        return cursor;
+    for (auto n = last; n >= first; --n) {
+        const float x = sample(n, channel), previous = sample(n - 1, channel);
+        const double at = static_cast<double>(n) / rate;
+        if (at > span.startSec && at < span.endSec && at <= cursor && std::isfinite(x) &&
+            std::isfinite(previous) &&
+            (x == 0 || (previous < 0 && x > 0) || (previous > 0 && x < 0)))
+            return at;
+    }
+    return cursor;
+}
 
 template <class T>
 Result<Id> require(const model::Session& s, const std::string& text, std::string path) {
@@ -241,6 +355,7 @@ struct ItemSplitArgs {
     bool bypassGroups = false;
     std::string item;
     double at = 0;
+    std::string snap = "none";
 };
 struct SplitResult {
     std::string left, right;
@@ -1555,13 +1670,26 @@ void registerExtraCommands(cmd::Registry& registry) {
         c.name = "item.split";
         c.kind = Kind::Edit;
         c.exposure = cmd::Exposure::McpTool;
-        c.summary = "Split an audio or MIDI item at a beat, keeping take source positions aligned.";
+        c.summary = "Split an item at a beat, optionally at the prior audio zero crossing.";
+        c.description =
+            "snap defaults to none. zero_crossing searches the active take's prepared playback "
+            "source up to 100 ms before at, before FX/fades/gain. After channel mode, use the "
+            "louder stereo channel by window energy (left on ties), never a stereo sum unless "
+            "MonoMix is selected. Choose the latest exact zero or sign-change sample boundary; "
+            "never search forward or outside the item. Without a crossing, split at at. MIDI "
+            "and empty takes refuse zero_crossing; the GUI skips them. Current prepared audio "
+            "must be available; start the engine and retry after preparation. Linked items use "
+            "the initiating item's resolved split time. History records that time for replay.";
         c.tags = {"item"};
         c.args = schema::object<ItemSplitArgs>("item_split_args")
                      .field("bypass_groups", &ItemSplitArgs::bypassGroups, schema::boolean())
                      .defaultValue(false)
                      .field("item", &ItemSplitArgs::item, idSchema("it"))
                      .field("at", &ItemSplitArgs::at, schema::number().min(0))
+                     .field("snap", &ItemSplitArgs::snap,
+                            schema::enumeration<std::string>(
+                                {{"none", "none"}, {"zero_crossing", "zero_crossing"}}))
+                     .defaultValue(std::string("none"))
                      .build();
         c.result =
             schema::object<SplitResult>("item_split_result")
@@ -1574,8 +1702,32 @@ void registerExtraCommands(cmd::Registry& registry) {
                 .defaultValue(std::vector<std::string>{})
                 .omitIfDefault()
                 .build();
+        c.errors = {{"item.split_range", "the cursor is outside the item's interior",
+                     "choose a beat strictly after the start and before the end"},
+                    {"item.split_not_audio", "zero_crossing needs an active audio take",
+                     "use snap none to split MIDI or empty items at the cursor"},
+                    {"item.split_source_pending", "current source audio is not prepared",
+                     "start the engine, wait for source preparation and retry"},
+                    {"item.split_source", "the audio source could not be prepared",
+                     "relink or repair the audio source and retry"}};
         c.examples = {{"Split halfway", j(R"({"item":"it_1","at":2})"),
-                       j(R"({"left":"it_1","right":"it_2"})"), "song_with_item"}};
+                       j(R"({"left":"it_1","right":"it_2"})"), "song_with_item"},
+                      {"Split at a prior audio zero crossing",
+                       j(R"({"item":"it_1","at":2,"snap":"zero_crossing"})"),
+                       j(R"({"left":"it_1","right":"it_2"})"), "song_with_prepared_audio"}};
+        c.resolve = [](ItemSplitArgs& a, Context& ctx) -> Status {
+            if (a.snap != "zero_crossing") return {};
+            const auto s = app(ctx).view();
+            auto id = require<model::Item>(s, a.item, "/item");
+            if (!id) return id.error();
+            SUPPLE_TRY(checkUnlocked(s, *id));
+            auto at =
+                priorZeroCrossing(app(ctx), s, *s.items.find(*id), s.timeMap->secondsAt(a.at));
+            if (!at) return at.error();
+            a.at = s.timeMap->beatAt(*at);
+            a.snap = "none";  // the bus logs the resolved beat for linked edits and replay
+            return {};
+        };
         c.run = [](const ItemSplitArgs& a, Context& ctx) -> Result<SplitResult> {
             const auto s = app(ctx).view();
             auto id = require<model::Item>(s, a.item, "/item");

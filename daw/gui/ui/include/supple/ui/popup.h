@@ -9,6 +9,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -29,5 +30,7 @@ struct MenuItem {
 // A menu's content node (a list); `close` is called before an item runs.
 std::unique_ptr<Node> makeMenu(std::string id, std::vector<MenuItem> items,
                                std::function<void()> close);
+// Inspect a menu's rows; the span is borrowed until the menu is destroyed.
+std::span<const MenuItem> menuItems(const Node& menu);
 
 }  // namespace supple::ui

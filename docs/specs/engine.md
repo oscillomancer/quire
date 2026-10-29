@@ -1932,6 +1932,8 @@ The worker retains at most 2^26 sample values of reusable variants between reque
 eviction never invalidates outstanding plan leases. Startup and explicit
 offline rendering wait for preparation. Shutdown joins the worker before releasing
 its cache or wake target. Decode calls themselves are not interruptible mid-call.
+Prepared source snapshots retain their immutable input session and target sample
+rate as provenance for source-dependent edits; this adds no separate audio cache.
 
 An active warp is a valid nonempty piecewise-linear map on nonlooped, pitch-preserving
 Signalsmith audio. Invalid legacy maps and unsupported modes retain scalar playback
@@ -2005,3 +2007,39 @@ exclusive with `start_offset`, which slips the map in source time. Changing
 right take. Clipboard copies remap a complete warp bundle to fresh take IDs;
 partial copies are independent. Edits that break a remaining bundle's alignment
 fail at transaction commit, allowing a batch to move all members together.
+
+### Splitting at a prior zero crossing
+
+`item.split {item, at, snap?: none|zero_crossing, bypass_groups?: false}` keeps
+the existing `{left, right, linked_left?, linked_right?}` result. `at` is a project
+beat strictly inside the item (`item.split_range` otherwise). Default `none`
+preserves the ordinary audio/MIDI split. `zero_crossing` requires an active audio
+take: MIDI and empty takes return `item.split_not_audio` with a hint to use
+`snap: none`. The GUI skips those items before issuing calls.
+
+The command searches the existing immutable prepared playback source, before
+take FX, fades, gain/pan, track processing and master transport-rate conversion.
+Scalar resampling/stretch/pitch, source offset, looping and item-local warp audio
+use the playback clip's sample/offset rules. Channel mode is applied first; normal
+stereo uses the channel with greater squared-sample energy in the search window,
+left on ties. This avoids anti-phase cancellation and silent-channel bias; only
+the first stereo pair is heard by current playback. MonoMix explicitly sums that
+pair. ReverseStereo swaps the pair; temporal reversal is not a take feature.
+
+Search at most 100 ms backward in item/project time, excluding item boundaries.
+Choose the latest sample boundary at or before `at` with an exact zero or a sign
+change from its predecessor; do not interpolate or search forward. Nonfinite
+pairs are ignored. A fractional cursor in silence stays exact; without a crossing
+(including DC), keep the requested cursor. A crossing in one channel does not
+guarantee silence in the other or account for discontinuities caused by FX.
+
+The source snapshot must match the active take's source settings and media
+identity; warped data also requires matching item duration and phase peers.
+`item.split_source_pending` asks callers to start the engine if necessary, wait
+for preparation and retry. `item.split_source` asks them to repair/relink failed
+media. No decoding, stretching, file access or new cache is introduced in this
+edit handler. Multi-item batches may consume the same matching source snapshot.
+Linked peers split at the initiating item's resolved beat, without independent
+searches. Existing locks, freeze and warp-bundle validation remain in force.
+History logs the resolved beat with `snap: none` so branch replay needs no audio
+search or source preparation. Each successful command or batch is one undo step.

@@ -307,6 +307,16 @@ while any saved project or history still needs them.
 
 ## Timing audio with hits and stretch markers
 
+Right-click an item and choose **Split item at cursor**, or press S, to split
+selected audio and MIDI items at the edit cursor. Items outside the cursor stay
+whole; the menu's pointer position does not set the split point. Undo restores
+the entire selection edit in one step.
+
+**Split item at prior zero crossing** moves the split back to the last point,
+at most 100 ms before the cursor, where the item's audio crosses zero, which
+avoids a click at the cut. If there is none, it splits at the cursor. It does
+nothing to MIDI items. Linked items split together at the same point.
+
 Right-click selected audio items and choose **Detect hits** to show candidate
 attacks. Drag a dim hit to create a stretch marker, or drag a solid marker handle
 to change timing while retaining pitch. Hold Shift for a move off the grid. Item

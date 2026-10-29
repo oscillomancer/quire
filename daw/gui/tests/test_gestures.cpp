@@ -21,6 +21,7 @@
 #include "supple/gui/window.h"
 #include "supple/peaks/peaks.h"
 #include "supple/ui/list.h"
+#include "supple/ui/popup.h"
 #include "supple/ui/root.h"
 #include "supple/views/arrange.h"
 #include "supple/views/envelope_lane.h"
@@ -929,8 +930,42 @@ ui::Point laneAt(Fixture& f, model::Id it, std::size_t lane) {
 // Item menu rows: Cut, Copy, Paste, Duplicate, Delete, Merge, rule, four
 // timebases, rule, Take FX, three take envelopes, rule, then (several takes)
 // Show all takes, the two explodes and Delete take, then the two renders.
-constexpr int kShowAll = 21, kExplodeTracks = 22, kExplodeSerial = 23, kDeleteTake = 24;
+constexpr int kShowAll = 23, kExplodeTracks = 24, kExplodeSerial = 25, kDeleteTake = 26;
 }  // namespace
+
+TEST_CASE("arrange item menu splits at the edit cursor and disables zero crossing for MIDI") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto audio = f.itemOnRow(0);
+    const auto span = model::itemSpan(f.app->head(), f.item(audio));
+    const double cursor = span.startSec + .25;
+    f.view->setPlayhead(cursor);
+    rightClick(f, onItem(f, audio, f.rectOf(audio).y + f.rectOf(audio).h / 2));
+    auto* menu = f.root->find("item.menu");
+    REQUIRE(menu);
+    auto rows = ui::menuItems(*menu);
+    REQUIRE(rows.size() > 7);
+    CHECK(rows[6].label == "Split item at cursor");
+    CHECK(rows[7].label == "Split item at prior zero crossing");
+    CHECK(rows[7].enabled);
+    if (const char* out = std::getenv("SUPPLE_TEST_SNAPSHOTS"))
+        REQUIRE(
+            gui::writePng(std::filesystem::path(out) / "item-split-menu.png", f.root->readBack()));
+    const auto count = f.app->head().items.size(), steps = f.steps();
+    pick(f, 6);
+    CHECK(f.app->head().items.size() == count + 1);
+    CHECK(model::itemSpan(f.app->head(), f.item(audio)).endSec == doctest::Approx(cursor));
+    CHECK(f.steps() == steps + 1);
+    const auto midi = f.itemOnRow(1, true);
+    rightClick(f, onItem(f, midi, f.rectOf(midi).y + f.rectOf(midi).h / 2));
+    menu = f.root->find("item.menu");
+    REQUIRE(menu);
+    CHECK_FALSE(ui::menuItems(*menu)[7].enabled);
+    const auto before = model::serializeProject(f.app->head());
+    pick(f, 7);
+    CHECK(f.root->find("item.menu"));  // a disabled entry does not activate
+    CHECK(model::serializeProject(f.app->head()) == before);
+}
 
 TEST_CASE("takes: show all takes spreads them out; a lane is heard, deleted from its menu") {
     Fixture f;
@@ -1031,7 +1066,7 @@ TEST_CASE("takes: explode onto new tracks; render an item with FX as a new take"
     REQUIRE(f.item(audio).takes.size() == 1);
     const ui::Rect ra = f.rectOf(audio);
     rightClick(f, onItem(f, audio, ra.y + ra.h / 2));
-    pick(f, 22);  // Render with FX as a new take
+    pick(f, 24);  // Render with FX as a new take
     REQUIRE(f.item(audio).takes.size() == 2);
     const model::Take& made = *f.app->head().takes.find(*f.item(audio).activeTake);
     CHECK(made.name.ends_with("(FX)"));
@@ -1157,7 +1192,7 @@ TEST_CASE("arrange gestures: the item menu sets what items follow; a time item m
     f.sync();
     REQUIRE(f.root->find("item.menu"));
     const double startSec = model::itemSpan(f.app->head(), f.item(audio)).startSec;
-    f.menuRow("item.menu", 8);  // Cut … Merge, rule, beat, time
+    f.menuRow("item.menu", 10);  // Cut … Merge, two splits, rule, beat, time
     CHECK(f.item(audio).timebase == model::ItemTimebase::Time);
     CHECK(f.item(audio).position == doctest::Approx(startSec));  // seconds now, same place
     CHECK(g.selection() == std::vector<model::Id>{audio});
@@ -1195,10 +1230,10 @@ TEST_CASE("arrange gestures: take FX and a take envelope drawn and edited on its
     };
     // Rows: Delete, rule, four timebases, rule, Take FX…, volume, pan, mute.
     rightClick();
-    f.menuRow("item.menu", 16);
+    f.menuRow("item.menu", 18);
     CHECK(takeFx == std::vector<model::Id>{take});
     rightClick();
-    f.menuRow("item.menu", 17);
+    f.menuRow("item.menu", 19);
     auto envelope = [&]() -> const model::Envelope* {
         for (const auto& e : f.app->head().envelopes)
             if (e.value->target.object == take && e.value->target.param == "volume")
@@ -1235,7 +1270,7 @@ TEST_CASE("arrange gestures: take FX and a take envelope drawn and edited on its
     CHECK(envelope()->points.size() == 1);
     // Hidden from the menu, its line no longer takes the press: the item moves instead.
     rightClick();
-    f.menuRow("item.menu", 17);
+    f.menuRow("item.menu", 19);
     CHECK_FALSE(envelope()->visible);
     CHECK_FALSE(g.takeEnvelopeAt(audio, {mid.x, lineY}));
 }

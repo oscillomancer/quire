@@ -700,6 +700,7 @@ q = nil
 ---@field bypass_groups? boolean (default: false)
 ---@field item string
 ---@field at number
+---@field snap? "none"|"zero_crossing" (default: "none")
 
 ---@class Quire.item_split_result
 ---@field left string
@@ -1556,7 +1557,7 @@ q = nil
 ---@field paste fun(args: Quire.item_paste_args): Quire.item_paste_result Copy items as they were in a version (a clipboard) to tracks and beats.
 ---@field remove fun(args: Quire.item_remove_args): table Remove an item with its takes (unpooled sources go too).
 ---@field set fun(args: Quire.item_set_args): table Set an item's position, length, playback, fades, name, color, or lock.
----@field split fun(args: Quire.item_split_args): Quire.item_split_result Split an audio or MIDI item at a beat, keeping take source positions aligned.
+---@field split fun(args: Quire.item_split_args): Quire.item_split_result Split an item at a beat, optionally at the prior audio zero crossing.
 
 ---@class Quire.job
 ---@field cancel fun(args: Quire.job_cancel_args): table Cancel a job.
