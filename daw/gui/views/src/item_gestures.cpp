@@ -1147,7 +1147,12 @@ void ItemGestures::openItemMenu(ui::Point at) {
         menu.enabled = std::any_of(selection_.begin(), selection_.end(), [&](auto id) {
             const auto* it = s.items.find(id);
             const auto* tk = it && it->activeTake ? s.takes.find(*it->activeTake) : nullptr;
-            return tk && tk->source && tk->source->kind == model::Kind::Media;
+            if (!tk || !tk->source || !s.media.contains(*tk->source)) return false;
+            if (std::string_view(op) != "marker") return true;
+            const auto span = model::itemSpan(s, *it);
+            return !it->locked && !model::frozenOwner(s, id) && !it->loop && tk->preservePitch &&
+                   tk->pitchMode == "signalsmith" && model::validateWarpMap(*tk) &&
+                   view_.playhead() > span.startSec && view_.playhead() < span.endSec;
         });
         items.push_back(std::move(menu));
     }

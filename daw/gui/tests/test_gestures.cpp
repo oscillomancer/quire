@@ -998,6 +998,26 @@ TEST_CASE("arrange item menu inserts a stretch marker at the cursor and skips MI
     menu = f.root->find("item.menu");
     REQUIRE(menu);
     CHECK_FALSE(ui::menuItems(*menu)[14].enabled);
+    f.root->closePopups();
+    gestures.setSelection({audio});
+    for (const auto& [command, field, value] : {std::tuple{"item.set", "loop", true},
+                                                {"item.set", "locked", true},
+                                                {"take.set", "preserve_pitch", false}}) {
+        auto args = json::Value::object();
+        args[std::string(command) == "take.set" ? "take" : "item"] =
+            std::string(command) == "take.set" ? take.str() : audio.str();
+        args[field] = value;
+        REQUIRE(f.dispatcher->execute({command, args, kUi}));
+        f.sync();
+        rightClick(f, onItem(f, audio, f.rectOf(audio).y + f.rectOf(audio).h / 2));
+        CHECK_FALSE(ui::menuItems(*f.root->find("item.menu"))[14].enabled);
+        f.root->closePopups();
+        REQUIRE(f.app->undo());
+        f.sync();
+    }
+    f.view->setPlayhead(span.endSec + 1);
+    rightClick(f, onItem(f, audio, f.rectOf(audio).y + f.rectOf(audio).h / 2));
+    CHECK_FALSE(ui::menuItems(*f.root->find("item.menu"))[14].enabled);
 }
 
 TEST_CASE("takes: show all takes spreads them out; a lane is heard, deleted from its menu") {

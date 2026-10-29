@@ -1354,7 +1354,9 @@ The item menu offers Detect hits, Add stretch marker at cursor, Quantize audio,
 Slice at hits and Remove warping. Add stretch marker at cursor inserts an identity
 anchor into each selected audio item whose interior contains the edit cursor,
 using `take.stretch.add` without `source_pos`; existing anchors are not duplicated.
-MIDI items are skipped and the entry is disabled without selected audio. It is one
+MIDI items are skipped. The entry is disabled unless some selected audio item
+contains the cursor, is unlocked/unfrozen and nonlooped, and uses valid
+Signalsmith pitch-preserving warp settings. It is one
 undo step, independent of the menu pointer/grid, and preserves existing source
 timing. Warp peers receive one edit per bundle; locks, frozen items and unsupported
 loop/rate modes refuse the transaction as with other warp edits. Ordinary edit
