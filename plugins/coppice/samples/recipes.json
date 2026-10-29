@@ -1,0 +1,452 @@
+{
+ "schema": "supple.factory-samples/1.0",
+ "rate": 48000,
+ "sounds": [
+  {
+   "name": "keys",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "osc1.type": "fm",
+     "osc1.level": "-1 dB",
+     "osc1.fm": 2.5,
+     "osc1.retrigger": true,
+     "osc2.type": "fm",
+     "osc2.level": "-60 dB",
+     "osc2.retrigger": true,
+     "osc3.type": "fm",
+     "osc3.level": "-34 dB",
+     "osc3.ratio": 14.0,
+     "osc3.retrigger": true,
+     "filter1.type": "off",
+     "amp.attack": "1 ms",
+     "amp.decay": "4.5 s",
+     "amp.sustain": "0 %",
+     "amp.release": "450 ms",
+     "env2.attack": "0 ms",
+     "env2.decay": "1.6 s",
+     "env2.sustain": "15 %",
+     "env2.release": "400 ms",
+     "env2.fm": 100.0
+    }
+   },
+   "notation": "1: C4:w",
+   "tempo": 60,
+   "tail_s": 0.5,
+   "channels": 1,
+   "seconds": 4.0,
+   "fade_ms": 300,
+   "peak_db": -3
+  },
+  {
+   "name": "pad",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "voice.unison": 3,
+     "voice.unison_spread": "70 %",
+     "voice.drift": "25 %",
+     "osc1.fine": "-7 ct",
+     "osc2.type": "analog",
+     "osc2.fine": "+7 ct",
+     "filter1.cutoff": "1.2 kHz",
+     "filter1.resonance": "25 %",
+     "amp.attack": "600 ms",
+     "amp.decay": "1.2 s",
+     "amp.release": "1.5 s",
+     "env2.attack": "1.5 s",
+     "env2.decay": "3 s",
+     "env2.sustain": "30 %",
+     "env2.release": "2 s",
+     "lfo1.rate": "0.25 Hz",
+     "lfo1.mode": "free"
+    },
+    "routes": {
+     "lfo1>filter1.cutoff": {
+      "amount": "+0.6 oct"
+     }
+    }
+   },
+   "notation": "1: C3:w",
+   "tempo": 60,
+   "tail_s": 0.5,
+   "channels": 2,
+   "seconds": 4.0,
+   "fade_ms": 400,
+   "peak_db": -3
+  },
+  {
+   "name": "pluck",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "osc1.retrigger": true,
+     "osc2.type": "analog",
+     "osc2.fine": "+5 ct",
+     "osc2.level": "-6 dB",
+     "osc2.retrigger": true,
+     "filter1.cutoff": "500 Hz",
+     "filter1.resonance": "20 %",
+     "filter1.keytrack": "50 %",
+     "filter1.env": "+4 oct",
+     "amp.attack": "0 ms",
+     "amp.decay": "1.4 s",
+     "amp.sustain": "0 %",
+     "amp.release": "400 ms",
+     "env2.attack": "0 ms",
+     "env2.decay": "220 ms",
+     "env2.sustain": "0 %",
+     "env2.release": "200 ms"
+    }
+   },
+   "notation": "1: C4:h r:*",
+   "tempo": 60,
+   "tail_s": 0.5,
+   "channels": 1,
+   "seconds": 1.8,
+   "fade_ms": 200,
+   "peak_db": -3
+  },
+  {
+   "name": "bass",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "osc1.level": "1 dB",
+     "osc1.retrigger": true,
+     "osc2.level": "-60 dB",
+     "filter1.cutoff": "600 Hz",
+     "filter1.resonance": "30 %",
+     "filter1.keytrack": "50 %",
+     "filter1.env": "+3.5 oct",
+     "amp.decay": "450 ms",
+     "amp.sustain": "50 %",
+     "amp.release": "120 ms",
+     "env2.decay": "250 ms",
+     "env2.sustain": "0 %",
+     "env2.release": "200 ms"
+    }
+   },
+   "notation": "1: C2:h r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 2.2,
+   "fade_ms": 100,
+   "peak_db": -3
+  },
+  {
+   "name": "bell",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "osc1.type": "fm",
+     "osc1.level": "-7 dB",
+     "osc1.fm": 3.5,
+     "osc1.retrigger": true,
+     "osc2.type": "fm",
+     "osc2.level": "-60 dB",
+     "osc2.ratio": 3.5,
+     "osc2.retrigger": true,
+     "filter1.type": "off",
+     "amp.attack": "1 ms",
+     "amp.decay": "6 s",
+     "amp.sustain": "0 %",
+     "amp.release": "2.5 s",
+     "env2.attack": "0 ms",
+     "env2.decay": "2.5 s",
+     "env2.sustain": "0 %",
+     "env2.release": "2.5 s",
+     "env2.fm": 70.0
+    }
+   },
+   "notation": "1: C5:h r:*",
+   "tempo": 60,
+   "tail_s": 1.5,
+   "channels": 1,
+   "seconds": 3.0,
+   "fade_ms": 800,
+   "peak_db": -3
+  },
+  {
+   "name": "voice",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "voice.unison": 2,
+     "voice.unison_detune": "8 ct",
+     "voice.unison_spread": "30 %",
+     "osc1.level": "-2 dB",
+     "filter1.type": "formant",
+     "filter1.vowel": 0.0,
+     "filter1.keytrack": "30 %",
+     "amp.attack": "30 ms",
+     "amp.decay": "400 ms",
+     "amp.sustain": "85 %",
+     "amp.release": "200 ms",
+     "lfo1.rate": "5.5 Hz",
+     "lfo1.delay": "350 ms",
+     "lfo2.rate": "0.5 Hz",
+     "lfo2.mode": "free",
+     "lfo2.phase": "270 deg"
+    },
+    "routes": {
+     "lfo1>voice.tune": {
+      "amount": "+20 ct"
+     },
+     "lfo2>filter1.vowel": {
+      "amount": 2.0
+     }
+    }
+   },
+   "notation": "1: C4:w",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 4.0,
+   "fade_ms": 200,
+   "peak_db": -3
+  },
+  {
+   "name": "kick",
+   "internal": true,
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "osc1.wave": "sine",
+     "osc1.retrigger": true,
+     "filter1.type": "off",
+     "amp.attack": "0 ms",
+     "amp.decay": "380 ms",
+     "amp.sustain": "0 %",
+     "amp.release": "80 ms",
+     "env2.attack": "0 ms",
+     "env2.decay": "55 ms",
+     "env2.sustain": "0 %",
+     "env2.pitch": "+24 st"
+    }
+   },
+   "notation": "1: G1:q r:*",
+   "tempo": 60,
+   "tail_s": 0.2,
+   "channels": 1,
+   "seconds": 0.6,
+   "fade_ms": 50,
+   "peak_db": -1
+  },
+  {
+   "name": "snare",
+   "internal": true,
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "osc1.type": "noise",
+     "osc1.level": "0 dB",
+     "osc2.type": "analog",
+     "osc2.level": "-3 dB",
+     "osc2.coarse": -5,
+     "osc2.wave": "triangle",
+     "osc2.to": "direct",
+     "osc2.retrigger": true,
+     "filter1.type": "svf",
+     "filter1.cutoff": "6 kHz",
+     "filter1.env": "+0 oct",
+     "filter2.type": "svf",
+     "filter2.cutoff": "350 Hz",
+     "filter2.mode": "highpass",
+     "amp.attack": "0 ms",
+     "amp.decay": "190 ms",
+     "amp.sustain": "0 %",
+     "amp.release": "120 ms",
+     "env2.attack": "0 ms",
+     "env2.decay": "45 ms",
+     "env2.sustain": "0 %",
+     "env2.pitch": "+12 st"
+    }
+   },
+   "notation": "1: D3:q r:*",
+   "tempo": 60,
+   "tail_s": 0.2,
+   "channels": 1,
+   "seconds": 0.5,
+   "fade_ms": 50,
+   "peak_db": -1
+  },
+  {
+   "name": "hat",
+   "internal": true,
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "osc1.type": "noise",
+     "osc1.level": "0 dB",
+     "filter1.type": "svf",
+     "filter1.cutoff": "8 kHz",
+     "filter1.mode": "highpass",
+     "filter1.env": "+0 oct",
+     "amp.attack": "0 ms",
+     "amp.decay": "55 ms",
+     "amp.sustain": "0 %",
+     "amp.release": "40 ms"
+    }
+   },
+   "notation": "1: C4:s r:*",
+   "tempo": 60,
+   "tail_s": 0.1,
+   "channels": 1,
+   "seconds": 0.2,
+   "fade_ms": 20,
+   "peak_db": -1
+  },
+  {
+   "name": "break",
+   "tempo": 100,
+   "beats": 8,
+   "channels": 1,
+   "fade_ms": 20,
+   "peak_db": -3,
+   "hits": [
+    [
+     "kick",
+     0,
+     0
+    ],
+    [
+     "kick",
+     1.5,
+     -2
+    ],
+    [
+     "kick",
+     2.75,
+     -3
+    ],
+    [
+     "kick",
+     4,
+     0
+    ],
+    [
+     "kick",
+     6.5,
+     -2
+    ],
+    [
+     "snare",
+     1,
+     -2
+    ],
+    [
+     "snare",
+     3,
+     -2
+    ],
+    [
+     "snare",
+     3.75,
+     -10
+    ],
+    [
+     "snare",
+     5,
+     -2
+    ],
+    [
+     "snare",
+     6.75,
+     -9
+    ],
+    [
+     "snare",
+     7,
+     -2
+    ],
+    [
+     "hat",
+     0,
+     -8
+    ],
+    [
+     "hat",
+     0.5,
+     -12
+    ],
+    [
+     "hat",
+     1,
+     -8
+    ],
+    [
+     "hat",
+     1.5,
+     -12
+    ],
+    [
+     "hat",
+     2,
+     -8
+    ],
+    [
+     "hat",
+     2.5,
+     -12
+    ],
+    [
+     "hat",
+     3,
+     -8
+    ],
+    [
+     "hat",
+     3.5,
+     -12
+    ],
+    [
+     "hat",
+     4,
+     -8
+    ],
+    [
+     "hat",
+     4.5,
+     -12
+    ],
+    [
+     "hat",
+     5,
+     -8
+    ],
+    [
+     "hat",
+     5.5,
+     -12
+    ],
+    [
+     "hat",
+     6,
+     -8
+    ],
+    [
+     "hat",
+     6.25,
+     -14
+    ],
+    [
+     "hat",
+     6.5,
+     -12
+    ],
+    [
+     "hat",
+     7,
+     -8
+    ],
+    [
+     "hat",
+     7.5,
+     -12
+    ]
+   ]
+  }
+ ]
+}
