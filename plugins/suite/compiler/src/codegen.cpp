@@ -562,7 +562,10 @@ MIR_reg_t Codegen::aggregate(Expr* e) {
 // Writes a value of type t, described by `init`, at `address`: a copy of
 // another value, braces, or the type's starting state.
 void Codegen::initialize(MIR_reg_t address, const Type* t, Expr* init, int line) {
-    if (t->isScalar()) {
+    // Text (const char*) is a pointer value and is stored as a scalar is: a
+    // literal or format() has no memory of its own to copy from, and
+    // aggregate() would hand it straight back here.
+    if (t->isScalar() || t->kind == TypeKind::String) {
         store(t, Place{false, address, 0}, init ? value(init) : zero(kindOf(t)));
         return;
     }
