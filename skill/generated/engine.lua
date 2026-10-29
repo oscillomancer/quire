@@ -643,6 +643,14 @@ q = nil
 ---@field source string
 ---@field path string
 
+---@class Quire.item_consolidate_args
+---@field items string[]
+
+---@class Quire.item_consolidate_commit_args
+---@field items string[]
+---@field expected string
+---@field media table[]
+
 ---@class Quire.item_duplicate_args
 ---@field bypass_groups? boolean (default: false)
 ---@field item string
@@ -1551,6 +1559,7 @@ q = nil
 ---@class Quire.item
 ---@field add fun(args: Quire.item_add_args): Quire.item_add_result Add an item on a track: MIDI written in notation, or an audio file.
 ---@field ["apply-fx"] fun(args: Quire.item_apply_fx_args): Quire.item_apply_fx_result Render an item through its take and track FX into a new audio take.
+---@field consolidate fun(args: Quire.item_consolidate_args): table Consolidate selected audio and MIDI per track in a background job.
 ---@field duplicate fun(args: Quire.item_duplicate_args): Quire.item_duplicate_result Copy an item and its takes to a new beat position (default: immediately after).
 ---@field ["explode-takes"] fun(args: Quire.item_explode_takes_args): Quire.item_explode_takes_result Spread an item's takes onto new tracks, or one after another on its track.
 ---@field move fun(args: Quire.item_move_args): table Move an item in time (position in beats or bar) and/or to another track.
@@ -1558,6 +1567,9 @@ q = nil
 ---@field remove fun(args: Quire.item_remove_args): table Remove an item with its takes (unpooled sources go too).
 ---@field set fun(args: Quire.item_set_args): table Set an item's position, length, playback, fades, name, color, or lock.
 ---@field split fun(args: Quire.item_split_args): Quire.item_split_result Split an item at a beat, optionally at the prior audio zero crossing.
+
+---@class Quire.item.consolidate
+---@field commit fun(args: Quire.item_consolidate_commit_args): table Attach consolidated audio and merge MIDI as one replayable edit.
 
 ---@class Quire.job
 ---@field cancel fun(args: Quire.job_cancel_args): table Cancel a job.

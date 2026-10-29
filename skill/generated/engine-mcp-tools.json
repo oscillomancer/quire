@@ -4946,6 +4946,32 @@
     }
   },
   {
+    "name": "item_consolidate",
+    "title": "Consolidate selected audio and MIDI per track in a background job.",
+    "description": "Consolidate selected audio and MIDI per track in a background job. Partitions by track and active source kind. Audio bakes active takes, item controls, warp and take FX/automation to float WAV; track processing remains live. MIDI uses midi.merge; singleton MIDI stays unchanged. Select complete linked/warp bundles on matching lanes/groups. One undo step after successful job publication. No item-count cap; existing render/source sample budgets apply. job.get returns resulting items/files. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "item_consolidate_args",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{2}_[0-9]+$"
+          },
+          "minItems": 1
+        }
+      },
+      "required": ["items"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "item_duplicate",
     "title": "Copy an item and its takes to a new beat position (default: immediately after).",
     "description": "Copy an item and its takes to a new beat position (default: immediately after).  See describe for errors and examples.",

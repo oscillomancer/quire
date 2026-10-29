@@ -307,6 +307,14 @@ while any saved project or history still needs them.
 
 ## Timing audio with hits and stretch markers
 
+Agents can use `item.consolidate {items:[...]}` to combine material per track.
+Audio and MIDI remain separate. Audio uses active takes and bakes their item
+controls, timing, take FX and envelopes into a new WAV; track processing stays
+live. Gaps stay silent. MIDI keeps the existing merge behavior. Follow the
+returned job with `job.get`; all results publish together in one undo step.
+Select complete linked/warp bundles on matching lanes and groups. Undo retains
+the original takes; the new media stays available to history and project saves.
+
 Right-click an item and choose **Split item at cursor**, or press S, to split
 selected audio and MIDI items at the edit cursor. Items outside the cursor stay
 whole; the menu's pointer position does not set the split point. Undo restores

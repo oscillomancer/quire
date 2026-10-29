@@ -6398,6 +6398,78 @@ Result:
 
 ```
 
+## `item.consolidate@1`
+
+Consolidate selected audio and MIDI per track in a background job.
+
+Partitions by track and active source kind. Audio bakes active takes, item controls, warp and take FX/automation to float WAV; track processing remains live. MIDI uses midi.merge; singleton MIDI stays unchanged. Select complete linked/warp bundles on matching lanes/groups. One undo step after successful job publication. No item-count cap; existing render/source sample budgets apply. job.get returns resulting items/files.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `items` | array |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Errors
+
+- `item.consolidate_*`: invalid material, stale inputs or failed capture Hint: repair the selected sources/layout and retry consolidation
+- `item.selection`: selection omits linked peers Hint: select the full group or suspend its edit link
+- `warp.peers`: incomplete or invalid warp bundle Hint: select every bundle owner or detach it first
+
+### Examples
+
+**Consolidate the active audio take** (`song_with_audio`)
+
+```json
+{
+  "items": ["it_1"]
+}
+
+```
+
+Result:
+
+```json
+{
+  "job": "<any>"
+}
+
+```
+
+## `item.consolidate.commit@1`
+
+Attach consolidated audio and merge MIDI as one replayable edit.
+
+
+
+Kind: `edit`. Exposure: `internal`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `items` | array |  |  |  |  |
+| `expected` | string |  |  |  |  |
+| `media` | array |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
 ## `item.duplicate@1`
 
 Copy an item and its takes to a new beat position (default: immediately after).

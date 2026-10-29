@@ -2014,6 +2014,50 @@ right take. Clipboard copies remap a complete warp bundle to fresh take IDs;
 partial copies are independent. Edits that break a remaining bundle's alignment
 fail at transaction commit, allowing a batch to move all members together.
 
+### Consolidating items
+
+`item.consolidate {items:[it...]}` is a background action returning `{job}`.
+`job.get` becomes done only after one atomic edit publishes all results; its
+result contains `items` and audio `files`. Partition the explicit selection by
+track and active source kind: one audio and one MIDI result at most per track.
+Each spans its group's first start to last end. Audio uses only active takes;
+inactive alternatives remain available through undo. MIDI groups reuse
+`midi.merge`; a singleton MIDI partition stays unchanged. A selection with
+only singleton MIDI groups has nothing to consolidate.
+
+Audio capture bakes item mute/gain/fades, take gain/pan/polarity/channel mode,
+take envelopes, source looping/rate/pitch/warp and take FX with their automation.
+Track/input FX, strip controls, routing, VCA and master-rate conversion stay live.
+The existing renderer captures PreFader from a derivative snapshot with the target
+track's processing/input routes neutralized; PreFx is before item sources and
+is not a suitable capture tap. Take output is cropped to its item bounds as in
+playback, leaving silence in gaps and layering overlaps. No extra tails are added.
+The result is project-rate stereo float WAV, placed with project sample-boundary
+rounding, in the project's media folder. Keep the earliest item ID, placement,
+lane/timebase/group and presentation, replacing its takes with one neutral take:
+zero source offset/pitch/gain/pan, unity rate, normal channels, no envelopes/FX,
+looping, mute or fades. Track processing then applies once.
+
+`model::consolidationGroups` is the shared read-only command/menu planner.
+Different lanes or item-group tokens within a partition refuse with
+`item.consolidate_layout`. `completeItemSelection` reuses audio-warp validation
+and requires all affected warp owners and linked edit peers, respecting locks,
+freeze and group suspension; incomplete selections report a repair hint.
+There is no additional item-count cap: existing source and render sample budgets
+apply to each capture. `itemEditFingerprint` guards selected material and owned
+automation/timing without including unrelated mixer controls; IDs normalize for
+branch replay. Input hashes are checked on the worker and source file stamps
+again before publication. Project/branch/destination changes or changed selected
+material refuse the completion with `item.consolidate_stale`.
+
+Owned pending WAVs live under `.consolidate-pending`, excluded from Save As copies.
+Cancellation or failure publishes no model change and removes owned artifacts.
+One internal `item.consolidate.commit` edit verifies saved media, attaches all
+audio results and merges MIDI atomically. Replay reuses those files rather than
+rerendering FX. Published files remain available to history, undo and project
+copies. Errors carry paths and repair hints; source/render problems must be fixed
+before retrying. No sample processing or I/O is added to audio executors.
+
 ### Splitting at a prior zero crossing
 
 `item.split {item, at, snap?: none|zero_crossing, bypass_groups?: false}` keeps
