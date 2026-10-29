@@ -444,6 +444,14 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
             tracks.put(entry.id, entry.rev, std::move(soloed));
         }
         selectedSession.tracks = tracks.build();
+        model::IdMap<model::TrackGroup>::Builder groups(s.groups);
+        for (const auto& entry : s.groups) {
+            if (!entry.value->vca || !entry.value->vca->solo) continue;
+            auto control = std::make_shared<model::TrackGroup>(*entry.value);
+            control->vca->solo = false;
+            groups.put(entry.id, entry.rev, std::move(control));
+        }
+        selectedSession.groups = groups.build();
     }
     auto compiled = detail::compile(selectedSession, pool, opt.startSeconds, opt.blockSize);
     if (!compiled) return std::move(compiled).error();

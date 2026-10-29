@@ -63,6 +63,7 @@ class Mixer {
     // shared with the TCP).
     std::function<std::string(const model::Id& track)> inputText;
     std::function<void(const model::Id& track, const ui::Rect& anchor)> pickInput;
+    std::function<void(const model::Id&, const ui::Rect&)> envelopes;
 
     // Tests.
     struct Strip {
@@ -126,7 +127,7 @@ class Mixer {
     const Strip* stripAt(ui::Point p) const;
     std::string structure() const;
     Result<json::Value> set(const std::string& track, const char* field, json::Value value,
-                            const std::string& gesture = {});
+                            const std::string& gesture = {}, bool bypassGroups = false);
     ui::Root& root_;
     AppActions& actions_;
     cmd::Dispatcher& dispatcher_;
@@ -139,7 +140,7 @@ class Mixer {
     ui::Node* panel_ = nullptr;
     ui::Node* row_ = nullptr;  // the strips' container
     ui::Toggle* console9_ = nullptr;
-    std::vector<Strip> strips_;
+    std::vector<Strip> strips_, vcaStrips_;
     float height_ = defaultHeight(), shown_ = 0;  // asked for; on screen
     std::shared_ptr<DragView> drag_ = std::make_shared<DragView>();
     ui::Root::OverlayHandle ghost_;

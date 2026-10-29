@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "selection_edit.h"
+#include "supple/model/groups.h"
 
 #include <algorithm>
 #include <iterator>
+#include <set>
 #include <vector>
 
 namespace supple::gui {
@@ -24,55 +26,91 @@ const model::Track* trackOf(const model::Session& s, const std::string& text) {
 Result<json::Value> SelectionEdit::set(json::Value args, const std::string& gesture) {
     cmd::Origin origin{cmd::Origin::Type::Ui, "gui", {}};
     origin.gesture = gesture;
-    const json::Value* named = args.find("track");
+    if (const auto* bypass = args.find("bypass_groups"); bypass && bypass->asBool())
+        return dispatcher_.execute({"track.set", std::move(args), origin});
+    const auto* named = args.find("track");
     const std::string track = named && named->isString() ? named->asString() : std::string();
-    const model::Session& s = app_.head();
-    std::vector<std::string> targets{track};
-    // Only a strip's mix and record controls spread; a name or colour does not.
+    const model::Session s = app_.head();
+    const auto* source = trackOf(s, track);
+    if (!source) return dispatcher_.execute({"track.set", std::move(args), origin});
+    std::vector<std::string> seeds{track};
     const bool shared = std::any_of(std::begin(kShared), std::end(kShared),
                                     [&](const char* k) { return args.find(k) != nullptr; });
     if (shared && ui_.selectedTracks.size() > 1 && trackSelected(ui_, track)) {
-        // Arm, monitoring and the input belong to channels: busses skip them.
-        const bool channelOnly = args.find("armed") || args.find("monitor") ||
-                                 args.find("record_input") || args.find("record_midi");
-        targets.clear();
-        for (const std::string& t : ui_.selectedTracks) {
-            const model::Track* tr = trackOf(s, t);
-            if (!tr) continue;
-            if (channelOnly && tr->type != model::StripType::Channel && t != track) continue;
-            targets.push_back(t);
+        seeds = ui_.selectedTracks;
+        std::erase_if(seeds, [&](const auto& id) { return !trackOf(s, id) || id == track; });
+        seeds.insert(seeds.begin(), track);  // the touched member drives its component
+    }
+    std::map<std::string, json::Value> edits;
+    std::map<std::string, std::string> relativeLevel, relativePan;
+    for (const auto& seed : seeds) edits[seed] = args;
+    for (const char* field : {"volume_db", "pan", "mute", "solo", "armed", "monitor"}) {
+        const auto* value = args.find(field);
+        if (!value) continue;
+        const std::string attribute = std::string_view(field) == "volume_db" ? "volume" : field;
+        std::set<std::string> covered;
+        for (const auto& seed : seeds) {
+            if (covered.contains(seed)) continue;
+            const auto id = model::Id::parse(seed);
+            if (!id) continue;
+            const auto targets = model::linkedTracks(s, *id, attribute);
+            for (auto target : targets) {
+                const auto text = target.str();
+                if (!edits.contains(text)) edits[text] = json::Value::object();
+                edits[text][field] = *value;
+                covered.insert(text);
+                if (targets.size() > 1) {
+                    if (attribute == "volume") relativeLevel[text] = seed;
+                    if (attribute == "pan") relativePan[text] = seed;
+                }
+            }
         }
     }
-    if (targets.size() <= 1) return dispatcher_.execute({"track.set", std::move(args), origin});
-    const bool level = args.find("volume_db") != nullptr, pan = args.find("pan") != nullptr;
+    const bool level = args.find("volume_db"), pan = args.find("pan");
     if (!gesture.empty() && (level || pan) && gesture != gesture_) {
-        gesture_ = gesture;  // the drag's first move: where every track starts
+        gesture_ = gesture;
         start_.clear();
-        for (const std::string& t : targets)
-            if (const model::Track* tr = trackOf(s, t)) start_[t] = {tr->volumeDb, tr->pan};
+        for (const auto& [id, unused] : edits) {
+            (void)unused;
+            if (const auto* t = trackOf(s, id)) start_[id] = {t->volumeDb, t->pan};
+        }
     }
-    const bool relative = !gesture.empty() && gesture == gesture_ && start_.contains(track);
-    return dispatcher_.transact(
-        "Edit " + std::to_string(targets.size()) + " tracks", origin, [&]() -> Result<json::Value> {
-            Result<json::Value> last = json::Value::object();
-            for (const std::string& t : targets) {
-                json::Value each = args;
-                each["track"] = t;
-                if (relative && start_.contains(t)) {
-                    const auto [db0, pan0] = start_.at(t);
-                    const auto [refDb, refPan] = start_.at(track);
-                    if (level)
-                        each["volume_db"] = std::clamp(db0 + (args["volume_db"].asDouble() - refDb),
-                                                       kSilenceDb, kTopDb);
-                    if (pan)
-                        each["pan"] =
-                            std::clamp(pan0 + (args["pan"].asDouble() - refPan), -100.0, 100.0);
-                }
-                last = dispatcher_.execute({"track.set", std::move(each), origin});
-                if (!last) return last;
+    const bool drag = !gesture.empty() && gesture == gesture_ && start_.contains(track);
+    auto apply = [&]() -> Result<json::Value> {
+        Result<json::Value> last = json::Value::object();
+        for (auto& [id, each] : edits) {
+            const auto* t = trackOf(s, id);
+            if (!t) continue;
+            each["track"] = id;
+            each["bypass_groups"] = true;
+            if (t->type != model::StripType::Channel && id != track)
+                for (const char* field : {"armed", "monitor", "record_input", "record_midi"})
+                    each.asObject().erase(field);
+            const auto start =
+                drag && start_.contains(id) ? start_.at(id) : std::pair{t->volumeDb, t->pan};
+            if (each.find("volume_db") && (drag || relativeLevel.contains(id))) {
+                const auto& driver = drag ? track : relativeLevel.at(id);
+                const double ref = drag ? start_.at(track).first : trackOf(s, driver)->volumeDb;
+                const double desired = args["volume_db"].asDouble();
+                each["volume_db"] =
+                    desired <= kSilenceDb ? kSilenceDb
+                    : (ref <= kSilenceDb || start.first <= kSilenceDb)
+                        ? (id == driver ? desired : start.first)
+                        : std::clamp(start.first + desired - ref, kSilenceDb, kTopDb);
             }
-            return last;
-        });
+            if (each.find("pan") && (drag || relativePan.contains(id))) {
+                const double ref =
+                    drag ? start_.at(track).second : trackOf(s, relativePan.at(id))->pan;
+                each["pan"] =
+                    std::clamp(start.second + args["pan"].asDouble() - ref, -100.0, 100.0);
+            }
+            last = dispatcher_.execute({"track.set", each, origin});
+            if (!last) return last;
+        }
+        return last;
+    };
+    if (edits.size() <= 1) return apply();
+    return dispatcher_.transact("Edit " + std::to_string(edits.size()) + " tracks", origin, apply);
 }
 
 }  // namespace supple::gui

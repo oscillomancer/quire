@@ -137,7 +137,8 @@ bool TrackLayout::show(const model::Session& session, const std::vector<model::C
     if (replaced) changes = nullptr;
     generation_ = generation;
     bool geometry = replaced || indexed_ == ~std::uint64_t{0} ||
-                    session.project->masters != session_.project->masters;
+                    session.project->masters != session_.project->masters ||
+                    !session.groups.sameStorage(session_.groups);
     for (auto id : changedObjects(session_.tracks, session.tracks, changes)) {
         const auto* before = session_.tracks.find(id);
         const auto* after = session.tracks.find(id);
@@ -153,6 +154,7 @@ bool TrackLayout::show(const model::Session& session, const std::vector<model::C
         auto lane = [](const model::Envelope* env) {
             return env && env->visible &&
                    (env->target.object.kind == model::Kind::Track ||
+                    env->target.object.kind == model::Kind::Group ||
                     env->target.object.kind == model::Kind::Fx);
         };
         geometry |= (lane(after) && scaleOf(*after).has_value()) != scaledEnvs_.contains(id);
@@ -196,6 +198,7 @@ bool TrackLayout::show(const model::Session& session, const std::vector<model::C
     for (const auto& envelope : session_.envelopes) {
         if (!envelope.value->visible || !scaleOf(*envelope.value)) continue;
         if (envelope.value->target.object.kind == model::Kind::Track ||
+            envelope.value->target.object.kind == model::Kind::Group ||
             envelope.value->target.object.kind == model::Kind::Fx)
             scaledEnvs_.insert(envelope.id);
         auto owner = envelope.value->target.object;
@@ -204,7 +207,7 @@ bool TrackLayout::show(const model::Session& session, const std::vector<model::C
             if (found == fxOwners.end()) continue;
             owner = found->second;
         }
-        if (owner.kind == model::Kind::Track)
+        if (owner.kind == model::Kind::Track || owner.kind == model::Kind::Group)
             lanes[owner].emplace_back(envOrder(*envelope.value), envelope.id);
     }
     for (auto& [track, entries] : lanes) std::sort(entries.begin(), entries.end());
@@ -227,6 +230,12 @@ bool TrackLayout::show(const model::Session& session, const std::vector<model::C
         if (t->folderCompact == 2) return;  // a collapsed folder hides its children
         for (model::Id c : displayChildren(session_, *t)) visit(c, row ? depth + 1 : depth);
     };
+    for (const auto& g : session_.groups)
+        if (g.value->vca)
+            for (const auto& lane : lanes[g.id]) {
+                envRows_[lane.second] = rows_.size();
+                rows_.push_back({g.id, model::StripType::Buss, 0, lane.second});
+            }
     for (model::Id master : session_.project->masters) visit(master, 0);
     // Drop overrides for tracks that are gone (they would never be read again).
     for (auto it = heights_.begin(); it != heights_.end();)

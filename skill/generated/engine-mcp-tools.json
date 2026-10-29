@@ -2803,7 +2803,7 @@
   {
     "name": "env_add",
     "title": "Automate a parameter: a track's or route's mixer control, or a plugin's.",
-    "description": "Automate a parameter: a track's or route's mixer control, or a plugin's. Target one of track (param volume|pan|mute; playrate only on tr_0), route (volume|pan|mute) or fx (a semantic key such as \"gain\" or \"filter1.cutoff\", or for other plugins a CLAP id or parameter name). points: [{beat|bar|seconds, value, shape?, tension?}]; values in the parameter's unit (dB, %, Hz… — text like \"800 Hz\" works for plugins); shapes linear, square, slow, fast_start, fast_end, bezier. Plugin values move along the parameter's curve (a log cutoff sweeps evenly in pitch). take (param volume|pan|mute): a take envelope, its points in beats from the item's start (it moves with the item); it shapes the take after its take FX (a MIDI take needs an instrument in its take FX). Master playrate points are finite numeric ratios 0.25..4.0; an active nonempty master curve replaces the saved scalar during playback and rendering. Audio sources convert before take FX/live mixing; MIDI and automation follow the same timeline clock. See describe for errors and examples.",
+    "description": "Automate a parameter: a track's or route's mixer control, or a plugin's. Target one of track (param volume|pan|mute; playrate only on tr_0), route (volume|pan|mute), group (VCA volume|mute), or fx (a semantic key such as \"gain\" or \"filter1.cutoff\", or for other plugins a CLAP id or parameter name). points: [{beat|bar|seconds, value, shape?, tension?}]; values in the parameter's unit (dB, %, Hz… — text like \"800 Hz\" works for plugins); shapes linear, square, slow, fast_start, fast_end, bezier. Plugin values move along the parameter's curve (a log cutoff sweeps evenly in pitch). take (param volume|pan|mute): a take envelope, its points in beats from the item's start (it moves with the item); it shapes the take after its take FX (a MIDI take needs an instrument in its take FX). Master playrate points are finite numeric ratios 0.25..4.0; an active nonempty master curve replaces the saved scalar during playback and rendering. Audio sources convert before take FX/live mixing; MIDI and automation follow the same timeline clock. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "env_add_args",
@@ -2817,6 +2817,11 @@
           "type": "string",
           "pattern": "^tk_[0-9]+$",
           "description": "Take id, e.g. \"tk_1\"."
+        },
+        "group": {
+          "type": "string",
+          "pattern": "^gr_[0-9]+$",
+          "description": "VCA group id, e.g. \"gr_1\"."
         },
         "fx": {
           "type": "string",
@@ -4232,6 +4237,433 @@
     }
   },
   {
+    "name": "group_add",
+    "title": "Create a named track group with optional links and members.",
+    "description": "Create a named track group with optional links and members.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "group_add_args",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "color": {
+          "type": "string"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{2}_[0-9]+$"
+          }
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(volume|pan|mute|solo|armed|monitor|selection|edit)$"
+          }
+        }
+      },
+      "required": ["name"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "group_ref",
+      "properties": {
+        "group": {
+          "type": "string",
+          "pattern": "^gr_[0-9]+$"
+        }
+      },
+      "required": ["group"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "group_describe",
+    "title": "Describe a track group's membership, links and VCA ancestry.",
+    "description": "Describe a track group's membership, links and VCA ancestry.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "group_ref",
+      "properties": {
+        "group": {
+          "type": "string",
+          "pattern": "^gr_[0-9]+$"
+        }
+      },
+      "required": ["group"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "group_entry",
+      "properties": {
+        "group": {
+          "type": "string",
+          "pattern": "^gr_[0-9]+$"
+        },
+        "state": {
+          "type": "object",
+          "title": "track_group",
+          "properties": {
+            "name": {
+              "type": "string",
+              "default": ""
+            },
+            "color": {
+              "type": "string",
+              "default": ""
+            },
+            "active": {
+              "type": "boolean",
+              "default": true
+            },
+            "members": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z]{2}_[0-9]+$"
+              },
+              "default": []
+            },
+            "links": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^(volume|pan|mute|solo|armed|monitor|selection|edit)$"
+              },
+              "default": ["volume", "mute", "solo"]
+            },
+            "vca": {
+              "type": "object",
+              "title": "vca",
+              "properties": {
+                "volume_db": {
+                  "type": "number",
+                  "minimum": -150.0,
+                  "maximum": 12.0,
+                  "default": 0.0
+                },
+                "mute": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "solo": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "followers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[a-z]{2}_[0-9]+$"
+                  },
+                  "default": []
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "controllers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{2}_[0-9]+$"
+          }
+        }
+      },
+      "required": ["group", "state", "controllers"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "group_list",
+    "title": "List track groups, linked attributes and optional VCA controls.",
+    "description": "List track groups, linked attributes and optional VCA controls.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "no_args",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "group_list",
+      "properties": {
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "title": "group_entry",
+            "properties": {
+              "group": {
+                "type": "string",
+                "pattern": "^gr_[0-9]+$"
+              },
+              "state": {
+                "type": "object",
+                "title": "track_group",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "default": ""
+                  },
+                  "color": {
+                    "type": "string",
+                    "default": ""
+                  },
+                  "active": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "members": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[a-z]{2}_[0-9]+$"
+                    },
+                    "default": []
+                  },
+                  "links": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^(volume|pan|mute|solo|armed|monitor|selection|edit)$"
+                    },
+                    "default": ["volume", "mute", "solo"]
+                  },
+                  "vca": {
+                    "type": "object",
+                    "title": "vca",
+                    "properties": {
+                      "volume_db": {
+                        "type": "number",
+                        "minimum": -150.0,
+                        "maximum": 12.0,
+                        "default": 0.0
+                      },
+                      "mute": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "solo": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "followers": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z]{2}_[0-9]+$"
+                        },
+                        "default": []
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              "controllers": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z]{2}_[0-9]+$"
+                }
+              }
+            },
+            "required": ["group", "state", "controllers"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["groups"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "group_members_set",
+    "title": "Replace a group's track membership; an empty array clears it.",
+    "description": "Replace a group's track membership; an empty array clears it.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "group_members_args",
+      "properties": {
+        "group": {
+          "type": "string",
+          "pattern": "^gr_[0-9]+$"
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{2}_[0-9]+$"
+          }
+        }
+      },
+      "required": ["group", "members"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
+    "name": "group_remove",
+    "title": "Remove a track group and its VCA, keeping its tracks.",
+    "description": "Remove a track group and its VCA, keeping its tracks.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "group_ref",
+      "properties": {
+        "group": {
+          "type": "string",
+          "pattern": "^gr_[0-9]+$"
+        }
+      },
+      "required": ["group"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "group_set",
+    "title": "Change a group's name, color, links or active state.",
+    "description": "Change a group's name, color, links or active state.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "group_set_args",
+      "properties": {
+        "group": {
+          "type": "string",
+          "pattern": "^gr_[0-9]+$"
+        },
+        "name": {
+          "type": "string"
+        },
+        "color": {
+          "type": "string"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(volume|pan|mute|solo|armed|monitor|selection|edit)$"
+          }
+        }
+      },
+      "required": ["group"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
+    "name": "group_targets",
+    "title": "Resolve linked tracks or matching items for an edit or selection.",
+    "description": "Resolve linked tracks or matching items for an edit or selection.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "group_targets_args",
+      "properties": {
+        "track": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$"
+        },
+        "item": {
+          "type": "string",
+          "pattern": "^it_[0-9]+$"
+        },
+        "attribute": {
+          "type": "string",
+          "pattern": "^(volume|pan|mute|solo|armed|monitor|selection|edit)$"
+        }
+      },
+      "required": ["attribute"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "group_targets",
+      "properties": {
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{2}_[0-9]+$"
+          }
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{2}_[0-9]+$"
+          }
+        }
+      },
+      "required": ["tracks", "items"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "history_list",
     "title": "List the current branch's recent versions (newest first).",
     "description": "List the current branch's recent versions (newest first).  See describe for errors and examples.",
@@ -4489,6 +4921,10 @@
       "type": "object",
       "title": "item_duplicate_args",
       "properties": {
+        "bypass_groups": {
+          "type": "boolean",
+          "default": false
+        },
         "item": {
           "type": "string",
           "pattern": "^it_[0-9]+$"
@@ -4503,10 +4939,17 @@
     },
     "outputSchema": {
       "type": "object",
-      "title": "created_id",
+      "title": "item_duplicate_result",
       "properties": {
         "id": {
           "type": "string"
+        },
+        "linked": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
         }
       },
       "required": ["id"],
@@ -4573,6 +5016,10 @@
       "type": "object",
       "title": "item_move_args",
       "properties": {
+        "bypass_groups": {
+          "type": "boolean",
+          "default": false
+        },
         "item": {
           "type": "string",
           "pattern": "^it_[0-9]+$",
@@ -4675,6 +5122,10 @@
       "type": "object",
       "title": "item_ref",
       "properties": {
+        "bypass_groups": {
+          "type": "boolean",
+          "default": false
+        },
         "item": {
           "type": "string",
           "pattern": "^it_[0-9]+$",
@@ -4704,6 +5155,10 @@
       "type": "object",
       "title": "item_set_args",
       "properties": {
+        "bypass_groups": {
+          "type": "boolean",
+          "default": false
+        },
         "item": {
           "type": "string",
           "pattern": "^it_[0-9]+$"
@@ -4797,6 +5252,10 @@
       "type": "object",
       "title": "item_split_args",
       "properties": {
+        "bypass_groups": {
+          "type": "boolean",
+          "default": false
+        },
         "item": {
           "type": "string",
           "pattern": "^it_[0-9]+$"
@@ -4818,6 +5277,20 @@
         },
         "right": {
           "type": "string"
+        },
+        "linked_left": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "linked_right": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
         }
       },
       "required": ["left", "right"],
@@ -8019,6 +8492,94 @@
     }
   },
   {
+    "name": "track_describe",
+    "title": "Describe track groups and requested/applied effective gain at a time.",
+    "description": "Describe track groups and requested/applied effective gain at a time.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "track_describe_args",
+      "properties": {
+        "track": {
+          "type": "string",
+          "pattern": "^tr_[0-9]+$"
+        },
+        "at": {
+          "type": "number",
+          "minimum": 0.0
+        }
+      },
+      "required": ["track"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "track_description",
+      "properties": {
+        "track": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["channel", "buss", "master"]
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{2}_[0-9]+$"
+          }
+        },
+        "vcas": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{2}_[0-9]+$"
+          }
+        },
+        "volume_db": {
+          "type": "number"
+        },
+        "requested_effective_volume_db": {
+          "type": "number"
+        },
+        "effective_volume_db": {
+          "type": "number"
+        },
+        "at": {
+          "type": "number"
+        },
+        "effective_mute": {
+          "type": "boolean"
+        },
+        "solo_silenced": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "track",
+        "name",
+        "type",
+        "groups",
+        "vcas",
+        "volume_db",
+        "requested_effective_volume_db",
+        "effective_volume_db",
+        "at",
+        "effective_mute",
+        "solo_silenced"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "track_duplicate",
     "title": "Duplicate channels or busses with their FX, items, sends and automation.",
     "description": "Duplicate channels or busses with their FX, items, sends and automation. Each copy goes right after its original, under the same parent, with the same settings and name; its main and input chains (each plugin's settings as it sounds now, as fx.copy), items and takes (unpooled MIDI copied, audio media shared), sends and record input, and the envelopes on the track, its plugins, sends and takes. Not copied: a folder's children, sends into the track, and item groups. Masters cannot be duplicated. One undo step; the copies' ids in the order given. See describe for errors and examples.",
@@ -8064,8 +8625,13 @@
     "description": "List tracks in tree order with their level, mute/solo, fx and items.  See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
-      "title": "no_args",
-      "properties": {},
+      "title": "track_list_args",
+      "properties": {
+        "at": {
+          "type": "number",
+          "minimum": 0.0
+        }
+      },
       "additionalProperties": false
     },
     "outputSchema": {
@@ -8114,6 +8680,35 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "groups": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z]{2}_[0-9]+$"
+                }
+              },
+              "vcas": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z]{2}_[0-9]+$"
+                }
+              },
+              "requested_effective_volume_db": {
+                "type": "number"
+              },
+              "effective_volume_db": {
+                "type": "number"
+              },
+              "at": {
+                "type": "number"
+              },
+              "effective_mute": {
+                "type": "boolean"
+              },
+              "solo_silenced": {
+                "type": "boolean"
               }
             },
             "required": [
@@ -8126,7 +8721,14 @@
               "mute",
               "solo",
               "fx",
-              "items"
+              "items",
+              "groups",
+              "vcas",
+              "requested_effective_volume_db",
+              "effective_volume_db",
+              "at",
+              "effective_mute",
+              "solo_silenced"
             ],
             "additionalProperties": false
           }
@@ -8214,6 +8816,10 @@
       "type": "object",
       "title": "track_set_args",
       "properties": {
+        "bypass_groups": {
+          "type": "boolean",
+          "default": false
+        },
         "track": {
           "type": "string",
           "pattern": "^tr_[0-9]+$",
@@ -9705,6 +10311,190 @@
       "readOnlyHint": false,
       "destructiveHint": true,
       "idempotentHint": false
+    }
+  },
+  {
+    "name": "vca_add",
+    "title": "Add an audio-free VCA fader to a track group.",
+    "description": "Add an audio-free VCA fader to a track group. VCA gain adds to member automation before the fader, capped at the Console 9 native top. Group suspension only suspends linked editing. Use vca.members.set to nest VCAs. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "vca_args",
+      "properties": {
+        "group": {
+          "type": "string",
+          "pattern": "^gr_[0-9]+$"
+        },
+        "volume_db": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -150.0,
+              "maximum": 12.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:dB|db))?\\s*$"
+            }
+          ],
+          "x-unit": "dB",
+          "x-unit-strings": true,
+          "description": "Quantity strings are range-checked by the server. (dB; accepts quantity strings)"
+        },
+        "mute": {
+          "type": "boolean"
+        },
+        "solo": {
+          "type": "boolean"
+        },
+        "followers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{2}_[0-9]+$"
+          }
+        }
+      },
+      "required": ["group"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "vca_members_set",
+    "title": "Replace the tracks or nested VCAs controlled by a VCA.",
+    "description": "Replace the tracks or nested VCAs controlled by a VCA.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "vca_members_args",
+      "properties": {
+        "group": {
+          "type": "string",
+          "pattern": "^gr_[0-9]+$"
+        },
+        "tracks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{2}_[0-9]+$"
+          }
+        },
+        "vcas": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{2}_[0-9]+$"
+          }
+        }
+      },
+      "required": ["group"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
+    }
+  },
+  {
+    "name": "vca_remove",
+    "title": "Remove a VCA and its automation, keeping the track group.",
+    "description": "Remove a VCA and its automation, keeping the track group.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "group_ref",
+      "properties": {
+        "group": {
+          "type": "string",
+          "pattern": "^gr_[0-9]+$"
+        }
+      },
+      "required": ["group"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "vca_set",
+    "title": "Set a VCA's level, mute or solo without moving member faders.",
+    "description": "Set a VCA's level, mute or solo without moving member faders. VCA gain adds to member automation before the fader, capped at the Console 9 native top. Group suspension only suspends linked editing. Use vca.members.set to nest VCAs. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "vca_args",
+      "properties": {
+        "group": {
+          "type": "string",
+          "pattern": "^gr_[0-9]+$"
+        },
+        "volume_db": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": -150.0,
+              "maximum": 12.0
+            },
+            {
+              "type": "string",
+              "pattern": "^\\s*[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?:\\s*(?:dB|db))?\\s*$"
+            }
+          ],
+          "x-unit": "dB",
+          "x-unit-strings": true,
+          "description": "Quantity strings are range-checked by the server. (dB; accepts quantity strings)"
+        },
+        "mute": {
+          "type": "boolean"
+        },
+        "solo": {
+          "type": "boolean"
+        },
+        "followers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{2}_[0-9]+$"
+          }
+        }
+      },
+      "required": ["group"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "type": "object",
+      "title": "empty",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
     }
   }
 ]

@@ -496,7 +496,7 @@ TEST_CASE("project 1.x migration: folders and receives become busses with child 
 
 TEST_CASE("project newer minor ignores unknown fields with load warnings") {
     auto doc = projectToJson(Session::create());
-    doc["schema"] = "supple.project/2.2";
+    doc["schema"] = "supple.project/2.3";
     doc["tracks"]["tr_0"]["future"] = true;
     std::vector<schema::Warning> warnings;
     auto parsed = projectFromJson(doc, &warnings);
@@ -697,17 +697,19 @@ TEST_CASE(
     REQUIRE(parsed);
     CHECK(serializeProject(*parsed) == bytes);
     doc["ui"] = json::Value::array();
+    doc["schema"] = "supple.project/2.1";
     doc["groups"] = json::parse(R"({"gr_1":{"future":true}})").value();
     std::vector<schema::Warning> warnings;
     auto withWarnings = projectFromJson(doc, &warnings);
     REQUIRE(withWarnings);
     REQUIRE(warnings.size() == 2);
-    CHECK(warnings[0].path == "/ui");
-    CHECK(warnings[0].message.find(".ui.json") != std::string::npos);
-    CHECK(warnings[1].path == "/groups");
+    CHECK(warnings[1].path == "/ui");
+    CHECK(warnings[1].message.find(".ui.json") != std::string::npos);
+    CHECK(warnings[0].path == "/groups");
     auto saved = projectToJson(*withWarnings);
     CHECK_FALSE(saved.find("ui"));
-    CHECK(saved["groups"] == doc["groups"]);
+    CHECK(saved["extensions"]["legacy_track_groups"] == doc["groups"]);
+    saved["extensions"].asObject().erase("legacy_track_groups");
     CHECK(saved["extensions"] == doc["extensions"]);
 }
 

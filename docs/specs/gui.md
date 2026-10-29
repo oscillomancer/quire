@@ -1284,3 +1284,34 @@ which made the app exit at once; desktop and Start-menu launchers start in the
 home or installation folder, which collected a stray `renders/`.
 Linux/Windows windows use the embedded 256px application icon; Windows also
 embeds the multi-size ICO resource for Explorer and Start-menu shortcuts.
+
+### Track groups and VCA controls (ADR-0052)
+
+The track context menu's **Groups…** submenu creates a named group from the
+selected tracks and opens existing groups. A group menu edits its name, color,
+linked attributes, membership and active state, and adds/removes its VCA.
+Defaults link volume, mute and solo. Headers show small colored membership tabs;
+the mixer adds named tabs that open the group menu. Suspended groups are dimmed
+in headers and marked with a dot in the mixer.
+
+Linked volume and pan gestures preserve relative offsets, including peers
+outside the selection. A selected peer is changed once per gesture even when
+several selected tracks share a group. A value reset applies the requested
+value to the first selected member of each independent group (the touched
+member first in its group), preserving that group's other offsets. Alt/Option held at the start of a fader
+or pan gesture changes only that member. Group suspension disables links,
+including selection and matched-span item edits, but leaves VCA sound active.
+
+A group's optional VCA appears after audio strips and before pinned masters in
+the existing mixer. It has a name/color, member count/menu, envelope button,
+fader, mute and solo; it has no audio meter, pan, inserts, inputs or routing.
+Members' fader handles continue to show their own levels. VCA volume/mute
+lanes use the normal arrange automation editor and appear before the audio
+track lanes. Nested VCA membership is available through typed commands.
+
+Selection links select track peers together. Edit links select items on other
+member tracks with matching project-sample start/end and the same lane token.
+Move, trim, fade, mute, split, duplicate and remove reuse the typed linked
+commands; batches with explicit peer operations bypass implicit propagation
+so each target changes once. Take/MIDI-content edits stay local. Cross-track
+moves require explicit destinations for every selected peer or command bypass.

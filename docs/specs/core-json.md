@@ -223,6 +223,11 @@ the null state).
 
 ## Part B — core-schema
 
+Array decoding replaces the destination vector, including any nonempty C++
+member default. An omitted field decodes its schema default once; a supplied
+array (including `[]`) replaces that default.
+
+
 Header layout: `supple/schema/schema.h` (builders), `export.h`
 (JSON Schema), `errors.h` (error codes, closest-match helper).
 

@@ -31,7 +31,7 @@ Session
 ├── sources        md_* audio media, mi_* MIDI sources (pooled or unique)
 ├── routes         sd_*  edges: track→track, track→hw out, hw in→track
 ├── envelopes      en_*  automation (targets any param), automation items ai_*
-├── groups         gr_*  (not yet implemented; preserved as an unknown section)
+├── groups         gr_*  track edit groups and optional VCA controls (ADR-0052)
 └── blobs          content-addressed opaque data (plugin states, large arrays)
 ```
 
@@ -65,7 +65,7 @@ ids, tr_0 first). *(`pan_law` was removed with ADR-0019.)*
 Master playrate (ADR-0045) is `playrate: {rate, preserve_pitch}`: a finite
 ratio 0.25..4.0 (default 1.0) and bool (default false). Missing settings in
 older projects decode to these defaults; the 1.x migration sets them explicitly.
-A schema 2.1 document persists settings and automation. Playback and mix/stem
+Schema 2.1 and later persist settings and automation. Playback and mix/stem
 renders apply the master rate before file sources reach take FX or live mixing;
 MIDI and automation follow the same fractional clock (engine.md, ADR-0045).
 
@@ -373,7 +373,7 @@ routes: sd_1 tr_2 → tr_6 ch 1/2→3/4 pre-fader −6 dB (sidechain)
 markers: mk_1 "Verse" bar 1 · regions: rg_1 "Chorus" bars 9–17
 ```
 
-## 5. Project file (`supple.project/2.1`)
+## 5. Project file (`supple.project/2.2`)
 
 ### 5.1 Shape
 
@@ -384,7 +384,7 @@ with warnings.)*
 
 Schema 2.1 adds master playrate and its envelope target (ADR-0045).
 
-The loader accepts 1.x and 2.x documents and saves 2.1. Migration allocates
+The loader accepts 1.x and 2.x documents and saves 2.2. Migration allocates
 child channel IDs in track-ID order, inserts each child first, and moves the
 source items and record/input FX there while keeping user inserts on the
 buss. Hardware/MIDI record routes follow the new child. Legacy numeric send
@@ -397,9 +397,9 @@ Masters are ordered by `project.masters`, independently of processing order;
 Canonical JSON (ADR-0009) with members in this order: `schema`, `project`,
 `tempo` (`points`, `meters`), `rulers` (`markers`, `regions`), `tracks`,
 `items`, `takes`, `fx`, `sources` (`media`, `midi`), `routes`, `envelopes`,
-`automation_items` (when present), `blobs`, then preserved unknown top-level
-sections and `extensions`. `groups` / `gr_*` are not yet implemented; a
-`groups` section is preserved with a warning. `ui` belongs to the sidecar. *(Amended 2026-09-26: `fx` — plugin instances are
+`automation_items` and `groups` (when present), `blobs`, then preserved unknown top-level
+sections and `extensions`. `groups` / `gr_*` are typed track groups since 2.2 (ADR-0052);
+older opaque groups are preserved in extensions with a warning. `ui` belongs to the sidecar. *(Amended 2026-09-26: `fx` — plugin instances are
 ID-keyed objects like the rest; chains reference them by id.)* Members equal
 to their defaults are omitted (the schema fills them in on load). Objects keyed by ID in ID order
 (numeric by kind). Compact array forms for bulk data:
@@ -422,8 +422,7 @@ are dropped with warnings listing their paths. Unknown top-level sections and
 an explicit top-level `extensions` object are preserved verbatim on save.
 A newer minor loads with a version warning; older majors migrate and newer
 majors refuse. A project `ui` member is ignored with a warning pointing to
-`<name>.ui.json`. `groups` is preserved with a warning that track groups are
-not implemented. The parser is
+`<name>.ui.json`. Legacy opaque `groups` is preserved in extensions with a migration warning. The parser is
 fuzzed (`project.fuzz`). Unknown plugin formats or missing plugins load as
 placeholder instances that keep their state untouched and pass audio
 through (the session survives; `project.load` reports them).
@@ -732,3 +731,82 @@ Automation retains its 100,000 expanded-point budget and validates finite scaled
 curves. In-memory command renders use the engine’s existing 2^28-frame capacity
 at the project and requested output rates, with block headroom; this is a work
 budget, not a new duration policy.
+
+## Track groups and VCA controls (schema 2.2, ADR-0052)
+
+`groups` is an ID-keyed map of `gr_*` objects: `{name, color, active, members,
+links, vca?}`. `members` is a unique set of track IDs; commands sort it
+numerically. Groups may overlap. Defaults: active, no members, links
+`volume`, `mute`, `solo`. Other links are `pan`, `armed`, `monitor`,
+`selection`, `edit`. The group's color uses the track palette or `#rrggbb`.
+Names and colors never propagate. `Item.group` remains an independent opaque
+item-group token, not a reference to this collection.
+
+For each linked attribute a manual command expands the active connected
+component, takes a snapshot, and updates each eligible member once. Volume
+uses a relative dB delta, pan a percentage-point delta; results clamp to
+existing field bounds. Discrete controls copy the requested value. Armed and
+monitor affect channels only; record input/mode, polarity and mono are local.
+Finite relative moves leave silent followers silent. Setting the source to
+silence silences followers; raising a source from silence changes only that
+source (there is no finite relative delta). Prefer mute for reversible group
+silencing. `bypass_groups: true` on track.set or linked item commands edits
+only the named member. Each command is one undo step; a batch remains
+sequential, so agents should issue one linked edit rather than repeat it for
+every member. GUI selection edits expand once and dispatch bypassed targets.
+Automation playback never propagates edits; a deliberate linked control edit
+records each affected writing-mode envelope using the existing capture rules.
+
+Edit links match item start/end after timebase resolution and project-rate
+sample rounding, with the same lane token (main matches main; ordered lane
+objects are not yet implemented). No overlap/nearest/transient matching.
+Selection, item.move on the same track, item.set position/length/mute/fades,
+split, remove and duplicate link. Take contents, source offsets, MIDI edits,
+warp, gain, name, color, lock and timebase remain local. A matched locked item
+refuses an edit atomically; copies retain the existing permission to copy
+locked items. Cross-track moves with matching peers require bypass. Split and
+copy preserve whole takes, including fields not interpreted by grouping.
+Split results add `linked_left`/`linked_right`; duplicate adds `linked` when
+there are linked copies. Empty added result arrays are omitted.
+
+An optional `vca` is `{volume_db, mute, solo, followers}`: defaults 0 dB,
+false, false, empty. `followers` are group IDs with their own VCA, not tracks.
+The graph must be acyclic and a track may have at most 32 distinct controlling
+VCAs. Unique ancestors contribute once in numeric ID order. Direct membership
+plus ancestry determines control; audio routing is unchanged. Assigning a
+channel and its parent buss applies control at both faders. `active: false`
+suspends linked edits/selection only: VCA gain and mute still apply.
+
+Envelopes may target `{object: gr_id, param: volume|mute}` in the saved target
+shape; `env.add` accepts `{group, param}`. VCA automation uses ordinary curves,
+timebases, automation items and writing modes. Volume stays in -150..+12 dB,
+mute in 0..1; source and scaled automation-item values obey these bounds.
+VCA solo is a discrete edit, not an envelope target. Removing a VCA removes
+its envelopes/items and incoming follower references but preserves the group;
+removing a group removes its VCA, never tracks. Track removal prunes membership.
+Track duplication/single-track templates do not inherit groups; project
+templates retain them. Group objects participate in versions, diffs, history
+budgets and replay ID remapping.
+
+Commands: group.add `{name,color?,members?,links?,active?}` returns `{group}`;
+group.set `{group,name?,color?,active?,links?}`; group.members.set
+`{group,members}`; group.remove `{group}`; group.list; group.describe `{group}`;
+group.targets `{track?|item?,attribute}` resolves linked targets. vca.add and
+vca.set accept `{group,volume_db?,mute?,solo?,followers?}`;
+vca.members.set `{group,tracks?,vcas?}` replaces supplied sets (tracks writes
+the same group membership, vcas writes followers); vca.remove `{group}`.
+track.describe `{track,at?}` and track.list `{at?}` expose groups, VCAs,
+`requested_effective_volume_db`, `effective_volume_db`, effective mute and
+solo suppression at project seconds `at` (default transport time, or zero).
+These are model/curve target values, not instantaneous smoothing telemetry.
+
+The writer now emits `supple.project/2.2`. Typed groups follow automation_items
+and precede blobs. Earlier opaque groups are moved verbatim into
+`extensions.legacy_track_groups`, with an unused numeric suffix on collision,
+and `project.groups_legacy` warns. They never become active automatically.
+
+The model-thread helpers in `supple/model/groups.h` resolve sorted, unique
+`linkedTracks`, `linkedItems`, `trackGroups` and `vcaControllers` IDs.
+`validateGroups` checks links, graph bounds and group-envelope values;
+`effectiveTrackLevel` and `groupParameterAt` evaluate the project-time control
+values without querying an audio executor.

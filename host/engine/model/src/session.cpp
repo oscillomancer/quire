@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "supple/model/session.h"
+#include "supple/model/groups.h"
 #include "supple/model/numeric.h"
 
 #include <algorithm>
@@ -133,6 +134,7 @@ Session EditTxn::preview() const {
     apply<TempoPointObj>(s, builders_);
     apply<MeterObj>(s, builders_);
     apply<Track>(s, builders_);
+    apply<TrackGroup>(s, builders_);
     apply<Item>(s, builders_);
     apply<Take>(s, builders_);
     apply<MediaSource>(s, builders_);
@@ -173,6 +175,7 @@ Result<Session> EditTxn::commit() {
     apply<TempoPointObj>(s, builders_);
     apply<MeterObj>(s, builders_);
     apply<Track>(s, builders_);
+    apply<TrackGroup>(s, builders_);
     apply<Item>(s, builders_);
     apply<Take>(s, builders_);
     apply<MediaSource>(s, builders_);
@@ -238,6 +241,7 @@ struct Checker {
         check(s.tempo, Kind::TempoPoint);
         check(s.meters, Kind::Meter);
         check(s.tracks, Kind::Track);
+        check(s.groups, Kind::Group);
         check(s.items, Kind::Item);
         check(s.takes, Kind::Take);
         check(s.media, Kind::Media);
@@ -415,10 +419,12 @@ struct Checker {
         for (const auto& e : s.envelopes) {
             const Envelope& env = *e.value;
             const Id o = env.target.object;
-            const bool ok = (o.kind == Kind::Track && s.tracks.contains(o)) ||
-                            (o.kind == Kind::Route && s.routes.contains(o)) ||
-                            (o.kind == Kind::Fx && s.fx.contains(o)) ||
-                            (o.kind == Kind::Take && s.takes.contains(o));
+            const bool ok =
+                (o.kind == Kind::Track && s.tracks.contains(o)) ||
+                (o.kind == Kind::Group && s.groups.contains(o) && s.groups.find(o)->vca) ||
+                (o.kind == Kind::Route && s.routes.contains(o)) ||
+                (o.kind == Kind::Fx && s.fx.contains(o)) ||
+                (o.kind == Kind::Take && s.takes.contains(o));
             if (!ok) fail(at("envelopes", e.id, "target"), "target " + o.str() + " does not exist");
             for (std::size_t i = 1; i < env.points.size(); ++i)
                 if (env.points[i].pos < env.points[i - 1].pos) {
@@ -702,6 +708,7 @@ Status checkInvariants(const Session& s) {
         error.code = "model.invariant";
         return error;
     }
+    SUPPLE_TRY(validateGroups(s));
     c.counters();
     c.tracks();
     c.itemsAndTakes();
@@ -771,6 +778,7 @@ std::vector<ObjectDiff> diff(const Session& a, const Session& b) {
     diffMap(a.markers, b.markers, out);
     diffMap(a.regions, b.regions, out);
     diffMap(a.tracks, b.tracks, out);
+    diffMap(a.groups, b.groups, out);
     diffMap(a.items, b.items, out);
     diffMap(a.takes, b.takes, out);
     diffMap(a.fx, b.fx, out);

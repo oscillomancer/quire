@@ -1,3 +1,4 @@
+#include "supple/model/groups.h"
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "supple/views/tcp.h"
@@ -280,6 +281,7 @@ TcpPanel::Row::Row(TcpPanel& panel, std::size_t slot)
         if (!target || target != track_) return;
         json::Value args = trackArg(*target);
         args["volume_db"] = db;
+        args["bypass_groups"] = bool(fader_->gestureModifiers() & ui::kAlt);
         setTrack(std::move(args), g == ui::Gesture::Move
                                       ? gestureFor("tcp.volume", *target, panel_.gestureSerial_)
                                       : std::string{});
@@ -299,6 +301,7 @@ TcpPanel::Row::Row(TcpPanel& panel, std::size_t slot)
         if (!target || target != track_) return;
         json::Value args = trackArg(*target);
         args["pan"] = pan;
+        args["bypass_groups"] = bool(pan_->gestureModifiers() & ui::kAlt);
         setTrack(std::move(args), g == ui::Gesture::Move
                                       ? gestureFor("tcp.pan", *target, panel_.gestureSerial_)
                                       : std::string{});
@@ -500,6 +503,14 @@ void TcpPanel::Row::paint(ui::Canvas& c) {
     c.text(badge,
            std::string(1, static_cast<char>(std::toupper(model::stripTypeName(tr->type).front()))),
            ui::Font::UiBold, t.type("caption"), t.color("panel"), ui::kCenter | ui::kMiddle);
+    float tabX = badge.x;
+    for (auto id : model::trackGroups(panel_.session_, *track_)) {
+        const auto& group = *panel_.session_.groups.find(id);
+        const auto color = t.trackColor(group.color).value_or(t.color("focus"));
+        c.fillRect({tabX, badge.bottom() + 1, 5, 3}, color.withAlpha(group.active ? 1.f : .3f));
+        tabX += 7;
+        if (tabX > badge.x + 21) break;
+    }
     // The row being dragged to a new place.
     if (panel_.reorder_ && panel_.reorder_->moved && panel_.reorder_->track == track_)
         c.fillRect(r, t.color("focus").withAlpha(0.12f));
@@ -894,7 +905,8 @@ class TcpPanel::EnvRow : public ui::Node {
     void refresh(const model::Session& session) {
         const model::Envelope* e = env_ ? session.envelopes.find(*env_) : nullptr;
         if (!e) return;
-        title_->setText(envTitle(*e));
+        const auto* g = session.groups.find(e->target.object);
+        title_->setText(g ? g->name + " · " + envTitle(*e) : envTitle(*e));
         mode_->setText(modeName(e->mode));
         active_->setOn(e->active);
     }

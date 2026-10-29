@@ -246,3 +246,26 @@ The tool list is large (over 140 tools). If you run a local model behind a
 harness that sends every tool with each request, give the model a context of
 32k tokens or more. llama.cpp's `llama-server` needs `--jinja` to accept
 tools.
+
+### Track groups and VCA faders
+
+Select the tracks, right-click a track header or mixer strip, then choose
+**Groups… → Create group from selected tracks…**. Groups initially link volume, mute and solo. Open a
+group's menu to add/remove selected tracks, change its color or links, or
+suspend it. Volume changes preserve members' dB offsets; pan links preserve
+pan offsets. Hold Alt (Option on macOS) when starting a fader or pan gesture
+to adjust just that member.
+
+Enable **Edit** to select and edit matching items across the member tracks.
+Items must have the same start/end at project sample resolution and the same
+lane. Moves, trims, fades, mute, splits, duplicates and deletes stay together;
+notes and take contents remain independent. A locked matching item refuses
+the whole linked edit.
+
+Choose **Add VCA** in the group menu for a mixer fader that controls the
+members without moving their own faders. Its mute and solo affect the group;
+its **env** button opens normal volume/mute automation lanes. Suspending the
+group stops linked editing while its VCA remains audible. Combined member and
+VCA levels stop at Console 9's native fader top (about +12.0412 dB). Agents can
+inspect requested and applied levels with `track.describe` or `track.list`,
+and nest controls with `vca.members.set`.

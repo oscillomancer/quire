@@ -1562,6 +1562,8 @@ double staticValue(const model::Session& s, const model::EnvTarget& t) {
         return t.param == "volume" ? tr->volumeDb
                : t.param == "pan"  ? tr->pan
                                    : (tr->mute ? 1.0 : 0.0);
+    if (const auto* g = s.groups.find(t.object); g && g->vca)
+        return t.param == "volume" ? g->vca->volumeDb : (g->vca->mute ? 1.0 : 0.0);
     if (const model::Route* r = s.routes.find(t.object))
         return t.param == "volume" ? r->volumeDb
                : t.param == "pan"  ? r->pan.percent.value_or(0.0)
@@ -2791,6 +2793,11 @@ struct Gain : Effect {
     }
     run("track.add", R"({"name": "Bass"})");
     if (fixture == "song") return;
+    if (fixture == "song_with_group" || fixture == "song_with_vca") {
+        run("group.add", R"({"name":"Drums","members":["tr_1"]})");
+        if (fixture == "song_with_vca") run("vca.add", R"({"group":"gr_1"})");
+        return;
+    }
     if (fixture == "song_with_project_template") {
         run("project.template.save", R"({"name":"Band"})");
         return;

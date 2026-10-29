@@ -388,7 +388,7 @@ TEST_CASE("mixer: strips select like the TCP's rows, and the menu deletes the se
     ui::Node* menu = f.root->find("track.menu." + c);
     REQUIRE(menu);
     const auto before = f.steps();
-    const ui::Point del{menu->bounds().x + 40, menu->bounds().y + 6 * 26 + 13};
+    const ui::Point del{menu->bounds().x + 40, menu->bounds().y + 7 * 26 + 13};
     f.pointer(ui::PointerEvent::Type::Move, del);
     f.pointer(ui::PointerEvent::Type::Down, del);
     f.pointer(ui::PointerEvent::Type::Up, del);
@@ -670,7 +670,7 @@ TEST_CASE("mixer: the track menu duplicates the selected strips, and selects the
     f.pointer(ui::PointerEvent::Type::Up, at, 1, 0, 3);
     ui::Node* menu = f.node("track.menu." + c);
     const auto before = f.steps();
-    const ui::Point dup{menu->bounds().x + 40, menu->bounds().y + 5 * 26 + 13};
+    const ui::Point dup{menu->bounds().x + 40, menu->bounds().y + 6 * 26 + 13};
     f.pointer(ui::PointerEvent::Type::Move, dup);
     f.pointer(ui::PointerEvent::Type::Down, dup);
     f.pointer(ui::PointerEvent::Type::Up, dup);
@@ -1484,4 +1484,75 @@ TEST_CASE(
     CHECK_FALSE(prefs.setPreventDeepIdle(false));
     CHECK(prefs.preferences().preventDeepIdle);
     CHECK(f.app->cpuIdleLatencyStatus().requested);
+}
+
+TEST_CASE("mixer: group faders deduplicate selected peers, Alt overrides and VCA stays separate") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto a = f.addTrack("channel", "Kick"), b = f.addTrack("channel", "Snare");
+    f.exec("track.set", R"({"track":"tr_2","volume_db":-6})");
+    f.exec("group.add", R"({"name":"Drums","color":"teal","members":["tr_1","tr_2"]})");
+    f.exec("vca.add", R"({"group":"gr_1"})");
+    f.ui.selectedTracks = {a, b};
+    f.refresh();
+    REQUIRE(f.root->find("mixer.vca.gr_1"));
+    REQUIRE(f.root->find("mixer.group.tr_1.gr_1"));
+    auto rect = f.strip(a).fader->bounds();
+    ui::Point cap{rect.x + rect.w / 2,
+                  rect.bottom() - 8 -
+                      static_cast<float>(ui::faderPosition(f.track(a).volumeDb)) * (rect.h - 16)};
+    auto steps = f.steps();
+    f.drag(cap, {cap.x, cap.y - 18});
+    CHECK(f.track(b).volumeDb == doctest::Approx(-6 + f.track(a).volumeDb));
+    CHECK(f.steps() == steps + 1);
+    f.refresh();
+    const auto other = f.track(b).volumeDb;
+    rect = f.strip(a).fader->bounds();
+    cap = {rect.x + rect.w / 2,
+           rect.bottom() - 8 -
+               static_cast<float>(ui::faderPosition(f.track(a).volumeDb)) * (rect.h - 16)};
+    f.pointer(ui::PointerEvent::Type::Down, cap, 1, ui::kAlt);
+    f.pointer(ui::PointerEvent::Type::Move, {cap.x, cap.y + 12}, 1, ui::kAlt);
+    f.pointer(ui::PointerEvent::Type::Up, {cap.x, cap.y + 12}, 1, ui::kAlt);
+    CHECK(f.track(b).volumeDb == other);
+    f.refresh();
+    const auto member = f.track(a).volumeDb;
+    REQUIRE(f.root->click("mixer.vca.mute.gr_1"));
+    CHECK_FALSE(f.track(a).mute);
+    CHECK(f.track(a).volumeDb == member);
+    CHECK(f.app->head().groups.find({model::Kind::Group, 1})->vca->mute);
+    f.exec("group.set", R"({"group":"gr_1","links":["volume","selection"]})");
+    f.ui.selectedTracks.clear();
+    f.refresh();
+    const auto at = f.empty(a);
+    f.pointer(ui::PointerEvent::Type::Down, at);
+    f.pointer(ui::PointerEvent::Type::Up, at);
+    CHECK(f.ui.selectedTracks == std::vector<std::string>{a, b});
+    f.pointer(ui::PointerEvent::Type::Down, at, 1, ui::kCtrl);
+    f.pointer(ui::PointerEvent::Type::Up, at, 1, ui::kCtrl);
+    CHECK(f.ui.selectedTracks.empty());
+    CHECK(f.errors.empty());
+}
+
+TEST_CASE("mixer: a value reset preserves offsets in each selected group") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto a = f.addTrack("channel", "A"), b = f.addTrack("channel", "B"),
+               c = f.addTrack("channel", "C"), d = f.addTrack("channel", "D");
+    f.exec("track.set", R"({"track":"tr_1","volume_db":-6})");
+    f.exec("track.set", R"({"track":"tr_2","volume_db":-9})");
+    f.exec("track.set", R"({"track":"tr_3","volume_db":-12})");
+    f.exec("track.set", R"({"track":"tr_4","volume_db":-15})");
+    f.exec("group.add", R"({"name":"AB","members":["tr_1","tr_2"]})");
+    f.exec("group.add", R"({"name":"CD","members":["tr_3","tr_4"]})");
+    f.ui.selectedTracks = {c, a};
+    f.refresh();
+    const auto before = f.steps();
+    f.strip(a).fader->onChange(0, ui::Gesture::Set);
+    CHECK(f.track(a).volumeDb == 0);
+    CHECK(f.track(b).volumeDb == -3);
+    CHECK(f.track(c).volumeDb == 0);
+    CHECK(f.track(d).volumeDb == -3);
+    CHECK(f.steps() == before + 1);
+    CHECK(f.errors.empty());
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include <supple/base/paths.h>
+#include <supple/model/groups.h>
 // <slug>: the DAW with a window (docs/specs/gui.md). The UI thread is the
 // model thread: it pumps the command bus's loop (socket requests, the service
 // tick) between SDL events, and draws only when something changed.
@@ -447,6 +448,9 @@ int main(int argc, char** argv) {
     mixer.pickInput = [&shell](const model::Id& track, const ui::Rect& anchor) {
         shell.openInputMenu(track, anchor);
     };
+    mixer.envelopes = [&shell](const model::Id& id, const ui::Rect& anchor) {
+        shell.openEnvelopeMenu(id, anchor);
+    };
     gui::HistoryPanel history(root, appActions, dispatcher, **app);
     gui::FileActions fileActions(root, appActions, dispatcher, **app, uiState, (*window)->sdl(),
                                  [&](std::function<void()> f) { loop.post(std::move(f)); });
@@ -603,12 +607,39 @@ int main(int argc, char** argv) {
         else
             std::fprintf(stderr, "mouse: %s (using the defaults)\n",
                          mouse.error().toString().c_str());
-        g.run = [&dispatcher, ui](
+        g.run = [&dispatcher, &app, ui](
                     const std::string& label,
                     const std::vector<views::EditStep>& steps) -> Result<json::Value> {
             return dispatcher.transact(label, ui, [&]() -> Result<json::Value> {
+                const auto before = (*app)->view();
+                std::map<std::string, std::set<model::Id>> explicitItems;
+                for (const auto& step : steps)
+                    if (const auto* item = step.args.find("item"); item && item->isString())
+                        if (auto id = model::Id::parse(item->asString()))
+                            explicitItems[step.command].insert(*id);
                 std::vector<json::Value> results;
+                std::vector<bool> bypassed;
                 for (views::EditStep step : steps) {
+                    bool bypass = false;
+                    if (const auto* item = step.args.find("item"); item && item->isString()) {
+                        const auto text = item->asString();
+                        if (auto id = model::Id::parse(text)) {
+                            const auto peers = model::linkedItems(before, *id);
+                            bypass = peers.size() > 1 &&
+                                     std::all_of(peers.begin(), peers.end(), [&](auto peer) {
+                                         return explicitItems[step.command].contains(peer);
+                                     });
+                        } else if (text.rfind("$step", 0) == 0) {
+                            const auto at = static_cast<std::size_t>(std::stoul(text.substr(5)));
+                            bypass = at < bypassed.size() && bypassed[at];
+                        }
+                    }
+                    if (bypass &&
+                        (step.command == "item.set" || step.command == "item.move" ||
+                         step.command == "item.split" || step.command == "item.duplicate" ||
+                         step.command == "item.remove"))
+                        step.args["bypass_groups"] = true;
+                    bypassed.push_back(bypass);
                     if (step.args.isObject())
                         for (auto& [key, value] : step.args.asObject()) {
                             if (!value.isString() || value.asString().rfind("$step", 0) != 0)

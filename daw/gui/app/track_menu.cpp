@@ -98,6 +98,15 @@ void TrackMenu::open(const model::Id& track, const ui::Rect& anchor,
     m.label = "Channels…";
     m.run = [this, track, anchor] { openChannels(track, anchor); };
     items.push_back(std::move(m));
+    m = {};
+    m.label = "Groups…";
+    m.run = [this, track, anchor] {
+        auto selected = selection ? selection() : std::vector<std::string>{};
+        if (std::find(selected.begin(), selected.end(), track.str()) == selected.end())
+            selected = {track.str()};
+        openGroups(std::move(selected), anchor);
+    };
+    items.push_back(std::move(m));
     items.push_back({"", "", {}, true, true});  // separator
     // Duplicate and Delete: the whole selection when the track is part of it.
     std::vector<std::string> doomed{track.str()};
@@ -136,6 +145,134 @@ void TrackMenu::open(const model::Id& track, const ui::Rect& anchor,
     items.push_back(std::move(m));
     root.openPopup(
         ui::makeMenu("track.menu." + track.str(), std::move(items), [this] { root.closePopup(); }),
+        anchor);
+}
+
+void TrackMenu::openGroups(std::vector<std::string> tracks, const ui::Rect& anchor) const {
+    std::vector<ui::MenuItem> items;
+    items.push_back({"Create group from selected tracks…", "", [this, tracks, anchor] {
+                         auto field = std::make_unique<ui::TextField>("group.name", "Group");
+                         auto* input = field.get();
+                         input->layout.width = ui::SizeRule::fixed(240);
+                         input->onSubmit = [this, tracks](const std::string& name) {
+                             json::Value args = json::Value::object(),
+                                         members = json::Value::array();
+                             for (const auto& id : tracks) members.push_back(id);
+                             args["name"] = name;
+                             args["color"] = "teal";
+                             args["members"] = std::move(members);
+                             commit("group.add", std::move(args));
+                             root.closePopup();
+                         };
+                         input->onCancel = [this] { root.closePopup(); };
+                         root.openPopup(std::move(field), anchor);
+                         input->selectAll();
+                         root.focus(input);
+                     }});
+    for (const auto& entry : app.head().groups) {
+        ui::MenuItem item;
+        item.label = entry.value->name.empty() ? entry.id.str() : entry.value->name;
+        item.run = [this, id = entry.id, tracks, anchor] { openGroup(id, tracks, anchor); };
+        items.push_back(std::move(item));
+    }
+    root.openPopup(ui::makeMenu("track.groups", std::move(items), [this] { root.closePopup(); }),
+                   anchor);
+}
+void TrackMenu::openGroup(model::Id id, std::vector<std::string> tracks,
+                          const ui::Rect& anchor) const {
+    const auto* group = app.head().groups.find(id);
+    if (!group) return;
+    const auto value = *group;
+    std::vector<ui::MenuItem> items;
+    auto ref = [id] {
+        auto args = json::Value::object();
+        args["group"] = id.str();
+        return args;
+    };
+    items.push_back(
+        {value.active ? "Suspend links" : "Resume links", "", [this, ref, active = value.active] {
+             auto args = ref();
+             args["active"] = !active;
+             commit("group.set", std::move(args));
+         }});
+    for (bool add : {true, false})
+        items.push_back({add ? "Assign selected tracks" : "Remove selected tracks", "",
+                         [this, ref, tracks, add, value] {
+                             auto members = value.members;
+                             for (const auto& text : tracks)
+                                 if (auto track = model::Id::parse(text)) {
+                                     if (add)
+                                         members.push_back(*track);
+                                     else
+                                         std::erase(members, *track);
+                                 }
+                             auto args = ref();
+                             auto list = json::Value::array();
+                             for (auto track : members) list.push_back(track.str());
+                             args["members"] = std::move(list);
+                             commit("group.members.set", std::move(args));
+                         }});
+    items.push_back({value.vca ? "Remove VCA fader" : "Add VCA fader", "",
+                     [this, ref, present = value.vca.has_value()] {
+                         commit(present ? "vca.remove" : "vca.add", ref());
+                     }});
+    items.push_back({"Rename…", "", [this, ref, value, anchor] {
+                         auto field = std::make_unique<ui::TextField>("group.rename", value.name);
+                         auto* input = field.get();
+                         input->layout.width = ui::SizeRule::fixed(240);
+                         input->onSubmit = [this, ref](const std::string& name) {
+                             auto args = ref();
+                             args["name"] = name;
+                             commit("group.set", std::move(args));
+                             root.closePopup();
+                         };
+                         input->onCancel = [this] { root.closePopup(); };
+                         root.openPopup(std::move(field), anchor);
+                         input->selectAll();
+                         root.focus(input);
+                     }});
+    items.push_back({"Color…", "", [this, ref, anchor] {
+                         std::vector<ui::MenuItem> colors;
+                         for (auto color : model::kTrackColors)
+                             colors.push_back({std::string(color), "", [this, ref, color] {
+                                                   auto args = ref();
+                                                   args["color"] = std::string(color);
+                                                   commit("group.set", std::move(args));
+                                               }});
+                         root.openPopup(ui::makeMenu("group.colors", std::move(colors),
+                                                     [this] { root.closePopup(); }),
+                                        anchor);
+                     }});
+    items.push_back({"Linked attributes…", "", [this, ref, value, anchor] {
+                         std::vector<ui::MenuItem> links;
+                         for (const char* name : {"volume", "pan", "mute", "solo", "armed",
+                                                  "monitor", "selection", "edit"}) {
+                             const bool on = std::find(value.links.begin(), value.links.end(),
+                                                       name) != value.links.end();
+                             ui::MenuItem item;
+                             item.label = name;
+                             item.checked = on;
+                             item.run = [this, ref, value, on, name = std::string(name)] {
+                                 auto list = value.links;
+                                 if (on)
+                                     std::erase(list, name);
+                                 else
+                                     list.push_back(name);
+                                 auto args = ref();
+                                 auto array = json::Value::array();
+                                 for (const auto& link : list) array.push_back(link);
+                                 args["links"] = std::move(array);
+                                 commit("group.set", std::move(args));
+                             };
+                             links.push_back(std::move(item));
+                         }
+                         root.openPopup(ui::makeMenu("group.links", std::move(links),
+                                                     [this] { root.closePopup(); }),
+                                        anchor);
+                     }});
+    items.push_back({"Delete group", "", [this, ref] { commit("group.remove", ref()); }});
+    root.openPopup(
+        ui::makeMenu("group.menu." + id.str(), std::move(items), [this] { root.closePopup(); }),
         anchor);
 }
 

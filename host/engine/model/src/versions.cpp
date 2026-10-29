@@ -72,6 +72,8 @@ EntryInfo entryInfo(const Session& s, Id id) {
             return info(s.markers, id);
         case Kind::Region:
             return info(s.regions, id);
+        case Kind::Group:
+            return info(s.groups, id);
         case Kind::TempoPoint:
             return info(s.tempo, id);
         case Kind::Meter:
@@ -112,6 +114,8 @@ json::Value objectJson(const Session& s, Id id) {
             return enc(s.markers);
         case Kind::Region:
             return enc(s.regions);
+        case Kind::Group:
+            return enc(s.groups);
         case Kind::TempoPoint:
             return enc(s.tempo);
         case Kind::Meter:
@@ -155,6 +159,8 @@ const json::Value* objectSchema(const Session& s, Id id) {
             return &schemaFor(s.markers);
         case Kind::Region:
             return &schemaFor(s.regions);
+        case Kind::Group:
+            return &schemaFor(s.groups);
         case Kind::TempoPoint:
             return &schemaFor(s.tempo);
         case Kind::Meter:
@@ -519,6 +525,7 @@ struct RetainedSize {
         map(v.id, s.autoItems);
         map(v.id, s.markers);
         map(v.id, s.regions);
+        map(v.id, s.groups);
         for (const auto& [hash, blob] : s.blobs)
             add(v.id, blob.get(), sizeof(Blob) + blob->data.size());
     }

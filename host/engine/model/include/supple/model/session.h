@@ -29,6 +29,7 @@ struct Session {
     IdMap<MeterObj> meters;
     std::shared_ptr<const time::TimeMap> timeMap = std::make_shared<const time::TimeMap>();
     IdMap<Track> tracks;
+    IdMap<TrackGroup> groups;
     IdMap<Item> items;
     IdMap<Take> takes;
     IdMap<MediaSource> media;
@@ -40,7 +41,7 @@ struct Session {
     IdMap<Marker> markers;
     IdMap<Region> regions;
     std::map<std::string, std::shared_ptr<const Blob>> blobs;  // "sha256:<hex>"
-    // Unknown top-level project sections (including extensions/groups) survive
+    // Unknown top-level project sections (including extensions) survive
     // load/save; UI state belongs to the separate .ui.json sidecar.
     json::Value extraSections = json::Value::object();
     std::uint64_t version = 0;  // the version that produced this state
@@ -55,6 +56,7 @@ struct TxnBuilders {
     std::optional<IdMap<TempoPointObj>::Builder> tempo;
     std::optional<IdMap<MeterObj>::Builder> meters;
     std::optional<IdMap<Track>::Builder> tracks;
+    std::optional<IdMap<TrackGroup>::Builder> groups;
     std::optional<IdMap<Item>::Builder> items;
     std::optional<IdMap<Take>::Builder> takes;
     std::optional<IdMap<MediaSource>::Builder> media;
@@ -81,6 +83,7 @@ struct Traits;
 SUPPLE_MODEL_TRAITS(TempoPointObj, TempoPoint, tempo)
 SUPPLE_MODEL_TRAITS(MeterObj, Meter, meters)
 SUPPLE_MODEL_TRAITS(Track, Track, tracks)
+SUPPLE_MODEL_TRAITS(TrackGroup, Group, groups)
 SUPPLE_MODEL_TRAITS(Item, Item, items)
 SUPPLE_MODEL_TRAITS(Take, Take, takes)
 SUPPLE_MODEL_TRAITS(MediaSource, Media, media)

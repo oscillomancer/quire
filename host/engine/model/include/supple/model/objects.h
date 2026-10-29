@@ -24,6 +24,8 @@
 namespace supple::model {
 
 inline constexpr double kSilenceDb = -150.0;  // levels at or below this are silence (-inf)
+// The highest effective strip level: Console 9's native fader top, 20·log10(4).
+inline constexpr double kFaderCeilingDb = 12.041199826559248;
 
 enum class Timebase : std::uint8_t { Time, Beats, BeatsPosition };
 enum class ItemTimebase : std::uint8_t { Track, Time, Beats, BeatsPosition };
@@ -113,6 +115,21 @@ struct Track {
     // UI intent (kept in the model, ignored by merges' conflict checks).
     bool locked = false, hiddenTcp = false, hiddenMixer = false;
     int folderCompact = 0;  // 0 normal, 1 small, 2 collapsed
+};
+
+// Track edit links and an optional audio-free VCA control (ADR-0052).
+inline constexpr std::size_t kMaxVcaControllers = 32;
+struct Vca {
+    double volumeDb = 0.0;
+    bool mute = false, solo = false;
+    std::vector<Id> followers;
+};
+struct TrackGroup {
+    std::string name, color;
+    bool active = true;
+    std::vector<Id> members;
+    std::vector<std::string> links{"volume", "mute", "solo"};
+    std::optional<Vca> vca;
 };
 
 enum class FadeShape : std::uint8_t { Linear, Slow, Fast, SlowFast, FastSlow, Cos, Exp };
@@ -292,7 +309,7 @@ struct EnvPoint {
 };
 
 struct EnvTarget {
-    Id object = kMaster;  // tr_*, sd_*, fx_* or tk_*
+    Id object = kMaster;  // tr_*, sd_*, fx_*, tk_* or a VCA gr_*
     std::string param;    // volume|pan|mute, pitch for takes, playrate on tr_0, or plugin key/id
 };
 

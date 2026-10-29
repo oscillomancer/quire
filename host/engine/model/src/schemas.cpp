@@ -553,6 +553,46 @@ const Schema<MeterObj>& schemaOf<MeterObj>() {
 }
 
 template <>
+const Schema<Vca>& schemaOf<Vca>() {
+    static const auto s = [] {
+        auto b = schema::object<Vca>("vca");
+        b.field("volume_db", &Vca::volumeDb, num().range(kSilenceDb, 12));
+        dflt(b, 0.0);
+        b.field("mute", &Vca::mute, boolean());
+        dflt(b, false);
+        b.field("solo", &Vca::solo, boolean());
+        dflt(b, false);
+        b.field("followers", &Vca::followers, ids());
+        dflt(b, std::vector<Id>{});
+        return b.build();
+    }();
+    return s;
+}
+template <>
+const Schema<TrackGroup>& schemaOf<TrackGroup>() {
+    static const auto s = [] {
+        const TrackGroup d;
+        auto b = schema::object<TrackGroup>("track_group");
+        b.field("name", &TrackGroup::name, str());
+        dflt(b, d.name);
+        b.field("color", &TrackGroup::color, str());
+        dflt(b, d.color);
+        b.field("active", &TrackGroup::active, boolean());
+        dflt(b, d.active);
+        b.field("members", &TrackGroup::members, ids());
+        dflt(b, d.members);
+        b.field(
+            "links", &TrackGroup::links,
+            schema::arrayOf(str().pattern("^(volume|pan|mute|solo|armed|monitor|selection|edit)$",
+                                          "a track group link")));
+        dflt(b, d.links);
+        b.field("vca", &TrackGroup::vca, schemaOf<Vca>());
+        return b.build();
+    }();
+    return s;
+}
+
+template <>
 const Schema<Track>& schemaOf<Track>() {
     static const Schema<Track> s = [] {
         const Track d;
@@ -1123,6 +1163,7 @@ json::Value projectToJson(const Session& s) {
     }
     // Written only when there are some: projects without them stay byte-identical.
     if (!s.autoItems.empty()) doc["automation_items"] = mapToJson(s.autoItems);
+    if (!s.groups.empty()) doc["groups"] = mapToJson(s.groups);
     json::Value blobs = json::Value::object();
     for (const auto& [hash, blob] : s.blobs) {
         json::Value b = json::Value::object();
@@ -1172,9 +1213,34 @@ Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Wa
         auto migrated = migrateProject1(std::move(doc), warnings);
         if (!migrated) return std::move(migrated).error();
         doc = std::move(*migrated);
-    } else if (version->minor > 1 && warnings)
+    } else if (version->minor > 2 && warnings)
         warnings->push_back(
             {"project.newer_minor", "loading a newer project minor version", "/schema"});
+    std::uint32_t legacyGroupNext = 1;
+    // Previously opaque groups never become active merely by opening an old file.
+    if ((version->major == 1 || version->minor < 2) && doc.find("groups")) {
+        auto legacy = doc["groups"];
+        if (legacy.isObject())
+            for (const auto& entry : legacy.asObject())
+                if (auto id = Id::parse(entry.key); id && id->kind == Kind::Group) {
+                    if (id->n == UINT32_MAX)
+                        return Error("project.id", "legacy group id exhausted",
+                                     "/groups/" + entry.key, "use a smaller group token");
+                    legacyGroupNext = std::max(legacyGroupNext, id->n + 1);
+                }
+        if (auto* ext = doc.find("extensions"); ext && !ext->isObject())
+            return Error("schema.type", "expected an extensions object", "/extensions",
+                         "keep extensions as an object");
+        std::string key = "legacy_track_groups";
+        for (int suffix = 1; doc["extensions"].find(key); ++suffix)
+            key = "legacy_track_groups_" + std::to_string(suffix);
+        doc["extensions"][key] = std::move(legacy);
+        doc.asObject().erase("groups");
+        if (warnings)
+            warnings->push_back({"project.groups_legacy",
+                                 "preserved inactive legacy groups in extensions." + key,
+                                 "/groups"});
+    }
     options.unknownMembers = schema::UnknownMembers::Ignore;
     std::vector<Error> errors;
     Session s;
@@ -1184,7 +1250,7 @@ Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Wa
     };
     const std::set<std::string_view> known{
         "schema", "project", "tempo",  "rulers",    "tracks",           "items", "takes",
-        "fx",     "sources", "routes", "envelopes", "automation_items", "blobs"};
+        "fx",     "sources", "routes", "envelopes", "automation_items", "blobs", "groups"};
     for (const auto& section : doc.asObject()) {
         const auto path = json::pointerJoin("", section.key);
         if (section.key == "ui") {
@@ -1268,6 +1334,7 @@ Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Wa
     IdMap<Marker>::Builder markers(s.markers);
     IdMap<Region>::Builder regions(s.regions);
     IdMap<Track>::Builder tracks(s.tracks);
+    IdMap<TrackGroup>::Builder groups(s.groups);
     IdMap<Item>::Builder items(s.items);
     IdMap<Take>::Builder takes(s.takes);
     IdMap<MediaSource>::Builder media(s.media);
@@ -1285,6 +1352,8 @@ Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Wa
                         options, warnings);
     mapFromJson<Track>(sub("tracks", nullptr), "/tracks", Kind::Track, tracks, errors, options,
                        warnings);
+    mapFromJson<TrackGroup>(sub("groups", nullptr), "/groups", Kind::Group, groups, errors, options,
+                            warnings);
     mapFromJson<Item>(sub("items", nullptr), "/items", Kind::Item, items, errors, options,
                       warnings);
     mapFromJson<Take>(sub("takes", nullptr), "/takes", Kind::Take, takes, errors, options,
@@ -1351,6 +1420,7 @@ Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Wa
     s.markers = markers.build();
     s.regions = regions.build();
     s.tracks = tracks.build();
+    s.groups = groups.build();
     s.items = items.build();
     s.takes = takes.build();
     s.media = media.build();
@@ -1369,6 +1439,14 @@ Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Wa
                                      "ignored stale envelope items; derived from automation_items",
                                      json::pointerJoin("/envelopes", envelope) + "/items"});
         }
+    for (const auto& e : s.items)
+        if (e.value->group && e.value->group->kind == Kind::Group) {
+            if (e.value->group->n == UINT32_MAX)
+                return Error("project.id", "legacy group id exhausted",
+                             "/items/" + e.id.str() + "/group", "use a smaller group token");
+            s.next[Kind::Group] = std::max(s.next[Kind::Group], e.value->group->n + 1);
+        }
+    s.next[Kind::Group] = std::max(s.next[Kind::Group], legacyGroupNext);
     // Derive the time map and validate everything through a no-op transaction.
     EditTxn txn(s, 0);
     return txn.commit();

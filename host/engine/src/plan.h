@@ -152,6 +152,50 @@ struct Automation {
     }
 };
 
+// Per-consumer VCA curves: each cursor belongs to exactly one executor/node.
+struct VcaControl {
+    double volumeDb = 0;
+    bool mute = false;
+    Automation volume, gate;
+};
+struct VcaControls {
+    std::vector<VcaControl> values;
+    bool empty() const SUPPLE_RT { return values.empty(); }
+    bool automated() const SUPPLE_RT {
+        for (const auto& v : values)
+            if (v.volume.active()) return true;
+        return false;
+    }
+    void evaluate(std::int64_t at, double& db, bool& muted) SUPPLE_RT {
+        bool silence = db <= model::kSilenceDb;
+        for (auto& v : values) {
+            const double value = v.volume.active() ? v.volume.at(at) : v.volumeDb;
+            silence |= value <= model::kSilenceDb;
+            db += value;
+            muted |= v.gate.active() ? v.gate.at(at) >= .5 : v.mute;
+        }
+        if (silence) db = model::kSilenceDb;
+    }
+    void shift(std::int64_t at) {
+        for (auto& v : values) {
+            v.volume.shift(at);
+            v.gate.shift(at);
+        }
+    }
+    void timeline(PlayrateTimeline* clock) {
+        for (auto& v : values) {
+            v.volume.timeline = clock;
+            v.gate.timeline = clock;
+        }
+    }
+    void reset() SUPPLE_RT {
+        for (auto& v : values) {
+            v.volume.cursor = 0;
+            v.gate.cursor = 0;
+        }
+    }
+};
+
 // One render block of a signal (the master's, or a frontier edge's tap),
 // tagged with the transport epoch it belongs to (ADR-0012, ADR-0014).
 struct Chunk {
@@ -248,7 +292,8 @@ struct Edge {
         l = map[0][0] * a + map[0][1] * b;
         r = map[1][0] * a + map[1][1] * b;
     }
-    Automation autoVolume, autoPan, autoMute;     // route envelopes (dB, %, 0/1)
+    Automation autoVolume, autoPan, autoMute;  // route envelopes (dB, %, 0/1)
+    VcaControls vcas;
     Automation stripVolume, stripPan, stripMute;  // private copies: source-owned
     bool encode = false, followPan = true, muted = false;
     ConsoleStage<console9::Channel> encoder;
@@ -538,6 +583,8 @@ struct Node {
     std::array<std::uint8_t, 16 * 128> liveHeld{};  // device notes sounding (per channel/key)
     bool live = false;
     Automation autoVolume, autoPan, autoMute;
+    VcaControls vcas;
+    std::vector<float> auxPostGain;  // source-owned main-to-aux post-fader gain
     // Metering (engine.md §2.3, P5.3c): the bank slot this strip's post signal
     // is measured into (0xFFFF: unmetered), and the last block's measurements,
     // written by processNode on whichever executor processed it.

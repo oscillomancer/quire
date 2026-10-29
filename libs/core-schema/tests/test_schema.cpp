@@ -382,3 +382,22 @@ TEST_CASE("string lengths count characters, as the exported JSON Schema does") {
     CHECK_FALSE(three.decode(json::Value("\xc3\xa9\xc3\xa9")));  // four bytes, two characters
     CHECK(three.decode(json::Value("\xc3\xa9\xc3\xa9\xc3\xa9")));
 }
+
+TEST_CASE("array decode replaces a nonempty model default") {
+    struct Links {
+        std::vector<std::string> values{"volume", "mute", "solo"};
+    };
+    const auto s = object<Links>("links")
+                       .field("values", &Links::values, arrayOf(string()))
+                       .defaultValue(Links{}.values)
+                       .build();
+    auto defaults = s.decode(json::Value::object());
+    REQUIRE(defaults);
+    CHECK(defaults->values == Links{}.values);
+    auto explicitValue = s.decode(json::parse(R"({"values":["pan"]})").value());
+    REQUIRE(explicitValue);
+    CHECK(explicitValue->values == std::vector<std::string>{"pan"});
+    auto empty = s.decode(json::parse(R"({"values":[]})").value());
+    REQUIRE(empty);
+    CHECK(empty->values.empty());
+}
