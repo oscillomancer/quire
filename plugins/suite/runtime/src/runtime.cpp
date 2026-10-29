@@ -1165,6 +1165,9 @@ void Param::editNormalized(double position) const {
     if (detail::EditorServices* ui = services())
         ui->editParam(slot_, detail::EditorServices::Edit::Position, position);
 }
+void Instrument::playNote(int key, double velocity, bool on) const {
+    if (detail::EditorServices* ui = services()) ui->playNote(key, velocity, on);
+}
 void Param::reset() const {
     if (detail::EditorServices* ui = services())
         ui->editParam(slot_, detail::EditorServices::Edit::Default, 0.0);

@@ -564,7 +564,13 @@ records it, the audio code hears it, and `value()` has it at once. A
 press's edits, through its drags to its release, are one gesture, however
 many parameters they change; a wheel's are one per burst, and
 edits on a `Move` or a `Leave` do nothing. Only `pointer()` (and what it
-calls) may edit; `draw()` runs with no user acting. A hover or a drag
+calls) may edit; `draw()` runs with no user acting. An instrument's
+`pointer()` may also play itself, as its keyboard does:
+`playNote(key, velocity, on)` (velocity 0 to 1) on a `Press`, `Drag` or
+`Release` reaches the audio code as a host's note does, through
+`startVoice()`; a note still on when the press ends is ended then, so
+none is left sounding. A drum pad played where it is clicked is
+`playNote(36 + pad, velocity, true)` on its press. A hover or a drag
 state is a member of the editor's own:
 
 ```cpp

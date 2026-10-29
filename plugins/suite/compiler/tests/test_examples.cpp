@@ -235,6 +235,9 @@ class Recorder final : public script::detail::Painter,
     void editParam(int slot, Edit kind, double value) override {
         add("edit", {double(slot), double(int(kind)), value});
     }
+    void playNote(int key, double velocity, bool on) override {
+        add("playNote", {double(key), velocity, double(on)});
+    }
 
     // --- Painter ---
     double width() const override { return 400; }

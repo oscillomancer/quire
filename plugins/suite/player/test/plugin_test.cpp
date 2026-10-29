@@ -544,4 +544,38 @@ TEST(a_scripts_pointer_edits_its_parameters_in_a_picture) {
     CHECK_NEAR(patch.find("params")->find("gain")->asDouble(), 10.0, 1e-9);
 }
 
+TEST(an_instruments_pointer_plays_a_note_in_a_picture) {
+    Library library("pluck");
+    library.edit("pluck", "    void process(Block& io) {",
+                 "    void draw(Canvas& g) {}\n"
+                 "    void pointer(const Pointer& p) {\n"
+                 "        if (p.action() == PointerAction::Press) playNote(69, 1.0, true);\n"
+                 "    }\n"
+                 "    void process(Block& io) {",
+                 0);
+    // It rings on past its key: the picture's editor ends the press's note
+    // as it goes, before the block that plays it.
+    library.edit("pluck", "void releaseVoice(int v) { voice[v].env.gate(false); }",
+                 "void releaseVoice(int v) {}", 0);
+    Instance a("com.example.pluck");
+    a.activate();
+    CHECK(a.active);
+    CHECK(a.plugin->start_processing(a.plugin));
+    CHECK(a.play(0.0f) == 0.0f);
+    const auto* picture = static_cast<const clap_plugin_supple_editor_picture_t*>(
+        a.plugin->get_extension(a.plugin, CLAP_EXT_SUPPLE_EDITOR_PICTURE));
+    CHECK(picture != nullptr);
+    if (!picture) return;
+    // A press over no control plays the note.
+    const clap_supple_pointer_input_t press[] = {{CLAP_SUPPLE_POINTER_PRESS, 0, 200, 200, 0}};
+    Text out, why;
+    if (!picture->draw(a.plugin, 1.0, press, 1, &out.out, &why.out)) {
+        CHECK_MSG(!std::getenv("SUPPLE_REQUIRE_OFFSCREEN"), "%s", why.text.c_str());
+        std::printf("    (%s: skipped)\n", why.text.c_str());
+        return;
+    }
+    CHECK(std::abs(a.play(0.0f)) > 1e-4f);
+    a.plugin->stop_processing(a.plugin);
+}
+
 SUPPLE_TEST_MAIN

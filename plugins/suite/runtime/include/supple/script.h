@@ -908,6 +908,11 @@ class Instrument : public Plugin {
     // voiceCount() (all of them unless set); a note past them steals one.
     // Lowering it stops the voices above it, through stopVoice().
     void setVoiceLimit(int voices);
+    // In pointer(): play a note through the plugin as the editor's keyboard
+    // does, on at a velocity (0..1) or off. A note still on when the press
+    // that played it ends (its release, or the editor losing it) is ended
+    // then, so none is left sounding.
+    void playNote(int key, double velocity, bool on) const;
 };
 
 // Notes in, notes out. Not available to scripts yet, and the compiler says

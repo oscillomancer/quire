@@ -510,6 +510,14 @@ void Builtins::addClasses() {
         m.instrument = m.intrinsic == Intrinsic::None;
         if (m.instrument) m.contexts = kInit | kAudio;
     }
+    // pointer()'s (editorRules() keeps it there), an instrument's only.
+    r.method(
+        plugin, "void playNote(int key, double velocity, bool on) const",
+        +[](const S::Instrument* p, int key, double velocity, int on) {
+            p->playNote(key, velocity, on != 0);
+        },
+        Writes::Nothing, kUi);
+    plugin->methods.back().instrument = true;
     // Every plugin's, in prepare().
     r.method(
         plugin, "void setLatency(int samples)", +[](S::Plugin* p, int n) { p->setLatency(n); },
