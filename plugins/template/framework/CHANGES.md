@@ -4,6 +4,17 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.33.1
+
+What a product must do: nothing.
+
+- **A narrow file slot keeps the file's name.** A slot shows a factory
+  file by its name (`kick.flac`, as its menu lists it) rather than the
+  whole `factory:kick.flac`, lets a long name shrink a little before it is
+  cut, and leaves out the loaded file's summary (`1 ch, 0.70 s`) when the
+  name would not fit beside it; the summary stays in its tooltip. A slot
+  as narrow as a drum pad's showed only "fa…".
+
 ## 1.33.0
 
 What a product must do: nothing.

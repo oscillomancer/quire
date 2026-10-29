@@ -497,7 +497,8 @@ your own once the product is past its sketch.
   - Without a parameter: `button(rect, label, action)`; `momentary(param,
     rect)`, on while held; `textField(propertyId, rect)` for a property (its
     label is the placeholder); `fileSlot(propertyId, rect)` for a file
-    property: its name and state (loading, loaded, missing), a dialog on a
+    property: its name (a factory file's without `factory:`) and state
+    (loading, loaded, missing), a dialog on a
     click, a file dropped on it taken, cleared from its menu, where the
     product's own files it takes (`PRODUCT_ASSETS`) are offered too;
     `presetBar(rect)` and `presetList(rect)`;

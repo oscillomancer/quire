@@ -370,7 +370,11 @@ void fileSlot(NVGcontext* vg, const Theme& t, const Control& c, const ControlSta
     nvgLineJoin(vg, NVG_ROUND);
     nvgStroke(vg);
 
-    // The state on the right; the name in what is left.
+    // The state on the right, if the name still fits beside it; the name in
+    // what is left. A factory file goes by its name, as the slot's menu lists it.
+    const std::string name = files::isFactoryReference(s.text) ? std::string(s.text.substr(files::kFactoryPrefix.size()))
+                                                               : files::fileName(s.text);
+    const float left = x + w + 9.0f;
     const char* tag = nullptr;
     NVGcolor tagColour = rgb(t.textFaint);
     switch (s.file) {
@@ -383,15 +387,14 @@ void fileSlot(NVGcontext* vg, const Theme& t, const Control& c, const ControlSta
     float right = b.right() - 9.0f;
     if (tag) {
         const float tw = textWidth(vg, tag, 10.0f, font::kUi);
-        if (tw < b.w * 0.45f) {
+        const float named = name.empty() ? 0.0f : textWidth(vg, name.c_str(), 11.5f, font::kUi);
+        if (tw < b.w * 0.45f && (s.file != State::Ready || left + named + 10.0f + tw <= right)) {
             label(vg, right, b.cy() + 0.5f, tag, 10.0f, tagColour, Align::Right);
             right -= tw + 10.0f;
         }
     }
-    const float left = x + w + 9.0f;
-    const std::string name = files::fileName(s.text);
     if (!name.empty())
-        fittedLabel(vg, left, b.cy() + 0.5f, name.c_str(), 11.5f, 11.5f, right - left,
+        fittedLabel(vg, left, b.cy() + 0.5f, name.c_str(), 11.5f, 10.0f, right - left,
                     s.file == State::Missing ? rgb(t.textMuted) : rgb(t.text), Align::Left, false);
     else
         fittedLabel(vg, left, b.cy() + 0.5f, c.label ? c.label : "Choose or drop a file", 11.5f, 11.5f, right - left,
