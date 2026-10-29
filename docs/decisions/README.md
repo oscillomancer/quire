@@ -68,3 +68,5 @@ current state.
 | [0050](0050-audio-device-preferences.md) | Audio device preferences and per-client graph requests | Accepted |
 | [0051](0051-read-ahead-latency-compensation.md) | Latency compensation by read-ahead | Accepted |
 | [0052](0052-track-groups-and-vcas.md) | Track edit groups and VCA control strips | Accepted |
+| [0053](0053-audio-warp.md) | Audio warp, transient editing and prepared sources | Accepted |
+| [0054](0054-track-freeze.md) | Whole-chain channel freeze | Accepted |
