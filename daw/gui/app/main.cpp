@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include <supple/base/paths.h>
+#include "audio_edit.h"
 // <slug>: the DAW with a window (docs/specs/gui.md). The UI thread is the
 // model thread: it pumps the command bus's loop (socket requests, the service
 // tick) between SDL events, and draws only when something changed.
@@ -594,8 +595,13 @@ int main(int argc, char** argv) {
             renderDialog.showFolder();
         });
     };
+    gui::AudioEdit audioEdit(**app, dispatcher);
+    audioEdit.onStatus = [&](const std::string& message) { shell.setStatus(message); };
     {
         views::ItemGestures& g = shell.arrange()->gestures();
+        g.onAudioEdit = [&](const auto& items, const auto& operation, double grid) {
+            audioEdit.run(items, operation, grid);
+        };
         g.pinVersion = [&app](std::uint64_t version) { return (*app)->versions().pin(version); };
         const cmd::Origin ui{cmd::Origin::Type::Ui, "gui", {}};
         if (auto mouse = views::MouseMap::load(mouseFile))
@@ -1012,6 +1018,7 @@ int main(int argc, char** argv) {
             }
             fxWindow.tick(event);
             renderDialog.tick();
+            audioEdit.poll();
             if (preferences.isOpen()) preferences.refresh();
             if (audioDevice.isOpen()) audioDevice.refresh();
             if (shell.arrange()->poll(event)) root.requestAnimationFrame();

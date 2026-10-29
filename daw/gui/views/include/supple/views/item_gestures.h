@@ -65,6 +65,7 @@ class ItemGestures {
     ~ItemGestures();
 
     Runner run;
+    std::function<void(const std::vector<model::Id>&, const std::string&, double)> onAudioEdit;
     std::function<std::uint64_t()>
         projectGeneration;  // app identity, even before the next resnapshot
     // Keep the copied version available to item.paste until the clipboard changes.
@@ -159,6 +160,7 @@ class ItemGestures {
     // What a drag is doing (the overlay and tests read it).
     enum class Drag {
         None,
+        Warp,
         Move,
         TrimLeft,
         TrimRight,
@@ -174,6 +176,9 @@ class ItemGestures {
     };
     struct State {
         Drag drag = Drag::None;
+        std::optional<std::size_t> warpIndex;
+        double warpSource = 0, warpPosition = 0;
+        std::uint64_t warpVersion = 0, warpGeneration = 0;
         model::Id anchor{};               // the item under the press
         double deltaBeats = 0;            // move / trim-left / trim-right / slip, snapped
         int deltaRows = 0;                // move

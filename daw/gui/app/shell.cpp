@@ -25,6 +25,10 @@
 #include "transport_bar.h"
 
 namespace supple::gui {
+void Shell::setStatus(const std::string& text) {
+    editStatus_ = text;
+    if (counts_) counts_->setText(text);
+}
 namespace {
 
 double nowMs() {
@@ -237,6 +241,12 @@ void Shell::sync(bool event) {
                          "version " + std::to_string(s.version));
         arrange_->show(s, changes, projectGeneration_);
     }
+    const auto note = app_.preparingAudio()              ? std::string("Preparing audio…")
+                      : !app_.preparationError().empty() ? app_.preparationError()
+                                                         : editStatus_;
+    const int strips = static_cast<int>(s.tracks.size());
+    counts_->setText(std::to_string(strips) + (strips == 1 ? " strip  " : " strips  ") +
+                     "version " + std::to_string(s.version) + (note.empty() ? "" : " · " + note));
     std::vector<model::Id> selected;
     for (const auto& text : ui_.selectedItems)
         if (auto id = model::Id::parse(text); id && s.items.find(*id)) selected.push_back(*id);

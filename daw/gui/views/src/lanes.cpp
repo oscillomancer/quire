@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "supple/views/lanes.h"
+#include "supple/model/audio_warp.h"
 
 #include "supple/views/envelope_lane.h"
 
@@ -118,6 +119,24 @@ class LaneLabels : public ui::Node {
                                t.type("caption"),
                                t.color(heard ? "ink" : "ink-quiet").withAlpha(alpha));
                     }
+                if (take) {
+                    const double start = model::itemSpan(s, *item).startSec;
+                    auto tick = [&](double local, bool solid) {
+                        const float x = lanes_.xAt(start + local);
+                        if (x < r.x || x > r.right()) return;
+                        const auto color = t.color(solid ? "ink" : "ink-quiet");
+                        c.fillRect({x, r.y + 18, 1, std::max(0.f, r.h - 18)},
+                                   color.withAlpha(solid ? .8f : .35f));
+                        if (solid) c.fillRect({x - 3, r.y + 17, 7, 5}, color);
+                    };
+                    const model::AudioWarpMap hitMap(*take);
+                    if (take->transients)
+                        for (double pos : take->transients->positions)
+                            tick(item->loop ? (pos - take->startOffset) / take->playrate
+                                            : hitMap.itemAt(pos),
+                                 false);
+                    for (const auto& marker : take->stretchMarkers) tick(marker.itemPos, true);
+                }
                 if (item->activeTake) paintTakeEnvelopes(c, i, *item);
             }
         }
@@ -510,6 +529,7 @@ void Lanes::drawAudio(const ui::GlFrame& frame, const ui::Rect& r, const model::
     const float px = 1.0f / frame.ratio;  // one device pixel in design units
     const double rate = pyramid->sampleRate();
     const double sourceSeconds = static_cast<double>(pyramid->frames()) / rate;
+    const model::AudioWarpMap timeMap(take);
     const double framesPerUnit = rate * take.playrate / view_.pixelsPerSecond;
     const peaks::Level& level = pyramid->pick(framesPerUnit * static_cast<double>(px));
     const float gain = static_cast<float>(dbToGain(item.gainDb + take.gainDb));
@@ -519,9 +539,11 @@ void Lanes::drawAudio(const ui::GlFrame& frame, const ui::Rect& r, const model::
         const float mid = r.y + laneH * (static_cast<float>(c) + 0.5f), half = laneH * 0.5f - 1;
         strips_->beginRun();
         for (float x = std::floor(vis.x * frame.ratio) / frame.ratio; x < vis.right(); x += px) {
-            // Item time → source time (stretch markers: P5.4 follow-up).
-            double s0 = take.startOffset + (timeAt(x) - itemStart) * take.playrate;
-            double s1 = s0 + static_cast<double>(px) / view_.pixelsPerSecond * take.playrate;
+            // The waveform and playback share original-source coordinates.
+            double s0 = item.loop ? take.startOffset + (timeAt(x) - itemStart) * take.playrate
+                                  : timeMap.sourceAt(timeAt(x) - itemStart);
+            double s1 = item.loop ? take.startOffset + (timeAt(x + px) - itemStart) * take.playrate
+                                  : timeMap.sourceAt(timeAt(x + px) - itemStart);
             if (item.loop && sourceSeconds > 0) {
                 const double wrap = std::floor(s0 / sourceSeconds) * sourceSeconds;
                 s0 -= wrap;

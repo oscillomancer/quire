@@ -34,6 +34,7 @@ struct TrackMenu;
 
 class Shell {
   public:
+    void setStatus(const std::string& text);
     // The device's record inputs (the shape of `engine.inputs`: running, audio
     // [{channel, port}], midi [names]). The app passes the engine's; a test
     // passes a stub. Empty: the shell asks the bus.
@@ -96,7 +97,7 @@ class Shell {
     SelectionEdit selectionEdit_;           // a strip control on a selected track: all of them
     std::unique_ptr<TrackMenu> trackMenu_;  // made in build() (needs the root)
     UiState& ui_;
-    std::string status_;
+    std::string status_, editStatus_;
     std::uint64_t shownVersion_ = ~std::uint64_t{0};
     std::uint64_t projectGeneration_ = ~std::uint64_t{0};
     ui::Label* counts_ = nullptr;

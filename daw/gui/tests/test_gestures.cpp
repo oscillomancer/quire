@@ -8,6 +8,9 @@
 #include <filesystem>
 #include <mutex>
 
+#include <cmath>
+#include <condition_variable>
+#include "audio_edit.h"
 #include "generate.h"
 #include "generated_media.h"
 #include "plugin_scales.h"
@@ -44,7 +47,7 @@ struct Fixture {
     std::vector<double> seeks;
     bool ok = false;
 
-    Fixture() {
+    Fixture(std::function<void()> jobFinished = {}) {
         dir = std::filesystem::temp_directory_path() /
               ("supple-gesture-test-" + std::to_string(testProcessId()));
         std::filesystem::remove_all(dir);
@@ -69,6 +72,7 @@ struct Fixture {
         fonts = *f;
         engine::AppOptions options;
         options.workdir = dir;
+        options.jobFinishedHook = std::move(jobFinished);
         options.pluginPath = {std::filesystem::path(SUPPLE_CLAP_DIR)};  // the stock plugins only
         auto a = engine::EngineApp::create(options);
         REQUIRE(a);
@@ -925,7 +929,7 @@ ui::Point laneAt(Fixture& f, model::Id it, std::size_t lane) {
 // Item menu rows: Cut, Copy, Paste, Duplicate, Delete, Merge, rule, four
 // timebases, rule, Take FX, three take envelopes, rule, then (several takes)
 // Show all takes, the two explodes and Delete take, then the two renders.
-constexpr int kShowAll = 17, kExplodeTracks = 18, kExplodeSerial = 19, kDeleteTake = 20;
+constexpr int kShowAll = 21, kExplodeTracks = 22, kExplodeSerial = 23, kDeleteTake = 24;
 }  // namespace
 
 TEST_CASE("takes: show all takes spreads them out; a lane is heard, deleted from its menu") {
@@ -1027,7 +1031,7 @@ TEST_CASE("takes: explode onto new tracks; render an item with FX as a new take"
     REQUIRE(f.item(audio).takes.size() == 1);
     const ui::Rect ra = f.rectOf(audio);
     rightClick(f, onItem(f, audio, ra.y + ra.h / 2));
-    pick(f, 18);  // Render with FX as a new take
+    pick(f, 22);  // Render with FX as a new take
     REQUIRE(f.item(audio).takes.size() == 2);
     const model::Take& made = *f.app->head().takes.find(*f.item(audio).activeTake);
     CHECK(made.name.ends_with("(FX)"));
@@ -1191,10 +1195,10 @@ TEST_CASE("arrange gestures: take FX and a take envelope drawn and edited on its
     };
     // Rows: Delete, rule, four timebases, rule, Take FX…, volume, pan, mute.
     rightClick();
-    f.menuRow("item.menu", 12);
+    f.menuRow("item.menu", 16);
     CHECK(takeFx == std::vector<model::Id>{take});
     rightClick();
-    f.menuRow("item.menu", 13);
+    f.menuRow("item.menu", 17);
     auto envelope = [&]() -> const model::Envelope* {
         for (const auto& e : f.app->head().envelopes)
             if (e.value->target.object == take && e.value->target.param == "volume")
@@ -1231,7 +1235,7 @@ TEST_CASE("arrange gestures: take FX and a take envelope drawn and edited on its
     CHECK(envelope()->points.size() == 1);
     // Hidden from the menu, its line no longer takes the press: the item moves instead.
     rightClick();
-    f.menuRow("item.menu", 13);
+    f.menuRow("item.menu", 17);
     CHECK_FALSE(envelope()->visible);
     CHECK_FALSE(g.takeEnvelopeAt(audio, {mid.x, lineY}));
 }
@@ -1599,4 +1603,108 @@ TEST_CASE("automation item drags reject concurrent transform and geometry edits"
             CHECK(item->points.back().value == 50);
         }
     }
+}
+
+TEST_CASE("audio warp handles drag once and render hits on the waveform") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto item = f.itemOnRow(0);
+    const auto take = *f.item(item).activeTake;
+    auto set = json::Value::object();
+    set["item"] = item.str();
+    set["loop"] = false;
+    REQUIRE(f.dispatcher->execute({"item.set", set, kUi}));
+    auto hits = json::Value::object();
+    hits["take"] = take.str();
+    hits["positions"] = *json::parse("[0.4,0.7,1.1]");
+    REQUIRE(f.dispatcher->execute({"take.hits.set", hits, kUi}));
+    auto anchor = json::Value::object();
+    anchor["take"] = take.str();
+    anchor["source_pos"] = .7;
+    anchor["item_pos"] = .6;
+    REQUIRE(f.dispatcher->execute({"take.stretch.add", anchor, kUi}));
+    auto viewport = f.view->viewport();
+    viewport.pixelsPerSecond = 150;
+    f.view->setViewport(viewport);
+    f.sync();
+    const auto rect = f.rectOf(item);
+    const double start = model::itemSpan(f.app->head(), f.item(item)).startSec;
+    const auto steps = f.steps();
+    f.drag({f.view->xAt(start + .6), rect.y + 25}, {f.view->xAt(start + .7), rect.y + 25},
+           ui::kShift);
+    CHECK(f.app->head().takes.find(take)->stretchMarkers[1].itemPos == doctest::Approx(.7));
+    CHECK(f.steps() == steps + 1);
+    if (const char* out = std::getenv("SUPPLE_SCREENSHOT_DIR")) {
+        REQUIRE(gui::writePng(std::filesystem::path(out) / "audio-warp.png", f.root->readBack()));
+        // Keep a portable one-item scene for a full-app render after this fixture
+        // and its private media directory have been removed.
+        model::EditTxn snapshot(model::Session::create(), 1);
+        model::Track track;
+        track.parent = model::kMaster;
+        const auto trackId = snapshot.create(track);
+        snapshot.modify<model::Track>(model::kMaster,
+                                      [&](auto& master) { master.children.push_back(trackId); });
+        auto tk = *f.app->head().takes.find(take);
+        auto source = *f.app->head().media.find(*tk.source);
+        const auto file = std::filesystem::path(out) / "warp-source.wav";
+        std::filesystem::copy_file(f.app->mediaDir() / source.path, file,
+                                   std::filesystem::copy_options::overwrite_existing);
+        source.path = file.string();
+        tk.source = snapshot.create(source);
+        const auto takeId = snapshot.create(tk);
+        auto it = f.item(item);
+        it.track = trackId;
+        it.takes = {takeId};
+        it.activeTake = takeId;
+        snapshot.create(it);
+        auto project = snapshot.commit();
+        REQUIRE(project);
+        REQUIRE(writeFileAtomic(std::filesystem::path(out) / "warp-project.json",
+                                model::serializeProject(*project)));
+    }
+}
+
+TEST_CASE("audio slice menu workflow detects missing hits then commits its pure edit") {
+    std::mutex mutex;
+    std::condition_variable done;
+    bool finished = false;
+    Fixture f([&] {
+        {
+            std::lock_guard lock(mutex);
+            finished = true;
+        }
+        done.notify_one();
+    });
+    if (!f.ok) return;
+    audio::AudioData audio;
+    audio.sampleRate = 48000;
+    audio.channels.assign(1, std::vector<float>(48000));
+    for (int at : {4800, 19200, 33600})
+        for (int i = 0; i < 2400; ++i)
+            audio.channels[0][static_cast<std::size_t>(at + i)] =
+                static_cast<float>(.8 * std::exp(-double(i) / 400) * std::cos(double(i) * .08));
+    const auto path = f.dir / "attacks.wav";
+    REQUIRE(audio::writeWav(path, audio));
+    auto args = json::Value::object();
+    args["track"] = f.item(f.itemOnRow(0)).track.str();
+    args["audio_file"] = path.string();
+    args["position"] = 0;
+    auto added = f.dispatcher->execute({"item.add", args, kUi});
+    REQUIRE(added);
+    const auto item = *model::Id::parse(added->find("item")->asString());
+    const auto count = f.app->head().items.size();
+    const auto steps = f.steps();
+    gui::AudioEdit edits(*f.app, *f.dispatcher);
+    std::string message;
+    edits.onStatus = [&](const auto& status) { message = status; };
+    edits.run({item}, "slice", .25);
+    {
+        std::unique_lock lock(mutex);
+        done.wait(lock, [&] { return finished; });
+    }
+    f.dispatcher->flushJobEvents();
+    edits.poll();
+    INFO(message);
+    CHECK(f.app->head().items.size() == count + 3);
+    CHECK(f.steps() == steps + 2);
 }

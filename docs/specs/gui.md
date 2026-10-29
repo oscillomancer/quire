@@ -1284,3 +1284,21 @@ which made the app exit at once; desktop and Start-menu launchers start in the
 home or installation folder, which collected a stray `renders/`.
 Linux/Windows windows use the embedded 256px application icon; Windows also
 embeds the multi-size ICO resource for Explorer and Start-menu shortcuts.
+
+### Audio warp editing (ADR-0053)
+
+Audio items display dim ticks for detected transients and solid handles/vertical
+lines for authored stretch anchors. Waveforms use the same source-time map as
+playback. Drag a hit to create an anchor, or drag an interior anchor to move its
+item time; the source coordinate stays fixed. The overlay previews the destination,
+current grid snapping applies (Shift frees it), and release commits one command.
+A changed project/version cancels the marker gesture. Bundle anchors move together.
+
+The item menu offers Detect hits, Quantize audio, Slice at hits and Remove warping.
+Detect hits analyzes selected audio takes. Quantize audio uses the current arrange
+grid and full strength; Slice at hits uses strength zero (split only). Both detect
+missing or stale hits automatically, then apply the edit after the detection result
+commits; this workflow has two undo steps. Explicit detection is still available
+for inspecting candidates first. Changing the target items/takes while analysis
+runs cancels the follow-up edit. There is no new panel or editing mode. The existing
+status line displays detection, preparation and command errors.
