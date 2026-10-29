@@ -62,6 +62,7 @@ CASES = {
     "com.suppleaudio.sedge": Case("Sedge", False, "Tolerance", 0, 1, "transparent", True),
     "com.suppleaudio.gain": Case("Gain", False, "Gain",
                                normalized(0, -32, 32), normalized(-12, -32, 32), "gain", True),
+    "com.suppleaudio.hornbeam": Case("Hornbeam", False, "Output", .5, .25, "gain"),
 }
 
 

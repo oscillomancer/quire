@@ -82,6 +82,7 @@ tool (or as `args` through `exec`).
 | Chorus, stereo widening, string ensemble, multi-voice doubling and vibrato, with lows kept dry (Withy) | `guides/chorus.md` |
 | Phasing: swirls, resonant sweeps, a photocell vibe's throb, envelope and tempo sweeps, an endless barber pole (Pollia) | `guides/phaser.md` |
 | Tape: a mix's peaks gently rounded, drums pushed into tape, head bump, wow and flutter, hiss, a worn machine or a cassette (Umber) | `guides/tape.md` |
+| Guitar or bass DI into an amp and a miked cabinet: cleans to high gain, the tone stack, mic placement, the cabinet or the amp alone (Hornbeam) | `guides/amp.md` |
 | Measuring loudness, peaks, tonal balance, stereo and key at any point in a chain, and reading any plugin's meters (Lichen, `fx.meters`) | `guides/analyzer.md` |
 | What the analysis numbers mean | `guides/analysis.md` |
 

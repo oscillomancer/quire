@@ -48,7 +48,8 @@ machine, but file formats and commands can still change.
   Treeline (limiter), Gorse (transient shaper), Hickory (stereo utility),
   Sorrel (gate and expander), Teasel (saturation), Bracken (delay), Ghyll
   (reverb), Withy (chorus), Pollia (phaser), Umber (tape), Lichen
-  (analyzer), Sedge (tuner) and Gain, as CLAP plugins usable in any host. Each has JSON patches and exposes its
+  (analyzer), Sedge (tuner), Gain and Hornbeam (guitar amp and cabinet), as
+  CLAP plugins usable in any host. Each has JSON patches and exposes its
   parameters in physical units through a CLAP extension. All are written as
   DSP scripts and compiled into plugins of their own (`plugins/<name>`).
 - **Text formats.** Projects, patches and FX chains are canonical JSON; MIDI

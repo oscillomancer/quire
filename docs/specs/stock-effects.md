@@ -1943,7 +1943,197 @@ returns it to 0 dB.
 No factory patches: 0 dB is its only neutral setting, and any other is a
 number an agent or a user types.
 
-## 16. Acceptance
+## 16. Amp and cabinet — "Hornbeam" [`hornbeam`]
+
+A guitar amplifier and the cabinet it plays into, written as a DSP script
+(ADR-0047: `plugins/hornbeam/script/hornbeam.cpp`), every part a model of the
+circuit or the physics: no impulse responses, convolution or recorded data
+of any kind. Main stereo or mono in and out; latency is the amp's
+oversampler's (0 to 5 samples), the same in every chain so a switch never
+moves the timing.
+
+| key | type | range | curve | default |
+|---|---|---|---|---|
+| `voice` | enum | `clean`, `chime`, `crunch`, `lead`, `bass` | | `chime` |
+| `gain` | % | 0..100: the gain pot's travel (audio taper) | linear | 45 |
+| `bass`, `mid`, `treble` | % | 0..100: the tone stack's pots (bass and treble audio taper, mid linear) | linear | 50, 55, 60 |
+| `presence` | % | 0..100: the power amp's feedback lifted above 3 to 4 kHz | linear | 40 |
+| `sag` | % | 0..100: how far the supply droops under load | linear | 40 |
+| `master` | % | 0..100: the power amp's drive, −20..+20 dB | linear | 55 |
+| `cabinet` | enum | `open1x12`, `open2x12`, `closed2x12`, `closed4x12`, `closed4x10`, `closed1x15` | | `open2x12` |
+| `speaker` | enum | `alnico`, `vintage`, `modern`, `heavy` | | `alnico` |
+| `mic` | enum | `dynamic`, `condenser`, `ribbon` | | `dynamic` |
+| `position` | % | 0..100: the cap's centre to the cone's edge | linear | 30 |
+| `distance` | m | 0.01..1: from the plane of the cone's rim | log | 0.04 |
+| `room` | % | 0..100: how hard the floor and walls are | linear | 20 |
+| `chain` | enum | `full`, `amp` (the amp into a speaker's load), `cab` (the cabinet driven clean) | | `full` |
+| `channels` | enum | `mono` (the left input, heard on both sides), `stereo` (an amp for each side) | | `mono` |
+| `mix` | % | 0..100, latency aligned | linear | 100 |
+| `output` | dB | −24..24 | linear | 0 |
+| `quality` | enum | `x1`, `x2`, `x4`, `x8`, `x16`: the amp's oversampling (at most 768 kHz inside); a restart | | `x4` |
+| `input_level`, `output_level` | dBFS | readonly: peaks, falling 20 dB/s | | |
+| `distortion` | % | readonly: what the amp's curves add (below) | | |
+| `sag_now` | dB | readonly: the supply's droop this moment | | |
+
+- **Calibration.** 0 dBFS at the input is 2 V at the guitar's jack and a
+  preamp grid's bias is 1.5 V, so a DI peaking at −6 dBFS drives the first
+  stage about as a humbucker does.
+- **Preamp.** By the voice, two to four triode stages and a cathode
+  follower. A stage: the coupling capacitor's high-pass (8 to 120 Hz), the
+  cathode's bypass as a low shelf (none, or 3 to 6 dB down below 220 to
+  400 Hz), the gain into it, its curve, a Miller low-pass (8 to 22 kHz), and
+  it inverts. The curve is Child's law in units of the bias:
+  ((v + 1.7)^1.5 − 1.7^1.5) / (1.5 √1.7), cut off at −1.7, with v the grid
+  held back above 0.8 by grid current, 0.8 + e / (1 + 3e); a cold stage
+  (the lead's second) sits 0.6 below. Grid current charges the coupling
+  capacitor by the peaks' excess (in about a millisecond, leaking away at the
+  coupling's own time), shifting the bias colder by up to 1.5 times the
+  stage's share (0.3 to 0.8). A follower is unity up to 1, held above it.
+  The gain pot is an audio taper (10 % at half travel) with the voice's
+  bright capacitor (0, 120 or 470 pF) across its upper part:
+  g (1 + s(1 − g)RC) / (1 + s g(1 − g)RC), R = 1 MΩ. The first stage's
+  filters run before the oversampler.
+- **Tone stack.** The passive three-knob network: the treble capacitor to the
+  treble pot, whose wiper is the output; the slope resistor to the bass and
+  mid capacitors; the treble pot's bottom to the bass pot, which runs to the
+  mid pot. Solved by nodal analysis with the source's resistance (the plate,
+  38 kΩ, or a follower's 1.5 kΩ) and the next grid's 1 MΩ: a third-order
+  transfer function whose coefficients are polynomials in the three pots'
+  shares, so the knobs lean on each other as real ones do (the mid at 0 is
+  the deepest scoop, the bass loads the treble). Bilinear at the oversampled
+  rate, redesigned every 16 frames of a glide. Parts by voice (treble,
+  bass, mid pot; slope; treble, bass, mid capacitor): clean 250 k, 250 k,
+  10 k, 100 k, 250 p, 100 n, 47 n; chime 250 k, 1 M, 25 k, 56 k, 470 p, 22 n,
+  47 n; crunch 220 k, 1 M, 22 k, 33 k, 470 p, 22 n, 22 n; lead 250 k, 1 M,
+  25 k, 47 k, 250 p, 22 n, 22 n; bass 250 k, 1 M, 25 k, 56 k, 250 p, 47 n,
+  47 n.
+- **Level.** The preamp's level against gain is held: a Gaussian at −18 dBFS
+  RMS through the stages as curves (the stack at its log-averaged level at
+  noon) gives the gain that brings it to 0.1 RMS into the power amp, at 65
+  points of the gain's travel, and a trim per voice fitted on a guitar's DI
+  covers what the static model misses (the filters between stages, the
+  grid's charge). Below a fifth of the travel the level is no longer made
+  up: the pot fades the amp toward silence, as a real one does. Measured on
+  a synthetic DI (−22 dBFS RMS, peaks −6): within 0.3 dB from 25 to 100 %
+  gain in every voice; strummed chords within ±3 dB across gain and master.
+- **Power amp.** Presence is a first-order high shelf of up to 8 dB above
+  3 to 4 kHz before the pair (less feedback above it: more highs, and more
+  distortion of them). The push-pull pair is u / (1 + 2(1 − h)u² + u⁴)^¼
+  (h by voice: 0, class A, to 0.9) with an offset for a little second
+  harmonic, under a supply that sags: B = max(0.35, 1 − sag × depth × e),
+  e the output's level (4 ms up, 50 to 120 ms down by voice; depth 0.2 to
+  0.5), the drive over B and the ceiling under it. `master` drives it from
+  −20 to +20 dB; below half way the level is made up (the pair stays clean
+  at the same loudness), above it 60 % of the drive is, so the amp grows
+  denser and a little louder up to its ceiling. Then the output
+  transformer, as Teasel's (§5: the flux integrated, the derivative of what
+  saturation took from it taken away) with a cheaper core, 0.4v + 0.6v /
+  √(1 + v²), at 20 to 40 Hz by voice, at the session's rate since its
+  harmonics are the bass's.
+- **Speaker.** A motor and a cone of five masses on springs: the voice coil,
+  the apex (cap and inner cone, 0 to 0.38 of the radius), two rings (to 0.62
+  and 0.84) and the rim with half the surround, each of the paper's areal
+  density times its area plus a share of the air load; links between them
+  tuned by speaker (coil to apex 4 to 7 kHz, outward to 1.1 to 2.2 kHz),
+  the spider at the coil and the surround at the rim (60/40 of the
+  suspension, which with the moving mass gives the resonance fs), and a
+  closed box's air on every ring by its area (ρc²/V, the volume doubled for
+  lining and leaks, shared by the box's speakers). Solved into five modes
+  (Jacobi rotations), each a state-variable filter driven by the force at
+  the coil: the lowest is the cone as a piston at its resonance, the rest
+  the breakup. Mode damping: 1/(2 Qms), then each breakup mode's loss
+  factor. The force is Bl times the coil's current, through Re (plus the
+  amp's output impedance) and the coil's inductance with its eddy currents'
+  loss resistance across it; the back EMF a sample late. The air load falls
+  away above ka ≈ 1, a first-order shelf on the force. Bl falls and the
+  suspension stiffens with the coil's excursion (Bl / (1 + 0.4 (x/X)²), the
+  spring's force K x (x/X)², X the speaker's limit): a cranked amp's lows
+  compress and thicken, an alnico speaker soonest. The speakers, at
+  12 inches (fs, Qms, Qes, Re, Le, rated power, X): alnico 75 Hz, 4, 1.3,
+  6.4 Ω, 0.45 mH, 15 W, 2.5 mm (a light, bright cone); vintage 75, 5,
+  0.85, 6.4, 0.65, 25 W, 3 mm (soft, damped, rolling off early); modern 85,
+  6, 0.6, 6.4, 0.7, 60 W, 3.5 mm (stiff, peaking 2.5 to 5 kHz); heavy 62,
+  7, 0.38, 6.0, 0.9, 200 W, 5 mm (stiff, damped, extended). A 10 or 15 inch
+  cone scales its masses, radius, links and resonance.
+- **Amp to speaker.** The amp drives the speaker through its output
+  impedance (clean 3 Ω, chime 10, crunch 5, lead 4, bass 1.5), which raises
+  the speaker's Q at its resonance (the thump in the box) and lifts the
+  coil's inductive roll-off. At the ceiling the speaker sees √(2 P × 8 Ω)
+  for the voice's power (40, 30, 50, 100, 300 W), divided among the box's
+  speakers. `chain` `cab` drives it from a voltage source (no output
+  impedance, no amp, no oversampler: the input delayed by the latency, 0 dBFS
+  as 5 V, about 3 W); `amp` outputs the amp's voltage across a vintage
+  speaker in a closed 4x12 as its load (V − Zo i), for an impulse response
+  elsewhere.
+- **Microphone.** The cone is a cone: the cap sits its depth (4.2 to 5 cm at
+  12 inches) behind the rim. Each ring's surface, in 4 radial and 12
+  angular steps across the half the mic faces, reaches the mic at
+  (pos × radius, distance) by its own path (the capsule's 8 mm radius the
+  shortest), as Rayleigh's integral has it: dA / (2πr), delayed r/c. They
+  are binned by distance into 3 taps a ring, each with a pressure weight and
+  a gradient weight: a mic hears α of the pressure and 1 − α of its gradient
+  along its axis, (1 + c/(jωr)) cos θ per path, the c/(jωr) part through
+  one leaky integrator (8 Hz): the proximity effect of every path at its own
+  distance. Then the far paths, from the cone's far field (Σ area ×
+  acceleration): the box's other speakers (two taps each, their near and far
+  halves, through a low-pass where ka sin θ = 1.6), an open back's rear wave
+  (inverted, round the nearest side, 700 Hz) or a closed box's nearest edge
+  (inverted, 0.35, 600 Hz), the floor (0.85 × `room`, 3 kHz), and for the
+  figure eight the wall 1.5 m behind the mic (0.7 × `room`). The earliest
+  path is taken as no delay. Then the capsule: dynamic (cardioid α 0.5; a
+  115 Hz high-pass, Q 0.6; +5 dB at 5.2 kHz; −1 dB at 2 kHz; a 12.5 kHz
+  low-pass), condenser (cardioid; 55 Hz; +2.5 dB at 11 kHz; 20 kHz), ribbon
+  (figure eight α 0; 20 Hz; +1 dB at 200 Hz; a 7.5 kHz low-pass, Q 0.55).
+  The cabinet's gain is set to unity over 100 Hz to 5 kHz (equal weight per
+  octave), recomputed with the paths every 128 frames of a glide.
+- **What it sounds like** (cab only, measured from the audio): a closed
+  4x12's box resonance is near 105 Hz (vintage); close-miked with the
+  dynamic it is within 3 dB from about 110 to 400 Hz; the breakup peaks
+  between 2 and 5 kHz move with the speaker; it falls 20 to 25 dB in the
+  octave above 6 kHz; the cap's centre is brightest, with
+  notches that move with the mic; the cone's edge is darker from 3 kHz; at
+  30 cm the other speakers comb, and at 1 m a 4x12 beams. An open back
+  thins the lows at a distance and keeps them close up. The plot in the
+  editor is the same model evaluated at the session's rate, every filter's
+  response exactly as the audio has it: on impulses through the cabinet it
+  matches the audio to within 0.001 dB (8 frequencies, 3 settings, 44.1, 48
+  and 96 kHz).
+- **Switching** voice, cabinet, speaker, mic, chain or channels dips the
+  output for 5 ms, sets up afresh and comes back in 5 ms.
+- **`distortion`**: for each curve (the stages and the pair) the share of
+  its output not a scaled copy of its input, from running moments over
+  300 ms, combined as √(1 − Π(1 − share²)); the filters between the curves
+  do not count.
+
+Measured (48 kHz):
+
+| check | result |
+|---|---|
+| aliasing, E6 (1318.5 Hz) at −6 dBFS, worst component 20 Hz–20 kHz, x1 / x2 / x4 / x8 | High Gain Rhythm −32 / −36 / −51 / −64 dBc; Classic Crunch −58 / −66 / −86 / −100 dBc |
+| the speaker's excursion (at the session's rate), low E at 0 dBFS, cab only | THD up to 3.8 % (alnico, open 1x12), 0.22 % at −12 dBFS; aliases ≤ −97.7 dBc, the measurement's floor at every level |
+| the cabinet alone, −30 dBFS | THD below 0.01 % |
+| factory patches on a guitar DI at −22 dBFS RMS | within 1.5 dB of the input's level |
+| cost (clap-bench, release) | defaults 13.7 refs (Teasel's 15.7 the same run), factory patches 13.3 on average (17.6), high gain 18 to 19, cab only 4.5 to 5.1, automated 29.0 (27.7); with `channels` stereo the defaults cost 25.0 |
+
+Editor (1080 × 768): the header's hornbeam leaf, the name and the input and
+output meters. The amp: the voices as pills, gain, bass, mid, treble,
+presence, sag and master as dials, and the tone stack's response with
+presence and the bright cap as the amp has them (at its oversampled rate),
+with the distortion and sag readouts. The cabinet: the cone from the front,
+its rings lit by how much of what the mic hears comes from each (the taps'
+weights), the mic where `position` puts it (dragged across, wheeled for
+distance), the box small with its speakers and the miked one; the speaker
+from the side with the mic on a log ruler of its distance (dragged); the
+response of the cabinet and mic (or, amp only, of the load), and pills for
+the cabinet, speaker and mic, and room. The footer: chain, channels, mix,
+output, oversampling and the latency.
+
+Factory patches: Edge of Breakup (the defaults), Glass Clean, Sparkle
+Clean, Chime, Classic Crunch, Singing Lead, Hot Rod, High Gain Rhythm,
+Scooped Metal, Ribbon Room, Small Combo Squash, Bass Amp, Bass Grit (with
+the DI at 40 %), Cab Only 4x12, Cab Only 1x12 Open, Amp Only.
+
+## 17. Acceptance
 
 A plugin is done when its tests, the CLAP validator, the RT sanitizer run,
 a REAPER load and automation check, and its skill page exist.

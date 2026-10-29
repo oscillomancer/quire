@@ -88,13 +88,18 @@ plugins ship as CLAP (and VST3, AU) files of their own that other hosts load.
    (2026-10-28) The sixteenth is Gain, a level change
    (`com.suppleaudio.gain`), with no predecessor: one knob, named for
    what it does by the maintainer's choice, the one exception to item 6.
+   (2026-10-28) The seventeenth is Hornbeam, the guitar amp and cabinet
+   (`com.suppleaudio.hornbeam`), with no predecessor; the hornbeam is a
+   hardwood hard enough to be called ironwood, long turned into piano
+   actions and mallets.
 6. **Names and look.** A stock plugin is named after a plant or something
    else of the natural world, not after its effect type (Yarrow, the EQ;
    Sundew, the compressor; Treeline, the limiter; Gorse, the transient
    shaper; Hickory, the stereo utility; Sorrel, the gate; Teasel, the
    saturation; Bracken, the delay; Canopy, the reverb; Lichen, the
    analyzer; Marram, the synthesizer; (2026-10-22) Withy, the chorus;
-   Pollia, the phaser; Umber, the tape machine; Sedge, the tuner).
+   Pollia, the phaser; Umber, the tape machine; Sedge, the tuner;
+   (2026-10-28) Hornbeam, the guitar amp and cabinet).
    (2026-10-28) Gain, a level change of one knob, is the exception: the
    maintainer named it for what it does.
    Every stock script draws with the scripts' palette (`kScriptTheme` in

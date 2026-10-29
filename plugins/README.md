@@ -26,6 +26,7 @@ player, and every check the other stock plugins have.
 | `umber` | Umber, the tape machine | `com.suppleaudio.umber` |
 | `sedge` | Sedge, the chromatic tuner | `com.suppleaudio.sedge` |
 | `gain` | Gain, a level change | `com.suppleaudio.gain` |
+| `hornbeam` | Hornbeam, the guitar amp and cabinet | `com.suppleaudio.hornbeam` |
 
 ## Files
 
