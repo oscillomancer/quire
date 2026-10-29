@@ -4,6 +4,37 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.33.2
+
+What a product must do: nothing.
+
+- **A narrow file slot keeps the end of the file's name.** A name too long
+  for its slot drops its extension before it is cut, so names that differ
+  only at the end (`analog-open-hat.flac`, `analog-cymbal.flac`) still read
+  apart in a slot as narrow as a drum pad's.
+
+## 1.33.1
+
+What a product must do: nothing.
+
+- **A narrow file slot keeps the file's name.** A slot shows a factory
+  file by its name (`kick.flac`, as its menu lists it) rather than the
+  whole `factory:kick.flac`, lets a long name shrink a little before it is
+  cut, and leaves out the loaded file's summary (`1 ch, 0.70 s`) when the
+  name would not fit beside it; the summary stays in its tooltip. A slot
+  as narrow as a drum pad's showed only "fa…".
+
+## 1.33.0
+
+What a product must do: nothing.
+
+- **A file slot's menu offers the factory files.** Its context menu (a
+  secondary click) lists, under "Factory", each of the product's
+  `PRODUCT_ASSETS` the slot's property takes, by file name, the present
+  one checked; choosing one sets `"factory:<name>"`. Until now a factory
+  file reached a slot only from a default, a preset or the host, so a
+  user could not put one back after choosing a file of their own.
+
 ## 1.32.0
 
 What a product must do: nothing. A product that wants files inside its

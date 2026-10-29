@@ -23,6 +23,8 @@ set(PRODUCT_PRESETS     ON)
 set(PRODUCT_KIND        "@KIND@")
 set(PRODUCT_CHANNELS    @CHANNELS@)
 set(PRODUCT_FEATURES    "@FEATURES@")
+# The extra outputs the script names (Info.outputs), each as wide as the main bus.
+set(PRODUCT_AUX_OUTPUTS @AUX_OUTPUTS@)
 
 # The suite's layer: the semantic-params extension and the script's status
 # in the host's log.

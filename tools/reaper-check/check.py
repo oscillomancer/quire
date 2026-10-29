@@ -65,6 +65,8 @@ CASES = {
     "com.suppleaudio.hornbeam": Case("Hornbeam", False, "Output", .5, .25, "gain"),
     "com.suppleaudio.coppice": Case("Coppice", True, "Output",
                                   normalized(0, -36, 12), normalized(-12, -36, 12), "gain"),
+    "com.suppleaudio.pollard": Case("Pollard", True, "Output",
+                                  normalized(0, -36, 12), normalized(-12, -36, 12), "gain"),
 }
 
 

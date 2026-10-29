@@ -17,7 +17,8 @@ or a sequence of other sounds, placed at beats and summed:
    "hits": [["kick", 0, 0.0], ["hat", 0.5, -6.0]]}   (sound, beat, dB)
 and takes, after it is made: "channels" (1 sums to mono, 2 keeps stereo),
 "seconds" (what is kept from the start), "fade_ms" (a cosine fade at the
-end) and "peak_db" (normalized to that peak). An "internal" sound is used by
+end), "fade_in_ms" (one at the start, so a hit begins at zero) and
+"peak_db" (normalized to that peak). An "internal" sound is used by
 sequences and not written.
 """
 import argparse, array, filecmp, json, math, os, re, shutil, struct, subprocess, sys, tempfile
@@ -134,10 +135,13 @@ def finish(sound, channels, rate):
         keep = int(round(sound["seconds"] * rate))
         channels = [(c + [0.0] * max(0, keep - len(c)))[:keep] for c in channels]
     fade = int(round(sound.get("fade_ms", 0) * rate / 1000.0))
+    fade_in = int(round(sound.get("fade_in_ms", 0) * rate / 1000.0))
     frames = len(channels[0])
     for c in channels:
         for k in range(min(fade, frames)):
             c[frames - 1 - k] *= 0.5 - 0.5 * math.cos(math.pi * k / fade)
+        for k in range(min(fade_in, frames)):
+            c[k] *= 0.5 - 0.5 * math.cos(math.pi * k / fade_in)
     if "peak_db" in sound:
         peak = max(abs(x) for c in channels for x in c)
         if peak > 0.0:

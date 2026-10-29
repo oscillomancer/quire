@@ -766,6 +766,24 @@ TEST(a_file_slot_chooses_takes_drops_clears_and_shows_its_state) {
     CHECK(ui.menu().open && menuRow(ui, "Clear") >= 0);
     choose(ui, menuRow(ui, "Clear"));
     CHECK(host.property(p.id).empty());
+    // The menu offers the product's own files the slot takes.
+    for (size_t a = 0; a < assets::count(); ++a) {
+        const std::string name(assets::at(a).name);
+        CHECK(ui.pointerDown(100, 35, 1, 0, false));
+        const int row = menuRow(ui, name.c_str());
+        CHECK((row >= 0) == files::hasExtension(name, p.extensions));
+        if (row < 0) {
+            ui.key(key::kEscape, 0);
+            continue;
+        }
+        CHECK(menuRow(ui, "Factory") >= 0);
+        choose(ui, row);
+        CHECK(host.property(p.id) == "factory:" + name);
+        CHECK(ui.pointerDown(100, 35, 1, 0, false));
+        CHECK(ui.menu().items[static_cast<size_t>(menuRow(ui, name.c_str()))].checked);
+        ui.key(key::kEscape, 0);
+        host.setProperty(p.id, "");
+    }
     // What it shows follows the host, and a change repaints.
     host.setProperty(p.id, "/gone/cathedral.wav");
     host.files.state = FileStatus::State::Missing;

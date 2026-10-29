@@ -15,8 +15,9 @@ LFOs, routes and look wherever it has the same thing, so an agent that
 knows one knows most of the other. Zones, velocity layers, round robin,
 time-stretching, recording, reading a file's root or `smpl` loop points
 and detecting its root are left out (the design's reasons are in the
-commit that added it); a drum sampler with several pads is a separate
-plugin, still to come.
+commit that added it); Pollard (`pollard.md`), the drum sampler, plays
+sixteen pads with this engine, which the two scripts share as identical
+text.
 
 ## 1. Signal flow (per voice)
 

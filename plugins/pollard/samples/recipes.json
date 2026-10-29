@@ -1,0 +1,806 @@
+{
+ "schema": "supple.factory-samples/1.0",
+ "rate": 48000,
+ "sounds": [
+  {
+   "name": "analog-kick",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.wave": "sine",
+     "osc1.retrigger": true,
+     "filter1.type": "off",
+     "amp.decay": "450 ms",
+     "amp.release": "80 ms",
+     "env2.decay": "45 ms",
+     "env2.pitch": "+24 st",
+     "env2.release": "40 ms"
+    }
+   },
+   "notation": "1: G1:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.7,
+   "fade_ms": 60,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "analog-boom",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.wave": "sine",
+     "osc1.retrigger": true,
+     "filter1.type": "off",
+     "amp.decay": "3 s",
+     "amp.release": "300 ms",
+     "env2.decay": "30 ms",
+     "env2.pitch": "+7 st",
+     "env2.release": "30 ms"
+    }
+   },
+   "notation": "1: F1:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 2.0,
+   "fade_ms": 250,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "analog-snare",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.type": "noise",
+     "osc1.level": "0 dB",
+     "osc2.type": "analog",
+     "osc2.level": "-3 dB",
+     "osc2.coarse": -5,
+     "osc2.wave": "triangle",
+     "osc2.to": "direct",
+     "osc2.retrigger": true,
+     "filter1.type": "svf",
+     "filter1.cutoff": "7 kHz",
+     "filter1.env": "+0 oct",
+     "filter2.type": "svf",
+     "filter2.cutoff": "300 Hz",
+     "filter2.mode": "highpass",
+     "amp.decay": "220 ms",
+     "amp.release": "120 ms",
+     "env2.decay": "40 ms",
+     "env2.pitch": "+12 st",
+     "env2.release": "40 ms"
+    }
+   },
+   "notation": "1: D3:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.5,
+   "fade_ms": 60,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "analog-rim",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.wave": "triangle",
+     "osc1.retrigger": true,
+     "osc2.type": "noise",
+     "osc2.level": "-8 dB",
+     "filter1.type": "svf",
+     "filter1.mode": "bandpass",
+     "filter1.cutoff": "2.2 kHz",
+     "filter1.resonance": "30 %",
+     "filter1.env": "+0 oct",
+     "amp.decay": "45 ms",
+     "amp.release": "30 ms"
+    }
+   },
+   "notation": "1: E5:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.15,
+   "fade_ms": 20,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "clap-burst",
+   "internal": true,
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.type": "noise",
+     "osc1.level": "0 dB",
+     "filter1.type": "svf",
+     "filter1.mode": "bandpass",
+     "filter1.cutoff": "1.3 kHz",
+     "filter1.resonance": "25 %",
+     "filter1.env": "+0 oct",
+     "amp.decay": "14 ms",
+     "amp.release": "10 ms"
+    }
+   },
+   "notation": "1: C4:w r:*",
+   "tempo": 60,
+   "tail_s": 0.1,
+   "channels": 1,
+   "seconds": 0.06,
+   "fade_ms": 5
+  },
+  {
+   "name": "clap-tail",
+   "internal": true,
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.type": "noise",
+     "osc1.level": "0 dB",
+     "filter1.type": "svf",
+     "filter1.mode": "bandpass",
+     "filter1.cutoff": "1.2 kHz",
+     "filter1.resonance": "20 %",
+     "filter1.env": "+0 oct",
+     "amp.decay": "190 ms",
+     "amp.release": "80 ms"
+    }
+   },
+   "notation": "1: C4:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.4,
+   "fade_ms": 40
+  },
+  {
+   "name": "analog-clap",
+   "tempo": 60,
+   "beats": 0.45,
+   "channels": 1,
+   "fade_ms": 40,
+   "fade_in_ms": 0.5,
+   "peak_db": -1,
+   "hits": [
+    [
+     "clap-burst",
+     0,
+     0
+    ],
+    [
+     "clap-burst",
+     0.011,
+     -1
+    ],
+    [
+     "clap-burst",
+     0.023,
+     -2
+    ],
+    [
+     "clap-tail",
+     0.034,
+     -8
+    ]
+   ]
+  },
+  {
+   "name": "analog-hat",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.type": "noise",
+     "osc1.level": "0 dB",
+     "filter1.type": "svf",
+     "filter1.cutoff": "8 kHz",
+     "filter1.mode": "highpass",
+     "filter1.env": "+0 oct",
+     "amp.decay": "55 ms",
+     "amp.release": "40 ms"
+    }
+   },
+   "notation": "1: C4:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.2,
+   "fade_ms": 20,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "analog-open-hat",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.type": "noise",
+     "osc1.level": "0 dB",
+     "filter1.type": "svf",
+     "filter1.cutoff": "7 kHz",
+     "filter1.mode": "highpass",
+     "filter1.env": "+0 oct",
+     "amp.decay": "650 ms",
+     "amp.release": "300 ms"
+    }
+   },
+   "notation": "1: C4:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 1.0,
+   "fade_ms": 150,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "analog-tom",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.wave": "sine",
+     "osc1.retrigger": true,
+     "osc2.type": "analog",
+     "osc2.wave": "triangle",
+     "osc2.level": "-10 dB",
+     "osc2.retrigger": true,
+     "filter1.type": "off",
+     "amp.decay": "380 ms",
+     "amp.release": "100 ms",
+     "env2.decay": "90 ms",
+     "env2.pitch": "+7 st",
+     "env2.release": "60 ms"
+    }
+   },
+   "notation": "1: A2:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.6,
+   "fade_ms": 60,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "analog-cowbell",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.wave": "square",
+     "osc1.fine": "-45 ct",
+     "osc1.retrigger": true,
+     "osc2.type": "analog",
+     "osc2.wave": "square",
+     "osc2.coarse": 7,
+     "osc2.fine": "-20 ct",
+     "osc2.retrigger": true,
+     "filter1.type": "svf",
+     "filter1.mode": "bandpass",
+     "filter1.cutoff": "800 Hz",
+     "filter1.resonance": "35 %",
+     "filter1.env": "+0 oct",
+     "amp.decay": "300 ms",
+     "amp.release": "100 ms"
+    }
+   },
+   "notation": "1: C#5:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.5,
+   "fade_ms": 60,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "analog-cymbal",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.type": "noise",
+     "osc1.level": "0 dB",
+     "osc2.type": "fm",
+     "osc2.level": "-10 dB",
+     "osc2.ratio": 1.4142,
+     "osc2.fm": 5.0,
+     "osc2.feedback": "40 %",
+     "osc2.retrigger": true,
+     "filter1.type": "svf",
+     "filter1.cutoff": "5 kHz",
+     "filter1.mode": "highpass",
+     "filter1.env": "+0 oct",
+     "amp.decay": "1.8 s",
+     "amp.release": "800 ms"
+    }
+   },
+   "notation": "1: A5:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 2.0,
+   "fade_ms": 400,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "analog-shaker",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "15 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.type": "noise",
+     "osc1.level": "0 dB",
+     "filter1.type": "svf",
+     "filter1.cutoff": "5 kHz",
+     "filter1.mode": "highpass",
+     "filter1.env": "+0 oct",
+     "amp.decay": "80 ms",
+     "amp.release": "40 ms"
+    }
+   },
+   "notation": "1: C4:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.22,
+   "fade_ms": 30,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "fm-kick",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.type": "fm",
+     "osc1.fm": 2.0,
+     "osc1.retrigger": true,
+     "filter1.type": "off",
+     "amp.decay": "350 ms",
+     "amp.release": "80 ms",
+     "env2.decay": "35 ms",
+     "env2.pitch": "+18 st",
+     "env2.fm": 100.0,
+     "env2.release": "30 ms"
+    }
+   },
+   "notation": "1: A1:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.6,
+   "fade_ms": 60,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "fm-snare",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.type": "fm",
+     "osc1.ratio": 1.41,
+     "osc1.fm": 4.0,
+     "osc1.retrigger": true,
+     "osc2.type": "noise",
+     "osc2.level": "-4 dB",
+     "filter1.type": "svf",
+     "filter1.mode": "highpass",
+     "filter1.cutoff": "200 Hz",
+     "filter1.env": "+0 oct",
+     "amp.decay": "180 ms",
+     "amp.release": "80 ms",
+     "env2.decay": "30 ms",
+     "env2.pitch": "+7 st",
+     "env2.fm": 60.0,
+     "env2.release": "30 ms",
+     "filter2.type": "svf",
+     "filter2.mode": "lowpass",
+     "filter2.cutoff": "9 kHz"
+    }
+   },
+   "notation": "1: E3:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.45,
+   "fade_ms": 60,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "fm-hat",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.type": "fm",
+     "osc1.ratio": 1.4142,
+     "osc1.fm": 6.0,
+     "osc1.feedback": "40 %",
+     "osc1.retrigger": true,
+     "filter1.type": "svf",
+     "filter1.mode": "highpass",
+     "filter1.cutoff": "7 kHz",
+     "filter1.env": "+0 oct",
+     "amp.decay": "60 ms",
+     "amp.release": "40 ms"
+    }
+   },
+   "notation": "1: C6:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.2,
+   "fade_ms": 20,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "fm-open-hat",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.type": "fm",
+     "osc1.ratio": 1.4142,
+     "osc1.fm": 6.0,
+     "osc1.feedback": "40 %",
+     "osc1.retrigger": true,
+     "filter1.type": "svf",
+     "filter1.mode": "highpass",
+     "filter1.cutoff": "6 kHz",
+     "filter1.env": "+0 oct",
+     "amp.decay": "550 ms",
+     "amp.release": "250 ms"
+    }
+   },
+   "notation": "1: C6:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.9,
+   "fade_ms": 150,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "fm-tom",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.type": "fm",
+     "osc1.fm": 1.5,
+     "osc1.retrigger": true,
+     "filter1.type": "off",
+     "amp.decay": "420 ms",
+     "amp.release": "100 ms",
+     "env2.decay": "60 ms",
+     "env2.pitch": "+5 st",
+     "env2.fm": 80.0,
+     "env2.release": "50 ms"
+    }
+   },
+   "notation": "1: E2:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.6,
+   "fade_ms": 60,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "fm-ride",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.type": "fm",
+     "osc1.ratio": 3.5,
+     "osc1.fm": 3.0,
+     "osc1.retrigger": true,
+     "osc2.type": "noise",
+     "osc2.level": "-24 dB",
+     "filter1.type": "svf",
+     "filter1.mode": "highpass",
+     "filter1.cutoff": "1.5 kHz",
+     "filter1.env": "+0 oct",
+     "amp.decay": "2.4 s",
+     "amp.release": "1 s",
+     "env2.decay": "400 ms",
+     "env2.fm": 50.0,
+     "env2.release": "300 ms"
+    }
+   },
+   "notation": "1: G5:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 2.5,
+   "fade_ms": 400,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "fm-zap",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.wave": "sine",
+     "osc1.retrigger": true,
+     "filter1.type": "off",
+     "amp.decay": "200 ms",
+     "amp.release": "60 ms",
+     "env2.decay": "120 ms",
+     "env2.pitch": "+36 st",
+     "env2.release": "60 ms"
+    }
+   },
+   "notation": "1: C2:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.4,
+   "fade_ms": 40,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "hand-conga",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.wave": "triangle",
+     "osc1.retrigger": true,
+     "osc2.type": "noise",
+     "osc2.level": "-20 dB",
+     "filter1.type": "svf",
+     "filter1.cutoff": "3 kHz",
+     "filter1.env": "+0 oct",
+     "amp.decay": "300 ms",
+     "amp.release": "80 ms",
+     "env2.decay": "20 ms",
+     "env2.pitch": "+3 st",
+     "env2.release": "20 ms"
+    }
+   },
+   "notation": "1: D3:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.5,
+   "fade_ms": 60,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "hand-bongo",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.wave": "triangle",
+     "osc1.retrigger": true,
+     "filter1.type": "svf",
+     "filter1.cutoff": "4 kHz",
+     "filter1.env": "+0 oct",
+     "amp.decay": "160 ms",
+     "amp.release": "60 ms",
+     "env2.decay": "15 ms",
+     "env2.pitch": "+4 st",
+     "env2.release": "15 ms"
+    }
+   },
+   "notation": "1: A3:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.35,
+   "fade_ms": 40,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "hand-clave",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.wave": "sine",
+     "osc1.retrigger": true,
+     "filter1.type": "off",
+     "amp.decay": "45 ms",
+     "amp.release": "30 ms"
+    }
+   },
+   "notation": "1: D#7:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.15,
+   "fade_ms": 20,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "hand-woodblock",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "1 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.wave": "triangle",
+     "osc1.retrigger": true,
+     "filter1.type": "svf",
+     "filter1.mode": "bandpass",
+     "filter1.cutoff": "900 Hz",
+     "filter1.resonance": "40 %",
+     "filter1.env": "+0 oct",
+     "amp.decay": "60 ms",
+     "amp.release": "40 ms"
+    }
+   },
+   "notation": "1: G5:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.2,
+   "fade_ms": 20,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "hand-tambourine",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "2 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.type": "noise",
+     "osc1.level": "-2 dB",
+     "osc2.type": "fm",
+     "osc2.level": "-8 dB",
+     "osc2.ratio": 2.76,
+     "osc2.fm": 4.0,
+     "osc2.retrigger": true,
+     "filter1.type": "svf",
+     "filter1.mode": "highpass",
+     "filter1.cutoff": "6 kHz",
+     "filter1.env": "+0 oct",
+     "amp.decay": "260 ms",
+     "amp.release": "100 ms"
+    }
+   },
+   "notation": "1: E6:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.5,
+   "fade_ms": 80,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  },
+  {
+   "name": "hand-cabasa",
+   "patch": {
+    "schema": "supple.marram-patch/1.0",
+    "params": {
+     "amp.attack": "10 ms",
+     "amp.sustain": "0 %",
+     "env2.attack": "0 ms",
+     "env2.sustain": "0 %",
+     "osc1.type": "noise",
+     "osc1.level": "0 dB",
+     "osc1.color": "blue",
+     "filter1.type": "svf",
+     "filter1.mode": "highpass",
+     "filter1.cutoff": "4 kHz",
+     "filter1.env": "+0 oct",
+     "amp.decay": "90 ms",
+     "amp.release": "40 ms"
+    }
+   },
+   "notation": "1: C4:w r:*",
+   "tempo": 60,
+   "tail_s": 0.3,
+   "channels": 1,
+   "seconds": 0.25,
+   "fade_ms": 30,
+   "fade_in_ms": 0.5,
+   "peak_db": -1
+  }
+ ]
+}

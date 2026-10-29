@@ -117,6 +117,8 @@ class EditorServices {
     // Each sets the Param's value in the editor's copy as well.
     enum class Edit { Value, Position, Default };
     virtual void editParam(int slot, Edit kind, double value) = 0;
+    // pointer()'s notes (Instrument::playNote).
+    virtual void playNote(int key, double velocity, bool on) = 0;
 
   protected:
     ~EditorServices() = default;

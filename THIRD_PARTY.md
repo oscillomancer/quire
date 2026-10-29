@@ -75,7 +75,8 @@ Plex, Fraunces; OFL-1.1) travel with each plugin copy with their license files.
 First-party content, not third-party: Coppice's factory samples
 (`plugins/coppice/samples/*.flac`, embedded in the plugin) are rendered
 from Marram by `tools/factory-samples/render.py` and dedicated to the public
-domain under CC0 1.0 (`plugins/coppice/samples/LICENSE`).
+domain under CC0 1.0 (`plugins/coppice/samples/LICENSE`); so are Pollard's
+factory hits (`plugins/pollard/samples/*.flac`, `plugins/pollard/samples/LICENSE`).
 
 Development tool (not linked, bundled, or used at runtime):
 `free-audio/clap-validator` 0.4.1, tag `0.4.1` at

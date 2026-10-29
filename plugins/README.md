@@ -28,6 +28,7 @@ player, and every check the other stock plugins have.
 | `gain` | Gain, a level change | `com.suppleaudio.gain` |
 | `hornbeam` | Hornbeam, the guitar amp and cabinet | `com.suppleaudio.hornbeam` |
 | `coppice` | Coppice, the sampler (`docs/specs/coppice.md`) | `com.suppleaudio.coppice` |
+| `pollard` | Pollard, the drum sampler (`docs/specs/pollard.md`) | `com.suppleaudio.pollard` |
 
 ## Files
 
@@ -41,9 +42,10 @@ player, and every check the other stock plugins have.
   -P plugins/catalog.cmake`.
 - `product.cmake`: identity, kept by hand: AU codes, the parameter
   host-smoke turns (one that changes the sound at its default), and the
-  CLAP features, which the plugin takes from the script's `Info`
-  (`.features`, what the plugin is: Quire's plugin browser shows it after
-  the name) and `plugin.<name>.catalog` checks agree.
+  CLAP features and extra outputs, which the plugin takes from the
+  script's `Info` (`.features`, what the plugin is: Quire's plugin browser
+  shows it after the name; `.outputs`, as `PRODUCT_AUX_OUTPUTS`) and
+  `plugin.<name>.catalog` checks agree with a fresh source export.
   The state tag is the player's for the id, so sessions saved while the
   script ran in the player load in the native plugin.
 - `Layer.cpp`, `Processor.h`, `Theme.h`, `targets.cmake`, `NOTICES.txt`: as
@@ -52,12 +54,15 @@ player, and every check the other stock plugins have.
 - `response.cmake` (optional): the plugin's own measurements through the
   built plugin, as `plugin.<name>.response`.
 - `samples/` (optional): factory files, which `product.cmake` lists as
-  `PRODUCT_ASSETS` and a script names as `factory:<name>`. Coppice's are
-  rendered from Marram: `recipes.json` says how, and
+  `PRODUCT_ASSETS` and a script names as `factory:<name>`. Coppice's and
+  Pollard's are rendered from Marram: `recipes.json` says how, and
   `tools/factory-samples/render.py plugins/<name>/samples/recipes.json`
   renders them again (`--check` compares them with the committed files),
   through the dev build's sandbox and Marram. They are first-party
   content, CC0 (`LICENSE` beside them).
+- `engine-copy.cmake` (Pollard): checks that the engine between the
+  markers in `pollard.cpp` is the same text as in `coppice.cpp`, as
+  `plugin.pollard.engine-copy`.
 
 ## Changing one
 

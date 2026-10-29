@@ -3221,9 +3221,11 @@ void Sema::editorRules() {
     reach(p.draw);
     reach(p.editor);
     auto edits = [&](const CallExpr* c) {
-        return c->builtinMethod && c->builtinMethod->owner == b_.param() &&
-               (c->builtinMethod->name == "edit" || c->builtinMethod->name == "editNormalized" ||
-                c->builtinMethod->name == "reset");
+        return c->builtinMethod &&
+               ((c->builtinMethod->owner == b_.param() &&
+                 (c->builtinMethod->name == "edit" || c->builtinMethod->name == "editNormalized" ||
+                  c->builtinMethod->name == "reset")) ||
+                c->builtinMethod->name == "playNote");
     };
     struct Use {
         FunctionDecl* f = nullptr;
@@ -3289,14 +3291,19 @@ void Sema::editorRules() {
                         error(c->loc, "script.editor.call",
                               name + "() is the editor's, and " + f->name + "() is " +
                                   hookList(f->contexts & (kInit | kAudio)) + " code",
-                              edits(c) ? "the audio code reads the parameter; a user, or "
-                                         "pointer(), changes it"
-                                       : "call it from draw() or editor(); share what they need "
-                                         "with a Shared member");
+                              name == "playNote" ? "a note it plays reaches the audio code as the "
+                                                   "host's do, through startVoice()"
+                              : edits(c) ? "the audio code reads the parameter; a user, or "
+                                           "pointer(), changes it"
+                                         : "call it from draw() or editor(); share what they need "
+                                           "with a Shared member");
                     if (ui && edits(c) && drawing.count(f))
                         error(c->loc, "script.editor.edit",
-                              name + "() changes the parameter as a user would, and " + f->name +
-                                  "() " +
+                              name +
+                                  (name == "playNote"
+                                       ? "() plays a note as a user would, and "
+                                       : "() changes the parameter as a user would, and ") +
+                                  f->name + "() " +
                                   (f == p.draw     ? "draws"
                                    : f == p.editor ? "lays the editor out"
                                                    : "is called while drawing") +

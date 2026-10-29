@@ -616,6 +616,26 @@ TEST_CASE("editor code reads parameters and Shared members, and keeps the rest a
                                       "void nudge() { gain.reset(); }")) == "script.editor.edit");
     CHECK(firstError(plugin("void process(Block& io) { gain.edit(0); }\n" + draw)) ==
           "script.editor.call");
+    // An instrument's pointer() plays it, as its keyboard does; nothing else does.
+    auto synth = [&](const std::string& body) {
+        return head + "struct T : Instrument {\n" +
+               "static constexpr Info info = {.name = \"T\", .id = \"com.example.t\"};\n" +
+               "void startVoice(int v) {}\nvoid releaseVoice(int v) {}\n" + process + draw + body +
+               "\n};\n";
+    };
+    CHECK(firstError(synth("void pointer(const Pointer& p) {\n"
+                           "  if (p.action() == PointerAction::Press) playNote(36, 0.8, true);\n"
+                           "}")) == "");
+    CHECK(firstError(synth("void editor(Editor& e) { playNote(36, 1, true); }")) ==
+          "script.editor.edit");
+    CHECK(firstError(head + "struct T : Instrument {\n" +
+                     "static constexpr Info info = {.name = \"T\", .id = \"com.example.t\"};\n" +
+                     "void startVoice(int v) { playNote(36, 1, true); }\n"
+                     "void releaseVoice(int v) {}\n" +
+                     process + "};\n") == "script.editor.call");
+    CHECK(firstError(plugin(process + draw +
+                            "void pointer(const Pointer& p) { playNote(36, 1, true); }")) ==
+          "script.plugin.instrument");
     CHECK(firstError(plugin(process + "void pointer(const Pointer& p) {}")) ==
           "script.editor.pointer");
     CHECK(firstError(plugin(process + draw + "int pointer(const Pointer& p) { return 0; }")) ==

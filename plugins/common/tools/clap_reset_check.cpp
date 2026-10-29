@@ -89,7 +89,8 @@ struct Timed {
 };
 
 // An instrument needs notes; the exact figure does not matter as long as both
-// renders are given the same one.
+// renders are given the same one. A pair low down too, where a drum map's
+// kick and snare are (GM's 36 and 38), for a plugin that plays only there.
 std::vector<Timed> makeNotes() {
     std::vector<Timed> events;
     auto note = [&](std::int64_t at, bool on, std::int16_t key) {
@@ -106,11 +107,18 @@ std::vector<Timed> makeNotes() {
     note(24000, false, 60);
     note(24000, true, 67);
     note(47998, false, 67);
+    note(0, true, 38);
+    note(24000, false, 38);
+    note(24000, true, 36);
+    note(47998, false, 36);
+    std::stable_sort(events.begin(), events.end(),
+                     [](const Timed& a, const Timed& b) { return a.sample < b.sample; });
     return events;
 }
 
 struct Capture {
     std::vector<float> left, right;
+    std::vector<float> aux;        // the extra outputs' channels, a frame at a time (ADR-0021)
     std::vector<double> readouts;  // every read-only parameter, as the render ends
     bool ok = false;
 };
@@ -128,6 +136,11 @@ Capture renderSecond(host::Instance& in, const Stimulus& stimulus, std::uint32_t
 
     std::vector<float> outL(block, 0.0f), outR(block, 0.0f), inL(block, 0.0f), inR(block, 0.0f);
     float* outPtr[2] = {outL.data(), outR.data()};
+    // A drum sampler's pads may play on its extra outputs only: they count too.
+    const std::uint32_t auxChannels = in.auxOutputChannels();
+    std::vector<float> auxBuffer(static_cast<std::size_t>(auxChannels) * block, 0.0f);
+    std::vector<float*> auxPtr(auxChannels);
+    for (std::uint32_t c = 0; c < auxChannels; ++c) auxPtr[c] = auxBuffer.data() + c * block;
     float* inPtr[2] = {inL.data(), inR.data()};
     std::vector<host::OutputEvent> outStorage(1024);
     host::OutputEvents outEvents;
@@ -137,6 +150,7 @@ Capture renderSecond(host::Instance& in, const Stimulus& stimulus, std::uint32_t
 
     out.left.assign(static_cast<std::size_t>(frames), 0.0f);
     out.right.assign(static_cast<std::size_t>(frames), 0.0f);
+    out.aux.assign(static_cast<std::size_t>(frames) * auxChannels, 0.0f);
 
     in.reset();
     in.flushParams();
@@ -164,6 +178,8 @@ Capture renderSecond(host::Instance& in, const Stimulus& stimulus, std::uint32_t
         b.inputChannels = inChannels > 0 ? std::min<std::uint32_t>(inChannels, 2u) : 0u;
         b.outputs = outPtr;
         b.outputChannels = std::min<std::uint32_t>(outChannels, 2u);
+        b.auxOutputs = auxChannels > 0 ? auxPtr.data() : nullptr;
+        b.auxOutputChannels = auxChannels;
         b.frames = n;
         b.events = blockEvents;
         b.steadyTime = pos;
@@ -173,6 +189,8 @@ Capture renderSecond(host::Instance& in, const Stimulus& stimulus, std::uint32_t
             const auto at = static_cast<std::size_t>(pos) + i;
             out.left[at] = outL[i];
             out.right[at] = outR[i];
+            for (std::uint32_t c = 0; c < auxChannels; ++c)
+                out.aux[at * auxChannels + c] = auxPtr[c][i];
         }
     }
     in.stopProcessing();
@@ -188,6 +206,7 @@ double peakOf(const Capture& c) {
     for (std::size_t i = 0; i < c.left.size(); ++i)
         peak = std::max({peak, std::abs(static_cast<double>(c.left[i])),
                          std::abs(static_cast<double>(c.right[i]))});
+    for (float x : c.aux) peak = std::max(peak, std::abs(static_cast<double>(x)));
     return peak;
 }
 
@@ -196,6 +215,10 @@ std::int64_t firstDifference(const Capture& a, const Capture& b) {
     for (std::size_t i = 0; i < a.left.size(); ++i) {
         if (a.left[i] != b.left[i] || a.right[i] != b.right[i]) return static_cast<std::int64_t>(i);
     }
+    const std::size_t width =
+        a.left.empty() ? 1 : std::max<std::size_t>(1, a.aux.size() / a.left.size());
+    for (std::size_t i = 0; i < a.aux.size() && i < b.aux.size(); ++i)
+        if (a.aux[i] != b.aux[i]) return static_cast<std::int64_t>(i / width);
     return -1;
 }
 

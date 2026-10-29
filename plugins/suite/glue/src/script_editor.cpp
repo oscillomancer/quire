@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bitset>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -135,6 +136,18 @@ class Copy final : public D::EditorServices {
     void allowEdits(bool on) { editing_ = on; }
     std::vector<Edited> takeEdits() { return std::exchange(edits_, {}); }
 
+    // pointer()'s notes, taken while edits are allowed, in order.
+    struct Note {
+        int key;
+        double velocity;
+        bool on;
+    };
+    void playNote(int key, double velocity, bool on) override {
+        if (!editing_ || key < 0 || key > 127) return;
+        notes_.push_back({key, std::isfinite(velocity) ? std::clamp(velocity, 0.0, 1.0) : 0.0, on});
+    }
+    std::vector<Note> takeNotes() { return std::exchange(notes_, {}); }
+
   private:
     std::shared_ptr<const D::Code> code_;
     const ParamTable& table_;
@@ -145,6 +158,7 @@ class Copy final : public D::EditorServices {
     int used_ = 0;
     bool editing_ = false;
     std::vector<Edited> edits_;
+    std::vector<Note> notes_;
 };
 
 // What editor() asks for: a size, and controls in the order given.
@@ -555,6 +569,7 @@ class ScriptEditor final : public gui::EditorBase {
         }
         report("editor()");
     }
+    ~ScriptEditor() override { endNotes(); }
 
     // --- pointer() --------------------------------------------------------------
     // Presses and the wheel where no control is, and every move, go to the
@@ -591,6 +606,7 @@ class ScriptEditor final : public gui::EditorBase {
         if (button != 0 || !pressed_) return true;
         pressed_ = false;
         point(S::PointerAction::Release, x, y, mods, 0.0, false);
+        endNotes();
         ui().endDragEdit();
         if (left_) {
             left_ = false;
@@ -621,6 +637,7 @@ class ScriptEditor final : public gui::EditorBase {
         if (!pressed_) return;
         pressed_ = left_ = false;
         point(S::PointerAction::Release, lastX_, lastY_, 0, 0.0, false, false);
+        endNotes();
     }
 
     gui::Cursor cursor() const override {
@@ -714,7 +731,23 @@ class ScriptEditor final : public gui::EditorBase {
             else
                 ui().dragEdit(hidden_[e.index], e.host);
         }
+        for (const Copy::Note& n : copy_->takeNotes()) {
+            if (n.on == held_.test(static_cast<size_t>(n.key))) {
+                if (!n.on) continue;
+                host().playNote(n.key, 0.0, false);  // again: the last one ends first
+            }
+            host().playNote(n.key, n.velocity, n.on);
+            held_.set(static_cast<size_t>(n.key), n.on);
+        }
+        if (action == A::Release) endNotes();
         markDirty();
+    }
+
+    // Every note pointer() left on, ended.
+    void endNotes() {
+        for (size_t k = 0; k < held_.size(); ++k)
+            if (held_.test(k)) host().playNote(static_cast<int>(k), 0.0, false);
+        held_.reset();
     }
 
     // What went wrong in the editor's code, in the host's log, once each.
@@ -768,8 +801,9 @@ class ScriptEditor final : public gui::EditorBase {
     RouteList* heldRoutes_ = nullptr;                 // the one that took the press being held
     RouteList* hoverRoutes_ = nullptr;                // the one the pointer is over
     float pointerX_ = -1.0f, pointerY_ = -1.0f;
-    bool pressed_ = false;  // a press pointer() got, until its release
-    bool left_ = false;     // the pointer left during that press
+    std::bitset<128> held_;  // the keys pointer() has on
+    bool pressed_ = false;   // a press pointer() got, until its release
+    bool left_ = false;      // the pointer left during that press
     float lastX_ = 0.0f, lastY_ = 0.0f;
     bool stopped_ = false;
     std::uint32_t budgetReported_ = 0, rangeReported_ = 0;
