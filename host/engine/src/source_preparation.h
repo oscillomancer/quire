@@ -1,0 +1,79 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 Supple Audio
+#pragma once
+#include <condition_variable>
+#include <mutex>
+#include "supple/base/thread.h"
+#include "supple/engine/offline.h"
+
+namespace supple::engine {
+// One worker, one replaceable pending request, one immutable completed result.
+// No plug-ins, model mutation, or callback-owned state lives on this worker.
+class SourcePreparation {
+  public:
+    explicit SourcePreparation(std::function<void()> wake)
+        : wake_(std::move(wake)), worker_([this](StopToken) { run(); }) {}
+    ~SourcePreparation() {
+        {
+            std::lock_guard lock(mutex_);
+            stopping_ = true;
+            ++generation_;
+        }
+        changed_.notify_one();
+        worker_.join();
+    }
+    void request(model::Session session, std::filesystem::path directory, double rate) {
+        std::lock_guard lock(mutex_);
+        const auto generation = ++generation_;
+        request_ = Request{std::move(session), std::move(directory), rate, generation};
+        result_.reset();
+        changed_.notify_one();
+    }
+    std::optional<Result<std::shared_ptr<const PreparedSources>>> take() {
+        std::lock_guard lock(mutex_);
+        auto out = std::move(result_);
+        result_.reset();
+        return out;
+    }
+
+  private:
+    struct Request {
+        model::Session session;
+        std::filesystem::path directory;
+        double rate;
+        std::uint64_t generation;
+    };
+    void run() {
+        MediaCache cache;
+        for (;;) {
+            std::optional<Request> request;
+            {
+                std::unique_lock lock(mutex_);
+                changed_.wait(lock, [&] { return stopping_ || request_.has_value(); });
+                if (stopping_) return;
+                request = std::move(request_);
+                request_.reset();
+            }
+            const auto serial = request->generation;
+            auto result = cache.prepareSources(request->session, request->directory, request->rate,
+                                               [&] { return generation_.load() != serial; });
+            cache.trimVariants();
+            {
+                std::lock_guard lock(mutex_);
+                if (stopping_) return;
+                if (generation_.load() != serial) continue;
+                result_ = std::move(result);
+            }
+            wake_();
+        }
+    }
+    std::function<void()> wake_;
+    std::mutex mutex_;
+    std::condition_variable changed_;
+    bool stopping_ = false;
+    std::atomic<std::uint64_t> generation_{0};
+    std::optional<Request> request_;
+    std::optional<Result<std::shared_ptr<const PreparedSources>>> result_;
+    JoiningThread worker_;
+};
+}  // namespace supple::engine

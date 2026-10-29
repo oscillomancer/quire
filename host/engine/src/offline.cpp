@@ -391,6 +391,20 @@ Result<std::shared_ptr<const audio::AudioData>> MediaCache::get(const std::files
     return data;
 }
 
+void MediaCache::trimVariants(std::size_t samples) {
+    std::size_t retained = 0;
+    for (auto entry = entries_.begin(); entry != entries_.end();) {
+        const auto count = entry->second->frames() * entry->second->channelCount();
+        if (count > samples - std::min(samples, retained))
+            entry = entries_.erase(entry);
+        else {
+            retained += count;
+            ++entry;
+        }
+    }
+    std::erase_if(decoded_, [](const auto& entry) { return entry.second.expired(); });
+}
+
 // --- mixing helpers ---------------------------------------------------------------------
 
 std::pair<double, double> panGains(double pan, double panLawDb) {
@@ -463,6 +477,33 @@ Result<OfflineResult> renderOffline(const Session& s, InstancePool& pool,
     MediaCache localMedia;
     p.projectDir = opt.projectDir;
     p.media = opt.media ? opt.media : &localMedia;
+    // Retain the full ownership context for every selected take's phase peers,
+    // without decoding unrelated tracks (which may legitimately have missing media).
+    Session sourceSession = s;
+    std::set<Id> sourceTakes;
+    for (const auto& entry : selectedSession.items)
+        if (entry.value->activeTake) {
+            sourceTakes.insert(*entry.value->activeTake);
+            if (const auto* take = s.takes.find(*entry.value->activeTake))
+                sourceTakes.insert(take->warpPeers.begin(), take->warpPeers.end());
+        }
+    model::IdMap<model::Item>::Builder sourceItems(s.items);
+    for (const auto& entry : s.items) {
+        if (selectedSession.items.contains(entry.id)) continue;
+        const auto peer = std::find_if(entry.value->takes.begin(), entry.value->takes.end(),
+                                       [&](Id take) { return sourceTakes.contains(take); });
+        if (peer == entry.value->takes.end())
+            sourceItems.erase(entry.id);
+        else {
+            auto item = std::make_shared<model::Item>(*entry.value);
+            item->activeTake = *peer;
+            sourceItems.put(entry.id, entry.rev, std::move(item));
+        }
+    }
+    sourceSession.items = sourceItems.build();
+    auto sources = p.media->prepareSources(sourceSession, p.projectDir, p.rate);
+    if (!sources) return sources.error();
+    p.preparedSources = *sources;
     SUPPLE_TRY(prepare(p, selectedSession));
     auto master = std::find_if(p.nodes.begin(), p.nodes.end(),
                                [&](const Node& node) { return node.id == opt.master; });

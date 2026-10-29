@@ -1,6 +1,6 @@
 # Status
 
-Updated 2026-10-28. This file describes the present: what works, what is
+Updated 2026-10-29. This file describes the present: what works, what is
 known not to, and what is planned. Keep it current with each change; the
 history is in git.
 
@@ -172,7 +172,9 @@ instructions are in `docs/guides/installing.md`.
   the arm), MIDI monitoring and recording with overdub, loop recording into
   takes, punch, count-in, metronome.
 - **Editing**: items, takes, comping lanes, fades and crossfades with
-  shapes, time stretch and pitch (Signalsmith Stretch), markers, regions,
+  shapes, time stretch and pitch (Signalsmith Stretch), draggable audio warp
+  anchors, transient detection, joint multitrack audio quantize and slicing,
+  markers, regions,
   tempo and meter maps, the item clipboard, a piano roll with velocity and
   CC lanes, an event list and a notation panel.
 - **Automation**: envelopes on strip, route and plugin parameters,
@@ -749,13 +751,21 @@ Session and editing:
   Render-command budgets conservatively use the minimum curve value; a long
   varying-rate range may need splitting even when its exact duration would fit
   the output budget.
-- Take `stretch_markers` are stored but not applied; stretching and
-  resampling run synchronously when a plan is compiled.
 - Track groups and optional nested VCA controls are implemented (ADR-0052).
   Effective VCA gain is capped at Console 9’s native top (about +12.0412 dB);
   queries expose the requested and applied levels. Edit links require matching
   item boundaries and lanes; MIDI/take-content/warp edits stay local. Native
   macOS/Windows validation is pending.
+- Audio warp (ADR-0053) v1 supports aligned bundles, pitch-preserving Signalsmith
+  takes, nonlooped items and linear slopes only. Slice mode requires unwarped
+  input; arbitrary-span bundles, curved slopes and musical beat-domain markers
+  are deferred. Invalid legacy maps remain stored but play at scalar rate with
+  warnings. Very large stretch ratios can smear attacks. Slice gaps fade to
+  silence; there is no synthesized tail filling.
+- Source edits prepare immutable audio on a background worker; initial engine
+  startup still waits synchronously for its first sources. Decode is not cancellable
+  mid-call, and the cache remains memory-backed. Native CI for audio warp and
+  background preparation is pending on macOS/Windows.
 - Loop recording passes that span a change of the loop range are not
   handled; MIDI recordings have no crash recovery.
 - `fx.copy` does not copy envelopes or key routes; take FX cannot be keyed.
@@ -857,6 +867,6 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
 - Profile the 64-frame worst case; a pipelined bridge mode.
 - Close the capacity gap with REAPER (B2) by making the anticipative
   renderer cheaper, then keep refining capacity in both modes.
-- Stretch markers, MIDI outputs, a background media cache.
+- MIDI outputs, a disk-backed media cache.
 - Lua ergonomics (a script library path, hot reload).
 - Native audio/MIDI hardware validation and GUI hardening on macOS and Windows.

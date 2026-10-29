@@ -134,10 +134,17 @@ fs::path freshFile(const fs::path& dir, std::string name) {
 
 }  // namespace
 
-void removeTakeObjects(model::EditTxn& t, const model::Session& s, Id take) {
+Status removeTakeObjects(model::EditTxn& t, const model::Session& s, Id take) {
     const model::Take* tk = s.takes.find(take);
     std::set<Id> gone{take};
     if (tk) {
+        for (Id peer : tk->warpPeers) SUPPLE_TRY(checkUnlockedTake(s, peer, "/take"));
+        for (Id peer : tk->warpPeers)
+            if (peer != take && s.takes.contains(peer))
+                t.modify<model::Take>(peer, [&](auto& p) {
+                    std::erase(p.warpPeers, take);
+                    if (p.warpPeers.size() < 2) p.warpPeers.clear();
+                });
         for (Id f : tk->chain) {
             t.remove<model::FxInstance>(f);
             gone.insert(f);
@@ -153,6 +160,7 @@ void removeTakeObjects(model::EditTxn& t, const model::Session& s, Id take) {
     for (const auto& e : s.envelopes)
         if (gone.count(e.value->target.object)) t.remove<model::Envelope>(e.id);
     t.remove<model::Take>(take);
+    return {};
 }
 
 void registerTakeCommands(cmd::Registry& registry) {
@@ -190,7 +198,7 @@ void registerTakeCommands(cmd::Registry& registry) {
                 return TakeRemoveResult{item->str(), true};
             }
             model::EditTxn& t = app(ctx).txn();
-            removeTakeObjects(t, s, *take);
+            SUPPLE_TRY(removeTakeObjects(t, s, *take));
             t.modify<model::Item>(*item, [&](model::Item& it) { dropTake(it, *take); });
             return TakeRemoveResult{item->str(), false};
         };
@@ -415,7 +423,7 @@ void registerTakeCommands(cmd::Registry& registry) {
             take.name = (heard->name.empty() ? std::string("Take") : heard->name) + " (FX)";
             const Id made = t.create(std::move(take));
             const Id old = *it.activeTake;
-            if (a.mode == "replace") removeTakeObjects(t, s, old);
+            if (a.mode == "replace") SUPPLE_TRY(removeTakeObjects(t, s, old));
             t.modify<model::Item>(*item, [&](model::Item& x) {
                 auto at = std::find(x.takes.begin(), x.takes.end(), old);
                 if (a.mode == "replace" && at != x.takes.end())

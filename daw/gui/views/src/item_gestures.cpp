@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "supple/views/item_gestures.h"
+#include "supple/model/audio_warp.h"
 
 #include <algorithm>
 #include <cmath>
@@ -188,6 +189,16 @@ class Ghost : public ui::Node {
         const model::Item* anchor =
             st.anchor.kind == model::Kind::Item ? itemOf(s, st.anchor) : nullptr;
         switch (st.drag) {
+            case ItemGestures::Drag::Warp:
+                if (anchor)
+                    if (auto r = rectFor(*anchor, 0, 0, 0, 0)) {
+                        const float x =
+                            v.xAt(model::itemSpan(s, *anchor).startSec + st.warpPosition);
+                        c.fillRect({x - 1, r->y + 17, 2, std::max(0.f, r->h - 17)},
+                                   t.color("focus"));
+                        c.fillRect({x - 4, r->y + 17, 9, 5}, t.color("focus"));
+                    }
+                break;
             case ItemGestures::Drag::Move: {
                 std::vector<model::Id> moving = g.selection();
                 if (anchor && std::find(moving.begin(), moving.end(), st.anchor) == moving.end())
@@ -712,6 +723,34 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
             }
             state_.drag = h->zone;
             if (h->takeLane) state_.takeLane = *h->takeLane;
+            if (state_.drag == Drag::Move && pressed && !pressed->locked && pressed->activeTake &&
+                e.pos.y >= h->rect.y + 17 && !(e.mods & ui::kAlt)) {
+                const auto* take = s.takes.find(*pressed->activeTake);
+                if (take && take->source && take->source->kind == model::Kind::Media) {
+                    const auto span = model::itemSpan(s, *pressed);
+                    float distance = 5;
+                    auto candidate = [&](double source, double local,
+                                         std::optional<std::size_t> index) {
+                        const float d = std::abs(view_.xAt(span.startSec + local) - e.pos.x);
+                        if (local > 0 && local < span.endSec - span.startSec && d <= distance) {
+                            distance = d;
+                            state_.drag = Drag::Warp;
+                            state_.warpIndex = index;
+                            state_.warpSource = source;
+                            state_.warpPosition = local;
+                            state_.warpVersion = s.version;
+                            state_.warpGeneration = view_.projectGeneration();
+                        }
+                    };
+                    if (take->transients)
+                        for (double pos : take->transients->positions)
+                            candidate(pos, model::audioItemAt(*take, pos), {});
+                    for (std::size_t i = 1; i + 1 < take->stretchMarkers.size(); ++i) {
+                        const auto& m = take->stretchMarkers[i];
+                        candidate(m.sourcePos, m.itemPos, i);
+                    }
+                }
+            }
             // The mouse map says what this press does with these modifiers.
             std::string_view b;
             if (state_.drag == Drag::Move) {
@@ -776,6 +815,14 @@ bool ItemGestures::pointer(const ui::PointerEvent& e) {
         const model::Item* anchor =
             state_.anchor.kind == model::Kind::Item ? itemOf(s, state_.anchor) : nullptr;
         switch (state_.drag) {
+            case Drag::Warp:
+                if (anchor)
+                    state_.warpPosition = std::clamp(
+                        s.timeMap->secondsAt(snap(beatAtX(e.pos.x), (e.mods & ui::kShift) != 0)) -
+                            model::itemSpan(s, *anchor).startSec,
+                        0.,
+                        model::itemSpan(s, *anchor).endSec - model::itemSpan(s, *anchor).startSec);
+                break;
             case Drag::Move: {
                 if (!anchor) break;
                 std::vector<model::Id> items = selection_;
@@ -1017,6 +1064,22 @@ void ItemGestures::openItemMenu(ui::Point at) {
             if (auto r = run("Item timebase", steps); !r && onError) onError(r.error());
         };
         items.push_back(std::move(m));
+    }
+    for (const auto& [label, operation] : {std::pair{"Detect hits", "detect"},
+                                           {"Quantize audio", "warp"},
+                                           {"Slice at hits", "slice"},
+                                           {"Remove warping", "reset"}}) {
+        ui::MenuItem menu;
+        menu.label = label;
+        menu.run = [this, operation = std::string(operation)] {
+            if (onAudioEdit) onAudioEdit(selection_, operation, gridBeats());
+        };
+        menu.enabled = std::any_of(selection_.begin(), selection_.end(), [&](auto id) {
+            const auto* it = s.items.find(id);
+            const auto* tk = it && it->activeTake ? s.takes.find(*it->activeTake) : nullptr;
+            return tk && tk->source && tk->source->kind == model::Kind::Media;
+        });
+        items.push_back(std::move(menu));
     }
     // The active take's own chain and envelopes (gap log #22).
     const model::Id itemId =
@@ -1298,6 +1361,26 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
         runSteps(in ? "Fade-in shape" : "Fade-out shape", {{"item.set", std::move(args)}});
         return;
     }
+    if (state_.drag == Drag::Warp) {
+        if (!moved_ || !anchor || !anchor->activeTake) return;
+        if (state_.warpVersion != s.version || state_.warpGeneration != view_.projectGeneration() ||
+            (projectGeneration && projectGeneration() != state_.warpGeneration)) {
+            if (onError)
+                onError(Error("warp.changed", "audio changed during marker drag", {},
+                              "drag the marker again"));
+            return;
+        }
+        auto args = json::Value::object();
+        args["take"] = anchor->activeTake->str();
+        args["item_pos"] = state_.warpPosition;
+        if (state_.warpIndex)
+            args["index"] = static_cast<std::uint64_t>(*state_.warpIndex);
+        else
+            args["source_pos"] = state_.warpSource;
+        runSteps("Warp audio",
+                 {{state_.warpIndex ? "take.stretch.move" : "take.stretch.add", args}});
+        return;
+    }
     if (!moved_) {  // a click
         if (state_.drag == Drag::Marquee && e.button == 3 &&
             state_.anchor.kind == model::Kind::Item) {
@@ -1347,6 +1430,8 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
         return;
     }
     switch (state_.drag) {
+        case Drag::Warp:
+            return;  // committed above, with version guard
         case Drag::Marquee:
             // Points selected: the keys act on them (with items too: deleteAll).
             mixed_ = !selection_.empty() && !pointSel_.empty();
@@ -1427,7 +1512,11 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
                 if (const auto* take = s.takes.find(id)) {
                     json::Value targs = json::Value::object();
                     targs["take"] = id.str();
-                    targs["start_offset"] = offsetFor(*take, d);
+                    if (isMidi(take))
+                        targs["start_offset"] = offsetFor(*take, d);
+                    else
+                        targs["rebase_seconds"] = s.timeMap->secondsAt(startBeat(s, *anchor) + d) -
+                                                  s.timeMap->secondsAt(startBeat(s, *anchor));
                     steps.push_back({"take.set", std::move(targs)});
                 }
             json::Value args = json::Value::object();

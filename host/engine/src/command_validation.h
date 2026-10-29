@@ -30,7 +30,7 @@ inline Status checkUnlockedTake(const model::Session& s, model::Id take, std::st
 // Removes a take with its FX, the envelopes on it and its FX, and its MIDI
 // source when nothing else uses it (take.remove, item.remove; take_commands.cpp).
 // The item's take list is the caller's to update.
-void removeTakeObjects(model::EditTxn& t, const model::Session& s, model::Id take);
+Status removeTakeObjects(model::EditTxn& t, const model::Session& s, model::Id take);
 
 // Validate derived edit values before the invocation succeeds, so a caught Lua
 // error restores this invocation's savepoint even inside a larger transaction.

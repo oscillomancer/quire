@@ -138,6 +138,18 @@ struct MediaVariant {
 // Sources with a known hash share their content; otherwise every get checks
 // dev/inode/size/nanosecond-mtime before using cached data. Decoded originals
 // are weakly indexed; only a plan or passthrough variant keeps them alive.
+struct PreparedSource {
+    std::shared_ptr<const audio::AudioData> data;
+    bool itemLocal = false;
+    std::optional<Error> error;
+};
+// Complete immutable source snapshot. Preparation never owns plug-in instances.
+struct PreparedSources {
+    std::string key;
+    std::map<model::Id, PreparedSource> takes;
+};
+Result<std::string> sourcePreparationKey(const model::Session& session,
+                                         const std::filesystem::path& directory, double rate);
 class MediaCache {
   public:
     // Decoded audio at `rate` (resampled once, then kept; 0: the file's own
@@ -149,11 +161,21 @@ class MediaCache {
                                                         const MediaVariant& variant = {},
                                                         std::string_view contentHash = {});
     std::size_t size() const { return entries_.size(); }
+    // Bound worker-owned reusable variants; outstanding plan leases remain valid.
+    void trimVariants(std::size_t samples = std::size_t{1} << 26);
+    Result<std::shared_ptr<const PreparedSources>> prepareSources(
+        const model::Session& session, const std::filesystem::path& directory, double rate,
+        const std::function<bool()>& cancelled = {});
+    void adoptSources(std::shared_ptr<const PreparedSources> sources) {
+        prepared_ = std::move(sources);
+    }
+    const std::shared_ptr<const PreparedSources>& sources() const { return prepared_; }
 
   private:
     friend struct MediaCacheTestAccess;
     std::map<std::string, std::weak_ptr<const audio::AudioData>> decoded_;
     std::map<std::string, std::shared_ptr<const audio::AudioData>> entries_;
+    std::shared_ptr<const PreparedSources> prepared_;
 };
 
 struct OfflineSettings {

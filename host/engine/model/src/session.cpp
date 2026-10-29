@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Supple Audio
 #include "supple/model/session.h"
 #include "supple/model/groups.h"
+#include "supple/model/audio_warp.h"
 #include "supple/model/numeric.h"
 
 #include <algorithm>
@@ -488,6 +489,7 @@ Status automationExpansionBudget(const Session& s) {
 }
 
 Status validateNumeric(const Session& s) {
+    SUPPLE_TRY(validateAudioWarp(s, false));
     const auto validPlayrate = [](double rate, const std::string& path) -> Status {
         if (!std::isfinite(rate) || rate < kMinPlayrate || rate > kMaxPlayrate)
             return Error("playrate.range", "master playrate is outside 0.25..4.0", path,
@@ -701,6 +703,7 @@ Status validateNumeric(const Session& s) {
 }
 
 Status checkInvariants(const Session& s) {
+    SUPPLE_TRY(validateAudioWarp(s));
     SUPPLE_TRY(validateNumeric(s));
     Checker c{s, {}};
     if (!(s.project->sampleRate >= 8000 && s.project->sampleRate <= 384000))

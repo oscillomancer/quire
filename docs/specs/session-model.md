@@ -175,8 +175,8 @@ it is allowed.
 (algorithm id: `signalsmith`, a Signalsmith Stretch mode (MIT), or
 `resample`), `gain` dB, `pan` %, `phase_invert`, `channel_mode`
 (`normal|reverse_stereo|mono_mix|left|right|...`), `stretch_markers`
-(array of `[source_pos_s, item_pos_s, slope]`), `take_markers` (array of
-`[pos_s, name, color]`), `chain` (take FX), envelopes via §1.9.
+(array of `{source_pos, item_pos, slope?}` objects, seconds), `take_markers` (array of
+`{pos, name?, color?}` objects), `chain` (take FX), envelopes via §1.9.
 
 ### 1.6 Sources
 
@@ -846,3 +846,23 @@ Writers now emit `supple.project/2.2`; missing freeze fields in older projects
 mean unfrozen. Newer minor warnings begin above 2.2. Old applications can discard
 freeze metadata and restore original processing; do not use them to preserve a
 frozen state.
+
+### Audio warp data (schema 2.2, ADR-0053)
+
+Takes optionally persist `transients: {algorithm, source_hash, sensitivity,
+positions}` and `warp_peers: [tk_id...]`. Hit positions are sorted original-source
+seconds, sensitivity is 0..1, and both hits and stretch markers are limited to
+65,536 entries. Absent transient state means not analyzed; an empty positions array
+means analyzed silence. Older documents default to no hits and independent takes.
+`warp_peers` is a sorted reciprocal set including self (at most 128 takes), with
+aligned item spans, scalar rates, pitch and source-relative maps. These typed IDs
+participate in branch remapping; they are independent of editing groups.
+
+Stretch anchors map item-local seconds to original-file seconds. Between anchors
+the map is linear; outside it extrapolates at scalar take playrate. Empty or malformed
+legacy maps retain scalar playback; malformed rows are preserved with load warnings.
+Nonzero legacy slope is retained with a warning and interpreted linearly. New warp
+commands only author slope zero and strictly increasing coordinates with segment
+rates 0.01..100; anchor coordinate magnitudes are at most 1e9 seconds. Source positions outside the file represent silence. Master playrate
+acts after this map. Splitting/rebasing subtracts the cut from marker item times;
+slipping translates absolute source positions; rate-stretch scales marker item times.

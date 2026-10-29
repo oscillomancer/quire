@@ -304,3 +304,27 @@ Frozen files are kept like recorded media, including after unfreeze, because
 undo, branches, autosaves and saved projects can still refer to them. Save and
 Save As carry them with the project. Do not manually edit or remove those files
 while any saved project or history still needs them.
+
+## Timing audio with hits and stretch markers
+
+Right-click selected audio items and choose **Detect hits** to show candidate
+attacks. Drag a dim hit to create a stretch marker, or drag a solid marker handle
+to change timing while retaining pitch. Hold Shift for a move off the grid. Item
+edges stay pinned when the first marker is added. **Remove warping** returns to the
+take's original scalar rate/pitch and leaves detected hits visible.
+
+**Quantize audio** moves attacks to the current arrange grid. **Slice at hits**
+splits without moving them and adds short fades. Both detect hits automatically
+when needed; undo the timing edit first, then detection if desired. Agents can
+also quantize slice positions, choose sensitivity/strength/swing, and merge hits
+from several selected items. Several aligned drum-microphone items use one set of
+hit times; warp bundles process their channels together to retain relative phase.
+Select the entire bundle for further timing edits or use `audio.warp.detach` to
+separate it deliberately. Gain, pan and FX remain independently editable.
+
+Use nonlooped audio with pitch preservation and the Signalsmith algorithm. Linked
+items must share start/end positions, rate and pitch. Remove warping before slicing.
+Quantization that would cross hits or land on an item edge refuses with a hint to
+choose a finer grid or lower strength. Slicing can leave faded gaps; it does not
+invent sustained tails. The previous audio continues while “Preparing audio…” is
+shown. Source preparation finishes before the new timing becomes audible.

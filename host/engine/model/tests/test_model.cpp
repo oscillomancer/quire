@@ -785,7 +785,8 @@ TEST_CASE("known nested project fields reject wrong shapes and drop unknowns wit
 }
 
 TEST_CASE("master playrate: old projects default to unity without preserving pitch") {
-    for (const char* format : {"supple.project/1.7", "supple.project/2.0", "supple.project/2.1"}) {
+    for (const char* format :
+         {"supple.project/1.7", "supple.project/2.0", "supple.project/2.1", "supple.project/2.2"}) {
         auto doc = projectToJson(Session::create());
         CHECK(doc["project"].find("playrate") == nullptr);
         doc["schema"] = format;
