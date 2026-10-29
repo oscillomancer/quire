@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Supple Audio
 #include "supple/model/schemas.h"
 #include "migration.h"
+#include "supple/model/audio_warp.h"
 #include "supple/schema/document.h"
 
 #include "supple/base/files.h"
@@ -731,8 +732,21 @@ const Schema<Take>& schemaOf<Take>() {
                                  {ChannelMode::Left, "left"},
                                  {ChannelMode::Right, "right"}}));
         dflt(b, d.channelMode);
-        b.field("stretch_markers", &Take::stretchMarkers, schema::arrayOf(stretch));
+        b.field("stretch_markers", &Take::stretchMarkers,
+                schema::arrayOf(stretch).maxItems(kMaxAudioMarkers));
         dflt(b, d.stretchMarkers);
+        const auto hits = schema::object<Transients>("transients")
+                              .field("algorithm", &Transients::algorithm, str())
+                              .defaultValue(std::string("flux-v1"))
+                              .field("source_hash", &Transients::sourceHash, str())
+                              .field("sensitivity", &Transients::sensitivity, num().range(0, 1))
+                              .defaultValue(0.5)
+                              .field("positions", &Transients::positions,
+                                     schema::arrayOf(num().min(0)).maxItems(kMaxAudioMarkers))
+                              .build();
+        b.field("transients", &Take::transients, hits);
+        b.field("warp_peers", &Take::warpPeers, ids().maxItems(128));
+        dflt(b, d.warpPeers);
         b.field("take_markers", &Take::takeMarkers, schema::arrayOf(marker));
         dflt(b, d.takeMarkers);
         b.field("chain", &Take::chain, ids());
@@ -1172,7 +1186,7 @@ Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Wa
         auto migrated = migrateProject1(std::move(doc), warnings);
         if (!migrated) return std::move(migrated).error();
         doc = std::move(*migrated);
-    } else if (version->minor > 1 && warnings)
+    } else if (version->minor > 2 && warnings)
         warnings->push_back(
             {"project.newer_minor", "loading a newer project minor version", "/schema"});
     options.unknownMembers = schema::UnknownMembers::Ignore;
@@ -1369,6 +1383,17 @@ Result<Session> projectFromJson(const json::Value& input, std::vector<schema::Wa
                                      "ignored stale envelope items; derived from automation_items",
                                      json::pointerJoin("/envelopes", envelope) + "/items"});
         }
+    for (const auto& entry : s.takes) {
+        if (auto map = validateWarpMap(*entry.value); !map)
+            warn("warp.inactive", "preserved malformed stretch map; warping is inactive",
+                 "/takes/" + entry.id.str() + "/stretch_markers");
+        for (const auto& marker : entry.value->stretchMarkers)
+            if (marker.slope != 0) {
+                warn("warp.slope", "preserved slope; only linear interpolation is supported",
+                     "/takes/" + entry.id.str() + "/stretch_markers");
+                break;
+            }
+    }
     // Derive the time map and validate everything through a no-op transaction.
     EditTxn txn(s, 0);
     return txn.commit();

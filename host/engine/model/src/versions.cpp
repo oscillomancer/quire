@@ -449,6 +449,12 @@ std::uint64_t objectBytes(const T& v) {
     if constexpr (requires { v.chain; }) bytes += v.chain.size() * sizeof(Id);
     if constexpr (requires { v.inputChain; }) bytes += v.inputChain.size() * sizeof(Id);
     if constexpr (requires { v.takes; }) bytes += v.takes.size() * sizeof(Id);
+    if constexpr (requires { v.warpPeers; }) {
+        bytes += v.warpPeers.size() * sizeof(Id) + v.stretchMarkers.size() * sizeof(StretchMarker);
+        if (v.transients)
+            bytes += v.transients->positions.size() * sizeof(double) +
+                     v.transients->sourceHash.size() + v.transients->algorithm.size();
+    }
     if constexpr (requires { v.patch; })
         if (v.patch) bytes += jsonBytes(*v.patch);
     return bytes;

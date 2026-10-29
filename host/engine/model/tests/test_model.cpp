@@ -496,7 +496,7 @@ TEST_CASE("project 1.x migration: folders and receives become busses with child 
 
 TEST_CASE("project newer minor ignores unknown fields with load warnings") {
     auto doc = projectToJson(Session::create());
-    doc["schema"] = "supple.project/2.2";
+    doc["schema"] = "supple.project/2.3";
     doc["tracks"]["tr_0"]["future"] = true;
     std::vector<schema::Warning> warnings;
     auto parsed = projectFromJson(doc, &warnings);
@@ -783,7 +783,8 @@ TEST_CASE("known nested project fields reject wrong shapes and drop unknowns wit
 }
 
 TEST_CASE("master playrate: old projects default to unity without preserving pitch") {
-    for (const char* format : {"supple.project/1.7", "supple.project/2.0", "supple.project/2.1"}) {
+    for (const char* format :
+         {"supple.project/1.7", "supple.project/2.0", "supple.project/2.1", "supple.project/2.2"}) {
         auto doc = projectToJson(Session::create());
         CHECK(doc["project"].find("playrate") == nullptr);
         doc["schema"] = format;

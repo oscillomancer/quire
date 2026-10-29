@@ -175,8 +175,8 @@ it is allowed.
 (algorithm id: `signalsmith`, a Signalsmith Stretch mode (MIT), or
 `resample`), `gain` dB, `pan` %, `phase_invert`, `channel_mode`
 (`normal|reverse_stereo|mono_mix|left|right|...`), `stretch_markers`
-(array of `[source_pos_s, item_pos_s, slope]`), `take_markers` (array of
-`[pos_s, name, color]`), `chain` (take FX), envelopes via §1.9.
+(array of `{source_pos, item_pos, slope?}` objects, seconds), `take_markers` (array of
+`{pos, name?, color?}` objects), `chain` (take FX), envelopes via §1.9.
 
 ### 1.6 Sources
 
@@ -373,7 +373,7 @@ routes: sd_1 tr_2 → tr_6 ch 1/2→3/4 pre-fader −6 dB (sidechain)
 markers: mk_1 "Verse" bar 1 · regions: rg_1 "Chorus" bars 9–17
 ```
 
-## 5. Project file (`supple.project/2.1`)
+## 5. Project file (`supple.project/2.2`)
 
 ### 5.1 Shape
 
@@ -384,7 +384,7 @@ with warnings.)*
 
 Schema 2.1 adds master playrate and its envelope target (ADR-0045).
 
-The loader accepts 1.x and 2.x documents and saves 2.1. Migration allocates
+The loader accepts 1.x and 2.x documents and saves 2.2. Migration allocates
 child channel IDs in track-ID order, inserts each child first, and moves the
 source items and record/input FX there while keeping user inserts on the
 buss. Hardware/MIDI record routes follow the new child. Legacy numeric send
@@ -732,3 +732,23 @@ Automation retains its 100,000 expanded-point budget and validates finite scaled
 curves. In-memory command renders use the engine’s existing 2^28-frame capacity
 at the project and requested output rates, with block headroom; this is a work
 budget, not a new duration policy.
+
+### Audio warp data (schema 2.2, ADR-0053)
+
+Takes optionally persist `transients: {algorithm, source_hash, sensitivity,
+positions}` and `warp_peers: [tk_id...]`. Hit positions are sorted original-source
+seconds, sensitivity is 0..1, and both hits and stretch markers are limited to
+65,536 entries. Absent transient state means not analyzed; an empty positions array
+means analyzed silence. Older documents default to no hits and independent takes.
+`warp_peers` is a sorted reciprocal set including self (at most 128 takes), with
+aligned item spans, scalar rates, pitch and source-relative maps. These typed IDs
+participate in branch remapping; they are independent of editing groups.
+
+Stretch anchors map item-local seconds to original-file seconds. Between anchors
+the map is linear; outside it extrapolates at scalar take playrate. Empty or malformed
+legacy maps retain scalar playback; malformed rows are preserved with load warnings.
+Nonzero legacy slope is retained with a warning and interpreted linearly. New warp
+commands only author slope zero and strictly increasing coordinates with segment
+rates 0.01..100; anchor coordinate magnitudes are at most 1e9 seconds. Source positions outside the file represent silence. Master playrate
+acts after this map. Splitting/rebasing subtracts the cut from marker item times;
+slipping translates absolute source positions; rate-stretch scales marker item times.

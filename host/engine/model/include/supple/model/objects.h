@@ -142,6 +142,14 @@ enum class ChannelMode : std::uint8_t { Normal, ReverseStereo, MonoMix, Left, Ri
 
 struct StretchMarker {
     double sourcePos = 0.0, itemPos = 0.0, slope = 0.0;
+    bool operator==(const StretchMarker&) const = default;
+};
+inline constexpr std::size_t kMaxAudioMarkers = 65536;
+struct Transients {
+    std::string algorithm = "flux-v1", sourceHash;
+    double sensitivity = 0.5;
+    std::vector<double> positions;
+    bool operator==(const Transients&) const = default;
 };
 struct TakeMarker {
     double pos = 0.0;
@@ -160,6 +168,8 @@ struct Take {
     bool phaseInvert = false;
     ChannelMode channelMode = ChannelMode::Normal;
     std::vector<StretchMarker> stretchMarkers;
+    std::optional<Transients> transients;
+    std::vector<Id> warpPeers;
     std::vector<TakeMarker> takeMarkers;
     std::vector<Id> chain;
 };
