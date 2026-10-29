@@ -393,8 +393,17 @@ void fileSlot(NVGcontext* vg, const Theme& t, const Control& c, const ControlSta
             right -= tw + 10.0f;
         }
     }
-    if (!name.empty())
-        fittedLabel(vg, left, b.cy() + 0.5f, name.c_str(), 11.5f, 10.0f, right - left,
+    // A name too long for the slot gives up its extension before its end, so
+    // names that differ only there (tom-high.flac, tom-low.flac) still do.
+    std::string shown = name;
+    const size_t dot = shown.rfind('.');
+    if (dot != std::string::npos && dot > 0) {
+        std::string whole = name;
+        fitText(vg, whole, 11.5f, 10.0f, right - left, font::kUi);
+        if (whole != name) shown.erase(dot);
+    }
+    if (!shown.empty())
+        fittedLabel(vg, left, b.cy() + 0.5f, shown.c_str(), 11.5f, 10.0f, right - left,
                     s.file == State::Missing ? rgb(t.textMuted) : rgb(t.text), Align::Left, false);
     else
         fittedLabel(vg, left, b.cy() + 0.5f, c.label ? c.label : "Choose or drop a file", 11.5f, 11.5f, right - left,

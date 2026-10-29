@@ -4,6 +4,15 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.33.2
+
+What a product must do: nothing.
+
+- **A narrow file slot keeps the end of the file's name.** A name too long
+  for its slot drops its extension before it is cut, so names that differ
+  only at the end (`analog-open-hat.flac`, `analog-cymbal.flac`) still read
+  apart in a slot as narrow as a drum pad's.
+
 ## 1.33.1
 
 What a product must do: nothing.
