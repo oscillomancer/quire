@@ -47,4 +47,4 @@ set(PRODUCT_ASSETS          product/samples/keys.flac product/samples/pad.flac
                             product/samples/break.flac)
 
 set(PRODUCT_SMOKE_PLAIN_PARAM   "Gain")
-set(PRODUCT_SMOKE_LATENCY_PARAM "Quality")
+set(PRODUCT_SMOKE_LATENCY_PARAM "Oversampling")

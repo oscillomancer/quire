@@ -307,7 +307,7 @@ class OneScript final : public supple::Catalog {
                 {&Script::p16Choke, "pad16.choke"},
                 {&Script::p16Output, "pad16.output"},
                 {&Script::firstKey, "pads.key"},
-                {&Script::quality, "voice.quality"},
+                {&Script::oversampling, "voice.oversampling"},
                 {&Script::output, "output"},
             }, std::vector<Code::FileKey>{
                 {&Script::pad1, "pad1"},

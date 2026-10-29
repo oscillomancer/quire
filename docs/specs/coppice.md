@@ -37,10 +37,10 @@ text.
   and `rms()` over any range of frames): a slice's place, the waveform and
   Normalize's level are ready in the block the file arrives in. A voice
   reads as many channels as the file has: a mono file costs one.
-- **Oversampling** as Marram's (`voice.quality`: eco 1x, normal 2x, high
-  4x; minimum-phase half-bands, 3 to 5 samples of latency, reported); a
-  sound pitched up stays free of aliasing an octave up at normal, two at
-  high.
+- **Oversampling** as Marram's (`voice.oversampling`: `x1`, `x2` or
+  `x4`; minimum-phase half-bands, only the way down, so 0, 1 or 2 samples
+  of latency, reported); a sound pitched up stays free of aliasing an
+  octave up at 2x, two at 4x.
 - **Control** every 16 samples of a voice's life, glided between, as
   Marram's, so a render does not depend on the block size; free LFOs count
   whole frames from their anchors.
@@ -221,7 +221,7 @@ and resets on a double click.
 ## 6. Performance
 
 Release build, one core, 48 kHz, `clap-bench` (2026-10-29): 0.18 % of a core
-for the default (the keys, filter off, normal quality; 1.99 refs), 1.29 %
+for the default (the keys, filter off, 2x oversampling; 1.99 refs), 1.29 %
 for Air Pad (a stereo pad through the ladder), the factory patches 5.28
 refs on average. Marram the same way: 0.53 % (5.94 refs), its factory
 patches 10.2. The release `Coppice.clap` is 3,364,040 bytes, the factory

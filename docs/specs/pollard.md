@@ -38,8 +38,8 @@ sound across the keys.
   is made in both. Pollard uses it without loops, slices or the ladder.
 - **Files** arrive resampled to the session's rate and are measured as
   they load, as in Coppice; a pad reads as many channels as its file has.
-- **Oversampling** as Coppice's (`voice.quality`: eco 1x, normal 2x, high
-  4x; latency reported). Each output is brought down once, so a pad sent
+- **Oversampling** as Coppice's (`voice.oversampling`: `x1`, `x2` or
+  `x4`; 0, 1 or 2 samples of latency, reported). Each output is brought down once, so a pad sent
   to Out 3 costs no more than one on the main output, and an output that
   has been silent for 4096 samples skips its downsampler.
 - **Control** every 16 samples of a voice's life, glided between, so a
@@ -111,7 +111,7 @@ moved stays where it is.
 | key | unit / options | range | default |
 |---|---|---|---|
 | `pads.key` | the key of pad 1; pad N is N − 1 keys above | 0..112 | **36** (C2) |
-| `voice.quality` | `eco`, `normal`, `high` (oversampling; restarts) | | **normal** |
+| `voice.oversampling` | `x1`, `x2`, `x4` (restarts) | | **x2** |
 | `output` | dB, every output | −36..12 | **0** |
 
 ## 3. The kits and the factory hits
@@ -184,7 +184,7 @@ output's peaks as `Shared` members.
   tune, velocity, vary, one-shot or gated, reverse), Envelope (attack,
   decay, release, its shape drawn), Filter (off, LP, BP, HP; cutoff and
   resonance), Choke and Output.
-- **Every pad's**: first key, quality, output.
+- **Every pad's**: first key, oversampling, output.
 
 Controls that do not apply are dimmed in place. Every dial drags (Shift:
 finely), turns by the wheel and resets on a double click.

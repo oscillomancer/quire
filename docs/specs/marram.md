@@ -33,9 +33,10 @@ never reused.
               to the numbers each voice reads
 ```
 
-Every voice runs at the oversampled rate (`voice.quality`: eco 1x,
-normal 2x, high 4x); the voices are summed and brought down once
-(minimum-phase half-bands; latency 3 to 5 samples, reported). Modulation
+Every voice runs at the oversampled rate (`voice.oversampling`: `x1`,
+`x2` or `x4`); the voices are summed and brought down once
+(minimum-phase half-bands). Only the way down delays the sound, 1.4
+samples at 2x and 1.8 at 4x, so the reported latency is 0, 1 or 2. Modulation
 is computed every 16 samples of a voice's life and glided between, so
 renders do not depend on the block size; every random choice (free-running
 phases, unison and drift, noise) is seeded by the order of the notes, so a
@@ -75,7 +76,7 @@ parameter keeps its value and is left out of descriptions.
 | `voice.unison_detune` | ct, the outer copies each way | 0..100 | **12** | unison > 1 |
 | `voice.unison_spread` | % across the stereo field | 0..100 | **60** | unison > 1 |
 | `voice.drift` | % (100: pitch ±5 ct, each oscillator its own, cutoff ±3 %) | 0..100 | **0** | |
-| `voice.quality` | `eco`, `normal`, `high` (restarts the plugin) | | **normal** | |
+| `voice.oversampling` | `x1`, `x2`, `x4` (restarts the plugin) | | **x2** | |
 
 ### 2.2 `osc1`..`osc4`
 
@@ -103,8 +104,8 @@ for osc1, **off** for the others).
 | `oscN.retrigger` | start each note at phase 0 (else free-running) | | **off** | neither off nor noise |
 
 - **Analog** waves are polyBLEP/BLAMP band-limited (at C7, 2093 Hz, the
-  energy away from the harmonics is −34 dB at eco, −55 dB at normal and
-  −66 dB at high, as Orrery's).
+  energy away from the harmonics is −34 dB at 1x, −55 dB at 2x and
+  −66 dB at 4x, as Orrery's).
 - **Wavetables** are made when the plugin starts, from the same harmonic
   recipes as Orrery's (no third-party data): 16 frames a table, 9
   band-limited copies of each (256 harmonics at the top), the copy chosen
@@ -130,7 +131,7 @@ for osc1, **off** for the others).
   higher one a sample late. Unison copies modulate copy by copy.
 - **Sub** follows the note an octave or two down, with the analog waves.
 - **Noise** is made at the plugin's rate and held across the oversampled
-  frame, so it sounds the same at every quality.
+  frame, so it sounds the same at every oversampling.
 - **Unison** stacks up to 8 copies of each analog, wavetable or FM
   oscillator, detuned linearly to ± `unison_detune` and spread linearly
   across ± `unison_spread`, each at 1/√copies; sub and noise stay single.
@@ -287,7 +288,7 @@ places as `Shared` members.
 - **LFOs**: the shape with its delay's fade and the newest note's phase.
 - **Modulation**: the route list (`e.routes()`), the same as the automatic
   editor's for any script with routes.
-- **Voice**: quality, mode, polyphony, glide, bend range, tuning, unison
+- **Voice**: oversampling, mode, polyphony, glide, bend range, tuning, unison
   and drift.
 
 Every dial drags (Shift: finely), turns by the wheel and resets on a
@@ -296,5 +297,5 @@ double click.
 ## 6. Performance
 
 Release build, one core, 48 kHz: 8 notes of a pad with two saws and a sub,
-3 unison copies, a 24 dB ladder and the tape drive Marram then had (2026-10-21) at normal quality, 4.1 %
+3 unison copies, a 24 dB ladder and the tape drive Marram then had (2026-10-21) at 2x oversampling, 4.1 %
 with or without routes (Orrery's equivalent: 3.1 %).

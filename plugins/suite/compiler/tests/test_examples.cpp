@@ -15,6 +15,7 @@
 #include <fstream>
 #include <limits>
 #include <sstream>
+#include <utility>
 
 #include "runner.h"
 #include "supple/script_native.h"
@@ -626,6 +627,33 @@ TEST_CASE("Oversampler: 1x passes through, and linear phase is a pure delay") {
     for (size_t n = 1000; n < in.size(); ++n)
         worst = std::max(worst, std::abs(out[n] - in[n - static_cast<size_t>(lag)]));
     CHECK(worst < 1e-4);
+}
+
+TEST_CASE("Oversampler: the way down alone is the 1 or 2 samples the instruments report") {
+    script::detail::Instance instance;
+    script::detail::CurrentScope scope(&instance);
+    // An instrument makes its voices at the oversampled rate and only comes
+    // down: a 200 Hz sine's phase coming out gives that delay.
+    for (const auto& [factor, reported] : {std::pair{2, 1}, std::pair{4, 2}}) {
+        CAPTURE(factor);
+        script::Oversampler o;
+        o.prepare(factor);
+        const double w = 6.283185307179586 * 200.0 / 48000.0;
+        double re = 0.0, im = 0.0;
+        for (int n = 0; n < 4800; ++n) {
+            o.up(0.0);
+            for (int k = 0; k < factor; ++k)
+                o.set(k, std::sin(w * (n + static_cast<double>(k) / factor)));
+            const double y = o.down();
+            if (n >= 1200) {
+                re += y * std::sin(w * n);
+                im += y * std::cos(w * n);
+            }
+        }
+        const double delay = std::atan2(-im, re) / w;
+        CAPTURE(delay);
+        CHECK(std::lround(delay) == reported);
+    }
 }
 
 TEST_CASE("a script compiled as C++ describes the plugin the compiler describes") {

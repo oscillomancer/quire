@@ -642,14 +642,13 @@ struct Coppice : Instrument {
                      .help(
                          "Fine tuning. Routes move the whole voice's pitch through it: an "
                          "LFO's vibrato, an envelope's sweep.");
-    Param quality =
-        choice("Quality", {"Eco", "Normal", "High"}, 1)
-            .withKey("voice.quality")
+    Param oversampling =
+        choice("Oversampling", {"1x", "2x", "4x"}, 1)
+            .keys({"x1", "x2", "x4"})
+            .withKey("voice.oversampling")
             .in("Voice")
             .restarts()
-            .help(
-                "Oversampling: Eco none, Normal 2x, High 4x, which keeps a sound played far "
-                "above its root free of aliasing.");
+            .help("Oversampling, which keeps a sound played far above its root free of aliasing.");
 
     // --- Filter ---------------------------------------------------------------------------
 
@@ -975,13 +974,16 @@ struct Coppice : Instrument {
     // --- Hooks ------------------------------------------------------------------------------
 
     void prepare() {
-        factor = quality.index() == 0 ? 1 : quality.index() == 1 ? 2 : 4;
+        factor = oversampling.index() == 0 ? 1 : oversampling.index() == 1 ? 2 : 4;
         rate = sampleRate() * factor;
         for (int c = 0; c < 2; ++c) {
             over[c].prepare(factor);
             over[c].clear();
         }
-        setLatency(over[0].latency());
+        // The voices are made at the oversampled rate and only come down, so the
+        // delay is the down filters' alone, not latency()'s way up and down: 1.4
+        // samples at 2x and 1.8 at 4x (the suite's Oversampler test measures it).
+        setLatency(factor == 1 ? 0 : factor == 2 ? 1 : 2);
         newest = -1;
         peakL = 0.0;
         peakR = 0.0;
@@ -1824,7 +1826,7 @@ struct Coppice : Instrument {
             case 25:
                 return readOn(tune, how);
             case 26:
-                return readOn(quality, how);
+                return readOn(oversampling, how);
             case 30:
                 return readOn(fType, how);
             case 31:
@@ -1989,7 +1991,7 @@ struct Coppice : Instrument {
                 editOn(tune, how, v);
                 return;
             case 26:
-                editOn(quality, how, v);
+                editOn(oversampling, how, v);
                 return;
             case 30:
                 editOn(fType, how, v);
@@ -2191,7 +2193,7 @@ struct Coppice : Instrument {
                 g.fillText(tune.text(), x, y);
                 return;
             case 26:
-                g.fillText(quality.text(), x, y);
+                g.fillText(oversampling.text(), x, y);
                 return;
             case 30:
                 g.fillText(fType.text(), x, y);
@@ -2395,7 +2397,7 @@ struct Coppice : Instrument {
                 g.fillText("TUNE", x, y);
                 return;
             case 26:
-                g.fillText("QUALITY", x, y);
+                g.fillText("OVERSAMPLING", x, y);
                 return;
             case 30:
                 g.fillText("TYPE", x, y);
@@ -2587,15 +2589,7 @@ struct Coppice : Instrument {
             return;
         }
         if (code == 26) {
-            if (value == 0) {
-                g.fillText("ECO", x, y);
-                return;
-            }
-            if (value == 1) {
-                g.fillText("NORMAL", x, y);
-                return;
-            }
-            g.fillText("HIGH", x, y);
+            g.fillText(value == 0 ? "1x" : value == 1 ? "2x" : "4x", x, y);
             return;
         }
         if (code == 30) {
@@ -2737,7 +2731,7 @@ struct Coppice : Instrument {
     }
 
     // The pitch: the root, transposing, tuning, bending and key tracking; the
-    // voices: how notes take them, how many, the glide and the quality.
+    // voices: how notes take them, how many, the glide and the oversampling.
     static constexpr double pRow1 = pitY + 88;
     static constexpr double pRow2 = pitY + 160;
 
@@ -3347,7 +3341,7 @@ struct Coppice : Instrument {
         panel(g, pitX, pitY, pitW, pitH);
         heading(g, "Pitch & Voice", pitX + 18, pitY + 25);
         label(g, "MODE", pitX + 494, pRow1 - 26, TextAlign::Center);
-        label(g, "QUALITY", pitX + 494, pRow2 - 26, TextAlign::Center);
+        label(g, "OVERSAMPLING", pitX + 494, pRow2 - 26, TextAlign::Center);
         if (choiceOf(1) == kSlice)
             aside(g, "a slice keeps its own pitch", pitX + 176, pRow2, TextAlign::Left);
     }

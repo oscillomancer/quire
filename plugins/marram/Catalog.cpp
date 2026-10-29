@@ -43,7 +43,7 @@ class OneScript final : public supple::Catalog {
                 {&Script::detune, "voice.unison_detune"},
                 {&Script::spread, "voice.unison_spread"},
                 {&Script::drift, "voice.drift"},
-                {&Script::quality, "voice.quality"},
+                {&Script::oversampling, "voice.oversampling"},
                 {&Script::o1Type, "osc1.type"},
                 {&Script::o1Level, "osc1.level"},
                 {&Script::o1Pan, "osc1.pan"},

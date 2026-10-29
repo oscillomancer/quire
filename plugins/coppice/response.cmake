@@ -52,8 +52,8 @@ endfunction()
 expect("{}" 440)
 expect("{\"sample.transpose\":12}" 880)
 expect("{\"sample.root\":69}" 261)
-expect("{\"voice.quality\":\"eco\"}" 440)
-expect("{\"voice.quality\":\"high\",\"filter.type\":\"ladder\"}" 440)
+expect("{\"voice.oversampling\":\"x1\"}" 440)
+expect("{\"voice.oversampling\":\"x4\",\"filter.type\":\"ladder\"}" 440)
 expect("{\"sample.keytrack\":false}" 261)
 
 # How long the sound goes on after the key of `notes` is up.

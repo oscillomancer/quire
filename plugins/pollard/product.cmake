@@ -57,4 +57,4 @@ set(PRODUCT_ASSETS          product/samples/analog-boom.flac product/samples/ana
                             product/samples/hand-woodblock.flac)
 
 set(PRODUCT_SMOKE_PLAIN_PARAM   "Pad 1 Level")
-set(PRODUCT_SMOKE_LATENCY_PARAM "Quality")
+set(PRODUCT_SMOKE_LATENCY_PARAM "Oversampling")

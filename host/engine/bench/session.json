@@ -16,7 +16,7 @@
           "voice.unison": 3,
           "voice.unison_detune": "12 ct",
           "voice.unison_spread": "70 %",
-          "voice.quality": "normal",
+          "voice.oversampling": "x2",
           "osc1.wave": "saw",
           "osc1.level": "-6 dB",
           "osc2.type": "analog",

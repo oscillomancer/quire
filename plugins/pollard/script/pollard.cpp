@@ -2114,14 +2114,13 @@ struct Pollard : Instrument {
             .withKey("pads.key")
             .in("Pads")
             .help("The key of pad 1; pad N is N - 1 keys above it (36, C2: GM's map).");
-    Param quality =
-        choice("Quality", {"Eco", "Normal", "High"}, 1)
-            .withKey("voice.quality")
+    Param oversampling =
+        choice("Oversampling", {"1x", "2x", "4x"}, 1)
+            .keys({"x1", "x2", "x4"})
+            .withKey("voice.oversampling")
             .in("Pads")
             .restarts()
-            .help(
-                "Oversampling: Eco none, Normal 2x, High 4x, which keeps a pad tuned far up "
-                "free of aliasing.");
+            .help("Oversampling, which keeps a pad tuned far up free of aliasing.");
     Param output = decibels("Output", -36, 12, 0)
                        .smoothed(20)
                        .in("Pads")
@@ -2175,13 +2174,16 @@ struct Pollard : Instrument {
     // --- Hooks ------------------------------------------------------------------------------
 
     void prepare() {
-        factor = quality.index() == 0 ? 1 : quality.index() == 1 ? 2 : 4;
+        factor = oversampling.index() == 0 ? 1 : oversampling.index() == 1 ? 2 : 4;
         rate = sampleRate() * factor;
         for (int c = 0; c < 18; ++c) {
             over[c].prepare(factor);
             over[c].clear();
         }
-        setLatency(over[0].latency());
+        // The voices are made at the oversampled rate and only come down, so the
+        // delay is the down filters' alone, not latency()'s way up and down: 1.4
+        // samples at 2x and 1.8 at 4x (the suite's Oversampler test measures it).
+        setLatency(factor == 1 ? 0 : factor == 2 ? 1 : 2);
         stride = maxBlockSize() * 4;
         mixL.resize(stride * kBuses);
         mixR.resize(stride * kBuses);
@@ -2809,7 +2811,7 @@ struct Pollard : Instrument {
     static constexpr int cChoke = 15;
     static constexpr int cOutput = 16;
     static constexpr int cFirstKey = 100;
-    static constexpr int cQuality = 101;
+    static constexpr int cOversampling = 101;
     static constexpr int cOut = 102;
     static constexpr int bChoice = 0;  // lit while its parameter holds its value
     static constexpr int bToggle = 1;  // lit while its parameter is on
@@ -3189,14 +3191,14 @@ struct Pollard : Instrument {
     // (1), or choice (2): the selected pad's, or every pad's.
     double readParam(int code, int how) const {
         if (code == cFirstKey) return readOn(firstKey, how);
-        if (code == cQuality) return readOn(quality, how);
+        if (code == cOversampling) return readOn(oversampling, how);
         if (code == cOut) return readOn(output, how);
         return padRead(selected, code, how);
     }
     // To a value (how 0), a position (1) or its default (2).
     void editParam(int code, int how, double v) {
         if (code == cFirstKey) editOn(firstKey, how, v);
-        if (code == cQuality) editOn(quality, how, v);
+        if (code == cOversampling) editOn(oversampling, how, v);
         if (code == cOut) editOn(output, how, v);
         if (code < 100) padWrite(selected, code, how, v);
     }
@@ -3273,10 +3275,8 @@ struct Pollard : Instrument {
             else
                 g.fillText(format("%d", value), x, y);
         }
-        if (code == cQuality) {
-            if (value == 0) g.fillText("ECO", x, y);
-            if (value == 1) g.fillText("NORMAL", x, y);
-            if (value == 2) g.fillText("HIGH", x, y);
+        if (code == cOversampling) {
+            g.fillText(value == 0 ? "1x" : value == 1 ? "2x" : "4x", x, y);
         }
     }
 
@@ -3349,7 +3349,7 @@ struct Pollard : Instrument {
         row(cChoke, 0, 9, selX + 92, routeY - 30, 300, 20, kSeaGlass);
         row(cOutput, 0, 9, selX + 92, routeY + 2, 300, 20, kSeaGlass);
         dial(cFirstKey, padsX + 52, barY + barH * 0.5 + 4, 15, kLinen, true);
-        row(cQuality, 0, 3, padsX + 150, barY + barH * 0.5 - 8, 210, 22, kLinen);
+        row(cOversampling, 0, 3, padsX + 150, barY + barH * 0.5 - 8, 210, 22, kLinen);
         dial(cOut, padsX + 430, barY + barH * 0.5 + 4, 15, kLinen, true);
     }
 
@@ -3828,7 +3828,7 @@ struct Pollard : Instrument {
 
     void drawBar(Canvas& g) {
         panel(g, padsX, barY, kW - 32, barH);
-        label(g, "QUALITY", padsX + 255, barY + 12, TextAlign::Center);
+        label(g, "OVERSAMPLING", padsX + 255, barY + 12, TextAlign::Center);
         aside(g, "settings for every pad; a pad's own are above", kW - 34, barY + barH * 0.5,
               TextAlign::Right);
     }

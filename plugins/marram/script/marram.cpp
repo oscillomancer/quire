@@ -32,8 +32,8 @@
 // breath, expression, aftertouch, pitch bend), to almost any number a voice
 // reads: "lfo1>voice.tune": {"amount": "20 ct", "via": "modwheel"}.
 //
-// Everything a voice does runs oversampled (2x at Normal quality, 4x at
-// High), summed, and brought down once. Modulation is worked out every 16
+// Everything a voice does runs oversampled (2x by default, 4x at most),
+// summed, and brought down once. Modulation is worked out every 16
 // samples of a voice's life and glided in between, so a render is the same
 // at any block size; every random choice (free-running phases, drift,
 // noise) comes from the order of the notes, so a render is the same every
@@ -616,12 +616,12 @@ struct Marram : Instrument {
                       .help(
                           "Slow random wander of each voice's pitch (up to 5 cents, and each "
                           "oscillator its own) and cutoff, like old analog circuits.");
-    Param quality =
-        choice("Quality", {"Eco", "Normal", "High"}, 1)
-            .withKey("voice.quality")
-            .in("Voice")
-            .restarts()
-            .help("Oversampling: Eco none, Normal 2x, High 4x for heavy FM, sync and drive.");
+    Param oversampling = choice("Oversampling", {"1x", "2x", "4x"}, 1)
+                             .keys({"x1", "x2", "x4"})
+                             .withKey("voice.oversampling")
+                             .in("Voice")
+                             .restarts()
+                             .help("Oversampling, for heavy FM, sync and drive.");
 
     // --- Oscillators --------------------------------------------------------------------
 
@@ -1649,14 +1649,17 @@ struct Marram : Instrument {
     // --- Hooks ------------------------------------------------------------------------------
 
     void prepare() {
-        factor = quality.index() == 0 ? 1 : quality.index() == 1 ? 2 : 4;
+        factor = oversampling.index() == 0 ? 1 : oversampling.index() == 1 ? 2 : 4;
         rate = sampleRate() * factor;
         limit = min(0.5, 20000.0 / rate);
         for (int c = 0; c < 2; ++c) {
             over[c].prepare(factor);
             over[c].clear();
         }
-        setLatency(over[0].latency());
+        // The voices are made at the oversampled rate and only come down, so the
+        // delay is the down filters' alone, not latency()'s way up and down: 1.4
+        // samples at 2x and 1.8 at 4x (the suite's Oversampler test measures it).
+        setLatency(factor == 1 ? 0 : factor == 2 ? 1 : 2);
         newest = -1;
         peakL = 0.0;
         peakR = 0.0;
@@ -2249,7 +2252,7 @@ struct Marram : Instrument {
             }
             --s.tickLeft;
             // Noise is made at the plugin's rate and held across the
-            // oversampled frame, so it sounds the same at every quality.
+            // oversampled frame, so it sounds the same at every oversampling.
             for (int o = 0; o < 4; ++o) {
                 if (s.type[o] != kNoise) continue;
                 const int col = osc[o].color;
@@ -2875,7 +2878,7 @@ struct Marram : Instrument {
     static constexpr int cDetune = 7;
     static constexpr int cSpread = 8;
     static constexpr int cDrift = 9;
-    static constexpr int cQuality = 10;
+    static constexpr int cOversampling = 10;
     static constexpr int cRouting = 11;
     static constexpr int cAmp = 20;   // attack, decay, sustain, release, velocity, level, pan
     static constexpr int cEnv2 = 30;  // attack, decay, sustain, release, pitch, fm
@@ -3016,7 +3019,7 @@ struct Marram : Instrument {
             case 9:
                 return readOn(drift, how);
             case 10:
-                return readOn(quality, how);
+                return readOn(oversampling, how);
             case 11:
                 return readOn(routing, how);
             case 20:
@@ -3336,7 +3339,7 @@ struct Marram : Instrument {
                 editOn(drift, how, v);
                 return;
             case 10:
-                editOn(quality, how, v);
+                editOn(oversampling, how, v);
                 return;
             case 11:
                 editOn(routing, how, v);
@@ -3797,7 +3800,7 @@ struct Marram : Instrument {
                 g.fillText(drift.text(), x, y);
                 return;
             case 10:
-                g.fillText(quality.text(), x, y);
+                g.fillText(oversampling.text(), x, y);
                 return;
             case 11:
                 g.fillText(routing.text(), x, y);
@@ -4422,7 +4425,7 @@ struct Marram : Instrument {
         button(lc(l, lSync), 0, x0 + 2 * (third + 5), by, third, 22, bToggle, Theme::modulation);
     }
 
-    // How the voices play (mode, quality) on the left; the dials in two
+    // How the voices play (mode, oversampling) on the left; the dials in two
     // rows: playing (voices, glide, bend, tune) and thickening (unison,
     // detune, spread, drift).
     static constexpr double vRow1 = voiY + 80;
@@ -4430,7 +4433,7 @@ struct Marram : Instrument {
 
     void layoutVoice() {
         row(cMode, 0, 3, voiX + 16, vRow1 - 11, 210, 22, kSeaGlass);
-        row(cQuality, 0, 3, voiX + 16, vRow2 - 11, 210, 22, kSeaGlass);
+        row(cOversampling, 0, 3, voiX + 16, vRow2 - 11, 210, 22, kSeaGlass);
         const int many = roundToInt(valueOf(cUnison));
         for (int k = 0; k < 8; ++k) {
             const int code = k == 0   ? cPolyphony
@@ -4571,8 +4574,8 @@ struct Marram : Instrument {
             g.fillText(value == 0 ? "POLY" : value == 1 ? "MONO" : "LEGATO", x, y);
             return;
         }
-        if (code == cQuality) {
-            g.fillText(value == 0 ? "ECO" : value == 1 ? "NORMAL" : "HIGH", x, y);
+        if (code == cOversampling) {
+            g.fillText(value == 0 ? "1x" : value == 1 ? "2x" : "4x", x, y);
             return;
         }
         if (code == cRouting) {
@@ -5881,7 +5884,7 @@ struct Marram : Instrument {
         panel(g, voiX, voiY, voiW, voiH);
         heading(g, "Voice", voiX + 18, voiY + 24);
         label(g, "MODE", voiX + 121, vRow1 - 26, TextAlign::Center);
-        label(g, "QUALITY", voiX + 121, vRow2 - 26, TextAlign::Center);
+        label(g, "OVERSAMPLING", voiX + 121, vRow2 - 26, TextAlign::Center);
     }
 
     void draw(Canvas& g) {

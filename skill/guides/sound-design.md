@@ -71,7 +71,7 @@ what you want, change its structure, measure, and hand the numbers to
   drive it. Marram has no effects: chain Teasel, Bracken, Ghyll after it.
 - **Voice**: `mode` poly, mono or legato; `polyphony`, `glide`, `unison`
   (copies of each analog, wavetable and FM oscillator) with `unison_detune`
-  and `unison_spread`, `drift` (slow pitch and cutoff wander), `quality`.
+  and `unison_spread`, `drift` (slow pitch and cutoff wander), `oversampling`.
 
 In `patch_merge`, omitted keys keep their values; a merge changes only what
 it names. `patch_set` replaces the patch, resetting omitted parameters to
@@ -175,8 +175,8 @@ with your phrase: its notes, velocity and duration affect the result.
   alone for this reason. Compare at matched loudness.
 - **Resonance:** on the ladder 40 % is a gentle bump, 70 % clearly resonant,
   and it sings near 100 %. On the SVF 40 % is about Q 1.4, 70 % about Q 5.6.
-- **Quality:** `normal` (2× oversampling) suits almost everything; `high`
-  for heavy FM, sync or drive, `eco` when CPU matters more than aliasing.
+- **Oversampling:** `x2` suits almost everything; `x4` for heavy FM, sync
+  or drive, `x1` when CPU matters more than aliasing.
   Changing it restarts the plugin.
 
 ## Recipes (starting points, not answers)

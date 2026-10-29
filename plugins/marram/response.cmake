@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Supple Audio
 # Marram, measured through the built plugin (dsp.test's A4 note and silence):
-# every pitched oscillator type, a unison stack and every quality play the
+# every pitched oscillator type, a unison stack and every oversampling play the
 # note in tune (a sub an octave down), routes from a global source (a macro)
 # and a voice's own (velocity) move it as far as their amounts say, and
 # nothing is wrong with the sound or with the silence after it (no clipping,
@@ -55,8 +55,8 @@ expect("{\"osc1.type\":\"wavetable\",\"osc1.table\":\"pwm\",\"osc1.position\":40
 expect("{\"osc1.type\":\"fm\",\"osc1.fm\":1.5,\"osc2.type\":\"fm\",\"osc2.ratio\":2,\"osc2.level\":-60}" 440)
 expect("{\"osc1.type\":\"sub\",\"osc1.wave\":\"sine\",\"filter1.type\":\"off\"}" 220)
 expect("{\"voice.unison\":3,\"voice.unison_detune\":10}" 440)
-expect("{\"voice.quality\":\"eco\"}" 440)
-expect("{\"voice.quality\":\"high\",\"filter1.drive\":24}" 440)
+expect("{\"voice.oversampling\":\"x1\"}" 440)
+expect("{\"voice.oversampling\":\"x4\",\"filter1.drive\":24}" 440)
 # A semitone up by Macro 1 at full; 80 cents up by dsp.test's velocity, 0.8.
 expect("{\"macro1\":100}" 466 "{\"macro1>voice.tune\":{\"amount\":\"1 st\"}}")
 expect("{}" 460 "{\"velocity>voice.tune\":{\"amount\":100}}")

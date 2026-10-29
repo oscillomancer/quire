@@ -59,7 +59,7 @@ class OneScript final : public supple::Catalog {
                 {&Script::glide, "voice.glide"},
                 {&Script::bendRange, "voice.bend_range"},
                 {&Script::tune, "voice.tune"},
-                {&Script::quality, "voice.quality"},
+                {&Script::oversampling, "voice.oversampling"},
                 {&Script::fType, "filter.type"},
                 {&Script::cutoff, "filter.cutoff"},
                 {&Script::resonance, "filter.resonance"},
