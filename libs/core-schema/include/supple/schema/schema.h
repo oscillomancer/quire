@@ -641,6 +641,7 @@ Schema<std::vector<T>> arrayOf(Schema<T> item) {
                     wrongType(c, p, "array");
                     return false;
                 }
+                out.clear();
                 bool ok = true;
                 for (std::size_t i = 0; i < v.size(); ++i) {
                     T x{};
