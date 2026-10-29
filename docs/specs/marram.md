@@ -253,8 +253,10 @@ and i, the mod wheel changes the vowel), Strings (a delayed vibrato), Noise Snar
 a rotary shimmer), Wobble Bass (an LFO in eighths of the song), Sync Lead
 (Env 3 sweeps a synced oscillator; vibrato under the mod wheel), Pulse Pad
 (two LFOs on the pulse widths) and Table Sweep (Env 3 and a drifting LFO
-through a wavetable; Macro 1 darkens it). Each measures −15.1 to −18.1 LUFS
-on `dsp.test`'s notes signal (a note, then a chord, velocity 0.8).
+through a wavetable; Macro 1 darkens it). On `dsp.test`'s notes signal
+(a note, then a chord, velocity 0.8; one second, integrated) they measure
+−11.4 (Tine Piano) to −20.2 LUFS (Dune Pad), most of them −14 to −18
+(2026-10-28).
 
 ## 5. The editor
 
