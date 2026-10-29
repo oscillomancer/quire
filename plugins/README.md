@@ -41,9 +41,10 @@ player, and every check the other stock plugins have.
   -P plugins/catalog.cmake`.
 - `product.cmake`: identity, kept by hand: AU codes, the parameter
   host-smoke turns (one that changes the sound at its default), and the
-  CLAP features, which the plugin takes from the script's `Info`
-  (`.features`, what the plugin is: Quire's plugin browser shows it after
-  the name) and `plugin.<name>.catalog` checks agree.
+  CLAP features and extra outputs, which the plugin takes from the
+  script's `Info` (`.features`, what the plugin is: Quire's plugin browser
+  shows it after the name; `.outputs`, as `PRODUCT_AUX_OUTPUTS`) and
+  `plugin.<name>.catalog` checks agree with a fresh source export.
   The state tag is the player's for the id, so sessions saved while the
   script ran in the player load in the native plugin.
 - `Layer.cpp`, `Processor.h`, `Theme.h`, `targets.cmake`, `NOTICES.txt`: as

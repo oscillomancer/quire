@@ -236,6 +236,10 @@ inline Status writeSource(const fs::path& kit, const fs::path& dest, const std::
     const std::string year = std::to_string(static_cast<int>(today.year()));
     std::string features;  // a CMake list
     for (const auto& f : info.features) features += (features.empty() ? "" : ";") + f;
+    std::string outputs;  // CMake arguments, one quoted name each
+    for (const auto& o : info.outputs)
+        outputs += (outputs.empty() ? "\"" : " \"") + cmakeText(o) + "\"";
+    if (outputs.empty()) outputs = "\"\"";
     const bool gpl = license == License::Gpl3;
     const std::string holder = cmakeText(vendor);
     const std::map<std::string, std::string> values = {
@@ -255,6 +259,7 @@ inline Status writeSource(const fs::path& kit, const fs::path& dest, const std::
                               : "effect"},
         {"CHANNELS", channels},
         {"FEATURES", features},
+        {"AUX_OUTPUTS", outputs},
         {"MANUFACTURER", manufacturerCode(vendor)},
         {"TAG", script::detail::stateTag(info.id)},
         {"SMOKE_PARAM", smoke},

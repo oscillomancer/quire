@@ -41,6 +41,24 @@ if(NOT declared STREQUAL kept_features)
                         "make product.cmake match the script")
 endif()
 
+# Its extra outputs likewise, from the script's Info.outputs; none when
+# product.cmake does not set them.
+function(product_outputs file out)
+    file(STRINGS "${file}" line REGEX "^set\\(PRODUCT_AUX_OUTPUTS .*\\)")
+    string(REGEX REPLACE "^set\\(PRODUCT_AUX_OUTPUTS +(.*)\\)" "\\1" value "${line}")
+    if(value STREQUAL "\"\"")
+        set(value "")
+    endif()
+    set(${out} "${value}" PARENT_SCOPE)
+endfunction()
+product_outputs("${WORK}/export/product/product.cmake" declared)
+product_outputs("${DIR}/product.cmake" kept_outputs)
+if(NOT declared STREQUAL kept_outputs)
+    message(FATAL_ERROR "${DIR}/product.cmake has PRODUCT_AUX_OUTPUTS ${kept_outputs}, but "
+                        "script/${NAME}.cpp's Info declares .outputs ${declared}: "
+                        "make product.cmake match the script")
+endif()
+
 file(READ "${WORK}/export/product/Catalog.cpp" fresh)
 file(READ "${DIR}/Catalog.cpp" kept)
 if(fresh STREQUAL kept)
