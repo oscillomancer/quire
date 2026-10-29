@@ -1065,13 +1065,13 @@ void ItemGestures::openItemMenu(ui::Point at) {
         };
         items.push_back(std::move(m));
     }
-    for (const auto& [label, operation] : {std::pair{"Detect hits", "detect"},
-                                           {"Quantize audio", "warp"},
-                                           {"Slice at hits", "slice"},
-                                           {"Remove warping", "reset"}}) {
+    for (const auto& [label, op] : {std::pair{"Detect hits", "detect"},
+                                    {"Quantize audio", "warp"},
+                                    {"Slice at hits", "slice"},
+                                    {"Remove warping", "reset"}}) {
         ui::MenuItem menu;
         menu.label = label;
-        menu.run = [this, operation = std::string(operation)] {
+        menu.run = [this, operation = std::string(op)] {
             if (onAudioEdit) onAudioEdit(selection_, operation, gridBeats());
         };
         menu.enabled = std::any_of(selection_.begin(), selection_.end(), [&](auto id) {
