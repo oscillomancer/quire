@@ -120,6 +120,7 @@ std::vector<Timed> makeNotes() {
 
 struct Capture {
     std::vector<float> left, right;
+    std::vector<float> aux;  // the extra outputs' channels, a frame at a time (ADR-0021)
     bool ok = false;
 };
 
@@ -135,6 +136,11 @@ Capture render(host::Instance& in, const Stimulus& stimulus,
     std::vector<float> outL(kMaxBlock), outR(kMaxBlock), inL(kMaxBlock), inR(kMaxBlock);
     float* outPtr[2] = {outL.data(), outR.data()};
     float* inPtr[2] = {inL.data(), inR.data()};
+    // A drum sampler's pads may play on its extra outputs: they count too.
+    const std::uint32_t auxChannels = in.auxOutputChannels();
+    std::vector<float> auxBuffer(static_cast<std::size_t>(auxChannels) * kMaxBlock, 0.0f);
+    std::vector<float*> auxPtr(auxChannels);
+    for (std::uint32_t c = 0; c < auxChannels; ++c) auxPtr[c] = auxBuffer.data() + c * kMaxBlock;
     std::vector<host::OutputEvent> outStorage(1024);
     host::OutputEvents outEvents;
     outEvents.storage = outStorage;
@@ -142,6 +148,7 @@ Capture render(host::Instance& in, const Stimulus& stimulus,
     blockEvents.reserve(events.size());
     out.left.assign(static_cast<std::size_t>(kFrames), 0.0f);
     out.right.assign(static_cast<std::size_t>(kFrames), 0.0f);
+    out.aux.assign(static_cast<std::size_t>(kFrames) * auxChannels, 0.0f);
 
     if (!in.startProcessing()) return out;
     std::size_t next = 0, cycle = 0;
@@ -165,6 +172,8 @@ Capture render(host::Instance& in, const Stimulus& stimulus,
         b.inputChannels = std::min<std::uint32_t>(inChannels, 2u);
         b.outputs = outPtr;
         b.outputChannels = std::min<std::uint32_t>(outChannels, 2u);
+        b.auxOutputs = auxChannels > 0 ? auxPtr.data() : nullptr;
+        b.auxOutputChannels = auxChannels;
         b.frames = n;
         b.events = blockEvents;
         b.steadyTime = pos;
@@ -172,6 +181,9 @@ Capture render(host::Instance& in, const Stimulus& stimulus,
         if (!in.process(b, &outEvents)) processed = false;
         std::copy_n(outL.begin(), n, out.left.begin() + pos);
         std::copy_n(outR.begin(), n, out.right.begin() + pos);
+        for (std::uint32_t i = 0; i < n; ++i)
+            for (std::uint32_t c = 0; c < auxChannels; ++c)
+                out.aux[static_cast<std::size_t>(pos + i) * auxChannels + c] = auxPtr[c][i];
         pos += n;
     }
     in.stopProcessing();
@@ -182,6 +194,8 @@ Capture render(host::Instance& in, const Stimulus& stimulus,
 bool allFinite(const Capture& c) {
     for (std::size_t i = 0; i < c.left.size(); ++i)
         if (!std::isfinite(c.left[i]) || !std::isfinite(c.right[i])) return false;
+    for (float x : c.aux)
+        if (!std::isfinite(x)) return false;
     return true;
 }
 
@@ -190,12 +204,17 @@ double peakOf(const Capture& c) {
     for (std::size_t i = 0; i < c.left.size(); ++i)
         peak = std::max({peak, std::abs(static_cast<double>(c.left[i])),
                          std::abs(static_cast<double>(c.right[i]))});
+    for (float x : c.aux) peak = std::max(peak, std::abs(static_cast<double>(x)));
     return peak;
 }
 
 std::int64_t firstDifference(const Capture& a, const Capture& b) {
     for (std::size_t i = 0; i < a.left.size(); ++i)
         if (a.left[i] != b.left[i] || a.right[i] != b.right[i]) return static_cast<std::int64_t>(i);
+    const std::size_t width =
+        a.left.empty() ? 1 : std::max<std::size_t>(1, a.aux.size() / a.left.size());
+    for (std::size_t i = 0; i < a.aux.size() && i < b.aux.size(); ++i)
+        if (a.aux[i] != b.aux[i]) return static_cast<std::int64_t>(i / width);
     return -1;
 }
 
