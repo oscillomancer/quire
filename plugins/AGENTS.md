@@ -57,6 +57,10 @@ copies.
 - **Permanent identifiers.** The CLAP id (`com.suppleaudio.<id>`), the AU
   subtype, the state tag and every parameter's key identify saved sessions
   and patches. Never change or reuse them; add new parameters with new keys.
+  A factory file's name (`factory:<name>`, a stock plugin's samples in its
+  `PRODUCT_ASSETS`) is one too, and so is its sound: sessions keep the name
+  and play what it holds, so a re-rendered or changed sound ships under a
+  new name and the old file stays.
 - **One parameter table.** Names, ranges, defaults, units and value text
   come from the script's parameters only. Values in patches and on the bus
   are physical units (ADR-0010).

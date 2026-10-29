@@ -528,13 +528,18 @@ class Param {
 // --- files ---------------------------------------------------------------------
 
 // A file member as the script declares it: audioFile("Sample") or
-// impulseResponse("Room"), with .help() and .withKey() as a parameter has.
+// impulseResponse("Room"), with .help() and .withKey() as a parameter has,
+// and .withDefault("factory:pad.flac"): the file a new instance starts with,
+// one the plugin carries inside it (its product's PRODUCT_ASSETS). Such a
+// factory file plays in the plugin built from the script, in any host; the
+// script player has none, so there the member starts with no file.
 struct FileSpec {
     enum class Kind { Audio, Impulse };
     Kind kind = Kind::Audio;
     const char* name = "";
     const char* description = "";
     const char* key = "";  // the patch key; the member's name when empty
+    const char* def = "";  // a factory file, "factory:<name>"; none when empty
 
     FileSpec help(const char* text) const {
         FileSpec f = *this;
@@ -544,6 +549,11 @@ struct FileSpec {
     FileSpec withKey(const char* k) const {
         FileSpec f = *this;
         f.key = k;
+        return f;
+    }
+    FileSpec withDefault(const char* factoryFile) const {
+        FileSpec f = *this;
+        f.def = factoryFile;
         return f;
     }
 };
@@ -1360,7 +1370,8 @@ class Pointer {
 // Values are patch values in physical units: percent is 30, not 0.3. A
 // route is as a patch writes it, its amount in the destination's unit (a
 // frequency's in octaves), and through a second source when one is given:
-// p.route("lfo1>pitch", 0.2, "modwheel").
+// p.route("lfo1>pitch", 0.2, "modwheel"). A file member takes one of the
+// plugin's factory files: p.file(sample, "factory:pad.flac").
 class Patches {
   public:
     explicit Patches(detail::PatchBuilder& builder) : builder_(&builder) {}
@@ -1372,6 +1383,8 @@ class Patches {
     Patches& set(const Param& param, const char* choiceKey);
     Patches& route(const char* route, double amount);
     Patches& route(const char* route, double amount, const char* via);
+    Patches& file(const AudioFile& file, const char* factoryFile);
+    Patches& file(const Convolver& file, const char* factoryFile);
 
   private:
     detail::PatchBuilder* builder_;

@@ -1678,6 +1678,10 @@ void Sema::evaluatePatches(FunctionDecl* f) {
                 evaluateRoute(set, patch, routed);
                 continue;
             }
+            if (static_cast<MemberExpr*>(set->callee)->member == "file") {
+                evaluatePatchFile(set, patch);
+                continue;
+            }
             if (static_cast<MemberExpr*>(set->callee)->member != "set" || set->args.size() != 2 ||
                 set->args[0]->kind != ExprKind::Name) {
                 syntax(set->loc);
@@ -1738,6 +1742,38 @@ void Sema::evaluatePatches(FunctionDecl* f) {
     scopes_ = std::move(savedScopes);
     fn_ = savedFn;
     self_ = savedSelf;
+}
+
+// p.file(sample, "factory:pad.flac"): a file member and one of the
+// plugin's factory files.
+void Sema::evaluatePatchFile(CallExpr* call, FactoryPatchModel& patch) {
+    const std::string example = "p.add(\"Name\").file(sample, \"factory:pad.flac\")";
+    const FileModel* file = nullptr;
+    if (call->args.size() == 2 && call->args[0]->kind == ExprKind::Name)
+        for (const FileModel& m : out_.plugin.files)
+            if (static_cast<NameExpr*>(call->args[0])->path == std::vector<std::string>{m.member})
+                file = &m;
+    if (!file) {
+        error(call->loc, "script.patch.file", "a factory patch's file is a file member's", example);
+        return;
+    }
+    auto value = evaluate(call->args[1], out_.plugin.decl);
+    if (!value) return;
+    if (value->kind != Constant::Kind::String ||
+        !script::detail::factoryFileName(value->stringValue)) {
+        error(call->args[1]->loc, "script.patch.file",
+              "a factory patch's file is one of the plugin's factory files, \"factory:<name>\"",
+              example);
+        return;
+    }
+    for (const auto& [id, given] : patch.files)
+        if (id == file->id) {
+            error(call->loc, "script.patch.duplicate",
+                  "a factory patch sets '" + file->key + "' twice",
+                  "keep one .file() for each file in this patch");
+            return;
+        }
+    patch.files.emplace_back(file->id, value->stringValue);
 }
 
 // p.route("lfo1>cutoff", 1.5) or p.route("lfo1>cutoff", 1.5, "modwheel"):

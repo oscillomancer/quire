@@ -4,7 +4,8 @@
 
 // Modulation: sources the script sets, parameters routes move (one past its
 // own range), and a factory patch's routes, one through an instrument's own
-// source.
+// source; a file that starts with a factory file, and a patch that picks
+// another.
 struct Routes : Instrument {
     static constexpr Info info = {.name = "Routes", .id = "com.example.routes", .voices = 4};
 
@@ -14,9 +15,13 @@ struct Routes : Instrument {
     Source lfo = voiceSource("LFO").help("A wobble.");
     Source env = voiceSource("Env").unipolar().withKey("env2");
     Source macro = source("Macro").unipolar();
+    AudioFile sample = audioFile("Sample").withDefault("factory:pad.flac");
 
     void factoryPatches(Patches& p) {
-        p.add("Wobble").route("lfo>cutoff", 1.5).route("env2>fine", 700, "modwheel");
+        p.add("Wobble")
+            .route("lfo>cutoff", 1.5)
+            .route("env2>fine", 700, "modwheel")
+            .file(sample, "factory:keys.flac");
     }
     void startVoice(int v) { lfo.set(v, 0.5); }
     void releaseVoice(int v) {}

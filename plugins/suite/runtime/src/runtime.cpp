@@ -66,6 +66,14 @@ Patches& Patches::route(const char* route, double amount, const char* via) {
     builder_->route(route, amount, via ? via : "");
     return *this;
 }
+Patches& Patches::file(const AudioFile& file, const char* factoryFile) {
+    builder_->file(&file, factoryFile ? factoryFile : "");
+    return *this;
+}
+Patches& Patches::file(const Convolver& file, const char* factoryFile) {
+    builder_->file(&file, factoryFile ? factoryFile : "");
+    return *this;
+}
 
 namespace detail {
 
@@ -82,6 +90,15 @@ std::string factoryChoiceKey(std::string_view label) {
     }
     if (!key.empty() && std::isdigit(static_cast<unsigned char>(key.front()))) key = "p" + key;
     return key;
+}
+
+bool factoryFileName(std::string_view reference) {
+    constexpr std::string_view prefix = "factory:";
+    if (reference.size() <= prefix.size() || reference.size() > 128 ||
+        reference.substr(0, prefix.size()) != prefix)
+        return false;
+    return reference.substr(prefix.size()).find_first_of(std::string_view("/\\:\0", 4)) ==
+           std::string_view::npos;
 }
 
 std::string choiceKey(const ParamModel& param, size_t k) {

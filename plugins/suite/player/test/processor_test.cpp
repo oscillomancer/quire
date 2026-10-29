@@ -781,6 +781,28 @@ struct Levels : Effect {
     }
 }
 
+TEST(a_files_default_and_a_patchs_file_are_factory_files) {
+    const auto d = compileText(R"(#include <supple/script.h>
+struct Kit : Instrument {
+    static constexpr Info info = {.name = "Kit", .id = "com.example.kit", .voices = 4};
+    AudioFile sample = audioFile("Sample").withDefault("factory:pad.flac");
+    void factoryPatches(Patches& p) { p.add("Keys").file(sample, "factory:keys.flac"); }
+    void startVoice(int v) {}
+    void releaseVoice(int v) {}
+    void process(Block& io) {}
+};
+)");
+    CHECK(d != nullptr);
+    if (!d) return;
+    CHECK(std::string(d->properties().at(0).def) == "factory:pad.flac");
+    CHECK(d->presets().size() == 1);
+    if (d->presets().empty()) return;
+    const auto& texts = d->presets()[0].texts;
+    CHECK(std::find(texts.begin(), texts.end(),
+                    std::pair<uint32_t, std::string>{d->properties().at(0).id,
+                                                     "factory:keys.flac"}) != texts.end());
+}
+
 TEST(a_convolution_reverb_plays_its_room_the_same_compiled_either_way) {
     const auto jit = compileText(exampleScript("reverb.cpp"));
     using Native = supple::script::native_reverb::Reverb;
