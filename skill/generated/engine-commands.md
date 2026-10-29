@@ -10326,7 +10326,7 @@ Kind: `action`. Exposure: `mcp-tool`.
 
 ### Examples
 
-**Freeze the channel** (`song`)
+**Freeze the channel** (`song_with_fx`)
 
 ```json
 {
@@ -11037,7 +11037,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 
 ### Examples
 
-**Unfreeze the channel** (`song`)
+**Unfreeze the channel** (`song_frozen`)
 
 ```json
 {
