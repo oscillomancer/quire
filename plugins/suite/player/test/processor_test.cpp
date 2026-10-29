@@ -731,6 +731,56 @@ TEST(a_sampler_plays_its_file_the_same_compiled_either_way_and_ends_with_it) {
     for (int i = 5000; i < 24000; ++i) CHECK(a[static_cast<size_t>(i)] == 0.0);
 }
 
+TEST(a_files_peak_and_rms_over_any_range_are_what_its_samples_say) {
+    // Over three levels of blocks (64, 4096, 262144 frames): each frame of
+    // the output is a range's peak (left) and RMS (right), of ranges that
+    // start and end anywhere, run past the file's end or hold nothing.
+    const auto d = compileText(R"(#include <supple/script.h>
+struct Levels : Effect {
+    static constexpr Info info = {.name = "Levels", .id = "com.example.levels"};
+    AudioFile s = audioFile("Sample");
+    int n = 0;
+    void process(Block& io) {
+        for (int i = 0; i < io.frames; ++i) {
+            const int from = n * 1171 - 300, to = from + 200000 - n * 791;
+            io[0][i] = s.peak(0, from, to);
+            io[1][i] = s.rms(0, from, to);
+            ++n;
+        }
+    }
+};
+)");
+    CHECK(d != nullptr);
+    if (!d) return;
+    constexpr int kFrames = 300000;
+    auto shape = [](int n) {
+        return (n == 123457 ? 0.95 : 0.0) + 0.5 * std::sin(n * 0.001) * std::sin(n * 0.37);
+    };
+    const std::string path = writeWav("levels.wav", kFrames, shape);
+    Engine engine(d);
+    engine.activate(48000.0, 64, 2, 2);
+    engine.setProperty(0, path, true);
+    constexpr int kRanges = 384;
+    std::vector<double> left(kRanges, 0.0), right(kRanges, 0.0);
+    for (int start = 0; start < kRanges; start += 64) {
+        double* io[] = {left.data() + start, right.data() + start};
+        engine.process(io, io, 64);
+    }
+    std::filesystem::remove(path);
+    for (int k = 0; k < kRanges; ++k) {
+        const int from = k * 1171 - 300, to = from + 200000 - k * 791;
+        double most = 0.0, sum = 0.0;
+        for (int i = std::max(from, 0); i < std::min(to, kFrames); ++i) {
+            const double x = static_cast<float>(shape(i));
+            most = std::max(most, std::abs(x));
+            sum += x * x;
+        }
+        CHECK(left[static_cast<size_t>(k)] == most);
+        CHECK_NEAR(right[static_cast<size_t>(k)], to > from ? std::sqrt(sum / (to - from)) : 0.0,
+                   1e-9);
+    }
+}
+
 TEST(a_convolution_reverb_plays_its_room_the_same_compiled_either_way) {
     const auto jit = compileText(exampleScript("reverb.cpp"));
     using Native = supple::script::native_reverb::Reverb;

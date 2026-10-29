@@ -585,6 +585,13 @@ class AudioFile {
     double sample(int channel, int frame) const;
     // Between samples, interpolated (cubic): for playing at another speed.
     double read(int channel, double frame) const;
+    // The largest |sample| of `channel` in frames [from, to), and their root
+    // mean square (frames outside the file count as silence); 0 for none.
+    // Measured when the file loads, so a range of any length -- the whole
+    // file, a waveform's column, the hop of an onset detector -- costs about
+    // as much as a few hundred sample() calls.
+    double peak(int channel, int from, int to) const;
+    double rms(int channel, int from, int to) const;
 
   private:
     friend struct detail::FileBinding;

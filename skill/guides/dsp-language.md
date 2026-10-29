@@ -421,7 +421,7 @@ is false. Not in `prepare()`: files arrive after it.
 
 | Object | Use |
 |---|---|
-| `AudioFile` | `loaded()`, `channels()`, `frames()`; `sample(c, i)` (0 outside; a channel past the file's last reads its last), `read(c, position)` between samples (cubic), for playing at another speed |
+| `AudioFile` | `loaded()`, `channels()`, `frames()`; `sample(c, i)` (0 outside; a channel past the file's last reads its last), `read(c, position)` between samples (cubic), for playing at another speed; `peak(c, from, to)` and `rms(c, from, to)` of frames [from, to), measured when the file loads, so the whole file costs about what a few hundred `sample()` calls do (a waveform overview, onsets, normalizing) |
 | `Convolver` | `process(c, x)`: channel `c` through the impulse response (its first 20 s), no latency; 0 until loaded. `loaded()`, `length()` |
 
 Files are members of the plugin struct only, one per member (no arrays),

@@ -286,8 +286,8 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
     }
     // On the framework's loading thread: the file's audio, resampled to the
     // session's rate (an impulse response's first 20 seconds, a sample's
-    // first 10 minutes), and an impulse response's convolution, prepared for
-    // the session's channels.
+    // first 10 minutes), its levels for peak() and rms(), and an impulse
+    // response's convolution, prepared for the session's channels.
     static std::unique_ptr<D::FileContents> loadFile(const FileRequest& r, std::string& error) {
         const bool impulse = r.kind == static_cast<uint32_t>(D::FileModel::Kind::Impulse);
         auto audio = ProcessorBase<ScriptProcessor>::loadFile(r, error, impulse ? 20.0 : 600.0);
@@ -298,6 +298,7 @@ class ScriptProcessor : public ProcessorBase<ScriptProcessor> {
         }
         auto contents = std::make_unique<D::FileContents>();
         contents->audio = std::move(*audio);
+        contents->measure();
         if (impulse) {
             const dsp::AudioData& ir = contents->audio;
             contents->length = static_cast<int>(ir.frames());

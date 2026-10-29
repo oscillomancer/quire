@@ -601,6 +601,12 @@ void Builtins::addClasses() {
     r.method(
         file, "double read(int channel, double frame) const",
         +[](const S::AudioFile* f, int c, double at) { return f->read(c, at); });
+    r.method(
+        file, "double peak(int channel, int from, int to) const",
+        +[](const S::AudioFile* f, int c, int a, int b) { return f->peak(c, a, b); });
+    r.method(
+        file, "double rms(int channel, int from, int to) const",
+        +[](const S::AudioFile* f, int c, int a, int b) { return f->rms(c, a, b); });
     auto* convolver = addClass("Convolver", sizeof(S::Convolver), alignof(S::Convolver));
     convolver_ = convolver;
     r.method(
