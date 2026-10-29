@@ -533,6 +533,11 @@ TEST_CASE("editor code reads parameters and Shared members, and keeps the rest a
           "script.editor.call");
     CHECK(firstError(plugin("DelayLine d;\n" + process +
                             "void draw(Canvas& g) { d.prepare(10); }")) == "script.editor.call");
+    // Text is made where it is drawn: no member holds it, in an Array either.
+    CHECK(firstError(plugin("Array<const char*, 2> names = {\"A\", \"B\"};\n" + process)) ==
+          "script.text.member");
+    CHECK(firstError(plugin("struct Row { Array<Array<const char*, 2>, 2> words; };\nRow row;\n" +
+                            process)) == "script.text.member");
     // format()'s pattern is checked as it is written.
     CHECK(firstError(plugin(process +
                             "void draw(Canvas& g) { g.fillText(format(\"%s\", 1.0), 0, 0); }")) ==

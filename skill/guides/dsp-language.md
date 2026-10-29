@@ -517,7 +517,8 @@ row under a 22-unit header, scrolling when they do not fit). `e.size(w, h)`: 480
 Text is a string literal, `format("%.1f dB", x)` (printf's number
 conversions, up to four values), or a parameter's `p.text()` (its value as
 hosts show it) and `p.name()`; it lasts until the hook returns, so a local
-`const char*` holds it but a member cannot. `hzToX(hz, lowHz, highHz, x, w)`
+`const char*` or `Array<const char*, N>` holds it but a member cannot, in
+an `Array` or a struct either. `hzToX(hz, lowHz, highHz, x, w)`
 and `dbToY(db, lowDb, highDb, y, h)` place a graph's points on the grids'
 lines. To draw a filter's response, give the editor a `Biquad` of its own,
 designed from the parameters in `draw()`, and plot its `responseDb(hz)`.

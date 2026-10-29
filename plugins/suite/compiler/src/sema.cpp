@@ -721,6 +721,19 @@ void Sema::checkStructs() {
                       "keep the number, and format it in draw(): format(\"%.1f\", x)");
                 continue;
             }
+            // An Array of text, or of Arrays of it, is text all the same (and
+            // a member's starting state would drop its words).
+            const Type* held = t;
+            while (held->kind == TypeKind::Array) held = held->element;
+            if (held->kind == TypeKind::String) {
+                error(f->loc, "script.text.member",
+                      t->name +
+                          " holds text, which lasts only while the editor draws, so it is "
+                          "not a member",
+                      "declare it in the function that draws the words: " + t->name + " " +
+                          f->name + " = {...}; or draw each from a switch that calls g.fillText()");
+                continue;
+            }
             if (b_.isSource(t)) {
                 if (!f->init)
                     error(f->loc, "script.source.declaration", "a source is declared with its name",
