@@ -176,7 +176,13 @@ instructions are in `docs/guides/installing.md`.
   zero-crossing split (100 ms search, louder stereo channel, cursor fallback;
   agents use `item.split` with `snap: zero_crossing`),
   time stretch and pitch (Signalsmith Stretch), draggable audio warp
-  anchors, transient detection, joint multitrack audio quantize and slicing,
+  anchors (including identity insertion at the edit cursor from the item menu),
+  transient detection, joint multitrack audio quantize and slicing,
+  background `item.consolidate` for active audio with take FX baked and MIDI
+  kept separate per track (one undo step, track processing stays live),
+  adjacent Consolidate items / Heal splits item-menu actions with shared engine
+  eligibility, and non-rendering `item.heal` for compatible split/slice chains,
+  retaining outer fades and full source maps while removing generated interior fades,
   markers, regions,
   tempo and meter maps, the item clipboard, a piano roll with velocity and
   CC lanes, an event list and a notation panel.
@@ -741,6 +747,8 @@ Engine and hosting:
   malformed UTF-8 parameter input is refused. Native verification is pending.
 
 Session and editing:
+- Consolidation's shared engine/model code has local Linux coverage; native
+  macOS/Windows validation remains pending before merge.
 - Project files accept `record.mode: output`, but output capture is not
   implemented: starting recording with an armed output-mode track fails with
   `record.output_unsupported` before creating files. Switch that track to input

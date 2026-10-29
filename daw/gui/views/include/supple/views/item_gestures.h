@@ -17,7 +17,8 @@
 // automation items, the envelope). Ctrl-drag below the name bar of an item with several takes takes
 // that take (the one under the pointer, else the heard one) out into an item of its own, on any
 // channel. A right-click on an item (without dragging) opens its menu: Cut, Copy, Paste (at the
-// pointer), Duplicate, Delete, Merge MIDI items, timebase, take FX
+// pointer), Duplicate, Delete, Consolidate items, Heal splits, Merge takes for
+// one multi-take MIDI item, timebase, take FX
 // and envelopes, and for several takes: show all takes, explode them onto tracks or along the
 // track, delete the take under the pointer; and rendering the item through its FX (MIDI to audio)
 // in place or as a new take; on empty lane space, a menu with Paste. Each gesture previews as a
@@ -66,6 +67,7 @@ class ItemGestures {
 
     Runner run;
     std::function<void(const std::vector<model::Id>&, const std::string&, double)> onAudioEdit;
+    std::function<void(const std::vector<model::Id>&)> onConsolidate;
     std::function<std::uint64_t()>
         projectGeneration;  // app identity, even before the next resnapshot
     // Keep the copied version available to item.paste until the clipboard changes.
@@ -119,9 +121,14 @@ class ItemGestures {
     // (midi.merge, one undo step), which becomes the selection.
     bool canMerge() const;
     Status mergeSelection();
+    bool canConsolidate() const;
+    bool canHeal() const;
+    void consolidateSelection();  // background action; completion is one engine edit
+    Status healSelection();
     // Menu and S: split only items containing the edit cursor, one undo step.
     // Zero-crossing mode skips items without an active audio take.
     Status splitSelection(bool zeroCrossing = false);
+    Status addStretchMarkerAtCursor();  // selected audio, one undo step; peers once
     bool canPaste() const {
         return !clipboard_.items.empty() &&
                (!projectGeneration || projectGeneration() == clipboard_.generation);

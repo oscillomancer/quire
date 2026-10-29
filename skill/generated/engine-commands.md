@@ -6398,6 +6398,78 @@ Result:
 
 ```
 
+## `item.consolidate@1`
+
+Consolidate selected audio and MIDI per track in a background job.
+
+Partitions by track and active source kind. Audio bakes active takes, item controls, warp and take FX/automation to float WAV; track processing remains live. MIDI uses midi.merge; singleton MIDI stays unchanged. Select complete linked/warp bundles on matching lanes/groups. One undo step after successful job publication. No item-count cap; existing render/source sample budgets apply. job.get returns resulting items/files.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `items` | array |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Errors
+
+- `item.consolidate_*`: invalid material, stale inputs or failed capture Hint: repair the selected sources/layout and retry consolidation
+- `item.selection`: selection omits linked peers Hint: select the full group or suspend its edit link
+- `warp.peers`: incomplete or invalid warp bundle Hint: select every bundle owner or detach it first
+
+### Examples
+
+**Consolidate the active audio take** (`song_with_audio`)
+
+```json
+{
+  "items": ["it_1"]
+}
+
+```
+
+Result:
+
+```json
+{
+  "job": "<any>"
+}
+
+```
+
+## `item.consolidate.commit@1`
+
+Attach consolidated audio and merge MIDI as one replayable edit.
+
+
+
+Kind: `edit`. Exposure: `internal`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `items` | array |  |  |  |  |
+| `expected` | string |  |  |  |  |
+| `media` | array |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
 ## `item.duplicate@1`
 
 Copy an item and its takes to a new beat position (default: immediately after).
@@ -6536,6 +6608,52 @@ Result:
 {
   "items": ["it_1", "<any>", "<any>"],
   "tracks": []
+}
+
+```
+
+## `item.heal@1`
+
+Heal compatible consecutive audio pieces without rendering.
+
+One chain per track, complete linked/warp selection, matching stored audio/take/FX properties and continuous source maps. Accepts touching split pieces and unchanged linear Slice-at-hits overlaps up to 50 ms. Keep all left takes, outer fades and full warp maps; remove interior slice fades. Nonlinear envelope seams that cannot be recovered refuse. Stored FX states must match exactly; no live plugin queries or audio rendering. One undo step.
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `items` | array |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Errors
+
+- `item.heal_*`: selection cannot be restored as a continuous source Hint: select unchanged split pieces or use item.consolidate instead
+- `item.selection`: a linked or warp peer is unselected Hint: include every affected peer or suspend the edit link
+
+### Examples
+
+**Heal an audio split** (`song_split_audio`)
+
+```json
+{
+  "items": ["it_1", "it_2"]
+}
+
+```
+
+Result:
+
+```json
+{
+  "items": ["it_1"]
 }
 
 ```
@@ -10915,7 +11033,7 @@ Result:
 
 Add a pitch-preserving audio stretch marker.
 
-
+Omit source_pos to insert a point on the current source map at item_pos without changing its timing. An identical existing point is not duplicated. Warp peers receive the same source-relative point; ordinary edit groups stay local, as with other take edits. Requires nonlooped pitch-preserving audio.
 
 Kind: `edit`. Exposure: `mcp-exec`.
 
@@ -10949,6 +11067,23 @@ Kind: `edit`. Exposure: `mcp-exec`.
 {
   "take": "tk_1",
   "source_pos": 0.3,
+  "item_pos": 0.25
+}
+
+```
+
+Result:
+
+```json
+"<any>"
+
+```
+
+**Insert an anchor without moving audio** (`song_with_audio`)
+
+```json
+{
+  "take": "tk_1",
   "item_pos": 0.25
 }
 

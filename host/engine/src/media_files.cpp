@@ -129,7 +129,8 @@ Status copyFolder(const fs::path& from, const fs::path& to) {
             }
         }
         // A freeze job has not published these files into history yet.
-        if (it->is_directory(ec) && it->path().filename() == ".freeze-pending") {
+        if (it->is_directory(ec) && (it->path().filename() == ".freeze-pending" ||
+                                     it->path().filename() == ".consolidate-pending")) {
             it.disable_recursion_pending();
             continue;
         }

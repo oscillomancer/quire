@@ -157,8 +157,14 @@ Status removeTakeObjects(model::EditTxn& t, const model::Session& s, Id take) {
             if (m && !m->pooled && !shared) t.remove<model::MidiSource>(*tk->source);
         }
     }
+    std::set<Id> removedEnvelopes;
     for (const auto& e : s.envelopes)
-        if (gone.count(e.value->target.object)) t.remove<model::Envelope>(e.id);
+        if (gone.count(e.value->target.object)) {
+            t.remove<model::Envelope>(e.id);
+            removedEnvelopes.insert(e.id);
+        }
+    for (const auto& e : s.autoItems)
+        if (removedEnvelopes.contains(e.value->envelope)) t.remove<model::AutomationItem>(e.id);
     t.remove<model::Take>(take);
     return {};
 }

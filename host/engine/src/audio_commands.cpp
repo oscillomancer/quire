@@ -73,7 +73,8 @@ struct Detect {
 };
 struct Marker {
     std::string take;
-    double sourcePos = 0, itemPos = 0;
+    std::optional<double> sourcePos;
+    double itemPos = 0;
     std::uint64_t index = 0;
 };
 struct Items {
@@ -312,6 +313,12 @@ void registerAudioCommands(cmd::Registry& registry) {
         c.summary = operation == "add"    ? "Add a pitch-preserving audio stretch marker."
                     : operation == "move" ? "Move an audio stretch marker's item position."
                                           : "Remove an interior audio stretch marker.";
+        if (operation == "add")
+            c.description =
+                "Omit source_pos to insert a point on the current source map at item_pos "
+                "without changing its timing. An identical existing point is not duplicated. "
+                "Warp peers receive the same source-relative point; ordinary edit groups stay "
+                "local, as with other take edits. Requires nonlooped pitch-preserving audio.";
         auto args = schema::object<Marker>("stretch_marker_args")
                         .field("take", &Marker::take, idSchema("tk"));
         if (operation == "add")
@@ -327,6 +334,10 @@ void registerAudioCommands(cmd::Registry& registry) {
                        : operation == "move" ? j(R"({"take":"tk_1","index":1,"item_pos":0.26})")
                                              : j(R"({"take":"tk_1","index":1})"),
                        j(R"("<any>")"), operation == "add" ? "song_with_audio" : "song_with_warp"}};
+        if (operation == "add")
+            c.examples.push_back({"Insert an anchor without moving audio",
+                                  j(R"({"take":"tk_1","item_pos":0.25})"), j(R"("<any>")"),
+                                  "song_with_audio"});
         c.run = [operation](const Marker& a, Context& ctx) -> Result<json::Value> {
             auto& host = app(ctx);
             const auto s = host.view();
@@ -334,6 +345,7 @@ void registerAudioCommands(cmd::Registry& registry) {
             if (!id) return id.error();
             SUPPLE_TRY(warpAllowed(s, *id));
             const auto& base = *s.takes.find(*id);
+            const double sourcePos = a.sourcePos.value_or(model::audioSourceAt(base, a.itemPos));
             const auto peers = base.warpPeers.empty() ? std::vector<Id>{*id} : base.warpPeers;
             for (auto peer : peers) {
                 SUPPLE_TRY(checkUnlockedTake(s, peer, "/take"));
@@ -346,8 +358,14 @@ void registerAudioCommands(cmd::Registry& registry) {
                     if (!(a.itemPos > 0 && a.itemPos < duration))
                         return Error("warp.boundary", "anchor must be inside the item", "/item_pos",
                                      "choose a position between item boundaries");
-                    t.stretchMarkers.push_back(
-                        {a.sourcePos + t.startOffset - base.startOffset, a.itemPos, 0});
+                    const double source = sourcePos + (t.startOffset - base.startOffset);
+                    if (std::any_of(t.stretchMarkers.begin(), t.stretchMarkers.end(),
+                                    [&](const auto& marker) {
+                                        return marker.itemPos == a.itemPos &&
+                                               marker.sourcePos == source;
+                                    }))
+                        continue;
+                    t.stretchMarkers.push_back({source, a.itemPos, 0});
                     std::sort(t.stretchMarkers.begin(), t.stretchMarkers.end(),
                               [](auto x, auto y) { return x.itemPos < y.itemPos; });
                 } else {

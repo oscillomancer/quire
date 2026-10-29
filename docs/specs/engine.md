@@ -1974,10 +1974,16 @@ an audio executor.
 - `take.hits.set {take, positions:[seconds], source_hash?, algorithm?, sensitivity?}`
   replaces candidates; empty positions records analyzed silence. Positions are
   ordered and within the original source. The default algorithm is `manual`.
-- `take.stretch.add {take, source_pos, item_pos}`, `.move {take,index,item_pos}` and
+- `take.stretch.add {take, source_pos?, item_pos}`, `.move {take,index,item_pos}` and
   `.remove {take,index}` edit anchors. First add pins the item boundaries. Indices
   are zero-based in item-time order; move/remove operate on interior anchors.
   Linked peers receive the same source-relative edit, atomically.
+  Omitting `source_pos` inserts an identity point on the current source map at
+  item-local `item_pos` seconds, including the take's offset/rate and existing warp;
+  audio timing stays unchanged until the marker moves. An identical existing point
+  succeeds without duplicating it. A conflicting point still fails map validation.
+  Warp peers receive the point once, with existing lock/freeze/mode checks;
+  ordinary item/track edit groups do not propagate take-content edits.
 - `audio.quantize {items:[it],grid,strength?,swing?,mode?,reference?,hits?,crossfade?}`
   consumes nonstale stored hits. Defaults: strength 1, swing 0, mode `warp`, first
   selected item as reference, hits `reference`, crossfade .005 seconds. `hits:merged`
@@ -2007,6 +2013,92 @@ exclusive with `start_offset`, which slips the map in source time. Changing
 right take. Clipboard copies remap a complete warp bundle to fresh take IDs;
 partial copies are independent. Edits that break a remaining bundle's alignment
 fail at transaction commit, allowing a batch to move all members together.
+
+### Consolidating items
+
+`item.consolidate {items:[it...]}` is a background action returning `{job}`.
+`job.get` becomes done only after one atomic edit publishes all results; its
+result contains `items` and audio `files`. Partition the explicit selection by
+track and active source kind: one audio and one MIDI result at most per track.
+Each spans its group's first start to last end. Audio uses only active takes;
+inactive alternatives remain available through undo. MIDI groups reuse
+`midi.merge`; a singleton MIDI partition stays unchanged. A selection with
+only singleton MIDI groups has nothing to consolidate.
+
+Audio capture bakes item mute/gain/fades, take gain/pan/polarity/channel mode,
+take envelopes, source looping/rate/pitch/warp and take FX with their automation.
+Track/input FX, strip controls, routing, VCA and master-rate conversion stay live.
+The existing renderer captures PreFader from a derivative snapshot with the target
+track's processing/input routes neutralized; PreFx is before item sources and
+is not a suitable capture tap. Take output is cropped to its item bounds as in
+playback, leaving silence in gaps and layering overlaps. No extra tails are added.
+The result is project-rate stereo float WAV, placed with project sample-boundary
+rounding, in the project's media folder. Keep the earliest item ID, placement,
+lane/timebase/group and presentation, replacing its takes with one neutral take:
+zero source offset/pitch/gain/pan, unity rate, normal channels, no envelopes/FX,
+looping, mute or fades. Track processing then applies once.
+
+`model::consolidationGroups` is the shared read-only command/menu planner.
+Different lanes or item-group tokens within a partition refuse with
+`item.consolidate_layout`. `completeItemSelection` reuses audio-warp validation
+and requires all affected warp owners and linked edit peers, respecting locks,
+freeze and group suspension; incomplete selections report a repair hint.
+There is no additional item-count cap: existing source and render sample budgets
+apply to each capture. `itemEditFingerprint` guards selected material and owned
+automation/timing without including unrelated mixer controls; IDs normalize for
+branch replay. Input hashes include all preparation peers (even inactive takes
+whose channels influence bundle phase), are checked on the worker, and file stamps
+again before publication. Project/branch/destination changes or changed selected
+material refuse the completion with `item.consolidate_stale`.
+
+Owned pending WAVs live under `.consolidate-pending`, excluded from Save As copies.
+Cancellation or failure publishes no model change and removes owned artifacts.
+One internal `item.consolidate.commit` edit verifies saved media, attaches all
+audio results and merges MIDI atomically. Replay reuses those files rather than
+rerendering FX. Published files remain available to history, undo and project
+copies. Errors carry paths and repair hints; source/render problems must be fixed
+before retrying. No sample processing or I/O is added to audio executors.
+
+### Healing audio splits
+
+`item.heal {items:[it...]}` is a pure edit returning surviving `items`, one per
+track, in one undo step. `model::healingGroups` is the shared read-only eligibility
+and reconstruction helper. Each selected track must have at least two consecutive
+audio pieces on one lane, with complete linked/warp selection. No source I/O,
+sample search, live-plugin queries or rendering happens in the handler.
+
+Touching pieces must meet at the same project sample boundary, without interior
+fades. The one overlap exception recognizes unchanged Slice-at-hits pre-roll:
+at most 50 ms, bounded by half the preceding logical slice, matching linear
+zero-curve interior fades, and the same global source map through the overlap.
+Gaps, moved pieces, nesting, unrelated overlaps and altered interior fades refuse.
+Healing restores continuous pre-split/pre-slice audio; removing the generated
+internal fades intentionally differs from the currently faded slice mix.
+
+Items must match lane, stored/effective timebase, loop, mute, gain, group token,
+take count/order and active index. Every corresponding take must be audio from
+the same media ID, with matching stored properties, including rate/pitch/mode,
+gain/pan/polarity/channels and original-source marker/transient metadata. Source
+offsets and complete stretch maps must represent the same rebased source map on
+the project sample grid. Keep the first item/take IDs and full authored maps,
+first fade-in and last fade-out (complete shapes/curves), and first presentation/
+snap point. Extend only the full span and remove redundant right-hand objects.
+
+Take FX chains must match their complete stored plugin/settings/patch/parameter/
+state-blob values and normalized owned automation; instance activity is irrelevant.
+No special normalization of drifting stored FX state is performed. Corresponding
+FX envelopes retain their full matching original curves/automation. Take-relative
+envelopes may join constant or linear seam continuations, with copied automation
+rebased to the original origin. An unrecoverable nonlinear seam refuses with
+`item.heal_envelope`; differing stored FX refuse with `item.heal_fx`. Other
+incompatibilities use `item.heal_incompatible`, all with a Consolidate hint.
+
+All original left-side warp peers must be represented by compatible selected
+chains. Retain their original take IDs and reciprocal ordering; right copies
+must be detached as the split command leaves them. Validate restored spans/maps
+with existing `validateAudioWarp` and group validation, without a second bundle
+alignment implementation. Removing takes also removes owned envelopes' automation
+items, so neither healing nor consolidation leaves orphaned automation blocks.
 
 ### Splitting at a prior zero crossing
 

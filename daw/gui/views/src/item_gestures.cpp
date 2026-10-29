@@ -12,6 +12,7 @@
 #include <tuple>
 
 #include "supple/model/freeze.h"
+#include "supple/model/item_edits.h"
 #include "supple/ui/canvas.h"
 #include "supple/ui/popup.h"
 #include "supple/ui/root.h"
@@ -988,6 +989,30 @@ Status ItemGestures::mergeSelection() {
     return {};
 }
 
+bool ItemGestures::canConsolidate() const {
+    return static_cast<bool>(model::consolidationGroups(view_.session(), selection_));
+}
+bool ItemGestures::canHeal() const {
+    return static_cast<bool>(model::healingGroups(view_.session(), selection_));
+}
+void ItemGestures::consolidateSelection() {
+    if (onConsolidate) onConsolidate(selection_);
+}
+Status ItemGestures::healSelection() {
+    if (!run) return {};
+    auto args = json::Value::object();
+    args["items"] = json::Value::array();
+    for (auto id : selection_) args["items"].push_back(id.str());
+    auto result = run("Heal splits", {{"item.heal", std::move(args)}});
+    if (!result) return result.error();
+    selection_.clear();
+    if (const auto* items = result->find("items"))
+        for (const auto& item : items->asArray())
+            if (auto id = model::Id::parse(item.asString())) selection_.push_back(*id);
+    changed();
+    return {};
+}
+
 Status ItemGestures::splitSelection(bool zeroCrossing) {
     if (!run) return {};
     const auto& s = view_.session();
@@ -1012,6 +1037,33 @@ Status ItemGestures::splitSelection(bool zeroCrossing) {
     }
     if (steps.empty()) return {};
     auto result = run(zeroCrossing ? "Split at prior zero crossing" : "Split at cursor", steps);
+    if (!result) return result.error();
+    return {};
+}
+
+Status ItemGestures::addStretchMarkerAtCursor() {
+    if (!run) return {};
+    const auto& s = view_.session();
+    const double cursor = view_.playhead();
+    std::set<model::Id> visited;
+    std::vector<EditStep> steps;
+    for (auto id : selection_) {
+        const auto* item = s.items.find(id);
+        const auto* take = item && item->activeTake ? s.takes.find(*item->activeTake) : nullptr;
+        if (!take || !take->source || take->source->kind != model::Kind::Media ||
+            visited.contains(*item->activeTake))
+            continue;
+        const auto span = model::itemSpan(s, *item);
+        if (!(cursor > span.startSec && cursor < span.endSec)) continue;
+        visited.insert(*item->activeTake);
+        visited.insert(take->warpPeers.begin(), take->warpPeers.end());
+        auto args = json::Value::object();
+        args["take"] = item->activeTake->str();
+        args["item_pos"] = cursor - span.startSec;
+        steps.push_back({"take.stretch.add", std::move(args)});
+    }
+    if (steps.empty()) return {};
+    auto result = run("Add stretch marker at cursor", steps);
     if (!result) return result.error();
     return {};
 }
@@ -1048,8 +1100,13 @@ void ItemGestures::addEditItems(std::vector<ui::MenuItem>& items, ui::Point at, 
     add("Duplicate" + count, "ui.item.duplicate", true, [this] { return duplicateSelection(); });
     add("Delete" + count, "edit.delete", true, [this] { return deleteSelection(); });
     // Always listed (greyed when it does not apply), so the rows keep their places.
-    add(n == 1 ? "Merge takes" : "Merge MIDI items", "ui.item.merge", canMerge(),
-        [this] { return mergeSelection(); });
+    add("Consolidate items", "ui.item.consolidate", canConsolidate(), [this] {
+        consolidateSelection();
+        return Status{};
+    });
+    add("Heal splits", "ui.item.heal", canHeal(), [this] { return healSelection(); });
+    if (n == 1 && canMerge())
+        add("Merge takes", "ui.item.merge", true, [this] { return mergeSelection(); });
     add("Split item at cursor", "item.split:playhead", true, [this] { return splitSelection(); });
     const auto& s = view_.session();
     const bool audio = std::any_of(selection_.begin(), selection_.end(), [&](auto id) {
@@ -1104,18 +1161,36 @@ void ItemGestures::openItemMenu(ui::Point at) {
         items.push_back(std::move(m));
     }
     for (const auto& [label, op] : {std::pair{"Detect hits", "detect"},
+                                    {"Add stretch marker at cursor", "marker"},
                                     {"Quantize audio", "warp"},
                                     {"Slice at hits", "slice"},
                                     {"Remove warping", "reset"}}) {
         ui::MenuItem menu;
         menu.label = label;
         menu.run = [this, operation = std::string(op)] {
-            if (onAudioEdit) onAudioEdit(selection_, operation, gridBeats());
+            if (operation == "marker") {
+                if (auto result = addStretchMarkerAtCursor(); !result && onError)
+                    onError(result.error());
+            } else if (onAudioEdit)
+                onAudioEdit(selection_, operation, gridBeats());
         };
         menu.enabled = std::any_of(selection_.begin(), selection_.end(), [&](auto id) {
             const auto* it = s.items.find(id);
             const auto* tk = it && it->activeTake ? s.takes.find(*it->activeTake) : nullptr;
-            return tk && tk->source && tk->source->kind == model::Kind::Media;
+            if (!tk || !tk->source || !s.media.contains(*tk->source)) return false;
+            if (std::string_view(op) != "marker") return true;
+            const auto span = model::itemSpan(s, *it);
+            if (it->locked || model::frozenOwner(s, id) || it->loop || !tk->preservePitch ||
+                tk->pitchMode != "signalsmith" || !model::validateWarpMap(*tk) ||
+                view_.playhead() <= span.startSec || view_.playhead() >= span.endSec)
+                return false;
+            for (auto peer : tk->warpPeers)
+                for (const auto& owner : s.items)
+                    if (std::find(owner.value->takes.begin(), owner.value->takes.end(), peer) !=
+                            owner.value->takes.end() &&
+                        (owner.value->locked || model::frozenOwner(s, owner.id)))
+                        return false;
+            return true;
         });
         items.push_back(std::move(menu));
     }

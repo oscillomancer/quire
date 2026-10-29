@@ -606,6 +606,7 @@ int main(int argc, char** argv) {
         g.onAudioEdit = [&](const auto& items, const auto& operation, double grid) {
             audioEdit.run(items, operation, grid);
         };
+        g.onConsolidate = [&](const auto& items) { audioEdit.consolidate(items); };
         g.pinVersion = [&app](std::uint64_t version) { return (*app)->versions().pin(version); };
         const cmd::Origin ui{cmd::Origin::Type::Ui, "gui", {}};
         if (auto mouse = views::MouseMap::load(mouseFile))
@@ -775,6 +776,10 @@ int main(int argc, char** argv) {
     });
     appActions.addUi("ui.item.merge", "Item: merge selected MIDI items (or one item's takes)",
                      [&] { reportEdit("merge", shell.arrange()->gestures().mergeSelection()); });
+    appActions.addUi("ui.item.consolidate", "Item: consolidate selected items",
+                     [&] { shell.arrange()->gestures().consolidateSelection(); });
+    appActions.addUi("ui.item.heal", "Item: heal selected audio splits",
+                     [&] { reportEdit("heal", shell.arrange()->gestures().healSelection()); });
     appActions.addUi("item.split:playhead", "Item: split selected at cursor",
                      [&] { reportEdit("split", shell.arrange()->gestures().splitSelection()); });
     appActions.addUi("ui.item.split-zero", "Item: split selected at prior zero crossing", [&] {

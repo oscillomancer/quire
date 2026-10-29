@@ -573,6 +573,10 @@ and naming. All `edit` unless marked (q) query or (a) action.
   (a), `track.template.load {name}` (a new strip under the master),
   `track.template.list` (q), `track.template.delete` (a).
 - **items/takes**: `item.add {track, position, length, source|midi|notation}`,
+  `item.consolidate {items}` (background action, one atomic result edit;
+  active audio with take FX baked, MIDI kept separate per track; engine.md),
+  `item.heal {items}` (pure edit joining compatible audio split/slice chains;
+  one result per track, no rendering; exact eligibility in engine.md),
   `item.remove`, `item.move`, `item.set`, `item.split {item, at, snap?: none|zero_crossing}`
   (default none; audio zero-crossing search and errors in engine.md),
   `item.duplicate`, `item.glue` (a+edit), `take.add`, `take.remove`,

@@ -307,6 +307,27 @@ while any saved project or history still needs them.
 
 ## Timing audio with hits and stretch markers
 
+Right-click selected items and choose **Consolidate items** to combine material
+per track.
+Audio and MIDI remain separate. Audio uses active takes and bakes their item
+controls, timing, take FX and envelopes into a new WAV; track processing stays
+live. Gaps stay silent. MIDI keeps the existing merge behavior. Progress appears
+in the status line; all results publish together in one undo step.
+Select complete linked/warp bundles on matching lanes and groups. Undo retains
+the original takes; the new media stays available to history and project saves.
+Agents use `item.consolidate {items:[...]}` and follow the returned job with `job.get`.
+
+**Heal splits**, beside Consolidate items, joins compatible audio pieces without
+making a new file. Agents use `item.heal {items:[...]}`.
+Select consecutive unchanged pieces from the same source on each track, including
+any linked/warp peers. Healing keeps all corresponding takes, the outer fades and
+the full source/warp mapping, removing generated internal slice fades. Source
+settings and stored take FX must match; moved pieces, changed fades and nonlinear
+envelope seams that cannot be restored need consolidation instead. Each track
+becomes one item and the operation is one undo step.
+Both menu entries are greyed when the selection cannot use them. For a single
+multi-take MIDI item, **Merge takes** remains available to layer its alternatives.
+
 Right-click an item and choose **Split item at cursor**, or press S, to split
 selected audio and MIDI items at the edit cursor. Items outside the cursor stay
 whole; the menu's pointer position does not set the split point. Undo restores
@@ -322,6 +343,15 @@ attacks. Drag a dim hit to create a stretch marker, or drag a solid marker handl
 to change timing while retaining pitch. Hold Shift for a move off the grid. Item
 edges stay pinned when the first marker is added. **Remove warping** returns to the
 take's original scalar rate/pitch and leaves detected hits visible.
+
+To put an anchor at a specific time, set the edit cursor there, right-click an
+item and choose **Add stretch marker at cursor**. It inserts a marker in each
+selected audio item containing the cursor, without moving its timing. Drag the
+marker to change timing later. Existing markers are not duplicated; MIDI items
+are skipped. The command is one undo step and keeps warp peers together. As with
+other warp edits, it needs nonlooped audio in Signalsmith pitch-preserving mode.
+Agents can use `take.stretch.add {take, item_pos}` with `item_pos` in seconds
+from the item's start; omitting `source_pos` preserves the current timing.
 
 **Quantize audio** moves attacks to the current arrange grid. **Slice at hits**
 splits without moving them and adds short fades. Both detect hits automatically
