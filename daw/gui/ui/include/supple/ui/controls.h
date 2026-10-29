@@ -33,6 +33,7 @@ class Fader : public Node {
     double value() const { return db_; }
     bool dragging() const { return dragging_; }
     void cancelGesture() { dragging_ = false; }
+    unsigned gestureModifiers() const { return gestureMods_; }
 
     Size measure(const Canvas& canvas, Size available) override;
     void paint(Canvas& canvas) override;
@@ -47,6 +48,7 @@ class Fader : public Node {
     double db_ = 0, pressDb_ = 0;
     Point press_{};
     bool dragging_ = false;
+    unsigned gestureMods_ = 0;
 };
 
 // A normalized slider: [0, 1] along its width, for values whose curve the
@@ -107,6 +109,7 @@ class PanControl : public Node {
     void setValue(double pan);
     double value() const { return pan_; }
     void cancelGesture() { dragging_ = false; }
+    unsigned gestureModifiers() const { return gestureMods_; }
     Size measure(const Canvas& canvas, Size available) override;
     void paint(Canvas& canvas) override;
     bool onPointer(const PointerEvent& e) override;
@@ -118,6 +121,7 @@ class PanControl : public Node {
     double pan_ = 0, pressPan_ = 0;
     Point press_{};
     bool dragging_ = false;
+    unsigned gestureMods_ = 0;
 };
 
 // Stereo peak/RMS meter, -60..+6 dBFS. Readings come from EngineApp::meters

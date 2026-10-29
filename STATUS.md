@@ -742,7 +742,11 @@ Session and editing:
   the output budget.
 - Take `stretch_markers` are stored but not applied; stretching and
   resampling run synchronously when a plan is compiled.
-- Track groups are preserved in project files but not implemented.
+- Track groups and optional nested VCA controls are implemented (ADR-0052).
+  Effective VCA gain is capped at Console 9’s native top (about +12.0412 dB);
+  queries expose the requested and applied levels. Edit links require matching
+  item boundaries and lanes; MIDI/take-content/warp edits stay local. Native
+  macOS/Windows validation is pending.
 - Loop recording passes that span a change of the loop range are not
   handled; MIDI recordings have no crash recovery.
 - `fx.copy` does not copy envelopes or key routes; take FX cannot be keyed.
@@ -844,6 +848,6 @@ detail; core-params formats magnitudes beyond six decimals imprecisely;
 - Profile the 64-frame worst case; a pipelined bridge mode.
 - Close the capacity gap with REAPER (B2) by making the anticipative
   renderer cheaper, then keep refining capacity in both modes.
-- Track groups, stretch markers, MIDI outputs, a background media cache.
+- Stretch markers, MIDI outputs, a background media cache.
 - Lua ergonomics (a script library path, hot reload).
 - Native audio/MIDI hardware validation and GUI hardening on macOS and Windows.

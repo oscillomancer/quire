@@ -12,6 +12,7 @@
 
 #include "panel_grip.h"
 #include "panel_height.h"
+#include "supple/model/groups.h"
 #include "supple/ui/controls.h"
 #include "supple/ui/list.h"
 #include "supple/ui/popup.h"
@@ -711,16 +712,23 @@ std::string Mixer::structure() const {
         for (model::Id child : t->children) walk(child);
     };
     for (model::Id m : s.project->masters) walk(m);
+    for (const auto& e : s.groups) {
+        out += e.id.str() + e.value->name + e.value->color + std::to_string(e.value->active) +
+               std::to_string(e.value->vca.has_value());
+        for (auto id : e.value->members) out += id.str();
+        for (const auto& link : e.value->links) out += link;
+    }
     return out;
 }
 
 Result<json::Value> Mixer::set(const std::string& track, const char* field, json::Value value,
-                               const std::string& gesture) {
+                               const std::string& gesture, bool bypassGroups) {
     if (projectGeneration_ != app_.projectGeneration())
         return Error("gui.mixer.stale", "the project changed; edit the control again", "/track",
                      "wait for the mixer to refresh");
     json::Value args = json::Value::object();
     args["track"] = track;
+    args["bypass_groups"] = bypassGroups;
     args[field] = std::move(value);
     auto r = selectionEdit_.set(std::move(args), gesture);
     if (!r && actions_.onError) actions_.onError(std::string("mixer: ") + r.error().message);
@@ -731,6 +739,7 @@ void Mixer::rebuild() {
     endDrag(false);  // the nodes it points at are about to go
     for (const Strip& s : strips_) meters_.detach(s.meter);
     strips_.clear();
+    vcaStrips_.clear();
     // Remove the old strips (the row keeps its scroll bar).
     static_cast<StripRow*>(row_)->clear();
     const model::Session& s = app_.head();
@@ -829,6 +838,20 @@ void Mixer::rebuild() {
             std::vector<std::string> shown;
             for (const Strip& x : strips_) shown.push_back(x.track);
             selectTrack(actions_.ui(), tid, mods, shown);
+            const bool selected = trackSelected(actions_.ui(), tid);
+            for (auto peer :
+                 model::linkedTracks(app_.head(), *model::Id::parse(tid), "selection")) {
+                if (!selected)
+                    std::erase(actions_.ui().selectedTracks, peer.str());
+                else if (!trackSelected(actions_.ui(), peer.str()))
+                    actions_.ui().selectedTracks.push_back(peer.str());
+            }
+            const auto seeds = actions_.ui().selectedTracks;
+            for (const auto& seed : seeds)
+                if (auto selectedId = model::Id::parse(seed))
+                    for (auto peer : model::linkedTracks(app_.head(), *selectedId, "selection"))
+                        if (!trackSelected(actions_.ui(), peer.str()))
+                            actions_.ui().selectedTracks.push_back(peer.str());
             showSelection();
         };
         frame->selected = [this, tid] { return trackSelected(actions_.ui(), tid); };
@@ -837,6 +860,24 @@ void Mixer::rebuild() {
             frame->drag.notify = [this, tid](DragPhase phase, ui::Point p) {
                 dragStrip(tid, phase, p);
             };
+        if (!s.groups.empty()) {
+            const auto groups = model::trackGroups(s, id);
+            auto& tabs = frame->emplace<ui::Node>("mixer.groups." + tid);
+            tabs.layout.dir = ui::Layout::Dir::Row;
+            tabs.layout.height = ui::SizeRule::fixed(14);
+            for (auto gid : groups) {
+                const auto& group = *s.groups.find(gid);
+                auto& color = tabs.emplace<ColorStripe>(
+                    "mixer.group.color." + tid + "." + gid.str(), group.color);
+                color.layout.width = ui::SizeRule::fixed(3);
+                color.layout.height = ui::SizeRule::fixed(14);
+                auto& tab = tabs.emplace<ui::Button>(
+                    "mixer.group." + tid + "." + gid.str(), (group.active ? "" : "· ") + group.name,
+                    [this, gid, tid] { trackMenu_.openGroup(gid, {tid}, {}); });
+                tab.layout.width = ui::SizeRule::fraction();
+                tab.layout.height = ui::SizeRule::fixed(14);
+            }
+        }
         // Sends: name and level, up to two; none leaves the room to the chain.
         auto& sends = frame->emplace<ui::Node>("mixer.sends." + tid);
         sends.layout.dir = ui::Layout::Dir::Column;
@@ -920,12 +961,13 @@ void Mixer::rebuild() {
         st.polarity->layout.height = st.mono->layout.height = ui::SizeRule::fixed(14);
         st.polarity->pill = st.mono->pill = true;
         st.pan = &frame->emplace<ui::PanControl>("mixer.pan." + tid);
-        st.pan->onChange = [this, tid](double pan, ui::Gesture g) {
+        st.pan->onChange = [this, tid, control = st.pan](double pan, ui::Gesture g) {
             if (g == ui::Gesture::Begin) ++gesture_;
             if (g == ui::Gesture::Begin || g == ui::Gesture::End) return;
             (void)set(
                 tid, "pan", json::Value(pan),
-                g == ui::Gesture::Move ? "mixer.pan:" + tid + ":" + std::to_string(gesture_) : "");
+                g == ui::Gesture::Move ? "mixer.pan:" + tid + ":" + std::to_string(gesture_) : "",
+                bool(control->gestureModifiers() & ui::kAlt));
         };
         auto& faderRow = frame->emplace<ui::Node>("mixer.faderrow." + tid);
         faderRow.layout.dir = ui::Layout::Dir::Row;
@@ -937,7 +979,7 @@ void Mixer::rebuild() {
         st.meter = &faderRow.emplace<ui::Meter>("mixer.meter." + tid);
         auto& spacer2 = faderRow.emplace<ui::Node>("mixer.spacer2." + tid);
         spacer2.layout.width = ui::SizeRule::fraction();
-        st.fader->onChange = [this, tid](double db, ui::Gesture g) {
+        st.fader->onChange = [this, tid, control = st.fader](double db, ui::Gesture g) {
             for (Strip& x : strips_)
                 if (x.track == tid && x.value) x.value->setText(dbText(db));
             if (g == ui::Gesture::Begin) ++gesture_;
@@ -945,7 +987,8 @@ void Mixer::rebuild() {
             (void)set(tid, "volume_db", json::Value(db),
                       g == ui::Gesture::Move
                           ? "mixer.volume:" + tid + ":" + std::to_string(gesture_)
-                          : "");
+                          : "",
+                      bool(control->gestureModifiers() & ui::kAlt));
         };
         st.value = &frame->emplace<ui::Label>("mixer.value." + tid, dbText(t.volumeDb),
                                               ui::Font::Mono, "caption", "ink-quiet");
@@ -968,6 +1011,64 @@ void Mixer::rebuild() {
         static_cast<StripRow*>(row_)->addStrip(std::move(frame),
                                                t.type == model::StripType::Master);
         strips_.push_back(st);
+    }
+    for (const auto& e : s.groups) {
+        if (!e.value->vca) continue;
+        const auto gid = e.id;
+        const auto tid = gid.str();
+        Strip st;
+        st.track = tid;
+        st.type = "vca";
+        auto frame = std::make_unique<StripFrame>(
+            "mixer.vca." + tid, "buss",
+            [this, gid](ui::Point p) { trackMenu_.openGroup(gid, {}, {p.x, p.y, 1, 1}); });
+        st.node = frame.get();
+        frame->emplace<ui::Label>("mixer.vca.name." + tid, e.value->name, ui::Font::UiBold, "small",
+                                  "ink");
+        frame->emplace<ColorStripe>("mixer.vca.color." + tid, e.value->color);
+        frame->emplace<ui::Label>("mixer.vca.badge." + tid, "VCA", ui::Font::Ui, "caption",
+                                  "ink-quiet");
+        auto& filler = frame->emplace<ui::Node>("mixer.vca.space." + tid);
+        filler.layout.height = ui::SizeRule::fraction();
+        frame->emplace<ui::Button>(
+            "mixer.vca.members." + tid, std::to_string(e.value->members.size()) + " members",
+            [this, gid] { trackMenu_.openGroup(gid, actions_.ui().selectedTracks, {}); });
+        frame->emplace<ui::Button>("mixer.vca.env." + tid, "env", [this, gid] {
+            if (envelopes) envelopes(gid, {});
+        });
+        st.fader = &frame->emplace<ui::Fader>("mixer.vca.fader." + tid);
+        st.fader->layout.height = ui::SizeRule::fixed(kFaderH);
+        st.fader->setValue(e.value->vca->volumeDb);
+        auto setVca = [this, gid](const char* field, json::Value value,
+                                  const std::string& gesture = {}) {
+            auto args = json::Value::object();
+            args["group"] = gid.str();
+            args[field] = std::move(value);
+            auto origin = kOrigin;
+            origin.gesture = gesture;
+            auto r = dispatcher_.execute({"vca.set", std::move(args), origin});
+            if (!r && actions_.onError) actions_.onError(r.error().message);
+        };
+        st.value =
+            &frame->emplace<ui::Label>("mixer.vca.value." + tid, dbText(e.value->vca->volumeDb),
+                                       ui::Font::Mono, "caption", "ink-quiet");
+        st.fader->onChange = [this, setVca, tid](double db, ui::Gesture g) {
+            if (g == ui::Gesture::Begin) ++gesture_;
+            if (g == ui::Gesture::Move || g == ui::Gesture::Set)
+                setVca("volume_db", db,
+                       g == ui::Gesture::Move ? "vca:" + tid + ":" + std::to_string(gesture_) : "");
+        };
+        auto& ms = frame->emplace<ui::Node>("mixer.vca.ms." + tid);
+        ms.layout.dir = ui::Layout::Dir::Row;
+        ms.layout.height = ui::SizeRule::fixed(20);
+        st.mute = &ms.emplace<ui::Toggle>("mixer.vca.mute." + tid, "M", "mute",
+                                          [setVca](bool on) { setVca("mute", on); });
+        st.solo = &ms.emplace<ui::Toggle>("mixer.vca.solo." + tid, "S", "solo",
+                                          [setVca](bool on) { setVca("solo", on); });
+        st.mute->layout.width = st.solo->layout.width = ui::SizeRule::fraction();
+        st.mute->pill = st.solo->pill = true;
+        static_cast<StripRow*>(row_)->addStrip(std::move(frame), false);
+        vcaStrips_.push_back(st);
     }
     root_.relayout();
     root_.damageAll();
@@ -1290,6 +1391,17 @@ void Mixer::endDrag(bool commit) {
 void Mixer::update() {
     const model::Session& s = app_.head();
     if (console9_) console9_->setOn(s.project->console9);
+    for (auto& st : vcaStrips_) {
+        const auto id = model::Id::parse(st.track);
+        const auto* g = id ? s.groups.find(*id) : nullptr;
+        if (!g || !g->vca) continue;
+        if (!st.fader->dragging()) {
+            st.fader->setValue(g->vca->volumeDb);
+            st.value->setText(dbText(g->vca->volumeDb));
+        }
+        st.mute->setOn(g->vca->mute);
+        st.solo->setOn(g->vca->solo);
+    }
     for (Strip& st : strips_) {
         const auto id = model::Id::parse(st.track);
         const model::Track* t = id ? s.tracks.find(*id) : nullptr;

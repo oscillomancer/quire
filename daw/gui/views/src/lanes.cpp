@@ -296,6 +296,8 @@ void Lanes::drawEnvelope(ui::Canvas& c, std::size_t row, const ui::Rect& r) {
                    : env->target.param == "volume" ? tr->volumeDb
                    : env->target.param == "pan"    ? tr->pan
                                                    : (tr->mute ? 1.0 : 0.0);
+    if (const auto* g = s.groups.find(env->target.object); g && g->vca)
+        fallback = env->target.param == "volume" ? g->vca->volumeDb : (g->vca->mute ? 1.0 : 0.0);
     const ui::Rect a = envArea(r);
     auto yOf = [&](double value) {
         return a.bottom() - static_cast<float>(scale->toNorm(value)) * a.h;

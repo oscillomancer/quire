@@ -1,3 +1,4 @@
+#include <supple/model/groups.h>
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "supple/views/item_gestures.h"
@@ -375,6 +376,10 @@ bool ItemGestures::isSelected(model::Id item) const {
 }
 
 void ItemGestures::changed() {
+    const auto seeds = selection_;
+    for (auto id : seeds)
+        for (auto peer : model::linkedItems(view_.session(), id))
+            if (!isSelected(peer)) selection_.push_back(peer);
     if (root_) root_->requestAnimationFrame();
     if (onSelection) onSelection(selection_);
 }
@@ -1321,9 +1326,10 @@ void ItemGestures::commit(const ui::PointerEvent& e) {
         }
         const std::string_view click = mouse.behaviour("item.click", e.mods);
         if (click == "toggle") {
-            if (isSelected(state_.anchor))
-                std::erase(selection_, state_.anchor);
-            else
+            if (isSelected(state_.anchor)) {
+                for (auto peer : model::linkedItems(view_.session(), state_.anchor))
+                    std::erase(selection_, peer);
+            } else
                 selection_.push_back(state_.anchor);
         } else if (click == "extend") {
             if (!isSelected(state_.anchor)) selection_.push_back(state_.anchor);

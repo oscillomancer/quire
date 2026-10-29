@@ -119,6 +119,8 @@ void Fader::paint(Canvas& c) {
 }
 
 bool Fader::onPointer(const PointerEvent& e) {
+    if (e.type == PointerEvent::Type::Down || e.type == PointerEvent::Type::Wheel)
+        gestureMods_ = e.mods;
     using T = PointerEvent::Type;
     switch (e.type) {
         case T::Down:
@@ -167,6 +169,7 @@ bool Fader::onPointer(const PointerEvent& e) {
 }
 
 bool Fader::onKey(const KeyEvent& e) {
+    gestureMods_ = e.mods;
     const double step = (e.mods & kShift) ? 0.1 : 1.0;
     switch (e.key) {
         case SDLK_UP:
@@ -235,6 +238,8 @@ void PanControl::paint(Canvas& c) {
 }
 
 bool PanControl::onPointer(const PointerEvent& e) {
+    if (e.type == PointerEvent::Type::Down || e.type == PointerEvent::Type::Wheel)
+        gestureMods_ = e.mods;
     using T = PointerEvent::Type;
     switch (e.type) {
         case T::Down:
@@ -277,6 +282,7 @@ bool PanControl::onPointer(const PointerEvent& e) {
 }
 
 bool PanControl::onKey(const KeyEvent& e) {
+    gestureMods_ = e.mods;
     const double step = (e.mods & kShift) ? 1 : 5;
     switch (e.key) {
         case SDLK_LEFT:

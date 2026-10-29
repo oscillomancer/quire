@@ -80,6 +80,9 @@ class Shell {
     void openInputMenu(const model::Id& track, const ui::Rect& anchor);
     std::string inputLabel(const model::Id& track) const;
 
+    // Track or VCA automation lanes; created on first show.
+    void openEnvelopeMenu(const model::Id& track, const ui::Rect& anchor);
+
   private:
     bool isSelected(const model::Id& track) const;
     void selectTrack(const model::Id& track, unsigned mods);
@@ -87,8 +90,6 @@ class Shell {
     // What the strip's input button says: the port names when the engine's list
     // is at hand, the channel numbers otherwise.
     std::string inputText(const model::Id& track, const std::string& channels) const;
-    // P5.14: the strip's automation lanes (show/hide; created when missing).
-    void openEnvelopeMenu(const model::Id& track, const ui::Rect& anchor);
 
     std::vector<std::string> shownSelection_;  // the track selection the TCP shows
     engine::EngineApp& app_;

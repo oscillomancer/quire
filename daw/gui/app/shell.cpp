@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "shell.h"
+#include <supple/model/groups.h>
 
 #include "plugin_scales.h"
 #include "track_menu.h"
@@ -309,9 +310,11 @@ void Shell::openEnvelopeMenu(const model::Id& track, const ui::Rect& anchor) {
     if (!root_) return;
     const model::Session& s = app_.head();
     const model::Track* tr = s.tracks.find(track);
-    if (!tr) return;
+    const auto* group = s.groups.find(track);
+    if (!tr && !(group && group->vca)) return;
     std::vector<ui::MenuItem> items, removals;
-    std::vector<const char*> params{"volume", "pan", "mute"};
+    std::vector<const char*> params = group ? std::vector<const char*>{"volume", "mute"}
+                                            : std::vector<const char*>{"volume", "pan", "mute"};
     if (track == model::kMaster) params.push_back("playrate");
     for (const char* param : params) {
         std::optional<model::Id> env;
@@ -345,14 +348,17 @@ void Shell::openEnvelopeMenu(const model::Id& track, const ui::Rect& anchor) {
             removals.push_back(std::move(remove));
         } else {
             // A new envelope starts flat at the strip's current value.
-            const double value = param == std::string_view("playrate") ? s.project->playrate.rate
-                                 : param == std::string_view("volume") ? tr->volumeDb
-                                 : param == std::string_view("pan")    ? tr->pan
-                                                                       : (tr->mute ? 1.0 : 0.0);
+            const double value =
+                group ? (param == std::string_view("volume") ? group->vca->volumeDb
+                                                             : (group->vca->mute ? 1.0 : 0.0))
+                : param == std::string_view("playrate") ? s.project->playrate.rate
+                : param == std::string_view("volume")   ? tr->volumeDb
+                : param == std::string_view("pan")      ? tr->pan
+                                                        : (tr->mute ? 1.0 : 0.0);
             m.run = [this, track, param = std::string(param), value] {
                 json::Value args = json::Value::object(), points = json::Value::array(),
                             first = json::Value::object();
-                args["track"] = track.str();
+                args[track.kind == model::Kind::Group ? "group" : "track"] = track.str();
                 args["param"] = param;
                 first["beat"] = 0.0;
                 first["value"] = value;
@@ -367,7 +373,7 @@ void Shell::openEnvelopeMenu(const model::Id& track, const ui::Rect& anchor) {
     bool firstPlugin = true;
     for (const auto& e : s.envelopes) {
         const model::Id target = e.value->target.object;
-        if (target.kind != model::Kind::Fx) continue;
+        if (!tr || target.kind != model::Kind::Fx) continue;
         const bool owned =
             std::find(tr->chain.begin(), tr->chain.end(), target) != tr->chain.end() ||
             std::find(tr->inputChain.begin(), tr->inputChain.end(), target) != tr->inputChain.end();
@@ -552,6 +558,20 @@ void Shell::selectTrack(const model::Id& track, unsigned mods) {
     for (const auto& row : arrange_->trackLayout().rows())
         if (!row.env) order.push_back(row.track.str());
     gui::selectTrack(ui_, track.str(), mods, order);
+    const bool selected = trackSelected(ui_, track.str());
+    for (auto peer : model::linkedTracks(app_.head(), track, "selection")) {
+        if (!selected)
+            std::erase(ui_.selectedTracks, peer.str());
+        else if (!trackSelected(ui_, peer.str()))
+            ui_.selectedTracks.push_back(peer.str());
+    }
+
+    // Shift/range selection can introduce several seeds at once.
+    const auto seeds = ui_.selectedTracks;
+    for (const auto& seed : seeds)
+        if (auto id = model::Id::parse(seed))
+            for (auto peer : model::linkedTracks(app_.head(), *id, "selection"))
+                if (!trackSelected(ui_, peer.str())) ui_.selectedTracks.push_back(peer.str());
     shownSelection_ = ui_.selectedTracks;
     arrange_->tcpPanel().invalidate();  // the highlight is the panel's own
 }
