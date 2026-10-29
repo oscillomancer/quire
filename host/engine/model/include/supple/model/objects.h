@@ -115,6 +115,21 @@ struct Track {
     int folderCompact = 0;  // 0 normal, 1 small, 2 collapsed
 };
 
+// Track edit links and an optional audio-free VCA control (ADR-0052).
+inline constexpr std::size_t kMaxVcaControllers = 32;
+struct Vca {
+    double volumeDb = 0.0;
+    bool mute = false, solo = false;
+    std::vector<Id> followers;
+};
+struct TrackGroup {
+    std::string name, color;
+    bool active = true;
+    std::vector<Id> members;
+    std::vector<std::string> links{"volume", "mute", "solo"};
+    std::optional<Vca> vca;
+};
+
 enum class FadeShape : std::uint8_t { Linear, Slow, Fast, SlowFast, FastSlow, Cos, Exp };
 struct Fade {
     double length = 0.0;  // seconds
@@ -292,7 +307,7 @@ struct EnvPoint {
 };
 
 struct EnvTarget {
-    Id object = kMaster;  // tr_*, sd_*, fx_* or tk_*
+    Id object = kMaster;  // tr_*, sd_*, fx_*, tk_* or a VCA gr_*
     std::string param;    // volume|pan|mute, pitch for takes, playrate on tr_0, or plugin key/id
 };
 
