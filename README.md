@@ -44,7 +44,7 @@ machine, but file formats and commands can still change.
 - **Console 9 summing.** Channels and busses use a port of Airwindows'
   Console 9 encode/decode; it can be switched off per project with levels
   matched.
-- **Stock plugins.** Marram (synth), Yarrow (EQ), Sundew (compressor),
+- **Stock plugins.** Marram (synth), Coppice (sampler), Yarrow (EQ), Sundew (compressor),
   Treeline (limiter), Gorse (transient shaper), Hickory (stereo utility),
   Sorrel (gate and expander), Teasel (saturation), Bracken (delay), Ghyll
   (reverb), Withy (chorus), Pollia (phaser), Umber (tape), Lichen

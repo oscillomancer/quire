@@ -278,9 +278,9 @@ instructions are in `docs/guides/installing.md`.
   validated against EBU Tech 3341/3342, spectral, pitch, envelope, stereo,
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
   the LLM evaluation harness (`tools/eval-harness`).
-- **Stock plugins** (ADR-0011, ADR-0047): Marram, Yarrow, Sundew, Treeline,
-  Gorse, Hickory, Sorrel, Teasel, Bracken, Ghyll, Lichen, Withy, Pollia,
-  Umber, Sedge, Gain and Hornbeam, each passing clap-validator, a reset determinism check, an unload
+- **Stock plugins** (ADR-0011, ADR-0047): Marram, Coppice, Yarrow, Sundew,
+  Treeline, Gorse, Hickory, Sorrel, Teasel, Bracken, Ghyll, Lichen, Withy,
+  Pollia, Umber, Sedge, Gain and Hornbeam, each passing clap-validator, a reset determinism check, an unload
   test and the headless REAPER check;
   JSON patches and the semantic-parameters extension.
   Yarrow, the EQ, is the first written as a DSP script
@@ -519,6 +519,23 @@ instructions are in `docs/guides/installing.md`.
   Teasel's 15.7; stereo, an amp per side, costs 25.0. Sixteen factory patches, cleans to high gain, bass and
   the cabinet or the amp alone. Tuned by measurement on a synthetic DI;
   nobody has listened to it on real guitars yet.
+  Coppice, the sampler (`plugins/coppice`, `docs/specs/coppice.md`), has
+  no predecessor. It plays one sound, a user's file or one of seven
+  factory samples rendered from Marram (`tools/factory-samples`, CC0,
+  0.9 MB inside the plugin as `factory:<name>`): classic (pitched from a
+  root, with a forward loop crossfaded or a ping-pong loop, snapped to zero
+  crossings, sustaining while the key is held or playing on), one-shot, or
+  slice (at transients or on a grid, a slice a key, trigger, gate or thru);
+  start, end, reverse, normalize; one ladder or state-variable filter, two
+  envelopes, two LFOs, four macros and Marram's routes (velocity to the
+  start, among others); 32 voices oversampled as Marram's. Its editor draws
+  the waveform with flags, the loop and its crossfade, or the slices and
+  their keys, every voice's place, close-ups of the start and the loop's
+  seam, and the slice keys or the root over its keyboard. Twelve factory
+  patches. 0.18 % of a core at the defaults. Not yet: zones and velocity
+  layers, time-stretching, a file's root or `smpl` loop points, and free
+  zoom of the waveform. The script player has no factory files: a script
+  that defaults to one plays nothing there until a file is chosen.
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The

@@ -27,6 +27,7 @@ player, and every check the other stock plugins have.
 | `sedge` | Sedge, the chromatic tuner | `com.suppleaudio.sedge` |
 | `gain` | Gain, a level change | `com.suppleaudio.gain` |
 | `hornbeam` | Hornbeam, the guitar amp and cabinet | `com.suppleaudio.hornbeam` |
+| `coppice` | Coppice, the sampler (`docs/specs/coppice.md`) | `com.suppleaudio.coppice` |
 
 ## Files
 
@@ -50,6 +51,13 @@ player, and every check the other stock plugins have.
   (`../suite`).
 - `response.cmake` (optional): the plugin's own measurements through the
   built plugin, as `plugin.<name>.response`.
+- `samples/` (optional): factory files, which `product.cmake` lists as
+  `PRODUCT_ASSETS` and a script names as `factory:<name>`. Coppice's are
+  rendered from Marram: `recipes.json` says how, and
+  `tools/factory-samples/render.py plugins/<name>/samples/recipes.json`
+  renders them again (`--check` compares them with the committed files),
+  through the dev build's sandbox and Marram. They are first-party
+  content, CC0 (`LICENSE` beside them).
 
 ## Changing one
 
