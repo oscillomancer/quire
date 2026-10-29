@@ -3,8 +3,8 @@
 #include "plan.h"
 #include "live_workers.h"
 #include "supple/model/fade_shape.h"
-#include "supple/model/groups.h"
 #include "supple/model/freeze.h"
+#include "supple/model/groups.h"
 #include "supple/model/source_mapping.h"
 
 #include <algorithm>

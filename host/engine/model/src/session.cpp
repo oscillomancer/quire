@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "supple/model/session.h"
-#include "supple/model/groups.h"
 #include "supple/model/audio_warp.h"
+#include "supple/model/groups.h"
 #include "supple/model/numeric.h"
 
 #include <algorithm>

@@ -6,8 +6,8 @@
 #include <memory>
 
 #include "supple/engine/app.h"
-#include "supple/model/groups.h"
 #include "supple/model/freeze.h"
+#include "supple/model/groups.h"
 #include "supple/model/numeric.h"
 
 namespace supple::engine {
