@@ -7,6 +7,7 @@
 #include <limits>
 
 #include "supple/base/sha256.h"
+#include "supple/model/freeze.h"
 #include "supple/params/params.h"
 
 namespace supple::engine {
@@ -35,7 +36,7 @@ json::Value EngineApp::pluginErrorJson(const Error& e) {
 }
 
 Status EngineApp::commitOutputGesture(const OutputKey& key, const OutputGesture& gesture) {
-    if (!gesture.latest) return {};
+    if (!gesture.latest || model::frozenOwner(head(), key.first)) return {};
     const auto* fx = head().fx.find(key.first);
     auto* instance = pool_->find(key.first);
     if (!fx || !instance || instance->failed()) return {};

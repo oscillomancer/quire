@@ -14,6 +14,7 @@
 #include "supple/model/fade_shape.h"
 #include "supple/model/source_mapping.h"
 #include "supple/time/timeline.h"
+#include "supple/ui/controls.h"
 
 namespace supple::views {
 namespace {
@@ -68,7 +69,15 @@ class LaneLabels : public ui::Node {
                                   take->preservePitch ? "" : " varispeed");
                     name += rate;
                 }
-                const float alpha = item->mute ? 0.45f : 0.85f;
+                const auto* owner = s.tracks.find(item->track);
+                const bool frozen = owner && owner->freeze;
+                if (frozen) {
+                    c.fillRect(r, t.color("panel").withAlpha(.3f));
+                    for (float x = r.x + 4; x < r.right(); x += 12)
+                        c.fillRect({x, r.bottom() - 3, std::min(6.f, r.right() - x), 2},
+                                   t.color("ink-quiet").withAlpha(.5f));
+                }
+                const float alpha = item->mute || frozen ? 0.45f : 0.85f;
                 // An item that does not follow the beat says what it follows: a
                 // tempo change leaves "time" items at their seconds, and "pos"
                 // items keep their length in seconds (their start follows).
@@ -85,8 +94,12 @@ class LaneLabels : public ui::Node {
                     c.text(badge, follows, ui::Font::Mono, t.type("caption"),
                            t.color("ink-quiet").withAlpha(alpha), ui::kCenter | ui::kMiddle);
                 }
-                // Keep the label clear of the padlock an item may carry.
-                const float textX = item->locked ? r.x + 18.0f : r.x + 4.0f;
+                // Keep the label clear of the padlock and the snowflake an item may carry.
+                const float markX = item->locked ? r.x + 18.0f : r.x + 4.0f;
+                if (frozen)
+                    ui::drawSnowflake(c, {markX + 5, r.y + 8}, 5.5f,
+                                      t.color("ink").withAlpha(alpha));
+                const float textX = frozen ? markX + 14.0f : markX;
                 const float textW = std::max(0.0f, r.right() - textX - 26.0f - timebaseW);
                 c.text({textX, r.y + 1, textW, 14}, name, ui::Font::Ui, t.type("caption"),
                        t.color("ink").withAlpha(alpha));

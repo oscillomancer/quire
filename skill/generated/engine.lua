@@ -301,7 +301,6 @@ q = nil
 ---@class Quire.env_add_args
 ---@field track? string Track id, e.g. "tr_1".
 ---@field take? string Take id, e.g. "tk_1".
----@field group? string VCA group id, e.g. "gr_1".
 ---@field fx? string Plugin instance id, e.g. "fx_1".
 ---@field route? string Route id, e.g. "sd_1".
 ---@field param string
@@ -533,50 +532,6 @@ q = nil
 ---@field isolation? "inherit"|"in_process"|"shared_bridge"|"dedicated"
 ---@field pins? table
 
----@class Quire.group_add_args
----@field name string
----@field color? string
----@field active? boolean
----@field members? string[]
----@field links? string[]
-
----@class Quire.group_add_result
----@field group string
-
----@class Quire.group_describe_args
----@field group string
-
----@class Quire.group_describe_result
----@field group string
----@field state table
----@field controllers string[]
-
----@class Quire.group_list_result
----@field groups table[]
-
----@class Quire.group_members_set_args
----@field group string
----@field members string[]
-
----@class Quire.group_remove_args
----@field group string
-
----@class Quire.group_set_args
----@field group string
----@field name? string
----@field color? string
----@field active? boolean
----@field links? string[]
-
----@class Quire.group_targets_args
----@field track? string
----@field item? string
----@field attribute string
-
----@class Quire.group_targets_result
----@field tracks string[]
----@field items string[]
-
 ---@class Quire.history_list_result
 ---@field versions table[]
 ---@field can_undo boolean
@@ -620,13 +575,11 @@ q = nil
 ---@field path string
 
 ---@class Quire.item_duplicate_args
----@field bypass_groups? boolean (default: false)
 ---@field item string
 ---@field to? number
 
 ---@class Quire.item_duplicate_result
 ---@field id string
----@field linked? string[] (default: [])
 
 ---@class Quire.item_explode_takes_args
 ---@field item string
@@ -637,7 +590,6 @@ q = nil
 ---@field tracks string[]
 
 ---@class Quire.item_move_args
----@field bypass_groups? boolean (default: false)
 ---@field item string Item id, e.g. "it_1".
 ---@field position? number
 ---@field bar? integer
@@ -651,11 +603,9 @@ q = nil
 ---@field items string[]
 
 ---@class Quire.item_remove_args
----@field bypass_groups? boolean (default: false)
 ---@field item string Item id, e.g. "it_1".
 
 ---@class Quire.item_set_args
----@field bypass_groups? boolean (default: false)
 ---@field item string
 ---@field position? number
 ---@field bar? integer
@@ -673,15 +623,12 @@ q = nil
 ---@field timebase? "track"|"time"|"beats"|"beats_position"
 
 ---@class Quire.item_split_args
----@field bypass_groups? boolean (default: false)
 ---@field item string
 ---@field at number
 
 ---@class Quire.item_split_result
 ---@field left string
 ---@field right string
----@field linked_left? string[] (default: [])
----@field linked_right? string[] (default: [])
 
 ---@class Quire.job_cancel_args
 ---@field job string
@@ -1135,31 +1082,22 @@ q = nil
 ---@class Quire.track_add_result
 ---@field track string
 
----@class Quire.track_describe_args
----@field track string
----@field at? number
-
----@class Quire.track_describe_result
----@field track string
----@field name string
----@field type "channel"|"buss"|"master"
----@field groups string[]
----@field vcas string[]
----@field volume_db number
----@field requested_effective_volume_db number
----@field effective_volume_db number
----@field at number
----@field effective_mute boolean
----@field solo_silenced boolean
-
 ---@class Quire.track_duplicate_args
 ---@field tracks string[]
 
 ---@class Quire.track_duplicate_result
 ---@field tracks string[]
 
----@class Quire.track_list_args
----@field at? number
+---@class Quire.track_freeze_args
+---@field track string
+---@field job? boolean (default: false)
+
+---@class Quire.track_freeze_commit_args
+---@field track string
+---@field expected string
+---@field media table
+---@field freeze table
+---@field states table[]
 
 ---@class Quire.track_list_result
 ---@field tracks table[]
@@ -1173,7 +1111,6 @@ q = nil
 ---@field track string Track id, e.g. "tr_1".
 
 ---@class Quire.track_set_args
----@field bypass_groups? boolean (default: false)
 ---@field track string Track id, e.g. "tr_1".
 ---@field type? "channel"|"buss"|"master"
 ---@field name? string
@@ -1221,6 +1158,9 @@ q = nil
 ---@class Quire.track_template_save_result
 ---@field path string
 ---@field effects integer
+
+---@class Quire.track_unfreeze_args
+---@field track string
 
 ---@class Quire.transport_get_result
 ---@field playing boolean
@@ -1349,28 +1289,6 @@ q = nil
 ---@field punch table
 ---@field recorded? table[]
 
----@class Quire.vca_add_args
----@field group string
----@field volume_db? number|string Quantity strings are range-checked by the server.
----@field mute? boolean
----@field solo? boolean
----@field followers? string[]
-
----@class Quire.vca_members_set_args
----@field group string
----@field tracks? string[]
----@field vcas? string[]
-
----@class Quire.vca_remove_args
----@field group string
-
----@class Quire.vca_set_args
----@field group string
----@field volume_db? number|string Quantity strings are range-checked by the server.
----@field mute? boolean
----@field solo? boolean
----@field followers? string[]
-
 ---@class Quire.analyze
 ---@field compare fun(args: Quire.analyze_compare_args): Quire.analyze_compare_result Compare two renders or track outputs by perceptual descriptors.
 ---@field masking fun(args: Quire.analyze_masking_args): table Estimate masking between two tracks over the same range.
@@ -1456,17 +1374,6 @@ q = nil
 ---@field list fun(args: Quire.fx_preset_list_args): Quire.fx_preset_list_result List a plugin's presets: its factory ones, then the user's.
 ---@field load fun(args: Quire.fx_preset_load_args): Quire.fx_preset_load_result Apply a factory or user preset to a plugin instance in one undo step.
 ---@field save fun(args: Quire.fx_preset_save_args): Quire.fx_preset_save_result Save a plugin instance's current settings as a named user preset.
-
----@class Quire.group
----@field add fun(args: Quire.group_add_args): Quire.group_add_result Create a named track group with optional links and members.
----@field describe fun(args: Quire.group_describe_args): Quire.group_describe_result Describe a track group's membership, links and VCA ancestry.
----@field list fun(): Quire.group_list_result List track groups, linked attributes and optional VCA controls.
----@field remove fun(args: Quire.group_remove_args): table Remove a track group and its VCA, keeping its tracks.
----@field set fun(args: Quire.group_set_args): table Change a group's name, color, links or active state.
----@field targets fun(args: Quire.group_targets_args): Quire.group_targets_result Resolve linked tracks or matching items for an edit or selection.
-
----@class Quire.group.members
----@field set fun(args: Quire.group_members_set_args): table Replace a group's track membership; an empty array clears it.
 
 ---@class Quire.history
 ---@field list fun(): Quire.history_list_result List the current branch's recent versions (newest first).
@@ -1581,12 +1488,16 @@ q = nil
 
 ---@class Quire.track
 ---@field add fun(args?: Quire.track_add_args): Quire.track_add_result Add a channel, buss or master strip and return its id.
----@field describe fun(args: Quire.track_describe_args): Quire.track_describe_result Describe track groups and requested/applied effective gain at a time.
 ---@field duplicate fun(args: Quire.track_duplicate_args): Quire.track_duplicate_result Duplicate channels or busses with their FX, items, sends and automation.
----@field list fun(args?: Quire.track_list_args): Quire.track_list_result List tracks in tree order with their level, mute/solo, fx and items.
+---@field freeze fun(args: Quire.track_freeze_args): table Freeze a channel's items and FX to pre-fader audio and release its plugins.
+---@field list fun(): Quire.track_list_result List tracks in tree order with their level, mute/solo, fx and items.
 ---@field move fun(args: Quire.track_move_args): table Move a track under another track or reorder it among its siblings.
 ---@field remove fun(args: Quire.track_remove_args): table Remove a track with its items, fx, routes and envelopes (not a folder).
 ---@field set fun(args: Quire.track_set_args): table Set track fields: name, type, volume, pan, mute, solo, polarity, mono, arming.
+---@field unfreeze fun(args: Quire.track_unfreeze_args): table Restore a frozen channel's original items and plugin state.
+
+---@class Quire.track.freeze
+---@field commit fun(args: Quire.track_freeze_commit_args): table Attach a verified freeze artifact as one replayable edit.
 
 ---@class Quire.track.template
 ---@field delete fun(args: Quire.track_template_delete_args): Quire.track_template_delete_result Delete a saved track template by name.
@@ -1610,14 +1521,6 @@ q = nil
 ---@field get fun(): Quire.transport_playrate_get_result Get requested/effective master playrate, pitch mode and active envelope.
 ---@field set fun(args?: Quire.transport_playrate_set_args): Quire.transport_playrate_set_result Set the project's master playrate ratio and preserve-pitch flag.
 
----@class Quire.vca
----@field add fun(args: Quire.vca_add_args): table Add an audio-free VCA fader to a track group.
----@field remove fun(args: Quire.vca_remove_args): table Remove a VCA and its automation, keeping the track group.
----@field set fun(args: Quire.vca_set_args): table Set a VCA's level, mute or solo without moving member faders.
-
----@class Quire.vca.members
----@field set fun(args: Quire.vca_members_set_args): table Replace the tracks or nested VCAs controlled by a VCA.
-
 ---@class Quire
 ---@field analyze Quire.analyze Commands named analyze.*
 ---@field autoitem Quire.autoitem Commands named autoitem.*
@@ -1626,7 +1529,6 @@ q = nil
 ---@field engine Quire.engine Commands named engine.*
 ---@field env Quire.env Commands named env.*
 ---@field fx Quire.fx Commands named fx.*
----@field group Quire.group Commands named group.*
 ---@field history Quire.history Commands named history.*
 ---@field item Quire.item Commands named item.*
 ---@field job Quire.job Commands named job.*
@@ -1647,7 +1549,6 @@ q = nil
 ---@field timesig Quire.timesig Commands named timesig.*
 ---@field track Quire.track Commands named track.*
 ---@field transport Quire.transport Commands named transport.*
----@field vca Quire.vca Commands named vca.*
 ---@field run fun(name: string, args?: table): any Run any registered command by name, e.g. the ones whose names are not Lua identifiers.
 ---@field batch fun(label: string, body: fun()) Run the calls inside body as one transaction: one undo step, rolled back when one of them fails.
 ---@field on fun(topic: string, handler: fun(payload: table, topic: string), filter?: table): integer Subscribe to bus events; returns a handle for q.off.

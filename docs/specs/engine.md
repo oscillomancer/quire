@@ -1843,3 +1843,63 @@ Member stems retain their VCAs and existing selected-tap trimming/decoding.
 Through-master stems clear existing track and VCA solos before selecting the
 stem target. VCA levels and mutes still apply; an unrelated soloed group cannot
 leak into an exclusive stem. Isolated stems retain their member VCA controls.
+
+## Track freeze (ADR-0054)
+
+`track.freeze` captures a channel's own sound from timeline zero through its last
+item, including take processing, all inserts, polarity/mono and every auxiliary
+channel. It uses a private instance pool and the **full graph** schedule, tapping
+pre-fader before the Console 9 encoder. It leaves the original objects and saved
+plugin patches/blobs in the model. `track.unfreeze` checks that the saved graph
+can prepare before restoring it. Missing plugins or render warnings refuse the
+operation instead of publishing silence or placeholders.
+
+`OfflineSettings.freezeTrack` selects that full-graph, multichannel capture;
+`freezeProbe` prepares only and returns target chain latency and timeline shift.
+`freezeTail` enables automatic tail capture, with `freezeTailLimitSeconds` an
+internal adaptive allocation bound (2 seconds initially, doubling to 600).
+The result carries `freezeLatency`, `freezeShift`, and `freezeTailFrames`.
+Serial insert tails add; parallel take chains contribute their maximum. Reported
+tails are sampled during processing. Capture ends only after the reported tail
+and one continuous second below -120 dBFS on every captured channel. An infinite,
+nonfinite, excessive or unsettled tail refuses publication. A bridge reporting a
+longer tail only after service refuses with `freeze.tail_changed`; in-process
+isolation can capture that dynamic tail. Plugins reporting no tail use the same
+silence rule; an unreported delay longer than that quiet window cannot be inferred.
+Capture is bounded to 2^28 total samples across channels and ten minutes of tail.
+
+The frozen plan omits all original channel/take/input plugin stages and item
+sources. One localized MediaCache preparation loads/resamples the cache outside
+both executors. The shared RT reader copies cached samples at
+`position + origin - timelineShift - virtualChainLatency`; outside the captured
+interval and while stopped it emits zero. It supplies the pre-fader and auxiliary
+buffers, then the ordinary fader/pan/mute, Console 9, sends and parent routing run.
+The captured latency remains in the normal solve, including live automation
+alignment. No cache work, allocation, locks or files occur in the callback.
+Frozen FX ignore MIDI parameter moves and queued editor output.
+Original live instances are pruned only after both executor epochs release the
+old plans. Dedicated bridges exit; a shared bridge removes the frozen instances and
+keeps its process for unrelated instances and later reuse. A frozen FX description reads stored state without creating a plugin.
+
+Publication is one private typed `track.freeze.commit` edit, not a head-version
+compare. It checks project generation, branch and media directory, recomputes the
+sound-dependency hash at the current head, verifies input file hashes, and probes
+the full head graph for unchanged target scheduling quantities. Unrelated edits
+can therefore complete while rendering. The replay record contains the captured
+states and verified cache metadata; redo/merge reuse that file. Unpublished job
+artifacts live in the reserved `.freeze-pending` media subdirectory, excluded
+from Save As copies. Publication renames into media before committing the
+reference; cancellation/failure removes the pending artifact. Published files remain as ordinary
+media for undo, branches, autosaves and Save As.
+
+V1 accepts disarmed channel strips at unity master rate with no active master-rate
+envelope or external audio/key/aux/MIDI input. A monitor setting on a disarmed
+channel is inactive and allowed. Freeze locks tempo, meter, project sample rate,
+master-rate and captured content (including pooled edits). Mixing and outgoing
+routing stay live. This captures an offline performance, not transient plugin
+DSP memory: random plugins, transport-sensitive state, new seeks and repeated
+loops can differ from running the original plugins. Plugin binaries, plugin-owned external files
+and private state absent from its exported patch/blob cannot be hashed by the
+host; keep those assets stable during capture. Cached playback itself uses the
+same reader offline and in both RT executors. At another device rate it resamples
+the recording; equality to a fresh unfrozen render at that new rate is not promised.

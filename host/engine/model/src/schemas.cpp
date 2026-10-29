@@ -552,6 +552,17 @@ const Schema<MeterObj>& schemaOf<MeterObj>() {
     return s;
 }
 
+Schema<TrackFreeze> trackFreezeSchema() {
+    return schema::object<TrackFreeze>("track_freeze")
+        .field("source", &TrackFreeze::source, idSchema())
+        .field("content_frames", &TrackFreeze::contentFrames, schema::integer().range(1, 1LL << 28))
+        .field("tail_frames", &TrackFreeze::tailFrames, schema::integer().range(0, 1LL << 28))
+        .field("latency_frames", &TrackFreeze::latencyFrames, schema::integer().range(0, 1LL << 28))
+        .field("dependency_hash", &TrackFreeze::dependencyHash,
+               str().pattern("^sha256:[0-9a-f]{64}$", "a SHA-256 dependency hash"))
+        .build();
+}
+
 template <>
 const Schema<Vca>& schemaOf<Vca>() {
     static const auto s = [] {
@@ -658,6 +669,7 @@ const Schema<Track>& schemaOf<Track>() {
         dflt(b, d.hiddenTcp);
         b.field("hidden_mixer", &Track::hiddenMixer, boolean());
         dflt(b, d.hiddenMixer);
+        b.field("freeze", &Track::freeze, trackFreezeSchema());
         b.field("folder_compact", &Track::folderCompact, intS().range(0, 2));
         dflt(b, d.folderCompact);
         return b.build();

@@ -11011,6 +11011,86 @@ Result:
 
 ```
 
+## `track.freeze@1`
+
+Freeze a channel's items and FX to pre-fader audio and release its plugins.
+
+One undo step after rendering; job:true reports progress through job.get. Fader, pan and outgoing sends remain live. Unfreeze to edit the captured sound.
+
+Kind: `action`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `track` | string |  |  |  |  |
+| `job` | boolean |  |  | false |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Errors
+
+- `freeze.unsupported`: the channel has unsupported live dependencies Hint: disarm it and remove external inputs; use unity master playrate
+- `freeze.stale_target`: sound dependencies changed during rendering Hint: retry track.freeze with the current sound
+- `freeze.tail_limit`: the tail is infinite or did not settle Hint: disable continuous sound or infinite feedback before freezing
+
+### Examples
+
+**Freeze the channel** (`song_with_fx`)
+
+```json
+{
+  "track": "tr_1"
+}
+
+```
+
+Result:
+
+```json
+{
+  "track": "tr_1",
+  "frozen": true,
+  "source": "<any>",
+  "path": "<any>",
+  "frames": "<any>",
+  "tail_frames": "<any>"
+}
+
+```
+
+## `track.freeze.commit@1`
+
+Attach a verified freeze artifact as one replayable edit.
+
+
+
+Kind: `edit`. Exposure: `internal`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `track` | string |  |  |  |  |
+| `expected` | string |  |  |  |  |
+| `media` | object |  |  |  |  |
+| `freeze` | object |  |  |  |  |
+| `states` | array |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Examples
+
 ## `track.list@1`
 
 List tracks in tree order with their level, mute/solo, fx and items.
@@ -11038,6 +11118,46 @@ Kind: `query`. Exposure: `mcp-tool`.
         "type": "object",
         "title": "track_entry",
         "properties": {
+          "frozen": {
+            "type": "boolean"
+          },
+          "freeze": {
+            "type": "object",
+            "title": "track_freeze",
+            "properties": {
+              "source": {
+                "type": "string",
+                "pattern": "^[a-z]{2}_[0-9]+$"
+              },
+              "content_frames": {
+                "type": "integer",
+                "minimum": 1.0,
+                "maximum": 268435456.0
+              },
+              "tail_frames": {
+                "type": "integer",
+                "minimum": 0.0,
+                "maximum": 268435456.0
+              },
+              "latency_frames": {
+                "type": "integer",
+                "minimum": 0.0,
+                "maximum": 268435456.0
+              },
+              "dependency_hash": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              }
+            },
+            "required": [
+              "source",
+              "content_frames",
+              "tail_frames",
+              "latency_frames",
+              "dependency_hash"
+            ],
+            "additionalProperties": false
+          },
           "id": {
             "type": "string"
           },
@@ -11106,6 +11226,7 @@ Kind: `query`. Exposure: `mcp-tool`.
           }
         },
         "required": [
+          "frozen",
           "id",
           "name",
           "type",
@@ -11638,6 +11759,52 @@ Result:
 {
   "path": "<any>",
   "effects": 2
+}
+
+```
+
+## `track.unfreeze@1`
+
+Restore a frozen channel's original items and plugin state.
+
+
+
+Kind: `edit`. Exposure: `mcp-tool`.
+
+### Arguments
+
+| Field | Type | Unit | Range | Default | Description |
+| --- | --- | --- | --- | --- | --- |
+| `track` | string |  |  |  |  |
+
+### Result
+
+```json
+{}
+
+```
+
+### Errors
+
+- `freeze.restore`: saved plugins could not be restored Hint: install or repair the saved plugins before unfreezing
+
+### Examples
+
+**Unfreeze the channel** (`song_frozen`)
+
+```json
+{
+  "track": "tr_1"
+}
+
+```
+
+Result:
+
+```json
+{
+  "track": "tr_1",
+  "frozen": false
 }
 
 ```

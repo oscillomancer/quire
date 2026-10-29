@@ -8620,6 +8620,32 @@
     }
   },
   {
+    "name": "track_freeze",
+    "title": "Freeze a channel's items and FX to pre-fader audio and release its plugins.",
+    "description": "Freeze a channel's items and FX to pre-fader audio and release its plugins. One undo step after rendering; job:true reports progress through job.get. Fader, pan and outgoing sends remain live. Unfreeze to edit the captured sound. See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "track_freeze_args",
+      "properties": {
+        "track": {
+          "type": "string",
+          "pattern": "^[a-z]{2}_[0-9]+$"
+        },
+        "job": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": ["track"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
     "name": "track_list",
     "title": "List tracks in tree order with their level, mute/solo, fx and items.",
     "description": "List tracks in tree order with their level, mute/solo, fx and items.  See describe for errors and examples.",
@@ -8644,6 +8670,46 @@
             "type": "object",
             "title": "track_entry",
             "properties": {
+              "frozen": {
+                "type": "boolean"
+              },
+              "freeze": {
+                "type": "object",
+                "title": "track_freeze",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "pattern": "^[a-z]{2}_[0-9]+$"
+                  },
+                  "content_frames": {
+                    "type": "integer",
+                    "minimum": 1.0,
+                    "maximum": 268435456.0
+                  },
+                  "tail_frames": {
+                    "type": "integer",
+                    "minimum": 0.0,
+                    "maximum": 268435456.0
+                  },
+                  "latency_frames": {
+                    "type": "integer",
+                    "minimum": 0.0,
+                    "maximum": 268435456.0
+                  },
+                  "dependency_hash": {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                  }
+                },
+                "required": [
+                  "source",
+                  "content_frames",
+                  "tail_frames",
+                  "latency_frames",
+                  "dependency_hash"
+                ],
+                "additionalProperties": false
+              },
               "id": {
                 "type": "string"
               },
@@ -8712,6 +8778,7 @@
               }
             },
             "required": [
+              "frozen",
               "id",
               "name",
               "type",
@@ -9109,6 +9176,28 @@
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
+      "idempotentHint": false
+    }
+  },
+  {
+    "name": "track_unfreeze",
+    "title": "Restore a frozen channel's original items and plugin state.",
+    "description": "Restore a frozen channel's original items and plugin state.  See describe for errors and examples.",
+    "inputSchema": {
+      "type": "object",
+      "title": "track_unfreeze_args",
+      "properties": {
+        "track": {
+          "type": "string",
+          "pattern": "^[a-z]{2}_[0-9]+$"
+        }
+      },
+      "required": ["track"],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
       "idempotentHint": false
     }
   },

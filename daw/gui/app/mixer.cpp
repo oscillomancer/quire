@@ -409,6 +409,18 @@ class ColorStripe : public ui::Node {
     std::string colour_;
 };
 
+// A frozen channel's mark: a snowflake under the strip's name.
+class FrozenMark : public ui::Node {
+  public:
+    explicit FrozenMark(std::string id) : Node(std::move(id)) {
+        layout.height = ui::SizeRule::fixed(14);
+    }
+    void paint(ui::Canvas& c) override {
+        const ui::Rect b = bounds();
+        ui::drawSnowflake(c, {b.x + 9, b.y + b.h / 2}, 6.0f, c.theme().color("ink"));
+    }
+};
+
 // A strip's background: the type's colour along the top; a right-click anywhere
 // on it opens the track menu, and a drag from a part no control uses moves the
 // strip among its own kind.
@@ -693,7 +705,7 @@ std::string Mixer::structure() const {
         const model::Track* t = s.tracks.find(id);
         if (!t) return;
         out += id.str() + ":" + std::string(model::stripTypeName(t->type)) + ":" + t->name + ":" +
-               t->color + ":";
+               t->color + ":" + (t->freeze ? "frozen:" : "");
         for (model::Id fx : t->chain) {
             const model::FxInstance* f = s.fx.find(fx);
             out += fx.str() + ",";
@@ -797,6 +809,7 @@ void Mixer::rebuild() {
         st.addFx->layout.width = ui::SizeRule::fixed(16);
         st.addFx->layout.height = ui::SizeRule::fixed(15);
         frame->emplace<ColorStripe>("mixer.color." + tid, t.color);
+        if (t.freeze) frame->emplace<FrozenMark>("mixer.frozen." + tid);
         // The plug-in chain (a click opens or closes the plug-in's editor); the
         // one section that takes the room the panel's height gives.
         auto& chain = frame->emplace<FxList>("mixer.fx." + tid);
@@ -832,6 +845,7 @@ void Mixer::rebuild() {
                 openFxMenu(fx, s->bounds(), p);
             };
             slot->remove = [this, fx] { removeFx(fx); };
+            slot->enabled = !t.freeze;
             chain.addSlot(std::move(slot));
         }
         frame->select = [this, tid](unsigned mods) {
@@ -1419,6 +1433,10 @@ void Mixer::update() {
         st.pan->setValue(t->pan);
         st.mute->setOn(t->mute);
         st.solo->setOn(t->solo != model::Solo::Off);
+        st.polarity->enabled = st.mono->enabled = !t->freeze;
+        st.addFx->enabled = !t->freeze;
+        if (st.arm) st.arm->enabled = !t->freeze;
+        if (st.monitor) st.monitor->enabled = !t->freeze;
         st.polarity->setOn(t->phaseInvert);
         st.mono->setOn(t->mono);
         if (st.arm) st.arm->setOn(t->record.armed);

@@ -518,6 +518,8 @@ struct TakeChain {
 
 struct Node {
     Id id;
+    std::optional<model::TrackFreeze> freeze;
+    std::shared_ptr<const audio::AudioData> frozenAudio;
     // Auxiliary channels 3.. (ADR-0020): summed from routes, read and written
     // by plug-in pins, read by routes after the chain; never faded, panned or
     // sent to the parent.

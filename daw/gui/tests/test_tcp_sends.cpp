@@ -542,7 +542,7 @@ TEST_CASE("TCP: the right-click menu renames, colours and deletes a track (one u
     // Channels…: four gives it aux channels 3/4 (the third choice).
     before = f.history();
     rightClick();
-    pickRow(menu, 3);
+    pickRow(menu, 4);
     REQUIRE(f.root->find("track.channels." + f.a.str()));
     pickRow("track.channels." + f.a.str(), 2);
     CHECK(f.app->head().tracks.find(f.a)->channels == 4);

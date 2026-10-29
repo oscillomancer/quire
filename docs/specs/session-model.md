@@ -810,3 +810,39 @@ The model-thread helpers in `supple/model/groups.h` resolve sorted, unique
 `validateGroups` checks links, graph bounds and group-envelope values;
 `effectiveTrackLevel` and `groupParameterAt` evaluate the project-time control
 values without querying an audio executor.
+
+### Track freeze (schema 2.2, ADR-0054)
+
+`Track.freeze`, absent when unfrozen, contains `source` (media ID),
+`content_frames` (>0), `tail_frames` (>=0), `latency_frames` (>=0) and
+`dependency_hash` (SHA-256). Content starts at project time zero; media frames
+are content plus tail, at the project rate, float32 WAV, with max(2, track
+channels) channels. Items, takes, FX, opaque blobs and automation retain their
+IDs and state. The descriptor replaces their execution, not their model data.
+
+`track.freeze {track, job?: false}` renders and attaches one history edit;
+`job: true` returns a job whose completion includes the committed edit.
+`track.unfreeze {track}` restores execution in one edit. `track.list` reports
+`frozen` and the descriptor; `session.describe` marks frozen channels.
+`track.freeze.commit` is the internal typed replay record: attaching existing
+verified media and captured states must not start another render during merges.
+
+Freeze sound dependencies include track content and processing, referenced MIDI
+and media, take/FX envelopes and their automation items, and global timing.
+Mixer state, outgoing routing and track display fields are excluded. Pending
+renders validate dependencies and latency scheduling at completion, not the head
+version. A changed project/branch/media directory also refuses completion.
+
+Frozen channels reject captured-content edits, including indirect pooled edits,
+new incoming dependencies and arm/monitor. Fader/pan/mute/solo, their envelopes,
+outgoing sends and parent routing remain editable. Tempo/meter/master-rate and
+sample-rate edits require unfreezing all frozen tracks; those unfreezes may precede
+the timing edit in the same batch. Deletion remains undoable.
+Published cache files stay on disk across unfreeze and history reclamation,
+because saved projects, autosaves and replay logs may still need them. First save,
+Save As and project templates carry frozen media like other media sources.
+
+Writers now emit `supple.project/2.2`; missing freeze fields in older projects
+mean unfrozen. Newer minor warnings begin above 2.2. Old applications can discard
+freeze metadata and restore original processing; do not use them to preserve a
+frozen state.

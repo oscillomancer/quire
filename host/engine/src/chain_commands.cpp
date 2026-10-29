@@ -16,6 +16,7 @@
 #include <set>
 #include <tuple>
 
+#include "command_validation.h"
 #include "supple/base/files.h"
 #include "supple/base/sha256.h"
 #include "supple/engine/app.h"
@@ -282,6 +283,7 @@ std::vector<std::string> installEffects(EngineApp& app, std::vector<Prepared>& p
 // an opaque state.
 Status captureLiveState(EngineApp& app, Id id, model::FxInstance& fx,
                         std::shared_ptr<const model::Blob>& blob) {
+    if (model::frozenOwner(app.view(), id)) return {};
     host::Instance* live = app.instanceOf(id);
     if (!live || live->failed()) return {};
     if (live->info().semantic) {
@@ -441,7 +443,7 @@ void registerTemplateCommands(cmd::Registry& registry) {
             return SaveResult{path->string(),
                               static_cast<std::int64_t>(doc.chain.size() + doc.inputChain.size())};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         cmd::Command<TemplateLoadArgs, TemplateLoadResult> c;
@@ -518,7 +520,7 @@ void registerTemplateCommands(cmd::Registry& registry) {
             });
             return result;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         cmd::Command<NoArgs, TemplateListResult> c;
@@ -561,7 +563,7 @@ void registerTemplateCommands(cmd::Registry& registry) {
                       });
             return result;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         cmd::Command<NameArgs, PathResult> c;
@@ -586,7 +588,7 @@ void registerTemplateCommands(cmd::Registry& registry) {
             SUPPLE_TRY(removeNamed(*path, "template.unknown", "track template"));
             return PathResult{path->string()};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
 }
 
@@ -725,7 +727,7 @@ void registerProjectTemplateCommands(cmd::Registry& registry) {
             if (!warnings.empty()) result.warnings = std::move(warnings);
             return result;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         cmd::Command<NameArgs, ProjectTemplateLoadResult> c;
@@ -758,7 +760,7 @@ void registerProjectTemplateCommands(cmd::Registry& registry) {
             for (const auto& w : warnings) ctx.warn(w.code, w.message, w.path);
             return ProjectTemplateLoadResult{app.head().project->name};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         cmd::Command<NoArgs, ProjectTemplateListResult> c;
@@ -804,7 +806,7 @@ void registerProjectTemplateCommands(cmd::Registry& registry) {
                       [](const auto& x, const auto& y) { return x.name < y.name; });
             return result;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         cmd::Command<NameArgs, PathResult> c;
@@ -839,7 +841,7 @@ void registerProjectTemplateCommands(cmd::Registry& registry) {
             fs::remove(at->legacy, ec);
             return PathResult{at->folder.string()};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
 }
 
@@ -1052,7 +1054,7 @@ void registerPresetCommands(cmd::Registry& registry) {
                     result.presets.push_back({p.name, "user", p.path.string()});
             return result;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         cmd::Command<PresetArgs, PresetLoadResult> c;
@@ -1161,7 +1163,7 @@ void registerPresetCommands(cmd::Registry& registry) {
             });
             return PresetLoadResult{a.name, "user"};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         cmd::Command<PresetSaveArgs, PathResult> c;
@@ -1262,7 +1264,7 @@ void registerPresetCommands(cmd::Registry& registry) {
                 if (p.legacy && taken(p)) fs::remove(p.path, ec);
             return PathResult{path.string()};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         cmd::Command<PresetDeleteArgs, PathResult> c;
@@ -1316,7 +1318,7 @@ void registerPresetCommands(cmd::Registry& registry) {
             return Error("fx.unknown_preset", "no user preset named '" + a.name + "'", "/name",
                          "choose a user preset from fx.preset.list");
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
 }
 
@@ -1385,7 +1387,7 @@ void registerChainCommands(cmd::Registry& registry) {
             SUPPLE_TRY(writePreset(*path, text, a.replace));
             return SaveResult{path->string(), static_cast<std::int64_t>(chain.size())};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         cmd::Command<LoadArgs, LoadResult> c;
@@ -1453,7 +1455,7 @@ void registerChainCommands(cmd::Registry& registry) {
             });
             return result;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         cmd::Command<NoArgs, ListResult> c;
@@ -1510,7 +1512,7 @@ void registerChainCommands(cmd::Registry& registry) {
                              "check the directory permissions");
             return result;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         cmd::Command<NameArgs, PathResult> c;
@@ -1537,7 +1539,7 @@ void registerChainCommands(cmd::Registry& registry) {
             SUPPLE_TRY(removeNamed(*path, "chain.unknown", "chain preset"));
             return PathResult{path->string()};
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         cmd::Command<CopyArgs, CopyResult> c;
@@ -1609,7 +1611,7 @@ void registerChainCommands(cmd::Registry& registry) {
             for (Id f : chain) result.chain.push_back(f.str());
             return result;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     {
         cmd::Command<DuplicateArgs, DuplicateResult> c;
@@ -1735,7 +1737,7 @@ void registerChainCommands(cmd::Registry& registry) {
             }
             return result;
         };
-        registry.add(std::move(c));
+        addChecked(registry, std::move(c));
     }
     registerTemplateCommands(registry);
     registerProjectTemplateCommands(registry);

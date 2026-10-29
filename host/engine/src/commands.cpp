@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "command_validation.h"
+#include "freeze_commands.h"
 #include "supple/model/numeric.h"
 // The engine's command catalogue (session-model §7) — the core set. Every
 // command is a thin, typed wrapper: validate references with helpful errors,
@@ -626,6 +627,8 @@ struct TrackSetArgs {
     std::optional<std::int64_t> channels;
 };
 struct TrackEntry {
+    bool frozen = false;
+    std::optional<model::TrackFreeze> freeze;
     std::string id, name, parent;
     model::StripType type = model::StripType::Channel;
     std::int64_t depth = 0;
@@ -915,6 +918,7 @@ Result<std::pair<model::MidiSource, double>> compileNotation(const model::Sessio
 }  // namespace
 
 void registerEngineCommands(cmd::Registry& registry) {
+    registerFreezeCommands(registry);
     registerExtraCommands(registry);
     registerGroupCommands(registry);
     registerMidiCommands(registry);
@@ -1830,6 +1834,8 @@ void registerEngineCommands(cmd::Registry& registry) {
                      .field("at", &TrackListArgs::at, schema::number().min(0))
                      .build();
         auto entry = schema::object<TrackEntry>("track_entry")
+                         .field("frozen", &TrackEntry::frozen, schema::boolean())
+                         .field("freeze", &TrackEntry::freeze, model::trackFreezeSchema())
                          .field("id", &TrackEntry::id, schema::string())
                          .field("name", &TrackEntry::name, schema::string())
                          .field("type", &TrackEntry::type, model::stripTypeSchema())
@@ -1860,6 +1866,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             std::function<void(Id, int)> walk = [&](Id id, int depth) {
                 const model::Track& t = *s.tracks.find(id);
                 TrackEntry e;
+                e.frozen = t.freeze.has_value();
+                e.freeze = t.freeze;
                 e.id = id.str();
                 e.name = t.name;
                 e.type = t.type;
@@ -2651,6 +2659,13 @@ void registerEngineCommands(cmd::Registry& registry) {
             FxDescription r;
             r.plugin = fx.plugin.id;
             r.name = fx.plugin.name;
+            if (auto owner = model::frozenOwner(s, *id)) {
+                r.description = "Frozen on " + owner->str() +
+                                "; stored state retained. Use track.unfreeze to edit.";
+                if (fx.patch) r.patch = *fx.patch;
+                r.params = model::toJson(fx);
+                return r;
+            }
             // A scratch instance cannot know what went wrong in the one playing.
             host::Instance* live = app.instanceOf(*id);
             if (live) {
@@ -4495,6 +4510,7 @@ std::string describeSession(const model::Session& s) {
             std::string line(static_cast<std::size_t>(2 * depth), ' ');
             line += id.str() + " " + (t.name.empty() ? "(unnamed)" : t.name);
             line += " [" + std::string(model::stripTypeName(t.type)) + "]";
+            if (t.freeze) line += " [Frozen " + t.freeze->source.str() + "]";
             if (t.volumeDb != 0) {
                 char v[32];
                 std::snprintf(v, sizeof v, " · vol %+.1f dB", t.volumeDb);

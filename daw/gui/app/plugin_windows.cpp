@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Supple Audio
 #include "plugin_windows.h"
+#include "supple/model/freeze.h"
 
 #include <SDL3/SDL.h>
 #if defined(__APPLE__)
@@ -285,6 +286,8 @@ Status PluginWindows::attach(Editor editor, const std::string& title) {
 }
 
 Status PluginWindows::open(model::Id fx) {
+    if (auto track = model::frozenOwner(app_.head(), fx))
+        return model::frozenError(app_.head(), *track, "/fx");
     for (std::size_t index = 0; index < editors_.size(); ++index) {
         Editor& e = editors_[index];
         if (e.fx == fx) {

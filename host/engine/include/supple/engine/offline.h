@@ -173,6 +173,11 @@ struct OfflineSettings {
     unsigned threads = 0;
     // Select one track's output without its sends or master processing.
     std::optional<model::Id> track;
+    // Internal freeze capture: full graph schedule, pre-fader main + auxiliaries.
+    std::optional<model::Id> freezeTrack;
+    bool freezeProbe = false;            // prepare and return scheduling metadata only
+    double freezeTailLimitSeconds = 2.;  // bounded attempt; caller retries up to 600 s
+    bool freezeTail = false;             // reported tail plus a sample-counted silence window
     // Render through the master with this track as the exclusive solo source.
     std::optional<model::Id> throughMaster;
     model::Tap tap = model::Tap::PostFader;
@@ -185,6 +190,7 @@ struct OfflineSettings {
 };
 
 struct OfflineResult {
+    std::int64_t freezeLatency = 0, freezeShift = 0, freezeTailFrames = 0;
     audio::AudioData audio;             // master output, stereo, at the project rate
     std::uint32_t outputLatency = 0;    // the compensated master latency (samples)
     std::vector<std::string> warnings;  // e.g. missing plugins rendered as pass-through

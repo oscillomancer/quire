@@ -167,6 +167,7 @@ class TcpPanel::Row : public ui::Node {
     bool channel_ = true;
     bool renaming_ = false;
     ui::Rect nameRect_{};
+    bool frozen_ = false;  // a snowflake precedes the name
     ui::Label* name_ = nullptr;
     ui::TextField* rename_ = nullptr;
     ui::Toggle* mute_ = nullptr;
@@ -351,9 +352,14 @@ void TcpPanel::Row::refresh(const model::Session& session) {
     const std::string name =
         tr->name.empty() ? std::string(model::stripTypeName(tr->type)) : tr->name;
     name_->setText(name);
+    if (frozen_ != tr->freeze.has_value()) {  // the snowflake takes room from the name
+        frozen_ = tr->freeze.has_value();
+        relayout();
+    }
     if (!renaming_) rename_->setText(name);
     mute_->setOn(tr->mute);
     solo_->setOn(tr->solo != model::Solo::Off);
+    polarity_->enabled = mono_->enabled = arm_->enabled = monitor_->enabled = !tr->freeze;
     polarity_->setOn(tr->phaseInvert);
     mono_->setOn(tr->mono);
     arm_->setOn(tr->record.armed);
@@ -430,8 +436,9 @@ void TcpPanel::Row::arrange(const ui::Canvas& canvas, const ui::Rect& r) {
                              TcpRowGeometry::kFxHeight});
     fx_->arrange(canvas, {right - 12 - addWidth - fxWidth, r.y + TcpRowGeometry::kFxTop, fxWidth,
                           TcpRowGeometry::kFxHeight});
-    nameRect_ = {x + 26 + indent, r.y + TcpRowGeometry::kNameTop,
-                 std::max(20.0f, right - x - 42 - fxWidth - addWidth - indent),
+    const float mark = frozen_ ? 14.0f : 0.0f;
+    nameRect_ = {x + 26 + indent + mark, r.y + TcpRowGeometry::kNameTop,
+                 std::max(20.0f, right - x - 42 - fxWidth - addWidth - indent - mark),
                  TcpRowGeometry::kNameHeight};
     name_->arrange(canvas, nameRect_);
     rename_->arrange(canvas, {nameRect_.x, nameRect_.y + 1, nameRect_.w, 17});
@@ -511,6 +518,10 @@ void TcpPanel::Row::paint(ui::Canvas& c) {
         tabX += 7;
         if (tabX > badge.x + 21) break;
     }
+    // A frozen channel: a snowflake before its name.
+    if (frozen_)
+        ui::drawSnowflake(c, {nameRect_.x - 8, nameRect_.y + nameRect_.h / 2}, 6.0f,
+                          t.color("ink"));
     // The row being dragged to a new place.
     if (panel_.reorder_ && panel_.reorder_->moved && panel_.reorder_->track == track_)
         c.fillRect(r, t.color("focus").withAlpha(0.12f));
@@ -615,7 +626,10 @@ void TcpPanel::Row::startRename() {
     if (!track_) return;
     renameTrack_ = track_;
     renaming_ = true;
-    rename_->setText(name_->text());
+    const auto* tr = panel_.session_.tracks.find(*track_);
+    rename_->setText(
+        tr ? (tr->name.empty() ? std::string(model::stripTypeName(tr->type)) : tr->name)
+           : name_->text());
     rename_->selectAll();
     rename_->visible = true;
     name_->visible = false;

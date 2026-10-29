@@ -128,6 +128,11 @@ Status copyFolder(const fs::path& from, const fs::path& to) {
                 continue;
             }
         }
+        // A freeze job has not published these files into history yet.
+        if (it->is_directory(ec) && it->path().filename() == ".freeze-pending") {
+            it.disable_recursion_pending();
+            continue;
+        }
         if (!it->is_regular_file(ec)) continue;
         const fs::path rel = it->path().lexically_relative(from);
         if (rel.filename().string().ends_with(".copy-tmp")) continue;
