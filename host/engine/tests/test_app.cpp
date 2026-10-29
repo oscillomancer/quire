@@ -1730,8 +1730,9 @@ TEST_CASE("the tick autosaves the project, rotates five, and open reports a newe
     // not load it: the head is still what was saved.
     auto other = makeApp(root.path / "fresh");
     cmd::Dispatcher d2(registry, *other);
-    auto opened =
-        d2.execute({"project.open", j(R"({"path": ")" + project.string() + R"("})"), kTest});
+    auto openArgs = json::Value::object();
+    openArgs["path"] = project.string();
+    auto opened = d2.execute({"project.open", std::move(openArgs), kTest});
     REQUIRE_MESSAGE(opened, (opened ? std::string() : opened.error().toString()));
     CHECK((*opened)["autosave_available"].asBool());
     CHECK(other->head().project->name == "Autosaved");

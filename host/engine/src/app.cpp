@@ -2819,8 +2819,9 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
         const Status st = audio::writeWav(file, tone);
         assert(st && "fixture audio failed");
         (void)st;
-        run("item.add",
-            R"({"track": "tr_1", "position": 0, "audio_file": ")" + file.string() + R"("})");
+        auto add = *json::parse(R"({"track": "tr_1", "position": 0})");
+        add["audio_file"] = file.string();  // a Windows path's backslashes need JSON escapes
+        run("item.add", json::writeCompact(add));
         if (fixture == "song_with_hits")
             run("take.hits.set", R"({"take":"tk_1","positions":[0.3,0.8]})");
         if (fixture == "song_split_audio") run("item.split", R"({"item":"it_1","at":2})");
