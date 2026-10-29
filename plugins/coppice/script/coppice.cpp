@@ -31,26 +31,35 @@
 // life, so a render is the same at any block size.
 
 constexpr int kVoices = 32;
-constexpr int kTick = 16;       // frames between a voice's control updates
 constexpr int kColumns = 1024;  // the waveform's, per channel
 constexpr int kSlices = 64;
 // Room for a chord: the factory samples peak at -3 dBFS, and with this the
 // default's note peaks near -16 dBFS and a chord near -7, about as Marram's do.
 constexpr double kHeadroom = 0.35481339;  // -9 dB
-constexpr int kHops = 4096;               // the most hops a search for hits looks at
 constexpr int kPane = 256;                // points in a close-up
 constexpr double kPaneMs = 2.5;           // each side of a close-up's centre
 
-// Modes and types, by their choices' indices.
+// Modes, by their choices' indices.
 constexpr int kClassic = 0;
 constexpr int kOneShot = 1;
 constexpr int kSlice = 2;
-constexpr int kLoopOff = 0;
-constexpr int kForward = 1;
-constexpr int kPingPong = 2;
 constexpr int kTrigger = 0;
 constexpr int kGate = 1;
 constexpr int kThru = 2;
+
+// --- engine: shared with Pollard, byte for byte ------------------------------------------
+//
+// From here to the end of the engine, the same text is in Pollard's script
+// (plugins/pollard), which plays a pad with it as this plays a key; the
+// test plugin.pollard.engine-copy fails when the two differ. Make a change
+// in both.
+
+constexpr int kTick = 16;    // frames between a voice's control updates
+constexpr int kHops = 4096;  // the most hops a search for hits looks at
+// Loops and filters, by their choices' indices.
+constexpr int kLoopOff = 0;
+constexpr int kForward = 1;
+constexpr int kPingPong = 2;
 constexpr int kOff = 0;
 constexpr int kLadder = 1;
 constexpr int kSvf = 2;
@@ -113,11 +122,11 @@ double divisionBeats(int d) {
 
 int clampInt(int x, int lo, int hi) { return x < lo ? lo : x > hi ? hi : x; }
 
-// --- the engine --------------------------------------------------------------------------
+// --- the voice ---------------------------------------------------------------------------
 //
 // What plays a sound, given numbers and the file: the envelope, the filter,
 // where a note reads its file and what it hears there. None of it reads a
-// parameter, so a drum sampler can play a pad with it as this plays a key.
+// parameter.
 
 // Attack, decay, sustain, release, each segment exactly as long as its time:
 // the attack straight, the decay and release exponential. It starts from
@@ -399,6 +408,71 @@ struct Voice {
     int tickLeft = 0;
     double lastL = 0.0, lastR = 0.0;
 };
+
+// Voice s on by `frames` frames from frame `from` of the block, all within
+// one control tick: its file read where it is (wrapping in its loop),
+// faded over a region's last `endFade` frames, filtered (`type` kOff,
+// kLadder or kSvf; `steep` the ladder's 24 dB; `mode` the state-variable
+// filter's) and through its amp, `factor` samples a frame, added into
+// mixL and mixR from `base`. It stops, done, once it runs past its span.
+void render(Voice& s, const AudioFile& f, int from, int frames, int factor, double endFade,
+            int type, bool steep, int mode, Buffer<double>& mixL, Buffer<double>& mixR, int base) {
+    const double length = s.span.length();
+    for (int i = from; i < from + frames; ++i) {
+        for (int k = 0; k < factor; ++k) {
+            // Past the end, or its loop.
+            if (s.looping && s.span.loop == kForward && s.q >= s.span.l1) {
+                s.q -= s.span.l1 - s.span.l0;
+            } else if (s.looping && s.span.loop == kPingPong) {
+                if (s.dir > 0.0 && s.q >= s.span.l1) {
+                    s.q = 2.0 * s.span.l1 - s.q;
+                    s.dir = -1.0;
+                } else if (s.dir < 0.0 && s.q < s.span.l0) {
+                    s.q = 2.0 * s.span.l0 - s.q;
+                    s.dir = 1.0;
+                }
+            }
+            if (s.q >= length || s.q < 0.0) {
+                s.done = true;
+                return;
+            }
+            double l = hear(f, s.span, 0, s.q, s.looping);
+            double r = s.narrow ? l : hear(f, s.span, 1, s.q, s.looping);
+            if (!s.looping) {
+                const double left = (length - s.q) / endFade;
+                if (left < 1.0) {
+                    l *= left;
+                    r *= left;
+                }
+            }
+            if (type != kOff) {
+                if (type == kLadder) {
+                    l = s.filter[0].ladder(l, s.g, s.k, s.drive, steep);
+                    if (!s.narrow) r = s.filter[1].ladder(r, s.g, s.k, s.drive, steep);
+                } else {
+                    l = s.filter[0].svf(l * s.drive, s.g, s.k, mode);
+                    if (!s.narrow) r = s.filter[1].svf(r * s.drive, s.g, s.k, mode);
+                }
+                if (s.narrow) r = l;
+                s.g += s.gStep;
+                s.k += s.kStep;
+            }
+            s.ampL += s.ampLStep;
+            s.ampR += s.ampRStep;
+            l *= s.ampL;
+            r *= s.ampR;
+            s.lastL = l;
+            s.lastR = r;
+            const int at = base + i * factor + k;
+            mixL[at] += l;
+            mixR[at] += r;
+            s.q += s.step * s.dir;
+            s.step += s.stepStep;
+        }
+    }
+}
+
+// --- end of the engine ---------------------------------------------------------------------
 
 struct Coppice : Instrument {
     static constexpr Info info = {
@@ -1310,67 +1384,19 @@ struct Coppice : Instrument {
     void play(int v, int count) {
         Voice& s = voice[v];
         const double endFade = 0.001 * sampleRate();  // a region's last millisecond fades
-        const int type = fType.index();
-        const bool steep = slope.index() == 1;
-        const int svfMode = fMode.index();
-        const double length = s.span.length();
-        for (int i = 0; i < count; ++i) {
+        int i = 0;
+        while (i < count) {
             if (s.tickLeft == 0) {
                 control(v, i);
                 s.tickLeft = kTick;
                 if (s.done) return;
             }
-            --s.tickLeft;
-            for (int k = 0; k < factor; ++k) {
-                // Past the end, or its loop.
-                if (s.looping && s.span.loop == kForward && s.q >= s.span.l1) {
-                    s.q -= s.span.l1 - s.span.l0;
-                } else if (s.looping && s.span.loop == kPingPong) {
-                    if (s.dir > 0.0 && s.q >= s.span.l1) {
-                        s.q = 2.0 * s.span.l1 - s.q;
-                        s.dir = -1.0;
-                    } else if (s.dir < 0.0 && s.q < s.span.l0) {
-                        s.q = 2.0 * s.span.l0 - s.q;
-                        s.dir = 1.0;
-                    }
-                }
-                if (s.q >= length || s.q < 0.0) {
-                    s.done = true;
-                    return;
-                }
-                double l = hear(sample, s.span, 0, s.q, s.looping);
-                double r = s.narrow ? l : hear(sample, s.span, 1, s.q, s.looping);
-                if (!s.looping) {
-                    const double left = (length - s.q) / endFade;
-                    if (left < 1.0) {
-                        l *= left;
-                        r *= left;
-                    }
-                }
-                if (type != kOff) {
-                    if (type == kLadder) {
-                        l = s.filter[0].ladder(l, s.g, s.k, s.drive, steep);
-                        if (!s.narrow) r = s.filter[1].ladder(r, s.g, s.k, s.drive, steep);
-                    } else {
-                        l = s.filter[0].svf(l * s.drive, s.g, s.k, svfMode);
-                        if (!s.narrow) r = s.filter[1].svf(r * s.drive, s.g, s.k, svfMode);
-                    }
-                    if (s.narrow) r = l;
-                    s.g += s.gStep;
-                    s.k += s.kStep;
-                }
-                s.ampL += s.ampLStep;
-                s.ampR += s.ampRStep;
-                l *= s.ampL;
-                r *= s.ampR;
-                s.lastL = l;
-                s.lastR = r;
-                const int at = i * factor + k;
-                mixL[at] += l;
-                mixR[at] += r;
-                s.q += s.step * s.dir;
-                s.step += s.stepStep;
-            }
+            const int run = min(s.tickLeft, count - i);
+            render(s, sample, i, run, factor, endFade, fType.index(), slope.index() == 1,
+                   fMode.index(), mixL, mixR, 0);
+            s.tickLeft -= run;
+            i += run;
+            if (s.done) return;
         }
     }
 
