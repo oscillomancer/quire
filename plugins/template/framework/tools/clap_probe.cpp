@@ -15,7 +15,7 @@
 //
 // Its window work is Cocoa-only; elsewhere it exercises everything but the
 // window (x11-probe covers X11 embedding). Audio goes to every port the
-// plugin declares; a plugin that takes notes is sent one held note, and one
+// plugin declares; a plugin that takes notes is sent two held notes, and one
 // without audio (a note effect) has to send notes back.
 #include <algorithm>
 #include <cmath>
@@ -140,14 +140,16 @@ void CLAP_ABI hostRequestCallback(const clap_host_t*) {
 
 // --- event plumbing --------------------------------------------------------
 
-// Middle C, held from the first block, when the plugin takes notes.
-clap_event_note_t gNoteOn{{sizeof(clap_event_note_t), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_ON, 0},
-                          -1, 0, 0, 60, 0.8};
+// C2 and middle C, held from the first block, when the plugin takes notes:
+// a drum sampler's first pad sits on C2 (the GM kick), a melodic one on C4.
+clap_event_note_t gNoteOn[2]{
+    {{sizeof(clap_event_note_t), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_ON, 0}, -1, 0, 0, 36, 0.8},
+    {{sizeof(clap_event_note_t), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_ON, 0}, -1, 0, 0, 60, 0.8}};
 bool gSendNote = false;
 
-uint32_t CLAP_ABI inSize(const clap_input_events_t*) { return gSendNote ? 1 : 0; }
+uint32_t CLAP_ABI inSize(const clap_input_events_t*) { return gSendNote ? 2 : 0; }
 const clap_event_header_t* CLAP_ABI inGet(const clap_input_events_t*, uint32_t index) {
-    return gSendNote && index == 0 ? &gNoteOn.header : nullptr;
+    return gSendNote && index < 2 ? &gNoteOn[index].header : nullptr;
 }
 
 bool CLAP_ABI outPush(const clap_output_events_t*, const clap_event_header_t* event) {
@@ -439,7 +441,7 @@ int main(int argc, char** argv) {
 
     double phase = 0.0, outputPeak = 0.0;
     for (int b = 0; b < blocks; ++b) {
-        // A sine on every input, and the note, so the processor and live
+        // A sine on every input, and the notes, so the processor and live
         // meters have something to do.
         audio.fillInputs(phase);
         gSendNote = takesNotes && b == 0;

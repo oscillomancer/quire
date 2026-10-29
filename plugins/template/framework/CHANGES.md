@@ -4,6 +4,14 @@ The framework is versioned on its own (`framework/VERSION.txt`) so a product can
 tell which one it carries. Each entry says what a product must do, if
 anything, after `framework/tools/update_framework.cmake` brings it in.
 
+## 1.33.3
+
+What a product must do: nothing.
+
+- **The probe plays C2 as well as middle C.** `clap-probe` holds both
+  notes from its first block, so a drum sampler whose pads start at C2 (the
+  GM kick) is heard instead of failing macOS's embedding test as silent.
+
 ## 1.33.2
 
 What a product must do: nothing.

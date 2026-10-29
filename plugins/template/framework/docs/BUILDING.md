@@ -265,8 +265,9 @@ template's own build of that preset.
   refusal, hot teardown) that writes `probe-window.png`; elsewhere it
   exercises everything but the window. Audio goes to every declared port
   (`--mono` keeps the default layout when there is no mono one); a plugin
-  that takes notes gets a held note, and a note effect passes on the notes
-  it sends.
+  that takes notes gets two held notes, C2 and middle C (so a drum
+  sampler's first pad sounds too), and a note effect passes on the notes it
+  sends.
 
 ## Continuous integration
 
