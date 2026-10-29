@@ -340,9 +340,6 @@ that exactly duplicates structuredContent is shown once.
         "Filter 2": [
           "filter2.type = Off  (off|ladder|svf|comb|formant)"
         ],
-        "Drive": [
-          "drive.type = Off  (off|soft|tape|fold|hard)"
-        ],
         "Amp": [
           "amp.attack = 2.00 ms  (0.0..30000.0 ms, pow:3)",
           "amp.decay = 600 ms  (1.0..30000.0 ms, log)",
@@ -400,11 +397,11 @@ that exactly duplicates structuredContent is shown once.
       },
       "patch_type": "supple.marram-patch/1.0",
       "description": "Marram: default settings",
-      "docs": "Synthesizer: four oscillators (analog, wavetable, FM, noise, sub) with unison, two filters (ladder, state-variable, comb, formant), drive, three envelopes, three LFOs and four macros, connected by modulation routes.",
+      "docs": "Synthesizer: four oscillators (analog, wavetable, FM, noise, sub) with unison, two filters (ladder, state-variable, comb, formant), three envelopes, three LFOs and four macros, connected by modulation routes.",
       "status_available": true,
       "problems": [],
       "inactive": {
-        "_elided_array_count": 85
+        "_elided_array_count": 82
       }
     }
   }
@@ -1752,9 +1749,6 @@ that exactly duplicates structuredContent is shown once.
         "Filter 2": [
           "filter2.type = Off  (off|ladder|svf|comb|formant)"
         ],
-        "Drive": [
-          "drive.type = Off  (off|soft|tape|fold|hard)"
-        ],
         "Amp": [
           "amp.attack = 2.00 ms  (0.0..30000.0 ms, pow:3)",
           "amp.decay = 600 ms  (1.0..30000.0 ms, log)",
@@ -1812,11 +1806,11 @@ that exactly duplicates structuredContent is shown once.
       },
       "patch_type": "supple.marram-patch/1.0",
       "description": "Marram: default settings",
-      "docs": "Synthesizer: four oscillators (analog, wavetable, FM, noise, sub) with unison, two filters (ladder, state-variable, comb, formant), drive, three envelopes, three LFOs and four macros, connected by modulation routes.",
+      "docs": "Synthesizer: four oscillators (analog, wavetable, FM, noise, sub) with unison, two filters (ladder, state-variable, comb, formant), three envelopes, three LFOs and four macros, connected by modulation routes.",
       "status_available": true,
       "problems": [],
       "inactive": {
-        "_elided_array_count": 85
+        "_elided_array_count": 82
       }
     }
   }
