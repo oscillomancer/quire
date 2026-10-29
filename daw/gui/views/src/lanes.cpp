@@ -126,7 +126,7 @@ class LaneLabels : public ui::Node {
                         if (x < r.x || x > r.right()) return;
                         const auto color = t.color(solid ? "ink" : "ink-quiet");
                         c.fillRect({x, r.y + 18, 1, std::max(0.f, r.h - 18)},
-                                   color.withAlpha(solid ? .8f : .35f));
+                                   color.withAlpha(solid ? .8f : .6f));
                         if (solid) c.fillRect({x - 3, r.y + 17, 7, 5}, color);
                     };
                     const model::AudioWarpMap hitMap(*take);
