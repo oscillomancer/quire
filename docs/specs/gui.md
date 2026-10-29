@@ -628,6 +628,12 @@ The single FX window switches track/take in place and raises when opened
 again. Its first content size is 840 × 560 design units, positioned like the
 former centred popup (18% down the main client area, clamped to its edges).
 The minimum size is 800 × 360. Content fills the client area on resize.
+The header's top left switches the shown track: `<` and `>` step to the
+previous and next strip in the mixer's order (channels, busses, masters, each
+in track order; `views::stripOrder`), wrapping at both ends, and the title
+(`FX: <track>`, with a caret) opens a menu of every strip in that order,
+divided by type, the shown track checked. A switch keeps the Chain or
+Parameters tab; from a take's chain it goes to a track's.
 Its Add plugin browser, chain/preset/pins menus and parameter MIDI learn
 dialog belong to its own root. A strip's standalone "+" / `ui.fx.add` browser
 belongs to the main root; the strip's "+" adds to its own track, Track > add

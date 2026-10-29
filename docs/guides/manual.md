@@ -131,6 +131,9 @@ track's FX chain, including when it is empty. In the mixer, right-click a
 plugin to rename, duplicate or delete it; a duplicate keeps the plugin's
 current settings and goes right after it. Alt-click (Option-click on macOS)
 also deletes a plugin.
+The chain window's **<** and **>** at the top left step to the previous or
+next track, bus or master in mixer order, and clicking its title lists them
+all to pick from.
 In the chain window, Ctrl-click (Cmd-click on macOS) toggles a row in the
 selection, including the active row. Effects moved to another track leave
 that window’s selection.

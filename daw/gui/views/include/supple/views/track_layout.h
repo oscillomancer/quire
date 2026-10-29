@@ -36,6 +36,11 @@ struct TrackRow {
 // two channels (gui.md §4.2). The model's child order is untouched.
 std::vector<model::Id> displayChildren(const model::Session& session, const model::Track& parent);
 
+// Every track in the mixer's strip order: channels, then busses, then masters,
+// each type in display order (displayChildren walked from the masters). The FX
+// window's track arrows and menu follow it too.
+std::vector<model::Id> stripOrder(const model::Session& session);
+
 // Where `track.move {track, index}` puts `track` (a pure reorder under its own
 // parent) so it lands in front of its sibling `before`, or after its last
 // sibling of the same type when `before` is empty. Only siblings of the same

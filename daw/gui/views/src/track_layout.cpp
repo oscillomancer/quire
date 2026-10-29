@@ -31,6 +31,24 @@ std::vector<model::Id> displayChildren(const model::Session& session, const mode
     return out;
 }
 
+std::vector<model::Id> stripOrder(const model::Session& session) {
+    std::vector<model::Id> order;
+    std::function<void(model::Id)> walk = [&](model::Id id) {
+        const model::Track* t = session.tracks.find(id);
+        if (!t) return;
+        order.push_back(id);
+        for (model::Id child : displayChildren(session, *t)) walk(child);
+    };
+    for (model::Id m : session.project->masters) walk(m);
+    std::vector<model::Id> grouped;
+    grouped.reserve(order.size());
+    for (model::StripType type :
+         {model::StripType::Channel, model::StripType::Buss, model::StripType::Master})
+        for (model::Id id : order)
+            if (session.tracks.find(id)->type == type) grouped.push_back(id);
+    return grouped;
+}
+
 std::optional<std::size_t> reorderIndex(const model::Session& session, model::Id track,
                                         std::optional<model::Id> before) {
     const model::Track* t = session.tracks.find(track);

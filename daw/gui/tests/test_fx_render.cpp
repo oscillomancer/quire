@@ -26,6 +26,7 @@
 #include "supple/host/clap_host.h"
 #include "supple/json/write.h"
 #include "supple/ui/list.h"
+#include "supple/ui/popup.h"
 #include "supple/ui/root.h"
 #include "supple/ui/text_field.h"
 #include "supple/ui/widgets.h"
@@ -1618,6 +1619,39 @@ TEST_CASE("double clicking empty FX chain space adds to its main, input or take 
     REQUIRE(f.fx->openToAdd(ui, track.str()));
     CHECK(f.root->find("browser"));  // the strip's standalone browser stays on main
     CHECK_FALSE(f.panel->root().find("browser"));
+}
+
+TEST_CASE("FX header arrows and menu switch among the strips in mixer order") {
+    Fixture f;
+    if (!f.ok) return;
+    const auto first = f.addTrack("First");
+    const auto added = f.run("track.add", f.args({{"type", "buss"}, {"name", "Bus"}}));
+    REQUIRE(added);
+    const auto bus = *model::Id::parse(added->find("track")->asString());
+    const auto second = f.addTrack("Second");
+    const model::Id master = f.app->head().project->masters.front();
+    REQUIRE(f.fx->open(first));
+    REQUIRE(f.click("fx.tab.params"));
+    // Channels, then busses, then masters, wrapping at both ends.
+    for (model::Id want : {second, bus, master, first}) {
+        REQUIRE(f.click("fx.track.next"));
+        CHECK(f.fx->track() == want);
+    }
+    REQUIRE(f.click("fx.track.prev"));
+    CHECK(f.fx->track() == master);
+    CHECK(f.panel->root().find("fx.params.chooser"));  // still on Parameters
+    REQUIRE(f.click("fx.title"));
+    const auto* menu = f.panel->root().find("fx.track.menu");
+    REQUIRE(menu);
+    f.snapshot("fx-track-menu.png");
+    std::vector<std::string> rows;
+    for (const auto& item : ui::menuItems(*menu))
+        rows.push_back(item.separator ? "-" : item.label + (item.checked ? "*" : ""));
+    CHECK(rows == std::vector<std::string>{"First", "Second", "-", "Bus", "-", "Master*"});
+    const auto pick = ui::menuItems(*menu)[1].run;  // the menu goes as it runs
+    pick();
+    CHECK(f.fx->track() == second);
+    CHECK_FALSE(f.panel->root().popupOpen());
 }
 
 TEST_CASE("FX native title follows track switches, renames and take headers") {

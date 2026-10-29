@@ -19,6 +19,7 @@
 #include "supple/ui/scroll_view.h"
 #include "supple/ui/text_field.h"
 #include "supple/ui/widgets.h"
+#include "supple/views/track_layout.h"
 
 namespace supple::gui {
 namespace {
@@ -125,6 +126,32 @@ class LoadChainButton : public ui::Button {
 
   private:
     bool shift_ = false;
+};
+
+// The header's title: the shown chain and a caret (the UI font has no arrow
+// glyphs); a click lists every strip to switch to.
+class TrackButton : public ui::Button {
+  public:
+    static constexpr float kCaret = 8, kGap = 6;
+    using Button::Button;
+    ui::Size measure(const ui::Canvas& canvas, ui::Size available) override {
+        ui::Size size = Button::measure(canvas, available);
+        size.w += kGap + kCaret;
+        return size;
+    }
+    void paint(ui::Canvas& canvas) override {
+        const ui::Theme& t = canvas.theme();
+        const ui::Rect b = bounds();
+        canvas.fillRound(b, t.radius("s"),
+                         pressed()   ? t.color("selection")
+                         : hovered() ? t.color("raised")
+                                     : t.color("panel"));
+        canvas.strokeRound(b, t.radius("s"), focused() ? t.color("focus") : t.color("rule"));
+        canvas.text({b.x, b.y, b.w - kGap - kCaret, b.h}, valueText(), ui::Font::UiBold,
+                    t.type("small"), t.color("ink"), ui::kCenter | ui::kMiddle);
+        const float x = b.right() - t.space("m") - kCaret, y = b.y + b.h / 2;
+        canvas.fillPath({{x, y - 2}, {x + kCaret, y - 2}, {x + kCaret / 2, y + 3}}, t.color("ink"));
+    }
 };
 
 // The saved chains: a click loads one (Shift replaces), a right click offers
@@ -457,8 +484,12 @@ std::unique_ptr<ui::Node> FxWindow::buildPage() {
     header.layout.height = ui::SizeRule::fixed(30);
     header.layout.gap = 8;
     header.layout.align = ui::Layout::Align::Center;
-    title_ = &header.emplace<ui::Label>("fx.title", "FX", ui::Font::UiBold, "title");
-    title_->layout.width = ui::SizeRule::fraction();
+    // The shown track: the arrows step through the strips in mixer order, the
+    // title opens a menu of them all.
+    header.emplace<ui::Button>("fx.track.prev", "<", [this] { stepTrack(-1); });
+    header.emplace<ui::Button>("fx.track.next", ">", [this] { stepTrack(1); });
+    title_ = &header.emplace<TrackButton>("fx.title", "FX", [this] { trackMenu(); });
+    header.emplace<ui::Node>("fx.header.space").layout.width = ui::SizeRule::fraction();
     presetChainButton_ = &header.emplace<ui::Button>(
         "fx.chain.target", "Main chain", [this] { choosePresetChain(presetChain_ != "input"); });
     header.emplace<ui::Button>("fx.chain.save", "Save chain…", [this] {
@@ -949,7 +980,7 @@ void FxWindow::refresh() {
     if (title_) {
         title_->setText(take_ ? "Take FX: " + trackName + " / " + take_->str()
                               : "FX: " + trackName);
-        panel_.setTitle(title_->text());
+        panel_.setTitle(title_->valueText());
     }
     body_->clear();
     const auto order = rowOrder();
@@ -1349,6 +1380,49 @@ void FxWindow::addFx(const std::string& pluginId) {
         }
     setStatus("added " + pluginId);
     refresh();
+}
+
+void FxWindow::showTrack(model::Id track) {
+    const Tab tab = tab_;  // the Parameters tab stays open across the switch
+    if (auto opened = open(track); !opened) return setStatus(opened.error().message);
+    if (tab != tab_) {
+        tab_ = tab;
+        refresh();
+    }
+}
+
+void FxWindow::stepTrack(int delta) {
+    const std::vector<model::Id> order = views::stripOrder(app_.head());
+    if (order.empty()) return;
+    const auto it = std::find(order.begin(), order.end(), track_);
+    const auto n = static_cast<std::ptrdiff_t>(order.size());
+    const std::ptrdiff_t at = it == order.end() ? (delta > 0 ? -1 : 0) : it - order.begin();
+    showTrack(order[static_cast<std::size_t>(((at + delta) % n + n) % n)]);
+}
+
+void FxWindow::trackMenu() {
+    if (trackMenuOpen_) {  // the title toggles its menu
+        while (trackMenuOpen_ && root().popupOpen()) root().closePopup();
+        return;
+    }
+    const model::Session& s = app_.head();
+    std::vector<ui::MenuItem> items;
+    std::optional<model::StripType> type;
+    for (model::Id id : views::stripOrder(s)) {
+        const model::StripType t = s.tracks.find(id)->type;
+        if (type && *type != t) items.push_back({"", "", {}, true, true});  // between types
+        type = t;
+        ui::MenuItem m;
+        m.label = model::trackLabel(s, id);
+        m.checked = id == track_ && !take_;
+        m.run = [this, id] { showTrack(id); };
+        items.push_back(std::move(m));
+    }
+    trackMenuOpen_ = true;
+    root().openPopup(
+        ui::makeMenu("fx.track.menu", std::move(items), [this] { root().closePopup(); }),
+        title_ ? title_->bounds() : ui::Rect{}, ui::Placement::Below,
+        [this] { trackMenuOpen_ = false; });
 }
 
 void FxWindow::choosePresetChain(bool input) {

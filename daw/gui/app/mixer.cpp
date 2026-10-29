@@ -755,21 +755,8 @@ void Mixer::rebuild() {
     // Remove the old strips (the row keeps its scroll bar).
     static_cast<StripRow*>(row_)->clear();
     const model::Session& s = app_.head();
-    std::vector<model::Id> order;
-    std::function<void(model::Id)> walk = [&](model::Id id) {
-        const model::Track* t = s.tracks.find(id);
-        if (!t) return;
-        order.push_back(id);
-        for (model::Id child : views::displayChildren(s, *t)) walk(child);
-    };
-    for (model::Id m : s.project->masters) walk(m);
     // Grouped by type: channels, busses, masters (each in track order).
-    std::vector<model::Id> grouped;
-    for (model::StripType type :
-         {model::StripType::Channel, model::StripType::Buss, model::StripType::Master})
-        for (model::Id id : order)
-            if (s.tracks.find(id)->type == type) grouped.push_back(id);
-    for (model::Id id : grouped) {
+    for (model::Id id : views::stripOrder(s)) {
         const model::Track& t = *s.tracks.find(id);
         const std::string tid = id.str();
         const std::string type(model::stripTypeName(t.type));

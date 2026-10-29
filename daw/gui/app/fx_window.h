@@ -133,6 +133,11 @@ class FxWindow {
     void saveChain();
     void loadChainMenu(bool replace);
     void choosePresetChain(bool input);
+    // The header's track switch: the arrows step `delta` strips along the
+    // mixer's order (wrapping), the title's menu lists every strip.
+    void showTrack(model::Id track);
+    void stepTrack(int delta);
+    void trackMenu();
     // A plugin's presets (fx.preset.*): the row's "presets" menu, and the name
     // field its "Save preset…" shows.
     void presetMenu(model::Id fx);
@@ -170,6 +175,7 @@ class FxWindow {
     std::set<std::string> failed_;  // engine.status failed_fx
     std::string presetChain_ = "main";
     bool chainMenuOpen_ = false;  // the Load chain… menu is showing
+    bool trackMenuOpen_ = false;  // the title's track menu is showing
     ui::Button* presetChainButton_ = nullptr;
     ui::Node* savePrompt_ = nullptr;
     ui::TextField* saveName_ = nullptr;
@@ -181,7 +187,7 @@ class FxWindow {
     ui::Node* page_ = nullptr;
     ui::Node* body_ = nullptr;
     ui::Node* tabsRow_ = nullptr;
-    ui::Label* title_ = nullptr;
+    ui::Button* title_ = nullptr;
     ui::Label* status_ = nullptr;
     ui::Label* touched_ = nullptr;  // the last touched parameter
     std::uint64_t touchedSerial_ = 0;
