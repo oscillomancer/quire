@@ -66,30 +66,38 @@ struct Work {
     bool named = false;
 };
 Result<std::map<fs::path, std::string>> inputHashes(const Work& work) {
-    std::map<fs::path, std::string> hashes;
+    std::set<Id> needed;
     for (const auto& group : work.groups) {
         if (!group.audio) continue;
         for (Id id : group.items) {
             const auto& item = *work.snapshot.items.find(id);
             const auto& take = *work.snapshot.takes.find(*item.activeTake);
-            const auto& media = *work.snapshot.media.find(*take.source);
-            fs::path path = media.path;
-            if (path.is_relative()) {
-                const auto inMedia = work.projectDir / work.snapshot.project->mediaDir / path;
-                std::error_code ec;
-                path = fs::exists(inMedia, ec) ? inMedia : work.projectDir / path;
-            }
-            if (hashes.contains(path)) continue;
-            auto hash = sha256File(path);
-            if (!hash) return hash.error();
-            if (!media.hash.empty() && media.hash != *hash)
-                return Error("item.consolidate_source", "input media content changed", "/items",
-                             "reimport the changed audio and retry consolidation");
-            hashes.emplace(path, *hash);
+            needed.insert(*item.activeTake);
+            needed.insert(take.warpPeers.begin(), take.warpPeers.end());
         }
+    }
+    // An inactive peer still influences its bundle's phase preparation.
+    std::map<fs::path, std::string> hashes;
+    for (Id id : needed) {
+        const auto& take = *work.snapshot.takes.find(id);
+        const auto& media = *work.snapshot.media.find(*take.source);
+        fs::path path = media.path;
+        if (path.is_relative()) {
+            const auto inMedia = work.projectDir / work.snapshot.project->mediaDir / path;
+            std::error_code ec;
+            path = fs::exists(inMedia, ec) ? inMedia : work.projectDir / path;
+        }
+        if (hashes.contains(path)) continue;
+        auto hash = sha256File(path);
+        if (!hash) return hash.error();
+        if (!media.hash.empty() && media.hash != *hash)
+            return Error("item.consolidate_source", "input media content changed", "/items",
+                         "reimport the changed audio and retry consolidation");
+        hashes.emplace(path, *hash);
     }
     return hashes;
 }
+
 Status render(Work& work, const std::vector<host::PluginInfo>& catalogue,
               const host::HostIdentity& identity, cmd::JobManager& jobs, const std::string& job,
               StopToken stop) {

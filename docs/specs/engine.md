@@ -2046,7 +2046,8 @@ freeze and group suspension; incomplete selections report a repair hint.
 There is no additional item-count cap: existing source and render sample budgets
 apply to each capture. `itemEditFingerprint` guards selected material and owned
 automation/timing without including unrelated mixer controls; IDs normalize for
-branch replay. Input hashes are checked on the worker and source file stamps
+branch replay. Input hashes include all preparation peers (even inactive takes
+whose channels influence bundle phase), are checked on the worker, and file stamps
 again before publication. Project/branch/destination changes or changed selected
 material refuse the completion with `item.consolidate_stale`.
 
