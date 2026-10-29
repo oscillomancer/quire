@@ -174,7 +174,7 @@ EffectiveLevel effectiveTrackLevel(const Session& s, Id track, double seconds) {
     if (silence) out.requestedDb = kSilenceDb;
     // Masters retain their existing plain stage when not under VCA control.
     const double ceiling =
-        t->type == StripType::Master && control.empty() ? out.requestedDb : 20 * std::log10(4.0);
+        t->type == StripType::Master && control.empty() ? out.requestedDb : kFaderCeilingDb;
     out.appliedDb = std::clamp(out.requestedDb, kSilenceDb, std::max(kSilenceDb, ceiling));
     std::set<Id> soloed;
     for (const auto& e : s.tracks) {

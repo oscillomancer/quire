@@ -24,6 +24,8 @@
 namespace supple::model {
 
 inline constexpr double kSilenceDb = -150.0;  // levels at or below this are silence (-inf)
+// The highest effective strip level: Console 9's native fader top, 20·log10(4).
+inline constexpr double kFaderCeilingDb = 12.041199826559248;
 
 enum class Timebase : std::uint8_t { Time, Beats, BeatsPosition };
 enum class ItemTimebase : std::uint8_t { Track, Time, Beats, BeatsPosition };

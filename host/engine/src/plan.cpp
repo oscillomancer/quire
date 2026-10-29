@@ -2382,7 +2382,7 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
         const double pan = node.autoPan.active() ? node.autoPan.at(at) : node.pan;
         bool ownMuted = node.autoMute.active() ? node.autoMute.at(at) >= .5 : node.mute;
         node.vcas.evaluate(at, db, ownMuted);
-        if (!node.vcas.empty()) db = std::min(db, 20 * std::log10(4.0));
+        if (!node.vcas.empty()) db = std::min(db, model::kFaderCeilingDb);
         const bool muted = node.soloSilenced || ownMuted;
         const double g = node.autoVolume.active() || !node.vcas.empty()
                              ? (node.master               ? dbToGain(db)
@@ -2459,7 +2459,7 @@ bool processNode(Plan& p, std::size_t index, std::int64_t pos, std::uint32_t n,
                 e.vcas.evaluate(at, sourceDb, sourceMute);
                 // A post-fader send starts from the member's applied level;
                 // attenuation cannot recover gain beyond the member's ceiling.
-                if (!e.vcas.empty()) sourceDb = std::min(sourceDb, 20 * std::log10(4.0));
+                if (!e.vcas.empty()) sourceDb = std::min(sourceDb, model::kFaderCeilingDb);
             }
             const double routeDb = e.autoVolume.active() ? e.autoVolume.at(at) : e.volumeDb;
             const double sourcePan = e.stripPan.active() ? e.stripPan.at(at) : node.pan;
