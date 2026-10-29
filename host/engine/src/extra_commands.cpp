@@ -1852,12 +1852,13 @@ void registerExtraCommands(cmd::Registry& registry) {
                                      it.activeTake == takeId, tk.gainDb, tk.pan, tk.startOffset,
                                      tk.playrate, tk.pitch, tk.preservePitch, tk.pitchMode});
                 auto encoded = model::toJson(tk);
-                auto& entry = out.takes.back();
-                if (const auto* v = encoded.find("stretch_markers")) entry.markers = *v;
-                if (const auto* v = encoded.find("transients")) entry.hits = *v;
-                if (const auto* v = encoded.find("warp_peers")) entry.peers = *v;
+                auto& listedTake = out.takes.back();
+                if (const auto* v = encoded.find("stretch_markers")) listedTake.markers = *v;
+                if (const auto* v = encoded.find("transients")) listedTake.hits = *v;
+                if (const auto* v = encoded.find("warp_peers")) listedTake.peers = *v;
                 const auto* md = tk.source ? s.media.find(*tk.source) : nullptr;
-                entry.hitsStale = tk.transients && (!md || md->hash != tk.transients->sourceHash);
+                listedTake.hitsStale =
+                    tk.transients && (!md || md->hash != tk.transients->sourceHash);
             }
             return out;
         };
