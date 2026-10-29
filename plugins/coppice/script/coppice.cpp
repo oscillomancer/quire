@@ -918,7 +918,7 @@ struct Coppice : Instrument {
     Shared<int> paneSlice;
     SharedArray<double, 2> envShown;  // the newest note's amp and Env 2: their level,
     SharedArray<int, 2> stageShown;   // and stage (0 idle, 1 attack ... 4 release)
-    SharedArray<double, 2> lfoShown;  // each LFO's phase (0..1); -1 for a note's with none
+    SharedArray<double, 2> lfoShown;  // each LFO's place in its two drawn cycles (0..1); -1: none
     Shared<int> newestKey;            // the newest note's key, -1 none
 
     // --- State ------------------------------------------------------------------------------
@@ -1525,13 +1525,17 @@ struct Coppice : Instrument {
         envShown[1] = on ? voice[newest].mod.level : 0.0;
         stageShown[0] = on ? voice[newest].amp.stage : 0;
         stageShown[1] = on ? voice[newest].mod.stage : 0;
-        // A free LFO's phase now: from its anchor and the frames since.
+        // Each LFO's place in the two cycles the editor draws from its start
+        // phase, so its dot crosses both: a free one from its anchor and the
+        // frames since, a note's from the newest note's start.
         for (int k = 0; k < 2; ++k) {
             const bool free = (k == 0 ? l1Mode.index() : l2Mode.index()) == 1;
             const double phase = (k == 0 ? l1Phase.value() : l2Phase.value()) / 360.0;
             lfoShown[k] =
-                free ? wrap01(freePhase[k] + freeRate[k] * freeFrames[k] / sampleRate() + phase)
-                : on ? voice[newest].lfoPhase[k]
+                free ? wrap01((freeCycle[k] + freePhase[k] +
+                               freeRate[k] * freeFrames[k] / sampleRate()) *
+                              0.5)
+                : on ? wrap01((voice[newest].lfoCycle[k] + voice[newest].lfoPhase[k] - phase) * 0.5)
                      : -1.0;
         }
         newestKey.set(on ? voiceKey(newest) : -1);
@@ -3584,9 +3588,8 @@ struct Coppice : Instrument {
             g.stroke();
         }
         g.globalAlpha(1.0);
-        const double at = lfoShown[l];
-        if (at >= 0.0) {
-            const double t = wrap01(at - from) * 0.5;
+        const double t = lfoShown[l];
+        if (t >= 0.0) {
             const double total = from + 2.0 * t;
             const double v = lfoWave(shape, total - floor(total), floorToInt(total), 7);
             g.fillStyle(kLinen);

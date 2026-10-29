@@ -1587,7 +1587,7 @@ struct Marram : Instrument {
     Shared<int> soundingNow;          // voices playing
     SharedArray<double, 3> envShown;  // the newest note's amp, Env 2 and Env 3: their level,
     SharedArray<int, 3> stageShown;   // and stage (0 idle, 1 attack ... 4 release)
-    SharedArray<double, 3> lfoShown;  // each LFO's phase (0..1); -1 for a note's with none
+    SharedArray<double, 3> lfoShown;  // each LFO's place in its two drawn cycles (0..1); -1: none
 
     // --- State ------------------------------------------------------------------------------
 
@@ -2497,16 +2497,17 @@ struct Marram : Instrument {
         stageShown[0] = on ? voice[newest].amp.stage : 0;
         stageShown[1] = on ? voice[newest].mod.stage : 0;
         stageShown[2] = on ? voice[newest].env3.stage : 0;
-        // A free LFO's phase now: from its anchor and the frames since.
-        lfoShown[0] = l1Mode.index() == 1 ? wrap01(freeNow(0) + l1Phase / 360.0)
-                      : on                ? voice[newest].lfoPhase[0]
-                                          : -1.0;
-        lfoShown[1] = l2Mode.index() == 1 ? wrap01(freeNow(1) + l2Phase / 360.0)
-                      : on                ? voice[newest].lfoPhase[1]
-                                          : -1.0;
-        lfoShown[2] = l3Mode.index() == 1 ? wrap01(freeNow(2) + l3Phase / 360.0)
-                      : on                ? voice[newest].lfoPhase[2]
-                                          : -1.0;
+        lfoShown[0] = lfoPlace(0, l1Mode.index() == 1, on, l1Phase / 360.0);
+        lfoShown[1] = lfoPlace(1, l2Mode.index() == 1, on, l2Phase / 360.0);
+        lfoShown[2] = lfoPlace(2, l3Mode.index() == 1, on, l3Phase / 360.0);
+    }
+    // Where LFO n is in the two cycles the editor draws from its start phase,
+    // 0..1, so its dot crosses both: a free one from its anchor and the frames
+    // since, a note's from the newest note's start. -1 with no note sounding.
+    double lfoPlace(int n, bool free, bool on, double start) const {
+        if (free) return wrap01((freeCycle[n] + freeNow(n)) * 0.5);
+        if (!on) return -1.0;
+        return wrap01((voice[newest].lfoCycle[n] + voice[newest].lfoPhase[n] - start) * 0.5);
     }
     double freeNow(int n) const {
         return freePhase[n] + freeRate[n] * freeFrames[n] / sampleRate();
@@ -5856,9 +5857,8 @@ struct Marram : Instrument {
         }
         g.globalAlpha(1.0);
         // Where it is now.
-        const double at = lfoShown[l];
-        if (at >= 0.0) {
-            const double t = wrap01(at - start) * 0.5;
+        const double t = lfoShown[l];
+        if (t >= 0.0) {
             const double total = start + 2.0 * t;
             const double v = lfoWave(shape, total - floor(total), floorToInt(total), 7);
             g.fillStyle(kLinen);
