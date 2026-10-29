@@ -14,8 +14,8 @@ Yarrow (`yarrow`, the EQ), Sundew (`sundew`, the compressor), Treeline
 (`teasel`, the saturation), Bracken (`bracken`, the delay), Ghyll
 (`ghyll`, the reverb), Lichen (`lichen`, the analyzer), Marram (`marram`,
 the synthesizer), Withy (`withy`, the chorus), Pollia (`pollia`, the
-phaser), Umber (`umber`, the tape machine) and Sedge (`sedge`, the
-tuner). Orrery, the hand-written synthesizer
+phaser), Umber (`umber`, the tape machine), Sedge (`sedge`, the
+tuner) and Hornbeam (`hornbeam`, the guitar amp and cabinet). Orrery, the hand-written synthesizer
 Marram replaced, was removed on 2026-10-21; git history has it.
 
 `common/` holds the shared semantic-parameters extension

@@ -26,6 +26,7 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 | `pollia` (`plugins/pollia`) | Pollia | `com.suppleaudio.pollia` | `EGJQ` (the player's for the id) | `Poll` | audio-effect, phaser |
 | `umber` (`plugins/umber`) | Umber | `com.suppleaudio.umber` | `auff` (the player's for the id) | `Umbr` | audio-effect, distortion, tape |
 | `sedge` (`plugins/sedge`) | Sedge | `com.suppleaudio.sedge` | `RkzT` (the player's for the id) | `Sedg` | audio-effect, analyzer |
+| `hornbeam` (`plugins/hornbeam`) | Hornbeam | `com.suppleaudio.hornbeam` | `hCbo` (the player's for the id) | `Hrnb` | audio-effect, distortion, amp-simulator |
 
 Marram is an instrument; its spec, implementation notes included, is
 `docs/specs/marram.md`.
@@ -814,6 +815,63 @@ plugin with no predecessor. Notes for maintainers:
   C reads −1.98 cents (the temperament's E is 1.955 above equal with A at
   0). Plucked-string measurements (§14 of the spec) were made with
   synthetic strings in a scratch harness, not kept as tests.
+
+## 17. Amp and cabinet — Hornbeam [`hornbeam`] (`stock-effects.md` §15)
+
+A DSP script (ADR-0047), `plugins/hornbeam/script/hornbeam.cpp`. A new stock
+plugin with no predecessor. Notes for maintainers:
+
+- **No recorded data, by rule.** The cabinet is a physical model and must
+  stay one: no impulse responses, convolution or measured curves, and
+  nothing taken from other cabinet simulators (Airwindows' Cabs2 was a
+  reference for the kind of plugin only; none of its code or constants is
+  used). The tone stack's coefficients (`stackAnalog`) are the nodal
+  analysis of the circuit with the source and load resistances, solved
+  symbolically and kept as the expanded polynomials in the pots' shares; the
+  part values per voice are the circuit's, not fitted.
+- **The plot is the audio.** `cabAt` (and `loadAt` for the amp alone)
+  evaluates exactly the filters `front()` and `hear()` run: the coil's
+  first-order admittance and the air shelf at their bilinear maps, each
+  mode's state-variable filter at its prewarped frequency, the back EMF a
+  sample late, each tap's delay with its linear interpolation, the far
+  sources' low-passes and the capsule's sections. Change one side and the
+  other with it: an impulse through the cabinet alone (`chain` `cab`, −40
+  dBFS) matched the traced `cabAt` within 0.001 dB at 8 frequencies, three
+  settings, 44.1, 48 and 96 kHz (a scratch check, `trace()` since removed).
+  The editor draws the cone and the mic from the same `Model` and `Taps`.
+- **The level trims are fitted.** `Voice::trim` (dB at gain 0, 25 .. 100 %)
+  makes up what the level table's static model misses. They were fitted on a
+  synthetic guitar DI (Karplus-Strong strings with a pickup's resonance, a
+  pentatonic riff peaking at −6 dBFS, −22 dBFS RMS) through `chain` `amp` at
+  `master` 30, to equal levels across voices and gain; refit them (and
+  `kOutFull`, `kOutAmp`, the factory patches' `output`) after changing a
+  stage, a curve or the level table, then check strummed chords too.
+- **Cost.** At the defaults 13.7 refs in the release build (`clap-bench`;
+  Teasel 15.7 the same run). It got there by running the first stage's
+  filters (before any curve) and the output transformer (its harmonics are
+  the bass's) at the session's rate, the supply's follower once a frame, one
+  fourth root for the pair, three distance bins a ring and two taps per
+  neighbouring speaker, skipping sources and capsule sections with nothing
+  to do, and by `channels` `mono` (one amp on the left input) as the
+  default: stereo processing, an amp per side, costs 25.0 at the defaults.
+  Under constant automation of the mic (29.0 refs, Teasel 27.7) the
+  paths and the cabinet's normalization are redone every 128 frames of a
+  glide.
+- **The speaker's nonlinearity runs at the session's rate**: its force
+  terms follow the coil's excursion, which the moving mass low-passes, so
+  what it adds is the bass's harmonics and sidebands near what is already
+  there; on a low E at full scale its aliases stayed at the measurement's
+  floor (−97.7 dBc) while its THD reached 3.8 %.
+- **Words in the editor are drawn by `words()`**, a switch on a group and an
+  index: a local `Array<const char*, N>` initialised from string literals
+  crashes the script compiler (reported; a five-line repro is an editor
+  hook with `Array<const char*, 3> names = {"A", "B", "C"};`).
+- **Tests.** The suite every stock plugin has, and
+  `plugin.hornbeam.response`: the cabinet alone (closed 4x12, vintage,
+  dynamic 2.5 cm at 30 %) at 100 Hz, 1, 3 and 8 kHz to its model's values
+  and below 0.01 % THD at −30 dBFS; `mix` 0 passes the input at 0.0 dB;
+  crunch's distortion under 5 % at a quarter of the gain and over 15 % at
+  three quarters.
 
 ## 6. Engine and benchmark use
 

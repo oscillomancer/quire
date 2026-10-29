@@ -132,6 +132,7 @@ include startup ramps.
 | `withy` | Withy | Output | 0 / −12 dB | −12 ±1 dB |
 | `umber` | Umber | Output | 0 / −12 dB | −12 ±1 dB |
 | `sedge` | Sedge | Tolerance | 1 / 10 ct | envelope reload + unchanged audio |
+| `hornbeam` | Hornbeam | Output | 0 / −12 dB | −12 ±1 dB |
 
 Continuous values use ADR-0010's normalized CLAP domain. The table keeps those
 values explicit. Add a plugin in a few lines in `CASES`

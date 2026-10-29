@@ -276,7 +276,7 @@ instructions are in `docs/guides/installing.md`.
   the LLM evaluation harness (`tools/eval-harness`).
 - **Stock plugins** (ADR-0011, ADR-0047): Marram, Yarrow, Sundew, Treeline,
   Gorse, Hickory, Sorrel, Teasel, Bracken, Ghyll, Lichen, Withy, Pollia,
-  Umber and Sedge, each passing clap-validator, a reset determinism check, an unload
+  Umber, Sedge and Hornbeam, each passing clap-validator, a reset determinism check, an unload
   test and the headless REAPER check;
   JSON patches and the semantic-parameters extension.
   Yarrow, the EQ, is the first written as a DSP script
@@ -487,6 +487,29 @@ instructions are in `docs/guides/installing.md`.
   a mark under the row at the exact pitch. Measured only on synthetic
   plucked strings so far; the user's recordings of real ones are still to
   check it against.
+  Hornbeam, the guitar amp and cabinet (`plugins/hornbeam`), has no
+  predecessor and uses no impulse responses or recorded data: every part
+  is a model. Five voices of two to four triode stages (Child's law, grid
+  current holding the grid and charging the coupling capacitor, the
+  cathode's bypass, the bright capacitor on the gain pot), the passive
+  three-knob tone stack solved from its circuit, presence, a push-pull pair
+  under a sagging supply and an output transformer, all oversampled but
+  the transformer; its level holds as the gain turns. The speaker is a
+  motor and a cone of five masses on springs solved into modes (the
+  resonance in its box, the breakup above a kilohertz), driven through the
+  amp's output impedance, its suspension stiffening and its motor weakening
+  with excursion; the mic hears each ring of the cone by its own paths
+  (the cap sits behind the rim) with its pattern and proximity, then the
+  box's other speakers, open back or edge, the floor and, for the ribbon,
+  the wall behind it. Six cabinets, four speakers, three mics placed
+  anywhere on the cone 1 cm to 1 m away; the amp alone (into a speaker's
+  load) or the cabinet alone (driven clean). The editor draws the
+  cabinet's response from the same model as the audio (within 0.001 dB of
+  it) and the mic where it is. Mono by default (the left input through one
+  amp, as a pedal's L/MONO jack): 13.7 refs at the defaults against
+  Teasel's 15.7; stereo, an amp per side, costs 25.0. Sixteen factory patches, cleans to high gain, bass and
+  the cabinet or the amp alone. Tuned by measurement on a synthetic DI;
+  nobody has listened to it on real guitars yet.
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The
