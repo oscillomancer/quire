@@ -927,6 +927,9 @@ Result<std::pair<model::MidiSource, double>> compileNotation(const model::Sessio
 }  // namespace
 
 void registerEngineCommands(cmd::Registry& registry) {
+    // Each command is built in its own immediately-invoked lambda, so an
+    // unoptimized build reuses one frame instead of stacking every command's
+    // locals (Windows' 1 MB main stack overflowed).
     registerFreezeCommands(registry);
     registerExtraCommands(registry);
     registerGroupCommands(registry);
@@ -940,7 +943,7 @@ void registerEngineCommands(cmd::Registry& registry) {
     registerDspCommands(registry);
     lua::registerScriptCommands(registry);
     // ---------------------------------------------------------------- project.get
-    {
+    [&] {
         Command<NoArgs, ProjectInfo> c;
         c.name = "project.get";
         c.kind = Kind::Query;
@@ -962,9 +965,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return projectInfo(app, app.view());
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- project.set
-    {
+    [&] {
         Command<ProjectSetArgs, Empty> c;
         c.name = "project.set";
         c.kind = Kind::Edit;
@@ -1068,9 +1071,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- project.save / project.open
-    {
+    [&] {
         Command<PathArgs, SaveResult> c;
         c.name = "project.save";
         c.kind = Kind::Action;
@@ -1106,8 +1109,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return result;
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<PathArgs, ProjectInfo> c;
         c.name = "project.open";
         c.kind = Kind::Action;
@@ -1141,9 +1144,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return info;
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- project.new
-    {
+    [&] {
         struct NewArgs {
             std::optional<std::string> name;
             std::optional<double> sampleRate;
@@ -1176,10 +1179,10 @@ void registerEngineCommands(cmd::Registry& registry) {
             return projectInfo(app, app.head());
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- project.recoverable /
     // project.recover
-    {
+    [&] {
         Command<NoArgs, RecoverableList> c;
         c.name = "project.recoverable";
         c.kind = Kind::Query;
@@ -1219,8 +1222,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return out;
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<RecoverArgs, RecoverResult> c;
         c.name = "project.recover";
         c.kind = Kind::Action;
@@ -1267,9 +1270,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return out;
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- session.describe
-    {
+    [&] {
         Command<NoArgs, TextResult> c;
         c.name = "session.describe";
         c.kind = Kind::Query;
@@ -1287,9 +1290,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return TextResult{describeSession(A(ctx).view())};
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- tempo.set / timesig.set
-    {
+    [&] {
         Command<TempoSetArgs, CountResult> c;
         c.name = "tempo.set";
         c.kind = Kind::Edit;
@@ -1336,8 +1339,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return CountResult{static_cast<std::int64_t>(a.points.size())};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<TimesigSetArgs, Empty> c;
         c.name = "timesig.set";
         c.kind = Kind::Edit;
@@ -1371,9 +1374,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- timesig.remove
-    {
+    [&] {
         Command<TimesigRemoveArgs, Empty> c;
         c.name = "timesig.remove";
         c.kind = Kind::Edit;
@@ -1399,9 +1402,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- track.add
-    {
+    [&] {
         Command<TrackAddArgs, TrackRef> c;
         c.name = "track.add";
         c.kind = Kind::Edit;
@@ -1470,9 +1473,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return TrackRef{id.str()};
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- track.remove
-    {
+    [&] {
         Command<TrackRef, Empty> c;
         c.name = "track.remove";
         c.kind = Kind::Edit;
@@ -1547,9 +1550,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- track.set
-    {
+    [&] {
         Command<TrackSetArgs, Empty> c;
         c.name = "track.set";
         c.kind = Kind::Edit;
@@ -1833,9 +1836,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- track.list
-    {
+    [&] {
         Command<TrackListArgs, TrackList> c;
         c.name = "track.list";
         c.kind = Kind::Query;
@@ -1906,9 +1909,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return out;
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- item.add
-    {
+    [&] {
         Command<ItemAddArgs, ItemAddResult> c;
         c.name = "item.add";
         c.kind = Kind::Edit;
@@ -2045,9 +2048,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return r;
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- item.remove / item.move
-    {
+    [&] {
         Command<ItemRef, Empty> c;
         c.name = "item.remove";
         c.kind = Kind::Edit;
@@ -2073,8 +2076,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<ItemMoveArgs, Empty> c;
         c.name = "item.move";
         c.kind = Kind::Edit;
@@ -2120,9 +2123,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- midi.write / midi.get
-    {
+    [&] {
         Command<MidiWriteArgs, Empty> c;
         c.name = "midi.write";
         c.kind = Kind::Edit;
@@ -2161,8 +2164,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<MidiGetArgs, TextResult> c;
         c.name = "midi.get";
         c.kind = Kind::Query;
@@ -2194,9 +2197,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return TextResult{std::move(*text)};
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- fx.add
-    {
+    [&] {
         Command<FxAddArgs, FxAddResult> c;
         c.name = "fx.add";
         c.kind = Kind::Edit;
@@ -2331,9 +2334,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return r;
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- fx.remove / fx.set
-    {
+    [&] {
         Command<FxRef, Empty> c;
         c.name = "fx.remove";
         c.kind = Kind::Edit;
@@ -2376,8 +2379,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<FxSetArgs, Empty> c;
         c.name = "fx.set";
         c.kind = Kind::Edit;
@@ -2457,8 +2460,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<FxRef, Empty> c;
         c.name = "fx.restart";
         c.kind = Kind::Action;
@@ -2481,7 +2484,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- fx.patch.merge /
     // fx.param.set
     auto mergeRun = [](EngineApp& app, const std::string& fxText, const json::Value& patch,
@@ -2536,7 +2539,7 @@ void registerEngineCommands(cmd::Registry& registry) {
                             "once what fx.describe full's active_when names allows it"))
             .build();
     };
-    {
+    [&] {
         Command<FxPatchArgs, MergeResult> c;
         c.name = "fx.patch.merge";
         c.kind = Kind::Edit;
@@ -2557,8 +2560,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return mergeRun(A(ctx), a.fx, a.patch, "/patch");
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<FxParamSetArgs, MergeResult> c;
         c.name = "fx.param.set";
         c.kind = Kind::Edit;
@@ -2620,9 +2623,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return merged;
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- fx.describe
-    {
+    [&] {
         Command<FxDescribeArgs, FxDescription> c;
         c.name = "fx.describe";
         c.kind = Kind::Query;
@@ -2743,9 +2746,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return r;
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- render.mix
-    {
+    [&] {
         Command<RenderMixArgs, RenderMixResult> c;
         c.name = "render.mix";
         c.kind = Kind::Action;
@@ -2942,7 +2945,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             return out;
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     registerRenderCommands(registry);
     registerEngineAnalysisCommands(registry);
     // ---------------------------------------------------------------- history
@@ -2974,7 +2977,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         };
         addChecked(registry, std::move(c));
     }
-    {
+    [&] {
         Command<NoArgs, HistoryList> c;
         c.name = "history.list";
         c.kind = Kind::Query;
@@ -3017,7 +3020,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             return out;
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- branches
     struct BranchCreateArgs {
         std::string name;
@@ -3054,7 +3057,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         return schema::string().pattern("^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$",
                                         "a branch name like agent/claude/darker");
     };
-    {
+    [&] {
         Command<BranchCreateArgs, BranchName> c;
         c.name = "branch.create";
         c.kind = Kind::Action;
@@ -3088,8 +3091,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return BranchName{a.name};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<BranchName, BranchName> c;
         c.name = "branch.switch";
         c.kind = Kind::Action;
@@ -3109,8 +3112,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return BranchName{a.name};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<NoArgs, BranchList> c;
         c.name = "branch.list";
         c.kind = Kind::Query;
@@ -3129,8 +3132,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return BranchList{app.versions().branches(), app.versions().branch()};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<BranchDiffArgs, BranchDiff> c;
         c.name = "branch.diff";
         c.kind = Kind::Query;
@@ -3165,8 +3168,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return out;
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<BranchMergeArgs, BranchMergeResult> c;
         c.name = "branch.merge";
         c.kind = Kind::Action;
@@ -3221,8 +3224,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return r;
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<BranchName, Empty> c;
         c.name = "branch.delete";
         c.kind = Kind::Action;
@@ -3240,9 +3243,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- env.*
-    {
+    [&] {
         Command<EnvAddArgs, EnvAddResult> c;
         c.name = "env.add";
         c.kind = Kind::Edit;
@@ -3351,8 +3354,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return EnvAddResult{id.str(), static_cast<std::int64_t>(env.points.size())};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<EnvPointsSetArgs, EnvCount> c;
         c.name = "env.points.set";
         c.kind = Kind::Edit;
@@ -3405,8 +3408,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return EnvCount{count};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<EnvSetArgs, Empty> c;
         c.name = "env.set";
         c.kind = Kind::Edit;
@@ -3437,8 +3440,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<EnvRef, Empty> c;
         c.name = "env.remove";
         c.kind = Kind::Edit;
@@ -3458,8 +3461,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<EnvListArgs, EnvList> c;
         c.name = "env.list";
         c.kind = Kind::Query;
@@ -3501,9 +3504,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return out;
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- autoitem.* (gap log #28)
-    {
+    [&] {
         struct ItemPointArg {
             double beat = 0;  // from the item's start
             json::Value value;
@@ -3829,9 +3832,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             };
             addChecked(registry, std::move(c));
         }
-    }
+    }();
     // ---------------------------------------------------------------- engine.*
-    {
+    [&] {
         Command<EngineDevicesArgs, EngineDevicesResult> c;
         c.name = "engine.devices";
         c.kind = Kind::Query;
@@ -3876,8 +3879,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return EngineDevicesResult{std::move(*devices)};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<EngineStartArgs, EngineStatus> c;
         c.name = "engine.start";
         c.kind = Kind::Action;
@@ -3979,8 +3982,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return app.engineStatus();
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<NoArgs, Empty> c;
         c.name = "engine.stop";
         c.kind = Kind::Action;
@@ -3995,8 +3998,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<NoArgs, json::Value> c;
         c.name = "engine.inputs";
         c.kind = Kind::Query;
@@ -4038,8 +4041,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return out;
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<NoArgs, EngineStatus> c;
         c.name = "engine.status";
         c.kind = Kind::Query;
@@ -4103,9 +4106,9 @@ void registerEngineCommands(cmd::Registry& registry) {
             return A(ctx).engineStatus();
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     // ---------------------------------------------------------------- transport.playrate.*
-    {
+    [&] {
         Command<NoArgs, PlayrateInfo> c;
         c.name = "transport.playrate.get";
         c.kind = Kind::Query;
@@ -4127,8 +4130,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return playrateInfo(A(ctx).view(), A(ctx).engine());
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<PlayrateArgs, PlayrateInfo> c;
         c.name = "transport.playrate.set";
         c.kind = Kind::Edit;
@@ -4176,8 +4179,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return playrateInfo(app.view(), app.engine());
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<NoArgs, Empty> c;
         c.name = "transport.playrate.apply-to-tempo";
         c.kind = Kind::Edit;
@@ -4236,7 +4239,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
+    }();
 
     // ---------------------------------------------------------------- transport.*
     for (const auto& [action, summary, playing] :
@@ -4282,7 +4285,7 @@ void registerEngineCommands(cmd::Registry& registry) {
         };
         addChecked(registry, std::move(c));
     }
-    {
+    [&] {
         Command<SeekArgs, TransportInfo> c;
         c.name = "transport.seek";
         c.kind = Kind::Action;
@@ -4329,8 +4332,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return app.transport("seek", seconds);
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<NoArgs, TransportInfo> c;
         c.name = "transport.get";
         c.kind = Kind::Query;
@@ -4351,8 +4354,8 @@ void registerEngineCommands(cmd::Registry& registry) {
             return A(ctx).transport("get");
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         struct MetronomeArgs {
             std::optional<bool> enabled;
             std::optional<double> volumeDb;
@@ -4408,7 +4411,7 @@ void registerEngineCommands(cmd::Registry& registry) {
             return m;
         };
         addChecked(registry, std::move(c));
-    }
+    }();
     for (const bool loop : {true, false}) {
         Command<RangeArgs, TransportRange> c;
         c.name = loop ? "transport.loop" : "transport.punch";

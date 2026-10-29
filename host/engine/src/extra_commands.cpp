@@ -643,7 +643,10 @@ auto rulerListSchema(bool region) {
 }  // namespace
 
 void registerExtraCommands(cmd::Registry& registry) {
-    {
+    // Each command is built in its own immediately-invoked lambda, so an
+    // unoptimized build reuses one frame instead of stacking every command's
+    // locals (Windows' 1 MB main stack overflowed).
+    [&] {
         Command<RouteArgs, IdResult> c;
         c.name = "route.add";
         c.kind = Kind::Edit;
@@ -671,8 +674,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return IdResult{app(ctx).txn().create(std::move(*r)).str()};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<RouteSetArgs, Empty> c;
         c.name = "route.set";
         c.kind = Kind::Edit;
@@ -704,8 +707,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<RouteRef, Empty> c;
         c.name = "route.remove";
         c.kind = Kind::Edit;
@@ -732,8 +735,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<cmd::NoArgs, RouteList> c;
         c.name = "route.list";
         c.kind = Kind::Query;
@@ -775,8 +778,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return out;
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         struct LogArgs {
             std::optional<std::int64_t> limit, since;
             bool queries = false;
@@ -850,8 +853,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return out;
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<cmd::NoArgs, json::Value> c;
         c.name = "route.matrix";
         c.kind = Kind::Query;
@@ -1001,9 +1004,9 @@ void registerExtraCommands(cmd::Registry& registry) {
             return out;
         };
         addChecked(registry, std::move(c));
-    }
+    }();
 
-    {
+    [&] {
         Command<TrackMoveArgs, Empty> c;
         c.name = "track.move";
         c.kind = Kind::Edit;
@@ -1083,7 +1086,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
+    }();
 
     auto rulerCommands = [&]<bool Region>() {
         using Object = std::conditional_t<Region, model::Region, model::Marker>;
@@ -1213,7 +1216,7 @@ void registerExtraCommands(cmd::Registry& registry) {
     rulerCommands.template operator()<false>();
     rulerCommands.template operator()<true>();
 
-    {
+    [&] {
         Command<PluginArgs, PluginList> c;
         c.name = "plugin.list";
         c.kind = Kind::Query;
@@ -1265,8 +1268,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return out;
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<ScanArgs, PluginList> c;
         c.name = "plugin.scan";
         c.kind = Kind::Action;
@@ -1357,8 +1360,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return out;
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<TimeArgs, TimeResult> c;
         c.name = "time.convert";
         c.kind = Kind::Query;
@@ -1398,8 +1401,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return TimeResult{map->secondsAt(beat), beat, bb.bar, bb.beat, bb.fraction};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<ItemSetArgs, Empty> c;
         c.name = "item.set";
         c.kind = Kind::Edit;
@@ -1488,8 +1491,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<ItemDuplicateArgs, ItemDuplicateResult> c;
         c.name = "item.duplicate";
         c.kind = Kind::Edit;
@@ -1534,8 +1537,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return ItemDuplicateResult{txn.create(std::move(copy)).str(), {}};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<ItemPasteArgs, ItemPasteResult> c;
         c.name = "item.paste";
         c.kind = Kind::Edit;
@@ -1664,8 +1667,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return out;
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<ItemSplitArgs, SplitResult> c;
         c.name = "item.split";
         c.kind = Kind::Edit;
@@ -1798,8 +1801,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return SplitResult{id->str(), fresh.str(), {}, {}};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<TakeAddArgs, IdResult> c;
         c.name = "take.add";
         c.kind = Kind::Edit;
@@ -1847,8 +1850,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return IdResult{fresh.str()};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<TakeActivateArgs, Empty> c;
         c.name = "take.activate";
         c.kind = Kind::Edit;
@@ -1895,8 +1898,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<TakeSetArgs, Empty> c;
         c.name = "take.set";
         c.kind = Kind::Edit;
@@ -1983,8 +1986,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<ItemQuery, TakeList> c;
         c.name = "take.list";
         c.kind = Kind::Query;
@@ -2042,8 +2045,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return out;
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<FxMoveArgs, Empty> c;
         c.name = "fx.move";
         c.kind = Kind::Edit;
@@ -2142,8 +2145,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return Empty{};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<FxPatchGetArgs, FxPatchResult> c;
         c.name = "fx.patch.get";
         c.kind = Kind::Query;
@@ -2179,8 +2182,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return FxPatchResult{std::move(*effective)};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<FxPatchListArgs, FxPatchListResult> c;
         c.name = "fx.patch.list";
         c.kind = Kind::Query;
@@ -2204,8 +2207,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return FxPatchListResult{std::move(*patches)};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<FxPatchSetArgs, FxPatchResult> c;
         c.name = "fx.patch.set";
         c.kind = Kind::Edit;
@@ -2265,8 +2268,8 @@ void registerExtraCommands(cmd::Registry& registry) {
             return FxPatchResult{std::move(*patch)};
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<FxParamGetArgs, FxParamResult> c;
         c.name = "fx.param.get";
         c.kind = Kind::Query;
@@ -2299,8 +2302,8 @@ void registerExtraCommands(cmd::Registry& registry) {
                          "use fx.describe {full:true} for parameter names");
         };
         addChecked(registry, std::move(c));
-    }
-    {
+    }();
+    [&] {
         Command<FxMetersArgs, FxMetersResult> c;
         c.name = "fx.meters";
         c.kind = Kind::Query;
@@ -2354,7 +2357,7 @@ void registerExtraCommands(cmd::Registry& registry) {
             return r;
         };
         addChecked(registry, std::move(c));
-    }
+    }();
 }
 
 }  // namespace supple::engine
