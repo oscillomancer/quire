@@ -14,6 +14,7 @@ namespace {
 
 class MenuList : public List {
   public:
+    std::span<const MenuItem> items() const { return items_; }
     MenuList(std::string id, std::vector<MenuItem> items, std::function<void()> close)
         : List(std::move(id)), items_(std::move(items)), close_(std::move(close)) {
         for (auto& item : items_) item.shortcut = shortcutLabel(std::move(item.shortcut));
@@ -186,6 +187,11 @@ void Root::closePopup() {
         if (enabled) focus(restore);
     }
     if (onClose) onClose();
+}
+
+std::span<const MenuItem> menuItems(const Node& menu) {
+    const auto* list = dynamic_cast<const MenuList*>(&menu);
+    return list ? list->items() : std::span<const MenuItem>{};
 }
 
 void Root::closePopups() {

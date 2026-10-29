@@ -6774,9 +6774,9 @@ Result:
 
 ## `item.split@1`
 
-Split an audio or MIDI item at a beat, keeping take source positions aligned.
+Split an item at a beat, optionally at the prior audio zero crossing.
 
-
+snap defaults to none. zero_crossing searches the active take's prepared playback source up to 100 ms before at, before FX/fades/gain. After channel mode, use the louder stereo channel by window energy (left on ties), never a stereo sum unless MonoMix is selected. Choose the latest exact zero or sign-change sample boundary; never search forward or outside the item. Without a crossing, split at at. MIDI and empty takes refuse zero_crossing; the GUI skips them. Current prepared audio must be available; start the engine and retry after preparation. Linked items use the initiating item's resolved split time. History records that time for replay.
 
 Kind: `edit`. Exposure: `mcp-tool`.
 
@@ -6787,6 +6787,7 @@ Kind: `edit`. Exposure: `mcp-tool`.
 | `bypass_groups` | boolean |  |  | false |  |
 | `item` | string |  |  |  |  |
 | `at` | number |  | 0.0.. |  |  |
+| `snap` | string |  |  | "none" |  |
 
 ### Result
 
@@ -6822,6 +6823,13 @@ Kind: `edit`. Exposure: `mcp-tool`.
 
 ```
 
+### Errors
+
+- `item.split_range`: the cursor is outside the item's interior Hint: choose a beat strictly after the start and before the end
+- `item.split_not_audio`: zero_crossing needs an active audio take Hint: use snap none to split MIDI or empty items at the cursor
+- `item.split_source_pending`: current source audio is not prepared Hint: start the engine, wait for source preparation and retry
+- `item.split_source`: the audio source could not be prepared Hint: relink or repair the audio source and retry
+
 ### Examples
 
 **Split halfway** (`song_with_item`)
@@ -6830,6 +6838,27 @@ Kind: `edit`. Exposure: `mcp-tool`.
 {
   "item": "it_1",
   "at": 2
+}
+
+```
+
+Result:
+
+```json
+{
+  "left": "it_1",
+  "right": "it_2"
+}
+
+```
+
+**Split at a prior audio zero crossing** (`song_with_prepared_audio`)
+
+```json
+{
+  "item": "it_1",
+  "at": 2,
+  "snap": "zero_crossing"
 }
 
 ```

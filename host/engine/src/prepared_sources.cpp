@@ -83,6 +83,8 @@ Result<std::shared_ptr<const PreparedSources>> MediaCache::prepareSources(
     if (prepared_ && prepared_->key == *key) return prepared_;
     auto out = std::make_shared<PreparedSources>();
     out->key = *key;
+    out->sampleRate = rate;
+    out->session = s;
     const auto owners = takeOwners(s);
     std::set<model::Id> needed;
     for (const auto& e : s.items)

@@ -5278,8 +5278,8 @@
   },
   {
     "name": "item_split",
-    "title": "Split an audio or MIDI item at a beat, keeping take source positions aligned.",
-    "description": "Split an audio or MIDI item at a beat, keeping take source positions aligned.  See describe for errors and examples.",
+    "title": "Split an item at a beat, optionally at the prior audio zero crossing.",
+    "description": "Split an item at a beat, optionally at the prior audio zero crossing. snap defaults to none. zero_crossing searches the active take's prepared playback source up to 100 ms before at, before FX/fades/gain. After channel mode, use the louder stereo channel by window energy (left on ties), never a stereo sum unless MonoMix is selected. Choose the latest exact zero or sign-change sample boundary; never search forward or outside the item. Without a crossing, split at at. MIDI and empty takes refuse zero_crossing; the GUI skips them. Current prepared audio must be available; start the engine and retry after preparation. Linked items use the initiating item's resolved split time. History records that time for replay. See describe for errors and examples.",
     "inputSchema": {
       "type": "object",
       "title": "item_split_args",
@@ -5295,6 +5295,11 @@
         "at": {
           "type": "number",
           "minimum": 0.0
+        },
+        "snap": {
+          "type": "string",
+          "enum": ["none", "zero_crossing"],
+          "default": "none"
         }
       },
       "required": ["item", "at"],

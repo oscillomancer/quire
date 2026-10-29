@@ -171,8 +171,11 @@ instructions are in `docs/guides/installing.md`.
 - **Recording**: armed inputs to crash-readable WAV, input monitoring (needs
   the arm), MIDI monitoring and recording with overdub, loop recording into
   takes, punch, count-in, metronome.
-- **Editing**: items, takes, comping lanes, fades and crossfades with
-  shapes, time stretch and pitch (Signalsmith Stretch), draggable audio warp
+- **Editing**: items, takes, comping lanes, fades and crossfades with shapes,
+  cursor splitting from the item menu (shared with S) and an audio-only prior
+  zero-crossing split (100 ms search, louder stereo channel, cursor fallback;
+  agents use `item.split` with `snap: zero_crossing`),
+  time stretch and pitch (Signalsmith Stretch), draggable audio warp
   anchors, transient detection, joint multitrack audio quantize and slicing,
   markers, regions,
   tempo and meter maps, the item clipboard, a piano roll with velocity and
@@ -726,6 +729,8 @@ Engine and hosting:
   malformed UTF-8 parameter input is refused. Native verification is pending.
 
 Session and editing:
+- Zero-crossing splits require current prepared playback sources; pending audio
+  reports a retryable error. Native macOS/Windows validation is pending.
 - Project files accept `record.mode: output`, but output capture is not
   implemented: starting recording with an armed output-mode track fails with
   `record.output_unsupported` before creating files. Switch that track to input

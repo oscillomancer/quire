@@ -2804,7 +2804,8 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
         (void)st;
         return;
     }
-    if (fixture == "song_with_audio" || fixture == "song_with_hits" ||
+    if (fixture == "song_with_audio" || fixture == "song_with_prepared_audio" ||
+        fixture == "song_with_hits" ||
         fixture == "song_with_warp") {  // tr_1 "Audio" + it_1/tk_1: four beats of a 0.5 tone
         run("track.add", R"({"name": "Audio"})");
         const fs::path file = mediaDir() / "tone.wav";
@@ -2824,6 +2825,11 @@ void EngineApp::setupFixture(cmd::Dispatcher& d, std::string_view fixture) {
             run("take.hits.set", R"({"take":"tk_1","positions":[0.3,0.8]})");
         if (fixture == "song_with_warp")
             run("take.stretch.add", R"({"take":"tk_1","source_pos":0.3,"item_pos":0.25})");
+        if (fixture == "song_with_prepared_audio") {
+            auto prepared = media_.prepareSources(head(), projectDir(), head().project->sampleRate);
+            assert(prepared && "fixture source preparation failed");
+            (void)prepared;
+        }
         return;
     }
     // gain/gain.cpp in the DSP script library; dsp_player: and the script

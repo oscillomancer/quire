@@ -488,9 +488,21 @@ curve is editable and saved, but audio application remains pending.
 **Paste** (at the pointer's beat on the grid and its channel), **Duplicate**
 (after the selection), **Delete**, **Merge MIDI items** (several MIDI items
 on one channel; with one item selected, **Merge takes** layers its MIDI
-takes; `midi.merge`, greyed otherwise), then the timebases and the take
+takes; `midi.merge`, greyed otherwise), **Split item at cursor** (S),
+**Split item at prior zero crossing**, then the timebases and the take
 entries below. A right-click on empty lane space opens a menu with Paste.
 The keys each action has are shown beside it.
+Both split entries use the project/edit cursor, independent of the menu position,
+and skip selected items whose interior does not contain it. The ordinary entry
+and S share the same one-transaction selection edit. The zero-crossing entry
+skips non-audio active takes and is disabled when none of the selection is audio.
+It searches the prepared active-take source up to 100 ms backward, respecting
+source offset, rate/pitch, warp and looping. After channel mode it uses the stereo
+channel with greater window energy (left on ties), before gain, fades or FX;
+silence keeps the cursor, and no crossing falls back to the cursor. Pending
+preparation produces a retryable status error. Linked items use the initiating
+item's resolved time. See engine.md for the command contract. The toolkit's
+`menuItems` accessor exposes borrowed, read-only menu rows for inspection.
 
 **Takes.** An item with several takes shows each in a lane under its name
 bar when the row is tall enough (at least 14 units a lane), the heard one
