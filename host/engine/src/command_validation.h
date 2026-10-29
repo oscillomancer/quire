@@ -66,7 +66,8 @@ void addChecked(cmd::Registry& registry, cmd::Command<Args, Output> command) {
                                     f.key != "mute" && f.key != "solo" && f.key != "name" &&
                                     f.key != "color" && f.key != "notes" &&
                                     f.key != "parent_send" && f.key != "locked" &&
-                                    f.key != "hidden_tcp" && f.key != "hidden_mixer")
+                                    f.key != "hidden_tcp" && f.key != "hidden_mixer" &&
+                                    f.key != "bypass_groups")
                                     sound = true;
                             if (!sound) continue;
                         }
