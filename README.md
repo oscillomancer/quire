@@ -11,9 +11,12 @@ person can.
 mixer with plugins and sends, and the history sidebar showing an agent's
 edits on a branch](docs/images/gui.png)
 
-The workflow follows REAPER: arrange view, track panel, mixer, FX chains,
-routing matrix, MIDI editor, render dialog, actions list. The architecture
-underneath is Quire's own.
+Quire also has its own plugin framework, so you can ask an agent for a plugin
+it doesn't have. Describe the effect or instrument you want, and the agent
+writes it as a DSP script inside the running DAW. It loads on a track and plays
+at once, and the agent measures and adjusts it while you listen. When it's
+done, it exports as a CLAP plugin for any other host. The stock plugins are
+written the same way.
 
 Quire is pre-release (0.3.1). It is used for real work on its author's
 machine, but file formats and commands can still change.
@@ -31,6 +34,20 @@ machine, but file formats and commands can still change.
   engine) from Claude Code, Codex or any other MCP client, with any model,
   local ones included. A bundled skill (`skill/`) teaches agents the
   commands, units and MIDI notation.
+- **Plugins from a script.** A DSP script is one C++ file in a checked
+  subset of C++20 (nothing that allocates where audio runs), compiled by a
+  built-in JIT the moment it is saved. Its parameters are declared in
+  physical units, and it can draw an editor of its own. An edit swaps into
+  the running instance with a short crossfade. A script that fails to
+  compile leaves the old version playing and returns errors with the line,
+  column and suggested fix. Agents work through `dsp_write`/`dsp_edit`:
+  `dsp_test` reports level, distortion, frequency response and problems
+  such as clipping or a note out of tune, and `dsp_preview` renders the
+  editor as an image. `dsp_export` writes a ready-to-use CLAP, or a C++
+  project that builds CLAP and VST3, plus AU on macOS. The DSP guides
+  (`skill/guides/dsp-language.md`, `dsp-workflow.md`) teach the language,
+  and the examples range from a gain to a synth, a sampler and a
+  convolution reverb.
 - **Measurement instead of listening.** Renders can be analyzed for loudness
   (BS.1770/R128), spectrum, pitch, envelope and stereo image, and compared
   against a reference, so an agent can check what it did.
