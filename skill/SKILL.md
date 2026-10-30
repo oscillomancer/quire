@@ -67,7 +67,7 @@ tool (or as `args` through `exec`).
 | A real room or hall: its size, materials, where the sound and the listener stand, decay, clarity, held ambience (Ghyll) | `guides/reverb.md` |
 | Designing a synth sound: oscillators, filters, envelopes, LFOs, routes, factory starting points (Marram) | `guides/sound-design.md`, then `plugin_describe` / `fx_describe` for exact fields |
 | Playing a sample: a file or a factory sample pitched with a loop, as a one-shot, or sliced onto keys (Coppice) | `guides/sampler.md` |
-| A drum kit from samples: sixteen pads on the GM keys, factory kits, choke groups, variation per hit, extra outputs (Pollard) | `guides/drums.md` |
+| A drum kit from samples: sixteen pads on the GM keys, factory kits, choke groups, variation per hit, extra outputs (Pollard) | `guides/drum-sampler.md` |
 | A drum machine: the LM-1's sounds synthesized, each pad on its own MIDI note (GM's drum map by default), tune, decay, choke groups, extra outputs (Drumlin) | `guides/drum-machine.md` |
 | Corrective mixing (levels, rumble, masking, loudness targets) and automation | `guides/mixing.md` |
 | Compressing (six characters, upward too), external-key ducking, catching peaks (Sundew/compressor) | `guides/comp.md` |

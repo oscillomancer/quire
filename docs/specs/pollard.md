@@ -2,8 +2,8 @@
 
 **Status:** Implemented: sixteen pads, the voice, choke groups, variation
 per hit, eight extra outputs and the editor, with twenty-four factory hits
-in seven kits. The drums guide (`skill/guides/drums.md`) describes it for
-agents.
+in seven kits. The drum sampler guide (`skill/guides/drum-sampler.md`)
+describes it for agents.
 **Plugin:** `plugins/pollard`, CLAP id `com.suppleaudio.pollard`,
 instrument. A DSP script compiled natively (ADR-0047),
 `plugins/pollard/script/pollard.cpp`.

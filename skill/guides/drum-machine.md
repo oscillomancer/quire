@@ -5,7 +5,7 @@ each a synthesized sound of a classic machine (the LM-1's first, fitted to
 recordings of a real one; no samples), each on a MIDI note of its own. The
 exact keys, units and ranges are in `plugin_describe` / `fx_describe`; this
 guide says what they do. For a kit from your own samples, use Pollard
-(`guides/drums.md`).
+(`guides/drum-sampler.md`).
 
 ## Which note plays which drum
 
