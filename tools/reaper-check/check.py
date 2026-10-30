@@ -34,6 +34,9 @@ class Case:
     second: float
     expectation: str = "quieter"
     passthrough: bool = False
+    # An instrument's notes, four of them, each played twice: a drum
+    # machine's have to be keys its pads are on.
+    notes: tuple = (48, 55, 60, 64)
 
 
 def normalized(db, low, high):
@@ -67,6 +70,9 @@ CASES = {
                                   normalized(0, -36, 12), normalized(-12, -36, 12), "gain"),
     "com.suppleaudio.pollard": Case("Pollard", True, "Output",
                                   normalized(0, -36, 12), normalized(-12, -36, 12), "gain"),
+    "com.suppleaudio.drumlin": Case("Drumlin", True, "Output",
+                                  normalized(0, -36, 12), normalized(-12, -36, 12), "gain",
+                                  notes=(36, 38, 42, 46)),
 }
 
 
@@ -328,7 +334,7 @@ local ok, err = xpcall(function()
   local item = reaper.CreateNewMIDIItemInProj(track,0,4,false)
   local take = reaper.GetActiveTake(item)
   for half=0,1 do
-    for j,note in ipairs({48,55,60,64}) do
+    for j,note in ipairs({""" + ",".join(str(n) for n in case.notes) + """}) do
       local t = half*2+(j-1)*.5
       local a = reaper.MIDI_GetPPQPosFromProjTime(take,t)
       local b = reaper.MIDI_GetPPQPosFromProjTime(take,t+.4)

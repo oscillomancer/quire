@@ -100,7 +100,8 @@ no desktop capture dependency or REAPER extension is needed. Logs and the
 Each project has one stereo track and a four-second render at 48 kHz. Effects
 receive an original, seeded Voss octave-noise WAV plus a continuous 1 kHz tone
 and windowed 125 Hz/8 kHz bursts. Its two-second halves repeat exactly.
-Instruments receive repeated four-note MIDI phrases. Default, bypass and
+Instruments receive repeated four-note MIDI phrases (48, 55, 60 and 64; a
+drum machine's on its pads' keys: Drumlin's 36, 38, 42 and 46). Default, bypass and
 automation projects are saved by REAPER, then rendered in separate processes.
 
 All outputs must have exactly 192000 frames, two channels, the requested rate
@@ -136,6 +137,7 @@ include startup ramps.
 | `hornbeam` | Hornbeam | Output | 0 / −12 dB | −12 ±1 dB |
 | `coppice` | Coppice | Output | 0 / −12 dB | −12 ±1 dB |
 | `pollard` | Pollard | Output | 0 / −12 dB | −12 ±1 dB |
+| `drumlin` | Drumlin | Output | 0 / −12 dB | −12 ±1 dB |
 
 Continuous values use ADR-0010's normalized CLAP domain. The table keeps those
 values explicit. Add a plugin in a few lines in `CASES`
