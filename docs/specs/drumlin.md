@@ -174,18 +174,22 @@ finely), turn with the wheel and reset on a double click.
 ## 6. Performance
 
 Release build, one core, 48 kHz, `clap-bench` (2026-10-29), whose notes
-fall on keys 40 to 79, so about a third of them play a pad: 0.40 % of a
-core for the default kit (4.44 refs), the factory kits 4.54 refs on
-average (Tight LM-1 4.31 to LM-1 Separate Outs 5.12, which keeps eight
-outputs' downsamplers running). Pollard the same run: 0.45 % (5.05 refs).
-The release `Drumlin.clap` is 2,500,864 bytes; it holds no samples.
+fall on keys 40 to 79, so about a third of them play a pad: 0.41 % of a
+core for the default kit (4.55 refs), the factory kits 4.59 refs on
+average (Tight LM-1 4.38 to LM-1 Separate Outs 5.23, which keeps eight
+outputs' downsamplers running). Pollard: 0.45 % (5.05 refs). The release
+`Drumlin.clap` is 2,509,256 bytes; it holds no samples.
 
 ## 7. Fitting
 
 `plugins/drumlin/fit` (`drumlin-fit`) compiles this script natively and
 searches a recipe's free numbers with CMA-ES on every core, scoring renders
 against recordings in band levels over time around the hit and through the
-body, the level envelope and, for tonal sounds, the waveform at the hit.
+body, the level envelope, the body's fine spectrum (which tells noise from
+tones and a cymbal's narrow partials from a few loud ones), the crest factor
+through the hit (how far it is clipped) and, for tonal sounds, the waveform
+at the hit. The cymbals and the hi-hat start from partials measured in their
+recordings (frequency, width, rise and decay).
 Each recipe was fitted to three or four recordings at different knob
 positions, played at their measured clocks, so one recipe holds across the
 knob's range. The recordings stay outside the repository.

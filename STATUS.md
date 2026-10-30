@@ -579,7 +579,7 @@ instructions are in `docs/guides/installing.md`.
   to a bank of real LM-1 recordings by `plugins/drumlin/fit` (CMA-ES over
   the script compiled natively); the recordings are not in the repository.
   Tune, Decay (the machine's own at 100 %), choke groups, variation per hit,
-  eight extra outputs, seven kits. 0.40 % of a core at the defaults. Not yet: other machines' sounds and real
+  eight extra outputs, seven kits. 0.41 % of a core at the defaults. Not yet: other machines' sounds and real
   drums, and a sound of the user's own fitting.
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
