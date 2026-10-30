@@ -305,7 +305,7 @@ that exactly duplicates structuredContent is shown once.
           "voice.tune = 0 ct  (-100.0..100.0 ct)",
           "voice.unison = 1  (1..8)",
           "voice.drift = 0 %  (0.0..100.0 %)",
-          "voice.quality = Normal  (eco|normal|high)"
+          "voice.oversampling = 2x  (x1|x2|x4)"
         ],
         "Osc 1": [
           "osc1.type = Analog  (off|analog|wavetable|fm|noise|sub)",
@@ -498,7 +498,7 @@ that exactly duplicates structuredContent is shown once.
       "peak_dbfs": -16.45,
       "tail_s": 0.22,
       "tail_capped": false,
-      "latency_samples": 3,
+      "latency_samples": 1,
       "analysis": {
         "schema": "supple.analysis-report/1.0",
         "source": {
@@ -643,7 +643,7 @@ that exactly duplicates structuredContent is shown once.
             "mean": 0.023,
             "median": 0.005,
             "p10": 0.0,
-            "p90": 0.071
+            "p90": 0.07
           },
           "tilt_db_per_oct": -9.5,
           "bands": {
@@ -827,7 +827,7 @@ that exactly duplicates structuredContent is shown once.
       "peak_dbfs": -15.610000000000001,
       "tail_s": 0.22,
       "tail_capped": false,
-      "latency_samples": 3,
+      "latency_samples": 1,
       "analysis": {
         "schema": "supple.analysis-report/1.0",
         "source": {
@@ -869,7 +869,7 @@ that exactly duplicates structuredContent is shown once.
           "stability_cents": 510.4,
           "harmonics_db": [
             0.0,
-            -6.0,
+            -6.1,
             -9.6,
             -12.2,
             -14.2,
@@ -894,7 +894,7 @@ that exactly duplicates structuredContent is shown once.
           "balance_db": 0.0,
           "mono_loss_lu": 0.0
         },
-        "summary": "-21.3 LUFS, true peak -15.6 dBTP. Pitched D3+12c (148 Hz), 2nd/3rd harmonics -6.0/-9.6 dB. Centroid 1151 Hz, tilt -4.6 dB/oct, most energy in low. Attack 69 ms, -20 dB after 1014 ms. Width 0.00, correlation 1.00."
+        "summary": "-21.3 LUFS, true peak -15.6 dBTP. Pitched D3+12c (148 Hz), 2nd/3rd harmonics -6.1/-9.6 dB. Centroid 1152 Hz, tilt -4.6 dB/oct, most energy in low. Attack 69 ms, -20 dB after 1014 ms. Width 0.00, correlation 1.00."
       }
     }
   }
@@ -936,22 +936,22 @@ that exactly duplicates structuredContent is shown once.
         "_elided_array_count": 18
       },
       "ltas_rms_db": 11.1,
-      "summary": "spectral.centroid_hz.p90 +1376.2 Hz; spectral.bands.air.level_db +26.2 dB; spectral.bands.presence.level_db +22.1 dB; spectral.centroid_hz.mean +760.9 Hz; spectral.bands.high_mid.level_db +15.3 dB. Timbre difference 11.1 dB (LTAS RMS, level removed).",
+      "summary": "spectral.centroid_hz.p90 +1375.9 Hz; spectral.bands.air.level_db +26.2 dB; spectral.bands.presence.level_db +22.1 dB; spectral.centroid_hz.mean +760.9 Hz; spectral.bands.high_mid.level_db +15.3 dB. Timbre difference 11.1 dB (LTAS RMS, level removed).",
       "loss": {
-        "total": 200.52640192935294,
+        "total": 200.53297224924086,
         "terms": {
-          "bands": 25.30695901593283,
-          "centroid": 8.178795239746554,
+          "bands": 25.30695267912023,
+          "centroid": 8.181635231661867,
           "envelope.attack": 0.0,
           "envelope.decay20": 0.0,
           "envelope.release": 0.0,
-          "flatness": 9.806669564121113e-08,
-          "flux": 0.0002457959127256162,
-          "harmonics": 0.4161591075361295,
-          "inharmonicity": 8.78902875305832e-07,
-          "ltas": 13.710254964084388,
+          "flatness": 9.78437558611631e-08,
+          "flux": 0.00017161899295100268,
+          "harmonics": 0.41621189245660134,
+          "inharmonicity": 7.231940417484903e-07,
+          "ltas": 13.710232422179855,
           "stereo": 0.0,
-          "trajectory": 152.91398682917077
+          "trajectory": 152.91776758379157
         },
         "note_off_s": {
           "reference": 2.0,
@@ -1061,17 +1061,17 @@ that exactly duplicates structuredContent is shown once.
       "job": "jb_1",
       "status": "done",
       "progress": {
-        "best_loss": 0.48,
+        "best_loss": 0.482,
         "evaluations": 17,
         "fraction": 1.0,
         "message": "generation 4"
       },
       "result": {
         "loss": {
-          "initial": 12.1453,
-          "best": 0.48,
+          "initial": 12.1426,
+          "best": 0.482,
           "terms": {
-            "profile.spectral.centroid_hz.median": 0.48
+            "profile.spectral.centroid_hz.median": 0.482
           }
         },
         "evaluations": 17,
@@ -1185,7 +1185,7 @@ that exactly duplicates structuredContent is shown once.
       "peak_dbfs": -15.33,
       "tail_s": 0.22,
       "tail_capped": false,
-      "latency_samples": 3,
+      "latency_samples": 1,
       "analysis": {
         "schema": "supple.analysis-report/1.0",
         "source": {
@@ -1330,7 +1330,7 @@ that exactly duplicates structuredContent is shown once.
             "mean": 0.024,
             "median": 0.006,
             "p10": 0.001,
-            "p90": 0.071
+            "p90": 0.07
           },
           "tilt_db_per_oct": -4.1,
           "bands": {
@@ -1714,7 +1714,7 @@ that exactly duplicates structuredContent is shown once.
           "voice.tune = 0 ct  (-100.0..100.0 ct)",
           "voice.unison = 1  (1..8)",
           "voice.drift = 0 %  (0.0..100.0 %)",
-          "voice.quality = Normal  (eco|normal|high)"
+          "voice.oversampling = 2x  (x1|x2|x4)"
         ],
         "Osc 1": [
           "osc1.type = Analog  (off|analog|wavetable|fm|noise|sub)",
@@ -1907,7 +1907,7 @@ that exactly duplicates structuredContent is shown once.
       "peak_dbfs": -16.45,
       "tail_s": 0.22,
       "tail_capped": false,
-      "latency_samples": 3,
+      "latency_samples": 1,
       "analysis": {
         "schema": "supple.analysis-report/1.0",
         "source": {
@@ -2052,7 +2052,7 @@ that exactly duplicates structuredContent is shown once.
             "mean": 0.023,
             "median": 0.005,
             "p10": 0.0,
-            "p90": 0.071
+            "p90": 0.07
           },
           "tilt_db_per_oct": -9.5,
           "bands": {
@@ -2236,7 +2236,7 @@ that exactly duplicates structuredContent is shown once.
       "peak_dbfs": -15.610000000000001,
       "tail_s": 0.22,
       "tail_capped": false,
-      "latency_samples": 3,
+      "latency_samples": 1,
       "analysis": {
         "schema": "supple.analysis-report/1.0",
         "source": {
@@ -2278,7 +2278,7 @@ that exactly duplicates structuredContent is shown once.
           "stability_cents": 510.4,
           "harmonics_db": [
             0.0,
-            -6.0,
+            -6.1,
             -9.6,
             -12.2,
             -14.2,
@@ -2303,7 +2303,7 @@ that exactly duplicates structuredContent is shown once.
           "balance_db": 0.0,
           "mono_loss_lu": 0.0
         },
-        "summary": "-21.3 LUFS, true peak -15.6 dBTP. Pitched D3+12c (148 Hz), 2nd/3rd harmonics -6.0/-9.6 dB. Centroid 1151 Hz, tilt -4.6 dB/oct, most energy in low. Attack 69 ms, -20 dB after 1014 ms. Width 0.00, correlation 1.00."
+        "summary": "-21.3 LUFS, true peak -15.6 dBTP. Pitched D3+12c (148 Hz), 2nd/3rd harmonics -6.1/-9.6 dB. Centroid 1152 Hz, tilt -4.6 dB/oct, most energy in low. Attack 69 ms, -20 dB after 1014 ms. Width 0.00, correlation 1.00."
       }
     }
   }
@@ -2345,22 +2345,22 @@ that exactly duplicates structuredContent is shown once.
         "_elided_array_count": 18
       },
       "ltas_rms_db": 11.1,
-      "summary": "spectral.centroid_hz.p90 +1376.2 Hz; spectral.bands.air.level_db +26.2 dB; spectral.bands.presence.level_db +22.1 dB; spectral.centroid_hz.mean +760.9 Hz; spectral.bands.high_mid.level_db +15.3 dB. Timbre difference 11.1 dB (LTAS RMS, level removed).",
+      "summary": "spectral.centroid_hz.p90 +1375.9 Hz; spectral.bands.air.level_db +26.2 dB; spectral.bands.presence.level_db +22.1 dB; spectral.centroid_hz.mean +760.9 Hz; spectral.bands.high_mid.level_db +15.3 dB. Timbre difference 11.1 dB (LTAS RMS, level removed).",
       "loss": {
-        "total": 200.52640192935294,
+        "total": 200.53297224924086,
         "terms": {
-          "bands": 25.30695901593283,
-          "centroid": 8.178795239746554,
+          "bands": 25.30695267912023,
+          "centroid": 8.181635231661867,
           "envelope.attack": 0.0,
           "envelope.decay20": 0.0,
           "envelope.release": 0.0,
-          "flatness": 9.806669564121113e-08,
-          "flux": 0.0002457959127256162,
-          "harmonics": 0.4161591075361295,
-          "inharmonicity": 8.78902875305832e-07,
-          "ltas": 13.710254964084388,
+          "flatness": 9.78437558611631e-08,
+          "flux": 0.00017161899295100268,
+          "harmonics": 0.41621189245660134,
+          "inharmonicity": 7.231940417484903e-07,
+          "ltas": 13.710232422179855,
           "stereo": 0.0,
-          "trajectory": 152.91398682917077
+          "trajectory": 152.91776758379157
         },
         "note_off_s": {
           "reference": 2.0,
@@ -2470,17 +2470,17 @@ that exactly duplicates structuredContent is shown once.
       "job": "jb_1",
       "status": "done",
       "progress": {
-        "best_loss": 0.48,
+        "best_loss": 0.482,
         "evaluations": 17,
         "fraction": 1.0,
         "message": "generation 4"
       },
       "result": {
         "loss": {
-          "initial": 12.1453,
-          "best": 0.48,
+          "initial": 12.1426,
+          "best": 0.482,
           "terms": {
-            "profile.spectral.centroid_hz.median": 0.48
+            "profile.spectral.centroid_hz.median": 0.482
           }
         },
         "evaluations": 17,
@@ -2594,7 +2594,7 @@ that exactly duplicates structuredContent is shown once.
       "peak_dbfs": -15.33,
       "tail_s": 0.22,
       "tail_capped": false,
-      "latency_samples": 3,
+      "latency_samples": 1,
       "analysis": {
         "schema": "supple.analysis-report/1.0",
         "source": {
@@ -2739,7 +2739,7 @@ that exactly duplicates structuredContent is shown once.
             "mean": 0.024,
             "median": 0.006,
             "p10": 0.001,
-            "p90": 0.071
+            "p90": 0.07
           },
           "tilt_db_per_oct": -4.1,
           "bands": {
