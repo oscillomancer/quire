@@ -231,7 +231,9 @@ jobs:
         if: matrix.platform != 'linux'
         env:
           SUPPLE_PICTURE_OUTPUT_DIR: ${{ github.workspace }}/build/${{ matrix.preset }}/pictures
-        run: ctest --preset ${{ matrix.preset }}
+        # The macOS runner has three cores: six tests at once there pushed the
+        # instruments' reset, state and validator checks past their timeouts.
+        run: ctest --preset ${{ matrix.preset }} ${{ matrix.platform == 'macos' && '--parallel 3' || '' }}
       - name: Save Linux compiler cache
         if: always() && matrix.platform == 'linux' && steps.compiler-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
