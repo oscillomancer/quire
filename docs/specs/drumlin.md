@@ -189,7 +189,7 @@ body, the level envelope, the body's fine spectrum (which tells noise from
 tones and a cymbal's narrow partials from a few loud ones), the crest factor
 through the hit (how far it is clipped) and, for tonal sounds, the waveform
 at the hit. The cymbals and the hi-hat start from partials measured in their
-recordings (frequency, width, rise and decay).
+recordings (frequency, width, rise and decay; `plugins/drumlin/fit/measure.py`).
 Each recipe was fitted to three or four recordings at different knob
 positions, played at their measured clocks, so one recipe holds across the
 knob's range. The recordings stay outside the repository.

@@ -84,3 +84,40 @@ drumlin-fit emit view.spec 0                           # the recipe as the scrip
 the script's generated `recipes()` for the sound's index. Read the renders
 against the recordings, not only the score: a plot of both waveforms and
 spectrograms shows where a recipe is short of something the score misses.
+
+## Measuring a recording
+
+`measure.py` (Python 3 and numpy) measures what a spec is built from and
+shows where a render falls short. It prints measurements; nothing it reads
+is copied.
+
+```sh
+measure.py clock rec.wav --guess 17000      # the DAC's clock: where the images mirror the partials
+measure.py partials rec.wav --clock 17402.3 > ride.json   # frequency, width, rise and decay of each
+measure.py spec ride.json --clock 17402.3 --length 1883 --target "rec.wav clock=17402.3" > ride.spec
+measure.py compare rec.wav out/render0.wav  # by third octave over time, partials, balance
+measure.py listen ride.spec out/ ride-ab.wav  # each recording, then its render, to listen to
+```
+
+- **The clock first.** A wrong clock puts every partial and image in the
+  wrong place, and no fit recovers from it. `clock` finds where the
+  spectrum's fine detail below half the clock best mirrors the images
+  above it, then checks partial and image pairs against that. Trust it
+  when its first correlation is high (0.9) and the best well away from it
+  is low. A sound's nulls and notches are not a reliable guide.
+- **Partials.** For a sound with partials (cymbals, a tambourine's
+  jingles, a cowbell), `partials` measures them, and `spec` drafts a
+  spec. Partials sounding from the hit become modes, those that bloom
+  later become narrow bands of noise, never narrower than measured
+  (narrower, they ring as steady tones). Broad bands make the wash, and a
+  stick band the strike. `--hold` keeps the partials' shapes at what was
+  measured: fit that first for the gains (`fit … --restarts 3`), then
+  `load` its `.best` into the full spec and fit again narrowly
+  (`--sigma 0.08`).
+- **Then listen.** The score is a guide, not the judge. A lower score can
+  sound worse: a cymbal refit that scored better made the wrong partials
+  the loudest, and it sounded higher pitched. `compare` shows what the
+  score blurs: the strongest partials (a cymbal's pitch), how far the
+  peaks stand above the floor (a ring), and the balance over time. Give
+  the user `listen`'s file before a recipe goes into the script.
+
