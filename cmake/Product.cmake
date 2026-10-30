@@ -7,4 +7,4 @@ set(PRODUCT_NAME "Quire")               # display name
 set(PRODUCT_SLUG "quire")               # lowercase: binary prefix, dirs, socket names
 set(PRODUCT_VENDOR "Supple Audio")
 set(PRODUCT_VENDOR_ID "com.suppleaudio") # reverse-DNS prefix for plugin/extension IDs
-set(PRODUCT_VERSION "0.3.1")
+set(PRODUCT_VERSION "0.5.0")
