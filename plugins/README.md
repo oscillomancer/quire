@@ -29,6 +29,7 @@ player, and every check the other stock plugins have.
 | `hornbeam` | Hornbeam, the guitar amp and cabinet | `com.suppleaudio.hornbeam` |
 | `coppice` | Coppice, the sampler (`docs/specs/coppice.md`) | `com.suppleaudio.coppice` |
 | `pollard` | Pollard, the drum sampler (`docs/specs/pollard.md`) | `com.suppleaudio.pollard` |
+| `drumlin` | Drumlin, the drum machine (`docs/specs/drumlin.md`) | `com.suppleaudio.drumlin` |
 
 ## Files
 

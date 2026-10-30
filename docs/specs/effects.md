@@ -30,10 +30,11 @@ ADR-0047, in its script's `Info` and its `product.cmake`).
 | `hornbeam` (`plugins/hornbeam`) | Hornbeam | `com.suppleaudio.hornbeam` | `hCbo` (the player's for the id) | `Hrnb` | audio-effect, distortion, amp-simulator |
 | `coppice` (`plugins/coppice`) | Coppice | `com.suppleaudio.coppice` | `Idrr` (the player's for the id) | `Cpce` | instrument, sampler |
 | `pollard` (`plugins/pollard`) | Pollard | `com.suppleaudio.pollard` | `ntDE` (the player's for the id) | `Plrd` | instrument, drum-machine, sampler |
+| `drumlin` (`plugins/drumlin`) | Drumlin | `com.suppleaudio.drumlin` | `WkjN` (the player's for the id) | `Drml` | instrument, drum-machine, synthesizer |
 
-Marram, Coppice and Pollard are instruments; their specs, implementation
-notes included, are `docs/specs/marram.md`, `docs/specs/coppice.md` and
-`docs/specs/pollard.md`.
+Marram, Coppice, Pollard and Drumlin are instruments; their specs,
+implementation notes included, are `docs/specs/marram.md`,
+`docs/specs/coppice.md`, `docs/specs/pollard.md` and `docs/specs/drumlin.md`.
 
 ## 1. The shape every effect shares
 

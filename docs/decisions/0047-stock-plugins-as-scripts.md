@@ -100,6 +100,12 @@ plugins ship as CLAP (and VST3, AU) files of their own that other hosts load.
    pads, each played by Coppice's engine, which the two scripts share as
    identical text (`plugin.pollard.engine-copy` checks it); a pollard is
    cut back at head height and grows its crown of new stems from there.
+   (2026-10-29) The twentieth is Drumlin, the drum machine
+   (`com.suppleaudio.drumlin`), with no predecessor: classic machines'
+   sounds without their samples, each a recipe fitted to recordings of the
+   machine (the LM-1's first) by `plugins/drumlin/fit`, whose fitted numbers
+   are all the script keeps; a drumlin is a long, smooth hill a glacier
+   shaped and left in swarms.
 6. **Names and look.** A stock plugin is named after a plant or something
    else of the natural world, not after its effect type (Yarrow, the EQ;
    Sundew, the compressor; Treeline, the limiter; Gorse, the transient
@@ -108,7 +114,8 @@ plugins ship as CLAP (and VST3, AU) files of their own that other hosts load.
    analyzer; Marram, the synthesizer; (2026-10-22) Withy, the chorus;
    Pollia, the phaser; Umber, the tape machine; Sedge, the tuner;
    (2026-10-28) Hornbeam, the guitar amp and cabinet; (2026-10-29)
-   Coppice, the sampler; Pollard, the drum sampler).
+   Coppice, the sampler; Pollard, the drum sampler; Drumlin, the drum
+   machine).
    (2026-10-28) Gain, a level change of one knob, is the exception: the
    maintainer named it for what it does.
    Every stock script draws with the scripts' palette (`kScriptTheme` in

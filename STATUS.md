@@ -298,7 +298,7 @@ instructions are in `docs/guides/installing.md`.
   validated against EBU Tech 3341/3342, spectral, pitch, envelope, stereo,
   comparison, masking); the CMA-ES patch optimizer (`specs/optimizer.md`);
   the LLM evaluation harness (`tools/eval-harness`).
-- **Stock plugins** (ADR-0011, ADR-0047): Marram, Coppice, Pollard, Yarrow, Sundew,
+- **Stock plugins** (ADR-0011, ADR-0047): Marram, Coppice, Pollard, Drumlin, Yarrow, Sundew,
   Treeline, Gorse, Hickory, Sorrel, Teasel, Bracken, Ghyll, Lichen, Withy,
   Pollia, Umber, Sedge, Gain and Hornbeam, each passing clap-validator, a reset determinism check, an unload
   test and the headless REAPER check;
@@ -568,6 +568,19 @@ instructions are in `docs/guides/installing.md`.
   `pointer()` may call `playNote`). Seven factory kits. 0.48 % of a core at the defaults. Not yet:
   velocity layers and round robin across several files, and sends or
   effects per pad.
+  Drumlin, the drum machine (`plugins/drumlin`, `docs/specs/drumlin.md`),
+  has no predecessor. Sixteen pads, each on a MIDI note of its own
+  (`padN.key`, General MIDI's drum map by default, so agents and the
+  notation's drum names find each drum), playing the LM-1's eleven sounds
+  and a crash and a ride without samples: each a recipe of modes and noise
+  bands made a sample at a time at the machine's DAC clock, through its
+  8-bit companded DAC with unsmoothed steps, the kick, tom and conga filter,
+  and the hi-hat's VCA over one looping recording. The recipes were fitted
+  to a bank of real LM-1 recordings by `plugins/drumlin/fit` (CMA-ES over
+  the script compiled natively); the recordings are not in the repository.
+  Tune, Decay (the machine's own at 100 %), choke groups, variation per hit,
+  eight extra outputs, seven kits. 0.40 % of a core at the defaults. Not yet: other machines' sounds and real
+  drums, and a sound of the user's own fitting.
 
 - **DSP scripting** (ADR-0032): plugins written in a checked subset of
   C++, run by a JIT player plugin, exported as plugins or C++ projects. The

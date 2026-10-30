@@ -16,8 +16,8 @@ Yarrow (`yarrow`, the EQ), Sundew (`sundew`, the compressor), Treeline
 the synthesizer), Withy (`withy`, the chorus), Pollia (`pollia`, the
 phaser), Umber (`umber`, the tape machine), Sedge (`sedge`, the
 tuner), Gain (`gain`, a level change), Hornbeam (`hornbeam`, the guitar
-amp and cabinet), Coppice (`coppice`, the sampler) and Pollard (`pollard`,
-the drum sampler). Orrery, the hand-written synthesizer
+amp and cabinet), Coppice (`coppice`, the sampler), Pollard (`pollard`,
+the drum sampler) and Drumlin (`drumlin`, the drum machine). Orrery, the hand-written synthesizer
 Marram replaced, was removed on 2026-10-21; git history has it.
 
 `common/` holds the shared semantic-parameters extension

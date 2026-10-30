@@ -18,6 +18,7 @@ if(SUPPLE_BUILD_TESTS)
   target_link_options(stock-nonfinite.tests PRIVATE ${_supple_sanitize_flags})
   add_test(NAME stock-nonfinite.tests COMMAND stock-nonfinite.tests)
   set_tests_properties(stock-nonfinite.tests PROPERTIES LABELS rt)
+  add_subdirectory(drumlin/fit)
 endif()
 
 if(SUPPLE_BUILD_PLUGINS)
@@ -261,6 +262,7 @@ if(SUPPLE_BUILD_PLUGINS)
   supple_add_stock_script(hornbeam Hornbeam com.suppleaudio.hornbeam)
   supple_add_stock_script(coppice Coppice com.suppleaudio.coppice)
   supple_add_stock_script(pollard Pollard com.suppleaudio.pollard)
+  supple_add_stock_script(drumlin Drumlin com.suppleaudio.drumlin)
   if(SUPPLE_BUILD_TESTS)
     # Pollard plays its pads with Coppice's engine, kept in both scripts.
     add_test(NAME plugin.pollard.engine-copy
